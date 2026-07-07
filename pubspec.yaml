@@ -1,0 +1,27 @@
+name: osinara
+description: Local desktop workspace for project-based CLI agent launch profiles.
+publish_to: 'none'
+version: 1.0.0+1
+
+executables:
+  osinara-run: osinara_run
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  flutter_pty: ^0.4.2
+  window_manager: ^0.5.2
+  xterm: ^4.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
