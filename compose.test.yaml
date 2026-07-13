@@ -1,0 +1,29 @@
+name: osinara-test
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: osinara_test
+      POSTGRES_PASSWORD: osinara-test-only
+      POSTGRES_USER: osinara_test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U osinara_test -d osinara_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  tests:
+    build:
+      context: .
+      target: test
+    command: ["sh", "-c", "npm run migrate && npm run typecheck && npm test && npm run build"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://osinara_test:osinara-test-only@postgres:5432/osinara_test
+      INVITATION_SIGNING_SECRET: integration-test-signing-secret-32-chars
+      RUN_DATABASE_INTEGRATION_TESTS: "true"

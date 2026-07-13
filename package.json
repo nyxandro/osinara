@@ -1,0 +1,48 @@
+{
+  "name": "osinara-family-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#*": "./agent/*",
+    "#evals/*": "./evals/*"
+  },
+  "scripts": {
+    "build": "eve build",
+    "bootstrap:code": "node --experimental-strip-types scripts/create-bootstrap-code.ts",
+    "dev": "eve dev",
+    "start": "eve start",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc",
+    "migrate": "node --experimental-strip-types scripts/migrate.ts",
+    "memory:reindex": "node --import tsx scripts/reindex-memory.ts",
+    "postinstall": "node --experimental-strip-types scripts/apply-eve-patches.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/groq": "4.0.7",
+    "@ai-sdk/openai-compatible": "3.0.7",
+    "ai": "7.0.0",
+    "dockerode": "5.0.1",
+    "eve": "0.22.5",
+    "file-type": "22.0.1",
+    "pg": "8.22.0",
+    "tar-stream": "3.2.0",
+    "tsx": "4.23.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/dockerode": "4.0.1",
+    "@types/node": "24.10.1",
+    "@types/pg": "8.20.0",
+    "@types/tar-stream": "3.1.4",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": "24.x"
+  },
+  "overrides": {
+    "ai": "7.0.0"
+  }
+}

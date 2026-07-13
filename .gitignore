@@ -1,0 +1,14 @@
+node_modules
+.env*
+!.env.example
+.eve
+.vercel
+.workflow-data
+.output
+.nitro
+coverage
+dist
+*.tsbuildinfo
+*.log
+__pycache__/
+*.py[cod]

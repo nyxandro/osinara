@@ -1,0 +1,230 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: osinara
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_USER: osinara
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U osinara -d osinara"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  agent:
+    build:
+      context: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+      document-parser:
+        condition: service_healthy
+      memory-embedding:
+        condition: service_healthy
+      sandbox-runner:
+        condition: service_healthy
+    environment:
+      CLI_PROXY_API_KEY: ${CLI_PROXY_API_KEY-}
+      CLI_PROXY_BASE_URL: ${CLI_PROXY_BASE_URL-}
+      DATABASE_URL: postgresql://osinara:${POSTGRES_PASSWORD}@postgres:5432/osinara
+      GROQ_API_KEY: ${GROQ_API_KEY:?GROQ_API_KEY is required}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET-}
+      INTEGRATION_TOKEN_ENCRYPTION_KEY: ${INTEGRATION_TOKEN_ENCRYPTION_KEY-}
+      INVITATION_SIGNING_SECRET: ${INVITATION_SIGNING_SECRET:?INVITATION_SIGNING_SECRET is required}
+      MEMORY_EMBEDDING_BASE_URL: http://memory-embedding:80
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN is required}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:?TELEGRAM_BOT_USERNAME is required}
+      TELEGRAM_WEBHOOK_SECRET_TOKEN: ${TELEGRAM_WEBHOOK_SECRET_TOKEN:?TELEGRAM_WEBHOOK_SECRET_TOKEN is required}
+      WORKFLOW_QUEUE_NAMESPACE: eve6f73696e6172612d66616d696c792d6167656e74
+    restart: unless-stopped
+    networks:
+      - default
+      - document-processing
+      - sandbox-control
+    volumes:
+      - sandbox-data:/app/.eve/sandbox-cache
+      - workflow-data:/app/.workflow-data
+      - workspace-data:/app/workspaces
+
+  sandbox-runtime-image:
+    build:
+      context: .
+      target: sandbox-runtime
+    command: ["true"]
+    image: osinara-sandbox-runtime:local
+    network_mode: none
+    restart: "no"
+
+  sandbox-runner:
+    build:
+      context: .
+      target: sandbox-runner
+    depends_on:
+      sandbox-egress-proxy:
+        condition: service_healthy
+      sandbox-runtime-image:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - sandbox-control
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - tool-environments:/runner/tools
+      - workspace-data:/runner/workspaces
+
+  sandbox-egress-proxy:
+    build:
+      context: .
+      target: sandbox-egress-proxy
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('node:net').connect(3128,'127.0.0.1').on('connect',function(){this.destroy();process.exit(0)}).on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - default
+      - sandbox-egress
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+
+  clamav:
+    image: clamav/clamav:1.5.3_base@sha256:d5158b7c2c5489e0160184fc32cfa11bdf3900be6a4078de95fddaf670a460c8
+    cpus: 1.0
+    mem_limit: 4g
+    restart: unless-stopped
+    networks:
+      - clamav-egress
+      - document-processing
+    volumes:
+      - clamav-signatures:/var/lib/clamav
+
+  document-parser:
+    build:
+      context: .
+      target: document-parser
+    cap_drop:
+      - ALL
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 512m
+    networks:
+      - document-processing
+    pids_limit: 64
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+
+  memory-embedding:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07
+    cpus: 1.5
+    mem_limit: 1536m
+    command:
+      - --model-id
+      - intfloat/multilingual-e5-small
+      - --revision
+      - 614241f622f53c4eeff9890bdc4f31cfecc418b3
+      - --tokenization-workers
+      - "2"
+      - --max-client-batch-size
+      - "8"
+      - --max-concurrent-requests
+      - "8"
+      - --max-batch-requests
+      - "8"
+      - --max-batch-tokens
+      - "4096"
+      - --auto-truncate=false
+    environment:
+      OMP_NUM_THREADS: "2"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+    restart: unless-stopped
+    volumes:
+      - memory-embedding-model-e5:/data
+
+  memory-embedding-worker:
+    build:
+      context: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      memory-embedding:
+        condition: service_healthy
+    entrypoint: ["node", "--import", "tsx", "scripts/memory-embedding-worker.ts"]
+    environment:
+      DATABASE_URL: postgresql://osinara:${POSTGRES_PASSWORD}@postgres:5432/osinara
+      MEMORY_EMBEDDING_BASE_URL: http://memory-embedding:80
+    restart: unless-stopped
+
+  telegram-ingress-worker:
+    build:
+      context: .
+    depends_on:
+      - agent
+    entrypoint: ["node", "--experimental-strip-types", "scripts/telegram-ingress-worker.ts"]
+    environment:
+      AGENT_INTERNAL_BASE_URL: http://agent:3000
+      TELEGRAM_WEBHOOK_SECRET_TOKEN: ${TELEGRAM_WEBHOOK_SECRET_TOKEN:?TELEGRAM_WEBHOOK_SECRET_TOKEN is required}
+    restart: unless-stopped
+
+  edge:
+    image: nginx:1.29-alpine
+    depends_on:
+      - agent
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    volumes:
+      - ./infra/nginx.conf:/etc/nginx/nginx.conf:ro
+
+volumes:
+  clamav-signatures:
+  postgres-data:
+  memory-embedding-model-e5:
+  sandbox-data:
+  tool-environments:
+  workflow-data:
+  workspace-data:
+
+networks:
+  clamav-egress:
+  document-processing:
+    internal: true
+  sandbox-control:
+    internal: true
+  sandbox-egress:
+    internal: true
