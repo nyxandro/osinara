@@ -12,6 +12,7 @@
  * - Captionless photos retain a model-visible trusted workspace reference.
  * - External groups drop all inbound media before persistence, journaling, or model dispatch.
  * - Foreign replies to pending HITL prompts stop before Eve dispatch.
+ * - Forum replies inherit routing from the referenced bot message, not a newly assigned thread.
  */
 import type { TelegramMessage } from "eve/channels/telegram";
 import { describe, expect, it, vi } from "vitest";
@@ -294,10 +295,12 @@ describe("createTelegramMessageHandler", () => {
     const { context, sendMessage } = telegramContext();
     const message: TelegramMessage = {
       ...groupMessage("Подтвердить"),
+      chat: { id: "group-101", title: "Форум", type: "supergroup" },
       from: { firstName: "Борис", id: "telegram-202", isBot: false },
       messageId: "89",
+      messageThreadId: 88,
       replyToMessage: {
-        chat: { id: "group-101", type: "group" },
+        chat: { id: "group-101", type: "supergroup" },
         from: {
           firstName: "Osinara",
           id: "bot-1",
