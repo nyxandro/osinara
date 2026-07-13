@@ -12,10 +12,7 @@ import { createHash } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "../database.js";
-import {
-  createSoftwareUpdateRepository,
-  softwareUpdateRepository,
-} from "./repository.js";
+import { createSoftwareUpdateRepository } from "./repository.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 const url = process.env.DATABASE_URL;
@@ -24,6 +21,7 @@ if (enabled && (!url || !new URL(url).pathname.endsWith("_test"))) {
 }
 const describeWithDatabase = enabled ? describe : describe.skip;
 const TOKEN = "integration-callback-secret";
+const softwareUpdateRepository = createSoftwareUpdateRepository({ currentVersion: "0.1.0" });
 const manifest = {
   commitSha: "b".repeat(40),
   composeSha256: "c".repeat(64),
