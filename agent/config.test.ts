@@ -2,14 +2,15 @@
  * Runtime environment validation tests.
  *
  * Constructs covered:
- * - `requireRuntimeEnvironment`: requires the active Groq credential.
- * - Retained CLIProxy credentials are optional but must be configured as a complete pair.
+ * - `requireRuntimeEnvironment`: requires independent Groq voice and CLIProxy agent credentials.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { requireRuntimeEnvironment } from "./config.js";
 
 function stubRequiredEnvironment(): void {
+  vi.stubEnv("CLI_PROXY_API_KEY", "cli-proxy-test-key");
+  vi.stubEnv("CLI_PROXY_BASE_URL", "http://model-proxy:8317/v1");
   vi.stubEnv("DATABASE_URL", "postgresql://test:test@postgres:5432/osinara_test");
   vi.stubEnv("GROQ_API_KEY", "groq-test-key");
   vi.stubEnv("INVITATION_SIGNING_SECRET", "12345678901234567890123456789012");
@@ -23,12 +24,14 @@ describe("requireRuntimeEnvironment", () => {
     vi.unstubAllEnvs();
   });
 
-  it("accepts Groq-only configuration while the retained route is inactive", () => {
+  it("accepts complete voice and agent provider configuration", () => {
     stubRequiredEnvironment();
-    vi.stubEnv("CLI_PROXY_API_KEY", "");
-    vi.stubEnv("CLI_PROXY_BASE_URL", "");
 
-    expect(requireRuntimeEnvironment()).toMatchObject({ GROQ_API_KEY: "groq-test-key" });
+    expect(requireRuntimeEnvironment()).toMatchObject({
+      CLI_PROXY_API_KEY: "cli-proxy-test-key",
+      CLI_PROXY_BASE_URL: "http://model-proxy:8317/v1",
+      GROQ_API_KEY: "groq-test-key",
+    });
   });
 
   it("rejects missing credentials for the active Groq route", () => {
@@ -38,7 +41,7 @@ describe("requireRuntimeEnvironment", () => {
     expect(() => requireRuntimeEnvironment()).toThrowError(/GROQ_API_KEY/);
   });
 
-  it("rejects a partially configured retained CLIProxy route", () => {
+  it("rejects missing credentials for the active CLIProxy route", () => {
     stubRequiredEnvironment();
     vi.stubEnv("CLI_PROXY_API_KEY", "");
     vi.stubEnv("CLI_PROXY_BASE_URL", "http://model-proxy:8317/v1");

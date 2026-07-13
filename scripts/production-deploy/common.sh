@@ -5,6 +5,7 @@
 readonly BASE_DIR="/opt/osinara"
 readonly BIN_DIR="${BASE_DIR}/bin"
 readonly SERVER_ENV="${BASE_DIR}/.env"
+readonly MODEL_PROVIDER_CONFIG="${BASE_DIR}/model-providers.json"
 readonly RELEASES_DIR="${BASE_DIR}/releases"
 readonly BACKUPS_DIR="${BASE_DIR}/backups"
 readonly GLOBAL_RELEASE_ENV="${BASE_DIR}/release.env"
@@ -78,6 +79,7 @@ require_server_boundary() {
   require_metadata "$ENTRYPOINT_PATH" "0:0:750"
   require_metadata "$MODULE_DIR" "0:0:750"
   require_metadata "$SERVER_ENV" "0:0:600"
+  require_metadata "$MODEL_PROVIDER_CONFIG" "0:0:640"
   install -d -o root -g root -m 0750 "$RELEASES_DIR" "$BACKUPS_DIR"
 
   local command

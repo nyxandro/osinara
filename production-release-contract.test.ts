@@ -73,6 +73,7 @@ describe("production container contract", () => {
     expect(runtime).toContain("COPY --from=build /app/agent ./agent");
     expect(runtime).not.toMatch(/COPY --from=build \/app\/(scripts|services)\b/);
     expect(entrypoint).toContain("node .runtime/scripts/migrate.js");
+    expect(entrypoint).toContain("node .runtime/scripts/validate-model-provider-config.js");
     expect(entrypoint).not.toContain("npm run migrate");
   });
 
@@ -282,6 +283,8 @@ describe("server deployment contract", () => {
     expect(script).toContain("privileged");
     expect(script).toContain("network_mode");
     expect(script).toContain("/var/run/docker.sock");
+    expect(script).toContain("/opt/osinara/model-providers.json");
+    expect(script).toContain(".read_only == true");
   });
 
   it("rejects environment image injection, downgrade, and unsafe initial reuse", () => {

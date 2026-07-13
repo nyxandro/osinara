@@ -163,12 +163,16 @@ validate_resolved_compose() {
     all(.services[]; (.pid // "") != "host") and
     all(.services[]; (.ipc // "") != "host") and
     all(.services[]; (has("build") or has("devices") or has("cap_add")) | not) and
+    any(.services.agent.volumes[];
+      .source == "/opt/osinara/model-providers.json" and
+      .target == "/app/config/model-providers.json" and .read_only == true) and
     ([.services | to_entries[] as $service |
       ($service.value.volumes // [])[] |
       {service: $service.key, type, source, target}] | sort_by(.service, .target)) == ([
         {service: "agent", type: "volume", source: "sandbox-data", target: "/app/.eve/sandbox-cache"},
         {service: "agent", type: "volume", source: "workflow-data", target: "/app/.workflow-data"},
         {service: "agent", type: "volume", source: "workspace-data", target: "/app/workspaces"},
+        {service: "agent", type: "bind", source: "/opt/osinara/model-providers.json", target: "/app/config/model-providers.json"},
         {service: "memory-embedding", type: "volume", source: "memory-embedding-model-e5", target: "/data"},
         {service: "postgres", type: "volume", source: "postgres-data", target: "/var/lib/postgresql/data"},
         {service: "sandbox-runner", type: "bind", source: "/var/run/docker.sock", target: "/var/run/docker.sock"},

@@ -97,6 +97,7 @@ COPY --from=build /app/.eve ./.eve
 COPY --from=build /app/.runtime ./.runtime
 # Eve 0.22.5 `start` serves `.output` but still bundles authored modules from this tree.
 COPY --from=build /app/agent ./agent
+COPY --from=build /app/config ./config
 COPY --from=build /app/migrations ./migrations
 COPY --from=build /app/resources ./resources
 COPY --from=build /app/package.json ./package.json

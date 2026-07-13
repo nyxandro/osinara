@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `createWorkspaceImageInspector`: validates and submits authorized image bytes.
- * - `inspectWorkspaceImage`: production Qwen vision inspector.
+ * - `inspectWorkspaceImage`: production server-configured CLIProxy vision inspector.
  */
 import { generateText } from "ai";
 

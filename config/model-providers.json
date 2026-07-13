@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "agent": {
+    "textModelId": "MiniMax-M3",
+    "visionModelId": "MiniMax-M3",
+    "contextWindowTokens": 1000000
+  },
+  "voice": {
+    "transcriptionModelId": "whisper-large-v3-turbo"
+  }
+}

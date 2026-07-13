@@ -62,8 +62,8 @@ services:
       sandbox-runner:
         condition: service_healthy
     environment:
-      CLI_PROXY_API_KEY: ${CLI_PROXY_API_KEY-}
-      CLI_PROXY_BASE_URL: ${CLI_PROXY_BASE_URL-}
+      CLI_PROXY_API_KEY: ${CLI_PROXY_API_KEY:?CLI_PROXY_API_KEY is required}
+      CLI_PROXY_BASE_URL: ${CLI_PROXY_BASE_URL:?CLI_PROXY_BASE_URL is required}
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID-}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET-}
@@ -86,6 +86,7 @@ services:
       - sandbox-control
     restart: unless-stopped
     volumes:
+      - /opt/osinara/model-providers.json:/app/config/model-providers.json:ro
       - sandbox-data:/app/.eve/sandbox-cache
       - workflow-data:/app/.workflow-data
       - workspace-data:/app/workspaces

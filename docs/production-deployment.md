@@ -45,6 +45,7 @@ document intentionally does not provide a one-command installer. Prepare these r
 | Path | Mode | Purpose |
 | --- | --- | --- |
 | `/opt/osinara/.env` | `0600` | Production secrets and environment-specific URLs. |
+| `/opt/osinara/model-providers.json` | `0640` | Runtime text, vision, context-window, and voice model IDs. |
 | `/opt/osinara/bin/production-deploy.sh` | `0750` | Server deployment entrypoint. |
 | `/opt/osinara/bin/production-deploy/` | `0750` | Root-owned deployment module directory. |
 | `/opt/osinara/bin/production-deploy/*.sh` | `0640` | Fixed source modules checked before execution. |
@@ -57,9 +58,16 @@ sources a module. It creates `/opt/osinara/releases`, `/opt/osinara/backups`, an
 `/opt/osinara/release.env`.
 
 `/opt/osinara/.env` must be exactly `root:root 0600`. It contains `POSTGRES_PASSWORD`, the required
-internal application `DATABASE_URL`, Telegram/model secrets, and environment-specific integration
+internal application `DATABASE_URL`, `CLI_PROXY_API_KEY`, `CLI_PROXY_BASE_URL`, `GROQ_API_KEY`,
+Telegram secrets, and environment-specific integration
 settings. It must never contain or export any of the five `OSINARA_*_IMAGE` variables or
 `SANDBOX_RUNTIME_IMAGE`; those values exist only in a validated per-release `release.env`.
+
+`/opt/osinara/model-providers.json` must be exactly `root:root 0640` and follow the committed
+`config/model-providers.json` schema. The `agent` section selects independent text and vision model
+IDs behind the shared CLIProxy endpoint and declares the text model context window. The `voice`
+section selects the Groq transcription model. After changing it, validate and restart the agent
+container; a source release is not required.
 
 The server host requires Docker Engine with Compose v2, systemd, `curl`, `jq`, `flock`, `stat`,
 `sha256sum`, `tar`, and standard GNU file utilities. Missing tools are deployment errors; the
