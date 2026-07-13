@@ -102,16 +102,20 @@ function formatStoredAttachments(attachments: readonly StoredTelegramAttachment[
 }
 
 function baseContinuationToken(message: TelegramMessage): string {
-  // This mirrors the reviewed Eve 0.22.5 Telegram state function exactly.
+  // A first reply in a forum can acquire a new thread ID; route by the referenced bot anchor.
+  const repliesToBot = message.replyToMessage?.from?.isBot === true;
   const conversationId = message.chat.type === "private"
     ? undefined
-    : message.replyToMessage?.from?.isBot === true
+    : repliesToBot
     ? message.replyToMessage.messageId
     : message.messageId;
+  const messageThreadId = repliesToBot
+    ? message.replyToMessage?.messageThreadId
+    : message.messageThreadId;
   return telegramContinuationToken({
     chatId: message.chat.id,
     ...(conversationId === undefined ? {} : { conversationId }),
-    ...(message.messageThreadId === undefined ? {} : { messageThreadId: message.messageThreadId }),
+    ...(messageThreadId === undefined ? {} : { messageThreadId }),
   });
 }
 
