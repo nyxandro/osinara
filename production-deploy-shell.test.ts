@@ -5,8 +5,9 @@
  * - Stable SemVer comparison rejects equal and lower releases.
  * - Exported release image variables fail before Compose interpolation.
  * - `composeSha256` binds the exact released Compose bytes.
+ * - PostgreSQL command tags cannot masquerade as returned proposal rows.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -78,5 +79,14 @@ describe("production deploy shell policies", () => {
     expect(valid.status, valid.stderr).toBe(0);
     expect(invalid.status).toBe(1);
     expect(invalid.stderr).toContain("DEPLOY_COMPOSE_HASH_MISMATCH");
+  });
+
+  it("suppresses PostgreSQL command tags for no-row state transitions", () => {
+    const databaseScript = readFileSync(
+      join(projectRoot, "scripts/production-deploy/database.sh"),
+      "utf8",
+    );
+
+    expect(databaseScript).toContain("--quiet");
   });
 });

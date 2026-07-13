@@ -6,7 +6,7 @@ readonly DEPLOYMENT_LEASE_INTERVAL="60 minutes"
 
 psql_current() {
   compose_current exec -T postgres psql -X --no-psqlrc --set ON_ERROR_STOP=1 \
-    --username osinara --dbname osinara --no-align --tuples-only "$@"
+    --username osinara --dbname osinara --no-align --tuples-only --quiet "$@"
 }
 
 reconcile_stale_deployments() {
