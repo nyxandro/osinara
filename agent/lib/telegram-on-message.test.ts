@@ -269,6 +269,7 @@ describe("createTelegramMessageHandler", () => {
         groupType: "family_private",
         memoryScopes: ["family"],
         sandboxSessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        telegramReplyToMessageId: "1",
       },
     });
   });

@@ -4,6 +4,7 @@
  * Constructs covered:
  * - RichBlockThinking and text updates reuse one draft per private chat/topic.
  * - Completed output is persisted with sendRichMessage and anchors group conversations.
+ * - The first chunk of a group response replies to the verified triggering message.
  * - Telegram rejection and ambiguous transport failures remain fail-fast without retries.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -144,6 +145,28 @@ describe("postTelegramRichMessage", () => {
       rich_message: { markdown: expect.stringContaining("| Шаг | Статус |") },
     });
     expect(state.conversationId).toBe("73");
+  });
+
+  it("replies only the first group chunk to the triggering user message", async () => {
+    const telegramFetch = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () => telegramResponse({ chat: { type: "supergroup" }, message_id: 73 }),
+    );
+
+    await postTelegramRichMessage(
+      Array.from(
+        { length: 300 },
+        (_, index) => `Абзац ${index}: ${"длинный текст ".repeat(20)}`,
+      ).join("\n\n"),
+      telegramTarget({ chatId: "-100123", chatType: "supergroup" }),
+      undefined,
+      { allow_sending_without_reply: true, message_id: 55 },
+    );
+
+    expect(telegramFetch.mock.calls.length).toBeGreaterThan(1);
+    expect(requestBody(telegramFetch, 0)).toMatchObject({
+      reply_parameters: { allow_sending_without_reply: true, message_id: 55 },
+    });
+    expect(requestBody(telegramFetch, 1)).not.toHaveProperty("reply_parameters");
   });
 
   it("does not retry an ambiguously failed final delivery", async () => {

@@ -44,6 +44,9 @@ describe("createTelegramInputRequestHandler", () => {
           current: {
             attributes: {
               applicationSessionId: "app-session-1",
+              telegramChatId: "-1001",
+              telegramChatType: "supergroup",
+              telegramReplyToMessageId: "77",
               telegramUserId: "101",
             },
             authenticator: "telegram",
@@ -77,6 +80,7 @@ describe("createTelegramInputRequestHandler", () => {
 
     expect(markPendingOperation).toHaveBeenCalledWith("app-session-1", true);
     expect(post).toHaveBeenCalledWith(expect.objectContaining({
+      reply_parameters: { allow_sending_without_reply: true, message_id: 77 },
       text: "Подготавливаю безопасный запрос подтверждения.",
     }));
     expect(post.mock.calls[0]?.[0]).not.toHaveProperty("reply_markup");

@@ -315,6 +315,9 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
           telegramChatId: message.chat.id,
           telegramChatType: message.chat.type,
           telegramMessageId: message.messageId,
+          ...(message.chat.type === "private"
+            ? {}
+            : { telegramReplyToMessageId: message.messageId }),
           ...(message.messageThreadId === undefined
             ? {}
             : { telegramMessageThreadId: String(message.messageThreadId) }),
