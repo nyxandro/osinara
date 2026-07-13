@@ -4,6 +4,7 @@
  * Exports:
  * - `localizeTelegramInputRequest`: translates approvals without changing response IDs.
  * - `localizeTelegramReplyMarkup`: translates the freeform answer placeholder.
+ * - `TelegramInputRequest`: stable structural input used by the secure HITL renderer.
  * - Failure formatters: hide internals while preserving stable support references.
  */
 
@@ -55,10 +56,18 @@ interface TelegramInputOption {
   style?: "danger" | "default" | "primary";
 }
 
-interface TelegramInputRequest {
+type TelegramJsonValue =
+  | boolean
+  | null
+  | number
+  | string
+  | { readonly [key: string]: TelegramJsonValue }
+  | readonly TelegramJsonValue[];
+
+export interface TelegramInputRequest {
   action: {
     callId: string;
-    input: Record<string, unknown>;
+    input: Record<string, TelegramJsonValue>;
     kind: "tool-call";
     toolName: string;
   };

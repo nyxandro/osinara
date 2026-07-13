@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import {
   ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES,
   CONTROLLED_TOOL_NAMES,
+  EXTERNAL_GROUP_TOOL_NAMES,
 } from "./group-tool-catalog.js";
 
 describe("external group tool catalog", () => {
@@ -35,5 +36,10 @@ describe("external group tool catalog", () => {
     for (const toolName of ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES) {
       expect(CONTROLLED_TOOL_NAMES).not.toContain(toolName);
     }
+  });
+
+  it("does not expose the removed PDF parser capability", () => {
+    expect(EXTERNAL_GROUP_TOOL_NAMES).not.toContain("inspect_workspace_pdf");
+    expect(CONTROLLED_TOOL_NAMES).not.toContain("inspect_workspace_pdf");
   });
 });

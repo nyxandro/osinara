@@ -4,32 +4,31 @@
  * Constructs:
  * - Verified webhook transport with durable PostgreSQL ingress.
  * - Application-owned family/group authorization in `onMessage`.
- * - Verified image forwarding plus application-owned document persistence.
- * - Native real-time Telegram draft streaming for private chats.
+ * - Durable identity-bound HITL callbacks and replies.
+ * - Validated attachment persistence with model-safe workspace references.
+ * - Native RichBlockThinking, chat-scoped streaming, and completed Rich Message delivery.
  */
-import {
-  registerTelegramFreeformPrompt,
-  renderTelegramInputRequest,
-  telegramChannel,
-} from "eve/channels/telegram";
+import { telegramChannel } from "eve/channels/telegram";
 
-import { TELEGRAM_MAX_INBOUND_ATTACHMENT_BYTES } from "../config.js";
 import { handleTelegramDurableIngress } from "../lib/telegram-durable-ingress.js";
-import { streamTelegramMessageDraft } from "../lib/telegram-draft-streaming.js";
-import {
-  formatTelegramSessionFailure,
-  formatTelegramTurnFailure,
-  localizeTelegramInputRequest,
-  localizeTelegramReplyMarkup,
-} from "../lib/telegram-interface.js";
+import { formatTelegramTurnFailure } from "../lib/telegram-interface.js";
+import { TELEGRAM_EVE_UPLOAD_POLICY } from "../lib/telegram-message-policy.js";
 import { handleTelegramMessage } from "../lib/telegram-on-message.js";
-import { postTelegramMarkdown } from "../lib/telegram-markdown.js";
 import { completedTelegramMessage } from "../lib/telegram-progress.js";
 import {
+  postTelegramRichMessage,
+  startTelegramRichThinkingDraft,
+  streamTelegramRichMessageDraft,
+} from "../lib/telegram-rich-messages.js";
+import {
+  applicationSessionId,
   rekeyTelegramSession,
-  resolveApplicationSessionId,
 } from "../lib/sessions/session-context.js";
 import { sessionRepository } from "../lib/sessions/session-repository.js";
+import { authorizeTelegramHitlCallback } from "../lib/telegram-hitl/callback-authorization.js";
+import { handleTelegramInputRequested } from "../lib/telegram-hitl/input-request.js";
+import { telegramHitlApprovalRepository } from "../lib/telegram-hitl/approval-repository.js";
+import { handleTelegramSessionFailure } from "../lib/telegram-session-failure.js";
 
 export default telegramChannel({
   botUsername: process.env.TELEGRAM_BOT_USERNAME as string,
@@ -38,73 +37,67 @@ export default telegramChannel({
   },
   drainRoute: "/eve/v1/telegram-drain",
   events: {
-    async "input.requested"(data, channel, ctx) {
-      const sessionId = await resolveApplicationSessionId(ctx, channel.continuationToken);
-      await sessionRepository.markPendingOperation(sessionId, true);
-      for (const request of data.requests) {
-        const localizedRequest = localizeTelegramInputRequest(request);
-        const rendered = renderTelegramInputRequest(localizedRequest, channel.state);
-        const sent = await channel.telegram.post({
-          reply_markup: localizeTelegramReplyMarkup(rendered.replyMarkup),
-          text: rendered.text,
-        });
-        if (rendered.freeformRequestId && sent.id) {
-          registerTelegramFreeformPrompt(channel.state, {
-            messageId: sent.id,
-            requestId: rendered.freeformRequestId,
-          });
-        }
-      }
-      await rekeyTelegramSession(channel, ctx);
+    async "action.result"(_data, channel) {
+      // Refresh the same chat-scoped preview before the next model step.
+      await startTelegramRichThinkingDraft(channel.telegram);
     },
+    async "actions.requested"(_data, channel) {
+      await startTelegramRichThinkingDraft(channel.telegram);
+    },
+    "input.requested": handleTelegramInputRequested,
     async "message.completed"(data, channel, ctx) {
       // Model-authored pre-tool text is a user-visible progress update, not technical tool noise.
       const message = completedTelegramMessage(data);
       if (!message) return;
-      const sessionId = await resolveApplicationSessionId(ctx, channel.continuationToken);
+      const sessionId = applicationSessionId(ctx);
       if (!await sessionRepository.isCurrentEveSession(sessionId, ctx.session.id)) return;
-      await postTelegramMarkdown(channel.telegram, message);
+      await postTelegramRichMessage(message, channel.telegram, channel.state);
       await rekeyTelegramSession(channel, ctx);
     },
     async "message.appended"(data, channel, ctx) {
-      // Eve already coalesces queued deltas under backpressure, so no artificial timer is needed.
-      const sessionId = await resolveApplicationSessionId(ctx, channel.continuationToken);
+      // Every turn and tool-loop step updates one Telegram preview for this private chat/topic.
+      const sessionId = applicationSessionId(ctx);
       if (!await sessionRepository.isCurrentEveSession(sessionId, ctx.session.id)) return;
-      await streamTelegramMessageDraft(data, channel.telegram);
+      await streamTelegramRichMessageDraft(data, channel.telegram);
     },
     async "session.failed"(data, channel) {
-      await channel.telegram.post(formatTelegramSessionFailure(data));
-      await sessionRepository.recordSessionFailedByContinuationToken(channel.continuationToken);
+      await handleTelegramSessionFailure(data, channel, sessionRepository);
     },
     async "turn.failed"(data, channel, ctx) {
-      const sessionId = await resolveApplicationSessionId(ctx, channel.continuationToken);
+      const sessionId = applicationSessionId(ctx);
       // Eve's Telegram post helper updates both state and the durable continuation token.
       await channel.telegram.post(formatTelegramTurnFailure(data));
       await sessionRepository.recordTurnFailed(sessionId, ctx.session.id);
+      await telegramHitlApprovalRepository.clearForEveSession(sessionId, ctx.session.id);
       await rekeyTelegramSession(channel, ctx);
     },
     async "turn.started"(_data, channel, ctx) {
-      const sessionId = await resolveApplicationSessionId(ctx, channel.continuationToken);
+      const sessionId = applicationSessionId(ctx);
       await sessionRepository.bindEveSession(sessionId, ctx.session.id);
+      await startTelegramRichThinkingDraft(channel.telegram);
     },
     async "turn.completed"(_data, channel, ctx) {
-      const sessionId = await resolveApplicationSessionId(ctx, channel.continuationToken);
-      await sessionRepository.recordTurnCompleted(sessionId, ctx.session.id);
+      const sessionId = applicationSessionId(ctx);
+      const awaitingApproval = await telegramHitlApprovalRepository.hasPendingForSession(
+        sessionId,
+        ctx.session.id,
+      );
+      await sessionRepository.recordTurnCompleted(sessionId, ctx.session.id, awaitingApproval);
+      if (!awaitingApproval) {
+        await telegramHitlApprovalRepository.clearForEveSession(sessionId, ctx.session.id);
+      }
       await rekeyTelegramSession(channel, ctx);
     },
     async "authorization.required"(_data, channel, ctx) {
-      const sessionId = await resolveApplicationSessionId(ctx, channel.continuationToken);
+      const sessionId = applicationSessionId(ctx);
       await sessionRepository.markPendingOperation(sessionId, true);
     },
   },
   onDrain: handleTelegramDurableIngress.drain,
+  onHitlCallbackQuery: authorizeTelegramHitlCallback,
   onMessage: handleTelegramMessage,
   onVerifiedUpdate: handleTelegramDurableIngress,
-  resolveContinuationToken: (baseToken) => sessionRepository.resolveContinuationToken(baseToken),
-  uploadPolicy: {
-    // Groq Qwen accepts images but rejects non-image AI SDK file parts. Documents are already
-    // verified and mounted by the application handler, so Eve forwards only images to vision.
-    allowedMediaTypes: ["image/*"],
-    maxBytes: TELEGRAM_MAX_INBOUND_ATTACHMENT_BYTES,
-  },
+  // The application persists authorized files before dispatch. The primary model receives only
+  // trusted workspace paths and invokes the dedicated vision model when image analysis is needed.
+  uploadPolicy: TELEGRAM_EVE_UPLOAD_POLICY,
 });

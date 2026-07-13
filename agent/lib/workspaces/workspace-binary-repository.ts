@@ -11,6 +11,7 @@ import { resolve } from "node:path";
 
 import type { PoolClient } from "pg";
 
+import { telegramInboxDirectory } from "../attachments/telegram-inbox-path.js";
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
 import {
@@ -26,6 +27,7 @@ import type {
 import { workspaceRepository } from "./workspace-repository.js";
 import {
   getWorkspaceStoredFile,
+  listWorkspaceStoredFilesUnder,
   readWorkspaceFile,
   writeWorkspaceFile,
 } from "./workspace-storage.js";
@@ -96,6 +98,33 @@ export function createWorkspaceBinaryRepository(root: string, resolver: Workspac
       const safePath = validateWorkspacePath(path);
       const workspaceId = await resolveWorkspaceId(resolver, auth, scope);
       return await readCurrentBinary(root, workspaceId, scope, safePath);
+    },
+
+    async readTelegramInboxAttachment(
+      auth: WorkspaceAuthorization,
+      scope: WorkspaceScope,
+      telegramMessageId: string,
+    ): Promise<WorkspaceBinaryFile> {
+      if (!/^\d+$/u.test(telegramMessageId)) {
+        throw new AppError(
+          "AGENT_TELEGRAM_MESSAGE_ID_INVALID",
+          "Telegram message ID должен состоять только из цифр",
+        );
+      }
+      const inboxDirectory = telegramInboxDirectory(auth, scope, telegramMessageId);
+      const workspaceId = await resolveWorkspaceId(resolver, auth, scope);
+      const files = await listWorkspaceStoredFilesUnder(
+        root,
+        workspaceId,
+        inboxDirectory,
+      );
+      if (files.length !== 1) {
+        throw new AppError(
+          "AGENT_TELEGRAM_INBOX_AMBIGUOUS",
+          "Не удалось однозначно определить файл из сообщения Telegram",
+        );
+      }
+      return await readCurrentBinary(root, workspaceId, scope, files[0]!.path);
     },
 
     async writeBinary(auth: WorkspaceAuthorization, input: {

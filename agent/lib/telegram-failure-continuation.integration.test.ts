@@ -3,7 +3,7 @@
  *
  * Constructs covered:
  * - Installed Eve `channel.telegram.post`: re-anchors group state after an outbound failure reply.
- * - Installed Eve session bridge: updates the durable continuation token with the new anchor.
+ * - `handleTelegramSessionFailure`: records the pre-post continuation route before the anchor changes.
  */
 import {
   telegramChannel,
@@ -13,6 +13,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import { formatTelegramSessionFailure } from "./telegram-interface.js";
+import { handleTelegramSessionFailure } from "./telegram-session-failure.js";
 
 interface EveTelegramAdapter {
   createAdapterContext(input: {
@@ -69,5 +70,49 @@ describe("Eve Telegram failure continuation", () => {
 
     expect(state.conversationId).toBe("172");
     expect(setContinuationToken).toHaveBeenCalledWith("-1001::172");
+  });
+
+  it("records the route that existed before the failure reply changed the group anchor", async () => {
+    const recordSessionFailedByContinuationToken = vi.fn();
+    const channel = {
+      continuationToken: "-1001::166",
+      telegram: {
+        post: vi.fn().mockImplementation(async () => {
+          channel.continuationToken = "-1001::172";
+          return { id: "172", raw: null };
+        }),
+      },
+    };
+
+    await handleTelegramSessionFailure(
+      { code: "AGENT_SESSION_FAILED", message: "failed", sessionId: "wrun_failed" },
+      channel as never,
+      { recordSessionFailedByContinuationToken },
+    );
+
+    expect(recordSessionFailedByContinuationToken).toHaveBeenCalledWith(
+      "-1001::166",
+      "wrun_failed",
+    );
+    expect(recordSessionFailedByContinuationToken.mock.invocationCallOrder[0]).toBeLessThan(
+      channel.telegram.post.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("does not notify or rotate when the terminal event belongs to a stale Eve root", async () => {
+    const recordSessionFailedByContinuationToken = vi.fn().mockResolvedValue("stale");
+    const post = vi.fn();
+
+    await handleTelegramSessionFailure(
+      { code: "AGENT_SESSION_FAILED", message: "failed", sessionId: "wrun_old" },
+      { continuationToken: "-1001::166", telegram: { post } } as never,
+      { recordSessionFailedByContinuationToken },
+    );
+
+    expect(recordSessionFailedByContinuationToken).toHaveBeenCalledWith(
+      "-1001::166",
+      "wrun_old",
+    );
+    expect(post).not.toHaveBeenCalled();
   });
 });

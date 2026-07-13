@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `StoredTelegramAttachment`: trusted persistent path advertised to the model.
- * - `createTelegramWorkspaceAttachmentImporter`: download, verify, scan, and persist pipeline.
+ * - `createTelegramWorkspaceAttachmentImporter`: download, validate, and persist pipeline.
  */
 import type { TelegramAttachment } from "eve/channels/telegram";
 
@@ -15,10 +15,10 @@ import type {
   WorkspaceScope,
 } from "../workspaces/workspace-repository.js";
 import { validateAttachmentContent } from "./attachment-policy.js";
+import { telegramInboxDirectory } from "./telegram-inbox-path.js";
 
 interface AttachmentImporterDependencies {
   download(attachment: TelegramAttachment): Promise<Uint8Array>;
-  scan(bytes: Uint8Array): Promise<void>;
   writeBinary(auth: WorkspaceAuthorization, input: {
     bytes: Uint8Array;
     mediaType: string;
@@ -32,6 +32,7 @@ export interface StoredTelegramAttachment {
   mediaType: string;
   path: string;
   scope: WorkspaceScope;
+  telegramMessageId: string;
 }
 
 const MEDIA_TYPE_DEFAULT_EXTENSIONS: Readonly<Record<string, string>> = {
@@ -65,13 +66,9 @@ function defaultAttachmentName(attachment: TelegramAttachment, index: number): s
     : attachment.mediaType
     ? MEDIA_TYPE_DEFAULT_EXTENSIONS[attachment.mediaType]
     : undefined;
-  if (!extension) {
-    throw new AppError(
-      "AGENT_ATTACHMENT_FILENAME_MISSING",
-      "Telegram не передал имя или распознаваемый тип документа. Отправьте файл заново",
-    );
-  }
-  return `${attachment.kind}-${identity}${extension}`;
+  // Telegram file names are optional presentation metadata. Keep an opaque document storable even
+  // when neither Telegram nor content detection can provide a meaningful extension.
+  return `${attachment.kind}-${identity}${extension ?? ""}`;
 }
 
 function assertTelegramMessageId(value: string): void {
@@ -92,6 +89,7 @@ export function createTelegramWorkspaceAttachmentImporter(
       scope: WorkspaceScope;
     }): Promise<StoredTelegramAttachment[]> {
       assertTelegramMessageId(input.messageId);
+      const inboxDirectory = telegramInboxDirectory(input.auth, input.scope, input.messageId);
       if (input.attachments.length > TELEGRAM_MAX_ATTACHMENTS_PER_MESSAGE) {
         throw new AppError(
           "AGENT_ATTACHMENT_COUNT_EXCEEDED",
@@ -108,9 +106,8 @@ export function createTelegramWorkspaceAttachmentImporter(
           kind: attachment.kind,
         });
 
-        // Scanning is deliberately before persistence and before Eve starts the model turn.
-        await dependencies.scan(bytes);
-        const path = `inbox/${input.messageId}/${validated.fileName}`;
+        // Content validation establishes the stored MIME and safe filename before persistence.
+        const path = `${inboxDirectory}/${validated.fileName}`;
         const file = await dependencies.writeBinary(input.auth, {
           bytes,
           mediaType: validated.mediaType,
@@ -118,7 +115,12 @@ export function createTelegramWorkspaceAttachmentImporter(
           path,
           scope: input.scope,
         });
-        stored.push({ mediaType: file.mediaType, path: file.path, scope: file.scope });
+        stored.push({
+          mediaType: file.mediaType,
+          path: file.path,
+          scope: file.scope,
+          telegramMessageId: input.messageId,
+        });
       }
       return stored;
     },

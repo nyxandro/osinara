@@ -9,7 +9,6 @@
  */
 export const EXTERNAL_GROUP_TOOL_NAMES = [
   "inspect_workspace_image",
-  "inspect_workspace_pdf",
   "list_memories",
   "manage_memory.delete",
   "manage_memory.edit",
@@ -32,7 +31,6 @@ export const ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES = [
 export const CONTROLLED_TOOL_NAMES = [
   "export_memory",
   "inspect_workspace_image",
-  "inspect_workspace_pdf",
   "list_family_members",
   "list_memories",
   "list_pending_family_invitations",

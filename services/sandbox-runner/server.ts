@@ -5,13 +5,12 @@
  * - `createSandboxRunnerServer`: creates a dependency-injected internal HTTP server.
  *
  * Routes:
- * - Health, session create/stop/delete, process execution, and binary file I/O.
+ * - Health, session create/removal, process execution, and binary file I/O.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
 import {
   parseCreateSandboxRequest,
-  parseSandboxEveSessionId,
   parseSandboxProcessRequest,
   parseSandboxRemovePathRequest,
   parseSandboxSessionId,
@@ -25,16 +24,11 @@ interface ServerDependencies {
   engine: SandboxEngine;
 }
 
-const SESSION_ROUTE = new RegExp(`^${SANDBOX_RUNNER_API_PREFIX}/sessions/([^/]+)$`, "u");
 const PROCESS_ROUTE = new RegExp(
   `^${SANDBOX_RUNNER_API_PREFIX}/sessions/([^/]+)/processes$`,
   "u",
 );
 const FILE_ROUTE = new RegExp(`^${SANDBOX_RUNNER_API_PREFIX}/sessions/([^/]+)/files$`, "u");
-const EVE_SESSION_ROUTE = new RegExp(
-  `^${SANDBOX_RUNNER_API_PREFIX}/eve-sessions/([^/]+)$`,
-  "u",
-);
 const STOP_ROUTE = new RegExp(`^${SANDBOX_RUNNER_API_PREFIX}/sessions/([^/]+)/stop$`, "u");
 const TOOL_ENVIRONMENT_ROUTE = new RegExp(
   `^${SANDBOX_RUNNER_API_PREFIX}/tool-environments/([^/]+)$`,
@@ -164,28 +158,10 @@ async function route(
     return;
   }
 
-  const sessionMatch = SESSION_ROUTE.exec(url.pathname);
-  if (request.method === "DELETE" && sessionMatch) {
-    await dependencies.engine.deleteSession(
-      parseSandboxSessionId(decodeURIComponent(sessionMatch[1]!)),
-    );
-    sendEmpty(response, 204);
-    return;
-  }
-
   const toolsMatch = TOOL_ENVIRONMENT_ROUTE.exec(url.pathname);
   if (request.method === "DELETE" && toolsMatch) {
     await dependencies.engine.deleteToolEnvironment(
       parseSandboxWorkspaceId(decodeURIComponent(toolsMatch[1]!)),
-    );
-    sendEmpty(response, 204);
-    return;
-  }
-
-  const eveSessionMatch = EVE_SESSION_ROUTE.exec(url.pathname);
-  if (request.method === "DELETE" && eveSessionMatch) {
-    await dependencies.engine.deleteEveSession(
-      parseSandboxEveSessionId(decodeURIComponent(eveSessionMatch[1]!)),
     );
     sendEmpty(response, 204);
     return;

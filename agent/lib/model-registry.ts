@@ -51,7 +51,7 @@ export const availableModels = {
 // Selection is explicit: an unavailable primary route fails instead of silently switching provider.
 export const primaryModel = availableModels[PRIMARY_MODEL_ROUTE];
 
-// The primary model is text-only, so image and rendered-PDF analysis stays on Qwen.
+// The primary model is text-only, so workspace image analysis stays on Qwen.
 export const visionModel = availableModels[VISION_MODEL_ROUTE];
 
 export const voiceTranscriptionModel = groq.transcription(GROQ_TRANSCRIPTION_MODEL_ID);

@@ -5,5 +5,6 @@ node_modules
 .eve
 .workflow-data
 .output
+.runtime
 coverage
 *.log

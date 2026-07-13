@@ -30,7 +30,7 @@ const createSandboxRequestSchema = z.strictObject({
   access: z.enum(["restricted", "trusted"]),
   eveSessionId: eveSessionIdSchema,
   mounts: z.array(workspaceMountSchema).min(1).max(2),
-  sessionId: sessionIdSchema,
+  sandboxSessionId: workspaceIdSchema,
 }).superRefine((request, context) => {
   const points = request.mounts.map((mount) => mount.mountPoint);
   if (new Set(points).size !== points.length) {
@@ -88,6 +88,7 @@ export interface WorkspaceSandboxMount {
 
 export interface WorkspaceSandboxUseOptions {
   mounts: WorkspaceSandboxMount[];
+  sandboxSessionId: string;
 }
 
 export interface SandboxRunnerProcessResponse {

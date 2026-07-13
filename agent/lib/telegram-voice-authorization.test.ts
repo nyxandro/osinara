@@ -2,7 +2,7 @@
  * Telegram voice authorization tests.
  *
  * Constructs covered:
- * - `createTelegramVoiceAuthorizer`: prevents unauthorized Groq transcription requests.
+ * - `createTelegramVoiceAuthorizer`: limits Groq transcription to personal and family spaces.
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -60,4 +60,27 @@ describe("createTelegramVoiceAuthorizer", () => {
       }),
     ).resolves.toBe(false);
   });
+
+  it.each(["external_private", "external_public"] as const)(
+    "denies %s voice before identity lookup and Groq transcription",
+    async (groupType) => {
+      const telegram = {
+        findGroup: vi.fn().mockResolvedValue({
+          familyId: "family-1",
+          groupId: "group-1",
+          telegramChatId: "-1001",
+          toolAllowlist: [],
+          type: groupType,
+        }),
+        findIdentity: vi.fn(),
+      };
+      const authorize = createTelegramVoiceAuthorizer(telegram);
+
+      await expect(authorize({
+        chat: { id: "-1001", type: "supergroup" },
+        from: { id: "202", isBot: false },
+      })).resolves.toBe(false);
+      expect(telegram.findIdentity).not.toHaveBeenCalled();
+    },
+  );
 });

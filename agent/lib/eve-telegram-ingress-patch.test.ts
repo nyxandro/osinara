@@ -3,20 +3,17 @@
  *
  * Constructs covered:
  * - `onVerifiedUpdate`: runs only after webhook verification and parsing.
- * - Patched native dispatch: returns the Eve session and accepts application continuation tokens.
- * - Patched attachment fetch: ignores Telegram's generic binary MIME for verified photos.
+ * - Patched native dispatch: returns the Eve session and accepts application continuation/auth.
  * - Patch installation remains safe when lifecycle scripts invoke it repeatedly.
  */
 import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 
 import { telegramChannel } from "eve/channels/telegram";
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  createTelegramFetchFile,
-  createTelegramFileUrl,
-} from "../../node_modules/eve/dist/src/public/channels/telegram/attachments.js";
+import { callAdapterEventHandler } from "../../node_modules/eve/dist/src/channel/adapter.js";
 
 interface HttpRoute {
   handler(request: Request, context: Record<string, unknown>): Promise<Response>;
@@ -26,37 +23,31 @@ const execFileAsync = promisify(execFile);
 
 describe("Eve Telegram verified ingress patch", () => {
   it("can be applied repeatedly without changing its reviewed anchors", async () => {
-    await expect(execFileAsync(process.execPath, [
+    const command = [
       "--experimental-strip-types",
       "scripts/apply-eve-patches.ts",
-    ])).resolves.toMatchObject({ stderr: "" });
+    ];
+    await expect(execFileAsync(process.execPath, command)).resolves.toMatchObject({ stderr: "" });
+    const indexTypesPath = "node_modules/eve/dist/src/public/channels/telegram/index.d.ts";
+    const before = await readFile(indexTypesPath, "utf8");
+
+    await expect(execFileAsync(process.execPath, command)).resolves.toMatchObject({ stderr: "" });
+
+    await expect(readFile(indexTypesPath, "utf8")).resolves.toBe(before);
   });
 
-  it("preserves the declared photo MIME when Telegram downloads as generic binary", async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        ok: true,
-        result: { file_path: "photos/file_1.jpg" },
-      }), { headers: { "content-type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]), {
-        headers: { "content-type": "application/octet-stream" },
-      }));
-    const fetchFile = createTelegramFetchFile({
-      api: { fetch },
-      credentials: { botToken: "test-token" },
-      policy: { allowedMediaTypes: ["image/*"], maxBytes: 1_024 },
-    });
-    const url = createTelegramFileUrl({
-      fileId: "photo-file-id",
-      filename: "photo.jpg",
-      mediaType: "image/jpeg",
-    });
+  it("propagates input.requested handler failures instead of parking an unbound approval", async () => {
+    const error = new Error("AGENT_APPROVAL_STORAGE_FAILED");
+    const adapter = {
+      kind: "telegram",
+      "input.requested": vi.fn().mockRejectedValue(error),
+    };
 
-    await expect(fetchFile(url.toString())).resolves.toMatchObject({
-      filename: "photo.jpg",
-      mediaType: "image/jpeg",
-    });
+    await expect(callAdapterEventHandler(
+      adapter as never,
+      { data: { requests: [] }, type: "input.requested" } as never,
+      {} as never,
+    )).rejects.toBe(error);
   });
 
   it("acknowledges through the hook and dispatches with the native channel adapter", async () => {
@@ -146,7 +137,16 @@ describe("Eve Telegram verified ingress patch", () => {
 
   it("resolves a rotated continuation token for HITL callbacks before delivery", async () => {
     const send = vi.fn().mockResolvedValue({ id: "session-callback" });
-    const resolveContinuationToken = vi.fn().mockResolvedValue("-100:55:77:osinara:3");
+    const auth = {
+      attributes: { applicationSessionId: "app-session-1", role: "owner" },
+      authenticator: "telegram",
+      principalId: "user-1",
+      principalType: "user" as const,
+    };
+    const onHitlCallbackQuery = vi.fn().mockResolvedValue({
+      auth,
+      continuationToken: "-100:55:77:osinara:3",
+    });
     const channel = telegramChannel({
       api: {
         fetch: vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true, result: true }), {
@@ -154,7 +154,7 @@ describe("Eve Telegram verified ingress patch", () => {
         })),
       },
       credentials: { botToken: "test-token", webhookSecretToken: "webhook-secret" },
-      resolveContinuationToken,
+      onHitlCallbackQuery,
     });
     const route = channel.routes[0] as unknown as HttpRoute;
     let backgroundTask: Promise<unknown> | undefined;
@@ -187,10 +187,61 @@ describe("Eve Telegram verified ingress patch", () => {
     });
     await backgroundTask;
 
-    expect(resolveContinuationToken).toHaveBeenCalledWith("-100:55:77");
+    expect(onHitlCallbackQuery).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ id: "callback-1" }),
+      "-100:55:77",
+    );
     expect(send.mock.calls[0]?.[1]).toMatchObject({
+      auth,
       continuationToken: "-100:55:77:osinara:3",
     });
+  });
+
+  it("does not resume Eve when the application rejects a HITL callback", async () => {
+    const send = vi.fn();
+    const onHitlCallbackQuery = vi.fn().mockResolvedValue(null);
+    const channel = telegramChannel({
+      api: {
+        fetch: vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true, result: true }), {
+          headers: { "content-type": "application/json" },
+        })),
+      },
+      credentials: { botToken: "test-token", webhookSecretToken: "webhook-secret" },
+      onHitlCallbackQuery,
+    });
+    const route = channel.routes[0] as unknown as HttpRoute;
+    let backgroundTask: Promise<unknown> | undefined;
+
+    await route.handler(new Request("https://agent.example/eve/v1/telegram", {
+      body: JSON.stringify({
+        callback_query: {
+          data: "eve:0",
+          from: { first_name: "Анна", id: 202, is_bot: false },
+          id: "callback-foreign",
+          message: {
+            chat: { id: -100, type: "supergroup" },
+            date: 1_700_000_000,
+            message_id: 77,
+            text: "Подтвердите действие",
+          },
+        },
+        update_id: 1004,
+      }),
+      headers: { "x-telegram-bot-api-secret-token": "webhook-secret" },
+      method: "POST",
+    }), {
+      params: {},
+      requestIp: null,
+      send,
+      waitUntil(task: Promise<unknown>) {
+        backgroundTask = task;
+      },
+    });
+    await backgroundTask;
+
+    expect(onHitlCallbackQuery).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("exposes an authenticated private drain route on the same adapter", async () => {

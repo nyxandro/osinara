@@ -4,7 +4,7 @@
  * Constructs covered:
  * - Health and validated session creation routes.
  * - Fail-closed rejection before the Docker engine boundary.
- * - Process execution and session deletion delegation.
+ * - Process execution and disposable session removal delegation.
  */
 import type { AddressInfo } from "node:net";
 
@@ -14,16 +14,13 @@ import type { SandboxEngine } from "./sandbox-engine.js";
 import { createSandboxRunnerServer } from "./server.js";
 
 const SESSION_ID = "wrun_01JZ8K4R0W6G73VTHX9NF2QABC";
-const BACKEND_SESSION_ID =
-  "eve-sbx-ses-osinara-scoped-runner-local-a1b2c3d4e5f6-wrun_01JZ8K4R0W6G73VTHX9NF2QABC-__root__";
+const SANDBOX_SESSION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const WORKSPACE_ID = "11111111-1111-4111-8111-111111111111";
 const servers: Array<ReturnType<typeof createSandboxRunnerServer>> = [];
 
 function fakeEngine(): SandboxEngine {
   return {
-    createSession: vi.fn(async () => ({ created: true, sessionId: SESSION_ID })),
-    deleteSession: vi.fn(async () => undefined),
-    deleteEveSession: vi.fn(async () => undefined),
+    createSession: vi.fn(async () => ({ created: true, sessionId: SANDBOX_SESSION_ID })),
     deleteToolEnvironment: vi.fn(async () => undefined),
     health: vi.fn(async () => undefined),
     readFile: vi.fn(async () => null),
@@ -35,6 +32,7 @@ function fakeEngine(): SandboxEngine {
       stdout: "Linux\n",
     })),
     stopAllSessions: vi.fn(async () => undefined),
+    removeIdleSessions: vi.fn(async () => 0),
     stopSession: vi.fn(async () => undefined),
     writeFile: vi.fn(async () => undefined),
   };
@@ -63,13 +61,13 @@ describe("sandbox runner HTTP server", () => {
         access: "trusted",
         mounts: [{ mountPoint: "personal", workspaceId: WORKSPACE_ID }],
         eveSessionId: SESSION_ID,
-        sessionId: BACKEND_SESSION_ID,
+        sandboxSessionId: SANDBOX_SESSION_ID,
       }),
       headers: { "content-type": "application/json" },
       method: "POST",
     });
     const processResponse = await fetch(
-      `${baseUrl}/v1/sessions/${encodeURIComponent(BACKEND_SESSION_ID)}/processes`, {
+      `${baseUrl}/v1/sessions/${encodeURIComponent(SANDBOX_SESSION_ID)}/processes`, {
       body: JSON.stringify({ command: "uname -s" }),
       headers: { "content-type": "application/json" },
       method: "POST",
@@ -82,10 +80,10 @@ describe("sandbox runner HTTP server", () => {
       access: "trusted",
       eveSessionId: SESSION_ID,
       mounts: [{ mountPoint: "personal", workspaceId: WORKSPACE_ID }],
-      sessionId: BACKEND_SESSION_ID,
+      sandboxSessionId: SANDBOX_SESSION_ID,
     });
     expect(engine.runProcess).toHaveBeenCalledWith(
-      BACKEND_SESSION_ID,
+      SANDBOX_SESSION_ID,
       { command: "uname -s" },
       expect.any(AbortSignal),
     );
@@ -99,7 +97,7 @@ describe("sandbox runner HTTP server", () => {
         access: "trusted",
         eveSessionId: SESSION_ID,
         mounts: [{ mountPoint: "group", workspaceId: WORKSPACE_ID }],
-        sessionId: SESSION_ID,
+        sandboxSessionId: SANDBOX_SESSION_ID,
       }),
       headers: { "content-type": "application/json" },
       method: "POST",
@@ -110,20 +108,18 @@ describe("sandbox runner HTTP server", () => {
     expect(engine.createSession).not.toHaveBeenCalled();
   });
 
-  it("checks Docker health and delegates durable deletion", async () => {
+  it("checks Docker health and delegates disposable compute and tool deletion", async () => {
     const engine = fakeEngine();
     const baseUrl = await start(engine);
 
     expect((await fetch(`${baseUrl}/health`)).status).toBe(200);
-    expect((await fetch(`${baseUrl}/v1/sessions/${SESSION_ID}`, { method: "DELETE" })).status)
-      .toBe(204);
-    expect((await fetch(`${baseUrl}/v1/eve-sessions/${SESSION_ID}`, { method: "DELETE" })).status)
-      .toBe(204);
+    expect((await fetch(`${baseUrl}/v1/sessions/${SANDBOX_SESSION_ID}/stop`, {
+      method: "POST",
+    })).status).toBe(204);
     expect((await fetch(`${baseUrl}/v1/tool-environments/${WORKSPACE_ID}`, { method: "DELETE" })).status)
       .toBe(204);
     expect(engine.health).toHaveBeenCalledOnce();
-    expect(engine.deleteSession).toHaveBeenCalledWith(SESSION_ID);
-    expect(engine.deleteEveSession).toHaveBeenCalledWith(SESSION_ID);
+    expect(engine.stopSession).toHaveBeenCalledWith(SANDBOX_SESSION_ID);
     expect(engine.deleteToolEnvironment).toHaveBeenCalledWith(WORKSPACE_ID);
   });
 });

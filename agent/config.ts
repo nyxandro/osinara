@@ -3,7 +3,7 @@
  *
  * Exports:
  * - Named Groq language/transcription models and CLIProxy routes.
- * - Agent compaction, delegation, session lifecycle, attachment, and timeout constants.
+ * - Agent compaction, delegation, session lifecycle, attachment, update, and timeout constants.
  * - Internal service locations and sandbox runner execution limits.
  * - Telegram group journal retention and model-context limits.
  * - `requireRuntimeEnvironment`: reads required environment-specific values.
@@ -14,11 +14,6 @@ export const AGENT_COMPACTION_THRESHOLD = 0.75;
 export const AGENT_MAX_SUBAGENT_DEPTH = 0;
 export const CLI_PROXY_MODEL_ID = "gpt-5.5";
 export const CLI_PROXY_MODEL_ROUTE = "codex-subscription-gpt-5.5";
-export const CLAMAV_HOST = "clamav";
-export const CLAMAV_PORT = 3310;
-export const CLAMAV_SCAN_TIMEOUT_MS = 30_000;
-export const DOCUMENT_PARSER_BASE_URL = "http://document-parser:8080";
-export const DOCUMENT_PARSER_TIMEOUT_MS = 30_000;
 export const GROQ_GPT_OSS_MODEL_ID = "openai/gpt-oss-120b";
 export const GROQ_GPT_OSS_MODEL_ROUTE = "groq-gpt-oss-120b";
 export const GROQ_QWEN_MODEL_ID = "qwen/qwen3.6-27b";
@@ -34,10 +29,14 @@ export const SESSION_INACTIVITY_DAYS = 30;
 export const SESSION_MAX_COMPLETED_TURNS = 250;
 export const SESSION_RETENTION_LEASE_MS = 15 * 60 * 1_000;
 export const SESSION_RETENTION_DAYS = 90;
+export const SOFTWARE_UPDATE_GITHUB_RESPONSE_MAX_BYTES = 1024 * 1024;
+export const SOFTWARE_UPDATE_HTTP_TIMEOUT_MS = 15_000;
+export const SOFTWARE_UPDATE_MANIFEST_MAX_BYTES = 64 * 1024;
 export const TELEGRAM_API_REQUEST_TIMEOUT_MS = 15_000;
 export const TELEGRAM_GROUP_JOURNAL_CONTEXT_CHARACTERS = 12_000;
 export const TELEGRAM_GROUP_JOURNAL_CONTEXT_MESSAGES = 50;
 export const TELEGRAM_GROUP_JOURNAL_RETENTION_MESSAGES = 1_000;
+export const TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED = 1;
 export const TELEGRAM_INGRESS_LEASE_MS = 15 * 60 * 1_000;
 export const TELEGRAM_MAX_INBOUND_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 export const TELEGRAM_MAX_ATTACHMENTS_PER_MESSAGE = 1;
@@ -45,7 +44,6 @@ export const TELEGRAM_MAX_OUTBOUND_DOCUMENT_BYTES = 50 * 1024 * 1024;
 export const TELEGRAM_VOICE_MAX_BYTES = 20 * 1024 * 1024;
 export const WORKSPACE_MAX_FILE_BYTES = 50 * 1024 * 1024;
 export const WORKSPACE_DELETION_LEASE_MS = 15 * 60 * 1_000;
-export const WORKSPACE_PDF_VISION_PAGES_PER_CALL = 3;
 export const WORKSPACE_TOOL_MAX_TEXT_BYTES = 1024 * 1024;
 export const VISION_MAX_FILE_BYTES = 20 * 1024 * 1024;
 

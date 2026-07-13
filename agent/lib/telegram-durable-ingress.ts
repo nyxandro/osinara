@@ -4,6 +4,7 @@
  * Exports:
  * - `createTelegramDurableIngress`: verified Eve hook that persists before ACK and drains FIFO.
  * - `handleTelegramDurableIngress`: production hook with PostgreSQL and Groq dependencies.
+ * - Application software-update callbacks complete before native Eve dispatch begins.
  */
 import type {
   TelegramDrainContext,
@@ -19,9 +20,13 @@ import { AppError, isAppError } from "./app-error.js";
 import { transcribeTelegramVoice } from "./groq-voice-transcription.js";
 import { type TelegramIngressRepository } from "./telegram-ingress-contract.js";
 import { telegramIngressRepository } from "./telegram-ingress-repository.js";
-import { isMessageAddressedToBot } from "./telegram-message-policy.js";
+import {
+  hasTelegramInboundMedia,
+  isMessageAddressedToBot,
+} from "./telegram-message-policy.js";
 import { createTelegramVoiceAuthorizer } from "./telegram-voice-authorization.js";
 import { telegramRepository } from "./telegram-repository.js";
+import { handleSoftwareUpdateCallback } from "./software-updates/callback.js";
 
 const telegramUpdateIdSchema = z.union([z.number().int().nonnegative().safe(), z.string().regex(/^\d+$/)]);
 const telegramVoiceSchema = z.object({
@@ -43,8 +48,12 @@ interface EveSessionResult {
 }
 
 interface DurableIngressDependencies {
+  acceptMedia(message: Pick<TelegramMessage, "chat">, updateId: string): Promise<boolean>;
   authorizeVoice(message: Pick<TelegramMessage, "chat" | "from">): Promise<boolean>;
   botUsername: string;
+  handleSoftwareUpdateCallback(
+    query: Extract<TelegramUpdate, { kind: "callback_query" }>["callbackQuery"],
+  ): Promise<boolean>;
   leaseMilliseconds: number;
   repository: TelegramIngressRepository;
   transcribeVoice(input: {
@@ -60,6 +69,7 @@ interface TelegramDurableIngressHandler {
 }
 
 const LEASE_HEARTBEAT_DIVISOR = 3;
+const CAPTIONLESS_ATTACHMENT_MODEL_TEXT = "Пользователь отправил файл без подписи.";
 
 function updateId(raw: Record<string, unknown>): string {
   const parsed = telegramUpdateIdSchema.safeParse(raw.update_id);
@@ -131,6 +141,27 @@ function shouldTranscribeVoice(message: TelegramMessage, botUsername: string): b
   return isMessageAddressedToBot({ ...message, text: dispatchText }, botUsername);
 }
 
+function withCaptionlessAttachmentText(update: TelegramUpdate): TelegramUpdate {
+  if (
+    update.kind !== "message" ||
+    update.message.attachments.length === 0 ||
+    update.message.text.trim() ||
+    update.message.caption.trim()
+  ) {
+    return update;
+  }
+
+  // Eve no longer forwards persisted bytes to the text-only primary model. Keep its final user
+  // message non-empty while describing only the verified event, not inventing a file request.
+  return {
+    ...update,
+    message: {
+      ...update.message,
+      text: CAPTIONLESS_ATTACHMENT_MODEL_TEXT,
+    },
+  };
+}
+
 function withTranscript(payload: Record<string, unknown>, transcript: string): Record<string, unknown> {
   const cloned = structuredClone(payload);
   const message = cloned.message;
@@ -197,6 +228,15 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
           continue;
         }
 
+        // Application update decisions are durable DB transitions and never enter an Eve session.
+        if (
+          update.kind === "callback_query" &&
+          await dependencies.handleSoftwareUpdateCallback(update.callbackQuery)
+        ) {
+          await dependencies.repository.complete(claim.updateId, claim.leaseToken);
+          continue;
+        }
+
         if (claim.voice && update.kind === "message" && shouldTranscribeVoice(update.message, dependencies.botUsername)) {
           const authorized = await dependencies.authorizeVoice(update.message);
           if (authorized) {
@@ -233,7 +273,9 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
         }
 
         await dependencies.repository.beginDispatch(claim.updateId, claim.leaseToken);
-        const session = (await dispatch(update)) as EveSessionResult | null | undefined;
+        const session = (await dispatch(
+          withCaptionlessAttachmentText(update),
+        )) as EveSessionResult | null | undefined;
         if (!session) {
           await dependencies.repository.complete(claim.updateId, claim.leaseToken);
           continue;
@@ -282,11 +324,20 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
   const handleVerifiedUpdate = async function handleVerifiedUpdate(
     context: TelegramVerifiedUpdateContext,
   ): Promise<Response> {
+    const incomingUpdateId = updateId(context.raw);
+    // External media is acknowledged before durable storage, download, transcription, or Eve dispatch.
+    if (
+      context.update.kind === "message" &&
+      hasTelegramInboundMedia(context.update.message) &&
+      !await dependencies.acceptMedia(context.update.message, incomingUpdateId)
+    ) {
+      return new Response("ok");
+    }
     const voice = voiceMetadata(context.raw);
     await dependencies.repository.enqueue({
       continuationKey: queueKey(context.update),
       payload: context.raw,
-      updateId: updateId(context.raw),
+      updateId: incomingUpdateId,
       ...(voice ? { voice } : {}),
     });
     scheduleDrain(context);
@@ -304,8 +355,16 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
 const authorizeTelegramVoice = createTelegramVoiceAuthorizer(telegramRepository);
 
 export const handleTelegramDurableIngress = createTelegramDurableIngress({
+  acceptMedia(message, incomingUpdateId) {
+    return telegramIngressRepository.acceptMedia({
+      chatId: message.chat.id,
+      chatType: message.chat.type,
+      updateId: incomingUpdateId,
+    });
+  },
   authorizeVoice: authorizeTelegramVoice,
   botUsername: process.env.TELEGRAM_BOT_USERNAME as string,
+  handleSoftwareUpdateCallback,
   leaseMilliseconds: TELEGRAM_INGRESS_LEASE_MS,
   repository: telegramIngressRepository,
   transcribeVoice: transcribeTelegramVoice,

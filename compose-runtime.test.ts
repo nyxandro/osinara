@@ -4,10 +4,13 @@
  * Constructs covered:
  * - Eve Workflow queue namespace is available before the local world starts.
  * - Local E5 runtime is immutable and resource bounded.
- * - Attachment scanning and PDF rendering are private, pinned, and resource bounded.
+ * - Removed antivirus infrastructure cannot return to the runtime.
+ * - PDF processing stays inside the normal sandbox instead of a parallel service.
  * - Docker socket, runner control plane, egress proxy, and tools volume remain isolated.
+ * - Dynamic skill package assets are shipped in the production agent image.
+ * - Nginx re-resolves the agent service after Docker replaces its container IP.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
@@ -16,6 +19,16 @@ interface PackageManifest {
 }
 
 const projectRoot = new URL("./", import.meta.url);
+const REMOVED_DOCUMENT_PARSER_PATHS = [
+  "agent/lib/attachments/document-parser-client.ts",
+  "agent/lib/workspaces/workspace-pdf-inspection.ts",
+  "agent/tools/inspect_workspace_pdf.ts",
+  "services/document-parser/server.mjs",
+] as const;
+const REMOVED_ANTIVIRUS_PATHS = [
+  "agent/lib/attachments/clamav-scanner.ts",
+  "agent/lib/attachments/clamav-scanner.test.ts",
+] as const;
 
 describe("Docker Compose runtime wiring", () => {
   it("provides Eve's derived queue namespace before workflow recovery starts", () => {
@@ -40,14 +53,26 @@ describe("Docker Compose runtime wiring", () => {
     expect(compose).toContain("      - --auto-truncate=false\n");
   });
 
-  it("isolates and bounds attachment processing services", () => {
+  it("keeps antivirus and the separate document parser out of the runtime", () => {
     const compose = readFileSync(new URL("compose.yaml", projectRoot), "utf8");
+    const dockerfile = readFileSync(new URL("Dockerfile", projectRoot), "utf8");
 
-    expect(compose).toContain("clamav/clamav:1.5.3_base@sha256:");
-    expect(compose).toContain("      target: document-parser\n");
+    expect(compose.toLowerCase()).not.toContain("clamav");
+    expect(compose).not.toContain("attachment-scanning");
     expect(compose).toContain("    read_only: true\n");
     expect(compose).toContain("      - no-new-privileges:true\n");
-    expect(compose).toContain("  document-processing:\n    internal: true\n");
+    expect(compose).not.toContain("document-parser");
+    expect(compose).not.toContain("document-processing");
+    expect(dockerfile).not.toContain("AS document-parser");
+    expect(dockerfile).toContain("      poppler-utils \\\n");
+
+    // Keep the removed parallel processing path out of the production source tree.
+    for (const removedPath of REMOVED_DOCUMENT_PARSER_PATHS) {
+      expect(existsSync(new URL(removedPath, projectRoot)), removedPath).toBe(false);
+    }
+    for (const removedPath of REMOVED_ANTIVIRUS_PATHS) {
+      expect(existsSync(new URL(removedPath, projectRoot)), removedPath).toBe(false);
+    }
   });
 
   it("keeps Docker control out of the agent and sandbox egress out of the app network", () => {
@@ -69,5 +94,21 @@ describe("Docker Compose runtime wiring", () => {
     expect(runner).not.toContain("      - sandbox-egress\n");
     expect(compose).toContain("  sandbox-control:\n    internal: true\n");
     expect(compose).toContain("  sandbox-egress:\n    internal: true\n");
+  });
+
+  it("ships dynamic skill package assets in the production runtime", () => {
+    const dockerfile = readFileSync(new URL("Dockerfile", projectRoot), "utf8");
+
+    expect(dockerfile).toContain("COPY --from=build /app/resources ./resources\n");
+  });
+
+  it("re-resolves the agent upstream after Docker replaces its container", () => {
+    const nginx = readFileSync(new URL("infra/nginx.conf", projectRoot), "utf8");
+
+    // Docker's embedded DNS must be queried after startup; a shared upstream zone lets Nginx
+    // replace stale addresses without restarting the public webhook edge.
+    expect(nginx).toContain("  resolver 127.0.0.11 valid=10s ipv6=off;\n");
+    expect(nginx).toContain("    zone eve_agent 64k;\n");
+    expect(nginx).toContain("    server agent:3000 resolve;\n");
   });
 });

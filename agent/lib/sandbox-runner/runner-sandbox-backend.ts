@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `scopedWorkspaceRunner`: real-Bash backend with trusted scoped tools persistence.
- * - `deleteRunnerSandboxSession`: removes retained sandbox compute without deleting tools.
+ * - `deleteRunnerToolEnvironment`: removes persistent tools when their workspace is deleted.
  */
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, posix } from "node:path";
@@ -21,14 +21,19 @@ import { SandboxTemplateNotProvisionedError } from "eve/sandbox";
 import { SANDBOX_RUNNER_BASE_URL } from "../../config.js";
 import type {
   SandboxAccess,
+  SandboxRunnerCreateRequest,
   WorkspaceSandboxMount,
   WorkspaceSandboxUseOptions,
 } from "./sandbox-runner-contract.js";
-import { parseSandboxEveSessionId } from "./sandbox-runner-contract.js";
+import {
+  parseCreateSandboxRequest,
+  parseSandboxEveSessionId,
+} from "./sandbox-runner-contract.js";
 import { SandboxRunnerClient } from "./runner-client.js";
 
-const BACKEND_NAME = "osinara-scoped-runner";
+const BACKEND_NAME = "osinara-scoped-runner-v3";
 const CACHE_DIRECTORY = "osinara-scoped-runner";
+const BACKEND_STATE_SCHEMA_VERSION = 3;
 const TEMPLATE_SCHEMA_VERSION = 1;
 
 interface BackendOptions {
@@ -38,6 +43,35 @@ interface BackendOptions {
 interface StoredTemplate {
   files: Array<{ contentBase64: string; path: string }>;
   version: number;
+}
+
+interface StoredBackendMetadata {
+  access: SandboxAccess;
+  mounts: WorkspaceSandboxMount[];
+  sandboxSessionId: string;
+  version: number;
+}
+
+function parseBackendMetadata(
+  value: Record<string, unknown> | undefined,
+  eveSessionId: string,
+): StoredBackendMetadata | null {
+  if (!value) return null;
+  if (value.version !== BACKEND_STATE_SCHEMA_VERSION) {
+    throw new Error("AGENT_SANDBOX_RUNNER_STATE_INVALID: Reconnect schema mismatch");
+  }
+  const request = parseCreateSandboxRequest({
+    access: value.access,
+    eveSessionId,
+    mounts: value.mounts,
+    sandboxSessionId: value.sandboxSessionId,
+  });
+  return {
+    access: request.access,
+    mounts: request.mounts,
+    sandboxSessionId: request.sandboxSessionId,
+    version: BACKEND_STATE_SCHEMA_VERSION,
+  };
 }
 
 function templatePath(appRoot: string, templateKey: string): string {
@@ -140,12 +174,14 @@ function resolveSeedPath(
 function buildSession(input: {
   access: () => SandboxAccess | null;
   client: SandboxRunnerClient;
-  id: string;
+  ensure: () => Promise<string>;
+  id: () => string;
 }): SandboxSession {
   async function spawn(options: SandboxSpawnOptions): Promise<SandboxProcess> {
+    const sessionId = await input.ensure();
     const controller = new AbortController();
     let killed = false;
-    const completion = input.client.run(input.id, {
+    const completion = input.client.run(sessionId, {
       command: options.command,
       environment: options.env,
       workingDirectory: options.workingDirectory,
@@ -161,7 +197,7 @@ function buildSession(input: {
         if (killed) return;
         killed = true;
         controller.abort();
-        await input.client.stop(input.id);
+        await input.client.stop(sessionId);
       },
       async wait() {
         return { exitCode: (await completion).exitCode };
@@ -170,18 +206,20 @@ function buildSession(input: {
   }
 
   async function readBytes(path: string, signal?: AbortSignal): Promise<Uint8Array | null> {
-    return await input.client.readFile(input.id, resolveSandboxPath(path), signal);
+    return await input.client.readFile(await input.ensure(), resolveSandboxPath(path), signal);
   }
 
   async function writeBytes(path: string, content: Uint8Array, signal?: AbortSignal): Promise<void> {
-    await input.client.writeFile(input.id, resolveSandboxPath(path), content, signal);
+    await input.client.writeFile(await input.ensure(), resolveSandboxPath(path), content, signal);
   }
 
   return {
-    id: input.id,
+    get id() {
+      return input.id();
+    },
     resolvePath: resolveSandboxPath,
     async run(options) {
-      const result = await input.client.run(input.id, {
+      const result = await input.client.run(await input.ensure(), {
         command: options.command,
         environment: options.env,
         workingDirectory: options.workingDirectory,
@@ -218,7 +256,7 @@ function buildSession(input: {
       await writeBytes(options.path, Buffer.from(options.content, encoding), options.abortSignal);
     },
     async removePath(options) {
-      await input.client.removePath(input.id, {
+      await input.client.removePath(await input.ensure(), {
         force: options.force,
         path: resolveSandboxPath(options.path),
         recursive: options.recursive,
@@ -255,66 +293,99 @@ export function scopedWorkspaceRunner(options: BackendOptions = {}): SandboxBack
       return { reused: false };
     },
     async create(input) {
-      if (input.existingMetadata && input.existingMetadata.version !== TEMPLATE_SCHEMA_VERSION) {
-        throw new Error("AGENT_SANDBOX_RUNNER_STATE_INVALID: Reconnect schema mismatch");
-      }
       const template = input.templateKey === null
         ? null
         : await loadTemplate(input.runtimeContext.appRoot, input.templateKey);
-      // The backend key identifies one sandbox; the framework tag identifies its durable Eve session.
+      // A thread ID survives normal context rotation while a trust-zone replacement gets a new ID.
       const eveSessionId = parseSandboxEveSessionId(input.tags?.sessionId);
-      let mounts: WorkspaceSandboxMount[] | null = null;
-      let access: SandboxAccess | null = null;
-      const session = buildSession({ access: () => access, client, id: input.sessionKey });
+      const restored = parseBackendMetadata(input.existingMetadata, eveSessionId);
+      let request: SandboxRunnerCreateRequest | null = restored
+        ? {
+          access: restored.access,
+          eveSessionId,
+          mounts: restored.mounts,
+          sandboxSessionId: restored.sandboxSessionId,
+        }
+        : null;
+      const requireRequest = (): SandboxRunnerCreateRequest => {
+        if (!request) {
+          throw new Error(
+            "AGENT_SANDBOX_RUNNER_SESSION_MISSING: Sandbox session is not mounted",
+          );
+        }
+        return request;
+      };
+      const runnerSessionId = () => {
+        return requireRequest().sandboxSessionId;
+      };
+      const ensureRunner = async (): Promise<string> => {
+        const current = requireRequest();
+        const created = await client.create(current);
+        if (created.created) {
+          try {
+            for (const file of template?.files ?? []) {
+              await client.writeFile(
+                current.sandboxSessionId,
+                resolveSeedPath(file.path, current.access, current.mounts),
+                Buffer.from(file.contentBase64, "base64"),
+              );
+            }
+          } catch (error) {
+            // A partially seeded disposable container must not suppress seeding on recreation.
+            await client.stop(current.sandboxSessionId);
+            throw error;
+          }
+        }
+        return current.sandboxSessionId;
+      };
+      const session = buildSession({
+        access: () => request?.access ?? null,
+        client,
+        ensure: ensureRunner,
+        id: runnerSessionId,
+      });
       return {
         session,
         async useSessionFn(useOptions) {
           if (!useOptions) throw new Error("AGENT_SANDBOX_RUNNER_MOUNTS_MISSING: Mounts are required");
-          if (mounts) {
-            if (JSON.stringify(mounts) !== JSON.stringify(useOptions.mounts)) {
+          if (request) {
+            if (
+              request.sandboxSessionId !== useOptions.sandboxSessionId ||
+              JSON.stringify(request.mounts) !== JSON.stringify(useOptions.mounts)
+            ) {
               throw new Error("AGENT_SANDBOX_RUNNER_REMOUNT_DENIED: Session mounts are immutable");
             }
+            await ensureRunner();
             return session;
           }
-          access = accessForMounts(useOptions.mounts);
-          const created = await client.create({
-            access,
+          request = parseCreateSandboxRequest({
+            access: accessForMounts(useOptions.mounts),
             eveSessionId,
             mounts: useOptions.mounts,
-            sessionId: input.sessionKey,
+            sandboxSessionId: useOptions.sandboxSessionId,
           });
-          mounts = structuredClone(useOptions.mounts);
-          if (created.created) {
-            for (const file of template?.files ?? []) {
-              await client.writeFile(
-                input.sessionKey,
-                resolveSeedPath(file.path, access, mounts),
-                Buffer.from(file.contentBase64, "base64"),
-              );
-            }
-          }
+          await ensureRunner();
           return session;
         },
         async captureState() {
+          const current = requireRequest();
           return {
             backendName: BACKEND_NAME,
-            metadata: { version: TEMPLATE_SCHEMA_VERSION },
+            metadata: {
+              access: current.access,
+              mounts: current.mounts,
+              sandboxSessionId: current.sandboxSessionId,
+              version: BACKEND_STATE_SCHEMA_VERSION,
+            },
             sessionKey: input.sessionKey,
           };
         },
         async shutdown() {
-          if (mounts) await client.stop(input.sessionKey);
+          if (request) await client.stop(request.sandboxSessionId);
         },
       };
     },
   };
-}
-
-export async function deleteRunnerSandboxSession(
-  eveSessionId: string,
-  baseUrl = SANDBOX_RUNNER_BASE_URL,
-): Promise<void> {
-  await new SandboxRunnerClient(baseUrl).deleteEveSession(eveSessionId);
 }
 
 export async function deleteRunnerToolEnvironment(

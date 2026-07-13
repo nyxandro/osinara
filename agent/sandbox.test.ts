@@ -11,7 +11,7 @@ import sandbox from "./sandbox.js";
 
 describe("agent sandbox", () => {
   it("selects a backend explicitly instead of relying on production auto-detection", () => {
-    expect(sandbox.backend).toMatchObject({ name: "osinara-scoped-runner" });
+    expect(sandbox.backend).toMatchObject({ name: "osinara-scoped-runner-v3" });
   });
 
   it("installs verified workspace mounts on each Eve session", () => {

@@ -2,8 +2,8 @@
  * Telegram HITL authorization regression tests.
  *
  * Constructs covered:
- * - Owner and memory guards accept the durable verified initiator after approval.
- * - A present non-owner caller cannot inherit the initiator's owner role.
+ * - Owner and memory guards accept the freshly authenticated callback caller.
+ * - A non-owner callback caller cannot inherit the durable initiator's owner role.
  */
 import type { SessionContext } from "eve/context";
 import { describe, expect, it } from "vitest";
@@ -45,18 +45,18 @@ function context(input: {
 }
 
 describe("HITL authorization", () => {
-  it("authorizes the private owner and memory scope after approval resumes", () => {
-    const ctx = context({ initiatorRole: "owner" });
+  it("authorizes the current private owner and memory scope after approval resumes", () => {
+    const ctx = context({ currentRole: "owner" });
 
     expect(requirePrivateTelegramOwner(ctx)).toMatchObject({
       role: "owner",
       telegramChatId: "101",
-      userId: "initiator-user",
+      userId: "current-user",
     });
     expect(requireMemoryAuthorization(ctx)).toMatchObject({
       familyId: "family-1",
       scopes: ["personal", "family"],
-      userId: "initiator-user",
+      userId: "current-user",
     });
   });
 

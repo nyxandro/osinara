@@ -3,7 +3,9 @@
  *
  * Exports:
  * - `SandboxDockerRuntime`: resolved Docker resources owned by Compose.
+ * - `SANDBOX_CONTAINER_POLICY_VERSION`: invalidates containers created under older runtime policy.
  * - `buildSandboxContainerOptions`: creates fail-closed scoped container options.
+ * - `resolveTrustedToolMount`: selects the only persistent HOME mount for a trusted session.
  */
 import type Docker from "dockerode";
 
@@ -20,6 +22,10 @@ export interface SandboxDockerRuntime {
   workspaceVolume: string;
 }
 
+export const SANDBOX_CONTAINER_POLICY_VERSION = "4";
+
+const AGENT_BROWSER_SESSION_NAME = "osinara";
+const AGENT_BROWSER_RESTORE_SAVE_POLICY = "auto";
 const PROXY_URL = "http://sandbox-egress-proxy:3128";
 const BASE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 const SANDBOX_CPU_NANOSECONDS = 1_000_000_000;
@@ -46,24 +52,35 @@ function workspaceMounts(
   );
 }
 
-function toolsMounts(
+export function resolveTrustedToolMount(
+  mounts: readonly SandboxRunnerMount[],
+): SandboxRunnerMount {
+  // Private sessions prefer personal state; family sessions have only their family mount.
+  const primary = mounts.find((mount) => mount.mountPoint === "personal") ?? mounts[0];
+  if (!primary || primary.mountPoint === "group") {
+    throw new Error(
+      "AGENT_SANDBOX_RUNNER_TOOL_SCOPE_INVALID: Trusted tool environment is missing",
+    );
+  }
+  return primary;
+}
+
+function toolsMount(
   runtime: SandboxDockerRuntime,
   mounts: readonly SandboxRunnerMount[],
-): Docker.MountSettings[] {
-  return mounts.map((mount) =>
-    volumeMount(runtime.toolsVolume, `/tools/${mount.mountPoint}`, mount.workspaceId)
-  );
+): Docker.MountSettings {
+  const mount = resolveTrustedToolMount(mounts);
+  return volumeMount(runtime.toolsVolume, `/tools/${mount.mountPoint}`, mount.workspaceId);
 }
 
 function trustedEnvironment(mounts: readonly SandboxRunnerMount[]): string[] {
-  const primary = mounts.find((mount) => mount.mountPoint === "personal") ?? mounts[0]!;
+  const primary = resolveTrustedToolMount(mounts);
   const root = `/tools/${primary.mountPoint}`;
-  const executablePaths = mounts.flatMap((mount) => [
-    `/tools/${mount.mountPoint}/npm/bin`,
-    `/tools/${mount.mountPoint}/python/bin`,
-    `/tools/${mount.mountPoint}/bin`,
-  ]);
+  const executablePaths = [`${root}/npm/bin`, `${root}/python/bin`, `${root}/bin`];
   return [
+    `AGENT_BROWSER_RESTORE=${AGENT_BROWSER_SESSION_NAME}`,
+    `AGENT_BROWSER_RESTORE_SAVE=${AGENT_BROWSER_RESTORE_SAVE_POLICY}`,
+    `AGENT_BROWSER_SESSION=${AGENT_BROWSER_SESSION_NAME}`,
     `HOME=${root}/home`,
     `PATH=${[...executablePaths, BASE_PATH].join(":")}`,
     `NPM_CONFIG_PREFIX=${root}/npm`,
@@ -94,7 +111,7 @@ export function buildSandboxContainerOptions(
 ): Docker.ContainerCreateOptions {
   const trusted = request.access === "trusted";
   const mounts = workspaceMounts(runtime, request.mounts);
-  if (trusted) mounts.push(...toolsMounts(runtime, request.mounts));
+  if (trusted) mounts.push(toolsMount(runtime, request.mounts));
 
   return {
     AttachStderr: false,
@@ -105,6 +122,8 @@ export function buildSandboxContainerOptions(
     HostConfig: {
       AutoRemove: false,
       CapDrop: ["ALL"],
+      // Docker's init process reaps Chromium descendants so durable sandboxes do not exhaust PIDs.
+      Init: true,
       Memory: SANDBOX_MEMORY_BYTES,
       Mounts: mounts,
       NanoCpus: SANDBOX_CPU_NANOSECONDS,
@@ -120,8 +139,9 @@ export function buildSandboxContainerOptions(
     Labels: {
       "dev.osinara.sandbox.access": request.access,
       "dev.osinara.sandbox.eve-session-id": request.eveSessionId,
+      "dev.osinara.sandbox.policy-version": SANDBOX_CONTAINER_POLICY_VERSION,
       "dev.osinara.sandbox.project": runtime.project,
-      "dev.osinara.sandbox.session-id": request.sessionId,
+      "dev.osinara.sandbox.session-id": request.sandboxSessionId,
     },
     OpenStdin: false,
     StdinOnce: false,

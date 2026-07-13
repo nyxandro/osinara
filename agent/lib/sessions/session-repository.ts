@@ -42,6 +42,7 @@ export interface PreparedSession {
   generation: number;
   id: string;
   rotated: boolean;
+  sandboxSessionId: string;
 }
 
 export interface SessionRetentionClaim {
@@ -227,6 +228,7 @@ export const sessionRepository = {
         generation: current.generation,
         id: current.id,
         rotated: rotate || trustZoneRecreated,
+        sandboxSessionId: current.thread_id,
       };
     } catch (error) {
       await client.query("ROLLBACK");
@@ -263,15 +265,19 @@ export const sessionRepository = {
     }
   },
 
-  async recordTurnCompleted(id: string, eveSessionId: string): Promise<SessionEventResult> {
+  async recordTurnCompleted(
+    id: string,
+    eveSessionId: string,
+    pendingOperation: boolean,
+  ): Promise<SessionEventResult> {
     const result = await database().query(
       `UPDATE conversation_sessions
           SET completed_turns = completed_turns + 1,
-              last_activity_at = now(), pending_operation = false,
+              last_activity_at = now(), pending_operation = $3,
               eve_session_id = $2
         WHERE id = $1 AND retired_at IS NULL
            AND (eve_session_id IS NULL OR eve_session_id <= $2)`,
-      [id, eveSessionId],
+      [id, eveSessionId, pendingOperation],
     );
     if (result.rowCount === 1) return "recorded";
     return await classifyMissedSessionEvent(
@@ -299,17 +305,39 @@ export const sessionRepository = {
     );
   },
 
-  async recordSessionFailedByContinuationToken(continuationToken: string): Promise<void> {
-    const result = await database().query(
+  async recordSessionFailedByContinuationToken(
+    continuationToken: string,
+    eveSessionId: string,
+  ): Promise<SessionEventResult> {
+    const result = await database().query<{ id: string }>(
       `UPDATE conversation_sessions
-          SET pending_operation = false, rotation_requested_at = now()
+          SET pending_operation = false,
+              rotation_requested_at = now(),
+              eve_session_id = $2
+        WHERE continuation_token = $1
+          AND retired_at IS NULL
+          AND (eve_session_id IS NULL OR eve_session_id <= $2)`,
+      [continuationToken, eveSessionId],
+    );
+    if (result.rowCount === 1) return "recorded";
+    const session = await database().query<{ id: string }>(
+      `SELECT id FROM conversation_sessions
         WHERE continuation_token = $1 AND retired_at IS NULL`,
       [continuationToken],
     );
-    // A pre-rollout session can fail before it has any application lifecycle row.
-    if (result.rowCount !== 0 && result.rowCount !== 1) {
-      throw new AppError("AGENT_SESSION_FAILURE_RECORD_FAILED", "Не удалось завершить повреждённый контекст");
+    const id = session.rows[0]?.id;
+    if (!id) {
+      throw new AppError(
+        "AGENT_SESSION_FAILURE_RECORD_FAILED",
+        "Не удалось завершить повреждённый контекст",
+      );
     }
+    return await classifyMissedSessionEvent(
+      id,
+      eveSessionId,
+      "AGENT_SESSION_FAILURE_RECORD_FAILED",
+      "Не удалось сохранить состояние повреждённого контекста",
+    );
   },
 
   async requestRotation(id: string): Promise<void> {
@@ -348,79 +376,6 @@ export const sessionRepository = {
     } finally {
       client.release();
     }
-  },
-
-  async resolveContinuationToken(baseToken: string): Promise<string> {
-    const result = await database().query<{
-      continuation_token: string;
-      retired_at: Date | null;
-    }>(
-      `SELECT s.continuation_token, s.retired_at
-         FROM conversation_session_routes r
-         JOIN conversation_sessions s ON s.id = r.session_id
-        WHERE r.base_continuation_token = $1`,
-      [baseToken],
-    );
-    const routed = result.rows[0];
-    if (routed?.retired_at) {
-      throw new AppError(
-        "AGENT_SESSION_CALLBACK_EXPIRED",
-        "Кнопка относится к завершённому контексту. Повторите запрос в новом сообщении",
-      );
-    }
-    if (routed) return routed.continuation_token;
-
-    // Rollout compatibility: an approval can be clicked before the old generation-zero session
-    // receives its first normal post-deploy message. Numeric Telegram IDs are trusted DB keys.
-    const chatId = baseToken.split(":", 1)[0];
-    if (!chatId) return baseToken;
-    if (chatId.startsWith("-")) {
-      const group = await database().query<{
-        family_id: string;
-        id: string;
-        type: "external_private" | "external_public" | "family_private";
-      }>(
-        "SELECT id, family_id, type FROM telegram_groups WHERE telegram_chat_id = $1",
-        [chatId],
-      );
-      const row = group.rows[0];
-      if (!row) return baseToken;
-      const prepared = await this.prepareTurn({
-        baseContinuationToken: baseToken,
-        familyId: row.family_id,
-        groupId: row.id,
-        now: new Date(),
-        scope: row.type === "family_private" ? "family" : "group",
-        userId: null,
-      });
-      return prepared.continuationToken;
-    }
-    const identity = await database().query<{ family_id: string; user_id: string }>(
-      `SELECT fm.family_id, u.id AS user_id
-         FROM users u JOIN family_memberships fm ON fm.user_id = u.id
-        WHERE u.telegram_user_id = $1`,
-      [chatId],
-    );
-    const row = identity.rows[0];
-    if (!row) return baseToken;
-    const prepared = await this.prepareTurn({
-      baseContinuationToken: baseToken,
-      familyId: row.family_id,
-      groupId: null,
-      now: new Date(),
-      scope: "personal",
-      userId: row.user_id,
-    });
-    return prepared.continuationToken;
-  },
-
-  async findIdByContinuationToken(continuationToken: string): Promise<string | null> {
-    const result = await database().query<{ id: string }>(
-      `SELECT id FROM conversation_sessions
-        WHERE continuation_token = $1 AND retired_at IS NULL`,
-      [continuationToken],
-    );
-    return result.rows[0]?.id ?? null;
   },
 
   async claimExpiredForDeletion(now: Date): Promise<SessionRetentionClaim | null> {

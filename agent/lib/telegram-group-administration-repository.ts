@@ -6,6 +6,7 @@
  * - `TelegramGroupAdministrationRepository`: injectable registration/removal contract.
  * - `telegramGroupAdministrationRepository`: family-scoped group lifecycle operations.
  */
+import { TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED } from "../config.js";
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
 import type {
@@ -49,6 +50,12 @@ export const telegramGroupAdministrationRepository: TelegramGroupAdministrationR
       if (!owner.rowCount) {
         throw new AppError("AGENT_OWNER_REQUIRED", "Это действие доступно только владельцу");
       }
+
+      // Receipt-time media policy and trust-zone replacement share this chat-level lock.
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, $2))",
+        [input.telegramChatId, TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED],
+      );
 
       // A type change crosses a trust boundary, so replace the row and cascade all scoped data.
       const existing = await client.query<{ family_id: string; id: string; type: RegisteredGroupType }>(
@@ -129,6 +136,12 @@ export const telegramGroupAdministrationRepository: TelegramGroupAdministrationR
       if (!owner.rowCount) {
         throw new AppError("AGENT_OWNER_REQUIRED", "Это действие доступно только владельцу");
       }
+
+      // Prevent removal from overtaking an in-flight media trust-zone decision.
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, $2))",
+        [input.telegramChatId, TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED],
+      );
 
       // Both group keys remain mandatory so another family's registration is never deleted.
       const result = await client.query<{ id: string }>(

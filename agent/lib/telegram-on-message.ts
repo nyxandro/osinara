@@ -17,7 +17,6 @@ import {
   TELEGRAM_GROUP_JOURNAL_CONTEXT_MESSAGES,
 } from "../config.js";
 import { downloadTelegramAttachment } from "./attachments/telegram-attachment-download.js";
-import { scanAttachmentForMalware } from "./attachments/clamav-scanner.js";
 import {
   createTelegramWorkspaceAttachmentImporter,
   type StoredTelegramAttachment,
@@ -30,13 +29,20 @@ import {
   sessionRepository,
   type PrepareSessionInput,
 } from "./sessions/session-repository.js";
-import { isMessageAddressedToBot } from "./telegram-message-policy.js";
+import {
+  hasTelegramInboundMedia,
+  isMessageAddressedToBot,
+} from "./telegram-message-policy.js";
 import { formatTelegramGroupJournalContext } from "./telegram-group-journal-context.js";
 import {
   telegramGroupJournalRepository,
   type TelegramGroupJournalRepository,
 } from "./telegram-group-journal-repository.js";
 import { telegramRepository, type TelegramRepository } from "./telegram-repository.js";
+import {
+  telegramHitlApprovalRepository,
+  type TelegramHitlApprovalRepository,
+} from "./telegram-hitl/approval-repository.js";
 import { workspaceBinaryRepository } from "./workspaces/workspace-binary-repository.js";
 import type {
   WorkspaceAuthorization,
@@ -54,6 +60,7 @@ interface TelegramMessageRepositories {
     }): Promise<StoredTelegramAttachment[]>;
   };
   family: Pick<FamilyRepository, "claimInvitation">;
+  hitl: Pick<TelegramHitlApprovalRepository, "authorizeReply">;
   journal: TelegramGroupJournalRepository;
   session: Pick<typeof sessionRepository, "prepareTurn">;
   telegram: TelegramRepository;
@@ -154,6 +161,8 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
     let journalEnabled = group?.messageMode === "all";
     if (message.chat.type !== "private") {
       if (!group) return null;
+      // External spaces never journal or dispatch media metadata, so Eve cannot download its bytes.
+      if (group.type !== "family_private" && hasTelegramInboundMedia(message)) return null;
       if (journalEnabled) {
         const recordResult = await repositories.journal.record(group.groupId, message);
         if (recordResult === "duplicate") return null;
@@ -231,6 +240,24 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
     }
 
     const access = decision.access;
+
+    // Replies can answer Eve approvals as plain text, so enforce the same initiator binding as buttons.
+    if (message.replyToMessage?.from?.isBot === true) {
+      const replyAuthorization = await repositories.hitl.authorizeReply({
+        baseContinuationToken: baseContinuationToken(message),
+        telegramChatId: message.chat.id,
+        telegramMessageId: message.replyToMessage.messageId,
+        telegramUserId: sender.id,
+      });
+      if (replyAuthorization === "forbidden" || replyAuthorization === "expired") {
+        const error = replyAuthorization === "forbidden"
+          ? "AGENT_APPROVAL_FORBIDDEN: Подтвердить действие может только пользователь, который его запросил."
+          : "AGENT_APPROVAL_EXPIRED: Это подтверждение уже использовано или больше не действует.";
+        await ctx.telegram.sendMessage(error);
+        return null;
+      }
+    }
+
     let storedAttachments: StoredTelegramAttachment[] = [];
     if (message.attachments.length > 0) {
       try {
@@ -257,7 +284,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
     const context = [
       `Verified conversation scope: ${access.memoryScopes.join(", ")}.`,
       `Verified role: ${access.role}.`,
-      "Verified Telegram delivery: reply in concise GitHub-flavored Markdown; safe HTML rendering is handled by the channel. Avoid Markdown tables and raw HTML.",
+      "Verified Telegram delivery: reply in concise Rich Markdown; the channel safely supports Markdown tables and approved text-rich structure.",
     ];
     if (storedAttachments.length > 0) context.push(formatStoredAttachments(storedAttachments));
 
@@ -284,6 +311,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
           applicationSessionId: appSession.id,
           memoryScopes: access.memoryScopes,
           role: access.role,
+          sandboxSessionId: appSession.sandboxSessionId,
           telegramChatId: message.chat.id,
           telegramChatType: message.chat.type,
           telegramMessageId: message.messageId,
@@ -310,10 +338,10 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
 export const handleTelegramMessage = createTelegramMessageHandler({
   attachments: createTelegramWorkspaceAttachmentImporter({
     download: downloadTelegramAttachment,
-    scan: scanAttachmentForMalware,
     writeBinary: workspaceBinaryRepository.writeBinary,
   }),
   family: familyRepository,
+  hitl: telegramHitlApprovalRepository,
   journal: telegramGroupJournalRepository,
   session: sessionRepository,
   telegram: telegramRepository,

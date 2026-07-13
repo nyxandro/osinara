@@ -44,6 +44,11 @@ export interface TelegramIngressClaim {
 }
 
 export interface TelegramIngressRepository {
+  acceptMedia(input: {
+    chatId: string;
+    chatType: "channel" | "group" | "private" | "supergroup";
+    updateId: string;
+  }): Promise<boolean>;
   beginVoiceTranscription(updateId: string, leaseToken: string): Promise<"completed" | "started">;
   beginDispatch(updateId: string, leaseToken: string): Promise<void>;
   claimNext(leaseMilliseconds: number): Promise<TelegramIngressClaim | null>;

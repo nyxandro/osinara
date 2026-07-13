@@ -14,8 +14,6 @@ import type {
 
 export interface SandboxEngine {
   createSession(request: SandboxRunnerCreateRequest): Promise<SandboxRunnerSessionResponse>;
-  deleteEveSession(eveSessionId: string): Promise<void>;
-  deleteSession(sessionId: string): Promise<void>;
   deleteToolEnvironment(workspaceId: string): Promise<void>;
   health(): Promise<void>;
   readFile(sessionId: string, path: string): Promise<Uint8Array | null>;
@@ -25,6 +23,7 @@ export interface SandboxEngine {
     request: SandboxRunnerProcessRequest,
     signal?: AbortSignal,
   ): Promise<SandboxRunnerProcessResponse>;
+  removeIdleSessions(now: Date): Promise<number>;
   stopAllSessions(): Promise<void>;
   stopSession(sessionId: string): Promise<void>;
   writeFile(sessionId: string, path: string, content: Uint8Array): Promise<void>;

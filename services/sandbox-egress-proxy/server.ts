@@ -9,11 +9,10 @@
  * - Private/reserved destinations and ports other than HTTP(S) are rejected.
  * - Proxy credentials and hop-by-hop headers are never forwarded.
  */
-import { lookup } from "node:dns/promises";
 import { createServer, request as httpRequest, type IncomingHttpHeaders } from "node:http";
 import { connect, type Socket } from "node:net";
 
-import { isPublicInternetAddress } from "./address-policy.js";
+import { resolvePublicInternetAddress } from "./public-dns-resolver.js";
 
 const ALLOWED_PORTS = new Set([80, 443]);
 const CONNECT_TIMEOUT_MS = 15_000;
@@ -44,11 +43,8 @@ function parsePort(value: string): number {
 }
 
 async function resolvePublicTarget(hostname: string, port: number): Promise<ResolvedTarget> {
-  const results = await lookup(hostname, { all: true, verbatim: true });
-  const publicAddress = results.find((result) => isPublicInternetAddress(result.address));
-  if (!publicAddress) {
-    throw new Error("AGENT_SANDBOX_EGRESS_DESTINATION_FORBIDDEN: Destination is not public");
-  }
+  // Resolve outside host VPN fake-IP DNS, then pin the validated address for this connection.
+  const publicAddress = await resolvePublicInternetAddress(hostname);
   return { ...publicAddress, hostname, port };
 }
 

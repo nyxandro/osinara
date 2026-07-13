@@ -73,7 +73,7 @@ export class SandboxRunnerClient {
       },
     ));
     const body = await response.json() as Partial<SandboxRunnerSessionResponse>;
-    if (typeof body.created !== "boolean" || body.sessionId !== request.sessionId) {
+    if (typeof body.created !== "boolean" || body.sessionId !== request.sandboxSessionId) {
       throw new Error("AGENT_SANDBOX_RUNNER_RESPONSE_INVALID: Session response is malformed");
     }
     return body as SandboxRunnerSessionResponse;
@@ -132,15 +132,6 @@ export class SandboxRunnerClient {
 
   async stop(sessionId: string): Promise<void> {
     await requireSuccess(await fetch(this.#sessionUrl(sessionId, "/stop"), { method: "POST" }));
-  }
-
-  async delete(sessionId: string): Promise<void> {
-    await requireSuccess(await fetch(this.#sessionUrl(sessionId), { method: "DELETE" }));
-  }
-
-  async deleteEveSession(eveSessionId: string): Promise<void> {
-    const url = `${this.#baseUrl}${SANDBOX_RUNNER_API_PREFIX}/eve-sessions/${encodeURIComponent(eveSessionId)}`;
-    await requireSuccess(await fetch(url, { method: "DELETE" }));
   }
 
   async deleteToolEnvironment(workspaceId: string): Promise<void> {

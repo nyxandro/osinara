@@ -134,11 +134,37 @@ describeWithDatabase("workspace repository", () => {
       scope: "personal",
     });
     const read = await binaries.readBinary(owner, "personal", stored.path);
+    const inboxRead = await binaries.readTelegramInboxAttachment(owner, "personal", "10");
     expect(stored).toMatchObject({ byteSize: bytes.byteLength, mediaType: "image/png" });
     expect(typeof stored.updatedAt).toBe("string");
     expect(read.bytes).toEqual(bytes);
+    expect(inboxRead.bytes).toEqual(bytes);
     expect(read.file).toMatchObject({ mediaType: "image/png", path: stored.path });
+    expect(inboxRead.file).toMatchObject({ mediaType: "image/png", path: stored.path });
     expect(typeof read.file.updatedAt).toBe("string");
+
+    // Family inbox references include the registered group so chat-local message IDs cannot collide.
+    const familyAuth = {
+      ...owner,
+      groupId: f.familyGroupId,
+      groupType: "family_private" as const,
+      telegramChatType: "group" as const,
+    };
+    const familyPath = `inbox/groups/${f.familyGroupId}/10/image.png`;
+    await binaries.writeBinary(familyAuth, {
+      bytes,
+      mediaType: "image/png",
+      operationKey: "family-binary-write",
+      path: familyPath,
+      scope: "family",
+    });
+    const familyInboxRead = await binaries.readTelegramInboxAttachment(
+      familyAuth,
+      "family",
+      "10",
+    );
+    expect(familyInboxRead.bytes).toEqual(bytes);
+    expect(familyInboxRead.file.path).toBe(familyPath);
   });
 
   it("reserves one Telegram delivery and replays its completed result without resending", async () => {

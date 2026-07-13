@@ -3,7 +3,7 @@
  *
  * Constructs covered:
  * - `manage_telegram_group.register`: executes after private-owner HITL resume.
- * - Group-chat execution is rejected because Telegram callbacks do not identify the clicker.
+ * - A freshly authenticated group callback remains invalid for private-only administration.
  */
 import type { ToolContext } from "eve/tools";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,22 +17,23 @@ vi.mock("./telegram-group-administration-repository.js", () => ({
 import manageTelegramGroup from "../tools/manage_telegram_group.js";
 
 function context(chatType: "private" | "supergroup"): ToolContext {
+  const caller = {
+    attributes: {
+      familyId: "family-1",
+      memoryScopes: ["personal", "family"],
+      role: "owner",
+      telegramChatId: chatType === "private" ? "101" : "-1001234567890",
+      telegramChatType: chatType,
+    },
+    authenticator: "telegram",
+    principalId: "owner-1",
+    principalType: "user" as const,
+  };
   return {
     session: {
       auth: {
-        current: null,
-        initiator: {
-          attributes: {
-            familyId: "family-1",
-            memoryScopes: ["personal", "family"],
-            role: "owner",
-            telegramChatId: chatType === "private" ? "101" : "-1001234567890",
-            telegramChatType: chatType,
-          },
-          authenticator: "telegram",
-          principalId: "owner-1",
-          principalType: "user",
-        },
+        current: caller,
+        initiator: caller,
       },
       id: "session-1",
       turn: { id: "turn-1", sequence: 1 },
@@ -78,7 +79,7 @@ describe("manage_telegram_group.register", () => {
       { action: "register", registration: input },
       context("supergroup"),
     )).rejects.toThrowError(
-      /AGENT_ACCESS_DENIED/,
+      /AGENT_PRIVATE_CHAT_REQUIRED/,
     );
     expect(registerGroup).not.toHaveBeenCalled();
   });

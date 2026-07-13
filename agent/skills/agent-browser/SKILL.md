@@ -10,6 +10,12 @@ accessibility-tree snapshots and compact `@eN` element refs.
 
 Install: `npm i -g agent-browser && agent-browser install`
 
+## Osinara runtime
+
+Osinara preconfigures `AGENT_BROWSER_SESSION=osinara`, `AGENT_BROWSER_RESTORE=osinara`, and a persistent scope-owned `$HOME`. Each CLI invocation is only a client request to the same background daemon: separate Bash calls continue the same Chromium process, tabs, cookies, and authentication state. `batch` is optional and does not control persistence.
+
+Open once, then use separate `snapshot`, `fill`, `click`, `screenshot`, and other commands as needed. A screenshot or completed CLI process does not close Chromium. Never call `close` or `close --all` until the entire user task is complete. Before claiming the browser or authorization was lost, run `agent-browser session info --json`; after a real sandbox recreation, the configured restore state reloads cookies and localStorage on the next `open`.
+
 ## Start here
 
 This file is a discovery stub, not the usage guide. Before running any

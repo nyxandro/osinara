@@ -3,6 +3,7 @@
  *
  * Constructs covered:
  * - `telegramIngressRepository.enqueue`: idempotent update ingestion with conflict detection.
+ * - `telegramIngressRepository.acceptMedia`: trust-zone decisions and tombstones are update-id atomic.
  * - `telegramIngressRepository.claimNext`: per-continuation FIFO with independent queue progress.
  * - Lease ownership: expired work can be reclaimed while stale workers are rejected.
  * - Continuation aliases: Telegram group re-keying keeps one logical FIFO.
@@ -50,7 +51,7 @@ function updateInput(updateId: string, continuationKey: string, text: string) {
 describeWithDatabase("telegramIngressRepository", () => {
   beforeEach(async () => {
     await database().query(
-      "TRUNCATE telegram_ingress_updates, telegram_ingress_continuation_aliases, telegram_ingress_queues CASCADE",
+      "TRUNCATE telegram_ingress_ignored_updates, telegram_ingress_updates, telegram_ingress_continuation_aliases, telegram_ingress_queues CASCADE",
     );
   });
 
@@ -71,6 +72,42 @@ describeWithDatabase("telegramIngressRepository", () => {
       "SELECT count(*)::text AS count FROM telegram_ingress_updates",
     );
     expect(count.rows[0]?.count).toBe("1");
+  });
+
+  it("keeps a rejected update tombstoned after the group becomes family-private", async () => {
+    const family = await database().query<{ id: string }>(
+      "INSERT INTO families (name) VALUES ('Ingress policy family') RETURNING id",
+    );
+    await database().query(
+      `INSERT INTO telegram_groups
+         (family_id, telegram_chat_id, title, type, message_mode, tool_allowlist)
+       VALUES ($1, '-100-policy', 'Policy group', 'external_public', 'addressed_only', '{}')`,
+      [family.rows[0]!.id],
+    );
+    const update = updateInput("1002", "telegram:group:-100-policy", "повтор после смены зоны");
+
+    await expect(telegramIngressRepository.acceptMedia({
+      chatId: "-100-policy",
+      chatType: "supergroup",
+      updateId: update.updateId,
+    })).resolves.toBe(false);
+    await database().query(
+      "UPDATE telegram_groups SET type = 'family_private' WHERE telegram_chat_id = '-100-policy'",
+    );
+    await expect(telegramIngressRepository.acceptMedia({
+      chatId: "-100-policy",
+      chatType: "supergroup",
+      updateId: update.updateId,
+    })).resolves.toBe(false);
+    await expect(telegramIngressRepository.enqueue(update)).resolves.toBe("duplicate");
+
+    const retained = await database().query<{ ignored: string; queued: string }>(
+      `SELECT
+         (SELECT count(*)::text FROM telegram_ingress_ignored_updates) AS ignored,
+         (SELECT count(*)::text FROM telegram_ingress_updates) AS queued`,
+    );
+    expect(retained.rows[0]).toEqual({ ignored: "1", queued: "0" });
+    await expect(telegramIngressRepository.claimNext(LEASE_MILLISECONDS)).resolves.toBeNull();
   });
 
   it("claims only the oldest update per queue while another queue progresses", async () => {

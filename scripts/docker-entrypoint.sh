@@ -25,9 +25,13 @@ if [ "${#INVITATION_SIGNING_SECRET}" -lt "$INVITATION_SIGNING_SECRET_MIN_LENGTH"
 fi
 
 # A compose run command is an explicit operator action and must terminate normally.
+if [ "$#" -eq 1 ] && [ "$1" = "start-after-migration" ]; then
+  exec npm run start -- --host 0.0.0.0 --port 3000
+fi
 if [ "$#" -gt 0 ]; then
   exec "$@"
 fi
 
-npm run migrate
+# Production images contain the emitted migration runner, not TypeScript source files.
+node .runtime/scripts/migrate.js
 exec npm run start -- --host 0.0.0.0 --port 3000

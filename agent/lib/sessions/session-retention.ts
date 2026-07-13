@@ -7,7 +7,6 @@
 import { resolve } from "node:path";
 
 import { isAppError } from "../app-error.js";
-import { deleteRunnerSandboxSession } from "../sandbox-runner/runner-sandbox-backend.js";
 import { deleteLocalEveSession } from "./eve-session-storage.js";
 import { sessionRepository } from "./session-repository.js";
 
@@ -21,7 +20,6 @@ export async function deleteExpiredSessions(): Promise<number> {
 
     try {
       await deleteLocalEveSession(WORKFLOW_DATA_ROOT, claim.eveSessionId);
-      await deleteRunnerSandboxSession(claim.eveSessionId);
       await sessionRepository.completeDeletion(claim.id, claim.leaseToken);
       deleted += 1;
     } catch (error) {

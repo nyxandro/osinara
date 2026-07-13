@@ -3,11 +3,15 @@
  *
  * Constructs covered:
  * - The newest user text is extracted from plain and multipart Eve model messages.
+ * - Turn instructions identify the active hybrid E5/pgvector retrieval pipeline.
  */
 import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
 
-import { latestUserText } from "./memory-retrieval.js";
+import {
+  formatRetrievedMemoryInstructions,
+  latestUserText,
+} from "./memory-retrieval.js";
 
 describe("latestUserText", () => {
   it("returns the newest plain user message", () => {
@@ -33,5 +37,18 @@ describe("latestUserText", () => {
     ] as ModelMessage[];
 
     expect(latestUserText(messages)).toBe("Что мне\nнельзя есть?");
+  });
+});
+
+describe("formatRetrievedMemoryInstructions", () => {
+  it("prevents the model from misrepresenting semantic retrieval as keyword filtering", () => {
+    const instructions = formatRetrievedMemoryInstructions([]);
+
+    expect(instructions).toContain("полнотекстовый PostgreSQL");
+    expect(instructions).toContain("384-мерным E5 embeddings");
+    expect(instructions).toContain("pgvector");
+    expect(instructions).toContain("активный pipeline текущей реализации");
+    expect(instructions).toContain("не выполняешь самостоятельный отбор по ключевым словам");
+    expect(instructions).toContain("выполни углубление контекста через `search_memories`");
   });
 });

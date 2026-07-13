@@ -3,6 +3,7 @@
  *
  * Constructs covered:
  * - Directly created nested files are immediately discoverable and readable.
+ * - One Telegram inbox directory can be listed without scanning unrelated workspace files.
  * - Symlinks cannot be followed by trusted application file operations.
  */
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
@@ -13,6 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   listWorkspaceStoredFiles,
+  listWorkspaceStoredFilesUnder,
   readWorkspaceFile,
   workspaceDirectory,
 } from "./workspace-storage.js";
@@ -48,5 +50,18 @@ describe("workspace storage", () => {
 
     await expect(readWorkspaceFile(root, WORKSPACE_ID, "secret.txt"))
       .rejects.toThrowError(/AGENT_WORKSPACE_SYMLINK_FORBIDDEN/);
+  });
+
+  it("lists only files under one Telegram inbox directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "osinara-storage-"));
+    roots.push(root);
+    const directory = workspaceDirectory(root, WORKSPACE_ID);
+    await mkdir(join(directory, "inbox", "773"), { recursive: true });
+    await mkdir(join(directory, "inbox", "775"), { recursive: true });
+    await writeFile(join(directory, "inbox", "773", "image.jpg"), "image");
+    await writeFile(join(directory, "inbox", "775", "other.jpg"), "other");
+
+    await expect(listWorkspaceStoredFilesUnder(root, WORKSPACE_ID, "inbox/773"))
+      .resolves.toEqual([expect.objectContaining({ path: "inbox/773/image.jpg" })]);
   });
 });

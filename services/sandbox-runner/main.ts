@@ -11,6 +11,7 @@ import {
   createDockerSandboxEngine,
   resolveSandboxDockerRuntime,
 } from "./docker-sandbox-engine.js";
+import { SANDBOX_IDLE_SWEEP_INTERVAL_MS } from "./docker-sandbox-lifecycle.js";
 import { createSandboxRunnerServer } from "./server.js";
 
 const RUNNER_PORT = 8080;
@@ -27,10 +28,21 @@ server.listen(RUNNER_PORT, "0.0.0.0", () => {
   console.log("Sandbox runner ready", { port: RUNNER_PORT });
 });
 
+// Bound compute lifetime independently of agent shutdown, which may be interrupted by Docker.
+const idleSweep = setInterval(() => {
+  void engine.removeIdleSessions(new Date()).then((removed) => {
+    if (removed > 0) console.log("Removed idle sandbox compute", { removed });
+  }, (error: unknown) => {
+    console.error("Sandbox idle reconciliation failed", { error });
+  });
+}, SANDBOX_IDLE_SWEEP_INTERVAL_MS);
+idleSweep.unref();
+
 let shuttingDown = false;
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
+  clearInterval(idleSweep);
   console.log("Sandbox runner stopping", { signal });
   await engine.stopAllSessions();
   await new Promise<void>((resolve, reject) =>

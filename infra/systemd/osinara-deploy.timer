@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll for an approved Osinara production release
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+Persistent=true
+Unit=osinara-deploy.service
+
+[Install]
+WantedBy=timers.target

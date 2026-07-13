@@ -2,8 +2,8 @@
  * Durable Eve session authentication tests.
  *
  * Constructs covered:
- * - `resolveSessionCaller`: preserves verified identity across Telegram HITL continuation.
- * - The active caller always takes precedence over the session initiator.
+ * - `resolveSessionCaller`: trusts only the current turn identity.
+ * - Durable initiator metadata never substitutes for a missing callback identity.
  */
 import type { SessionAuth, SessionAuthContext } from "eve/context";
 import { describe, expect, it } from "vitest";
@@ -20,11 +20,11 @@ function caller(principalId: string, chatType: "private" | "supergroup" = "priva
 }
 
 describe("resolveSessionCaller", () => {
-  it("uses the durable initiator when a Telegram HITL callback has null current auth", () => {
+  it("does not reuse a private durable initiator when current callback auth is absent", () => {
     const initiator = caller("owner-1");
     const auth: SessionAuth = { current: null, initiator };
 
-    expect(resolveSessionCaller({ session: { auth } })).toBe(initiator);
+    expect(resolveSessionCaller({ session: { auth } })).toBeNull();
   });
 
   it("never replaces a present current caller with a more privileged initiator", () => {

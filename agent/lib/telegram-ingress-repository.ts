@@ -6,6 +6,7 @@
  */
 import type { PoolClient } from "pg";
 
+import { TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED } from "../config.js";
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
 import {
@@ -20,6 +21,17 @@ import {
   validateEnqueueInput,
 } from "./telegram-ingress-contract.js";
 import { telegramIngressProcessingRepository } from "./telegram-ingress-processing-repository.js";
+
+const IGNORED_MEDIA_REASON = "external_media";
+
+async function insertIgnoredMedia(client: PoolClient, updateId: string): Promise<void> {
+  await client.query(
+    `INSERT INTO telegram_ingress_ignored_updates (update_id, reason)
+     VALUES ($1, $2)
+     ON CONFLICT (update_id) DO NOTHING`,
+    [updateId, IGNORED_MEDIA_REASON],
+  );
+}
 
 async function rollbackAndRethrow(client: PoolClient, error: unknown): Promise<never> {
   await client.query("ROLLBACK");
@@ -53,11 +65,82 @@ async function requireActiveLease(
 export const telegramIngressRepository: TelegramIngressRepository = {
   ...telegramIngressProcessingRepository,
 
+  async acceptMedia(input) {
+    requireUpdateId(input.updateId);
+    requireNonEmpty(
+      input.chatId,
+      "AGENT_TELEGRAM_CHAT_ID_INVALID",
+      "Telegram не передал идентификатор чата для проверки медиа",
+    );
+    const client = await database().connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock($1::bigint)", [input.updateId]);
+      const ignored = await client.query(
+        "SELECT 1 FROM telegram_ingress_ignored_updates WHERE update_id = $1",
+        [input.updateId],
+      );
+      if (ignored.rowCount) {
+        await client.query("COMMIT");
+        return false;
+      }
+      const queued = await client.query(
+        "SELECT 1 FROM telegram_ingress_updates WHERE update_id = $1",
+        [input.updateId],
+      );
+      if (queued.rowCount) {
+        await client.query("COMMIT");
+        return true;
+      }
+      if (input.chatType === "private") {
+        await client.query("COMMIT");
+        return true;
+      }
+      if (input.chatType === "channel") {
+        await insertIgnoredMedia(client, input.updateId);
+        await client.query("COMMIT");
+        return false;
+      }
+
+      // Serialize absent rows and type changes with group administration before fixing the decision.
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, $2))",
+        [input.chatId, TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED],
+      );
+      const group = await client.query<{ type: string }>(
+        "SELECT type::text FROM telegram_groups WHERE telegram_chat_id = $1 FOR SHARE",
+        [input.chatId],
+      );
+      if (group.rows[0]?.type === "family_private") {
+        await client.query("COMMIT");
+        return true;
+      }
+      await insertIgnoredMedia(client, input.updateId);
+      await client.query("COMMIT");
+      return false;
+    } catch (error) {
+      return rollbackAndRethrow(client, error);
+    } finally {
+      client.release();
+    }
+  },
+
   async enqueue(input) {
     validateEnqueueInput(input);
     const client = await database().connect();
     try {
       await client.query("BEGIN");
+      // One update-id lock serializes accepted payloads with payload-free ignored tombstones.
+      await client.query("SELECT pg_advisory_xact_lock($1::bigint)", [input.updateId]);
+      const ignored = await client.query(
+        "SELECT 1 FROM telegram_ingress_ignored_updates WHERE update_id = $1",
+        [input.updateId],
+      );
+      if (ignored.rowCount) {
+        await client.query("COMMIT");
+        return "duplicate";
+      }
+
       // Serialize first use of one continuation without blocking unrelated Telegram conversations.
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
         input.continuationKey,

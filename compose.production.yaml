@@ -1,0 +1,224 @@
+name: osinara-production
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17@sha256:d2ef61f42ef767baa5a1475393303cc235bcd92febd9d7014eddb48b41f3bad0
+    environment:
+      POSTGRES_DB: osinara
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_USER: osinara
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U osinara -d osinara"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - app-network
+    restart: unless-stopped
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  memory-embedding:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07
+    cpus: 1.0
+    mem_limit: 1536m
+    command:
+      - --model-id
+      - intfloat/multilingual-e5-small
+      - --revision
+      - 614241f622f53c4eeff9890bdc4f31cfecc418b3
+      - --tokenization-workers
+      - "1"
+      - --max-client-batch-size
+      - "8"
+      - --max-concurrent-requests
+      - "8"
+      - --max-batch-requests
+      - "8"
+      - --max-batch-tokens
+      - "4096"
+      - --auto-truncate=false
+    environment:
+      OMP_NUM_THREADS: "1"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+    networks:
+      - app-network
+    restart: unless-stopped
+    volumes:
+      - memory-embedding-model-e5:/data
+
+  agent:
+    image: ${OSINARA_APP_IMAGE:?OSINARA_APP_IMAGE must be an exact digest reference}
+    command: ["start-after-migration"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      memory-embedding:
+        condition: service_healthy
+      sandbox-runner:
+        condition: service_healthy
+    environment:
+      CLI_PROXY_API_KEY: ${CLI_PROXY_API_KEY-}
+      CLI_PROXY_BASE_URL: ${CLI_PROXY_BASE_URL-}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET-}
+      GROQ_API_KEY: ${GROQ_API_KEY:?GROQ_API_KEY is required}
+      INTEGRATION_TOKEN_ENCRYPTION_KEY: ${INTEGRATION_TOKEN_ENCRYPTION_KEY-}
+      INVITATION_SIGNING_SECRET: ${INVITATION_SIGNING_SECRET:?INVITATION_SIGNING_SECRET is required}
+      MEMORY_EMBEDDING_BASE_URL: http://memory-embedding:80
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN is required}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:?TELEGRAM_BOT_USERNAME is required}
+      TELEGRAM_WEBHOOK_SECRET_TOKEN: ${TELEGRAM_WEBHOOK_SECRET_TOKEN:?TELEGRAM_WEBHOOK_SECRET_TOKEN is required}
+      WORKFLOW_QUEUE_NAMESPACE: eve6f73696e6172612d66616d696c792d6167656e74
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/eve/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+    networks:
+      - app-network
+      - sandbox-control
+    restart: unless-stopped
+    volumes:
+      - sandbox-data:/app/.eve/sandbox-cache
+      - workflow-data:/app/.workflow-data
+      - workspace-data:/app/workspaces
+
+  migrate:
+    image: ${OSINARA_APP_IMAGE:?OSINARA_APP_IMAGE must be an exact digest reference}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["node", ".runtime/scripts/migrate.js"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+    networks:
+      - app-network
+    restart: "no"
+
+  memory-embedding-worker:
+    image: ${OSINARA_APP_IMAGE:?OSINARA_APP_IMAGE must be an exact digest reference}
+    depends_on:
+      memory-embedding:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    entrypoint: ["node", ".runtime/scripts/memory-embedding-worker.js"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      MEMORY_EMBEDDING_BASE_URL: http://memory-embedding:80
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  telegram-ingress-worker:
+    image: ${OSINARA_APP_IMAGE:?OSINARA_APP_IMAGE must be an exact digest reference}
+    depends_on:
+      agent:
+        condition: service_healthy
+    entrypoint: ["node", ".runtime/scripts/telegram-ingress-worker.js"]
+    environment:
+      AGENT_INTERNAL_BASE_URL: http://agent:3000
+      TELEGRAM_WEBHOOK_SECRET_TOKEN: ${TELEGRAM_WEBHOOK_SECRET_TOKEN:?TELEGRAM_WEBHOOK_SECRET_TOKEN is required}
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  edge:
+    image: ${OSINARA_EDGE_IMAGE:?OSINARA_EDGE_IMAGE must be an exact digest reference}
+    depends_on:
+      agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1/eve/v1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - app-network
+    ports:
+      - "127.0.0.1:8082:80"
+    restart: unless-stopped
+
+  sandbox-runtime-image:
+    image: ${SANDBOX_RUNTIME_IMAGE:?SANDBOX_RUNTIME_IMAGE must be an exact digest reference}
+    command: ["true"]
+    network_mode: none
+    restart: "no"
+
+  sandbox-runner:
+    image: ${OSINARA_SANDBOX_RUNNER_IMAGE:?OSINARA_SANDBOX_RUNNER_IMAGE must be an exact digest reference}
+    depends_on:
+      sandbox-egress-proxy:
+        condition: service_healthy
+      sandbox-runtime-image:
+        condition: service_completed_successfully
+    environment:
+      SANDBOX_RUNTIME_IMAGE: ${SANDBOX_RUNTIME_IMAGE:?SANDBOX_RUNTIME_IMAGE must be an exact digest reference}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - sandbox-control
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - tool-environments:/runner/tools
+      - workspace-data:/runner/workspaces
+
+  sandbox-egress-proxy:
+    image: ${OSINARA_SANDBOX_EGRESS_PROXY_IMAGE:?OSINARA_SANDBOX_EGRESS_PROXY_IMAGE must be an exact digest reference}
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('node:net').connect(3128,'127.0.0.1').on('connect',function(){this.destroy();process.exit(0)}).on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - app-network
+      - sandbox-egress
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+
+volumes:
+  postgres-data:
+    name: osinara-production-postgres-data
+  memory-embedding-model-e5:
+    name: osinara-production-memory-embedding-model-e5
+  sandbox-data:
+    name: osinara-production-sandbox-data
+  tool-environments:
+    name: osinara-production-tool-environments
+  workflow-data:
+    name: osinara-production-workflow-data
+  workspace-data:
+    name: osinara-production-workspace-data
+
+networks:
+  app-network:
+    name: osinara-production-app-network
+  sandbox-control:
+    internal: true
+    name: osinara-production-sandbox-control
+  sandbox-egress:
+    internal: true
+    name: osinara-production-sandbox-egress

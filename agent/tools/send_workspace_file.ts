@@ -10,7 +10,6 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 import { isAppError } from "../lib/app-error.js";
-import { scanAttachmentForMalware } from "../lib/attachments/clamav-scanner.js";
 import { deliverWorkspaceFile } from "../lib/attachments/telegram-workspace-file-delivery.js";
 import {
   requireTelegramDeliveryTarget,
@@ -42,7 +41,6 @@ export default defineTool({
 
     let delivery: { telegramMessageId: string };
     try {
-      await scanAttachmentForMalware(reservation.bytes);
       delivery = await deliverWorkspaceFile({
         bytes: reservation.bytes,
         ...(input.caption === undefined ? {} : { caption: input.caption }),

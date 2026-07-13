@@ -9,74 +9,21 @@
  * - Configured groups either ignore or journal passive messages by message mode.
  * - Journal deduplication prevents repeated model turns for Telegram retries.
  * - Authorized attachments persist before dispatch and enter trusted path context.
+ * - Captionless photos retain a model-visible trusted workspace reference.
+ * - External groups drop all inbound media before persistence, journaling, or model dispatch.
+ * - Foreign replies to pending HITL prompts stop before Eve dispatch.
  */
-import type { TelegramContext, TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "eve/channels/telegram";
 import { describe, expect, it, vi } from "vitest";
 
+import {
+  BOT_USERNAME,
+  groupMessage,
+  privateMessage,
+  repositories,
+  telegramContext,
+} from "./telegram-on-message.test-fixtures.js";
 import { createTelegramMessageHandler } from "./telegram-on-message.js";
-
-const BOT_USERNAME = "osinara_bot";
-
-function privateMessage(text: string): TelegramMessage {
-  return {
-    attachments: [],
-    caption: "",
-    chat: { id: "telegram-101", type: "private" },
-    from: { firstName: "Анна", id: "telegram-101", isBot: false, username: "anna" },
-    messageId: "1",
-    raw: { date: 1_700_000_000 },
-    text,
-  };
-}
-
-function groupMessage(text: string): TelegramMessage {
-  return {
-    ...privateMessage(text),
-    chat: { id: "group-101", title: "Группа", type: "group" },
-  };
-}
-
-function telegramContext() {
-  const sendMessage = vi.fn().mockResolvedValue({});
-  return {
-    context: {
-      telegram: {
-        botUsername: BOT_USERNAME,
-        sendMessage,
-      },
-    } as unknown as TelegramContext,
-    sendMessage,
-  };
-}
-
-function repositories() {
-  return {
-    attachments: {
-      persist: vi.fn().mockResolvedValue([]),
-    },
-    family: {
-      claimInvitation: vi.fn(),
-    },
-    journal: {
-      listBefore: vi.fn().mockResolvedValue([]),
-      record: vi.fn().mockResolvedValue("inserted"),
-    },
-    session: {
-      prepareTurn: vi.fn().mockResolvedValue({
-        continuationToken: "telegram-101::",
-        generation: 0,
-        id: "session-1",
-        rotated: false,
-      }),
-    },
-    telegram: {
-      claimFirstOwner: vi.fn(),
-      findGroup: vi.fn().mockResolvedValue(null),
-      findIdentity: vi.fn().mockResolvedValue(null),
-      hasOwner: vi.fn(),
-    },
-  };
-}
 
 describe("createTelegramMessageHandler", () => {
   it("terminates a successful bootstrap message before model dispatch", async () => {
@@ -162,6 +109,7 @@ describe("createTelegramMessageHandler", () => {
       mediaType: "application/pdf",
       path: "inbox/1/договор.pdf",
       scope: "personal",
+      telegramMessageId: "1",
     }]);
     const handler = createTelegramMessageHandler(repository);
     const message = {
@@ -192,8 +140,90 @@ describe("createTelegramMessageHandler", () => {
       scope: "personal",
     });
     expect(result?.context?.join("\n")).toContain("inbox/1/договор.pdf");
-    expect(result?.context?.join("\n")).toContain("GitHub-flavored Markdown");
+    expect(result?.context?.join("\n")).toContain("safely supports Markdown tables");
   });
+
+  it("persists a captionless private photo and exposes its trusted workspace path", async () => {
+    const repository = repositories();
+    repository.telegram.findIdentity.mockResolvedValue({
+      familyId: "family-1",
+      role: "owner",
+      userId: "user-1",
+    });
+    repository.attachments.persist.mockResolvedValue([{
+      mediaType: "image/jpeg",
+      path: "inbox/42/photo-unique-photo.jpg",
+      scope: "personal",
+      telegramMessageId: "42",
+    }]);
+    const handler = createTelegramMessageHandler(repository);
+    const message: TelegramMessage = {
+      ...privateMessage(""),
+      attachments: [{
+        fileId: "telegram-photo-1",
+        fileUniqueId: "unique-photo",
+        kind: "photo",
+        mediaType: "image/jpeg",
+        size: 1_024,
+      }],
+      messageId: "42",
+      raw: { photo: [{ file_id: "telegram-photo-1" }] },
+    };
+
+    const result = await handler(telegramContext().context, message);
+
+    expect(repository.attachments.persist).toHaveBeenCalledWith(expect.objectContaining({
+      attachments: message.attachments,
+      messageId: "42",
+      scope: "personal",
+    }));
+    expect(result?.context?.join("\n")).toContain("inbox/42/photo-unique-photo.jpg");
+    expect(result?.context?.join("\n")).toContain("image/jpeg");
+    expect(result?.context?.join("\n")).toContain('"telegramMessageId":"42"');
+    expect(result?.context?.join("\n")).not.toContain("telegram-photo-1");
+  });
+
+  it.each([
+    ["external_private", false],
+    ["external_public", false],
+    ["family_private", true],
+  ] as const)(
+    "%s group %s an addressed inbound document",
+    async (groupType, shouldPersist) => {
+      const repository = repositories();
+      repository.telegram.findGroup.mockResolvedValue({
+        familyId: "family-1",
+        groupId: "group-1",
+        messageMode: "addressed_only",
+        telegramChatId: "group-101",
+        toolAllowlist: [],
+        type: groupType,
+      });
+      repository.telegram.findIdentity.mockResolvedValue({
+        familyId: "family-1",
+        role: "member",
+        userId: "user-1",
+      });
+      const handler = createTelegramMessageHandler(repository);
+      const message: TelegramMessage = {
+        ...groupMessage(`@${BOT_USERNAME} посмотри документ`),
+        attachments: [{
+          fileId: "telegram-file-1",
+          fileName: "документ.pdf",
+          kind: "document",
+          mediaType: "application/pdf",
+        }],
+        raw: { document: { file_id: "telegram-file-1" } },
+      };
+
+      const result = await handler(telegramContext().context, message);
+
+      expect(repository.attachments.persist).toHaveBeenCalledTimes(shouldPersist ? 1 : 0);
+      expect(repository.journal.record).not.toHaveBeenCalled();
+      expect(repository.session.prepareTurn).toHaveBeenCalledTimes(shouldPersist ? 1 : 0);
+      expect(result === null).toBe(!shouldPersist);
+    },
+  );
 
   it("silently consumes an invitation command posted in a group", async () => {
     const repository = repositories();
@@ -209,15 +239,20 @@ describe("createTelegramMessageHandler", () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
-  it("preserves a group mention carried by a transcribed voice caption", async () => {
+  it("preserves a family-group mention carried by a transcribed voice caption", async () => {
     const repository = repositories();
     repository.telegram.findGroup.mockResolvedValue({
       familyId: "family-1",
       groupId: "group-1",
       messageMode: "addressed_only",
       telegramChatId: "group-101",
-      toolAllowlist: ["remember"],
-      type: "external_private",
+      toolAllowlist: [],
+      type: "family_private",
+    });
+    repository.telegram.findIdentity.mockResolvedValue({
+      familyId: "family-1",
+      role: "member",
+      userId: "user-1",
     });
     const handler = createTelegramMessageHandler(repository);
     const { context } = telegramContext();
@@ -231,11 +266,56 @@ describe("createTelegramMessageHandler", () => {
     expect(result?.auth).toMatchObject({
       attributes: {
         groupId: "group-1",
-        groupType: "external_private",
-        memoryScopes: ["group"],
-        toolAllowlist: ["remember"],
+        groupType: "family_private",
+        memoryScopes: ["family"],
+        sandboxSessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       },
     });
+  });
+
+  it("blocks another group member replying to a pending HITL prompt", async () => {
+    const repository = repositories();
+    repository.telegram.findGroup.mockResolvedValue({
+      familyId: "family-1",
+      groupId: "group-1",
+      messageMode: "addressed_only",
+      telegramChatId: "group-101",
+      toolAllowlist: [],
+      type: "family_private",
+    });
+    repository.telegram.findIdentity.mockResolvedValue({
+      familyId: "family-1",
+      role: "member",
+      userId: "user-2",
+    });
+    repository.hitl.authorizeReply.mockResolvedValue("forbidden");
+    const handler = createTelegramMessageHandler(repository);
+    const { context, sendMessage } = telegramContext();
+    const message: TelegramMessage = {
+      ...groupMessage("Подтвердить"),
+      from: { firstName: "Борис", id: "telegram-202", isBot: false },
+      messageId: "89",
+      replyToMessage: {
+        chat: { id: "group-101", type: "group" },
+        from: {
+          firstName: "Osinara",
+          id: "bot-1",
+          isBot: true,
+          username: BOT_USERNAME,
+        },
+        messageId: "88",
+      },
+    };
+
+    await expect(handler(context, message)).resolves.toBeNull();
+    expect(repository.hitl.authorizeReply).toHaveBeenCalledWith({
+      baseContinuationToken: "group-101::88",
+      telegramChatId: "group-101",
+      telegramMessageId: "88",
+      telegramUserId: "telegram-202",
+    });
+    expect(sendMessage).toHaveBeenCalledWith(expect.stringContaining("AGENT_APPROVAL_FORBIDDEN"));
+    expect(repository.session.prepareTurn).not.toHaveBeenCalled();
   });
 
   it("does not journal an ordinary message in addressed-only mode", async () => {

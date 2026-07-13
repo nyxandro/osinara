@@ -1,36 +1,15 @@
 /**
- * Safe model Markdown delivery for Telegram.
+ * Safe Markdown-to-HTML rendering for Telegram file captions.
  *
- * Exports:
- * - `renderTelegramMarkdownHtml`: converts the supported Markdown subset to Telegram HTML.
- * - `formatTelegramMarkdown`: returns balanced HTML chunks within Telegram's text limit.
- * - `formatTelegramMarkdownDraft`: returns one balanced native draft preview.
- * - `postTelegramMarkdown`: posts every chunk with explicit Telegram HTML parsing.
+ * Export:
+ * - `renderTelegramMarkdownHtml`: converts the supported caption subset to Telegram HTML.
  */
-import type { TelegramMessageBody } from "eve/channels/telegram";
-
 const TELEGRAM_MESSAGE_MAX_CHARACTERS = 4_096;
 const TELEGRAM_LINK_MAX_CHARACTERS = 2_048;
 const REPEATED_EMOJI_MINIMUM = 8;
 const INLINE_PLACEHOLDER_START = 0xE000;
 const INLINE_PLACEHOLDER_END = 0xF8FF;
 const ALLOWED_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:", "tg:"]);
-const HTML_TOKEN_PATTERN =
-  /<(?:b|i|s|code|pre|blockquote|a href="[^"]+")>|<\/(?:b|i|s|code|pre|blockquote|a)>|&(?:amp|lt|gt|quot|#39);|[\s\S]/gu;
-
-interface TelegramHtmlMessageBody extends TelegramMessageBody {
-  readonly parse_mode: "HTML";
-}
-
-interface TelegramPoster {
-  post(message: TelegramHtmlMessageBody): Promise<unknown>;
-}
-
-interface OpenHtmlTag {
-  close: string;
-  name: string;
-  open: string;
-}
 
 function escapeHtml(value: string): string {
   return value
@@ -205,79 +184,4 @@ export function renderTelegramMarkdownHtml(markdown: string): string {
     blocks.push(renderInline(paragraph.join("\n")));
   }
   return blocks.join("\n\n");
-}
-
-function openingTag(token: string): OpenHtmlTag | null {
-  const match = /^<([a-z]+)(?:\s[^>]*)?>$/u.exec(token);
-  if (!match) return null;
-  return { close: `</${match[1]!}>`, name: match[1]!, open: token };
-}
-
-function closingTagName(token: string): string | null {
-  return /^<\/([a-z]+)>$/u.exec(token)?.[1] ?? null;
-}
-
-function splitTelegramHtml(html: string, maxCharacters: number): string[] {
-  if (html.length === 0) return [];
-  const tokens = html.match(HTML_TOKEN_PATTERN) ?? [];
-  const chunks: string[] = [];
-  const stack: OpenHtmlTag[] = [];
-  let chunk = "";
-
-  const closingSuffix = () => stack.slice().reverse().map((tag) => tag.close).join("");
-  const flush = () => {
-    if (chunk.length === 0) return;
-    chunks.push(chunk + closingSuffix());
-    chunk = stack.map((tag) => tag.open).join("");
-  };
-
-  // Reserve room for closing tags before each token; reopened tags preserve formatting per chunk.
-  for (const token of tokens) {
-    const open = openingTag(token);
-    if (open) {
-      if (chunk.length + token.length + open.close.length + closingSuffix().length > maxCharacters) {
-        flush();
-      }
-      chunk += token;
-      stack.push(open);
-      continue;
-    }
-    const closeName = closingTagName(token);
-    if (closeName) {
-      const current = stack.at(-1);
-      if (!current || current.name !== closeName) {
-        throw new Error("AGENT_TELEGRAM_MARKDOWN_HTML_INVALID: Renderer produced unbalanced HTML");
-      }
-      chunk += token;
-      stack.pop();
-      continue;
-    }
-    if (chunk.length + token.length + closingSuffix().length > maxCharacters) {
-      flush();
-    }
-    chunk += token;
-  }
-  if (stack.length !== 0) {
-    throw new Error("AGENT_TELEGRAM_MARKDOWN_HTML_INVALID: Renderer produced unbalanced HTML");
-  }
-  if (chunk.length > 0) chunks.push(chunk);
-  return chunks;
-}
-
-export function formatTelegramMarkdown(markdown: string): string[] {
-  return splitTelegramHtml(renderTelegramMarkdownHtml(markdown), TELEGRAM_MESSAGE_MAX_CHARACTERS);
-}
-
-export function formatTelegramMarkdownDraft(markdown: string): string | null {
-  const chunks = formatTelegramMarkdown(markdown);
-  return chunks.length === 1 ? chunks[0]! : null;
-}
-
-export async function postTelegramMarkdown(
-  telegram: TelegramPoster,
-  markdown: string,
-): Promise<void> {
-  for (const text of formatTelegramMarkdown(markdown)) {
-    await telegram.post({ parse_mode: "HTML", text });
-  }
 }

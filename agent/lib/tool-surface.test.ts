@@ -3,7 +3,7 @@
  *
  * Constructs:
  * - Exact authored tool-file allowlist after CRUD consolidation.
- * - Exact native skill-directory allowlist after lifecycle cleanup.
+ * - Exact static package directories and dynamic skill modules.
  */
 import { readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -16,7 +16,6 @@ const EXPECTED_TOOL_FILES = [
   "export_memory.ts",
   "group-tool-policy.ts",
   "inspect_workspace_image.ts",
-  "inspect_workspace_pdf.ts",
   "list_family_members.ts",
   "list_memories.ts",
   "list_pending_family_invitations.ts",
@@ -43,9 +42,10 @@ const EXPECTED_SKILL_DIRECTORIES = [
   "find-skills",
   "pdf",
   "skill-creator",
-  "t-invest",
   "xlsx",
 ] as const;
+
+const EXPECTED_DYNAMIC_SKILL_FILES = ["t-invest.ts"] as const;
 
 describe("agent capability surface", () => {
   it("exposes only the consolidated authored tool files", async () => {
@@ -58,7 +58,7 @@ describe("agent capability surface", () => {
     expect(toolFiles).toEqual([...EXPECTED_TOOL_FILES]);
   });
 
-  it("keeps the agreed native skills and removes the obsolete lifecycle", async () => {
+  it("keeps the agreed static and scope-aware dynamic skills", async () => {
     const entries = await readdir(`${AGENT_ROOT}/skills`, { withFileTypes: true });
     const skillDirectories = entries
       .filter((entry) => entry.isDirectory())
@@ -66,5 +66,10 @@ describe("agent capability surface", () => {
       .sort();
 
     expect(skillDirectories).toEqual([...EXPECTED_SKILL_DIRECTORIES]);
+    const skillFiles = entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+      .map((entry) => entry.name)
+      .sort();
+    expect(skillFiles).toEqual([...EXPECTED_DYNAMIC_SKILL_FILES]);
   });
 });

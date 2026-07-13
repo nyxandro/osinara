@@ -1,0 +1,279 @@
+name: CI and release
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+
+concurrency:
+  group: ci-release-${{ github.workflow }}-${{ github.ref }}
+  # A newer main push must not interrupt image publication or leave a half-created release.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Docker Compose test suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out canonical source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Run production-equivalent checks
+        run: docker compose -f compose.test.yaml up --build --abort-on-container-exit --exit-code-from tests
+
+  release:
+    name: Publish immutable production release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+      packages: write
+    env:
+      APP_IMAGE: ghcr.io/nyxandro/osinara-app
+      EDGE_IMAGE: ghcr.io/nyxandro/osinara-edge
+      EGRESS_IMAGE: ghcr.io/nyxandro/osinara-sandbox-egress-proxy
+      RUNNER_IMAGE: ghcr.io/nyxandro/osinara-sandbox-runner
+      RUNTIME_IMAGE: ghcr.io/nyxandro/osinara-sandbox-runtime
+    steps:
+      - name: Check out canonical source and tags
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+
+      - name: Validate new version or resumable draft
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            printf '%s\n' "RELEASE_VERSION_INVALID: package.json must contain a stable SemVer" >&2
+            exit 1
+          fi
+          TAG="v${VERSION}"
+          RESUME_DRAFT=false
+          if RELEASE_JSON="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName,targetCommitish 2>/dev/null)"; then
+            if [[ "$(jq -r '.isDraft' <<<"$RELEASE_JSON")" != "true" ]]; then
+              printf '%s\n' "RELEASE_VERSION_ALREADY_EXISTS: published release ${TAG} exists; bump package.json" >&2
+              exit 1
+            fi
+            if [[ "$(jq -r '.targetCommitish' <<<"$RELEASE_JSON")" != "$GITHUB_SHA" ]]; then
+              printf '%s\n' "RELEASE_DRAFT_COMMIT_MISMATCH: draft ${TAG} belongs to another commit" >&2
+              exit 1
+            fi
+            git fetch --no-tags origin "refs/tags/${TAG}"
+            if [[ "$(git rev-parse 'FETCH_HEAD^{commit}')" != "$GITHUB_SHA" ]]; then
+              printf '%s\n' "RELEASE_DRAFT_TAG_MISMATCH: draft tag ${TAG} belongs to another commit" >&2
+              exit 1
+            fi
+            RESUME_DRAFT=true
+          elif git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            printf '%s\n' "RELEASE_VERSION_ALREADY_EXISTS: tag ${TAG} exists without a resumable draft; bump package.json" >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
+          printf 'resume-draft=%s\n' "$RESUME_DRAFT" >> "$GITHUB_OUTPUT"
+
+      - name: Sign in to GHCR with the automatic token
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+
+      - name: Build and push app image
+        id: app
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          build-args: |
+            OCI_SOURCE=https://github.com/${{ github.repository }}
+            OCI_VERSION=${{ steps.release.outputs.version }}
+            OCI_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+          context: .
+          push: true
+          tags: |
+            ${{ env.APP_IMAGE }}:v${{ steps.release.outputs.version }}
+            ${{ env.APP_IMAGE }}:sha-${{ github.sha }}
+          target: runtime
+
+      - name: Build and push sandbox runtime image
+        id: sandbox-runtime
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          build-args: |
+            OCI_SOURCE=https://github.com/${{ github.repository }}
+            OCI_VERSION=${{ steps.release.outputs.version }}
+            OCI_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=sandbox-runtime
+          cache-to: type=gha,mode=max,scope=sandbox-runtime
+          context: .
+          push: true
+          tags: |
+            ${{ env.RUNTIME_IMAGE }}:v${{ steps.release.outputs.version }}
+            ${{ env.RUNTIME_IMAGE }}:sha-${{ github.sha }}
+          target: sandbox-runtime
+
+      - name: Build and push sandbox runner image
+        id: sandbox-runner
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          build-args: |
+            OCI_SOURCE=https://github.com/${{ github.repository }}
+            OCI_VERSION=${{ steps.release.outputs.version }}
+            OCI_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=sandbox-runner
+          cache-to: type=gha,mode=max,scope=sandbox-runner
+          context: .
+          push: true
+          tags: |
+            ${{ env.RUNNER_IMAGE }}:v${{ steps.release.outputs.version }}
+            ${{ env.RUNNER_IMAGE }}:sha-${{ github.sha }}
+          target: sandbox-runner
+
+      - name: Build and push sandbox egress proxy image
+        id: sandbox-egress-proxy
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          build-args: |
+            OCI_SOURCE=https://github.com/${{ github.repository }}
+            OCI_VERSION=${{ steps.release.outputs.version }}
+            OCI_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=sandbox-egress-proxy
+          cache-to: type=gha,mode=max,scope=sandbox-egress-proxy
+          context: .
+          push: true
+          tags: |
+            ${{ env.EGRESS_IMAGE }}:v${{ steps.release.outputs.version }}
+            ${{ env.EGRESS_IMAGE }}:sha-${{ github.sha }}
+          target: sandbox-egress-proxy
+
+      - name: Build and push edge image
+        id: edge
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          build-args: |
+            OCI_SOURCE=https://github.com/${{ github.repository }}
+            OCI_VERSION=${{ steps.release.outputs.version }}
+            OCI_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=edge
+          cache-to: type=gha,mode=max,scope=edge
+          context: .
+          push: true
+          tags: |
+            ${{ env.EDGE_IMAGE }}:v${{ steps.release.outputs.version }}
+            ${{ env.EDGE_IMAGE }}:sha-${{ github.sha }}
+          target: edge
+
+      - name: Attest app image
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763
+        with:
+          subject-name: ${{ env.APP_IMAGE }}
+          subject-digest: ${{ steps.app.outputs.digest }}
+          push-to-registry: true
+      - name: Attest sandbox runtime image
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763
+        with:
+          subject-name: ${{ env.RUNTIME_IMAGE }}
+          subject-digest: ${{ steps.sandbox-runtime.outputs.digest }}
+          push-to-registry: true
+      - name: Attest sandbox runner image
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763
+        with:
+          subject-name: ${{ env.RUNNER_IMAGE }}
+          subject-digest: ${{ steps.sandbox-runner.outputs.digest }}
+          push-to-registry: true
+      - name: Attest sandbox egress proxy image
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763
+        with:
+          subject-name: ${{ env.EGRESS_IMAGE }}
+          subject-digest: ${{ steps.sandbox-egress-proxy.outputs.digest }}
+          push-to-registry: true
+      - name: Attest edge image
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763
+        with:
+          subject-name: ${{ env.EDGE_IMAGE }}
+          subject-digest: ${{ steps.edge.outputs.digest }}
+          push-to-registry: true
+
+      - name: Generate strict deployment manifest
+        env:
+          APP_DIGEST: ${{ steps.app.outputs.digest }}
+          EDGE_DIGEST: ${{ steps.edge.outputs.digest }}
+          EGRESS_DIGEST: ${{ steps.sandbox-egress-proxy.outputs.digest }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RUNNER_DIGEST: ${{ steps.sandbox-runner.outputs.digest }}
+          RUNTIME_DIGEST: ${{ steps.sandbox-runtime.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMPOSE_SHA256="$(sha256sum compose.production.yaml | cut -d ' ' -f1)"
+          if [[ ! "$COMPOSE_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            printf '%s\n' "RELEASE_COMPOSE_DIGEST_INVALID: compose.production.yaml hash is malformed" >&2
+            exit 1
+          fi
+          for digest in "$APP_DIGEST" "$EDGE_DIGEST" "$EGRESS_DIGEST" "$RUNNER_DIGEST" "$RUNTIME_DIGEST"; do
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              printf '%s\n' "RELEASE_IMAGE_DIGEST_INVALID: Buildx returned a malformed digest" >&2
+              exit 1
+            fi
+          done
+          jq -n \
+            --arg version "$RELEASE_VERSION" \
+            --arg commitSha "$GITHUB_SHA" \
+            --arg composeSha256 "$COMPOSE_SHA256" \
+            --arg app "${APP_IMAGE}@${APP_DIGEST}" \
+            --arg edge "${EDGE_IMAGE}@${EDGE_DIGEST}" \
+            --arg sandboxEgressProxy "${EGRESS_IMAGE}@${EGRESS_DIGEST}" \
+            --arg sandboxRunner "${RUNNER_IMAGE}@${RUNNER_DIGEST}" \
+            --arg sandboxRuntime "${RUNTIME_IMAGE}@${RUNTIME_DIGEST}" \
+            '{schemaVersion: 1, version: $version, commitSha: $commitSha, composeSha256: $composeSha256, images: {app: $app, edge: $edge, sandboxEgressProxy: $sandboxEgressProxy, sandboxRunner: $sandboxRunner, sandboxRuntime: $sandboxRuntime}}' \
+            > osinara-deployment.json
+
+      - name: Create or resume draft and upload exact assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RESUME_DRAFT: ${{ steps.release.outputs.resume-draft }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="v${RELEASE_VERSION}"
+          if [[ "$RESUME_DRAFT" == "false" ]]; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --target "$GITHUB_SHA" \
+              --title "Osinara ${TAG}" \
+              --notes "Immutable production images for commit ${GITHUB_SHA}."
+          fi
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            osinara-deployment.json compose.production.yaml
+
+          VERIFY_DIR="$(mktemp -d)"
+          trap 'rm -rf "$VERIFY_DIR"' EXIT
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$VERIFY_DIR" \
+            --pattern osinara-deployment.json --pattern compose.production.yaml
+          cmp --silent osinara-deployment.json "$VERIFY_DIR/osinara-deployment.json"
+          cmp --silent compose.production.yaml "$VERIFY_DIR/compose.production.yaml"
+          ASSETS_JSON="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets,isDraft,targetCommitish)"
+          jq -e --arg sha "$GITHUB_SHA" '
+            .isDraft == true and .targetCommitish == $sha and
+            ([.assets[].name] | sort) == ["compose.production.yaml", "osinara-deployment.json"]
+          ' <<<"$ASSETS_JSON" >/dev/null
+
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+            --jq 'select(.immutable == true and .draft == false and .prerelease == false) | .id' \
+            >/dev/null

@@ -5,6 +5,7 @@
  * - `workspaceDirectory`: maps an opaque workspace ID to its physical directory.
  * - `getWorkspaceStoredFile`: reads trusted filesystem metadata for one confined path.
  * - `listWorkspaceStoredFiles`: recursively discovers regular files without an external index.
+ * - `listWorkspaceStoredFilesUnder`: confines discovery to one verified relative directory.
  * - `readWorkspaceFile`, `writeWorkspaceFile`, `deleteWorkspaceFile`: confined file I/O.
  */
 import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
@@ -99,11 +100,54 @@ async function scanWorkspaceDirectory(
   return files;
 }
 
+async function physicalDirectoryPath(
+  root: string,
+  workspaceId: string,
+  path: string,
+): Promise<string> {
+  const directory = workspaceDirectory(root, workspaceId);
+  const safePath = validateWorkspacePath(path);
+  let current = directory;
+
+  // Directory traversal follows the same no-symlink invariant as file reads.
+  for (const segment of safePath.split("/")) {
+    current = join(current, segment);
+    let metadata;
+    try {
+      metadata = await lstat(current);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      throw new AppError(
+        "AGENT_WORKSPACE_FILE_NOT_FOUND",
+        "Каталог файла не найден в выбранном workspace",
+      );
+    }
+    if (metadata.isSymbolicLink()) {
+      throw new AppError("AGENT_WORKSPACE_SYMLINK_FORBIDDEN", "Символические ссылки запрещены в workspace");
+    }
+    if (!metadata.isDirectory()) {
+      throw new AppError("AGENT_WORKSPACE_PATH_INVALID", "Путь workspace должен указывать на каталог");
+    }
+  }
+  return current;
+}
+
 export async function listWorkspaceStoredFiles(
   root: string,
   workspaceId: string,
 ): Promise<WorkspaceStoredFile[]> {
   const files = await scanWorkspaceDirectory(workspaceDirectory(root, workspaceId));
+  return files.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+export async function listWorkspaceStoredFilesUnder(
+  root: string,
+  workspaceId: string,
+  path: string,
+): Promise<WorkspaceStoredFile[]> {
+  const workspaceRoot = workspaceDirectory(root, workspaceId);
+  const target = await physicalDirectoryPath(root, workspaceId, path);
+  const files = await scanWorkspaceDirectory(workspaceRoot, target);
   return files.sort((left, right) => left.path.localeCompare(right.path));
 }
 

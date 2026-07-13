@@ -17,22 +17,23 @@ vi.mock("./telegram-group-administration-repository.js", () => ({
 import manageTelegramGroup from "../tools/manage_telegram_group.js";
 
 function context(chatType: "private" | "supergroup"): ToolContext {
+  const caller = {
+    attributes: {
+      familyId: "family-1",
+      memoryScopes: ["personal", "family"],
+      role: "owner",
+      telegramChatId: chatType === "private" ? "101" : "-1001",
+      telegramChatType: chatType,
+    },
+    authenticator: "telegram",
+    principalId: "owner-1",
+    principalType: "user" as const,
+  };
   return {
     session: {
       auth: {
-        current: null,
-        initiator: {
-          attributes: {
-            familyId: "family-1",
-            memoryScopes: ["personal", "family"],
-            role: "owner",
-            telegramChatId: chatType === "private" ? "101" : "-1001",
-            telegramChatType: chatType,
-          },
-          authenticator: "telegram",
-          principalId: "owner-1",
-          principalType: "user",
-        },
+        current: caller,
+        initiator: caller,
       },
       id: "session-1",
       turn: { id: "turn-1", sequence: 1 },

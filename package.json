@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "eve build",
+    "build:runtime": "esbuild scripts/migrate.ts scripts/memory-embedding-worker.ts scripts/telegram-ingress-worker.ts services/sandbox-runner/main.ts services/sandbox-egress-proxy/main.ts --bundle --platform=node --format=esm --target=node24 --packages=external --outbase=. --outdir=.runtime",
     "bootstrap:code": "node --experimental-strip-types scripts/create-bootstrap-code.ts",
     "dev": "eve dev",
     "start": "eve start",
@@ -36,6 +37,7 @@
     "@types/node": "24.10.1",
     "@types/pg": "8.20.0",
     "@types/tar-stream": "3.1.4",
+    "esbuild": "0.28.1",
     "typescript": "7.0.2",
     "vitest": "4.1.10"
   },

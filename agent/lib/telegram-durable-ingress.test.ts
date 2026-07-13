@@ -3,7 +3,9 @@
  *
  * Constructs covered:
  * - Webhook ACK waits only for persistence, never voice transcription or Eve execution.
+ * - External media is acknowledged without entering the durable queue or native dispatch.
  * - Voice results persist once before native Eve dispatch.
+ * - Captionless attachments receive a non-empty factual model message after durable storage.
  * - FIFO releases at a waiting boundary even though the durable session stream remains open.
  */
 import type { TelegramVerifiedUpdateContext } from "eve/channels/telegram";
@@ -48,6 +50,7 @@ function repository() {
   return {
     claim,
     value: {
+      acceptMedia: vi.fn().mockResolvedValue(true),
       beginDispatch: vi.fn(),
       beginVoiceTranscription: vi.fn().mockResolvedValue("started"),
       claimNext: vi.fn().mockResolvedValueOnce(claim).mockResolvedValueOnce(null),
@@ -83,8 +86,10 @@ describe("createTelegramDurableIngress", () => {
     const update = parseTelegramUpdate(raw);
     if (!update) throw new Error("AGENT_TEST_TELEGRAM_UPDATE_INVALID: Не создано тестовое обновление");
     const handle = createTelegramDurableIngress({
+      acceptMedia: vi.fn().mockResolvedValue(true),
       authorizeVoice: vi.fn().mockResolvedValue(true),
       botUsername: "osinara_bot",
+      handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false),
       leaseMilliseconds: 60_000,
       repository: storage.value,
       transcribeVoice,
@@ -139,5 +144,97 @@ describe("createTelegramDurableIngress", () => {
       storage.claim.leaseToken,
       "session-1",
     );
+  });
+
+  it("acknowledges rejected external media without enqueue, download, or dispatch", async () => {
+    const storage = repository();
+    storage.value.claimNext.mockReset().mockResolvedValue(null);
+    const acceptMedia = vi.fn().mockResolvedValue(false);
+    const transcribeVoice = vi.fn();
+    const dispatch = vi.fn();
+    const waitUntil = vi.fn();
+    const raw = voicePayload();
+    const rawMessage = raw.message as Record<string, unknown>;
+    rawMessage.chat = { id: -1001, type: "supergroup" };
+    const update = parseTelegramUpdate(raw);
+    if (!update || update.kind !== "message") {
+      throw new Error("AGENT_TEST_TELEGRAM_UPDATE_INVALID: Не создано тестовое сообщение");
+    }
+    const handle = createTelegramDurableIngress({
+      acceptMedia,
+      authorizeVoice: vi.fn(),
+      botUsername: "osinara_bot",
+      handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false),
+      leaseMilliseconds: 60_000,
+      repository: storage.value,
+      transcribeVoice,
+    });
+
+    const response = await handle({ dispatch, raw, update, waitUntil } as TelegramVerifiedUpdateContext);
+
+    expect(response.status).toBe(200);
+    expect(acceptMedia).toHaveBeenCalledWith(update.message, "1001");
+    expect(storage.value.enqueue).not.toHaveBeenCalled();
+    expect(transcribeVoice).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(waitUntil).not.toHaveBeenCalled();
+  });
+
+  it("dispatches a captionless photo with a non-empty factual model message", async () => {
+    const storage = repository();
+    const raw = {
+      message: {
+        chat: { id: 101, type: "private" },
+        date: 1_700_000_000,
+        from: { first_name: "Анна", id: 101, is_bot: false },
+        message_id: 78,
+        photo: [{
+          file_id: "photo-file-1",
+          file_size: 1_024,
+          file_unique_id: "photo-unique-1",
+          height: 640,
+          width: 640,
+        }],
+      },
+      update_id: 1002,
+    };
+    Object.assign(storage.claim, { payload: raw, updateId: "1002", voice: null });
+    const update = parseTelegramUpdate(raw);
+    if (!update || update.kind !== "message") {
+      throw new Error("AGENT_TEST_TELEGRAM_UPDATE_INVALID: Не создано тестовое сообщение");
+    }
+    const dispatch = vi.fn().mockResolvedValue(null);
+    let backgroundTask: Promise<unknown> | undefined;
+    const handle = createTelegramDurableIngress({
+      acceptMedia: vi.fn().mockResolvedValue(true),
+      authorizeVoice: vi.fn(),
+      botUsername: "osinara_bot",
+      handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false),
+      leaseMilliseconds: 60_000,
+      repository: storage.value,
+      transcribeVoice: vi.fn(),
+    });
+
+    await handle({
+      dispatch,
+      raw,
+      update,
+      waitUntil(task) {
+        backgroundTask = task;
+      },
+    } as TelegramVerifiedUpdateContext);
+    if (!backgroundTask) {
+      throw new Error("AGENT_TEST_BACKGROUND_TASK_MISSING: Durable ingress did not schedule a drain");
+    }
+    await backgroundTask;
+
+    expect(dispatch.mock.calls[0]?.[0]).toMatchObject({
+      kind: "message",
+      message: {
+        attachments: [expect.objectContaining({ fileId: "photo-file-1", kind: "photo" })],
+        text: "Пользователь отправил файл без подписи.",
+      },
+    });
+    expect((raw.message as Record<string, unknown>).text).toBeUndefined();
   });
 });

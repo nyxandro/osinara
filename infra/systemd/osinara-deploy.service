@@ -1,0 +1,22 @@
+[Unit]
+Description=Osinara approved production release deployment
+After=docker.service network-online.target
+Wants=docker.service network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/osinara
+EnvironmentFile=/opt/osinara/.env
+ExecStart=/opt/osinara/bin/production-deploy.sh
+TimeoutStartSec=45min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/opt/osinara /run/lock
+
+[Install]
+WantedBy=multi-user.target

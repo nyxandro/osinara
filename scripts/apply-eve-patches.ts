@@ -5,7 +5,8 @@
  * - Adds a verified Telegram update hook around the native dispatcher.
  * - Makes the native dispatcher return its Eve session for FIFO coordination.
  * - Lets the application version continuation tokens for rotation, including HITL callbacks.
- * - Preserves a verified Telegram photo MIME when the download endpoint returns generic binary.
+ * - Lets the application authenticate the exact Telegram user resuming a HITL callback.
+ * - Propagates `input.requested` adapter failures so unbound approvals never park fail-open.
  * - Supports a zero-depth subagent limit so the root agent can disable delegation completely.
  * - Routes local Workflow recovery through Eve's configured queue namespace.
  * - Fails installation when the pinned Eve artifact no longer matches the reviewed source.
@@ -17,11 +18,17 @@ const EXPECTED_EVE_VERSION = "0.22.5";
 const telegramRuntimePath = resolve(
   "node_modules/eve/dist/src/public/channels/telegram/telegramChannel.js",
 );
-const telegramAttachmentsRuntimePath = resolve(
-  "node_modules/eve/dist/src/public/channels/telegram/attachments.js",
+const channelAdapterRuntimePath = resolve(
+  "node_modules/eve/dist/src/channel/adapter.js",
+);
+const channelAdapterTypesPath = resolve(
+  "node_modules/eve/dist/src/channel/adapter.d.ts",
 );
 const telegramTypesPath = resolve(
   "node_modules/eve/dist/src/public/channels/telegram/telegramChannel.d.ts",
+);
+const telegramIndexTypesPath = resolve(
+  "node_modules/eve/dist/src/public/channels/telegram/index.d.ts",
 );
 const workflowWorldRuntimePath = resolve(
   "node_modules/eve/dist/src/compiled/_chunks/workflow/dist-DnBjuNAZ.js",
@@ -36,9 +43,14 @@ const subagentDepthRuntimePath = resolve(
   "node_modules/eve/dist/src/harness/subagent-depth.js",
 );
 
-async function replaceOnce(path: string, before: string, after: string): Promise<void> {
+async function replaceOnce(
+  path: string,
+  before: string,
+  after: string,
+  acceptedFinalMarkers: readonly string[] = [],
+): Promise<void> {
   const source = await readFile(path, "utf8");
-  if (source.includes(after)) return;
+  if (source.includes(after) || acceptedFinalMarkers.some((marker) => source.includes(marker))) return;
   const first = source.indexOf(before);
   if (first < 0 || source.indexOf(before, first + before.length) >= 0) {
     throw new Error(
@@ -62,6 +74,18 @@ if (evePackage.version !== EXPECTED_EVE_VERSION) {
     `AGENT_EVE_PATCH_VERSION_UNSUPPORTED: Ожидалась Eve ${EXPECTED_EVE_VERSION}, установлена ${String(evePackage.version)}`,
   );
 }
+
+// A failed durable approval binding must fail the turn instead of parking without authorization.
+await replaceOnce(
+  channelAdapterRuntimePath,
+  "catch(n){log.error(`adapter event handler threw — event swallowed`,{adapterKind:getAdapterKind(e),eventType:t.type,error:n})}return t",
+  "catch(n){log.error(`adapter event handler threw`,{adapterKind:getAdapterKind(e),eventType:t.type,error:n});if(t.type===`input.requested`)throw n}return t",
+);
+await replaceOnce(
+  channelAdapterTypesPath,
+  " * Throwing handlers are logged and swallowed so a downstream delivery\n * failure does not corrupt the event stream write path.",
+  " * Throwing handlers are logged and swallowed except for `input.requested`, whose\n * failure propagates so an unbound human approval cannot remain parked fail-open.",
+);
 
 // Eve registers namespaced queues, so startup recovery must not publish to the unnamespaced topic.
 await replaceOnce(
@@ -88,14 +112,6 @@ await replaceOnce(
   "function parseSubagentMaxDepth(e){return typeof e==`number`&&Number.isInteger(e)&&e>=0?e:void 0}",
 );
 
-// Telegram's file endpoint can return application/octet-stream even for native photo updates.
-// The application handler has already validated the real image bytes before Eve stages this file.
-await replaceOnce(
-  telegramAttachmentsRuntimePath,
-  "l=s.headers.get(`content-type`)??i.mediaType??`application/octet-stream`",
-  "l=(()=>{let e=s.headers.get(`content-type`);return e===null||e.split(`;`,1)[0].trim().toLowerCase()===`application/octet-stream`?i.mediaType??e??`application/octet-stream`:e})()",
-);
-
 // The hook receives only a verified and parsed update while retaining Eve's native channel adapter.
 await replaceOnce(
   telegramRuntimePath,
@@ -113,19 +129,30 @@ await replaceOnce(
   telegramRuntimePath,
   "try{await e.send({inputResponses:[telegramCallbackInputResponse(e.query.data)]},{auth:null,continuationToken:continuationTokenFromState(t),state:t})}catch(e){log.error(`callback query delivery failed`,{error:e})}return",
   "try{return await e.send({inputResponses:[telegramCallbackInputResponse(e.query.data)]},{auth:null,continuationToken:e.config.resolveContinuationToken===void 0?continuationTokenFromState(t):await e.config.resolveContinuationToken(continuationTokenFromState(t)),state:t})}catch(e){log.error(`callback query delivery failed`,{error:e});throw e}",
+  ["onHitlCallbackQuery"],
 );
 
-// Message authorization may select a versioned continuation, while callbacks resolve the
-// version from the application route table because Telegram sends them without session auth.
+// Message authorization may select a versioned continuation token for the application session.
 await replaceOnce(
   telegramRuntimePath,
   "{auth:r.auth,continuationToken:continuationTokenFromState(t),state:t}",
   "{auth:r.auth,continuationToken:r.continuationToken??continuationTokenFromState(t),state:t}",
 );
+// HITL callbacks are resumed only after the application binds the exact verified Telegram user.
 await replaceOnce(
   telegramRuntimePath,
-  "{auth:null,continuationToken:continuationTokenFromState(t),state:t}",
-  "{auth:null,continuationToken:e.config.resolveContinuationToken===void 0?continuationTokenFromState(t):await e.config.resolveContinuationToken(continuationTokenFromState(t)),state:t}",
+  "if(e.query.data?.startsWith(TELEGRAM_HITL_CALLBACK_PREFIX)===!0){try{await n.telegram.answerCallbackQuery({callbackQueryId:e.query.id,text:`Answer received.`})}catch(e){log.warn(`Telegram callback-query acknowledgement failed`,{error:e})}if(!e.query.message||!t.chatId)return;try{return await e.send({inputResponses:[telegramCallbackInputResponse(e.query.data)]},{auth:null,continuationToken:e.config.resolveContinuationToken===void 0?continuationTokenFromState(t):await e.config.resolveContinuationToken(continuationTokenFromState(t)),state:t})}",
+  "if(e.query.data?.startsWith(TELEGRAM_HITL_CALLBACK_PREFIX)===!0){if(!e.query.message||!t.chatId)return;let r=continuationTokenFromState(t),i=e.config.onHitlCallbackQuery===void 0?{auth:null,continuationToken:e.config.resolveContinuationToken===void 0?r:await e.config.resolveContinuationToken(r)}:await e.config.onHitlCallbackQuery(n,e.query,r);if(i===null)return;try{await n.telegram.answerCallbackQuery({callbackQueryId:e.query.id,text:`Answer received.`})}catch(e){log.warn(`Telegram callback-query acknowledgement failed`,{error:e})}try{return await e.send({inputResponses:[telegramCallbackInputResponse(e.query.data)]},{auth:i.auth,continuationToken:i.continuationToken??r,state:t})}",
+  [
+    "let r=continuationTokenFromState(t),i=e.config.onHitlCallbackQuery",
+    "let r=e.config.resolveContinuationToken===void 0?continuationTokenFromState(t)",
+  ],
+);
+// Normalize installations produced by the previous authenticated-callback patch revision.
+await replaceOnce(
+  telegramRuntimePath,
+  "if(e.query.data?.startsWith(TELEGRAM_HITL_CALLBACK_PREFIX)===!0){if(!e.query.message||!t.chatId)return;let r=e.config.resolveContinuationToken===void 0?continuationTokenFromState(t):await e.config.resolveContinuationToken(continuationTokenFromState(t)),i=e.config.onHitlCallbackQuery===void 0?{auth:null}:await e.config.onHitlCallbackQuery(n,e.query,r);if(i===null)return;try{await n.telegram.answerCallbackQuery({callbackQueryId:e.query.id,text:`Answer received.`})}catch(e){log.warn(`Telegram callback-query acknowledgement failed`,{error:e})}try{return await e.send({inputResponses:[telegramCallbackInputResponse(e.query.data)]},{auth:i.auth,continuationToken:i.continuationToken??r,state:t})}",
+  "if(e.query.data?.startsWith(TELEGRAM_HITL_CALLBACK_PREFIX)===!0){if(!e.query.message||!t.chatId)return;let r=continuationTokenFromState(t),i=e.config.onHitlCallbackQuery===void 0?{auth:null,continuationToken:e.config.resolveContinuationToken===void 0?r:await e.config.resolveContinuationToken(r)}:await e.config.onHitlCallbackQuery(n,e.query,r);if(i===null)return;try{await n.telegram.answerCallbackQuery({callbackQueryId:e.query.id,text:`Answer received.`})}catch(e){log.warn(`Telegram callback-query acknowledgement failed`,{error:e})}try{return await e.send({inputResponses:[telegramCallbackInputResponse(e.query.data)]},{auth:i.auth,continuationToken:i.continuationToken??r,state:t})}",
 );
 await replaceOnce(
   telegramRuntimePath,
@@ -148,12 +175,14 @@ await replaceOnce(
 // reviewed blocks before inserting the canonical declarations exactly once.
 const verifiedUpdateDeclaration = "/** Verified Telegram ingress hook context for durable application queues. */\nexport interface TelegramVerifiedUpdateContext {\n    readonly raw: JsonObject;\n    readonly update: TelegramUpdate;\n    readonly dispatch: (update: TelegramUpdate) => Promise<Session | null | undefined>;\n    readonly waitUntil: (task: Promise<unknown>) => void;\n}\n";
 const drainDeclaration = "/** Internal drain hook context using the same native Telegram dispatcher. */\nexport interface TelegramDrainContext {\n    readonly dispatch: (update: TelegramUpdate) => Promise<Session | null | undefined>;\n    readonly waitUntil: (task: Promise<unknown>) => void;\n}\n";
+const hitlCallbackDeclaration = "/** Application-authenticated result for a Telegram HITL callback. */\nexport type TelegramHitlCallbackResult = {\n    readonly auth: SessionAuthContext | null;\n    readonly continuationToken?: string;\n} | null;\n";
 await replaceAll(telegramTypesPath, verifiedUpdateDeclaration, "");
 await replaceAll(telegramTypesPath, drainDeclaration, "");
+await replaceAll(telegramTypesPath, hitlCallbackDeclaration, "");
 await replaceOnce(
   telegramTypesPath,
   "/** Configuration for {@link telegramChannel}. */",
-  `${verifiedUpdateDeclaration}${drainDeclaration}/** Configuration for {@link telegramChannel}. */`,
+  `${verifiedUpdateDeclaration}${drainDeclaration}${hitlCallbackDeclaration}/** Configuration for {@link telegramChannel}. */`,
 );
 await replaceOnce(
   telegramTypesPath,
@@ -163,21 +192,26 @@ await replaceOnce(
 const oldVerifiedConfig = "    /** Runs after webhook verification and parsing, before native dispatch. */\n    readonly onVerifiedUpdate?: (context: TelegramVerifiedUpdateContext) => Response | Promise<Response>;\n";
 const oldDrainConfig = "    /** Optional internal endpoint that resumes persisted ingress after process restarts. */\n    readonly drainRoute?: string;\n    /** Drains persisted updates through the native dispatcher. */\n    readonly onDrain?: (context: TelegramDrainContext) => Response | Promise<Response>;\n";
 const oldResolverConfig = "    /** Resolves a versioned token for auth-less callback queries. */\n    readonly resolveContinuationToken?: (baseToken: string) => string | Promise<string>;\n";
+const hitlCallbackConfig = "    /** Authenticates a verified Telegram user before a HITL callback resumes Eve. */\n    readonly onHitlCallbackQuery?: (ctx: TelegramContext, query: TelegramCallbackQuery, continuationToken: string) => TelegramHitlCallbackResult | Promise<TelegramHitlCallbackResult>;\n";
 await replaceAll(telegramTypesPath, oldDrainConfig, "");
 await replaceAll(telegramTypesPath, oldResolverConfig, "");
+await replaceAll(telegramTypesPath, hitlCallbackConfig, "");
 await replaceAll(telegramTypesPath, oldVerifiedConfig, "");
 await replaceOnce(
   telegramTypesPath,
   "    /** Inbound message hook. Defaults to Telegram user auth and dispatch gating. */",
-  `${oldDrainConfig}${oldResolverConfig}${oldVerifiedConfig}    /** Inbound message hook. Defaults to Telegram user auth and dispatch gating. */`,
+  `${oldDrainConfig}${oldResolverConfig}${hitlCallbackConfig}${oldVerifiedConfig}    /** Inbound message hook. Defaults to Telegram user auth and dispatch gating. */`,
 );
 await replaceOnce(
-  resolve("node_modules/eve/dist/src/public/channels/telegram/index.d.ts"),
+  telegramIndexTypesPath,
   "type TelegramInboundResultOrPromise, type TelegramReceiveTarget, }",
   "type TelegramInboundResultOrPromise, type TelegramReceiveTarget, type TelegramVerifiedUpdateContext, }",
 );
+// Canonicalize prior patch revisions before inserting each public type exactly once.
+await replaceAll(telegramIndexTypesPath, "type TelegramDrainContext, ", "");
+await replaceAll(telegramIndexTypesPath, "type TelegramHitlCallbackResult, ", "");
 await replaceOnce(
-  resolve("node_modules/eve/dist/src/public/channels/telegram/index.d.ts"),
+  telegramIndexTypesPath,
   "type TelegramInboundResultOrPromise, type TelegramReceiveTarget, type TelegramVerifiedUpdateContext, }",
-  "type TelegramDrainContext, type TelegramInboundResultOrPromise, type TelegramReceiveTarget, type TelegramVerifiedUpdateContext, }",
+  "type TelegramDrainContext, type TelegramHitlCallbackResult, type TelegramInboundResultOrPromise, type TelegramReceiveTarget, type TelegramVerifiedUpdateContext, }",
 );

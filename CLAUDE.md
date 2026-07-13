@@ -1,5 +1,7 @@
 # Osinara Agent Guide
+
 ## Что это за проект
+
 Osinara — семейный Telegram-агент на TypeScript, Eve `0.22.5`, PostgreSQL и Groq.
 Он обслуживает личные чаты, закрытые семейные группы и изолированные внешние группы.
 Главная задача приложения — сохранять строгие границы между пользователями, семьями и группами.
@@ -12,12 +14,13 @@ durable Telegram ingress, Groq Whisper, HITL, Eve tools, skills и sandbox.
 Текущий архитектурный статус: начало `docs/plan.md`.
 
 ## Framework
+
 Проект закреплён на Eve `0.22.5`; не обновлять версию как побочный рефакторинг.
 Eve — filesystem-first framework для durable backend agents.
 Расположение файла определяет его роль и, как правило, runtime-имя.
 
-Официальная документация: https://eve.dev/docs
-Исходный репозиторий: https://github.com/vercel/eve
+Официальная документация: [https://eve.dev/docs](https://eve.dev/docs)
+Исходный репозиторий: [https://github.com/vercel/eve](https://github.com/vercel/eve)
 Точная документация установленной версии: `node_modules/eve/docs/README.md`.
 Публичные TypeScript-типы: `node_modules/eve/dist/src/public/`.
 
@@ -29,6 +32,7 @@ Eve — filesystem-first framework для durable backend agents.
 4. Использовать только публичные Eve API либо явно документированный локальный патч.
 
 Полезные guides:
+
 - layout и config: `node_modules/eve/docs/reference/project-layout.md`, `agent-config.md`;
 - Telegram: `node_modules/eve/docs/channels/telegram.mdx`;
 - durability и sessions: `node_modules/eve/docs/concepts/`;
@@ -103,8 +107,8 @@ Eve discovery воспримет такой файл как production tool ил
 
 ## Локальный патч Eve
 
-Eve `0.22.5` не предоставляет seam для durable Telegram ingress, отвергает Telegram photo при generic download MIME и не допускает zero-depth delegation limit.
-`scripts/apply-eve-patches.ts` добавляет verified-update/drain hooks, возврат Session, безопасное восстановление MIME уже проверенной фотографии и `maxSubagentDepth: 0`.
+Eve `0.22.5` не предоставляет seam для durable Telegram ingress и не допускает zero-depth delegation limit.
+`scripts/apply-eve-patches.ts` добавляет verified-update/drain hooks, возврат Session и `maxSubagentDepth: 0`.
 Патч применяется автоматически через `postinstall` после каждого `npm ci`.
 Он идемпотентен, проверяет точную версию и ожидаемые artifacts; несовпадение должно останавливать сборку.
 
@@ -120,8 +124,6 @@ Eve `0.22.5` не предоставляет seam для durable Telegram ingres
 Не дублировать Eve agent loop, HITL, channel delivery, compaction или skill discovery.
 Required config и required data проверять fail-fast; не добавлять бизнес-fallbacks.
 Ошибки должны иметь стабильный код и понятное русское user-facing сообщение.
-Secrets, invitation codes и raw provider errors не должны попадать модели или пользователю.
-Side effects должны быть idempotent либо иметь durable marker, запрещающий опасный повтор.
 Новый source-файл не должен превышать 500 строк; близкий к лимиту модуль разделять.
 
 ## Проверка изменений
