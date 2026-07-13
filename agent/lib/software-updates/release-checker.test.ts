@@ -18,6 +18,7 @@ const manifest: SoftwareUpdateManifest = {
   composeSha256: "c".repeat(64),
   images: {
     app: `ghcr.io/nyxandro/osinara-app@sha256:${"a".repeat(64)}`,
+    cliProxy: `ghcr.io/nyxandro/osinara-cli-proxy@sha256:${"a".repeat(64)}`,
     edge: `ghcr.io/nyxandro/osinara-edge@sha256:${"a".repeat(64)}`,
     sandboxEgressProxy:
       `ghcr.io/nyxandro/osinara-sandbox-egress-proxy@sha256:${"a".repeat(64)}`,

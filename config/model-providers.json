@@ -3,7 +3,19 @@
   "agent": {
     "textModelId": "MiniMax-M3",
     "visionModelId": "MiniMax-M3",
-    "contextWindowTokens": 1000000
+    "contextWindowTokens": 1000000,
+    "upstream": {
+      "name": "minimax",
+      "baseUrl": "https://api.minimax.io/v1",
+      "models": [
+        {
+          "name": "MiniMax-M3",
+          "alias": "MiniMax-M3",
+          "inputModalities": ["text", "image"],
+          "outputModalities": ["text"]
+        }
+      ]
+    }
   },
   "voice": {
     "transcriptionModelId": "whisper-large-v3-turbo"

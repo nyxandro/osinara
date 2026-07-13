@@ -14,10 +14,33 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
+  cli-proxy-api:
+    build:
+      context: .
+      target: cli-proxy
+    environment:
+      CLI_PROXY_API_KEY: ${CLI_PROXY_API_KEY:?CLI_PROXY_API_KEY is required}
+      MODEL_UPSTREAM_API_KEY: ${MODEL_UPSTREAM_API_KEY:?MODEL_UPSTREAM_API_KEY is required}
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent --show-error --header \"Authorization: Bearer $${CLI_PROXY_API_KEY}\" http://127.0.0.1:8317/v1/models >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - default
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /run/cli-proxy-api:size=16m,mode=0700,uid=10001,gid=10001
+
   agent:
     build:
       context: .
     depends_on:
+      cli-proxy-api:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       memory-embedding:
@@ -26,7 +49,7 @@ services:
         condition: service_healthy
     environment:
       CLI_PROXY_API_KEY: ${CLI_PROXY_API_KEY:?CLI_PROXY_API_KEY is required}
-      CLI_PROXY_BASE_URL: ${CLI_PROXY_BASE_URL:?CLI_PROXY_BASE_URL is required}
+      CLI_PROXY_BASE_URL: http://cli-proxy-api:8317/v1
       DATABASE_URL: postgresql://osinara:${POSTGRES_PASSWORD}@postgres:5432/osinara
       GROQ_API_KEY: ${GROQ_API_KEY:?GROQ_API_KEY is required}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID-}

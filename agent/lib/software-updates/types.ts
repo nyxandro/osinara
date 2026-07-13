@@ -12,6 +12,7 @@ export interface SoftwareUpdateManifest {
   composeSha256: string;
   images: {
     app: string;
+    cliProxy: string;
     edge: string;
     sandboxEgressProxy: string;
     sandboxRunner: string;

@@ -6,6 +6,7 @@ readonly GITHUB_REPOSITORY="nyxandro/osinara"
 readonly GITHUB_API="https://api.github.com/repos/${GITHUB_REPOSITORY}"
 readonly GITHUB_RELEASES="https://github.com/${GITHUB_REPOSITORY}/releases/download"
 readonly APP_IMAGE_PREFIX="ghcr.io/nyxandro/osinara-app@sha256:"
+readonly CLI_PROXY_IMAGE_PREFIX="ghcr.io/nyxandro/osinara-cli-proxy@sha256:"
 readonly EDGE_IMAGE_PREFIX="ghcr.io/nyxandro/osinara-edge@sha256:"
 readonly EGRESS_IMAGE_PREFIX="ghcr.io/nyxandro/osinara-sandbox-egress-proxy@sha256:"
 readonly RUNNER_IMAGE_PREFIX="ghcr.io/nyxandro/osinara-sandbox-runner@sha256:"
@@ -39,17 +40,19 @@ validate_manifest() {
     (.commitSha | test("^[0-9a-f]{40}$")) and
     (.composeSha256 | test("^[0-9a-f]{64}$")) and
     (.images | type == "object" and
-      keys == ["app", "edge", "sandboxEgressProxy", "sandboxRunner", "sandboxRuntime"])
+      keys == ["app", "cliProxy", "edge", "sandboxEgressProxy", "sandboxRunner", "sandboxRuntime"])
   ' "$manifest" >/dev/null || fail "DEPLOY_MANIFEST_INVALID" "Deployment manifest schema is invalid"
 
   MANIFEST_COMMIT="$(jq -er '.commitSha' "$manifest")"
   MANIFEST_COMPOSE_SHA="$(jq -er '.composeSha256' "$manifest")"
   APP_IMAGE="$(jq -er '.images.app' "$manifest")"
+  CLI_PROXY_IMAGE="$(jq -er '.images.cliProxy' "$manifest")"
   EDGE_IMAGE="$(jq -er '.images.edge' "$manifest")"
   EGRESS_IMAGE="$(jq -er '.images.sandboxEgressProxy' "$manifest")"
   RUNNER_IMAGE="$(jq -er '.images.sandboxRunner' "$manifest")"
   RUNTIME_IMAGE="$(jq -er '.images.sandboxRuntime' "$manifest")"
   require_image_ref "$APP_IMAGE" "$APP_IMAGE_PREFIX"
+  require_image_ref "$CLI_PROXY_IMAGE" "$CLI_PROXY_IMAGE_PREFIX"
   require_image_ref "$EDGE_IMAGE" "$EDGE_IMAGE_PREFIX"
   require_image_ref "$EGRESS_IMAGE" "$EGRESS_IMAGE_PREFIX"
   require_image_ref "$RUNNER_IMAGE" "$RUNNER_IMAGE_PREFIX"
@@ -58,7 +61,8 @@ validate_manifest() {
   if [[ "$INITIAL_MODE" -eq 0 ]] && {
     [[ "$STORED_VERSION" != "$version" || "$STORED_COMMIT" != "$MANIFEST_COMMIT" ||
        "$STORED_COMPOSE_SHA" != "$MANIFEST_COMPOSE_SHA" || "$STORED_APP" != "$APP_IMAGE" ||
-       "$STORED_EDGE" != "$EDGE_IMAGE" || "$STORED_EGRESS" != "$EGRESS_IMAGE" ||
+       "$STORED_CLI_PROXY" != "$CLI_PROXY_IMAGE" || "$STORED_EDGE" != "$EDGE_IMAGE" ||
+       "$STORED_EGRESS" != "$EGRESS_IMAGE" ||
        "$STORED_RUNNER" != "$RUNNER_IMAGE" || "$STORED_RUNTIME" != "$RUNTIME_IMAGE" ]];
   }; then
     fail "DEPLOY_APPROVED_MANIFEST_MISMATCH" "Public manifest differs from approved bytes"
@@ -128,6 +132,7 @@ prepare_candidate_release() {
   CANDIDATE_ENV="${CANDIDATE_DIR}/release.env"
   {
     printf 'OSINARA_APP_IMAGE=%s\n' "$APP_IMAGE"
+    printf 'OSINARA_CLI_PROXY_IMAGE=%s\n' "$CLI_PROXY_IMAGE"
     printf 'SANDBOX_RUNTIME_IMAGE=%s\n' "$RUNTIME_IMAGE"
     printf 'OSINARA_SANDBOX_RUNNER_IMAGE=%s\n' "$RUNNER_IMAGE"
     printf 'OSINARA_SANDBOX_EGRESS_PROXY_IMAGE=%s\n' "$EGRESS_IMAGE"
@@ -143,7 +148,7 @@ validate_resolved_compose() {
   local config_json="${WORK_DIR}/resolved-compose.json"
   compose_candidate config --images | LC_ALL=C sort > "$images_file"
   printf '%s\n' "$APP_IMAGE" "$APP_IMAGE" "$APP_IMAGE" "$APP_IMAGE" \
-    "$RUNTIME_IMAGE" "$RUNNER_IMAGE" "$EGRESS_IMAGE" "$EDGE_IMAGE" \
+    "$RUNTIME_IMAGE" "$RUNNER_IMAGE" "$EGRESS_IMAGE" "$EDGE_IMAGE" "$CLI_PROXY_IMAGE" \
     "$POSTGRES_IMAGE" "$TEI_IMAGE" | LC_ALL=C sort > "$expected_images_file"
   cmp --silent "$images_file" "$expected_images_file" ||
     fail "DEPLOY_COMPOSE_IMAGE_SET_INVALID" "Resolved Compose image multiset is not approved"
@@ -151,7 +156,7 @@ validate_resolved_compose() {
   compose_candidate config --format json > "$config_json"
   jq -e '
     (.services | keys) == [
-      "agent", "edge", "memory-embedding", "memory-embedding-worker", "migrate", "postgres",
+      "agent", "cli-proxy-api", "edge", "memory-embedding", "memory-embedding-worker", "migrate", "postgres",
       "sandbox-egress-proxy", "sandbox-runner", "sandbox-runtime-image", "telegram-ingress-worker"
     ] and
     .services.agent.depends_on.migrate.condition == "service_completed_successfully"
@@ -166,6 +171,9 @@ validate_resolved_compose() {
     any(.services.agent.volumes[];
       .source == "/opt/osinara/model-providers.json" and
       .target == "/app/config/model-providers.json" and .read_only == true) and
+    any(.services["cli-proxy-api"].volumes[];
+      .source == "/opt/osinara/model-providers.json" and
+      .target == "/config/model-providers.json" and .read_only == true) and
     ([.services | to_entries[] as $service |
       ($service.value.volumes // [])[] |
       {service: $service.key, type, source, target}] | sort_by(.service, .target)) == ([
@@ -173,6 +181,7 @@ validate_resolved_compose() {
         {service: "agent", type: "volume", source: "workflow-data", target: "/app/.workflow-data"},
         {service: "agent", type: "volume", source: "workspace-data", target: "/app/workspaces"},
         {service: "agent", type: "bind", source: "/opt/osinara/model-providers.json", target: "/app/config/model-providers.json"},
+        {service: "cli-proxy-api", type: "bind", source: "/opt/osinara/model-providers.json", target: "/config/model-providers.json"},
         {service: "memory-embedding", type: "volume", source: "memory-embedding-model-e5", target: "/data"},
         {service: "postgres", type: "volume", source: "postgres-data", target: "/var/lib/postgresql/data"},
         {service: "sandbox-runner", type: "bind", source: "/var/run/docker.sock", target: "/var/run/docker.sock"},
@@ -189,6 +198,7 @@ validate_resolved_compose() {
 
 pull_release_images() {
   docker pull "$APP_IMAGE"
+  docker pull "$CLI_PROXY_IMAGE"
   docker pull "$RUNTIME_IMAGE"
   docker pull "$RUNNER_IMAGE"
   docker pull "$EGRESS_IMAGE"

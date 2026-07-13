@@ -16,6 +16,7 @@ readonly HEALTH_ATTEMPTS=60
 readonly HEALTH_INTERVAL_SECONDS=5
 readonly RELEASE_IMAGE_VARIABLES=(
   OSINARA_APP_IMAGE
+  OSINARA_CLI_PROXY_IMAGE
   SANDBOX_RUNTIME_IMAGE
   OSINARA_SANDBOX_RUNNER_IMAGE
   OSINARA_SANDBOX_EGRESS_PROXY_IMAGE
@@ -79,7 +80,7 @@ require_server_boundary() {
   require_metadata "$ENTRYPOINT_PATH" "0:0:750"
   require_metadata "$MODULE_DIR" "0:0:750"
   require_metadata "$SERVER_ENV" "0:0:600"
-  require_metadata "$MODEL_PROVIDER_CONFIG" "0:0:640"
+  require_metadata "$MODEL_PROVIDER_CONFIG" "0:0:644"
   install -d -o root -g root -m 0750 "$RELEASES_DIR" "$BACKUPS_DIR"
 
   local command

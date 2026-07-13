@@ -40,12 +40,13 @@ function service(compose: string, name: string, nextName: string): string {
 }
 
 describe("production container contract", () => {
-  it("publishes five container-only first-party targets with OCI provenance", () => {
+  it("publishes six container-only first-party targets with OCI provenance", () => {
     const dockerfile = readProjectFile("Dockerfile");
     const entrypoint = readProjectFile("scripts/docker-entrypoint.sh");
 
     for (const target of [
       "runtime",
+      "cli-proxy",
       "sandbox-runtime",
       "sandbox-runner",
       "sandbox-egress-proxy",
@@ -87,6 +88,7 @@ describe("production container contract", () => {
 
     const requiredImages = [
       "OSINARA_APP_IMAGE",
+      "OSINARA_CLI_PROXY_IMAGE",
       "SANDBOX_RUNTIME_IMAGE",
       "OSINARA_SANDBOX_RUNNER_IMAGE",
       "OSINARA_SANDBOX_EGRESS_PROXY_IMAGE",
@@ -181,6 +183,7 @@ describe("release workflow contract", () => {
     }
     for (const image of [
       "osinara-app",
+      "osinara-cli-proxy",
       "osinara-sandbox-runtime",
       "osinara-sandbox-runner",
       "osinara-sandbox-egress-proxy",
@@ -188,7 +191,7 @@ describe("release workflow contract", () => {
     ]) {
       expect(workflow).toContain(`ghcr.io/nyxandro/${image}`);
     }
-    expect(workflow.match(/actions\/attest@/g)).toHaveLength(5);
+    expect(workflow.match(/actions\/attest@/g)).toHaveLength(6);
     expect(workflow).toContain("packages: write");
     expect(workflow).toContain("attestations: write");
     expect(workflow).toContain("id-token: write");

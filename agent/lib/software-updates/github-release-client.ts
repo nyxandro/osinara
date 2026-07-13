@@ -40,6 +40,9 @@ const manifestSchema = z.object({
   composeSha256: z.string().regex(/^[0-9a-f]{64}$/),
   images: z.object({
     app: z.string().regex(new RegExp(`^ghcr\\.io/nyxandro/osinara-app@sha256:${IMAGE_DIGEST}$`)),
+    cliProxy: z.string().regex(
+      new RegExp(`^ghcr\\.io/nyxandro/osinara-cli-proxy@sha256:${IMAGE_DIGEST}$`),
+    ),
     edge: z.string().regex(new RegExp(`^ghcr\\.io/nyxandro/osinara-edge@sha256:${IMAGE_DIGEST}$`)),
     sandboxEgressProxy: z.string().regex(
       new RegExp(`^ghcr\\.io/nyxandro/osinara-sandbox-egress-proxy@sha256:${IMAGE_DIGEST}$`),
