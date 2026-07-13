@@ -4,7 +4,7 @@
 
 GitHub-hosted CI runs the complete `compose.test.yaml` suite for pull requests and pushes to
 `develop` or `main`. A successful `main` run requires a new stable version in `package.json`,
-builds five source-free images, publishes immutable tags to GHCR, records artifact attestations,
+builds five container-only images, publishes immutable tags to GHCR, records artifact attestations,
 and prepares `vVERSION` as a draft. CI uploads and byte-verifies every asset before publishing the
 draft as the latest release. A failed rerun may resume only a draft whose tag still resolves to the
 same commit; a published release or unrelated tag requires a package version bump.
@@ -14,6 +14,10 @@ published releases whose API metadata does not report `immutable: true`.
 - `osinara-deployment.json` contains schema version 1, commit SHA, release version, the SHA-256 of
   the exact Compose bytes, and five exact `ghcr.io/nyxandro/...@sha256:...` references;
 - `compose.production.yaml` contains no build context or source bind mount.
+
+The app image contains the authored `agent/` tree because Eve `0.22.5` still bundles those modules
+when `eve start` serves the built `.output`. The server receives no checkout: the source is confined
+to the immutable app image selected by digest.
 
 GitHub Actions uses only the repository `GITHUB_TOKEN`. The workflow grants package, release,
 OIDC, and attestation writes only to the release job. This follows GitHub's current guidance for

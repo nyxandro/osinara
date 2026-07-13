@@ -2,7 +2,7 @@
  * Production release and deployment contract tests.
  *
  * Constructs covered:
- * - Source-free first-party Docker targets and OCI provenance labels.
+ * - Container-only first-party Docker targets and OCI provenance labels.
  * - Digest-only production Compose wiring, migration ordering, and isolation boundaries.
  * - Main-only GHCR release workflow with pinned actions and artifact attestations.
  * - Server-only deployment locking, validation, backup, status, and notification flow.
@@ -40,7 +40,7 @@ function service(compose: string, name: string, nextName: string): string {
 }
 
 describe("production container contract", () => {
-  it("publishes five source-free first-party targets with OCI provenance", () => {
+  it("publishes five container-only first-party targets with OCI provenance", () => {
     const dockerfile = readProjectFile("Dockerfile");
     const entrypoint = readProjectFile("scripts/docker-entrypoint.sh");
 
@@ -67,10 +67,11 @@ describe("production container contract", () => {
       "FROM nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de",
     );
 
-    // Production images receive emitted JavaScript/assets, never the TypeScript source tree.
+    // Eve 0.22.5 serves built output but still bundles authored modules during `eve start`.
     const runtime = dockerfile.slice(dockerfile.indexOf(" AS runtime"));
     expect(runtime).toContain("COPY --from=build /app/.runtime ./.runtime");
-    expect(runtime).not.toMatch(/COPY --from=build \/app\/(agent|scripts|services)\b/);
+    expect(runtime).toContain("COPY --from=build /app/agent ./agent");
+    expect(runtime).not.toMatch(/COPY --from=build \/app\/(scripts|services)\b/);
     expect(entrypoint).toContain("node .runtime/scripts/migrate.js");
     expect(entrypoint).not.toContain("npm run migrate");
   });
