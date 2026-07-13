@@ -7,6 +7,7 @@
  * - Durable identity-bound HITL callbacks and replies.
  * - Validated attachment persistence with model-safe workspace references.
  * - Native RichBlockThinking, chat-scoped streaming, and completed Rich Message delivery.
+ * - Verified group replies anchored to the triggering member message.
  */
 import { telegramChannel } from "eve/channels/telegram";
 
@@ -29,6 +30,7 @@ import { authorizeTelegramHitlCallback } from "../lib/telegram-hitl/callback-aut
 import { handleTelegramInputRequested } from "../lib/telegram-hitl/input-request.js";
 import { telegramHitlApprovalRepository } from "../lib/telegram-hitl/approval-repository.js";
 import { handleTelegramSessionFailure } from "../lib/telegram-session-failure.js";
+import { telegramTurnReplyParameters } from "../lib/telegram-reply.js";
 
 export default telegramChannel({
   botUsername: process.env.TELEGRAM_BOT_USERNAME as string,
@@ -51,7 +53,12 @@ export default telegramChannel({
       if (!message) return;
       const sessionId = applicationSessionId(ctx);
       if (!await sessionRepository.isCurrentEveSession(sessionId, ctx.session.id)) return;
-      await postTelegramRichMessage(message, channel.telegram, channel.state);
+      await postTelegramRichMessage(
+        message,
+        channel.telegram,
+        channel.state,
+        telegramTurnReplyParameters(channel.state, ctx),
+      );
       await rekeyTelegramSession(channel, ctx);
     },
     async "message.appended"(data, channel, ctx) {
@@ -66,7 +73,11 @@ export default telegramChannel({
     async "turn.failed"(data, channel, ctx) {
       const sessionId = applicationSessionId(ctx);
       // Eve's Telegram post helper updates both state and the durable continuation token.
-      await channel.telegram.post(formatTelegramTurnFailure(data));
+      const replyParameters = telegramTurnReplyParameters(channel.state, ctx);
+      await channel.telegram.post({
+        ...(replyParameters === undefined ? {} : { reply_parameters: replyParameters }),
+        text: formatTelegramTurnFailure(data),
+      });
       await sessionRepository.recordTurnFailed(sessionId, ctx.session.id);
       await telegramHitlApprovalRepository.clearForEveSession(sessionId, ctx.session.id);
       await rekeyTelegramSession(channel, ctx);

@@ -20,6 +20,7 @@ import {
 import { AppError } from "../app-error.js";
 import { applicationSessionId, rekeyTelegramSession } from "../sessions/session-context.js";
 import { sessionRepository } from "../sessions/session-repository.js";
+import { telegramTurnReplyParameters } from "../telegram-reply.js";
 import {
   telegramHitlApprovalRepository,
   type TelegramHitlApprovalRepository,
@@ -106,10 +107,12 @@ export function createTelegramInputRequestHandler(dependencies: InputRequestDepe
       const rendered = renderTelegramInputRequest(localizedRequest, channel.state);
       const replyMarkup = localizeTelegramReplyMarkup(rendered.replyMarkup);
       const callbacks = callbackData(replyMarkup);
+      const replyParameters = telegramTurnReplyParameters(channel.state, ctx);
 
       // The actionable prompt is revealed only after both the route and approver binding are durable.
       const sent = await channel.telegram.post({
         ...(callbacks.length === 0 ? { reply_markup: replyMarkup } : {}),
+        ...(replyParameters === undefined ? {} : { reply_parameters: replyParameters }),
         text: HITL_PREPARING_MESSAGE,
       });
       if (!sent.id) {

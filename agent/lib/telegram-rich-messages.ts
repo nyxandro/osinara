@@ -10,6 +10,7 @@
  * - One stable non-zero draft ID per private chat/topic across turns and model steps.
  * - Telegram Bot API 10.1 `sendRichMessageDraft` and `sendRichMessage` validation.
  * - Final-delivery ambiguity diagnostics without automatic retries.
+ * - First-chunk group replies anchored to a verified inbound message.
  */
 import { createHash } from "node:crypto";
 
@@ -23,6 +24,7 @@ import {
 
 import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../config.js";
 import { AppError } from "./app-error.js";
+import type { TelegramReplyParameters } from "./telegram-reply.js";
 import {
   formatTelegramRichMessageDraft,
   formatTelegramRichMessages,
@@ -201,12 +203,14 @@ function richBody(
   target: TelegramRichTarget,
   richMessage: Readonly<{ html: string } | { markdown: string }>,
   privateOnly: boolean,
+  replyParameters?: TelegramReplyParameters,
 ): TelegramApiBody {
   return {
     chat_id: numericChatId(target, privateOnly),
     ...(target.messageThreadId === undefined
       ? {}
       : { message_thread_id: target.messageThreadId }),
+    ...(replyParameters === undefined ? {} : { reply_parameters: replyParameters }),
     rich_message: richMessage,
   };
 }
@@ -240,12 +244,13 @@ export async function postTelegramRichMessage(
   markdown: string,
   target: TelegramRichTarget,
   state?: TelegramRichAnchorState,
+  replyParameters?: TelegramReplyParameters,
 ): Promise<void> {
   const chunks = formatTelegramRichMessages(markdown);
-  for (const chunk of chunks) {
+  for (const [index, chunk] of chunks.entries()) {
     const response = await requestTelegramRichApi(
       "sendRichMessage",
-      richBody(target, { markdown: chunk }, false),
+      richBody(target, { markdown: chunk }, false, index === 0 ? replyParameters : undefined),
     );
     const sent = requireSentMessage(response);
 
