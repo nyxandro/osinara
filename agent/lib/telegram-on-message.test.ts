@@ -320,6 +320,16 @@ describe("createTelegramMessageHandler", () => {
     });
     expect(sendMessage).toHaveBeenCalledWith(expect.stringContaining("AGENT_APPROVAL_FORBIDDEN"));
     expect(repository.session.prepareTurn).not.toHaveBeenCalled();
+
+    // Existing topics retain the referenced bot message's thread instead of the incoming value.
+    repository.hitl.authorizeReply.mockClear();
+    await handler(context, {
+      ...message,
+      replyToMessage: { ...message.replyToMessage!, messageThreadId: 42 },
+    });
+    expect(repository.hitl.authorizeReply).toHaveBeenCalledWith(expect.objectContaining({
+      baseContinuationToken: "group-101:42:88",
+    }));
   });
 
   it("does not journal an ordinary message in addressed-only mode", async () => {
