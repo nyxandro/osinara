@@ -1,6 +1,6 @@
 {
   "name": "osinara-family-agent",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "imports": {
@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "eve build",
-    "build:runtime": "esbuild scripts/migrate.ts scripts/memory-embedding-worker.ts scripts/telegram-ingress-worker.ts services/sandbox-runner/main.ts services/sandbox-egress-proxy/main.ts --bundle --platform=node --format=esm --target=node24 --packages=external --outbase=. --outdir=.runtime",
+    "build:runtime": "esbuild scripts/migrate.ts scripts/memory-embedding-worker.ts scripts/telegram-ingress-worker.ts scripts/validate-model-provider-config.ts services/sandbox-runner/main.ts services/sandbox-egress-proxy/main.ts --bundle --platform=node --format=esm --target=node24 --packages=external --outbase=. --outdir=.runtime",
     "bootstrap:code": "node --experimental-strip-types scripts/create-bootstrap-code.ts",
     "dev": "eve dev",
     "start": "eve start",

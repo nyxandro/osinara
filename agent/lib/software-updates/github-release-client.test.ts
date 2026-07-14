@@ -18,6 +18,7 @@ function deploymentManifest(overrides: Record<string, unknown> = {}) {
     composeSha256: "c".repeat(64),
     images: {
       app: `ghcr.io/nyxandro/osinara-app@sha256:${DIGEST}`,
+      cliProxy: `ghcr.io/nyxandro/osinara-cli-proxy@sha256:${DIGEST}`,
       edge: `ghcr.io/nyxandro/osinara-edge@sha256:${DIGEST}`,
       sandboxEgressProxy: `ghcr.io/nyxandro/osinara-sandbox-egress-proxy@sha256:${DIGEST}`,
       sandboxRunner: `ghcr.io/nyxandro/osinara-sandbox-runner@sha256:${DIGEST}`,

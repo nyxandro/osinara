@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "agent": {
+    "textModelId": "qwen3.6-fp8",
+    "visionModelId": "qwen3.6-fp8",
+    "contextWindowTokens": 262144,
+    "upstream": {
+      "name": "neuraldeep",
+      "baseUrl": "https://api.neuraldeep.ru/v1",
+      "models": [
+        {
+          "name": "qwen3.6-fp8",
+          "alias": "qwen3.6-fp8",
+          "inputModalities": ["text", "image"],
+          "outputModalities": ["text"]
+        }
+      ]
+    }
+  },
+  "voice": {
+    "transcriptionModelId": "whisper-large-v3-turbo"
+  }
+}

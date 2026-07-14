@@ -21,6 +21,9 @@ COPY . .
 RUN npm run typecheck && npm run build && npm run build:runtime
 
 FROM dependencies AS test
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes jq \
+    && rm -rf /var/lib/apt/lists/*
 COPY . .
 CMD ["npm", "test"]
 
@@ -31,6 +34,26 @@ ENV NODE_ENV=production
 COPY package.json package-lock.json ./
 COPY scripts/apply-eve-patches.ts ./scripts/apply-eve-patches.ts
 RUN npm ci --omit=dev
+
+FROM eceasy/cli-proxy-api@sha256:0b27437917e45a22612ff43ede0fd6baf077c1898c622037a24a79399a9b3d0c AS cli-proxy
+ARG OCI_SOURCE
+ARG OCI_VERSION
+ARG OCI_REVISION
+LABEL org.opencontainers.image.source="${OCI_SOURCE}" \
+      org.opencontainers.image.version="${OCI_VERSION}" \
+      org.opencontainers.image.revision="${OCI_REVISION}"
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes curl jq \
+    && groupadd --gid 10001 cli-proxy \
+    && useradd --gid cli-proxy --no-create-home --uid 10001 --shell /usr/sbin/nologin cli-proxy \
+    && install -d -o cli-proxy -g cli-proxy -m 0700 /config /run/cli-proxy-api \
+    && rm -rf /var/lib/apt/lists/*
+COPY --chown=cli-proxy:cli-proxy config/model-providers.json /config/model-providers.json
+COPY --chown=root:root infra/cli-proxy-entrypoint.sh /usr/local/bin/osinara-cli-proxy-entrypoint
+RUN chmod 0555 /usr/local/bin/osinara-cli-proxy-entrypoint
+USER cli-proxy
+ENTRYPOINT ["osinara-cli-proxy-entrypoint", "/config/model-providers.json", "/run/cli-proxy-api/config.json"]
+CMD ["/CLIProxyAPI/CLIProxyAPI", "-config", "/run/cli-proxy-api/config.json"]
 
 FROM first-party-node AS sandbox-runtime
 RUN apt-get update \
@@ -97,6 +120,7 @@ COPY --from=build /app/.eve ./.eve
 COPY --from=build /app/.runtime ./.runtime
 # Eve 0.22.5 `start` serves `.output` but still bundles authored modules from this tree.
 COPY --from=build /app/agent ./agent
+COPY --from=build /app/config ./config
 COPY --from=build /app/migrations ./migrations
 COPY --from=build /app/resources ./resources
 COPY --from=build /app/package.json ./package.json

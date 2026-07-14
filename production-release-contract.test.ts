@@ -40,12 +40,13 @@ function service(compose: string, name: string, nextName: string): string {
 }
 
 describe("production container contract", () => {
-  it("publishes five container-only first-party targets with OCI provenance", () => {
+  it("publishes six container-only first-party targets with OCI provenance", () => {
     const dockerfile = readProjectFile("Dockerfile");
     const entrypoint = readProjectFile("scripts/docker-entrypoint.sh");
 
     for (const target of [
       "runtime",
+      "cli-proxy",
       "sandbox-runtime",
       "sandbox-runner",
       "sandbox-egress-proxy",
@@ -73,6 +74,7 @@ describe("production container contract", () => {
     expect(runtime).toContain("COPY --from=build /app/agent ./agent");
     expect(runtime).not.toMatch(/COPY --from=build \/app\/(scripts|services)\b/);
     expect(entrypoint).toContain("node .runtime/scripts/migrate.js");
+    expect(entrypoint).toContain("node .runtime/scripts/validate-model-provider-config.js");
     expect(entrypoint).not.toContain("npm run migrate");
   });
 
@@ -86,6 +88,7 @@ describe("production container contract", () => {
 
     const requiredImages = [
       "OSINARA_APP_IMAGE",
+      "OSINARA_CLI_PROXY_IMAGE",
       "SANDBOX_RUNTIME_IMAGE",
       "OSINARA_SANDBOX_RUNNER_IMAGE",
       "OSINARA_SANDBOX_EGRESS_PROXY_IMAGE",
@@ -180,6 +183,7 @@ describe("release workflow contract", () => {
     }
     for (const image of [
       "osinara-app",
+      "osinara-cli-proxy",
       "osinara-sandbox-runtime",
       "osinara-sandbox-runner",
       "osinara-sandbox-egress-proxy",
@@ -187,7 +191,7 @@ describe("release workflow contract", () => {
     ]) {
       expect(workflow).toContain(`ghcr.io/nyxandro/${image}`);
     }
-    expect(workflow.match(/actions\/attest@/g)).toHaveLength(5);
+    expect(workflow.match(/actions\/attest@/g)).toHaveLength(6);
     expect(workflow).toContain("packages: write");
     expect(workflow).toContain("attestations: write");
     expect(workflow).toContain("id-token: write");
@@ -282,6 +286,8 @@ describe("server deployment contract", () => {
     expect(script).toContain("privileged");
     expect(script).toContain("network_mode");
     expect(script).toContain("/var/run/docker.sock");
+    expect(script).toContain("/opt/osinara/model-providers.json");
+    expect(script).toContain(".read_only == true");
   });
 
   it("rejects environment image injection, downgrade, and unsafe initial reuse", () => {
