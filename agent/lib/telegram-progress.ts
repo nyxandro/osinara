@@ -9,16 +9,29 @@ const COMPLETE_THINKING_BLOCK_PATTERN =
   /<(mm:)?think(?:\s[^>]*)?>[\s\S]*?<\/\1think\s*>/giu;
 const UNCLOSED_THINKING_BLOCK_PATTERN =
   /<(?:mm:)?think(?:\s[^>]*)?(?:>|$)[\s\S]*$/iu;
-const CONTENT_THROUGH_LAST_THINKING_CLOSE_PATTERN =
-  /^[\s\S]*<\/(?:mm:)?think\s*>/iu;
+const THINKING_CLOSE_PATTERN = /<\/(?:mm:)?think\s*>/giu;
 const THINKING_OPEN_PREFIXES = ["<mm:think", "<think"] as const;
 
 export function visibleTelegramModelText(message: string): string {
-  // MiniMax emits reasoning inside ordinary content, sometimes with only a closing boundary.
+  // MiniMax emits reasoning inside ordinary content and can duplicate stream boundaries.
+  let removedCompleteBlock = false;
   let visible = message
-    .replace(COMPLETE_THINKING_BLOCK_PATTERN, "")
-    .replace(UNCLOSED_THINKING_BLOCK_PATTERN, "")
-    .replace(CONTENT_THROUGH_LAST_THINKING_CLOSE_PATTERN, "");
+    .replace(COMPLETE_THINKING_BLOCK_PATTERN, () => {
+      removedCompleteBlock = true;
+      return "";
+    })
+    .replace(UNCLOSED_THINKING_BLOCK_PATTERN, "");
+
+  // A corrupted stream can inject duplicated reasoning between visible token fragments.
+  const closingMarkers = [...visible.matchAll(THINKING_CLOSE_PATTERN)];
+  if (closingMarkers.length > 0) {
+    const first = closingMarkers[0]!;
+    const last = closingMarkers[closingMarkers.length - 1]!;
+    const suffix = visible.slice(last.index + last[0].length).trimStart();
+    visible = removedCompleteBlock
+      ? `${visible.slice(0, first.index).trimEnd()}${suffix}`
+      : suffix;
+  }
 
   // Cumulative Eve drafts can end in a split plain or namespaced opening tag.
   const normalized = visible.toLowerCase();
