@@ -1,13 +1,13 @@
 /**
- * Fixed Google OAuth callback boundary.
+ * Fixed Google Workspace OAuth callback boundary.
  *
  * Exports:
  * - `createGoogleOAuthCallbackHandler`: injectable one-time grant completion handler.
  * - `handleGoogleOAuthCallback`: production callback used by the custom Eve channel.
  */
-import type { GoogleCalendarIdentity } from "./google-calendar-api-client.js";
-import { getGooglePrimaryCalendar } from "./google-calendar-api-client.js";
-import { requireGoogleOAuthEnvironment } from "./google-calendar-config.js";
+import type { GoogleAccountIdentity } from "./google-account-client.js";
+import { getGoogleAccountIdentity } from "./google-account-client.js";
+import { requireGoogleOAuthEnvironment } from "./google-workspace-config.js";
 import {
   type ClaimedGoogleAuthorization,
   googleIntegrationRepository,
@@ -41,8 +41,8 @@ interface GoogleOAuthCallbackDependencies {
     code: string,
   ): Promise<GoogleAuthorizationTokenResult>;
   failAuthorization(claim: ClaimedGoogleAuthorization, errorCode: string): Promise<void>;
+  getAccountIdentity(accessToken: string): Promise<GoogleAccountIdentity>;
   getConfig(): CallbackConfig;
-  getPrimaryCalendar(accessToken: string): Promise<GoogleCalendarIdentity>;
   now(): Date;
 }
 
@@ -77,7 +77,7 @@ export function createGoogleOAuthCallbackHandler(dependencies: GoogleOAuthCallba
       return htmlResponse(
         400,
         "Доступ не предоставлен",
-        "AGENT_GOOGLE_OAUTH_DENIED: Google Calendar не был подключён.",
+        "AGENT_GOOGLE_OAUTH_DENIED: Google Workspace не был подключён.",
       );
     }
     const code = params.get("code");
@@ -91,23 +91,23 @@ export function createGoogleOAuthCallbackHandler(dependencies: GoogleOAuthCallba
     }
     const config = dependencies.getConfig();
 
-    // Any failure after claim terminates this state and rethrows the original provider error.
+    // Any provider failure after a claim permanently consumes the one-time state.
     const completion = dependencies.exchangeCode(config, code).then(async (tokens) => {
-      const primary = await dependencies.getPrimaryCalendar(tokens.accessToken);
+      const identity = await dependencies.getAccountIdentity(tokens.accessToken);
       await dependencies.completeAuthorization(claim, {
         accessToken: tokens.accessToken,
         accessTokenExpiresAt: new Date(
           dependencies.now().getTime() + tokens.expiresInSeconds * 1_000,
         ),
-        displayName: primary.summary,
+        displayName: identity.email,
         encryptionKey: config.encryptionKey,
-        externalAccountId: primary.id,
+        externalAccountId: identity.subject,
         refreshToken: tokens.refreshToken,
         scopes: tokens.scopes,
       });
       return htmlResponse(
         200,
-        "Google Calendar подключён",
+        "Google Workspace подключён",
         "Аккаунт безопасно связан с вашим пользователем Osinara.",
       );
     });
@@ -127,7 +127,7 @@ export const handleGoogleOAuthCallback = createGoogleOAuthCallbackHandler({
   completeAuthorization: googleIntegrationRepository.completeAuthorization,
   exchangeCode: exchangeGoogleAuthorizationCode,
   failAuthorization: googleIntegrationRepository.failAuthorization,
+  getAccountIdentity: getGoogleAccountIdentity,
   getConfig: requireGoogleOAuthEnvironment,
-  getPrimaryCalendar: getGooglePrimaryCalendar,
   now: () => new Date(),
 });

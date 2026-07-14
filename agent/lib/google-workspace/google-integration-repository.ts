@@ -1,9 +1,9 @@
 /**
- * PostgreSQL Google integration account and credential boundary.
+ * PostgreSQL Google Workspace account and encrypted credential boundary.
  *
  * Exports:
  * - Authorization, account, and decrypted credential contracts.
- * - `googleIntegrationRepository`: one-time OAuth state and encrypted grant persistence.
+ * - `googleIntegrationRepository`: one-time OAuth state, grant persistence, and token rotation.
  */
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
@@ -13,6 +13,7 @@ import { database } from "../database.js";
 import { decryptGoogleToken, encryptGoogleToken } from "./google-token-crypto.js";
 
 const CURRENT_ENCRYPTION_KEY_VERSION = 1;
+const GOOGLE_WORKSPACE_PROVIDER = "google_workspace";
 
 export interface GoogleIntegrationAuthorization {
   familyId: string;
@@ -120,15 +121,22 @@ export const googleIntegrationRepository = {
       await client.query(
         `UPDATE oauth_authorizations
          SET status = 'failed', error_code = 'AGENT_GOOGLE_OAUTH_STATE_EXPIRED'
-         WHERE user_id = $1 AND provider = 'google_calendar'
+         WHERE user_id = $1 AND provider = $2
            AND status = 'pending' AND expires_at < now()`,
-        [auth.userId],
+        [auth.userId, GOOGLE_WORKSPACE_PROVIDER],
       );
       await client.query(
         `INSERT INTO oauth_authorizations
            (family_id, user_id, provider, state_hash, telegram_chat_id, expires_at)
-         VALUES ($1, $2, 'google_calendar', $3, $4, $5)`,
-        [auth.familyId, auth.userId, stateHash(input.rawState), auth.telegramChatId, input.expiresAt],
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          auth.familyId,
+          auth.userId,
+          GOOGLE_WORKSPACE_PROVIDER,
+          stateHash(input.rawState),
+          auth.telegramChatId,
+          input.expiresAt,
+        ],
       );
       await client.query("COMMIT");
       return { expiresAt: input.expiresAt.toISOString() };
@@ -149,15 +157,15 @@ export const googleIntegrationRepository = {
     }>(
       `UPDATE oauth_authorizations AS auth_row
        SET status = 'processing', claimed_at = $2
-       WHERE auth_row.state_hash = $1 AND auth_row.status = 'pending'
-         AND auth_row.expires_at >= $2
+       WHERE auth_row.state_hash = $1 AND auth_row.provider = $3
+         AND auth_row.status = 'pending' AND auth_row.expires_at >= $2
          AND EXISTS (
            SELECT 1 FROM family_memberships
            WHERE family_id = auth_row.family_id AND user_id = auth_row.user_id
          )
        RETURNING auth_row.id AS authorization_id, auth_row.family_id,
                  auth_row.user_id, auth_row.telegram_chat_id`,
-      [stateHash(rawState), now],
+      [stateHash(rawState), now, GOOGLE_WORKSPACE_PROVIDER],
     );
     const claimed = result.rows[0];
     if (!claimed) {
@@ -179,7 +187,7 @@ export const googleIntegrationRepository = {
     input: CompleteAuthorizationInput,
   ): Promise<GoogleIntegrationAccount> {
     if (!input.scopes.length) {
-      throw new AppError("AGENT_GOOGLE_SCOPE_MISSING", "Google не предоставил Calendar permissions");
+      throw new AppError("AGENT_GOOGLE_SCOPE_MISSING", "Google не предоставил разрешения Workspace");
     }
     const refresh = encryptGoogleToken(input.refreshToken, input.encryptionKey);
     const access = encryptGoogleToken(input.accessToken, input.encryptionKey);
@@ -188,9 +196,10 @@ export const googleIntegrationRepository = {
       await client.query("BEGIN");
       const authorization = await client.query(
         `SELECT 1 FROM oauth_authorizations
-         WHERE id = $1 AND family_id = $2 AND user_id = $3 AND status = 'processing'
+         WHERE id = $1 AND family_id = $2 AND user_id = $3
+           AND provider = $4 AND status = 'processing'
          FOR UPDATE`,
-        [claim.authorizationId, claim.familyId, claim.userId],
+        [claim.authorizationId, claim.familyId, claim.userId, GOOGLE_WORKSPACE_PROVIDER],
       );
       if (!authorization.rowCount) {
         throw new AppError(
@@ -198,16 +207,16 @@ export const googleIntegrationRepository = {
           "Авторизация Google уже завершена или отменена",
         );
       }
+
       // Serializing per user prevents concurrent first-account callbacks from both becoming default.
       await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE", [claim.userId]);
       const account = await client.query<AccountRow>(
         `INSERT INTO integration_accounts
            (family_id, user_id, provider, external_account_id, display_name, status, scopes, is_default)
-         VALUES ($1, $2, 'google_calendar', $3, $4, 'active', $5,
+         VALUES ($1, $2, $3, $4, $5, 'active', $6,
                  NOT EXISTS (
                    SELECT 1 FROM integration_accounts
-                   WHERE user_id = $2 AND provider = 'google_calendar'
-                     AND is_default AND status <> 'revoked'
+                   WHERE user_id = $2 AND provider = $3 AND is_default AND status <> 'revoked'
                  ))
          ON CONFLICT (user_id, provider, external_account_id) DO UPDATE
          SET family_id = EXCLUDED.family_id, display_name = EXCLUDED.display_name,
@@ -216,6 +225,7 @@ export const googleIntegrationRepository = {
         [
           claim.familyId,
           claim.userId,
+          GOOGLE_WORKSPACE_PROVIDER,
           input.externalAccountId,
           input.displayName,
           input.scopes,
@@ -260,8 +270,8 @@ export const googleIntegrationRepository = {
       await client.query(
         `INSERT INTO audit_events (family_id, actor_user_id, event_type, subject_id, metadata)
          VALUES ($1, $2, 'integration.connected', $3,
-                 jsonb_build_object('provider', 'google_calendar'))`,
-        [claim.familyId, claim.userId, stored.id],
+                 jsonb_build_object('provider', $4::text))`,
+        [claim.familyId, claim.userId, stored.id, GOOGLE_WORKSPACE_PROVIDER],
       );
       await client.query("COMMIT");
       return accountFromRow(stored);
@@ -277,8 +287,8 @@ export const googleIntegrationRepository = {
     await database().query(
       `UPDATE oauth_authorizations
        SET status = 'failed', completed_at = now(), error_code = $2
-       WHERE id = $1 AND status = 'processing'`,
-      [claim.authorizationId, errorCode],
+       WHERE id = $1 AND provider = $3 AND status = 'processing'`,
+      [claim.authorizationId, errorCode, GOOGLE_WORKSPACE_PROVIDER],
     );
   },
 
@@ -298,15 +308,14 @@ export const googleIntegrationRepository = {
        JOIN family_memberships AS membership
          ON membership.family_id = account.family_id AND membership.user_id = account.user_id
        WHERE account.family_id = $1 AND account.user_id = $2
-         AND account.provider = 'google_calendar' AND account.is_default
-         AND account.status = 'active'`,
-      [auth.familyId, auth.userId],
+         AND account.provider = $3 AND account.is_default AND account.status = 'active'`,
+      [auth.familyId, auth.userId, GOOGLE_WORKSPACE_PROVIDER],
     );
     const row = result.rows[0];
     if (!row) {
       throw new AppError(
         "AGENT_INTEGRATION_AUTH_REQUIRED",
-        "Подключите Google Calendar в личном чате",
+        "Подключите Google Workspace в личном чате",
       );
     }
     return {
@@ -324,5 +333,59 @@ export const googleIntegrationRepository = {
       }, encryptionKey),
       scopes: row.scopes,
     };
+  },
+
+  async updateAccessToken(auth: GoogleIntegrationAuthorization, accountId: string, input: {
+    accessToken: string;
+    accessTokenExpiresAt: Date;
+    encryptionKey: string;
+    scopes: string[];
+  }): Promise<void> {
+    const access = encryptGoogleToken(input.accessToken, input.encryptionKey);
+    const client = await database().connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query(
+        `UPDATE integration_credentials AS credential
+         SET access_token_ciphertext = $4, access_token_nonce = $5,
+             access_token_auth_tag = $6, access_token_expires_at = $7, updated_at = now()
+         FROM integration_accounts AS account
+         WHERE credential.account_id = account.id AND account.id = $1
+           AND account.family_id = $2 AND account.user_id = $3
+           AND account.provider = $8 AND account.status = 'active'
+           AND EXISTS (
+             SELECT 1 FROM family_memberships
+             WHERE family_id = account.family_id AND user_id = account.user_id
+           )`,
+        [
+          accountId,
+          auth.familyId,
+          auth.userId,
+          access.ciphertext,
+          access.nonce,
+          access.authTag,
+          input.accessTokenExpiresAt,
+          GOOGLE_WORKSPACE_PROVIDER,
+        ],
+      );
+      if (!result.rowCount) {
+        throw new AppError(
+          "AGENT_INTEGRATION_AUTH_REQUIRED",
+          "Аккаунт Google Workspace больше недоступен. Подключите его заново",
+        );
+      }
+      await client.query(
+        `UPDATE integration_accounts
+         SET scopes = $2, updated_at = now()
+         WHERE id = $1 AND family_id = $3 AND user_id = $4 AND provider = $5`,
+        [accountId, input.scopes, auth.familyId, auth.userId, GOOGLE_WORKSPACE_PROVIDER],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   },
 };

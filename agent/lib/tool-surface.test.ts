@@ -14,6 +14,7 @@ const AGENT_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 const EXPECTED_TOOL_FILES = [
   "export_memory.ts",
+  "google_workspace.ts",
   "group-tool-policy.ts",
   "inspect_workspace_image.ts",
   "list_family_members.ts",
@@ -45,7 +46,7 @@ const EXPECTED_SKILL_DIRECTORIES = [
   "xlsx",
 ] as const;
 
-const EXPECTED_DYNAMIC_SKILL_FILES = ["t-invest.ts"] as const;
+const EXPECTED_DYNAMIC_SKILL_FILES = ["google-workspace.ts", "t-invest.ts"] as const;
 
 describe("agent capability surface", () => {
   it("exposes only the consolidated authored tool files", async () => {

@@ -38,6 +38,7 @@ services:
   agent:
     build:
       context: .
+      target: runtime
     depends_on:
       cli-proxy-api:
         condition: service_healthy
@@ -165,12 +166,13 @@ services:
   memory-embedding-worker:
     build:
       context: .
+      target: runtime
     depends_on:
       postgres:
         condition: service_healthy
       memory-embedding:
         condition: service_healthy
-    entrypoint: ["node", "--import", "tsx", "scripts/memory-embedding-worker.ts"]
+    entrypoint: ["node", ".runtime/scripts/memory-embedding-worker.js"]
     environment:
       DATABASE_URL: postgresql://osinara:${POSTGRES_PASSWORD}@postgres:5432/osinara
       MEMORY_EMBEDDING_BASE_URL: http://memory-embedding:80
@@ -179,9 +181,10 @@ services:
   telegram-ingress-worker:
     build:
       context: .
+      target: runtime
     depends_on:
       - agent
-    entrypoint: ["node", "--experimental-strip-types", "scripts/telegram-ingress-worker.ts"]
+    entrypoint: ["node", ".runtime/scripts/telegram-ingress-worker.js"]
     environment:
       AGENT_INTERNAL_BASE_URL: http://agent:3000
       TELEGRAM_WEBHOOK_SECRET_TOKEN: ${TELEGRAM_WEBHOOK_SECRET_TOKEN:?TELEGRAM_WEBHOOK_SECRET_TOKEN is required}

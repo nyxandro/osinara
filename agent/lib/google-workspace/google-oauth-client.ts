@@ -1,21 +1,21 @@
 /**
- * Google OAuth 2.0 web-server HTTP client.
+ * Google Workspace OAuth 2.0 web-server HTTP client.
  *
  * Exports:
- * - `GOOGLE_CALENDAR_SCOPES`: least-privilege Calendar scope matrix.
+ * - `GOOGLE_WORKSPACE_SCOPES`: exact user identity and Workspace grant matrix.
  * - Consent URL, authorization-code exchange, and refresh-token exchange helpers.
  */
 import { z } from "zod";
 
 import { AppError } from "../app-error.js";
 import {
-  GOOGLE_CALENDAR_SCOPES,
   GOOGLE_OAUTH_AUTHORIZE_URL,
   GOOGLE_OAUTH_TOKEN_URL,
   GOOGLE_PROVIDER_REQUEST_TIMEOUT_MILLISECONDS,
-} from "./google-calendar-config.js";
+  GOOGLE_WORKSPACE_SCOPES,
+} from "./google-workspace-config.js";
 
-export { GOOGLE_CALENDAR_SCOPES } from "./google-calendar-config.js";
+export { GOOGLE_WORKSPACE_SCOPES } from "./google-workspace-config.js";
 
 export interface GoogleOAuthClientConfig {
   clientId: string;
@@ -59,15 +59,13 @@ export function buildGoogleAuthorizationUrl(
     prompt: "consent select_account",
     redirect_uri: config.redirectUri,
     response_type: "code",
-    scope: GOOGLE_CALENDAR_SCOPES.join(" "),
+    scope: GOOGLE_WORKSPACE_SCOPES.join(" "),
     state,
   }).toString();
   return url.toString();
 }
 
-async function requestToken(
-  body: URLSearchParams,
-): Promise<z.infer<typeof tokenResponseSchema>> {
+async function requestToken(body: URLSearchParams): Promise<z.infer<typeof tokenResponseSchema>> {
   let response: Response;
   try {
     response = await fetch(GOOGLE_OAUTH_TOKEN_URL, {
@@ -103,16 +101,16 @@ async function requestToken(
   }
   if (!response.ok) {
     const providerError = providerErrorSchema.safeParse(payload);
-    const code = providerError.success ? providerError.data.error : "unknown_provider_error";
+    const providerCode = providerError.success ? providerError.data.error : "unknown_provider_error";
     console.error(JSON.stringify({
       code: "AGENT_GOOGLE_OAUTH_PROVIDER_FAILED",
-      providerCode: code,
+      providerCode,
       providerStatus: response.status,
     }));
-    if (code === "invalid_grant") {
+    if (providerCode === "invalid_grant") {
       throw new AppError(
         "AGENT_GOOGLE_AUTH_EXPIRED",
-        "Доступ к Google Calendar истёк или был отозван. Подключите аккаунт заново",
+        "Доступ к Google Workspace истёк или был отозван. Подключите аккаунт заново",
       );
     }
     throw new AppError(
@@ -120,6 +118,7 @@ async function requestToken(
       "Google не завершил авторизацию. Попробуйте подключить аккаунт ещё раз",
     );
   }
+
   const parsed = tokenResponseSchema.safeParse(payload);
   if (!parsed.success) {
     throw new AppError(
@@ -127,12 +126,12 @@ async function requestToken(
       "Google OAuth вернул неполный ответ. Подключите аккаунт ещё раз",
     );
   }
-  const scopes = parsed.data.scope.split(" ").filter(Boolean);
-  const missingScope = GOOGLE_CALENDAR_SCOPES.find((scope) => !scopes.includes(scope));
+  const grantedScopes = parsed.data.scope.split(" ").filter(Boolean);
+  const missingScope = GOOGLE_WORKSPACE_SCOPES.find((scope) => !grantedScopes.includes(scope));
   if (missingScope) {
     throw new AppError(
       "AGENT_GOOGLE_SCOPE_MISSING",
-      "Google не предоставил все разрешения Calendar. Подключите аккаунт и подтвердите доступ",
+      "Google не предоставил все разрешения Workspace. Подключите аккаунт и подтвердите доступ",
     );
   }
   return parsed.data;
@@ -155,7 +154,7 @@ export async function exchangeGoogleAuthorizationCode(
   if (!token.refresh_token) {
     throw new AppError(
       "AGENT_GOOGLE_REFRESH_TOKEN_MISSING",
-      "Google не выдал долговременный доступ. Отзовите старый grant и подключите аккаунт снова",
+      "Google не выдал долговременный доступ. Отзовите старый доступ и подключите аккаунт снова",
     );
   }
   return {

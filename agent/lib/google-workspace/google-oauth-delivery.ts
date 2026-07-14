@@ -1,5 +1,5 @@
 /**
- * Trusted Telegram delivery for Google OAuth links and completion notices.
+ * Trusted Telegram delivery for Google Workspace OAuth links.
  *
  * Export:
  * - `deliverGoogleAuthorizationLink`: sends a state-bearing URL outside model context.
@@ -16,12 +16,24 @@ function botToken(): string {
   return value;
 }
 
-async function sendPrivateText(chatId: string, text: string): Promise<void> {
+export async function deliverGoogleAuthorizationLink(
+  chatId: string,
+  authorizationUrl: string,
+  expiresAt: Date,
+): Promise<void> {
   const signal = AbortSignal.timeout(TELEGRAM_API_REQUEST_TIMEOUT_MS);
   const fetchWithTimeout: typeof fetch = (request, init) => fetch(request, { ...init, signal });
   try {
     await sendTelegramMessage({
-      body: { protect_content: true, text },
+      body: {
+        protect_content: true,
+        text: [
+          "Подключение Google Workspace:",
+          authorizationUrl,
+          `Ссылка действует до ${expiresAt.toISOString()}.`,
+          "Откройте её в обычном браузере. Не пересылайте ссылку другим людям.",
+        ].join("\n"),
+      },
       chatId,
       credentials: { botToken: botToken() },
       fetch: fetchWithTimeout,
@@ -36,17 +48,4 @@ async function sendPrivateText(chatId: string, text: string): Promise<void> {
     }
     throw error;
   }
-}
-
-export async function deliverGoogleAuthorizationLink(
-  chatId: string,
-  authorizationUrl: string,
-  expiresAt: Date,
-): Promise<void> {
-  await sendPrivateText(chatId, [
-    "Подключение Google Calendar:",
-    authorizationUrl,
-    `Ссылка действует до ${expiresAt.toISOString()}.`,
-    "Откройте её в обычном браузере. Не пересылайте ссылку другим людям.",
-  ].join("\n"));
 }

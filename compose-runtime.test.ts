@@ -8,6 +8,7 @@
  * - PDF processing stays inside the normal sandbox instead of a parallel service.
  * - Docker socket, runner control plane, egress proxy, and tools volume remain isolated.
  * - Dynamic skill package assets are shipped in the production agent image.
+ * - Node application services explicitly select the production runtime image stage.
  * - Nginx re-resolves the agent service after Docker replaces its container IP.
  */
 import { existsSync, readFileSync } from "node:fs";
@@ -100,6 +101,33 @@ describe("Docker Compose runtime wiring", () => {
     const dockerfile = readFileSync(new URL("Dockerfile", projectRoot), "utf8");
 
     expect(dockerfile).toContain("COPY --from=build /app/resources ./resources\n");
+  });
+
+  it("builds every Node application service from the runtime stage", () => {
+    const compose = readFileSync(new URL("compose.yaml", projectRoot), "utf8");
+    const workerEntrypoints = new Map([
+      ["memory-embedding-worker", ".runtime/scripts/memory-embedding-worker.js"],
+      ["telegram-ingress-worker", ".runtime/scripts/telegram-ingress-worker.js"],
+    ]);
+
+    // An explicit target prevents a later Dockerfile stage, such as Nginx edge, from silently
+    // replacing the Node runtime when stages are reordered or appended.
+    for (const serviceName of ["agent", "memory-embedding-worker", "telegram-ingress-worker"]) {
+      const serviceStart = compose.indexOf(`\n  ${serviceName}:\n`);
+      const nextServiceOffset = compose.slice(serviceStart + 1).search(/\n  \S/);
+      const serviceEnd = nextServiceOffset === -1
+        ? undefined
+        : serviceStart + nextServiceOffset + 1;
+      const service = compose.slice(serviceStart, serviceEnd);
+
+      expect(service, serviceName).toContain("      target: runtime\n");
+      const workerEntrypoint = workerEntrypoints.get(serviceName);
+      if (workerEntrypoint) {
+        expect(service, serviceName).toContain(
+          `    entrypoint: ["node", "${workerEntrypoint}"]\n`,
+        );
+      }
+    }
   });
 
   it("re-resolves the agent upstream after Docker replaces its container", () => {

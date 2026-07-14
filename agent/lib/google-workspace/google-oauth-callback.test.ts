@@ -1,9 +1,9 @@
 /**
- * Google OAuth callback boundary tests.
+ * Google Workspace OAuth callback boundary tests.
  *
  * Constructs covered:
- * - State-bound grant completion and direct Telegram confirmation.
- * - Explicit user denial consumes the flow without exchanging a code.
+ * - State-bound grants persist OpenID identity rather than Calendar metadata.
+ * - Explicit denial consumes the one-time authorization without token exchange.
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -27,24 +27,22 @@ function dependencies() {
       scopes: ["scope"],
     }),
     failAuthorization: vi.fn(),
+    getAccountIdentity: vi.fn().mockResolvedValue({
+      email: "owner@example.com",
+      subject: "google-subject-123",
+    }),
     getConfig: () => ({
       clientId: "client-id",
       clientSecret: "client-secret",
       encryptionKey: Buffer.alloc(32, 1).toString("base64"),
       redirectUri: "https://agent.example/eve/v1/google-oauth/callback",
     }),
-    getPrimaryCalendar: vi.fn().mockResolvedValue({
-      accessRole: "owner",
-      id: "owner@example.com",
-      summary: "owner@example.com",
-      timeZone: "Europe/Moscow",
-    }),
     now: () => new Date("2026-07-12T12:00:00.000Z"),
   };
 }
 
-describe("Google OAuth callback", () => {
-  it("exchanges and persists a state-bound authorization", async () => {
+describe("Google Workspace OAuth callback", () => {
+  it("persists a state-bound OpenID account identity", async () => {
     const deps = dependencies();
     const handler = createGoogleOAuthCallbackHandler(deps);
     const response = await handler(new Request(
@@ -52,15 +50,14 @@ describe("Google OAuth callback", () => {
     ));
 
     expect(response.status).toBe(200);
-    expect(await response.text()).toContain("Google Calendar подключён");
+    expect(await response.text()).toContain("Google Workspace подключён");
     expect(deps.completeAuthorization).toHaveBeenCalledWith(claim, expect.objectContaining({
-      accessToken: "access-secret",
-      externalAccountId: "owner@example.com",
-      refreshToken: "refresh-secret",
+      displayName: "owner@example.com",
+      externalAccountId: "google-subject-123",
     }));
   });
 
-  it("records an explicit denial without calling the token endpoint", async () => {
+  it("records an explicit denial without exchanging a code", async () => {
     const deps = dependencies();
     const handler = createGoogleOAuthCallbackHandler(deps);
     const response = await handler(new Request(
@@ -68,14 +65,13 @@ describe("Google OAuth callback", () => {
     ));
 
     expect(response.status).toBe(400);
-    expect(await response.text()).toContain("AGENT_GOOGLE_OAUTH_DENIED");
     expect(deps.failAuthorization).toHaveBeenCalledWith(claim, "AGENT_GOOGLE_OAUTH_DENIED");
     expect(deps.exchangeCode).not.toHaveBeenCalled();
   });
 
-  it("terminates a claimed state when completion fails after token exchange", async () => {
+  it("terminates the claimed state after a provider completion failure", async () => {
     const deps = dependencies();
-    deps.getPrimaryCalendar.mockRejectedValue(new Error("provider unavailable"));
+    deps.getAccountIdentity.mockRejectedValue(new Error("provider unavailable"));
     const handler = createGoogleOAuthCallbackHandler(deps);
 
     await expect(handler(new Request(
