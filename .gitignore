@@ -11,5 +11,6 @@ coverage
 dist
 *.tsbuildinfo
 *.log
+client_secret_*.json
 __pycache__/
 *.py[cod]

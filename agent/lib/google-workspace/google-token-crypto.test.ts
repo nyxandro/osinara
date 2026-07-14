@@ -1,5 +1,5 @@
 /**
- * Google integration credential encryption tests.
+ * Google Workspace credential encryption tests.
  *
  * Constructs covered:
  * - AES-256-GCM round trip with unique nonces.

@@ -1,6 +1,6 @@
 {
   "name": "osinara-family-agent",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "type": "module",
   "imports": {
@@ -12,6 +12,8 @@
     "build:runtime": "esbuild scripts/migrate.ts scripts/memory-embedding-worker.ts scripts/telegram-ingress-worker.ts scripts/validate-model-provider-config.ts services/sandbox-runner/main.ts services/sandbox-egress-proxy/main.ts --bundle --platform=node --format=esm --target=node24 --packages=external --outbase=. --outdir=.runtime",
     "bootstrap:code": "node --experimental-strip-types scripts/create-bootstrap-code.ts",
     "dev": "eve dev",
+    "install:gws": "node --experimental-strip-types scripts/install-google-workspace-cli.ts",
+    "setup:google": "node --experimental-strip-types scripts/configure-google-workspace-cli.ts",
     "start": "eve start",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -23,6 +25,7 @@
   "dependencies": {
     "@ai-sdk/groq": "4.0.7",
     "@ai-sdk/openai-compatible": "3.0.7",
+    "@googleworkspace/cli": "0.22.5",
     "ai": "7.0.0",
     "dockerode": "5.0.1",
     "eve": "0.22.5",

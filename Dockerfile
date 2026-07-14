@@ -15,7 +15,10 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY scripts/apply-eve-patches.ts ./scripts/apply-eve-patches.ts
 COPY scripts/apply-openai-compatible-patches.ts ./scripts/apply-openai-compatible-patches.ts
-RUN npm ci
+COPY scripts/install-google-workspace-cli.ts ./scripts/install-google-workspace-cli.ts
+RUN npm ci --ignore-scripts \
+    && npm run postinstall \
+    && npm run install:gws
 
 FROM dependencies AS build
 COPY . .
@@ -35,7 +38,10 @@ ENV NODE_ENV=production
 COPY package.json package-lock.json ./
 COPY scripts/apply-eve-patches.ts ./scripts/apply-eve-patches.ts
 COPY scripts/apply-openai-compatible-patches.ts ./scripts/apply-openai-compatible-patches.ts
-RUN npm ci --omit=dev
+COPY scripts/install-google-workspace-cli.ts ./scripts/install-google-workspace-cli.ts
+RUN npm ci --omit=dev --ignore-scripts \
+    && npm run postinstall \
+    && npm run install:gws
 
 FROM eceasy/cli-proxy-api@sha256:0b27437917e45a22612ff43ede0fd6baf077c1898c622037a24a79399a9b3d0c AS cli-proxy
 ARG OCI_SOURCE

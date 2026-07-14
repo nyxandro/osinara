@@ -105,6 +105,34 @@ describe("Telegram interface localization", () => {
     expect(request.prompt).toContain("Разрешённые инструменты: remember");
   });
 
+  it("shows the exact Google Workspace mutation before approval", () => {
+    const request = localizeTelegramInputRequest({
+      action: {
+        callId: "call-1",
+        input: {
+          action: "execute",
+          command: {
+            method: "create",
+            resourcePath: ["files"],
+            service: "drive",
+          },
+          upload: { contentType: "application/pdf", path: "report.pdf", scope: "personal" },
+        },
+        kind: "tool-call" as const,
+        toolName: "google_workspace",
+      },
+      display: "confirmation" as const,
+      options: [],
+      prompt: "Approve tool call",
+      requestId: "request-google",
+    });
+
+    expect(request.prompt).toContain("изменить данные в Google Workspace");
+    expect(request.prompt).toContain("Сервис: drive");
+    expect(request.prompt).toContain("Метод: files.create");
+    expect(request.prompt).toContain("Файл: personal/report.pdf");
+  });
+
   it("localizes the freeform answer placeholder", () => {
     expect(
       localizeTelegramReplyMarkup({

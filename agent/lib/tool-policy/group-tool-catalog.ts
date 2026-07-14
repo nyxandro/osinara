@@ -30,6 +30,7 @@ export const ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES = [
 
 export const CONTROLLED_TOOL_NAMES = [
   "export_memory",
+  "google_workspace",
   "inspect_workspace_image",
   "list_family_members",
   "list_memories",

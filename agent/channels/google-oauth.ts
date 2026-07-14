@@ -6,8 +6,8 @@
  */
 import { defineChannel, GET } from "eve/channels";
 
-import { GOOGLE_OAUTH_CALLBACK_PATH } from "../lib/google-calendar/google-calendar-config.js";
-import { handleGoogleOAuthCallback } from "../lib/google-calendar/google-oauth-callback.js";
+import { handleGoogleOAuthCallback } from "../lib/google-workspace/google-oauth-callback.js";
+import { GOOGLE_OAUTH_CALLBACK_PATH } from "../lib/google-workspace/google-workspace-config.js";
 
 export default defineChannel({
   routes: [GET(GOOGLE_OAUTH_CALLBACK_PATH, handleGoogleOAuthCallback)],
