@@ -6,7 +6,9 @@
  * - MiniMax `reasoning_details` survives a complete assistant/tool round trip.
  * - Incremental streaming reasoning metadata is reconstructed on the AI SDK reasoning part.
  * - Multiple reasoning history parts serialize one complete MiniMax details envelope.
- * - Inline reasoning in text fails closed when the upstream contract is violated.
+ * - Inline reasoning is normalized into reasoning parts without leaking into visible text.
+ * - Redundant closing tags after structured reasoning are suppressed as provider separators.
+ * - Malformed inline reasoning still fails closed instead of exposing internal content.
  */
 import { describe, expect, it } from "vitest";
 import type {
@@ -15,6 +17,7 @@ import type {
   LanguageModelV4Prompt,
   LanguageModelV4StreamPart,
 } from "@ai-sdk/provider";
+import { streamText } from "ai";
 
 import { createMiniMaxCliProxyModel } from "./minimax-model.js";
 
@@ -159,7 +162,7 @@ describe("createMiniMaxCliProxyModel", () => {
         reasoning_content: REASONING_DETAILS_FRAGMENT_TWO[0].text,
         reasoning_details: REASONING_DETAILS_FRAGMENT_TWO,
       }, index: 0 }] })}\n\n`,
-      `data: ${JSON.stringify({ choices: [{ delta: { content: "Готовый ответ" }, finish_reason: "stop", index: 0 }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "</THINK>Готовый ответ" }, finish_reason: "stop", index: 0 }] })}\n\n`,
       "data: [DONE]\n\n",
     ].join("");
     const model = createMiniMaxCliProxyModel({
@@ -229,7 +232,7 @@ describe("createMiniMaxCliProxyModel", () => {
     });
   });
 
-  it("fails closed when case-variant inline reasoning appears in text", async () => {
+  it("normalizes case-variant inline reasoning in a generated response", async () => {
     const model = createMiniMaxCliProxyModel({
       apiKey: "proxy-key",
       baseURL: "http://cli-proxy-api:8317/v1",
@@ -240,15 +243,22 @@ describe("createMiniMaxCliProxyModel", () => {
       modelId: "MiniMax-M3",
     });
 
-    await expect(
-      model.doGenerate({ prompt: userPrompt() } as LanguageModelV4CallOptions),
-    ).rejects.toThrow("AGENT_MINIMAX_REASONING_CONTRACT_VIOLATION");
+    const result = await model.doGenerate({
+      prompt: userPrompt(),
+    } as LanguageModelV4CallOptions);
+
+    expect(result.content).toEqual([
+      { text: "Скрытое рассуждение", type: "reasoning" },
+      { text: "Ответ", type: "text" },
+    ]);
   });
 
-  it("fails closed when an inline boundary is split across stream chunks", async () => {
+  it("normalizes inline reasoning split across stream chunks", async () => {
     const eventStream = [
       `data: ${JSON.stringify({ choices: [{ delta: { content: "<thi" }, index: 0 }] })}\n\n`,
       `data: ${JSON.stringify({ choices: [{ delta: { content: "nk>Скрыто" }, index: 0 }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "е рассуждение</TH" }, index: 0 }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "INK>Ответ" }, finish_reason: "stop", index: 0 }] })}\n\n`,
       "data: [DONE]\n\n",
     ].join("");
     const model = createMiniMaxCliProxyModel({
@@ -262,10 +272,73 @@ describe("createMiniMaxCliProxyModel", () => {
     });
 
     const { stream } = await model.doStream({ prompt: userPrompt() } as LanguageModelV4CallOptions);
-    await expect(async () => {
-      for await (const _part of stream) {
-        // Fully consume the provider stream so contract errors propagate.
-      }
-    }).rejects.toThrow("AGENT_MINIMAX_REASONING_CONTRACT_VIOLATION");
+    const parts: LanguageModelV4StreamPart[] = [];
+    for await (const part of stream) parts.push(part);
+
+    const contentParts = parts.filter((part) => [
+      "reasoning-start",
+      "reasoning-delta",
+      "reasoning-end",
+      "text-start",
+      "text-delta",
+      "text-end",
+    ].includes(part.type));
+    expect(contentParts.map((part) => part.type)).toEqual([
+      "reasoning-start",
+      "reasoning-delta",
+      "reasoning-delta",
+      "reasoning-end",
+      "text-start",
+      "text-delta",
+      "text-end",
+    ]);
+    expect(parts.filter((part) => part.type === "reasoning-delta")).toEqual([
+      expect.objectContaining({ delta: "Скрыто" }),
+      expect.objectContaining({ delta: "е рассуждение" }),
+    ]);
+    expect(parts.filter((part) => part.type === "text-delta")).toEqual([
+      expect.objectContaining({ delta: "Ответ" }),
+    ]);
+  });
+
+  it("exposes recovered reasoning safely through the public AI SDK stream", async () => {
+    const eventStream = [
+      `data: ${JSON.stringify({ choices: [{ delta: {
+        content: "<think>Скрытое рассуждение</think>Готовый ответ",
+      }, finish_reason: "stop", index: 0 }] })}\n\n`,
+      "data: [DONE]\n\n",
+    ].join("");
+    const model = createMiniMaxCliProxyModel({
+      apiKey: "proxy-key",
+      baseURL: "http://cli-proxy-api:8317/v1",
+      fetch: async () => new Response(eventStream, {
+        headers: { "content-type": "text/event-stream" },
+        status: 200,
+      }),
+      modelId: "MiniMax-M3",
+    });
+
+    // Eve consumes the model through this AI SDK layer rather than reading raw provider parts.
+    const result = streamText({ model, prompt: "Подготовь документ" });
+    const [reasoningText, text] = await Promise.all([result.reasoningText, result.text]);
+
+    expect(reasoningText).toBe("Скрытое рассуждение");
+    expect(text).toBe("Готовый ответ");
+  });
+
+  it("fails closed when inline reasoning is not terminated", async () => {
+    const model = createMiniMaxCliProxyModel({
+      apiKey: "proxy-key",
+      baseURL: "http://cli-proxy-api:8317/v1",
+      fetch: async () => jsonResponse(completion({
+        content: "<think>Скрытое рассуждение",
+        role: "assistant",
+      }, "stop")),
+      modelId: "MiniMax-M3",
+    });
+
+    await expect(
+      model.doGenerate({ prompt: userPrompt() } as LanguageModelV4CallOptions),
+    ).rejects.toThrow("AGENT_MINIMAX_REASONING_CONTRACT_VIOLATION");
   });
 });
