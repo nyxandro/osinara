@@ -18,6 +18,7 @@ import {
 
 describe("model registry", () => {
   it("selects the configured CLIProxy text model", () => {
+    expect(modelProviderConfig.agent.upstream.name).toBe("minimax");
     expect(primaryModel.modelId).toBe(modelProviderConfig.agent.textModelId);
     expect(primaryModel.provider).toBe("cli-proxy-api.chat");
   });

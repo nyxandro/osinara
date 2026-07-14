@@ -60,6 +60,36 @@ if (packageJson.version !== EXPECTED_OPENAI_COMPATIBLE_VERSION) {
   );
 }
 
+// Merge incremental SSE fragments while also tolerating already-cumulative detail snapshots.
+await replaceOnce(
+  `function getOpenAIMetadata(message) {
+  var _a, _b;
+  return (_b = (_a = message == null ? void 0 : message.providerOptions) == null ? void 0 : _a.openaiCompatible) != null ? _b : {};
+}
+function getAudioFormat(mediaType) {`,
+  `function getOpenAIMetadata(message) {
+  var _a, _b;
+  return (_b = (_a = message == null ? void 0 : message.providerOptions) == null ? void 0 : _a.openaiCompatible) != null ? _b : {};
+}
+function mergeMiniMaxReasoningDetails(current, incoming) {
+  const merged = current == null ? [] : current.map((detail) => ({ ...detail }));
+  for (const detail of incoming) {
+    const existingIndex = merged.findIndex(
+      (candidate) => candidate.id === detail.id && candidate.index === detail.index
+    );
+    if (existingIndex < 0) {
+      merged.push({ ...detail });
+      continue;
+    }
+    const existing = merged[existingIndex];
+    const text = detail.text.startsWith(existing.text) ? detail.text : existing.text.startsWith(detail.text) ? existing.text : existing.text + detail.text;
+    merged[existingIndex] = { ...existing, ...detail, text };
+  }
+  return merged;
+}
+function getAudioFormat(mediaType) {`,
+);
+
 // Carry provider metadata from an AI SDK reasoning part back into assistant history.
 await replaceOnce(
   `        let reasoning = "";
@@ -76,7 +106,10 @@ await replaceOnce(
   `            case "reasoning": {
               reasoning += part.text;
               if (partMetadata.reasoningDetails !== void 0) {
-                reasoningDetails = partMetadata.reasoningDetails;
+                reasoningDetails = mergeMiniMaxReasoningDetails(
+                  reasoningDetails,
+                  partMetadata.reasoningDetails
+                );
               }
               break;
             }`,
@@ -134,7 +167,7 @@ await replaceOnce(
       });`,
 );
 
-// Keep the latest cumulative details and bind them to the streamed reasoning part.
+// Accumulate incremental details and bind the complete envelope to the reasoning part.
 await replaceOnce(
   `    let isActiveReasoning = false;
     let isActiveText = false;
@@ -152,7 +185,10 @@ await replaceOnce(
             const reasoningContent = (_b2 = delta.reasoning_content) != null ? _b2 : delta.reasoning;`,
   `            const delta = choice.delta;
             if (delta.reasoning_details != null) {
-              reasoningDetails = delta.reasoning_details;
+              reasoningDetails = mergeMiniMaxReasoningDetails(
+                reasoningDetails,
+                delta.reasoning_details
+              );
             }
             const reasoningContent = (_b2 = delta.reasoning_content) != null ? _b2 : delta.reasoning;`,
 );

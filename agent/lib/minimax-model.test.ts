@@ -4,7 +4,8 @@
  * Constructs covered:
  * - `createMiniMaxCliProxyModel`: adds `reasoning_split` to every request.
  * - MiniMax `reasoning_details` survives a complete assistant/tool round trip.
- * - Streaming reasoning metadata remains attached to the AI SDK reasoning part.
+ * - Incremental streaming reasoning metadata is reconstructed on the AI SDK reasoning part.
+ * - Multiple reasoning history parts serialize one complete MiniMax details envelope.
  * - Inline reasoning in text fails closed when the upstream contract is violated.
  */
 import { describe, expect, it } from "vitest";
@@ -24,6 +25,14 @@ const REASONING_DETAILS = [{
   text: "Проверяю погоду через инструмент.",
   type: "reasoning.text",
 }] as const;
+const REASONING_DETAILS_FRAGMENT_ONE = [{
+  ...REASONING_DETAILS[0],
+  text: "Проверяю ",
+}];
+const REASONING_DETAILS_FRAGMENT_TWO = [{
+  ...REASONING_DETAILS[0],
+  text: "погоду через инструмент.",
+}];
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -143,8 +152,12 @@ describe("createMiniMaxCliProxyModel", () => {
   it("keeps streaming reasoning_details on the completed reasoning part", async () => {
     const eventStream = [
       `data: ${JSON.stringify({ choices: [{ delta: {
-        reasoning_content: REASONING_DETAILS[0].text,
-        reasoning_details: REASONING_DETAILS,
+        reasoning_content: REASONING_DETAILS_FRAGMENT_ONE[0].text,
+        reasoning_details: REASONING_DETAILS_FRAGMENT_ONE,
+      }, index: 0 }] })}\n\n`,
+      `data: ${JSON.stringify({ choices: [{ delta: {
+        reasoning_content: REASONING_DETAILS_FRAGMENT_TWO[0].text,
+        reasoning_details: REASONING_DETAILS_FRAGMENT_TWO,
       }, index: 0 }] })}\n\n`,
       `data: ${JSON.stringify({ choices: [{ delta: { content: "Готовый ответ" }, finish_reason: "stop", index: 0 }] })}\n\n`,
       "data: [DONE]\n\n",
@@ -164,7 +177,7 @@ describe("createMiniMaxCliProxyModel", () => {
     for await (const part of stream) parts.push(part);
 
     expect(parts.find((part) => part.type === "reasoning-delta")).toMatchObject({
-      delta: REASONING_DETAILS[0].text,
+      delta: REASONING_DETAILS_FRAGMENT_ONE[0].text,
     });
     expect(parts.find((part) => part.type === "reasoning-end")).toMatchObject({
       providerMetadata: {
@@ -173,6 +186,46 @@ describe("createMiniMaxCliProxyModel", () => {
     });
     expect(parts.find((part) => part.type === "text-delta")).toMatchObject({
       delta: "Готовый ответ",
+    });
+  });
+
+  it("combines incremental reasoning metadata from assistant history parts", async () => {
+    let requestBody: Record<string, unknown> | undefined;
+    const model = createMiniMaxCliProxyModel({
+      apiKey: "proxy-key",
+      baseURL: "http://cli-proxy-api:8317/v1",
+      fetch: async (_input, init) => {
+        requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return jsonResponse(completion({ content: "Готово.", role: "assistant" }, "stop"));
+      },
+      modelId: "MiniMax-M3",
+    });
+    const reasoningParts: LanguageModelV4Content[] = [
+      {
+        providerMetadata: {
+          openaiCompatible: { reasoningDetails: REASONING_DETAILS_FRAGMENT_ONE },
+        },
+        text: REASONING_DETAILS_FRAGMENT_ONE[0].text,
+        type: "reasoning",
+      },
+      {
+        providerMetadata: {
+          openaiCompatible: { reasoningDetails: REASONING_DETAILS_FRAGMENT_TWO },
+        },
+        text: REASONING_DETAILS_FRAGMENT_TWO[0].text,
+        type: "reasoning",
+      },
+    ];
+
+    await model.doGenerate({
+      prompt: [userPrompt()[0]!, assistantPrompt(reasoningParts)],
+    } as LanguageModelV4CallOptions);
+
+    expect(requestBody).toMatchObject({
+      messages: [
+        expect.any(Object),
+        expect.objectContaining({ reasoning_details: REASONING_DETAILS }),
+      ],
     });
   });
 
