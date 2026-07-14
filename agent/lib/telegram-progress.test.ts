@@ -71,4 +71,19 @@ describe("completedTelegramMessage", () => {
       }),
     ).toBe("Понял вопрос. Вот готовый ответ.");
   });
+
+  it("rejoins visible text split by duplicated reasoning and orphan closing markers", () => {
+    expect(
+      completedTelegramMessage({
+        finishReason: "stop",
+        message: [
+          "<think>Пользователь спрашивает, как у меня дела.</think>",
+          "В",
+          "</think>",
+          " у меня дела. Это повтор внутреннего рассуждения.",
+          "</think>сё отлично, готов помогать!",
+        ].join("\n"),
+      }),
+    ).toBe("Всё отлично, готов помогать!");
+  });
 });
