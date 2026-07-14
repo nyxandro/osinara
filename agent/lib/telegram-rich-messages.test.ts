@@ -2,7 +2,7 @@
  * Native Telegram Rich Message delivery tests.
  *
  * Constructs covered:
- * - RichBlockThinking and text updates reuse one draft per private chat/topic.
+ * - RichBlockThinking uses one stable draft per private chat/topic.
  * - Completed output is persisted with sendRichMessage and anchors group conversations.
  * - The first chunk of a group response replies to the verified triggering message.
  * - Telegram rejection and ambiguous transport failures remain fail-fast without retries.
@@ -12,7 +12,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   postTelegramRichMessage,
   startTelegramRichThinkingDraft,
-  streamTelegramRichMessageDraft,
 } from "./telegram-rich-messages.js";
 
 beforeEach(() => vi.stubEnv("TELEGRAM_BOT_TOKEN", "telegram-bot-secret"));
@@ -67,72 +66,6 @@ describe("Telegram rich drafts", () => {
       message_thread_id: 42,
       rich_message: { html: expect.stringContaining("<tg-thinking>") },
     });
-  });
-
-  it("reuses one draft for thinking, all steps, and later turns in the same chat", async () => {
-    const telegramFetch = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(async () => telegramResponse(true));
-    const target = telegramTarget();
-
-    await startTelegramRichThinkingDraft(target);
-    await streamTelegramRichMessageDraft(
-      {
-        messageSoFar: "Первый шаг",
-        stepIndex: 0,
-        turnId: "turn_first",
-      },
-      target,
-    );
-    await streamTelegramRichMessageDraft(
-      {
-        messageSoFar: "Следующий ответ",
-        stepIndex: 2,
-        turnId: "turn_next",
-      },
-      target,
-    );
-
-    const ids = telegramFetch.mock.calls.map(
-      (_call, index) => requestBody(telegramFetch, index).draft_id,
-    );
-    expect(new Set(ids).size).toBe(1);
-  });
-
-  it("keeps partial MiniMax thinking private until visible answer text arrives", async () => {
-    const telegramFetch = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(telegramResponse(true));
-    const target = telegramTarget();
-
-    await streamTelegramRichMessageDraft(
-      {
-        messageSoFar: "<thi",
-        stepIndex: 0,
-        turnId: "turn_minimax",
-      },
-      target,
-    );
-    await streamTelegramRichMessageDraft(
-      {
-        messageSoFar: "<mm:thi",
-        stepIndex: 0,
-        turnId: "turn_minimax",
-      },
-      target,
-    );
-    await streamTelegramRichMessageDraft(
-      {
-        messageSoFar: "<think>Скрытое рассуждение</think>\n\nВидимый ответ",
-        stepIndex: 0,
-        turnId: "turn_minimax",
-      },
-      target,
-    );
-
-    expect(telegramFetch).toHaveBeenCalledOnce();
-    const body = requestBody(telegramFetch);
-    expect(body.rich_message).toEqual({ markdown: "Видимый ответ" });
   });
 
   it("keeps independent drafts for different private topics", async () => {

@@ -3,7 +3,6 @@
  *
  * Exports:
  * - `startTelegramRichThinkingDraft`: displays Telegram's native ephemeral thinking block.
- * - `streamTelegramRichMessageDraft`: updates the same chat-scoped draft with model output.
  * - `postTelegramRichMessage`: persists completed rich output and records group anchors.
  *
  * Key constructs:
@@ -24,12 +23,8 @@ import {
 
 import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../config.js";
 import { AppError } from "./app-error.js";
-import { visibleTelegramModelText } from "./telegram-progress.js";
 import type { TelegramReplyParameters } from "./telegram-reply.js";
-import {
-  formatTelegramRichMessageDraft,
-  formatTelegramRichMessages,
-} from "./telegram-rich-markdown.js";
+import { formatTelegramRichMessages } from "./telegram-rich-markdown.js";
 
 const TELEGRAM_DRAFT_ID_MODULUS = 2_147_483_647;
 const TELEGRAM_THINKING_CUSTOM_EMOJI_ID = "5535034915403333642";
@@ -40,15 +35,6 @@ const TELEGRAM_CHAT_TYPES = new Set<TelegramChatType>([
   "private",
   "supergroup",
 ]);
-
-interface TelegramTurnEvent {
-  readonly turnId: string;
-}
-
-interface TelegramDraftEvent extends TelegramTurnEvent {
-  readonly messageSoFar: string;
-  readonly stepIndex: number;
-}
 
 type TelegramRichTarget = Pick<
   TelegramHandle,
@@ -263,22 +249,6 @@ export async function startTelegramRichThinkingDraft(
   if (target.chatType !== "private") return;
   const response = await requestTelegramRichApi("sendRichMessageDraft", {
     ...richBody(target, { html: TELEGRAM_THINKING_HTML }, true),
-    draft_id: draftId(target),
-  });
-  requireDraftSuccess(response);
-}
-
-export async function streamTelegramRichMessageDraft(
-  event: TelegramDraftEvent,
-  target: TelegramRichTarget,
-): Promise<void> {
-  if (target.chatType !== "private") return;
-  const markdown = formatTelegramRichMessageDraft(
-    visibleTelegramModelText(event.messageSoFar),
-  );
-  if (!markdown) return;
-  const response = await requestTelegramRichApi("sendRichMessageDraft", {
-    ...richBody(target, { markdown }, true),
     draft_id: draftId(target),
   });
   requireDraftSuccess(response);

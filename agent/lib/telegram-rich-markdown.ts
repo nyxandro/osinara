@@ -4,7 +4,6 @@
  * Exports:
  * - `sanitizeTelegramRichMarkdown`: preserves text-rich structure and neutralizes active content.
  * - `formatTelegramRichMessages`: produces complete blocks within Telegram's rich text limit.
- * - `formatTelegramRichMessageDraft`: returns one valid ephemeral preview or `null` when too long.
  *
  * Key constructs:
  * - A narrow HTML allowlist for details and inline text formatting.
@@ -227,10 +226,4 @@ export function formatTelegramRichMessages(markdown: string): string[] {
   }
   if (chunk) chunks.push(chunk);
   return chunks;
-}
-
-export function formatTelegramRichMessageDraft(markdown: string): string | null {
-  const sanitized = sanitizeTelegramRichMarkdown(markdown).trim();
-  if (!sanitized || characterLength(sanitized) > TELEGRAM_RICH_MESSAGE_MAX_CHARACTERS) return null;
-  return sanitized;
 }

@@ -78,6 +78,15 @@ describe("production container contract", () => {
     expect(entrypoint).not.toContain("npm run migrate");
   });
 
+  it("installs every version-pinned dependency patch in build and production stages", () => {
+    const dockerfile = readProjectFile("Dockerfile");
+
+    expect(dockerfile.match(/COPY scripts\/apply-eve-patches\.ts/g)).toHaveLength(2);
+    expect(
+      dockerfile.match(/COPY scripts\/apply-openai-compatible-patches\.ts/g),
+    ).toHaveLength(2);
+  });
+
   it("uses only required digest references and one shared app image", () => {
     const compose = readProjectFile("compose.production.yaml");
 

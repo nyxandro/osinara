@@ -1,6 +1,6 @@
 {
   "name": "osinara-family-agent",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "type": "module",
   "imports": {
@@ -18,7 +18,7 @@
     "typecheck": "tsc",
     "migrate": "node --experimental-strip-types scripts/migrate.ts",
     "memory:reindex": "node --import tsx scripts/reindex-memory.ts",
-    "postinstall": "node --experimental-strip-types scripts/apply-eve-patches.ts"
+    "postinstall": "node --experimental-strip-types scripts/apply-eve-patches.ts && node --experimental-strip-types scripts/apply-openai-compatible-patches.ts"
   },
   "dependencies": {
     "@ai-sdk/groq": "4.0.7",
