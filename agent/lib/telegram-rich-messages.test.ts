@@ -115,6 +115,14 @@ describe("Telegram rich drafts", () => {
     );
     await streamTelegramRichMessageDraft(
       {
+        messageSoFar: "<mm:thi",
+        stepIndex: 0,
+        turnId: "turn_minimax",
+      },
+      target,
+    );
+    await streamTelegramRichMessageDraft(
+      {
         messageSoFar: "<think>Скрытое рассуждение</think>\n\nВидимый ответ",
         stepIndex: 0,
         turnId: "turn_minimax",
