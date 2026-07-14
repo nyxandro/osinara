@@ -5,6 +5,7 @@
  * - `primaryModel`: server-configured CLIProxy text route for the Eve agent loop.
  * - `visionModel`: independently configured CLIProxy route for workspace images.
  * - `voiceTranscriptionModel`: explicit Groq Whisper transcription route.
+ * - MiniMax chat models keep their CLIProxy identity after contract wrapping.
  */
 import { describe, expect, it } from "vitest";
 

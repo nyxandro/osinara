@@ -6,7 +6,7 @@
  * - Application-owned family/group authorization in `onMessage`.
  * - Durable identity-bound HITL callbacks and replies.
  * - Validated attachment persistence with model-safe workspace references.
- * - Native RichBlockThinking, chat-scoped streaming, and completed Rich Message delivery.
+ * - One native thinking draft per turn and completed Rich Message delivery.
  * - Verified group replies anchored to the triggering member message.
  */
 import { telegramChannel } from "eve/channels/telegram";
@@ -19,7 +19,6 @@ import { completedTelegramMessage } from "../lib/telegram-progress.js";
 import {
   postTelegramRichMessage,
   startTelegramRichThinkingDraft,
-  streamTelegramRichMessageDraft,
 } from "../lib/telegram-rich-messages.js";
 import {
   applicationSessionId,
@@ -39,13 +38,6 @@ export default telegramChannel({
   },
   drainRoute: "/eve/v1/telegram-drain",
   events: {
-    async "action.result"(_data, channel) {
-      // Refresh the same chat-scoped preview before the next model step.
-      await startTelegramRichThinkingDraft(channel.telegram);
-    },
-    async "actions.requested"(_data, channel) {
-      await startTelegramRichThinkingDraft(channel.telegram);
-    },
     "input.requested": handleTelegramInputRequested,
     async "message.completed"(data, channel, ctx) {
       // Model-authored pre-tool text is a user-visible progress update, not technical tool noise.
@@ -60,12 +52,6 @@ export default telegramChannel({
         telegramTurnReplyParameters(channel.state, ctx),
       );
       await rekeyTelegramSession(channel, ctx);
-    },
-    async "message.appended"(data, channel, ctx) {
-      // Every turn and tool-loop step updates one Telegram preview for this private chat/topic.
-      const sessionId = applicationSessionId(ctx);
-      if (!await sessionRepository.isCurrentEveSession(sessionId, ctx.session.id)) return;
-      await streamTelegramRichMessageDraft(data, channel.telegram);
     },
     async "session.failed"(data, channel) {
       await handleTelegramSessionFailure(data, channel, sessionRepository);

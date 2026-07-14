@@ -14,6 +14,7 @@ FROM first-party-node AS dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY scripts/apply-eve-patches.ts ./scripts/apply-eve-patches.ts
+COPY scripts/apply-openai-compatible-patches.ts ./scripts/apply-openai-compatible-patches.ts
 RUN npm ci
 
 FROM dependencies AS build
@@ -33,6 +34,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./
 COPY scripts/apply-eve-patches.ts ./scripts/apply-eve-patches.ts
+COPY scripts/apply-openai-compatible-patches.ts ./scripts/apply-openai-compatible-patches.ts
 RUN npm ci --omit=dev
 
 FROM eceasy/cli-proxy-api@sha256:0b27437917e45a22612ff43ede0fd6baf077c1898c622037a24a79399a9b3d0c AS cli-proxy

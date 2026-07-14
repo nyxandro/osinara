@@ -13,7 +13,6 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 import {
-  formatTelegramRichMessageDraft,
   formatTelegramRichMessages,
   sanitizeTelegramRichMarkdown,
 } from "./telegram-rich-markdown.js";
@@ -94,16 +93,6 @@ describe("formatTelegramRichMessages", () => {
     expect(chunks).toHaveLength(2);
     expect(chunks[0]).toBe(paragraph);
     expect(chunks[1]).toBe(code);
-  });
-
-  it("stops draft updates when the complete preview exceeds the rich limit", () => {
-    expect(formatTelegramRichMessageDraft("слово ".repeat(6_000))).toBeNull();
-  });
-
-  it("keeps an incomplete streamed HTML block inert until the model closes it", () => {
-    expect(formatTelegramRichMessageDraft("<details><summary>Пояснение")).toBe(
-      "&lt;details&gt;&lt;summary&gt;Пояснение",
-    );
   });
 
   it("fails explicitly when one indivisible block exceeds the rich limit", () => {
