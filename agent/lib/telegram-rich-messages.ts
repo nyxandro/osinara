@@ -24,6 +24,7 @@ import {
 
 import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../config.js";
 import { AppError } from "./app-error.js";
+import { visibleTelegramModelText } from "./telegram-progress.js";
 import type { TelegramReplyParameters } from "./telegram-reply.js";
 import {
   formatTelegramRichMessageDraft,
@@ -32,8 +33,7 @@ import {
 
 const TELEGRAM_DRAFT_ID_MODULUS = 2_147_483_647;
 const TELEGRAM_THINKING_CUSTOM_EMOJI_ID = "5535034915403333642";
-const TELEGRAM_THINKING_HTML =
-  `<tg-thinking><tg-emoji emoji-id="${TELEGRAM_THINKING_CUSTOM_EMOJI_ID}"></tg-emoji> Думаю…</tg-thinking>`;
+const TELEGRAM_THINKING_HTML = `<tg-thinking><tg-emoji emoji-id="${TELEGRAM_THINKING_CUSTOM_EMOJI_ID}"></tg-emoji> Думаю…</tg-thinking>`;
 const TELEGRAM_CHAT_TYPES = new Set<TelegramChatType>([
   "channel",
   "group",
@@ -55,8 +55,13 @@ type TelegramRichTarget = Pick<
   "chatId" | "chatType" | "messageThreadId"
 >;
 
-type TelegramRichAnchorState = Pick<TelegramChannelState, "chatType" | "conversationId">;
-type TelegramApiBody = NonNullable<Parameters<typeof callTelegramApi>[0]["body"]>;
+type TelegramRichAnchorState = Pick<
+  TelegramChannelState,
+  "chatType" | "conversationId"
+>;
+type TelegramApiBody = NonNullable<
+  Parameters<typeof callTelegramApi>[0]["body"]
+>;
 
 interface SentTelegramMessage {
   readonly chatType: TelegramChatType;
@@ -64,7 +69,8 @@ interface SentTelegramMessage {
 }
 
 function draftId(target: TelegramRichTarget): number {
-  const thread = target.messageThreadId === undefined ? "" : String(target.messageThreadId);
+  const thread =
+    target.messageThreadId === undefined ? "" : String(target.messageThreadId);
   const digest = createHash("sha256")
     .update(target.chatId)
     .update(":")
@@ -84,9 +90,16 @@ function requireTelegramBotToken(): string {
   return botToken;
 }
 
-function numericChatId(target: TelegramRichTarget, privateOnly: boolean): number | string {
+function numericChatId(
+  target: TelegramRichTarget,
+  privateOnly: boolean,
+): number | string {
   const numeric = Number(target.chatId);
-  if (Number.isSafeInteger(numeric) && numeric !== 0 && (!privateOnly || numeric > 0)) {
+  if (
+    Number.isSafeInteger(numeric) &&
+    numeric !== 0 &&
+    (!privateOnly || numeric > 0)
+  ) {
     return numeric;
   }
   if (!privateOnly && /^@[A-Za-z][A-Za-z0-9_]{3,}$/u.test(target.chatId)) {
@@ -98,7 +111,10 @@ function numericChatId(target: TelegramRichTarget, privateOnly: boolean): number
   );
 }
 
-function telegramRichFetch(request: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+function telegramRichFetch(
+  request: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
   const timeoutSignal = AbortSignal.timeout(TELEGRAM_API_REQUEST_TIMEOUT_MS);
   const signal = init?.signal
     ? AbortSignal.any([init.signal, timeoutSignal])
@@ -119,9 +135,10 @@ async function requestTelegramRichApi(
   method: "sendRichMessage" | "sendRichMessageDraft",
   body: TelegramApiBody,
 ): Promise<TelegramApiResponse> {
-  const transportCode = method === "sendRichMessage"
-    ? "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_AMBIGUOUS"
-    : "AGENT_TELEGRAM_RICH_DRAFT_DELIVERY_FAILED";
+  const transportCode =
+    method === "sendRichMessage"
+      ? "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_AMBIGUOUS"
+      : "AGENT_TELEGRAM_RICH_DRAFT_DELIVERY_FAILED";
   let response: TelegramApiResponse;
   try {
     response = await callTelegramApi({
@@ -132,27 +149,37 @@ async function requestTelegramRichApi(
     });
   } catch (error) {
     // A final network failure is ambiguous because Telegram may have accepted the message.
-    console.error(JSON.stringify({
-      code: transportCode,
-      errorName: error instanceof Error ? error.name : "UnknownError",
-      method,
-    }));
+    console.error(
+      JSON.stringify({
+        code: transportCode,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        method,
+      }),
+    );
     if (error instanceof Error) addStableErrorCode(error, transportCode);
     throw error;
   }
 
-  if (response.ok && typeof response.body === "object" && response.body !== null &&
-    "ok" in response.body && response.body.ok === true) {
+  if (
+    response.ok &&
+    typeof response.body === "object" &&
+    response.body !== null &&
+    "ok" in response.body &&
+    response.body.ok === true
+  ) {
     return response;
   }
-  const rejectionCode = method === "sendRichMessage"
-    ? "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_FAILED"
-    : "AGENT_TELEGRAM_RICH_DRAFT_DELIVERY_FAILED";
-  console.error(JSON.stringify({
-    code: rejectionCode,
-    method,
-    providerStatus: response.status,
-  }));
+  const rejectionCode =
+    method === "sendRichMessage"
+      ? "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_FAILED"
+      : "AGENT_TELEGRAM_RICH_DRAFT_DELIVERY_FAILED";
+  console.error(
+    JSON.stringify({
+      code: rejectionCode,
+      method,
+      providerStatus: response.status,
+    }),
+  );
   throw new AppError(
     rejectionCode,
     method === "sendRichMessage"
@@ -164,18 +191,22 @@ async function requestTelegramRichApi(
 function requireDraftSuccess(response: TelegramApiResponse): void {
   const body = response.body as { result?: unknown };
   if (body.result === true) return;
-  console.error(JSON.stringify({
-    code: "AGENT_TELEGRAM_RICH_DRAFT_DELIVERY_FAILED",
-    method: "sendRichMessageDraft",
-    providerStatus: response.status,
-  }));
+  console.error(
+    JSON.stringify({
+      code: "AGENT_TELEGRAM_RICH_DRAFT_DELIVERY_FAILED",
+      method: "sendRichMessageDraft",
+      providerStatus: response.status,
+    }),
+  );
   throw new AppError(
     "AGENT_TELEGRAM_RICH_DRAFT_DELIVERY_FAILED",
     "Telegram вернул некорректное подтверждение потокового ответа",
   );
 }
 
-function requireSentMessage(response: TelegramApiResponse): SentTelegramMessage {
+function requireSentMessage(
+  response: TelegramApiResponse,
+): SentTelegramMessage {
   const body = response.body as {
     result?: {
       chat?: { type?: unknown };
@@ -184,15 +215,24 @@ function requireSentMessage(response: TelegramApiResponse): SentTelegramMessage 
   };
   const messageId = body.result?.message_id;
   const chatType = body.result?.chat?.type;
-  if (Number.isSafeInteger(messageId) && Number(messageId) > 0 &&
-    typeof chatType === "string" && TELEGRAM_CHAT_TYPES.has(chatType as TelegramChatType)) {
-    return { chatType: chatType as TelegramChatType, messageId: String(messageId) };
+  if (
+    Number.isSafeInteger(messageId) &&
+    Number(messageId) > 0 &&
+    typeof chatType === "string" &&
+    TELEGRAM_CHAT_TYPES.has(chatType as TelegramChatType)
+  ) {
+    return {
+      chatType: chatType as TelegramChatType,
+      messageId: String(messageId),
+    };
   }
-  console.error(JSON.stringify({
-    code: "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_AMBIGUOUS",
-    method: "sendRichMessage",
-    providerStatus: response.status,
-  }));
+  console.error(
+    JSON.stringify({
+      code: "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_AMBIGUOUS",
+      method: "sendRichMessage",
+      providerStatus: response.status,
+    }),
+  );
   throw new AppError(
     "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_AMBIGUOUS",
     "Telegram принял запрос, но не подтвердил идентификатор отправленного сообщения",
@@ -210,7 +250,9 @@ function richBody(
     ...(target.messageThreadId === undefined
       ? {}
       : { message_thread_id: target.messageThreadId }),
-    ...(replyParameters === undefined ? {} : { reply_parameters: replyParameters }),
+    ...(replyParameters === undefined
+      ? {}
+      : { reply_parameters: replyParameters }),
     rich_message: richMessage,
   };
 }
@@ -231,7 +273,9 @@ export async function streamTelegramRichMessageDraft(
   target: TelegramRichTarget,
 ): Promise<void> {
   if (target.chatType !== "private") return;
-  const markdown = formatTelegramRichMessageDraft(event.messageSoFar);
+  const markdown = formatTelegramRichMessageDraft(
+    visibleTelegramModelText(event.messageSoFar),
+  );
   if (!markdown) return;
   const response = await requestTelegramRichApi("sendRichMessageDraft", {
     ...richBody(target, { markdown }, true),
@@ -250,7 +294,12 @@ export async function postTelegramRichMessage(
   for (const [index, chunk] of chunks.entries()) {
     const response = await requestTelegramRichApi(
       "sendRichMessage",
-      richBody(target, { markdown: chunk }, false, index === 0 ? replyParameters : undefined),
+      richBody(
+        target,
+        { markdown: chunk },
+        false,
+        index === 0 ? replyParameters : undefined,
+      ),
     );
     const sent = requireSentMessage(response);
 
