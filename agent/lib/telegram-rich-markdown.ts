@@ -8,7 +8,8 @@
  *
  * Key constructs:
  * - A narrow HTML allowlist for details and inline text formatting.
- * - Explicit rejection of over-wide tables, malformed allowed tags, and indivisible long blocks.
+ * - Inert rendering of malformed allowed tags without losing the model's answer.
+ * - Explicit rejection of over-wide tables, excessive nesting, and indivisible long blocks.
  */
 import { AppError } from "./app-error.js";
 
@@ -185,7 +186,19 @@ function sanitizeTelegramRichMarkdownInternal(
 }
 
 export function sanitizeTelegramRichMarkdown(markdown: string): string {
-  return sanitizeTelegramRichMarkdownInternal(markdown, true);
+  try {
+    return sanitizeTelegramRichMarkdownInternal(markdown, true);
+  } catch (error) {
+    if (
+      !(error instanceof AppError) ||
+      error.code !== "AGENT_TELEGRAM_RICH_HTML_INVALID"
+    ) {
+      throw error;
+    }
+
+    // Model-authored formatting must not suppress an otherwise valid answer.
+    return sanitizeTelegramRichMarkdownInternal(markdown, false);
+  }
 }
 
 export function formatTelegramRichMessages(markdown: string): string[] {
@@ -217,16 +230,7 @@ export function formatTelegramRichMessages(markdown: string): string[] {
 }
 
 export function formatTelegramRichMessageDraft(markdown: string): string | null {
-  let sanitized: string;
-  try {
-    sanitized = sanitizeTelegramRichMarkdown(markdown).trim();
-  } catch (error) {
-    if (!(error instanceof AppError) || error.code !== "AGENT_TELEGRAM_RICH_HTML_INVALID") {
-      throw error;
-    }
-    // Stream deltas can end midway through an allowed tag; show it inert until the block closes.
-    sanitized = sanitizeTelegramRichMarkdownInternal(markdown, false).trim();
-  }
+  const sanitized = sanitizeTelegramRichMarkdown(markdown).trim();
   if (!sanitized || characterLength(sanitized) > TELEGRAM_RICH_MESSAGE_MAX_CHARACTERS) return null;
   return sanitized;
 }

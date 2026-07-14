@@ -3,6 +3,7 @@
  *
  * Constructs covered:
  * - Supported text-rich Markdown and a narrow inline HTML allowlist survive sanitization.
+ * - Malformed allowed HTML is rendered inert instead of blocking final delivery.
  * - Model-authored media, Telegram service tags, and unsafe links are rendered inert.
  * - Final rich messages split only between complete blocks at Telegram's length limit.
  * - The permanent prompt teaches semantic rich formatting without exposing transport control.
@@ -62,6 +63,16 @@ describe("sanitizeTelegramRichMarkdown", () => {
     expect(() => sanitizeTelegramRichMarkdown(row)).toThrow(
       "AGENT_TELEGRAM_RICH_TABLE_TOO_WIDE",
     );
+  });
+
+  it("neutralizes unclosed allowed HTML instead of blocking final delivery", () => {
+    expect(
+      formatTelegramRichMessages(
+        "<details><summary>Результат</summary>\n\nОтвет без закрывающего details",
+      ),
+    ).toEqual([
+      "&lt;details&gt;&lt;summary&gt;Результат&lt;/summary&gt;\n\nОтвет без закрывающего details",
+    ]);
   });
 });
 
