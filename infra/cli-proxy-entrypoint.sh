@@ -12,8 +12,10 @@ target_config="$2"
 shift 2
 
 # Both secrets are mandatory and must remain single-line visible values safe for HTTP headers.
-for name in CLI_PROXY_API_KEY MODEL_UPSTREAM_API_KEY; do
-  eval "value=\${$name:-}"
+validate_secret() {
+  name="$1"
+  value="$2"
+
   if [ -z "$value" ]; then
     printf '%s\n' "CLI_PROXY_REQUIRED_CONFIG_MISSING: Не задана обязательная настройка $name" >&2
     exit 1
@@ -24,7 +26,10 @@ for name in CLI_PROXY_API_KEY MODEL_UPSTREAM_API_KEY; do
       exit 1
       ;;
   esac
-done
+}
+
+validate_secret "CLI_PROXY_API_KEY" "${CLI_PROXY_API_KEY:-}"
+validate_secret "MODEL_UPSTREAM_API_KEY" "${MODEL_UPSTREAM_API_KEY:-}"
 
 if [ ! -r "$source_config" ]; then
   printf '%s\n' "CLI_PROXY_MODEL_CONFIG_MISSING: Конфигурация моделей недоступна" >&2

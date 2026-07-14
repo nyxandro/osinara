@@ -50,12 +50,14 @@ describe("CLIProxyAPI runtime", () => {
       "api-keys": ["client-test-key"],
       "disable-cooling": true,
       "max-retry-credentials": 1,
-      "openai-compatibility": [{
-        "api-key-entries": [{ "api-key": "upstream-test-key" }],
-        "base-url": "https://api.neuraldeep.ru/v1",
-        models: [{ alias: "qwen3.6-fp8", name: "qwen3.6-fp8" }],
-        name: "neuraldeep",
-      }],
+      "openai-compatibility": [
+        {
+          "api-key-entries": [{ "api-key": "upstream-test-key" }],
+          "base-url": "https://api.neuraldeep.ru/v1",
+          models: [{ alias: "qwen3.6-fp8", name: "qwen3.6-fp8" }],
+          name: "neuraldeep",
+        },
+      ],
       "remote-management": {
         "allow-remote": false,
         "disable-control-panel": true,
@@ -76,7 +78,14 @@ describe("CLIProxyAPI runtime", () => {
         join(directory, "config.json"),
         "/bin/true",
       ],
-      { encoding: "utf8", env: { ...process.env, CLI_PROXY_API_KEY: "client-test-key" } },
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          CLI_PROXY_API_KEY: "client-test-key",
+          MODEL_UPSTREAM_API_KEY: "",
+        },
+      },
     );
 
     expect(result.status).toBe(1);
@@ -86,12 +95,17 @@ describe("CLIProxyAPI runtime", () => {
 
   it("ships a pinned internal-only CLIProxyAPI service", () => {
     const dockerfile = readFileSync(join(projectRoot, "Dockerfile"), "utf8");
-    const compose = readFileSync(join(projectRoot, "compose.production.yaml"), "utf8");
+    const compose = readFileSync(
+      join(projectRoot, "compose.production.yaml"),
+      "utf8",
+    );
     const serviceStart = compose.indexOf("\n  cli-proxy-api:\n");
     const serviceEnd = compose.indexOf("\n  agent:\n", serviceStart);
     const service = compose.slice(serviceStart, serviceEnd);
 
-    expect(dockerfile).toContain("eceasy/cli-proxy-api@sha256:0b27437917e45a22612ff43ede0fd6baf077c1898c622037a24a79399a9b3d0c AS cli-proxy");
+    expect(dockerfile).toContain(
+      "eceasy/cli-proxy-api@sha256:0b27437917e45a22612ff43ede0fd6baf077c1898c622037a24a79399a9b3d0c AS cli-proxy",
+    );
     expect(service).toContain("OSINARA_CLI_PROXY_IMAGE");
     expect(service).toContain("MODEL_UPSTREAM_API_KEY");
     expect(service).toContain("- app-network");
