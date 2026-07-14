@@ -11,19 +11,19 @@ import { parseModelProviderConfig } from "./model-provider-config.js";
 
 const validConfig = {
   agent: {
-    contextWindowTokens: 1_000_000,
-    textModelId: "MiniMax-M3",
+    contextWindowTokens: 262_144,
+    textModelId: "qwen3.6-fp8",
     upstream: {
-      baseUrl: "https://api.minimax.io/v1",
+      baseUrl: "https://api.neuraldeep.ru/v1",
       models: [{
-        alias: "MiniMax-M3",
+        alias: "qwen3.6-fp8",
         inputModalities: ["text", "image"],
-        name: "MiniMax-M3",
+        name: "qwen3.6-fp8",
         outputModalities: ["text"],
       }],
-      name: "minimax",
+      name: "neuraldeep",
     },
-    visionModelId: "MiniMax-M3",
+    visionModelId: "qwen3.6-fp8",
   },
   schemaVersion: 1,
   voice: {

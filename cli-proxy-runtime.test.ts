@@ -3,7 +3,7 @@
  *
  * Constructs covered:
  * - Runtime config rendering keeps client and upstream secrets out of source configuration.
- * - MiniMax-compatible models are exposed without retries or a management surface.
+ * - NeuralDeep-compatible models are exposed without retries or a management surface.
  * - Docker wiring keeps CLIProxyAPI internal and pins its canonical release image.
  */
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -52,9 +52,9 @@ describe("CLIProxyAPI runtime", () => {
       "max-retry-credentials": 1,
       "openai-compatibility": [{
         "api-key-entries": [{ "api-key": "upstream-test-key" }],
-        "base-url": "https://api.minimax.io/v1",
-        models: [{ alias: "MiniMax-M3", name: "MiniMax-M3" }],
-        name: "minimax",
+        "base-url": "https://api.neuraldeep.ru/v1",
+        models: [{ alias: "qwen3.6-fp8", name: "qwen3.6-fp8" }],
+        name: "neuraldeep",
       }],
       "remote-management": {
         "allow-remote": false,

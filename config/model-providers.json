@@ -1,16 +1,16 @@
 {
   "schemaVersion": 1,
   "agent": {
-    "textModelId": "MiniMax-M3",
-    "visionModelId": "MiniMax-M3",
-    "contextWindowTokens": 1000000,
+    "textModelId": "qwen3.6-fp8",
+    "visionModelId": "qwen3.6-fp8",
+    "contextWindowTokens": 262144,
     "upstream": {
-      "name": "minimax",
-      "baseUrl": "https://api.minimax.io/v1",
+      "name": "neuraldeep",
+      "baseUrl": "https://api.neuraldeep.ru/v1",
       "models": [
         {
-          "name": "MiniMax-M3",
-          "alias": "MiniMax-M3",
+          "name": "qwen3.6-fp8",
+          "alias": "qwen3.6-fp8",
           "inputModalities": ["text", "image"],
           "outputModalities": ["text"]
         }
