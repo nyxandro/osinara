@@ -1,6 +1,6 @@
-CREATE TYPE scheduled_task_scope AS ENUM ('personal', 'family');
-CREATE TYPE scheduled_task_status AS ENUM ('active', 'paused', 'leased', 'completed', 'failed');
-CREATE TYPE scheduled_task_recurrence_unit AS ENUM ('daily', 'weekly', 'monthly');
+CREATE TYPE reminder_scope AS ENUM ('personal', 'family');
+CREATE TYPE reminder_status AS ENUM ('active', 'paused', 'leased', 'completed', 'failed');
+CREATE TYPE reminder_recurrence_unit AS ENUM ('daily', 'weekly', 'monthly');
 
 -- Notification settings are required data: reminder creation fails until the user selects them.
 CREATE TABLE user_notification_settings (
@@ -16,25 +16,25 @@ CREATE TABLE user_notification_settings (
 );
 
 -- A task owns one current occurrence; recurrence is anchored to local wall-clock time for DST safety.
-CREATE TABLE scheduled_tasks (
+CREATE TABLE reminders (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   family_id uuid NOT NULL REFERENCES families(id) ON DELETE CASCADE,
   owner_user_id uuid REFERENCES users(id) ON DELETE CASCADE,
   author_user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   group_id uuid REFERENCES telegram_groups(id) ON DELETE CASCADE,
-  scope scheduled_task_scope NOT NULL,
+  scope reminder_scope NOT NULL,
   content text NOT NULL CHECK (char_length(content) BETWEEN 1 AND 1000),
   timezone text NOT NULL CHECK (char_length(timezone) BETWEEN 1 AND 100),
   telegram_chat_id text NOT NULL,
   message_thread_id bigint CHECK (message_thread_id > 0),
-  recurrence_unit scheduled_task_recurrence_unit,
+  recurrence_unit reminder_recurrence_unit,
   recurrence_interval integer CHECK (recurrence_interval BETWEEN 1 AND 365),
   recurrence_anchor_local timestamp NOT NULL,
   occurrence_index integer NOT NULL DEFAULT 0 CHECK (occurrence_index >= 0),
   due_at timestamptz NOT NULL,
   available_at timestamptz NOT NULL,
   delayed_by_quiet_hours boolean NOT NULL DEFAULT false,
-  status scheduled_task_status NOT NULL DEFAULT 'active',
+  status reminder_status NOT NULL DEFAULT 'active',
   attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
   lease_token uuid,
   lease_expires_at timestamptz,
@@ -56,21 +56,21 @@ CREATE TABLE scheduled_tasks (
   )
 );
 
-CREATE INDEX scheduled_tasks_due_idx
-  ON scheduled_tasks (available_at, id)
+CREATE INDEX reminders_due_idx
+  ON reminders (available_at, id)
   WHERE status = 'active';
-CREATE INDEX scheduled_tasks_family_owner_idx
-  ON scheduled_tasks (family_id, owner_user_id, created_at DESC, id DESC);
-CREATE INDEX scheduled_tasks_family_group_idx
-  ON scheduled_tasks (family_id, group_id, created_at DESC, id DESC);
+CREATE INDEX reminders_family_owner_idx
+  ON reminders (family_id, owner_user_id, created_at DESC, id DESC);
+CREATE INDEX reminders_family_group_idx
+  ON reminders (family_id, group_id, created_at DESC, id DESC);
 
 -- Replay markers survive task deletion so a resumed Eve step cannot recreate a reminder.
-CREATE TABLE scheduled_task_operations (
+CREATE TABLE reminder_operations (
   family_id uuid NOT NULL REFERENCES families(id) ON DELETE CASCADE,
   operation_key text NOT NULL,
   operation_kind text NOT NULL CHECK (operation_kind IN ('create', 'update', 'delete')),
   input_hash text NOT NULL CHECK (char_length(input_hash) = 64),
-  scheduled_task_id uuid REFERENCES scheduled_tasks(id) ON DELETE SET NULL,
+  reminder_id uuid REFERENCES reminders(id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (family_id, operation_key)
 );

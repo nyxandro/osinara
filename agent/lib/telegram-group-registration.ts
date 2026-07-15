@@ -2,6 +2,7 @@
  * Telegram group registration input contract.
  *
  * Exports:
+ * - Group registration constants: validate Telegram IDs, titles, and allowlists.
  * - `telegramGroupIdSchema`: validates group/supergroup Telegram chat IDs.
  * - `telegramGroupRegistrationInputSchema`: validates and normalizes model tool input.
  */
@@ -9,9 +10,9 @@ import { z } from "zod";
 
 import { EXTERNAL_GROUP_TOOL_NAMES } from "./tool-policy/group-tool-catalog.js";
 
-const TELEGRAM_GROUP_ID_PATTERN = /^-[1-9]\d*$/;
-const GROUP_TITLE_MAX_LENGTH = 200;
-const TOOL_ALLOWLIST_MAX_SIZE = 50;
+export const TELEGRAM_GROUP_ID_PATTERN = /^-[1-9]\d*$/;
+export const GROUP_TITLE_MAX_LENGTH = 200;
+export const TOOL_ALLOWLIST_MAX_SIZE = 50;
 
 export const telegramGroupIdSchema = z
   .union([

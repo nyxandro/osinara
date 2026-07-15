@@ -4,7 +4,7 @@
  * Exports:
  * - `PreparedSession`: application session selected for an inbound turn.
  * - `SessionRetentionClaim`: exclusive lease for physical Eve storage deletion.
- * - `sessionRepository`: rotation, route, event, and retention operations.
+ * - `sessionRepository`: rotation, route lookup, event, and retention operations.
  */
 import type { PoolClient } from "pg";
 
@@ -189,6 +189,17 @@ async function upsertRoute(client: PoolClient, baseToken: string, sessionId: str
 
 export const sessionRepository = {
   isCurrentEveSession,
+
+  async hasRoute(baseContinuationToken: string): Promise<boolean> {
+    const result = await database().query(
+      `SELECT 1
+         FROM conversation_session_routes
+        WHERE base_continuation_token = $1
+        LIMIT 1`,
+      [baseContinuationToken],
+    );
+    return Boolean(result.rowCount);
+  },
 
   async prepareTurn(input: PrepareSessionInput): Promise<PreparedSession> {
     const client = await database().connect();

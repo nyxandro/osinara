@@ -65,6 +65,8 @@ describeWithDatabase("session repository", () => {
         WHERE r.base_continuation_token = $1`,
       ["101:42:900"],
     )).resolves.toMatchObject({ rows: [{ continuation_token: "101:42:900" }] });
+    await expect(sessionRepository.hasRoute("101:42:900")).resolves.toBe(true);
+    await expect(sessionRepository.hasRoute("101:42:901")).resolves.toBe(false);
   });
 
   it("defers a requested rotation until the pending operation completes", async () => {

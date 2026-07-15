@@ -60,6 +60,7 @@ export function repositories() {
       record: vi.fn().mockResolvedValue("inserted"),
     },
     session: {
+      hasRoute: vi.fn().mockResolvedValue(false),
       prepareTurn: vi.fn().mockResolvedValue({
         continuationToken: "telegram-101::",
         generation: 0,

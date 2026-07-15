@@ -133,6 +133,7 @@ main() {
     claim_approved_proposal
     [[ "$CLAIM_FOUND" -eq 1 ]] || return 0
     require_upgrade_from_current
+    prune_old_deploy_backups
   fi
 
   download_and_validate_release "$REQUESTED_VERSION"
@@ -156,6 +157,7 @@ main() {
   record_proposal_result "succeeded" "DEPLOY_RELEASE_SUCCEEDED" \
     "Release v${REQUESTED_VERSION} passed the production health check"
   send_success_notification
+  prune_retired_release_images
   log_event "DEPLOY_RELEASE_SUCCEEDED" "Release v${REQUESTED_VERSION} is healthy"
 }
 

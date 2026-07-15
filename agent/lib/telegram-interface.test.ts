@@ -157,4 +157,25 @@ describe("Telegram interface localization", () => {
     expect(sessionMessage).not.toContain("secret");
   });
 
+  it("shows the actionable schedule input explanation without internal details", () => {
+    const turnMessage = formatTelegramTurnFailure({
+      code: "AGENT_SCHEDULE_INPUT_INVALID",
+      message: "AGENT_SCHEDULE_INPUT_INVALID: Для daily recurrence передайте recurrence: {\"kind\":\"daily\",\"interval\":1}",
+    });
+
+    expect(turnMessage).toContain("Для daily recurrence передайте recurrence");
+    expect(turnMessage).toContain("Код: AGENT_SCHEDULE_INPUT_INVALID");
+    expect(turnMessage).not.toContain("stack");
+  });
+
+  it("shows actionable input explanations for every validated model payload", () => {
+    const turnMessage = formatTelegramTurnFailure({
+      code: "AGENT_REMINDER_INPUT_INVALID",
+      message: "AGENT_REMINDER_INPUT_INVALID: Для recurrence передайте null или объект {\"unit\":\"weekly\",\"interval\":1}",
+    });
+
+    expect(turnMessage).toContain("Для recurrence передайте null");
+    expect(turnMessage).toContain("Код: AGENT_REMINDER_INPUT_INVALID");
+  });
+
 });

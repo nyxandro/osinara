@@ -2,7 +2,7 @@
  * Google Workspace OAuth 2.0 web-server HTTP client.
  *
  * Exports:
- * - `GOOGLE_WORKSPACE_SCOPES`: exact user identity and Workspace grant matrix.
+ * - `GOOGLE_WORKSPACE_SCOPES` and `missingGoogleWorkspaceScopes`: current grant contract.
  * - Consent URL, authorization-code exchange, and refresh-token exchange helpers.
  */
 import { z } from "zod";
@@ -13,9 +13,10 @@ import {
   GOOGLE_OAUTH_TOKEN_URL,
   GOOGLE_PROVIDER_REQUEST_TIMEOUT_MILLISECONDS,
   GOOGLE_WORKSPACE_SCOPES,
+  missingGoogleWorkspaceScopes,
 } from "./google-workspace-config.js";
 
-export { GOOGLE_WORKSPACE_SCOPES } from "./google-workspace-config.js";
+export { GOOGLE_WORKSPACE_SCOPES, missingGoogleWorkspaceScopes } from "./google-workspace-config.js";
 
 export interface GoogleOAuthClientConfig {
   clientId: string;
@@ -127,7 +128,7 @@ async function requestToken(body: URLSearchParams): Promise<z.infer<typeof token
     );
   }
   const grantedScopes = parsed.data.scope.split(" ").filter(Boolean);
-  const missingScope = GOOGLE_WORKSPACE_SCOPES.find((scope) => !grantedScopes.includes(scope));
+  const [missingScope] = missingGoogleWorkspaceScopes(grantedScopes);
   if (missingScope) {
     throw new AppError(
       "AGENT_GOOGLE_SCOPE_MISSING",

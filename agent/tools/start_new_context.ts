@@ -12,7 +12,7 @@ import { sessionRepository } from "../lib/sessions/session-repository.js";
 
 export default defineTool({
   description:
-    "Начать новый чистый контекст разговора по явной просьбе пользователя. Долговременная память, задачи и файлы сохраняются.",
+    "Начать новый чистый контекст разговора по явной просьбе пользователя. Долговременная память, напоминания и файлы сохраняются.",
   inputSchema: z.object({}),
   async execute(_input, ctx) {
     await sessionRepository.requestRotation(applicationSessionId(ctx));

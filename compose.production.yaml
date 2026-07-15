@@ -1,5 +1,11 @@
 name: osinara-production
 
+x-bounded-json-logs: &bounded-json-logs
+  driver: json-file
+  options:
+    max-file: "5"
+    max-size: "20m"
+
 services:
   postgres:
     image: pgvector/pgvector:pg17@sha256:d2ef61f42ef767baa5a1475393303cc235bcd92febd9d7014eddb48b41f3bad0
@@ -15,6 +21,7 @@ services:
     networks:
       - app-network
     restart: unless-stopped
+    logging: *bounded-json-logs
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
@@ -48,6 +55,7 @@ services:
     networks:
       - app-network
     restart: unless-stopped
+    logging: *bounded-json-logs
     volumes:
       - memory-embedding-model-e5:/data
 
@@ -65,6 +73,7 @@ services:
       - app-network
     read_only: true
     restart: unless-stopped
+    logging: *bounded-json-logs
     security_opt:
       - no-new-privileges:true
     tmpfs:
@@ -108,6 +117,7 @@ services:
       - app-network
       - sandbox-control
     restart: unless-stopped
+    logging: *bounded-json-logs
     volumes:
       - /opt/osinara/model-providers.json:/app/config/model-providers.json:ro
       - google-workspace-credentials:/app/google-workspace-credentials
@@ -126,6 +136,7 @@ services:
     networks:
       - app-network
     restart: "no"
+    logging: *bounded-json-logs
 
   memory-embedding-worker:
     image: ${OSINARA_APP_IMAGE:?OSINARA_APP_IMAGE must be an exact digest reference}
@@ -141,6 +152,7 @@ services:
     networks:
       - app-network
     restart: unless-stopped
+    logging: *bounded-json-logs
 
   telegram-ingress-worker:
     image: ${OSINARA_APP_IMAGE:?OSINARA_APP_IMAGE must be an exact digest reference}
@@ -154,6 +166,7 @@ services:
     networks:
       - app-network
     restart: unless-stopped
+    logging: *bounded-json-logs
 
   edge:
     image: ${OSINARA_EDGE_IMAGE:?OSINARA_EDGE_IMAGE must be an exact digest reference}
@@ -170,12 +183,14 @@ services:
     ports:
       - "127.0.0.1:8082:80"
     restart: unless-stopped
+    logging: *bounded-json-logs
 
   sandbox-runtime-image:
     image: ${SANDBOX_RUNTIME_IMAGE:?SANDBOX_RUNTIME_IMAGE must be an exact digest reference}
     command: ["true"]
     network_mode: none
     restart: "no"
+    logging: *bounded-json-logs
 
   sandbox-runner:
     image: ${OSINARA_SANDBOX_RUNNER_IMAGE:?OSINARA_SANDBOX_RUNNER_IMAGE must be an exact digest reference}
@@ -195,6 +210,7 @@ services:
       - sandbox-control
     read_only: true
     restart: unless-stopped
+    logging: *bounded-json-logs
     security_opt:
       - no-new-privileges:true
     stop_grace_period: 30s
@@ -220,6 +236,7 @@ services:
       - sandbox-egress
     read_only: true
     restart: unless-stopped
+    logging: *bounded-json-logs
     security_opt:
       - no-new-privileges:true
     tmpfs:

@@ -3,12 +3,39 @@
 # Dumps PostgreSQL while live, then snapshots only irreconstructible volumes while writers are stopped.
 
 readonly BACKUP_RESERVE_BYTES=$((512 * 1024 * 1024))
+readonly RETAINED_DEPLOY_BACKUP_COUNT=5
+readonly DEPLOY_BACKUP_NAME_PATTERN='^[0-9]{8}T[0-9]{6}Z-to-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 readonly DURABLE_VOLUMES=(
   osinara-production-google-workspace-credentials
   osinara-production-tool-environments
   osinara-production-workflow-data
   osinara-production-workspace-data
 )
+
+prune_old_deploy_backups() {
+  [[ -d "$BACKUPS_DIR" ]] || return 0
+  local -a deploy_backups=()
+  local nullglob_was_enabled=0 path name remove_count index
+  shopt -q nullglob && nullglob_was_enabled=1
+  shopt -s nullglob
+
+  # Timestamped deployment backups sort lexicographically; initial migration snapshots are retained.
+  for path in "$BACKUPS_DIR"/*; do
+    [[ -d "$path" ]] || continue
+    name="${path##*/}"
+    [[ "$name" =~ $DEPLOY_BACKUP_NAME_PATTERN ]] && deploy_backups+=("$path")
+  done
+  [[ "$nullglob_was_enabled" -eq 1 ]] || shopt -u nullglob
+
+  remove_count=$((${#deploy_backups[@]} - RETAINED_DEPLOY_BACKUP_COUNT))
+  ((remove_count > 0)) || return 0
+  for ((index = 0; index < remove_count; index += 1)); do
+    name="${deploy_backups[index]##*/}"
+    rm -rf -- "${deploy_backups[index]}" ||
+      fail "DEPLOY_BACKUP_RETENTION_FAILED" "Could not remove old deploy backup: ${name}"
+    log_event "DEPLOY_BACKUP_PRUNED" "Removed old deploy backup: ${name}"
+  done
+}
 
 ensure_durable_volume() {
   local volume="$1"

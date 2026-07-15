@@ -30,6 +30,8 @@ import { handleTelegramInputRequested } from "../lib/telegram-hitl/input-request
 import { telegramHitlApprovalRepository } from "../lib/telegram-hitl/approval-repository.js";
 import { handleTelegramSessionFailure } from "../lib/telegram-session-failure.js";
 import { telegramTurnReplyParameters } from "../lib/telegram-reply.js";
+import { agentScheduleDispatchRepository } from "../lib/agent-schedules/agent-schedule-dispatch-repository.js";
+import { isScheduledSession } from "../lib/agent-schedules/scheduled-session.js";
 
 export default telegramChannel({
   botUsername: process.env.TELEGRAM_BOT_USERNAME as string,
@@ -41,6 +43,7 @@ export default telegramChannel({
     "input.requested": handleTelegramInputRequested,
     async "message.completed"(data, channel, ctx) {
       // Model-authored pre-tool text is a user-visible progress update, not technical tool noise.
+      if (isScheduledSession(ctx) && data.finishReason !== "stop") return;
       const message = completedTelegramMessage(data);
       if (!message) return;
       const sessionId = applicationSessionId(ctx);
@@ -49,29 +52,39 @@ export default telegramChannel({
         message,
         channel.telegram,
         channel.state,
-        telegramTurnReplyParameters(channel.state, ctx),
+        isScheduledSession(ctx) ? undefined : telegramTurnReplyParameters(channel.state, ctx),
       );
-      await rekeyTelegramSession(channel, ctx);
+      if (!isScheduledSession(ctx)) await rekeyTelegramSession(channel, ctx);
     },
     async "session.failed"(data, channel) {
       await handleTelegramSessionFailure(data, channel, sessionRepository);
     },
     async "turn.failed"(data, channel, ctx) {
       const sessionId = applicationSessionId(ctx);
+      if (isScheduledSession(ctx)) {
+        await agentScheduleDispatchRepository.failRun(
+          sessionId,
+          ctx.session.id,
+          data.code,
+          new Date(),
+        );
+      }
       // Eve's Telegram post helper updates both state and the durable continuation token.
-      const replyParameters = telegramTurnReplyParameters(channel.state, ctx);
+      const replyParameters = isScheduledSession(ctx)
+        ? undefined
+        : telegramTurnReplyParameters(channel.state, ctx);
       await channel.telegram.post({
         ...(replyParameters === undefined ? {} : { reply_parameters: replyParameters }),
         text: formatTelegramTurnFailure(data),
       });
       await sessionRepository.recordTurnFailed(sessionId, ctx.session.id);
       await telegramHitlApprovalRepository.clearForEveSession(sessionId, ctx.session.id);
-      await rekeyTelegramSession(channel, ctx);
+      if (!isScheduledSession(ctx)) await rekeyTelegramSession(channel, ctx);
     },
     async "turn.started"(_data, channel, ctx) {
       const sessionId = applicationSessionId(ctx);
       await sessionRepository.bindEveSession(sessionId, ctx.session.id);
-      await startTelegramRichThinkingDraft(channel.telegram);
+      if (!isScheduledSession(ctx)) await startTelegramRichThinkingDraft(channel.telegram);
     },
     async "turn.completed"(_data, channel, ctx) {
       const sessionId = applicationSessionId(ctx);
@@ -79,11 +92,14 @@ export default telegramChannel({
         sessionId,
         ctx.session.id,
       );
+      if (isScheduledSession(ctx) && !awaitingApproval) {
+        await agentScheduleDispatchRepository.completeRun(sessionId, ctx.session.id, new Date());
+      }
       await sessionRepository.recordTurnCompleted(sessionId, ctx.session.id, awaitingApproval);
       if (!awaitingApproval) {
         await telegramHitlApprovalRepository.clearForEveSession(sessionId, ctx.session.id);
       }
-      await rekeyTelegramSession(channel, ctx);
+      if (!isScheduledSession(ctx)) await rekeyTelegramSession(channel, ctx);
     },
     async "authorization.required"(_data, channel, ctx) {
       const sessionId = applicationSessionId(ctx);

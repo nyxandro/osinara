@@ -13,6 +13,8 @@ readonly RUNNER_IMAGE_PREFIX="ghcr.io/nyxandro/osinara-sandbox-runner@sha256:"
 readonly RUNTIME_IMAGE_PREFIX="ghcr.io/nyxandro/osinara-sandbox-runtime@sha256:"
 readonly POSTGRES_IMAGE="pgvector/pgvector:pg17@sha256:d2ef61f42ef767baa5a1475393303cc235bcd92febd9d7014eddb48b41f3bad0"
 readonly TEI_IMAGE="ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07"
+readonly RETAINED_LOCAL_RELEASE_IMAGE_COUNT=2
+readonly RELEASE_DIRECTORY_NAME_PATTERN='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 
 curl_github() {
   curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
@@ -28,6 +30,62 @@ require_image_ref() {
   local digest="${value#"$prefix"}"
   [[ "$value" == "$prefix"* && "$digest" =~ ^[0-9a-f]{64}$ ]] ||
     fail "DEPLOY_IMAGE_REFERENCE_INVALID" "Manifest contains an unexpected image reference"
+}
+
+is_release_image_variable() {
+  local candidate="$1"
+  local variable
+  for variable in "${RELEASE_IMAGE_VARIABLES[@]}"; do
+    [[ "$candidate" == "$variable" ]] && return 0
+  done
+  return 1
+}
+
+release_image_refs_from_env() {
+  local env_file="$1"
+  local key value
+  [[ -f "$env_file" ]] || return 0
+  while IFS='=' read -r key value; do
+    if is_release_image_variable "$key" && [[ "$value" == ghcr.io/nyxandro/osinara-*@sha256:* ]]; then
+      printf '%s\n' "$value"
+    fi
+  done < "$env_file"
+}
+
+prune_retired_release_images() {
+  [[ -d "$RELEASES_DIR" ]] || return 0
+  local -a release_dirs=()
+  local name path release_count retained_start index ref release_name
+  declare -A retained_refs=()
+
+  # Release directories are sorted by SemVer so v0.2.10 is newer than v0.2.9.
+  while IFS=$'\t' read -r name path; do
+    [[ "$name" =~ $RELEASE_DIRECTORY_NAME_PATTERN ]] && release_dirs+=("$path")
+  done < <(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\t%p\n' | sort -V)
+
+  release_count=${#release_dirs[@]}
+  ((release_count > RETAINED_LOCAL_RELEASE_IMAGE_COUNT)) || return 0
+  retained_start=$((release_count - RETAINED_LOCAL_RELEASE_IMAGE_COUNT))
+  for ((index = retained_start; index < release_count; index += 1)); do
+    while IFS= read -r ref; do
+      retained_refs["$ref"]=1
+    done < <(release_image_refs_from_env "${release_dirs[index]}/release.env")
+  done
+
+  for ((index = 0; index < retained_start; index += 1)); do
+    release_name="${release_dirs[index]##*/}"
+    while IFS= read -r ref; do
+      [[ -n "${retained_refs[$ref]+retained}" ]] && continue
+      if docker image inspect "$ref" >/dev/null 2>&1; then
+        # Image cache cleanup is post-success housekeeping; an in-use ref is logged and kept.
+        if docker image rm "$ref" >/dev/null 2>&1; then
+          log_event "DEPLOY_RELEASE_IMAGE_PRUNED" "Removed retired ${release_name} image reference"
+        else
+          log_event "DEPLOY_RELEASE_IMAGE_PRUNE_SKIPPED" "Could not remove retired ${release_name} image reference"
+        fi
+      fi
+    done < <(release_image_refs_from_env "${release_dirs[index]}/release.env")
+  done
 }
 
 validate_manifest() {
@@ -168,6 +226,8 @@ validate_resolved_compose() {
     all(.services[]; (.pid // "") != "host") and
     all(.services[]; (.ipc // "") != "host") and
     all(.services[]; (has("build") or has("devices") or has("cap_add")) | not) and
+    all(.services[]; .logging.driver == "json-file" and
+      .logging.options["max-size"] == "20m" and .logging.options["max-file"] == "5") and
     any(.services.agent.volumes[];
       .source == "/opt/osinara/model-providers.json" and
       .target == "/app/config/model-providers.json" and .read_only == true) and

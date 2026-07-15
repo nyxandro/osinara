@@ -11,6 +11,7 @@ import {
   buildGoogleAuthorizationUrl,
   exchangeGoogleAuthorizationCode,
   GOOGLE_WORKSPACE_SCOPES,
+  missingGoogleWorkspaceScopes,
   refreshGoogleAccessToken,
 } from "./google-oauth-client.js";
 
@@ -38,9 +39,27 @@ describe("Google Workspace OAuth client", () => {
       "https://www.googleapis.com/auth/calendar",
       "https://mail.google.com/",
       "https://www.googleapis.com/auth/tasks",
+      "https://www.googleapis.com/auth/contacts",
+      "https://www.googleapis.com/auth/contacts.other.readonly",
+      "https://www.googleapis.com/auth/directory.readonly",
       "https://www.googleapis.com/auth/chat.messages",
       "https://www.googleapis.com/auth/chat.spaces",
     ]));
+  });
+
+  it("reports missing scopes for grants created before People API access", () => {
+    const peopleApiScopes = [
+      "https://www.googleapis.com/auth/contacts",
+      "https://www.googleapis.com/auth/contacts.other.readonly",
+      "https://www.googleapis.com/auth/directory.readonly",
+    ];
+    const previousGrant = GOOGLE_WORKSPACE_SCOPES.filter((scope) => !peopleApiScopes.includes(scope));
+
+    expect(missingGoogleWorkspaceScopes(previousGrant)).toEqual([
+      "https://www.googleapis.com/auth/contacts",
+      "https://www.googleapis.com/auth/contacts.other.readonly",
+      "https://www.googleapis.com/auth/directory.readonly",
+    ]);
   });
 
   it("exchanges and refreshes complete grants", async () => {

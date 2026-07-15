@@ -12,7 +12,7 @@ import { requireMemoryAuthorization } from "../lib/memory-context.js";
 import { memoryRepository } from "../lib/memory-repository.js";
 
 export default defineTool({
-  description: "Постранично показать долговременную память, доступную в текущем чате.",
+  description: "Постранично показать записи долговременной памяти, доступные в текущем чате.",
   inputSchema: z.object({
     cursor: z.string().optional(),
     limit: z.number().int().min(1).max(MEMORY_LIST_MAX_LIMIT).default(MEMORY_LIST_DEFAULT_LIMIT),
