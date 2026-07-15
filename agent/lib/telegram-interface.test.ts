@@ -105,21 +105,15 @@ describe("Telegram interface localization", () => {
     expect(request.prompt).toContain("Разрешённые инструменты: remember");
   });
 
-  it("shows the exact Google Workspace mutation before approval", () => {
+  it("localizes removal of a workspace Google profile", () => {
     const request = localizeTelegramInputRequest({
       action: {
         callId: "call-1",
         input: {
-          action: "execute",
-          command: {
-            method: "create",
-            resourcePath: ["files"],
-            service: "drive",
-          },
-          upload: { contentType: "application/pdf", path: "report.pdf", scope: "personal" },
+          action: "disconnect",
         },
         kind: "tool-call" as const,
-        toolName: "google_workspace",
+        toolName: "manage_google_workspace_connection",
       },
       display: "confirmation" as const,
       options: [],
@@ -127,10 +121,7 @@ describe("Telegram interface localization", () => {
       requestId: "request-google",
     });
 
-    expect(request.prompt).toContain("изменить данные в Google Workspace");
-    expect(request.prompt).toContain("Сервис: drive");
-    expect(request.prompt).toContain("Метод: files.create");
-    expect(request.prompt).toContain("Файл: personal/report.pdf");
+    expect(request.prompt).toContain("отключить Google Workspace от текущей области");
   });
 
   it("localizes the freeform answer placeholder", () => {

@@ -2,7 +2,7 @@
  * Google Workspace integration constants and lazy environment validation.
  *
  * Exports:
- * - OAuth endpoints, UserInfo endpoint, scope matrix, command limits, and state lifetime.
+ * - OAuth endpoints, UserInfo endpoint, scope matrix, and state lifetime.
  * - `requireGoogleOAuthEnvironment`: validates integration secrets only when invoked.
  */
 import { z } from "zod";
@@ -16,12 +16,6 @@ export const GOOGLE_OAUTH_STATE_TTL_MILLISECONDS = 10 * 60_000;
 export const GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
 export const GOOGLE_PROVIDER_REQUEST_TIMEOUT_MILLISECONDS = 15_000;
 export const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
-export const GOOGLE_WORKSPACE_ACCESS_TOKEN_REFRESH_SKEW_MILLISECONDS = 60_000;
-export const GOOGLE_WORKSPACE_COMMAND_JSON_MAX_CHARACTERS = 64 * 1024;
-export const GOOGLE_WORKSPACE_COMMAND_MAX_OUTPUT_BYTES = 1024 * 1024;
-export const GOOGLE_WORKSPACE_COMMAND_TIMEOUT_MILLISECONDS = 30_000;
-export const GOOGLE_WORKSPACE_PAGE_LIMIT_MAX = 10;
-
 // Broad user scopes cover every supported read/write mode without app-only or admin impersonation.
 export const GOOGLE_WORKSPACE_SCOPES = [
   "openid",

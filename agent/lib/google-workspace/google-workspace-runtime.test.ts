@@ -3,7 +3,7 @@
  *
  * Constructs covered:
  * - The exact gws version is a production dependency with locked integrity.
- * - Docker bypasses the upstream downloader and runs the checksum-pinned project installer.
+ * - Docker installs the verified binary into the sandbox where Bash invokes it.
  */
 import { readFile } from "node:fs/promises";
 
@@ -25,7 +25,7 @@ describe("Google Workspace runtime wiring", () => {
     });
   });
 
-  it("installs the verified binary before copying production dependencies", async () => {
+  it("installs the verified binary and copies it into the sandbox runtime", async () => {
     const dockerfile = await readFile(new URL("Dockerfile", projectRoot), "utf8");
 
     expect(dockerfile).toContain([
@@ -41,5 +41,10 @@ describe("Google Workspace runtime wiring", () => {
     expect(dockerfile).toContain(
       "COPY --from=production-dependencies /app/node_modules ./node_modules",
     );
+    expect(dockerfile).toContain([
+      "COPY --from=production-dependencies \\",
+      "  /app/node_modules/@googleworkspace/cli/bin/gws \\",
+      "  /usr/local/bin/gws",
+    ].join("\n"));
   });
 });

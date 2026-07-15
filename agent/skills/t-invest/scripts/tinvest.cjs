@@ -3824,6 +3824,10 @@ var T_INVEST_BASE_URL = "https://invest-public-api.tinkoff.ru/rest";
 var T_INVEST_SANDBOX_BASE_URL = "https://sandbox-invest-public-api.tinkoff.ru/rest";
 var REQUEST_TIMEOUT_MS = 3e4;
 var APP_VERSION = "1.1.0";
+var UPDATE_CHECK_URL = "https://raw.githubusercontent.com/nyxandro/t-invest-skill/main/package.json";
+var UPDATE_CHECK_TTL_MS = 24 * 60 * 60 * 1e3;
+var UPDATE_CHECK_TIMEOUT_MS = 2500;
+var UPDATE_CHECK_CACHE_PATH = import_node_path.default.join(import_node_os.default.homedir(), ".config", "tinvest", "update-check.json");
 var MS_PER_HOUR = 60 * 60 * 1e3;
 var MS_PER_DAY = 24 * MS_PER_HOUR;
 var MS_PER_YEAR = 365 * MS_PER_DAY;
@@ -7714,6 +7718,89 @@ function registerScreenCommands(program3) {
   );
 }
 
+// src/commands/update-check.ts
+var import_node_fs4 = __toESM(require("node:fs"), 1);
+function parseVersion(value) {
+  const normalized = value.trim().replace(/^v/i, "");
+  if (!/^\d+(\.\d+)*$/.test(normalized)) {
+    return null;
+  }
+  return normalized.split(".").map(Number);
+}
+function isNewer(latest, current) {
+  const a = parseVersion(latest);
+  const b = parseVersion(current);
+  if (!a || !b) {
+    return false;
+  }
+  const length = Math.max(a.length, b.length);
+  for (let i = 0; i < length; i++) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    if (x > y) {
+      return true;
+    }
+    if (x < y) {
+      return false;
+    }
+  }
+  return false;
+}
+function readCache(cachePath) {
+  try {
+    const raw = import_node_fs4.default.readFileSync(cachePath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.checkedAt === "string" && typeof parsed.latestVersion === "string") {
+      return { checkedAt: parsed.checkedAt, latestVersion: parsed.latestVersion };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+function writeCache2(cachePath, cache) {
+  try {
+    import_node_fs4.default.writeFileSync(cachePath, JSON.stringify(cache), "utf8");
+  } catch {
+  }
+}
+async function fetchLatestVersion(fetchFn) {
+  try {
+    const response = await fetchFn(UPDATE_CHECK_URL, { signal: AbortSignal.timeout(UPDATE_CHECK_TIMEOUT_MS) });
+    if (!response.ok) {
+      return null;
+    }
+    const pkg = await response.json();
+    return typeof pkg.version === "string" ? pkg.version : null;
+  } catch {
+    return null;
+  }
+}
+async function checkForUpdate(deps = {}) {
+  const now = deps.now ?? /* @__PURE__ */ new Date();
+  const cachePath = deps.cachePath ?? UPDATE_CHECK_CACHE_PATH;
+  const fetchFn = deps.fetchFn ?? fetch;
+  const current = APP_VERSION;
+  const cache = readCache(cachePath);
+  const cacheFresh = cache !== null && now.getTime() - Date.parse(cache.checkedAt) < UPDATE_CHECK_TTL_MS;
+  let latestVersion;
+  if (cacheFresh && cache) {
+    latestVersion = cache.latestVersion;
+  } else {
+    latestVersion = await fetchLatestVersion(fetchFn);
+    if (latestVersion !== null) {
+      writeCache2(cachePath, { checkedAt: now.toISOString(), latestVersion });
+    } else if (cache) {
+      latestVersion = cache.latestVersion;
+    }
+  }
+  return {
+    currentVersion: current,
+    latestVersion,
+    updateAvailable: latestVersion !== null && isNewer(latestVersion, current)
+  };
+}
+
 // src/cli/register-session.ts
 var STONKS_WARNING = "\u26A0\uFE0F \u0412\u043A\u043B\u044E\u0447\u0451\u043D stonks-\u0440\u0435\u0436\u0438\u043C (T_INVEST_STONKS_MODE): \u0430\u0433\u0435\u043D\u0442 \u043C\u043E\u0436\u0435\u0442 \u0441\u043E\u0432\u0435\u0440\u0448\u0430\u0442\u044C \u0441\u0434\u0435\u043B\u043A\u0438 \u0440\u0435\u0430\u043B\u044C\u043D\u044B\u043C\u0438 \u0434\u0435\u043D\u044C\u0433\u0430\u043C\u0438 \u0411\u0415\u0417 \u043F\u043E\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043D\u0438\u0439. \u0412\u044B \u043F\u0435\u0440\u0435\u0434\u0430\u0451\u0442\u0435 \u043F\u043E\u043B\u043D\u044B\u0439 \u0430\u0432\u0442\u043E\u043D\u043E\u043C\u043D\u044B\u0439 \u0434\u043E\u0441\u0442\u0443\u043F \u043A \u0441\u0447\u0451\u0442\u0443 \u2014 \u043E\u0442\u0432\u0435\u0442\u0441\u0442\u0432\u0435\u043D\u043D\u043E\u0441\u0442\u044C \u043D\u0430 \u0432\u0430\u0441, \u044D\u0442\u043E \u043D\u0435\u0431\u0435\u0437\u043E\u043F\u0430\u0441\u043D\u043E.";
 function assertSandboxMode(mode, command) {
@@ -7766,6 +7853,7 @@ function registerSessionCommands(program3) {
       const gate = resolveTradingGate(process.env);
       const sessionId = process.env[SESSION_ID_ENV_VAR]?.trim() || null;
       const warning = gate.stonksMode ? STONKS_WARNING : null;
+      const update = await checkForUpdate();
       if (json) {
         return {
           active: state !== null,
@@ -7776,17 +7864,22 @@ function registerSessionCommands(program3) {
           tradingAllowed: gate.allowTrading,
           stonksMode: gate.stonksMode,
           warning,
-          tokenEnvPath: GLOBAL_ENV_PATH
+          tokenEnvPath: GLOBAL_ENV_PATH,
+          currentVersion: update.currentVersion,
+          latestVersion: update.latestVersion,
+          updateAvailable: update.updateAvailable
         };
       }
       const tokensLine = Object.entries(tokens).map(([mode, ok]) => `${mode}: ${ok ? "\u2713" : "\u2717 (\u0442\u043E\u043A\u0435\u043D \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D)"}`).join(", ");
       const modeLine = state ? `\u0410\u043A\u0442\u0438\u0432\u043D\u044B\u0439 \u0440\u0435\u0436\u0438\u043C: \xAB${state.mode}\xBB (\u0437\u0430\u0444\u0438\u043A\u0441\u0438\u0440\u043E\u0432\u0430\u043D ${state.startedAt}).` : "\u0410\u043A\u0442\u0438\u0432\u043D\u044B\u0439 \u0440\u0435\u0436\u0438\u043C \u043D\u0435 \u0432\u044B\u0431\u0440\u0430\u043D \u2014 \u0432\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u0435 \xABsession start\xBB (\u043F\u043E \u0443\u043C\u043E\u043B\u0447\u0430\u043D\u0438\u044E readonly).";
+      const updateLine = update.updateAvailable ? `\u{1F514} \u0414\u043E\u0441\u0442\u0443\u043F\u043D\u0430 \u043D\u043E\u0432\u0430\u044F \u0432\u0435\u0440\u0441\u0438\u044F \u0441\u043A\u0438\u043B\u043B\u0430: ${update.latestVersion} (\u0443 \u0432\u0430\u0441 ${update.currentVersion}). \u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C: curl -fsSL https://raw.githubusercontent.com/nyxandro/t-invest-skill/main/install.sh | bash` : null;
       return [
         modeLine,
         `\u0422\u043E\u043A\u0435\u043D\u044B: ${tokensLine}`,
         tradingStatusLine(gate),
         warning,
-        `\u0424\u0430\u0439\u043B \u0442\u043E\u043A\u0435\u043D\u043E\u0432: ${GLOBAL_ENV_PATH}`
+        `\u0424\u0430\u0439\u043B \u0442\u043E\u043A\u0435\u043D\u043E\u0432: ${GLOBAL_ENV_PATH}`,
+        updateLine
       ].filter(Boolean).join("\n");
     })
   );

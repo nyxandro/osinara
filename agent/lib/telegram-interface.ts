@@ -14,8 +14,8 @@ const TOOL_ACTION_LABELS: Readonly<Record<string, string>> = {
 };
 
 const MANAGED_ACTION_LABELS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
-  google_workspace: {
-    execute: "изменить данные в Google Workspace",
+  manage_google_workspace_connection: {
+    disconnect: "отключить Google Workspace от текущей области",
   },
   manage_behavior_preference: {
     reset: "сбросить настройку поведения агента",
@@ -98,30 +98,6 @@ function approvalParameterLines(toolName: string, input: Record<string, unknown>
   };
 
   switch (toolName) {
-    case "google_workspace": {
-      const command = input.command;
-      if (!command || typeof command !== "object") return [];
-      const values = command as Record<string, unknown>;
-      const service = typeof values.service === "string" ? values.service : null;
-      const method = typeof values.method === "string" ? values.method : null;
-      const resources = Array.isArray(values.resourcePath)
-        ? values.resourcePath.filter((item): item is string => typeof item === "string")
-        : [];
-      const upload = input.upload;
-      const uploadValues = upload && typeof upload === "object"
-        ? upload as Record<string, unknown>
-        : null;
-      const uploadPath = uploadValues &&
-          typeof uploadValues.scope === "string" &&
-          typeof uploadValues.path === "string"
-        ? `${uploadValues.scope}/${uploadValues.path}`
-        : null;
-      return [
-        ...(service ? [`Сервис: ${service}`] : []),
-        ...(method ? [`Метод: ${[...resources, method].join(".")}`] : []),
-        ...(uploadPath ? [`Файл: ${uploadPath}`] : []),
-      ];
-    }
     case "manage_telegram_group": {
       if (input.action === "remove") return line("Telegram chat ID", "telegramChatId");
       const registration = input.registration;

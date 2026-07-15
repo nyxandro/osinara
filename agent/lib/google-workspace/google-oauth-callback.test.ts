@@ -10,10 +10,12 @@ import { describe, expect, it, vi } from "vitest";
 import { createGoogleOAuthCallbackHandler } from "./google-oauth-callback.js";
 
 const claim = {
+  actorUserId: "00000000-0000-4000-8000-000000000003",
   authorizationId: "00000000-0000-4000-8000-000000000001",
   familyId: "00000000-0000-4000-8000-000000000002",
-  telegramChatId: "101",
-  userId: "00000000-0000-4000-8000-000000000003",
+  scope: "personal" as const,
+  telegramUserId: "101",
+  workspaceId: "00000000-0000-4000-8000-000000000004",
 };
 
 function dependencies() {
@@ -38,6 +40,9 @@ function dependencies() {
       redirectUri: "https://agent.example/eve/v1/google-oauth/callback",
     }),
     now: () => new Date("2026-07-12T12:00:00.000Z"),
+    withProfileLock: async <T>(_workspaceId: string, operation: () => Promise<T>): Promise<T> =>
+      await operation(),
+    writeProfile: vi.fn(),
   };
 }
 
@@ -55,6 +60,12 @@ describe("Google Workspace OAuth callback", () => {
       displayName: "owner@example.com",
       externalAccountId: "google-subject-123",
     }));
+    expect(deps.writeProfile).toHaveBeenCalledWith(claim.workspaceId, {
+      client_id: "client-id",
+      client_secret: "client-secret",
+      refresh_token: "refresh-secret",
+      type: "authorized_user",
+    });
   });
 
   it("records an explicit denial without exchanging a code", async () => {

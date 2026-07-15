@@ -110,6 +110,7 @@ services:
     restart: unless-stopped
     volumes:
       - /opt/osinara/model-providers.json:/app/config/model-providers.json:ro
+      - google-workspace-credentials:/app/google-workspace-credentials
       - sandbox-data:/app/.eve/sandbox-cache
       - workflow-data:/app/.workflow-data
       - workspace-data:/app/workspaces
@@ -201,6 +202,7 @@ services:
       - /tmp:size=64m,mode=1777
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - google-workspace-credentials:/runner/google-workspace-credentials
       - tool-environments:/runner/tools
       - workspace-data:/runner/workspaces
 
@@ -228,6 +230,8 @@ volumes:
     name: osinara-production-postgres-data
   memory-embedding-model-e5:
     name: osinara-production-memory-embedding-model-e5
+  google-workspace-credentials:
+    name: osinara-production-google-workspace-credentials
   sandbox-data:
     name: osinara-production-sandbox-data
   tool-environments:
