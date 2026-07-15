@@ -120,6 +120,9 @@ USER node
 CMD ["node", ".runtime/services/sandbox-egress-proxy/main.js"]
 
 FROM first-party-node AS runtime
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=production-dependencies /app/node_modules ./node_modules

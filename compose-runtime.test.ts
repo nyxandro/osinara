@@ -8,6 +8,7 @@
  * - PDF processing stays inside the normal sandbox instead of a parallel service.
  * - Docker socket, runner control plane, egress proxy, and tools volume remain isolated.
  * - Dynamic skill package assets are shipped in the production agent image.
+ * - Production agent runtime includes system CA roots for native integration binaries.
  * - Node application services explicitly select the production runtime image stage.
  * - Nginx re-resolves the agent service after Docker replaces its container IP.
  */
@@ -101,6 +102,18 @@ describe("Docker Compose runtime wiring", () => {
     const dockerfile = readFileSync(new URL("Dockerfile", projectRoot), "utf8");
 
     expect(dockerfile).toContain("COPY --from=build /app/resources ./resources\n");
+  });
+
+  it("installs system CA roots in the production agent runtime", () => {
+    const dockerfile = readFileSync(new URL("Dockerfile", projectRoot), "utf8");
+    const runtime = dockerfile.slice(
+      dockerfile.indexOf("FROM first-party-node AS runtime"),
+      dockerfile.indexOf("FROM nginx:", dockerfile.indexOf("FROM first-party-node AS runtime")),
+    );
+
+    // The native gws binary uses the OS trust store rather than Node's bundled root certificates.
+    expect(runtime).toContain("ca-certificates");
+    expect(runtime).toContain("rm -rf /var/lib/apt/lists/*");
   });
 
   it("builds every Node application service from the runtime stage", () => {
