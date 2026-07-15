@@ -16,13 +16,14 @@ import type {
 
 export interface SandboxDockerRuntime {
   egressNetwork: string;
+  googleWorkspaceCredentialsVolume: string;
   image: string;
   project: string;
   toolsVolume: string;
   workspaceVolume: string;
 }
 
-export const SANDBOX_CONTAINER_POLICY_VERSION = "4";
+export const SANDBOX_CONTAINER_POLICY_VERSION = "5";
 
 const AGENT_BROWSER_SESSION_NAME = "osinara";
 const AGENT_BROWSER_RESTORE_SAVE_POLICY = "auto";
@@ -73,6 +74,21 @@ function toolsMount(
   return volumeMount(runtime.toolsVolume, `/tools/${mount.mountPoint}`, mount.workspaceId);
 }
 
+function googleWorkspaceCredentialsMount(
+  runtime: SandboxDockerRuntime,
+  mounts: readonly SandboxRunnerMount[],
+): Docker.MountSettings {
+  const mount = resolveTrustedToolMount(mounts);
+  return {
+    ...volumeMount(
+      runtime.googleWorkspaceCredentialsVolume,
+      "/credentials/google-workspace",
+      mount.workspaceId,
+    ),
+    ReadOnly: true,
+  };
+}
+
 function trustedEnvironment(mounts: readonly SandboxRunnerMount[]): string[] {
   const primary = resolveTrustedToolMount(mounts);
   const root = `/tools/${primary.mountPoint}`;
@@ -82,6 +98,7 @@ function trustedEnvironment(mounts: readonly SandboxRunnerMount[]): string[] {
     `AGENT_BROWSER_RESTORE_SAVE=${AGENT_BROWSER_RESTORE_SAVE_POLICY}`,
     `AGENT_BROWSER_SESSION=${AGENT_BROWSER_SESSION_NAME}`,
     `HOME=${root}/home`,
+    "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/credentials/google-workspace/credentials.json",
     `PATH=${[...executablePaths, BASE_PATH].join(":")}`,
     `NPM_CONFIG_PREFIX=${root}/npm`,
     `PIP_CACHE_DIR=${root}/cache/pip`,
@@ -111,7 +128,10 @@ export function buildSandboxContainerOptions(
 ): Docker.ContainerCreateOptions {
   const trusted = request.access === "trusted";
   const mounts = workspaceMounts(runtime, request.mounts);
-  if (trusted) mounts.push(toolsMount(runtime, request.mounts));
+  if (trusted) {
+    mounts.push(toolsMount(runtime, request.mounts));
+    mounts.push(googleWorkspaceCredentialsMount(runtime, request.mounts));
+  }
 
   return {
     AttachStderr: false,

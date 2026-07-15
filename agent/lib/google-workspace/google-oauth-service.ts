@@ -10,7 +10,7 @@ import {
   GOOGLE_OAUTH_STATE_TTL_MILLISECONDS,
   requireGoogleOAuthEnvironment,
 } from "./google-workspace-config.js";
-import type { GoogleIntegrationAuthorization } from "./google-integration-repository.js";
+import type { GoogleIntegrationAuthorization } from "./google-integration-contract.js";
 import { googleIntegrationRepository } from "./google-integration-repository.js";
 import { buildGoogleAuthorizationUrl } from "./google-oauth-client.js";
 import { deliverGoogleAuthorizationLink } from "./google-oauth-delivery.js";
@@ -24,12 +24,14 @@ export async function startGoogleWorkspaceAuthorization(
   const expiresAt = new Date(now.getTime() + GOOGLE_OAUTH_STATE_TTL_MILLISECONDS);
   await googleIntegrationRepository.createAuthorization(auth, { expiresAt, rawState });
   await deliverGoogleAuthorizationLink(
-    auth.telegramChatId,
+    auth.telegramUserId,
     buildGoogleAuthorizationUrl(config, rawState),
     expiresAt,
   );
   return {
     expiresAt: expiresAt.toISOString(),
-    notice: "Ссылка для подключения Google Workspace отправлена в этот личный чат.",
+    notice: auth.scope === "family"
+      ? "Ссылка для подключения общего Google Workspace отправлена владельцу в личный чат."
+      : "Ссылка для подключения Google Workspace отправлена в личный чат.",
   };
 }

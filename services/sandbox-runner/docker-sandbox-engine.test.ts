@@ -30,6 +30,7 @@ const SANDBOX_SESSION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const temporaryRoots: string[] = [];
 
 const runtime = {
+  googleWorkspaceCredentialsVolume: "osinara_google-workspace-credentials",
   egressNetwork: "osinara_sandbox-egress",
   image: "osinara-sandbox-runtime:local",
   project: "osinara",
@@ -71,6 +72,12 @@ describe("buildSandboxContainerOptions", () => {
         Target: "/tools/personal",
         VolumeOptions: { Subpath: PERSONAL_WORKSPACE_ID },
       }),
+      expect.objectContaining({
+        ReadOnly: true,
+        Source: runtime.googleWorkspaceCredentialsVolume,
+        Target: "/credentials/google-workspace",
+        VolumeOptions: { Subpath: PERSONAL_WORKSPACE_ID },
+      }),
     ]);
     expect(options.HostConfig).toMatchObject({
       CapDrop: ["ALL"],
@@ -82,7 +89,7 @@ describe("buildSandboxContainerOptions", () => {
       SecurityOpt: ["no-new-privileges:true"],
     });
     expect(options.Labels).toMatchObject({
-      "dev.osinara.sandbox.policy-version": "4",
+      "dev.osinara.sandbox.policy-version": "5",
       "dev.osinara.sandbox.project": "osinara",
       "dev.osinara.sandbox.session-id": SANDBOX_SESSION_ID,
     });
@@ -91,6 +98,7 @@ describe("buildSandboxContainerOptions", () => {
       "AGENT_BROWSER_RESTORE_SAVE=auto",
       "AGENT_BROWSER_SESSION=osinara",
       "HOME=/tools/personal/home",
+      "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/credentials/google-workspace/credentials.json",
       "HTTPS_PROXY=http://sandbox-egress-proxy:3128",
       "NPM_CONFIG_PREFIX=/tools/personal/npm",
     ]));
@@ -118,9 +126,16 @@ describe("buildSandboxContainerOptions", () => {
         Target: "/tools/family",
         VolumeOptions: { Subpath: FAMILY_WORKSPACE_ID },
       }),
+      expect.objectContaining({
+        ReadOnly: true,
+        Source: runtime.googleWorkspaceCredentialsVolume,
+        Target: "/credentials/google-workspace",
+        VolumeOptions: { Subpath: FAMILY_WORKSPACE_ID },
+      }),
     ]);
     expect(options.Env).toEqual(expect.arrayContaining([
       "HOME=/tools/family/home",
+      "GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/credentials/google-workspace/credentials.json",
       "NPM_CONFIG_PREFIX=/tools/family/npm",
     ]));
   });
@@ -142,6 +157,7 @@ describe("buildSandboxContainerOptions", () => {
       }),
     ]);
     expect(options.Env).not.toEqual(expect.arrayContaining([
+      expect.stringContaining("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"),
       expect.stringContaining("PROXY="),
       expect.stringContaining("/tools/"),
     ]));
@@ -172,7 +188,11 @@ describe("buildSandboxContainerOptions", () => {
     } as unknown as Docker;
     const engine = createDockerSandboxEngine({
       docker,
-      roots: { toolsRoot: `${root}/tools`, workspaceRoot: `${root}/workspaces` },
+      roots: {
+        googleWorkspaceCredentialsRoot: `${root}/google-workspace-credentials`,
+        toolsRoot: `${root}/tools`,
+        workspaceRoot: `${root}/workspaces`,
+      },
       runtime,
     });
 
@@ -211,7 +231,11 @@ describe("buildSandboxContainerOptions", () => {
     } as unknown as Docker;
     const engine = createDockerSandboxEngine({
       docker,
-      roots: { toolsRoot: "/tools", workspaceRoot: "/workspaces" },
+      roots: {
+        googleWorkspaceCredentialsRoot: "/google-workspace-credentials",
+        toolsRoot: "/tools",
+        workspaceRoot: "/workspaces",
+      },
       runtime,
     });
 
@@ -236,7 +260,11 @@ describe("buildSandboxContainerOptions", () => {
     } as unknown as Docker;
     const engine = createDockerSandboxEngine({
       docker,
-      roots: { toolsRoot: "/tools", workspaceRoot: "/workspaces" },
+      roots: {
+        googleWorkspaceCredentialsRoot: "/google-workspace-credentials",
+        toolsRoot: "/tools",
+        workspaceRoot: "/workspaces",
+      },
       runtime,
     });
 
@@ -266,7 +294,11 @@ describe("buildSandboxContainerOptions", () => {
     } as unknown as Docker;
     const engine = createDockerSandboxEngine({
       docker,
-      roots: { toolsRoot: "/tools", workspaceRoot: "/workspaces" },
+      roots: {
+        googleWorkspaceCredentialsRoot: "/google-workspace-credentials",
+        toolsRoot: "/tools",
+        workspaceRoot: "/workspaces",
+      },
       runtime,
     });
 
@@ -286,7 +318,11 @@ describe("buildSandboxContainerOptions", () => {
     const docker = { getContainer: vi.fn(() => container) } as unknown as Docker;
     const engine = createDockerSandboxEngine({
       docker,
-      roots: { toolsRoot: "/tools", workspaceRoot: "/workspaces" },
+      roots: {
+        googleWorkspaceCredentialsRoot: "/google-workspace-credentials",
+        toolsRoot: "/tools",
+        workspaceRoot: "/workspaces",
+      },
       runtime,
     });
 

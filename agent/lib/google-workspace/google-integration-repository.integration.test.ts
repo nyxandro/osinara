@@ -3,12 +3,13 @@
  *
  * Constructs covered:
  * - One-time expiring OAuth state claims.
- * - Encrypted credential persistence and identity-scoped default account selection.
- * - Refreshed access tokens remain bound to the current membership and account.
+ * - Existing and new credentials are bound to a workspace rather than a Telegram session.
+ * - Family profile management is owner-only while active members may use the profile.
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "../database.js";
+import type { GoogleIntegrationAuthorization } from "./google-integration-contract.js";
 import { googleIntegrationRepository } from "./google-integration-repository.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
@@ -31,21 +32,32 @@ async function fixture() {
     "INSERT INTO family_memberships (family_id, user_id, role) VALUES ($1, $2, 'owner')",
     [family.rows[0]!.id, user.rows[0]!.id],
   );
+  const workspace = await database().query<{ id: string }>(
+    `INSERT INTO workspaces (family_id, owner_user_id, scope)
+     VALUES ($1, $2, 'personal') RETURNING id`,
+    [family.rows[0]!.id, user.rows[0]!.id],
+  );
   return {
     familyId: family.rows[0]!.id,
     role: "owner" as const,
-    telegramChatId: "google-owner",
+    scope: "personal" as const,
+    telegramUserId: "google-owner",
     userId: user.rows[0]!.id,
+    workspaceId: workspace.rows[0]!.id,
   };
 }
 
-async function connectedAccount(auth: Awaited<ReturnType<typeof fixture>>) {
+async function connectedAccount(
+  auth: GoogleIntegrationAuthorization,
+  input: { externalAccountId?: string; state?: string } = {},
+) {
+  const state = input.state ?? "complete-state-with-at-least-32-bytes";
   await googleIntegrationRepository.createAuthorization(auth, {
     expiresAt: new Date("2026-07-12T12:10:00.000Z"),
-    rawState: "complete-state-with-at-least-32-bytes",
+    rawState: state,
   });
   const claim = await googleIntegrationRepository.claimAuthorization(
-    "complete-state-with-at-least-32-bytes",
+    state,
     new Date("2026-07-12T12:05:00.000Z"),
   );
   return await googleIntegrationRepository.completeAuthorization(claim, {
@@ -53,7 +65,7 @@ async function connectedAccount(auth: Awaited<ReturnType<typeof fixture>>) {
     accessTokenExpiresAt: new Date("2026-07-12T13:05:00.000Z"),
     displayName: "owner@example.com",
     encryptionKey,
-    externalAccountId: "google-subject-123",
+    externalAccountId: input.externalAccountId ?? "google-subject-123",
     refreshToken: "refresh-secret",
     scopes: ["scope-a", "scope-b"],
   });
@@ -77,7 +89,11 @@ describeWithDatabase("google integration repository", () => {
     await expect(googleIntegrationRepository.claimAuthorization(
       "state-secret-with-at-least-32-bytes",
       new Date("2026-07-12T12:05:00.000Z"),
-    )).resolves.toMatchObject({ familyId: auth.familyId, userId: auth.userId });
+    )).resolves.toMatchObject({
+      actorUserId: auth.userId,
+      familyId: auth.familyId,
+      workspaceId: auth.workspaceId,
+    });
     await expect(googleIntegrationRepository.claimAuthorization(
       "state-secret-with-at-least-32-bytes",
       new Date("2026-07-12T12:05:01.000Z"),
@@ -117,20 +133,74 @@ describeWithDatabase("google integration repository", () => {
     expect(JSON.stringify(raw.rows)).not.toContain("refresh-secret");
   });
 
-  it("persists a refreshed access token and updated scopes", async () => {
+  it("replaces the workspace default instead of retaining a stale account", async () => {
     const auth = await fixture();
-    const account = await connectedAccount(auth);
-    await googleIntegrationRepository.updateAccessToken(auth, account.id, {
-      accessToken: "refreshed-access-secret",
-      accessTokenExpiresAt: new Date("2026-07-12T14:05:00.000Z"),
-      encryptionKey,
-      scopes: ["scope-a", "scope-b", "scope-c"],
+    await connectedAccount(auth);
+    const replacement = await connectedAccount(auth, {
+      externalAccountId: "google-subject-456",
+      state: "replacement-state-with-at-least-32-bytes",
     });
 
     await expect(googleIntegrationRepository.getDefaultAccount(auth, encryptionKey)).resolves
-      .toMatchObject({
-        accessToken: "refreshed-access-secret",
-        scopes: ["scope-a", "scope-b", "scope-c"],
-      });
+      .toMatchObject({ externalAccountId: "google-subject-456", id: replacement.id });
+    const accounts = await database().query<{ external_account_id: string }>(
+      "SELECT external_account_id FROM integration_accounts WHERE workspace_id = $1",
+      [auth.workspaceId],
+    );
+    expect(accounts.rows).toEqual([{ external_account_id: "google-subject-456" }]);
+  });
+
+  it("allows family members to use but not replace the owner-managed family profile", async () => {
+    const personal = await fixture();
+    const member = await database().query<{ id: string }>(
+      `INSERT INTO users (telegram_user_id, display_name)
+       VALUES ('google-member', 'Участник') RETURNING id`,
+    );
+    await database().query(
+      "INSERT INTO family_memberships (family_id, user_id, role) VALUES ($1, $2, 'member')",
+      [personal.familyId, member.rows[0]!.id],
+    );
+    const familyWorkspace = await database().query<{ id: string }>(
+      `INSERT INTO workspaces (family_id, scope)
+       VALUES ($1, 'family') RETURNING id`,
+      [personal.familyId],
+    );
+    const ownerAuth = {
+      ...personal,
+      scope: "family" as const,
+      workspaceId: familyWorkspace.rows[0]!.id,
+    };
+    const account = await connectedAccount(ownerAuth);
+    const memberAuth = {
+      ...ownerAuth,
+      role: "member" as const,
+      telegramUserId: "google-member",
+      userId: member.rows[0]!.id,
+    };
+
+    await expect(googleIntegrationRepository.getDefaultAccount(memberAuth, encryptionKey)).resolves
+      .toMatchObject({ id: account.id, refreshToken: "refresh-secret" });
+    await expect(googleIntegrationRepository.createAuthorization(memberAuth, {
+      expiresAt: new Date("2026-07-12T12:10:00.000Z"),
+      rawState: "member-state-with-at-least-32-bytes",
+    })).rejects.toThrowError(/AGENT_OWNER_REQUIRED/);
+    await expect(googleIntegrationRepository.assertManagement(memberAuth)).rejects.toThrowError(
+      /AGENT_OWNER_REQUIRED/,
+    );
+  });
+
+  it("applies the native gws workspace-binding schema", async () => {
+    const columns = await database().query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'integration_accounts'`,
+    );
+    const names = columns.rows.map((row) => row.column_name);
+
+    expect(names).toContain("workspace_id");
+    expect(names).toContain("connected_by_user_id");
+    expect(names).not.toContain("user_id");
+    await expect(database().query<{ relation: string | null }>(
+      "SELECT to_regclass('public.integration_operations')::text AS relation",
+    )).resolves.toMatchObject({ rows: [{ relation: null }] });
   });
 });

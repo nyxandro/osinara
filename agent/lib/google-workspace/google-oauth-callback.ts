@@ -8,15 +8,17 @@
 import type { GoogleAccountIdentity } from "./google-account-client.js";
 import { getGoogleAccountIdentity } from "./google-account-client.js";
 import { requireGoogleOAuthEnvironment } from "./google-workspace-config.js";
-import {
-  type ClaimedGoogleAuthorization,
-  googleIntegrationRepository,
-} from "./google-integration-repository.js";
+import type { ClaimedGoogleAuthorization } from "./google-integration-contract.js";
+import { googleIntegrationRepository } from "./google-integration-repository.js";
 import {
   type GoogleAuthorizationTokenResult,
   type GoogleOAuthClientConfig,
   exchangeGoogleAuthorizationCode,
 } from "./google-oauth-client.js";
+import {
+  googleWorkspaceProfileStore,
+  type GoogleWorkspaceAuthorizedUserCredentials,
+} from "./google-workspace-profile-store.js";
 
 interface CallbackConfig extends GoogleOAuthClientConfig {
   encryptionKey: string;
@@ -44,6 +46,11 @@ interface GoogleOAuthCallbackDependencies {
   getAccountIdentity(accessToken: string): Promise<GoogleAccountIdentity>;
   getConfig(): CallbackConfig;
   now(): Date;
+  withProfileLock<T>(workspaceId: string, operation: () => Promise<T>): Promise<T>;
+  writeProfile(
+    workspaceId: string,
+    credentials: GoogleWorkspaceAuthorizedUserCredentials,
+  ): Promise<void>;
 }
 
 function htmlResponse(status: number, title: string, message: string): Response {
@@ -93,23 +100,32 @@ export function createGoogleOAuthCallbackHandler(dependencies: GoogleOAuthCallba
 
     // Any provider failure after a claim permanently consumes the one-time state.
     const completion = dependencies.exchangeCode(config, code).then(async (tokens) => {
-      const identity = await dependencies.getAccountIdentity(tokens.accessToken);
-      await dependencies.completeAuthorization(claim, {
-        accessToken: tokens.accessToken,
-        accessTokenExpiresAt: new Date(
-          dependencies.now().getTime() + tokens.expiresInSeconds * 1_000,
-        ),
-        displayName: identity.email,
-        encryptionKey: config.encryptionKey,
-        externalAccountId: identity.subject,
-        refreshToken: tokens.refreshToken,
-        scopes: tokens.scopes,
+      return await dependencies.withProfileLock(claim.workspaceId, async () => {
+        const identity = await dependencies.getAccountIdentity(tokens.accessToken);
+        await dependencies.completeAuthorization(claim, {
+          accessToken: tokens.accessToken,
+          accessTokenExpiresAt: new Date(
+            dependencies.now().getTime() + tokens.expiresInSeconds * 1_000,
+          ),
+          displayName: identity.email,
+          encryptionKey: config.encryptionKey,
+          externalAccountId: identity.subject,
+          refreshToken: tokens.refreshToken,
+          scopes: tokens.scopes,
+        });
+        // Native gws receives only the profile belonging to the target workspace volume.
+        await dependencies.writeProfile(claim.workspaceId, {
+          client_id: config.clientId,
+          client_secret: config.clientSecret,
+          refresh_token: tokens.refreshToken,
+          type: "authorized_user",
+        });
+        return htmlResponse(
+          200,
+          "Google Workspace подключён",
+          "Аккаунт безопасно связан с выбранной областью Osinara.",
+        );
       });
-      return htmlResponse(
-        200,
-        "Google Workspace подключён",
-        "Аккаунт безопасно связан с вашим пользователем Osinara.",
-      );
     });
     return completion.then(undefined, async (error: unknown) => {
       await dependencies.failAuthorization(claim, "AGENT_GOOGLE_OAUTH_COMPLETION_FAILED");
@@ -130,4 +146,6 @@ export const handleGoogleOAuthCallback = createGoogleOAuthCallbackHandler({
   getAccountIdentity: getGoogleAccountIdentity,
   getConfig: requireGoogleOAuthEnvironment,
   now: () => new Date(),
+  withProfileLock: googleIntegrationRepository.withProfileLock,
+  writeProfile: googleWorkspaceProfileStore.write,
 });

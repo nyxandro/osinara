@@ -6,8 +6,8 @@
  * - Local E5 runtime is immutable and resource bounded.
  * - Removed antivirus infrastructure cannot return to the runtime.
  * - PDF processing stays inside the normal sandbox instead of a parallel service.
- * - Docker socket, runner control plane, egress proxy, and tools volume remain isolated.
- * - Dynamic skill package assets are shipped in the production agent image.
+ * - Docker socket, runner control plane, egress proxy, tools, and Google credentials remain isolated.
+ * - Native skill package assets are shipped in the production agent image.
  * - Production agent runtime includes system CA roots for native integration binaries.
  * - Node application services explicitly select the production runtime image stage.
  * - Nginx re-resolves the agent service after Docker replaces its container IP.
@@ -91,6 +91,12 @@ describe("Docker Compose runtime wiring", () => {
 
     expect(agent).not.toContain("/var/run/docker.sock");
     expect(runner).toContain("      - /var/run/docker.sock:/var/run/docker.sock\n");
+    expect(agent).toContain(
+      "      - google-workspace-credentials:/app/google-workspace-credentials\n",
+    );
+    expect(runner).toContain(
+      "      - google-workspace-credentials:/runner/google-workspace-credentials\n",
+    );
     expect(runner).toContain("      - tool-environments:/runner/tools\n");
     expect(runner).toContain("      - sandbox-control\n");
     expect(runner).not.toContain("      - sandbox-egress\n");
@@ -98,10 +104,11 @@ describe("Docker Compose runtime wiring", () => {
     expect(compose).toContain("  sandbox-egress:\n    internal: true\n");
   });
 
-  it("ships dynamic skill package assets in the production runtime", () => {
+  it("ships native skill package assets in the production runtime", () => {
     const dockerfile = readFileSync(new URL("Dockerfile", projectRoot), "utf8");
 
-    expect(dockerfile).toContain("COPY --from=build /app/resources ./resources\n");
+    expect(dockerfile).toContain("COPY --from=build /app/agent ./agent\n");
+    expect(dockerfile).not.toContain("COPY --from=build /app/resources ./resources\n");
   });
 
   it("installs system CA roots in the production agent runtime", () => {

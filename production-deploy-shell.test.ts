@@ -6,6 +6,7 @@
  * - Exported release image variables fail before Compose interpolation.
  * - `composeSha256` binds the exact released Compose bytes.
  * - PostgreSQL command tags cannot masquerade as returned proposal rows.
+ * - Newly introduced durable volumes are bootstrapped only during the first compatible update.
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -88,5 +89,49 @@ describe("production deploy shell policies", () => {
     );
 
     expect(databaseScript).toContain("--quiet");
+  });
+
+  it("bootstraps the Google credentials volume only before the current release owns it", () => {
+    const directory = mkdtempSync(join(tmpdir(), "osinara-google-volume-"));
+    temporaryDirectories.push(directory);
+    const previousComposePath = join(directory, "previous-compose.yaml");
+    const currentComposePath = join(directory, "current-compose.yaml");
+    const callsPath = join(directory, "docker-calls.log");
+    writeFileSync(previousComposePath, "services:\n  agent: {}\n", "utf8");
+    writeFileSync(
+      currentComposePath,
+      "volumes:\n  google-workspace-credentials: {}\n",
+      "utf8",
+    );
+
+    const bootstrap = runShell(`
+      source scripts/production-deploy/backup.sh
+      fail() { printf '%s %s\n' "$1" "$2" >&2; exit 1; }
+      docker() {
+        printf '%s\n' "$*" >> ${JSON.stringify(callsPath)}
+        [[ "$1 $2" == "volume inspect" ]] && return 1
+        [[ "$1 $2" == "volume create" ]] && return 0
+        return 2
+      }
+      CURRENT_COMPOSE=${JSON.stringify(previousComposePath)}
+      ensure_durable_volume osinara-production-google-workspace-credentials
+    `);
+    const owned = runShell(`
+      source scripts/production-deploy/backup.sh
+      fail() { printf '%s %s\n' "$1" "$2" >&2; exit 1; }
+      docker() {
+        [[ "$1 $2" == "volume inspect" ]] && return 1
+        return 2
+      }
+      CURRENT_COMPOSE=${JSON.stringify(currentComposePath)}
+      ensure_durable_volume osinara-production-google-workspace-credentials
+    `);
+
+    expect(bootstrap.status, bootstrap.stderr).toBe(0);
+    expect(readFileSync(callsPath, "utf8")).toContain(
+      "volume create osinara-production-google-workspace-credentials",
+    );
+    expect(owned.status).toBe(1);
+    expect(owned.stderr).toContain("DEPLOY_BACKUP_VOLUME_MISSING");
   });
 });
