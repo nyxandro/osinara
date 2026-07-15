@@ -3,7 +3,7 @@
  *
  * Constructs covered:
  * - Credentials are atomically materialized in the exact workspace directory with private modes.
- * - Removing one profile cannot affect a sibling workspace profile.
+ * - Removing one profile cannot affect sibling profiles or active workspace directory mounts.
  */
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -46,7 +46,7 @@ describe("Google Workspace profile store", () => {
     expect((await stat(credentials)).mode & 0o777).toBe(0o600);
   });
 
-  it("removes only the selected workspace profile", async () => {
+  it("removes only credentials while preserving the workspace directory mount target", async () => {
     const root = await mkdtemp(join(tmpdir(), "osinara-gws-profiles-"));
     roots.push(root);
     const store = createGoogleWorkspaceProfileStore(root);
@@ -58,11 +58,28 @@ describe("Google Workspace profile store", () => {
     };
     await store.write(PERSONAL_WORKSPACE_ID, credentials);
     await store.write(FAMILY_WORKSPACE_ID, credentials);
+    const personalDirectory = join(root, PERSONAL_WORKSPACE_ID);
+    const personalCredentials = join(personalDirectory, "credentials.json");
+    const directoryBeforeRemove = await stat(personalDirectory);
 
     await store.remove(PERSONAL_WORKSPACE_ID);
 
-    await expect(stat(join(root, PERSONAL_WORKSPACE_ID))).rejects.toMatchObject({ code: "ENOENT" });
+    // Active sandbox containers bind-mount this directory, so its inode must remain stable.
+    const directoryAfterRemove = await stat(personalDirectory);
+    expect(directoryAfterRemove.ino).toBe(directoryBeforeRemove.ino);
+    await expect(stat(personalCredentials)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(stat(join(root, FAMILY_WORKSPACE_ID, "credentials.json"))).resolves.toBeDefined();
+
+    await store.write(PERSONAL_WORKSPACE_ID, {
+      ...credentials,
+      refresh_token: "next-refresh-secret",
+    });
+
+    const directoryAfterReconnect = await stat(personalDirectory);
+    expect(directoryAfterReconnect.ino).toBe(directoryBeforeRemove.ino);
+    expect(JSON.parse(await readFile(personalCredentials, "utf8"))).toEqual(expect.objectContaining({
+      refresh_token: "next-refresh-secret",
+    }));
   });
 
   it("rejects an untrusted workspace path before filesystem access", async () => {
