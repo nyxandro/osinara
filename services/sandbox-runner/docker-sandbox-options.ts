@@ -23,7 +23,7 @@ export interface SandboxDockerRuntime {
   workspaceVolume: string;
 }
 
-export const SANDBOX_CONTAINER_POLICY_VERSION = "5";
+export const SANDBOX_CONTAINER_POLICY_VERSION = "6";
 
 const AGENT_BROWSER_SESSION_NAME = "osinara";
 const AGENT_BROWSER_RESTORE_SAVE_POLICY = "auto";

@@ -89,7 +89,7 @@ describe("buildSandboxContainerOptions", () => {
       SecurityOpt: ["no-new-privileges:true"],
     });
     expect(options.Labels).toMatchObject({
-      "dev.osinara.sandbox.policy-version": "5",
+      "dev.osinara.sandbox.policy-version": "6",
       "dev.osinara.sandbox.project": "osinara",
       "dev.osinara.sandbox.session-id": SANDBOX_SESSION_ID,
     });
