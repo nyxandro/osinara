@@ -18,6 +18,7 @@ import { z } from "zod";
 import { WORKSPACE_MAX_FILE_BYTES } from "../../config.js";
 import { AppError } from "../app-error.js";
 import {
+  GOOGLE_WORKSPACE_COMMAND_JSON_MAX_CHARACTERS,
   GOOGLE_WORKSPACE_COMMAND_MAX_OUTPUT_BYTES,
   GOOGLE_WORKSPACE_COMMAND_TIMEOUT_MILLISECONDS,
   GOOGLE_WORKSPACE_PAGE_LIMIT_MAX,
@@ -46,13 +47,14 @@ const READ_ONLY_METHODS = new Set([
 const GWS_BINARY_PATH = resolve("node_modules/@googleworkspace/cli/bin/gws");
 const execFileAsync = promisify(execFile);
 
-const jsonObjectSchema = z.record(z.string(), z.unknown());
+// JSON text avoids provider-specific wrappers produced for unconstrained object values.
+const jsonObjectTextSchema = z.string().min(2).max(GOOGLE_WORKSPACE_COMMAND_JSON_MAX_CHARACTERS);
 export const googleWorkspaceCommandSchema = z.object({
-  body: jsonObjectSchema.optional(),
+  body: jsonObjectTextSchema.optional(),
   method: z.string().regex(COMMAND_SEGMENT_PATTERN),
   pageAll: z.boolean().optional(),
   pageLimit: z.number().int().min(1).max(GOOGLE_WORKSPACE_PAGE_LIMIT_MAX).optional(),
-  params: jsonObjectSchema.optional(),
+  params: jsonObjectTextSchema.optional(),
   resourcePath: z.array(z.string().regex(COMMAND_SEGMENT_PATTERN)).min(1).max(6),
   service: z.enum(GOOGLE_WORKSPACE_SERVICES),
   uploadContentType: z.string().min(1).max(200).optional(),
@@ -104,6 +106,25 @@ function parseCommand(command: GoogleWorkspaceCommand): GoogleWorkspaceCommand {
   return parsed.success ? parsed.data : invalidCommand();
 }
 
+function parseJsonObject(value: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new AppError(
+      "AGENT_GOOGLE_WORKSPACE_COMMAND_JSON_INVALID",
+      "Параметры Google Workspace должны быть корректным JSON-объектом",
+    );
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new AppError(
+      "AGENT_GOOGLE_WORKSPACE_COMMAND_JSON_INVALID",
+      "Параметры Google Workspace должны быть JSON-объектом, а не списком или значением",
+    );
+  }
+  return parsed as Record<string, unknown>;
+}
+
 export function isGoogleWorkspaceReadOnlyCommand(command: GoogleWorkspaceCommand): boolean {
   const parsed = googleWorkspaceCommandSchema.safeParse(command);
   if (!parsed.success || parsed.data.body || parsed.data.uploadContentType) return false;
@@ -121,8 +142,8 @@ export function buildGoogleWorkspaceArguments(
 
   // Values are serialized as individual argv entries, so JSON content can never become shell syntax.
   const args = [parsed.service, ...parsed.resourcePath, parsed.method];
-  if (parsed.params) args.push("--params", JSON.stringify(parsed.params));
-  if (parsed.body) args.push("--json", JSON.stringify(parsed.body));
+  if (parsed.params) args.push("--params", JSON.stringify(parseJsonObject(parsed.params)));
+  if (parsed.body) args.push("--json", JSON.stringify(parseJsonObject(parsed.body)));
   if (paths.uploadPath) {
     args.push("--upload", paths.uploadPath, "--upload-content-type", parsed.uploadContentType!);
   }

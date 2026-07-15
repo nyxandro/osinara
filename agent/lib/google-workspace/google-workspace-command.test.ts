@@ -22,7 +22,7 @@ describe("Google Workspace command boundary", () => {
       method: "list",
       pageAll: true,
       pageLimit: 4,
-      params: { pageSize: 25, q: "name contains 'report'" },
+      params: JSON.stringify({ pageSize: 25, q: "name contains 'report'" }),
       resourcePath: ["files"],
       service: "drive",
     }, {})).toEqual([
@@ -41,7 +41,7 @@ describe("Google Workspace command boundary", () => {
 
   it("uses only trusted temporary paths for upload and output", () => {
     const args = buildGoogleWorkspaceArguments({
-      body: { name: "report.pdf" },
+      body: JSON.stringify({ name: "report.pdf" }),
       method: "create",
       resourcePath: ["files"],
       service: "drive",
@@ -67,6 +67,19 @@ describe("Google Workspace command boundary", () => {
     );
   });
 
+  it.each([
+    "not-json",
+    "[]",
+    "null",
+  ])("rejects params that are not a JSON object: %s", (params) => {
+    expect(() => buildGoogleWorkspaceArguments({
+      method: "list",
+      params,
+      resourcePath: ["files"],
+      service: "drive",
+    }, {})).toThrowError(/AGENT_GOOGLE_WORKSPACE_COMMAND_JSON_INVALID/);
+  });
+
   it("classifies only known bodyless reads as approval-free", () => {
     expect(isGoogleWorkspaceReadOnlyCommand({
       method: "get",
@@ -79,7 +92,7 @@ describe("Google Workspace command boundary", () => {
       service: "drive",
     })).toBe(false);
     expect(isGoogleWorkspaceReadOnlyCommand({
-      body: { addParents: "folder" },
+      body: JSON.stringify({ addParents: "folder" }),
       method: "get",
       resourcePath: ["files"],
       service: "drive",
@@ -113,7 +126,7 @@ describe("Google Workspace command boundary", () => {
 
     await expect(runGoogleWorkspaceCommand({
       method: "get",
-      params: { alt: "media", fileId: "file-1" },
+      params: JSON.stringify({ alt: "media", fileId: "file-1" }),
       resourcePath: ["files"],
       service: "drive",
     }, "access-secret", {
