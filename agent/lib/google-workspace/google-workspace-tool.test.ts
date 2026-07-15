@@ -29,6 +29,12 @@ describe("google_workspace approval policy", () => {
     expect(schema).not.toHaveProperty("anyOf");
     expect(schema.properties).toMatchObject({
       action: { enum: ["connect", "execute"], type: "string" },
+      command: {
+        properties: {
+          body: { type: "string" },
+          params: { type: "string" },
+        },
+      },
     });
   });
 
