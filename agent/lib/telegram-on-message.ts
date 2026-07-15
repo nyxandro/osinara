@@ -4,6 +4,9 @@
  * Exports:
  * - `createTelegramMessageHandler`: builds an independently testable authorization handler.
  * - `handleTelegramMessage`: production handler using PostgreSQL repositories.
+ *
+ * Key constructs:
+ * - Group reply routing accepts username-less bot replies only when a known session route exists.
  */
 import type {
   TelegramContext,
@@ -62,7 +65,7 @@ interface TelegramMessageRepositories {
   family: Pick<FamilyRepository, "claimInvitation">;
   hitl: Pick<TelegramHitlApprovalRepository, "authorizeReply">;
   journal: TelegramGroupJournalRepository;
-  session: Pick<typeof sessionRepository, "prepareTurn">;
+  session: Pick<typeof sessionRepository, "hasRoute" | "prepareTurn">;
   telegram: TelegramRepository;
 }
 
@@ -119,6 +122,10 @@ function baseContinuationToken(message: TelegramMessage): string {
   });
 }
 
+function repliesToBotMessage(message: TelegramMessage): boolean {
+  return message.replyToMessage?.from?.isBot === true;
+}
+
 function sessionScope(access: ReturnType<typeof evaluateConversationAccess> & { allowed: true }) {
   const resolved = access.access;
   const input: Pick<PrepareSessionInput, "groupId" | "scope" | "userId"> =
@@ -149,7 +156,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       throw new Error("AGENT_TELEGRAM_CONFIG_MISSING: Не задано имя Telegram-бота");
     }
     const dispatchText = [message.text, message.caption].filter(Boolean).join("\n");
-    const addressed = isMessageAddressedToBot({ ...message, text: dispatchText }, botUsername);
+    let addressed = isMessageAddressedToBot({ ...message, text: dispatchText }, botUsername);
 
     const invitationCode = parseInvitationStartCommand(message.text);
     if (invitationCode && message.chat.type !== "private") {
@@ -171,6 +178,11 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
         const recordResult = await repositories.journal.record(group.groupId, message);
         if (recordResult === "duplicate") return null;
         if (recordResult === "mode_disabled") journalEnabled = false;
+      }
+      if (!addressed && repliesToBotMessage(message)) {
+        // Telegram may omit `reply_to_message.from.username` for bot messages. Accept that reply
+        // only when the replied message is already a persisted Osinara route, not merely any bot.
+        addressed = await repositories.session.hasRoute(baseContinuationToken(message));
       }
       if (!addressed) return null;
     } else if (!addressed) {

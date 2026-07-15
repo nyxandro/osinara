@@ -183,7 +183,7 @@ export const reminderRepository = {
         }
       }
       const inserted = await client.query<ReminderRow>(
-        `INSERT INTO scheduled_tasks
+        `INSERT INTO reminders
            (family_id, owner_user_id, author_user_id, group_id, scope, content, timezone,
             telegram_chat_id, message_thread_id, recurrence_unit, recurrence_interval,
             recurrence_anchor_local, due_at, available_at)
@@ -207,8 +207,8 @@ export const reminderRepository = {
       );
       const reminder = inserted.rows[0]!;
       await client.query(
-        `INSERT INTO scheduled_task_operations
-           (family_id, operation_key, operation_kind, input_hash, scheduled_task_id)
+        `INSERT INTO reminder_operations
+           (family_id, operation_key, operation_kind, input_hash, reminder_id)
          VALUES ($1, $2, 'create', $3, $4)`,
         [auth.familyId, input.operationKey, inputHash, reminder.id],
       );
@@ -231,17 +231,17 @@ export const reminderRepository = {
   async list(auth: ReminderAuthorization): Promise<ReminderRecord[]> {
     const result = await database().query<ReminderRow>(
       `SELECT ${REMINDER_COLUMNS}
-       FROM scheduled_tasks AS task
-       WHERE task.family_id = $1
+       FROM reminders AS reminder
+       WHERE reminder.family_id = $1
          AND EXISTS (
            SELECT 1 FROM family_memberships
            WHERE family_id = $1 AND user_id = $2
          )
          AND (
-           (task.scope = 'personal' AND task.owner_user_id = $2) OR
-           task.scope = 'family'
-         )
-       ORDER BY task.created_at DESC, task.id DESC
+            (reminder.scope = 'personal' AND reminder.owner_user_id = $2) OR
+            reminder.scope = 'family'
+          )
+       ORDER BY reminder.created_at DESC, reminder.id DESC
        LIMIT $3`,
       [auth.familyId, auth.userId, REMINDER_LIST_LIMIT],
     );
@@ -293,7 +293,7 @@ export const reminderRepository = {
           : null
         : recurrence;
       const updated = await client.query<ReminderRow>(
-        `UPDATE scheduled_tasks
+        `UPDATE reminders
          SET content = $2,
              recurrence_unit = $3, recurrence_interval = $4,
              recurrence_anchor_local = CASE WHEN $5 THEN $6::timestamptz AT TIME ZONE timezone ELSE recurrence_anchor_local END,
@@ -301,8 +301,8 @@ export const reminderRepository = {
              due_at = CASE WHEN $5 THEN $6 ELSE due_at END,
              available_at = CASE WHEN $5 THEN $6 ELSE available_at END,
              delayed_by_quiet_hours = CASE WHEN $5 THEN false ELSE delayed_by_quiet_hours END,
-             status = CASE WHEN $7 = false THEN 'paused'::scheduled_task_status
-                           WHEN $7 = true THEN 'active'::scheduled_task_status ELSE status END,
+              status = CASE WHEN $7 = false THEN 'paused'::reminder_status
+                           WHEN $7 = true THEN 'active'::reminder_status ELSE status END,
              attempts = CASE WHEN $5 OR $7 = true THEN 0 ELSE attempts END,
              last_error_code = CASE WHEN $5 OR $7 = true THEN NULL ELSE last_error_code END,
              updated_at = now()
@@ -319,8 +319,8 @@ export const reminderRepository = {
         ],
       );
       await client.query(
-        `INSERT INTO scheduled_task_operations
-           (family_id, operation_key, operation_kind, input_hash, scheduled_task_id)
+        `INSERT INTO reminder_operations
+           (family_id, operation_key, operation_kind, input_hash, reminder_id)
          VALUES ($1, $2, 'update', $3, $4)`,
         [auth.familyId, input.operationKey, inputHash, id],
       );
@@ -359,8 +359,8 @@ export const reminderRepository = {
         );
       }
       await client.query(
-        `INSERT INTO scheduled_task_operations
-           (family_id, operation_key, operation_kind, input_hash, scheduled_task_id)
+        `INSERT INTO reminder_operations
+           (family_id, operation_key, operation_kind, input_hash, reminder_id)
          VALUES ($1, $2, 'delete', $3, $4)`,
         [auth.familyId, operationKey, inputHash, id],
       );
@@ -369,7 +369,7 @@ export const reminderRepository = {
          VALUES ($1, $2, 'reminder.deleted', $3, jsonb_build_object('scope', $4::text))`,
         [auth.familyId, auth.userId, id, reminder.scope],
       );
-      await client.query("DELETE FROM scheduled_tasks WHERE id = $1", [id]);
+      await client.query("DELETE FROM reminders WHERE id = $1", [id]);
       await client.query("COMMIT");
       return true;
     } catch (error) {

@@ -21,6 +21,7 @@ import { AppError } from "../app-error.js";
 import { applicationSessionId, rekeyTelegramSession } from "../sessions/session-context.js";
 import { sessionRepository } from "../sessions/session-repository.js";
 import { telegramTurnReplyParameters } from "../telegram-reply.js";
+import { isScheduledSession } from "../agent-schedules/scheduled-session.js";
 import {
   telegramHitlApprovalRepository,
   type TelegramHitlApprovalRepository,
@@ -121,7 +122,7 @@ export function createTelegramInputRequestHandler(dependencies: InputRequestDepe
           "Telegram не вернул идентификатор запроса подтверждения",
         );
       }
-      await dependencies.rekey(channel, ctx);
+      if (!isScheduledSession(ctx)) await dependencies.rekey(channel, ctx);
       await dependencies.approvals.register({
         applicationSessionId: appSessionId,
         callbackData: callbacks,

@@ -25,6 +25,7 @@ const serviceSkills = [
   "gws-gmail-send",
   "gws-gmail-triage",
   "gws-gmail-watch",
+  "gws-people",
   "gws-sheets",
   "gws-sheets-append",
   "gws-sheets-read",
@@ -35,6 +36,7 @@ const apiSurfaceSkills = [
   "gws-docs",
   "gws-drive",
   "gws-gmail",
+  "gws-people",
   "gws-sheets",
 ] as const;
 
@@ -84,6 +86,19 @@ describe("Google Workspace gws skill packages", () => {
     expect(shared).toContain("manage_google_workspace_connection");
     expect(shared).toContain("gws auth login");
     expect(shared).toContain("ask_question");
+    expect(shared).toContain("service-specific confirmation rules");
     expect(shared).toContain("Do not automatically retry failed `gws` mutations");
+  });
+
+  it("documents Google People contact mutation policy", async () => {
+    const people = await readSkill("gws-people");
+
+    expect(people).toContain("createContact");
+    expect(people).toContain("updateContact");
+    expect(people).toContain("deleteContact");
+    expect(people).toContain("batchCreateContacts");
+    expect(people).toContain("delete and batch operations require explicit user confirmation");
+    expect(people).toContain("create and update operations do not require an extra confirmation");
+    expect(people).toContain("metadata.sources.etag");
   });
 });

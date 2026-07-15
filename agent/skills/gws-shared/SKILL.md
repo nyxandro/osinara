@@ -67,12 +67,13 @@ gws <service> <resource> [sub-resource] <method> [flags]
 ## Security Rules
 
 - **Never** output secrets (API keys, tokens) directly
-- **Always** confirm with the user before executing write/delete commands
+- Follow service-specific confirmation rules; if a skill does not define a
+  narrower policy, confirm with the user before write/delete commands
 - Prefer `--dry-run` for destructive operations
 - Use `--sanitize` for PII/content safety screening
 - For Osinara Telegram sessions, use `ask_question` once for the complete user
-  operation before external changes, then execute the confirmed `gws` calls
-  without asking again per API call
+  operation when confirmation is required, then execute the confirmed `gws`
+  calls without asking again per API call
 - Do not automatically retry failed `gws` mutations; inspect the error and
   current state first so a retry cannot duplicate a side effect
 

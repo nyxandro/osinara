@@ -3,6 +3,7 @@
  *
  * Exports:
  * - OAuth endpoints, UserInfo endpoint, scope matrix, and state lifetime.
+ * - `missingGoogleWorkspaceScopes`: detects stale OAuth grants after scope expansion.
  * - `requireGoogleOAuthEnvironment`: validates integration secrets only when invoked.
  */
 import { z } from "zod";
@@ -26,6 +27,9 @@ export const GOOGLE_WORKSPACE_SCOPES = [
   "https://www.googleapis.com/auth/calendar",
   "https://mail.google.com/",
   "https://www.googleapis.com/auth/tasks",
+  "https://www.googleapis.com/auth/contacts",
+  "https://www.googleapis.com/auth/contacts.other.readonly",
+  "https://www.googleapis.com/auth/directory.readonly",
   "https://www.googleapis.com/auth/chat.spaces",
   "https://www.googleapis.com/auth/chat.delete",
   "https://www.googleapis.com/auth/chat.messages",
@@ -36,6 +40,12 @@ export const GOOGLE_WORKSPACE_SCOPES = [
   "https://www.googleapis.com/auth/chat.users.sections",
   "https://www.googleapis.com/auth/chat.customemojis",
 ] as const;
+
+export function missingGoogleWorkspaceScopes(grantedScopes: readonly string[]): string[] {
+  // Current scope matrix is the durable contract; old grants must reconnect instead of degrading.
+  const grantedScopeSet = new Set(grantedScopes);
+  return GOOGLE_WORKSPACE_SCOPES.filter((scope) => !grantedScopeSet.has(scope));
+}
 
 const environmentSchema = z.object({
   GOOGLE_OAUTH_CLIENT_ID: z.string().min(1),

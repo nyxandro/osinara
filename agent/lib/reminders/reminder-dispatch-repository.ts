@@ -91,7 +91,7 @@ export const reminderDispatchRepository = {
 
       // Once Telegram dispatch starts, an expired lease is ambiguous and must never auto-repeat.
       const ambiguous = await client.query<{ family_id: string; id: string }>(
-        `UPDATE scheduled_tasks
+        `UPDATE reminders
          SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
              dispatch_started_at = NULL,
              last_error_code = 'AGENT_REMINDER_DELIVERY_AMBIGUOUS', updated_at = $1
@@ -103,7 +103,7 @@ export const reminderDispatchRepository = {
 
       // A crash before the side-effect marker is safe to recover, but retries remain explicitly bounded.
       const exhausted = await client.query<{ family_id: string; id: string }>(
-        `UPDATE scheduled_tasks
+        `UPDATE reminders
          SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
              last_error_code = 'AGENT_REMINDER_DELIVERY_ATTEMPTS_EXHAUSTED', updated_at = $1
          WHERE status = 'leased' AND lease_expires_at < $1 AND dispatch_started_at IS NULL
@@ -113,7 +113,7 @@ export const reminderDispatchRepository = {
       );
       await recordFailures(client, exhausted.rows, "AGENT_REMINDER_DELIVERY_ATTEMPTS_EXHAUSTED");
       await client.query(
-        `UPDATE scheduled_tasks
+        `UPDATE reminders
          SET status = 'active', lease_token = NULL, lease_expires_at = NULL, updated_at = $1
          WHERE status = 'leased' AND lease_expires_at < $1 AND dispatch_started_at IS NULL
            AND attempts < $2`,
@@ -122,30 +122,30 @@ export const reminderDispatchRepository = {
 
       // Removed memberships or changed trust zones invalidate a proactive destination fail-closed.
       const invalid = await client.query<{ family_id: string; id: string }>(
-        `UPDATE scheduled_tasks AS task
+        `UPDATE reminders AS reminder
          SET status = 'failed', last_error_code = 'AGENT_REMINDER_DESTINATION_REVOKED',
              updated_at = $1
-         WHERE task.status = 'active' AND (
-           NOT EXISTS (
-             SELECT 1 FROM family_memberships
-             WHERE family_id = task.family_id AND user_id = task.author_user_id
-           ) OR (
-             task.scope = 'family' AND NOT EXISTS (
-               SELECT 1 FROM telegram_groups AS group_row
-               WHERE group_row.id = task.group_id AND group_row.family_id = task.family_id
-                 AND group_row.telegram_chat_id = task.telegram_chat_id
-                 AND group_row.type = 'family_private'
-             )
-           )
-         )
-         RETURNING task.id, task.family_id`,
+         WHERE reminder.status = 'active' AND (
+            NOT EXISTS (
+              SELECT 1 FROM family_memberships
+              WHERE family_id = reminder.family_id AND user_id = reminder.author_user_id
+            ) OR (
+              reminder.scope = 'family' AND NOT EXISTS (
+                SELECT 1 FROM telegram_groups AS group_row
+                WHERE group_row.id = reminder.group_id AND group_row.family_id = reminder.family_id
+                  AND group_row.telegram_chat_id = reminder.telegram_chat_id
+                  AND group_row.type = 'family_private'
+              )
+            )
+          )
+         RETURNING reminder.id, reminder.family_id`,
         [options.now],
       );
       await recordFailures(client, invalid.rows, "AGENT_REMINDER_DESTINATION_REVOKED");
 
       // Quiet hours defer availability while retaining the original due_at for delayed-delivery notice.
       await client.query(
-        `UPDATE scheduled_tasks AS task
+        `UPDATE reminders AS reminder
          SET available_at = (
                (($1 AT TIME ZONE settings.timezone)::date + settings.quiet_end) +
                make_interval(days => CASE
@@ -156,8 +156,8 @@ export const reminderDispatchRepository = {
              delayed_by_quiet_hours = true,
              updated_at = $1
          FROM user_notification_settings AS settings
-         WHERE task.status = 'active' AND task.author_user_id = settings.user_id
-           AND task.available_at <= $1
+         WHERE reminder.status = 'active' AND reminder.author_user_id = settings.user_id
+           AND reminder.available_at <= $1
            AND settings.quiet_start IS NOT NULL AND settings.quiet_end IS NOT NULL
            AND (
              (settings.quiet_start < settings.quiet_end
@@ -172,25 +172,25 @@ export const reminderDispatchRepository = {
 
       const claimed = await client.query<ClaimedRow>(
         `WITH candidates AS (
-           SELECT task.id
-           FROM scheduled_tasks AS task
+           SELECT reminder.id
+           FROM reminders AS reminder
            JOIN family_memberships AS membership
-             ON membership.family_id = task.family_id AND membership.user_id = task.author_user_id
-           WHERE task.status = 'active' AND task.available_at <= $1
-             AND task.attempts < $4
-           ORDER BY task.available_at, task.id
-           FOR UPDATE OF task SKIP LOCKED
+             ON membership.family_id = reminder.family_id AND membership.user_id = reminder.author_user_id
+           WHERE reminder.status = 'active' AND reminder.available_at <= $1
+             AND reminder.attempts < $4
+           ORDER BY reminder.available_at, reminder.id
+           FOR UPDATE OF reminder SKIP LOCKED
            LIMIT $2
          )
-         UPDATE scheduled_tasks AS task
+         UPDATE reminders AS reminder
          SET status = 'leased', attempts = attempts + 1, lease_token = gen_random_uuid(),
              lease_expires_at = $1 + ($3::text || ' milliseconds')::interval,
              dispatch_started_at = NULL, updated_at = $1
          FROM candidates
-         WHERE task.id = candidates.id
-         RETURNING task.id, task.content, task.scope, task.timezone, task.telegram_chat_id,
-                   task.message_thread_id::text, task.due_at, task.lease_token::text,
-                   (task.delayed_by_quiet_hours OR task.due_at < $1 - ($5::text || ' milliseconds')::interval) AS delayed`,
+         WHERE reminder.id = candidates.id
+         RETURNING reminder.id, reminder.content, reminder.scope, reminder.timezone, reminder.telegram_chat_id,
+                   reminder.message_thread_id::text, reminder.due_at, reminder.lease_token::text,
+                   (reminder.delayed_by_quiet_hours OR reminder.due_at < $1 - ($5::text || ' milliseconds')::interval) AS delayed`,
         [
           options.now,
           options.limit,
@@ -221,7 +221,7 @@ export const reminderDispatchRepository = {
 
   async markDispatchStarted(id: string, leaseToken: string): Promise<void> {
     const result = await database().query(
-      `UPDATE scheduled_tasks SET dispatch_started_at = now(), updated_at = now()
+      `UPDATE reminders SET dispatch_started_at = now(), updated_at = now()
        WHERE id = $1 AND status = 'leased' AND lease_token = $2
          AND dispatch_started_at IS NULL`,
       [id, leaseToken],
@@ -229,7 +229,7 @@ export const reminderDispatchRepository = {
     if (!result.rowCount) {
       throw new AppError(
         "AGENT_REMINDER_LEASE_STALE",
-        "Задача доставки напоминания уже неактуальна",
+        "Доставка напоминания уже неактуальна",
       );
     }
   },
@@ -238,24 +238,24 @@ export const reminderDispatchRepository = {
     const client = await database().connect();
     try {
       await client.query("BEGIN");
-      const task = await client.query<{
+      const reminder = await client.query<{
         family_id: string;
         recurrence_unit: ReminderRecurrenceUnit | null;
       }>(
-        `SELECT family_id, recurrence_unit FROM scheduled_tasks
+        `SELECT family_id, recurrence_unit FROM reminders
          WHERE id = $1 AND status = 'leased' AND lease_token = $2
            AND dispatch_started_at IS NOT NULL
          FOR UPDATE`,
         [job.id, job.leaseToken],
       );
-      const current = task.rows[0];
+      const current = reminder.rows[0];
       if (!current) {
-        throw new AppError("AGENT_REMINDER_LEASE_STALE", "Задача доставки уже неактуальна");
+        throw new AppError("AGENT_REMINDER_LEASE_STALE", "Доставка напоминания уже неактуальна");
       }
 
       if (current.recurrence_unit === null) {
         await client.query(
-          `UPDATE scheduled_tasks
+          `UPDATE reminders
            SET status = 'completed', lease_token = NULL, lease_expires_at = NULL,
                dispatch_started_at = NULL, delayed_by_quiet_hours = false,
                last_error_code = NULL, updated_at = $2
@@ -266,24 +266,24 @@ export const reminderDispatchRepository = {
         // Recompute from the original local anchor, skipping missed occurrences without replaying them.
         const recurrence = await client.query<RecurrenceRow>(
           `WITH RECURSIVE occurrences AS (
-             SELECT task.family_id, task.occurrence_index + 1 AS next_index,
-                    CASE task.recurrence_unit
-                      WHEN 'daily' THEN (task.recurrence_anchor_local + make_interval(days => task.recurrence_interval * (task.occurrence_index + 1))) AT TIME ZONE task.timezone
-                      WHEN 'weekly' THEN (task.recurrence_anchor_local + make_interval(days => 7 * task.recurrence_interval * (task.occurrence_index + 1))) AT TIME ZONE task.timezone
-                      WHEN 'monthly' THEN (task.recurrence_anchor_local + make_interval(months => task.recurrence_interval * (task.occurrence_index + 1))) AT TIME ZONE task.timezone
-                    END AS next_due_at,
-                    task.occurrence_index AS initial_index
-             FROM scheduled_tasks AS task WHERE task.id = $1
+             SELECT reminder.family_id, reminder.occurrence_index + 1 AS next_index,
+                    CASE reminder.recurrence_unit
+                      WHEN 'daily' THEN (reminder.recurrence_anchor_local + make_interval(days => reminder.recurrence_interval * (reminder.occurrence_index + 1))) AT TIME ZONE reminder.timezone
+                      WHEN 'weekly' THEN (reminder.recurrence_anchor_local + make_interval(days => 7 * reminder.recurrence_interval * (reminder.occurrence_index + 1))) AT TIME ZONE reminder.timezone
+                      WHEN 'monthly' THEN (reminder.recurrence_anchor_local + make_interval(months => reminder.recurrence_interval * (reminder.occurrence_index + 1))) AT TIME ZONE reminder.timezone
+                     END AS next_due_at,
+                    reminder.occurrence_index AS initial_index
+             FROM reminders AS reminder WHERE reminder.id = $1
              UNION ALL
              SELECT occurrence.family_id, occurrence.next_index + 1,
-                    CASE task.recurrence_unit
-                      WHEN 'daily' THEN (task.recurrence_anchor_local + make_interval(days => task.recurrence_interval * (occurrence.next_index + 1))) AT TIME ZONE task.timezone
-                      WHEN 'weekly' THEN (task.recurrence_anchor_local + make_interval(days => 7 * task.recurrence_interval * (occurrence.next_index + 1))) AT TIME ZONE task.timezone
-                      WHEN 'monthly' THEN (task.recurrence_anchor_local + make_interval(months => task.recurrence_interval * (occurrence.next_index + 1))) AT TIME ZONE task.timezone
-                    END,
+                    CASE reminder.recurrence_unit
+                      WHEN 'daily' THEN (reminder.recurrence_anchor_local + make_interval(days => reminder.recurrence_interval * (occurrence.next_index + 1))) AT TIME ZONE reminder.timezone
+                      WHEN 'weekly' THEN (reminder.recurrence_anchor_local + make_interval(days => 7 * reminder.recurrence_interval * (occurrence.next_index + 1))) AT TIME ZONE reminder.timezone
+                      WHEN 'monthly' THEN (reminder.recurrence_anchor_local + make_interval(months => reminder.recurrence_interval * (occurrence.next_index + 1))) AT TIME ZONE reminder.timezone
+                     END,
                     occurrence.initial_index
              FROM occurrences AS occurrence
-             JOIN scheduled_tasks AS task ON task.id = $1
+             JOIN reminders AS reminder ON reminder.id = $1
              WHERE occurrence.next_due_at <= $2
                AND occurrence.next_index - occurrence.initial_index < $3
            )
@@ -300,7 +300,7 @@ export const reminderDispatchRepository = {
           );
         }
         await client.query(
-          `UPDATE scheduled_tasks
+          `UPDATE reminders
            SET status = 'active', occurrence_index = $2, due_at = $3, available_at = $3,
                attempts = 0, lease_token = NULL, lease_expires_at = NULL,
                dispatch_started_at = NULL, delayed_by_quiet_hours = false,
@@ -328,7 +328,7 @@ export const reminderDispatchRepository = {
     try {
       await client.query("BEGIN");
       const failed = await client.query<{ family_id: string }>(
-        `UPDATE scheduled_tasks
+        `UPDATE reminders
          SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
              dispatch_started_at = NULL, last_error_code = $3, updated_at = now()
          WHERE id = $1 AND status = 'leased' AND lease_token = $2

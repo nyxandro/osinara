@@ -8,7 +8,7 @@
  * - PostgreSQL command tags cannot masquerade as returned proposal rows.
  * - Newly introduced durable volumes are bootstrapped only during the first compatible update.
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -133,5 +133,76 @@ describe("production deploy shell policies", () => {
     );
     expect(owned.status).toBe(1);
     expect(owned.stderr).toContain("DEPLOY_BACKUP_VOLUME_MISSING");
+  });
+
+  it("retains the initial backup and only the latest deploy backups", () => {
+    const directory = mkdtempSync(join(tmpdir(), "osinara-backup-retention-"));
+    temporaryDirectories.push(directory);
+    for (const name of [
+      "initial-migration-v0.1.1",
+      "20260713T222732Z-to-v0.1.2",
+      "20260713T225008Z-to-v0.1.3",
+      "20260714T065745Z-to-v0.2.0",
+      "20260714T080346Z-to-v0.2.1",
+      "20260714T083709Z-to-v0.2.2",
+      "20260714T090552Z-to-v0.2.3",
+      "20260714T113003Z-to-v0.2.4",
+    ]) {
+      mkdirSync(join(directory, name));
+    }
+
+    const result = runShell(`
+      BACKUPS_DIR=${JSON.stringify(directory)}
+      source scripts/production-deploy/backup.sh
+      log_event() { printf '%s %s\n' "$1" "$2" >&2; }
+      prune_old_deploy_backups
+    `);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(readdirSync(directory).sort()).toEqual([
+      "20260714T065745Z-to-v0.2.0",
+      "20260714T080346Z-to-v0.2.1",
+      "20260714T083709Z-to-v0.2.2",
+      "20260714T090552Z-to-v0.2.3",
+      "20260714T113003Z-to-v0.2.4",
+      "initial-migration-v0.1.1",
+    ]);
+  });
+
+  it("removes only non-retained Osinara release image references", () => {
+    const directory = mkdtempSync(join(tmpdir(), "osinara-image-retention-"));
+    temporaryDirectories.push(directory);
+    const callsPath = join(directory, "docker-calls.log");
+    for (const [version, digest] of [
+      ["v0.2.8", "a".repeat(64)],
+      ["v0.2.9", "b".repeat(64)],
+      ["v0.2.10", "c".repeat(64)],
+    ]) {
+      const releaseDirectory = join(directory, version);
+      mkdirSync(releaseDirectory);
+      writeFileSync(
+        join(releaseDirectory, "release.env"),
+        `OSINARA_APP_IMAGE=ghcr.io/nyxandro/osinara-app@sha256:${digest}\n`,
+        "utf8",
+      );
+    }
+
+    const result = runShell(`
+      RELEASES_DIR=${JSON.stringify(directory)}
+      RELEASE_IMAGE_VARIABLES=(OSINARA_APP_IMAGE)
+      source scripts/production-deploy/release.sh
+      log_event() { printf '%s %s\n' "$1" "$2" >&2; }
+      docker() {
+        printf '%s\n' "$*" >> ${JSON.stringify(callsPath)}
+        [[ "$1 $2" == "image inspect" || "$1 $2" == "image rm" ]]
+      }
+      prune_retired_release_images
+    `);
+
+    expect(result.status, result.stderr).toBe(0);
+    const calls = readFileSync(callsPath, "utf8");
+    expect(calls).toContain(`image rm ghcr.io/nyxandro/osinara-app@sha256:${"a".repeat(64)}`);
+    expect(calls).not.toContain(`image rm ghcr.io/nyxandro/osinara-app@sha256:${"b".repeat(64)}`);
+    expect(calls).not.toContain(`image rm ghcr.io/nyxandro/osinara-app@sha256:${"c".repeat(64)}`);
   });
 });

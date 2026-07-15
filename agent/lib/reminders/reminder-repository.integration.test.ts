@@ -80,7 +80,7 @@ function familyAuth(fixture: Fixture, user: "member" | "owner") {
 describeWithDatabase("reminder repositories", () => {
   beforeEach(async () => {
     await database().query(
-      "TRUNCATE scheduled_tasks, user_notification_settings, telegram_groups, family_memberships, users, families CASCADE",
+      "TRUNCATE reminders, user_notification_settings, telegram_groups, family_memberships, users, families CASCADE",
     );
   });
   afterAll(async () => closeDatabase());

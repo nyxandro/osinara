@@ -146,6 +146,15 @@ describe("production container contract", () => {
     }
   });
 
+  it("bounds production container logs in every service", () => {
+    const compose = readProjectFile("compose.production.yaml");
+
+    expect(compose).toContain("x-bounded-json-logs: &bounded-json-logs");
+    expect(compose).toContain('max-size: "20m"');
+    expect(compose).toContain('max-file: "5"');
+    expect(compose.match(/logging: \*bounded-json-logs/g)).toHaveLength(11);
+  });
+
   it("limits Docker control to the runner and tunes pinned TEI for one CPU", () => {
     const compose = readProjectFile("compose.production.yaml");
     const agent = service(compose, "agent", "migrate");
@@ -246,6 +255,8 @@ describe("server deployment contract", () => {
     expect(script).toContain("pg_dump");
     expect(script).toContain("backup_volume");
     expect(script).toContain("preflight_backup");
+    expect(script).toContain("prune_old_deploy_backups");
+    expect(script).toContain("prune_retired_release_images");
     expect(script).toContain("pg_restore --list");
     expect(script).toContain("tar -tzf");
     expect(script).toContain("restart_current_release");
@@ -253,9 +264,13 @@ describe("server deployment contract", () => {
     expect(script).not.toMatch(/git\s+(pull|fetch|checkout)/);
     expect(script).not.toMatch(/docker\s+(compose\s+)?build/);
     const main = readProjectFile("scripts/production-deploy.sh");
+    expect(main.indexOf("prune_old_deploy_backups")).toBeLessThan(main.indexOf("preflight_backup"));
     expect(main.indexOf("pull_release_images")).toBeLessThan(main.indexOf("create_postgres_backup"));
     expect(main.indexOf("create_postgres_backup")).toBeLessThan(main.indexOf("stop_current_services"));
     expect(main.indexOf("stop_current_services")).toBeLessThan(main.indexOf("snapshot_durable_volumes"));
+    expect(main.lastIndexOf("record_proposal_result")).toBeLessThan(
+      main.lastIndexOf("prune_retired_release_images"),
+    );
     for (const file of files) {
       expect(file.source.split("\n").length, `${file.path} exceeds 500 lines`).toBeLessThanOrEqual(500);
       expect(file.source.startsWith("#!/bin/bash"), `${file.path} has no shell header`).toBe(true);
@@ -297,6 +312,7 @@ describe("server deployment contract", () => {
     expect(script).toContain("DEPLOY_COMPOSE_SECURITY_INVALID");
     expect(script).toContain("privileged");
     expect(script).toContain("network_mode");
+    expect(script).toContain("logging.driver");
     expect(script).toContain("/var/run/docker.sock");
     expect(script).toContain("/opt/osinara/model-providers.json");
     expect(script).toContain(".read_only == true");

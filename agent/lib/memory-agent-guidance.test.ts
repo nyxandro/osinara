@@ -17,7 +17,7 @@ describe("agent memory guidance", () => {
   it("requires bounded multi-query context deepening for complex requests", async () => {
     const instructions = await readFile(INSTRUCTIONS_PATH, "utf8");
 
-    expect(instructions).toContain("# Context deepening protocol");
+    expect(instructions).toContain("## Углубление контекста");
     expect(instructions).toContain("до трёх последовательных вызовов `search_memories`");
     expect(instructions).toContain("с разными смысловыми формулировками");
     expect(instructions).toContain("Остановись раньше");

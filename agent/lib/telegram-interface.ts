@@ -20,6 +20,14 @@ const MANAGED_ACTION_LABELS: Readonly<Record<string, Readonly<Record<string, str
   manage_behavior_preference: {
     reset: "сбросить настройку поведения агента",
   },
+  manage_agent_schedule: {
+    create: "создать агентное расписание",
+    delete: "удалить агентное расписание",
+    pause: "приостановить агентное расписание",
+    resume: "возобновить агентное расписание",
+    run_now: "запустить агентное расписание сейчас",
+    update: "изменить агентное расписание",
+  },
   manage_family_invitation: {
     approve: "добавить участника в семью",
     create: "создать приглашение в семейного агента",
@@ -34,12 +42,6 @@ const MANAGED_ACTION_LABELS: Readonly<Record<string, Readonly<Record<string, str
     pause: "приостановить напоминание",
     resume: "возобновить напоминание",
     update: "изменить напоминание",
-  },
-  manage_task: {
-    complete: "завершить задачу",
-    create: "создать задачу",
-    delete: "удалить задачу",
-    update: "изменить задачу",
   },
   manage_telegram_group: {
     register: "подключить Telegram-группу",
@@ -84,6 +86,7 @@ export interface TelegramInputRequest {
 interface FailureData {
   code: string;
   details?: Readonly<Record<string, unknown>>;
+  message?: string;
 }
 
 function approvalParameterLines(toolName: string, input: Record<string, unknown>): string[] {
@@ -136,7 +139,8 @@ function approvalParameterLines(toolName: string, input: Record<string, unknown>
       ];
     case "manage_behavior_preference":
       return [...line("Настройка", "preference"), ...line("Область", "scope")];
-    case "manage_task":
+    case "manage_agent_schedule":
+      return [...line("ID", "id"), ...line("Название", "title"), ...line("Сценарий", "scenarioPrompt")];
     case "manage_reminder":
       return [...line("ID", "id"), ...line("Название", "title"), ...line("Текст", "content")];
     case "remove_group_file":
@@ -156,6 +160,11 @@ function approvalActionLabel(toolName: string, input: Record<string, unknown>): 
 function supportReference(details: FailureData["details"]): string | null {
   if (!details) return null;
   return ERROR_ID_PATTERN.exec(JSON.stringify(details))?.[0] ?? null;
+}
+
+function publicFailureExplanation(data: FailureData): string | null {
+  if (!data.code.endsWith("_INPUT_INVALID") || typeof data.message !== "string") return null;
+  return data.message.replace(new RegExp(`^${data.code}:\\s*`, "u"), "");
 }
 
 export function localizeTelegramInputRequest<T extends TelegramInputRequest>(request: T): T {
@@ -192,8 +201,10 @@ export function localizeTelegramReplyMarkup(
 
 export function formatTelegramTurnFailure(data: FailureData): string {
   const errorId = supportReference(data.details);
+  const explanation = publicFailureExplanation(data);
   return [
     "Не удалось выполнить запрос.",
+    ...(explanation ? [explanation] : []),
     "Попробуйте отправить сообщение ещё раз. Если ошибка повторится, сообщите код поддержке.",
     `Код: ${data.code}`,
     ...(errorId ? [`Номер ошибки: ${errorId}`] : []),

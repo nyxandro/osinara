@@ -60,10 +60,10 @@ export async function findReminderOperation(
   const result = await client.query<{
     input_hash: string;
     operation_kind: string;
-    scheduled_task_id: string | null;
+    reminder_id: string | null;
   }>(
-    `SELECT operation_kind, input_hash, scheduled_task_id
-     FROM scheduled_task_operations WHERE family_id = $1 AND operation_key = $2`,
+    `SELECT operation_kind, input_hash, reminder_id
+     FROM reminder_operations WHERE family_id = $1 AND operation_key = $2`,
     [auth.familyId, operationKey],
   );
   const operation = result.rows[0];
@@ -74,7 +74,7 @@ export async function findReminderOperation(
       "Повтор операции напоминания содержит другие параметры",
     );
   }
-  return operation.scheduled_task_id;
+  return operation.reminder_id;
 }
 
 export async function selectReminder(
@@ -86,7 +86,7 @@ export async function selectReminder(
   const result = await client.query<MutableReminderRow>(
     `SELECT ${REMINDER_COLUMNS}, family_id, author_user_id, occurrence_index,
             recurrence_anchor_local
-     FROM scheduled_tasks WHERE family_id = $1 AND id = $2${lock ? " FOR UPDATE" : ""}`,
+     FROM reminders WHERE family_id = $1 AND id = $2${lock ? " FOR UPDATE" : ""}`,
     [familyId, id],
   );
   return result.rows[0] ?? null;

@@ -1,26 +1,3 @@
--- Overdue delivery has its own availability and ambiguity markers, separate from task due time.
-ALTER TABLE family_tasks
-  ADD COLUMN overdue_available_at timestamptz,
-  ADD COLUMN overdue_dispatch_started_at timestamptz,
-  ADD COLUMN overdue_error_code text;
-
-UPDATE family_tasks
-SET overdue_available_at = due_at + interval '24 hours'
-WHERE scope = 'family' AND due_at IS NOT NULL AND status = 'open';
-
-ALTER TABLE family_tasks
-  ADD CONSTRAINT family_tasks_overdue_state_check CHECK (
-    (overdue_lease_token IS NULL AND overdue_lease_expires_at IS NULL
-      AND overdue_dispatch_started_at IS NULL) OR
-    (overdue_lease_token IS NOT NULL AND overdue_lease_expires_at IS NOT NULL)
-  );
-
-DROP INDEX family_tasks_overdue_idx;
-CREATE INDEX family_tasks_overdue_idx
-  ON family_tasks (overdue_available_at, id)
-  WHERE scope = 'family' AND status = 'open' AND overdue_notified_at IS NULL
-    AND overdue_error_code IS NULL;
-
 CREATE TYPE shopping_list_status AS ENUM ('active', 'archived');
 CREATE TYPE shopping_item_status AS ENUM ('pending', 'purchased');
 

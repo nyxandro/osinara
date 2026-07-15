@@ -31,11 +31,16 @@ claims one approved PostgreSQL proposal after rechecking the current owner, veri
 release, Compose hash, fixed service/image/mount policy, and digest names. It pulls before stopping,
 backs up existing durable state, starts the released Compose graph without build, and checks
 `http://127.0.0.1:8082/eve/v1/health`.
+Before each non-initial deployment it also prunes older Osinara deployment backups, retaining the
+initial migration backup and the five newest timestamped deploy backups. After a successful health
+check and terminal success record it removes local first-party Osinara image references older than
+the current and previous release; this never prunes non-Osinara projects on the same server.
 
 `compose.production.yaml` uses the stable project name `osinara-production`, explicit volume and
 network names, a one-shot migration gate, and a loopback-only edge port. Only sandbox-runner owns
 the Docker socket. The agent has no Docker socket and reaches the runner only over the internal
-control network.
+control network. Every service uses bounded Docker `json-file` logging (`20m` by `5` files), and
+the deployment validator rejects releases that remove this bound.
 
 ## Server files
 
