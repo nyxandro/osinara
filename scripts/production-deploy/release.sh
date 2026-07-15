@@ -178,6 +178,7 @@ validate_resolved_compose() {
       ($service.value.volumes // [])[] |
       {service: $service.key, type, source, target}] | sort_by(.service, .target)) == ([
         {service: "agent", type: "volume", source: "sandbox-data", target: "/app/.eve/sandbox-cache"},
+        {service: "agent", type: "volume", source: "google-workspace-credentials", target: "/app/google-workspace-credentials"},
         {service: "agent", type: "volume", source: "workflow-data", target: "/app/.workflow-data"},
         {service: "agent", type: "volume", source: "workspace-data", target: "/app/workspaces"},
         {service: "agent", type: "bind", source: "/opt/osinara/model-providers.json", target: "/app/config/model-providers.json"},
@@ -185,6 +186,7 @@ validate_resolved_compose() {
         {service: "memory-embedding", type: "volume", source: "memory-embedding-model-e5", target: "/data"},
         {service: "postgres", type: "volume", source: "postgres-data", target: "/var/lib/postgresql/data"},
         {service: "sandbox-runner", type: "bind", source: "/var/run/docker.sock", target: "/var/run/docker.sock"},
+        {service: "sandbox-runner", type: "volume", source: "google-workspace-credentials", target: "/runner/google-workspace-credentials"},
         {service: "sandbox-runner", type: "volume", source: "tool-environments", target: "/runner/tools"},
         {service: "sandbox-runner", type: "volume", source: "workspace-data", target: "/runner/workspaces"}
       ] | sort_by(.service, .target)) and

@@ -101,6 +101,9 @@ RUN apt-get update \
       xdg-utils \
       zip \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=production-dependencies \
+  /app/node_modules/@googleworkspace/cli/bin/gws \
+  /usr/local/bin/gws
 WORKDIR /workspace
 CMD ["sleep", "infinity"]
 
@@ -133,7 +136,6 @@ COPY --from=build /app/.runtime ./.runtime
 COPY --from=build /app/agent ./agent
 COPY --from=build /app/config ./config
 COPY --from=build /app/migrations ./migrations
-COPY --from=build /app/resources ./resources
 COPY --from=build /app/package.json ./package.json
 COPY scripts/docker-entrypoint.sh /usr/local/bin/osinara-entrypoint
 RUN chmod +x /usr/local/bin/osinara-entrypoint

@@ -129,6 +129,7 @@ describe("production container contract", () => {
     for (const volume of [
       "postgres-data",
       "memory-embedding-model-e5",
+      "google-workspace-credentials",
       "sandbox-data",
       "tool-environments",
       "workflow-data",
@@ -152,7 +153,9 @@ describe("production container contract", () => {
 
     expect(compose.match(/\/var\/run\/docker\.sock/g)).toHaveLength(2);
     expect(agent).not.toContain("/var/run/docker.sock");
+    expect(agent).toContain("google-workspace-credentials:/app/google-workspace-credentials");
     expect(runner).toContain("/var/run/docker.sock:/var/run/docker.sock");
+    expect(runner).toContain("google-workspace-credentials:/runner/google-workspace-credentials");
     expect(runner).toContain("      - sandbox-control");
     expect(runner).not.toContain("      - sandbox-egress");
     expect(compose).toContain(

@@ -113,7 +113,8 @@ failure is `ambiguous` and no automatic rollback is attempted. Operators inspect
 result code, logs, and timestamp, then approve a later version explicitly.
 
 Before every non-initial update the script verifies durable volumes and free space, writes and
-validates a logical PostgreSQL dump, stops application writers, archives `tool-environments`,
-`workflow-data`, and `workspace-data`, then validates each archive. Reconstructible embedding model
-and sandbox cache volumes are omitted. Candidate release files remain in a unique temporary
-directory and become `releases/vVERSION` only after health succeeds.
+validates a logical PostgreSQL dump, stops application writers, archives
+`google-workspace-credentials`, `tool-environments`, `workflow-data`, and `workspace-data`, then
+validates each archive. Reconstructible embedding model and sandbox cache volumes are omitted.
+Candidate release files remain in a unique temporary directory and become `releases/vVERSION` only
+after health succeeds.

@@ -5,6 +5,7 @@
  * - Agent compaction, delegation, session lifecycle, attachment, update, and timeout constants.
  * - Internal service locations and sandbox runner execution limits.
  * - Telegram group journal retention and model-context limits.
+ * - Cross-process advisory-lock namespaces for sensitive workspace state.
  * - `requireRuntimeEnvironment`: reads required environment-specific values.
  */
 import { z } from "zod";
@@ -12,6 +13,7 @@ import { z } from "zod";
 export const AGENT_COMPACTION_THRESHOLD = 0.75;
 export const AGENT_MAX_SUBAGENT_DEPTH = 0;
 export const GROQ_TRANSCRIPTION_TIMEOUT_MS = 60_000;
+export const GOOGLE_WORKSPACE_PROFILE_LOCK_HASH_SEED = 2;
 export const SANDBOX_RUNNER_BASE_URL = "http://sandbox-runner:8080";
 export const SESSION_INACTIVITY_DAYS = 30;
 export const SESSION_MAX_COMPLETED_TURNS = 250;

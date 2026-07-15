@@ -3,7 +3,7 @@
  *
  * Constructs:
  * - Exact authored tool-file allowlist after CRUD consolidation.
- * - Exact static package directories and dynamic skill modules.
+ * - Exact native skill package directories, with no TypeScript pseudo-skills.
  */
 import { readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -14,7 +14,6 @@ const AGENT_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 const EXPECTED_TOOL_FILES = [
   "export_memory.ts",
-  "google_workspace.ts",
   "group-tool-policy.ts",
   "inspect_workspace_image.ts",
   "list_family_members.ts",
@@ -24,6 +23,7 @@ const EXPECTED_TOOL_FILES = [
   "list_tasks.ts",
   "manage_behavior_preference.ts",
   "manage_family_invitation.ts",
+  "manage_google_workspace_connection.ts",
   "manage_memory.ts",
   "manage_reminder.ts",
   "manage_task.ts",
@@ -41,12 +41,30 @@ const EXPECTED_SKILL_DIRECTORIES = [
   "docx",
   "find-docs",
   "find-skills",
+  "gws-calendar",
+  "gws-calendar-agenda",
+  "gws-calendar-insert",
+  "gws-docs",
+  "gws-docs-write",
+  "gws-drive",
+  "gws-drive-upload",
+  "gws-gmail",
+  "gws-gmail-forward",
+  "gws-gmail-read",
+  "gws-gmail-reply",
+  "gws-gmail-reply-all",
+  "gws-gmail-send",
+  "gws-gmail-triage",
+  "gws-gmail-watch",
+  "gws-shared",
+  "gws-sheets",
+  "gws-sheets-append",
+  "gws-sheets-read",
   "pdf",
   "skill-creator",
+  "t-invest",
   "xlsx",
 ] as const;
-
-const EXPECTED_DYNAMIC_SKILL_FILES = ["google-workspace.ts", "t-invest.ts"] as const;
 
 describe("agent capability surface", () => {
   it("exposes only the consolidated authored tool files", async () => {
@@ -59,7 +77,7 @@ describe("agent capability surface", () => {
     expect(toolFiles).toEqual([...EXPECTED_TOOL_FILES]);
   });
 
-  it("keeps the agreed static and scope-aware dynamic skills", async () => {
+  it("keeps skills as native Eve packages only", async () => {
     const entries = await readdir(`${AGENT_ROOT}/skills`, { withFileTypes: true });
     const skillDirectories = entries
       .filter((entry) => entry.isDirectory())
@@ -71,6 +89,16 @@ describe("agent capability surface", () => {
       .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
       .map((entry) => entry.name)
       .sort();
-    expect(skillFiles).toEqual([...EXPECTED_DYNAMIC_SKILL_FILES]);
+    expect(skillFiles).toEqual([]);
+  });
+
+  it("requires every native skill package to declare SKILL.md", async () => {
+    await Promise.all(
+      EXPECTED_SKILL_DIRECTORIES.map(async (skillName) => {
+        const files = await readdir(`${AGENT_ROOT}/skills/${skillName}`);
+
+        expect(files).toContain("SKILL.md");
+      }),
+    );
   });
 });
