@@ -48,8 +48,12 @@ describe("T-Invest skill package", () => {
 
   it("keeps secrets outside the skill package", async () => {
     const skill = await readSkill();
+    const cli = await readFile(cliFile, "utf8");
 
     expect(skill).toContain("~/.config/tinvest/.env");
     expect(skill).toContain("Токены НЕ хранятся в папке скилла");
+    expect(skill).not.toContain("install.sh");
+    expect(cli).not.toContain("updateAvailable");
+    expect(cli).not.toContain("raw.githubusercontent.com/nyxandro/t-invest-skill");
   });
 });

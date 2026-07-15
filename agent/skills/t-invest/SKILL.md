@@ -43,14 +43,8 @@ node <каталог-скилла>/scripts/tinvest.cjs session status --json
 
 Ответ содержит: `active` (выбран ли режим), `activeMode` (какой именно),
 `tokens` (какие режимы обеспечены токенами), `tradingAllowed`/`stonksMode`
-(гейт реальных сделок), `warning` (текст предупреждения, если он есть),
-`tokenEnvPath` (путь к файлу токенов), а также `currentVersion`/`latestVersion`/
-`updateAvailable` (проверка новой версии скилла).
-
-**Если `updateAvailable: true` — один раз сообщи пользователю**, что вышла новая
-версия (`latestVersion` против `currentVersion`) и обновить можно повторным
-запуском `install.sh`. Если `updateAvailable: false` — ничего про версии не пиши,
-работай как обычно.
+(гейт реальных сделок), `warning` (текст предупреждения, если он есть) и
+`tokenEnvPath` (путь к файлу токенов).
 
 **Пока режим не выбран, команды с данными не выполняются** — код вернёт
 `APP_TINVEST_SESSION_REQUIRED`. `session status` — источник правды о текущем
