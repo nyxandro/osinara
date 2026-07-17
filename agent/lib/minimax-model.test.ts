@@ -8,7 +8,7 @@
  * - Multiple reasoning history parts serialize one complete MiniMax details envelope.
  * - Inline reasoning is normalized into reasoning parts without leaking into visible text.
  * - Redundant closing tags after structured reasoning are suppressed as provider separators.
- * - Malformed inline reasoning still fails closed instead of exposing internal content.
+ * - Inline reasoning bias stays hidden; only unrecoverable empty/truncated output fails.
  */
 import { describe, expect, it } from "vitest";
 import type {
@@ -326,7 +326,72 @@ describe("createMiniMaxCliProxyModel", () => {
     expect(text).toBe("Готовый ответ");
   });
 
-  it("fails closed when inline reasoning is not terminated", async () => {
+  it("recovers unterminated trailing reasoning when the provider stopped cleanly", async () => {
+    const model = createMiniMaxCliProxyModel({
+      apiKey: "proxy-key",
+      baseURL: "http://cli-proxy-api:8317/v1",
+      fetch: async () => jsonResponse(completion({
+        content: "Готовый ответ.<think>Скрытое рассуждение",
+        role: "assistant",
+      }, "stop")),
+      modelId: "MiniMax-M3",
+    });
+
+    const result = await model.doGenerate({
+      prompt: userPrompt(),
+    } as LanguageModelV4CallOptions);
+
+    expect(result.content).toEqual([
+      { text: "Готовый ответ.", type: "text" },
+      { text: "Скрытое рассуждение", type: "reasoning" },
+    ]);
+  });
+
+  it("keeps attribute and nested reasoning tags out of visible generated text", async () => {
+    const model = createMiniMaxCliProxyModel({
+      apiKey: "proxy-key",
+      baseURL: "http://cli-proxy-api:8317/v1",
+      fetch: async () => jsonResponse(completion({
+        content: "Ответ <think budget=\"high\">outer <think>inner</think> tail</think>Финал",
+        role: "assistant",
+      }, "stop")),
+      modelId: "MiniMax-M3",
+    });
+
+    const result = await model.doGenerate({
+      prompt: userPrompt(),
+    } as LanguageModelV4CallOptions);
+
+    const visibleText = result.content
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("");
+    const reasoningText = result.content
+      .filter((part) => part.type === "reasoning")
+      .map((part) => part.text)
+      .join("");
+
+    expect(visibleText).toBe("Ответ Финал");
+    expect(reasoningText).toBe("outer inner tail");
+  });
+
+  it("fails when unterminated inline reasoning is truncated", async () => {
+    const model = createMiniMaxCliProxyModel({
+      apiKey: "proxy-key",
+      baseURL: "http://cli-proxy-api:8317/v1",
+      fetch: async () => jsonResponse(completion({
+        content: "Готовый ответ.<think>Скрытое рассуждение",
+        role: "assistant",
+      }, "length")),
+      modelId: "MiniMax-M3",
+    });
+
+    await expect(
+      model.doGenerate({ prompt: userPrompt() } as LanguageModelV4CallOptions),
+    ).rejects.toThrow("AGENT_MINIMAX_REASONING_TRUNCATED");
+  });
+
+  it("fails when normalized generated output has no visible text or tool calls", async () => {
     const model = createMiniMaxCliProxyModel({
       apiKey: "proxy-key",
       baseURL: "http://cli-proxy-api:8317/v1",
@@ -339,6 +404,52 @@ describe("createMiniMaxCliProxyModel", () => {
 
     await expect(
       model.doGenerate({ prompt: userPrompt() } as LanguageModelV4CallOptions),
-    ).rejects.toThrow("AGENT_MINIMAX_REASONING_CONTRACT_VIOLATION");
+    ).rejects.toThrow("AGENT_MINIMAX_EMPTY_VISIBLE_ANSWER");
+  });
+
+  it("streams visible text when trailing reasoning is unterminated but complete", async () => {
+    const eventStream = [
+      `data: ${JSON.stringify({ choices: [{ delta: {
+        content: "Готовый ответ.<think>Скрытое рассуждение",
+      }, finish_reason: "stop", index: 0 }] })}\n\n`,
+      "data: [DONE]\n\n",
+    ].join("");
+    const model = createMiniMaxCliProxyModel({
+      apiKey: "proxy-key",
+      baseURL: "http://cli-proxy-api:8317/v1",
+      fetch: async () => new Response(eventStream, {
+        headers: { "content-type": "text/event-stream" },
+        status: 200,
+      }),
+      modelId: "MiniMax-M3",
+    });
+
+    const result = streamText({ model, prompt: "Подготовь документ" });
+    const [reasoningText, text] = await Promise.all([result.reasoningText, result.text]);
+
+    expect(reasoningText).toBe("Скрытое рассуждение");
+    expect(text).toBe("Готовый ответ.");
+  });
+
+  it("fails streamed truncated reasoning instead of delivering a partial answer", async () => {
+    const eventStream = [
+      `data: ${JSON.stringify({ choices: [{ delta: {
+        content: "Готовый ответ.<think>Скрытое рассуждение",
+      }, finish_reason: "length", index: 0 }] })}\n\n`,
+      "data: [DONE]\n\n",
+    ].join("");
+    const model = createMiniMaxCliProxyModel({
+      apiKey: "proxy-key",
+      baseURL: "http://cli-proxy-api:8317/v1",
+      fetch: async () => new Response(eventStream, {
+        headers: { "content-type": "text/event-stream" },
+        status: 200,
+      }),
+      modelId: "MiniMax-M3",
+    });
+
+    await expect(
+      streamText({ model, prompt: "Подготовь документ" }).text,
+    ).rejects.toThrow("AGENT_MINIMAX_REASONING_TRUNCATED");
   });
 });

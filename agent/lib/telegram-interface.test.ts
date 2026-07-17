@@ -178,4 +178,23 @@ describe("Telegram interface localization", () => {
     expect(turnMessage).toContain("Код: AGENT_REMINDER_INPUT_INVALID");
   });
 
+  it("keeps generic model failures from exposing internals", () => {
+    const turnMessage = formatTelegramTurnFailure({
+      code: "MODEL_CALL_FAILED",
+      details: {
+        errorId: "8c4eebf2-a386-4dcb-913d-4b5a28edee2f",
+        raw: "<think>secret reasoning</think>",
+      },
+      message:
+        "AGENT_MINIMAX_REASONING_CONTRACT_VIOLATION: Модель вернула внутреннее рассуждение в тексте ответа",
+    });
+
+    expect(turnMessage).toContain("Не удалось выполнить запрос");
+    expect(turnMessage).toContain("Код: MODEL_CALL_FAILED");
+    expect(turnMessage).toContain("Номер ошибки: 8c4eebf2-a386-4dcb-913d-4b5a28edee2f");
+    expect(turnMessage).not.toContain("AGENT_MINIMAX");
+    expect(turnMessage).not.toContain("<think>");
+    expect(turnMessage).not.toContain("secret reasoning");
+  });
+
 });
