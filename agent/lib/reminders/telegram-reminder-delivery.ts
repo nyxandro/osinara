@@ -2,11 +2,13 @@
  * Trusted proactive Telegram reminder delivery.
  *
  * Export:
- * - `deliverTelegramReminder`: sends deterministic reminder text without exposing it to a model.
+ * - `deliverTelegramReminder`: sends deterministic text and returns its durable delivery receipt.
  */
 import { sendTelegramMessage } from "eve/channels/telegram";
 
 import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../../config.js";
+import { AppError } from "../app-error.js";
+import type { ProactiveDeliveryReceipt } from "../proactive-deliveries/proactive-delivery-repository.js";
 import type { ClaimedReminder } from "./reminder-dispatch-repository.js";
 
 function requireBotToken(): string {
@@ -38,7 +40,7 @@ function formatScheduledTime(job: ClaimedReminder): string {
   }).format(new Date(job.dueAt));
 }
 
-export async function deliverTelegramReminder(job: ClaimedReminder): Promise<void> {
+export async function deliverTelegramReminder(job: ClaimedReminder): Promise<ProactiveDeliveryReceipt> {
   const delayedNotice = job.delayed
     ? `Доставлено с задержкой. Изначальное время: ${formatScheduledTime(job)} (${job.timezone}).`
     : null;
@@ -48,7 +50,7 @@ export async function deliverTelegramReminder(job: ClaimedReminder): Promise<voi
 
   // Telegram has no idempotency key; the durable marker is written before this boundary call.
   try {
-    await sendTelegramMessage({
+    const sent = await sendTelegramMessage({
       body: {
         ...(job.messageThreadId === null
           ? {}
@@ -59,6 +61,13 @@ export async function deliverTelegramReminder(job: ClaimedReminder): Promise<voi
       credentials: { botToken: requireBotToken() },
       fetch: fetchWithTimeout,
     });
+    if (!/^[1-9]\d*$/u.test(sent.id)) {
+      throw new AppError(
+        "AGENT_REMINDER_TELEGRAM_DELIVERY_AMBIGUOUS",
+        "Telegram принял напоминание, но не подтвердил идентификатор сообщения",
+      );
+    }
+    return { messageId: sent.id, text };
   } catch (error) {
     console.error(JSON.stringify({
       code: "AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED",

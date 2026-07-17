@@ -27,6 +27,37 @@ import {
 import { createTelegramMessageHandler } from "./telegram-on-message.js";
 
 describe("createTelegramMessageHandler", () => {
+  it("adds unseen proactive deliveries and carries their cursor into trusted auth", async () => {
+    const repository = repositories();
+    repository.telegram.findIdentity.mockResolvedValue({
+      familyId: "family-1",
+      role: "owner",
+      userId: "user-1",
+    });
+    repository.proactiveDeliveries.listPendingContext.mockResolvedValue({
+      context: "<recent_proactive_deliveries>digest</recent_proactive_deliveries>",
+      cursor: "42",
+    });
+    const handler = createTelegramMessageHandler(repository);
+
+    const result = await handler(telegramContext().context, privateMessage("Что было в сводке?"));
+
+    expect(repository.proactiveDeliveries.listPendingContext).toHaveBeenCalledWith({
+      applicationSessionId: "session-1",
+      familyId: "family-1",
+      groupId: null,
+      messageThreadId: null,
+      now: expect.any(Date),
+      ownerUserId: "user-1",
+      scope: "personal",
+      telegramChatId: "telegram-101",
+    });
+    expect(result?.context).toContain(
+      "<recent_proactive_deliveries>digest</recent_proactive_deliveries>",
+    );
+    expect(result?.auth?.attributes).toMatchObject({ proactiveDeliveryCursor: "42" });
+  });
+
   it("terminates a successful bootstrap message before model dispatch", async () => {
     const repository = repositories();
     repository.telegram.hasOwner.mockResolvedValue(false);

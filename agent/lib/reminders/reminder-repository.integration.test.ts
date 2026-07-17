@@ -177,7 +177,11 @@ describeWithDatabase("reminder repositories", () => {
     expect(claimed).toMatchObject({ delayed: true, id: reminder.id, telegramChatId: "reminder-member" });
 
     await reminderDispatchRepository.markDispatchStarted(claimed!.id, claimed!.leaseToken);
-    await reminderDispatchRepository.complete(claimed!, new Date("2026-07-13T04:00:01.000Z"));
+    await reminderDispatchRepository.complete(
+      claimed!,
+      new Date("2026-07-13T04:00:01.000Z"),
+      { messageId: "601", text: "Напоминание:\n\nПроверить дверь" },
+    );
     await expect(reminderRepository.list(auth)).resolves.toEqual([
       expect.objectContaining({ id: reminder.id, status: "completed" }),
     ]);
@@ -205,7 +209,11 @@ describeWithDatabase("reminder repositories", () => {
       now: new Date("2026-03-28T08:00:00.000Z"),
     });
     await reminderDispatchRepository.markDispatchStarted(claimed!.id, claimed!.leaseToken);
-    await reminderDispatchRepository.complete(claimed!, new Date("2026-03-28T08:01:00.000Z"));
+    await reminderDispatchRepository.complete(
+      claimed!,
+      new Date("2026-03-28T08:01:00.000Z"),
+      { messageId: "602", text: "Напоминание:\n\nУтреннее лекарство" },
+    );
 
     const [stored] = await reminderRepository.list(auth);
     expect(stored).toMatchObject({ id: reminder.id, nextRunAt: "2026-03-29T07:00:00.000Z", status: "active" });

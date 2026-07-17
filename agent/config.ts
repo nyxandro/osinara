@@ -4,7 +4,7 @@
  * Exports:
  * - Agent compaction, delegation, session lifecycle, attachment, update, and timeout constants.
  * - Internal service locations and sandbox runner execution limits.
- * - Telegram group journal retention and model-context limits.
+ * - Telegram group journal and proactive delivery model-context limits.
  * - Cross-process advisory-lock namespaces for sensitive workspace state.
  * - `requireRuntimeEnvironment`: reads required environment-specific values.
  */
@@ -19,6 +19,10 @@ export const SESSION_INACTIVITY_DAYS = 30;
 export const SESSION_MAX_COMPLETED_TURNS = 250;
 export const SESSION_RETENTION_LEASE_MS = 15 * 60 * 1_000;
 export const SESSION_RETENTION_DAYS = 90;
+export const PROACTIVE_DELIVERY_CONTEXT_MAX_AGE_DAYS = 30;
+export const PROACTIVE_DELIVERY_CONTEXT_MAX_CHARACTERS = 12_000;
+export const PROACTIVE_DELIVERY_CONTEXT_MAX_ITEMS = 10;
+export const PROACTIVE_DELIVERY_HISTORY_MAX_ITEMS = 10;
 export const SOFTWARE_UPDATE_GITHUB_RESPONSE_MAX_BYTES = 1024 * 1024;
 export const SOFTWARE_UPDATE_HTTP_TIMEOUT_MS = 15_000;
 export const SOFTWARE_UPDATE_MANIFEST_MAX_BYTES = 64 * 1024;

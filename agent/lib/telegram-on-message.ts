@@ -29,6 +29,10 @@ import { evaluateConversationAccess } from "./family-access.js";
 import { familyRepository, type FamilyRepository } from "./family-repository.js";
 import { parseInvitationStartCommand } from "./invitation-code.js";
 import {
+  proactiveDeliveryRepository,
+  type ProactiveDeliveryAuthorization,
+} from "./proactive-deliveries/proactive-delivery-repository.js";
+import {
   sessionRepository,
   type PrepareSessionInput,
 } from "./sessions/session-repository.js";
@@ -65,6 +69,7 @@ interface TelegramMessageRepositories {
   family: Pick<FamilyRepository, "claimInvitation">;
   hitl: Pick<TelegramHitlApprovalRepository, "authorizeReply">;
   journal: TelegramGroupJournalRepository;
+  proactiveDeliveries: Pick<typeof proactiveDeliveryRepository, "listPendingContext">;
   session: Pick<typeof sessionRepository, "hasRoute" | "prepareTurn">;
   telegram: TelegramRepository;
 }
@@ -135,6 +140,24 @@ function sessionScope(access: ReturnType<typeof evaluateConversationAccess> & { 
       ? { groupId: resolved.groupId, scope: "group", userId: null }
       : { groupId: resolved.groupId, scope: "family", userId: null };
   return input;
+}
+
+function proactiveDeliveryAuthorization(
+  access: ReturnType<typeof evaluateConversationAccess> & { allowed: true },
+  message: TelegramMessage,
+): ProactiveDeliveryAuthorization | null {
+  const scope = sessionScope(access);
+  if (scope.scope === "group") return null;
+  return {
+    familyId: access.access.familyId,
+    groupId: scope.groupId,
+    messageThreadId: message.messageThreadId === undefined
+      ? null
+      : String(message.messageThreadId),
+    ownerUserId: scope.userId,
+    scope: scope.scope,
+    telegramChatId: message.chat.id,
+  };
 }
 
 function profileName(message: TelegramMessage): string {
@@ -290,12 +313,21 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
         throw error;
       }
     }
+    const resolvedSessionScope = sessionScope(decision);
     const appSession = await repositories.session.prepareTurn({
       baseContinuationToken: baseContinuationToken(message),
       familyId: access.familyId,
       now: new Date(),
-      ...sessionScope(decision),
+      ...resolvedSessionScope,
     });
+    const deliveryAuthorization = proactiveDeliveryAuthorization(decision, message);
+    const pendingDeliveries = deliveryAuthorization
+      ? await repositories.proactiveDeliveries.listPendingContext({
+        ...deliveryAuthorization,
+        applicationSessionId: appSession.id,
+        now: new Date(),
+      })
+      : null;
     const principalId = access.userId ?? `telegram:${sender.id}`;
     const context = [
       `Verified conversation scope: ${access.memoryScopes.join(", ")}.`,
@@ -303,6 +335,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       "Verified Telegram delivery: reply in concise Rich Markdown; the channel safely supports Markdown tables and approved text-rich structure.",
     ];
     if (storedAttachments.length > 0) context.push(formatStoredAttachments(storedAttachments));
+    if (pendingDeliveries) context.push(pendingDeliveries.context);
 
     // Only an authorized addressed turn receives previous messages from its exact forum topic.
     if (group && journalEnabled) {
@@ -328,6 +361,9 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
           memoryScopes: access.memoryScopes,
           role: access.role,
           sandboxSessionId: appSession.sandboxSessionId,
+          ...(pendingDeliveries
+            ? { proactiveDeliveryCursor: pendingDeliveries.cursor }
+            : {}),
           telegramChatId: message.chat.id,
           telegramChatType: message.chat.type,
           telegramMessageId: message.messageId,
@@ -362,6 +398,7 @@ export const handleTelegramMessage = createTelegramMessageHandler({
   family: familyRepository,
   hitl: telegramHitlApprovalRepository,
   journal: telegramGroupJournalRepository,
+  proactiveDeliveries: proactiveDeliveryRepository,
   session: sessionRepository,
   telegram: telegramRepository,
 });

@@ -10,6 +10,10 @@ import type { PoolClient } from "pg";
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
 import {
+  type ProactiveDeliveryReceipt,
+  recordProactiveDelivery,
+} from "../proactive-deliveries/proactive-delivery-repository.js";
+import {
   REMINDER_DISPATCH_LATE_AFTER_MILLISECONDS,
   REMINDER_DISPATCH_MAX_SAFE_ATTEMPTS,
   REMINDER_RECURRENCE_MAX_SKIPPED_OCCURRENCES,
@@ -20,9 +24,12 @@ export interface ClaimedReminder {
   content: string;
   delayed: boolean;
   dueAt: string;
+  familyId: string;
+  groupId: string | null;
   id: string;
   leaseToken: string;
   messageThreadId: string | null;
+  ownerUserId: string | null;
   scope: ReminderScope;
   telegramChatId: string;
   timezone: string;
@@ -38,9 +45,12 @@ interface ClaimedRow {
   content: string;
   delayed: boolean;
   due_at: Date;
+  family_id: string;
+  group_id: string | null;
   id: string;
   lease_token: string;
   message_thread_id: string | null;
+  owner_user_id: string | null;
   scope: ReminderScope;
   telegram_chat_id: string;
   timezone: string;
@@ -188,7 +198,8 @@ export const reminderDispatchRepository = {
              dispatch_started_at = NULL, updated_at = $1
          FROM candidates
          WHERE reminder.id = candidates.id
-         RETURNING reminder.id, reminder.content, reminder.scope, reminder.timezone, reminder.telegram_chat_id,
+         RETURNING reminder.id, reminder.family_id, reminder.owner_user_id, reminder.group_id,
+                   reminder.content, reminder.scope, reminder.timezone, reminder.telegram_chat_id,
                    reminder.message_thread_id::text, reminder.due_at, reminder.lease_token::text,
                    (reminder.delayed_by_quiet_hours OR reminder.due_at < $1 - ($5::text || ' milliseconds')::interval) AS delayed`,
         [
@@ -204,9 +215,12 @@ export const reminderDispatchRepository = {
         content: row.content,
         delayed: row.delayed,
         dueAt: row.due_at.toISOString(),
+        familyId: row.family_id,
+        groupId: row.group_id,
         id: row.id,
         leaseToken: row.lease_token,
         messageThreadId: row.message_thread_id,
+        ownerUserId: row.owner_user_id,
         scope: row.scope,
         telegramChatId: row.telegram_chat_id,
         timezone: row.timezone,
@@ -234,7 +248,11 @@ export const reminderDispatchRepository = {
     }
   },
 
-  async complete(job: ClaimedReminder, completedAt: Date): Promise<void> {
+  async complete(
+    job: ClaimedReminder,
+    completedAt: Date,
+    receipt: ProactiveDeliveryReceipt,
+  ): Promise<void> {
     const client = await database().connect();
     try {
       await client.query("BEGIN");
@@ -252,6 +270,23 @@ export const reminderDispatchRepository = {
       if (!current) {
         throw new AppError("AGENT_REMINDER_LEASE_STALE", "Доставка напоминания уже неактуальна");
       }
+
+      // The journal row and reminder state commit together after Telegram confirms the message id.
+      await recordProactiveDelivery(client, {
+        content: receipt.text,
+        deliveredAt: completedAt,
+        familyId: job.familyId,
+        groupId: job.groupId,
+        messageThreadId: job.messageThreadId,
+        ownerUserId: job.ownerUserId,
+        scheduledFor: new Date(job.dueAt),
+        scope: job.scope,
+        sourceId: job.id,
+        sourceKind: "reminder",
+        telegramChatId: job.telegramChatId,
+        telegramMessageId: receipt.messageId,
+        title: null,
+      });
 
       if (current.recurrence_unit === null) {
         await client.query(

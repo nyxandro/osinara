@@ -6,6 +6,7 @@
  * - `dispatchDueReminders`: production dispatcher used by the Eve minute schedule.
  */
 import { isAppError } from "../app-error.js";
+import type { ProactiveDeliveryReceipt } from "../proactive-deliveries/proactive-delivery-repository.js";
 import {
   REMINDER_DISPATCH_BATCH_SIZE,
   REMINDER_DISPATCH_LEASE_MILLISECONDS,
@@ -22,13 +23,17 @@ interface ReminderDispatcherRepository {
     limit: number;
     now: Date;
   }): Promise<ClaimedReminder[]>;
-  complete(job: ClaimedReminder, completedAt: Date): Promise<void>;
+  complete(
+    job: ClaimedReminder,
+    completedAt: Date,
+    receipt: ProactiveDeliveryReceipt,
+  ): Promise<void>;
   fail(job: ClaimedReminder, errorCode: string): Promise<void>;
   markDispatchStarted(id: string, leaseToken: string): Promise<void>;
 }
 
 interface ReminderDispatcherDependencies {
-  deliver(job: ClaimedReminder): Promise<void>;
+  deliver(job: ClaimedReminder): Promise<ProactiveDeliveryReceipt>;
   repository: ReminderDispatcherRepository;
 }
 
@@ -44,8 +49,8 @@ export function createReminderDispatcher(dependencies: ReminderDispatcherDepende
     for (const job of jobs) {
       try {
         await dependencies.repository.markDispatchStarted(job.id, job.leaseToken);
-        await dependencies.deliver(job);
-        await dependencies.repository.complete(job, new Date());
+        const receipt = await dependencies.deliver(job);
+        await dependencies.repository.complete(job, new Date(), receipt);
       } catch (error) {
         if (isAppError(error) && error.code === "AGENT_REMINDER_LEASE_STALE") {
           console.error(JSON.stringify({
@@ -55,7 +60,10 @@ export function createReminderDispatcher(dependencies: ReminderDispatcherDepende
           }));
           continue;
         }
-        await dependencies.repository.fail(job, "AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED");
+        const errorCode = isAppError(error)
+          ? error.code
+          : "AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED";
+        await dependencies.repository.fail(job, errorCode);
       }
     }
     return jobs.length;

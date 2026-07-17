@@ -68,6 +68,8 @@ describe("agent schedule dispatcher", () => {
         attributes: expect.objectContaining({
           applicationSessionId: "app-session-1",
           memoryScopes: ["personal", "family"],
+          scheduleScheduledFor: "2026-07-17T06:00:00.000Z",
+          scheduleTitle: "Новости ИИ",
           scheduledRunId: "run-1",
         }),
         authenticator: "telegram",

@@ -19,6 +19,7 @@ const EXPECTED_TOOL_FILES = [
   "list_agent_schedules.ts",
   "list_memories.ts",
   "list_pending_family_invitations.ts",
+  "list_proactive_deliveries.ts",
   "list_reminders.ts",
   "manage_agent_schedule.ts",
   "manage_behavior_preference.ts",
