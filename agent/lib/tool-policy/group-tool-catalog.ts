@@ -34,6 +34,7 @@ export const CONTROLLED_TOOL_NAMES = [
   "list_agent_schedules",
   "list_memories",
   "list_pending_family_invitations",
+  "list_proactive_deliveries",
   "list_reminders",
   "manage_behavior_preference",
   "manage_agent_schedule",

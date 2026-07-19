@@ -11,12 +11,15 @@ import type { ClaimedReminder } from "./reminder-dispatch-repository.js";
 import { createReminderDispatcher } from "./reminder-dispatcher.js";
 
 const job: ClaimedReminder = {
+  familyId: "00000000-0000-4000-8000-000000000010",
   content: "Позвонить врачу",
   delayed: false,
   dueAt: "2026-07-13T06:00:00.000Z",
   id: "00000000-0000-4000-8000-000000000001",
   leaseToken: "00000000-0000-4000-8000-000000000002",
   messageThreadId: null,
+  groupId: null,
+  ownerUserId: "00000000-0000-4000-8000-000000000011",
   scope: "personal",
   telegramChatId: "101",
   timezone: "Europe/Moscow",
@@ -31,11 +34,16 @@ describe("reminder dispatcher", () => {
       fail: vi.fn(),
       markDispatchStarted: vi.fn().mockImplementation(async () => { order.push("mark"); }),
     };
-    const deliver = vi.fn().mockImplementation(async () => { order.push("deliver"); });
+    const receipt = { messageId: "55", text: "Напоминание:\n\nПозвонить врачу" };
+    const deliver = vi.fn().mockImplementation(async () => {
+      order.push("deliver");
+      return receipt;
+    });
     const dispatch = createReminderDispatcher({ deliver, repository });
 
     await expect(dispatch(new Date("2026-07-13T06:00:00.000Z"))).resolves.toBe(1);
     expect(order).toEqual(["mark", "deliver", "complete"]);
+    expect(repository.complete).toHaveBeenCalledWith(job, expect.any(Date), receipt);
     expect(repository.fail).not.toHaveBeenCalled();
   });
 

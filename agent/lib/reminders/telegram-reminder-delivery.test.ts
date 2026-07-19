@@ -11,12 +11,15 @@ import type { ClaimedReminder } from "./reminder-dispatch-repository.js";
 import { deliverTelegramReminder } from "./telegram-reminder-delivery.js";
 
 const delayedJob: ClaimedReminder = {
+  familyId: "00000000-0000-4000-8000-000000000010",
   content: "Собрать документы",
   delayed: true,
   dueAt: "2026-07-13T06:00:00.000Z",
   id: "00000000-0000-4000-8000-000000000001",
   leaseToken: "00000000-0000-4000-8000-000000000002",
   messageThreadId: "77",
+  groupId: "00000000-0000-4000-8000-000000000012",
+  ownerUserId: null,
   scope: "family",
   telegramChatId: "-1001",
   timezone: "Europe/Moscow",
@@ -33,7 +36,19 @@ describe("deliverTelegramReminder", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(deliverTelegramReminder(delayedJob)).resolves.toBeUndefined();
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      ok: true,
+      result: { chat: { id: -1001, type: "supergroup" }, message_id: 55 },
+    }), { status: 200 }));
+
+    await expect(deliverTelegramReminder(delayedJob)).resolves.toEqual({
+      messageId: "55",
+      text: [
+        "Напоминание:",
+        "Собрать документы",
+        "Доставлено с задержкой. Изначальное время: 13 июл. 2026 г., 09:00 (Europe/Moscow).",
+      ].join("\n\n"),
+    });
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
     expect(JSON.parse(String(request?.body))).toEqual({
       chat_id: "-1001",

@@ -31,7 +31,11 @@ import { telegramHitlApprovalRepository } from "../lib/telegram-hitl/approval-re
 import { handleTelegramSessionFailure } from "../lib/telegram-session-failure.js";
 import { telegramTurnReplyParameters } from "../lib/telegram-reply.js";
 import { agentScheduleDispatchRepository } from "../lib/agent-schedules/agent-schedule-dispatch-repository.js";
-import { isScheduledSession } from "../lib/agent-schedules/scheduled-session.js";
+import {
+  isScheduledSession,
+  scheduledDeliveryMetadata,
+} from "../lib/agent-schedules/scheduled-session.js";
+import { proactiveDeliveryRepository } from "../lib/proactive-deliveries/proactive-delivery-repository.js";
 
 export default telegramChannel({
   botUsername: process.env.TELEGRAM_BOT_USERNAME as string,
@@ -48,12 +52,36 @@ export default telegramChannel({
       if (!message) return;
       const sessionId = applicationSessionId(ctx);
       if (!await sessionRepository.isCurrentEveSession(sessionId, ctx.session.id)) return;
-      await postTelegramRichMessage(
+      const sentMessages = await postTelegramRichMessage(
         message,
         channel.telegram,
         channel.state,
         isScheduledSession(ctx) ? undefined : telegramTurnReplyParameters(channel.state, ctx),
       );
+      const scheduledDelivery = scheduledDeliveryMetadata(ctx);
+      if (scheduledDelivery) {
+        const firstMessage = sentMessages[0];
+        if (!firstMessage) {
+          throw new Error(
+            "AGENT_SCHEDULE_DELIVERY_CONFIRMATION_MISSING: Telegram не подтвердил доставку результата расписания",
+          );
+        }
+        await proactiveDeliveryRepository.record({
+          content: message,
+          deliveredAt: new Date(),
+          familyId: scheduledDelivery.familyId,
+          groupId: scheduledDelivery.groupId,
+          messageThreadId: scheduledDelivery.messageThreadId,
+          ownerUserId: scheduledDelivery.ownerUserId,
+          scheduledFor: new Date(scheduledDelivery.scheduledFor),
+          scope: scheduledDelivery.scope,
+          sourceId: scheduledDelivery.runId,
+          sourceKind: "agent_schedule",
+          telegramChatId: scheduledDelivery.telegramChatId,
+          telegramMessageId: firstMessage.messageId,
+          title: scheduledDelivery.title,
+        });
+      }
       if (!isScheduledSession(ctx)) await rekeyTelegramSession(channel, ctx);
     },
     async "session.failed"(data, channel) {
@@ -84,6 +112,13 @@ export default telegramChannel({
     async "turn.started"(_data, channel, ctx) {
       const sessionId = applicationSessionId(ctx);
       await sessionRepository.bindEveSession(sessionId, ctx.session.id);
+      const proactiveDeliveryCursor = ctx.session.auth.current?.attributes.proactiveDeliveryCursor;
+      if (typeof proactiveDeliveryCursor === "string") {
+        await proactiveDeliveryRepository.advanceSessionCursor(
+          sessionId,
+          proactiveDeliveryCursor,
+        );
+      }
       if (!isScheduledSession(ctx)) await startTelegramRichThinkingDraft(channel.telegram);
     },
     async "turn.completed"(_data, channel, ctx) {

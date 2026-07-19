@@ -4,6 +4,7 @@
  * Exports:
  * - `startTelegramRichThinkingDraft`: displays Telegram's native ephemeral thinking block.
  * - `postTelegramRichMessage`: persists completed rich output and records group anchors.
+ * - `SentTelegramMessage`: confirmed Telegram identity for each delivered rich chunk.
  *
  * Key constructs:
  * - One stable non-zero draft ID per private chat/topic across turns and model steps.
@@ -49,7 +50,7 @@ type TelegramApiBody = NonNullable<
   Parameters<typeof callTelegramApi>[0]["body"]
 >;
 
-interface SentTelegramMessage {
+export interface SentTelegramMessage {
   readonly chatType: TelegramChatType;
   readonly messageId: string;
 }
@@ -259,8 +260,9 @@ export async function postTelegramRichMessage(
   target: TelegramRichTarget,
   state?: TelegramRichAnchorState,
   replyParameters?: TelegramReplyParameters,
-): Promise<void> {
+): Promise<SentTelegramMessage[]> {
   const chunks = formatTelegramRichMessages(markdown);
+  const sentMessages: SentTelegramMessage[] = [];
   for (const [index, chunk] of chunks.entries()) {
     const response = await requestTelegramRichApi(
       "sendRichMessage",
@@ -272,6 +274,7 @@ export async function postTelegramRichMessage(
       ),
     );
     const sent = requireSentMessage(response);
+    sentMessages.push(sent);
 
     // Eve normally anchors groups inside `telegram.post`; raw rich delivery mirrors that contract.
     if (state) {
@@ -281,4 +284,5 @@ export async function postTelegramRichMessage(
       }
     }
   }
+  return sentMessages;
 }

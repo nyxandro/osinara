@@ -59,6 +59,9 @@ export function repositories() {
       listBefore: vi.fn().mockResolvedValue([]),
       record: vi.fn().mockResolvedValue("inserted"),
     },
+    proactiveDeliveries: {
+      listPendingContext: vi.fn().mockResolvedValue(null),
+    },
     session: {
       hasRoute: vi.fn().mockResolvedValue(false),
       prepareTurn: vi.fn().mockResolvedValue({

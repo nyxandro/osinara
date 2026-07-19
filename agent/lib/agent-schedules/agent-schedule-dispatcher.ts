@@ -89,6 +89,8 @@ function scheduledAuth(job: ClaimedAgentSchedule, prepared: PreparedSession) {
       role: job.role,
       sandboxSessionId: prepared.sandboxSessionId,
       scheduleId: job.id,
+      scheduleScheduledFor: job.nextRunAt,
+      scheduleTitle: job.title,
       scheduledRunId: job.runId,
       telegramChatId: job.telegramChatId,
       telegramChatType: job.telegramChatType,
