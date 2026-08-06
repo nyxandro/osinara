@@ -83,12 +83,13 @@ its own model ID and output limit; an unsupported route cannot construct a fake 
 Changing active model selection therefore requires a reviewed release and rolls back atomically
 with that image.
 
-The active `deepseek-v4-flash` route uses DeepSeek OpenAI Chat Completions with thinking explicitly
-enabled at `high` effort. The transport keeps `reasoning_content` separate from user-visible text
-and replays it after tool calls, as required by DeepSeek multi-round semantics. The application caps
-one response at 128,000 tokens even though the provider advertises a larger native maximum. DeepSeek
-does not accept image input, so `inspect_workspace_image` returns a stable unsupported-capability
-result before reading bytes or starting a paid model call.
+The active `opencode-go-deepseek-v4-flash` route uses the existing tailnet-only CPA over HTTPS
+with thinking explicitly enabled at `high` effort. CPA retains the OpenCode Go credential pool,
+rotation, and retry policy; the Osinara host receives only a dedicated downstream bearer key.
+The transport keeps `reasoning_content` separate from user-visible text and replays it after tool
+calls, as required by DeepSeek multi-round semantics. The application caps one response at 128,000
+tokens. DeepSeek does not accept image input, so `inspect_workspace_image` returns a stable
+unsupported-capability result before reading bytes or starting a paid model call.
 
 The retained MiniMax alternative transport explicitly enables a narrow web-search adapter because
 MiniMax returns

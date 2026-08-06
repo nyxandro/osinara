@@ -3,8 +3,8 @@
   "agent": {
     "transport": {
       "protocol": "openai-chat-completions",
-      "baseUrl": "https://api.deepseek.com",
-      "providerName": "deepseek",
+      "baseUrl": "https://cpa-vps-185.taila35a33.ts.net:8443/v1",
+      "providerName": "cpa",
       "thinking": {
         "type": "enabled",
         "effort": "high"
@@ -12,7 +12,7 @@
     },
     "models": {
       "primary": {
-        "id": "deepseek-v4-flash",
+        "id": "opencode-go-deepseek-v4-flash",
         "contextWindowTokens": 1000000,
         "maxOutputTokens": 128000
       },

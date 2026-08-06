@@ -19,7 +19,7 @@ describe("model registry", () => {
   it("selects the configured protocol-native text model", () => {
     expect(modelProviderConfig.agent.transport.protocol).toBe("openai-chat-completions");
     expect(primaryModel.modelId).toBe(modelProviderConfig.agent.models.primary.id);
-    expect(primaryModel.provider).toBe("deepseek.chat");
+    expect(primaryModel.provider).toBe("cpa.chat");
   });
 
   it("does not construct a model that cannot accept image input", () => {
