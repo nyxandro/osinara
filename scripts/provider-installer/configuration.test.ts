@@ -20,6 +20,7 @@ describe("provider installer configuration", () => {
     expect(MODEL_PROVIDER_OPTIONS.map(({ value }) => value)).toEqual([
       "deepseek",
       "minimax",
+      "neuraldeep",
       "opencode-go",
       "openrouter",
     ]);

@@ -15,7 +15,7 @@ import { MODEL_PROVIDER_MAX_OUTPUT_TOKENS } from "./model-provider-limits.js";
 import { getOpenCodeGoProtocol } from "./provider-catalog/opencode-go-models.js";
 
 const modelIdSchema = z.string().trim().min(1).max(200);
-const modelProviderIdSchema = z.enum(["deepseek", "minimax", "opencode-go", "openrouter"]);
+const modelProviderIdSchema = z.enum(["deepseek", "minimax", "neuraldeep", "opencode-go", "openrouter"]);
 const reasoningEffortSchema = z.enum(["max", "xhigh", "high", "medium", "low", "minimal"]);
 const maxOutputTokensSchema = z.number().int().positive().max(MODEL_PROVIDER_MAX_OUTPUT_TOKENS);
 const externalBaseUrlSchema = z.url().superRefine((value, context) => {
@@ -91,6 +91,7 @@ const modelProviderConfigSchema = z.object({
   const expectedBaseUrl = {
     deepseek: "https://api.deepseek.com",
     minimax: "https://api.minimax.io/anthropic/v1",
+    neuraldeep: "https://api.neuraldeep.ru/v1",
     "opencode-go": "https://opencode.ai/zen/go/v1",
     openrouter: "https://openrouter.ai/api/v1",
   }[config.provider];
@@ -115,6 +116,11 @@ const modelProviderConfigSchema = z.object({
   )) {
     context.addIssue({ code: "custom", message: "MiniMax transport mismatch", path: ["agent", "transport"] });
   }
+  if (config.provider === "neuraldeep" && (
+    transport.protocol !== "openai-chat-completions" ||
+    transport.providerName !== "neuraldeep" ||
+    transport.reasoning !== null
+  )) context.addIssue({ code: "custom", message: "NeuralDeep transport mismatch", path: ["agent", "transport"] });
   if (config.provider === "opencode-go") {
     const expectedProtocol = getOpenCodeGoProtocol(config.agent.models.primary.id);
     const anthropicMismatch = transport.protocol === "anthropic-messages" && (

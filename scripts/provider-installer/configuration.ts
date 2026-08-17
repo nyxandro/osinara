@@ -28,6 +28,7 @@ export const ADDRESS_MODE_OPTIONS: readonly PromptOption<AddressMode>[] = [
 export const MODEL_PROVIDER_OPTIONS: readonly PromptOption<ModelProvider>[] = [
   { label: "DeepSeek", value: "deepseek" },
   { label: "MiniMax", value: "minimax" },
+  { label: "NeuralDeep", value: "neuraldeep" },
   { label: "OpenCode Go", value: "opencode-go" },
   { label: "OpenRouter", value: "openrouter" },
 ];

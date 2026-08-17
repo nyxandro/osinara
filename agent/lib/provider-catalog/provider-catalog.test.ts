@@ -4,7 +4,7 @@
  * Constructs covered:
  * - `fetchProviderCatalog`: fetches provider model catalogs through an injected fetch.
  * - Provider authentication, endpoint selection, HTTP handling, and bounded timeout behavior.
- * - DeepSeek and MiniMax OpenAI-list parsing without fabricated capability metadata.
+ * - DeepSeek, MiniMax, and NeuralDeep parsing without fabricated live availability.
  * - Models.dev enrichment, strict live-ID intersection, and installer-ready model filtering.
  * - OpenCode Go's maintained protocol allowlist and exclusion of unknown or unsupported IDs.
  * - Stable `AppError` codes for invalid input and malformed provider responses.
@@ -36,7 +36,7 @@ function createCatalogFetch(responses: Record<string, Response>): ProviderCatalo
 }
 
 describe("fetchProviderCatalog", () => {
-  it.each(["deepseek", "minimax"] as const)(
+  it.each(["deepseek", "minimax", "neuraldeep"] as const)(
     "requires authentication before fetching the %s catalog",
     async (providerId) => {
       const fetch = createFetch(jsonResponse({ object: "list", data: [] }));
@@ -49,6 +49,43 @@ describe("fetchProviderCatalog", () => {
       expect(fetch).not.toHaveBeenCalled();
     },
   );
+
+  it("returns the documented NeuralDeep qwen3.8 model only when it is live", async () => {
+    const fetch = createCatalogFetch({
+      "https://api.neuraldeep.ru/v1/models": jsonResponse({
+        object: "list",
+        data: [
+          { id: "qwen3.8-27b", object: "model", owned_by: "neuraldeep" },
+          { id: "embedding-only", object: "model", owned_by: "neuraldeep" },
+        ],
+      }),
+    });
+
+    const models = await fetchProviderCatalog({
+      apiKey: "neuraldeep-secret",
+      fetch,
+      providerId: "neuraldeep",
+      timeoutMs: REQUEST_TIMEOUT_MS,
+    });
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledWith("https://api.neuraldeep.ru/v1/models", {
+      headers: { authorization: "Bearer neuraldeep-secret" },
+      method: "GET",
+      signal: expect.any(AbortSignal),
+    });
+    expect(models).toEqual<ProviderCatalogModel[]>([{
+      contextWindowTokens: 262_144,
+      defaultReasoningOption: null,
+      displayName: "Qwen 3.8 27B",
+      id: "qwen3.8-27b",
+      maxOutputTokens: 16_384,
+      protocol: "openai-chat-completions",
+      reasoningOptions: [],
+      supportsImageInput: true,
+      supportsTools: true,
+    }]);
+  });
 
   it("rejects a blank required API key before fetching", async () => {
     const fetch = createFetch(jsonResponse({ object: "list", data: [] }));

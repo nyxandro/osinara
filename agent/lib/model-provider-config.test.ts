@@ -39,6 +39,31 @@ const validConfig = {
 } as const;
 
 describe("parseModelProviderConfig", () => {
+  it("accepts only the fixed NeuralDeep OpenAI-compatible transport", () => {
+    const neuraldeep = {
+      ...validConfig,
+      agent: {
+        ...validConfig.agent,
+        transport: {
+          baseUrl: "https://api.neuraldeep.ru/v1",
+          protocol: "openai-chat-completions",
+          providerName: "neuraldeep",
+          reasoning: null,
+        },
+      },
+      provider: "neuraldeep",
+    } as const;
+
+    expect(parseModelProviderConfig(neuraldeep)).toEqual(neuraldeep);
+    expect(() => parseModelProviderConfig({
+      ...neuraldeep,
+      agent: {
+        ...neuraldeep.agent,
+        transport: { ...neuraldeep.agent.transport, providerName: "openrouter" },
+      },
+    })).toThrow("AGENT_MODEL_PROVIDER_CONFIG_INVALID");
+  });
+
   it("loads the same active schema that production mounts for the agent", async () => {
     const active = JSON.parse(await readFile("config/agent-model-providers.json", "utf8"));
 

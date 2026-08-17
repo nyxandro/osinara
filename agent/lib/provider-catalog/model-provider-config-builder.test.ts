@@ -37,6 +37,17 @@ describe("buildModelProviderConfig", () => {
   it.each([
     {
       expected: {
+        baseUrl: "https://api.neuraldeep.ru/v1",
+        protocol: "openai-chat-completions",
+        providerName: "neuraldeep",
+        reasoning: null,
+      },
+      model: catalogModel({ reasoningOptions: [] }),
+      providerId: "neuraldeep",
+      reasoning: null,
+    },
+    {
+      expected: {
         baseUrl: "https://api.deepseek.com",
         protocol: "openai-chat-completions",
         providerName: "deepseek",
@@ -102,7 +113,7 @@ describe("buildModelProviderConfig", () => {
     expected: object;
     model: ProviderCatalogModel;
     providerId: ProviderId;
-    reasoning: ReasoningSelection;
+    reasoning: ReasoningSelection | null;
   }>)("builds the exact $providerId transport", ({ expected, model, providerId, reasoning }) => {
     const config = buildModelProviderConfig(providerId, model, reasoning, false);
 

@@ -15,6 +15,7 @@ import { enrichModelsFromModelsDev } from "./models-dev-parser.js";
 import { parseOpenAiModelList } from "./openai-model-list-parser.js";
 import { parseOpenRouterModels } from "./openrouter-model-parser.js";
 import { getOpenCodeGoProtocol } from "./opencode-go-models.js";
+import { selectSupportedNeuralDeepModels } from "./neuraldeep-models.js";
 import { providerCatalogError } from "./provider-catalog-errors.js";
 import type {
   FetchProviderCatalogOptions,
@@ -53,6 +54,11 @@ const PROVIDER_ENDPOINTS = {
     authentication: "required",
     protocol: "anthropic-messages",
     url: "https://api.minimax.io/v1/models",
+  },
+  neuraldeep: {
+    authentication: "required",
+    protocol: "openai-chat-completions",
+    url: "https://api.neuraldeep.ru/v1/models",
   },
   "opencode-go": {
     authentication: "optional",
@@ -178,6 +184,7 @@ export async function fetchProviderCatalog(
 
     // Validate availability first, then spend only the remaining deadline on metadata enrichment.
     const liveModels = parseLiveProviderResponse(providerId, liveBody);
+    if (providerId === "neuraldeep") return selectSupportedNeuralDeepModels(liveModels);
     const metadataBody = await fetchJsonWithinDeadline(
       fetch,
       MODELS_DEV_URL,

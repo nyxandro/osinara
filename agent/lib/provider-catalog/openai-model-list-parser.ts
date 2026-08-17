@@ -2,7 +2,7 @@
  * OpenAI-compatible ID-only catalog parser.
  *
  * Exports:
- * - `parseOpenAiModelList`: validates DeepSeek, MiniMax, and OpenCode Go `/models` envelopes.
+ * - `parseOpenAiModelList`: validates OpenAI-compatible provider `/models` envelopes.
  * - `OpenAiModelListEntry`: validated model identifier returned by the provider.
  */
 import { z } from "zod";

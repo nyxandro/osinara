@@ -196,6 +196,11 @@ function buildTransport(
       format: "deepseek",
       providerName: "deepseek",
     },
+    neuraldeep: {
+      baseUrl: "https://api.neuraldeep.ru/v1",
+      format: "reasoning-effort",
+      providerName: "neuraldeep",
+    },
     "opencode-go": {
       baseUrl: "https://opencode.ai/zen/go/v1",
       format: "reasoning-effort",
