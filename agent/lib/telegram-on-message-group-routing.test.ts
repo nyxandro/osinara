@@ -112,7 +112,7 @@ describe("createTelegramMessageHandler group routing", () => {
       telegramMessageId: "88",
       telegramUserId: "telegram-202",
     });
-    expect(sendMessage).toHaveBeenCalledWith(expect.stringContaining("AGENT_APPROVAL_FORBIDDEN"));
+    expect(sendMessage).not.toHaveBeenCalled();
     expect(repository.session.prepareTurn).not.toHaveBeenCalled();
 
     // Existing topics retain the referenced bot message's thread instead of the incoming value.

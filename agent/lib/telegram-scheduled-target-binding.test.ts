@@ -112,7 +112,7 @@ function mismatchedChannel() {
 
 function matchingChannel() {
   return {
-    state: {},
+    state: { chatType: "supergroup" },
     telegram: {
       chatId: "-100111",
       messageThreadId: 77,
@@ -200,5 +200,26 @@ describe("scheduled Telegram target binding", () => {
       "eve-session-1",
     );
     expect(dependencies.releaseMemoryTurnSources).toHaveBeenCalledWith(context);
+  });
+
+  it("terminalizes a matching group run without publishing a failure message", async () => {
+    const handler = dependencies.channelConfig?.events?.["turn.failed"];
+
+    await handler(
+      { code: "AGENT_MODEL_FAILED" },
+      matchingChannel(),
+      context,
+    );
+
+    expect(dependencies.failRunForNotification).toHaveBeenCalledOnce();
+    expect(dependencies.postStableMessage).not.toHaveBeenCalled();
+    expect(dependencies.recordTurnFailed).toHaveBeenCalledWith(
+      "application-session-1",
+      "eve-session-1",
+    );
+    expect(dependencies.clearApprovals).toHaveBeenCalledWith(
+      "application-session-1",
+      "eve-session-1",
+    );
   });
 });

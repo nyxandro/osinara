@@ -48,6 +48,7 @@ import {
 import { proactiveDeliveryRepository } from "../lib/proactive-deliveries/proactive-delivery-repository.js";
 import { telegramGroupJournalRepository } from "../lib/telegram-group-journal-repository.js";
 import { postTelegramMessageWithoutContinuationChange } from "../lib/telegram-stable-delivery.js";
+import { shouldNotifyTelegramFailure } from "../lib/telegram-failure-notification.js";
 import { AppError } from "../lib/app-error.js";
 import { conversationTimelineRepository } from "../lib/conversation-timeline-repository.js";
 import { setTelegramMessageReaction } from "../lib/telegram-message-reaction.js";
@@ -278,6 +279,8 @@ export default telegramChannel({
           );
         }
       }
+      // Terminal diagnostics are private-only even when the failed turn belonged to a shared chat.
+      notifyFailure = notifyFailure && shouldNotifyTelegramFailure(channel);
       // A final send that started may already be visible; never append a second failure message.
       const finalDeliveryMayBeVisible = notifyFailure &&
         await telegramFinalDeliveryRepository.shouldSuppressFailureMessage(

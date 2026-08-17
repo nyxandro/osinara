@@ -84,7 +84,7 @@ describe("Eve Telegram failure continuation", () => {
     });
     const channel = {
       continuation: { token: "-1001::166" },
-      state: { chatId: "-1001", messageThreadId: null },
+      state: { chatId: "649624756", chatType: "private", messageThreadId: null },
       telegram: {
         request,
       },
@@ -105,6 +105,28 @@ describe("Eve Telegram failure continuation", () => {
       request.mock.invocationCallOrder[0]!,
     );
     expect(channel.continuation.token).toBe("-1001::166");
+  });
+
+  it("records a group session failure without publishing it to the group", async () => {
+    const recordSessionFailedByContinuationToken = vi.fn().mockResolvedValue("recorded");
+    const request = vi.fn();
+
+    await handleTelegramSessionFailure(
+      { code: "AGENT_SESSION_FAILED", message: "failed", sessionId: "wrun_group" },
+      {
+        continuation: { token: "-1001::166" },
+        state: { chatId: "-1001", chatType: "supergroup", messageThreadId: null },
+        telegram: { request },
+      } as never,
+      { recordSessionFailedByContinuationToken },
+      { failRunByIdentityForNotification: vi.fn() },
+    );
+
+    expect(recordSessionFailedByContinuationToken).toHaveBeenCalledWith(
+      "-1001::166",
+      "wrun_group",
+    );
+    expect(request).not.toHaveBeenCalled();
   });
 
   it("does not notify or rotate when the terminal event belongs to a stale Eve root", async () => {

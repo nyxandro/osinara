@@ -281,7 +281,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
         const error = replyAuthorization === "forbidden"
           ? "AGENT_APPROVAL_FORBIDDEN: Подтвердить действие может только пользователь, который его запросил."
           : "AGENT_APPROVAL_EXPIRED: Это подтверждение уже использовано или больше не действует.";
-        await ctx.telegram.sendMessage(error);
+        if (message.chat.type === "private") await ctx.telegram.sendMessage(error);
         return null;
       }
       // DB authorization, not a pre-rotation route snapshot, decides whether this is synthetic HITL.

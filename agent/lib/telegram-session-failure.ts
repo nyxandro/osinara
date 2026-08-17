@@ -3,7 +3,7 @@
  *
  * Export:
  * - `isHookConflictFailure`: identifies Eve's expected competing-root ownership rejection.
- * - `handleTelegramSessionFailure`: ignores ownership conflicts or records and reports a real failure.
+ * - `handleTelegramSessionFailure`: records failures and reports them only to private chats.
  */
 import type { TelegramEventContext } from "eve/channels/telegram";
 
@@ -14,6 +14,7 @@ import type { sessionRepository } from "./sessions/session-repository.js";
 import { scheduledRunIdFromContinuationToken } from "./agent-schedules/scheduled-session.js";
 import type { agentScheduleDispatchRepository } from "./agent-schedules/agent-schedule-dispatch-repository.js";
 import { postTelegramMessageWithoutContinuationChange } from "./telegram-stable-delivery.js";
+import { shouldNotifyTelegramFailure } from "./telegram-failure-notification.js";
 
 interface SessionFailureData {
   code: string;
@@ -74,5 +75,6 @@ export async function handleTelegramSessionFailure(
   ) as SessionEventResult;
   if (result === "stale") return;
   if (!notifyScheduledFailure) return;
+  if (!shouldNotifyTelegramFailure(channel)) return;
   await postTelegramMessageWithoutContinuationChange(channel, formatTelegramSessionFailure(data));
 }
