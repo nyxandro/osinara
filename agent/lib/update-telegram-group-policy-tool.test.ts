@@ -4,12 +4,18 @@
  * Constructs covered:
  * - `manage_telegram_group.update_policy`: requires one complete top-level policy payload.
  * - Execution uses only verified private-owner identity and returns the persisted policy contract.
+ * - Subscription-coupled capabilities are grantable only while their model provider is active.
  */
 import type { ToolContext } from "eve/tools";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { updatePolicy } = vi.hoisted(() => ({ updatePolicy: vi.fn() }));
 
+// This suite covers the Codex-subscription runtime, where image generation is genuinely grantable.
+// The direct-provider denial has its own suite because the gate resolves once at module load.
+vi.mock("./image-generation/image-generation-availability.js", () => ({
+  IMAGE_GENERATION_AVAILABLE: true,
+}));
 vi.mock("./telegram-group-administration-repository.js", () => ({
   telegramGroupAdministrationRepository: {
     registerGroup: vi.fn(),
@@ -46,7 +52,9 @@ const input = {
   action: "update_policy" as const,
   messageMode: "owner_only" as const,
   telegramChatId: "-1003567628736",
-  toolAllowlist: ["remember", "list_group_history"] as Array<"remember" | "list_group_history">,
+  toolAllowlist: ["remember", "list_group_history", "generate_image"] as Array<
+    "remember" | "list_group_history" | "generate_image"
+  >,
 };
 
 describe("manage_telegram_group.update_policy", () => {
@@ -62,14 +70,14 @@ describe("manage_telegram_group.update_policy", () => {
       messageMode: "owner_only",
       policyUpdated: true,
       telegramChatId: "-1003567628736",
-      toolAllowlist: ["remember", "list_group_history"],
+      toolAllowlist: ["remember", "list_group_history", "generate_image"],
     });
     expect(updatePolicy).toHaveBeenCalledWith({
       familyId: "family-1",
       messageMode: "owner_only",
       requestedBy: "owner-1",
       telegramChatId: "-1003567628736",
-      toolAllowlist: ["remember", "list_group_history"],
+      toolAllowlist: ["remember", "list_group_history", "generate_image"],
     });
   });
 
@@ -96,7 +104,7 @@ describe("manage_telegram_group.update_policy", () => {
     }, context("private"))).resolves.toMatchObject({ policyUpdated: true });
     expect(updatePolicy).toHaveBeenCalledWith(expect.objectContaining({
       messageMode: "owner_only",
-      toolAllowlist: ["remember", "list_group_history"],
+      toolAllowlist: ["remember", "list_group_history", "generate_image"],
     }));
   });
 

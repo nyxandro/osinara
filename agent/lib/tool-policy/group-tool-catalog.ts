@@ -7,10 +7,14 @@
  * - Derived capability-name tuples used by validation and execution policy.
  * - `FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS`: Eve built-ins overridden fail-closed externally.
  * - `ExternalGroupToolName`: validated persisted allowlist value.
+ * - `isSubscriptionOnlyExternalGroupToolName`: marks capabilities tied to a specific provider.
  * - `parseExternalGroupToolAllowlist`: validates the complete persisted policy atomically.
  */
 interface ExternalGroupCapability<Name extends string = string> {
   readonly name: Name;
+  // Set when the capability only exists under one model provider, so the owner-facing grant surface
+  // can drop it while persisted validation still recognizes a grant made under a previous provider.
+  readonly subscriptionOnly?: true;
   readonly usage: string;
 }
 
@@ -24,6 +28,11 @@ function capabilityNames<const Catalog extends readonly ExternalGroupCapability[
 
 // Persisted grants are action-level where one static descriptor contains distinct side effects.
 export const EXTERNAL_GROUP_CAPABILITY_CATALOG = [
+  {
+    name: "generate_image",
+    subscriptionOnly: true,
+    usage: "создавать одно GPT-Image-2 изображение в workspace текущей группы и сразу отправлять его в текущий Telegram-чат",
+  },
   {
     name: "import_telegram_attachment",
     usage: "принимать и импортировать UTF-8 файлы TXT, Markdown, JSON, CSV, TSV, HTML, XML и YAML из сообщений текущей группы",
@@ -87,6 +96,18 @@ export const EXTERNAL_GROUP_TOOL_NAMES = capabilityNames(
   EXTERNAL_GROUP_CAPABILITY_CATALOG,
 );
 export type ExternalGroupToolName = (typeof EXTERNAL_GROUP_TOOL_NAMES)[number];
+
+// Persisted validation stays provider-agnostic on purpose: a grant made while another provider was
+// active must keep the surrounding policy parseable instead of invalidating every other capability.
+const SUBSCRIPTION_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set(
+  (EXTERNAL_GROUP_CAPABILITY_CATALOG as readonly ExternalGroupCapability[])
+    .filter(({ subscriptionOnly }) => subscriptionOnly === true)
+    .map(({ name }) => name),
+);
+
+export function isSubscriptionOnlyExternalGroupToolName(value: string): boolean {
+  return SUBSCRIPTION_ONLY_TOOL_NAMES.has(value);
+}
 
 // Same-name wrappers preserve Eve's native contracts while adding live authorization and exact
 // group-root confinement. They remain baseline capabilities and need no persisted grant.

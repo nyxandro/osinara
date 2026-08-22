@@ -10,6 +10,12 @@ import type { SkillDefinition } from "eve/skills";
 
 import { AppError } from "../app-error.js";
 import { resolveConversationEnvironment } from "../conversation-environment.js";
+import { IMAGE_GENERATION_AVAILABLE } from "../image-generation/image-generation-availability.js";
+import {
+  IMAGE_GENERATION_SKILL_DEFINITION,
+  IMAGE_GENERATION_SKILL_NAME,
+} from "../image-generation/image-generation-skill.js";
+import { resolveExternalGroupToolPolicy } from "../tool-policy/external-group-policy.js";
 import { resolveExternalGroupSkillPolicy } from "../tool-policy/external-group-policy.js";
 import { selectGroupSafeSkillDefinitions } from "./group-skill-definitions.js";
 import type { GroupSafeSkillName } from "./group-skill-catalog.js";
@@ -20,20 +26,39 @@ interface ConversationSkillResolverDependencies {
   loadGroupSkillAllowlist(groupId: string): Promise<ReadonlySet<GroupSafeSkillName>>;
 }
 
+interface ConversationSkillResolverOptions {
+  scheduledRun?: boolean;
+  subagent?: boolean;
+}
+
 export function createConversationSkillResolver(
   dependencies: ConversationSkillResolverDependencies,
 ) {
-  return async function resolveSkills(auth: SessionAuth): Promise<Record<string, SkillDefinition>> {
+  return async function resolveSkills(
+    auth: SessionAuth,
+    options: ConversationSkillResolverOptions = {},
+  ): Promise<Record<string, SkillDefinition>> {
+    const imageGenerationEnabled = IMAGE_GENERATION_AVAILABLE &&
+      options.scheduledRun !== true && options.subagent !== true;
     const environment = resolveConversationEnvironment(auth);
     if (environment === "private") {
       return {
+        ...(imageGenerationEnabled
+          ? { [IMAGE_GENERATION_SKILL_NAME]: IMAGE_GENERATION_SKILL_DEFINITION }
+          : {}),
         ...TRUSTED_GOOGLE_WORKSPACE_SKILL_DEFINITIONS,
         ...selectGroupSafeSkillDefinitions(new Set<GroupSafeSkillName>(["pohuy"])),
       };
     }
 
     if (environment === "external") {
-      return selectGroupSafeSkillDefinitions(resolveExternalGroupSkillPolicy(auth));
+      const tools = resolveExternalGroupToolPolicy(auth);
+      return {
+        ...selectGroupSafeSkillDefinitions(resolveExternalGroupSkillPolicy(auth)),
+        ...(imageGenerationEnabled && tools.restricted && tools.allowed.has("generate_image")
+          ? { [IMAGE_GENERATION_SKILL_NAME]: IMAGE_GENERATION_SKILL_DEFINITION }
+          : {}),
+      };
     }
 
     const groupId = auth.current?.attributes.groupId;
@@ -46,7 +71,13 @@ export function createConversationSkillResolver(
     const granted = selectGroupSafeSkillDefinitions(
       await dependencies.loadGroupSkillAllowlist(groupId),
     );
-    return { ...TRUSTED_GOOGLE_WORKSPACE_SKILL_DEFINITIONS, ...granted };
+    return {
+      ...(imageGenerationEnabled
+        ? { [IMAGE_GENERATION_SKILL_NAME]: IMAGE_GENERATION_SKILL_DEFINITION }
+        : {}),
+      ...TRUSTED_GOOGLE_WORKSPACE_SKILL_DEFINITIONS,
+      ...granted,
+    };
   };
 }
 

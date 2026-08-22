@@ -87,6 +87,7 @@ jq -n \
     debug: false,
     pprof: {enable: false, addr: $pprof_address},
     plugins: {enabled: false, dir: "/run/cli-proxy-api/plugins", configs: {}},
+    "disable-image-generation": "chat",
     "logging-to-file": false,
     "usage-statistics-enabled": false,
     "request-retry": 0,

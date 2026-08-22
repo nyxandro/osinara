@@ -19,6 +19,7 @@ const AGENT_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const EXPECTED_TOOL_MODULES = [
   "execute_google_workspace.ts",
   "export_memory.ts",
+  "generate_image.ts",
   "get_current_time.ts",
   "get_memory_source.ts",
   "import_telegram_attachment.ts",

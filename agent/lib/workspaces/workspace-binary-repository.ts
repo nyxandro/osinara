@@ -97,6 +97,27 @@ export function createWorkspaceBinaryRepository(root: string, resolver: Workspac
       await resolveWorkspaceId(resolver, auth, scope);
     },
 
+    async workspaceId(
+      auth: WorkspaceAuthorization,
+      scope: WorkspaceScope,
+    ): Promise<string> {
+      return await resolveWorkspaceId(resolver, auth, scope);
+    },
+
+    async findBinaryWrite(
+      auth: WorkspaceAuthorization,
+      scope: WorkspaceScope,
+      operationKey: string,
+    ): Promise<WorkspaceFileRecord | null> {
+      const workspaceId = await resolveWorkspaceId(resolver, auth, scope);
+      const result = await database().query<{ result: WorkspaceFileRecord }>(
+        `SELECT result FROM workspace_operations
+          WHERE operation_key = $1 AND workspace_id = $2 AND operation_type = 'binary_write'`,
+        [operationKey, workspaceId],
+      );
+      return result.rows[0]?.result ?? null;
+    },
+
     async readBinary(
       auth: WorkspaceAuthorization,
       scope: WorkspaceScope,

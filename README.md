@@ -35,6 +35,7 @@ Osinara — приватный семейный Telegram-агент на TypeScr
 | Расписания | Напоминания и автономные agent schedules: личные и семейные сценарии, а также owner-approved отчёты во внешние группы с отдельной fresh session, минимальным capability allowlist и bounded snapshot истории. |
 | Голос | Groq Whisper transcription перед основным agent turn с повторной проверкой authorization. |
 | Workspaces | Изолированные personal, family и group файловые области, attachment persistence, безопасная отправка файлов. |
+| Изображения | Root-agent создаёт одно WebP через `gpt-image-2`, сохраняет его в authorized workspace и доставляет в Telegram без скрытых повторов; внешней группе capability выдаёт владелец из личного чата. |
 | Google Workspace | Native `gws` skills для Gmail, Calendar, Drive, Docs, Sheets и People через workspace-bound OAuth credentials. |
 | Sandbox | Долгоживущие Docker sandbox sessions с scoped mounts, isolated tools volume, egress proxy и fail-closed policy. |
 | Оркестрация | В trusted private/family режимах root-agent делегирует большие задачи нативному Eve `agent` со свежим контекстом и теми же разрешёнными tools, skills, connections, sandbox и workspace; во внешних группах child delegation запрещена. |
@@ -63,10 +64,10 @@ flowchart LR
 
 | Область | Память | Workspace | Tools |
 | --- | --- | --- | --- |
-| Личный чат | `personal` и `family` | `/workspace/personal`, `/workspace/family` | Полный trusted sandbox, personal tools environment. |
-| Семейная группа | Только `family` | `/workspace/family` | Trusted sandbox, family tools environment. |
-| Внешняя группа | Только `group` | `/workspace/group` | Без Bash, произвольного сетевого доступа и persistent credentials; `web_fetch` доступен только через controlled wrapper и отдельную capability; безопасные file tools и настраиваемый импорт UTF-8 TXT/MD/JSON/CSV/TSV/HTML/XML/YAML/YML из Telegram. |
-| Native child | Та же проверенная identity и scopes, что у parent turn | Тот же разрешённый workspace и sandbox | Тот же trust-zone surface, кроме root-owned `remember`; отдельные history и state. |
+| Личный чат | `personal` и `family` | `/workspace/personal`, `/workspace/family` | Полный trusted sandbox и personal tools environment; при активной Codex-подписке root-agent может создавать изображения. |
+| Семейная группа | Только `family` | `/workspace/family` | Trusted sandbox и family tools environment; при активной Codex-подписке root-agent может создавать изображения. |
+| Внешняя группа | Только `group` | `/workspace/group` | Без Bash, произвольного сетевого доступа и persistent credentials; `web_fetch` и `generate_image` доступны только через отдельные owner grants, причём `generate_image` предлагается владельцу лишь при активном provider `codex-subscription`; безопасные file tools и настраиваемый импорт UTF-8 TXT/MD/JSON/CSV/TSV/HTML/XML/YAML/YML из Telegram. |
+| Native child | Та же проверенная identity и scopes, что у parent turn | Тот же разрешённый workspace и sandbox | Тот же trust-zone surface, кроме root-owned `remember` и `generate_image`; отдельные history и state. |
 
 ## Production Flow
 
@@ -235,6 +236,7 @@ Highlighted skill groups:
 | Browser and research | `agent-browser`, `find-docs`. |
 | Personalization | `behavior-preferences`. |
 | Tone, opt-in | `pohuy` — режим ответов с матом, грузится только по явной просьбе. |
+| Image generation | Dynamic `imagegen` доступен root-agent только вместе с активным subscription-backed `generate_image`; без provider `codex-subscription` ни tool, ни skill не существуют и не выдаются. |
 
 ## Release Badges
 

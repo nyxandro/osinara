@@ -27,9 +27,13 @@ import {
   TOOL_ALLOWLIST_MAX_SIZE,
 } from "../telegram-group-registration.js";
 import {
+  GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES,
+  isGrantableExternalGroupToolName,
+  selectGrantableExternalGroupTools,
+} from "../tool-policy/grantable-group-capabilities.js";
+import {
   ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES,
-  EXTERNAL_GROUP_TOOL_NAMES,
-  isExternalGroupToolName,
+  isSubscriptionOnlyExternalGroupToolName,
 } from "../tool-policy/group-tool-catalog.js";
 import {
   requireAction,
@@ -67,7 +71,7 @@ const registrationSchema = z.object({
   messageMode: z.enum(EXTERNAL_MESSAGE_MODES).optional().describe("Обязательно внутри registration: addressed_only, all или owner_only для external."),
   telegramChatId: z.string().optional().describe("Обязательный точный отрицательный Telegram chat ID регистрируемой группы."),
   title: z.string().optional().describe("Обязательное отображаемое название регистрируемой группы."),
-  toolAllowlist: z.array(z.enum(EXTERNAL_GROUP_TOOL_NAMES)).optional().describe("Только для registration.type=external; для family_private поле не передавайте."),
+  toolAllowlist: z.array(z.enum(GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES)).optional().describe("Только для registration.type=external; для family_private поле не передавайте."),
   type: z.enum(GROUP_TYPES).optional().describe("Обязательный тип trust zone: family_private или external."),
 }).strict();
 
@@ -87,7 +91,7 @@ const manageTelegramGroupSchema = z.object({
   telegramChatId: z.string().optional().describe(
     "Точный отрицательный ID обязателен для start_new_context, update_policy, update_skills и remove. Для status не передавайте; для register используйте registration.telegramChatId.",
   ),
-  toolAllowlist: z.array(z.enum(EXTERNAL_GROUP_TOOL_NAMES)).optional().describe(
+  toolAllowlist: z.array(z.enum(GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES)).optional().describe(
     "Передавайте на верхнем уровне только при action=update_policy. Для external register используйте registration.toolAllowlist; для остальных actions поле не передавайте.",
   ),
 }).strict();
@@ -116,17 +120,30 @@ function requireExternalToolAllowlist(raw: unknown, policyLabel: string): string
   if (!Array.isArray(raw)) {
     toolInputError(
       INPUT_ERROR_CODE,
-      `Для ${policyLabel} передайте toolAllowlist массивом разрешённых tools: ${EXTERNAL_GROUP_TOOL_NAMES.join(", ")}`,
+      `Для ${policyLabel} передайте toolAllowlist массивом разрешённых tools: ${GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES.join(", ")}`,
     );
   }
   if (raw.length > TOOL_ALLOWLIST_MAX_SIZE) {
     toolInputError(INPUT_ERROR_CODE, `toolAllowlist должен содержать не больше ${TOOL_ALLOWLIST_MAX_SIZE} tools`);
   }
   const names = raw.map((name) => {
-    if (typeof name !== "string" || !isExternalGroupToolName(name)) {
+    // A catalog capability that the active model provider cannot serve gets its own diagnosis, so
+    // the owner learns the grant is impossible instead of reading it as a malformed payload.
+    if (
+      typeof name === "string" &&
+      isSubscriptionOnlyExternalGroupToolName(name) &&
+      !isGrantableExternalGroupToolName(name)
+    ) {
       toolInputError(
         INPUT_ERROR_CODE,
-        `Недопустимый toolAllowlist item. Используйте только: ${EXTERNAL_GROUP_TOOL_NAMES.join(", ")}`,
+        `Capability ${name} недоступна: текущая модель агента работает не через подписку OpenAI Codex. ` +
+          "Выдать это право нельзя; передайте toolAllowlist без него",
+      );
+    }
+    if (typeof name !== "string" || !isGrantableExternalGroupToolName(name)) {
+      toolInputError(
+        INPUT_ERROR_CODE,
+        `Недопустимый toolAllowlist item. Используйте только: ${GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES.join(", ")}`,
       );
     }
     return name;
@@ -301,17 +318,25 @@ export default defineTool({
             };
           }
           const builtInWorkspaceTools = [...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES];
+          // A grant persisted under a previous model provider stays in PostgreSQL but is inert, so
+          // status reports the round-trippable allowlist and names the dead grants separately.
+          const { effective, unavailable } = selectGrantableExternalGroupTools(group.toolAllowlist);
           return {
             ...group,
             builtInWorkspaceTools,
-            effectiveConfiguredTools: [...builtInWorkspaceTools, ...group.toolAllowlist],
-            policySummary:
-              "Базовые workspace tools плюс полный настроенный allowlist внешней группы.",
+            effectiveConfiguredTools: [...builtInWorkspaceTools, ...effective],
+            policySummary: unavailable.length === 0
+              ? "Базовые workspace tools плюс полный настроенный allowlist внешней группы."
+              : "Базовые workspace tools плюс действующий allowlist внешней группы; " +
+                "перечисленные unavailableConfiguredTools сейчас не действуют и не могут быть " +
+                "выданы заново в текущей конфигурации агента.",
             startNewContextInput: {
               action: "start_new_context" as const,
               telegramChatId: group.telegramChatId,
             },
             toolAccessMode: "external_allowlist" as const,
+            toolAllowlist: effective,
+            ...(unavailable.length === 0 ? {} : { unavailableConfiguredTools: unavailable }),
           };
         }),
         total: groups.length,

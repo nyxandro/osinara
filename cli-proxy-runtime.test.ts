@@ -48,6 +48,7 @@ describe("CLIProxy Codex subscription runtime", () => {
         "api-keys": ["client-test-key"],
         "auth-dir": authDirectory,
         "disable-cooling": true,
+        "disable-image-generation": "chat",
         "max-retry-credentials": 1,
         "request-retry": 0,
       });

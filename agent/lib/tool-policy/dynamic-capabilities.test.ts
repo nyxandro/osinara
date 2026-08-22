@@ -13,6 +13,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const loadCurrentExternalGroupCapabilities = vi.hoisted(() => vi.fn());
 const authorizeCurrentExternalGroupCapability = vi.hoisted(() => vi.fn());
 
+vi.mock("../image-generation/image-generation-availability.js", () => ({
+  IMAGE_GENERATION_AVAILABLE: true,
+}));
 vi.mock("./external-group-live-policy.js", () => ({
   loadCurrentExternalGroupCapabilities,
   authorizeCurrentExternalGroupCapability,
@@ -166,6 +169,26 @@ describe("dynamic capability resolver", () => {
     });
 
     expect(surface).toHaveProperty("load_skill");
+  });
+
+  it("emits imagegen loading only for an interactive live generate_image grant", async () => {
+    loadCurrentExternalGroupCapabilities.mockResolvedValue(new Set(["generate_image"]));
+    const attributes = {
+      familyId: "family-1",
+      groupId: "group-1",
+      groupType: "external",
+      memoryScopes: ["group"],
+      telegramChatType: "supergroup",
+      toolAllowlist: ["generate_image"],
+    };
+
+    const interactive = await resolve(attributes);
+    const scheduled = await resolve({ ...attributes, scheduledRunId: "run-1" }, attributes);
+
+    expect(interactive?.load_skill?.description).toMatch(/available skill/iu);
+    expect(interactive).toHaveProperty("generate_image");
+    expect(scheduled?.load_skill?.description).toMatch(/недоступен/iu);
+    expect(scheduled).not.toHaveProperty("generate_image");
   });
 
   it.each([

@@ -11,6 +11,7 @@ import {
   type ExternalGroupToolName,
 } from "./group-tool-catalog.js";
 import type { GroupSafeSkillName } from "../group-skills/group-skill-catalog.js";
+import { IMAGE_GENERATION_AVAILABLE } from "../image-generation/image-generation-availability.js";
 
 function modelInvocation(name: ExternalGroupToolName | string): string {
   const memoryAction = /^manage_memory\.(edit|delete|undo)$/u.exec(name)?.[1];
@@ -41,7 +42,11 @@ export function externalGroupCapabilityInstructions(
   // Catalog order makes the prompt deterministic while the set keeps authorization exact.
   const effectiveCapabilities = [
     ...SANDBOX_FILE_CAPABILITY_CATALOG,
-    ...EXTERNAL_GROUP_CAPABILITY_CATALOG.filter(({ name }) => allowed.has(name)),
+    ...EXTERNAL_GROUP_CAPABILITY_CATALOG.filter(({ name }) =>
+      allowed.has(name) && !(name === "generate_image" && (
+        options.scheduledRun || !IMAGE_GENERATION_AVAILABLE
+      ))
+    ),
   ];
   const applicationCore = options.includeApplicationCore
     ? [
@@ -59,10 +64,14 @@ export function externalGroupCapabilityInstructions(
     .map(({ name, usage: description }) => `- ${modelInvocation(name)}: ${description}.`)
     .join("\n");
   const effectiveAllowlist = completeSurface.map(({ name }) => modelInvocation(name)).join(", ");
-  const skillUsage = [...skills]
+  const effectiveSkills = new Set<string>(skills);
+  if (IMAGE_GENERATION_AVAILABLE && !options.scheduledRun && allowed.has("generate_image")) {
+    effectiveSkills.add("imagegen");
+  }
+  const skillUsage = [...effectiveSkills]
     .map((name) => `- \`load_skill\` с \`skill=${name}\`: загрузить инструкции разрешённого skill \`${name}\`.`)
     .join("\n");
-  const skillAllowlist = [...skills].map((name) => `\`${name}\``).join(", ");
+  const skillAllowlist = [...effectiveSkills].map((name) => `\`${name}\``).join(", ");
   // Naming an action-level tool that was never granted would reintroduce the capability the
   // surrounding prompt deliberately omits, so this clarification is itself conditional.
   const memoryActions = [...allowed].some((name) => name.startsWith("manage_memory."))
@@ -78,7 +87,7 @@ Effective allowlist: ${effectiveAllowlist}.
 
 ${usage}
 
-${skills.size === 0 ? "" : `Effective skill allowlist: ${skillAllowlist}.\n\n${skillUsage}`}
+  ${effectiveSkills.size === 0 ? "" : `Effective skill allowlist: ${skillAllowlist}.\n\n${skillUsage}`}
 
 Используй capabilities только для указанного usage. Не вызывай, не предлагай и не утверждай, что можешь использовать инструменты, не перечисленные выше.${memoryActions}
 

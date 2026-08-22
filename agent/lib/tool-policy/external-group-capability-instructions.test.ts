@@ -7,7 +7,11 @@
  * - Application-core descriptors are included in the same exact effective surface.
  * - Skill loading is advertised only for the exact live group grants.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("../image-generation/image-generation-availability.js", () => ({
+  IMAGE_GENERATION_AVAILABLE: true,
+}));
 
 import { externalGroupCapabilityInstructions } from "./external-group-capability-instructions.js";
 
@@ -84,6 +88,22 @@ describe("externalGroupCapabilityInstructions", () => {
     expect(withoutSkills).not.toContain("`pohuy`");
     expect(withPohuy).toContain("`load_skill` с `skill=pohuy`");
     expect(withPohuy).toContain("Effective skill allowlist: `pohuy`.");
+  });
+
+  it("advertises imagegen instructions only with generate_image", () => {
+    const denied = externalGroupCapabilityInstructions(new Set(), new Set());
+    const granted = externalGroupCapabilityInstructions(new Set(["generate_image"]), new Set());
+    const scheduled = externalGroupCapabilityInstructions(new Set(["generate_image"]), new Set(), {
+      includeApplicationCore: true,
+      scheduledHistory: true,
+      scheduledRun: true,
+    });
+
+    expect(denied).not.toContain("skill=imagegen");
+    expect(granted).toContain("`load_skill` с `skill=imagegen`");
+    expect(granted).toContain("Effective skill allowlist: `imagegen`.");
+    expect(scheduled).not.toContain("skill=imagegen");
+    expect(scheduled).not.toContain("`generate_image`");
   });
 
   it("marks static trusted-only Google Workspace skills as unavailable externally", () => {

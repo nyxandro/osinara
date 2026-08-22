@@ -50,6 +50,12 @@ describe("external group tool catalog", () => {
     expect(FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS).toContain("bash");
   });
 
+  it("offers owner-grantable subscription image generation with Telegram delivery", () => {
+    expect(EXTERNAL_GROUP_TOOL_NAMES).toContain("generate_image");
+    expect(EXTERNAL_GROUP_CAPABILITY_CATALOG.find(({ name }) => name === "generate_image")?.usage)
+      .toMatch(/создавать.*отправлять/iu);
+  });
+
   it("defines non-empty model usage for every persisted and always-available capability", () => {
     expect(EXTERNAL_GROUP_CAPABILITY_CATALOG.map(({ name }) => name)).toEqual(
       EXTERNAL_GROUP_TOOL_NAMES,

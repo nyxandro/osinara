@@ -8,7 +8,7 @@
  */
 import { z } from "zod";
 
-import { EXTERNAL_GROUP_TOOL_NAMES } from "./tool-policy/group-tool-catalog.js";
+import { GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES } from "./tool-policy/grantable-group-capabilities.js";
 
 export const TELEGRAM_GROUP_ID_PATTERN = /^-[1-9]\d*$/;
 export const GROUP_TITLE_MAX_LENGTH = 200;
@@ -34,8 +34,10 @@ const externalMessageModeSchema = z
     "owner_only сохраняет доставленную историю для контекста, но запускает агента только для текущего владельца Osinara",
   );
 
+// Only capabilities the active model provider can actually serve are grantable, so a provider that
+// lacks one never gets a persisted grant that would sit inert in the trust zone.
 const externalToolAllowlistSchema = z
-  .array(z.enum(EXTERNAL_GROUP_TOOL_NAMES))
+  .array(z.enum(GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES))
   .max(TOOL_ALLOWLIST_MAX_SIZE)
   .describe(
     "Дополнительные application tools внешней группы; glob, grep, read_file и write_file доступны в её изолированном workspace всегда",
