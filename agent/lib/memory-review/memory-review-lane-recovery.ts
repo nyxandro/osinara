@@ -101,6 +101,13 @@ export async function readMemoryReviewLaneHealth(client: PoolClient) {
   );
   for (const row of result.rows) {
     if (row.batch_id && (row.head_status === "failed" || row.head_status === "ambiguous")) {
+      // A terminal handler may own the batch while waiting for our lane. Never let the alert FK
+      // wait back on that handler: the next minute can fill the outbox after it releases the row.
+      const available = await client.query(
+        `SELECT 1 FROM memory_review_batches WHERE id = $1
+          AND status IN ('failed', 'ambiguous') FOR KEY SHARE SKIP LOCKED`, [row.batch_id],
+      );
+      if (!available.rowCount) continue;
       await enqueueMemoryReviewOwnerAlert(client, row.batch_id, "AGENT_MEMORY_REVIEW_LANE_BLOCKED");
     }
   }

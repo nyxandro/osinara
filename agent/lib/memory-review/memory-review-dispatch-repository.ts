@@ -49,7 +49,7 @@ function project(row: SourceRow): TelegramGroupJournalEntry {
   };
 }
 
-async function materializeReadyBatches(client: PoolClient): Promise<void> {
+async function materializeReadyBatches(client: PoolClient, now: Date): Promise<void> {
   // This is the crash-recovery path for a committed 50th message whose inline observer did not run.
   const lanes = await client.query<{
     conversation_id: string;
@@ -64,6 +64,9 @@ async function materializeReadyBatches(client: PoolClient): Promise<void> {
        JOIN telegram_groups AS telegram_group ON telegram_group.id = conversation.telegram_group_id
       ORDER BY lane.created_at, lane.id FOR UPDATE OF lane`,
   );
+  // Recovery must not take one later lane before this globally ordered set: another dispatcher
+  // could hold an earlier lane while waiting for that same later lane.
+  await recoverUnstartedReviewBatches(client, now);
   for (const lane of lanes.rows) {
     const existing = await client.query<{ status: string; through_sequence: string }>(
       `SELECT status::text, through_sequence::text FROM memory_review_batches
@@ -114,8 +117,7 @@ export const memoryReviewDispatchRepository = {
     try {
       await client.query("BEGIN");
       await terminalizeStaleMemoryReviewBatches(client, input.now);
-      await recoverUnstartedReviewBatches(client, input.now);
-      await materializeReadyBatches(client);
+      await materializeReadyBatches(client, input.now);
       const laneHealth = await readMemoryReviewLaneHealth(client);
       const claimed = await client.query<{
         conversation_id: string; family_id: string; group_id: string;
