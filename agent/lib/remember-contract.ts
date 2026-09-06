@@ -93,11 +93,11 @@ export const memoryThreadSchema = z.discriminatedUnion("action", [
 
 function createRememberInputSchema(scope: z.ZodType<"family" | "group" | "personal">) {
   return z.object({
-    basis: z.enum(["agent_inferred", "user_requested"]).describe("Почему запись сохраняется: устойчивый вывод или явная просьба"),
-    content: z.string().min(1).max(MEMORY_CONTENT_MAX_CHARACTERS).describe("Одна самостоятельная устойчивая запись без догадок"),
-    kind: z.enum(["profile", "preference", "fact", "episode", "family_shared"]).describe("Семантический тип записи"),
+    basis: z.enum(["agent_inferred", "user_requested"]).describe("agent_inferred: сама отобрала сведение из сообщения, не догадка; user_requested: автор прямо попросил сохранить"),
+    content: z.string().min(1).max(MEMORY_CONTENT_MAX_CHARACTERS).describe("Одно самостоятельное конкретное сведение без догадок; сохраняй известные даты, контекст и точный URL для полезной ссылки"),
+    kind: z.enum(["profile", "preference", "fact", "episode", "family_shared"]).describe("profile: устойчивые сведения о человеке; preference: предпочтения; episode: отдельное событие или опыт; fact: прочие факты, планы, ресурсы; family_shared: общесемейные сведения"),
     scope: scope.describe("Разрешённая область памяти текущего trust zone"),
-    sensitivity: z.enum(["normal", "sensitive"]).describe("Sensitive всегда требует Eve HITL"),
+    sensitivity: z.enum(["normal", "sensitive"]).describe("Чувствительность сохраняемого сведения"),
     sourceSequence: z.string().regex(TIMELINE_SEQUENCE_PATTERN).refine(
       (value) => BigInt(value) <= POSTGRES_BIGINT_MAX,
       "Номер сообщения выходит за допустимые границы",

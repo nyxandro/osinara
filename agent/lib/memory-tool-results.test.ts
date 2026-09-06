@@ -39,7 +39,8 @@ vi.mock("./memory-repository.js", () => ({
 vi.mock("./memory-retrieval.js", () => ({
   retrieveRelevantMemories: retrieveMemories,
 }));
-vi.mock("./memory-observability.js", () => ({
+vi.mock("./memory-observability.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./memory-observability.js")>(),
   logMemoryWriteEvent,
 }));
 vi.mock("./memory-turn-source.js", () => ({
@@ -390,5 +391,34 @@ describe("model-facing memory tool results", () => {
     await expect(executeNonStreamingTool(searchMemories, { query: "чай" }, context))
       .resolves.toEqual([safeMemory]);
     expect(JSON.stringify(await retrieveMemories.mock.results[0]!.value)).not.toContain(MEMORY_ID);
+  });
+
+  it("records an explicit search without logging its query or result text", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const found = [{ memoryRef: MEMORY_REF, content: "Частный факт" }];
+    retrieveMemories.mockResolvedValue(found);
+    try {
+      await executeNonStreamingTool(searchMemories, { query: "Частный запрос" }, context);
+      expect(JSON.parse(info.mock.calls[0]![0] as string)).toMatchObject({
+        code: "AGENT_MEMORY_SEARCH_METRICS", sessionId: context.session.id,
+        turnId: context.session.turn.id, callId: context.callId, outcome: "succeeded",
+        memoryRefs: [MEMORY_REF], memoryCharacters: "Частный факт".length,
+      });
+      expect(JSON.stringify(info.mock.calls)).not.toMatch(/Частный запрос|Частный факт/u);
+    } finally { info.mockRestore(); }
+  });
+
+  it("does not present a failed search as an empty successful result or retry it", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const failure = new Error("unavailable");
+    retrieveMemories.mockRejectedValue(failure);
+    try {
+      await expect(executeNonStreamingTool(searchMemories, { query: "Частный запрос" }, context))
+        .rejects.toBe(failure);
+      expect(retrieveMemories).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(info.mock.calls[0]![0] as string)).toMatchObject({
+        outcome: "failed", memoryRefs: null, memoryCharacters: null,
+      });
+    } finally { info.mockRestore(); }
   });
 });

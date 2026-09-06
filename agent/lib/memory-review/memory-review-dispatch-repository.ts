@@ -17,6 +17,7 @@ import {
 } from "./memory-review-dispatch-terminal-repository.js";
 import { formatMemoryReviewBatchPrompt } from "./memory-review-prompt.js";
 import type { MemoryReviewClaim } from "./memory-review-repository.js";
+import { readMemoryReviewLaneHealth, recoverUnstartedReviewBatches } from "./memory-review-lane-recovery.js";
 
 interface SourceRow {
   actor_id: string;
@@ -113,12 +114,15 @@ export const memoryReviewDispatchRepository = {
     try {
       await client.query("BEGIN");
       await terminalizeStaleMemoryReviewBatches(client, input.now);
+      await recoverUnstartedReviewBatches(client, input.now);
       await materializeReadyBatches(client);
+      const laneHealth = await readMemoryReviewLaneHealth(client);
       const claimed = await client.query<{
         conversation_id: string; family_id: string; group_id: string;
         group_type: "external" | "family_private"; id: string; lease_token: string;
         message_thread_id: string | null; owner_telegram_user_id: string; owner_user_id: string;
         scope: "family" | "group"; telegram_chat_id: string;
+        source_count: number;
         telegram_chat_type: "group" | "supergroup"; through_sequence: string;
         tool_allowlist: string[];
       }>(
@@ -141,7 +145,7 @@ export const memoryReviewDispatchRepository = {
             AND telegram_group.id = conversation.telegram_group_id
             AND membership.family_id = conversation.family_id AND membership.role = 'owner'
             AND owner.id = membership.user_id
-         RETURNING batch.id, batch.conversation_id, batch.through_sequence::text,
+          RETURNING batch.id, batch.conversation_id, batch.through_sequence::text, batch.source_count,
                    batch.lease_token::text, lane.message_thread_id::text,
                    conversation.family_id, conversation.scope::text,
                    telegram_group.id AS group_id, telegram_group.type::text AS group_type,
@@ -164,7 +168,7 @@ export const memoryReviewDispatchRepository = {
             WHERE source.batch_id = $1 ORDER BY source.timeline_sequence`,
           [row.id],
         );
-        if (sources.rows.length !== MEMORY_REVIEW_BATCH_SIZE) throw new AppError(
+        if (sources.rows.length !== row.source_count) throw new AppError(
           "AGENT_MEMORY_REVIEW_SOURCE_SET_INVALID",
           "Пакет проверки памяти не содержит ожидаемые сообщения",
         );
@@ -183,6 +187,15 @@ export const memoryReviewDispatchRepository = {
         });
       }
       await client.query("COMMIT");
+      for (const lane of laneHealth) {
+        const blocked = lane.head_status === "failed" || lane.head_status === "ambiguous";
+        (blocked ? console.error : console.info)(JSON.stringify({
+          code: blocked ? "AGENT_MEMORY_REVIEW_LANE_BLOCKED" : "AGENT_MEMORY_REVIEW_LANE_METRICS",
+          laneId: lane.lane_id, batchId: lane.batch_id, headStatus: lane.head_status,
+          diagnosticCode: lane.diagnostic_code, processedThroughSequence: lane.processed_through_sequence,
+          waitingSources: lane.waiting_sources, oldestUnreviewedAt: lane.oldest_unreviewed_at,
+        }));
+      }
       return claims;
     } catch (error) {
       await client.query("ROLLBACK");

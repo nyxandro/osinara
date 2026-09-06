@@ -66,7 +66,7 @@ function reviewRemember(): AnyTool {
     ...definition,
     approval: () => "not-applicable",
     description:
-      "Сохранить одну устойчивую запись из конкретного sourceSequence текущего тихого batch. Разрешена только normal sensitivity.",
+      "Сохранить одно конкретное сведение из sourceSequence текущего тихого batch: факт, предпочтение, личный опыт, событие, план или полезную ссылку с контекстом. Особая важность не требуется, догадки запрещены. Разрешена только normal sensitivity.",
     inputSchema: reviewRememberSchema,
     async execute(input, ctx) {
       if (ctx.session.auth.current?.attributes.groupType === "external") {

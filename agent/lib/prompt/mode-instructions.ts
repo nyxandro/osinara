@@ -141,7 +141,7 @@ function privateInstructions(
     // A scheduled report is not a live exchange: it has no message to react to and never imitates
     // a spontaneous afterthought.
     scheduledRun ? null : SPOKEN_ASIDE_RULES,
-    scheduledRun ? null : reactionRules(reactions, "private"),
+    scheduledRun ? null : reactionRules(reactions),
     scheduledRun ? null : trustedBehaviorPreferenceRules(),
   ]);
 }
@@ -199,7 +199,7 @@ function familyInstructions(
   return block([
     ...FAMILY_INSTRUCTION_SECTIONS,
     scheduledRun ? null : SPOKEN_ASIDE_RULES,
-    scheduledRun ? null : reactionRules(reactions, "group"),
+    scheduledRun ? null : reactionRules(reactions),
     scheduledRun ? null : trustedBehaviorPreferenceRules(),
   ]);
 }
@@ -308,7 +308,7 @@ ${GROUP_TIMELINE_TRUST}`,
 Не используй личные или семейные аккаунты, токены и браузерные авторизации. Браузер этой группы имеет собственное изолированное состояние. Не проси публиковать секреты в общем чате; если требуемое подключение не настроено для группы, сообщи об этом вместо попытки использовать чужое.`,
     EXTERNAL_GROUP_MODEL_POLICY,
     scheduledRun ? null : SPOKEN_ASIDE_RULES,
-    scheduledRun ? null : reactionRules(reactions, "group"),
+    scheduledRun ? null : reactionRules(reactions),
     includeApplicationCore && !scheduledRun ? trustedBehaviorPreferenceRules() : null,
     reminders ? GROUP_REMINDER_RULES : null,
     channelAuthored ? CHANNEL_AUTHORED_REMINDER_NOTICE : null,
