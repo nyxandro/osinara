@@ -16,8 +16,11 @@ import {
   MEMORY_RETRIEVAL_MIN_RUSSIAN_MORPHOLOGY_RANK,
   MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY,
   MEMORY_RETRIEVAL_MIN_SIMPLE_LEXICAL_RANK,
-  MEMORY_RETRIEVAL_RECENCY_BOOST,
-  MEMORY_RETRIEVAL_RECENCY_DECAY_SECONDS,
+  MEMORY_DISCUSSION_SUMMARY_ATTRIBUTE,
+  MEMORY_RETENTION_RANK_FLOOR,
+  MEMORY_STABILITY_DAYS_DISCUSSION_SUMMARY,
+  MEMORY_STABILITY_DAYS_EPISODE,
+  MEMORY_STABILITY_DAYS_SEMANTIC,
   MEMORY_RETRIEVAL_RRF_RANK_OFFSET,
 } from "./memory-config.js";
 import type { MemoryAuthorization } from "./memory-context.js";
@@ -33,6 +36,7 @@ import {
 
 interface RetrievalRow extends ReferencedMemoryRow {
   fused_score: number | string;
+  retention: number | string;
   memory_project_id: string | null;
   russian_morphology_rank: number | string | null;
   semantic_similarity: number | string | null;
@@ -145,6 +149,7 @@ function rowToScoredResult(row: RetrievalRow): ScoredMemoryRetrievalResult {
       row.source_author_telegram_user_id,
     ]),
     memory: rowToReferencedMemory(row),
+    retention: requiredScore(row.retention),
     score: requiredScore(row.fused_score),
     sourceEvidence: {
       authorLabel: row.source_author_label,
@@ -154,12 +159,19 @@ function rowToScoredResult(row: RetrievalRow): ScoredMemoryRetrievalResult {
   };
 }
 
+/** Optional inclusive date window over the event date, falling back to creation time. */
+export interface MemoryRetrievalWindow {
+  occurredAfter?: string;
+  occurredBefore?: string;
+}
+
 export const memoryRetrievalRepository = {
   async search(
     auth: MemoryAuthorization,
     query: string,
     queryEmbedding: readonly number[],
     limit = MEMORY_RETRIEVAL_LIMIT,
+    window: MemoryRetrievalWindow = {},
   ): Promise<ScoredMemoryRetrievalResult[]> {
     const normalizedQuery = query.trim();
     if (!normalizedQuery) {
@@ -177,6 +189,8 @@ export const memoryRetrievalRepository = {
           JOIN memory_item_refs AS ref ON ref.memory_item_id = item.id
            WHERE item.family_id = $1 AND item.claim_status = 'active'
              AND ${authorizedClaimPredicate("item")}
+             AND ($19::timestamptz IS NULL OR COALESCE(item.occurred_at, item.created_at) >= $19::timestamptz)
+             AND ($20::timestamptz IS NULL OR COALESCE(item.occurred_at, item.created_at) <= $20::timestamptz)
        ),
        simple_evidence AS (
          SELECT id, updated_at, relevance
@@ -242,7 +256,7 @@ export const memoryRetrievalRepository = {
        SELECT authorized.id, authorized.author_user_id, authorized.author_telegram_user_id,
               authorized.scope, authorized.kind, authorized.content, authorized.source,
                authorized.confirmation, authorized.sensitivity, authorized.message_thread_id,
-               authorized.embedding_status, authorized.created_at, authorized.updated_at,
+               authorized.embedding_status, authorized.created_at, authorized.updated_at, authorized.occurred_at,
                authorized.memory_ref, authorized.scope_partition_key, authorized.subject_family_id,
                authorized.subject_user_id, authorized.subject_participant_id,
                authorized.memory_project_id, authorized.subject_label,
@@ -259,17 +273,29 @@ export const memoryRetrievalRepository = {
                  source_evidence.author_participant_id AS source_author_participant_id,
                  COALESCE(source_evidence.author_telegram_user_id,
                           authorized.author_telegram_user_id) AS source_author_telegram_user_id,
-               (COALESCE(1.0 / ($12::double precision + simple_lexical.ordinal), 0) +
-                COALESCE(1.0 / ($12::double precision + russian_morphology.ordinal), 0) +
-                COALESCE(1.0 / ($12::double precision + semantic.ordinal), 0) +
-                CASE WHEN authorized.confirmation = 'user_confirmed' THEN $13::double precision ELSE 0 END +
-                $14::double precision / (1 + EXTRACT(EPOCH FROM (now() - authorized.updated_at)) / $15))
+               retention.value AS retention,
+               ((COALESCE(1.0 / ($12::double precision + simple_lexical.ordinal), 0) +
+                 COALESCE(1.0 / ($12::double precision + russian_morphology.ordinal), 0) +
+                 COALESCE(1.0 / ($12::double precision + semantic.ordinal), 0))
+                  * ($14::double precision + (1 - $14::double precision) * retention.value)
+                + CASE WHEN authorized.confirmation = 'user_confirmed' THEN $13::double precision ELSE 0 END)
                  AS fused_score
        FROM candidates
        JOIN authorized USING (id)
        LEFT JOIN simple_lexical USING (id)
        LEFT JOIN russian_morphology USING (id)
        LEFT JOIN semantic USING (id)
+       -- Retention R = exp(-age / S) mirrors memory-retention.ts: age from the last reinforcement,
+       -- else the event date, else creation; S widens with reinforcement.
+       CROSS JOIN LATERAL (
+         SELECT exp(
+           - GREATEST(0, EXTRACT(EPOCH FROM (now() - COALESCE(authorized.last_reinforced_at, authorized.occurred_at, authorized.created_at)))) / 86400.0
+           / ((CASE WHEN authorized.kind = 'episode'
+                    THEN CASE WHEN authorized.attribute = $18::text THEN $16::double precision ELSE $15::double precision END
+                    ELSE $17::double precision END)
+              * (1 + ln(1 + GREATEST(0, authorized.reinforcement_count))))
+         ) AS value
+       ) AS retention
        LEFT JOIN LATERAL (
           SELECT evidence_kind, observed_at, author_label_snapshot, origin_conversation_id,
                  author_user_id, author_participant_id, author_telegram_user_id
@@ -292,8 +318,13 @@ export const memoryRetrievalRepository = {
         MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY,
         MEMORY_RETRIEVAL_RRF_RANK_OFFSET,
         MEMORY_RETRIEVAL_CONFIRMATION_BOOST,
-        MEMORY_RETRIEVAL_RECENCY_BOOST,
-        MEMORY_RETRIEVAL_RECENCY_DECAY_SECONDS,
+        MEMORY_RETENTION_RANK_FLOOR,
+        MEMORY_STABILITY_DAYS_EPISODE,
+        MEMORY_STABILITY_DAYS_DISCUSSION_SUMMARY,
+        MEMORY_STABILITY_DAYS_SEMANTIC,
+        MEMORY_DISCUSSION_SUMMARY_ATTRIBUTE,
+        window.occurredAfter ?? null,
+        window.occurredBefore ?? null,
       ],
     );
     // Duplicate collapse is read-only and happens after global rank, preserving its representative.
@@ -305,12 +336,13 @@ export const memoryRetrievalRepository = {
     query: string,
     queryEmbedding: readonly number[],
     limit = MEMORY_RETRIEVAL_LIMIT,
+    window: MemoryRetrievalWindow = {},
   ): Promise<{
     conflicts: MemoryConflictGroup[];
     relatedClaimIds: string[];
     results: ScoredMemoryRetrievalResult[];
   }> {
-    const results = await memoryRetrievalRepository.search(auth, query, queryEmbedding, limit);
+    const results = await memoryRetrievalRepository.search(auth, query, queryEmbedding, limit, window);
     const selectedIds = results.map((result) => result.memory.id);
     if (selectedIds.length === 0) return { conflicts: [], relatedClaimIds: [], results };
 

@@ -12,13 +12,6 @@ import { AppError } from "./app-error.js";
 import { database } from "./database.js";
 import type { TelegramActorKind, TelegramTimelineActorKind } from "./telegram-inbound-actor.js";
 
-// The timeline discriminator each invoking actor kind must carry on its own current message.
-const TURN_SOURCE_ACTOR_KINDS: Record<TelegramActorKind, TelegramTimelineActorKind> = {
-  telegram_bot: "telegram_bot",
-  telegram_channel: "telegram_channel",
-  telegram_user: "user",
-};
-
 export interface BindMemoryTurnSourcesInput {
   applicationSessionId: string;
   conversationId: string;
@@ -163,12 +156,14 @@ export const memoryTurnSourceRepository = {
         [input.conversationId, entryIds],
       );
       const current = entries.rows.find((entry) => entry.id === input.currentTimelineEntryId);
-      // Each actor kind proves itself through its own timeline column. An exhaustive map keeps a
-      // future actor from silently inheriting the channel branch and failing every one of its turns.
-      const expectedActorKind = TURN_SOURCE_ACTOR_KINDS[input.invokingActorKind];
-      const currentActorId = expectedActorKind === "telegram_channel"
+      // A user and another bot are both identified by telegram_user_id; only a channel post
+      // carries its identity in sender_chat.
+      const currentActorId = input.invokingActorKind === "telegram_channel"
         ? current?.telegram_sender_chat_id
         : current?.telegram_user_id;
+      const expectedActorKind = input.invokingActorKind === "telegram_user"
+        ? "user"
+        : input.invokingActorKind;
       if (entries.rows.length !== entryIds.length || current?.actor_kind !== expectedActorKind || currentActorId !== input.invokingActorId) {
         throw new AppError("AGENT_MEMORY_TURN_SOURCE_SET_INVALID", "Сообщения текущего хода не принадлежат проверенному разговору или автору");
       }
@@ -267,7 +262,7 @@ export const memoryTurnSourceRepository = {
            FROM memory_review_batch_sources AS source
            JOIN telegram_group_messages AS message ON message.id = source.timeline_entry_id
           WHERE source.batch_id = $1 AND source.conversation_id = $2
-            AND message.id = ANY($3::uuid[]) AND message.actor_kind = 'user'
+            AND message.id = ANY($3::uuid[]) AND message.actor_kind IN ('user', 'telegram_bot')
           ORDER BY message.sequence_id`,
         [input.memoryReviewBatchId, input.conversationId, entryIds],
       );
@@ -316,7 +311,7 @@ export const memoryTurnSourceRepository = {
           ON review_batch.id = source_set.memory_review_batch_id
        JOIN telegram_group_messages AS message ON message.id = source.timeline_entry_id
        WHERE source.eve_session_id = $1 AND source.eve_turn_id = $2
-         AND message.actor_kind = 'user' AND message.content_text IS NOT NULL
+         AND message.actor_kind IN ('user', 'telegram_bot') AND message.content_text IS NOT NULL
          AND (($3::bigint IS NULL AND source.is_current) OR source.timeline_sequence = $3::bigint)`,
       [input.eveSessionId, input.eveTurnId, input.sourceSequence],
     );

@@ -14,7 +14,6 @@ import {
   MEMORY_EMBEDDING_MODEL_VERSION,
 } from "./memory-config.js";
 import { memoryIndexRepository } from "./memory-index-repository.js";
-import { chunkMemoryContent } from "./memory-embedding-chunks.js";
 
 const integrationTestsEnabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 const integrationDatabaseUrl = process.env.DATABASE_URL;
@@ -142,34 +141,5 @@ describeWithDatabase("memoryIndexRepository", () => {
       [memoryId],
     );
     expect(chunks.rowCount).toBe(0);
-  });
-
-  it("stores Unicode-safe overlapping chunks without changing the memory text", async () => {
-    const memoryId = await insertPendingMemory();
-    const content = "а".repeat(319) + "😀🧑🏽‍💻".repeat(75) + "б".repeat(500);
-    await database().query("UPDATE memory_items SET content = $2 WHERE id = $1", [memoryId, content]);
-    const [job] = await memoryIndexRepository.claim(1, MEMORY_EMBEDDING_LEASE_MILLISECONDS);
-    const chunks = chunkMemoryContent(job!.content);
-    await expect(memoryIndexRepository.complete(
-      memoryId,
-      job!.leaseToken,
-      chunks.map((chunk) => ({
-        ...chunk,
-        embedding: Array.from({ length: MEMORY_EMBEDDING_DIMENSIONS }, () => 0.125),
-      })),
-      MEMORY_EMBEDDING_MODEL_VERSION,
-    )).resolves.toBe(true);
-    expect((await database().query("SELECT content,embedding_status FROM memory_items WHERE id=$1", [memoryId])).rows)
-      .toEqual([{ content, embedding_status: "indexed" }]);
-    const stored = (await database().query<{ content: string; start_offset: number; end_offset: number }>(
-      "SELECT content,start_offset,end_offset FROM memory_embedding_chunks WHERE memory_item_id=$1 ORDER BY chunk_index",
-      [memoryId],
-    )).rows;
-    expect(stored).toHaveLength(chunks.length);
-    for (const chunk of stored) {
-      expect(chunk.content).not.toMatch(/[\uD800-\uDFFF]/u);
-      expect(chunk.content).toBe(content.slice(chunk.start_offset, chunk.end_offset));
-    }
-    expect((await database().query("SELECT 1 FROM memory_embedding_jobs WHERE memory_item_id=$1", [memoryId])).rowCount).toBe(0);
   });
 });

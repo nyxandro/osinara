@@ -66,7 +66,7 @@ export const memoryListRepository = {
     const result = await database().query<MemoryListRow>(
       `SELECT item.id, item.author_user_id, item.author_telegram_user_id, item.scope, item.kind,
                item.content, item.source, item.confirmation, item.sensitivity,
-               item.message_thread_id, item.embedding_status, item.created_at, item.updated_at,
+               item.message_thread_id, item.embedding_status, item.created_at, item.updated_at, item.occurred_at,
                ref.memory_ref,
                COALESCE(source_evidence.evidence_kind, 'unresolved') AS source_evidence_kind,
                COALESCE(source_evidence.observed_at, item.created_at) AS source_observed_at,

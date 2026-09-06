@@ -54,10 +54,7 @@ function chunkText(content: string): MemoryEmbeddingChunkText[] {
   const chunks: MemoryEmbeddingChunkText[] = [];
   let sourceStart = 0;
   while (sourceStart < content.length) {
-    let sourceEnd = preferredEnd(content, sourceStart);
-    // Stored offsets are UTF-16 indexes. A character above U+FFFF occupies two code units;
-    // keep both together or JSON encodes an unpaired surrogate that TEI rejects.
-    if (sourceEnd < content.length && content.codePointAt(sourceEnd - 1)! > 0xffff) sourceEnd -= 1;
+    const sourceEnd = preferredEnd(content, sourceStart);
     const bounds = trimmedBounds(content, sourceStart, sourceEnd);
     if (bounds.start < bounds.end) {
       chunks.push({
@@ -74,8 +71,6 @@ function chunkText(content: string): MemoryEmbeddingChunkText[] {
       sourceEnd - MEMORY_EMBEDDING_CHUNK_OVERLAP_CHARACTERS,
       sourceStart + 1,
     );
-    // Move forward at the overlap edge: the preceding chunk already contains this character.
-    if (content.codePointAt(sourceStart - 1)! > 0xffff) sourceStart += 1;
   }
   if (chunks.length === 0) {
     throw new AppError(

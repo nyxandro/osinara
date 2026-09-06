@@ -13,6 +13,7 @@ import { insertClaimEvidence } from "./claim-evidence-writer.js";
 import { prepareExplicitClaimEvidence } from "./memory-explicit-claim-evidence.js";
 import type { MemoryAuthorization, MemoryScope } from "./memory-context.js";
 import { memoryListRepository } from "./memory-list-repository.js";
+import { memoryReinforcementRepository } from "./memory-reinforcement-repository.js";
 import {
   memoryOperationHash,
   normalizeMemoryClaimContent,
@@ -104,7 +105,7 @@ async function selectAuthorizedMemory(
   const result = await client.query<MutationMemoryRow>(
     `SELECT item.id, item.author_user_id, item.author_telegram_user_id, item.scope, item.kind,
             item.content, item.source, item.confirmation, item.sensitivity, item.message_thread_id,
-             item.embedding_status, item.created_at, item.updated_at, ref.memory_ref,
+             item.embedding_status, item.created_at, item.updated_at, item.occurred_at, ref.memory_ref,
              item.owner_user_id, item.group_id, item.origin_conversation_id,
              item.subject_family_id, item.subject_user_id, item.subject_participant_id,
              item.subject_conversation_id, item.subject_label, item.memory_project_id,
@@ -222,6 +223,31 @@ export const memoryRepository = {
 
   async create(auth: MemoryAuthorization, input: CreateMemoryInput): Promise<ReferencedMemoryItem> {
     return await createMemoryClaim(auth, input);
+  },
+
+  /** The writer confirmed an existing record says the same: reinforce it instead of inserting. */
+  async reinforceByRef(
+    auth: MemoryAuthorization,
+    input: { memoryRef: string; provenance: { sessionId: string; turnId: string } },
+  ): Promise<ReferencedMemoryItem> {
+    const result = await memoryReinforcementRepository.reinforceByRefs(auth, {
+      memoryRefs: [input.memoryRef],
+      provenance: input.provenance,
+      reason: "remember_reinforces",
+    });
+    if (result.reinforced.length === 0) {
+      throw new AppError("AGENT_MEMORY_REF_INVALID", "Запись не найдена в разрешённой области памяти");
+    }
+    const client = await database().connect();
+    try {
+      const memory = await selectAuthorizedMemory(client, auth, input.memoryRef, "ref");
+      if (!memory) {
+        throw new AppError("AGENT_MEMORY_REF_INVALID", "Запись не найдена в разрешённой области памяти");
+      }
+      return rowToReferencedMemory(memory);
+    } finally {
+      client.release();
+    }
   },
 
   async deleteByRef(
@@ -424,7 +450,7 @@ export const memoryRepository = {
              sensitivity, operation_key, provenance_state, origin_conversation_id,
              subject_family_id, subject_user_id, subject_participant_id, subject_conversation_id,
              subject_label, memory_project_id, save_approved, endorsed_by_user_id, endorsed_at,
-             content_normalized, profile_eligible)
+             content_normalized, profile_eligible, attribute, occurred_at)
           SELECT family_id, owner_user_id, group_id, $2, $3, scope, COALESCE($4, kind), $5,
                   'explicit_correction', $9, $10, 'user_confirmed',
                   COALESCE($6, sensitivity), $7, 'evidenced', $11,
@@ -432,10 +458,14 @@ export const memoryRepository = {
                  subject_conversation_id, subject_label, memory_project_id, true, $2,
                  CASE WHEN $2::uuid IS NULL THEN NULL ELSE now() END,
                   $8,
-                  profile_eligible AND COALESCE($6, sensitivity) = 'normal'
+                  profile_eligible AND COALESCE($6, sensitivity) = 'normal',
+                  -- A correction is a new version of the same record: it keeps the slot and the
+                  -- event date, or the edited episode leaves its date window and the profile claim
+                  -- leaves its slot.
+                  attribute, occurred_at
          FROM memory_items WHERE id = $1 AND claim_status = 'active'
          RETURNING id, author_user_id, author_telegram_user_id, scope, kind, content, source,
-                   confirmation, sensitivity, message_thread_id, embedding_status, created_at, updated_at`,
+                   confirmation, sensitivity, message_thread_id, embedding_status, created_at, updated_at, occurred_at`,
         [memory.id, auth.userId, memory.scope === "group" ? auth.telegramUserId : null,
           input.kind ?? null, input.content, input.sensitivity ?? null, input.operationKey,
            normalizeMemoryClaimContent(input.content), primarySource.sourceMessageId,

@@ -26,6 +26,7 @@ function candidate(input: Partial<ProfileClaimCandidate> & {
   subjectRef: string;
 }): ProfileClaimCandidate {
   return {
+    attribute: null,
     claimStatus: "active",
     confirmation: "model_high",
     content: `claim-${input.memoryRef}`,
@@ -147,5 +148,17 @@ describe("R3 profile selection", () => {
 
     expect(selectProfileClaims(candidates, NOW))
       .toEqual(selectProfileClaims([...candidates].reverse(), NOW));
+  });
+
+  it("puts attribute slots first and renders the slot name", () => {
+    const selection = selectProfileClaims([
+      candidate({ content: "Любит кофе", kind: "preference", memoryRef: "mem_2", subjectRef: "subj_1" }),
+      candidate({ attribute: "работа", content: "Логист", kind: "profile", memoryRef: "mem_1", subjectRef: "subj_1" }),
+      candidate({ content: "Родился в Туле", kind: "profile", memoryRef: "mem_3", subjectRef: "subj_1" }),
+    ], NOW);
+
+    const claims = selection.subjects[0]!.claims;
+    expect(claims.map((claim) => claim.memoryRef)).toEqual(["mem_1", "mem_3", "mem_2"]);
+    expect(claims[0]!.renderedText).toContain("работа: Логист");
   });
 });

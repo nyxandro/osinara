@@ -35,7 +35,7 @@ interface MutationOperationRow {
 
 const MEMORY_COLUMNS = `item.id, item.author_user_id, item.author_telegram_user_id, item.scope,
   item.kind, item.content, item.source, item.confirmation, item.sensitivity,
-  item.message_thread_id, item.embedding_status, item.created_at, item.updated_at`;
+  item.message_thread_id, item.embedding_status, item.created_at, item.updated_at, item.occurred_at`;
 
 function undoDenied(): AppError {
   return new AppError(

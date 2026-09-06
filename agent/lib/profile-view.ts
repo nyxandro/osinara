@@ -13,6 +13,7 @@ import { EVIDENCE_KIND_LEGEND } from "./model-memory.js";
 import { escapeUntrustedContextJson } from "./untrusted-context-json.js";
 
 export interface ProfileViewClaim {
+  attribute: string | null;
   confirmation: MemoryConfirmation;
   content: string;
   evidenceKind: "explicit" | "firsthand" | "inferred" | "reported" | "unresolved";
@@ -47,6 +48,8 @@ export interface CreateProfileViewInput {
   replyTelegramUserId: string | null;
   replyTimelineSequence?: string | null;
   retrievalClaimIds: readonly string[];
+  /** The author's own card was shown recently; include them only as a reply or mention subject. */
+  suppressCurrentAuthor?: boolean;
 }
 
 export function toProfileView(input: {
@@ -59,6 +62,7 @@ export function toProfileView(input: {
     profileViewRef: input.profileViewRef,
     subjects: input.selection.subjects.map((subject) => ({
       claims: subject.claims.map((claim) => ({
+        attribute: claim.attribute,
         confirmation: claim.confirmation,
         content: claim.content,
         evidenceKind: claim.evidenceKind,

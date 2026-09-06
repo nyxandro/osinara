@@ -33,6 +33,7 @@ function result(
     scope: "personal",
     sensitivity: "normal",
     source: "test:retrieval-ranking",
+    occurredAt: null,
     updatedAt: "2026-07-01T10:00:00.000Z",
   };
   return {
@@ -43,6 +44,7 @@ function result(
       simpleLexicalRank: 0.1,
     },
     memory,
+    retention: 1,
     score,
   };
 }

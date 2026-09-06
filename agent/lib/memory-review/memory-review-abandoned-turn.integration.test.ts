@@ -22,6 +22,20 @@ const describeWithDatabase = process.env.RUN_DATABASE_INTEGRATION_TESTS === "tru
   ? describe
   : describe.skip;
 
+/** Eight passive messages: the shortest tail an addressed turn still reviews inline here. */
+async function insertReviewTail(
+  fixture: { conversationId: string; groupId: string },
+  from: number,
+): Promise<{ id: string }> {
+  let last: { id: string } | null = null;
+  for (let sequence = from; sequence < from + 8; sequence += 1) {
+    last = await insertReviewUserMessage({
+      conversationId: fixture.conversationId, groupId: fixture.groupId, sequence,
+    });
+  }
+  return last!;
+}
+
 describeWithDatabase("abandoned memory review turns", () => {
   beforeEach(async () => {
     await database().query("TRUNCATE users, families CASCADE");
@@ -31,11 +45,7 @@ describeWithDatabase("abandoned memory review turns", () => {
   it("finds the review batch of a resumed turn whose context lost the marker", async () => {
     const fixture = await createMainAgentMemoryFixture();
     const session = await insertReviewSession(fixture.familyId, fixture.groupId, "review-resumed");
-    const source = await insertReviewUserMessage({
-      conversationId: fixture.conversationId,
-      groupId: fixture.groupId,
-      sequence: 2,
-    });
+    const source = await insertReviewTail(fixture, 2);
     const batch = await memoryReviewRepository.prepareInteractiveTurn({
       applicationSessionId: session,
       groupId: fixture.groupId,
@@ -77,11 +87,7 @@ describeWithDatabase("abandoned memory review turns", () => {
   it("releases a running batch whose session no longer waits for an answer", async () => {
     const fixture = await createMainAgentMemoryFixture();
     const session = await insertReviewSession(fixture.familyId, fixture.groupId, "review-abandoned");
-    const source = await insertReviewUserMessage({
-      conversationId: fixture.conversationId,
-      groupId: fixture.groupId,
-      sequence: 2,
-    });
+    const source = await insertReviewTail(fixture, 2);
     const batch = await memoryReviewRepository.prepareInteractiveTurn({
       applicationSessionId: session,
       groupId: fixture.groupId,
@@ -115,17 +121,102 @@ describeWithDatabase("abandoned memory review turns", () => {
       groupId: fixture.groupId,
       timelineEntryId: source.id,
     });
-    expect(repeated?.sourceCount).toBe(2);
+    expect(repeated?.sourceCount).toBe(9);
+  });
+
+  it("resolves an ambiguous head at the cursor by provenance after the time bound", async () => {
+    const fixture = await createMainAgentMemoryFixture();
+    const session = await insertReviewSession(fixture.familyId, fixture.groupId, "review-ambiguous-head");
+    const source = await insertReviewTail(fixture, 2);
+    const batch = await memoryReviewRepository.prepareInteractiveTurn({
+      applicationSessionId: session,
+      groupId: fixture.groupId,
+      timelineEntryId: source.id,
+    });
+    await memoryReviewRepository.bindEveTurn({
+      applicationSessionId: session,
+      batchId: batch!.batchId,
+      eveSessionId: "eve-ambiguous",
+      eveTurnId: "turn-ambiguous",
+    });
+    // A session failure or a handoff timeout still ends this way; the lane cursor cannot pass it.
+    await database().query(
+      `UPDATE memory_review_batches
+          SET status = 'ambiguous', diagnostic_code = 'AGENT_MEMORY_REVIEW_SESSION_FAILED_AMBIGUOUS',
+              completed_at = '2026-08-12T09:00:00.000Z', updated_at = '2026-08-12T09:00:00.000Z'
+        WHERE id = $1`,
+      [batch!.batchId],
+    );
+    await expect(memoryReviewRepository.prepareInteractiveTurn({
+      applicationSessionId: session, groupId: fixture.groupId, timelineEntryId: source.id,
+    })).resolves.toBeNull();
+
+    // Ten minutes later the head is still fresh and still blocks the lane.
+    await memoryReviewDispatchRepository.claimPending({
+      leaseMilliseconds: 60_000, limit: 10, now: new Date("2026-08-12T09:10:00.000Z"),
+    });
+    await expect(database().query(
+      "SELECT status::text FROM memory_review_batches WHERE id = $1", [batch!.batchId],
+    )).resolves.toMatchObject({ rows: [{ status: "ambiguous" }] });
+
+    // Past the bound it wrote nothing and nothing stands behind it: released to the tail.
+    await memoryReviewDispatchRepository.claimPending({
+      leaseMilliseconds: 60_000, limit: 10, now: new Date("2026-08-12T11:00:00.000Z"),
+    });
+    await expect(database().query(
+      "SELECT count(*)::integer AS batches FROM memory_review_batches WHERE id = $1", [batch!.batchId],
+    )).resolves.toMatchObject({ rows: [{ batches: 0 }] });
+    const repeated = await memoryReviewRepository.prepareInteractiveTurn({
+      applicationSessionId: session, groupId: fixture.groupId, timelineEntryId: source.id,
+    });
+    expect(repeated?.sourceCount).toBe(9);
+  });
+
+  it("skips a failed head at the cursor that already has a completed successor", async () => {
+    const fixture = await createMainAgentMemoryFixture();
+    const session = await insertReviewSession(fixture.familyId, fixture.groupId, "review-failed-head");
+    const head = await insertReviewTail(fixture, 2);
+    const failed = await memoryReviewRepository.prepareInteractiveTurn({
+      applicationSessionId: session, groupId: fixture.groupId, timelineEntryId: head.id,
+    });
+    await memoryReviewRepository.bindEveTurn({
+      applicationSessionId: session, batchId: failed!.batchId, eveSessionId: "eve-failed-head", eveTurnId: "turn-failed-head",
+    });
+    const successorSource = await insertReviewTail(fixture, 10);
+    const successor = await memoryReviewRepository.prepareInteractiveTurn({
+      applicationSessionId: session, groupId: fixture.groupId, timelineEntryId: successorSource.id,
+    });
+    await memoryReviewRepository.bindEveTurn({
+      applicationSessionId: session, batchId: successor!.batchId, eveSessionId: "eve-successor", eveTurnId: "turn-successor",
+    });
+    await database().query(
+      `UPDATE memory_review_batches
+          SET status = CASE WHEN id = $1 THEN 'failed'::memory_review_batch_status ELSE 'completed'::memory_review_batch_status END,
+              diagnostic_code = CASE WHEN id = $1 THEN 'AGENT_MEMORY_REVIEW_MODEL_FAILED' ELSE NULL END,
+              completed_at = '2026-08-12T09:00:00.000Z', updated_at = '2026-08-12T09:00:00.000Z'
+        WHERE id IN ($1, $2)`,
+      [failed!.batchId, successor!.batchId],
+    );
+
+    await memoryReviewDispatchRepository.claimPending({
+      leaseMilliseconds: 60_000, limit: 10, now: new Date("2026-08-12T11:00:00.000Z"),
+    });
+
+    await expect(database().query(
+      `SELECT batch.status::text, lane.processed_through_sequence::text AS cursor
+         FROM memory_review_batches AS batch JOIN memory_review_lanes AS lane ON lane.id = batch.lane_id
+        WHERE batch.id = $1`,
+      [failed!.batchId],
+    )).resolves.toMatchObject({ rows: [{ cursor: "17", status: "skipped" }] });
+    await expect(database().query(
+      "SELECT batch_diagnostic_code FROM memory_review_owner_alerts WHERE batch_id = $1", [failed!.batchId],
+    )).resolves.toMatchObject({ rows: [{ batch_diagnostic_code: "AGENT_MEMORY_REVIEW_PASS_SKIPPED" }] });
   });
 
   it("keeps a running batch whose turn is still parked on a human answer", async () => {
     const fixture = await createMainAgentMemoryFixture();
     const session = await insertReviewSession(fixture.familyId, fixture.groupId, "review-parked");
-    const source = await insertReviewUserMessage({
-      conversationId: fixture.conversationId,
-      groupId: fixture.groupId,
-      sequence: 2,
-    });
+    const source = await insertReviewTail(fixture, 2);
     const batch = await memoryReviewRepository.prepareInteractiveTurn({
       applicationSessionId: session,
       groupId: fixture.groupId,
@@ -165,11 +256,7 @@ describeWithDatabase("abandoned memory review turns", () => {
   it("counts an abandoned turn that already wrote memory as reviewed", async () => {
     const fixture = await createMainAgentMemoryFixture();
     const session = await insertReviewSession(fixture.familyId, fixture.groupId, "review-partial");
-    const source = await insertReviewUserMessage({
-      conversationId: fixture.conversationId,
-      groupId: fixture.groupId,
-      sequence: 2,
-    });
+    const source = await insertReviewTail(fixture, 2);
     const batch = await memoryReviewRepository.prepareInteractiveTurn({
       applicationSessionId: session,
       groupId: fixture.groupId,
@@ -209,7 +296,7 @@ describeWithDatabase("abandoned memory review turns", () => {
          JOIN memory_review_batches AS batch ON batch.lane_id = lane.id
         WHERE batch.id = $1`,
       [batch!.batchId],
-    )).resolves.toMatchObject({ rows: [{ cursor: "2" }] });
+    )).resolves.toMatchObject({ rows: [{ cursor: "9" }] });
   });
 
   it("releases a running batch whose application session is already gone", async () => {
@@ -257,11 +344,7 @@ describeWithDatabase("abandoned memory review turns", () => {
   it("skips an abandoned head that already has successors instead of deleting it", async () => {
     const fixture = await createMainAgentMemoryFixture();
     const session = await insertReviewSession(fixture.familyId, fixture.groupId, "review-head");
-    const head = await insertReviewUserMessage({
-      conversationId: fixture.conversationId,
-      groupId: fixture.groupId,
-      sequence: 2,
-    });
+    const head = await insertReviewTail(fixture, 2);
     const abandoned = await memoryReviewRepository.prepareInteractiveTurn({
       applicationSessionId: session,
       groupId: fixture.groupId,
@@ -275,11 +358,7 @@ describeWithDatabase("abandoned memory review turns", () => {
     });
     // Пока голова висит, обычные ходы продолжают создавать пакеты за ней: они цепляются за её
     // конец, а не за курсор лейна. Именно так лейн и накапливает наследников.
-    const successorSource = await insertReviewUserMessage({
-      conversationId: fixture.conversationId,
-      groupId: fixture.groupId,
-      sequence: 3,
-    });
+    const successorSource = await insertReviewTail(fixture, 10);
     const successor = await memoryReviewRepository.prepareInteractiveTurn({
       applicationSessionId: session,
       groupId: fixture.groupId,
@@ -311,7 +390,7 @@ describeWithDatabase("abandoned memory review turns", () => {
     )).resolves.toMatchObject({
       rows: [{
         closed: true,
-        cursor: "2",
+        cursor: "9",
         diagnostic_code: "AGENT_MEMORY_REVIEW_TURN_ABANDONED",
         sources: 0,
         status: "skipped",
@@ -321,7 +400,7 @@ describeWithDatabase("abandoned memory review turns", () => {
     await expect(database().query(
       "SELECT predecessor_sequence::text AS predecessor FROM memory_review_batches WHERE id = $1",
       [successor!.batchId],
-    )).resolves.toMatchObject({ rows: [{ predecessor: "2" }] });
+    )).resolves.toMatchObject({ rows: [{ predecessor: "9" }] });
     // Владелец узнаёт о безвозвратно пропущенных сообщениях.
     await expect(database().query(
       "SELECT batch_diagnostic_code FROM memory_review_owner_alerts WHERE batch_id = $1",
@@ -334,11 +413,7 @@ describeWithDatabase("abandoned memory review turns", () => {
   it("leaves a running batch alone before the abandon timeout elapses", async () => {
     const fixture = await createMainAgentMemoryFixture();
     const session = await insertReviewSession(fixture.familyId, fixture.groupId, "review-fresh");
-    const source = await insertReviewUserMessage({
-      conversationId: fixture.conversationId,
-      groupId: fixture.groupId,
-      sequence: 2,
-    });
+    const source = await insertReviewTail(fixture, 2);
     const batch = await memoryReviewRepository.prepareInteractiveTurn({
       applicationSessionId: session,
       groupId: fixture.groupId,
@@ -425,11 +500,7 @@ describeWithDatabase("abandoned memory review turns", () => {
   it("accepts a repeated completion event after the batch was released", async () => {
     const fixture = await createMainAgentMemoryFixture();
     const session = await insertReviewSession(fixture.familyId, fixture.groupId, "review-replay");
-    const source = await insertReviewUserMessage({
-      conversationId: fixture.conversationId,
-      groupId: fixture.groupId,
-      sequence: 2,
-    });
+    const source = await insertReviewTail(fixture, 2);
     const batch = await memoryReviewRepository.prepareInteractiveTurn({
       applicationSessionId: session,
       groupId: fixture.groupId,
@@ -460,22 +531,14 @@ describeWithDatabase("abandoned memory review turns", () => {
   it("skips a never-started head that already has successors", async () => {
     const fixture = await createMainAgentMemoryFixture();
     const session = await insertReviewSession(fixture.familyId, fixture.groupId, "review-unstarted");
-    const head = await insertReviewUserMessage({
-      conversationId: fixture.conversationId,
-      groupId: fixture.groupId,
-      sequence: 2,
-    });
+    const head = await insertReviewTail(fixture, 2);
     const abandoned = await memoryReviewRepository.prepareInteractiveTurn({
       applicationSessionId: session,
       groupId: fixture.groupId,
       timelineEntryId: head.id,
     });
     // Отмена следующим сообщением приходит раньше `turn.started`, поэтому привязки к ходу нет.
-    const successorSource = await insertReviewUserMessage({
-      conversationId: fixture.conversationId,
-      groupId: fixture.groupId,
-      sequence: 3,
-    });
+    const successorSource = await insertReviewTail(fixture, 10);
     const successor = await memoryReviewRepository.prepareInteractiveTurn({
       applicationSessionId: session,
       groupId: fixture.groupId,
@@ -527,7 +590,7 @@ describeWithDatabase("abandoned memory review turns", () => {
       [abandoned!.batchId],
     )).resolves.toMatchObject({
       rows: [{
-        cursor: "3",
+        cursor: "17",
         diagnostic_code: "AGENT_MEMORY_REVIEW_TURN_NEVER_STARTED",
         status: "skipped",
       }],
@@ -543,11 +606,7 @@ describeWithDatabase("abandoned memory review turns", () => {
   it("releases a cancelled batch that never bound its turn", async () => {
     const fixture = await createMainAgentMemoryFixture();
     const session = await insertReviewSession(fixture.familyId, fixture.groupId, "review-cancelled");
-    const source = await insertReviewUserMessage({
-      conversationId: fixture.conversationId,
-      groupId: fixture.groupId,
-      sequence: 2,
-    });
+    const source = await insertReviewTail(fixture, 2);
     const batch = await memoryReviewRepository.prepareInteractiveTurn({
       applicationSessionId: session,
       groupId: fixture.groupId,
@@ -571,21 +630,13 @@ describeWithDatabase("abandoned memory review turns", () => {
   it("skips a cancelled head with a successor without warning the owner", async () => {
     const fixture = await createMainAgentMemoryFixture();
     const session = await insertReviewSession(fixture.familyId, fixture.groupId, "review-steer");
-    const head = await insertReviewUserMessage({
-      conversationId: fixture.conversationId,
-      groupId: fixture.groupId,
-      sequence: 2,
-    });
+    const head = await insertReviewTail(fixture, 2);
     const abandoned = await memoryReviewRepository.prepareInteractiveTurn({
       applicationSessionId: session,
       groupId: fixture.groupId,
       timelineEntryId: head.id,
     });
-    const successorSource = await insertReviewUserMessage({
-      conversationId: fixture.conversationId,
-      groupId: fixture.groupId,
-      sequence: 3,
-    });
+    const successorSource = await insertReviewTail(fixture, 10);
     await memoryReviewRepository.prepareInteractiveTurn({
       applicationSessionId: session,
       groupId: fixture.groupId,

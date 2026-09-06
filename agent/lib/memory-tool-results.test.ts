@@ -249,7 +249,9 @@ describe("model-facing memory tool results", () => {
     });
     expect(result.thread).toEqual(internalMemory.thread);
     expect(JSON.stringify(result)).not.toContain(MEMORY_ID);
-    expect(result.notice).toContain(`memoryRef ${MEMORY_REF}`);
+    // No user-facing sentence in the result: the model tended to echo it verbatim.
+    expect(result.undoAvailable).toBe(true);
+    expect(JSON.stringify(result)).not.toContain("Сохранено в область");
     expect(createMemory).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({

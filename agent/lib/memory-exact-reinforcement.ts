@@ -3,6 +3,8 @@
  *
  * Exports:
  * - `reinforceExactClaim`: serializes same-subject lookup and atomically records reinforcement.
+ *   Identity is the normalized text plus subject, kind, slot and event date: two trips to the
+ *   same city on different dates are two episodes, not one reinforced record.
  */
 import type { PoolClient } from "pg";
 
@@ -14,7 +16,13 @@ import type { MemoryAuthorization } from "./memory-context.js";
 import type { ReferencedMemoryRow } from "./memory-record.js";
 
 interface ExactClaimIdentity {
+  /** Slot of a semantic claim; a repeat in another slot is a different fact. */
+  attribute: string | null;
   contentNormalized: string;
+  /** Kind of the claim: a fact and an episode with the same words are different records. */
+  kind: string;
+  /** Event date of an episode: the same words on another date are another event. */
+  occurredAt: string | null;
   memoryProjectId: string | null;
   operationKey: string;
   prepared: PreparedClaimEvidence | null;
@@ -47,7 +55,7 @@ export async function reinforceExactClaim(
   const duplicate = await client.query<ReferencedMemoryRow>(
     `SELECT item.id, item.author_user_id, item.author_telegram_user_id, item.scope,
             item.kind, item.content, item.source, item.confirmation, item.sensitivity,
-            item.message_thread_id, item.embedding_status, item.created_at, item.updated_at,
+            item.message_thread_id, item.embedding_status, item.created_at, item.updated_at, item.occurred_at,
             ref.memory_ref
      FROM memory_items AS item
      JOIN memory_item_refs AS ref ON ref.memory_item_id = item.id
@@ -59,10 +67,13 @@ export async function reinforceExactClaim(
         AND item.subject_family_id IS NULL
         AND item.subject_label IS NOT DISTINCT FROM $7::text
         AND item.memory_project_id IS NOT DISTINCT FROM $8::uuid
+        AND item.kind = $9::memory_kind
+        AND item.attribute IS NOT DISTINCT FROM $10::text
+        AND item.occurred_at IS NOT DISTINCT FROM $11::timestamptz
      ORDER BY item.created_at, item.id LIMIT 1 FOR UPDATE OF item`,
     [auth.familyId, identity.scope, identity.scopePartitionKey, identity.contentNormalized,
       identity.subjectParticipantId, identity.subjectUserId, identity.subjectLabel,
-      identity.memoryProjectId],
+      identity.memoryProjectId, identity.kind, identity.attribute, identity.occurredAt],
   );
   const existing = duplicate.rows[0];
   if (!existing) return null;

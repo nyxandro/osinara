@@ -335,15 +335,19 @@ describeWithDatabase("memory review dispatch repository", () => {
                'review-session-failure', now(), now()) RETURNING id`,
       [fixture.familyId, fixture.groupId],
     );
-    const source = await insertUserMessage({
-      conversationId: fixture.conversationId,
-      groupId: fixture.groupId,
-      sequence: 2,
-    });
+    let source: { id: string } | null = null;
+    // Eight passive messages: the shortest tail an addressed turn still reviews inline.
+    for (let sequence = 2; sequence <= 9; sequence += 1) {
+      source = await insertUserMessage({
+        conversationId: fixture.conversationId,
+        groupId: fixture.groupId,
+        sequence,
+      });
+    }
     const batch = await memoryReviewRepository.prepareInteractiveTurn({
       applicationSessionId: session.rows[0]!.id,
       groupId: fixture.groupId,
-      timelineEntryId: source.id,
+      timelineEntryId: source!.id,
     });
     await memoryReviewRepository.bindEveTurn({
       applicationSessionId: session.rows[0]!.id,
@@ -382,8 +386,8 @@ describeWithDatabase("memory review dispatch repository", () => {
     const repeated = await memoryReviewRepository.prepareInteractiveTurn({
       applicationSessionId: session.rows[0]!.id,
       groupId: fixture.groupId,
-      timelineEntryId: source.id,
+      timelineEntryId: source!.id,
     });
-    expect(repeated?.sourceCount).toBe(2);
+    expect(repeated?.sourceCount).toBe(9);
   });
 });

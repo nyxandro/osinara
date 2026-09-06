@@ -19,7 +19,7 @@ import {
   MEMORY_REVIEW_DENIED_TOOL_NAMES,
   buildMemoryReviewToolSurface,
 } from "./memory-review-tool-surface.js";
-import { MEMORY_REVIEW_INSTRUCTIONS } from "./memory-review-prompt.js";
+import { MEMORY_REVIEW_INSTRUCTIONS, formatExistingMemoryForReview } from "./memory-review-prompt.js";
 import { memoryReviewBatchIdFromContinuationToken } from "./memory-review-session.js";
 
 function externalAuth(): SessionAuth {
@@ -45,6 +45,34 @@ function externalAuth(): SessionAuth {
     initiator: null,
   };
 }
+
+describe("memory review existing memory block", () => {
+  it("renders existing memory for review as untrusted data with refs and slots", () => {
+    const block = formatExistingMemoryForReview([
+      { attribute: "работа", content: "Serje пишет книгу", kind: "profile", memoryRef: "mem_1", subjectLabel: "Serje" },
+    ]);
+    expect(block).toContain("<existing_memory>");
+    expect(block).toContain("mem_1");
+    expect(block).toContain("работа");
+    expect(formatExistingMemoryForReview([])).toBe("");
+  });
+});
+
+describe("memory review instructions", () => {
+  it("selects by future usefulness and folds a discussion into one record", () => {
+    expect(MEMORY_REVIEW_INSTRUCTIONS).toContain("изменит будущий ответ");
+    expect(MEMORY_REVIEW_INSTRUCTIONS).toContain("одна запись episode");
+    expect(MEMORY_REVIEW_INSTRUCTIONS).toContain("итог обсуждения");
+    expect(MEMORY_REVIEW_INSTRUCTIONS).not.toContain("всё, что пригодится");
+    expect(MEMORY_REVIEW_INSTRUCTIONS).not.toContain("от 3 до 10 записей");
+  });
+
+  it("describes silent review for any conversation and the personal scope choice", () => {
+    expect(MEMORY_REVIEW_INSTRUCTIONS).toContain("тихая проверка памяти разговора");
+    expect(MEMORY_REVIEW_INSTRUCTIONS).not.toContain("памяти группы");
+    expect(MEMORY_REVIEW_INSTRUCTIONS).toContain("scope personal");
+  });
+});
 
 describe("memory review model surface", () => {
   beforeEach(() => {

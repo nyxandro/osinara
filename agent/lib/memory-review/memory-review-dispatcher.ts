@@ -60,13 +60,15 @@ function reviewAuth(batch: ClaimedMemoryReviewBatch, prepared: PreparedSession) 
     attributes: {
       applicationSessionId: prepared.id,
       familyId: batch.familyId,
-      groupId: batch.groupId,
-      groupType: batch.groupType,
+      // A personal conversation has no group identity; the claim already carries null there.
+      ...(batch.groupId === null || batch.groupType === null
+        ? {}
+        : { groupId: batch.groupId, groupType: batch.groupType }),
       memoryReviewBatchId: batch.batchId,
       memoryReviewMode: "background",
       memoryReviewSourceEntryIds: batch.sourceEntryIds,
-      memoryScopes: [batch.scope],
-      role: batch.groupType === "external" ? "external" : "owner",
+      memoryScopes: batch.memoryScopes,
+      role: batch.role,
       sandboxSessionId: prepared.sandboxSessionId,
       telegramActorId: batch.ownerTelegramUserId,
       telegramActorKind: "telegram_user",

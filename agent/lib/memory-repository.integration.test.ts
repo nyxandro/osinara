@@ -64,6 +64,67 @@ describeWithDatabase("memoryRepository", () => {
     await expect(memoryRepository.list(first.owner, { cursor: "invalid", limit: 20 }))
       .rejects.toMatchObject({ code: "AGENT_MEMORY_CURSOR_INVALID" });
   });
+  it("keeps the event date and the slot when a record is corrected", async () => {
+    const family = await createFamily("family-correction-fields");
+    const episode = await memoryRepository.create(family.member, {
+      ...createInput("family", "episode-create", "Анна ездила в Питер на конференцию"),
+      kind: "episode",
+      occurredAt: "2026-09-08",
+    });
+    const profile = await memoryRepository.create(family.member, {
+      ...createInput("family", "profile-create", "Анна работает логистом"),
+      attribute: "работа",
+      kind: "profile",
+    });
+    const source = await correctionSource(family.owner, "family");
+
+    const correctedEpisode = await memoryRepository.updateByRef(family.owner, {
+      content: "Анна ездила в Питер на конференцию по логистике",
+      memoryRef: episode.memoryRef,
+      operationKey: "episode-correct",
+      source,
+    });
+    const correctedProfile = await memoryRepository.updateByRef(family.owner, {
+      content: "Анна работает старшим логистом",
+      memoryRef: profile.memoryRef,
+      operationKey: "profile-correct",
+      source,
+    });
+
+    // The corrected event stays in its date window; the corrected profile claim stays in its slot.
+    expect(correctedEpisode.occurredAt).toBe("2026-09-08T00:00:00.000Z");
+    await expect(database().query(
+      "SELECT attribute, occurred_at FROM memory_items WHERE id = $1",
+      [correctedProfile.id],
+    )).resolves.toMatchObject({ rows: [{ attribute: "работа", occurred_at: null }] });
+  });
+
+  it("keeps episodes with the same words on different dates apart", async () => {
+    const family = await createFamily("family-episode-dates");
+    const trip = (operationKey: string, occurredAt: string) => memoryRepository.create(family.member, {
+      ...createInput("family", operationKey, "Анна ездила в Питер"),
+      kind: "episode",
+      occurredAt,
+    });
+
+    const september = await trip("trip-september", "2026-09-08");
+    const october = await trip("trip-october", "2026-10-01");
+    const septemberAgain = await trip("trip-september-again", "2026-09-08");
+    // The same words as a fact are a different record from the episode.
+    const fact = await memoryRepository.create(family.member, {
+      ...createInput("family", "trip-fact", "Анна ездила в Питер"),
+      kind: "fact",
+    });
+
+    expect(october.id).not.toBe(september.id);
+    expect(septemberAgain.id).toBe(september.id);
+    expect(fact.id).not.toBe(september.id);
+    await expect(database().query(
+      "SELECT reinforcement_count FROM memory_items WHERE id = $1",
+      [september.id],
+    )).resolves.toMatchObject({ rows: [{ reinforcement_count: 1 }] });
+  });
+
   it("allows only the family author or current owner to update and delete a shared record", async () => {
     const family = await createFamily("family-rights");
     const record = await memoryRepository.create(

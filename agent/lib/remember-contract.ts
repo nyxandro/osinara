@@ -14,10 +14,13 @@
 import { z } from "zod";
 
 import {
+  MEMORY_ATTRIBUTE_MAX_CHARACTERS,
+  MEMORY_DISCUSSION_SUMMARY_ATTRIBUTE,
   THREAD_PURPOSE_MAX_CHARACTERS,
   THREAD_TITLE_MAX_CHARACTERS,
 } from "./memory-config.js";
 import { THREAD_REF_PATTERN } from "./memory-thread-query-repository.js";
+import { MEMORY_REF_PATTERN } from "./model-memory.js";
 
 const MEMORY_CONTENT_MAX_CHARACTERS = 4_000;
 const SUBJECT_LABEL_MAX_CHARACTERS = 200;
@@ -94,8 +97,17 @@ export const memoryThreadSchema = z.discriminatedUnion("action", [
 function createRememberInputSchema(scope: z.ZodType<"family" | "group" | "personal">) {
   return z.object({
     basis: z.enum(["agent_inferred", "user_requested"]).describe("Почему запись сохраняется: устойчивый вывод или явная просьба"),
+    attribute: z.string().trim().min(1).max(MEMORY_ATTRIBUTE_MAX_CHARACTERS).optional().describe(
+      "Слот записи: для человека работа, профессия, город, семья, дети, партнёр, питомцы, машина, здоровье, привычки, увлечения, вкусы, музыка, еда, техника, прозвище, роль в чате, день рождения; для fact/family_shared о названной сущности или о чате вместе с subject.label (например «Гоша» + «содержание»); для episode только «итог обсуждения» с subject.label = тема. Новая запись в том же слоте заменяет старую",
+    ),
     content: z.string().min(1).max(MEMORY_CONTENT_MAX_CHARACTERS).describe("Одна самостоятельная устойчивая запись без догадок"),
+    distinct: z.boolean().optional().describe("true после AGENT_MEMORY_NEAR_DUPLICATE, если это другой факт, а не версия существующего"),
+    reinforces: z.string().regex(MEMORY_REF_PATTERN).optional().describe("После AGENT_MEMORY_NEAR_DUPLICATE: memoryRef записи с тем же смыслом; она подкрепляется, новая не создаётся"),
     kind: z.enum(["profile", "preference", "fact", "episode", "family_shared"]).describe("Семантический тип записи"),
+    occurredAt: z.string().regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?(Z|[+-]\d{2}:\d{2})?)?$/u).refine(
+      (value) => Number.isFinite(Date.parse(value)),
+      "Дата события должна быть корректной ISO-датой",
+    ).optional().describe("Только для episode: дата или дата-время события в ISO 8601, из текста или из sentAt сообщения"),
     scope: scope.describe("Разрешённая область памяти текущего trust zone"),
     sensitivity: z.enum(["normal", "sensitive"]).describe("Sensitive всегда требует Eve HITL"),
     sourceSequence: z.string().regex(TIMELINE_SEQUENCE_PATTERN).refine(
@@ -127,6 +139,21 @@ function createRememberInputSchema(scope: z.ZodType<"family" | "group" | "person
         code: "custom",
         message: "AGENT_MEMORY_THREAD_INPUT_INVALID: Project identity недоступна в личной записи",
         path: ["thread", "identity"],
+      });
+    }
+    if (input.occurredAt !== undefined && input.kind !== "episode") {
+      context.addIssue({
+        code: "custom",
+        message: "AGENT_MEMORY_INPUT_INVALID: occurredAt применим только к событию",
+        path: ["occurredAt"],
+      });
+    }
+    if (input.attribute !== undefined && input.kind === "episode" &&
+      input.attribute !== MEMORY_DISCUSSION_SUMMARY_ATTRIBUTE) {
+      context.addIssue({
+        code: "custom",
+        message: `AGENT_MEMORY_INPUT_INVALID: Слот attribute для события допустим только как "${MEMORY_DISCUSSION_SUMMARY_ATTRIBUTE}"`,
+        path: ["attribute"],
       });
     }
     if (input.sourceSequence !== undefined && input.sensitivity === "sensitive") {

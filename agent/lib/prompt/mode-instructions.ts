@@ -20,6 +20,7 @@ import {
   MEMORY_DEEPENING_PROTOCOL,
   MEMORY_EXACT_DUPLICATE_HANDLING,
   GROUP_MEMORY_DELTA_CONTRACT,
+  MEMORY_USED_DIRECTIVE_RULE,
   MEMORY_WRITE_CONTRACT,
   PRIVATE_MEMORY_SOURCE_CONTRACT,
   SEND_WORKSPACE_FILE_RULES,
@@ -93,6 +94,7 @@ const PRIVATE_INSTRUCTION_SECTIONS = [
 
 Экспорт личной памяти выполняй только через \`export_memory\`; не пересказывай весь экспорт через модель.`,
   MEMORY_WRITE_CONTRACT,
+  MEMORY_USED_DIRECTIVE_RULE,
   PRIVATE_MEMORY_SOURCE_CONTRACT,
   memoryEditContract(new Set<MemoryEditAction>(["delete", "edit", "undo"])),
   MEMORY_EXACT_DUPLICATE_HANDLING,
@@ -155,6 +157,7 @@ const FAMILY_INSTRUCTION_SECTIONS = [
 
 ${GROUP_ADDRESSING}`,
   MEMORY_WRITE_CONTRACT,
+  MEMORY_USED_DIRECTIVE_RULE,
   GROUP_MEMORY_DELTA_CONTRACT,
   memoryEditContract(new Set<MemoryEditAction>(["delete", "edit", "undo"])),
   MEMORY_EXACT_DUPLICATE_HANDLING,
@@ -257,6 +260,7 @@ function externalInstructions(
     EXTERNAL_PEOPLE_RULES,
     externalMemorySection(capabilities),
     capabilities.has("remember") ? MEMORY_WRITE_CONTRACT : null,
+    capabilities.has("search_memories") || capabilities.has("remember") ? MEMORY_USED_DIRECTIVE_RULE : null,
     capabilities.has("remember") ? GROUP_MEMORY_DELTA_CONTRACT : null,
     memoryEditContract(editActions),
     searchable ? MEMORY_DEEPENING_PROTOCOL : null,

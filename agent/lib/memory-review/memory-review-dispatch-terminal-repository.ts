@@ -20,6 +20,7 @@ import type { MemoryReviewClaim } from "./memory-review-repository.js";
 import {
   resolveAbandonedReviewBatch,
   terminalizeAbandonedReviewTurns,
+  terminalizeBlockedReviewHeads,
 } from "./memory-review-terminal-repository.js";
 
 const TURN_NEVER_STARTED = "AGENT_MEMORY_REVIEW_TURN_NEVER_STARTED";
@@ -93,6 +94,7 @@ export async function terminalizeStaleMemoryReviewBatches(
   await terminalizeStaleInteractiveBatches(client, now);
   await terminalizeStaleDispatchingBatches(client, now);
   await terminalizeAbandonedReviewTurns(client, now);
+  await terminalizeBlockedReviewHeads(client, now);
 }
 
 export const memoryReviewDispatchTerminalRepository = {

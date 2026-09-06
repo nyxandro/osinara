@@ -42,7 +42,6 @@ function sessionContext(input: {
     groupType: "external",
     memoryScopes: ["group"],
     role: "external",
-    skillAllowlist: ["pohuy"],
     telegramChatType: "supergroup",
     telegramConversationId: input.conversationId,
     telegramTimelineEntryId: input.timelineEntryId,
@@ -130,7 +129,7 @@ describeWithDatabase("critical main-agent memory paths", () => {
       `INSERT INTO telegram_groups
          (family_id, telegram_chat_id, title, type, message_mode, tool_allowlist, skill_allowlist)
        VALUES ($1, '-100-critical-memory', 'Critical memory', 'external', 'addressed_only',
-               ARRAY['remember'], ARRAY['pohuy'])
+               ARRAY['remember'], '{}')
        RETURNING id`,
       [family.rows[0]!.id],
     );

@@ -21,6 +21,7 @@ import { formatTelegramTurnFailure } from "../lib/telegram-interface.js";
 import { TELEGRAM_EVE_UPLOAD_POLICY } from "../lib/telegram-message-policy.js";
 import { handleTelegramMessage } from "../lib/telegram-on-message.js";
 import { completedTelegramOutput } from "../lib/telegram-progress.js";
+import { reinforceUsedMemories } from "../lib/memory-used-reinforcement.js";
 import { deliverTelegramProgressNotice } from "../lib/telegram-progress-notice.js";
 import { refreshTelegramReactionPolicy } from "../lib/telegram-reaction-policy.js";
 import { asidePauseMilliseconds } from "../lib/telegram-aside-pacing.js";
@@ -265,6 +266,13 @@ export default telegramChannel({
           ctx,
           sentMessages.map((sent) => sent.messageId),
         );
+        // The delivered answer named the records it relied on; only refs shown this turn count.
+        await reinforceUsedMemories({
+          applicationSessionId: sessionId,
+          ctx,
+          declared: output.memoryUsedDeclared ?? false,
+          memoryRefs: output.memoryUsedRefs ?? [],
+        });
       }
     },
     async "session.failed"(data, channel) {

@@ -53,13 +53,11 @@ export function requireMemoryAuthorization(ctx: MemoryContext): MemoryAuthorizat
     );
   }
   const groupIdValue = typeof groupId === "string" ? groupId : null;
-  // A channel is an accountless participant of exactly one external group and carries no user id.
   const channelShapeValid = actor.kind !== "telegram_channel" || (
     caller?.principalType === "service" && role === "external" && groupIdValue !== null &&
     memoryScopes.length === 1 && memoryScopes[0] === "group" && telegramUserId === undefined
   );
-  // A person and a bot both identify themselves by their own Telegram user id.
-  const userShapeValid = actor.kind === "telegram_channel" || typeof telegramUserId === "string";
+  const userShapeValid = actor.kind !== "telegram_user" || typeof telegramUserId === "string";
   if (!channelShapeValid || !userShapeValid) {
     throw new AppError(
       "AGENT_MEMORY_CONTEXT_INVALID",

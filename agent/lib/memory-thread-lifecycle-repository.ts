@@ -119,7 +119,7 @@ async function verifyCurrentStatement(
      JOIN application_conversations AS conversation ON conversation.id = message.conversation_id
      WHERE message.id = $1 AND conversation.id = $2 AND conversation.family_id = $3
        AND conversation.scope = $4 AND conversation.scope_partition_key = $5
-       AND message.actor_kind IN ('user', 'telegram_bot') AND message.telegram_user_id = $6
+       AND message.actor_kind = 'user' AND message.telegram_user_id = $6
        AND message.content_text IS NOT NULL`,
     [turn.timelineEntryId, turn.conversationId, auth.familyId, thread.scope,
       thread.scope_partition_key, auth.telegramUserId],

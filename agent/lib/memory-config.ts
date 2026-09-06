@@ -17,9 +17,12 @@ export const MEMORY_SCOPE_QUOTAS = {
 } as const;
 
 export const MEMORY_CONTENT_MAX_LENGTH = 4_000;
+export const MEMORY_ATTRIBUTE_MAX_CHARACTERS = 64;
 export const MEMORY_LIST_DEFAULT_LIMIT = 20;
 export const MEMORY_LIST_MAX_LIMIT = 50;
 export const MEMORY_RETRIEVAL_LIMIT = 12;
+// Automatic per-turn context enters model input on every step, so it is narrower than tool search.
+export const MEMORY_TURN_RETRIEVAL_LIMIT = 8;
 export const MEMORY_RETRIEVAL_CANDIDATE_LIMIT = 40;
 
 export const CONVERSATION_TIMELINE_SELECTION_MAX_ENTRIES = 50;
@@ -31,11 +34,13 @@ export const MEMORY_EXTRACTION_WORKER_STABILITY_MILLISECONDS = 30_000;
 export const MEMORY_EVIDENCE_SNIPPET_MAX_CHARACTERS = 1_000;
 
 // Live briefs are generated only for activated threads and contain whole source-backed records.
+// Per-turn budgets are prompt-cost budgets: the model can read a full thread through
+// read_memory_thread when the automatic brief is not enough.
 export const THREAD_CONTEXT_MAX_THREADS = 2;
-export const THREAD_CONTEXT_MAX_CHARACTERS = 16_000;
+export const THREAD_CONTEXT_MAX_CHARACTERS = 6_000;
 export const THREAD_TITLE_MAX_CHARACTERS = 120;
 export const THREAD_PURPOSE_MAX_CHARACTERS = 500;
-export const THREAD_BRIEF_MAX_CHARACTERS = 6_000;
+export const THREAD_BRIEF_MAX_CHARACTERS = 3_000;
 export const THREAD_BRIEF_MAX_ITEMS = 20;
 export const THREAD_CONTEXT_EPISODES_PER_THREAD = 3;
 export const THREAD_EPISODE_MAX_CHARACTERS = 2_000;
@@ -55,9 +60,9 @@ export const THREAD_NOTICE_DELIVERY_LEASE_MILLISECONDS = 5 * 60 * 1_000;
 
 // Profile context is a bounded read projection; whole claims are skipped rather than truncated.
 export const PROFILE_CONTEXT_MAX_SUBJECTS = 4;
-export const PROFILE_CONTEXT_MAX_CHARACTERS = 12_000;
-export const PROFILE_CONTEXT_MAX_CLAIMS_PER_SUBJECT = 30;
-export const PROFILE_CONTEXT_MAX_SUBJECT_CHARACTERS = 8_000;
+export const PROFILE_CONTEXT_MAX_CHARACTERS = 6_000;
+export const PROFILE_CONTEXT_MAX_CLAIMS_PER_SUBJECT = 20;
+export const PROFILE_CONTEXT_MAX_SUBJECT_CHARACTERS = 4_000;
 export const PROFILE_SELECTION_DORMANCY_MILLISECONDS = 60 * 24 * 60 * 60 * 1_000;
 export const PROFILE_PROJECTION_NOTICE_LEASE_MILLISECONDS = 5 * 60 * 1_000;
 
@@ -67,8 +72,19 @@ export const MEMORY_RETRIEVAL_MIN_RUSSIAN_MORPHOLOGY_RANK = 0.05;
 export const MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY = 0.78;
 export const MEMORY_RETRIEVAL_RRF_RANK_OFFSET = 60;
 export const MEMORY_RETRIEVAL_CONFIRMATION_BOOST = 0.001;
-export const MEMORY_RETRIEVAL_RECENCY_BOOST = 0.0005;
-export const MEMORY_RETRIEVAL_RECENCY_DECAY_SECONDS = 31_557_600;
+// Retention (ACT-R / Ebbinghaus in closed form): R = exp(-age / S), S = S0 * (1 + ln(1 + n)).
+// S0 by record kind in days; only the automatic turn block applies the minimum retention.
+export const MEMORY_DISCUSSION_SUMMARY_ATTRIBUTE = "итог обсуждения";
+export const MEMORY_STABILITY_DAYS_EPISODE = 30;
+export const MEMORY_STABILITY_DAYS_DISCUSSION_SUMMARY = 60;
+export const MEMORY_STABILITY_DAYS_SEMANTIC = 180;
+export const MEMORY_RETENTION_RANK_FLOOR = 0.3;
+export const MEMORY_AUTO_CONTEXT_MIN_RETENTION = 0.2;
+export const MEMORY_SEMANTIC_KINDS = ["profile", "preference", "fact", "family_shared"] as const;
+// Near-duplicate gate at write time; the prod embedder (multilingual-e5-small) keeps distinct facts
+// above 0.9 too, so the model decides and the gate only surfaces candidates.
+export const MEMORY_NEAR_DUPLICATE_SIMILARITY = 0.9;
+export const MEMORY_NEAR_DUPLICATE_CANDIDATES = 2;
 
 export const MEMORY_EMBEDDING_DIMENSIONS = 384;
 export const MEMORY_EMBEDDING_MODEL = "intfloat/multilingual-e5-small";
@@ -83,3 +99,9 @@ export const MEMORY_EMBEDDING_PROVIDER_BATCH_SIZE = 8;
 export const MEMORY_EMBEDDING_CHUNK_MAX_CHARACTERS = 400;
 export const MEMORY_EMBEDDING_CHUNK_MIN_BOUNDARY_CHARACTERS = 280;
 export const MEMORY_EMBEDDING_CHUNK_OVERLAP_CHARACTERS = 80;
+
+// A record shown to the model in the last N turns of the same session stays out of the automatic
+// context; the model can still search for it. Production showed the same three facts 50 times a day.
+export const MEMORY_EXPOSURE_WINDOW_TURNS = 10;
+// The current author's own profile card returns after this many turns unless they became the subject.
+export const PROFILE_AUTHOR_CARD_WINDOW_TURNS = 20;

@@ -11,7 +11,10 @@ import type { PoolClient } from "pg";
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
 import type { TelegramGroupJournalEntry } from "../telegram-group-journal-context.js";
-import { MEMORY_REVIEW_BATCH_SIZE } from "./memory-review-config.js";
+import {
+  MEMORY_REVIEW_BATCH_SIZE,
+  MEMORY_REVIEW_INTERACTIVE_MIN_SOURCES,
+} from "./memory-review-config.js";
 import { formatMemoryReviewBatchPrompt } from "./memory-review-prompt.js";
 import { memoryReviewTerminalRepository } from "./memory-review-terminal-repository.js";
 
@@ -28,15 +31,17 @@ export interface MemoryReviewBatchSummary {
 export interface MemoryReviewClaim extends MemoryReviewBatchSummary {
   conversationId: string;
   familyId: string;
-  groupId: string;
-  groupType: "external" | "family_private";
+  groupId: string | null;
+  groupType: "external" | "family_private" | null;
   leaseToken: string;
+  memoryScopes: Array<"family" | "group" | "personal">;
   ownerTelegramUserId: string;
   ownerUserId: string;
   prompt: string;
-  scope: "family" | "group";
+  role: "external" | "member" | "owner" | "recovery_owner";
+  scope: "family" | "group" | "personal";
   telegramChatId: string;
-  telegramChatType: "group" | "supergroup";
+  telegramChatType: "group" | "private" | "supergroup";
   toolAllowlist: string[];
 }
 
@@ -49,7 +54,7 @@ interface LaneRow {
 
 interface SourceRow {
   actor_id: string;
-  actor_kind: "agent_self" | "user";
+  actor_kind: "agent_self" | "telegram_bot" | "user";
   content_text: string | null;
   id: string;
   message_kind: string;
@@ -238,7 +243,7 @@ export const memoryReviewRepository = {
     try {
       await client.query("BEGIN");
       const message = await client.query<{
-        actor_kind: "agent_self" | "user";
+        actor_kind: "agent_self" | "telegram_bot" | "user";
         conversation_id: string;
         message_thread_id: string | null;
         sequence_id: string;
@@ -249,7 +254,7 @@ export const memoryReviewRepository = {
         [input.timelineEntryId, input.groupId],
       );
       const source = message.rows[0];
-      if (!source || source.actor_kind !== "user") {
+      if (!source || (source.actor_kind !== "user" && source.actor_kind !== "telegram_bot")) {
         await client.query("COMMIT");
         return null;
       }
@@ -308,8 +313,7 @@ export const memoryReviewRepository = {
       }>(
         `SELECT conversation_id, message_thread_id::text, sequence_id::text
            FROM telegram_group_messages
-          WHERE id = $1 AND group_id = $2
-            AND actor_kind IN ('user', 'telegram_bot') FOR SHARE`,
+          WHERE id = $1 AND group_id = $2 AND actor_kind IN ('user', 'telegram_bot') FOR SHARE`,
         [input.timelineEntryId, input.groupId],
       );
       const current = message.rows[0];
@@ -351,7 +355,9 @@ export const memoryReviewRepository = {
           upperSequence: current.sequence_id,
         });
       }
-      if (sources.length === 0) {
+      // A short tail stays for idle review: one or two replies give the model nothing to judge,
+      // and the addressed turn is busy answering.
+      if (sources.length < MEMORY_REVIEW_INTERACTIVE_MIN_SOURCES) {
         await client.query("COMMIT");
         return null;
       }

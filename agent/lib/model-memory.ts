@@ -29,6 +29,7 @@ export interface ModelMemory {
   createdAt: string;
   kind: MemoryKind;
   memoryRef: string;
+  occurredAt: string | null;
   scope: MemoryScope;
   sensitivity: MemorySensitivity;
   /** Present only when the record actually changed after it was written. */
@@ -60,6 +61,7 @@ export function toModelMemory(
     createdAt: memory.createdAt,
     kind: memory.kind,
     memoryRef: memory.memoryRef,
+    occurredAt: memory.occurredAt,
     scope: memory.scope,
     sensitivity: memory.sensitivity,
     ...(memory.updatedAt === memory.createdAt ? {} : { updatedAt: memory.updatedAt }),

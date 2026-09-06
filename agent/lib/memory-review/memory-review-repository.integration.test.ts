@@ -2,7 +2,7 @@
  * Durable group memory-review PostgreSQL integration tests.
  *
  * Constructs covered:
- * - Passive user messages form one immutable batch only when one lane reaches exactly 50 sources.
+ * - Passive user messages form one immutable batch when one lane reaches 50 sources; personal lanes are claimable.
  * - Agent responses and other forum topics do not count toward that lane's batch.
  * - Active source rows prevent timeline pruning until terminal completion.
  * - Successful review advances the lane cursor; failure leaves the lane blocked at its predecessor.
@@ -39,6 +39,15 @@ async function insertUserMessage(input: {
     [input.conversationId, input.groupId, input.sequence,
       `Сообщение памяти ${input.sequence}`, input.messageThreadId ?? null],
   )).rows[0]!;
+}
+
+/** Eight passive messages: the shortest tail an addressed turn still reviews inline. */
+async function insertInteractiveTail(input: { conversationId: string; groupId: string }) {
+  let last: { id: string } | null = null;
+  for (let sequence = 2; sequence <= 9; sequence += 1) {
+    last = await insertUserMessage({ ...input, sequence });
+  }
+  return last!;
 }
 
 describeWithDatabase("memory review repository", () => {
@@ -147,7 +156,7 @@ describeWithDatabase("memory review repository", () => {
     });
   });
 
-  it("does not materialize a legacy personal lane after observer crash", async () => {
+  it("materializes and claims a personal lane batch once fifty sources accumulate", async () => {
     const fixture = await createMainAgentPrivateMemoryFixture();
     await memoryReviewRepository.initializeLane({
       conversationId: fixture.conversationId,
@@ -162,16 +171,20 @@ describeWithDatabase("memory review repository", () => {
       });
     }
 
-    await expect(memoryReviewDispatchRepository.claimPending({
+    const claimed = await memoryReviewDispatchRepository.claimPending({
       leaseMilliseconds: 60_000,
       limit: 10,
       now: new Date("2026-08-12T10:00:00.000Z"),
-    })).resolves.toEqual([]);
-    await expect(database().query(
-      `SELECT count(*)::integer AS count FROM memory_review_batches
-        WHERE conversation_id = $1`,
-      [fixture.conversationId],
-    )).resolves.toMatchObject({ rows: [{ count: 0 }] });
+    });
+
+    expect(claimed).toHaveLength(1);
+    expect(claimed[0]).toMatchObject({
+      groupId: null,
+      scope: "personal",
+      sourceCount: 50,
+      telegramChatType: "private",
+      throughSequence: "51",
+    });
   });
 
   it("retains active sources and advances only after successful completion", async () => {
@@ -189,17 +202,17 @@ describeWithDatabase("memory review repository", () => {
                'review-interactive', now(), now()) RETURNING id`,
       [fixture.familyId, fixture.groupId],
     );
-    const firstSource = await insertUserMessage({
+    const firstSource = await insertInteractiveTail({
       conversationId: fixture.conversationId,
       groupId: fixture.groupId,
-      sequence: 2,
     });
     const first = await memoryReviewRepository.prepareInteractiveTurn({
       applicationSessionId: session.rows[0]!.id,
       groupId: fixture.groupId,
       timelineEntryId: firstSource.id,
     });
-    expect(first?.sourceEntryIds).toEqual([firstSource.id]);
+    expect(first?.sourceEntryIds).toHaveLength(8);
+    expect(first?.sourceEntryIds.at(-1)).toBe(firstSource.id);
 
     await expect(database().query(
       "DELETE FROM telegram_group_messages WHERE id = $1",
@@ -222,7 +235,7 @@ describeWithDatabase("memory review repository", () => {
       invokingActorKind: "telegram_user",
       memoryReviewBatchId: first!.batchId,
       memoryReviewSourceEntryIds: first!.sourceEntryIds,
-      visibleTimelineEntryIds: [firstSource.id],
+      visibleTimelineEntryIds: first!.sourceEntryIds,
     });
     await memoryReviewRepository.completeBatch({
       batchId: first!.batchId,
@@ -234,11 +247,41 @@ describeWithDatabase("memory review repository", () => {
     await expect(memoryReviewRepository.getLaneCursor({
       conversationId: fixture.conversationId,
       messageThreadId: null,
-    })).resolves.toBe("2");
+    })).resolves.toBe("9");
     await expect(database().query(
       "DELETE FROM telegram_group_messages WHERE id = $1",
       [firstSource.id],
     )).resolves.toMatchObject({ rowCount: 1 });
+  });
+
+  it("leaves a tail shorter than eight messages to idle review", async () => {
+    const fixture = await createMainAgentMemoryFixture();
+    const session = await database().query<{ id: string }>(
+      `INSERT INTO conversation_sessions
+         (thread_id, generation, family_id, group_id, scope, kind, conversation_key,
+          continuation_token, started_at, last_activity_at)
+       VALUES (gen_random_uuid(), 0, $1, $2, 'family', 'canonical', 'review-short-tail',
+               'review-short-tail', now(), now()) RETURNING id`,
+      [fixture.familyId, fixture.groupId],
+    );
+    let source: { id: string } | null = null;
+    for (const sequence of [2, 3]) {
+      source = await insertUserMessage({
+        conversationId: fixture.conversationId, groupId: fixture.groupId, sequence,
+      });
+    }
+
+    const batch = await memoryReviewRepository.prepareInteractiveTurn({
+      applicationSessionId: session.rows[0]!.id,
+      groupId: fixture.groupId,
+      timelineEntryId: source!.id,
+    });
+
+    expect(batch).toBeNull();
+    await expect(database().query(
+      "SELECT count(*)::text AS count FROM memory_review_batches WHERE conversation_id = $1",
+      [fixture.conversationId],
+    )).resolves.toMatchObject({ rows: [{ count: "0" }] });
   });
 
   it("accepts replayed terminal events without changing the recorded outcome", async () => {
@@ -251,10 +294,9 @@ describeWithDatabase("memory review repository", () => {
                'review-replay', now(), now()) RETURNING id`,
       [fixture.familyId, fixture.groupId],
     );
-    const source = await insertUserMessage({
+    const source = await insertInteractiveTail({
       conversationId: fixture.conversationId,
       groupId: fixture.groupId,
-      sequence: 2,
     });
     const batch = await memoryReviewRepository.prepareInteractiveTurn({
       applicationSessionId: session.rows[0]!.id,
@@ -278,7 +320,7 @@ describeWithDatabase("memory review repository", () => {
       invokingActorKind: "telegram_user",
       memoryReviewBatchId: batch!.batchId,
       memoryReviewSourceEntryIds: batch!.sourceEntryIds,
-      visibleTimelineEntryIds: [source.id],
+      visibleTimelineEntryIds: batch!.sourceEntryIds,
     });
     const completion = {
       batchId: batch!.batchId,
@@ -312,10 +354,9 @@ describeWithDatabase("memory review repository", () => {
                'review-failure-replay', now(), now()) RETURNING id`,
       [fixture.familyId, fixture.groupId],
     );
-    const source = await insertUserMessage({
+    const source = await insertInteractiveTail({
       conversationId: fixture.conversationId,
       groupId: fixture.groupId,
-      sequence: 2,
     });
     const batch = await memoryReviewRepository.prepareInteractiveTurn({
       applicationSessionId: session.rows[0]!.id,
@@ -354,10 +395,9 @@ describeWithDatabase("memory review repository", () => {
                'review-failure-wrote', now(), now()) RETURNING id`,
       [fixture.familyId, fixture.groupId],
     );
-    const source = await insertUserMessage({
+    const source = await insertInteractiveTail({
       conversationId: fixture.conversationId,
       groupId: fixture.groupId,
-      sequence: 2,
     });
     const batch = await memoryReviewRepository.prepareInteractiveTurn({
       applicationSessionId: session.rows[0]!.id,
@@ -394,7 +434,7 @@ describeWithDatabase("memory review repository", () => {
       [batch!.batchId],
     )).resolves.toMatchObject({
       rows: [{
-        cursor: "2",
+        cursor: "9",
         diagnostic_code: "AGENT_MEMORY_REVIEW_MODEL_FAILED",
         status: "completed",
       }],
@@ -411,10 +451,9 @@ describeWithDatabase("memory review repository", () => {
                'review-stale', now(), now()) RETURNING id`,
       [fixture.familyId, fixture.groupId],
     );
-    const source = await insertUserMessage({
+    const source = await insertInteractiveTail({
       conversationId: fixture.conversationId,
       groupId: fixture.groupId,
-      sequence: 2,
     });
     const batch = await memoryReviewRepository.prepareInteractiveTurn({
       applicationSessionId: session.rows[0]!.id,
@@ -446,7 +485,7 @@ describeWithDatabase("memory review repository", () => {
       groupId: fixture.groupId,
       timelineEntryId: source.id,
     });
-    expect(repeated?.sourceCount).toBe(2);
+    expect(repeated?.sourceCount).toBe(9);
     await expect(database().query(
       "SELECT count(*)::integer AS alerts FROM memory_review_owner_alerts",
     )).resolves.toMatchObject({ rows: [{ alerts: 0 }] });

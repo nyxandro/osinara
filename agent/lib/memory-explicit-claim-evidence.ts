@@ -77,13 +77,15 @@ export async function prepareExplicitClaimEvidence(
       WHERE message.id = $1 AND message.conversation_id = $2
         AND message.actor_kind IN ('user', 'telegram_bot')
         AND (
-          conversation.scope = 'group' OR EXISTS (
+          conversation.scope = 'group' OR message.actor_kind = 'telegram_bot' OR EXISTS (
             SELECT 1 FROM family_memberships AS membership
             WHERE membership.family_id = conversation.family_id
               AND membership.user_id = participant.linked_user_id
           )
         )
         AND (
+           -- The invoking actor may be a person or another bot; both are journaled by their
+           -- Telegram id, and the turn's source set was bound to that exact actor.
            message.telegram_user_id = $3 OR EXISTS (
             SELECT 1
             FROM memory_turn_sources AS turn_source
@@ -94,7 +96,7 @@ export async function prepareExplicitClaimEvidence(
               AND turn_source.conversation_id = message.conversation_id
               AND source_set.eve_session_id = $4
               AND source_set.eve_turn_id = $5
-               AND source_set.invoking_actor_kind IN ('telegram_user', 'telegram_bot')
+               AND source_set.invoking_actor_kind = $6::text
                AND source_set.invoking_actor_id = $3
            ) OR EXISTS (
              SELECT 1
@@ -109,8 +111,10 @@ export async function prepareExplicitClaimEvidence(
                AND source_set.memory_review_batch_id IS NOT NULL
            )
         )`,
-    [source.timelineEntryId, source.conversationId, auth.telegramUserId,
-      input.provenance?.sessionId ?? null, input.provenance?.turnId ?? null],
+    [source.timelineEntryId, source.conversationId,
+      auth.telegramActorKind === "telegram_channel" ? null : auth.telegramActorId,
+      input.provenance?.sessionId ?? null, input.provenance?.turnId ?? null,
+      auth.telegramActorKind === "telegram_channel" ? null : auth.telegramActorKind],
   );
   const row = result.rows[0];
   const expectedPartition = input.scope === "group"

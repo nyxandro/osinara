@@ -21,6 +21,7 @@ describe("memory untrusted prompt boundaries", () => {
       profileViewRef: "view_11111111111111111111111111111111",
       subjects: [{
         claims: [{
+          attribute: null,
           confirmation: "model_high",
           content: INJECTION,
           evidenceKind: "reported",

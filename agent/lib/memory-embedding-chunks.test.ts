@@ -10,7 +10,7 @@ import {
   MEMORY_EMBEDDING_CHUNK_MAX_CHARACTERS,
   MEMORY_EMBEDDING_CHUNK_OVERLAP_CHARACTERS,
 } from "./memory-config.js";
-import { chunkMemoryContent, chunkMemoryQuery } from "./memory-embedding-chunks.js";
+import { chunkMemoryContent } from "./memory-embedding-chunks.js";
 
 describe("chunkMemoryContent", () => {
   it("keeps short content in one source-aligned chunk", () => {
@@ -44,32 +44,6 @@ describe("chunkMemoryContent", () => {
       expect(previous.endOffset - current.startOffset).toBeLessThanOrEqual(
         MEMORY_EMBEDDING_CHUNK_OVERLAP_CHARACTERS,
       );
-    }
-  });
-
-  it.each([
-    ["memory", chunkMemoryContent], ["query", chunkMemoryQuery],
-  ] as const)("keeps complete Unicode characters at every boundary in %s", (_name, chunk) => {
-    // Both the hard end (400) and overlap start (320) can land inside a UTF-16 surrogate pair.
-    for (const prefix of [0, 1, 79, 80, 319, 320, 399, 400]) {
-      const content = "а".repeat(prefix) + "😀🧑🏽‍💻".repeat(75) + "б".repeat(500);
-      const chunks = chunk(content);
-      let coveredThrough = 0;
-      for (const [index, current] of chunks.entries()) {
-        expect(current.content).not.toMatch(/[\uD800-\uDFFF]/u);
-        expect(current.content).toBe(content.slice(current.startOffset, current.endOffset));
-        expect(current.content.length).toBeLessThanOrEqual(MEMORY_EMBEDDING_CHUNK_MAX_CHARACTERS);
-        expect(current.chunkIndex).toBe(index);
-        expect(current.startOffset).toBeLessThanOrEqual(coveredThrough);
-        if (index > 0) {
-          const previous = chunks[index - 1]!;
-          expect(current.startOffset).toBeGreaterThan(previous.startOffset);
-          expect(previous.endOffset - current.startOffset).toBeLessThanOrEqual(MEMORY_EMBEDDING_CHUNK_OVERLAP_CHARACTERS);
-        }
-        coveredThrough = current.endOffset;
-      }
-      expect(coveredThrough).toBe(content.length);
-      expect(chunk(content)).toEqual(chunks);
     }
   });
 });

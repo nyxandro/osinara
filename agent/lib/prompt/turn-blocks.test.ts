@@ -255,7 +255,7 @@ describe("memory block resolution", () => {
       TEST_TURN_ID,
     );
 
-    expect(markdown).toContain("активный pipeline текущей реализации");
+    expect(markdown).toContain("Записи отобраны сервером");
   });
 
   it("returns no block when the turn carries no user text", async () => {
@@ -346,6 +346,7 @@ describe("memory block resolution", () => {
       replyTelegramUserId: "203",
       replyTimelineSequence: "44",
       retrievalClaimIds: ["claim-related"],
+      suppressCurrentAuthor: false,
     });
     expect(markdown).toContain("<verified_profile_view");
     expect(markdown).toContain('"priority":"retrieval_related"');

@@ -32,12 +32,15 @@ import {
 } from "../memory-context.js";
 import {
   formatRetrievedMemoryInstructions,
+  MEMORY_USED_REMINDER,
   memoryRetrievalQuery,
   retrieveRelevantMemories,
   retrieveMemoryTurnContext,
   type MemoryTurnContext,
+  type MemoryTurnContextOptions,
   type ModelMemoryContextItem,
 } from "../memory-retrieval.js";
+import { memoryContextExposureRepository } from "../memory-context-exposure-repository.js";
 import { applicationThreadSkillHints } from "../memory-thread-activation.js";
 import {
   formatProfileViewContext,
@@ -238,13 +241,28 @@ export function createReactionSetBlockResolver(dependencies: {
   };
 }
 
+interface MemoryExposureLedger {
+  authorCardShownRecently(applicationSessionId: string, telegramUserId: string, sessionTurn: number): Promise<boolean>;
+  recentlyShownMemoryRefs(applicationSessionId: string, sessionTurn: number): Promise<Set<string>>;
+  record(input: {
+    applicationSessionId: string;
+    authorTelegramUserId: string | null;
+    memoryRefs: readonly string[];
+    sessionTurn: number;
+  }): Promise<void>;
+  sessionTurn(applicationSessionId: string): Promise<number>;
+}
+
 export function createMemoryBlockResolver(dependencies: {
   authorize: (ctx: TurnBlockContext) => MemoryAuthorization;
   createProfile: (auth: MemoryAuthorization, input: CreateProfileViewInput) => Promise<ProfileView>;
+  /** What this application session already showed; absent in tests that do not care about repetition. */
+  exposures?: MemoryExposureLedger;
   retrieve: (
     auth: MemoryAuthorization,
     query: string,
     skillHints: readonly string[],
+    options?: MemoryTurnContextOptions,
   ) => Promise<MemoryTurnContext>;
 }) {
   return async function resolve(ctx: TurnBlockContext, turnId: string): Promise<string | null> {
@@ -256,20 +274,51 @@ export function createMemoryBlockResolver(dependencies: {
       const query = memoryRetrievalQuery(ctx.session.auth, ctx.messages,
         ctx.channel?.kind === "subagent" || Boolean(ctx.session.parent));
       if (query === null) return null;
+      // Records shown in the last turns of this application session stay out of the automatic
+      // block and the current author's card returns only after a while: without this, three group
+      // records circled through every turn, fifty times a day.
+      const applicationSessionId = ctx.session.auth.current?.attributes.applicationSessionId;
+      const exposures = typeof applicationSessionId === "string" ? dependencies.exposures : undefined;
+      const sessionTurn = exposures ? await exposures.sessionTurn(applicationSessionId as string) : 0;
+      const excludeMemoryRefs = exposures
+        ? await exposures.recentlyShownMemoryRefs(applicationSessionId as string, sessionTurn)
+        : new Set<string>();
       const context = await dependencies.retrieve(
         authorization,
         query,
         applicationThreadSkillHints(ctx.messages),
+        { excludeMemoryRefs },
       );
       memories = context.memories.length;
       outcome = "succeeded";
       const profileInput = telegramProfileInput(ctx, context.retrievedClaimIds, turnId);
+      const authorIsSubject = profileInput !== null && (
+        profileInput.replyTelegramUserId === profileInput.currentTelegramUserId ||
+        profileInput.explicitMentionTelegramUserIds.includes(profileInput.currentTelegramUserId));
+      const suppressCurrentAuthor = profileInput !== null && exposures !== undefined && !authorIsSubject &&
+        await exposures.authorCardShownRecently(applicationSessionId as string, profileInput.currentTelegramUserId, sessionTurn);
       const profile = profileInput === null
         ? null
-        : await dependencies.createProfile(authorization, profileInput);
+        : await dependencies.createProfile(authorization, { ...profileInput, suppressCurrentAuthor });
+      const shownMemoryRefs = [
+        ...context.memories.flatMap((memory) => "memoryRef" in memory && typeof memory.memoryRef === "string" ? [memory.memoryRef] : []),
+        ...(profile?.subjects.flatMap((subject) => subject.claims.map((claim) => claim.memoryRef)) ?? []),
+      ];
+      if (exposures) {
+        const shownAuthorCard = profile?.subjects.some((subject) => subject.priority === "current_author") === true;
+        await exposures.record({
+          applicationSessionId: applicationSessionId as string,
+          authorTelegramUserId: shownAuthorCard && profileInput !== null ? profileInput.currentTelegramUserId : null,
+          memoryRefs: shownMemoryRefs,
+          sessionTurn,
+        });
+      }
       return [
         ...(profile === null ? [] : [formatProfileViewContext(profile)]),
-        formatRetrievedMemoryInstructions(context.memories, context.threads),
+        // The reminder sits right after the records: the rule in the mode block alone was ignored.
+        shownMemoryRefs.length === 0
+          ? formatRetrievedMemoryInstructions(context.memories, context.threads)
+          : `${formatRetrievedMemoryInstructions(context.memories, context.threads)}\n${MEMORY_USED_REMINDER}`,
       ].join("\n\n");
     } catch (error) {
       outcome = "failed";
@@ -364,6 +413,7 @@ export const resolveReactionSetBlock = createReactionSetBlockResolver({
 export const resolveMemoryBlock = createMemoryBlockResolver({
   authorize: requireMemoryAuthorization,
   createProfile: profileViewRepository.create,
+  exposures: memoryContextExposureRepository,
   retrieve: retrieveMemoryTurnContext,
 });
 

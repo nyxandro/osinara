@@ -5,6 +5,7 @@
  * - `memoryReviewTerminalRepository`: replay-safe completion/failure and pre-Eve source release.
  * - `resolveAbandonedReviewBatch`: the one terminal decision for a turn that never reports.
  * - `terminalizeAbandonedReviewTurns`: last-resort time bound for a turn that went silent.
+ * - `terminalizeBlockedReviewHeads`: the same bound for a failed or ambiguous head at the cursor.
  */
 import type { PoolClient } from "pg";
 
@@ -16,7 +17,6 @@ import {
   MEMORY_REVIEW_ABANDONED_TURN_TIMEOUT_MILLISECONDS,
 } from "./memory-review-config.js";
 import { enqueueMemoryReviewOwnerAlert } from "./memory-review-owner-alert-repository.js";
-import { terminalizeApplicationSession } from "./memory-review-session-terminal.js";
 
 export type MemoryReviewTerminalResult = "recorded" | "released" | "replayed" | "skipped";
 export type MemoryReviewCompletionResult = MemoryReviewTerminalResult | "failed";
@@ -26,6 +26,7 @@ const BATCH_RESOLVED = "AGENT_MEMORY_REVIEW_BATCH_RESOLVED";
 const PASS_SKIPPED = "AGENT_MEMORY_REVIEW_PASS_SKIPPED";
 const TURN_CANCELLED = "AGENT_MEMORY_REVIEW_TURN_CANCELLED";
 const TURN_ABANDONED = "AGENT_MEMORY_REVIEW_TURN_ABANDONED";
+const HEAD_UNBLOCKED = "AGENT_MEMORY_REVIEW_HEAD_UNBLOCKED";
 
 async function advanceCompletedChain(client: PoolClient, laneId: string): Promise<void> {
   const lane = await client.query<{ processed_through_sequence: string }>(
@@ -49,6 +50,48 @@ async function advanceCompletedChain(client: PoolClient, laneId: string): Promis
     `UPDATE memory_review_lanes SET processed_through_sequence = $2, updated_at = now()
       WHERE id = $1`,
     [laneId, cursor],
+  );
+}
+
+async function terminalizeApplicationSession(
+  client: PoolClient,
+  input: {
+    applicationSessionId: string;
+    completedAt: Date;
+    eveSessionId: string;
+    outcome: "completed" | "failed";
+  },
+): Promise<void> {
+  const result = await client.query(
+    `UPDATE conversation_sessions
+        SET completed_turns = completed_turns + CASE WHEN $4 = 'completed' THEN 1 ELSE 0 END,
+            last_activity_at = $3, pending_operation = false, eve_session_id = $2,
+            task_state = CASE
+              WHEN kind <> 'canonical' THEN $4::conversation_task_state
+              ELSE task_state
+            END,
+            retired_at = CASE WHEN kind <> 'canonical' THEN $3 ELSE retired_at END,
+            delete_after = CASE
+              WHEN kind <> 'canonical' THEN $3 + $5 * interval '1 day'
+              ELSE delete_after
+            END
+      WHERE id = $1 AND retired_at IS NULL
+        AND (eve_session_id IS NULL OR eve_session_id = $2)`,
+    [input.applicationSessionId, input.eveSessionId, input.completedAt, input.outcome,
+      SESSION_RETENTION_DAYS],
+  );
+  if (result.rowCount !== 1) throw new AppError(
+    "AGENT_MEMORY_REVIEW_SESSION_TERMINAL_INVALID",
+    "Не удалось завершить контекст проверки памяти",
+  );
+  // Review sessions have no route, but retain the standard noncanonical retirement audit contract.
+  await client.query(
+    `INSERT INTO audit_events (family_id, event_type, subject_id, metadata)
+     SELECT family_id, 'session.noncanonical_retired', id,
+            jsonb_build_object('kind', kind::text, 'taskState', task_state::text)
+       FROM conversation_sessions
+      WHERE id = $1 AND retired_at IS NOT NULL AND kind <> 'canonical'`,
+    [input.applicationSessionId],
   );
 }
 
@@ -220,6 +263,68 @@ export async function terminalizeAbandonedReviewTurns(
   }
 }
 
+/**
+ * A `failed` or `ambiguous` batch at the lane cursor still blocks the lane: `laneBlocked` refuses
+ * to reuse its place and `coveredThrough` stops at it. Session failures and handoff timeouts
+ * still end that way, so after the same time bound the head is resolved by provenance like an
+ * abandoned turn: counted when it wrote memory, released when nothing stands behind it, skipped
+ * otherwise. A missing source binding stays manual: that is a data defect, not lost traffic.
+ */
+export async function terminalizeBlockedReviewHeads(
+  client: PoolClient,
+  now: Date,
+): Promise<void> {
+  const blocked = await client.query<{
+    application_session_id: string | null;
+    diagnostic_code: string | null;
+    eve_session_id: string | null;
+    eve_turn_id: string | null;
+    from_sequence: string;
+    id: string;
+    lane_id: string;
+    status: string;
+    through_sequence: string;
+  }>(
+    `SELECT batch.id, batch.lane_id, batch.application_session_id, batch.eve_session_id,
+            batch.eve_turn_id, batch.status::text, batch.diagnostic_code,
+            batch.from_sequence::text, batch.through_sequence::text
+       FROM memory_review_batches AS batch
+       JOIN memory_review_lanes AS lane ON lane.id = batch.lane_id
+      WHERE batch.status IN ('failed', 'ambiguous')
+        AND batch.predecessor_sequence = lane.processed_through_sequence
+        AND batch.diagnostic_code IS DISTINCT FROM $4
+        AND batch.completed_at <= $1::timestamptz - $2::double precision * interval '1 millisecond'
+      ORDER BY batch.completed_at, batch.id
+      FOR UPDATE OF batch SKIP LOCKED
+      LIMIT $3`,
+    [now, MEMORY_REVIEW_ABANDONED_TURN_TIMEOUT_MILLISECONDS,
+      MEMORY_REVIEW_ABANDONED_TURN_BATCH_SIZE, SOURCE_BINDING_MISSING],
+  );
+  for (const batch of blocked.rows) {
+    const outcome = await resolveAbandonedReviewBatch(client, {
+      applicationSessionId: batch.application_session_id,
+      batchId: batch.id,
+      diagnosticCode: HEAD_UNBLOCKED,
+      eveSessionId: batch.eve_session_id,
+      eveTurnId: batch.eve_turn_id,
+      laneId: batch.lane_id,
+      notifyOwner: true,
+      now,
+    });
+    console.error(JSON.stringify({
+      batchId: batch.id,
+      code: BATCH_RESOLVED,
+      diagnosticCode: HEAD_UNBLOCKED,
+      fromSequence: batch.from_sequence,
+      laneId: batch.lane_id,
+      outcome,
+      previousDiagnosticCode: batch.diagnostic_code,
+      previousStatus: batch.status,
+      throughSequence: batch.through_sequence,
+    }));
+  }
+}
+
 export const memoryReviewTerminalRepository = {
   async completeBatch(input: {
     batchId: string;
@@ -231,12 +336,12 @@ export const memoryReviewTerminalRepository = {
     try {
       await client.query("BEGIN");
       const batch = await client.query<{
-        application_session_id: string; diagnostic_code: string | null;
+        application_session_id: string; batch_kind: string; diagnostic_code: string | null;
         eve_session_id: string | null; eve_turn_id: string | null; lane_id: string;
-        status: string;
+        source_count: number; started_at: Date | null; status: string;
       }>(
         `SELECT lane_id, application_session_id, eve_session_id, eve_turn_id,
-                status::text, diagnostic_code
+                status::text, diagnostic_code, batch_kind::text, source_count, started_at
            FROM memory_review_batches WHERE id = $1 FOR UPDATE`,
         [input.batchId],
       );
@@ -313,7 +418,25 @@ export const memoryReviewTerminalRepository = {
         "DELETE FROM memory_review_batch_sources WHERE batch_id = $1",
         [input.batchId],
       );
+      // Capture rate per batch is the one number that tells whether review earns its model call.
+      const written = await client.query<{ count: string }>(
+        `SELECT count(*)::text AS count FROM memory_mutation_operations
+          WHERE mutation_kind = 'create' AND eve_session_id = $1 AND eve_turn_id = $2`,
+        [input.eveSessionId, input.eveTurnId],
+      );
       await client.query("COMMIT");
+      console.info(JSON.stringify({
+        code: "AGENT_MEMORY_REVIEW_RESULT",
+        batchId: input.batchId,
+        batchKind: recorded.batch_kind,
+        claimsWritten: Number(written.rows[0]?.count ?? 0),
+        durationMs: recorded.started_at === null
+          ? null
+          : input.completedAt.getTime() - recorded.started_at.getTime(),
+        eveSessionId: input.eveSessionId,
+        eveTurnId: input.eveTurnId,
+        sourceCount: recorded.source_count,
+      }));
       return "recorded";
     } catch (error) {
       await client.query("ROLLBACK");

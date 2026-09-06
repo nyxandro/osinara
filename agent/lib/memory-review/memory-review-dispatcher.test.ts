@@ -22,10 +22,12 @@ const batch: ClaimedMemoryReviewBatch = {
   groupId: "00000000-0000-4000-8000-000000000020",
   groupType: "family_private",
   leaseToken: "00000000-0000-4000-8000-000000000060",
+  memoryScopes: ["family"],
   messageThreadId: null,
   ownerTelegramUserId: "101",
   ownerUserId: "00000000-0000-4000-8000-000000000030",
   prompt: "<untrusted_memory_review_batch>\n50 messages\n</untrusted_memory_review_batch>",
+  role: "owner",
   scope: "family",
   sourceCount: 50,
   sourceEntryIds: Array.from(
@@ -103,6 +105,40 @@ describe("memory review dispatcher", () => {
       applicationSessionId: "application-review-session-1",
       eveSessionId: "eve-review-session-1",
     });
+  });
+
+  it("starts a private review turn with personal and family scopes and no group identity", async () => {
+    const personal: ClaimedMemoryReviewBatch = {
+      ...batch,
+      groupId: null,
+      groupType: null,
+      memoryScopes: ["personal", "family"],
+      role: "member",
+      scope: "personal",
+      sourceCount: 3,
+      sourceEntryIds: batch.sourceEntryIds.slice(0, 3),
+      telegramChatId: "101",
+      telegramChatType: "private",
+      throughSequence: "3",
+    };
+    const fixture = dependencies({
+      claimPending: vi.fn().mockResolvedValue([personal]),
+    });
+
+    await createMemoryReviewDispatcher(fixture.dependencies as never)(
+      new Date("2026-09-03T10:00:00.000Z"),
+    );
+
+    const auth = fixture.send.mock.calls[0]![1].auth;
+    expect(auth.attributes).toMatchObject({
+      memoryScopes: ["personal", "family"],
+      role: "member",
+      telegramChatId: "101",
+      telegramChatType: "private",
+    });
+    expect(auth.attributes).not.toHaveProperty("groupId");
+    expect(auth.attributes).not.toHaveProperty("groupType");
+    expect(auth.attributes).not.toHaveProperty("toolAllowlist");
   });
 
   it("marks a rejected handoff ambiguous because Eve may already have started", async () => {

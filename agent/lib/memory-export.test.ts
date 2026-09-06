@@ -24,6 +24,7 @@ describe("formatMemoryExportFiles", () => {
         scope: "personal",
         sensitivity: "normal",
         source: "eve:session:turn",
+        occurredAt: null,
         updatedAt: "2026-07-12T10:00:00.000Z",
       }],
       schemaVersion: 1,

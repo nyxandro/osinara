@@ -25,6 +25,7 @@ export type ProfileSubjectPriority =
   | "retrieval_related";
 
 export interface ProfileClaimCandidate {
+  attribute: string | null;
   claimStatus: "active" | "duplicate" | "superseded";
   confirmation: MemoryConfirmation;
   content: string;
@@ -82,11 +83,15 @@ function isDormant(lastVerifiedAt: string, now: Date): boolean {
 }
 
 function renderClaim(candidate: ProfileClaimCandidate): string {
-  return `- [${candidate.originScope}: ${candidate.originLabel}] ${candidate.content}`;
+  const slot = candidate.attribute === null ? "" : `${candidate.attribute}: `;
+  return `- [${candidate.originScope}: ${candidate.originLabel}] ${slot}${candidate.content}`;
 }
 
 function compareClaims(left: ProfileClaimCandidate, right: ProfileClaimCandidate): number {
+  // Slotted claims read as a card (работа, город, …) and go before free-form ones of the same kind.
   return KIND_PRIORITY[left.kind] - KIND_PRIORITY[right.kind] ||
+    Number(right.attribute !== null) - Number(left.attribute !== null) ||
+    (left.attribute ?? "").localeCompare(right.attribute ?? "") ||
     Number(right.confirmation === "user_confirmed") - Number(left.confirmation === "user_confirmed") ||
     ORIGIN_PRIORITY[left.originScope] - ORIGIN_PRIORITY[right.originScope] ||
     right.updatedAt.localeCompare(left.updatedAt) ||

@@ -63,6 +63,7 @@ export interface MemoryItem {
   id: string;
   kind: MemoryKind;
   messageThreadId: string | null;
+  occurredAt: string | null;
   scope: MemoryScope;
   sensitivity: MemorySensitivity;
   source: string;
@@ -76,7 +77,11 @@ export interface ReferencedMemoryItem extends MemoryItem {
 }
 
 export interface CreateMemoryInput {
+  attribute?: string;
   confirmation: MemoryConfirmation;
+  /** The writer has seen the near-duplicate candidates and asserts this is a different fact. */
+  distinct?: boolean;
+  occurredAt?: string;
   content: string;
   explicitSource?: CreateMemoryExplicitSourceInput;
   kind: MemoryKind;
@@ -107,6 +112,7 @@ export interface MemoryRow {
   id: string;
   kind: MemoryKind;
   message_thread_id: string | null;
+  occurred_at: Date | null;
   scope: MemoryScope;
   sensitivity: MemorySensitivity;
   source: string;
@@ -135,6 +141,7 @@ export function rowToMemory(row: MemoryRow): MemoryItem {
     embeddingStatus: row.embedding_status,
     id: row.id,
     kind: row.kind,
+    occurredAt: row.occurred_at ? row.occurred_at.toISOString() : null,
     messageThreadId: row.message_thread_id,
     scope: row.scope,
     sensitivity: row.sensitivity,

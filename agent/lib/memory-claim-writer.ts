@@ -11,7 +11,14 @@ import { insertClaimEvidence } from "./claim-evidence-writer.js";
 import { prepareExplicitClaimEvidence } from "./memory-explicit-claim-evidence.js";
 import { database } from "./database.js";
 import type { MemoryAuthorization, MemoryScope } from "./memory-context.js";
+import { embedMemoryQuery } from "./memory-embedding-client.js";
 import { reinforceExactClaim } from "./memory-exact-reinforcement.js";
+import {
+  findNearDuplicateClaims,
+  isSemanticMemoryKind,
+  nearDuplicateError,
+} from "./memory-near-duplicate.js";
+import { supersedeSlotClaims } from "./memory-slot-supersede.js";
 import { enforceMemoryQuota } from "./memory-quota.js";
 import {
   memoryOperationHash,
@@ -112,7 +119,7 @@ async function existingCreate(
   const result = await client.query<ReferencedMemoryRow>(
     `SELECT item.id, item.author_user_id, item.author_telegram_user_id, item.scope, item.kind,
             item.content, item.source, item.confirmation, item.sensitivity, item.message_thread_id,
-            item.embedding_status, item.created_at, item.updated_at, ref.memory_ref
+            item.embedding_status, item.created_at, item.updated_at, item.occurred_at, ref.memory_ref
      FROM memory_items AS item
      JOIN memory_item_refs AS ref ON ref.memory_item_id = item.id
      WHERE item.id = $1 AND item.family_id = $2 AND (
@@ -246,6 +253,21 @@ export async function createMemoryClaim(
     reservation = preflight.reservation;
   }
   let titleEmbedding: Awaited<ReturnType<typeof embedMemoryThreadTitle>>;
+  // A slot write, an asserted distinct fact, and every episode skip the neighbour gate.
+  const gateNeighbours = isSemanticMemoryKind(input.kind) && input.attribute === undefined &&
+    input.distinct !== true;
+  let contentEmbedding: number[] | null = null;
+  if (gateNeighbours) {
+    try {
+      contentEmbedding = await embedMemoryQuery(input.content);
+    } catch (error) {
+      // The gate is advisory: an unavailable embedder must not block a memory write.
+      console.warn(JSON.stringify({
+        code: "AGENT_MEMORY_NEAR_DUPLICATE_SKIPPED",
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }
   try {
     titleEmbedding = await embedMemoryThreadTitle(input.thread);
   } catch (error) {
@@ -314,8 +336,11 @@ export async function createMemoryClaim(
         : auth.familyId;
     const contentNormalized = prepared?.contentNormalized ?? normalizeMemoryClaimContent(input.content);
     const reinforced = await reinforceExactClaim(client, auth, {
+      attribute: input.attribute ?? null,
       contentNormalized,
+      kind: input.kind,
       memoryProjectId: threadWrite?.identity.memoryProjectId ?? null,
+      occurredAt: input.occurredAt ?? null,
       operationKey: input.operationKey,
       prepared,
       scope: input.scope,
@@ -325,6 +350,26 @@ export async function createMemoryClaim(
       subjectUserId: prepared?.subjectUserId ?? null,
       systemActor: input.systemActor === true,
     });
+    if (!reinforced && contentEmbedding) {
+      const neighbours = await findNearDuplicateClaims(client, auth, {
+        embedding: contentEmbedding,
+        kind: input.kind,
+        scope: input.scope,
+        scopePartitionKey,
+        subjectLabel: prepared?.subjectLabel ?? null,
+        subjectParticipantId: prepared?.subjectParticipantId ?? null,
+        subjectUserId: prepared?.subjectUserId ?? null,
+      });
+      if (neighbours.length > 0) {
+        console.info(JSON.stringify({
+          code: "AGENT_MEMORY_NEAR_DUPLICATE",
+          candidates: neighbours.length,
+          scope: input.scope,
+          topSimilarity: Number(neighbours[0]!.similarity.toFixed(3)),
+        }));
+        throw nearDuplicateError(neighbours);
+      }
+    }
     if (reinforced) {
       if (threadWrite) {
         await materializeMemoryThreadWrite(
@@ -353,12 +398,13 @@ export async function createMemoryClaim(
           sensitivity, operation_key, origin_conversation_id, subject_participant_id,
            subject_conversation_id, subject_user_id, subject_label, memory_project_id, save_approved,
            endorsed_by_user_id, endorsed_at, provenance_state, content_normalized, profile_eligible,
-           claim_status, duplicate_of)
+           claim_status, duplicate_of, attribute, occurred_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
                 $15, $16, $17, $18, $19, $20, $21, $22,
-                CASE WHEN $22::uuid IS NULL THEN NULL ELSE now() END, $23, $24, $25, $26, $27)
+                CASE WHEN $22::uuid IS NULL THEN NULL ELSE now() END, $23, $24, $25, $26, $27, $28,
+                $29::timestamptz)
        RETURNING id, author_user_id, author_telegram_user_id, scope, kind, content, source,
-                 confirmation, sensitivity, message_thread_id, embedding_status, created_at, updated_at`,
+                 confirmation, sensitivity, message_thread_id, embedding_status, created_at, updated_at, occurred_at`,
       [auth.familyId, ownerUserId, groupId, authorUserId,
         prepared?.primaryAuthorTelegramUserId ?? (input.scope === "group" ? auth.telegramUserId : null),
         input.scope, input.kind, input.content, input.source, input.sourceEventId ?? null,
@@ -372,7 +418,9 @@ export async function createMemoryClaim(
           prepared !== null && input.sensitivity === "normal" &&
             (prepared.subjectUserId !== null || prepared.subjectParticipantId !== null),
           "active",
-          null],
+          null,
+          input.attribute ?? null,
+          input.occurredAt ?? null],
     );
     const row = result.rows[0];
     if (!row) throw new AppError("AGENT_MEMORY_WRITE_FAILED", "Не удалось сохранить запись памяти");
@@ -391,6 +439,19 @@ export async function createMemoryClaim(
         "AGENT_MEMORY_REF_CREATE_FAILED",
         "Не удалось создать безопасную ссылку на запись памяти",
       );
+    }
+    if (input.attribute !== undefined) {
+      await supersedeSlotClaims(client, auth, {
+        attribute: input.attribute,
+        kind: input.kind,
+        newClaimId: row.id,
+        scope: input.scope,
+        scopePartitionKey,
+        subjectLabel: prepared?.subjectLabel ?? null,
+        subjectParticipantId: prepared?.subjectParticipantId ?? null,
+        subjectUserId: prepared?.subjectUserId ?? null,
+        systemActor: input.systemActor === true,
+      });
     }
     await insertCreateOperation(client, auth, input, inputHash, row.id, threadWrite);
     await client.query("INSERT INTO memory_embedding_jobs (memory_item_id) VALUES ($1)", [row.id]);

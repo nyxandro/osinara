@@ -14,12 +14,21 @@ import { resolveMemoryTurnSource } from "../memory-turn-source.js";
 import { toModelMemory } from "../model-memory.js";
 import { rememberInputSchema } from "../remember-contract.js";
 
+interface RememberToolResult {
+  item: ReturnType<typeof toModelMemory>;
+  /** Set when an existing record was reinforced instead of creating a new one. */
+  reinforced?: true;
+  thread?: NonNullable<Awaited<ReturnType<typeof memoryRepository.create>>["thread"]>;
+  undoAvailable: boolean;
+}
+
 export default defineTool({
   description: [
     "Сохранить одну устойчивую запись, которую ты сама определила только из проверенного сообщения текущего хода; не сохраняй предположения и одноразовые запросы.",
     "Обычный payload: {\"basis\":\"user_requested\",\"content\":\"...\",\"kind\":\"fact\",\"scope\":\"personal\",\"sensitivity\":\"normal\",\"subject\":{\"kind\":\"current_author\"}}.",
     "В группе sourceSequence выбирает ровно одно сообщение видимой дельты. Для существующей нити используй thread.action=attach и threadRef только из list/search/read_memory_thread; thread.action=create создаёт нить атомарно.",
-    "Результат содержит item.memoryRef, optional thread и notice для немедленного undo.",
+    "Результат содержит item.memoryRef и optional thread; для немедленной отмены доступен manage_memory с action undo. Не пересказывай пользователю служебные поля результата.",
+    "При ошибке AGENT_MEMORY_NEAR_DUPLICATE один раз повтори вызов с reinforces (то же самое), attribute (факт изменился) или distinct=true (другой факт).",
   ].join(" "),
   inputSchema: rememberInputSchema,
   async execute(input, ctx) {
@@ -28,6 +37,20 @@ export default defineTool({
     const requestedSourceKind = input.sourceSequence === undefined ? "current" : "delta";
     let source: Awaited<ReturnType<typeof resolveMemoryTurnSource>> | null = null;
     let item: Awaited<ReturnType<typeof memoryRepository.create>>;
+    if (input.reinforces !== undefined) {
+      // The writer confirmed an existing record says the same; nothing new is inserted.
+      const reinforced = await memoryRepository.reinforceByRef(authorization, {
+        memoryRef: input.reinforces,
+        provenance: { sessionId: ctx.session.id, turnId: ctx.session.turn.id },
+      });
+      console.info(JSON.stringify({
+        code: "AGENT_MEMORY_REINFORCED",
+        reason: "remember_reinforces",
+        refs: [reinforced.memoryRef],
+      }));
+      const result: RememberToolResult = { item: toModelMemory(reinforced), reinforced: true, undoAvailable: false };
+      return result;
+    }
     try {
       source = await resolveMemoryTurnSource(ctx, authorization, input.sourceSequence);
       const reviewWrite = source.isReview;
@@ -39,11 +62,14 @@ export default defineTool({
         );
       }
       item = await memoryRepository.create(authorization, {
+        ...(input.attribute === undefined ? {} : { attribute: input.attribute }),
+        ...(input.occurredAt === undefined ? {} : { occurredAt: input.occurredAt }),
         // A request to save another participant's delta message is not that author's endorsement.
         confirmation: input.basis === "user_requested" && source.isCurrent
           ? "user_confirmed"
           : "model_high",
         content: requireAllowedMemoryContent(input.content),
+        ...(input.distinct === undefined ? {} : { distinct: input.distinct }),
         explicitSource: {
           conversationId: source.conversationId,
           subject: input.subject,
@@ -82,10 +108,12 @@ export default defineTool({
       sourceKind: source.isCurrent ? "current" : "delta",
       threadAction: item.thread?.action ?? "none",
     });
-    return {
+    const result: RememberToolResult = {
       item: toModelMemory(item),
       ...(item.thread === undefined ? {} : { thread: item.thread }),
-      notice: `Сохранено в область «${scope}». Для немедленной отмены используй manage_memory с action undo и memoryRef ${item.memoryRef}.`,
+      // Machine-readable only: a sentence here tends to be echoed to the user verbatim.
+      undoAvailable: true,
     };
+    return result;
   },
 });

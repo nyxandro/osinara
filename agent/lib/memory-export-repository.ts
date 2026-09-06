@@ -63,7 +63,7 @@ export const memoryExportRepository = {
       }
       const result = await client.query<MemoryRow>(
         `SELECT id, author_user_id, author_telegram_user_id, scope, kind, content, source,
-                confirmation, sensitivity, message_thread_id, embedding_status, created_at, updated_at
+                confirmation, sensitivity, message_thread_id, embedding_status, created_at, updated_at, occurred_at
          FROM memory_items
          WHERE family_id = $1 AND scope = 'personal' AND owner_user_id = $2
          ORDER BY created_at, id`,

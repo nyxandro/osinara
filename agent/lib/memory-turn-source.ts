@@ -30,8 +30,6 @@ function sourceError(reason: string): AppError {
 
 export async function bindMemoryTurnSources(ctx: TurnContext): Promise<void> {
   const attributes = ctx.session.auth.current?.attributes;
-  // The frozen approved action is resumed, but a button/timeout is not a new message with facts.
-  if (attributes?.telegramApprovalContinuation === "true") return;
   const applicationSessionId = attributes?.applicationSessionId;
   const conversationId = attributes?.telegramConversationId;
   const currentTimelineEntryId = attributes?.telegramTimelineEntryId;
@@ -132,15 +130,17 @@ export async function resolveMemoryTurnSource(
   if (sourceSequence !== undefined && (!POSITIVE_SEQUENCE_PATTERN.test(sourceSequence) || BigInt(sourceSequence) > POSTGRES_BIGINT_MAX)) {
     throw sourceError("source_sequence_invalid");
   }
-  if (sourceSequence !== undefined && auth.groupId === null) {
-    throw sourceError("personal_delta_source_forbidden");
-  }
   const source = await memoryTurnSourceRepository.resolve({
     eveSessionId: ctx.session.id,
     eveTurnId: ctx.session.turn.id,
     sourceSequence: sourceSequence ?? null,
   });
   if (!source) throw sourceError("source_not_bound_to_turn");
+  // An ordinary personal turn saves only its current message; the silent review of a personal
+  // conversation is the one place where a historical sequence is a verified, batch-bound source.
+  if (sourceSequence !== undefined && auth.groupId === null && !source.isReview) {
+    throw sourceError("personal_delta_source_forbidden");
+  }
   const expectedPartition = source.scope === "group" ? auth.groupId : source.scope === "personal" ? auth.userId : auth.familyId;
   if (
     (!source.isReview && (source.invokingActorId !== auth.telegramActorId || source.invokingActorKind !== auth.telegramActorKind)) ||

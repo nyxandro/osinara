@@ -15,6 +15,7 @@ import {
   MEMORY_EMBEDDING_DIMENSIONS,
   MEMORY_EMBEDDING_MODEL_VERSION,
 } from "./memory-config.js";
+import { memoryRetention } from "./memory-retention-score.js";
 import { memoryRetrievalRepository } from "./memory-retrieval-repository.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
@@ -100,6 +101,61 @@ describeWithDatabase("memoryRetrievalRepository", () => {
       .toHaveLength(1);
     expect(results.map((result) => result.memory.content)).not.toContain("Скрытая аллергия на орехи");
     expect(results[0]?.evidence.russianMorphologyRank).not.toBeNull();
+  });
+
+  it("ranks a stale unreinforced record below a fresh one and reports retention", async () => {
+    const insert = async (
+      content: string,
+      key: string,
+      ageDays: number,
+      reinforcement: { count: number; daysAgo: number } | null = null,
+    ) => {
+      // The reinforcement shape constraint pairs a positive count with a last-reinforced time.
+      const memory = await database().query<{ id: string }>(
+        `INSERT INTO memory_items
+           (family_id, owner_user_id, author_user_id, author_telegram_user_id, scope, kind,
+            content, source, confirmation, sensitivity, operation_key, embedding_status,
+            created_at, updated_at, reinforcement_count, last_reinforced_at)
+         VALUES ($1, $2, $2, $3, 'personal', 'episode', $4, 'test:retention',
+                 'model_high', 'normal', $5, 'indexed',
+                 now() - ($6 * interval '1 day'), now() - ($6 * interval '1 day'), $7,
+                 CASE WHEN $8::int IS NULL THEN NULL ELSE now() - ($8 * interval '1 day') END)
+         RETURNING id`,
+        [auth.familyId, auth.userId, auth.telegramActorId, content, key, ageDays,
+          reinforcement?.count ?? 0, reinforcement?.daysAgo ?? null],
+      );
+      await database().query(
+        `INSERT INTO memory_embedding_chunks
+           (memory_item_id, chunk_index, content, start_offset, end_offset, embedding, embedding_model)
+         VALUES ($1, 0, $2, 0, $3, $4::vector, $5)`,
+        [memory.rows[0]!.id, content, content.length, `[${vector(0, 1).join(",")}]`, MEMORY_EMBEDDING_MODEL_VERSION],
+      );
+      return memory.rows[0]!.id;
+    };
+    const freshId = await insert("Анна готовится к марафону в Казани", "fresh", 0);
+    const staleId = await insert("Анна готовилась к марафону в Казани", "stale", 120);
+    const revivedId = await insert("Анна снова готовится к марафону в Казани", "revived", 120, { count: 3, daysAgo: 10 });
+
+    const results = await memoryRetrievalRepository.search(auth, "марафон Казань", vector(0, 1));
+    const byId = new Map(results.map((result) => [result.memory.id, result]));
+    const fresh = byId.get(freshId)!;
+    const stale = byId.get(staleId)!;
+    const revived = byId.get(revivedId)!;
+
+    expect(fresh.retention).toBeGreaterThan(0.95);
+    expect(stale.retention).toBeLessThan(0.05);
+    expect(stale.retention).toBeCloseTo(memoryRetention({
+      attribute: null,
+      createdAt: new Date(Date.now() - 120 * 86_400_000),
+      kind: "episode",
+      lastReinforcedAt: null,
+      occurredAt: null,
+      reinforcementCount: 0,
+    }, new Date()), 2);
+    // Three reinforcements widen stability, and age counts from the last one.
+    expect(revived.retention).toBeGreaterThan(0.8);
+    expect(results.indexOf(fresh)).toBeLessThan(results.indexOf(stale));
+    expect(results.indexOf(revived)).toBeLessThan(results.indexOf(stale));
   });
 
   it("loads an unresolved low-score conflict partner as one complete opaque group", async () => {

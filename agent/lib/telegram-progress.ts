@@ -9,6 +9,7 @@
  * policy never receives.
  */
 import { AppError } from "./app-error.js";
+import { extractMemoryUsedDirective } from "./memory-used-directive.js";
 import { stripTelegramAsideDirectives } from "./telegram-authored-split.js";
 import {
   isTelegramMessageReactionEmoji,
@@ -22,7 +23,7 @@ const TELEGRAM_REACTION_DIRECTIVE_FRAGMENT = "telegram-reaction";
 
 export type CompletedTelegramOutput =
   | { emoji: TelegramMessageReactionEmoji; kind: "reaction" }
-  | { kind: "message"; message: string }
+  | { kind: "message"; memoryUsedDeclared: boolean; memoryUsedRefs: string[]; message: string }
   | { kind: "progress"; message: string };
 
 export function completedTelegramOutput(data: {
@@ -30,9 +31,14 @@ export function completedTelegramOutput(data: {
   message?: string | null;
 }): CompletedTelegramOutput | null {
   // Only completed visible assistant text should become a durable Telegram message.
-  const message =
-    data.message === undefined || data.message === null ? "" : data.message.trim();
-  if (!message) return null;
+  const raw = data.message === undefined || data.message === null ? "" : data.message.trim();
+  // The memory-used directive is bookkeeping for the final answer; it never reaches Telegram.
+  const { declared: memoryUsedDeclared, memoryRefs: memoryUsedRefs, message } = extractMemoryUsedDirective(raw);
+  if (!message) {
+    // The directive instead of an answer means the person gets nothing: count it.
+    if (memoryUsedDeclared) console.warn(JSON.stringify({ code: "AGENT_MEMORY_USED_DIRECTIVE_ONLY" }));
+    return null;
+  }
 
   // Text authored before a tool call is what a person reads while a long task runs.
   if (data.finishReason === TOOL_CALLS_FINISH_REASON) {
@@ -55,5 +61,5 @@ export function completedTelegramOutput(data: {
   }
   // An answer made of transport directives alone has no visible content to deliver.
   if (!stripTelegramAsideDirectives(message)) return null;
-  return { kind: "message", message };
+  return { kind: "message", memoryUsedDeclared, memoryUsedRefs, message };
 }

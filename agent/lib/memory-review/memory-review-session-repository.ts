@@ -18,10 +18,10 @@ export const memoryReviewSessionRepository = {
       thread_id: string;
     }>(
       `INSERT INTO conversation_sessions
-         (thread_id, generation, family_id, group_id, scope, kind, task_state,
+         (thread_id, generation, family_id, group_id, owner_user_id, scope, kind, task_state,
            telegram_forum_topic_id, conversation_key, continuation_token,
            started_at, last_activity_at, memory_review_batch_id)
-        VALUES (gen_random_uuid(), 0, $1, $2, $3, 'proactive', 'running', $4,
+        VALUES (gen_random_uuid(), 0, $1, $2, $8, $3, 'proactive', 'running', $4,
                 $5, $5, $6, $6, $7)
         ON CONFLICT (memory_review_batch_id) WHERE memory_review_batch_id IS NOT NULL
         DO UPDATE SET last_activity_at = EXCLUDED.last_activity_at
@@ -30,7 +30,8 @@ export const memoryReviewSessionRepository = {
             AND conversation_sessions.eve_session_id IS NULL
         RETURNING id, thread_id`,
       [batch.familyId, batch.groupId, batch.scope, batch.messageThreadId,
-        continuationToken, now, batch.batchId],
+        continuationToken, now, batch.batchId,
+        batch.scope === "personal" ? batch.ownerUserId : null],
     );
     const row = result.rows[0];
     if (!row) throw new AppError(
