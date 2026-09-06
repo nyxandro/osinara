@@ -266,6 +266,31 @@ describe("memory block resolution", () => {
     expect(retrieve).not.toHaveBeenCalled();
   });
 
+  it("logs selected refs and text volume without logging the question or memory content", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const memories = [{ memoryRef: "mem_first", content: "Частная запись", kind: "fact" }, {
+      type: "unresolved_conflict", versions: [
+        { memoryRef: "mem_second", content: "Первая версия" },
+        { memoryRef: "mem_third", content: "Другая версия" },
+      ],
+    }];
+    const resolve = createMemoryBlockResolver({ authorize: () => authorization, createProfile,
+      retrieve: vi.fn().mockResolvedValue({ memories, retrievedClaimIds: [],
+        threads: { threads: [], totalCharacters: 0 } }),
+    });
+    try {
+      await resolve(context(privateAuth, [{ role: "user", content: "Личный вопрос" }]), TEST_TURN_ID);
+      const logged = JSON.parse(info.mock.calls[0]![0] as string);
+      expect(logged).toMatchObject({ code: "AGENT_MEMORY_RETRIEVAL_METRICS", outcome: "succeeded",
+        memoryRefs: ["mem_first", "mem_second", "mem_third"],
+        memoryCharacters: "Частная записьПервая версияДругая версия".length,
+        memorySerializedCharacters: JSON.stringify(memories).length,
+        profileCharacters: 0, threadRefs: [],
+      });
+      expect(JSON.stringify(logged)).not.toMatch(/Личный вопрос|Частная запись|Первая версия|Другая версия/u);
+    } finally { info.mockRestore(); }
+  });
+
   it("discloses unavailable memory instead of throwing on authorization failure", async () => {
     const resolve = createMemoryBlockResolver({
       authorize: () => {

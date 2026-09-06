@@ -38,6 +38,7 @@ import {
   type MemoryTurnContext,
   type ModelMemoryContextItem,
 } from "../memory-retrieval.js";
+import { memorySelectionMetrics } from "../memory-observability.js";
 import { applicationThreadSkillHints } from "../memory-thread-activation.js";
 import {
   formatProfileViewContext,
@@ -251,6 +252,11 @@ export function createMemoryBlockResolver(dependencies: {
     const started = performance.now();
     let outcome = "skipped";
     let memories: number | null = null;
+    let selection = memorySelectionMetrics(null);
+    let profileCharacters: number | null = null;
+    let profileMemoryRefs: string[] | null = null;
+    let threadRefs: string[] | null = null;
+    let threadCharacters: number | null = null;
     try {
       const authorization = dependencies.authorize(ctx);
       const query = memoryRetrievalQuery(ctx.session.auth, ctx.messages,
@@ -267,6 +273,12 @@ export function createMemoryBlockResolver(dependencies: {
       const profile = profileInput === null
         ? null
         : await dependencies.createProfile(authorization, profileInput);
+      selection = memorySelectionMetrics(context.memories);
+      profileCharacters = profile === null ? 0 : JSON.stringify(profile.subjects).length;
+      profileMemoryRefs = profile === null ? []
+        : profile.subjects.flatMap((subject) => subject.claims.map((claim) => claim.memoryRef));
+      threadRefs = context.threads.threads.map((thread) => thread.threadRef);
+      threadCharacters = JSON.stringify(context.threads).length;
       return [
         ...(profile === null ? [] : [formatProfileViewContext(profile)]),
         formatRetrievedMemoryInstructions(context.memories, context.threads),
@@ -277,7 +289,8 @@ export function createMemoryBlockResolver(dependencies: {
       return MEMORY_UNAVAILABLE_BLOCK;
     } finally {
       console.info(JSON.stringify({ code: "AGENT_MEMORY_RETRIEVAL_METRICS", sessionId: ctx.session.id,
-        turnId, outcome, memories, durationMs: Math.round(performance.now() - started) }));
+        turnId, outcome, memories, ...selection, profileCharacters, profileMemoryRefs,
+        threadRefs, threadCharacters, durationMs: Math.round(performance.now() - started) }));
     }
   };
 }
