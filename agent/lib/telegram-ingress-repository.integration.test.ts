@@ -59,6 +59,18 @@ function updateInput(updateId: string, continuationKey: string, text: string) {
 }
 
 describeWithDatabase("telegramIngressRepository", () => {
+  it("lets concurrent drainers claim different queues but never two heads of the same queue", async () => {
+    await telegramIngressRepository.enqueue(updateInput("1001", "101::", "first"));
+    await telegramIngressRepository.enqueue(updateInput("1002", "101::", "second"));
+    await telegramIngressRepository.enqueue(updateInput("1003", "202::", "other chat"));
+    const claims = (await Promise.all(Array.from({ length: 6 }, () =>
+      telegramIngressRepository.claimNext(LEASE_MILLISECONDS)))).filter(claim => claim !== null);
+    expect(claims.map(claim => claim.updateId).sort()).toEqual(["1001", "1003"]);
+    expect(await telegramIngressRepository.claimNext(LEASE_MILLISECONDS)).toBeNull();
+    const first = claims.find(claim => claim.updateId === "1001")!;
+    await telegramIngressRepository.complete(first.updateId, first.leaseToken);
+    expect((await telegramIngressRepository.claimNext(LEASE_MILLISECONDS))?.updateId).toBe("1002");
+  });
   beforeEach(async () => {
     await database().query(
       `TRUNCATE eve_session_event_cursors, telegram_ingress_ignored_updates,
