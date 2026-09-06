@@ -172,6 +172,7 @@ describeWithDatabase("unbound interactive memory-review recovery", () => {
     const recovering = await database().connect();
     const monitoring = await database().connect();
     let recovery: Promise<unknown> | undefined;
+    let recoveryError: unknown;
     try {
       await recovering.query("BEGIN");
       await monitoring.query("BEGIN");
@@ -193,12 +194,12 @@ describeWithDatabase("unbound interactive memory-review recovery", () => {
       await expect(readMemoryReviewLaneHealth(monitoring)).resolves.toHaveLength(1);
     } finally {
       await monitoring.query("ROLLBACK");
-      const recoveryError = await recovery;
+      recoveryError = await recovery;
       await recovering.query("ROLLBACK");
       monitoring.release();
       recovering.release();
-      if (recoveryError) throw recoveryError;
     }
+    if (recoveryError) throw recoveryError;
   });
 
   it("takes older lanes before the recovered lane, without an inverted two-lane wait", async () => {
@@ -209,6 +210,7 @@ describeWithDatabase("unbound interactive memory-review recovery", () => {
     )).rows[0]!.id;
     const other = await database().connect();
     let pending: Promise<unknown> | undefined;
+    let failure: unknown;
     try {
       await other.query("BEGIN");
       await other.query("SET LOCAL lock_timeout = '500ms'");
@@ -230,9 +232,9 @@ describeWithDatabase("unbound interactive memory-review recovery", () => {
     } finally {
       await other.query("ROLLBACK");
       other.release();
-      const failure = await pending;
-      if (failure) throw failure;
+      failure = await pending;
     }
+    if (failure) throw failure;
   });
 
   it("defers an alert for a batch held by a terminal handler rather than waiting with its lane locked", async () => {
