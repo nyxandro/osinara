@@ -48,7 +48,7 @@ export function externalPurposeSection(
 ): string {
   const purposes = [
     ALWAYS_AVAILABLE_PURPOSE,
-    ...(options.web ? ["искать актуальную информацию в интернете, проверять источники и читать страницы по ссылкам"] : []),
+    ...(options.web ? ["искать в интернете публичные сведения и готовые материалы, проверять источники и читать страницы по ссылкам"] : []),
     ...(options.reminders ? [REMINDER_PURPOSE] : []),
     ...CAPABILITY_PURPOSES
       .filter(([capability]) => capabilities.has(capability))

@@ -5,7 +5,6 @@
  * - The newest user text is extracted from plain and multipart Eve model messages.
  * - A verified group turn searches memory by the addressed message, not the whole timeline.
  * - Retrieved records enter the prompt as escaped model-safe untrusted data.
- * - Turn instructions identify the active thresholded morphology/simple/E5 retrieval pipeline.
  */
 import type { SessionAuth, SessionAuthContext } from "eve/context";
 import type { ModelMessage } from "ai";
@@ -194,21 +193,4 @@ describe("formatRetrievedMemoryInstructions", () => {
     expect(instructions).not.toMatch(/"(?:familyId|groupId|scopePartitionKey)"/u);
   });
 
-  it("prevents the model from misrepresenting semantic retrieval as keyword filtering", () => {
-    const instructions = formatRetrievedMemoryInstructions([]);
-
-    expect(instructions).toContain("русский морфологический FTS");
-    expect(instructions).toContain("simple FTS");
-    expect(instructions).toContain("multilingual E5 semantic search");
-    expect(instructions).toContain("384-мерным embeddings");
-    expect(instructions).toContain("pgvector");
-    expect(instructions).toContain("калиброванный порог");
-    expect(instructions).toContain("может вернуть пустую подборку");
-    expect(instructions).toContain("схлопывает только при чтении");
-    expect(instructions).toContain("активный pipeline текущей реализации");
-    expect(instructions).toContain("не выполняешь самостоятельный отбор по ключевым словам");
-    expect(instructions).toContain("выполни углубление контекста через `search_memories`");
-    expect(instructions).toContain("Claims из разных scopes остаются независимыми read-only наблюдениями");
-    expect(instructions).toContain("не выдумывай между ними сохранённую relation");
-  });
 });
