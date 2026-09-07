@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { TELEGRAM_HITL_CALLBACK_PREFIX } from "eve/channels/telegram";
 import { createTelegramDurableIngress } from "./telegram-durable-ingress.js";
 import type { TelegramIngressRepository } from "./telegram-ingress-contract.js";
+import { correlatedDispatch } from "./telegram-ingress.test-fixtures.js";
 
 function fixture(count: number) {
   const claims = Array.from({ length: count }, (_, index) => ({
@@ -34,7 +35,7 @@ function fixture(count: number) {
   });
   async function drain() {
     let pending: Promise<unknown> | undefined;
-    await handler.drain({ dispatch, waitUntil: (task) => { pending = task; } });
+    await handler.drain({ dispatch: correlatedDispatch(dispatch), notifyTimeout: vi.fn(), waitUntil: (task) => { pending = task; } });
     if (!pending) throw new Error("TEST_DRAIN_NOT_SCHEDULED");
     await pending;
   }
@@ -60,7 +61,7 @@ describe("native Telegram HITL ingress", () => {
     expect(dispatch).toHaveBeenCalledTimes(2);
     expect(dispatch).toHaveBeenNthCalledWith(1, expect.objectContaining({
       kind: "callback_query", callbackQuery: expect.objectContaining({ data: "eve:0" }),
-    }));
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(repository.beginDispatch).toHaveBeenNthCalledWith(1, "1001", "lease-0");
     expect(repository.beginDispatch).toHaveBeenNthCalledWith(2, "1002", "lease-1");
     expect(starts).toEqual([0, 2]);

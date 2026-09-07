@@ -6,7 +6,7 @@
  * - Production startup health wait: permits bounded first-run sandbox preparation.
  * - Workflow transport: bounded internal HTTP and a process-local fence for live redelivery.
  * - Review delegation policy: keeps implicit root delegation out of background memory review.
- * - Adapter approval policy: propagates failed `input.requested` persistence.
+ * - Mandatory adapter preparation: propagates failed `turn.started` and `input.requested` handlers.
  * - Background task auth: restores the verified caller that created the task on every parent wake.
  * - Telegram durable ingress: verified-update and authenticated internal-drain hooks.
  * - Telegram dispatch extensions: Session return, message/token override, reply routing, and HITL auth.
@@ -21,6 +21,8 @@ import { patchWorkflowTransport } from "./eve-patches/workflow-transport.ts";
 import { patchSkillSync } from "./eve-patches/skill-sync.ts";
 import { patchHitlContext } from "./eve-patches/hitl-context.ts";
 import { patchStreamRecovery } from "./eve-patches/stream-recovery.ts";
+import { patchTelegramDispatchControl } from "./eve-patches/telegram-dispatch-control.ts";
+import { patchModelInactivity } from "./eve-patches/model-inactivity.ts";
 
 const EXPECTED_EVE_VERSION = "0.40.0";
 const EVE_PRODUCTION_START_HEALTH_TIMEOUT_MS = 300_000;
@@ -120,6 +122,8 @@ await patchWorkflowTransport(replaceExact);
 await patchSkillSync(replaceExact);
 await patchHitlContext(replaceExact);
 await patchStreamRecovery(replaceExact);
+await patchTelegramDispatchControl(replaceExact);
+await patchModelInactivity(replaceExact);
 
 // A cold production start may prepare sandbox images before the child server becomes healthy.
 await replaceExact(
@@ -189,13 +193,13 @@ await replaceExact(
 // Failure to persist an approval prompt must fail the turn instead of parking it unbound.
 await replaceExact(
   runtimePaths.channelAdapter,
-  "catch(r){log.error(`adapter event handler threw — event swallowed`,{adapterKind:getAdapterKind(e),eventType:n.type,error:r})}return withWaitingContinuationToken(i,r)",
-  "catch(r){log.error(`adapter event handler threw`,{adapterKind:getAdapterKind(e),eventType:n.type,error:r});if(n.type===`input.requested`)throw r}return withWaitingContinuationToken(i,r)",
+  "catch(r){log.error(`adapter event handler threw — event swallowed`,{adapterKind:getAdapterKind(e),eventType:n.type,error:r})}",
+  "catch(r){log.error(`adapter event handler threw`,{adapterKind:getAdapterKind(e),eventType:n.type,error:r});if(n.type===`input.requested`||n.type===`turn.started`)throw r}",
 );
 await replaceExact(
   runtimePaths.channelAdapterTypes,
   " * Throwing handlers are logged and swallowed so a downstream delivery\n * failure does not corrupt the event stream write path.",
-  " * Throwing handlers are logged and swallowed except for `input.requested`, whose\n * failure propagates so an unbound human approval cannot remain parked fail-open.",
+  " * Required `turn.started` preparation and `input.requested` persistence failures\n * propagate. Optional notification handler failures remain logged and swallowed.",
 );
 
 // Framework task wakes are ordinary deliveries. Without an explicit caller they reuse whichever
@@ -344,12 +348,12 @@ await replaceExact(
 await replaceExact(
   runtimePaths.telegram,
   "let u=parseTelegramUpdate(c);return u===null?new Response(`ok`):u.kind===`message`?(o(dispatchMessage({config:e,message:u.message,onMessage:n,uploadPolicy:t,from:a})),new Response(`ok`)):(o(dispatchCallbackQuery({config:e,query:u.callbackQuery,from:a})),new Response(`ok`))",
-  "let u=parseTelegramUpdate(c);if(u===null)return new Response(`ok`);let d=l=>l.kind===`message`?dispatchMessage({config:e,message:l.message,onMessage:n,uploadPolicy:t,from:a}):dispatchCallbackQuery({config:e,query:l.callbackQuery,from:a});return e.onVerifiedUpdate!==void 0?e.onVerifiedUpdate({dispatch:d,raw:c,update:u,waitUntil:o}):(o(d(u)),new Response(`ok`))",
+  "let u=parseTelegramUpdate(c);if(u===null)return new Response(`ok`);let d=(l,g)=>{g?.signal.throwIfAborted();let f=g?osinaraTelegramDispatchFrom(a,osinaraResolveSession,g):a;return l.kind===`message`?dispatchMessage({config:e,message:l.message,onMessage:n,uploadPolicy:t,from:f}):dispatchCallbackQuery({config:e,query:l.callbackQuery,from:f})};return e.onVerifiedUpdate!==void 0?e.onVerifiedUpdate({dispatch:d,notifyTimeout:(u,t,s)=>osinaraTelegramTimeoutNotice(e,u,t,s),raw:c,update:u,waitUntil:o}):(o(d(u)),new Response(`ok`))",
 );
 await replaceExact(
   runtimePaths.telegram,
   "})],async receive",
-  "}),...e.onDrain===void 0?[]:[POST(e.drainRoute??`/eve/v1/telegram-drain`,async(r,{from:a,waitUntil:o})=>{if(await verifyInbound(r,e.credentials)===null)return new Response(`unauthorized`,{status:401});let d=l=>l.kind===`message`?dispatchMessage({config:e,message:l.message,onMessage:n,uploadPolicy:t,from:a}):dispatchCallbackQuery({config:e,query:l.callbackQuery,from:a});return e.onDrain({dispatch:d,waitUntil:o})})]],async receive",
+  "}),...e.onDrain===void 0?[]:[POST(e.drainRoute??`/eve/v1/telegram-drain`,async(r,{from:a,resolveSession:osinaraResolveSession,waitUntil:o})=>{if(await verifyInbound(r,e.credentials)===null)return new Response(`unauthorized`,{status:401});let d=(l,g)=>{g?.signal.throwIfAborted();let f=g?osinaraTelegramDispatchFrom(a,osinaraResolveSession,g):a;return l.kind===`message`?dispatchMessage({config:e,message:l.message,onMessage:n,uploadPolicy:t,from:f}):dispatchCallbackQuery({config:e,query:l.callbackQuery,from:f})};return e.onDrain({dispatch:d,notifyTimeout:(u,t,s)=>osinaraTelegramTimeoutNotice(e,u,t,s),waitUntil:o})})]],async receive",
 );
 
 // Bot API 10.0 lets a bot see other bots' group messages, but Eve still drops every bot sender
@@ -404,16 +408,25 @@ await replaceExact(
   'import { type TelegramCallbackQuery, type TelegramChatType, type TelegramMessage } from "#public/channels/telegram/inbound.js";',
   'import { type TelegramCallbackQuery, type TelegramChatType, type TelegramMessage, type TelegramUpdate } from "#public/channels/telegram/inbound.js";\nimport type { Session } from "#channel/session.js";',
 );
-const telegramHookDeclarations = `/** Verified Telegram ingress hook context for durable application queues. */
+const telegramHookDeclarations = `/** Deadline controls supplied only by the verified application ingress. */
+export interface TelegramDispatchControl {
+    readonly signal: AbortSignal;
+    readonly deadlineAt: string;
+    readonly dispatchId: string;
+    readonly onDispatch: (target: { resolveSession(): Promise<Session | undefined> }) => void;
+}
+/** Verified Telegram ingress hook context for durable application queues. */
 export interface TelegramVerifiedUpdateContext {
     readonly raw: JsonObject;
     readonly update: TelegramUpdate;
-    readonly dispatch: (update: TelegramUpdate) => Promise<Session | null | undefined>;
+    readonly dispatch: (update: TelegramUpdate, control?: TelegramDispatchControl) => Promise<Session | null | undefined>;
+    readonly notifyTimeout: (update: TelegramUpdate, text: string, signal: AbortSignal) => Promise<unknown>;
     readonly waitUntil: (task: Promise<unknown>) => void;
 }
 /** Internal drain hook context using the native verified Telegram dispatcher. */
 export interface TelegramDrainContext {
-    readonly dispatch: (update: TelegramUpdate) => Promise<Session | null | undefined>;
+    readonly dispatch: (update: TelegramUpdate, control?: TelegramDispatchControl) => Promise<Session | null | undefined>;
+    readonly notifyTimeout: (update: TelegramUpdate, text: string, signal: AbortSignal) => Promise<unknown>;
     readonly waitUntil: (task: Promise<unknown>) => void;
 }
 /** Application-authenticated result for a Telegram HITL callback. */
@@ -452,5 +465,5 @@ await replaceExact(
 await replaceExact(
   runtimePaths.telegramIndexTypes,
   "type TelegramInboundResultOrPromise, type TelegramReceiveTarget, }",
-  "type TelegramDrainContext, type TelegramHitlCallbackResult, type TelegramInboundResultOrPromise, type TelegramReceiveTarget, type TelegramVerifiedUpdateContext, }",
+  "type TelegramDispatchControl, type TelegramDrainContext, type TelegramHitlCallbackResult, type TelegramInboundResultOrPromise, type TelegramReceiveTarget, type TelegramVerifiedUpdateContext, }",
 );

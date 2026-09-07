@@ -350,7 +350,7 @@ describe("server deployment contract", () => {
     expect(script).not.toMatch(/git\s+(pull|fetch|checkout)/);
     expect(script).not.toMatch(/docker\s+(compose\s+)?build/);
     const main = readProjectFile("scripts/production-deploy.sh");
-    expect(main.indexOf("prune_old_deploy_backups")).toBeLessThan(main.indexOf("preflight_backup"));
+    expect(main.indexOf("prune_old_deploy_backups")).toBeGreaterThan(main.indexOf("snapshot_durable_volumes"));
     expect(main.indexOf("pull_release_images")).toBeLessThan(main.indexOf("create_postgres_backup"));
     expect(main.indexOf("create_postgres_backup")).toBeLessThan(main.indexOf("stop_current_services"));
     expect(main.indexOf("stop_current_services")).toBeLessThan(main.indexOf("snapshot_durable_volumes"));

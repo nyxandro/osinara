@@ -144,7 +144,6 @@ main() {
     claim_approved_proposal
     [[ "$CLAIM_FOUND" -eq 1 ]] || return 0
     require_upgrade_from_current
-    prune_old_deploy_backups
   fi
 
   download_and_validate_release "$REQUESTED_VERSION"
@@ -163,6 +162,7 @@ main() {
     create_postgres_backup
     stop_current_services
     snapshot_durable_volumes
+    prune_old_deploy_backups
   fi
 
   MIGRATION_STARTED=1

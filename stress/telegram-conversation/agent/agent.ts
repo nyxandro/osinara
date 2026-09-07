@@ -1,14 +1,19 @@
 /** Native Eve turns with a deterministic provider; all Telegram/application boundaries stay real. */
 import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
+import { wrapLanguageModel } from "ai";
+import { setTimeout as sleep } from "node:timers/promises";
 import { SESSION_MAX_COMPLETED_TURNS } from "../../../agent/config.js";
+import { database } from "../../../agent/lib/database.js";
 
-export default defineAgent({
-  build: { externalDependencies: ["@workflow/world-postgres"] },
-  experimental: { workflow: { world: "@workflow/world-postgres" } },
-  model: mockModel(({ lastUserMessage, toolResults, tools }) => {
+const testModel = mockModel(async ({ lastUserMessage, toolResults, tools }) => {
     const marker = [...(lastUserMessage ?? "").matchAll(/conversation-probe-\d+/gu)].at(-1)?.[0];
     if (!marker) throw new Error("TEST_CURRENT_MESSAGE_MISSING");
+    await database().query("INSERT INTO telegram_conversation_test_model_calls(marker) VALUES ($1)", [marker]);
+    if (marker === `conversation-probe-${SESSION_MAX_COMPLETED_TURNS + 10}`) {
+      return { toolCalls: [{ name: "ask_question", input: { prompt: "Продолжить проверку отмены?", allowFreeform: false,
+        options: [{ id: "continue", label: "Продолжить" }] } }] };
+    }
     const child = lastUserMessage?.includes(`child:${marker}`) === true;
     if (child && tools.some((tool) => tool.name === "agent" || tool.name === "remember")) {
       throw new Error("TEST_CHILD_ROOT_AUTHORITY_LEAK");
@@ -31,6 +36,26 @@ export default defineAgent({
       return { toolCalls: [{ name: "probe_workspace", input: { marker } }] };
     }
     return `${child ? "child" : "reply"}-${marker}`;
-  }),
+});
+if (typeof testModel === "string") throw new Error("TEST_MODEL_IMPLEMENTATION_MISSING");
+
+export default defineAgent({
+  build: { externalDependencies: ["@workflow/world-postgres"] },
+  experimental: { workflow: { world: "@workflow/world-postgres" } },
+  model: wrapLanguageModel({ model: testModel, middleware: {
+    async wrapStream({ doStream, params }) {
+      const marker = [...JSON.stringify(params.prompt)
+        .matchAll(/conversation-probe-\d+/gu)].at(-1)?.[0];
+      const answered = params.prompt.some((message) => message.role === "tool" && message.content.some((part) => part.type === "tool-result" && part.toolName === "ask_question"));
+      if ([8, 9].some((offset) => marker === `conversation-probe-${SESSION_MAX_COMPLETED_TURNS + offset}`) ||
+          marker === `conversation-probe-${SESSION_MAX_COMPLETED_TURNS + 10}` && answered) {
+        if (!params.abortSignal) throw new Error("TEST_MODEL_ABORT_SIGNAL_MISSING");
+        await database().query("INSERT INTO telegram_conversation_test_model_calls(marker) VALUES ($1)", [marker]);
+        await sleep(30_000, undefined, { signal: params.abortSignal });
+        throw new Error("TEST_NATIVE_CANCELLATION_NOT_OBSERVED");
+      }
+      return doStream();
+    },
+  } }),
   modelContextWindowTokens: 1_000_000,
 });

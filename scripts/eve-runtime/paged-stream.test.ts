@@ -14,6 +14,25 @@ function fixture() {
 }
 
 describe("bounded durable stream consumption", () => {
+  it("supports native byte-stream consumers without transferring pg's pooled Buffer", async () => {
+    const f = fixture();
+    const payload = Buffer.from("cancel");
+    f.page.mockResolvedValue([{ id: "abort", data: payload, eof: false }]);
+    const source = createPagedStream(f).getReader();
+    const native = new ReadableStream<Uint8Array>({ type: "bytes",
+      async pull(controller) {
+        const item = await source.read();
+        if (item.done) controller.close();
+        else controller.enqueue(item.value);
+      },
+      cancel: () => source.cancel(),
+    });
+    const reader = native.getReader();
+    try {
+      await expect(reader.read()).resolves.toEqual({ value: new TextEncoder().encode("cancel"), done: false });
+      expect(payload.toString()).toBe("cancel");
+    } finally { await source.cancel(); source.releaseLock(); reader.releaseLock(); }
+  });
   it("does not fetch before demand, reads from the requested cursor and unsubscribes at EOF", async () => {
     const f = fixture(); const stream = createPagedStream(f, 1);
     await Promise.resolve(); expect(f.page).not.toHaveBeenCalled();

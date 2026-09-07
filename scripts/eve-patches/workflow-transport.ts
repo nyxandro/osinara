@@ -22,4 +22,29 @@ export async function patchWorkflowTransport(replace: (path: string, before: str
   await replace(queue,
     "            await localWorld.close?.();",
     "            await httpClient.close();\n            await localWorld.close?.();");
+  // Workflow executes steps inline in a workflow HTTP request. Serializing all replays behind
+  // that request prevents cancellation hooks from reaching the still-running step.
+  await replace(queue, "resolveQueueNamespace, WorkflowInvokePayloadSchema, }", "resolveQueueNamespace, }");
+  await replace(queue, "    const inflightWorkflowRuns = new Map();", "    // Whole-run HTTP serialization would block native cancellation of inline steps.");
+  await replace(queue, `            const workflowInvoke = WorkflowInvokePayloadSchema.safeParse(body);
+            const workflowRunSerializationKey = workflowInvoke.success && !workflowInvoke.data.stepId
+                ? \`workflow:\${workflowInvoke.data.runId}\`
+                : undefined;`, "            // Independent replays retain Workflow's native atomic step claims.");
+  await replace(queue, `                if (workflowRunSerializationKey) {
+                    // Preserve step fan-out while preventing two workflow replays from
+                    // mutating the same run's event log at the same time.
+                    const previous = inflightWorkflowRuns.get(workflowRunSerializationKey);
+                    const execution = (previous ?? Promise.resolve())
+                        .catch(() => { })
+                        .then(() => executeTask())
+                        .finally(() => {
+                        if (inflightWorkflowRuns.get(workflowRunSerializationKey) ===
+                            execution) {
+                            inflightWorkflowRuns.delete(workflowRunSerializationKey);
+                        }
+                    });
+                    inflightWorkflowRuns.set(workflowRunSerializationKey, execution);
+                    await execution;
+                    return;
+                }`, "                // Do not queue a cancellation replay behind its own inline step.");
 }

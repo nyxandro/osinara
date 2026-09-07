@@ -49,7 +49,7 @@ interface LaneRow {
 
 interface SourceRow {
   actor_id: string;
-  actor_kind: "agent_self" | "user";
+  actor_kind: "telegram_bot" | "user";
   content_text: string | null;
   id: string;
   message_kind: string;
@@ -238,7 +238,7 @@ export const memoryReviewRepository = {
     try {
       await client.query("BEGIN");
       const message = await client.query<{
-        actor_kind: "agent_self" | "user";
+        actor_kind: TelegramGroupJournalEntry["actorKind"];
         conversation_id: string;
         message_thread_id: string | null;
         sequence_id: string;
@@ -249,7 +249,7 @@ export const memoryReviewRepository = {
         [input.timelineEntryId, input.groupId],
       );
       const source = message.rows[0];
-      if (!source || source.actor_kind !== "user") {
+      if (!source || (source.actor_kind !== "user" && source.actor_kind !== "telegram_bot")) {
         await client.query("COMMIT");
         return null;
       }

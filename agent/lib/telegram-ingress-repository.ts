@@ -249,8 +249,13 @@ export const telegramIngressRepository: TelegramIngressRepository = {
       `WITH candidate AS (
          SELECT item.update_id
          FROM telegram_ingress_updates item
-         WHERE (item.status = 'pending'
-             OR (item.status = 'processing' AND item.lease_expires_at <= now()))
+          WHERE (item.status = 'pending'
+              OR (item.status = 'processing' AND item.lease_expires_at <= now()))
+            AND NOT EXISTS (
+              SELECT 1 FROM telegram_ingress_updates blocked
+              WHERE blocked.queue_id = item.queue_id AND blocked.status = 'failed'
+                AND blocked.last_error_code = 'AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED'
+            )
            AND NOT EXISTS (
              SELECT 1
              FROM telegram_ingress_updates earlier

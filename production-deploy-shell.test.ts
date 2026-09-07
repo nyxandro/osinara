@@ -408,33 +408,6 @@ describe("production deploy shell policies", () => {
     expect(deployScript).toContain('if [[ "$MIGRATION_STARTED" -eq 1 ]]; then\n    status="ambiguous"');
   });
 
-  it("clears every old backup before creating the one rolling deploy backup", () => {
-    const directory = mkdtempSync(join(tmpdir(), "osinara-backup-retention-"));
-    temporaryDirectories.push(directory);
-    for (const name of [
-      "initial-migration-v0.1.1",
-      "20260713T222732Z-to-v0.1.2",
-      "20260713T225008Z-to-v0.1.3",
-      "20260714T065745Z-to-v0.2.0",
-      "20260714T080346Z-to-v0.2.1",
-      "20260714T083709Z-to-v0.2.2",
-      "20260714T090552Z-to-v0.2.3",
-      "20260714T113003Z-to-v0.2.4",
-    ]) {
-      mkdirSync(join(directory, name));
-    }
-
-    const result = runShell(`
-      BACKUPS_DIR=${JSON.stringify(directory)}
-      source scripts/production-deploy/backup.sh
-      log_event() { printf '%s %s\n' "$1" "$2" >&2; }
-      prune_old_deploy_backups
-    `);
-
-    expect(result.status, result.stderr).toBe(0);
-    expect(readdirSync(directory)).toEqual([]);
-  });
-
   it("removes only non-retained Osinara release image references", () => {
     const directory = mkdtempSync(join(tmpdir(), "osinara-image-retention-"));
     temporaryDirectories.push(directory);

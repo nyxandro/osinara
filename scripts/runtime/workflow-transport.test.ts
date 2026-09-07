@@ -21,7 +21,7 @@ describe("workflow execution fence", () => {
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
-  it("serializes different deliveries for a run while allowing independent steps and runs", async () => {
+  it("admits control replays while an inline step is running, without duplicating a delivery", async () => {
     let finish!: () => void;
     const pending = new Promise<void>((resolve) => { finish = resolve; });
     const seen: string[] = [];
@@ -34,9 +34,9 @@ describe("workflow execution fence", () => {
     const replay = handler({ runId: "run" }, meta("first"));
     await handler({ runId: "run", stepId: "step" }, meta("step"));
     await handler({ runId: "other" }, meta("other"));
-    expect(seen).toEqual(["first", "step", "other"]);
+    expect(seen).toEqual(["first", "next", "step", "other"]);
     finish(); await Promise.all([first, next, replay]);
-    expect(seen).toEqual(["first", "step", "other", "next"]);
+    expect(seen).toEqual(["first", "next", "step", "other"]);
   });
 
   it("rejects reuse of a live message ID with different bytes", async () => {
@@ -67,8 +67,8 @@ describe("workflow execution fence", () => {
     const gate = new Promise<void>((resolve) => { finish = resolve; });
     const execute = vi.fn(async () => gate);
     const handler = createWorkflowExecutionFence(() => closing)(execute);
-    const first = handler({ runId: "run" }, meta("first"));
-    const next = handler({ runId: "run" }, meta("next"));
+    const first = handler({ runId: "run", stepId: "step" }, meta("first"));
+    const next = handler({ runId: "run", stepId: "step" }, meta("next"));
     await Promise.resolve(); closing = true; finish();
     await first;
     await expect(next).rejects.toThrow("AGENT_WORKFLOW_SHUTTING_DOWN");

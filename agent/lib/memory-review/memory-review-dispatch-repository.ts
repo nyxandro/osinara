@@ -21,7 +21,7 @@ import { readMemoryReviewLaneHealth, recoverUnstartedReviewBatches } from "./mem
 
 interface SourceRow {
   actor_id: string;
-  actor_kind: "agent_self" | "user";
+  actor_kind: "telegram_bot" | "user";
   content_text: string | null;
   id: string;
   message_kind: string;

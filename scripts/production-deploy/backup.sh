@@ -4,7 +4,6 @@
 
 readonly BACKUP_RESERVE_BYTES=$((512 * 1024 * 1024))
 readonly RETAINED_DEPLOY_BACKUP_COUNT=1
-readonly PRE_DEPLOY_RETAINED_BACKUP_COUNT=$((RETAINED_DEPLOY_BACKUP_COUNT - 1))
 readonly LEGACY_INITIAL_MIGRATION_BACKUP_NAME="initial-migration-v0.1.1"
 readonly DEPLOY_BACKUP_NAME_PATTERN='^[0-9]{8}T[0-9]{6}Z-to-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 readonly LEGACY_EVE_VOLUME="osinara-production-workflow-data"
@@ -25,9 +24,19 @@ RETIRED_CUTOVER_VOLUME=""
 RETIRED_CUTOVER_ARCHIVED=0
 PRESERVED_WORKFLOW_CUTOVER_VOLUME=""
 CANDIDATE_HEALTH_VALIDATED=0
+COMPLETED_BACKUP_DIR=""
 
 prune_old_deploy_backups() {
-  [[ -d "$BACKUPS_DIR" ]] || return 0
+  if [[ -z "$COMPLETED_BACKUP_DIR" || ! -d "$COMPLETED_BACKUP_DIR" || -L "$COMPLETED_BACKUP_DIR" ||
+        "$COMPLETED_BACKUP_DIR" != "$BACKUPS_DIR/${COMPLETED_BACKUP_DIR##*/}" ||
+        ! "${COMPLETED_BACKUP_DIR##*/}" =~ $DEPLOY_BACKUP_NAME_PATTERN ]]; then
+    fail "DEPLOY_BACKUP_NOT_READY" "A complete new backup is required before removing any old copy"
+    return 1
+  fi
+  if ! (cd -- "$COMPLETED_BACKUP_DIR" && sha256sum --check --status SHA256SUMS); then
+    fail "DEPLOY_BACKUP_VERIFICATION_FAILED" "New backup checksum verification failed; old copies were retained"
+    return 1
+  fi
   local -a deploy_backups=()
   local nullglob_was_enabled=0 path name remove_count index
   shopt -q nullglob && nullglob_was_enabled=1
@@ -36,13 +45,14 @@ prune_old_deploy_backups() {
   # Timestamped deployment backups sort lexicographically; the bootstrap snapshot is pruned below.
   for path in "$BACKUPS_DIR"/*; do
     [[ -d "$path" ]] || continue
+    [[ "$path" == "$COMPLETED_BACKUP_DIR" ]] && continue
     name="${path##*/}"
     [[ "$name" =~ $DEPLOY_BACKUP_NAME_PATTERN ]] && deploy_backups+=("$path")
   done
   [[ "$nullglob_was_enabled" -eq 1 ]] || shopt -u nullglob
 
-  # Reserve one slot before preflight so the newly validated snapshot restores the final count.
-  remove_count=$((${#deploy_backups[@]} - PRE_DEPLOY_RETAINED_BACKUP_COUNT))
+  # Keep the explicit verified copy even if the host clock moved backwards since an older backup.
+  remove_count=$((${#deploy_backups[@]} - RETAINED_DEPLOY_BACKUP_COUNT + 1))
   for ((index = 0; index < remove_count; index += 1)); do
     name="${deploy_backups[index]##*/}"
     rm -rf -- "${deploy_backups[index]}" ||
@@ -245,7 +255,8 @@ snapshot_durable_volumes() {
       RETIRED_CUTOVER_ARCHIVED=1
     fi
   done
-  sha256sum "${BACKUP_TEMP_DIR}"/* > "${BACKUP_TEMP_DIR}/SHA256SUMS"
+  # Relative paths remain verifiable after the temporary directory is atomically renamed.
+  (cd -- "$BACKUP_TEMP_DIR" && sha256sum -- ./* > SHA256SUMS && sha256sum --check --status SHA256SUMS)
   local timestamp final_dir
   timestamp="$(date -u +'%Y%m%dT%H%M%SZ')"
   final_dir="${BACKUPS_DIR}/${timestamp}-to-v${REQUESTED_VERSION}"
@@ -253,6 +264,7 @@ snapshot_durable_volumes() {
     fail "DEPLOY_BACKUP_DIR_EXISTS" "Final backup directory already exists"
   mv "$BACKUP_TEMP_DIR" "$final_dir"
   BACKUP_TEMP_DIR=""
+  COMPLETED_BACKUP_DIR="$final_dir"
 }
 
 remove_retired_cutover_volume() {

@@ -43,16 +43,16 @@ export function createWorkflowExecutionFence(isClosing: () => boolean = () => fa
       return existing.execution;
     }
     const invocation = WorkflowInvokePayloadSchema.safeParse(message);
-    const runKey = invocation.success
-      ? JSON.stringify([invocation.data.runId, invocation.data.stepId ?? null])
+    const runKey = invocation.success && invocation.data.stepId
+      ? JSON.stringify([invocation.data.runId, invocation.data.stepId])
       : deliveryKey;
     const previous = runTails.get(runKey);
     const execute = () => {
       if (isClosing()) throw new Error("AGENT_WORKFLOW_SHUTTING_DOWN: Delivery did not start before shutdown");
       return handler(message, meta);
     };
-    // Distinct deliveries must not be discarded: they may carry a new hook/cancellation payload.
-    // Each original caller still receives its own failure; only ordering continues after rejection.
+    // A workflow replay must receive cancellation while an inline step is still running.
+    // Only explicit step deliveries serialize; Workflow retains its atomic inline-step ownership.
     const execution = previous ? previous.then(execute, execute) : Promise.resolve().then(execute);
     const entry = { digest, execution };
     deliveries.set(deliveryKey, entry);
