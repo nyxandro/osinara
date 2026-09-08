@@ -1,0 +1,18 @@
+http:
+  routers:
+    osinara:
+      rule: 'Host(`{{ env "OSINARA_HOSTNAME" }}`)'
+      entryPoints:
+        - websecure
+      service: osinara
+      tls:
+        certResolver: letsencrypt
+  services:
+    osinara:
+      loadBalancer:
+        servers:
+          - url: http://edge:80
+        healthCheck:
+          path: /eve/v1/health
+          interval: 10s
+          timeout: 3s

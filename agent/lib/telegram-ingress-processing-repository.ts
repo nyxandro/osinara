@@ -57,15 +57,16 @@ export const telegramIngressProcessingRepository: ProcessingOperations = {
     throw new AppError("AGENT_TELEGRAM_VOICE_INVALID", "Для сообщения не найдены данные голосовой записи");
   },
 
-  async beginDispatch(updateId, leaseToken) {
+  async beginDispatch(updateId, leaseToken, dispatchId) {
     requireUuid(leaseToken, "AGENT_TELEGRAM_LEASE_INVALID", "Токен аренды обработки Telegram имеет некорректный формат");
+    requireUuid(dispatchId, "AGENT_TELEGRAM_DISPATCH_ID_INVALID", "Не удалось проверить идентификатор обработки сообщения");
     const started = await database().query(
       `UPDATE telegram_ingress_updates
-       SET dispatch_started_at = now(), updated_at = now()
+        SET dispatch_started_at = now(), dispatch_id = $3, updated_at = now()
        WHERE update_id = $1 AND status = 'processing' AND lease_token = $2
          AND lease_expires_at > now() AND dispatch_started_at IS NULL
        RETURNING update_id`,
-      [requireUpdateId(updateId), leaseToken],
+      [requireUpdateId(updateId), leaseToken, dispatchId],
     );
     if (started.rowCount === 1) return;
 

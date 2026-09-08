@@ -7,6 +7,8 @@ import { correlatedDispatch } from "./telegram-ingress.test-fixtures.js";
 
 function fixture(count: number) {
   const claims = Array.from({ length: count }, (_, index) => ({
+    dispatchStarted: false, dispatchBinding: null,
+    recoveryCancelRequested: false,
     attemptCount: 1, deliveryContinuationKey: "101::", ingressContinuationKey: "101::",
     leaseExpiresAt: new Date(Date.now() + 60_000), leaseToken: `lease-${index}`, queueId: "queue",
     updateId: String(1001 + index), transcript: null, voice: null,
@@ -35,7 +37,7 @@ function fixture(count: number) {
   });
   async function drain() {
     let pending: Promise<unknown> | undefined;
-    await handler.drain({ dispatch: correlatedDispatch(dispatch), notifyTimeout: vi.fn(), waitUntil: (task) => { pending = task; } });
+    await handler.drain({ attachSession: vi.fn(), dispatch: correlatedDispatch(dispatch), notifyTimeout: vi.fn(), waitUntil: (task) => { pending = task; } });
     if (!pending) throw new Error("TEST_DRAIN_NOT_SCHEDULED");
     await pending;
   }
@@ -62,8 +64,8 @@ describe("native Telegram HITL ingress", () => {
     expect(dispatch).toHaveBeenNthCalledWith(1, expect.objectContaining({
       kind: "callback_query", callbackQuery: expect.objectContaining({ data: "eve:0" }),
     }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
-    expect(repository.beginDispatch).toHaveBeenNthCalledWith(1, "1001", "lease-0");
-    expect(repository.beginDispatch).toHaveBeenNthCalledWith(2, "1002", "lease-1");
+    expect(repository.beginDispatch).toHaveBeenNthCalledWith(1, "1001", "lease-0", expect.any(String));
+    expect(repository.beginDispatch).toHaveBeenNthCalledWith(2, "1002", "lease-1", expect.any(String));
     expect(starts).toEqual([0, 2]);
     expect(repository.completeWithSession).toHaveBeenNthCalledWith(1, "1001", "lease-0", "eve-session", 2);
     expect(repository.completeWithSession).toHaveBeenNthCalledWith(2, "1002", "lease-1", "eve-session", 4);

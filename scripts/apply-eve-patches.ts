@@ -348,12 +348,12 @@ await replaceExact(
 await replaceExact(
   runtimePaths.telegram,
   "let u=parseTelegramUpdate(c);return u===null?new Response(`ok`):u.kind===`message`?(o(dispatchMessage({config:e,message:u.message,onMessage:n,uploadPolicy:t,from:a})),new Response(`ok`)):(o(dispatchCallbackQuery({config:e,query:u.callbackQuery,from:a})),new Response(`ok`))",
-  "let u=parseTelegramUpdate(c);if(u===null)return new Response(`ok`);let d=(l,g)=>{g?.signal.throwIfAborted();let f=g?osinaraTelegramDispatchFrom(a,osinaraResolveSession,g):a;return l.kind===`message`?dispatchMessage({config:e,message:l.message,onMessage:n,uploadPolicy:t,from:f}):dispatchCallbackQuery({config:e,query:l.callbackQuery,from:f})};return e.onVerifiedUpdate!==void 0?e.onVerifiedUpdate({dispatch:d,notifyTimeout:(u,t,s)=>osinaraTelegramTimeoutNotice(e,u,t,s),raw:c,update:u,waitUntil:o}):(o(d(u)),new Response(`ok`))",
+  "let u=parseTelegramUpdate(c);if(u===null)return new Response(`ok`);let d=(l,g)=>{g?.signal.throwIfAborted();let f=g?osinaraTelegramDispatchFrom(a,osinaraResolveSession,g):a;return l.kind===`message`?dispatchMessage({config:e,message:l.message,onMessage:n,uploadPolicy:t,from:f}):dispatchCallbackQuery({config:e,query:l.callbackQuery,from:f})};return e.onVerifiedUpdate!==void 0?e.onVerifiedUpdate({attachSession:osinaraAttachSession,dispatch:d,notifyTimeout:(u,t,s)=>osinaraTelegramTimeoutNotice(e,u,t,s),raw:c,update:u,waitUntil:o}):(o(d(u)),new Response(`ok`))",
 );
 await replaceExact(
   runtimePaths.telegram,
   "})],async receive",
-  "}),...e.onDrain===void 0?[]:[POST(e.drainRoute??`/eve/v1/telegram-drain`,async(r,{from:a,resolveSession:osinaraResolveSession,waitUntil:o})=>{if(await verifyInbound(r,e.credentials)===null)return new Response(`unauthorized`,{status:401});let d=(l,g)=>{g?.signal.throwIfAborted();let f=g?osinaraTelegramDispatchFrom(a,osinaraResolveSession,g):a;return l.kind===`message`?dispatchMessage({config:e,message:l.message,onMessage:n,uploadPolicy:t,from:f}):dispatchCallbackQuery({config:e,query:l.callbackQuery,from:f})};return e.onDrain({dispatch:d,notifyTimeout:(u,t,s)=>osinaraTelegramTimeoutNotice(e,u,t,s),waitUntil:o})})]],async receive",
+  "}),...e.onDrain===void 0?[]:[POST(e.drainRoute??`/eve/v1/telegram-drain`,async(r,{from:a,attachSession:osinaraAttachSession,resolveSession:osinaraResolveSession,waitUntil:o})=>{if(await verifyInbound(r,e.credentials)===null)return new Response(`unauthorized`,{status:401});let d=(l,g)=>{g?.signal.throwIfAborted();let f=g?osinaraTelegramDispatchFrom(a,osinaraResolveSession,g):a;return l.kind===`message`?dispatchMessage({config:e,message:l.message,onMessage:n,uploadPolicy:t,from:f}):dispatchCallbackQuery({config:e,query:l.callbackQuery,from:f})};return e.onDrain({attachSession:osinaraAttachSession,dispatch:d,notifyTimeout:(u,t,s)=>osinaraTelegramTimeoutNotice(e,u,t,s),waitUntil:o})})]],async receive",
 );
 
 // Bot API 10.0 lets a bot see other bots' group messages, but Eve still drops every bot sender
@@ -410,6 +410,7 @@ await replaceExact(
 );
 const telegramHookDeclarations = `/** Deadline controls supplied only by the verified application ingress. */
 export interface TelegramDispatchControl {
+    readonly updateId?: string;
     readonly signal: AbortSignal;
     readonly deadlineAt: string;
     readonly dispatchId: string;
@@ -417,6 +418,7 @@ export interface TelegramDispatchControl {
 }
 /** Verified Telegram ingress hook context for durable application queues. */
 export interface TelegramVerifiedUpdateContext {
+    readonly attachSession: (sessionId: string) => Session;
     readonly raw: JsonObject;
     readonly update: TelegramUpdate;
     readonly dispatch: (update: TelegramUpdate, control?: TelegramDispatchControl) => Promise<Session | null | undefined>;
@@ -425,6 +427,7 @@ export interface TelegramVerifiedUpdateContext {
 }
 /** Internal drain hook context using the native verified Telegram dispatcher. */
 export interface TelegramDrainContext {
+    readonly attachSession: (sessionId: string) => Session;
     readonly dispatch: (update: TelegramUpdate, control?: TelegramDispatchControl) => Promise<Session | null | undefined>;
     readonly notifyTimeout: (update: TelegramUpdate, text: string, signal: AbortSignal) => Promise<unknown>;
     readonly waitUntil: (task: Promise<unknown>) => void;

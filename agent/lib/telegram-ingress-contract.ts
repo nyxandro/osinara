@@ -31,7 +31,17 @@ export interface TelegramIngressFailure {
   message: string;
 }
 
+export interface TelegramIngressDispatchBinding {
+  id: string;
+  sessionId: string;
+  turnId: string;
+  cursor: number;
+}
+
 export interface TelegramIngressClaim {
+  dispatchStarted: boolean;
+  dispatchBinding: TelegramIngressDispatchBinding | null;
+  recoveryCancelRequested: boolean;
   attemptCount: number;
   deliveryContinuationKey: string;
   ingressContinuationKey: string;
@@ -52,7 +62,7 @@ export interface TelegramIngressRepository {
     updateId: string;
   }): Promise<boolean>;
   beginVoiceTranscription(updateId: string, leaseToken: string): Promise<"completed" | "started">;
-  beginDispatch(updateId: string, leaseToken: string): Promise<void>;
+  beginDispatch(updateId: string, leaseToken: string, dispatchId: string): Promise<void>;
   claimNext(leaseMilliseconds: number): Promise<TelegramIngressClaim | null>;
   complete(updateId: string, leaseToken: string): Promise<void>;
   completeWithSession(
@@ -75,6 +85,12 @@ export interface TelegramIngressRepository {
 }
 
 export interface ClaimRow {
+  dispatch_started_at: Date | null;
+  dispatch_id: string | null;
+  dispatch_session_id: string | null;
+  dispatch_turn_id: string | null;
+  dispatch_start_index: string | null;
+  recovery_cancel_requested: boolean;
   attempt_count: number;
   current_continuation_key: string;
   ingress_continuation_key: string;
@@ -175,6 +191,12 @@ export function mapTelegramIngressClaim(row: ClaimRow): TelegramIngressClaim {
       }
     : null;
   return {
+    dispatchStarted: row.dispatch_started_at !== null,
+    recoveryCancelRequested: row.recovery_cancel_requested,
+    dispatchBinding: row.dispatch_session_id === null ? null : {
+      id: row.dispatch_id!, sessionId: row.dispatch_session_id,
+      turnId: row.dispatch_turn_id!, cursor: Number(row.dispatch_start_index),
+    },
     attemptCount: row.attempt_count,
     deliveryContinuationKey: row.current_continuation_key,
     ingressContinuationKey: row.ingress_continuation_key,

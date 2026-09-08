@@ -38,7 +38,8 @@ describeWithDatabase("Telegram conversation end-to-end", () => {
         maxBuffer: 16 * 1024 * 1024,
         timeout: 300_000,
       });
-      expect(result.stdout).toContain("verified 56 turns, 4 sessions");
+       expect(result.stdout).toContain("verified 56 turns, 4 sessions");
+       expect(result.stdout).toContain("verified restart recovery without repeating model calls, tools or Telegram delivery");
       expect(result.stdout).toContain("verified mandatory preparation failure stops before the model");
       expect(result.stdout).toContain("verified native cancellation stops a running model without a late reply");
       expect(result.stderr).not.toContain("AGENT_MEMORY_UNAVAILABLE");

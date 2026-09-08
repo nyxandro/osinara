@@ -13,12 +13,18 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 const TELEGRAM_CHANNEL_PATH = new URL("../channels/telegram.ts", import.meta.url);
+async function readChannelSource() {
+  return (await Promise.all([
+    readFile(TELEGRAM_CHANNEL_PATH, "utf8"),
+    readFile(new URL("./telegram-turn-preparation.ts", import.meta.url), "utf8"),
+  ])).join("\n");
+}
 
 describe("Telegram channel draft policy", () => {
   it("keeps reaction-capable turns free of speculative Telegram drafts", async () => {
-    const source = await readFile(TELEGRAM_CHANNEL_PATH, "utf8");
+    const source = await readChannelSource();
 
-    expect(source).toContain('async "turn.started"');
+    expect(source).toContain('"turn.started": prepareTelegramTurn');
     expect(source).not.toContain("startTelegramRichThinkingDraft");
     expect(source).not.toContain('"message.appended"');
     expect(source).not.toContain('"action.result"');
@@ -41,13 +47,13 @@ describe("Telegram channel draft policy", () => {
   });
 
   it("does not create background extraction work at turn start", async () => {
-    const source = await readFile(TELEGRAM_CHANNEL_PATH, "utf8");
+    const source = await readChannelSource();
 
     expect(source).not.toContain("createTurnExtractionBatch");
   });
 
   it("retains turn-bound memory sources while HITL is parked", async () => {
-    const source = await readFile(TELEGRAM_CHANNEL_PATH, "utf8");
+    const source = await readChannelSource();
     const turnCompleted = source.slice(
       source.indexOf('async "turn.completed"'),
       source.indexOf('async "authorization.required"'),

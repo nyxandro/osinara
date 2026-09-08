@@ -22,11 +22,13 @@ import { TELEGRAM_EVE_UPLOAD_POLICY } from "../lib/telegram-message-policy.js";
 import { handleTelegramMessage } from "../lib/telegram-on-message.js";
 import { completedTelegramOutput } from "../lib/telegram-progress.js";
 import { deliverTelegramProgressNotice } from "../lib/telegram-progress-notice.js";
-import { refreshTelegramReactionPolicy } from "../lib/telegram-reaction-policy.js";
 import { asidePauseMilliseconds } from "../lib/telegram-aside-pacing.js";
 import { stripTelegramAsideDirectives } from "../lib/telegram-authored-split.js";
 import { deliverTelegramFinalOutput } from "../lib/telegram-final-delivery.js";
 import { telegramFinalDeliveryRepository } from "../lib/telegram-final-delivery-repository.js";
+import { bindTelegramIngressTurn } from "../lib/telegram-ingress-binding.js";
+import { completeRuntimeHandoff, completeRuntimeSessionHandoffs } from "../lib/runtime-handoff.js";
+import { prepareTelegramTurn } from "../lib/telegram-turn-preparation.js";
 import { postTelegramRichMessageChunk } from "../lib/telegram-rich-messages.js";
 import { postTelegramPlainMessageChunk } from "../lib/telegram-plain-messages.js";
 import {
@@ -34,7 +36,6 @@ import {
   registerTelegramDeliveredMessageRoutes,
 } from "../lib/sessions/session-context.js";
 import { sessionRepository } from "../lib/sessions/session-repository.js";
-import { groupTimelineCursorRepository } from "../lib/sessions/group-timeline-cursor-repository.js";
 import { authorizeTelegramHitlCallback } from "../lib/telegram-hitl/callback-authorization.js";
 import { handleTelegramInputRequested } from "../lib/telegram-hitl/input-request.js";
 import { telegramHitlApprovalRepository } from "../lib/telegram-hitl/approval-repository.js";
@@ -52,7 +53,6 @@ import {
   SCHEDULED_TELEGRAM_TARGET_MISMATCH_CODE,
   scheduledTelegramTargetMatches,
 } from "../lib/agent-schedules/scheduled-telegram-target.js";
-import { proactiveDeliveryRepository } from "../lib/proactive-deliveries/proactive-delivery-repository.js";
 import { telegramGroupJournalRepository } from "../lib/telegram-group-journal-repository.js";
 import { postTelegramMessageWithoutContinuationChange } from "../lib/telegram-stable-delivery.js";
 import { shouldNotifyTelegramFailure } from "../lib/telegram-failure-notification.js";
@@ -60,15 +60,12 @@ import { AppError, isAppError } from "../lib/app-error.js";
 import { conversationTimelineRepository } from "../lib/conversation-timeline-repository.js";
 import { setTelegramMessageReaction } from "../lib/telegram-message-reaction.js";
 import {
-  bindMemoryTurnSources,
   releaseMemoryTurnSources,
 } from "../lib/memory-turn-source.js";
-import { memoryReviewBatchId } from "../lib/memory-review/memory-review-session.js";
 import { resolveMemoryReviewBatch } from "../lib/memory-review/memory-review-turn-binding.js";
 import { memoryReviewRepository } from "../lib/memory-review/memory-review-repository.js";
 import { memoryReviewDispatchRepository } from "../lib/memory-review/memory-review-dispatch-repository.js";
 import { accountlessActorApprovalError } from "../lib/telegram-session-actor.js";
-import { requireTelegramAdmissionDeadline } from "../lib/telegram-processing-deadline.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -269,6 +266,7 @@ export default telegramChannel({
       }
     },
     async "session.failed"(data, channel) {
+      await completeRuntimeSessionHandoffs(data.sessionId);
       const failureRepository = {
         async recordSessionFailedByContinuationToken(
           continuationToken: string,
@@ -392,43 +390,7 @@ export default telegramChannel({
         ctx.session.id,
       );
     },
-    async "turn.started"(_data, channel, ctx) {
-      requireTelegramAdmissionDeadline(ctx.session.auth);
-      const sessionId = applicationSessionId(ctx);
-      await sessionRepository.bindEveSession(sessionId, ctx.session.id);
-      // Which reactions this chat accepts is provider state, so it is refreshed here and read from
-      // the database by the prompt resolver. A brand new chat therefore gains the reaction surface
-      // from its next turn instead of guessing it now.
-      if (!isScheduledSession(ctx)) await refreshTelegramReactionPolicy(channel.telegram);
-      const reviewBatchId = memoryReviewBatchId(ctx);
-      if (reviewBatchId) {
-        await memoryReviewRepository.bindEveTurn({
-          applicationSessionId: sessionId,
-          batchId: reviewBatchId,
-          eveSessionId: ctx.session.id,
-          eveTurnId: ctx.session.turn.id,
-        });
-      }
-      // This immutable snapshot survives every later model/tool/HITL step in the same durable turn.
-      await bindMemoryTurnSources(ctx);
-      const attributes = ctx.session.auth.current?.attributes;
-      const timelineSequence = attributes?.telegramTimelineSequence;
-      if (typeof timelineSequence === "string") {
-        await groupTimelineCursorRepository.advance(
-          sessionId,
-          ctx.session.id,
-          timelineSequence,
-        );
-      }
-      const proactiveDeliveryCursor = attributes?.proactiveDeliveryCursor;
-      if (typeof proactiveDeliveryCursor === "string") {
-        await proactiveDeliveryRepository.advanceSessionCursor(
-          sessionId,
-          proactiveDeliveryCursor,
-        );
-      }
-      requireTelegramAdmissionDeadline(ctx.session.auth);
-    },
+    "turn.started": prepareTelegramTurn,
     async "turn.completed"(_data, channel, ctx) {
       const sessionId = applicationSessionId(ctx);
       const awaitingApproval = await sessionRepository.hasPendingOperation(sessionId, ctx.session.id);
@@ -477,6 +439,13 @@ export default telegramChannel({
     },
     async "authorization.completed"(_data, _channel, ctx) {
       await sessionRepository.resumePendingSession(applicationSessionId(ctx), ctx.session.id);
+    },
+    async "session.waiting"(_data, _channel, ctx) {
+      if (!ctx.session.parent) await bindTelegramIngressTurn(ctx.session.auth, ctx.session.id, ctx.session.turn.id, true);
+      await completeRuntimeHandoff(ctx.session.auth, ctx.session.id);
+    },
+    async "session.completed"(_data, _channel, ctx) {
+      await completeRuntimeSessionHandoffs(ctx.session.id);
     },
   },
   onDrain: handleTelegramDurableIngress.drain,

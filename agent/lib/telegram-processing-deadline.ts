@@ -5,10 +5,11 @@ import type { SessionAuth } from "eve/context";
 import { AppError } from "./app-error.js";
 import { waitForSessionBoundary, type BoundaryEvent, type EveSessionResult } from "./telegram-session-boundary.js";
 
-interface DeadlineSession extends EveSessionResult {
+export interface DeadlineSession extends EveSessionResult {
   cancel(options: { turnId: string }): Promise<{ status: "accepted"; sessionId: string } | { status: "no_active_turn" }>;
 }
 interface ProcessingControl {
+  updateId?: string;
   signal: AbortSignal;
   deadlineAt: string;
   dispatchId: string;
@@ -40,6 +41,9 @@ export function requireTelegramAdmissionDeadline(auth: SessionAuth, now = Date.n
 }
 
 export async function runTelegramProcessing<T>(input: {
+  dispatchId?: string;
+  updateId?: string;
+  initialTurnId?: string;
   timeoutMilliseconds: number;
   cancellationMilliseconds: number;
   signal?: AbortSignal;
@@ -50,8 +54,8 @@ export async function runTelegramProcessing<T>(input: {
     throw new AppError("AGENT_TELEGRAM_DEADLINE_INVALID", "Не задан допустимый срок обработки сообщения");
   }
   const controller = new AbortController();
-  const dispatchId = randomUUID();
-  let observedTurnId: string | undefined;
+  const dispatchId = input.dispatchId ?? randomUUID();
+  let observedTurnId: string | undefined = input.initialTurnId;
   const matchesEvent = (event: BoundaryEvent) => event.type === "session.failed" || event.type === "session.completed" ||
     event.data?.osinaraTelegramIngressId === dispatchId;
   const acceptsEvent = (event: BoundaryEvent) => {
@@ -93,7 +97,7 @@ export async function runTelegramProcessing<T>(input: {
   }
   const operation = Promise.resolve().then(() => {
     controller.signal.throwIfAborted();
-    return input.execute({ signal: controller.signal, deadlineAt: new Date(expires).toISOString(), dispatchId, acceptsEvent,
+    return input.execute({ signal: controller.signal, deadlineAt: new Date(expires).toISOString(), dispatchId, updateId: input.updateId, acceptsEvent,
     onDispatch(value) { controller.signal.throwIfAborted(); target = value; },
     observeSession,
     });

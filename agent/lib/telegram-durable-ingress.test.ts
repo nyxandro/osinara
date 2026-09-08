@@ -89,6 +89,7 @@ async function runDrain(
   if (!update) throw new Error("AGENT_TEST_TELEGRAM_UPDATE_INVALID: Не создано тестовое обновление");
   let backgroundTask: Promise<unknown> | undefined;
   await handle({
+    attachSession: vi.fn(),
     dispatch: correlatedDispatch(dispatch as TelegramVerifiedUpdateContext["dispatch"]),
     notifyTimeout: vi.fn(),
     raw,
@@ -105,6 +106,9 @@ async function runDrain(
 
 function repository() {
   const claim = {
+    dispatchStarted: false,
+    dispatchBinding: null,
+    recoveryCancelRequested: false,
     attemptCount: 1,
     deliveryContinuationKey: "101::",
     ingressContinuationKey: "101::",
@@ -166,6 +170,7 @@ describe("createTelegramDurableIngress", () => {
     });
 
     const response = await handle({
+      attachSession: vi.fn(),
       dispatch: correlatedDispatch(dispatch),
       notifyTimeout: vi.fn(),
       raw,
@@ -209,6 +214,7 @@ describe("createTelegramDurableIngress", () => {
     expect(storage.value.beginDispatch).toHaveBeenCalledWith(
       "1001",
       storage.claim.leaseToken,
+      expect.any(String),
     );
     expect(storage.value.completeWithSession).toHaveBeenCalledWith(
       "1001",
@@ -251,6 +257,7 @@ describe("createTelegramDurableIngress", () => {
     let backgroundTask: Promise<unknown> | undefined;
 
     await handle({
+      attachSession: vi.fn(),
       dispatch: correlatedDispatch(dispatch),
       notifyTimeout: vi.fn(),
       raw,
@@ -404,7 +411,7 @@ describe("createTelegramDurableIngress", () => {
       transcribeVoice,
     });
 
-    const response = await handle({ dispatch, notifyTimeout: vi.fn(), raw, update, waitUntil } as TelegramVerifiedUpdateContext);
+    const response = await handle({ attachSession: vi.fn(), dispatch, notifyTimeout: vi.fn(), raw, update, waitUntil } as TelegramVerifiedUpdateContext);
 
     expect(response.status).toBe(200);
     expect(acceptMedia).toHaveBeenCalledWith(update.message, "1001", "unsupported_media");
@@ -450,6 +457,7 @@ describe("createTelegramDurableIngress", () => {
     });
 
     await handle({
+      attachSession: vi.fn(),
       dispatch: correlatedDispatch(dispatch),
       notifyTimeout: vi.fn(),
       raw,

@@ -1,0 +1,44 @@
+name: osinara-tls
+services:
+  traefik:
+    image: traefik:v3.7.12@sha256:9c2a54d87f76f5c2f5f2682c68394af92fb12c0a2686798d6462a3f84bd78eaf
+    command:
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --providers.file.filename=/etc/traefik/dynamic.yaml
+      - --certificatesresolvers.letsencrypt.acme.storage=/data/acme.json
+      - --certificatesresolvers.letsencrypt.acme.tlschallenge=true
+      - --ping=true
+      - --log.format=json
+      - --accesslog=true
+      - --accesslog.format=json
+    environment:
+      OSINARA_HOSTNAME: ${OSINARA_HOSTNAME:?OSINARA_HOSTNAME is required}
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /opt/osinara/tls/traefik-dynamic.yaml:/etc/traefik/dynamic.yaml:ro
+      - traefik-data:/data
+    tmpfs:
+      - /tmp:size=16m,mode=0700
+    networks:
+      - edge-frontend
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+networks:
+  edge-frontend:
+    external: true
+    name: osinara-production-edge-frontend
+volumes:
+  traefik-data:
+    name: osinara-tls-traefik-data

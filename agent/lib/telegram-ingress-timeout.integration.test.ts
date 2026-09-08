@@ -73,6 +73,7 @@ describeWithDatabase("Telegram queue after a session timeout", () => {
     });
     let running: Promise<unknown> | undefined;
     await ingress.drain({
+      attachSession: vi.fn(),
       notifyTimeout: vi.fn(),
       dispatch: dispatch as unknown as TelegramDrainContext["dispatch"],
       waitUntil(task) { running = task; },
@@ -104,7 +105,7 @@ describeWithDatabase("Telegram queue after a session timeout", () => {
     if (failure === "crash") {
       const claim = await telegramIngressRepository.claimNext(1000);
       if (!claim) throw new Error("TEST_INGRESS_CLAIM_MISSING");
-      await telegramIngressRepository.beginDispatch(claim.updateId, claim.leaseToken);
+      await telegramIngressRepository.beginDispatch(claim.updateId, claim.leaseToken, crypto.randomUUID());
       await database().query("UPDATE telegram_ingress_updates SET lease_expires_at=now()-interval '1 second' WHERE update_id=$1", [claim.updateId]);
     }
     const ingress = createTelegramDurableIngress({
@@ -113,7 +114,7 @@ describeWithDatabase("Telegram queue after a session timeout", () => {
       observerIdleMilliseconds: 100,
     });
     let running: Promise<unknown> | undefined;
-    const context = { dispatch: dispatch as TelegramDrainContext["dispatch"], notifyTimeout, waitUntil(task: Promise<unknown>) { running = task; } };
+    const context = { attachSession: vi.fn(), dispatch: dispatch as TelegramDrainContext["dispatch"], notifyTimeout, waitUntil(task: Promise<unknown>) { running = task; } };
     await ingress.drain(context);
     await running;
     await ingress.drain(context);

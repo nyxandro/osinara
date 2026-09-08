@@ -19,6 +19,8 @@ import {
   requireInternalToken,
 } from "../lib/telegram-hitl/approval-timeout-sweep.js";
 import { createApprovalTimeoutResolver } from "../lib/telegram-hitl/approval-timeout.js";
+import { withRuntimeAdmission } from "../lib/runtime-maintenance.js";
+import { runtimeHandoffSession } from "../lib/runtime-handoff.js";
 
 export default defineChannel({
   routes: [
@@ -27,13 +29,12 @@ export default defineChannel({
       if (!isInternalTokenAuthorized(presented, requireInternalToken())) {
         return new Response(null, { status: 404 });
       }
-      const resolve = createApprovalTimeoutResolver({
-        attachSession,
+      const resolved = await withRuntimeAdmission("callback", admissionId => createApprovalTimeoutResolver({
+        attachSession: sessionId => runtimeHandoffSession(attachSession(sessionId), admissionId),
         finalizePrompt: finalizeTimedOutPrompt,
         repository: approvalTimeoutRepository,
-      });
-      const resolved = await resolve(new Date());
-      return Response.json({ resolved });
+      })(new Date()));
+      return Response.json(resolved === null ? { paused: true } : { resolved });
     }),
   ],
 });
