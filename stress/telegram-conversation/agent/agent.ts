@@ -10,6 +10,15 @@ const testModel = mockModel(async ({ lastUserMessage, toolResults, tools }) => {
     const marker = [...(lastUserMessage ?? "").matchAll(/conversation-probe-\d+/gu)].at(-1)?.[0];
     if (!marker) throw new Error("TEST_CURRENT_MESSAGE_MISSING");
     await database().query("INSERT INTO telegram_conversation_test_model_calls(marker) VALUES ($1)", [marker]);
+    if (marker === `conversation-probe-${SESSION_MAX_COMPLETED_TURNS + 12}`) {
+      if (toolResults.at(-1)?.isError) throw new Error(`TEST_PROFILE_PROJECTION_FAILED: ${JSON.stringify(toolResults.at(-1))}`);
+      if (toolResults.some(result => result.name === "manage_profile_projection")) return `reply-${marker}`;
+      const policy = (await database().query<{ group_ref: string }>(`SELECT p.group_ref
+        FROM external_profile_projection_policies p JOIN telegram_groups g ON g.id=p.group_id
+        WHERE g.telegram_chat_id='-900000101'`)).rows[0];
+      if (!policy) throw new Error("TEST_PROFILE_PROJECTION_GROUP_MISSING");
+      return { toolCalls: [{ name: "manage_profile_projection", input: { action: "update", enabled: true, groupRef: policy.group_ref } }] };
+    }
     if (marker === `conversation-probe-${SESSION_MAX_COMPLETED_TURNS + 10}`) {
       return { toolCalls: [{ name: "ask_question", input: { prompt: "Продолжить проверку отмены?", allowFreeform: false,
         options: [{ id: "continue", label: "Продолжить" }] } }] };

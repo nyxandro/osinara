@@ -120,6 +120,49 @@ describe("Telegram processing deadline", () => {
     expect(active.cancel).not.toHaveBeenCalled();
   });
 
+  it("does not cancel an approval continuation when audit events have no turn coordinate", async () => {
+    const active = session();
+    await expect(runTelegramProcessing({ timeoutMilliseconds: 100, cancellationMilliseconds: 20,
+      readCursor: async () => 0,
+      async execute(control) {
+        active.correlate(control.dispatchId);
+        control.observeSession(active);
+        for (const type of ["approval.candidate", "approval.settled"]) {
+          expect(control.acceptsEvent({ type, data: { turnId: "", osinaraTelegramIngressId: control.dispatchId } })).toBe(true);
+        }
+        control.acceptsEvent({ type: "input.resolved", data: { turnId: "turn_12", osinaraTelegramIngressId: control.dispatchId } });
+        control.acceptsEvent({ type: "turn.started", data: { turnId: "turn_13", osinaraTelegramIngressId: control.dispatchId } });
+        return "approved operation continued";
+      },
+    })).resolves.toBe("approved operation continued");
+    expect(active.cancel).not.toHaveBeenCalled();
+  });
+
+  it("does not let approval audit metadata replace the observed running turn", async () => {
+    const active = session();
+    const failure = new Error("observer failed after approval");
+    await expect(runTelegramProcessing({ timeoutMilliseconds: 100, cancellationMilliseconds: 100,
+      readCursor: async () => 0,
+      async execute(control) {
+        active.correlate(control.dispatchId);
+        control.observeSession(active);
+        control.acceptsEvent({ type: "turn.started", data: { turnId: "turn_13", osinaraTelegramIngressId: control.dispatchId } });
+        control.acceptsEvent({ type: "approval.settled", data: { turnId: "turn_12", osinaraTelegramIngressId: control.dispatchId } });
+        throw failure;
+      },
+    })).rejects.toMatchObject({ code: "AGENT_TELEGRAM_PROCESSING_INTERRUPTED" });
+    expect(active.cancel).toHaveBeenCalledWith({ turnId: "turn_13" });
+  });
+
+  it("still rejects an empty coordinate on an actual turn start", async () => {
+    await expect(runTelegramProcessing({ timeoutMilliseconds: 100, cancellationMilliseconds: 20,
+      readCursor: async () => 0,
+      async execute(control) {
+        control.acceptsEvent({ type: "turn.started", data: { turnId: "", osinaraTelegramIngressId: control.dispatchId } });
+      },
+    })).rejects.toThrow("Ingress turn ID is invalid");
+  });
+
   it("does not free the queue while an application callback or dispatch is still running", async () => {
     const active = session();
     await expect(runTelegramProcessing({ timeoutMilliseconds: 10, cancellationMilliseconds: 20,
