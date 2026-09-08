@@ -7,6 +7,7 @@
 import { defineSchedule } from "eve/schedules";
 
 import { runSoftwareUpdateCheck } from "../lib/software-updates/release-checker.js";
+import { withRuntimeAdmission } from "../lib/runtime-maintenance.js";
 
 async function runScheduledSoftwareUpdateCheck(): Promise<void> {
   try {
@@ -24,6 +25,6 @@ async function runScheduledSoftwareUpdateCheck(): Promise<void> {
 export default defineSchedule({
   cron: "0 */6 * * *",
   run({ waitUntil }) {
-    waitUntil(runScheduledSoftwareUpdateCheck());
+    waitUntil(withRuntimeAdmission("ordinary", () => runScheduledSoftwareUpdateCheck()));
   },
 });

@@ -42,6 +42,7 @@ import { telegramRepository } from "./telegram-repository.js";
 import { handleSoftwareUpdateCallback } from "./software-updates/callback.js";
 import { waitForSessionBoundary } from "./telegram-session-boundary.js";
 import { runTelegramProcessing, TelegramProcessingTimeout } from "./telegram-processing-deadline.js";
+import { recoverTelegramIngress } from "./telegram-ingress-recovery.js";
 
 const telegramUpdateIdSchema = z.union([z.number().int().nonnegative().safe(), z.string().regex(/^\d+$/)]);
 const telegramVoiceSchema = z.object({
@@ -197,6 +198,7 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
   async function drain(
     dispatch: TelegramVerifiedUpdateContext["dispatch"],
     notifyTimeout: TelegramVerifiedUpdateContext["notifyTimeout"],
+    attachSession: TelegramDrainContext["attachSession"],
   ): Promise<void> {
     while (true) {
       const claim = await dependencies.repository.claimNext(dependencies.leaseMilliseconds);
@@ -232,7 +234,23 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
         if (heartbeatError) throw heartbeatError;
         if (waitedForSlot) await dependencies.repository.renewLease(claim.updateId, claim.leaseToken, dependencies.leaseMilliseconds);
 
+        if (claim.dispatchStarted) {
+          const recovered = await recoverTelegramIngress({
+            dispatch: claim.dispatchBinding,
+            cancel: claim.recoveryCancelRequested,
+            attach: attachSession,
+            timeoutMs: dependencies.observerIdleMilliseconds ?? TELEGRAM_INGRESS_OBSERVER_IDLE_MS,
+            cancellationMs: dependencies.cancellationMilliseconds ?? TELEGRAM_INGRESS_CANCELLATION_GRACE_MS,
+            signal: heartbeatController.signal,
+          });
+          await dependencies.repository.completeWithSession(claim.updateId, claim.leaseToken,
+            recovered.sessionId, recovered.nextEventIndex);
+          console.info(JSON.stringify({ code: "AGENT_TELEGRAM_INGRESS_RECOVERED", updateId: claim.updateId,
+            eveSessionId: recovered.sessionId }));
+          continue;
+        }
         const completion = await runTelegramProcessing({
+          updateId: claim.updateId,
           signal: heartbeatController.signal,
           timeoutMilliseconds: dependencies.admissionMilliseconds ?? TELEGRAM_INGRESS_ADMISSION_TIMEOUT_MS,
           cancellationMilliseconds: dependencies.cancellationMilliseconds ?? TELEGRAM_INGRESS_CANCELLATION_GRACE_MS,
@@ -290,7 +308,7 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
             }
 
             control.signal.throwIfAborted();
-            await dependencies.repository.beginDispatch(claim.updateId, claim.leaseToken);
+            await dependencies.repository.beginDispatch(claim.updateId, claim.leaseToken, control.dispatchId);
             control.signal.throwIfAborted();
             const session = await dispatch(withCaptionlessAttachmentText(update), control);
             if (!session) return null;
@@ -367,7 +385,7 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
   function scheduleDrain(context: TelegramDrainContext): void {
     // PostgreSQL leases only the first non-terminal item of each queue. Independent drainers
     // let another chat progress while a slow turn runs, without overtaking this chat's head.
-    context.waitUntil(drain(context.dispatch, context.notifyTimeout));
+    context.waitUntil(drain(context.dispatch, context.notifyTimeout, context.attachSession));
   }
 
   const handleVerifiedUpdate = async function handleVerifiedUpdate(
@@ -399,7 +417,7 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
   // The private poller uses the same native dispatcher without creating a synthetic update.
   handleVerifiedUpdate.drain = async (context: TelegramDrainContext): Promise<Response> => {
     scheduleDrain(context);
-    return new Response("ok");
+    return new Response("ok", { headers: { "x-osinara-runtime-admission": "1" } });
   };
   return handleVerifiedUpdate as TelegramDurableIngressHandler;
 }

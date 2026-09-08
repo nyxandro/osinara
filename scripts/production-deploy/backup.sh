@@ -1,6 +1,6 @@
 #!/bin/bash
 # Pre-migration backup and current-release recovery operations.
-# Dumps PostgreSQL while live, then snapshots only irreconstructible volumes while writers are stopped.
+# Drains application work, stops writers, then snapshots PostgreSQL and irreconstructible volumes.
 
 readonly BACKUP_RESERVE_BYTES=$((512 * 1024 * 1024))
 readonly RETAINED_DEPLOY_BACKUP_COUNT=1
@@ -25,6 +25,110 @@ RETIRED_CUTOVER_ARCHIVED=0
 PRESERVED_WORKFLOW_CUTOVER_VOLUME=""
 CANDIDATE_HEALTH_VALIDATED=0
 COMPLETED_BACKUP_DIR=""
+MAINTENANCE_TOKEN=""
+MAINTENANCE_ACTIVE=0
+readonly MAINTENANCE_WAIT_ATTEMPTS=60
+readonly MAINTENANCE_WAIT_SECONDS=5
+
+require_runtime_admission() {
+  # Old runtimes must not pretend a SQL flag fences their execution. The first rollout needs
+  # a controlled maintenance window; every later release uses this handshake.
+  local supported
+  supported="$(compose_current exec -T agent node --input-type=module -e '
+    const secret=process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN;
+    if(!secret) throw new Error("DEPLOY_WEBHOOK_SECRET_MISSING");
+    const r=await fetch("http://127.0.0.1:3000/eve/v1/telegram-drain", {
+      method:"POST",body:"{}",headers:{"x-telegram-bot-api-secret-token":secret},
+      signal:AbortSignal.timeout(10000)
+    });
+    if(!r.ok) throw new Error("DEPLOY_ADMISSION_CHECK_FAILED");
+    console.log(r.headers.get("x-osinara-runtime-admission"));
+  ')" || return 1
+  [[ "$supported" == "1" ]] || fail "DEPLOY_ADMISSION_UNSUPPORTED" \
+    "Current runtime cannot drain safely; install the first admission-enabled release in a controlled maintenance window"
+}
+
+set_runtime_phase() {
+  local phase="$1" updated
+  updated="$(psql_current --set="phase=$phase" --set="owner=$MAINTENANCE_TOKEN" <<'SQL'
+UPDATE runtime_maintenance
+   SET phase = :'phase',
+       owner_token = CASE WHEN :'phase' = 'ready' THEN NULL ELSE :'owner'::uuid END,
+       updated_at = now()
+ WHERE singleton AND (owner_token = :'owner'::uuid OR
+   (phase = 'ready' AND :'phase' IN ('draining', 'ready')))
+ RETURNING phase;
+SQL
+)" || return 1
+  [[ "$updated" == "$phase" ]] || fail "DEPLOY_MAINTENANCE_OWNERSHIP_LOST" \
+    "Maintenance state belongs to another operation; no services were stopped"
+}
+
+runtime_is_idle() {
+  local app_idle workflow_idle
+  app_idle="$(psql_current <<'SQL'
+SELECT CASE
+ WHEN EXISTS (SELECT 1 FROM conversation_sessions WHERE retired_at IS NULL AND pending_operation)
+   THEN 'approval'
+ WHEN EXISTS (SELECT 1 FROM runtime_admission_holders)
+   OR EXISTS (SELECT 1 FROM telegram_ingress_updates WHERE status = 'processing'
+     OR last_error_code = 'AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED')
+   OR EXISTS (SELECT 1 FROM conversation_sessions WHERE retired_at IS NULL
+     AND kind IN ('scheduled', 'proactive') AND task_state IN ('pending', 'running'))
+   THEN 'busy'
+ ELSE 'idle' END;
+SQL
+)" || return 2
+  [[ "$app_idle" == "approval" ]] && return 3
+  [[ "$app_idle" == "busy" ]] && return 1
+  [[ "$app_idle" == "idle" ]] || return 2
+  workflow_idle="$(compose_current exec -T postgres psql -X --no-psqlrc --set ON_ERROR_STOP=1 \
+    --username osinara --dbname osinara_workflow --no-align --tuples-only --quiet <<'SQL'
+SELECT NOT EXISTS (SELECT 1 FROM workflow.workflow_runs
+ WHERE status NOT IN ('completed', 'failed', 'cancelled')
+   AND name NOT IN ('workflow//eve//workflowEntry', 'workflow//eve//sessionTimeoutWorkflow'));
+SQL
+)" || return 2
+  [[ "$workflow_idle" =~ ^[tf]$ ]] || return 2
+  [[ "$workflow_idle" == "t" ]]
+}
+
+resume_runtime_admission() {
+  [[ "$MAINTENANCE_ACTIVE" -eq 1 ]] || return 0
+  set_runtime_phase ready || return $?
+  MAINTENANCE_ACTIVE=0
+}
+
+prepare_runtime_update() {
+  require_runtime_admission
+  read -r MAINTENANCE_TOKEN < /proc/sys/kernel/random/uuid
+  MAINTENANCE_ACTIVE=1
+  set_runtime_phase draining
+  local attempt result
+  for ((attempt=0; attempt<MAINTENANCE_WAIT_ATTEMPTS; attempt+=1)); do
+    result=0
+    runtime_is_idle || result=$?
+    if [[ "$result" -eq 0 ]]; then
+      set_runtime_phase frozen
+      result=0
+      runtime_is_idle || result=$?
+      [[ "$result" -eq 0 ]] && return 0
+      set_runtime_phase draining
+    fi
+    if [[ "$result" -eq 3 ]]; then
+      resume_runtime_admission || return $?
+      fail "DEPLOY_APPROVAL_PENDING" "Update deferred: waiting for a human answer; normal admission restored"
+      return 1
+    fi
+    if [[ "$result" -ne 1 ]]; then
+      fail "DEPLOY_RUNTIME_STATE_UNAVAILABLE" "Could not prove runtime idleness; deployment will not stop services"
+      return 1
+    fi
+    sleep "$MAINTENANCE_WAIT_SECONDS"
+  done
+  resume_runtime_admission
+  fail "DEPLOY_RUNTIME_BUSY" "Active or unresolved work did not settle; update deferred, current release remains running"
+}
 
 prune_old_deploy_backups() {
   if [[ -z "$COMPLETED_BACKUP_DIR" || ! -d "$COMPLETED_BACKUP_DIR" || -L "$COMPLETED_BACKUP_DIR" ||

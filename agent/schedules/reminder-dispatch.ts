@@ -13,16 +13,19 @@ import { purgeSoftDeletedMemory } from "../lib/memory-retention.js";
 import { deleteExpiredSessions } from "../lib/sessions/session-retention.js";
 import { sweepTimedOutApprovals } from "../lib/telegram-hitl/approval-timeout-sweep.js";
 import { deleteOrphanedWorkspaces } from "../lib/workspaces/workspace-deletion.js";
+import { withRuntimeAdmission } from "../lib/runtime-maintenance.js";
 
 export default defineSchedule({
   cron: "* * * * *",
   run({ waitUntil }) {
-    waitUntil(Promise.all([
-      dispatchDueReminders(),
-      deleteExpiredSessions(),
-      deleteOrphanedWorkspaces(),
-      sweepTimedOutApprovals(),
-      purgeSoftDeletedMemory(new Date()),
-    ]));
+    waitUntil(withRuntimeAdmission("ordinary", async () => {
+      const results = await Promise.allSettled([
+        dispatchDueReminders(), deleteExpiredSessions(), deleteOrphanedWorkspaces(),
+        purgeSoftDeletedMemory(new Date()),
+      ]);
+      const failed = results.find(result => result.status === "rejected");
+      if (failed?.status === "rejected") throw failed.reason;
+    }));
+    waitUntil(sweepTimedOutApprovals());
   },
 });

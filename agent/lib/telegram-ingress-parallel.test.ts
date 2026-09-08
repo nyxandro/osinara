@@ -27,7 +27,7 @@ describe("independent Telegram queue progress", () => {
       botUsername: "osinara_bot", leaseMilliseconds: 60_000, acceptMedia: vi.fn(), authorizeVoice: vi.fn(),
       handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), transcribeVoice: vi.fn() });
     try {
-      for (let index = 0; index < ordinary + callbacks; index++) await handler.drain({ notifyTimeout: vi.fn(), waitUntil: task => { work.push(task); }, dispatch: correlatedDispatch(async update => {
+      for (let index = 0; index < ordinary + callbacks; index++) await handler.drain({ attachSession: vi.fn(), notifyTimeout: vi.fn(), waitUntil: task => { work.push(task); }, dispatch: correlatedDispatch(async update => {
         const id = Number(update.kind === "message" ? update.message.messageId : update.callbackQuery.message!.messageId);
         dispatched.push(id); active[update.kind]++; maximum[update.kind] = Math.max(maximum[update.kind], active[update.kind]);
         return { id: String(id), getEventStream: async () => new ReadableStream({ async start(controller) {
@@ -61,7 +61,7 @@ describe("independent Telegram queue progress", () => {
         const message = { message_id: item.id, date: 1700000000,
           chat: { id: item.chat, type: item.chat > 0 ? "private" : "group" },
           from: { id: 101, first_name: "Owner", is_bot: false }, text: "request" };
-        return { updateId: String(item.id), queueId: String(item.chat), leaseToken: `lease-${item.id}`,
+        return { dispatchStarted: false, dispatchBinding: null, recoveryCancelRequested: false, updateId: String(item.id), queueId: String(item.chat), leaseToken: `lease-${item.id}`,
           leaseExpiresAt: new Date(Date.now() + 60_000), attemptCount: 1,
           deliveryContinuationKey: `${item.chat}::`, ingressContinuationKey: `${item.chat}::`,
           voice: null, transcript: null, payload: { update_id: item.id,
@@ -92,7 +92,7 @@ describe("independent Telegram queue progress", () => {
     });
     const work: Promise<unknown>[] = [];
     async function drain() {
-      await handler.drain({ notifyTimeout: vi.fn(), waitUntil: (task) => { work.push(task); }, dispatch: correlatedDispatch(async (update) => {
+      await handler.drain({ attachSession: vi.fn(), notifyTimeout: vi.fn(), waitUntil: (task) => { work.push(task); }, dispatch: correlatedDispatch(async (update) => {
         const id = Number(update.kind === "message" ? update.message.messageId : update.callbackQuery.message!.messageId);
         dispatched.push(id);
         return { id: id > 2 ? "private-session" : "group-session", getEventStream: async ({ startIndex }: { startIndex: number }) => {

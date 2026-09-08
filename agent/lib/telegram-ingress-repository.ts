@@ -6,7 +6,7 @@
  */
 import type { PoolClient } from "pg";
 
-import { TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED } from "../config.js";
+import { TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED, TELEGRAM_INGRESS_RECOVERY_MAX_ATTEMPTS } from "../config.js";
 import { AppError } from "./app-error.js";
 import { parseExternalGroupToolAllowlist } from "./tool-policy/group-tool-catalog.js";
 import { database } from "./database.js";
@@ -246,15 +246,22 @@ export const telegramIngressRepository: TelegramIngressRepository = {
     requireLeaseMilliseconds(leaseMilliseconds);
     // The anti-join makes every non-terminal earlier update a hard FIFO barrier for its queue.
     const result = await database().query<ClaimRow>(
-      `WITH candidate AS (
+      `WITH admission AS MATERIALIZED (
+          SELECT phase FROM runtime_maintenance WHERE singleton FOR SHARE
+        ), candidate AS (
          SELECT item.update_id
          FROM telegram_ingress_updates item
-          WHERE (item.status = 'pending'
-              OR (item.status = 'processing' AND item.lease_expires_at <= now()))
+           WHERE (item.status = 'pending'
+               OR (item.status = 'processing' AND item.lease_expires_at <= now())
+               OR (item.status = 'failed' AND item.last_error_code = 'AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED'
+                 AND item.dispatch_session_id IS NOT NULL AND item.recovery_attempts < $2))
+             AND EXISTS (SELECT 1 FROM admission WHERE phase = 'ready' OR
+               (phase = 'draining' AND (item.dispatch_started_at IS NOT NULL OR item.payload ? 'callback_query')))
             AND NOT EXISTS (
               SELECT 1 FROM telegram_ingress_updates blocked
-              WHERE blocked.queue_id = item.queue_id AND blocked.status = 'failed'
-                AND blocked.last_error_code = 'AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED'
+               WHERE blocked.queue_id = item.queue_id AND blocked.status = 'failed'
+                 AND blocked.last_error_code = 'AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED'
+                 AND blocked.update_id <> item.update_id
             )
            AND NOT EXISTS (
              SELECT 1
@@ -268,8 +275,11 @@ export const telegramIngressRepository: TelegramIngressRepository = {
          LIMIT 1
        )
        UPDATE telegram_ingress_updates item
-       SET status = 'processing',
-           attempt_count = attempt_count + 1,
+        SET status = 'processing',
+            eve_session_id = NULL,
+            attempt_count = attempt_count + 1,
+            recovery_attempts = recovery_attempts + CASE WHEN dispatch_started_at IS NULL THEN 0 ELSE 1 END,
+            completed_at = NULL,
            lease_token = gen_random_uuid(),
            lease_expires_at = now() + ($1 * interval '1 millisecond'),
            last_error_code = NULL,
@@ -279,10 +289,12 @@ export const telegramIngressRepository: TelegramIngressRepository = {
        WHERE item.update_id = candidate.update_id
          AND queue.id = item.queue_id
        RETURNING item.update_id::text, item.queue_id, item.ingress_continuation_key,
-         item.payload, item.attempt_count, item.lease_token::text, item.lease_expires_at,
+          item.payload, item.attempt_count, item.lease_token::text, item.lease_expires_at,
+          item.dispatch_started_at, item.dispatch_id::text, item.dispatch_session_id,
+          item.dispatch_turn_id, item.dispatch_start_index::text, item.recovery_cancel_requested,
          item.voice_file_id, item.voice_file_size::text, item.voice_mime_type,
          item.voice_transcript, queue.current_continuation_key`,
-      [leaseMilliseconds],
+      [leaseMilliseconds, TELEGRAM_INGRESS_RECOVERY_MAX_ATTEMPTS],
     );
     return result.rows[0] ? mapTelegramIngressClaim(result.rows[0]) : null;
   },

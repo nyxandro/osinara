@@ -449,7 +449,7 @@ describeWithDatabase("telegramIngressRepository", () => {
   it("does not repeat an Eve dispatch after its durable start marker", async () => {
     await telegramIngressRepository.enqueue(updateInput("6001", "telegram:private:101", "действие"));
     const first = await telegramIngressRepository.claimNext(LEASE_MILLISECONDS);
-    await telegramIngressRepository.beginDispatch(first!.updateId, first!.leaseToken);
+    await telegramIngressRepository.beginDispatch(first!.updateId, first!.leaseToken, crypto.randomUUID());
     await telegramIngressRepository.release(first!.updateId, first!.leaseToken, {
       code: "AGENT_PROCESS_INTERRUPTED",
       message: "Процесс был прерван",
@@ -457,7 +457,7 @@ describeWithDatabase("telegramIngressRepository", () => {
     const reclaimed = await telegramIngressRepository.claimNext(LEASE_MILLISECONDS);
 
     await expect(
-      telegramIngressRepository.beginDispatch(reclaimed!.updateId, reclaimed!.leaseToken),
+      telegramIngressRepository.beginDispatch(reclaimed!.updateId, reclaimed!.leaseToken, crypto.randomUUID()),
     ).rejects.toThrowError(/AGENT_TELEGRAM_DISPATCH_RECOVERY_REQUIRED/);
   });
 });

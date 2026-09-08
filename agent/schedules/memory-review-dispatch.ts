@@ -5,6 +5,7 @@
  * - Default schedule that delivers severe alerts and starts ready 50-message task sessions.
  */
 import { defineSchedule } from "eve/schedules";
+import { withRuntimeAdmission } from "../lib/runtime-maintenance.js";
 
 import { dispatchPendingMemoryReviews } from "../lib/memory-review/memory-review-dispatcher.js";
 import { dispatchMemoryReviewOwnerAlerts } from
@@ -36,6 +37,6 @@ async function dispatchMemoryReviewCycle(to: Parameters<typeof dispatchPendingMe
 export default defineSchedule({
   cron: "* * * * *",
   run({ to, waitUntil }) {
-    waitUntil(dispatchMemoryReviewCycle(to));
+    waitUntil(withRuntimeAdmission("ordinary", () => dispatchMemoryReviewCycle(to)));
   },
 });

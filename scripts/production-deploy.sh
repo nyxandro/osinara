@@ -81,6 +81,14 @@ handle_failure() {
   fi
 
   cleanup_incomplete_backup
+  # Before migration, a deferred/failed update must return the old healthy runtime to service.
+  if [[ "$MIGRATION_STARTED" -eq 0 && "$status" == "failed" ]]; then
+    if ! resume_runtime_admission; then
+      status="ambiguous"
+      code="DEPLOY_ADMISSION_RECOVERY_FAILED"
+      message="Could not restore request admission; operator recovery is required"
+    fi
+  fi
   log_event "$code" "$message"
   if [[ -n "$PROPOSAL_ID" && "$TERMINAL_RECORDED" -eq 0 ]]; then
     record_proposal_result "$status" "$code" "$message"
@@ -159,8 +167,9 @@ main() {
   if [[ "$INITIAL_MODE" -eq 0 ]]; then
     recheck_claim_owner
     preflight_backup
-    create_postgres_backup
+    prepare_runtime_update
     stop_current_services
+    create_postgres_backup
     snapshot_durable_volumes
     prune_old_deploy_backups
   fi
@@ -177,6 +186,7 @@ main() {
   if [[ "$INITIAL_MODE" -eq 1 ]]; then
     resolve_initial_owner_chat
   fi
+  resume_runtime_admission
   record_proposal_result "succeeded" "DEPLOY_RELEASE_SUCCEEDED" \
     "Release v${REQUESTED_VERSION} passed the production health check"
   send_success_notification

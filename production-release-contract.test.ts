@@ -352,7 +352,8 @@ describe("server deployment contract", () => {
     const main = readProjectFile("scripts/production-deploy.sh");
     expect(main.indexOf("prune_old_deploy_backups")).toBeGreaterThan(main.indexOf("snapshot_durable_volumes"));
     expect(main.indexOf("pull_release_images")).toBeLessThan(main.indexOf("create_postgres_backup"));
-    expect(main.indexOf("create_postgres_backup")).toBeLessThan(main.indexOf("stop_current_services"));
+    expect(main.indexOf("prepare_runtime_update")).toBeLessThan(main.indexOf("stop_current_services"));
+    expect(main.indexOf("stop_current_services")).toBeLessThan(main.indexOf("create_postgres_backup"));
     expect(main.indexOf("stop_current_services")).toBeLessThan(main.indexOf("snapshot_durable_volumes"));
     const backup = readProjectFile("scripts/production-deploy/backup.sh");
     expect(backup).toMatch(/compose_current stop[^\n]*memory-extraction-worker/u);

@@ -64,6 +64,7 @@ export const TELEGRAM_INGRESS_ADMISSION_TIMEOUT_MS = 15 * 60 * 1_000;
 // Actual model silence is bounded by the native AI SDK policy, not this transport guard.
 export const TELEGRAM_INGRESS_OBSERVER_IDLE_MS = 35 * 60 * 1_000;
 export const TELEGRAM_INGRESS_CANCELLATION_GRACE_MS = 30_000;
+export const TELEGRAM_INGRESS_RECOVERY_MAX_ATTEMPTS = 3;
 // Bound expensive turns on the single-process deployment without letting groups occupy button slots.
 export const TELEGRAM_INGRESS_MESSAGE_CONCURRENCY = 2;
 export const TELEGRAM_INGRESS_CALLBACK_CONCURRENCY = 2;

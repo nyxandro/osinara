@@ -112,6 +112,32 @@ export default defineEval({
       }
       t.log(`verified ${turnCount + 2} turns, 4 sessions, all chat modes, granted skills, Bash, native subagents, rotation and recovery`);
 
+      // Simulate a lost ingress completion after Eve and Telegram have finished. A new drain
+      // must use the persisted attempt binding, not replay the message/model/tools/delivery.
+      const recoveryUpdateId = 900_000_000 + turnCount + 2;
+      const modelCallsBefore = (await db.query("SELECT count(*)::integer AS n FROM telegram_conversation_test_model_calls")).rows[0].n;
+      const sendsBefore = (await db.query("SELECT count(*)::integer AS n FROM telegram_conversation_test_deliveries")).rows[0].n;
+      const bound = (await db.query("SELECT dispatch_session_id,dispatch_turn_id FROM telegram_ingress_updates WHERE update_id=$1", [recoveryUpdateId])).rows[0];
+      assert.ok(bound.dispatch_session_id && bound.dispatch_turn_id, "Native turn must bind before model execution");
+      await db.query(`UPDATE telegram_ingress_updates SET status='failed',
+        last_error_code='AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED',last_error_message='TEST_OBSERVER_RESTART'
+        WHERE update_id=$1`, [recoveryUpdateId]);
+      const recoveredResponse = await t.target.fetch("/eve/v1/telegram-drain", {
+        method: "POST", headers: { "x-telegram-bot-api-secret-token": "conversation-test-secret" }, body: "{}",
+      });
+      assert.equal(recoveredResponse.status, 200);
+      let recovered = false;
+      for (let poll = 0; poll < 150; poll++) {
+        if ((await db.query("SELECT status FROM telegram_ingress_updates WHERE update_id=$1", [recoveryUpdateId])).rows[0].status === "completed") {
+          recovered = true; break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      assert.ok(recovered, "Persisted ingress did not recover after observer loss");
+      assert.equal((await db.query("SELECT count(*)::integer AS n FROM telegram_conversation_test_model_calls")).rows[0].n, modelCallsBefore);
+      assert.equal((await db.query("SELECT count(*)::integer AS n FROM telegram_conversation_test_deliveries")).rows[0].n, sendsBefore);
+      t.log("verified restart recovery without repeating model calls, tools or Telegram delivery");
+
       // Inject a real PostgreSQL error in the mandatory native turn.started preparation.
       // The model ledger proves that optional adapter-error handling cannot let the provider run.
       assert.ok((await db.query("SELECT 1 FROM telegram_conversation_test_model_calls LIMIT 1")).rowCount);
