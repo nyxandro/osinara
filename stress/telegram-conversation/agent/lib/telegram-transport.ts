@@ -17,6 +17,13 @@ globalThis.fetch = async (request, init) => {
     return Response.json({ ok: true, result: { id: Number(body.chat_id), type: "supergroup", available_reactions: [] } });
   }
   if (method === "sendChatAction") return Response.json({ ok: true, result: true });
+  if (method === "answerCallbackQuery") return Response.json({ ok: true, result: true });
+  if (method === "editMessageText") {
+    const updated = await database().query("UPDATE telegram_conversation_test_deliveries SET body=body || $2::jsonb WHERE id=$1 AND body->>'chat_id'=$3",
+      [body.message_id, JSON.stringify(body), String(body.chat_id)]);
+    if (updated.rowCount !== 1) throw new Error("TEST_TELEGRAM_EDIT_TARGET_MISSING");
+    return Response.json({ ok: true, result: { message_id: body.message_id } });
+  }
   if (method !== "sendMessage" && method !== "sendRichMessage") {
     throw new Error(`TEST_UNEXPECTED_TELEGRAM_METHOD: ${method}`);
   }

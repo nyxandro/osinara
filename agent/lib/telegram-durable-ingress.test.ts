@@ -18,6 +18,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { TelegramIngressRepository } from "./telegram-ingress-contract.js";
 import { createTelegramDurableIngress } from "./telegram-durable-ingress.js";
+import { correlatedDispatch } from "./telegram-ingress.test-fixtures.js";
 
 const BOUNDARY_SETTLEMENT_TIMEOUT_MILLISECONDS = 100;
 
@@ -71,6 +72,9 @@ function ingress(
     handleSoftwareUpdateCallback:
       overrides.handleSoftwareUpdateCallback ?? vi.fn().mockResolvedValue(false),
     leaseMilliseconds: overrides.leaseMilliseconds ?? 60_000,
+    admissionMilliseconds: overrides.leaseMilliseconds ?? 60_000,
+    observerIdleMilliseconds: overrides.leaseMilliseconds ?? 60_000,
+    cancellationMilliseconds: 20,
     repository: storage.value,
     transcribeVoice: vi.fn().mockResolvedValue("Купи молоко"),
   });
@@ -85,7 +89,8 @@ async function runDrain(
   if (!update) throw new Error("AGENT_TEST_TELEGRAM_UPDATE_INVALID: Не создано тестовое обновление");
   let backgroundTask: Promise<unknown> | undefined;
   await handle({
-    dispatch,
+    dispatch: correlatedDispatch(dispatch as TelegramVerifiedUpdateContext["dispatch"]),
+    notifyTimeout: vi.fn(),
     raw,
     update,
     waitUntil(task) {
@@ -161,7 +166,8 @@ describe("createTelegramDurableIngress", () => {
     });
 
     const response = await handle({
-      dispatch,
+      dispatch: correlatedDispatch(dispatch),
+      notifyTimeout: vi.fn(),
       raw,
       update,
       waitUntil(task) {
@@ -245,7 +251,8 @@ describe("createTelegramDurableIngress", () => {
     let backgroundTask: Promise<unknown> | undefined;
 
     await handle({
-      dispatch,
+      dispatch: correlatedDispatch(dispatch),
+      notifyTimeout: vi.fn(),
       raw,
       update,
       waitUntil(task) {
@@ -320,7 +327,7 @@ describe("createTelegramDurableIngress", () => {
     );
   });
 
-  it("releases the queue when a session never reaches a boundary", async () => {
+  it("quarantines the affected queue when a session cannot confirm stopping", async () => {
     const storage = repository();
     const dispatch = vi.fn().mockResolvedValue({
       getEventStream: async () => new ReadableStream({ start() {} }),
@@ -332,7 +339,7 @@ describe("createTelegramDurableIngress", () => {
     expect(storage.value.completeWithSession).not.toHaveBeenCalled();
     expect(storage.value.fail).toHaveBeenCalledTimes(1);
     expect(storage.value.fail.mock.calls[0]?.[2]).toMatchObject({
-      code: "AGENT_TELEGRAM_SESSION_BOUNDARY_TIMEOUT",
+      code: "AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED",
     });
   });
 
@@ -364,13 +371,13 @@ describe("createTelegramDurableIngress", () => {
     await running;
     expect(settled).toBe(true);
     if (phase === "open") {
-      expect(storage.value.fail.mock.calls[0]?.[2]).toMatchObject({ code: "AGENT_TELEGRAM_SESSION_BOUNDARY_TIMEOUT" });
+      expect(storage.value.fail.mock.calls[0]?.[2]).toMatchObject({ code: "AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED" });
     } else {
       expect(storage.value.fail).not.toHaveBeenCalled();
       expect(storage.value.completeWithSession).toHaveBeenCalledWith("1001", storage.claim.leaseToken, "session-stuck", 1);
     }
     expect(storage.value.complete).toHaveBeenCalledWith("1003", storage.claim.leaseToken);
-    await vi.waitFor(() => expect(cancel).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledTimes(phase === "open" ? 2 : 1));
   });
 
   it("acknowledges rejected external media without enqueue, download, or dispatch", async () => {
@@ -397,7 +404,7 @@ describe("createTelegramDurableIngress", () => {
       transcribeVoice,
     });
 
-    const response = await handle({ dispatch, raw, update, waitUntil } as TelegramVerifiedUpdateContext);
+    const response = await handle({ dispatch, notifyTimeout: vi.fn(), raw, update, waitUntil } as TelegramVerifiedUpdateContext);
 
     expect(response.status).toBe(200);
     expect(acceptMedia).toHaveBeenCalledWith(update.message, "1001", "unsupported_media");
@@ -443,7 +450,8 @@ describe("createTelegramDurableIngress", () => {
     });
 
     await handle({
-      dispatch,
+      dispatch: correlatedDispatch(dispatch),
+      notifyTimeout: vi.fn(),
       raw,
       update,
       waitUntil(task) {

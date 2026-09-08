@@ -21,6 +21,7 @@ export default defineEval({
       await db.query(`CREATE TABLE telegram_conversation_test_deliveries (
         id integer GENERATED ALWAYS AS IDENTITY (START WITH 10000), body jsonb NOT NULL)`);
       await db.query("CREATE TABLE telegram_conversation_test_sandboxes (eve_session_id text NOT NULL, mounts jsonb NOT NULL)");
+      await db.query("CREATE TABLE telegram_conversation_test_model_calls (marker text NOT NULL)");
       const owner = (await db.query<{ id: string }>("INSERT INTO users(telegram_user_id,display_name) VALUES('902','Human') RETURNING id")).rows[0]!;
       await db.query("INSERT INTO family_memberships(family_id,user_id,role) VALUES($1,$2,'owner')", [family.id, owner.id]);
       await db.query("INSERT INTO telegram_groups(family_id,telegram_chat_id,title,type,message_mode) VALUES($1,$2,'Family test','family_private','all')", [family.id, String(familyChatId)]);
@@ -110,12 +111,140 @@ export default defineEval({
         assert.equal(replies.length, ordinal === failingOrdinal ? 0 : 1, `Delivery count for turn ${ordinal}`);
       }
       t.log(`verified ${turnCount + 2} turns, 4 sessions, all chat modes, granted skills, Bash, native subagents, rotation and recovery`);
+
+      // Inject a real PostgreSQL error in the mandatory native turn.started preparation.
+      // The model ledger proves that optional adapter-error handling cannot let the provider run.
+      assert.ok((await db.query("SELECT 1 FROM telegram_conversation_test_model_calls LIMIT 1")).rowCount);
+      await db.query(`CREATE FUNCTION telegram_test_reject_binding() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN RAISE EXCEPTION 'TEST_REQUIRED_PREPARATION_FAILED'; END $$`);
+      await db.query(`CREATE TRIGGER telegram_test_reject_binding BEFORE UPDATE OF eve_session_id
+        ON conversation_sessions FOR EACH ROW EXECUTE FUNCTION telegram_test_reject_binding()`);
+      const preparationOrdinal = turnCount + 3;
+      const response = await t.target.fetch("/eve/v1/telegram", {
+        method: "POST", headers: { "x-telegram-bot-api-secret-token": "conversation-test-secret" },
+        body: JSON.stringify({ update_id: 900_000_000 + preparationOrdinal, message: {
+          message_id: preparationOrdinal, date: Math.floor(Date.now() / 1000),
+          chat: { id: familyChatId, type: "supergroup" }, from: { id: 902, first_name: "Human", is_bot: false },
+          text: `@osinara_bot conversation-probe-${preparationOrdinal}`,
+        } }),
+      });
+      assert.equal(response.status, 200);
+      let preparationSettled = false;
+      for (let poll = 0; poll < 150; poll++) {
+        const row = (await db.query<{ status: string; eve_session_id: string | null }>(
+          "SELECT status,eve_session_id FROM telegram_ingress_updates WHERE update_id=$1", [900_000_000 + preparationOrdinal],
+        )).rows[0];
+        if (row?.status === "completed") {
+          assert.ok(row.eve_session_id);
+          const session = await t.target.attachSession(row.eve_session_id, { startIndex: cursors.get(row.eve_session_id) ?? 0 });
+          session.event("session.failed");
+          preparationSettled = true;
+          break;
+        }
+        assert.notEqual(row?.status, "failed", "Preparation must terminate through the native session lifecycle");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      assert.ok(preparationSettled, "Mandatory preparation failure did not settle");
+      assert.equal((await db.query("SELECT 1 FROM telegram_conversation_test_model_calls WHERE marker=$1",
+        [`conversation-probe-${preparationOrdinal}`])).rowCount, 0);
+      t.log("verified mandatory preparation failure stops before the model");
+      await db.query("DROP TRIGGER telegram_test_reject_binding ON conversation_sessions");
+      await db.query("DROP FUNCTION telegram_test_reject_binding()");
+
+      let previousCancellationSession: string | undefined;
+      for (const cancellationOrdinal of [turnCount + 4, turnCount + 5, turnCount + 6]) {
+      const afterQuestion = cancellationOrdinal === turnCount + 6;
+      let ingressUpdateId = 900_000_000 + cancellationOrdinal;
+      let cancellationSessionId: string | undefined;
+      await t.target.fetch("/eve/v1/telegram", {
+        method: "POST", headers: { "x-telegram-bot-api-secret-token": "conversation-test-secret" },
+        body: JSON.stringify({ update_id: 900_000_000 + cancellationOrdinal, message: {
+          message_id: cancellationOrdinal, date: Math.floor(Date.now() / 1000),
+          chat: { id: familyChatId, type: "supergroup" }, from: { id: 902, first_name: "Human", is_bot: false },
+          text: `@osinara_bot conversation-probe-${cancellationOrdinal}`,
+        } }),
+      });
+      if (afterQuestion) {
+        let parkedSessionId: string | undefined;
+        for (let poll = 0; poll < 150; poll++) {
+          const row = (await db.query<{ status: string; eve_session_id: string }>(
+            "SELECT status,eve_session_id FROM telegram_ingress_updates WHERE update_id=$1", [ingressUpdateId])).rows[0];
+          if (row?.status === "completed") { parkedSessionId = row.eve_session_id; break; }
+          assert.notEqual(row?.status, "failed");
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        assert.ok(parkedSessionId, "Question did not park through the Telegram ingress");
+        cancellationSessionId = parkedSessionId;
+        const parked = await t.target.attachSession(parkedSessionId, { startIndex: cursors.get(parkedSessionId) ?? 0 });
+        parked.event("input.requested");
+        const cursor = (await db.query<{ next_event_index: number }>("SELECT next_event_index FROM eve_session_event_cursors WHERE eve_session_id=$1", [parkedSessionId])).rows[0]!;
+        cursors.set(parkedSessionId, Number(cursor.next_event_index));
+        const prompt = (await db.query<{ id: number; body: { reply_markup: { inline_keyboard: { callback_data: string }[][] } } }>(
+          "SELECT id,body FROM telegram_conversation_test_deliveries WHERE body->'reply_markup'->'inline_keyboard'->0->0->>'callback_data' IS NOT NULL ORDER BY id DESC LIMIT 1")).rows[0];
+        assert.ok(prompt, "Question button was not delivered");
+        ingressUpdateId += 1;
+        await t.target.fetch("/eve/v1/telegram", {
+          method: "POST", headers: { "x-telegram-bot-api-secret-token": "conversation-test-secret" },
+          body: JSON.stringify({ update_id: ingressUpdateId, callback_query: {
+            id: "cancellation-probe-answer", chat_instance: "test-chat", data: prompt.body.reply_markup.inline_keyboard[0]![0]!.callback_data,
+            from: { id: 902, first_name: "Human", is_bot: false }, message: { message_id: prompt.id,
+              date: Math.floor(Date.now() / 1000), chat: { id: familyChatId, type: "supergroup" } },
+          } }),
+        });
+      }
+      let modelObserved = false;
+      for (let poll = 0; poll < 100; poll++) {
+        if ((await db.query("SELECT 1 FROM telegram_conversation_test_model_calls WHERE marker=$1",
+          [`conversation-probe-${cancellationOrdinal}`])).rowCount === (afterQuestion ? 2 : 1)) {
+          modelObserved = true;
+          if (!afterQuestion) cancellationSessionId = (await db.query<{ eve_session_id: string }>(`SELECT session.eve_session_id
+            FROM conversation_sessions session JOIN telegram_groups chat ON chat.id=session.group_id
+            WHERE chat.telegram_chat_id=$1 AND session.kind='canonical' AND session.retired_at IS NULL`, [String(familyChatId)])).rows[0]?.eve_session_id;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      assert.ok(modelObserved && cancellationSessionId, "Cancellation probe did not reach the model");
+      if (previousCancellationSession) assert.equal(cancellationSessionId, previousCancellationSession, "Cancellation must also work on a reused session");
+      previousCancellationSession = cancellationSessionId;
+      const live = t.target.watchTurn(cancellationSessionId, { startIndex: cursors.get(cancellationSessionId) ?? 0 });
+      const started = await live.waitForEvent("step.started");
+      const cancelRequestedAt = Date.now();
+      const cancellations = await Promise.all([1, 2, 3].map(() => t.target.fetch(`/eve/v1/session/${cancellationSessionId}/cancel`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ turnId: started.data.turnId }),
+      })));
+      assert.ok(cancellations.every((response) => response.status === 202 || response.status === 200));
+      const ending = await live.result();
+      ending.event("turn.cancelled");
+      ending.event("session.waiting");
+      assert.ok(ending.events.some((event) => event.type === "turn.cancelled"), "Native cancellation did not stop the active turn");
+      assert.ok(Date.now() - cancelRequestedAt < 5000, "Cancellation waited for the model instead of interrupting it");
+      const waiting = ending.events.find((event) => event.type === "session.waiting");
+      assert.equal((waiting?.data as Record<string, unknown>)?.osinaraTelegramIngressId,
+        (started.data as Record<string, unknown>).osinaraTelegramIngressId, "Cancellation lost the current delivery identity");
+      assert.equal((await db.query("SELECT 1 FROM telegram_conversation_test_model_calls WHERE marker=$1",
+        [`conversation-probe-${cancellationOrdinal}`])).rowCount, afterQuestion ? 2 : 1, "Control replays must not execute the model twice");
+      assert.equal((await db.query("SELECT 1 FROM telegram_conversation_test_deliveries WHERE body->>'text'=$1",
+        [`reply-conversation-probe-${cancellationOrdinal}`])).rowCount, 0);
+      let ingressCompleted = false;
+      for (let poll = 0; poll < 100; poll++) {
+        const row = (await db.query<{ status: string }>("SELECT status FROM telegram_ingress_updates WHERE update_id=$1", [ingressUpdateId])).rows[0];
+        if (row?.status === "completed") { ingressCompleted = true; break; }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      assert.ok(ingressCompleted, "Native cancellation did not release its ingress item");
+      const cursor = (await db.query<{ next_event_index: number }>("SELECT next_event_index FROM eve_session_event_cursors WHERE eve_session_id=$1", [cancellationSessionId])).rows[0]!;
+      cursors.set(cancellationSessionId, Number(cursor.next_event_index));
+      }
+      t.log("verified native cancellation stops a running model without a late reply");
     } finally {
+      await db.query("DROP TRIGGER IF EXISTS telegram_test_reject_binding ON conversation_sessions");
+      await db.query("DROP FUNCTION IF EXISTS telegram_test_reject_binding()");
       await db.query("TRUNCATE users, families CASCADE");
       await db.query("DELETE FROM telegram_ingress_updates WHERE update_id BETWEEN $1 AND $2", [
-        900_000_001, 900_000_000 + turnCount + 2,
+        900_000_001, 900_000_000 + turnCount + 7,
       ]);
-      await db.query("DROP TABLE IF EXISTS telegram_conversation_test_deliveries, telegram_conversation_test_sandboxes");
+      await db.query("DROP TABLE IF EXISTS telegram_conversation_test_deliveries, telegram_conversation_test_sandboxes, telegram_conversation_test_model_calls");
       await closeDatabase();
     }
   },

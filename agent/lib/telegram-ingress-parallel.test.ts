@@ -1,6 +1,7 @@
 /** A slow group must not block private approval buttons; each chat still has one FIFO head. */
 import { describe, expect, it, vi } from "vitest";
 import { createTelegramDurableIngress } from "./telegram-durable-ingress.js";
+import { correlatedDispatch } from "./telegram-ingress.test-fixtures.js";
 import type { TelegramIngressRepository } from "./telegram-ingress-contract.js";
 import { TELEGRAM_INGRESS_CALLBACK_CONCURRENCY, TELEGRAM_INGRESS_MESSAGE_CONCURRENCY } from "../config.js";
 
@@ -26,7 +27,7 @@ describe("independent Telegram queue progress", () => {
       botUsername: "osinara_bot", leaseMilliseconds: 60_000, acceptMedia: vi.fn(), authorizeVoice: vi.fn(),
       handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), transcribeVoice: vi.fn() });
     try {
-      for (let index = 0; index < ordinary + callbacks; index++) await handler.drain({ waitUntil: task => { work.push(task); }, dispatch: async update => {
+      for (let index = 0; index < ordinary + callbacks; index++) await handler.drain({ notifyTimeout: vi.fn(), waitUntil: task => { work.push(task); }, dispatch: correlatedDispatch(async update => {
         const id = Number(update.kind === "message" ? update.message.messageId : update.callbackQuery.message!.messageId);
         dispatched.push(id); active[update.kind]++; maximum[update.kind] = Math.max(maximum[update.kind], active[update.kind]);
         return { id: String(id), getEventStream: async () => new ReadableStream({ async start(controller) {
@@ -34,7 +35,7 @@ describe("independent Telegram queue progress", () => {
           if (failure === "turn" && id === 1) { controller.error(new Error("expected test turn failure")); return; }
           controller.enqueue({ type: "session.waiting" }); controller.close();
         } }) } as never;
-      } });
+      }) });
       await vi.waitFor(() => expect(dispatched).toHaveLength(TELEGRAM_INGRESS_MESSAGE_CONCURRENCY + TELEGRAM_INGRESS_CALLBACK_CONCURRENCY));
       releaseCallbacks(); await vi.waitFor(() => expect(completed.filter(id => id > ordinary)).toHaveLength(callbacks));
       expect(dispatched.filter(id => id <= ordinary)).toHaveLength(TELEGRAM_INGRESS_MESSAGE_CONCURRENCY);
@@ -91,7 +92,7 @@ describe("independent Telegram queue progress", () => {
     });
     const work: Promise<unknown>[] = [];
     async function drain() {
-      await handler.drain({ waitUntil: (task) => { work.push(task); }, dispatch: async (update) => {
+      await handler.drain({ notifyTimeout: vi.fn(), waitUntil: (task) => { work.push(task); }, dispatch: correlatedDispatch(async (update) => {
         const id = Number(update.kind === "message" ? update.message.messageId : update.callbackQuery.message!.messageId);
         dispatched.push(id);
         return { id: id > 2 ? "private-session" : "group-session", getEventStream: async ({ startIndex }: { startIndex: number }) => {
@@ -104,7 +105,7 @@ describe("independent Telegram queue progress", () => {
             },
           });
         } } as never;
-      } });
+      }) });
     }
     try {
       await drain();

@@ -26,7 +26,7 @@ ${MEMORY_SELECTION_RULES}
 
 function reviewEntry(entry: TelegramGroupJournalEntry) {
   return {
-    actor: "user",
+    actor: entry.actorKind,
     messageKind: entry.messageKind,
     messageThreadId: entry.messageThreadId,
     replyToSequence: entry.replyToSequenceId,

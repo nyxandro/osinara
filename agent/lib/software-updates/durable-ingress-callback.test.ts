@@ -68,6 +68,7 @@ describe("software update callback durable ingress", () => {
 
     await ingress.drain({
       dispatch,
+      notifyTimeout: vi.fn(),
       waitUntil(task) {
         backgroundTask = task;
       },

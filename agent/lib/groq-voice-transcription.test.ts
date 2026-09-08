@@ -36,9 +36,9 @@ describe("createTelegramVoiceTranscriber", () => {
     await expect(
       transcribeVoice({ fileId: "telegram-file-1", fileSize: 512, mimeType: "audio/ogg" }),
     ).resolves.toBe("Распознанный текст");
-    expect(adapter.getFile).toHaveBeenCalledWith("telegram-file-1");
-    expect(adapter.downloadFile).toHaveBeenCalledWith("voice/file-1.oga");
-    expect(adapter.transcribe).toHaveBeenCalledWith(oggOpusBytes());
+    expect(adapter.getFile).toHaveBeenCalledWith("telegram-file-1", undefined);
+    expect(adapter.downloadFile).toHaveBeenCalledWith("voice/file-1.oga", undefined);
+    expect(adapter.transcribe).toHaveBeenCalledWith(oggOpusBytes(), undefined);
   });
 
   it("rejects an oversized note before requesting Telegram file metadata", async () => {
@@ -49,6 +49,26 @@ describe("createTelegramVoiceTranscriber", () => {
       transcribeVoice({ fileId: "telegram-file-1", fileSize: 1025, mimeType: "audio/ogg" }),
     ).rejects.toThrowError(/AGENT_VOICE_FILE_TOO_LARGE/);
     expect(adapter.getFile).not.toHaveBeenCalled();
+    expect(adapter.transcribe).not.toHaveBeenCalled();
+  });
+
+  it("passes the active cancellation signal through metadata, download and transcription", async () => {
+    const adapter = dependencies();
+    const controller = new AbortController();
+    await createTelegramVoiceTranscriber(adapter)({ fileId: "voice", signal: controller.signal });
+    expect(adapter.getFile).toHaveBeenCalledWith("voice", controller.signal);
+    expect(adapter.downloadFile).toHaveBeenCalledWith("voice/file-1.oga", controller.signal);
+    expect(adapter.transcribe).toHaveBeenCalledWith(oggOpusBytes(), controller.signal);
+  });
+
+  it("does not start a paid transcription after the request was aborted during download", async () => {
+    const adapter = dependencies();
+    const controller = new AbortController();
+    adapter.downloadFile.mockImplementation(async () => {
+      controller.abort(new Error("TEST_VOICE_DEADLINE"));
+      return new Response(Buffer.from(oggOpusBytes()));
+    });
+    await expect(createTelegramVoiceTranscriber(adapter)({ fileId: "voice", signal: controller.signal })).rejects.toThrow("TEST_VOICE_DEADLINE");
     expect(adapter.transcribe).not.toHaveBeenCalled();
   });
 

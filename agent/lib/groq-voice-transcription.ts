@@ -30,13 +30,14 @@ export interface TelegramVoiceFile {
   fileId: string;
   fileSize?: number;
   mimeType?: string;
+  signal?: AbortSignal;
 }
 
 interface TelegramVoiceTranscriberDependencies {
-  downloadFile(filePath: string): Promise<Response>;
-  getFile(fileId: string): Promise<{ filePath: string }>;
+  downloadFile(filePath: string, signal?: AbortSignal): Promise<Response>;
+  getFile(fileId: string, signal?: AbortSignal): Promise<{ filePath: string }>;
   maxBytes: number;
-  transcribe(audio: Uint8Array): Promise<string>;
+  transcribe(audio: Uint8Array, signal?: AbortSignal): Promise<string>;
 }
 
 function startsWith(bytes: Uint8Array, signature: Uint8Array): boolean {
@@ -96,6 +97,7 @@ async function readLimitedBody(response: Response, maxBytes: number): Promise<Ui
 
 export function createTelegramVoiceTranscriber(dependencies: TelegramVoiceTranscriberDependencies) {
   return async function transcribeVoice(voice: TelegramVoiceFile): Promise<string> {
+    voice.signal?.throwIfAborted();
     // Reject untrusted metadata before making Telegram or Groq requests.
     if (voice.fileSize !== undefined && voice.fileSize > dependencies.maxBytes) {
       throw new AppError(
@@ -110,8 +112,9 @@ export function createTelegramVoiceTranscriber(dependencies: TelegramVoiceTransc
       );
     }
 
-    const { filePath } = await dependencies.getFile(voice.fileId);
-    const response = await dependencies.downloadFile(filePath);
+    const { filePath } = await dependencies.getFile(voice.fileId, voice.signal);
+    voice.signal?.throwIfAborted();
+    const response = await dependencies.downloadFile(filePath, voice.signal);
     if (!response.ok) {
       throw new AppError(
         "AGENT_VOICE_DOWNLOAD_FAILED",
@@ -121,31 +124,36 @@ export function createTelegramVoiceTranscriber(dependencies: TelegramVoiceTransc
 
     // Telegram voice notes must contain Ogg pages with an Opus identification header.
     const audio = await readLimitedBody(response, dependencies.maxBytes);
+    voice.signal?.throwIfAborted();
     if (!startsWith(audio, OGG_SIGNATURE) || !includesSignature(audio, OPUS_HEAD_SIGNATURE)) {
       throw new AppError(
         "AGENT_VOICE_CONTENT_INVALID",
         "Telegram передал повреждённое голосовое сообщение. Запишите и отправьте его заново",
       );
     }
-    return dependencies.transcribe(audio);
+    return dependencies.transcribe(audio, voice.signal);
   };
 }
 
-function telegramFetchWithTimeout(input: URL | RequestInfo, init?: RequestInit): Promise<Response> {
-  return fetch(input, {
+function telegramFetchWithTimeout(signal?: AbortSignal) {
+  return (input: URL | RequestInfo, init?: RequestInit): Promise<Response> => fetch(input, {
     ...init,
-    signal: AbortSignal.timeout(TELEGRAM_API_REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.any([
+      AbortSignal.timeout(TELEGRAM_API_REQUEST_TIMEOUT_MS),
+      ...(signal ? [signal] : []),
+      ...(init?.signal ? [init.signal] : []),
+    ]),
   });
 }
 
 export const transcribeTelegramVoice = createTelegramVoiceTranscriber({
-  downloadFile: (filePath) => downloadTelegramFile({ fetch: telegramFetchWithTimeout, filePath }),
-  getFile: async (fileId) => {
-    const file = await getTelegramFile({ fetch: telegramFetchWithTimeout, fileId });
+  downloadFile: (filePath, signal) => downloadTelegramFile({ fetch: telegramFetchWithTimeout(signal), filePath }),
+  getFile: async (fileId, signal) => {
+    const file = await getTelegramFile({ fetch: telegramFetchWithTimeout(signal), fileId });
     return { filePath: file.filePath };
   },
   maxBytes: TELEGRAM_VOICE_MAX_BYTES,
-  transcribe: async (audio) => {
+  transcribe: async (audio, signal) => {
     if (voiceTranscriptionModel === null) {
       throw new AppError(
         "AGENT_VOICE_NOT_CONFIGURED",
@@ -153,7 +161,7 @@ export const transcribeTelegramVoice = createTelegramVoiceTranscriber({
       );
     }
     const result = await transcribe({
-      abortSignal: AbortSignal.timeout(GROQ_TRANSCRIPTION_TIMEOUT_MS),
+      abortSignal: AbortSignal.any([AbortSignal.timeout(GROQ_TRANSCRIPTION_TIMEOUT_MS), ...(signal ? [signal] : [])]),
       audio,
       maxRetries: 0,
       model: voiceTranscriptionModel,

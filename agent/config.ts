@@ -59,6 +59,11 @@ export const TELEGRAM_ATTACHMENT_REFERENCE_LIST_DEFAULT_LIMIT = 50;
 export const TELEGRAM_ATTACHMENT_REFERENCE_LIST_MAX_LIMIT = 50;
 export const TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED = 1;
 export const TELEGRAM_INGRESS_LEASE_MS = 15 * 60 * 1_000;
+export const TELEGRAM_INGRESS_ADMISSION_TIMEOUT_MS = 15 * 60 * 1_000;
+// Last-resort loss-of-observation window, longer than a runner's 30-minute command limit.
+// Actual model silence is bounded by the native AI SDK policy, not this transport guard.
+export const TELEGRAM_INGRESS_OBSERVER_IDLE_MS = 35 * 60 * 1_000;
+export const TELEGRAM_INGRESS_CANCELLATION_GRACE_MS = 30_000;
 // Bound expensive turns on the single-process deployment without letting groups occupy button slots.
 export const TELEGRAM_INGRESS_MESSAGE_CONCURRENCY = 2;
 export const TELEGRAM_INGRESS_CALLBACK_CONCURRENCY = 2;

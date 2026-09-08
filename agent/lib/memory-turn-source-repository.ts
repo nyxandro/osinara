@@ -267,7 +267,7 @@ export const memoryTurnSourceRepository = {
            FROM memory_review_batch_sources AS source
            JOIN telegram_group_messages AS message ON message.id = source.timeline_entry_id
           WHERE source.batch_id = $1 AND source.conversation_id = $2
-            AND message.id = ANY($3::uuid[]) AND message.actor_kind = 'user'
+            AND message.id = ANY($3::uuid[]) AND message.actor_kind IN ('user', 'telegram_bot')
           ORDER BY message.sequence_id`,
         [input.memoryReviewBatchId, input.conversationId, entryIds],
       );
@@ -316,7 +316,7 @@ export const memoryTurnSourceRepository = {
           ON review_batch.id = source_set.memory_review_batch_id
        JOIN telegram_group_messages AS message ON message.id = source.timeline_entry_id
        WHERE source.eve_session_id = $1 AND source.eve_turn_id = $2
-         AND message.actor_kind = 'user' AND message.content_text IS NOT NULL
+         AND message.actor_kind IN ('user', 'telegram_bot') AND message.content_text IS NOT NULL
          AND (($3::bigint IS NULL AND source.is_current) OR source.timeline_sequence = $3::bigint)`,
       [input.eveSessionId, input.eveTurnId, input.sourceSequence],
     );

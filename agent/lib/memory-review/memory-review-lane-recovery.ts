@@ -49,7 +49,7 @@ export async function recoverUnstartedReviewBatches(client: PoolClient, now: Dat
               message.conversation_id <> batch.conversation_id OR
               message.sequence_id <> source.timeline_sequence OR
               message.message_thread_id IS DISTINCT FROM lane.message_thread_id OR
-              message.actor_kind <> 'user'
+              message.actor_kind NOT IN ('user', 'telegram_bot')
             )
           )
           AND NOT EXISTS (

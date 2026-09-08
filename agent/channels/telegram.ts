@@ -68,6 +68,7 @@ import { resolveMemoryReviewBatch } from "../lib/memory-review/memory-review-tur
 import { memoryReviewRepository } from "../lib/memory-review/memory-review-repository.js";
 import { memoryReviewDispatchRepository } from "../lib/memory-review/memory-review-dispatch-repository.js";
 import { accountlessActorApprovalError } from "../lib/telegram-session-actor.js";
+import { requireTelegramAdmissionDeadline } from "../lib/telegram-processing-deadline.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -392,6 +393,7 @@ export default telegramChannel({
       );
     },
     async "turn.started"(_data, channel, ctx) {
+      requireTelegramAdmissionDeadline(ctx.session.auth);
       const sessionId = applicationSessionId(ctx);
       await sessionRepository.bindEveSession(sessionId, ctx.session.id);
       // Which reactions this chat accepts is provider state, so it is refreshed here and read from
@@ -425,6 +427,7 @@ export default telegramChannel({
           proactiveDeliveryCursor,
         );
       }
+      requireTelegramAdmissionDeadline(ctx.session.auth);
     },
     async "turn.completed"(_data, channel, ctx) {
       const sessionId = applicationSessionId(ctx);
