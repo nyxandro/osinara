@@ -263,12 +263,64 @@ export default defineEval({
       cursors.set(cancellationSessionId, Number(cursor.next_event_index));
       }
       t.log("verified native cancellation stops a running model without a late reply");
+
+      // A real tool approval emits approval.settled with an empty turnId before input.resolved.
+      // Exercise the actual private policy mutation, not just a question's continuation.
+      const projectionOrdinal = SESSION_MAX_COMPLETED_TURNS + 12;
+      const waitForIngress = async (updateId: number) => {
+        for (let poll = 0; poll < 150; poll++) {
+          const row = (await db.query<{ status: string; eve_session_id: string }>(
+            "SELECT status,eve_session_id FROM telegram_ingress_updates WHERE update_id=$1", [updateId])).rows[0];
+          assert.notEqual(row?.status, "failed", `Approval ingress ${updateId} failed`);
+          if (row?.status === "completed") return row;
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        throw new Error(`TEST_APPROVAL_INGRESS_STALLED: ${updateId}`);
+      };
+      await t.target.fetch("/eve/v1/telegram", {
+        method: "POST", headers: { "x-telegram-bot-api-secret-token": "conversation-test-secret" },
+        body: JSON.stringify({ update_id: 900_000_000 + projectionOrdinal, message: {
+          message_id: projectionOrdinal, date: Math.floor(Date.now() / 1000),
+          chat: { id: 902, type: "private" }, from: { id: 902, first_name: "Human", is_bot: false },
+          text: `conversation-probe-${projectionOrdinal}`,
+        } }),
+      });
+      const awaiting = await waitForIngress(900_000_000 + projectionOrdinal);
+      assert.equal((await db.query("SELECT enabled FROM external_profile_projection_policies WHERE group_id=$1", [group.id])).rows[0].enabled, false);
+      const approvalCursor = Number((await db.query("SELECT next_event_index FROM eve_session_event_cursors WHERE eve_session_id=$1", [awaiting.eve_session_id])).rows[0].next_event_index);
+      const projectionPrompt = (await db.query<{ id: number; body: { text: string; reply_markup: { inline_keyboard: { text: string; callback_data: string }[][] } } }>(
+        "SELECT id,body FROM telegram_conversation_test_deliveries WHERE body->>'chat_id'='902' AND body->'reply_markup'->'inline_keyboard' IS NOT NULL ORDER BY id DESC LIMIT 1")).rows[0];
+      assert.ok(projectionPrompt);
+      assert.ok(projectionPrompt.body.text.includes("Группа: BotBattle test"));
+      assert.ok(projectionPrompt.body.text.includes("из внешней группы в личные чаты"));
+      assert.ok(!projectionPrompt.body.text.includes("grp_"));
+      const approve = projectionPrompt.body.reply_markup.inline_keyboard.flat().find(button => button.text === "Включить перенос");
+      assert.ok(approve, "Meaningful approval button was not delivered");
+      for (const offset of [1, 2]) {
+        await t.target.fetch("/eve/v1/telegram", {
+          method: "POST", headers: { "x-telegram-bot-api-secret-token": "conversation-test-secret" },
+          body: JSON.stringify({ update_id: 900_000_000 + projectionOrdinal + offset, callback_query: {
+            id: `projection-approval-${offset}`, chat_instance: "private-test", data: approve.callback_data,
+            from: { id: 902, first_name: "Human", is_bot: false }, message: {
+              message_id: projectionPrompt.id, date: Math.floor(Date.now() / 1000), chat: { id: 902, type: "private" },
+            },
+          } }),
+        });
+        await waitForIngress(900_000_000 + projectionOrdinal + offset);
+      }
+      assert.equal((await db.query("SELECT enabled FROM external_profile_projection_policies WHERE group_id=$1", [group.id])).rows[0].enabled, true);
+      assert.equal((await db.query("SELECT 1 FROM external_profile_projection_policy_operations WHERE group_id=$1", [group.id])).rowCount, 1);
+      const approvalTrace = await t.target.attachSession(awaiting.eve_session_id, { startIndex: approvalCursor });
+      assert.ok(approvalTrace.events.some(event => event.type === "approval.settled" && event.data.turnId === ""));
+      assert.ok(!approvalTrace.events.some(event => event.type === "turn.cancelled"));
+      assert.equal((await db.query("SELECT 1 FROM telegram_conversation_test_deliveries WHERE body->>'text'=$1", [`reply-conversation-probe-${projectionOrdinal}`])).rowCount, 1);
+      t.log("verified real profile approval executes once and survives empty audit turn IDs");
     } finally {
       await db.query("DROP TRIGGER IF EXISTS telegram_test_reject_binding ON conversation_sessions");
       await db.query("DROP FUNCTION IF EXISTS telegram_test_reject_binding()");
       await db.query("TRUNCATE users, families CASCADE");
       await db.query("DELETE FROM telegram_ingress_updates WHERE update_id BETWEEN $1 AND $2", [
-        900_000_001, 900_000_000 + turnCount + 7,
+        900_000_001, 900_000_000 + SESSION_MAX_COMPLETED_TURNS + 14,
       ]);
       await db.query("DROP TABLE IF EXISTS telegram_conversation_test_deliveries, telegram_conversation_test_sandboxes, telegram_conversation_test_model_calls");
       await closeDatabase();

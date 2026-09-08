@@ -12,6 +12,11 @@
 export const DEFAULT_CONSEQUENCE =
   "Действие будет выполнено один раз. Автоматического повтора при ошибке не будет.";
 
+export const PROFILE_PROJECTION_ENABLE_CONSEQUENCE =
+  "Подходящие факты из этой группы станут доступны в личных чатах только после доставки уведомления в группу. Настройка действует до отключения владельцем.";
+export const PROFILE_PROJECTION_DISABLE_CONSEQUENCE =
+  "Перенос будет отключён до следующего включения владельцем. Групповые факты больше не будут подбираться в личные профили по этой настройке. Факты в памяти группы и ранее отправленные ответы не удаляются.";
+
 export const GOOGLE_WORKSPACE_CONSEQUENCE =
   "Команда будет выполнена один раз в текущем профиле. Автоматического повтора при ошибке не будет.";
 
@@ -36,6 +41,8 @@ export const SCHEDULE_CONSEQUENCES: Readonly<Record<string, string>> = {
 export function allApprovalConsequences(): string[] {
   return [
     DEFAULT_CONSEQUENCE,
+    PROFILE_PROJECTION_ENABLE_CONSEQUENCE,
+    PROFILE_PROJECTION_DISABLE_CONSEQUENCE,
     GOOGLE_WORKSPACE_CONSEQUENCE,
     GROUP_SKILLS_BASH_CONSEQUENCE, GROUP_SKILLS_CONSEQUENCE, GROUP_TOOLS_BASH_CONSEQUENCE, GROUP_TOOLS_NO_BASH_CONSEQUENCE,
     ...Object.values(SCHEDULE_CONSEQUENCES),

@@ -60,6 +60,9 @@ export async function runTelegramProcessing<T>(input: {
     event.data?.osinaraTelegramIngressId === dispatchId;
   const acceptsEvent = (event: BoundaryEvent) => {
     if (!matchesEvent(event)) return false;
+    // Eve's approval audit events can precede turn preparation and carry an empty or old turnId.
+    // They describe a request decision, not the execution coordinate used for cancellation.
+    if (event.type === "approval.candidate" || event.type === "approval.settled") return true;
     const turnId = event.data?.turnId;
     if (turnId !== undefined) {
       if (typeof turnId !== "string" || !turnId) throw new Error("Ingress turn ID is invalid");
