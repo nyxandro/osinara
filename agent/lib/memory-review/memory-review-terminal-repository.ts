@@ -5,6 +5,7 @@
  * - `memoryReviewTerminalRepository`: replay-safe completion/failure and pre-Eve source release.
  * - `resolveAbandonedReviewBatch`: the one terminal decision for a turn that never reports.
  * - `terminalizeAbandonedReviewTurns`: last-resort time bound for a turn that went silent.
+ * - `advanceCompletedChain`: shared cursor advancement for terminal and operator decisions.
  */
 import type { PoolClient } from "pg";
 
@@ -27,7 +28,7 @@ const PASS_SKIPPED = "AGENT_MEMORY_REVIEW_PASS_SKIPPED";
 const TURN_CANCELLED = "AGENT_MEMORY_REVIEW_TURN_CANCELLED";
 const TURN_ABANDONED = "AGENT_MEMORY_REVIEW_TURN_ABANDONED";
 
-async function advanceCompletedChain(client: PoolClient, laneId: string): Promise<void> {
+export async function advanceCompletedChain(client: PoolClient, laneId: string): Promise<void> {
   const lane = await client.query<{ processed_through_sequence: string }>(
     `SELECT processed_through_sequence::text FROM memory_review_lanes
       WHERE id = $1 FOR UPDATE`,
