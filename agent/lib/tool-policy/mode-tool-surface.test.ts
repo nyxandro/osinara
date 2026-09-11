@@ -120,7 +120,7 @@ describe("trusted mode tool surfaces", () => {
   it("keeps HITL approval configuration after dynamic emission", () => {
     const surface = buildModeToolSurface({ environment: "private" });
 
-    for (const toolName of ["manage_reminder", "manage_agent_schedule", "manage_family_invitation", "manage_gmail_message"]) {
+    for (const toolName of ["manage_family_invitation", "manage_gmail_message"]) {
       expect((surface[toolName] as unknown as { approval?: unknown }).approval, `${toolName} must keep its approval policy`).toBeDefined();
     }
   });

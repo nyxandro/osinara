@@ -3,7 +3,7 @@
  *
  * Constructs covered:
  * - Read-only status does not require approval and lists only owner-managed external schedules.
- * - Create requires approval and forwards an explicit destination, capability subset, and history window.
+ * - Create needs no approval and forwards an explicit destination, capability subset, and history window.
  * - Invalid schema and action semantics become model-readable denials before execution.
  * - Mutations use opaque schedule IDs and never accept model-selected family or group IDs.
  */
@@ -77,7 +77,7 @@ describe("manage_external_group_schedule", () => {
     dependencies.create.mockResolvedValue({ id: "schedule-1", scope: "group" });
 
     expect(await approvalFor(input))
-      .toBe("user-approval");
+      .toBe("not-applicable");
     await manageExternalGroupSchedule.execute({
       ...input,
       capabilityAllowlist: [...input.capabilityAllowlist],

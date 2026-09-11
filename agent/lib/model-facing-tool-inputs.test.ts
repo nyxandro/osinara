@@ -160,41 +160,19 @@ describe("model-facing tool input hardening", () => {
     expect(toolCalls.reminderCreate).not.toHaveBeenCalled();
   });
 
-  it("rejects incomplete recurrence before requesting reminder approval", () => {
-    const approval = manageReminder.approval;
-    expect(approval).toBeTypeOf("function");
-
-    expect(() => (approval as (context: never) => unknown)({
-      approvedTools: new Set(),
-      callId: "call-invalid-recurrence",
-      session: {} as never,
-      toolInput: {
-        action: "update",
-        id: "00000000-0000-4000-8000-000000000001",
-        recurrence: {},
-      } as never,
-      toolName: "manage_reminder",
-    } as never)).toThrowError(
+  it("rejects incomplete recurrence before writing a reminder", async () => {
+    await expect(manageReminder.execute({
+      action: "update",
+      id: "00000000-0000-4000-8000-000000000001",
+      recurrence: {},
+    } as never, context)).rejects.toThrowError(
       /AGENT_REMINDER_INPUT_INVALID: Поле unit обязательно.*Пример: daily/u,
     );
     expect(toolCalls.reminderUpdate).not.toHaveBeenCalled();
   });
 
-  it("requests one approval for a complete one-time recurrence update", () => {
-    const approval = manageReminder.approval;
-    expect(approval).toBeTypeOf("function");
-
-    expect((approval as (context: never) => unknown)({
-      approvedTools: new Set(),
-      callId: "call-valid-recurrence",
-      session: {} as never,
-      toolInput: {
-        action: "update",
-        id: "00000000-0000-4000-8000-000000000001",
-        recurrence: null,
-      },
-      toolName: "manage_reminder",
-    } as never)).toBe("user-approval");
+  it("never requests approval for trusted reminder mutations", () => {
+    expect(manageReminder.approval).toBeUndefined();
   });
 
   it("ignores known create-only sibling fields on a recurrence update", async () => {

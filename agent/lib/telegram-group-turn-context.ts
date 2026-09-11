@@ -98,12 +98,16 @@ function currentTelegramMessageEnvelope(
     | "replyTargetUnavailable"
     | "replyToSequenceId"
   >,
+  inlineReply?: TelegramGroupJournalEntry,
 ): string {
   const snapshotConflict = input.replyTargetSnapshot !== null &&
     input.replyTargetSnapshot !== undefined &&
     (!input.replyTargetUnavailable || input.replyToSequenceId !== null);
   if ((input.replyTargetUnavailable && input.replyToSequenceId !== null) || snapshotConflict) {
     throw turnMessageError("reply_metadata_conflict");
+  }
+  if (inlineReply && inlineReply.sequenceId !== input.replyToSequenceId) {
+    throw turnMessageError("inline_reply_identity_conflict");
   }
   // The exact envelope is retained as trusted composition metadata without Telegram identifiers.
   const currentMessage = escapeUntrustedContextJson({
@@ -116,6 +120,11 @@ function currentTelegramMessageEnvelope(
         ? { replyTargetUnavailable: true }
         : {}),
     ...(input.replyToSequenceId === null ? {} : { replyToSequenceId: input.replyToSequenceId }),
+    ...(inlineReply ? { replyTo: {
+      senderKind: inlineReply.actorKind,
+      senderDisplayName: inlineReply.senderDisplayName,
+      text: inlineReply.contentText,
+    } } : {}),
     text: input.messageText,
   });
   return `${CURRENT_MESSAGE_OPEN_TAG}\n${currentMessage}\n${CURRENT_MESSAGE_CLOSE_TAG}`;
@@ -216,13 +225,33 @@ export function createTelegramGroupTurnContextPreparer(
         "Текущее сообщение превышает допустимый размер контекста разговора",
       );
     }
-    const selected = selectTelegramGroupJournalContext(
+    let selected = selectTelegramGroupJournalContext(
       visibleEntries,
       timelineCharacterBudget,
       page.omittedBeforeSequence,
       input.replyToSequenceId,
       TELEGRAM_GROUP_JOURNAL_CONTEXT_MESSAGES - CURRENT_TIMELINE_ENTRY_COUNT,
     );
+    let inlineReply: TelegramGroupJournalEntry | undefined;
+    const replyEntry = input.groupId === null ? undefined : selected.entries.find(
+      (entry) => entry.sequenceId === input.replyToSequenceId,
+    );
+    if (replyEntry) {
+      const inlineEnvelope = currentTelegramMessageEnvelope(input, replyEntry);
+      const inlineBudget = TELEGRAM_GROUP_JOURNAL_CONTEXT_CHARACTERS - inlineEnvelope.length - 2;
+      if (inlineBudget > 0) {
+        const withInlineReply = selectTelegramGroupJournalContext(
+          visibleEntries, inlineBudget, page.omittedBeforeSequence, input.replyToSequenceId,
+          TELEGRAM_GROUP_JOURNAL_CONTEXT_MESSAGES - CURRENT_TIMELINE_ENTRY_COUNT,
+        );
+        // The inline copy is presentation only. Never lose an otherwise readable long reply or
+        // silently shorten its text to fit it twice; the existing timeline/id contract still works.
+        if (withInlineReply.entries.some((entry) => entry.sequenceId === replyEntry.sequenceId)) {
+          selected = withInlineReply;
+          inlineReply = replyEntry;
+        }
+      }
+    }
     const timeline = selected.context;
     // A DB-resolved reply is usable only when its protected target survived model-context bounds.
     const replyTargetIncluded = input.replyToSequenceId === null ||
@@ -233,7 +262,7 @@ export function createTelegramGroupTurnContextPreparer(
       ...input,
       replyTargetUnavailable,
       replyToSequenceId,
-    });
+    }, inlineReply);
     const durableMessage = composeTelegramTurnMessage(timeline, resolvedCurrentMessageEnvelope);
     if (durableMessage.length > TELEGRAM_GROUP_JOURNAL_CONTEXT_CHARACTERS) {
       throw new AppError(

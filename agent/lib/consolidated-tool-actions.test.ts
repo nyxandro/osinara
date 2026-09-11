@@ -129,7 +129,7 @@ describe("consolidated tool action schemas", () => {
     }).success).toBe(true);
   });
 
-  it("separates notification reads from approved writes", () => {
+  it("separates notification reads from explicit writes", () => {
     const schema = schemaOf(notificationSettings);
 
     expect(schema.safeParse({ action: "get" }).success).toBe(true);

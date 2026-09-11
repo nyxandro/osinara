@@ -3,7 +3,7 @@
  *
  * Constructs covered:
  * - Machine-visible required action enum in an object schema.
- * - Shared semantic validation before approval and execution.
+ * - Semantic validation before execution, without a user approval gate.
  * - Explicit safe handling of MiniMax sibling-field materialization.
  * - Complete payload and bounded-correction guidance in the tool description.
  */
@@ -30,12 +30,6 @@ import notificationSettings from "./tools/notification_settings.js";
 
 const context = { callId: "call-1" } as ToolContext;
 
-function approvalFor(input: Record<string, unknown>) {
-  return (notificationSettings.approval as (context: never) => unknown)(
-    { toolInput: input } as never,
-  );
-}
-
 describe("notification_settings model input", () => {
   beforeEach(() => {
     configureNotifications.mockReset();
@@ -55,12 +49,13 @@ describe("notification_settings model input", () => {
     expect(schema.properties.action?.enum).toEqual(["get", "set"]);
   });
 
-  it("rejects the same incomplete set before HITL and execution", async () => {
+  it("does not require approval to configure the first reminder", () => {
+    expect(notificationSettings.approval).toBeUndefined();
+  });
+
+  it("rejects an incomplete set before execution", async () => {
     const invalid = { action: "set", timezone: "Europe/Moscow" };
 
-    expect(() => approvalFor(invalid)).toThrowError(
-      /AGENT_NOTIFICATION_SETTINGS_INPUT_INVALID.*quietStart/u,
-    );
     await expect(notificationSettings.execute(invalid as never, context)).rejects.toThrowError(
       /AGENT_NOTIFICATION_SETTINGS_INPUT_INVALID.*quietStart/u,
     );
@@ -75,7 +70,6 @@ describe("notification_settings model input", () => {
       timezone: "Europe/Moscow",
     } as const;
 
-    expect(approvalFor(input)).toBe("not-applicable");
     await expect(notificationSettings.execute(input, context)).resolves.toEqual({
       timezone: "Europe/Moscow",
     });
@@ -83,8 +77,8 @@ describe("notification_settings model input", () => {
     expect(configureNotifications).not.toHaveBeenCalled();
   });
 
-  it("rejects unpublished fields before approval", () => {
-    expect(() => approvalFor({ action: "get", timezoneId: "Europe/Moscow" })).toThrowError(
+  it("rejects unpublished fields before execution", async () => {
+    await expect(notificationSettings.execute({ action: "get", timezoneId: "Europe/Moscow" } as never, context)).rejects.toThrowError(
       /AGENT_NOTIFICATION_SETTINGS_INPUT_INVALID.*timezoneId/u,
     );
   });

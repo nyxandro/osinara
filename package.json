@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "eve build && node --experimental-strip-types scripts/validate-eve-tool-surface-build.ts",
-    "build:runtime": "esbuild scripts/create-bootstrap-code.ts scripts/telegram-ingress-admin.ts scripts/migrate-workflow.ts scripts/migrate.ts scripts/memory-embedding-worker.ts scripts/memory-extraction-worker.ts scripts/telegram-ingress-worker.ts scripts/validate-model-provider-config.ts services/sandbox-runner/main.ts services/sandbox-egress-proxy/main.ts --bundle --platform=node --format=esm --target=node24 --packages=external --outbase=. --outdir=.runtime",
+    "build:runtime": "esbuild scripts/create-bootstrap-code.ts scripts/telegram-ingress-admin.ts scripts/memory-review-admin.ts scripts/migrate-workflow.ts scripts/migrate.ts scripts/memory-embedding-worker.ts scripts/memory-extraction-worker.ts scripts/telegram-ingress-worker.ts scripts/validate-model-provider-config.ts services/sandbox-runner/main.ts services/sandbox-egress-proxy/main.ts --bundle --platform=node --format=esm --target=node24 --packages=external --outbase=. --outdir=.runtime",
     "bootstrap:code": "node --experimental-strip-types scripts/create-bootstrap-code.ts",
     "dev": "eve dev",
     "install:gws": "node --experimental-strip-types scripts/install-google-workspace-cli.ts",

@@ -6,7 +6,7 @@
  *
  * Key constructs:
  * - Object-shaped model schema publishes a required finite action discriminator.
- * - One semantic parser validates both approval and execution inputs.
+ * - A semantic parser validates execution inputs.
  * - Input validation explains the exact quiet-hours contract before repository calls.
  */
 import { defineTool } from "eve/tools";
@@ -80,6 +80,7 @@ function requireNotificationSettingsInput(input: unknown) {
 
 const TOOL_DESCRIPTION = [
   "Получить или настроить личный IANA timezone и тихие часы для напоминаний.",
+  "Сохраняй явно названные пользователем настройки без дополнительного подтверждения.",
   "Для action=get обязателен только action: {\"action\":\"get\"}; остальные поля не передавайте.",
   "Для action=set обязательны action, timezone, quietStart и quietEnd: {\"action\":\"set\",\"timezone\":\"Europe/Moscow\",\"quietStart\":\"22:00\",\"quietEnd\":\"08:00\"}.",
   "timezone должен быть явным IANA timezone; quietStart и quietEnd должны быть разными значениями ЧЧ:ММ.",
@@ -89,10 +90,6 @@ const TOOL_DESCRIPTION = [
 ].join(" ");
 
 export default defineTool({
-  approval: ({ toolInput }) => {
-    const parsed = requireNotificationSettingsInput(toolInput);
-    return parsed.action === "set" ? "user-approval" : "not-applicable";
-  },
   description: TOOL_DESCRIPTION,
   inputSchema: notificationSettingsSchema,
   async execute(input, ctx) {
