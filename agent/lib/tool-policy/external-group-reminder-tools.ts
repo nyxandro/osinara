@@ -8,8 +8,7 @@
  * Key constructs:
  * - The public chat has exactly one scope and one timezone, so neither is a model input here. A
  *   trusted descriptor keeps its own scope field and stays untouched by this module.
- * - Every execute re-derives the verified Telegram participant, so a resumed approval acts in the
- *   chat it was requested in and nowhere else.
+ * - Every execute re-derives the verified Telegram participant and acts only in that chat.
  */
 import { defineTool, type ToolDefinition } from "eve/tools";
 import { z } from "zod";
@@ -44,7 +43,7 @@ const INPUT_ERROR_CODE = "AGENT_REMINDER_INPUT_INVALID";
 const TOOL_ACTIONS = ["create", "update", "pause", "resume", "delete"] as const;
 const RECURRENCE_UNITS = ["daily", "weekly", "monthly"] as const;
 const TOP_LEVEL_FIELDS = ["action", "content", "firstRunAt", "id", "recurrence"] as const;
-// The chat has one timezone, so the wall clock the human confirms and the instant that is stored
+// The chat has one timezone, so the wall clock reported to the human and the instant that is stored
 // must be the same reading. A UTC timestamp would silently move the reminder by three hours.
 const MOSCOW_OFFSET_SUFFIX = "+03:00";
 
@@ -138,7 +137,6 @@ function requireManageInput(input: unknown) {
   requireOnlyFields(payload, TOP_LEVEL_FIELDS, "manage_reminder", INPUT_ERROR_CODE);
   const action = requireAction(payload, "manage_reminder", TOOL_ACTIONS, INPUT_ERROR_CODE);
 
-  // Approval and execution share this parser, so malformed model output never reaches HITL.
   if (action === "create") return { action, values: requireCreateInput(payload) } as const;
   if (action === "update") return { action, values: requireUpdateInput(payload) } as const;
   return { action, id: requireIdOnlyInput(payload, action) } as const;
@@ -146,6 +144,8 @@ function requireManageInput(input: unknown) {
 
 const MANAGE_DESCRIPTION = [
   "Создать, изменить, приостановить, возобновить или удалить напоминание этого чата: в указанное время бот сам пришлёт сюда его текст.",
+  "Явной просьбы участника достаточно: выполняй без дополнительного подтверждения. Недостающие или неоднозначные данные уточняй обычным сообщением в чат.",
+  "content отправляется как готовый текст без вызова модели. Не сохраняй в нём задание что-то придумать или выполнить позже; если просят сочинить сообщение, подготовь его до создания напоминания.",
   "Это не автономный запуск агента: работать по расписанию, искать в сети и готовить отчёты в этом чате нельзя.",
   "Напоминания принадлежат чату: любой участник может изменить и удалить любое из них, а не только своё.",
   `Лимит: не больше ${GROUP_REMINDER_MAX_PER_CHAT} действующих напоминаний на весь чат.`,
@@ -153,7 +153,7 @@ const MANAGE_DESCRIPTION = [
   "Create payload: {\"action\":\"create\",\"content\":\"Созвон по проекту\",\"firstRunAt\":\"2026-09-04T18:00:00+03:00\",\"recurrence\":null}.",
   "Повторение: без повтора recurrence=null; для повтора передай {\"unit\":\"daily\",\"interval\":1}, {\"unit\":\"weekly\",\"interval\":1} или {\"unit\":\"monthly\",\"interval\":1}.",
   "Update передаёт id и только изменяемые content, firstRunAt или recurrence. Pause/resume/delete передают только action и id.",
-  "Один вызов работает ровно с одним напоминанием: не создавай и не удаляй несколько за раз.",
+  "Один вызов работает ровно с одним напоминанием. Просьбу о нескольких выполняй отдельными вызовами без поштучного согласования; сообщай только об успешно выполненных действиях.",
   "Человек называет напоминание словами, а не id: найди нужную запись через list_reminders и, если под описание подходит несколько, уточни какую именно.",
   `firstRunAt всегда ISO datetime с московским смещением ${MOSCOW_OFFSET_SUFFIX}: другое смещение отклоняется, чтобы подтверждённое человеку время совпадало с сохранённым.`,
   "Напоминание уходит в общий чат, а не в тему форума.",
@@ -177,10 +177,6 @@ export const EXTERNAL_GROUP_REMINDER_TOOLS: Readonly<Record<string, AnyToolDefin
     },
   }) as unknown as AnyToolDefinition,
   manage_reminder: defineTool({
-    approval: ({ toolInput }) => {
-      requireManageInput(toolInput);
-      return "user-approval";
-    },
     description: MANAGE_DESCRIPTION,
     inputSchema: manageReminderSchema,
     async execute(input, ctx) {

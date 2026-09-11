@@ -57,14 +57,6 @@ const validDailyCreatePayload = {
   userRequest: "ежедневно в 23:33 МСК получать сводку про новые модели ИИ",
 } as const;
 
-function approvalFor(input: Record<string, unknown>) {
-  const approval = manageAgentSchedule.approval as unknown as
-    | ((context: { toolInput: Record<string, unknown> }) => unknown)
-    | undefined;
-  expect(approval).toBeTypeOf("function");
-  return approval!({ toolInput: input });
-}
-
 describe("manage_agent_schedule", () => {
   beforeEach(() => {
     createSchedule.mockReset();
@@ -134,28 +126,18 @@ describe("manage_agent_schedule", () => {
     expect(createSchedule).not.toHaveBeenCalled();
   });
 
-  it("rejects malformed recurrence before requesting HITL approval", () => {
-    expect(() => approvalFor({
-      ...validDailyCreatePayload,
-      recurrence: { kind: "daily" },
-    })).toThrowError(
-      /AGENT_SCHEDULE_INPUT_INVALID: Для daily recurrence передайте recurrence: \{"kind":"daily","interval":1\}/,
-    );
-    expect(createSchedule).not.toHaveBeenCalled();
+  it("never requests approval for schedule mutations", () => {
+    expect(manageAgentSchedule.approval).toBeUndefined();
   });
 
-  it("requests approval only after the complete semantic payload passes", () => {
-    expect(approvalFor(validDailyCreatePayload)).toBe("user-approval");
-  });
-
-  it("rejects unknown root and recurrence fields fail-closed", () => {
-    expect(() => approvalFor({ ...validDailyCreatePayload, firstRun: "tomorrow" })).toThrowError(
+  it("rejects unknown root and recurrence fields fail-closed", async () => {
+    await expect(manageAgentSchedule.execute({ ...validDailyCreatePayload, firstRun: "tomorrow" } as never, context)).rejects.toThrowError(
       /AGENT_SCHEDULE_INPUT_INVALID.*firstRun/u,
     );
-    expect(() => approvalFor({
+    await expect(manageAgentSchedule.execute({
       ...validDailyCreatePayload,
       recurrence: { interval: 1, kind: "daily", unit: "days" },
-    })).toThrowError(/AGENT_SCHEDULE_INPUT_INVALID.*unit/u);
+    } as never, context)).rejects.toThrowError(/AGENT_SCHEDULE_INPUT_INVALID.*unit/u);
   });
 
   it("ignores only known create-only siblings materialized by MiniMax on update", async () => {
@@ -184,8 +166,8 @@ describe("manage_agent_schedule", () => {
 
   it.each(["delete", "pause", "resume", "run_now"] as const)(
     "keeps action=%s id-only even for known shared sibling fields",
-    (action) => {
-      expect(() => approvalFor({ action, id: scheduleId, timezone: "Europe/Moscow" })).toThrowError(
+    async (action) => {
+      await expect(manageAgentSchedule.execute({ action, id: scheduleId, timezone: "Europe/Moscow" }, context)).rejects.toThrowError(
         new RegExp(`AGENT_SCHEDULE_INPUT_INVALID: action=${action} содержит неизвестные поля: timezone`),
       );
     },

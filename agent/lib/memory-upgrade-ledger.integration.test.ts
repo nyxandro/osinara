@@ -122,6 +122,7 @@ const POST_V0101_MIGRATIONS = [
   "088_unified_group_skills.sql",
   "089_unstarted_memory_review_recovery.sql",
   "090_telegram_ingress_recovery.sql",
+  "091_private_telegram_media_groups.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [

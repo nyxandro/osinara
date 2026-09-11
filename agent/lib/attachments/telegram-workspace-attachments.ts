@@ -80,27 +80,46 @@ function assertTelegramMessageId(value: string): void {
   }
 }
 
+// Populated only by the verified album composer; a native single-file message uses its own ID.
+export interface TelegramWorkspaceAttachment extends TelegramAttachment {
+  readonly telegramMessageId?: string;
+}
+
 export function createTelegramWorkspaceAttachmentImporter(
   dependencies: AttachmentImporterDependencies,
 ) {
   return {
     async persist(input: {
-      attachments: readonly TelegramAttachment[];
+      attachments: readonly TelegramWorkspaceAttachment[];
       auth: WorkspaceAuthorization;
       chatId: string;
       messageId: string;
       scope: WorkspaceScope;
     }): Promise<StoredTelegramAttachment[]> {
       assertTelegramMessageId(input.messageId);
-      const inboxDirectory = telegramInboxDirectory(input.auth, input.scope, input.messageId);
       if (input.attachments.length > TELEGRAM_MAX_ATTACHMENTS_PER_MESSAGE) {
         throw new AppError(
           "AGENT_ATTACHMENT_COUNT_EXCEEDED",
-          "Одно сообщение Telegram может содержать только один обрабатываемый файл",
+          `В одном обращении можно обработать не более ${TELEGRAM_MAX_ATTACHMENTS_PER_MESSAGE} файлов. Отправьте оставшиеся файлы отдельно`,
         );
+      }
+      const sourceIds = input.attachments.map(attachment => {
+        if (input.attachments.length > 1 && attachment.telegramMessageId === undefined) {
+          throw new AppError("AGENT_ATTACHMENT_SOURCE_MISSING",
+            "Не удалось определить исходные сообщения файлов. Отправьте пачку заново");
+        }
+        const sourceId = attachment.telegramMessageId ?? input.messageId;
+        assertTelegramMessageId(sourceId);
+        return sourceId;
+      });
+      if (new Set(sourceIds).size !== sourceIds.length) {
+        throw new AppError("AGENT_ATTACHMENT_SOURCE_CONFLICT",
+          "Несколько файлов привязаны к одному исходному сообщению. Отправьте пачку заново");
       }
       const stored: StoredTelegramAttachment[] = [];
       for (const [index, attachment] of input.attachments.entries()) {
+        const sourceId = sourceIds[index]!;
+        const inboxDirectory = telegramInboxDirectory(input.auth, input.scope, sourceId);
         const bytes = await dependencies.download(attachment);
         // Restricted groups persist only files that Eve's text-only read_file can consume.
         const validator = input.scope === "group"
@@ -114,11 +133,13 @@ export function createTelegramWorkspaceAttachmentImporter(
         });
 
         // Content validation establishes the stored MIME and safe filename before persistence.
+        // Each real Telegram message retains its own directory and idempotency identity. This also
+        // preserves image lookup by message ID and repeated occurrences of the same file in an album.
         const path = `${inboxDirectory}/${validated.fileName}`;
         const file = await dependencies.writeBinary(input.auth, {
           bytes,
           mediaType: validated.mediaType,
-          operationKey: `telegram-attachment:${input.chatId}:${input.messageId}:${attachment.fileUniqueId ?? attachment.fileId}`,
+          operationKey: `telegram-attachment:${input.chatId}:${sourceId}:${attachment.fileUniqueId ?? attachment.fileId}`,
           path,
           scope: input.scope,
         });
@@ -126,7 +147,7 @@ export function createTelegramWorkspaceAttachmentImporter(
           mediaType: file.mediaType,
           path: file.path,
           scope: file.scope,
-          telegramMessageId: input.messageId,
+          telegramMessageId: sourceId,
         });
       }
       return stored;

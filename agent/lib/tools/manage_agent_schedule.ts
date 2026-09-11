@@ -7,7 +7,7 @@
  * Key constructs:
  * - Object-shaped model schema publishes machine-visible actions without a root JSON Schema union.
  * - Exact nested recurrence variants describe once, daily, and weekly schedules.
- * - One semantic parser validates both approval and execution before trusted boundaries run.
+ * - A semantic parser validates execution input before trusted boundaries run.
  */
 import { defineTool } from "eve/tools";
 import { z } from "zod";
@@ -340,7 +340,6 @@ function requireManageAgentScheduleInput(input: unknown) {
   requireOnlyFields(payload, TOP_LEVEL_FIELDS, "manage_agent_schedule");
   const action = requireAction(payload);
 
-  // Approval and execution consume the same parsed contract, preventing malformed HITL requests.
   if (action === "create") return { action, values: requireCreateInput(payload) } as const;
   if (action === "update") return { action, values: requireUpdateInput(payload) } as const;
   return { action, id: requireIdOnlyInput(payload, action) } as const;
@@ -348,6 +347,7 @@ function requireManageAgentScheduleInput(input: unknown) {
 
 const TOOL_DESCRIPTION = [
   "Создать, изменить, приостановить, возобновить, запустить сейчас или удалить агентное расписание.",
+  "Явной просьбы пользователя достаточно: выполняй без дополнительного подтверждения. Уточняй только недостающие или неоднозначные данные.",
   "Это не напоминание: schedule запускает агента по сценарию и отправляет итог. Существующее расписание сначала найди через list_agent_schedules.",
   "Create payload: {\"action\":\"create\",\"title\":\"Дайджест: новые модели ИИ\",\"firstRunAt\":\"2026-07-15T23:33:00+03:00\",\"timezone\":\"Europe/Moscow\",\"recurrence\":{\"kind\":\"daily\",\"interval\":1},\"scope\":\"personal\",\"scenarioPrompt\":\"Что собрать, источники, фильтры, формат итогового сообщения и когда не присылать пустой отчет\",\"userRequest\":\"ежедневно в 23:33 МСК получать сводку\"}.",
   "Update передаёт id и только реально изменяемые поля; firstRunAt, timezone и scope в update не передавай. Pause, resume, run_now и delete передают только action и id.",
@@ -357,10 +357,6 @@ const TOOL_DESCRIPTION = [
 ].join(" ");
 
 export default defineTool({
-  approval: ({ toolInput }) => {
-    requireManageAgentScheduleInput(toolInput);
-    return "user-approval";
-  },
   description: TOOL_DESCRIPTION,
   inputSchema: manageAgentScheduleSchema,
   async execute(input, ctx) {

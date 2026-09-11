@@ -2,7 +2,7 @@
  * External-group reminder tool contract tests.
  *
  * Constructs covered:
- * - Malformed model payloads stop in the approval policy, before HITL and before any write.
+ * - Mutations need no approval; malformed model payloads stop before any write.
  * - Action routing: pause and resume become one enabled flag, delete carries the Eve call id.
  * - The group descriptor knows no scope or timezone field, so neither can reach the repository.
  * - A Moscow offset is required, so a UTC timestamp cannot move the reminder by three hours.
@@ -38,17 +38,6 @@ const context = { callId: "call-1" } as never;
 const manageReminder = EXTERNAL_GROUP_REMINDER_TOOLS.manage_reminder!;
 const listReminders = EXTERNAL_GROUP_REMINDER_TOOLS.list_reminders!;
 
-function approve(toolInput: unknown): unknown {
-  const approval = manageReminder.approval as (ctx: never) => unknown;
-  return approval({
-    approvedTools: new Set(),
-    callId: "call-1",
-    session: {} as never,
-    toolInput,
-    toolName: "manage_reminder",
-  } as never);
-}
-
 describe("external group reminder tools", () => {
   beforeEach(() => {
     repository.create.mockReset();
@@ -59,18 +48,13 @@ describe("external group reminder tools", () => {
     authorization.requireGroupReminderAuthorization.mockReturnValue(AUTH);
   });
 
-  it("requests one approval for a complete create payload", () => {
-    expect(approve({
-      action: "create",
-      content: "Созвон по проекту",
-      firstRunAt: "2026-09-04T18:00:00+03:00",
-      recurrence: null,
-    })).toBe("user-approval");
+  it("never requests approval for reminder mutations", () => {
+    expect(manageReminder.approval).toBeUndefined();
   });
 
-  it("rejects an incomplete payload before approval and before any write", () => {
-    expect(() => approve({ action: "create", firstRunAt: "2026-09-04T18:00:00+03:00", recurrence: null }))
-      .toThrowError(/AGENT_REMINDER_INPUT_INVALID/u);
+  it("rejects an incomplete payload before any write", async () => {
+    await expect(manageReminder.execute({ action: "create", firstRunAt: "2026-09-04T18:00:00+03:00", recurrence: null } as never, context))
+      .rejects.toThrowError(/AGENT_REMINDER_INPUT_INVALID/u);
     expect(repository.create).not.toHaveBeenCalled();
     expect(authorization.requireGroupReminderAuthorization).not.toHaveBeenCalled();
   });
@@ -138,13 +122,13 @@ describe("external group reminder tools", () => {
     expect(repository.delete).toHaveBeenCalledWith(AUTH, REMINDER_ID, "call-1");
   });
 
-  it("refuses a first run that is not expressed in Moscow time", () => {
-    expect(() => approve({
+  it("refuses a first run that is not expressed in Moscow time", async () => {
+    await expect(manageReminder.execute({
       action: "create",
       content: "Созвон по проекту",
       firstRunAt: "2026-09-04T18:00:00Z",
       recurrence: null,
-    })).toThrowError(/AGENT_REMINDER_INPUT_INVALID/u);
+    } as never, context)).rejects.toThrowError(/AGENT_REMINDER_INPUT_INVALID/u);
     expect(repository.create).not.toHaveBeenCalled();
   });
 

@@ -151,7 +151,6 @@ function requireManageReminderInput(input: unknown) {
   requireOnlyFields(payload, TOP_LEVEL_FIELDS, "manage_reminder", INPUT_ERROR_CODE);
   const action = requireAction(payload, "manage_reminder", TOOL_ACTIONS, INPUT_ERROR_CODE);
 
-  // Approval and execution share this parser so malformed model output never reaches HITL.
   if (action === "create") return { action, values: requireCreateInput(payload) } as const;
   if (action === "update") return { action, values: requireUpdateInput(payload) } as const;
   return { action, id: requireIdOnlyInput(payload, action) } as const;
@@ -159,6 +158,8 @@ function requireManageReminderInput(input: unknown) {
 
 const TOOL_DESCRIPTION = [
   "Создать, изменить, приостановить, возобновить или удалить обычное напоминание с текстом уведомления.",
+  "Явной просьбы пользователя достаточно: выполняй без дополнительного подтверждения. Уточняй только недостающие или неоднозначные данные.",
+  "content отправляется как готовый текст без вызова модели. Не сохраняй в нём задание что-то придумать или выполнить позже; если просят сочинить сообщение, подготовь его до создания напоминания.",
   "Это не агентное расписание: если нужен будущий автономный запуск агента с исследованием или отчётом, используй manage_agent_schedule.",
   "Create payload: {\"action\":\"create\",\"content\":\"Позвонить врачу\",\"firstRunAt\":\"2026-08-01T10:00:00+03:00\",\"timezone\":\"Europe/Moscow\",\"scope\":\"personal\",\"recurrence\":null}.",
   "Повторение: без повтора recurrence=null; повтор — {\"unit\":\"daily\",\"interval\":1}, {\"unit\":\"weekly\",\"interval\":1} или {\"unit\":\"monthly\",\"interval\":1}.",
@@ -168,10 +169,6 @@ const TOOL_DESCRIPTION = [
 ].join(" ");
 
 export default defineTool({
-  approval: ({ toolInput }) => {
-    requireManageReminderInput(toolInput);
-    return "user-approval";
-  },
   description: TOOL_DESCRIPTION,
   inputSchema: manageReminderSchema,
   async execute(input, ctx) {
