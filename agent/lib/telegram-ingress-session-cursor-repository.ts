@@ -6,6 +6,7 @@
  */
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
+import { settleTelegramMediaGroupMembersSql } from "./telegram-media-group-repository.js";
 import {
   requireNonEmpty,
   requireUpdateId,
@@ -36,11 +37,14 @@ export const telegramIngressSessionCursorRepository = {
     try {
       await client.query("BEGIN");
       const result = await client.query(
-        `UPDATE telegram_ingress_updates
-         SET status = 'completed', eve_session_id = $3, completed_at = now(),
-             lease_token = NULL, lease_expires_at = NULL, updated_at = now()
-         WHERE update_id = $1 AND status = 'processing' AND lease_token = $2
-           AND lease_expires_at > now()`,
+        `WITH finished AS (
+           UPDATE telegram_ingress_updates
+           SET status = 'completed', eve_session_id = $3, completed_at = now(),
+               lease_token = NULL, lease_expires_at = NULL, updated_at = now()
+           WHERE update_id = $1 AND status = 'processing' AND lease_token = $2
+             AND lease_expires_at > now()
+           RETURNING *
+         ), ${settleTelegramMediaGroupMembersSql} SELECT update_id FROM finished`,
         [updateId, leaseToken, sessionId],
       );
       if (!result.rowCount) {

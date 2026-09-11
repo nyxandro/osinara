@@ -49,6 +49,8 @@ export interface TelegramIngressClaim {
   leaseToken: string;
   payload: Record<string, unknown>;
   queueId: string;
+  mediaGroupPayloads?: Record<string, unknown>[];
+  mediaGroupLate?: boolean;
   transcript: string | null;
   updateId: string;
   voice: TelegramIngressVoice | null;
@@ -103,6 +105,8 @@ export interface ClaimRow {
   voice_file_size: string | null;
   voice_mime_type: string | null;
   voice_transcript: string | null;
+  media_group_key: string | null;
+  media_group_late: boolean;
 }
 
 export function requireNonEmpty(value: string, code: string, message: string): string {
@@ -203,6 +207,7 @@ export function mapTelegramIngressClaim(row: ClaimRow): TelegramIngressClaim {
     leaseExpiresAt: row.lease_expires_at,
     leaseToken: row.lease_token,
     payload: row.payload,
+    ...(row.media_group_late ? { mediaGroupLate: true } : {}),
     queueId: row.queue_id,
     transcript: row.voice_transcript,
     updateId: row.update_id,

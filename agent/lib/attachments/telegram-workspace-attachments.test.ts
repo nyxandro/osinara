@@ -68,7 +68,44 @@ describe("createTelegramWorkspaceAttachmentImporter", () => {
     });
   });
 
-  it("rejects an impossible multi-attachment message before downloading", async () => {
+  it("persists all album files without overwriting repeated filenames", async () => {
+    const download = vi.fn().mockImplementation(async (file: TelegramAttachment) => Buffer.from(file.fileId));
+    const writeBinary = vi.fn().mockImplementation(async (_auth, file) => ({ ...file, scope: "personal" }));
+    const importer = createTelegramWorkspaceAttachmentImporter({ download, writeBinary });
+    const files = Array.from({ length: 10 }, (_, index) => ({
+      ...attachment, fileId: `file-${index}`, fileUniqueId: `unique-${index}`, fileName: "key.txt",
+      telegramMessageId: String(42 + index),
+    }));
+    const result = await importer.persist({ attachments: files, auth, chatId: "101", messageId: "42", scope: "personal" });
+    expect(result).toHaveLength(10);
+    expect(new Set(result.map(file => file.path)).size).toBe(10);
+    expect(result.map(file => file.telegramMessageId)).toEqual(files.map(file => file.telegramMessageId));
+    expect(result.map(file => file.path)).toEqual(files.map(file => `inbox/${file.telegramMessageId}/key.txt`));
+    expect(download).toHaveBeenCalledTimes(10);
+    expect(writeBinary.mock.calls.map(call => call[1].bytes.toString())).toEqual(files.map(file => file.fileId));
+  });
+
+  it("retains two occurrences of the same file under their real Telegram message IDs", async () => {
+    const writeBinary = vi.fn().mockImplementation(async (_auth, file) => ({ ...file, scope: "personal" }));
+    const importer = createTelegramWorkspaceAttachmentImporter({ download: vi.fn().mockResolvedValue(Buffer.from("same file")), writeBinary });
+    const result = await importer.persist({ attachments: [
+      { ...attachment, telegramMessageId: "41" }, { ...attachment, telegramMessageId: "42" },
+    ], auth, chatId: "101", messageId: "42", scope: "personal" });
+    expect(result.map(file => file.telegramMessageId)).toEqual(["41", "42"]);
+    expect(writeBinary.mock.calls.map(call => call[1].operationKey)).toEqual([
+      "telegram-attachment:101:41:unique-file-id", "telegram-attachment:101:42:unique-file-id",
+    ]);
+  });
+
+  it("rejects a multi-file import missing individual source identities before downloading", async () => {
+    const download = vi.fn();
+    const importer = createTelegramWorkspaceAttachmentImporter({ download, writeBinary: vi.fn() });
+    await expect(importer.persist({ attachments: [attachment, attachment], auth, chatId: "101", messageId: "42", scope: "personal" }))
+      .rejects.toThrow(/AGENT_ATTACHMENT_SOURCE_MISSING/);
+    expect(download).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized album before downloading", async () => {
     const download = vi.fn();
     const importer = createTelegramWorkspaceAttachmentImporter({
       download,
@@ -76,7 +113,7 @@ describe("createTelegramWorkspaceAttachmentImporter", () => {
     });
 
     await expect(importer.persist({
-      attachments: [attachment, { ...attachment, fileId: "second" }],
+      attachments: Array.from({ length: 11 }, (_, index) => ({ ...attachment, fileId: `file-${index}` })),
       auth,
       chatId: "101",
       messageId: "42",

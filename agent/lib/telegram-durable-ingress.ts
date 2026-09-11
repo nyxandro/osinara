@@ -43,6 +43,7 @@ import { handleSoftwareUpdateCallback } from "./software-updates/callback.js";
 import { waitForSessionBoundary } from "./telegram-session-boundary.js";
 import { runTelegramProcessing, TelegramProcessingTimeout } from "./telegram-processing-deadline.js";
 import { recoverTelegramIngress } from "./telegram-ingress-recovery.js";
+import { combineTelegramMediaGroup } from "./telegram-media-group.js";
 
 const telegramUpdateIdSchema = z.union([z.number().int().nonnegative().safe(), z.string().regex(/^\d+$/)]);
 const telegramVoiceSchema = z.object({
@@ -219,7 +220,12 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
 
       try {
         let payload = claim.payload;
-        const acceptedUpdate = parseTelegramUpdate(payload);
+        if (claim.mediaGroupLate) {
+          throw new AppError("AGENT_TELEGRAM_MEDIA_GROUP_LATE",
+            "Один из файлов пришёл после начала обработки пачки и не был обработан. Отправьте его отдельно с нужной просьбой");
+        }
+        const acceptedUpdate = claim.mediaGroupPayloads
+          ? combineTelegramMediaGroup(claim.mediaGroupPayloads) : parseTelegramUpdate(payload);
         if (!acceptedUpdate) {
           await dependencies.repository.complete(claim.updateId, claim.leaseToken);
           continue;
@@ -359,7 +365,9 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
         // A lost observer has no trustworthy cursor. Do not reuse that canonical session and
         // accidentally consume its late waiting event as the next message's completion.
         await dependencies.repository.fail(claim.updateId, claim.leaseToken, failure, dispatchedSessionId);
-        if (error instanceof TelegramProcessingTimeout) {
+        if (error instanceof TelegramProcessingTimeout ||
+          (isAppError(error) && (error.code === "AGENT_TELEGRAM_MEDIA_GROUP_LATE" ||
+            error.code === "AGENT_TELEGRAM_MEDIA_GROUP_INVALID"))) {
           const update = parseTelegramUpdate(claim.payload);
           if (update) {
             let noticeTimer: ReturnType<typeof setTimeout> | undefined;
