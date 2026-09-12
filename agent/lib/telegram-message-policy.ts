@@ -7,6 +7,8 @@
  * - `hasTelegramInboundMedia`: identifies file-bearing updates without downloading their bytes.
  * - `isAgentNameMentioned`: recognizes agent-name stems with any suffix at Unicode word boundaries.
  * - `isMessageAddressedToBot`: preserves private, mention, and reply behavior.
+ * - `telegramGroupTurnTrigger`: names the technical signal that woke the agent in a group.
+ * - `replyToAgentTrigger`: folds a journal-proven reply to the agent into that signal.
  * - `isTelegramSlashCommand`: identifies command-shaped text reserved for application handlers.
  * - `isReplyToBot`: verifies that a Telegram reply targets this exact bot identity.
  * - `TELEGRAM_EVE_UPLOAD_POLICY`: prevents direct file delivery to the text-only primary model.
@@ -30,6 +32,13 @@ interface TelegramDispatchMessage {
   };
   text: string;
 }
+
+/**
+ * The mechanical reason a group message reached the agent. It describes how the trigger fired,
+ * not whether the author addressed the agent: a bare name covers both "Осинара, посчитай" and
+ * "Осинара вчера сказала", and only the model can tell those apart from the text.
+ */
+export type TelegramGroupTurnTrigger = "mention" | "name_in_text" | "reply_to_agent";
 
 const TELEGRAM_COMMAND_PATTERN =
   /^\/[A-Za-z0-9_]{1,32}(?:@[A-Za-z0-9_]{5,32})?(?:\s|$)/u;
@@ -170,19 +179,35 @@ export function isTelegramSlashCommand(text: string): boolean {
   return TELEGRAM_COMMAND_PATTERN.test(text);
 }
 
-export function isMessageAddressedToBot(
+export function telegramGroupTurnTrigger(
   message: TelegramDispatchMessage,
   botUsername: string,
-): boolean {
-  // Private messages are direct by definition; channels never dispatch to the agent.
-  if (message.chat.type === "private") return true;
-  if (message.chat.type === "channel") return false;
-  if (isTelegramSlashCommand(message.text)) return false;
+): TelegramGroupTurnTrigger | null {
+  // A private chat has no group trigger; a channel post and a slash command never wake the agent.
+  if (message.chat.type === "private" || message.chat.type === "channel") return null;
+  if (isTelegramSlashCommand(message.text)) return null;
 
   // Mentions and replies must target the complete username of this bot, not another bot.
   const addressedByMention = Array.from(message.text.matchAll(TELEGRAM_MENTION_PATTERN)).some(
     (match) => match.groups?.target?.toLowerCase() === botUsername.toLowerCase(),
   );
-  if (addressedByMention) return true;
-  return isReplyToBot(message, botUsername) || isAgentNameMentioned(message.text);
+  if (addressedByMention) return "mention";
+  if (isReplyToBot(message, botUsername)) return "reply_to_agent";
+  return isAgentNameMentioned(message.text) ? "name_in_text" : null;
+}
+
+/** A reply to the agent is a deliberate signal and outranks a bare name; an explicit mention stays. */
+export function replyToAgentTrigger(
+  current: TelegramGroupTurnTrigger | null,
+): TelegramGroupTurnTrigger {
+  return current === "mention" ? "mention" : "reply_to_agent";
+}
+
+export function isMessageAddressedToBot(
+  message: TelegramDispatchMessage,
+  botUsername: string,
+): boolean {
+  // Private messages are direct by definition; every group trigger counts as an address.
+  if (message.chat.type === "private") return true;
+  return telegramGroupTurnTrigger(message, botUsername) !== null;
 }

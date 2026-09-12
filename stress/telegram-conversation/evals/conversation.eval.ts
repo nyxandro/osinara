@@ -315,12 +315,37 @@ export default defineEval({
       assert.ok(!approvalTrace.events.some(event => event.type === "turn.cancelled"));
       assert.equal((await db.query("SELECT 1 FROM telegram_conversation_test_deliveries WHERE body->>'text'=$1", [`reply-conversation-probe-${projectionOrdinal}`])).rowCount, 1);
       t.log("verified real profile approval executes once and survives empty audit turn IDs");
+
+      // A bare agent name in the family group wakes the model with `name_in_text`; it answers with
+      // Eve's empty-delivery marker. Nothing reaches the chat, Eve does not reissue the model call as
+      // an empty response, and the ingress item still completes through the session boundary.
+      const silentOrdinal = SESSION_MAX_COMPLETED_TURNS + 15;
+      await t.target.fetch("/eve/v1/telegram", {
+        method: "POST", headers: { "x-telegram-bot-api-secret-token": "conversation-test-secret" },
+        body: JSON.stringify({ update_id: 900_000_000 + silentOrdinal, message: {
+          message_id: silentOrdinal, date: Math.floor(Date.now() / 1000),
+          chat: { id: familyChatId, type: "supergroup" }, from: { id: 902, first_name: "Human", is_bot: false },
+          text: `Осинара вчера уже разбирала conversation-probe-${silentOrdinal}, не трогаем`,
+        } }),
+      });
+      const silentRow = await waitForIngress(900_000_000 + silentOrdinal);
+      const silent = await t.target.attachSession(silentRow.eve_session_id, { startIndex: cursors.get(silentRow.eve_session_id) ?? 0 });
+      silent.succeeded();
+      const silentCompletions = silent.events.filter((event) => event.type === "message.completed");
+      assert.ok(silentCompletions.length > 0, "Silent turn must still complete a final model step");
+      assert.ok(silentCompletions.every((event) => (event.data as { message?: unknown }).message === null),
+        "Silent turn must complete only Eve's undelivered final step");
+      assert.equal((await db.query("SELECT count(*)::integer AS n FROM telegram_conversation_test_model_calls WHERE marker=$1",
+        [`conversation-probe-${silentOrdinal}`])).rows[0].n, 1, "Silence must not trigger an empty-response reissue");
+      assert.equal((await db.query("SELECT 1 FROM telegram_conversation_test_deliveries WHERE body::text LIKE $1",
+        [`%conversation-probe-${silentOrdinal}%`])).rowCount, 0, "Silent turn must deliver nothing");
+      t.log("verified silent group turn delivers nothing and keeps the trigger reason");
     } finally {
       await db.query("DROP TRIGGER IF EXISTS telegram_test_reject_binding ON conversation_sessions");
       await db.query("DROP FUNCTION IF EXISTS telegram_test_reject_binding()");
       await db.query("TRUNCATE users, families CASCADE");
       await db.query("DELETE FROM telegram_ingress_updates WHERE update_id BETWEEN $1 AND $2", [
-        900_000_001, 900_000_000 + SESSION_MAX_COMPLETED_TURNS + 14,
+        900_000_001, 900_000_000 + SESSION_MAX_COMPLETED_TURNS + 15,
       ]);
       await db.query("DROP TABLE IF EXISTS telegram_conversation_test_deliveries, telegram_conversation_test_sandboxes, telegram_conversation_test_model_calls");
       await closeDatabase();

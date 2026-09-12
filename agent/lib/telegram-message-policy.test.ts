@@ -3,6 +3,7 @@
  *
  * Constructs covered:
  * - `isMessageAddressedToBot`: ignores slash commands and accepts name stems with any suffix.
+ * - `telegramGroupTurnTrigger`: names the technical signal that woke the agent in a group.
  * - `classifyTelegramInboundMedia`: recognizes one native photo or allowlisted document candidate.
  * - `hasTelegramInboundMedia`: detects every file-bearing Telegram message kind without download.
  * - `TELEGRAM_EVE_UPLOAD_POLICY`: keeps persisted files out of the text-only primary model.
@@ -18,6 +19,7 @@ import {
   hasTelegramInboundMedia,
   isMessageAddressedToBot,
   TELEGRAM_EVE_UPLOAD_POLICY,
+  telegramGroupTurnTrigger,
 } from "./telegram-message-policy.js";
 
 const groupMessage = {
@@ -25,6 +27,80 @@ const groupMessage = {
   replyToMessage: undefined,
   text: "обычное сообщение",
 };
+
+describe("telegramGroupTurnTrigger", () => {
+  const replyToThisBot = {
+    from: { id: "bot-1", isBot: true, username: "family_agent" },
+  };
+
+  it("reports a private chat and a channel post as having no group trigger", () => {
+    expect(telegramGroupTurnTrigger(
+      { ...groupMessage, chat: { id: "101", type: "private" }, text: "Осинара, привет" },
+      "family_agent",
+    )).toBeNull();
+    expect(telegramGroupTurnTrigger(
+      { ...groupMessage, chat: { id: "-1002", type: "channel" }, text: "@family_agent привет" },
+      "family_agent",
+    )).toBeNull();
+  });
+
+  it("reports ordinary conversation, slash commands and foreign mentions as no trigger", () => {
+    expect(telegramGroupTurnTrigger(groupMessage, "family_agent")).toBeNull();
+    expect(telegramGroupTurnTrigger(
+      { ...groupMessage, text: "/start@family_agent Осинара" },
+      "family_agent",
+    )).toBeNull();
+    expect(telegramGroupTurnTrigger(
+      { ...groupMessage, text: "@other_agent помоги" },
+      "family_agent",
+    )).toBeNull();
+  });
+
+  it("names the exact @mention of this bot", () => {
+    expect(telegramGroupTurnTrigger(
+      { ...groupMessage, text: "@family_agent помоги" },
+      "family_agent",
+    )).toBe("mention");
+  });
+
+  it("names a reply to this bot without any written name", () => {
+    expect(telegramGroupTurnTrigger(
+      { ...groupMessage, replyToMessage: replyToThisBot, text: "а точнее?" },
+      "family_agent",
+    )).toBe("reply_to_agent");
+  });
+
+  it.each(["Осинара, посчитай смету", "Осинара вчера сказала, что смета готова"])(
+    "names a bare agent name in text the same way for an address and a third-person mention: %s",
+    (text) => {
+      expect(telegramGroupTurnTrigger({ ...groupMessage, text }, "family_agent")).toBe(
+        "name_in_text",
+      );
+    },
+  );
+
+  it("prefers the explicit @mention, then the reply, over a bare name", () => {
+    expect(telegramGroupTurnTrigger(
+      { ...groupMessage, replyToMessage: replyToThisBot, text: "@family_agent Осинара, а точнее?" },
+      "family_agent",
+    )).toBe("mention");
+    expect(telegramGroupTurnTrigger(
+      { ...groupMessage, replyToMessage: replyToThisBot, text: "Осинара, а точнее?" },
+      "family_agent",
+    )).toBe("reply_to_agent");
+  });
+
+  it("ignores a reply to another bot", () => {
+    expect(telegramGroupTurnTrigger(
+      {
+        ...groupMessage,
+        replyToMessage: { from: { id: "bot-2", isBot: true, username: "other_agent" } },
+        text: "спасибо",
+      },
+      "family_agent",
+    )).toBeNull();
+  });
+});
 
 describe("isMessageAddressedToBot", () => {
   it("accepts every private message", () => {

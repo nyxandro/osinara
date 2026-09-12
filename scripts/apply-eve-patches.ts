@@ -25,6 +25,9 @@ import { patchTelegramDispatchControl } from "./eve-patches/telegram-dispatch-co
 import { patchModelInactivity } from "./eve-patches/model-inactivity.ts";
 
 const EXPECTED_EVE_VERSION = "0.40.0";
+// The Docker dependencies stage runs this script before `agent/` exists, so the marker is a
+// literal here; `agent/lib/eve-empty-delivery-marker.test.ts` keeps it equal to the app constant.
+const EVE_EMPTY_DELIVERY_MARKER = "<eve-empty-delivery/>";
 const EVE_PRODUCTION_START_HEALTH_TIMEOUT_MS = 300_000;
 
 const runtimePaths = {
@@ -32,6 +35,8 @@ const runtimePaths = {
   channelAdapter: resolve("node_modules/eve/dist/src/channel/adapter.js"),
   channelAdapterTypes: resolve("node_modules/eve/dist/src/channel/adapter.d.ts"),
   compaction: resolve("node_modules/eve/dist/src/harness/compaction.js"),
+  emission: resolve("node_modules/eve/dist/src/harness/emission.js"),
+  emptyDelivery: resolve("node_modules/eve/dist/src/shared/empty-delivery.js"),
   contextKeys: resolve("node_modules/eve/dist/src/context/keys.js"),
   contextKeyTypes: resolve("node_modules/eve/dist/src/context/keys.d.ts"),
   dispatchRuntimeActionsShared: resolve(
@@ -108,6 +113,17 @@ async function replaceExact(
   await writeFile(path, source.split(before).join(after), "utf8");
 }
 
+// Pins an unpatched runtime contract the application relies on; a changed artifact fails closed.
+async function assertExact(path: string, marker: string): Promise<void> {
+  const source = await readFile(path, "utf8");
+  const count = occurrenceCount(source, marker);
+  if (count !== 1) {
+    throw new Error(
+      `AGENT_EVE_PATCH_MISMATCH: Ожидаемый контракт Eve 0.40.0 не найден в ${path}; found=${count}, expected=1`,
+    );
+  }
+}
+
 // The package version gates every minified replacement against the exact reviewed release.
 const evePackage = JSON.parse(
   await readFile(resolve("node_modules/eve/package.json"), "utf8"),
@@ -124,6 +140,28 @@ await patchHitlContext(replaceExact);
 await patchStreamRecovery(replaceExact);
 await patchTelegramDispatchControl(replaceExact);
 await patchModelInactivity(replaceExact);
+
+// Silence in an ordinary chat relies on Eve's empty-delivery marker, which Eve documents only to
+// scheduled and task turns. The prompt teaches the exact string; the runtime must keep honouring
+// it in every turn: `message: null` for the channel, no history entry, no empty-response nudge.
+await assertExact(
+  runtimePaths.emptyDelivery,
+  `EMPTY_DELIVERY_SENTINEL=\`${EVE_EMPTY_DELIVERY_MARKER}\``,
+);
+await assertExact(
+  runtimePaths.emptyDelivery,
+  `function hasEmptyDeliverySentinel(e){return e?.includes(\`${EVE_EMPTY_DELIVERY_MARKER}\`)??!1}`,
+);
+await assertExact(
+  runtimePaths.emission,
+  "p!==`tool-calls`&&hasEmptyDeliverySentinel(f)?await a(createMessageCompletedEvent({finishReason:p,message:null,",
+);
+await assertExact(
+  runtimePaths.toolLoop,
+  "l=i.finishReason!==`tool-calls`&&i.toolCalls.length===0&&hasEmptyDeliverySentinel(c)",
+);
+await assertExact(runtimePaths.toolLoop, "f=l?[]:appendMissingToolResultMessages(");
+await assertExact(runtimePaths.toolLoop, "p=l?null:c");
 
 // A cold production start may prepare sandbox images before the child server becomes healthy.
 await replaceExact(

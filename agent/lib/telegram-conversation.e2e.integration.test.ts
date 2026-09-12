@@ -43,6 +43,7 @@ describeWithDatabase("Telegram conversation end-to-end", () => {
        expect(result.stdout).toContain("verified real profile approval executes once and survives empty audit turn IDs");
       expect(result.stdout).toContain("verified mandatory preparation failure stops before the model");
       expect(result.stdout).toContain("verified native cancellation stops a running model without a late reply");
+      expect(result.stdout).toContain("verified silent group turn delivers nothing and keeps the trigger reason");
       expect(result.stderr).not.toContain("AGENT_MEMORY_UNAVAILABLE");
     } catch (error) {
       const output = error as { stdout?: string; stderr?: string };

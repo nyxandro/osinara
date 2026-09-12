@@ -87,6 +87,11 @@ describe("createTelegramMessageHandler", () => {
       "<recent_proactive_deliveries>digest</recent_proactive_deliveries>",
     );
     expect(result?.auth?.attributes).toMatchObject({ proactiveDeliveryCursor: "42" });
+    // A private chat is direct by definition: no group trigger is reported or recorded.
+    expect(repository.groupContext.prepare).toHaveBeenCalledWith(
+      expect.not.objectContaining({ triggeredBy: expect.anything() }),
+    );
+    expect(result?.auth?.attributes).not.toHaveProperty("telegramGroupTurnTrigger");
   });
 
   it("terminates a successful bootstrap message before model dispatch", async () => {
@@ -493,7 +498,11 @@ describe("createTelegramMessageHandler", () => {
     expect(result?.auth?.attributes).toMatchObject({
       groupId: "group-1",
       skillAllowlist: ["pohuy"],
+      telegramGroupTurnTrigger: "name_in_text",
     });
+    expect(repository.groupContext.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({ triggeredBy: "name_in_text" }),
+    );
     expect(repository.session.prepareTurn).toHaveBeenCalledTimes(1);
   });
 

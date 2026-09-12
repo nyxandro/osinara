@@ -121,6 +121,10 @@ describe("createTelegramMessageHandler reply routing", () => {
     });
 
     expect(repository.session.hasRoute).toHaveBeenCalledWith("group-101::340");
+    expect(repository.groupContext.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({ triggeredBy: "reply_to_agent" }),
+    );
+    expect(result?.auth?.attributes).toMatchObject({ telegramGroupTurnTrigger: "reply_to_agent" });
     expect(repository.hitl.authorizeReply).toHaveBeenCalledWith(expect.objectContaining({
       baseContinuationToken: "group-101::340",
       telegramMessageId: "340",

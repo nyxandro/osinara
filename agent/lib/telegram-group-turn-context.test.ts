@@ -6,6 +6,7 @@
  * - Existing sessions receive only unseen entries that are not already owned by that session.
  * - Timeline context is embedded in the durable user message rather than ephemeral Eve context.
  * - The addressed message text is recoverable from the durable envelope the preparer produced.
+ * - The envelope names the technical trigger of a group turn and never invents one for a private chat.
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -58,9 +59,34 @@ const input = {
   messageThreadId: null,
   replyTargetUnavailable: false,
   replyToSequenceId: null,
+  triggeredBy: "mention" as const,
 };
 
 describe("Telegram group turn context", () => {
+  it("carries the technical trigger of the current group message inside the envelope", async () => {
+    const prepare = createTelegramGroupTurnContextPreparer(dependencies(null));
+
+    const result = await prepare({ ...input, triggeredBy: "name_in_text" });
+
+    expect(result.currentMessageEnvelope).toContain('"triggeredBy":"name_in_text"');
+    expect(currentTelegramMessageText(result.durableMessage)).toBe("Что решили?");
+  });
+
+  it("rejects a group turn whose trigger is unknown", async () => {
+    const prepare = createTelegramGroupTurnContextPreparer(dependencies(null));
+    const { triggeredBy: _omitted, ...withoutTrigger } = input;
+
+    await expect(prepare(withoutTrigger)).rejects.toThrowError(/AGENT_TELEGRAM_TURN_MESSAGE_INVALID/u);
+  });
+
+  it("rejects a trigger on a private conversation, which is direct by definition", async () => {
+    const timeline = { listIncremental: vi.fn(), listRecent: vi.fn().mockResolvedValue([]) };
+    const prepare = createTelegramGroupTurnContextPreparer({ ...dependencies(null), timeline });
+
+    await expect(prepare({ ...input, conversationId: "conversation-personal-1", groupId: null }))
+      .rejects.toThrowError(/AGENT_TELEGRAM_TURN_MESSAGE_INVALID/u);
+  });
+
   it("uses the same bounded context contract for a private conversation", async () => {
     const deps = dependencies(null);
     const privateEntry = {
@@ -73,8 +99,9 @@ describe("Telegram group turn context", () => {
     };
     const prepare = createTelegramGroupTurnContextPreparer({ ...deps, timeline });
 
+    const { triggeredBy: _omitted, ...privateInput } = input;
     const result = await prepare({
-      ...input,
+      ...privateInput,
       conversationId: "conversation-personal-1",
       groupId: null,
     });
