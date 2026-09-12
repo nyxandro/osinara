@@ -157,6 +157,8 @@ export function createModeBlockResolver(dependencies: {
       return MODE_UNAVAILABLE_BLOCK;
     }
     const scheduledRun = isScheduledSession(ctx);
+    // A child answers its parent through the `agent` tool result, never the chat itself.
+    const subagentTurn = ctx.channel?.kind === "subagent" || Boolean(ctx.session.parent);
     // A scheduled run has no inbound message to react to, and a channel-authored turn keeps its
     // text-only surface, so neither one requests a reaction policy.
     const reactionsPossible = !scheduledRun && !isTelegramChannelSession(ctx.session.auth);
@@ -170,7 +172,7 @@ export function createModeBlockResolver(dependencies: {
       }
     }
     if (environment !== "external") {
-      return modeInstructions({ environment, reactions, scheduledRun });
+      return modeInstructions({ environment, reactions, scheduledRun, subagentTurn });
     }
 
     // Channel-authored turns can receive text only. Keep prompt instructions aligned with the
@@ -184,6 +186,7 @@ export function createModeBlockResolver(dependencies: {
         reactions,
         scheduledRun,
         skills: new Set(),
+        subagentTurn,
       });
     }
 
@@ -209,6 +212,7 @@ export function createModeBlockResolver(dependencies: {
         scheduledGroupHistoryAccess(ctx.session.auth) !== null,
       scheduledRun,
       skills,
+      subagentTurn,
     });
   };
 }

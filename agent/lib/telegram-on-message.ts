@@ -28,8 +28,10 @@ import { handleTelegramEnrollmentBoundary } from "./telegram-enrollment-boundary
 import { groupCanonicalContinuationToken } from "./sessions/group-canonical-token.js";
 import {
   classifyTelegramInboundMedia,
-  isMessageAddressedToBot,
   isTelegramSlashCommand,
+  replyToAgentTrigger,
+  type TelegramGroupTurnTrigger,
+  telegramGroupTurnTrigger,
 } from "./telegram-message-policy.js";
 import { parseExternalGroupToolAllowlist } from "./tool-policy/group-tool-catalog.js";
 import { telegramForumTopicId, telegramInboundText } from "./telegram-group-message-storage.js";
@@ -58,6 +60,18 @@ import {
 import { prepareTelegramMemoryReviewTurn } from "./memory-review/telegram-memory-review-turn.js";
 import { telegramInboundActor } from "./telegram-inbound-actor.js";
 
+// Every accepted group turn owes the model its trigger; reaching dispatch without one is a bug.
+function requireGroupTurnTrigger(
+  trigger: TelegramGroupTurnTrigger | null,
+): TelegramGroupTurnTrigger {
+  if (trigger === null) {
+    throw new Error(
+      "AGENT_TELEGRAM_TURN_TRIGGER_MISSING: Для группового хода не определён сигнал обращения",
+    );
+  }
+  return trigger;
+}
+
 export function createTelegramMessageHandler(repositories: TelegramMessageRepositories) {
   return async function handleMessage(
     ctx: TelegramContext,
@@ -73,7 +87,8 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
     }
     const dispatchText = telegramInboundText(message);
     const routingText = Object.hasOwn(message.raw, "voice") ? message.caption : dispatchText;
-    let addressed = isMessageAddressedToBot({ ...message, text: routingText }, botUsername);
+    let groupTurnTrigger = telegramGroupTurnTrigger({ ...message, text: routingText }, botUsername);
+    let addressed = message.chat.type === "private" || groupTurnTrigger !== null;
     const unsupportedGroupSlashCommand = message.chat.type !== "private" &&
       isTelegramSlashCommand(routingText);
     let verifiedReplyRoute: string | undefined;
@@ -137,7 +152,10 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
         }
         return null;
       }
-      if (inboundTimeline.replyToAgent) addressed = true;
+      if (inboundTimeline.replyToAgent) {
+        addressed = true;
+        groupTurnTrigger = replyToAgentTrigger(groupTurnTrigger);
+      }
       const routeEligibleReply = message.replyToMessage &&
         (inboundTimeline.replyToAgent || message.replyToMessage.from?.isBot !== false);
       if (routeEligibleReply) {
@@ -148,6 +166,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
         for (const candidateRoute of candidateRoutes) {
           if (await repositories.session.hasRoute(candidateRoute)) {
             addressed = true;
+            groupTurnTrigger = replyToAgentTrigger(groupTurnTrigger);
             verifiedReplyRoute = candidateRoute;
             hasResumableReplyRoute = true;
             break;
@@ -392,6 +411,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
           ...(replyTargetSnapshot === null ? {} : { replyTargetSnapshot }),
           replyTargetUnavailable: inboundTimeline.replyTargetUnavailable,
           replyToSequenceId: inboundTimeline.replyToSequenceId,
+          ...(group ? { triggeredBy: requireGroupTurnTrigger(groupTurnTrigger) } : {}),
         })
       : null;
     if (!preparedGroupTurnContext) {
@@ -447,6 +467,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       conversation,
       forumTopicId,
       group,
+      groupTurnTrigger: group ? requireGroupTurnTrigger(groupTurnTrigger) : null,
       lazyAttachment,
       message,
       pendingDelivery: pendingDeliveries,

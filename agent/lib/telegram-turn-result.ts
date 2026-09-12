@@ -14,6 +14,7 @@ import type { PreparedTelegramGroupTurnContext } from "./telegram-group-turn-con
 import type { TelegramGroupAttachmentSummary } from "./telegram-group-journal-context.js";
 import type { PreparedSession } from "./sessions/session-repository.js";
 import type { TelegramInboundActor } from "./telegram-inbound-actor.js";
+import type { TelegramGroupTurnTrigger } from "./telegram-message-policy.js";
 import {
   formatStoredTelegramAttachments,
   formatTelegramAttachmentReferences,
@@ -26,6 +27,8 @@ export function buildTelegramTurnResult(input: {
   conversation: ApplicationConversation;
   forumTopicId: string | null;
   group: RegisteredGroup | null;
+  /** Present for every group turn so the channel can attribute a silent turn to its trigger. */
+  groupTurnTrigger: TelegramGroupTurnTrigger | null;
   lazyAttachment: (TelegramGroupAttachmentSummary & { telegramMessageId: string }) | null;
   message: TelegramMessage;
   pendingDelivery: { context: string; cursor: string } | null;
@@ -60,6 +63,7 @@ export function buildTelegramTurnResult(input: {
         familyId: input.access.familyId,
         ...(input.access.groupId ? { groupId: input.access.groupId } : {}),
         ...(input.group ? { groupType: input.group.type } : {}),
+        ...(input.groupTurnTrigger === null ? {} : { telegramGroupTurnTrigger: input.groupTurnTrigger }),
         memoryScopes: input.access.memoryScopes,
         ...(input.pendingDelivery ? { proactiveDeliveryCursor: input.pendingDelivery.cursor } : {}),
         role: input.access.role,

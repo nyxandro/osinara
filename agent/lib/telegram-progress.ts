@@ -2,13 +2,15 @@
  * Telegram delivery policy for completed model messages.
  *
  * Exports:
- * - `CompletedTelegramOutput`: final message, silent reaction, or interim progress decision.
+ * - `CompletedTelegramOutput`: final message, silent reaction, deliberate silence, or interim
+ *   progress decision.
  * - `completedTelegramOutput`: validates model output before Telegram delivery.
  *
  * Provider adapters route typed reasoning parts to dedicated Eve events that this delivery
  * policy never receives.
  */
 import { AppError } from "./app-error.js";
+import { EVE_EMPTY_DELIVERY_MARKER } from "./eve-empty-delivery.js";
 import { stripTelegramAsideDirectives } from "./telegram-authored-split.js";
 import {
   isTelegramMessageReactionEmoji,
@@ -23,12 +25,18 @@ const TELEGRAM_REACTION_DIRECTIVE_FRAGMENT = "telegram-reaction";
 export type CompletedTelegramOutput =
   | { emoji: TelegramMessageReactionEmoji; kind: "reaction" }
   | { kind: "message"; message: string }
-  | { kind: "progress"; message: string };
+  | { kind: "progress"; message: string }
+  | { kind: "silence" };
 
 export function completedTelegramOutput(data: {
   finishReason: string;
   message?: string | null;
 }): CompletedTelegramOutput | null {
+  // Eve reports a final step the model marked as undelivered with `message: null`; that is the
+  // model's deliberate silence, while a blank step is technical noise.
+  if (data.message === null && data.finishReason !== TOOL_CALLS_FINISH_REASON) {
+    return { kind: "silence" };
+  }
   // Only completed visible assistant text should become a durable Telegram message.
   const message =
     data.message === undefined || data.message === null ? "" : data.message.trim();
@@ -38,7 +46,13 @@ export function completedTelegramOutput(data: {
   if (data.finishReason === TOOL_CALLS_FINISH_REASON) {
     const progress = stripTelegramAsideDirectives(message);
     // Transport directives belong to the final answer; interim noise is dropped, never delivered.
-    if (!progress || progress.includes(TELEGRAM_REACTION_DIRECTIVE_FRAGMENT)) return null;
+    if (
+      !progress ||
+      progress.includes(TELEGRAM_REACTION_DIRECTIVE_FRAGMENT) ||
+      progress.includes(EVE_EMPTY_DELIVERY_MARKER)
+    ) {
+      return null;
+    }
     return { kind: "progress", message: progress };
   }
 

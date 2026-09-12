@@ -29,6 +29,7 @@ import {
   telegramGroupJournalRepository,
   type TelegramGroupJournalRepository,
 } from "./telegram-group-journal-repository.js";
+import type { TelegramGroupTurnTrigger } from "./telegram-message-policy.js";
 import type { TelegramReplyTargetSnapshot } from "./telegram-reply-target-snapshot.js";
 
 interface PrepareTelegramGroupTurnContextInput {
@@ -45,6 +46,8 @@ interface PrepareTelegramGroupTurnContextInput {
   replyTargetSnapshot?: TelegramReplyTargetSnapshot | null;
   replyTargetUnavailable: boolean;
   replyToSequenceId: string | null;
+  /** Required for a group turn and forbidden for a private chat, which is direct by definition. */
+  triggeredBy?: TelegramGroupTurnTrigger;
 }
 
 interface TelegramGroupTurnContextDependencies {
@@ -97,6 +100,7 @@ function currentTelegramMessageEnvelope(
     | "replyTargetSnapshot"
     | "replyTargetUnavailable"
     | "replyToSequenceId"
+    | "triggeredBy"
   >,
   inlineReply?: TelegramGroupJournalEntry,
 ): string {
@@ -112,6 +116,7 @@ function currentTelegramMessageEnvelope(
   // The exact envelope is retained as trusted composition metadata without Telegram identifiers.
   const currentMessage = escapeUntrustedContextJson({
     sourceSequence: input.currentSequence,
+    ...(input.triggeredBy === undefined ? {} : { triggeredBy: input.triggeredBy }),
     senderDisplayName: input.currentSenderDisplayName,
     senderUsername: input.currentSenderUsername,
     ...(input.replyTargetSnapshot
@@ -167,6 +172,14 @@ export function createTelegramGroupTurnContextPreparer(
   dependencies: TelegramGroupTurnContextDependencies,
 ): TelegramGroupTurnContextPreparer {
   return async (input) => {
+    // The model must always learn how a group turn was triggered, and a private chat must never
+    // pretend to have a group trigger.
+    if (input.groupId !== null && input.triggeredBy === undefined) {
+      throw turnMessageError("trigger_missing");
+    }
+    if (input.groupId === null && input.triggeredBy !== undefined) {
+      throw turnMessageError("trigger_unexpected");
+    }
     const cursor = await dependencies.sessions.currentGroupTimelineCursor(
       input.applicationSessionId,
     );

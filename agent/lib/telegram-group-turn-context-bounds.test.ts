@@ -51,6 +51,7 @@ const input = {
   messageThreadId: null,
   replyTargetUnavailable: false,
   replyToSequenceId: null,
+  triggeredBy: "mention" as const,
 };
 
 describe("Telegram group turn context entry bounds", () => {
