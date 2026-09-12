@@ -214,6 +214,7 @@ describe("createTelegramMessageHandler group routing", () => {
       messageThreadId: "42",
       replyTargetUnavailable: false,
       replyToSequenceId: null,
+      triggeredBy: "mention",
     });
     expect(result?.message).toContain("предыдущая реплика");
     expect(result?.context?.join("\n")).not.toContain("предыдущая реплика");

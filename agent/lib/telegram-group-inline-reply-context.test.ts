@@ -17,6 +17,7 @@ const input = {
   messageThreadId: null,
   replyTargetUnavailable: false,
   replyToSequenceId: "98",
+  triggeredBy: "reply_to_agent" as const,
 };
 
 function entry(sequenceId: string, contentText: string | null): TelegramGroupJournalEntry {
@@ -49,7 +50,7 @@ describe("inline group reply context", () => {
       entry("97", "Другая реплика"), entry("98", "Передам запрос через файл"), entry("99", "Другая задача"),
     ], cursor)(input);
     expect(envelope(result.currentMessageEnvelope)).toEqual({
-      sourceSequence: "100", senderDisplayName: "Максим Функ", senderUsername: "WangW19",
+      sourceSequence: "100", triggeredBy: "reply_to_agent", senderDisplayName: "Максим Функ", senderUsername: "WangW19",
       replyToSequenceId: "98", text: "Добавь и выполни",
       replyTo: { senderKind: "user", senderDisplayName: "Nikita Pastukhov", text: "Передам запрос через файл" },
     });
@@ -101,9 +102,11 @@ describe("inline group reply context", () => {
   });
 
   it("does not change private conversation envelopes", async () => {
-    const result = await preparer([entry("98", "Ответ в личке")])({ ...input, groupId: null, conversationId: "personal-1" });
+    const { triggeredBy: _omitted, ...privateInput } = input;
+    const result = await preparer([entry("98", "Ответ в личке")])({ ...privateInput, groupId: null, conversationId: "personal-1" });
     expect(envelope(result.currentMessageEnvelope)).toHaveProperty("replyToSequenceId", "98");
     expect(envelope(result.currentMessageEnvelope)).not.toHaveProperty("replyTo");
+    expect(envelope(result.currentMessageEnvelope)).not.toHaveProperty("triggeredBy");
   });
 
   it("accounts for the inline copy when selecting unrelated history", async () => {

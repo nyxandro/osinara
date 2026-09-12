@@ -86,6 +86,33 @@ describe("createTelegramMessageHandler reply routing", () => {
     });
   });
 
+  it("keeps an explicit @mention as the trigger when the message also replies to the agent", async () => {
+    const repository = familyGroupRepository();
+    repository.telegram.findIdentity.mockResolvedValue({ familyId: "family-1", role: "member", userId: "user-1" });
+    repository.journal.record.mockResolvedValue({
+      entryId: "00000000-0000-4000-8000-000000000350",
+      replyToAgent: true,
+      sequenceId: "352",
+      status: "inserted",
+    });
+    const handler = createTelegramMessageHandler(repository);
+
+    const result = await handler(telegramContext().context, {
+      ...groupMessage(`@${BOT_USERNAME} Осинара, а точнее?`),
+      messageId: "352",
+      replyToMessage: {
+        chat: { id: "group-101", type: "group" },
+        from: { firstName: "Osinara", id: "bot-1", isBot: true },
+        messageId: "350",
+      },
+    });
+
+    expect(repository.groupContext.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({ triggeredBy: "mention" }),
+    );
+    expect(result?.auth?.attributes).toMatchObject({ telegramGroupTurnTrigger: "mention" });
+  });
+
   it("starts a fresh message continuation for a timeline-proven agent reply without a route", async () => {
     const repository = familyGroupRepository();
     repository.telegram.findIdentity.mockResolvedValue({
@@ -121,6 +148,10 @@ describe("createTelegramMessageHandler reply routing", () => {
     });
 
     expect(repository.session.hasRoute).toHaveBeenCalledWith("group-101::340");
+    expect(repository.groupContext.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({ triggeredBy: "reply_to_agent" }),
+    );
+    expect(result?.auth?.attributes).toMatchObject({ telegramGroupTurnTrigger: "reply_to_agent" });
     expect(repository.hitl.authorizeReply).toHaveBeenCalledWith(expect.objectContaining({
       baseContinuationToken: "group-101::340",
       telegramMessageId: "340",

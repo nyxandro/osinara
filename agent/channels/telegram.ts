@@ -21,6 +21,7 @@ import { formatTelegramTurnFailure } from "../lib/telegram-interface.js";
 import { TELEGRAM_EVE_UPLOAD_POLICY } from "../lib/telegram-message-policy.js";
 import { handleTelegramMessage } from "../lib/telegram-on-message.js";
 import { completedTelegramOutput } from "../lib/telegram-progress.js";
+import { logTelegramSilentTurn } from "../lib/telegram-silent-turn.js";
 import { deliverTelegramProgressNotice } from "../lib/telegram-progress-notice.js";
 import { asidePauseMilliseconds } from "../lib/telegram-aside-pacing.js";
 import { stripTelegramAsideDirectives } from "../lib/telegram-authored-split.js";
@@ -90,6 +91,15 @@ export default telegramChannel({
       if (!output) return;
       const sessionId = applicationSessionId(ctx);
       if (!await sessionRepository.isCurrentEveSession(sessionId, ctx.session.id)) return;
+      if (output.kind === "silence") {
+        // The model chose to deliver nothing; the trigger it stayed quiet on is the useful signal.
+        logTelegramSilentTurn({
+          auth: ctx.session.auth.current,
+          eveSessionId: ctx.session.id,
+          eveTurnId: ctx.session.turn.id,
+        });
+        return;
+      }
       if (output.kind === "progress") {
         await deliverTelegramProgressNotice({
           applicationSessionId: sessionId,
