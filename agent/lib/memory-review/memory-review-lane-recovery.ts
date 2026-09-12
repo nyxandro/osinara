@@ -1,5 +1,6 @@
 /** Repairs only the persisted pre-Eve incident class and measures lane progress without chat text. */
 import type { PoolClient } from "pg";
+import { AppError } from "../app-error.js";
 
 import { MEMORY_REVIEW_ABANDONED_TURN_BATCH_SIZE } from "./memory-review-config.js";
 import { enqueueMemoryReviewOwnerAlert } from "./memory-review-owner-alert-repository.js";
@@ -108,7 +109,10 @@ export async function readMemoryReviewLaneHealth(client: PoolClient) {
           AND status IN ('failed', 'ambiguous') FOR KEY SHARE SKIP LOCKED`, [row.batch_id],
       );
       if (!available.rowCount) continue;
-      await enqueueMemoryReviewOwnerAlert(client, row.batch_id, "AGENT_MEMORY_REVIEW_LANE_BLOCKED");
+      if (!row.diagnostic_code) throw new AppError(
+        "AGENT_MEMORY_REVIEW_DIAGNOSTIC_MISSING", "Для остановленной проверки памяти не сохранена причина ошибки",
+      );
+      await enqueueMemoryReviewOwnerAlert(client, row.batch_id, row.diagnostic_code);
     }
   }
   return result.rows;

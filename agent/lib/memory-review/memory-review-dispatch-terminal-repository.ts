@@ -10,6 +10,8 @@ import type { PoolClient } from "pg";
 import { SESSION_RETENTION_DAYS } from "../../config.js";
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
+import { isRecoverableModelCode } from "../model-failure.js";
+import { failBackgroundReview } from "./memory-review-model-recovery.js";
 import {
   MEMORY_REVIEW_ABANDONED_TURN_BATCH_SIZE,
   MEMORY_REVIEW_INTERACTIVE_START_TIMEOUT_MILLISECONDS,
@@ -201,10 +203,15 @@ export const memoryReviewDispatchTerminalRepository = {
     diagnosticCode: string;
     eveSessionId: string;
   }): Promise<void> {
+    if (isRecoverableModelCode(input.diagnosticCode)) {
+      await failBackgroundReview(input);
+      return;
+    }
     const client = await database().connect();
     try {
       await client.query("BEGIN");
-      // Lock the application root before the batch so concurrent Eve binding cannot change owner.
+      // Match recovery/writer fencing order: batch first, then the exact application session.
+      await client.query("SELECT id FROM memory_review_batches WHERE id = $1 FOR UPDATE", [input.batchId]);
       const session = await client.query<{ id: string }>(
         `SELECT app_session.id
            FROM conversation_sessions AS app_session

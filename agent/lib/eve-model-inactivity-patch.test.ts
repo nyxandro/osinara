@@ -34,6 +34,13 @@ function fixture(beforeHeaders = false) {
     history: [], compaction: { threshold: 9000, recentWindowSize: 10 },
   }, { message: "test" });
   return { running, doStream, cancellation, signal: () => signal,
+    async stop() {
+      const stopped = running.catch((error) => { if (error.name !== "TurnCancelledError") throw error; });
+      cancellation.abort();
+      // Eve may be sleeping between attempts when the test requests cancellation.
+      await vi.advanceTimersByTimeAsync(2_000);
+      await stopped;
+    },
     reasoning() { stream.enqueue({ type: "reasoning-delta", id: "reasoning", delta: "working" }); },
   };
 }
@@ -46,7 +53,7 @@ it("aborts a silent provider through the native first-output timer", async () =>
     expect(state.doStream).toHaveBeenCalledOnce();
     await vi.advanceTimersByTimeAsync(QUIET_MS + 1);
     expect(state.signal().aborted).toBe(true);
-  } finally { state.cancellation.abort(); await state.running.catch((error) => { if (error.name !== "TurnCancelledError") throw error; }); }
+  } finally { await state.stop(); }
 });
 
 it("also bounds the first-output wait before response headers arrive", async () => {
@@ -57,7 +64,7 @@ it("also bounds the first-output wait before response headers arrive", async () 
     expect(state.doStream).toHaveBeenCalledOnce();
     await vi.advanceTimersByTimeAsync(QUIET_MS + 1);
     expect(state.signal().aborted).toBe(true);
-  } finally { state.cancellation.abort(); await state.running.catch((error) => { if (error.name !== "TurnCancelledError") throw error; }); }
+  } finally { await state.stop(); }
 });
 
 it.each([true, false])("retains inactivity protection after a native transport retry (headers pending: %s)", async (beforeHeaders) => {
@@ -68,9 +75,10 @@ it.each([true, false])("retains inactivity protection after a native transport r
   try {
     await vi.advanceTimersByTimeAsync(2001);
     expect(state.doStream).toHaveBeenCalledTimes(2);
+    const activeSignal = state.signal();
     await vi.advanceTimersByTimeAsync(QUIET_MS + 1);
-    expect(state.signal().aborted).toBe(true);
-  } finally { state.cancellation.abort(); await state.running.catch((error) => { if (error.name !== "TurnCancelledError") throw error; }); }
+    expect(activeSignal.aborted).toBe(true);
+  } finally { await state.stop(); }
 });
 
 it("does not apply model silence timers to a long tool after the provider finishes", async () => {
@@ -118,8 +126,9 @@ it("keeps receiving reasoning beyond fifteen minutes and stops only after a sile
       await vi.advanceTimersByTimeAsync(QUIET_MS / 2);
       expect(state.signal().aborted).toBe(false);
     }
-    await vi.advanceTimersByTimeAsync(QUIET_MS + 1);
-    expect(state.signal().aborted).toBe(true);
     expect(state.doStream).toHaveBeenCalledOnce();
-  } finally { state.cancellation.abort(); await state.running.catch((error) => { if (error.name !== "TurnCancelledError") throw error; }); }
+    const activeSignal = state.signal();
+    await vi.advanceTimersByTimeAsync(QUIET_MS + 1);
+    expect(activeSignal.aborted).toBe(true);
+  } finally { await state.stop(); }
 });

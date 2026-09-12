@@ -18,6 +18,20 @@ const { Client } = pg;
 const EVE_RUN_ID_PATTERN = /^wrun_[A-Z0-9]{26}$/u;
 const TERMINAL_RUN_STATUSES = new Set(["cancelled", "completed", "failed"]);
 
+/** Read-only proof used by the explicit operator recovery, without re-enqueuing a Workflow run. */
+export async function isConfiguredEveSessionTerminal(runId: string): Promise<boolean> {
+  if (!EVE_RUN_ID_PATTERN.test(runId)) throw new AppError("AGENT_EVE_SESSION_ID_INVALID", "Некорректный идентификатор Eve-сессии");
+  const connectionString = process.env.WORKFLOW_POSTGRES_URL;
+  if (!connectionString) throw new AppError("AGENT_WORKFLOW_DATABASE_CONFIG_MISSING", "Не задано подключение к базе Workflow");
+  const client = new Client({ connectionString });
+  await client.connect();
+  try {
+    const result = await client.query<{ status: string }>("SELECT status::text FROM workflow.workflow_runs WHERE id = $1", [runId]);
+    const status = result.rows[0]?.status;
+    return status !== undefined && TERMINAL_RUN_STATUSES.has(status);
+  } finally { await client.end(); }
+}
+
 interface WorkflowQueryClient {
   query(
     text: string,

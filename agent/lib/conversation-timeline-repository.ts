@@ -143,9 +143,15 @@ async function prune(client: PoolClient, conversationId: string): Promise<void> 
           SELECT 1 FROM memory_review_batch_sources AS source
           WHERE source.timeline_entry_id = telegram_group_messages.id
         ) AND NOT EXISTS (
-         SELECT 1 FROM memory_turn_sources AS source
+          SELECT 1 FROM memory_turn_sources AS source
          WHERE source.timeline_entry_id = telegram_group_messages.id
-       )`,
+        ) AND NOT EXISTS (
+          SELECT 1 FROM memory_review_lanes AS lane
+          WHERE lane.conversation_id = telegram_group_messages.conversation_id
+            AND lane.message_thread_id IS NOT DISTINCT FROM telegram_group_messages.message_thread_id
+            AND telegram_group_messages.actor_kind IN ('user', 'telegram_bot')
+            AND telegram_group_messages.sequence_id > lane.processed_through_sequence
+        )`,
     [conversationId, TELEGRAM_GROUP_JOURNAL_RETENTION_MESSAGES],
   );
 }

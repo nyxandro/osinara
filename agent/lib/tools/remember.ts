@@ -13,6 +13,7 @@ import { logMemoryWriteEvent } from "../memory-observability.js";
 import { resolveMemoryTurnSource } from "../memory-turn-source.js";
 import { toModelMemory } from "../model-memory.js";
 import { rememberInputSchema } from "../remember-contract.js";
+import { memoryReviewBatchId } from "../memory-review/memory-review-session.js";
 
 export default defineTool({
   description: [
@@ -31,6 +32,10 @@ export default defineTool({
     try {
       source = await resolveMemoryTurnSource(ctx, authorization, input.sourceSequence);
       const reviewWrite = source.isReview;
+      const reviewBatchId = reviewWrite ? memoryReviewBatchId(ctx) : null;
+      if (reviewWrite && !reviewBatchId) throw new AppError(
+        "AGENT_MEMORY_REVIEW_CONTEXT_INVALID", "Не удалось подтвердить текущий пакет проверки памяти",
+      );
       if (reviewWrite && (input.sensitivity !== "normal" || input.basis !== "agent_inferred" ||
         input.sourceSequence === undefined)) {
         throw new AppError(
@@ -39,6 +44,7 @@ export default defineTool({
         );
       }
       item = await memoryRepository.create(authorization, {
+        ...(reviewBatchId === null ? {} : { memoryReviewBatchId: reviewBatchId }),
         // A request to save another participant's delta message is not that author's endorsement.
         confirmation: input.basis === "user_requested" && source.isCurrent
           ? "user_confirmed"

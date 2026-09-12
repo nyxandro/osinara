@@ -10,6 +10,7 @@ import { memoryReviewRepository } from "./memory-review/memory-review-repository
 import { memoryReviewDispatchRepository } from "./memory-review/memory-review-dispatch-repository.js";
 import { memoryReviewSessionRepository } from "./memory-review/memory-review-session-repository.js";
 import remember from "./tools/remember.js";
+import { sessionRepository } from "./sessions/session-repository.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 if (enabled) {
@@ -154,6 +155,7 @@ describeWithDatabase("bot memory source end-to-end", () => {
     const session = await memoryReviewSessionRepository.prepare(batch!, new Date());
     await memoryReviewDispatchRepository.markDispatchStarted(batch!, session.id);
     const ctx = context(f, session.id, false, batch!);
+    await sessionRepository.bindEveSession(session.id, ctx.session.id);
     await memoryReviewRepository.bindEveTurn({ applicationSessionId: session.id, batchId: batch!.batchId,
       eveSessionId: ctx.session.id, eveTurnId: ctx.session.turn.id });
     await bindMemoryTurnSources(ctx);

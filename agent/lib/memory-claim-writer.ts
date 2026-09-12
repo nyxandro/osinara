@@ -10,6 +10,7 @@ import { AppError } from "./app-error.js";
 import { insertClaimEvidence } from "./claim-evidence-writer.js";
 import { prepareExplicitClaimEvidence } from "./memory-explicit-claim-evidence.js";
 import { database } from "./database.js";
+import { fenceReviewMemoryWrite } from "./memory-review/memory-review-attempt.js";
 import type { MemoryAuthorization, MemoryScope } from "./memory-context.js";
 import { reinforceExactClaim } from "./memory-exact-reinforcement.js";
 import { enforceMemoryQuota } from "./memory-quota.js";
@@ -175,6 +176,7 @@ async function replayBeforeTitleEmbedding(
       await client.query("COMMIT");
       return { replay, reservation: null };
     }
+    await fenceReviewMemoryWrite(client, input);
     await replayMemoryThreadCreationAttempt(client, auth, input, inputHash);
     // A new reservation is persisted only after the Telegram source has been verified in this scope.
     await prepareExplicitClaimEvidence(client, auth, input);
@@ -237,7 +239,9 @@ export async function createMemoryClaim(
     );
   }
   requireScope(auth, input.scope);
-  const inputHash = memoryOperationHash(input);
+  // Attempt fencing is verified context, not mutation content; keep shipped replay hashes stable.
+  const { memoryReviewBatchId: _reviewBatchId, ...operationInput } = input;
+  const inputHash = memoryOperationHash(operationInput);
   let reservation: MemoryThreadCreationReservation | null = null;
   if (input.thread?.action === "create") {
     const preflight = await replayBeforeTitleEmbedding(auth, input, inputHash);
@@ -265,6 +269,7 @@ export async function createMemoryClaim(
       await client.query("COMMIT");
       return replay;
     }
+    await fenceReviewMemoryWrite(client, input);
     const attachLocked = await lockMemoryThreadCandidateAttach(client, auth, input);
     if (attachLocked) {
       // The operation can commit while this concurrent replay waits for the source lock.

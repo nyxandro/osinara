@@ -174,6 +174,8 @@ describeWithDatabase("069 memory review sandbox recovery migration", () => {
       )).resolves.toMatchObject({ rows: [{ count: 50, first: "5540", last: "5589" }] });
 
       // A later terminal outcome must not be hidden by the already-delivered generation-one alert.
+      // The current outbox implementation runs against its current schema, not the 069 snapshot.
+      await client.query(await readFile(resolve("migrations/093_memory_review_model_recovery.sql"), "utf8"));
       await client.query(
         `UPDATE memory_review_batches SET status = 'failed',
                 diagnostic_code = 'AGENT_MEMORY_REVIEW_TEST_TERMINAL', completed_at = now()

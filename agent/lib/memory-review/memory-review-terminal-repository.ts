@@ -12,6 +12,8 @@ import type { PoolClient } from "pg";
 import { SESSION_RETENTION_DAYS } from "../../config.js";
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
+import { blockPartialReviewAttempt, failBackgroundReview } from "./memory-review-model-recovery.js";
+import { isRetiredReviewAttempt, lockReviewAttempt, reviewAttemptHasWrites } from "./memory-review-attempt.js";
 import {
   MEMORY_REVIEW_ABANDONED_TURN_BATCH_SIZE,
   MEMORY_REVIEW_ABANDONED_TURN_TIMEOUT_MILLISECONDS,
@@ -19,7 +21,7 @@ import {
 import { enqueueMemoryReviewOwnerAlert } from "./memory-review-owner-alert-repository.js";
 import { terminalizeApplicationSession } from "./memory-review-session-terminal.js";
 
-export type MemoryReviewTerminalResult = "recorded" | "released" | "replayed" | "skipped";
+export type MemoryReviewTerminalResult = "recorded" | "released" | "replayed" | "skipped" | "waiting" | "blocked";
 export type MemoryReviewCompletionResult = MemoryReviewTerminalResult | "failed";
 
 const SOURCE_BINDING_MISSING = "AGENT_MEMORY_REVIEW_SOURCE_BINDING_MISSING";
@@ -79,7 +81,7 @@ async function retireAbandonedReviewSession(
   );
 }
 
-export type AbandonedReviewOutcome = "counted" | "released" | "skipped";
+export type AbandonedReviewOutcome = "counted" | "released" | "skipped" | "blocked";
 
 /**
  * The single terminal decision for a batch whose own turn will never report an outcome: it was
@@ -107,6 +109,11 @@ export async function resolveAbandonedReviewBatch(
     now: Date;
   },
 ): Promise<AbandonedReviewOutcome> {
+  const attempt = await lockReviewAttempt(client, input.batchId);
+  if (attempt?.batch_kind === "background" && await reviewAttemptHasWrites(client, attempt)) {
+    await blockPartialReviewAttempt(client, attempt, input.diagnosticCode, input.now);
+    return "blocked";
+  }
   // A turn writes memory only after `turn.started` bound its id, so a batch without that binding
   // cannot have written anything and needs no provenance lookup at all.
   const wrote = input.eveSessionId === null || input.eveTurnId === null
@@ -249,6 +256,10 @@ export const memoryReviewTerminalRepository = {
       }
       const exactTurn = recorded.eve_session_id === input.eveSessionId &&
         recorded.eve_turn_id === input.eveTurnId;
+      if (exactTurn && (recorded.status === "waiting_model" || recorded.diagnostic_code === "AGENT_MEMORY_REVIEW_PARTIAL_RESULT") ||
+          !exactTurn && await isRetiredReviewAttempt(client, input)) {
+        await client.query("COMMIT"); return "replayed";
+      }
       if (recorded.status === "skipped") {
         // Four paths now produce `skipped`, and its binding may be absent, so the exact-turn check
         // cannot apply. The pass is already terminal: a late completion event changes nothing.
@@ -337,6 +348,10 @@ export const memoryReviewTerminalRepository = {
     eveSessionId: string;
     eveTurnId: string;
   }): Promise<MemoryReviewTerminalResult> {
+    if (input.diagnosticCode !== TURN_CANCELLED) {
+      const result = await failBackgroundReview(input);
+      if (result !== null) return result;
+    }
     const client = await database().connect();
     try {
       await client.query("BEGIN");
@@ -354,6 +369,13 @@ export const memoryReviewTerminalRepository = {
         [input.batchId],
       );
       const batch = claimed.rows[0];
+      if (batch?.eve_session_id === input.eveSessionId && batch.eve_turn_id === input.eveTurnId &&
+          (batch.status === "waiting_model" || batch.diagnostic_code === "AGENT_MEMORY_REVIEW_PARTIAL_RESULT")) {
+        await client.query("COMMIT"); return "replayed";
+      }
+      if (batch && batch.eve_session_id !== input.eveSessionId && await isRetiredReviewAttempt(client, input)) {
+        await client.query("COMMIT"); return "replayed";
+      }
       // Eve lifecycle events are at-least-once, and a released batch leaves no row at all: both
       // describe the same outcome. A different recorded outcome is a real disagreement about what
       // happened to this turn and fails closed instead of being overwritten.

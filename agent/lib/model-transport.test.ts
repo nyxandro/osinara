@@ -80,6 +80,20 @@ const thinkingEvents = [
 describe("createConfiguredLanguageModel", () => {
   afterEach(() => vi.unstubAllEnvs());
 
+  it("observes a real completed model response through an explicit success callback", async () => {
+    const onSuccessfulCall = vi.fn();
+    const model = createConfiguredLanguageModel({
+      apiKey: "test", modelId: "health-test", maxOutputTokens: 100, onSuccessfulCall,
+      transport: { protocol: "openai-chat-completions", providerName: "test", baseUrl: "https://model.invalid/v1" },
+      fetch: async () => jsonResponse({ id: "health", created: 1, model: "health-test",
+        choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: "Готово" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }),
+    } as never);
+    await model.doGenerate({ prompt: [{ role: "user", content: [{ type: "text", text: "Проверка" }] }] });
+    expect(onSuccessfulCall).toHaveBeenCalledOnce();
+    expect(onSuccessfulCall).toHaveBeenCalledWith(expect.objectContaining({ routeKey: expect.any(String), observedAt: expect.any(Date) }));
+  });
+
   it("fails before fetch instead of sending an unrelated environment credential", async () => {
     const fetch = vi.fn();
     vi.stubEnv("ANTHROPIC_API_KEY", "foreign-anthropic-key");
