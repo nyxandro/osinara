@@ -10,11 +10,13 @@ import { createHash } from "node:crypto";
 
 export type AgentScheduleScope = "family" | "group" | "personal";
 export type AgentScheduleStatus = "active" | "completed" | "failed" | "leased" | "paused";
-export type AgentScheduleRecurrenceKind = "daily" | "once" | "weekly";
+export const AGENT_SCHEDULE_SIMPLE_RECURRENCE_KINDS = ["daily", "minutely", "hourly", "monthly", "yearly"] as const;
+export type AgentScheduleSimpleRecurrenceKind = (typeof AGENT_SCHEDULE_SIMPLE_RECURRENCE_KINDS)[number];
+export type AgentScheduleRecurrenceKind = AgentScheduleSimpleRecurrenceKind | "once" | "weekly";
 
 export type AgentScheduleRecurrence =
   | { kind: "once" }
-  | { interval: number; kind: "daily" }
+  | { interval: number; kind: AgentScheduleSimpleRecurrenceKind }
   | { daysOfWeek: number[]; interval: number; kind: "weekly" };
 
 export interface AgentScheduleRow {
@@ -56,8 +58,8 @@ export interface AgentScheduleRecord {
 
 function rowRecurrence(row: AgentScheduleRow): AgentScheduleRecurrence {
   if (row.recurrence_kind === "once") return { kind: "once" };
-  if (row.recurrence_kind === "daily") {
-    return { interval: row.recurrence_interval, kind: "daily" };
+  if (row.recurrence_kind !== "weekly") {
+    return { interval: row.recurrence_interval, kind: row.recurrence_kind };
   }
   return {
     daysOfWeek: [...(row.recurrence_days_of_week ?? [])],

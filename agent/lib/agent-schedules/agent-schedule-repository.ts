@@ -8,6 +8,7 @@
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
 import type { AgentScheduleAuthorization } from "./agent-schedule-context.js";
+import { recurrenceValues } from "./agent-schedule-recurrence.js";
 import {
   type AgentScheduleRecord,
   type AgentScheduleRecurrence,
@@ -65,22 +66,6 @@ export interface AgentScheduleUpdateInput {
   scenarioPrompt?: string;
   title?: string;
   userRequest?: string;
-}
-
-function recurrenceValues(recurrence: AgentScheduleRecurrence): {
-  daysOfWeek: number[] | null;
-  interval: number;
-  kind: AgentScheduleRecurrence["kind"];
-} {
-  if (recurrence.kind === "once") return { daysOfWeek: null, interval: 1, kind: "once" };
-  if (recurrence.kind === "daily") {
-    return { daysOfWeek: null, interval: recurrence.interval, kind: "daily" };
-  }
-  return {
-    daysOfWeek: recurrence.daysOfWeek,
-    interval: recurrence.interval,
-    kind: "weekly",
-  };
 }
 
 function requireDestination(auth: AgentScheduleAuthorization, scope: AgentScheduleScope): void {
@@ -156,10 +141,10 @@ export const agentScheduleRepository = {
         `INSERT INTO agent_schedules
            (family_id, owner_user_id, author_user_id, group_id, scope, title,
             user_request, scenario_prompt, timezone, recurrence_kind,
-            recurrence_interval, recurrence_days_of_week, recurrence_anchor_local,
+            recurrence_interval, recurrence_days_of_week, recurrence_anchor_local, recurrence_anchor_at,
              next_run_at, telegram_chat_id, telegram_chat_type, message_thread_id, forum_topic_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                  $13::timestamptz AT TIME ZONE $9, $13, $14, $15, $16::bigint, $17::bigint)
+                  $13::timestamptz AT TIME ZONE $9, $13, $13, $14, $15, $16::bigint, $17::bigint)
          RETURNING ${AGENT_SCHEDULE_COLUMNS}`,
         [
           auth.familyId,
@@ -315,7 +300,8 @@ export const agentScheduleRepository = {
              recurrence_kind = $5,
              recurrence_interval = $6,
              recurrence_days_of_week = $7,
-             recurrence_anchor_local = CASE WHEN $8 THEN $9::timestamptz AT TIME ZONE timezone ELSE recurrence_anchor_local END,
+              recurrence_anchor_local = CASE WHEN $8 THEN $9::timestamptz AT TIME ZONE timezone ELSE recurrence_anchor_local END,
+              recurrence_anchor_at = CASE WHEN $8 THEN $9::timestamptz ELSE recurrence_anchor_at END,
              occurrence_index = CASE WHEN $8 THEN 0 ELSE occurrence_index END,
              next_run_at = CASE WHEN $8 THEN $9 ELSE next_run_at END,
              status = CASE WHEN $10 = false THEN 'paused'::agent_schedule_status

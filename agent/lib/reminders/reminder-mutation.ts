@@ -63,7 +63,8 @@ export async function applyReminderUpdate(
     `UPDATE reminders
      SET content = $2,
          recurrence_unit = $3, recurrence_interval = $4,
-         recurrence_anchor_local = CASE WHEN $5 THEN $6::timestamptz AT TIME ZONE timezone ELSE recurrence_anchor_local END,
+          recurrence_anchor_local = CASE WHEN $5 THEN $6::timestamptz AT TIME ZONE timezone ELSE recurrence_anchor_local END,
+          recurrence_anchor_at = CASE WHEN $5 THEN $6::timestamptz ELSE recurrence_anchor_at END,
          occurrence_index = CASE WHEN $5 THEN 0 ELSE occurrence_index END,
          due_at = CASE WHEN $5 THEN $6 ELSE due_at END,
          available_at = CASE WHEN $5 THEN $6 ELSE available_at END,

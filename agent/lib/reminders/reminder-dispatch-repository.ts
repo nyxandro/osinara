@@ -9,6 +9,7 @@ import type { PoolClient } from "pg";
 
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
+import { nextAnchoredOccurrence } from "../scheduling/next-occurrence.js";
 import {
   type ProactiveDeliveryReceipt,
   recordProactiveDelivery,
@@ -16,7 +17,6 @@ import {
 import {
   REMINDER_DISPATCH_LATE_AFTER_MILLISECONDS,
   REMINDER_DISPATCH_MAX_SAFE_ATTEMPTS,
-  REMINDER_RECURRENCE_MAX_SKIPPED_OCCURRENCES,
 } from "./reminder-config.js";
 import type { ReminderRecurrenceUnit, ReminderScope } from "./reminder-record.js";
 
@@ -56,12 +56,6 @@ interface ClaimedRow {
   scope: ReminderScope;
   telegram_chat_id: string;
   timezone: string;
-}
-
-interface RecurrenceRow {
-  family_id: string;
-  next_due_at: Date;
-  next_index: number;
 }
 
 function requireClaimOptions(options: ClaimOptions): void {
@@ -317,42 +311,7 @@ export const reminderDispatchRepository = {
           [job.id, completedAt],
         );
       } else {
-        // Recompute from the original local anchor, skipping missed occurrences without replaying them.
-        const recurrence = await client.query<RecurrenceRow>(
-          `WITH RECURSIVE occurrences AS (
-             SELECT reminder.family_id, reminder.occurrence_index + 1 AS next_index,
-                    CASE reminder.recurrence_unit
-                      WHEN 'daily' THEN (reminder.recurrence_anchor_local + make_interval(days => reminder.recurrence_interval * (reminder.occurrence_index + 1))) AT TIME ZONE reminder.timezone
-                      WHEN 'weekly' THEN (reminder.recurrence_anchor_local + make_interval(days => 7 * reminder.recurrence_interval * (reminder.occurrence_index + 1))) AT TIME ZONE reminder.timezone
-                      WHEN 'monthly' THEN (reminder.recurrence_anchor_local + make_interval(months => reminder.recurrence_interval * (reminder.occurrence_index + 1))) AT TIME ZONE reminder.timezone
-                     END AS next_due_at,
-                    reminder.occurrence_index AS initial_index
-             FROM reminders AS reminder WHERE reminder.id = $1
-             UNION ALL
-             SELECT occurrence.family_id, occurrence.next_index + 1,
-                    CASE reminder.recurrence_unit
-                      WHEN 'daily' THEN (reminder.recurrence_anchor_local + make_interval(days => reminder.recurrence_interval * (occurrence.next_index + 1))) AT TIME ZONE reminder.timezone
-                      WHEN 'weekly' THEN (reminder.recurrence_anchor_local + make_interval(days => 7 * reminder.recurrence_interval * (occurrence.next_index + 1))) AT TIME ZONE reminder.timezone
-                      WHEN 'monthly' THEN (reminder.recurrence_anchor_local + make_interval(months => reminder.recurrence_interval * (occurrence.next_index + 1))) AT TIME ZONE reminder.timezone
-                     END,
-                    occurrence.initial_index
-             FROM occurrences AS occurrence
-             JOIN reminders AS reminder ON reminder.id = $1
-             WHERE occurrence.next_due_at <= $2
-               AND occurrence.next_index - occurrence.initial_index < $3
-           )
-           SELECT family_id, next_index, next_due_at
-           FROM occurrences WHERE next_due_at > $2
-           ORDER BY next_index LIMIT 1`,
-          [job.id, completedAt, REMINDER_RECURRENCE_MAX_SKIPPED_OCCURRENCES],
-        );
-        const next = recurrence.rows[0];
-        if (!next) {
-          throw new AppError(
-            "AGENT_REMINDER_RECURRENCE_EXHAUSTED",
-            "Не удалось вычислить следующее время повторяющегося напоминания",
-          );
-        }
+        const next = await nextAnchoredOccurrence(client, "reminders", job.id, completedAt);
         await client.query(
           `UPDATE reminders
            SET status = 'active', occurrence_index = $2, due_at = $3, available_at = $3,
@@ -360,7 +319,7 @@ export const reminderDispatchRepository = {
                dispatch_started_at = NULL, delayed_by_quiet_hours = false,
                last_error_code = NULL, updated_at = $4
            WHERE id = $1`,
-          [job.id, next.next_index, next.next_due_at, completedAt],
+          [job.id, next.next_index, next.next_run_at, completedAt],
         );
       }
       await client.query(

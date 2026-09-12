@@ -58,6 +58,24 @@ describeWithDatabase("external agent schedule repository", () => {
   });
   afterAll(async () => closeDatabase());
 
+  it.each(["minutely", "hourly", "monthly", "yearly"] as const)("creates and updates %s automation without losing its identity", async (kind) => {
+    const setup = await fixture();
+    const auth = { familyId: setup.familyId, requestedBy: setup.ownerId };
+    const recurrence = { kind, interval: 1 };
+    const created = await externalAgentScheduleRepository.create(auth, {
+      capabilityAllowlist: [], firstRunAt: new Date("2026-10-25T02:30:00+02:00"), operationKey: "new-period",
+      recurrence, scenarioPrompt: "Проверь ресурс", telegramChatId: "-100-external-schedule",
+      timezone: "Europe/Berlin", title: "Проверка", userRequest: "Проверяй по расписанию",
+    });
+    expect(created).toMatchObject({ recurrence, scope: "group" });
+    const anchor = await database().query("SELECT recurrence_anchor_at FROM agent_schedules WHERE id = $1", [created.id]);
+    expect(anchor.rows[0].recurrence_anchor_at).toEqual(new Date("2026-10-25T00:30:00Z"));
+    const updated = await externalAgentScheduleRepository.update(auth, created.id, {
+      recurrence: { kind, interval: 2 }, operationKey: "new-period-update",
+    });
+    expect(updated).toMatchObject({ id: created.id, recurrence: { kind, interval: 2 }, scope: "group" });
+  });
+
   it("creates an owner-approved group schedule from the registered destination", async () => {
     const setup = await fixture();
     const authorization = { familyId: setup.familyId, requestedBy: setup.ownerId };

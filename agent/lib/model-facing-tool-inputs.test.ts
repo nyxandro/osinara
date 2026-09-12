@@ -8,6 +8,7 @@
  */
 import type { ToolContext, ToolDefinition } from "eve/tools";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 const toolCalls = vi.hoisted(() => ({
   approveInvitation: vi.fn(),
@@ -173,6 +174,23 @@ describe("model-facing tool input hardening", () => {
 
   it("never requests approval for trusted reminder mutations", () => {
     expect(manageReminder.approval).toBeUndefined();
+  });
+
+  it.each(["minutely", "hourly", "yearly"])("accepts %s recurrence for trusted reminders", async (unit) => {
+    const recurrence = { unit, interval: 1 };
+    const input = {
+      action: "create", content: "Проверка", firstRunAt: "2026-09-12T18:00:00+03:00",
+      recurrence, scope: "personal", timezone: "Europe/Moscow",
+    };
+    expect((manageReminder.inputSchema as z.ZodType).safeParse(input).success).toBe(true);
+    await manageReminder.execute(input as never, context);
+    expect(toolCalls.reminderCreate).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ recurrence }));
+    await manageReminder.execute({ action: "update", id: "00000000-0000-4000-8000-000000000001", recurrence } as never, context);
+    expect(toolCalls.reminderUpdate).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ recurrence }));
+    for (const interval of [0, -1, 0.5]) {
+      await expect(manageReminder.execute({ ...input, recurrence: { unit, interval } } as never, context))
+        .rejects.toMatchObject({ code: "AGENT_REMINDER_INPUT_INVALID" });
+    }
   });
 
   it("ignores known create-only sibling fields on a recurrence update", async () => {

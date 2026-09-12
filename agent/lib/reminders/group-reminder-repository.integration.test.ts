@@ -176,6 +176,25 @@ describeWithDatabase("group reminder repository", () => {
       .rejects.toThrowError(/AGENT_REMINDER_DESTINATION_INVALID/);
   });
 
+  it.each(["minutely", "hourly", "yearly"] as const)("persists and delivers %s group reminders", async (unit) => {
+    const fixture = await createFixture();
+    const auth = groupAuth(fixture, FIRST_AUTHOR);
+    const recurrence = { unit, interval: 1 };
+    const record = await groupReminderRepository.create(auth, {
+      content: "Проверка", firstRunAt: new Date("2026-09-04T09:00:00Z"), operationKey: "interval-create", recurrence,
+    });
+    expect(record.recurrence).toEqual(recurrence);
+    await groupReminderRepository.update(groupAuth(fixture, SECOND_AUTHOR), record.id, {
+      operationKey: "interval-update", firstRunAt: new Date("2026-09-04T10:00:00Z"), recurrence,
+    });
+    const [job] = await reminderDispatchRepository.claimDue({ now: new Date("2026-09-04T10:00:00Z"), limit: 1, leaseMilliseconds: 300_000 });
+    await reminderDispatchRepository.markDispatchStarted(job!.id, job!.leaseToken);
+    await reminderDispatchRepository.complete(job!, new Date("2026-09-04T10:00:01Z"), { messageId: "603", text: "Проверка" });
+    const next = { minutely: "2026-09-04T10:01:00.000Z", hourly: "2026-09-04T11:00:00.000Z", yearly: "2027-09-04T10:00:00.000Z" }[unit];
+    expect((await groupReminderRepository.list(auth, { limit: 10 })).items)
+      .toEqual([expect.objectContaining({ id: record.id, recurrence, nextRunAt: next })]);
+  });
+
   it("refuses a first run far in the past, so no anchor can replay missed occurrences", async () => {
     const fixture = await createFixture();
 

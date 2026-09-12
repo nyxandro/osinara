@@ -89,8 +89,26 @@ describe("manage_agent_schedule", () => {
       recurrence: { daysOfWeek: [1], interval: 1, kind: "daily" },
     }).success).toBe(false);
     expect(schema.safeParse({ ...validDailyCreatePayload, recurrence: { interval: 1, kind: "once" } }).success).toBe(false);
-    expect(schema.safeParse({ ...validDailyCreatePayload, recurrence: { interval: 1, kind: "monthly" } }).success).toBe(false);
+    expect(schema.safeParse({ ...validDailyCreatePayload, recurrence: { interval: 1, kind: "secondly" } }).success).toBe(false);
   });
+
+  it.each(["minutely", "hourly", "monthly", "yearly"] as const)(
+    "creates and updates %s schedules through both schema and execution",
+    async (kind) => {
+      const recurrence = { interval: 1, kind };
+      const schema = manageAgentSchedule.inputSchema as z.ZodType;
+      expect(schema.safeParse({ ...validDailyCreatePayload, recurrence }).success).toBe(true);
+      await manageAgentSchedule.execute({ ...validDailyCreatePayload, recurrence } as never, context);
+      expect(createSchedule).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ recurrence }));
+      await manageAgentSchedule.execute({ action: "update", id: scheduleId, recurrence } as never, context);
+      expect(updateSchedule).toHaveBeenCalledWith(expect.anything(), scheduleId, expect.objectContaining({ recurrence }));
+      for (const invalid of [{ interval: 0, kind }, { interval: 0.5, kind }, { interval: 1, kind, daysOfWeek: [1] }]) {
+        expect(schema.safeParse({ ...validDailyCreatePayload, recurrence: invalid }).success).toBe(false);
+        await expect(manageAgentSchedule.execute({ ...validDailyCreatePayload, recurrence: invalid } as never, context))
+          .rejects.toMatchObject({ code: "AGENT_SCHEDULE_INPUT_INVALID" });
+      }
+    },
+  );
 
   it("routes a valid daily schedule payload into the repository", async () => {
     await expect(manageAgentSchedule.execute(validDailyCreatePayload, context)).resolves.toEqual({

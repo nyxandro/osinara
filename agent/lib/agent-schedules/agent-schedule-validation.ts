@@ -2,7 +2,7 @@
  * Agent schedule input validation and recurrence normalization.
  *
  * Exports:
- * - `AgentScheduleInputRecurrence`: supported one-time, daily, and weekly recurrence.
+ * - `AgentScheduleInputRecurrence`: one-time and minute-to-year recurrence.
  * - Required-field validators for titles, prompts, dates, recurrence, and Telegram topic IDs.
  */
 import { AppError } from "../app-error.js";
@@ -13,7 +13,7 @@ import {
   AGENT_SCHEDULE_USER_REQUEST_MAX_LENGTH,
   AGENT_SCHEDULE_WEEKDAYS,
 } from "./agent-schedule-config.js";
-import type { AgentScheduleRecurrence } from "./agent-schedule-record.js";
+import { AGENT_SCHEDULE_SIMPLE_RECURRENCE_KINDS, type AgentScheduleRecurrence, type AgentScheduleSimpleRecurrenceKind } from "./agent-schedule-record.js";
 
 export type AgentScheduleInputRecurrence = AgentScheduleRecurrence;
 
@@ -82,13 +82,13 @@ export function requireAgentScheduleRecurrence(
   recurrence: AgentScheduleInputRecurrence,
 ): AgentScheduleRecurrence {
   if (recurrence.kind === "once") return { kind: "once" };
-  if (recurrence.kind === "daily") {
-    return { interval: requireInterval(recurrence.interval), kind: "daily" };
+  if (recurrence.kind !== "weekly" && AGENT_SCHEDULE_SIMPLE_RECURRENCE_KINDS.includes(recurrence.kind as AgentScheduleSimpleRecurrenceKind)) {
+    return { interval: requireInterval(recurrence.interval), kind: recurrence.kind };
   }
   if (recurrence.kind !== "weekly") {
     throw new AppError(
       "AGENT_SCHEDULE_RECURRENCE_INVALID",
-      "Поддерживаются только one-time, daily и weekly расписания",
+      "Поддерживаются однократные расписания и повторения по минутам, часам, дням, неделям, месяцам и годам",
     );
   }
 

@@ -23,7 +23,7 @@ import {
   REMINDER_LIST_MAX_LIMIT,
   REMINDER_RECURRENCE_INTERVAL_MAX,
 } from "../reminders/reminder-config.js";
-import type { ReminderRecurrence } from "../reminders/reminder-record.js";
+import { REMINDER_RECURRENCE_UNITS, type ReminderRecurrence } from "../reminders/reminder-record.js";
 import {
   optionalIsoDate,
   optionalString,
@@ -41,7 +41,6 @@ type AnyToolDefinition = ToolDefinition<any, any>;
 
 const INPUT_ERROR_CODE = "AGENT_REMINDER_INPUT_INVALID";
 const TOOL_ACTIONS = ["create", "update", "pause", "resume", "delete"] as const;
-const RECURRENCE_UNITS = ["daily", "weekly", "monthly"] as const;
 const TOP_LEVEL_FIELDS = ["action", "content", "firstRunAt", "id", "recurrence"] as const;
 // The chat has one timezone, so the wall clock reported to the human and the instant that is stored
 // must be the same reading. A UTC timestamp would silently move the reminder by three hours.
@@ -59,7 +58,7 @@ function requireMoscowOffset(raw: unknown): void {
 
 const recurrenceSchema = z.object({
   interval: z.number().int().min(1).max(REMINDER_RECURRENCE_INTERVAL_MAX),
-  unit: z.enum(RECURRENCE_UNITS),
+  unit: z.enum(REMINDER_RECURRENCE_UNITS),
 }).strict();
 
 const manageReminderSchema = z.object({
@@ -80,7 +79,7 @@ function requireRecurrence(raw: unknown): ReminderRecurrence | null {
   }
   const recurrence = raw as Record<string, unknown>;
   requireOnlyFields(recurrence, ["interval", "unit"], "recurrence", INPUT_ERROR_CODE);
-  const unit = requiredEnum(recurrence, "unit", RECURRENCE_UNITS, INPUT_ERROR_CODE);
+  const unit = requiredEnum(recurrence, "unit", REMINDER_RECURRENCE_UNITS, INPUT_ERROR_CODE);
   const interval = recurrence.interval;
   if (
     typeof interval !== "number" || !Number.isInteger(interval) ||
@@ -151,7 +150,7 @@ const MANAGE_DESCRIPTION = [
   `Лимит: не больше ${GROUP_REMINDER_MAX_PER_CHAT} действующих напоминаний на весь чат.`,
   `Часовой пояс чата всегда ${GROUP_REMINDER_TIMEZONE}, менять его нельзя; называй время по Москве, когда подтверждаешь напоминание.`,
   "Create payload: {\"action\":\"create\",\"content\":\"Созвон по проекту\",\"firstRunAt\":\"2026-09-04T18:00:00+03:00\",\"recurrence\":null}.",
-  "Повторение: без повтора recurrence=null; для повтора передай {\"unit\":\"daily\",\"interval\":1}, {\"unit\":\"weekly\",\"interval\":1} или {\"unit\":\"monthly\",\"interval\":1}.",
+  "Повторение: без повтора recurrence=null; для повтора передай {\"unit\":\"minutely\",\"interval\":5}. unit: minutely, hourly, daily, weekly, monthly, yearly; interval целый от 1 до 365. Минимум 1 минута. Минуты и часы отсчитываются как длительность, календарные периоды сохраняют местное время. Отсутствующая дата переносится на последний день месяца без потери исходной даты для следующих повторов. Проверка времени минутная, пропущенные повторы не догоняются.",
   "Update передаёт id и только изменяемые content, firstRunAt или recurrence. Pause/resume/delete передают только action и id.",
   "Один вызов работает ровно с одним напоминанием. Просьбу о нескольких выполняй отдельными вызовами без поштучного согласования; сообщай только об успешно выполненных действиях.",
   "Человек называет напоминание словами, а не id: найди нужную запись через list_reminders и, если под описание подходит несколько, уточни какую именно.",
