@@ -19,6 +19,7 @@ import {
   createPreferenceBlockResolver,
   createReactionSetBlockResolver,
 } from "./turn-blocks.js";
+import { EVE_EMPTY_DELIVERY_MARKER } from "../eve-empty-delivery.js";
 import { formatReactionSetAnnouncement } from "../telegram-reaction-announcement.js";
 import { TELEGRAM_DEFAULT_REACTIONS } from "../telegram-reaction-set.js";
 
@@ -86,6 +87,29 @@ const channelAuth: SessionAuth = {
 const reactionPolicy = vi.fn().mockResolvedValue(null);
 
 describe("mode block resolution", () => {
+  it("offers the group response outcomes only to a live root group turn", async () => {
+    const resolve = createModeBlockResolver({
+      loadCapabilities: vi.fn().mockResolvedValue(new Set()),
+      loadReactionPolicy: reactionPolicy,
+      loadSkills: vi.fn().mockResolvedValue(new Set()),
+    });
+    const scheduledCurrent = auth({ ...externalAuth.current!.attributes, scheduledRunId: "run-1" });
+
+    const root = await resolve(context(externalAuth));
+    const child = await resolve({ ...context(externalAuth), channel: { kind: "subagent" } });
+    const nested = await resolve({ ...context(externalAuth), session: { auth: externalAuth, id: "session-1", parent: {} } });
+    const scheduled = await resolve(context({ ...scheduledCurrent, initiator: scheduledCurrent.current }));
+    const personal = await resolve(context(privateAuth));
+
+    // A child answers its parent, a scheduled run has no message to stay silent on, and a private
+    // chat is direct by definition: none of them may learn the silence marker.
+    expect(root).toContain(EVE_EMPTY_DELIVERY_MARKER);
+    expect(child).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
+    expect(nested).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
+    expect(scheduled).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
+    expect(personal).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
+  });
+
   it("resolves the verified profile for a trusted conversation", async () => {
     const resolve = createModeBlockResolver({
       loadCapabilities: vi.fn(),

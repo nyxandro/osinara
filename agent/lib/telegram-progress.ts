@@ -10,6 +10,7 @@
  * policy never receives.
  */
 import { AppError } from "./app-error.js";
+import { EVE_EMPTY_DELIVERY_MARKER } from "./eve-empty-delivery.js";
 import { stripTelegramAsideDirectives } from "./telegram-authored-split.js";
 import {
   isTelegramMessageReactionEmoji,
@@ -45,7 +46,13 @@ export function completedTelegramOutput(data: {
   if (data.finishReason === TOOL_CALLS_FINISH_REASON) {
     const progress = stripTelegramAsideDirectives(message);
     // Transport directives belong to the final answer; interim noise is dropped, never delivered.
-    if (!progress || progress.includes(TELEGRAM_REACTION_DIRECTIVE_FRAGMENT)) return null;
+    if (
+      !progress ||
+      progress.includes(TELEGRAM_REACTION_DIRECTIVE_FRAGMENT) ||
+      progress.includes(EVE_EMPTY_DELIVERY_MARKER)
+    ) {
+      return null;
+    }
     return { kind: "progress", message: progress };
   }
 

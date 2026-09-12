@@ -21,6 +21,15 @@ describe("completedTelegramOutput", () => {
     ).toEqual({ kind: "progress", message: "Собрал информацию. Теперь формирую документ." });
   });
 
+  it("drops interim text that carries the silence marker instead of announcing it", () => {
+    expect(
+      completedTelegramOutput({
+        finishReason: "tool-calls",
+        message: "Молчу <eve-empty-delivery/>",
+      }),
+    ).toBeNull();
+  });
+
   it("drops interim text that carries a reaction directive", () => {
     expect(
       completedTelegramOutput({
