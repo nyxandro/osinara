@@ -138,13 +138,14 @@ ${CURRENT_TIME_TOOL_RULES}`,
 function privateInstructions(
   scheduledRun: boolean,
   reactions: readonly string[] | null,
+  subagentTurn: boolean,
 ): string {
   return block([
     ...PRIVATE_INSTRUCTION_SECTIONS,
     // A scheduled report is not a live exchange: it has no message to react to and never imitates
     // a spontaneous afterthought.
-    scheduledRun ? null : SPOKEN_ASIDE_RULES,
-    scheduledRun ? null : reactionRules(reactions),
+    scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,
+    scheduledRun || subagentTurn ? null : reactionRules(reactions),
     scheduledRun ? null : trustedBehaviorPreferenceRules(),
   ]);
 }
@@ -203,8 +204,8 @@ function familyInstructions(
   return block([
     ...FAMILY_INSTRUCTION_SECTIONS,
     scheduledRun || subagentTurn ? null : GROUP_RESPONSE_OUTCOMES,
-    scheduledRun ? null : SPOKEN_ASIDE_RULES,
-    scheduledRun ? null : reactionRules(reactions),
+    scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,
+    scheduledRun || subagentTurn ? null : reactionRules(reactions),
     scheduledRun ? null : trustedBehaviorPreferenceRules(),
   ]);
 }
@@ -320,8 +321,8 @@ ${GROUP_TIMELINE_TRUST}`,
 Не используй личные или семейные аккаунты, токены и браузерные авторизации. Браузер этой группы имеет собственное изолированное состояние. Не проси публиковать секреты в общем чате; если требуемое подключение не настроено для группы, сообщи об этом вместо попытки использовать чужое.`,
     EXTERNAL_GROUP_MODEL_POLICY,
     scheduledRun || subagentTurn ? null : GROUP_RESPONSE_OUTCOMES,
-    scheduledRun ? null : SPOKEN_ASIDE_RULES,
-    scheduledRun ? null : reactionRules(reactions),
+    scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,
+    scheduledRun || subagentTurn ? null : reactionRules(reactions),
     includeApplicationCore && !scheduledRun ? trustedBehaviorPreferenceRules() : null,
     reminders ? GROUP_REMINDER_RULES : null,
     channelAuthored ? CHANNEL_AUTHORED_REMINDER_NOTICE : null,
@@ -337,7 +338,7 @@ export function modeInstructions(input: ModeInstructionsInput): string {
   const reactions = input.reactions ?? null;
   const scheduledRun = input.scheduledRun ?? false;
   const subagentTurn = input.subagentTurn ?? false;
-  if (input.environment === "private") return privateInstructions(scheduledRun, reactions);
+  if (input.environment === "private") return privateInstructions(scheduledRun, reactions, subagentTurn);
   if (input.environment === "family") return familyInstructions(scheduledRun, reactions, subagentTurn);
   return externalInstructions(
     input.capabilities,

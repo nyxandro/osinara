@@ -110,6 +110,27 @@ describe("mode block resolution", () => {
     expect(personal).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
   });
 
+  it("keeps every transport directive away from a subagent child", async () => {
+    const resolve = createModeBlockResolver({
+      loadCapabilities: vi.fn().mockResolvedValue(new Set()),
+      loadReactionPolicy: vi.fn().mockResolvedValue({ allowsAll: false, emoji: ["👍", "🔥"] }),
+      loadSkills: vi.fn().mockResolvedValue(new Set()),
+    });
+
+    const root = await resolve(context(externalAuth));
+    const child = await resolve({ ...context(externalAuth), channel: { kind: "subagent" } });
+    const nested = await resolve({ ...context(privateAuth), session: { auth: privateAuth, id: "session-1", parent: {} } });
+
+    // A child's answer becomes the parent's tool result, never a Telegram delivery, so the split
+    // and reaction directives would only pollute that result.
+    expect(root).toContain("[[split]]");
+    expect(root).toContain("<telegram-reaction>");
+    for (const block of [child, nested]) {
+      expect(block).not.toContain("[[split]]");
+      expect(block).not.toContain("<telegram-reaction>");
+    }
+  });
+
   it("resolves the verified profile for a trusted conversation", async () => {
     const resolve = createModeBlockResolver({
       loadCapabilities: vi.fn(),
