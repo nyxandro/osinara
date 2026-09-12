@@ -17,6 +17,7 @@ import { createMainAgentMemoryFixture } from "./memory-agent-write.integration-f
 import { memoryReviewDispatchRepository } from "./memory-review/memory-review-dispatch-repository.js";
 import { memoryReviewRepository } from "./memory-review/memory-review-repository.js";
 import { memoryReviewSessionRepository } from "./memory-review/memory-review-session-repository.js";
+import { sessionRepository } from "./sessions/session-repository.js";
 import {
   bindMemoryTurnSources,
   releaseMemoryTurnSources,
@@ -276,6 +277,7 @@ describeWithDatabase("critical main-agent memory paths", () => {
       new Date("2026-08-13T10:00:01.000Z"),
     );
     expect(await memoryReviewDispatchRepository.markDispatchStarted(batch!, appSession.id)).toBe(true);
+    await sessionRepository.bindEveSession(appSession.id, "eve-background-memory-session");
     await memoryReviewRepository.bindEveTurn({
       applicationSessionId: appSession.id,
       batchId: batch!.batchId,

@@ -10,7 +10,7 @@ import {
   REMINDER_CONTENT_MAX_LENGTH,
   REMINDER_RECURRENCE_INTERVAL_MAX,
 } from "./reminder-config.js";
-import type { ReminderRecurrence } from "./reminder-record.js";
+import { REMINDER_RECURRENCE_UNITS, type ReminderRecurrence } from "./reminder-record.js";
 
 export interface NotificationSettingsInput {
   quietEnd: string | null;
@@ -43,7 +43,7 @@ export function requireReminderRecurrence(
 ): ReminderRecurrence | null {
   if (value === null) return null;
   if (
-    !["daily", "weekly", "monthly"].includes(value.unit) ||
+    !REMINDER_RECURRENCE_UNITS.includes(value.unit) ||
     !Number.isInteger(value.interval) ||
     value.interval < 1 ||
     value.interval > REMINDER_RECURRENCE_INTERVAL_MAX

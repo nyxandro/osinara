@@ -12,13 +12,19 @@ export async function inspectMemoryReviewLanes() {
     laneId: string; groupTitle: string; batchId: string | null; status: string | null;
     diagnosticCode: string | null; processedThroughSequence: string; waitingSources: number;
     fromSequence: string | null; throughSequence: string | null; sourceCount: number | null;
+    modelRouteKey: string | null; modelRecoveryGeneration: number | null;
+    waitingSince: Date | null; lastModelSuccessAt: Date | null;
+    eveSessionId: string | null; eveTurnId: string | null;
   }>(
     `SELECT lane.id AS "laneId", telegram_group.title AS "groupTitle",
             batch.id AS "batchId", batch.status::text AS status,
             batch.diagnostic_code AS "diagnosticCode",
             lane.processed_through_sequence::text AS "processedThroughSequence",
             batch.from_sequence::text AS "fromSequence", batch.through_sequence::text AS "throughSequence",
-            batch.source_count AS "sourceCount",
+             batch.source_count AS "sourceCount",
+             batch.model_route_key AS "modelRouteKey", batch.model_recovery_generation AS "modelRecoveryGeneration",
+             batch.waiting_since AS "waitingSince", health.observed_at AS "lastModelSuccessAt",
+             batch.eve_session_id AS "eveSessionId", batch.eve_turn_id AS "eveTurnId",
             (SELECT count(*)::integer FROM telegram_group_messages AS message
               WHERE message.conversation_id = lane.conversation_id
                 AND message.message_thread_id IS NOT DISTINCT FROM lane.message_thread_id
@@ -27,8 +33,9 @@ export async function inspectMemoryReviewLanes() {
        FROM memory_review_lanes AS lane
        JOIN application_conversations AS conversation ON conversation.id = lane.conversation_id
        JOIN telegram_groups AS telegram_group ON telegram_group.id = conversation.telegram_group_id
-       LEFT JOIN memory_review_batches AS batch ON batch.lane_id = lane.id
-         AND batch.predecessor_sequence = lane.processed_through_sequence
+        LEFT JOIN memory_review_batches AS batch ON batch.lane_id = lane.id
+          AND batch.predecessor_sequence = lane.processed_through_sequence
+        LEFT JOIN model_availability AS health ON health.route_key = batch.model_route_key
        ORDER BY lane.created_at, lane.id`,
   );
   return result.rows;

@@ -8,6 +8,7 @@
  * - A Moscow offset is required, so a UTC timestamp cannot move the reminder by three hours.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 const repository = vi.hoisted(() => ({
   create: vi.fn(),
@@ -50,6 +51,18 @@ describe("external group reminder tools", () => {
 
   it("never requests approval for reminder mutations", () => {
     expect(manageReminder.approval).toBeUndefined();
+  });
+
+  it.each(["minutely", "hourly", "yearly"])("accepts %s recurrence for group create and update", async (unit) => {
+    const recurrence = { interval: 1, unit };
+    const payload = { action: "create", content: "Проверка", firstRunAt: "2026-09-12T18:00:00+03:00", recurrence };
+    expect((manageReminder.inputSchema as z.ZodType).safeParse(payload).success).toBe(true);
+    await manageReminder.execute(payload as never, context);
+    expect(repository.create).toHaveBeenCalledWith(AUTH, expect.objectContaining({ recurrence }));
+    await manageReminder.execute({ action: "update", id: REMINDER_ID, recurrence } as never, context);
+    expect(repository.update).toHaveBeenCalledWith(AUTH, REMINDER_ID, expect.objectContaining({ recurrence }));
+    await expect(manageReminder.execute({ ...payload, recurrence: { unit, interval: 0 } } as never, context))
+      .rejects.toMatchObject({ code: "AGENT_REMINDER_INPUT_INVALID" });
   });
 
   it("rejects an incomplete payload before any write", async () => {

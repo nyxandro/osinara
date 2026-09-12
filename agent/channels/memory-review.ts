@@ -17,11 +17,13 @@ import { memoryReviewRepository } from "../lib/memory-review/memory-review-repos
 import {
   memoryReviewBatchId,
   memoryReviewBatchIdFromContinuationToken,
+  reviewContinuationToken,
 } from "../lib/memory-review/memory-review-session.js";
 import { memoryReviewDispatchRepository } from "../lib/memory-review/memory-review-dispatch-repository.js";
 import { applicationSessionId } from "../lib/sessions/session-context.js";
 import { sessionRepository } from "../lib/sessions/session-repository.js";
 import { isHookConflictFailure } from "../lib/telegram-session-failure.js";
+import { recoverableModelFailureCode } from "../lib/model-failure.js";
 
 export default defineChannel<undefined, void, { batchId: string }>({
   // Eve 0.32 discovers authored receive targets only when the channel owns a route. This route is
@@ -34,7 +36,11 @@ export default defineChannel<undefined, void, { batchId: string }>({
         "AGENT_MEMORY_REVIEW_HANDOFF_INVALID: Internal review target does not match verified auth",
       );
     }
-    return from(`memory-review:${batchId}`).send(input.message, {
+    const generation = input.auth.attributes.memoryReviewGeneration;
+    if (typeof generation !== "string" || !/^(?:0|[1-9]\d*)$/u.test(generation)) throw new Error(
+      "AGENT_MEMORY_REVIEW_GENERATION_INVALID: Internal review has no verified attempt number",
+    );
+    return from(reviewContinuationToken(batchId, Number(generation))).send(input.message, {
       auth: input.auth,
       mode: "task",
     });
@@ -76,7 +82,7 @@ export default defineChannel<undefined, void, { batchId: string }>({
       );
       const terminal = await memoryReviewRepository.failRunning({
         batchId,
-        diagnosticCode: data.code,
+        diagnosticCode: recoverableModelFailureCode(data) ?? data.code,
         eveSessionId: ctx.session.id,
         eveTurnId: ctx.session.turn.id,
       });
@@ -106,7 +112,7 @@ export default defineChannel<undefined, void, { batchId: string }>({
       );
       await memoryReviewDispatchRepository.markSessionAmbiguous({
         batchId,
-        diagnosticCode: "AGENT_MEMORY_REVIEW_SESSION_FAILED_AMBIGUOUS",
+        diagnosticCode: recoverableModelFailureCode(data) ?? "AGENT_MEMORY_REVIEW_SESSION_FAILED_AMBIGUOUS",
         eveSessionId: data.sessionId,
       });
     },

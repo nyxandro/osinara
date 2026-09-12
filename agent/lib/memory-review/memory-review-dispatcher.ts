@@ -64,6 +64,7 @@ function reviewAuth(batch: ClaimedMemoryReviewBatch, prepared: PreparedSession) 
       groupType: batch.groupType,
       memoryReviewBatchId: batch.batchId,
       memoryReviewMode: "background",
+      memoryReviewGeneration: String(prepared.generation),
       memoryReviewSourceEntryIds: batch.sourceEntryIds,
       memoryScopes: [batch.scope],
       role: batch.groupType === "external" ? "external" : "owner",

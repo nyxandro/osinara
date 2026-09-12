@@ -10,7 +10,8 @@ import { createHash } from "node:crypto";
 
 export type ReminderScope = "family" | "group" | "personal";
 export type ReminderStatus = "active" | "completed" | "failed" | "leased" | "paused";
-export type ReminderRecurrenceUnit = "daily" | "monthly" | "weekly";
+export const REMINDER_RECURRENCE_UNITS = ["daily", "weekly", "monthly", "minutely", "hourly", "yearly"] as const;
+export type ReminderRecurrenceUnit = (typeof REMINDER_RECURRENCE_UNITS)[number];
 
 export interface ReminderRecurrence {
   interval: number;

@@ -16,8 +16,8 @@ import { database } from "../database.js";
 import { parseExternalGroupToolAllowlist } from "../tool-policy/group-tool-catalog.js";
 import type { AgentScheduleAuthorization } from "./agent-schedule-context.js";
 import { agentScheduleRepository } from "./agent-schedule-repository.js";
+import { recurrenceValues } from "./agent-schedule-recurrence.js";
 import {
-  type AgentScheduleRecurrence,
   type AgentScheduleRow,
   agentScheduleOperationHash,
   rowToAgentSchedule,
@@ -182,18 +182,6 @@ function requireCapabilitySubset(
   return [...scheduled];
 }
 
-function recurrenceValues(recurrence: AgentScheduleRecurrence): {
-  daysOfWeek: number[] | null;
-  interval: number;
-  kind: AgentScheduleRecurrence["kind"];
-} {
-  if (recurrence.kind === "once") return { daysOfWeek: null, interval: 1, kind: "once" };
-  if (recurrence.kind === "daily") {
-    return { daysOfWeek: null, interval: recurrence.interval, kind: "daily" };
-  }
-  return { daysOfWeek: recurrence.daysOfWeek, interval: recurrence.interval, kind: "weekly" };
-}
-
 function status(row: ExternalScheduleStatusRow) {
   return {
     ...rowToAgentSchedule(row),
@@ -289,11 +277,11 @@ export const externalAgentScheduleRepository = {
         `INSERT INTO agent_schedules
            (family_id, owner_user_id, author_user_id, group_id, scope, title,
             user_request, scenario_prompt, timezone, recurrence_kind,
-            recurrence_interval, recurrence_days_of_week, recurrence_anchor_local,
+            recurrence_interval, recurrence_days_of_week, recurrence_anchor_local, recurrence_anchor_at,
             next_run_at, telegram_chat_id, telegram_chat_type, message_thread_id,
             forum_topic_id, history_window_days, tool_allowlist)
          VALUES ($1, NULL, $2, $3, 'group', $4, $5, $6, $7, $8, $9, $10,
-                 $11::timestamptz AT TIME ZONE $7, $11, $12, $13, NULL, NULL, $14, $15)
+                 $11::timestamptz AT TIME ZONE $7, $11, $11, $12, $13, NULL, NULL, $14, $15)
          RETURNING id`,
         [
           auth.familyId,

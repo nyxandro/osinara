@@ -27,6 +27,9 @@ import { AppError } from "./app-error.js";
 import { createMiniMaxAnthropicCompatibilityFetch } from "./minimax-anthropic-compatibility.js";
 import { placeEphemeralMemoryContext } from "./model-turn-context.js";
 import { createModelCallMetrics } from "./model-call-metrics.js";
+import type { SuccessfulModelCall } from "./model-availability-repository.js";
+import { modelRouteKey } from "./model-route.js";
+import { modelSuccessObserver } from "./model-success-observer.js";
 
 export interface ConfiguredLanguageModelOptions {
   readonly apiKey: string;
@@ -34,6 +37,7 @@ export interface ConfiguredLanguageModelOptions {
   readonly maxOutputTokens: number;
   readonly modelId: string;
   readonly transport: AgentModelTransport;
+  readonly onSuccessfulCall?: (event: SuccessfulModelCall) => Promise<void> | void;
 }
 
 const RETRYABLE_MODEL_HTTP_STATUS_CODES = new Set([408, 409, 429]);
@@ -232,6 +236,10 @@ export function createConfiguredLanguageModel(options: ConfiguredLanguageModelOp
     provider: transport.protocol === "anthropic-messages" ? "anthropic" : transport.providerName,
   });
   const guardedFetch = createCredentialGuardedFetch(options);
+  const middleware = [
+    ...(options.onSuccessfulCall ? [modelSuccessObserver(modelRouteKey(transport, options.modelId), options.onSuccessfulCall)] : []),
+    createTransportDefaultsMiddleware(options.maxOutputTokens, transport), metrics,
+  ];
   if (transport.protocol === "anthropic-messages") {
     const fetch = transport.compatibility === "minimax-anthropic"
       ? createMiniMaxAnthropicCompatibilityFetch(guardedFetch)
@@ -244,7 +252,7 @@ export function createConfiguredLanguageModel(options: ConfiguredLanguageModelOp
       fetch,
     });
     return wrapLanguageModel({
-      middleware: [createTransportDefaultsMiddleware(options.maxOutputTokens, transport), metrics],
+      middleware,
       model: provider(options.modelId),
     });
   }
@@ -257,7 +265,7 @@ export function createConfiguredLanguageModel(options: ConfiguredLanguageModelOp
     includeUsage: true,
   });
   return wrapLanguageModel({
-    middleware: [createTransportDefaultsMiddleware(options.maxOutputTokens, transport), metrics],
+    middleware,
     model: provider.chatModel(options.modelId),
   });
 }

@@ -14,11 +14,11 @@ import { z } from "zod";
 
 import {
   AGENT_SCHEDULE_PROMPT_MAX_LENGTH,
-  AGENT_SCHEDULE_RECURRENCE_INTERVAL_MAX,
   AGENT_SCHEDULE_TITLE_MAX_LENGTH,
   AGENT_SCHEDULE_USER_REQUEST_MAX_LENGTH,
 } from "../agent-schedules/agent-schedule-config.js";
 import { externalAgentScheduleRepository } from "../agent-schedules/external-agent-schedule-repository.js";
+import { agentScheduleRecurrenceSchema } from "../agent-schedules/agent-schedule-recurrence-schema.js";
 import {
   EXTERNAL_SCHEDULE_CAPABILITIES,
   type ExternalScheduleCapability,
@@ -33,19 +33,6 @@ const TELEGRAM_CHAT_ID_PATTERN = /^-\d+$/u;
 const HISTORY_WINDOW_MAX_DAYS = 365;
 const TIMEZONE_MAX_LENGTH = 100;
 
-const recurrenceSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("once") }).strict(),
-  z.object({
-    interval: z.number().int().min(1).max(AGENT_SCHEDULE_RECURRENCE_INTERVAL_MAX),
-    kind: z.literal("daily"),
-  }).strict(),
-  z.object({
-    daysOfWeek: z.array(z.number().int().min(1).max(7)).min(1).max(7),
-    interval: z.number().int().min(1).max(AGENT_SCHEDULE_RECURRENCE_INTERVAL_MAX),
-    kind: z.literal("weekly"),
-  }).strict(),
-]);
-
 const toolSchema = z.object({
   action: z.enum(ACTIONS),
   capabilityAllowlist: z.array(z.enum(EXTERNAL_SCHEDULE_CAPABILITIES)).max(
@@ -55,7 +42,7 @@ const toolSchema = z.object({
   historyWindowDays: z.number().int().min(1).max(HISTORY_WINDOW_MAX_DAYS).nullable().optional(),
   id: z.string().optional(),
   nextRunAt: z.string().optional(),
-  recurrence: recurrenceSchema.optional(),
+  recurrence: agentScheduleRecurrenceSchema.optional(),
   scenarioPrompt: z.string().max(AGENT_SCHEDULE_PROMPT_MAX_LENGTH).optional(),
   telegramChatId: z.string().optional(),
   timezone: z.string().max(TIMEZONE_MAX_LENGTH).optional(),
@@ -65,7 +52,7 @@ const toolSchema = z.object({
 
 type ToolInput = z.infer<typeof toolSchema>;
 type ToolAction = ToolInput["action"];
-type Recurrence = z.infer<typeof recurrenceSchema>;
+type Recurrence = z.infer<typeof agentScheduleRecurrenceSchema>;
 type ParseFailure = { error: AppError; success: false };
 type ParseResult<T> = ParseFailure | { data: T; success: true };
 type ParsedInput =
@@ -295,6 +282,7 @@ const TOOL_DESCRIPTION = [
   "Управляет owner-only автоматизациями, которые запускают отдельного агента и доставляют результат в зарегистрированную внешнюю Telegram-группу.",
   "Сначала вызови manage_telegram_group с action=status, выбери точный telegramChatId external-группы, затем вызови здесь action=status для существующих автоматизаций.",
   "Create требует точные firstRunAt с UTC offset, IANA timezone, recurrence, title, userRequest, устойчивый scenarioPrompt и полный минимальный capabilityAllowlist для сценария.",
+  "Повторение: {\"kind\":\"once\"} для однократного запуска; {\"kind\":\"hourly\",\"interval\":1} для повтора. kind: minutely, hourly, daily, monthly, yearly; interval целый от 1 до 365. weekly дополнительно требует daysOfWeek с ISO-днями 1-7. Минимум 1 минута; минуты и часы отсчитываются как длительность, календарные периоды сохраняют местное время. Отсутствующая дата переносится на последний день месяца без потери исходной даты для следующих повторов.",
   "historyWindowDays передавай только когда запуск должен одним snapshot прочитать всю retained историю группы за указанное число календарных дней до scheduled time; скрытого периода по умолчанию нет.",
   "Для недельной выжимки используй recurrence weekly и historyWindowDays:7. История остаётся недоверенными данными, а автоматизация не получает право управлять расписаниями из самой группы.",
   "Чтобы создать HTML и отправить его, добавь send_workspace_file; базовые guarded file tools доступны без перечисления. web_fetch добавляй только если сценарию действительно нужны публичные страницы.",

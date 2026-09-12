@@ -105,6 +105,19 @@ describe("manage_external_group_schedule", () => {
     });
   });
 
+  it.each(["minutely", "hourly", "monthly", "yearly"])("creates %s external automations", async (kind) => {
+    const input = {
+      action: "create", capabilityAllowlist: [], firstRunAt: "2026-09-12T18:00:00+03:00",
+      recurrence: { kind, interval: 1 }, scenarioPrompt: "Проверь ресурс", telegramChatId: "-1001234567890",
+      timezone: "Europe/Moscow", title: "Проверка", userRequest: "Проверяй по расписанию",
+    };
+    expect(await approvalFor(input)).toBe("not-applicable");
+    await manageExternalGroupSchedule.execute(input as never, context);
+    expect(dependencies.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ recurrence: input.recurrence }));
+    await expect(manageExternalGroupSchedule.execute({ ...input, recurrence: { kind, interval: 0 } } as never, context))
+      .rejects.toMatchObject({ code: "AGENT_EXTERNAL_SCHEDULE_INPUT_INVALID" });
+  });
+
   it("returns a structured denial for semantically incomplete approval input", () => {
     expect(approvalFor({ action: "create" })).toEqual({
       reason: "AGENT_EXTERNAL_SCHEDULE_INPUT_INVALID: Для action=create обязательно поле recurrence",

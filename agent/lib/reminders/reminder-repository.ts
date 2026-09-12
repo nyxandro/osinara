@@ -193,9 +193,9 @@ export const reminderRepository = {
         `INSERT INTO reminders
            (family_id, owner_user_id, author_user_id, group_id, scope, content, timezone,
              telegram_chat_id, message_thread_id, forum_topic_id, recurrence_unit, recurrence_interval,
-            recurrence_anchor_local, due_at, available_at)
+            recurrence_anchor_local, recurrence_anchor_at, due_at, available_at)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::bigint, $10::bigint, $11, $12,
-                  $13::timestamptz AT TIME ZONE $7, $13, $13)
+                  $13::timestamptz AT TIME ZONE $7, $13, $13, $13)
          RETURNING ${REMINDER_COLUMNS}`,
         [
           auth.familyId,

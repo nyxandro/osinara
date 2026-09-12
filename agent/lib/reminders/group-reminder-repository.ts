@@ -109,9 +109,9 @@ export const groupReminderRepository = {
         `INSERT INTO reminders
            (family_id, author_telegram_user_id, group_id, scope, content, timezone,
             telegram_chat_id, recurrence_unit, recurrence_interval,
-            recurrence_anchor_local, due_at, available_at)
+            recurrence_anchor_local, recurrence_anchor_at, due_at, available_at)
          VALUES ($1, $2, $3, 'group', $4, $5, $6, $7, $8,
-                 $9::timestamptz AT TIME ZONE $5, $9, $9)
+                 $9::timestamptz AT TIME ZONE $5, $9, $9, $9)
          RETURNING ${REMINDER_COLUMNS}`,
         [
           auth.familyId,

@@ -39,6 +39,18 @@ interface MemoryReviewOwnerAlertDispatcherDependencies {
 
 function alertText(alert: MemoryReviewOwnerAlertClaim): string {
   const groupTitle = alert.groupTitle.replace(/\s+/gu, " ").trim();
+  if (alert.diagnosticCode === "AGENT_MEMORY_REVIEW_WAITING_MODEL") return [
+    "AGENT_MEMORY_REVIEW_WAITING_MODEL",
+    `Модель временно не отвечает. Проверка памяти группы «${groupTitle}» ожидает восстановления.`,
+    `Сообщения ${alert.fromSequence}–${alert.throughSequence} сохранены. После успешного обращения к этой модели проверка продолжится автоматически.`,
+    "Общение в группе остаётся доступным.",
+  ].join("\n\n");
+  if (alert.diagnosticCode === "AGENT_MEMORY_REVIEW_PARTIAL_RESULT") return [
+    "AGENT_MEMORY_REVIEW_PARTIAL_RESULT",
+    `Проверка памяти группы «${groupTitle}» завершилась после частичного сохранения сведений.`,
+    `Пакет ${alert.fromSequence}–${alert.throughSequence} не отмечен полностью проверенным. Сведения и исходные сообщения сохранены.`,
+    "Для продолжения нужна проверка администратора. Общение в группе остаётся доступным.",
+  ].join("\n\n");
   if (alert.diagnosticCode === "AGENT_MEMORY_REVIEW_PASS_SKIPPED") {
     // These sources are released rather than held: the lane had to move on, and no later pass will
     // revisit them. Promising their safe recovery here would be false.

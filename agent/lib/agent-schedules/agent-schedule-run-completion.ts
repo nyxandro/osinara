@@ -8,6 +8,7 @@
 import type { PoolClient } from "pg";
 
 import { AppError } from "../app-error.js";
+import { nextAnchoredOccurrence } from "../scheduling/next-occurrence.js";
 import { recordProactiveDelivery } from "../proactive-deliveries/proactive-delivery-repository.js";
 import type { AgentScheduleRecurrenceKind } from "./agent-schedule-record.js";
 
@@ -38,37 +39,6 @@ export interface CompleteDeliveredAgentScheduleRunInput {
   telegramChatId: string;
   telegramMessageId: string;
   title: string;
-}
-
-async function nextDailyOccurrence(
-  client: PoolClient,
-  scheduleId: string,
-  after: Date,
-): Promise<NextOccurrenceRow | null> {
-  const result = await client.query<NextOccurrenceRow>(
-    `WITH RECURSIVE occurrences AS (
-       SELECT schedule.occurrence_index + 1 AS next_index,
-              CASE schedule.recurrence_kind
-                WHEN 'daily' THEN (schedule.recurrence_anchor_local + make_interval(days => schedule.recurrence_interval * (schedule.occurrence_index + 1))) AT TIME ZONE schedule.timezone
-                ELSE schedule.next_run_at
-              END AS next_run_at,
-              schedule.occurrence_index AS initial_index
-         FROM agent_schedules AS schedule WHERE schedule.id = $1
-       UNION ALL
-       SELECT occurrence.next_index + 1,
-              (schedule.recurrence_anchor_local + make_interval(days => schedule.recurrence_interval * (occurrence.next_index + 1))) AT TIME ZONE schedule.timezone,
-              occurrence.initial_index
-         FROM occurrences AS occurrence
-         JOIN agent_schedules AS schedule ON schedule.id = $1
-        WHERE occurrence.next_run_at <= $2
-          AND occurrence.next_index - occurrence.initial_index < 100000
-     )
-     SELECT next_index, next_run_at
-       FROM occurrences WHERE next_run_at > $2
-      ORDER BY next_index LIMIT 1`,
-    [scheduleId, after],
-  );
-  return result.rows[0] ?? null;
 }
 
 async function nextWeeklyOccurrence(
@@ -108,9 +78,9 @@ async function nextOccurrence(
   recurrenceKind: AgentScheduleRecurrenceKind,
   after: Date,
 ): Promise<NextOccurrenceRow | null> {
-  if (recurrenceKind === "daily") return await nextDailyOccurrence(client, scheduleId, after);
+  if (recurrenceKind === "once") return null;
   if (recurrenceKind === "weekly") return await nextWeeklyOccurrence(client, scheduleId, after);
-  return null;
+  return await nextAnchoredOccurrence(client, "agent_schedules", scheduleId, after);
 }
 
 export async function finishActiveAgentScheduleRun(

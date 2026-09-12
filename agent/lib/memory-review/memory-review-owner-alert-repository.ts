@@ -27,28 +27,31 @@ export async function enqueueMemoryReviewOwnerAlert(
   batchId: string,
   diagnosticCode: string,
 ): Promise<void> {
+  const kind = diagnosticCode === "AGENT_MEMORY_REVIEW_WAITING_MODEL" ? "waiting_model"
+    : diagnosticCode === "AGENT_MEMORY_REVIEW_PARTIAL_RESULT" ? "partial" : "blocked";
   const result = await client.query(
     `INSERT INTO memory_review_owner_alerts
        (batch_id, family_id, group_id, group_title_snapshot, from_sequence,
-         through_sequence, batch_diagnostic_code, recovery_generation)
+          through_sequence, batch_diagnostic_code, recovery_generation, model_recovery_generation, notification_kind)
      SELECT batch.id, conversation.family_id, telegram_group.id, telegram_group.title,
-             batch.from_sequence, batch.through_sequence, $2, batch.recovery_attempts
+              batch.from_sequence, batch.through_sequence, $2, batch.recovery_attempts, batch.model_recovery_generation, $3
        FROM memory_review_batches AS batch
        JOIN application_conversations AS conversation ON conversation.id = batch.conversation_id
        JOIN telegram_groups AS telegram_group ON telegram_group.id = conversation.telegram_group_id
       -- Compared as text because migration tests exercise this insert against schemas older
       -- than the terminal status that was added last.
-      WHERE batch.id = $1 AND batch.status::text IN ('failed', 'ambiguous', 'skipped')
-     ON CONFLICT (batch_id, recovery_generation) DO NOTHING`,
-    [batchId, diagnosticCode],
+       WHERE batch.id = $1 AND batch.status::text IN ('failed', 'ambiguous', 'skipped', 'waiting_model')
+      ON CONFLICT (batch_id, recovery_generation, model_recovery_generation, notification_kind) DO NOTHING`,
+    [batchId, diagnosticCode, kind],
   );
   if (result.rowCount !== 1) {
     const existing = await client.query(
       `SELECT 1 FROM memory_review_owner_alerts AS alert
         JOIN memory_review_batches AS batch ON batch.id = alert.batch_id
        WHERE alert.batch_id = $1
-         AND alert.recovery_generation = batch.recovery_attempts`,
-      [batchId],
+          AND alert.recovery_generation = batch.recovery_attempts
+          AND alert.model_recovery_generation = batch.model_recovery_generation AND alert.notification_kind = $2`,
+      [batchId, kind],
     );
     if (!existing.rows[0]) throw new AppError(
       "AGENT_MEMORY_REVIEW_OWNER_ALERT_CREATE_FAILED",
@@ -100,6 +103,10 @@ export const memoryReviewOwnerAlertRepository = {
     try {
       await client.query("BEGIN");
       await terminalizeStaleDeliveries(client, input.now);
+      // An unsent waiting notice is obsolete once this attempt recovered or became a hard failure.
+      await client.query(`DELETE FROM memory_review_owner_alerts alert USING memory_review_batches batch
+        WHERE alert.batch_id = batch.id AND alert.status = 'pending' AND alert.notification_kind = 'waiting_model'
+          AND (batch.status <> 'waiting_model' OR batch.model_recovery_generation <> alert.model_recovery_generation)`);
       const ownerless = await terminalizeOwnerlessAlerts(client, input.now);
       const result = await client.query<{
         batch_id: string;
