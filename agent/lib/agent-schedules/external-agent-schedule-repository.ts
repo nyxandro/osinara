@@ -13,6 +13,7 @@ import type { PoolClient } from "pg";
 
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
+import { requireAgentScheduleMaxRuns, requireScheduleLimitConsistency } from "./agent-schedule-limits.js";
 import { parseExternalGroupToolAllowlist } from "../tool-policy/group-tool-catalog.js";
 import type { AgentScheduleAuthorization } from "./agent-schedule-context.js";
 import { agentScheduleRepository } from "./agent-schedule-repository.js";
@@ -64,6 +65,7 @@ interface ExternalScheduleStatusRow extends AgentScheduleRow {
 }
 
 interface CreateExternalScheduleInput {
+  maxRuns?: number | null;
   capabilityAllowlist: ExternalScheduleCapability[];
   firstRunAt: Date;
   historyWindowDays?: number;
@@ -77,6 +79,7 @@ interface CreateExternalScheduleInput {
 }
 
 interface UpdateExternalScheduleInput {
+  maxRuns?: number | null;
   capabilityAllowlist?: ExternalScheduleCapability[];
   historyWindowDays?: number | null;
   nextRunAt?: Date;
@@ -226,6 +229,8 @@ export const externalAgentScheduleRepository = {
     const firstRunAt = requireAgentScheduleDate(input.firstRunAt);
     const recurrence = requireAgentScheduleRecurrence(input.recurrence);
     const recurrenceValue = recurrenceValues(recurrence);
+    const maxRuns = requireAgentScheduleMaxRuns(input.maxRuns);
+    requireScheduleLimitConsistency(maxRuns === undefined ? null : maxRuns, 0, recurrence.kind);
     const historyWindowDays = requireHistoryWindowDays(input.historyWindowDays);
     const client = await database().connect();
     try {
@@ -279,9 +284,9 @@ export const externalAgentScheduleRepository = {
             user_request, scenario_prompt, timezone, recurrence_kind,
             recurrence_interval, recurrence_days_of_week, recurrence_anchor_local, recurrence_anchor_at,
             next_run_at, telegram_chat_id, telegram_chat_type, message_thread_id,
-            forum_topic_id, history_window_days, tool_allowlist)
+            forum_topic_id, history_window_days, tool_allowlist, max_runs)
          VALUES ($1, NULL, $2, $3, 'group', $4, $5, $6, $7, $8, $9, $10,
-                 $11::timestamptz AT TIME ZONE $7, $11, $11, $12, $13, NULL, NULL, $14, $15)
+                 $11::timestamptz AT TIME ZONE $7, $11, $11, $12, $13, NULL, NULL, $14, $15, $16)
          RETURNING id`,
         [
           auth.familyId,
@@ -299,6 +304,7 @@ export const externalAgentScheduleRepository = {
           group.telegram_chat_type,
           historyWindowDays,
           capabilityAllowlist,
+          maxRuns === undefined ? null : maxRuns,
         ],
       );
       const id = inserted.rows[0]!.id;

@@ -24,6 +24,7 @@ import { AGENT_SCHEDULE_SIMPLE_RECURRENCE_KINDS, type AgentScheduleSimpleRecurre
 import { agentScheduleRecurrenceSchema } from "../agent-schedules/agent-schedule-recurrence-schema.js";
 import type { AgentScheduleInputRecurrence } from "../agent-schedules/agent-schedule-validation.js";
 import { AppError } from "../app-error.js";
+import { AGENT_SCHEDULE_LIMIT_DESCRIPTION, agentScheduleMaxRunsSchema, requireAgentScheduleMaxRuns } from "../agent-schedules/agent-schedule-limits.js";
 
 const TOOL_ACTIONS = ["create", "update", "pause", "resume", "run_now", "delete"] as const;
 const RECURRENCE_KINDS = ["once", ...AGENT_SCHEDULE_SIMPLE_RECURRENCE_KINDS, "weekly"] as const;
@@ -36,6 +37,7 @@ type ToolAction = (typeof TOOL_ACTIONS)[number];
 type ScheduleScope = (typeof SCOPES)[number];
 
 const TOP_LEVEL_FIELDS = [
+  "maxRuns",
   "action",
   "firstRunAt",
   "id",
@@ -49,6 +51,7 @@ const TOP_LEVEL_FIELDS = [
 ] as const;
 
 const manageAgentScheduleSchema = z.object({
+  maxRuns: agentScheduleMaxRunsSchema.optional(),
   action: z.enum(TOOL_ACTIONS),
   firstRunAt: z.string().optional(),
   id: z.string().optional(),
@@ -229,6 +232,7 @@ function optionalRecurrence(raw: unknown): AgentScheduleInputRecurrence | undefi
 
 function requireCreateInput(input: Record<string, unknown>) {
   requireOnlyFields(input, [
+    "maxRuns",
     "action",
     "firstRunAt",
     "recurrence",
@@ -240,6 +244,7 @@ function requireCreateInput(input: Record<string, unknown>) {
   ], "action=create");
   return {
     firstRunAt: requiredDate(input, "firstRunAt"),
+    maxRuns: requireAgentScheduleMaxRuns(input.maxRuns),
     recurrence: requiredRecurrence(input.recurrence),
     scenarioPrompt: requiredString(
       input,
@@ -271,6 +276,7 @@ function requireCreateInput(input: Record<string, unknown>) {
 
 function requireUpdateInput(input: Record<string, unknown>) {
   requireOnlyFields(input, [
+    "maxRuns",
     "action",
     // MiniMax may materialize these known create-only siblings from the shared root schema.
     "firstRunAt",
@@ -284,6 +290,7 @@ function requireUpdateInput(input: Record<string, unknown>) {
     "userRequest",
   ], "action=update");
   const nextRunAt = optionalDate(input, "nextRunAt");
+  const maxRuns = requireAgentScheduleMaxRuns(input.maxRuns);
   const recurrence = optionalRecurrence(input.recurrence);
   const scenarioPrompt = optionalString(
     input,
@@ -305,14 +312,15 @@ function requireUpdateInput(input: Record<string, unknown>) {
   );
   if (
     nextRunAt === undefined &&
+    maxRuns === undefined &&
     recurrence === undefined &&
     scenarioPrompt === undefined &&
     title === undefined &&
     userRequest === undefined
   ) {
-    inputError("Для action=update передайте хотя бы одно поле изменения: nextRunAt, recurrence, scenarioPrompt, title или userRequest");
+    inputError("Для action=update передайте хотя бы одно поле изменения: maxRuns, nextRunAt, recurrence, scenarioPrompt, title или userRequest");
   }
-  return { id: requiredUuid(input), nextRunAt, recurrence, scenarioPrompt, title, userRequest };
+  return { id: requiredUuid(input), maxRuns, nextRunAt, recurrence, scenarioPrompt, title, userRequest };
 }
 
 function requireIdOnlyInput(input: Record<string, unknown>, action: ToolAction): string {
@@ -334,6 +342,8 @@ function requireManageAgentScheduleInput(input: unknown) {
 }
 
 const TOOL_DESCRIPTION = [
+  AGENT_SCHEDULE_LIMIT_DESCRIPTION,
+  "Для паузы из самого сценария используй schedule_id из scheduled_agent_run.",
   "Создать, изменить, приостановить, возобновить, запустить сейчас или удалить агентное расписание.",
   "Явной просьбы пользователя достаточно: выполняй без дополнительного подтверждения. Уточняй только недостающие или неоднозначные данные.",
   "Это не напоминание: schedule запускает агента по сценарию и отправляет итог. Существующее расписание сначала найди через list_agent_schedules.",

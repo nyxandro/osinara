@@ -27,7 +27,7 @@ export async function recoverUnstartedAgentSchedules(client: PoolClient, now: Da
   for (const run of candidates.rows) {
     if (run.attempts>=AGENT_SCHEDULE_DISPATCH_MAX_SAFE_ATTEMPTS) {
       await client.query(`UPDATE agent_schedule_runs SET status='failed',error_code='AGENT_SCHEDULE_ATTEMPTS_EXHAUSTED',completed_at=$2,updated_at=$2 WHERE id=$1`, [run.id,now]);
-      await client.query(`UPDATE agent_schedules SET status='failed',last_error_code='AGENT_SCHEDULE_ATTEMPTS_EXHAUSTED',
+      await client.query(`UPDATE agent_schedules SET status='failed',pause_requested=false,last_error_code='AGENT_SCHEDULE_ATTEMPTS_EXHAUSTED',
         lease_token=NULL,lease_expires_at=NULL,dispatch_started_at=NULL,updated_at=$2 WHERE id=$1`, [run.schedule_id,now]);
       await recordOperationalIncident({ key: `schedule-run:${run.id}`,code: "AGENT_SCHEDULE_ATTEMPTS_EXHAUSTED",
         summary: "Не удалось запустить расписание после восстановления. Запуск остановлен; требуется проверка владельца.",
@@ -42,7 +42,8 @@ export async function recoverUnstartedAgentSchedules(client: PoolClient, now: Da
     await client.query(`UPDATE conversation_sessions SET retired_at=$2,delete_after=$2::timestamptz+$3*interval '1 day',
       pending_operation=false,task_state='failed' WHERE id=$1`, [run.application_session_id, now, SESSION_RETENTION_DAYS]);
     await client.query("DELETE FROM agent_schedule_history_snapshots WHERE run_id=$1", [run.id]);
-    await client.query(`UPDATE agent_schedules SET status='active',lease_token=NULL,lease_expires_at=NULL,
+    await client.query(`UPDATE agent_schedules SET status=CASE WHEN pause_requested THEN 'paused'::agent_schedule_status ELSE 'active'::agent_schedule_status END,
+      pause_requested=false,lease_token=NULL,lease_expires_at=NULL,
       dispatch_started_at=NULL,updated_at=$2 WHERE id=$1`, [run.schedule_id, now]);
     await client.query(`INSERT INTO audit_events(family_id,event_type,subject_id,metadata)
       SELECT family_id,'agent_schedule.handoff_recovered',id,jsonb_build_object('runId',$2::text,'revokedSessionId',$3::text)

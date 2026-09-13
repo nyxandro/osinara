@@ -11,6 +11,8 @@ import { createAgentScheduleDispatcher } from "./agent-schedule-dispatcher.js";
 import type { ClaimedAgentSchedule } from "./agent-schedule-dispatch-repository.js";
 
 const job: ClaimedAgentSchedule = {
+  completedRuns: 0,
+  maxRuns: null,
   authorUserId: "user-1",
   capabilityAllowlist: [],
   familyId: "family-1",

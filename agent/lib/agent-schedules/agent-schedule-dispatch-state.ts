@@ -45,7 +45,7 @@ export async function beginAgentScheduleDispatch(
       // A still-current group lease failed only its live authorization predicate.
       const revoked = await client.query<{ family_id: string }>(
         `UPDATE agent_schedules
-            SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
+            SET status = 'failed', pause_requested = false, lease_token = NULL, lease_expires_at = NULL,
                 dispatch_started_at = NULL,
                 last_error_code = 'AGENT_SCHEDULE_DESTINATION_REVOKED', updated_at = now()
           WHERE id = $1 AND status = 'leased' AND lease_token = $2

@@ -37,6 +37,8 @@ import {
 } from "./agent-schedule-dispatch-state.js";
 
 export interface ClaimedAgentSchedule {
+  completedRuns: number;
+  maxRuns: number | null;
   authorUserId: string;
   capabilityAllowlist: string[];
   familyId: string;
@@ -67,6 +69,8 @@ interface ClaimOptions {
 }
 
 interface CandidateRow {
+  completed_runs: number;
+  max_runs: number | null;
   author_user_id: string;
   family_id: string;
   forum_topic_id: string | null;
@@ -152,7 +156,7 @@ export const agentScheduleDispatchRepository = {
             FOR UPDATE
          ), updated AS (
            UPDATE agent_schedules AS schedule
-              SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
+              SET status = 'failed', pause_requested = false, lease_token = NULL, lease_expires_at = NULL,
                   dispatch_started_at = NULL,
                   last_error_code = 'AGENT_SCHEDULE_DELIVERY_AMBIGUOUS', updated_at = $1
              FROM expired
@@ -182,7 +186,7 @@ export const agentScheduleDispatchRepository = {
       // Crashes before handoff are safe to recover, but only for bounded attempts.
       const exhausted = await client.query<{ family_id: string; id: string }>(
         `UPDATE agent_schedules
-            SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
+            SET status = 'failed', pause_requested = false, lease_token = NULL, lease_expires_at = NULL,
                 last_error_code = 'AGENT_SCHEDULE_ATTEMPTS_EXHAUSTED', updated_at = $1
           WHERE status = 'leased' AND lease_expires_at < $1 AND dispatch_started_at IS NULL
             AND attempts >= $2
@@ -210,7 +214,8 @@ export const agentScheduleDispatchRepository = {
       await recordFailures(client, exhausted.rows, "AGENT_SCHEDULE_ATTEMPTS_EXHAUSTED");
       await client.query(
         `UPDATE agent_schedules
-            SET status = 'active', lease_token = NULL, lease_expires_at = NULL, updated_at = $1
+            SET status = CASE WHEN pause_requested THEN 'paused'::agent_schedule_status ELSE 'active'::agent_schedule_status END,
+                pause_requested = false, lease_token = NULL, lease_expires_at = NULL, updated_at = $1
           WHERE status = 'leased' AND lease_expires_at < $1 AND dispatch_started_at IS NULL
             AND attempts < $2`,
         [options.now, AGENT_SCHEDULE_DISPATCH_MAX_SAFE_ATTEMPTS],
@@ -219,7 +224,7 @@ export const agentScheduleDispatchRepository = {
       // Removed memberships or changed trust zones invalidate proactive runs fail-closed.
       const invalid = await client.query<{ family_id: string; id: string }>(
         `UPDATE agent_schedules AS schedule
-            SET status = 'failed', last_error_code = 'AGENT_SCHEDULE_DESTINATION_REVOKED',
+            SET status = 'failed', pause_requested = false, last_error_code = 'AGENT_SCHEDULE_DESTINATION_REVOKED',
                 updated_at = $1
           WHERE schedule.status = 'active' AND (
              NOT EXISTS (
@@ -279,12 +284,14 @@ export const agentScheduleDispatchRepository = {
                 schedule.next_run_at, schedule.telegram_chat_id, schedule.telegram_chat_type,
                  schedule.message_thread_id::text, schedule.forum_topic_id::text,
                  schedule.history_window_days, schedule.tool_allowlist,
-                 membership.role, users.telegram_user_id
+                 membership.role, users.telegram_user_id, schedule.max_runs, schedule.completed_runs
            FROM agent_schedules AS schedule
            JOIN family_memberships AS membership
              ON membership.family_id = schedule.family_id AND membership.user_id = schedule.author_user_id
            JOIN users ON users.id = schedule.author_user_id
-          WHERE schedule.status = 'active' AND schedule.next_run_at <= $1
+           WHERE schedule.status = 'active' AND schedule.next_run_at <= $1
+             AND NOT schedule.pause_requested
+             AND (schedule.max_runs IS NULL OR schedule.completed_runs < schedule.max_runs)
             AND schedule.attempts < $3
           ORDER BY schedule.next_run_at, schedule.id
           FOR UPDATE OF schedule SKIP LOCKED
@@ -324,7 +331,7 @@ export const agentScheduleDispatchRepository = {
           // A terminal run for this occurrence means retrying would duplicate side effects.
           const failed = await client.query<{ family_id: string }>(
             `UPDATE agent_schedules
-                SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
+                SET status = 'failed', pause_requested = false, lease_token = NULL, lease_expires_at = NULL,
                     dispatch_started_at = NULL, last_error_code = 'AGENT_SCHEDULE_RUN_CONFLICT',
                     updated_at = $2
               WHERE id = $1 AND status = 'leased' AND lease_token = $3
@@ -339,6 +346,8 @@ export const agentScheduleDispatchRepository = {
           continue;
         }
         claimed.push({
+          completedRuns: candidate.completed_runs,
+          maxRuns: candidate.max_runs,
           authorUserId: candidate.author_user_id,
           capabilityAllowlist: candidate.tool_allowlist,
           familyId: candidate.family_id,
@@ -408,7 +417,7 @@ export const agentScheduleDispatchRepository = {
       await client.query("BEGIN");
       const failed = await client.query<{ family_id: string }>(
         `UPDATE agent_schedules
-            SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
+            SET status = 'failed', pause_requested = false, lease_token = NULL, lease_expires_at = NULL,
                 dispatch_started_at = NULL, last_error_code = $3, updated_at = now()
           WHERE id = $1 AND status = 'leased' AND lease_token = $2
           RETURNING family_id`,

@@ -20,6 +20,9 @@ export type AgentScheduleRecurrence =
   | { daysOfWeek: number[]; interval: number; kind: "weekly" };
 
 export interface AgentScheduleRow {
+  completed_runs: number;
+  max_runs: number | null;
+  pause_requested: boolean;
   created_at: Date;
   history_window_days: number | null;
   id: string;
@@ -41,6 +44,9 @@ export interface AgentScheduleRow {
 }
 
 export interface AgentScheduleRecord {
+  completedRuns: number;
+  maxRuns: number | null;
+  pauseRequested: boolean;
   createdAt: string;
   id: string;
   lastErrorCode: string | null;
@@ -70,6 +76,9 @@ function rowRecurrence(row: AgentScheduleRow): AgentScheduleRecurrence {
 
 export function rowToAgentSchedule(row: AgentScheduleRow): AgentScheduleRecord {
   return {
+    completedRuns: row.completed_runs,
+    maxRuns: row.max_runs,
+    pauseRequested: row.pause_requested,
     createdAt: row.created_at.toISOString(),
     id: row.id,
     lastErrorCode: row.last_error_code,
