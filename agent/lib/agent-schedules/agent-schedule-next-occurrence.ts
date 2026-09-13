@@ -1,5 +1,6 @@
 /** Calendar-preserving next occurrence shared by completion and explicit reactivation. */
 import type { PoolClient } from "pg";
+import { AppError } from "../app-error.js";
 import { nextAnchoredOccurrence } from "../scheduling/next-occurrence.js";
 import type { AgentScheduleRecurrenceKind } from "./agent-schedule-record.js";
 
@@ -49,6 +50,8 @@ export async function advanceReactivatedSchedule(client: PoolClient, scheduleId:
     FROM agent_schedule_runs run JOIN agent_schedules schedule ON schedule.id=run.schedule_id
     WHERE schedule.id=$1 AND run.scheduled_for=date_trunc('milliseconds',schedule.next_run_at) AND run.status <> 'claimed'`, [scheduleId]);
   if (!terminal.rowCount) return;
+  if (kind === "once") throw new AppError("AGENT_SCHEDULE_ONCE_ALREADY_EXECUTED",
+    "Попытка этого однократного расписания уже завершена. Укажите новое время или выберите «запустить сейчас»");
   const next = await nextAgentScheduleOccurrence(client, scheduleId, kind, terminal.rows[0]!.after);
   if (!next) return;
   await client.query("UPDATE agent_schedules SET next_run_at=$2,occurrence_index=$3 WHERE id=$1", [scheduleId, next.next_run_at, next.next_index]);

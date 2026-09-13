@@ -206,6 +206,20 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
     expect(await schedules.findById(auth, schedule.id)).toMatchObject({ status: "completed", completedRuns: 2 });
   });
 
+  it("rejects resume of an already executed one-time occurrence without reopening it", async () => {
+    const { auth, schedule } = await setup(null);
+    await schedules.update(auth, schedule.id, { recurrence: { kind: "once" }, operationKey: "once" });
+    await dispatch.completeDeliveredRun((await start(auth, "2026-09-14T12:00:00Z")).receipt);
+    await expect(schedules.update(auth, schedule.id, { enabled: true, operationKey: "resume" }))
+      .rejects.toMatchObject({ code: "AGENT_SCHEDULE_ONCE_ALREADY_EXECUTED" });
+    expect(await schedules.findById(auth, schedule.id)).toMatchObject({ status: "completed", completedRuns: 1 });
+    await schedules.update(auth, schedule.id, {
+      enabled: true, nextRunAt: new Date("2026-09-14T12:02:00Z"), operationKey: "new-time",
+    });
+    await dispatch.completeDeliveredRun((await start(auth, "2026-09-14T12:02:00Z")).receipt);
+    expect(await schedules.findById(auth, schedule.id)).toMatchObject({ status: "completed", completedRuns: 2 });
+  });
+
   // Exhaustive property over all three-event success/failure streams, with duplicate delivery replay.
   it.each(Array.from({ length: 8 }, (_, mask) => mask))("counts only unique confirmed deliveries for event stream %i", async (mask) => {
     const { auth, schedule } = await setup(2);
