@@ -39,6 +39,10 @@ export interface TelegramIngressDispatchBinding {
 }
 
 export interface TelegramIngressClaim {
+  recoveryProtocol?: 1;
+  dispatchAttemptId?: string;
+  responseAdmission?: true;
+  executionBound?: true;
   dispatchStarted: boolean;
   dispatchBinding: TelegramIngressDispatchBinding | null;
   recoveryCancelRequested: boolean;
@@ -87,11 +91,15 @@ export interface TelegramIngressRepository {
 }
 
 export interface ClaimRow {
+  recovery_protocol: number;
   dispatch_started_at: Date | null;
   dispatch_id: string | null;
   dispatch_session_id: string | null;
   dispatch_turn_id: string | null;
   dispatch_start_index: string | null;
+  response_session_id: string | null;
+  response_turn_id: string | null;
+  response_start_index: string | null;
   recovery_cancel_requested: boolean;
   attempt_count: number;
   current_continuation_key: string;
@@ -195,9 +203,15 @@ export function mapTelegramIngressClaim(row: ClaimRow): TelegramIngressClaim {
       }
     : null;
   return {
+    ...(row.recovery_protocol === 1 ? { recoveryProtocol: 1 as const } : {}),
+    ...(row.dispatch_id === null ? {} : { dispatchAttemptId: row.dispatch_id }),
+    ...(row.response_session_id ? { responseAdmission: true as const } : {}),
+    ...(row.dispatch_session_id ? { executionBound: true as const } : {}),
     dispatchStarted: row.dispatch_started_at !== null,
     recoveryCancelRequested: row.recovery_cancel_requested,
-    dispatchBinding: row.dispatch_session_id === null ? null : {
+    dispatchBinding: row.dispatch_session_id === null ? row.response_session_id == null ? null : {
+      id: row.dispatch_id!,sessionId: row.response_session_id,turnId: row.response_turn_id!,cursor: Number(row.response_start_index),
+    } : {
       id: row.dispatch_id!, sessionId: row.dispatch_session_id,
       turnId: row.dispatch_turn_id!, cursor: Number(row.dispatch_start_index),
     },

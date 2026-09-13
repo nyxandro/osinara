@@ -15,6 +15,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { formatTelegramSessionFailure } from "./telegram-interface.js";
 import { handleTelegramSessionFailure } from "./telegram-session-failure.js";
+import { recordTelegramFailure } from "./operational-incidents/telegram-failure.js";
+vi.mock("./operational-incidents/telegram-failure.js", () => ({ recordTelegramFailure: vi.fn() }));
 
 interface EveTelegramAdapter {
   createAdapterContext(input: {
@@ -102,7 +104,7 @@ describe("Eve Telegram failure continuation", () => {
       "wrun_failed",
     );
     expect(recordSessionFailedByContinuationToken.mock.invocationCallOrder[0]).toBeLessThan(
-      request.mock.invocationCallOrder[0]!,
+      vi.mocked(recordTelegramFailure).mock.invocationCallOrder[0]!,
     );
     expect(channel.continuation.token).toBe("-1001::166");
   });

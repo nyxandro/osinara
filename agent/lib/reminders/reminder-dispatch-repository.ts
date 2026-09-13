@@ -9,6 +9,7 @@ import type { PoolClient } from "pg";
 
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
+import { recordOperationalIncident } from "../operational-incidents/owner-alerts.js";
 import { nextAnchoredOccurrence } from "../scheduling/next-occurrence.js";
 import {
   type ProactiveDeliveryReceipt,
@@ -80,6 +81,10 @@ async function recordFailures(
   errorCode: string,
 ): Promise<void> {
   for (const row of rows) {
+    const reminder = (await client.query<{ due_at: Date }>("SELECT due_at FROM reminders WHERE id=$1", [row.id])).rows[0]!;
+    await recordOperationalIncident({ key: `reminder:${row.id}:${reminder.due_at.toISOString()}`,
+      code: "AGENT_REMINDER_DELIVERY_FAILED", summary: "Не удалось подтвердить доставку напоминания. Проверьте его состояние.",
+      context: { reminderId: row.id, causeCode: errorCode } }, client);
     await client.query(
       `INSERT INTO audit_events (family_id, event_type, subject_id, metadata)
        VALUES ($1, 'reminder.delivery_failed', $2, jsonb_build_object('code', $3::text))`,
@@ -281,6 +286,10 @@ export const reminderDispatchRepository = {
       );
       const current = reminder.rows[0];
       if (!current) {
+        const delivered = await client.query(`SELECT 1 FROM proactive_deliveries WHERE source_kind='reminder' AND source_id=$1
+          AND scheduled_for=$2 AND telegram_chat_id=$3 AND telegram_message_id=$4 AND content_text=$5`,
+        [job.id, new Date(job.dueAt), job.telegramChatId, receipt.messageId, receipt.text]);
+        if (delivered.rowCount === 1) { await client.query("COMMIT"); return; }
         throw new AppError("AGENT_REMINDER_LEASE_STALE", "Доставка напоминания уже неактуальна");
       }
 

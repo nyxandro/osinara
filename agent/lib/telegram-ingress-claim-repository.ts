@@ -18,8 +18,8 @@ export async function claimNextTelegramIngress(leaseMilliseconds: number) {
            WHERE (item.status = 'pending'
                OR (item.status = 'processing' AND item.lease_expires_at <= now())
                OR (item.status = 'failed' AND item.last_error_code = 'AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED'
-                 AND item.dispatch_session_id IS NOT NULL AND item.recovery_attempts < $2))
-             AND (item.media_group_leader_id IS NULL OR item.media_group_late)
+                  AND (item.dispatch_session_id IS NOT NULL OR item.response_session_id IS NOT NULL) AND item.recovery_attempts < $2))
+              AND (item.media_group_leader_id IS NULL OR item.media_group_late)
              AND (item.media_group_ready_at IS NULL OR item.media_group_closed_at IS NOT NULL
                OR item.media_group_ready_at <= now())
              AND EXISTS (SELECT 1 FROM admission WHERE phase = 'ready' OR
@@ -53,8 +53,9 @@ export async function claimNextTelegramIngress(leaseMilliseconds: number) {
        FROM candidate WHERE item.update_id = candidate.update_id
        RETURNING item.update_id::text, item.queue_id, item.ingress_continuation_key,
           item.payload, item.attempt_count, item.lease_token::text, item.lease_expires_at,
-          item.dispatch_started_at, item.dispatch_id::text, item.dispatch_session_id,
-          item.dispatch_turn_id, item.dispatch_start_index::text, item.recovery_cancel_requested,
+           item.dispatch_started_at, item.dispatch_id::text, item.dispatch_session_id, item.recovery_protocol,
+           item.dispatch_turn_id, item.dispatch_start_index::text, item.recovery_cancel_requested,
+           item.response_session_id,item.response_turn_id,item.response_start_index::text,
           item.voice_file_id, item.voice_file_size::text, item.voice_mime_type,
           item.voice_transcript, item.media_group_key, item.media_group_late, candidate.current_continuation_key`,
       [leaseMilliseconds, TELEGRAM_INGRESS_RECOVERY_MAX_ATTEMPTS],

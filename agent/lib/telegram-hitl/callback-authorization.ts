@@ -18,6 +18,8 @@ import {
   type TelegramHitlApprovalRepository,
 } from "./approval-repository.js";
 import { boundSettledPrompt, settledPromptText } from "./settled-prompt.js";
+import type { TelegramPreparationContext } from "../telegram-ingress-preparation.js";
+import { recordOperationalIncident } from "../operational-incidents/owner-alerts.js";
 
 const CALLBACK_ERRORS = {
   expired:
@@ -49,7 +51,7 @@ export function createTelegramHitlCallbackAuthorizer(
   repository: Pick<TelegramHitlApprovalRepository, "claimCallback">,
 ) {
   return async function authorizeHitlCallback(
-    ctx: TelegramContext,
+    ctx: TelegramPreparationContext,
     query: TelegramCallbackQuery,
     _continuationToken: string,
   ): Promise<TelegramHitlCallbackResult> {
@@ -72,6 +74,8 @@ export function createTelegramHitlCallbackAuthorizer(
     });
     // The repository atomically binds the exact button, active Eve request, and current DB role.
     const result = await repository.claimCallback({
+      ...(ctx.ingressRecovery ? { ingress: { updateId: ctx.ingressRecovery.updateId,
+        dispatchId: ctx.ingressRecovery.dispatchId,callbackQueryId: query.id } } : {}),
       baseContinuationToken: promptRoute,
       callbackData,
       telegramChatId: message.chat.id,
@@ -79,18 +83,23 @@ export function createTelegramHitlCallbackAuthorizer(
       telegramUserId: query.from.id,
     });
     if (result.status === "authorized") {
+      if (result.replayed) return { acknowledgementText: "Решение сохранено", auth: result.auth, continuationToken: result.continuationToken };
       // Replace the exact claimed prompt before Eve resumes; an empty keyboard removes stale buttons.
-      const edited = await ctx.telegram.request("editMessageText", {
-        chat_id: message.chat.id,
-        message_id: Number(message.messageId),
-        reply_markup: { inline_keyboard: [] },
-        text: resolvedApprovalText(result),
-      });
-      if (!edited.ok) {
-        throw new AppError(
-          "AGENT_APPROVAL_MESSAGE_FINALIZE_FAILED",
-          "Telegram не обновил сообщение с выбранным решением. Повторите действие",
-        );
+      try {
+        const edited = await ctx.telegram.request("editMessageText", {
+          chat_id: message.chat.id,
+          message_id: Number(message.messageId),
+          reply_markup: { inline_keyboard: [] },
+          text: resolvedApprovalText(result),
+        });
+        if (!edited.ok) throw new AppError("AGENT_APPROVAL_MESSAGE_FINALIZE_FAILED", "Telegram не обновил сообщение с выбранным решением");
+      } catch (error) {
+        // The decision is already committed. A cosmetic edit must not prevent its durable handoff.
+        console.error(JSON.stringify({ code: "AGENT_APPROVAL_MESSAGE_FINALIZE_FAILED", callbackId: query.id,
+          errorName: error instanceof Error ? error.name : "UnknownError" }));
+        await recordOperationalIncident({ key: `callback-prompt:${query.id}`,code: "AGENT_APPROVAL_MESSAGE_FINALIZE_FAILED",
+          summary: "Решение пользователя сохранено, но Telegram не обновил сообщение с кнопками. Передача решения продолжается.",
+          context: { chatId: message.chat.id,messageId: message.messageId } });
       }
       return {
         acknowledgementText: "Решение сохранено",
@@ -99,6 +108,7 @@ export function createTelegramHitlCallbackAuthorizer(
       };
     }
 
+    if (ctx.ingressRecovery?.replaying) return null;
     await ctx.telegram.answerCallbackQuery({
       callbackQueryId: query.id,
       showAlert: true,

@@ -39,7 +39,7 @@ export async function recoverTelegramIngress(input: {
         idle: true,
         accepts: control.acceptsEvent,
         async event(event) {
-          if (["turn.cancelled", "turn.failed", "session.failed"].includes(event.type)) interrupted = true;
+          if (["turn.failed", "session.failed"].includes(event.type)) interrupted = true;
         },
       });
       control.signal.throwIfAborted();

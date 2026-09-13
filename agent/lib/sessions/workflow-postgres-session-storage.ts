@@ -10,25 +10,28 @@
  * - The run row is locked and removed last; any failure rolls the transaction back.
  * - Existing hooks block deletion so Workflow token-retention semantics cannot be shortened.
  */
-import pg from "pg";
+import { createApplicationDatabasePool } from "../database-client.js";
 
 import { AppError } from "../app-error.js";
 
-const { Client } = pg;
 const EVE_RUN_ID_PATTERN = /^wrun_[A-Z0-9]{26}$/u;
 const TERMINAL_RUN_STATUSES = new Set(["cancelled", "completed", "failed"]);
 
 /** Read-only proof used by the explicit operator recovery, without re-enqueuing a Workflow run. */
 export async function isConfiguredEveSessionTerminal(runId: string): Promise<boolean> {
+  const status = await readConfiguredEveRunStatus(runId);
+  return status !== null && TERMINAL_RUN_STATUSES.has(status);
+}
+
+export async function readConfiguredEveRunStatus(runId: string): Promise<string | null> {
   if (!EVE_RUN_ID_PATTERN.test(runId)) throw new AppError("AGENT_EVE_SESSION_ID_INVALID", "Некорректный идентификатор Eve-сессии");
   const connectionString = process.env.WORKFLOW_POSTGRES_URL;
   if (!connectionString) throw new AppError("AGENT_WORKFLOW_DATABASE_CONFIG_MISSING", "Не задано подключение к базе Workflow");
-  const client = new Client({ connectionString });
-  await client.connect();
+  const client = createApplicationDatabasePool({ connectionString,max: 1,connectionTimeoutMillis: 5000 });
   try {
     const result = await client.query<{ status: string }>("SELECT status::text FROM workflow.workflow_runs WHERE id = $1", [runId]);
     const status = result.rows[0]?.status;
-    return status !== undefined && TERMINAL_RUN_STATUSES.has(status);
+    return status ?? null;
   } finally { await client.end(); }
 }
 
@@ -121,11 +124,12 @@ export async function deleteConfiguredPostgresEveSession(runId: string): Promise
   }
 
   // A short-lived client keeps the retention job independent from the world worker's pool lifecycle.
-  const client = new Client({ connectionString });
-  await client.connect();
+  const pool = createApplicationDatabasePool({ connectionString,max: 1,connectionTimeoutMillis: 5000 });
   try {
-    await deletePostgresEveSession(runId, client);
+    const client=await pool.connect();
+    try { await deletePostgresEveSession(runId,client); }
+    finally { client.release(); }
   } finally {
-    await client.end();
+    await pool.end();
   }
 }

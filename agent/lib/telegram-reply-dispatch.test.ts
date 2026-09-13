@@ -59,7 +59,8 @@ describe("Telegram reply dispatch", () => {
       const channel = telegramChannel({
         botUsername: BOT_USERNAME,
         credentials: { webhookSecretToken: "webhook-secret" },
-        onMessage: createTelegramMessageHandler(repository),
+        onMessage: (context,message) => createTelegramMessageHandler(repository)({ ...context,
+          ingressRecovery: { updateId: "1001",dispatchId: "123e4567-e89b-42d3-a456-426614174000" } },message),
       });
       const route = channel.routes[0] as unknown as HttpRoute;
       let backgroundTask: Promise<unknown> | undefined;
@@ -123,7 +124,9 @@ describe("Telegram reply dispatch", () => {
         expect(respond).toHaveBeenCalledWith([
           { requestId: "telegram_reply:3493", text },
         ], expect.anything());
-        expect(repository.session.prepareTurn).toHaveBeenCalledWith(expect.objectContaining({ kind: "task" }));
+        expect(repository.session.prepareAuthorizedResponse).toHaveBeenCalledWith(expect.objectContaining({
+          ingress: expect.objectContaining({ updateId: "1001" }),
+        }));
       } else {
         expect(from).not.toHaveBeenCalled();
         expect(repository.session.prepareTurn).not.toHaveBeenCalled();

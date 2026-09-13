@@ -27,11 +27,11 @@ async function ready() {
 const lease = 60_000;
 
 async function drain(dispatch: TelegramDrainContext["dispatch"], notifyTimeout = vi.fn()) {
-  const ingress = createTelegramDurableIngress({ repository, botUsername: "osinara_bot", leaseMilliseconds: lease,
+  const ingress = createTelegramDurableIngress({ reportFailure: notifyTimeout, repository, botUsername: "osinara_bot", leaseMilliseconds: lease,
     acceptMedia: vi.fn(), authorizeVoice: vi.fn(), handleSoftwareUpdateCallback: vi.fn(), transcribeVoice: vi.fn(),
   });
   const tasks: Promise<unknown>[] = [];
-  await ingress.drain({ attachSession: vi.fn(), dispatch: correlatedDispatch(dispatch), notifyTimeout,
+  await ingress.drain({ attachSession: vi.fn(), dispatch: correlatedDispatch(dispatch),
     waitUntil(task) { tasks.push(task); } });
   await Promise.all(tasks);
 }
@@ -202,8 +202,7 @@ async function drain(dispatch: TelegramDrainContext["dispatch"], notifyTimeout =
     try {
       await drain(dispatch, notify);
       expect(dispatch).not.toHaveBeenCalled();
-      expect(notify).toHaveBeenCalledWith(expect.objectContaining({ message: expect.objectContaining({ messageId: "1002" }) }),
-        expect.stringContaining("AGENT_TELEGRAM_MEDIA_GROUP_LATE"), expect.any(AbortSignal));
+      expect(notify).toHaveBeenCalledWith(expect.objectContaining({ key: "telegram:1002", code: "AGENT_TELEGRAM_MEDIA_GROUP_LATE" }));
       expect((await database().query("SELECT status FROM telegram_ingress_updates WHERE update_id = 1002")).rows[0]?.status).toBe("failed");
     } finally { log.mockRestore(); }
   });

@@ -6,6 +6,7 @@
  * - `dispatchDueReminders`: production dispatcher used by the Eve minute schedule.
  */
 import { isAppError } from "../app-error.js";
+import { recoverDatabaseBookkeeping } from "../database-recovery.js";
 import type { ProactiveDeliveryReceipt } from "../proactive-deliveries/proactive-delivery-repository.js";
 import {
   REMINDER_DISPATCH_BATCH_SIZE,
@@ -59,7 +60,7 @@ export function createReminderDispatcher(dependencies: ReminderDispatcherDepende
         receipt = await dependencies.deliver(job);
         completedAt = new Date();
         // Completion atomically records the proactive receipt before any secondary projection.
-        await dependencies.repository.complete(job, completedAt, receipt);
+        await recoverDatabaseBookkeeping(() => dependencies.repository.complete(job, completedAt, receipt));
       } catch (error) {
         if (isAppError(error) && error.code === "AGENT_REMINDER_LEASE_STALE") {
           console.error(JSON.stringify({

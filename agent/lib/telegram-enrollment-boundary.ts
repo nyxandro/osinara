@@ -24,6 +24,8 @@ export async function handleTelegramEnrollmentBoundary(input: {
   message: TelegramMessage;
   repositories: Pick<TelegramMessageRepositories, "family" | "telegram">;
 }): Promise<boolean> {
+  // A replay after owner creation must never forward the one-time bootstrap secret to the model.
+  if (input.identity && OWNER_BOOTSTRAP_COMMAND_PATTERN.test(input.message.text.trim())) return true;
   // Invitation secrets are channel commands, not conversation content, even for existing members.
   if (input.identity && input.invitationCode) {
     await input.ctx.telegram.sendMessage(

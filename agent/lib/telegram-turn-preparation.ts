@@ -11,11 +11,16 @@ import { memoryReviewBatchId } from "./memory-review/memory-review-session.js";
 import { memoryReviewRepository } from "./memory-review/memory-review-repository.js";
 import { bindMemoryTurnSources } from "./memory-turn-source.js";
 import { proactiveDeliveryRepository } from "./proactive-deliveries/proactive-delivery-repository.js";
+import { admitScheduledAgentTurn } from "./agent-schedules/agent-schedule-recovery.js";
 
 export const prepareTelegramTurn: TelegramChannelEvents["turn.started"] = async (_data, channel, ctx) => {
   requireTelegramAdmissionDeadline(ctx.session.auth);
   if (!ctx.session.parent) await bindTelegramIngressTurn(ctx.session.auth, ctx.session.id, ctx.session.turn.id);
   const sessionId = applicationSessionId(ctx);
+  const scheduledRunId = ctx.session.auth.current?.attributes.scheduledRunId;
+  if (!ctx.session.parent && typeof scheduledRunId === "string") await admitScheduledAgentTurn({
+    runId: scheduledRunId, applicationSessionId: sessionId, eveSessionId: ctx.session.id, eveTurnId: ctx.session.turn.id,
+  });
   await sessionRepository.bindEveSession(sessionId, ctx.session.id);
   // Provider reaction policy is refreshed for later instruction resolution, never guessed.
   if (!isScheduledSession(ctx)) await refreshTelegramReactionPolicy(channel.telegram);

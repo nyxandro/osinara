@@ -8,6 +8,7 @@
 import type { PoolClient } from "pg";
 
 import { AppError } from "../app-error.js";
+import { recordOperationalIncident } from "../operational-incidents/owner-alerts.js";
 import { nextAnchoredOccurrence } from "../scheduling/next-occurrence.js";
 import { recordProactiveDelivery } from "../proactive-deliveries/proactive-delivery-repository.js";
 import type { AgentScheduleRecurrenceKind } from "./agent-schedule-record.js";
@@ -101,6 +102,9 @@ export async function finishActiveAgentScheduleRun(
   );
   const row = active.rows[0];
   if (!row) return false;
+  if (input.errorCode !== null) await recordOperationalIncident({ key: `schedule-run:${row.run_id}`,
+    code: "AGENT_SCHEDULE_EXECUTION_FAILED", summary: "Агентный сценарий завершился с ошибкой. Проверьте результат перед повтором.",
+    context: { runId: row.run_id, scheduleId: row.schedule_id, causeCode: input.errorCode } }, client);
 
   // The run row is terminal before the schedule is re-opened, avoiding overlap windows.
   await client.query(

@@ -23,11 +23,11 @@ describe("independent Telegram queue progress", () => {
     const repository = { claimNext: vi.fn(async () => items.shift() ?? null), beginDispatch: vi.fn(),
       renewLease: vi.fn(async (id: string) => { if (failure === "lease" && id === String(ordinary)) throw new Error("expected test lease loss"); }),
       sessionEventStreamCursor: vi.fn(async () => 0), completeWithSession: vi.fn(async (id: string) => { completed.push(Number(id)); }), fail: vi.fn() };
-    const handler = createTelegramDurableIngress({ repository: repository as unknown as TelegramIngressRepository,
+    const handler = createTelegramDurableIngress({ reportFailure: vi.fn(), repository: repository as unknown as TelegramIngressRepository,
       botUsername: "osinara_bot", leaseMilliseconds: 60_000, acceptMedia: vi.fn(), authorizeVoice: vi.fn(),
       handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), transcribeVoice: vi.fn() });
     try {
-      for (let index = 0; index < ordinary + callbacks; index++) await handler.drain({ attachSession: vi.fn(), notifyTimeout: vi.fn(), waitUntil: task => { work.push(task); }, dispatch: correlatedDispatch(async update => {
+      for (let index = 0; index < ordinary + callbacks; index++) await handler.drain({ attachSession: vi.fn(), waitUntil: task => { work.push(task); }, dispatch: correlatedDispatch(async update => {
         const id = Number(update.kind === "message" ? update.message.messageId : update.callbackQuery.message!.messageId);
         dispatched.push(id); active[update.kind]++; maximum[update.kind] = Math.max(maximum[update.kind], active[update.kind]);
         return { id: String(id), getEventStream: async () => new ReadableStream({ async start(controller) {
@@ -86,13 +86,13 @@ describe("independent Telegram queue progress", () => {
     const privateGate = new Promise<void>((resolve) => { releasePrivate = resolve; });
     const dispatched: number[] = [];
     const streamStarts: number[][] = [];
-    const handler = createTelegramDurableIngress({ repository, botUsername: "osinara_bot",
+    const handler = createTelegramDurableIngress({ reportFailure: vi.fn(), repository, botUsername: "osinara_bot",
       leaseMilliseconds: 60_000, acceptMedia: vi.fn(), authorizeVoice: vi.fn(),
       handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), transcribeVoice: vi.fn(),
     });
     const work: Promise<unknown>[] = [];
     async function drain() {
-      await handler.drain({ attachSession: vi.fn(), notifyTimeout: vi.fn(), waitUntil: (task) => { work.push(task); }, dispatch: correlatedDispatch(async (update) => {
+      await handler.drain({ attachSession: vi.fn(), waitUntil: (task) => { work.push(task); }, dispatch: correlatedDispatch(async (update) => {
         const id = Number(update.kind === "message" ? update.message.messageId : update.callbackQuery.message!.messageId);
         dispatched.push(id);
         return { id: id > 2 ? "private-session" : "group-session", getEventStream: async ({ startIndex }: { startIndex: number }) => {

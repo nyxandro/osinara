@@ -183,13 +183,4 @@ export const telegramFinalDeliveryRepository = {
     );
   },
 
-  async shouldSuppressFailureMessage(eveSessionId: string, eveTurnId: string): Promise<boolean> {
-    const result = await database().query<{ status: string }>(
-      `SELECT status FROM telegram_final_deliveries
-       WHERE eve_session_id = $1 AND eve_turn_id = $2`,
-      [eveSessionId, eveTurnId],
-    );
-    const status = result.rows[0]?.status;
-    return status === "started" || status === "delivered" || status === "ambiguous";
-  },
 };

@@ -32,7 +32,6 @@ const dependencies = vi.hoisted(() => ({
     telegramChatId: "-100111",
     title: "Сводка",
   },
-  shouldSuppressFailure: vi.fn(),
 }));
 
 vi.mock("eve/channels/telegram", () => ({
@@ -65,11 +64,6 @@ vi.mock("./sessions/session-repository.js", () => ({
 }));
 vi.mock("./telegram-final-delivery.js", () => ({
   deliverTelegramFinalOutput: dependencies.deliverFinalOutput,
-}));
-vi.mock("./telegram-final-delivery-repository.js", () => ({
-  telegramFinalDeliveryRepository: {
-    shouldSuppressFailureMessage: dependencies.shouldSuppressFailure,
-  },
 }));
 vi.mock("./telegram-hitl/approval-repository.js", () => ({
   telegramHitlApprovalRepository: { clearForEveSession: dependencies.clearApprovals },
@@ -134,7 +128,6 @@ describe("scheduled Telegram target binding", () => {
     dependencies.failRun.mockResolvedValue(true);
     dependencies.failRunForNotification.mockResolvedValue(true);
     dependencies.postStableMessage.mockResolvedValue("failure-message-1");
-    dependencies.shouldSuppressFailure.mockResolvedValue(false);
   });
 
   it("rejects a completed result before authorization or Telegram delivery when chat differs", async () => {

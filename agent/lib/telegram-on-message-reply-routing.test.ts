@@ -269,7 +269,7 @@ describe("createTelegramMessageHandler reply routing", () => {
     repository.hitl.authorizeReply.mockResolvedValue("authorized");
     const handler = createTelegramMessageHandler(repository);
 
-    const result = await handler(telegramContext().context, {
+    const result = await handler({ ...telegramContext().context,ingressRecovery: { updateId: "343",dispatchId: "123e4567-e89b-42d3-a456-426614174000" } }, {
       ...groupMessage("да"),
       messageId: "343",
       replyToMessage: {
@@ -279,9 +279,8 @@ describe("createTelegramMessageHandler reply routing", () => {
       },
     });
 
-    expect(repository.session.prepareTurn).toHaveBeenCalledWith(expect.objectContaining({
-      baseContinuationToken: "group-101::341",
-      kind: "task",
+    expect(repository.session.prepareAuthorizedResponse).toHaveBeenCalledWith(expect.objectContaining({
+      ingress: expect.objectContaining({ updateId: "343" }),
     }));
     expect(result).not.toBeNull();
     expect(result).not.toHaveProperty("replyHandling");

@@ -98,6 +98,7 @@ export async function resolveCurrentApprovalAuth(client: PoolClient, row: Approv
     attributes: {
       applicationSessionId: row.application_session_id,
       telegramApprovalContinuation: "true",
+      osinaraTelegramResponseSessionId: row.eve_session_id,
       telegramApprovalScope: row.scope,
       familyId: row.family_id,
       memoryScopes,

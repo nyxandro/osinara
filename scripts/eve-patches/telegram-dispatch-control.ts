@@ -19,27 +19,35 @@ export async function patchTelegramDispatchControl(replace: (path: string, befor
     }
     function osinaraBaseCoalesceDeliveries(e){`);
   const path = resolve("node_modules/eve/dist/src/public/channels/telegram/telegramChannel.js");
+  // The native driver already deduplicates taskDeliveryId before consuming input responses.
+  // Reuse that inbox capability for an exact verified Telegram callback, never for a new session.
+  await replace(resolve("node_modules/eve/dist/src/channel/channel-address.js"),
+    "d=l===void 0?u:{...u,caller:l},dispatch=async()=>",
+    "d={...(l===void 0?u:{...u,caller:l}),...((c.inputResponses?.length||o.auth?.attributes.osinaraTelegramResponseSessionId)&&o.auth?.attributes.osinaraTelegramUpdateId?{taskDeliveryId:`osinara.telegram.update:${o.auth.attributes.osinaraTelegramUpdateId}`}:{})},dispatch=async()=>");
+  await replace(resolve("node_modules/eve/dist/src/channel/channel-address.js"),
+    "let t=await r.runtime.dispatchContinuation({command:d,continuationToken:a});",
+    "let t=o.auth?.attributes.osinaraTelegramResponseSessionId?await r.runtime.dispatchSession({command:d,sessionId:o.auth.attributes.osinaraTelegramResponseSessionId}):await r.runtime.dispatchContinuation({command:d,continuationToken:a});");
+  await replace(resolve("node_modules/eve/dist/src/channel/channel-address.js"),
+    "if(f!==void 0)return f;if(c.inputResponses",
+    "if(f!==void 0)return f;if(o.auth?.attributes.osinaraTelegramResponseSessionId)throw Error('AGENT_TELEGRAM_RESPONSE_SESSION_INACTIVE');if(c.inputResponses");
   await replace(path, "function telegramChannel(e={}){", `
+function osinaraTelegramCallbackConfig(config,control){
+  return control?.prepareCallback&&config.onHitlCallbackQuery?{...config,onHitlCallbackQuery:(ctx,query,token)=>control.prepareCallback(ctx,query,token,config.onHitlCallbackQuery)}:config;
+}
 function osinaraTelegramDispatchFrom(from,resolveSession,control){
   if(!Number.isFinite(Date.parse(control.deadlineAt))||typeof control.dispatchId!=="string"||!control.dispatchId)throw Error("AGENT_TELEGRAM_DEADLINE_INVALID");
   return token=>{
     const source=from(token);
-    const prepare=options=>{
+    const prepare=async(options,kind)=>{
       control.signal.throwIfAborted();
       if(options.auth==null)throw Error("AGENT_TELEGRAM_DISPATCH_AUTH_MISSING");
-      control.onDispatch({resolveSession:()=>resolveSession(token)});
+      await control.beforeDispatch?.(token,kind);
+      control.signal.throwIfAborted();
+      control.onDispatch({resolveSession:async()=>{const session=await resolveSession(token);return options.auth.attributes.osinaraTelegramResponseSessionId&&session?.id!==options.auth.attributes.osinaraTelegramResponseSessionId?undefined:session;}});
       return {...options,auth:{...options.auth,attributes:{...options.auth.attributes,osinaraTelegramDeadlineAt:control.deadlineAt,osinaraTelegramIngressId:control.dispatchId,...control.updateId===undefined?{}:{osinaraTelegramUpdateId:control.updateId}}}};
     };
-    return {...source,send:(message,options)=>source.send(message,prepare(options)),respond:(responses,options)=>source.respond(responses,prepare(options))};
+    return {...source,send:async(message,options)=>source.send(message,await prepare(options,"send")),respond:async(responses,options)=>source.respond(responses,await prepare(options,"respond"))};
   };
-}
-function osinaraTelegramTimeoutNotice(config,update,text,signal){
-  const message=update.kind==="message"?update.message:update.callbackQuery.message;
-  if(!message)throw Error("AGENT_TELEGRAM_TIMEOUT_TARGET_MISSING");
-  const fetchImpl=config.api?.fetch??globalThis.fetch;
-  return sendTelegramMessage({...config.api,credentials:config.credentials,chatId:message.chat.id,
-    fetch:(url,init)=>{signal.throwIfAborted();return fetchImpl(url,{...init,signal})},
-    body:{text,message_thread_id:message.messageThreadId,reply_parameters:{message_id:Number(message.messageId)}}});
 }
 function telegramChannel(e={}){`);
   await replace(path,

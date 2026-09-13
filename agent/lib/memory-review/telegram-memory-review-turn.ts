@@ -8,6 +8,7 @@
  * - Combined participant sources are deduplicated, chronological, and synchronized in bounded chunks.
  */
 import { AppError } from "../app-error.js";
+import { isDatabaseUnavailable } from "../database-recovery.js";
 import {
   composeTelegramTurnMessage,
   type PreparedTelegramGroupTurnContext,
@@ -119,6 +120,7 @@ export async function prepareTelegramMemoryReviewTurn(input: {
     }
     return context;
   } catch (error) {
+    if (isDatabaseUnavailable(error)) throw error;
     if (reviewBatch) {
       await input.repositories.memoryReview.failInteractivePreparation(
         reviewBatch.batchId,

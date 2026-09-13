@@ -5,7 +5,8 @@
  * - `database`: lazily initialized connection pool.
  * - `closeDatabase`: graceful shutdown helper for scripts and tests.
  */
-import { Pool } from "pg";
+import type { Pool } from "pg";
+import { createApplicationDatabasePool } from "./database-client.js";
 
 let pool: Pool | null = null;
 
@@ -17,7 +18,9 @@ export function database(): Pool {
       "AGENT_DATABASE_CONFIG_MISSING: Не задано подключение к базе данных",
     );
   }
-  pool ??= new Pool({ connectionString, max: 10 });
+  if (pool === null) {
+    pool = createApplicationDatabasePool({ connectionString, max: 10, connectionTimeoutMillis: 5_000 });
+  }
   return pool;
 }
 

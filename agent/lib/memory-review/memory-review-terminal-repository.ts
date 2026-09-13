@@ -193,7 +193,8 @@ export async function terminalizeAbandonedReviewTurns(
             batch.eve_turn_id, batch.from_sequence::text, batch.through_sequence::text
        FROM memory_review_batches AS batch
        LEFT JOIN conversation_sessions AS session ON session.id = batch.application_session_id
-      WHERE batch.status = 'running' AND batch.eve_session_id IS NOT NULL
+       WHERE batch.status = 'running' AND batch.eve_session_id IS NOT NULL
+         AND NOT (batch.batch_kind='background' AND batch.recovery_protocol=1)
         AND batch.started_at <= $1::timestamptz - $2::double precision * interval '1 millisecond'
         AND (session.id IS NULL OR session.retired_at IS NOT NULL
           OR session.pending_operation = false)

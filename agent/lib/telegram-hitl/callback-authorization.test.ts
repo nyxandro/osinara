@@ -11,6 +11,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { buildApprovalMessage } from "./approval-message.js";
 import { createTelegramHitlCallbackAuthorizer } from "./callback-authorization.js";
+import { recordOperationalIncident } from "../operational-incidents/owner-alerts.js";
+vi.mock("../operational-incidents/owner-alerts.js", () => ({ recordOperationalIncident: vi.fn() }));
 
 function callbackQuery(): TelegramCallbackQuery {
   return {
@@ -37,6 +39,16 @@ function telegramContext() {
 }
 
 describe("createTelegramHitlCallbackAuthorizer", () => {
+  it("forwards a committed decision even when updating its Telegram prompt fails", async () => {
+    const auth = { authenticator: "telegram",principalId: "user-1",principalType: "user",attributes: { role: "owner" } };
+    const repository = { claimCallback: vi.fn().mockResolvedValue({ status: "authorized",auth,continuationToken: "exact",
+      promptText: "Подтвердите",selectedOptionId: "approve",selectedOptionLabel: "Да" }) };
+    const { context,request } = telegramContext();
+    request.mockRejectedValueOnce(new Error("Telegram unavailable"));
+    await expect(createTelegramHitlCallbackAuthorizer(repository)(context,callbackQuery(),"exact"))
+      .resolves.toMatchObject({ auth,continuationToken: "exact" });
+    expect(recordOperationalIncident).toHaveBeenCalledWith(expect.objectContaining({ code: "AGENT_APPROVAL_MESSAGE_FINALIZE_FAILED" }));
+  });
   it("returns the freshly claimed Telegram auth to Eve", async () => {
     const auth = {
       attributes: { applicationSessionId: "session-1", role: "member" },

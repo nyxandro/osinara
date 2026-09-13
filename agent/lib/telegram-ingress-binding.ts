@@ -20,9 +20,10 @@ export async function bindTelegramIngressTurn(auth: SessionAuth, sessionId: stri
   const result = await database().query(
     `UPDATE telegram_ingress_updates item
         SET dispatch_session_id = $3, dispatch_turn_id = $4,
-            dispatch_start_index = COALESCE(item.dispatch_start_index,
+             dispatch_start_index = COALESCE(item.dispatch_start_index, item.response_start_index,
               (SELECT next_event_index FROM eve_session_event_cursors WHERE eve_session_id = $3), 0)
-      WHERE item.update_id = $1 AND item.dispatch_id = $2 AND item.dispatch_started_at IS NOT NULL
+       WHERE item.update_id = $1 AND item.dispatch_id = $2 AND item.dispatch_started_at IS NOT NULL
+         AND (item.response_session_id IS NULL OR item.response_session_id=$3)
         AND (item.status = 'processing' OR ($5 AND item.dispatch_session_id = $3 AND item.dispatch_turn_id = $4) OR
           (item.status = 'failed' AND item.last_error_code = 'AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED'))
         AND (item.dispatch_session_id IS NULL OR

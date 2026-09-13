@@ -13,13 +13,12 @@
  * - Production side-effect adapters are assembled in `telegram-on-message-repositories.ts`.
  */
 import type {
-  TelegramContext,
   TelegramInboundResult,
   TelegramMessage,
 } from "eve/channels/telegram";
 
 import type { StoredTelegramAttachment } from "./attachments/telegram-workspace-attachments.js";
-import { AppError, isAppError } from "./app-error.js";
+import { AppError } from "./app-error.js";
 import { bindTelegramConversationTimeline } from "./telegram-conversation-timeline.js";
 import { evaluateConversationAccess } from "./family-access.js";
 import { parseInvitationStartCommand } from "./invitation-code.js";
@@ -59,6 +58,8 @@ import {
 } from "./telegram-on-message-repositories.js";
 import { prepareTelegramMemoryReviewTurn } from "./memory-review/telegram-memory-review-turn.js";
 import { telegramInboundActor } from "./telegram-inbound-actor.js";
+import type { TelegramPreparationContext } from "./telegram-ingress-preparation.js";
+import type { PreparedSession } from "./sessions/session-repository.js";
 
 // Every accepted group turn owes the model its trigger; reaching dispatch without one is a bug.
 function requireGroupTurnTrigger(
@@ -74,7 +75,7 @@ function requireGroupTurnTrigger(
 
 export function createTelegramMessageHandler(repositories: TelegramMessageRepositories) {
   return async function handleMessage(
-    ctx: TelegramContext,
+    ctx: TelegramPreparationContext,
     message: TelegramMessage,
   ): Promise<TelegramInboundResult> {
     const actor = telegramInboundActor(message);
@@ -141,7 +142,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       inboundTimeline = await repositories.journal.record(group.groupId, message, actor);
       if (inboundTimeline.status === "duplicate") {
         journalDuplicate = true;
-        if (!hasLazyGroupAttachment) return null;
+        if (!hasLazyGroupAttachment && !ctx.ingressRecovery) return null;
       }
       if (unsupportedGroupSlashCommand) {
         if (inboundTimeline.status === "inserted" && actor.kind !== "telegram_channel") {
@@ -252,7 +253,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
     });
     const conversation = timelineBinding.conversation;
     inboundTimeline = timelineBinding.inboundTimeline;
-    if (message.chat.type === "private" && inboundTimeline.status === "duplicate") return null;
+    if (message.chat.type === "private" && inboundTimeline.status === "duplicate" && !ctx.ingressRecovery) return null;
     // Group media stays remote until a mode-authorized tool consumes this safe opaque reference.
     const currentAttachment = hasLazyGroupAttachment && group
       ? await repositories.attachmentReferences.record(group.groupId, message)
@@ -279,7 +280,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       )
       : null;
     const lazyAttachment = currentAttachment ?? replyAttachment;
-    if (!addressed || journalDuplicate) {
+    if (!addressed || (journalDuplicate && !ctx.ingressRecovery)) {
       if (!addressed && !journalDuplicate && group && inboundTimeline &&
         actor.kind !== "telegram_channel") {
         await repositories.memoryReview.observePassiveMessage({
@@ -295,6 +296,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
     await repositories.conversations.syncTimelineParticipants(conversation.id, [inboundTimeline.entryId]);
     // A persisted agent timeline anchor is trusted even when Telegram omits compact sender metadata.
     const replyAuthorization = await authorizeTelegramReply({
+      ...(ctx.ingressRecovery ? { ingress: ctx.ingressRecovery } : {}),
       actor,
       botUsername,
       exactReplyRoute,
@@ -348,19 +350,13 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       message.attachments.length > 0 &&
       message.chat.type === "private"
     ) {
-      try {
-        storedAttachments = await repositories.attachments.persist({
-          attachments: message.attachments,
-          auth: telegramWorkspaceAuthorization(decision, group, message),
-          chatId: message.chat.id,
-          messageId: message.messageId,
-          scope: telegramAttachmentScope(decision),
-        });
-      } catch (error) {
-        // The channel boundary informs the user, while rethrowing preserves terminal ingress failure.
-        if (isAppError(error)) await ctx.telegram.sendMessage(error.message);
-        throw error;
-      }
+      storedAttachments = await repositories.attachments.persist({
+        attachments: message.attachments,
+        auth: telegramWorkspaceAuthorization(decision, group, message),
+        chatId: message.chat.id,
+        messageId: message.messageId,
+        scope: telegramAttachmentScope(decision),
+      });
     }
     // One instant anchors session rotation, pending-delivery visibility, and model-visible time.
     const resolvedSessionScope = telegramSessionScope(decision);
@@ -370,10 +366,20 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
         ? telegramBaseContinuationToken(message, verifiedReplyRoute ?? exactReplyRoute)
         : groupCanonicalContinuationToken(group.groupId, verifiedForumTopicId)
       : telegramBaseContinuationToken(message, verifiedReplyRoute);
-    const appSession = await repositories.session.prepareTurn({
+    let appSession: PreparedSession;
+    let responseSessionId: string | undefined;
+    if (resumesPendingTask) {
+      if (!ctx.ingressRecovery) throw new AppError("AGENT_RESPONSE_INGRESS_MISSING", "Не найден проверенный источник ответа");
+      const response = await repositories.session.prepareAuthorizedResponse({
+        ingress: ctx.ingressRecovery,familyId: access.familyId,groupId: resolvedSessionScope.groupId,
+        userId: resolvedSessionScope.userId,scope: resolvedSessionScope.scope,now: turnStartedAt,telegramForumTopicId: verifiedForumTopicId,
+      });
+      appSession=response;
+      responseSessionId=response.nativeSessionId;
+    } else appSession = await repositories.session.prepareTurn({
       baseContinuationToken,
       familyId: access.familyId,
-      kind: resumesPendingTask ? "task" : "canonical",
+      kind: "canonical",
       now: turnStartedAt,
       telegramForumTopicId: verifiedForumTopicId,
       ...resolvedSessionScope,
@@ -474,6 +480,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       profileSignals,
       profileReplyTimelineSequence: inboundTimeline.replyToSequenceId,
       replyHandling,
+      ...(responseSessionId === undefined ? {} : { responseSessionId }),
       storedAttachments,
       timelineEntryId: inboundTimeline.entryId,
       turnContext: groupTurnContext,

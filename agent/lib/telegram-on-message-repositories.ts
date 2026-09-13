@@ -75,7 +75,7 @@ export interface TelegramMessageRepositories {
     "failInteractivePreparation" | "observePassiveMessage" | "prepareInteractiveTurn"
   >;
   proactiveDeliveries: Pick<typeof proactiveDeliveryRepository, "listPendingContext">;
-  session: Pick<typeof sessionRepository, "hasRoute" | "prepareTurn">;
+  session: Pick<typeof sessionRepository, "hasRoute" | "prepareTurn" | "prepareAuthorizedResponse">;
   telegram: TelegramRepository;
   timeline: Pick<typeof conversationTimelineRepository, "recordInbound">;
 }

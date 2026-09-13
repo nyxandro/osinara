@@ -57,6 +57,7 @@ describe("software update callback durable ingress", () => {
     const dispatch = vi.fn();
     let backgroundTask: Promise<unknown> | undefined;
     const ingress = createTelegramDurableIngress({
+      reportFailure: vi.fn(),
       acceptMedia: vi.fn(),
       authorizeVoice: vi.fn(),
       botUsername: "osinara_bot",

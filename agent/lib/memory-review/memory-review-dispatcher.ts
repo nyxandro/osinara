@@ -20,6 +20,8 @@ import {
 } from "./memory-review-repository.js";
 import { memoryReviewDispatchRepository } from "./memory-review-dispatch-repository.js";
 import { memoryReviewSessionRepository } from "./memory-review-session-repository.js";
+import { isDatabaseUnavailable, recoverDatabaseBookkeeping } from "../database-recovery.js";
+import { reconcileMemoryReviewExecutions } from "./memory-review-execution-reconciliation.js";
 
 export type ClaimedMemoryReviewBatch = MemoryReviewClaim;
 
@@ -97,6 +99,7 @@ async function dispatchOne(
     await dependencies.syncParticipants(batch);
     prepared = await dependencies.prepareSession(batch, now);
   } catch (error) {
+    if (isDatabaseUnavailable(error)) throw error;
     await dependencies.failClaim(batch, "AGENT_MEMORY_REVIEW_SESSION_PREPARATION_FAILED");
     throw error;
   }
@@ -105,6 +108,7 @@ async function dispatchOne(
   try {
     dispatchStarted = await dependencies.markDispatchStarted(batch, prepared.id);
   } catch (error) {
+    if (isDatabaseUnavailable(error)) throw error;
     await dependencies.markAmbiguous(
       batch,
       "AGENT_MEMORY_REVIEW_DISPATCH_MARKER_AMBIGUOUS",
@@ -123,13 +127,14 @@ async function dispatchOne(
     session = await dependencies.to(memoryReviewChannel, { batchId: batch.batchId })
       .send(batch.prompt, { auth: reviewAuth(batch, prepared) });
   } catch (error) {
+    if (isDatabaseUnavailable(error)) throw error;
     await dependencies.markAmbiguous(batch, "AGENT_MEMORY_REVIEW_HANDOFF_AMBIGUOUS", prepared.id);
     throw error;
   }
-  await dependencies.markRunning(batch, {
+  await recoverDatabaseBookkeeping(() => dependencies.markRunning(batch, {
     applicationSessionId: prepared.id,
     eveSessionId: session.id,
-  });
+  }));
 }
 
 export function createMemoryReviewDispatcher(dependencies: MemoryReviewDispatcherDependencies) {
@@ -158,7 +163,7 @@ export function dispatchPendingMemoryReviews(
   to: ScheduleToFn,
   now = new Date(),
 ): Promise<number> {
-  return createMemoryReviewDispatcher({
+  return reconcileMemoryReviewExecutions().then(() => createMemoryReviewDispatcher({
     claimPending: (input) => memoryReviewDispatchRepository.claimPending(input),
     discardSession: (batch, applicationSessionId) =>
       memoryReviewSessionRepository.retireUnstarted(batch, applicationSessionId),
@@ -175,5 +180,5 @@ export function dispatchPendingMemoryReviews(
       batch.sourceEntryIds,
     ),
     to,
-  })();
+  })());
 }

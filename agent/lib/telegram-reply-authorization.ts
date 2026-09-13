@@ -20,6 +20,7 @@ export interface TelegramReplyAuthorizationResult {
 }
 
 export async function authorizeTelegramReply(input: {
+  ingress?: { updateId: string; dispatchId: string };
   actor: TelegramInboundActor;
   botUsername: string;
   exactReplyRoute: string | undefined;
@@ -51,6 +52,7 @@ export async function authorizeTelegramReply(input: {
       );
     }
     const authorization = await input.hitl.authorizeReply({
+      ...(input.ingress ? { ingress: input.ingress } : {}),
       baseContinuationToken: telegramBaseContinuationToken(
         input.message,
         verifiedReplyRoute ?? (input.replyToAgent ? input.exactReplyRoute : undefined),

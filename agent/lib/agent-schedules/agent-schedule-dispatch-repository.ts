@@ -9,6 +9,8 @@ import type { PoolClient } from "pg";
 
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
+import { recoverUnstartedAgentSchedules } from "./agent-schedule-recovery.js";
+import { recordOperationalIncident } from "../operational-incidents/owner-alerts.js";
 import {
   AGENT_SCHEDULE_DISPATCH_MAX_SAFE_ATTEMPTS,
 } from "./agent-schedule-config.js";
@@ -113,6 +115,10 @@ async function recordFailures(
   errorCode: string,
 ): Promise<void> {
   for (const row of rows) {
+    const run = (await client.query<{ id: string }>("SELECT id FROM agent_schedule_runs WHERE schedule_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1", [row.id])).rows[0];
+    await recordOperationalIncident({ key: run ? `schedule-run:${run.id}` : `schedule:${row.id}:${errorCode}`,
+      code: "AGENT_SCHEDULE_EXECUTION_FAILED", summary: "Не удалось выполнить агентное расписание. Проверьте состояние запуска.",
+      context: { scheduleId: row.id, runId: run?.id ?? null, causeCode: errorCode } }, client);
     await client.query(
       `INSERT INTO audit_events (family_id, event_type, subject_id, metadata)
        VALUES ($1, 'agent_schedule.failed', $2, jsonb_build_object('code', $3::text))`,
@@ -127,6 +133,7 @@ export const agentScheduleDispatchRepository = {
     const client = await database().connect();
     try {
       await client.query("BEGIN");
+      await recoverUnstartedAgentSchedules(client, options.now);
 
       // Only an unfinished Eve handoff expires; a confirmed running workflow owns its lifecycle.
       const ambiguous = await client.query<{ family_id: string; id: string; lease_token: string }>(
@@ -139,7 +146,8 @@ export const agentScheduleDispatchRepository = {
                 SELECT 1 FROM agent_schedule_runs AS run
                  WHERE run.schedule_id = schedule.id
                    AND run.lease_token = schedule.lease_token
-                   AND run.status = 'dispatching'
+                    AND run.status = 'dispatching'
+                    AND run.recovery_protocol=0
               )
             FOR UPDATE
          ), updated AS (

@@ -3,6 +3,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
 import type { SessionAuth } from "eve/context";
 import { AppError } from "./app-error.js";
+import { isDatabaseUnavailable } from "./database-recovery.js";
 import { waitForSessionBoundary, type BoundaryEvent, type EveSessionResult } from "./telegram-session-boundary.js";
 
 export interface DeadlineSession extends EveSessionResult {
@@ -111,6 +112,7 @@ export async function runTelegramProcessing<T>(input: {
   try {
     return await Promise.race([operation, timeout, interrupted]);
   } catch (error) {
+    if (isDatabaseUnavailable(error) || error instanceof AppError && error.code === "AGENT_TELEGRAM_LEASE_LOST") throw error;
     const timedOut = error instanceof TelegramProcessingTimeout || error instanceof AppError && error.code === "AGENT_TELEGRAM_SESSION_BOUNDARY_TIMEOUT";
     if (!controller.signal.aborted && !timedOut && !target && !session) throw error;
     clearTimeout(timer);

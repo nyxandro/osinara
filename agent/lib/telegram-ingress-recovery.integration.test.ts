@@ -55,7 +55,7 @@ describeDatabase("Telegram restart recovery", () => {
       c.enqueue({ type: "session.waiting", data: { osinaraTelegramIngressId: id } }); c.close();
     } }));
     const attachSession = vi.fn(() => ({ id: "eve-1", getEventStream: read, cancel: vi.fn() }));
-    const restarted = createTelegramDurableIngress({ repository, botUsername: "osinara_bot", leaseMilliseconds: 60000,
+    const restarted = createTelegramDurableIngress({ reportFailure: vi.fn(), repository, botUsername: "osinara_bot", leaseMilliseconds: 60000,
       observerIdleMilliseconds: 100, cancellationMilliseconds: 50, acceptMedia: vi.fn(), authorizeVoice: vi.fn(),
       handleSoftwareUpdateCallback: vi.fn(), transcribeVoice: vi.fn(),
     });
@@ -67,8 +67,8 @@ describeDatabase("Telegram restart recovery", () => {
     expect(dispatch).toHaveBeenCalledTimes(1);
     expect(dispatch.mock.calls[0]?.[0]).toMatchObject({ message: { messageId: "2" } });
     expect((await database().query("SELECT status FROM telegram_ingress_updates ORDER BY update_id")).rows)
-      .toEqual([{ status: failure === "interrupted" ? "failed" : "completed" }, { status: "completed" }]);
-    if (failure !== "interrupted") expect(await repository.sessionEventStreamCursor("eve-1")).toBe(13);
+      .toEqual([{ status: "completed" }, { status: "completed" }]);
+    expect(await repository.sessionEventStreamCursor("eve-1")).toBe(13);
   });
 
   it("rejects binding to another attempt or session and never overwrites provenance", async () => {

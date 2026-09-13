@@ -14,6 +14,16 @@ function fixture() {
 }
 
 describe("bounded durable stream consumption", () => {
+  it("marks a native PostgreSQL socket reset while preserving its original cause", async () => {
+    const f=fixture();
+    const error=Object.assign(new Error("socket reset"),{ code: "ECONNRESET" });
+    f.page.mockRejectedValueOnce(error);
+    const reader=createPagedStream(f).getReader();
+    await expect(reader.read()).rejects.toMatchObject({ code: "AGENT_DATABASE_UNAVAILABLE",cause: error });
+    expect(f.unsubscribe).toHaveBeenCalledOnce();
+    expect(f.page).toHaveBeenCalledOnce();
+    reader.releaseLock();
+  });
   it("supports native byte-stream consumers without transferring pg's pooled Buffer", async () => {
     const f = fixture();
     const payload = Buffer.from("cancel");

@@ -31,13 +31,14 @@ function fixture(count: number) {
   } satisfies TelegramIngressRepository;
   const dispatch = vi.fn();
   const handler = createTelegramDurableIngress({
+    reportFailure: vi.fn(),
     acceptMedia: vi.fn(), authorizeVoice: vi.fn(), botUsername: "osinara_bot",
     handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), leaseMilliseconds: 1_000,
     repository, transcribeVoice: vi.fn(),
   });
   async function drain() {
     let pending: Promise<unknown> | undefined;
-    await handler.drain({ attachSession: vi.fn(), dispatch: correlatedDispatch(dispatch), notifyTimeout: vi.fn(), waitUntil: (task) => { pending = task; } });
+    await handler.drain({ attachSession: vi.fn(), dispatch: correlatedDispatch(dispatch), waitUntil: (task) => { pending = task; } });
     if (!pending) throw new Error("TEST_DRAIN_NOT_SCHEDULED");
     await pending;
   }

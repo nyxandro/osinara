@@ -19,7 +19,8 @@ describe("runtime maintenance admission", () => {
     const work = vi.fn();
     expect(await withRuntimeAdmission("ordinary", work)).toBeNull();
     expect(work).not.toHaveBeenCalled();
-    expect(storage.query).toHaveBeenCalledTimes(1);
+    expect(storage.query).toHaveBeenCalledTimes(2);
+    expect(storage.query.mock.calls[1]?.[0]).toContain("DELETE FROM runtime_admission_holders");
   });
   it("allows an approval to finish existing work during draining", async () => {
     storage.phase = "draining";
