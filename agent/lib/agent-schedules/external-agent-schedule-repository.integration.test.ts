@@ -64,16 +64,16 @@ describeWithDatabase("external agent schedule repository", () => {
     const recurrence = { kind, interval: 1 };
     const created = await externalAgentScheduleRepository.create(auth, {
       capabilityAllowlist: [], firstRunAt: new Date("2026-10-25T02:30:00+02:00"), operationKey: "new-period",
-      recurrence, scenarioPrompt: "Проверь ресурс", telegramChatId: "-100-external-schedule",
+      recurrence, maxRuns: 10, scenarioPrompt: "Проверь ресурс", telegramChatId: "-100-external-schedule",
       timezone: "Europe/Berlin", title: "Проверка", userRequest: "Проверяй по расписанию",
     });
-    expect(created).toMatchObject({ recurrence, scope: "group" });
+    expect(created).toMatchObject({ recurrence, scope: "group", maxRuns: 10, completedRuns: 0 });
     const anchor = await database().query("SELECT recurrence_anchor_at FROM agent_schedules WHERE id = $1", [created.id]);
     expect(anchor.rows[0].recurrence_anchor_at).toEqual(new Date("2026-10-25T00:30:00Z"));
     const updated = await externalAgentScheduleRepository.update(auth, created.id, {
-      recurrence: { kind, interval: 2 }, operationKey: "new-period-update",
+      recurrence: { kind, interval: 2 }, maxRuns: 3, operationKey: "new-period-update",
     });
-    expect(updated).toMatchObject({ id: created.id, recurrence: { kind, interval: 2 }, scope: "group" });
+    expect(updated).toMatchObject({ id: created.id, recurrence: { kind, interval: 2 }, scope: "group", maxRuns: 3 });
   });
 
   it("creates an owner-approved group schedule from the registered destination", async () => {

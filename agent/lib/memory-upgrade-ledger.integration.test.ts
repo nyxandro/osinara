@@ -133,6 +133,7 @@ const POST_V0101_MIGRATIONS = [
   "099_runtime_process_identity.sql",
   "100_response_admission_coordinates.sql",
   "101_text_response_recovery.sql",
+  "102_agent_schedule_limits.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [

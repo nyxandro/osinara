@@ -7,6 +7,8 @@
  */
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
+import { isPauseOnlyUpdate, requireAgentScheduleMaxRuns, requireScheduleLimitConsistency, requireScheduleLimitRemaining } from "./agent-schedule-limits.js";
+import { advanceReactivatedSchedule } from "./agent-schedule-next-occurrence.js";
 import type { AgentScheduleAuthorization } from "./agent-schedule-context.js";
 import { recurrenceValues } from "./agent-schedule-recurrence.js";
 import {
@@ -45,6 +47,7 @@ import {
 } from "./external-agent-schedule-policy.js";
 
 export interface AgentScheduleCreateInput {
+  maxRuns?: number | null;
   firstRunAt: Date;
   operationKey: string;
   recurrence: AgentScheduleInputRecurrence;
@@ -56,6 +59,7 @@ export interface AgentScheduleCreateInput {
 }
 
 export interface AgentScheduleUpdateInput {
+  maxRuns?: number | null;
   capabilityAllowlist?: ExternalScheduleCapability[];
   enabled?: boolean;
   historyWindowDays?: number | null;
@@ -95,6 +99,8 @@ export const agentScheduleRepository = {
     const firstRunAt = requireAgentScheduleDate(input.firstRunAt);
     const recurrence = requireAgentScheduleRecurrence(input.recurrence);
     const recurrenceValue = recurrenceValues(recurrence);
+    const maxRuns = requireAgentScheduleMaxRuns(input.maxRuns);
+    requireScheduleLimitConsistency(maxRuns === undefined ? null : maxRuns, 0, recurrence.kind);
     const inputHash = agentScheduleOperationHash({
       ...input,
       firstRunAt: firstRunAt.toISOString(),
@@ -142,9 +148,9 @@ export const agentScheduleRepository = {
            (family_id, owner_user_id, author_user_id, group_id, scope, title,
             user_request, scenario_prompt, timezone, recurrence_kind,
             recurrence_interval, recurrence_days_of_week, recurrence_anchor_local, recurrence_anchor_at,
-             next_run_at, telegram_chat_id, telegram_chat_type, message_thread_id, forum_topic_id)
+              next_run_at, telegram_chat_id, telegram_chat_type, message_thread_id, forum_topic_id, max_runs)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                  $13::timestamptz AT TIME ZONE $9, $13, $13, $14, $15, $16::bigint, $17::bigint)
+                  $13::timestamptz AT TIME ZONE $9, $13, $13, $14, $15, $16::bigint, $17::bigint, $18)
          RETURNING ${AGENT_SCHEDULE_COLUMNS}`,
         [
           auth.familyId,
@@ -164,6 +170,7 @@ export const agentScheduleRepository = {
           auth.telegramChatType,
           input.scope === "personal" ? null : auth.messageThreadId,
           input.scope === "personal" ? null : auth.forumTopicId,
+          maxRuns === undefined ? null : maxRuns,
         ],
       );
       const schedule = inserted.rows[0]!;
@@ -210,6 +217,7 @@ export const agentScheduleRepository = {
   ): Promise<AgentScheduleRecord> {
     if (
       input.capabilityAllowlist === undefined &&
+      input.maxRuns === undefined &&
       input.enabled === undefined &&
       input.historyWindowDays === undefined &&
       input.nextRunAt === undefined &&
@@ -234,6 +242,7 @@ export const agentScheduleRepository = {
       ? undefined
       : requireAgentScheduleRecurrence(input.recurrence);
     const historyWindowDays = requireExternalScheduleHistoryWindowDays(input.historyWindowDays);
+    const maxRuns = requireAgentScheduleMaxRuns(input.maxRuns);
     const inputHash = agentScheduleOperationHash({
       ...input,
       nextRunAt: nextRunAt?.toISOString(),
@@ -272,7 +281,7 @@ export const agentScheduleRepository = {
           "Окно истории доступно только для автоматизации внешней группы",
         );
       }
-      if (schedule.status === "leased") {
+      if (schedule.status === "leased" && !isPauseOnlyUpdate(input)) {
         throw new AppError(
           "AGENT_SCHEDULE_RUN_IN_PROGRESS",
           "Запланированный сценарий сейчас выполняется. Повторите изменение после завершения",
@@ -286,6 +295,9 @@ export const agentScheduleRepository = {
         kind: schedule.recurrence_kind,
       } as AgentScheduleRecurrence;
       const recurrenceValue = recurrenceValues(nextRecurrence);
+      const nextMaxRuns = maxRuns === undefined ? schedule.max_runs : maxRuns;
+      requireScheduleLimitConsistency(nextMaxRuns, schedule.completed_runs, nextRecurrence.kind);
+      if (input.enabled === true) requireScheduleLimitRemaining(nextMaxRuns, schedule.completed_runs);
       const capabilityAllowlist = await requireUpdatedExternalScheduleCapabilities(
         client,
         schedule,
@@ -304,8 +316,11 @@ export const agentScheduleRepository = {
               recurrence_anchor_at = CASE WHEN $8 THEN $9::timestamptz ELSE recurrence_anchor_at END,
              occurrence_index = CASE WHEN $8 THEN 0 ELSE occurrence_index END,
              next_run_at = CASE WHEN $8 THEN $9 ELSE next_run_at END,
-             status = CASE WHEN $10 = false THEN 'paused'::agent_schedule_status
-                           WHEN $10 = true THEN 'active'::agent_schedule_status ELSE status END,
+              status = CASE WHEN status = 'leased' THEN status
+                            WHEN $13::integer IS NOT NULL AND completed_runs >= $13 THEN 'completed'::agent_schedule_status
+                            WHEN $10 = false THEN 'paused'::agent_schedule_status
+                            WHEN $10 = true THEN 'active'::agent_schedule_status ELSE status END,
+               pause_requested = (status = 'leased' AND $10 = false), max_runs = $13,
               attempts = CASE WHEN $8 OR $10 = true THEN 0 ELSE attempts END,
               last_error_code = CASE WHEN $8 OR $10 = true THEN NULL ELSE last_error_code END,
               history_window_days = $11,
@@ -326,8 +341,13 @@ export const agentScheduleRepository = {
           input.enabled ?? null,
           historyWindowDays === undefined ? schedule.history_window_days : historyWindowDays,
           capabilityAllowlist ?? schedule.tool_allowlist,
+          nextMaxRuns,
         ],
       );
+      if (input.enabled === true && nextRunAt === undefined) {
+        await advanceReactivatedSchedule(client, id, nextRecurrence.kind);
+        updated.rows[0] = (await selectAgentSchedule(client, auth.familyId, id))!;
+      }
       await client.query(
         `INSERT INTO agent_schedule_operations
            (family_id, operation_key, operation_kind, input_hash, schedule_id)
@@ -429,10 +449,11 @@ export const agentScheduleRepository = {
           "Запланированный сценарий уже выполняется",
         );
       }
+      requireScheduleLimitRemaining(schedule.max_runs, schedule.completed_runs);
       const updated = await client.query<AgentScheduleRow>(
         `UPDATE agent_schedules
             SET status = 'active', next_run_at = now(), attempts = 0,
-                last_error_code = NULL, updated_at = now()
+                pause_requested = false, last_error_code = NULL, updated_at = now()
           WHERE id = $1
           RETURNING ${AGENT_SCHEDULE_COLUMNS}`,
         [id],

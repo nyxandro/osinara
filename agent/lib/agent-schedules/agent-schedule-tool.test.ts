@@ -127,6 +127,22 @@ describe("manage_agent_schedule", () => {
     );
   });
 
+  it.each([10, null])("passes maxRuns=%s through create and limit-only update", async (maxRuns) => {
+    const schema = manageAgentSchedule.inputSchema as z.ZodType;
+    expect(schema.safeParse({ ...validDailyCreatePayload, maxRuns }).success).toBe(true);
+    await manageAgentSchedule.execute({ ...validDailyCreatePayload, maxRuns }, context);
+    expect(createSchedule).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ maxRuns }));
+    await manageAgentSchedule.execute({ action: "update", id: scheduleId, maxRuns }, context);
+    expect(updateSchedule).toHaveBeenCalledWith(expect.anything(), scheduleId, expect.objectContaining({ maxRuns }));
+  });
+
+  it.each([0, -1, 1.5, "10", 2_147_483_648])("rejects invalid maxRuns=%s before mutation", async (maxRuns) => {
+    const payload = { ...validDailyCreatePayload, maxRuns };
+    expect((manageAgentSchedule.inputSchema as z.ZodType).safeParse(payload).success).toBe(false);
+    await expect(manageAgentSchedule.execute(payload as never, context)).rejects.toMatchObject({ code: "AGENT_SCHEDULE_LIMIT_INVALID" });
+    expect(createSchedule).not.toHaveBeenCalled();
+  });
+
   it("returns an actionable error when the model sends an empty payload", async () => {
     await expect(manageAgentSchedule.execute({} as never, context)).rejects.toThrowError(
       /AGENT_SCHEDULE_INPUT_INVALID: Для manage_agent_schedule передайте action/,

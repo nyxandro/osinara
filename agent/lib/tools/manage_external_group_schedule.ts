@@ -24,6 +24,7 @@ import {
   type ExternalScheduleCapability,
 } from "../agent-schedules/external-agent-schedule-policy.js";
 import { AppError } from "../app-error.js";
+import { AGENT_SCHEDULE_LIMIT_DESCRIPTION, agentScheduleMaxRunsSchema } from "../agent-schedules/agent-schedule-limits.js";
 import { requirePrivateTelegramOwner } from "../family-context.js";
 
 const ACTIONS = ["create", "delete", "pause", "resume", "run_now", "status", "update"] as const;
@@ -34,6 +35,7 @@ const HISTORY_WINDOW_MAX_DAYS = 365;
 const TIMEZONE_MAX_LENGTH = 100;
 
 const toolSchema = z.object({
+  maxRuns: agentScheduleMaxRunsSchema.optional(),
   action: z.enum(ACTIONS),
   capabilityAllowlist: z.array(z.enum(EXTERNAL_SCHEDULE_CAPABILITIES)).max(
     EXTERNAL_SCHEDULE_CAPABILITIES.length,
@@ -59,6 +61,7 @@ type ParsedInput =
   | { action: "status"; telegramChatId: string | null }
   | {
       action: "create";
+      maxRuns?: number | null;
       capabilityAllowlist: ExternalScheduleCapability[];
       firstRunAt: Date;
       historyWindowDays?: number;
@@ -72,6 +75,7 @@ type ParsedInput =
   | {
       action: "update";
       changes: {
+        maxRuns?: number | null;
         capabilityAllowlist?: ExternalScheduleCapability[];
         historyWindowDays?: number | null;
         nextRunAt?: Date;
@@ -173,6 +177,7 @@ function parseSemanticInput(input: ToolInput): ParseResult<ParsedInput> {
   }
   if (input.action === "create") {
     const fieldsError = exactFields(input, [
+      "maxRuns",
       "action",
       "capabilityAllowlist",
       "firstRunAt",
@@ -208,6 +213,7 @@ function parseSemanticInput(input: ToolInput): ParseResult<ParsedInput> {
       action: input.action,
       capabilityAllowlist: capabilities.data,
       firstRunAt: firstRunAt.data,
+      maxRuns: input.maxRuns,
       historyWindowDays,
       recurrence: input.recurrence,
       scenarioPrompt: scenarioPrompt.data,
@@ -219,6 +225,7 @@ function parseSemanticInput(input: ToolInput): ParseResult<ParsedInput> {
   }
   if (input.action === "update") {
     const fieldsError = exactFields(input, [
+      "maxRuns",
       "action",
       "capabilityAllowlist",
       "historyWindowDays",
@@ -235,6 +242,7 @@ function parseSemanticInput(input: ToolInput): ParseResult<ParsedInput> {
       : requiredDate(input, "nextRunAt");
     if (!nextRunAt.success) return nextRunAt;
     const changes = {
+      maxRuns: input.maxRuns,
       capabilityAllowlist: input.capabilityAllowlist,
       historyWindowDays: input.historyWindowDays,
       nextRunAt: nextRunAt.data,
@@ -279,6 +287,7 @@ function requireParsedInput(input: unknown): ParsedInput {
 }
 
 const TOOL_DESCRIPTION = [
+  AGENT_SCHEDULE_LIMIT_DESCRIPTION,
   "Управляет owner-only автоматизациями, которые запускают отдельного агента и доставляют результат в зарегистрированную внешнюю Telegram-группу.",
   "Сначала вызови manage_telegram_group с action=status, выбери точный telegramChatId external-группы, затем вызови здесь action=status для существующих автоматизаций.",
   "Create требует точные firstRunAt с UTC offset, IANA timezone, recurrence, title, userRequest, устойчивый scenarioPrompt и полный минимальный capabilityAllowlist для сценария.",

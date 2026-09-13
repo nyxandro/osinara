@@ -14,12 +14,14 @@ const dependencies = vi.hoisted(() => ({
   create: vi.fn(),
   list: vi.fn(),
   owner: vi.fn(),
+  update: vi.fn(),
 }));
 
 vi.mock("./agent-schedules/external-agent-schedule-repository.js", () => ({
   externalAgentScheduleRepository: {
     create: dependencies.create,
     list: dependencies.list,
+    update: dependencies.update,
   },
 }));
 vi.mock("./family-context.js", () => ({
@@ -41,6 +43,7 @@ describe("manage_external_group_schedule", () => {
     dependencies.create.mockReset();
     dependencies.list.mockReset();
     dependencies.owner.mockReset();
+    dependencies.update.mockReset();
     dependencies.owner.mockReturnValue({ familyId: "family-1", userId: "owner-1" });
   });
 
@@ -67,6 +70,7 @@ describe("manage_external_group_schedule", () => {
       capabilityAllowlist: ["send_workspace_file"],
       firstRunAt: "2026-08-17T09:00:00+03:00",
       historyWindowDays: 7,
+      maxRuns: 10,
       recurrence: { daysOfWeek: [1], interval: 1, kind: "weekly" },
       scenarioPrompt: "Прочитай весь снимок истории, подготовь HTML-выжимку и отправь файл в чат.",
       telegramChatId: "-1001234567890",
@@ -90,6 +94,7 @@ describe("manage_external_group_schedule", () => {
         capabilityAllowlist: ["send_workspace_file"],
         firstRunAt: new Date("2026-08-17T06:00:00.000Z"),
         historyWindowDays: 7,
+        maxRuns: 10,
         operationKey: "call-1",
         telegramChatId: "-1001234567890",
         timezone: "Europe/Moscow",
@@ -103,6 +108,14 @@ describe("manage_external_group_schedule", () => {
         "AGENT_EXTERNAL_SCHEDULE_INPUT_INVALID: Входные данные не соответствуют схеме manage_external_group_schedule. Проверьте обязательные поля и их типы",
       type: "denied",
     });
+  });
+
+  it.each([3, null])("updates only maxRuns=%s through semantic validation", async (maxRuns) => {
+    const id = "00000000-0000-4000-8000-000000000001";
+    const input = { action: "update" as const, id, maxRuns };
+    expect(await approvalFor(input)).toBe("not-applicable");
+    await manageExternalGroupSchedule.execute(input, context);
+    expect(dependencies.update).toHaveBeenCalledWith(expect.anything(), id, expect.objectContaining({ maxRuns }));
   });
 
   it.each(["minutely", "hourly", "monthly", "yearly"])("creates %s external automations", async (kind) => {
