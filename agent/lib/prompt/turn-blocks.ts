@@ -9,9 +9,8 @@
  * - `createPreferenceBlockResolver` / `resolvePreferenceBlock`: one editable chat prompt.
  *
  * Key constructs:
- * - Eve keeps a previous turn's block when a dynamic resolver throws, and never clears the durable
- *   record on its own. Every resolver here therefore returns an explicit value instead of throwing:
- *   a fail-closed block where the model must stop, and `null` where an absent block is safe.
+ * - Eve 0.40 clears turn-scoped system selections on each new turn. Explicit unavailable blocks
+ *   explain known failures to the model; `null` is used only when no context is needed.
  */
 import type { SessionAuth } from "eve/context";
 import type { ModelMessage } from "ai";
@@ -33,11 +32,13 @@ import {
 import {
   formatRetrievedMemoryInstructions,
   memoryRetrievalQuery,
-  retrieveRelevantMemories,
   retrieveMemoryTurnContext,
   type MemoryTurnContext,
-  type ModelMemoryContextItem,
 } from "../memory-retrieval.js";
+import {
+  MemoryContextFailure, memoryFailureCode, recordMemoryContextIncident,
+  type MemoryContextIncident, type MemoryContextPhase,
+} from "../memory-context-failure.js";
 import { memorySelectionMetrics } from "../memory-observability.js";
 import { applicationThreadSkillHints } from "../memory-thread-activation.js";
 import {
@@ -103,7 +104,8 @@ const MODE_UNAVAILABLE_BLOCK = `
 const MEMORY_UNAVAILABLE_BLOCK = [
   "AGENT_MEMORY_UNAVAILABLE: В этом ходу долговременная память недоступна.",
   "Не утверждай, что проверила память, и не делай вывод, что записей нет.",
-  "Если ответ зависит от долговременной памяти, скажи, что она временно недоступна, и предложи повторить запрос позже.",
+  "Продолжай исходную задачу в частях, не зависящих от памяти. Этот служебный блок не является новым запросом.",
+  "Для частей, требующих памяти, сообщи конкретное ограничение: нужные сведения сейчас проверить нельзя. Не придумывай их и не объявляй задачу полностью выполненной.",
 ].join(" ");
 
 function logBlockFailure(code: string, error: unknown): void {
@@ -244,6 +246,7 @@ export function createReactionSetBlockResolver(dependencies: {
 }
 
 export function createMemoryBlockResolver(dependencies: {
+  reportFailure: (incident: MemoryContextIncident) => Promise<void>;
   authorize: (ctx: TurnBlockContext) => MemoryAuthorization;
   createProfile: (auth: MemoryAuthorization, input: CreateProfileViewInput) => Promise<ProfileView>;
   retrieve: (
@@ -261,11 +264,15 @@ export function createMemoryBlockResolver(dependencies: {
     let profileMemoryRefs: string[] | null = null;
     let threadRefs: string[] | null = null;
     let threadCharacters: number | null = null;
+    let phase: MemoryContextPhase = "authorization";
+    let causeCode: string | null = null;
     try {
       const authorization = dependencies.authorize(ctx);
+      phase = "query";
       const query = memoryRetrievalQuery(ctx.session.auth, ctx.messages,
         ctx.channel?.kind === "subagent" || Boolean(ctx.session.parent));
       if (query === null) return null;
+      phase = "retrieval";
       const context = await dependencies.retrieve(
         authorization,
         query,
@@ -273,6 +280,7 @@ export function createMemoryBlockResolver(dependencies: {
       );
       memories = context.memories.length;
       outcome = "succeeded";
+      phase = "profile";
       const profileInput = telegramProfileInput(ctx, context.retrievedClaimIds, turnId);
       const profile = profileInput === null
         ? null
@@ -283,18 +291,36 @@ export function createMemoryBlockResolver(dependencies: {
         : profile.subjects.flatMap((subject) => subject.claims.map((claim) => claim.memoryRef));
       threadRefs = context.threads.threads.map((thread) => thread.threadRef);
       threadCharacters = JSON.stringify(context.threads).length;
+      phase = "format";
       return [
         ...(profile === null ? [] : [formatProfileViewContext(profile)]),
         formatRetrievedMemoryInstructions(context.memories, context.threads),
       ].join("\n\n");
     } catch (error) {
       outcome = "failed";
-      logBlockFailure("AGENT_MEMORY_UNAVAILABLE", error);
+      if (error instanceof MemoryContextFailure) phase = error.phase;
+      causeCode = memoryFailureCode(error);
+      const attributes = ctx.session.auth.current?.attributes;
+      const incident: MemoryContextIncident = {
+        causeCode, phase, sessionId: ctx.session.id, turnId,
+        runId: typeof attributes?.scheduledRunId === "string" ? attributes.scheduledRunId : null,
+        scheduleId: typeof attributes?.scheduleId === "string" ? attributes.scheduleId : null,
+      };
+      console.error(JSON.stringify({ code: "AGENT_MEMORY_UNAVAILABLE", ...incident,
+        errorName: error instanceof Error ? error.name : "UnknownError" }));
+      try {
+        await dependencies.reportFailure(incident);
+      } catch (recordError) {
+        // A failed incident store must not turn a known memory outage into loss of the user task.
+        console.error(JSON.stringify({ code: "AGENT_MEMORY_INCIDENT_RECORD_FAILED",
+          sessionId: ctx.session.id, turnId, causeCode: memoryFailureCode(recordError) }));
+      }
       return MEMORY_UNAVAILABLE_BLOCK;
     } finally {
       console.info(JSON.stringify({ code: "AGENT_MEMORY_RETRIEVAL_METRICS", sessionId: ctx.session.id,
         turnId, outcome, memories, ...selection, profileCharacters, profileMemoryRefs,
-        threadRefs, threadCharacters, durationMs: Math.round(performance.now() - started) }));
+        threadRefs, threadCharacters, failurePhase: outcome === "failed" ? phase : null, causeCode,
+        durationMs: Math.round(performance.now() - started) }));
     }
   };
 }
@@ -379,6 +405,7 @@ export const resolveReactionSetBlock = createReactionSetBlockResolver({
 });
 
 export const resolveMemoryBlock = createMemoryBlockResolver({
+  reportFailure: recordMemoryContextIncident,
   authorize: requireMemoryAuthorization,
   createProfile: profileViewRepository.create,
   retrieve: retrieveMemoryTurnContext,

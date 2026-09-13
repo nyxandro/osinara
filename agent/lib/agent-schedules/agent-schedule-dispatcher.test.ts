@@ -65,6 +65,7 @@ describe("agent schedule dispatcher", () => {
     })(new Date("2026-07-17T06:00:00.000Z"));
 
     expect(dispatched).toBe(1);
+    expect(send.mock.calls[0]![0]).toContain("scheduled_for_local: 2026-07-17 09:00:00 Europe/Moscow");
     expect(prepareSession).toHaveBeenCalledWith(job, "101::schedule:run-1", new Date("2026-07-17T06:00:00.000Z"));
     expect(to).toHaveBeenCalledWith(expect.any(Object), {
       chatId: "101",

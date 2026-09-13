@@ -15,8 +15,10 @@ Show unread inbox summary (sender, subject, date)
 
 ## Usage
 
-```bash
-gws gmail +triage
+Call `execute_google_workspace`:
+
+```json
+{"argv":["gmail","+triage"]}
 ```
 
 ## Flags
@@ -29,11 +31,10 @@ gws gmail +triage
 
 ## Examples
 
-```bash
-gws gmail +triage
-gws gmail +triage --max 5 --query 'from:boss'
-gws gmail +triage --max 10 --labels
-gws gmail +triage --labels
+```json
+{"argv":["gmail","+triage","--max","5","--query","from:boss"]}
+{"argv":["gmail","+triage","--max","10","--labels"]}
+{"argv":["gmail","+triage","--labels"]}
 ```
 
 ## Tips

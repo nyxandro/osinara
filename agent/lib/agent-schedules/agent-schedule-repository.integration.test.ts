@@ -138,13 +138,37 @@ describeWithDatabase("agent schedule repositories", () => {
       title: "Новости ИИ",
     });
     await expect(agentScheduleRepository.list(auth, { limit: 100 })).resolves.toEqual({
-      items: [schedule],
+      items: [{ ...schedule, nextRunAtLocal: "2026-07-17 09:00:00 Europe/Moscow", lastRun: null }],
       nextCursor: null,
     });
     await expect(agentScheduleRepository.findById(auth, schedule.id)).resolves.toEqual(schedule);
     await expect(
       agentScheduleRepository.findById(privateAuth(fixture, "owner"), schedule.id),
     ).resolves.toBeNull();
+  });
+
+  it("separates delivered execution from verified task success and scopes recorded diagnostics", async () => {
+    const fixture = await createFixture();
+    const auth = privateAuth(fixture, "member");
+    const now = new Date("2026-09-13T07:00:00Z");
+    const schedule = await agentScheduleRepository.create(auth, {
+      firstRunAt: now, operationKey: "diagnostic-schedule", recurrence: { kind: "once" },
+      scenarioPrompt: "Собери дайджест", scope: "personal", timezone: "Europe/Moscow", title: "Дайджест", userRequest: "Новости",
+    });
+    const job = (await agentScheduleDispatchRepository.claimDue({ now, limit: 10, leaseMilliseconds: 60000 }))[0]!;
+    await database().query("UPDATE agent_schedule_runs SET status='completed', completed_at=$2, eve_session_id='diagnostic-session', eve_turn_id='turn_0' WHERE id=$1", [job.runId, now]);
+    await database().query(`INSERT INTO operational_incidents(operation_key,code,summary,context) VALUES($1,'AGENT_MEMORY_UNAVAILABLE','Память недоступна',$2)`,
+      ["memory-context:diagnostic-session:turn_0", JSON.stringify({ runId: job.runId, phase: "embedding", causeCode: "AGENT_MEMORY_EMBEDDING_PROVIDER_FAILED", privateText: "must-not-leak" })]);
+    const result = await agentScheduleRepository.list(auth, { limit: 10 });
+    expect(result.items[0]).toMatchObject({ id: schedule.id, lastRun: {
+      id: job.runId, executionStatus: "completed", taskOutcome: "not_verified", deliveredAt: null,
+      scheduledForLocal: "2026-09-13 10:00:00 Europe/Moscow",
+      diagnostics: [{ code: "AGENT_MEMORY_UNAVAILABLE", phase: "embedding", causeCode: "AGENT_MEMORY_EMBEDDING_PROVIDER_FAILED" }],
+    } });
+    expect(JSON.stringify(result)).not.toContain("must-not-leak");
+    expect((await agentScheduleRepository.list(privateAuth(fixture, "owner"), { limit: 10 })).items).toEqual([]);
+    await database().query("DELETE FROM family_memberships WHERE family_id=$1 AND user_id=$2", [fixture.familyId, fixture.memberId]);
+    expect((await agentScheduleRepository.list(auth, { limit: 10 })).items).toEqual([]);
   });
 
   it("requires a verified family group destination for family schedules", async () => {

@@ -192,7 +192,7 @@ export const agentScheduleRepository = {
   async list(
     auth: AgentScheduleAuthorization,
     options: { cursor?: string; limit: number },
-  ): Promise<{ items: AgentScheduleRecord[]; nextCursor: string | null }> {
+  ): ReturnType<typeof listAgentSchedules> {
     return await listAgentSchedules(auth, options);
   },
 

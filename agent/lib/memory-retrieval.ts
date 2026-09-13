@@ -21,6 +21,7 @@ import { currentTelegramMessageText } from "./telegram-group-turn-context.js";
 import { escapeUntrustedContextJson } from "./untrusted-context-json.js";
 import { memoryThreadBriefRepository } from "./memory-thread-brief-repository.js";
 import type { MemoryThreadContext } from "./memory-thread-context.js";
+import { MemoryContextFailure, type MemoryContextPhase } from "./memory-context-failure.js";
 
 export type ModelMemoryContextItem = ModelMemory | (MemoryConflictGroup & {
   type: "unresolved_conflict";
@@ -109,17 +110,24 @@ export async function retrieveMemoryTurnContext(
   query: string,
   skillHints: readonly string[],
 ): Promise<MemoryTurnContext> {
-  const embedding = await embedMemoryQuery(query);
-  const retrieval = await memoryRetrievalRepository.searchWithConflictClosure(auth, query, embedding);
-  const memories: ModelMemoryContextItem[] = [
-    ...retrieval.results.map((result) => toModelMemory(result.memory, result.sourceEvidence)),
-    ...retrieval.conflicts.map((conflict) => ({ ...conflict, type: "unresolved_conflict" as const })),
-  ];
-  const threads = await memoryThreadBriefRepository.activate({
-    auth,
-    queryEmbedding: embedding,
-    retrievedClaimIds: retrieval.results.map((result) => result.memory.id),
-    skillHints,
-  });
-  return { memories, retrievedClaimIds: retrieval.relatedClaimIds, threads };
+  let phase: MemoryContextPhase = "embedding";
+  try {
+    const embedding = await embedMemoryQuery(query);
+    phase = "search";
+    const retrieval = await memoryRetrievalRepository.searchWithConflictClosure(auth, query, embedding);
+    const memories: ModelMemoryContextItem[] = [
+      ...retrieval.results.map((result) => toModelMemory(result.memory, result.sourceEvidence)),
+      ...retrieval.conflicts.map((conflict) => ({ ...conflict, type: "unresolved_conflict" as const })),
+    ];
+    phase = "threads";
+    const threads = await memoryThreadBriefRepository.activate({
+      auth,
+      queryEmbedding: embedding,
+      retrievedClaimIds: retrieval.results.map((result) => result.memory.id),
+      skillHints,
+    });
+    return { memories, retrievedClaimIds: retrieval.relatedClaimIds, threads };
+  } catch (error) {
+    throw new MemoryContextFailure(phase, error);
+  }
 }

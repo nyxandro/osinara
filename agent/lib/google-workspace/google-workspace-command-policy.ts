@@ -363,6 +363,7 @@ function resolveReviewedRoute(argv: readonly string[]): {
         ? "API resource и method объединены через точку или route не существует."
         : "Route не найден в проверенном allowlist.",
       "Передайте service, resource, optional sub-resource и method отдельными argv элементами. Точка допустима только во втором аргументе top-level schema; отказ не означает read-only OAuth.",
+      SERVICE_NAMES.has(argv[0]!) ? { argv: [argv[0], "--help"] } : undefined,
     );
   }
   return {
@@ -429,6 +430,12 @@ export function classifyGoogleWorkspaceCommand(
   if (argv.length === 2 && SERVICE_NAMES.has(argv[0]!) && argv[1] === "--help") return "read";
   if (argv[0] === "schema" && argv.length === 2) {
     const route = argv[1]!.split(".").join(" ");
+    if (!READ_ROUTE_SET.has(route) && !MUTATION_ROUTE_SET.has(route)) {
+      const service = argv[1]!.split(".")[0]!;
+      throw forbidden("Запрошенный schema route отсутствует в allowlist.",
+        "Получите справку сервиса, затем вызовите schema с точным путём API метода.",
+        SERVICE_NAMES.has(service) ? { argv: [service, "--help"] } : undefined);
+    }
     classifyRoute(route);
     return "read";
   }

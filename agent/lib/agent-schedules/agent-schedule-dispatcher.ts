@@ -15,6 +15,7 @@ import { scheduledGroupHistorySnapshotRepository } from "./scheduled-group-histo
 import { numericMessageThreadId } from "./agent-schedule-validation.js";
 import { sessionRepository, type PreparedSession } from "../sessions/session-repository.js";
 import { isDatabaseUnavailable, recoverDatabaseBookkeeping } from "../database-recovery.js";
+import { localScheduledTime } from "../scheduling/local-time.js";
 
 interface AgentScheduleDispatcherRepository {
   claimDue(options: { leaseMilliseconds: number; limit: number; now: Date }): Promise<ClaimedAgentSchedule[]>;
@@ -54,11 +55,13 @@ function scheduledRunPrompt(job: ClaimedAgentSchedule): string {
     "Выполни запланированный агентный сценарий для Telegram.",
     "Не пиши промежуточные статусы и не описывай процесс. Итоговый ответ должен быть готовым сообщением для пользователя.",
     "Если обязательной авторизации или данных не хватает, задай один понятный вопрос или сообщи конкретную ошибку.",
+    "Сбой одной зависимости не отменяет независимые части задания. В результате явно отдели проверенные сведения от недоступных разделов; не объявляй неполную задачу полностью выполненной.",
     "<scheduled_agent_run>",
     `schedule_id: ${job.id}`,
     `run_id: ${job.runId}`,
     `title: ${job.title}`,
     `scheduled_for: ${job.nextRunAt}`,
+    `scheduled_for_local: ${localScheduledTime(job.nextRunAt, job.timezone)}`,
     `timezone: ${job.timezone}`,
     "original_user_request:",
     job.userRequest,

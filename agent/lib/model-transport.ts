@@ -25,7 +25,6 @@ import { type LanguageModelMiddleware, wrapLanguageModel } from "ai";
 import type { AgentModelTransport } from "./model-provider-config.js";
 import { AppError } from "./app-error.js";
 import { createMiniMaxAnthropicCompatibilityFetch } from "./minimax-anthropic-compatibility.js";
-import { placeEphemeralMemoryContext } from "./model-turn-context.js";
 import { createModelCallMetrics } from "./model-call-metrics.js";
 import type { SuccessfulModelCall } from "./model-availability-repository.js";
 import { modelRouteKey } from "./model-route.js";
@@ -173,9 +172,9 @@ function createTransportDefaultsMiddleware(
       return {
         ...params,
         maxOutputTokens: params.maxOutputTokens ?? maxOutputTokens,
-        prompt: placeEphemeralMemoryContext(transport.protocol === "openai-chat-completions"
+        prompt: transport.protocol === "openai-chat-completions"
           ? removeUnresolvedOpenAIToolCalls(params.prompt)
-          : params.prompt),
+          : params.prompt,
         providerOptions: {
           ...params.providerOptions,
           ...configuredProviderOptions(params.providerOptions, transport),

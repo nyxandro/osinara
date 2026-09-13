@@ -2,7 +2,7 @@
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
 import { memoryReviewOwnerAlertTransport } from "../memory-review/memory-review-owner-alert-transport.js";
-import type { PoolClient } from "pg";
+import type { PoolClient, QueryConfig } from "pg";
 
 export interface OperationalIncident {
   key: string;
@@ -11,13 +11,48 @@ export interface OperationalIncident {
   context: Readonly<Record<string, string | number | null>>;
 }
 
-export async function recordOperationalIncident(input: OperationalIncident, client: Pick<PoolClient, "query"> = database()): Promise<void> {
+function incidentInsert(input: OperationalIncident): QueryConfig {
   if (!input.key || input.key.length > 500 || !/^AGENT_[A-Z0-9_]+$/.test(input.code) || !input.summary || input.summary.length > 1000) {
     throw new AppError("AGENT_INCIDENT_INVALID", "Не удалось сохранить диагностику: неверные данные инцидента");
   }
-  await client.query(`INSERT INTO operational_incidents(operation_key,code,summary,context)
+  return { text: `INSERT INTO operational_incidents(operation_key,code,summary,context)
     VALUES($1,$2,$3,$4::jsonb) ON CONFLICT(operation_key) DO NOTHING`,
-  [input.key, input.code, input.summary, JSON.stringify(input.context)]);
+  values: [input.key, input.code, input.summary, JSON.stringify(input.context)] };
+}
+
+export async function recordOperationalIncident(input: OperationalIncident, client: Pick<PoolClient, "query"> = database()): Promise<void> {
+  const insert = incidentInsert(input);
+  await client.query(insert.text, insert.values);
+}
+
+/** Optional diagnostics on the response path cannot wait indefinitely behind a database lock. */
+export async function recordBoundedOperationalIncident(
+  input: OperationalIncident,
+  limits: { statementTimeoutMs: number; queryTimeoutMs: number },
+): Promise<void> {
+  const insert = incidentInsert(input);
+  if (!Number.isSafeInteger(limits.statementTimeoutMs) || limits.statementTimeoutMs <= 0 ||
+    !Number.isSafeInteger(limits.queryTimeoutMs) || limits.queryTimeoutMs <= limits.statementTimeoutMs) {
+    throw new AppError("AGENT_INCIDENT_TIMEOUT_INVALID", "Не удалось проверить время ожидания записи диагностики");
+  }
+  // Pool acquisition is already bounded by the application's connectionTimeoutMillis.
+  const client = await database().connect();
+  const query = (config: QueryConfig) => {
+    // pg 8.22 supports per-query query_timeout; its public QueryConfig typings omit the field.
+    const bounded = { ...config, query_timeout: limits.queryTimeoutMs };
+    return client.query(bounded);
+  };
+  let failed = true;
+  try {
+    await query({ text: `BEGIN; SET LOCAL statement_timeout = '${limits.statementTimeoutMs}ms'` });
+    await query(insert);
+    await query({ text: "COMMIT" });
+    failed = false;
+  } finally {
+    // A client read timeout does not cancel a SQL statement. Destroy the connection on failure
+    // so it cannot be reused with an active query/transaction; PostgreSQL rolls it back on close.
+    client.release(failed);
+  }
 }
 
 export async function dispatchOperationalIncidents(dependencies = { deliver: memoryReviewOwnerAlertTransport.deliver }): Promise<number> {

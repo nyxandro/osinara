@@ -111,13 +111,15 @@ docker compose -f compose.test.yaml up --build --abort-on-container-exit --exit-
 
 ## Деплой и документация
 
+В корне `docs/` оставлять только `openviking-memory-analysis.md` и `production-deployment.md`.
+Отчёты о работе давать в чате; отдельные документы создавать только по прямому запросу владельца.
+
 Перед подготовкой релиза или любыми действиями с production прочитать
 [инструкцию деплоя](docs/production-deployment.md).
 Production собирается через CI/CD из канонического состояния репозитория.
 Обычная задача разработки не разрешает ручную сборку production или изменение production-БД.
 Описание выпуска хранится в `docs/releases/vVERSION.md`; порядок выпуска определяет инструкция деплоя.
 Обзор установки и использования: [README.md](README.md).
-Восстановление проверки памяти: [docs/memory-review-recovery.md](docs/memory-review-recovery.md).
 
 ## Зеркало правил
 
