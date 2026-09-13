@@ -13,6 +13,18 @@ import {
 } from "./google-workspace-command-policy.js";
 
 describe("classifyGoogleWorkspaceCommand", () => {
+  it("returns an executable discovery example for the observed malformed Gmail calls", () => {
+    for (const argv of [["gmail", "triage"], ["gmail", "messages", "list"], ["schema", "gmail.list-messages"]]) {
+      try {
+        classifyGoogleWorkspaceCommand(argv);
+        throw new Error("Expected rejection");
+      } catch (error) {
+        expect(error).toMatchObject({ contract: { example: { argv: expect.any(Array) }, sideEffectStatus: "not_started" } });
+        const example = (error as { contract: { example: { argv: string[] } } }).contract.example.argv;
+        expect(classifyGoogleWorkspaceCommand(example)).toBe("read");
+      }
+    }
+  });
   it("classifies reviewed reads and mutations independently of argument text", () => {
     expect(classifyGoogleWorkspaceCommand([
       "calendar",

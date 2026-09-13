@@ -10,10 +10,10 @@ import type { LanguageModelV4CallOptions } from "@ai-sdk/provider";
 import { describe, expect, it, vi } from "vitest";
 
 import { createConfiguredLanguageModel } from "./model-transport.js";
-import { ephemeralMemoryContext } from "./model-turn-context.js";
+import { formatTurnMemoryContext } from "./prompt/turn-memory-context.js";
 
 describe("NeuralDeep model transport", () => {
-  it("keeps the actual system/history prefix stable and requests streamed cache usage", async () => {
+  it("keeps turn memory in system context and the real task last, with streamed cache usage", async () => {
     const requests: { messages: { role: string; content: string }[]; user: string; stream_options: unknown }[] = [];
     const model = createConfiguredLanguageModel({
       apiKey: "synthetic-secret", maxOutputTokens: 128, modelId: "qwen3.8-27b",
@@ -30,7 +30,7 @@ describe("NeuralDeep model transport", () => {
     });
     for (const question of ["first question", "second question"]) {
       const prompt: LanguageModelV4CallOptions["prompt"] = [
-        { role: "system", content: `Stable rules\n\n${ephemeralMemoryContext(`Facts for ${question}`)}` },
+        { role: "system", content: `Stable rules\n\n${formatTurnMemoryContext(`Facts for ${question}`)}` },
         { role: "user", content: [{ type: "text", text: "Earlier question" }] },
         { role: "assistant", content: [{ type: "text", text: "Earlier answer" }] },
         { role: "user", content: [{ type: "text", text: question }] },
@@ -42,13 +42,40 @@ describe("NeuralDeep model transport", () => {
       expect(finish?.usage).toMatchObject({ inputTokens: { total: 1200, cacheRead: 1024 }, outputTokens: { total: 20, reasoning: 18 } });
       expect(prompt).toEqual(original);
     }
-    expect(requests[0]!.messages.slice(0, 3)).toEqual(requests[1]!.messages.slice(0, 3));
+    expect(requests[0]!.messages.slice(1, 3)).toEqual(requests[1]!.messages.slice(1, 3));
     for (const [index, request] of requests.entries()) {
       expect(request.user).toBe("synthetic-session");
       expect(request.stream_options).toEqual({ include_usage: true });
-      expect(request.messages[0]).toEqual({ role: "system", content: "Stable rules" });
-      expect(request.messages.at(-1)?.content).toContain("<osinara_turn_memory");
+      expect(request.messages[0]!.role).toBe("system");
+      expect(request.messages[0]!.content).toContain("<osinara_turn_memory");
+      expect(request.messages).toHaveLength(4);
+      expect(request.messages.at(-1)?.content).toBe(index === 0 ? "first question" : "second question");
       expect(request.messages[3]!.content).toBe(index === 0 ? "first question" : "second question");
+    }
+  });
+
+  it("does not turn an unavailable-memory notice into a new request after tool results", async () => {
+    const bodies: { messages: { role: string; content: unknown }[] }[] = [];
+    const model = createConfiguredLanguageModel({
+      apiKey: "synthetic-secret", maxOutputTokens: 128, modelId: "test-model",
+      transport: { baseUrl: "https://test.invalid/v1", protocol: "openai-chat-completions", providerName: "test", reasoning: null },
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return Response.json({ id: "test", created: 1, model: "test-model", choices: [
+          { index: 0, finish_reason: "stop", message: { role: "assistant", content: "Дайджест" } },
+        ], usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 } });
+      },
+    });
+    const prompt: LanguageModelV4CallOptions["prompt"] = [
+      { role: "system", content: formatTurnMemoryContext("AGENT_MEMORY_UNAVAILABLE: Память недоступна") },
+      { role: "user", content: [{ type: "text", text: "Собери дайджест" }] },
+      { role: "assistant", content: [{ type: "tool-call", toolCallId: "search-1", toolName: "web_search", input: { query: "AI" } }] },
+      { role: "tool", content: [{ type: "tool-result", toolCallId: "search-1", toolName: "web_search", output: { type: "text", value: "Новости" } }] },
+    ];
+    for (let step = 0; step < 3; step++) await model.doGenerate({ prompt });
+    for (const body of bodies) {
+      expect(body.messages.map(message => message.role)).toEqual(["system", "user", "assistant", "tool"]);
+      expect(body.messages[1]!.content).toBe("Собери дайджест");
     }
   });
 

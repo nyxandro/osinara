@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { defineSkill, type SkillDefinition, type SkillFileContent } from "eve/skills";
 import { AppError } from "../app-error.js";
 import { GROUP_SAFE_SKILL_NAMES, SKILL_CATALOG_ROOT, type GroupSafeSkillName } from "./group-skill-catalog.js";
+import { GOOGLE_WORKSPACE_EXECUTION_GUIDE } from "../google-workspace/google-workspace-skill-instructions.js";
 
 function loadSkill(name: string): SkillDefinition {
   const root = join(SKILL_CATALOG_ROOT, name);
@@ -31,7 +32,10 @@ function loadSkill(name: string): SkillDefinition {
     }
   }
   const license = frontmatter[1].match(/^license:\s*(.+)$/mu)?.[1].trim();
-  return defineSkill({ description, markdown: frontmatter[2].trimStart(), files, ...(license ? { license } : {}) });
+  const markdown = name.startsWith("gws-")
+    ? `${GOOGLE_WORKSPACE_EXECUTION_GUIDE}\n\n${frontmatter[2].trimStart()}`
+    : frontmatter[2].trimStart();
+  return defineSkill({ description, markdown, files, ...(license ? { license } : {}) });
 }
 
 export const GROUP_SAFE_SKILL_DEFINITIONS: Readonly<Record<GroupSafeSkillName, SkillDefinition>> =

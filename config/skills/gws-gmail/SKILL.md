@@ -45,12 +45,12 @@ gws gmail <resource> <method> [flags]
 
 Before calling any API method, inspect it:
 
-```bash
-# Browse resources and methods
-gws gmail --help
+Call `execute_google_workspace`. For the unread message list, inspect the schema and then supply its required parameters:
 
-# Inspect a method's required params, types, and defaults
-gws schema gmail.<resource>.<method>
+```json
+{"argv":["gmail","--help"]}
+{"argv":["schema","gmail.users.messages.list"]}
+{"argv":["gmail","users","messages","list","--params","{\"userId\":\"me\",\"q\":\"is:unread\",\"maxResults\":20}"]}
 ```
 
 Use `gws schema` output to build your `--params` and `--json` flags.

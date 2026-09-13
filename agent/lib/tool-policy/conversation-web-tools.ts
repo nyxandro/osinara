@@ -7,6 +7,7 @@ import { resolveConversationEnvironment } from "../conversation-environment.js";
 import { resolveExternalGroupPolicyIdentity } from "./external-group-policy.js";
 import { loadCurrentExternalGroupCapabilities } from "./external-group-live-policy.js";
 import { controlledWebFetchTool, executeControlledWebFetch, CONTROLLED_WEB_FETCH_PROXY_URL } from "./controlled-web-fetch.js";
+import { isExaQuotaNotice, normalizeSearchFailure, searchError } from "./web-search-errors.js";
 
 const SEARCH_ENDPOINT = "https://mcp.exa.ai/mcp";
 const SEARCH_TIMEOUT_MS = 30_000;
@@ -23,10 +24,6 @@ async function authorizeWebAccess(ctx: ToolContext): Promise<void> {
   const identity = resolveExternalGroupPolicyIdentity(ctx.session.auth);
   if (!identity) throw new AppError("AGENT_GROUP_REGISTRATION_INVALID", "Не удалось проверить регистрацию группы");
   await loadCurrentExternalGroupCapabilities(identity);
-}
-
-function searchError(code = "AGENT_WEB_SEARCH_FAILED"): AppError {
-  return new AppError(code, "Поиск в интернете сейчас недоступен. Попробуйте позже");
 }
 
 export async function searchPublicWeb(
@@ -48,7 +45,10 @@ export async function searchPublicWeb(
       redirect: "error",
     });
     status = response.status;
-    if (!response.ok) { await response.body?.cancel(); throw searchError(); }
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw searchError(status === 429 ? "AGENT_WEB_SEARCH_RATE_LIMITED" : "AGENT_WEB_SEARCH_FAILED");
+    }
     if (!response.body) throw searchError();
     const reader = response.body.getReader();
     const chunks: Uint8Array[] = [];
@@ -76,16 +76,20 @@ export async function searchPublicWeb(
     const matches = payloads.filter((value): value is Record<string, any> =>
       value !== null && typeof value === "object" && "id" in value && value.id === id
     );
-    if (matches.length !== 1 || matches[0]!.jsonrpc !== "2.0" || matches[0]!.error || matches[0]!.result?.isError) throw searchError();
+    if (matches.length !== 1 || matches[0]!.jsonrpc !== "2.0") throw searchError("AGENT_WEB_SEARCH_RESPONSE_INVALID");
+    if (matches[0]!.error) throw searchError();
     const content = matches[0]!.result?.content;
     if (!Array.isArray(content) || content.some((item) => item?.type !== "text" || typeof item.text !== "string")) {
       throw searchError("AGENT_WEB_SEARCH_RESPONSE_INVALID");
     }
     const result = content.map((item) => item.text as string).join("\n\n");
+    if (content.some((item) => isExaQuotaNotice(item.text))) throw searchError("AGENT_WEB_SEARCH_RATE_LIMITED");
+    if (matches[0]!.result?.isError) throw searchError();
     return { content: result.slice(0, SEARCH_MAX_CONTEXT_CHARACTERS), truncated: result.length > SEARCH_MAX_CONTEXT_CHARACTERS };
   } catch (error) {
-    console.error(JSON.stringify({ code: "AGENT_WEB_SEARCH_FAILED", status, errorName: error instanceof Error ? error.name : "UnknownError" }));
-    throw new Error(searchError().message, { cause: error });
+    const failure = normalizeSearchFailure(error);
+    console.error(JSON.stringify({ code: failure.code, status, errorName: error instanceof Error ? error.name : "UnknownError" }));
+    throw failure;
   }
 }
 

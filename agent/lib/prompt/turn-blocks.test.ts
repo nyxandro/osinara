@@ -2,7 +2,7 @@
  * Turn-scoped prompt block resolution tests.
  *
  * Constructs covered:
- * - Eve retains a previous turn's block when a resolver throws, so resolvers must never throw.
+ * - Explicit blocks explain unavailable context within the current turn.
  * - An unresolvable environment produces an explicit fail-closed block, not a stale one.
  * - A failed external capability lookup degrades to an empty allowlist, matching execution policy.
  * - Scheduled-history instructions require the same successful application-core policy lookup.
@@ -286,6 +286,7 @@ describe("memory block resolution", () => {
 
   it("returns retrieved records for an authorized turn", async () => {
     const resolve = createMemoryBlockResolver({
+      reportFailure: vi.fn(),
       authorize: () => authorization,
       createProfile,
       retrieve: vi.fn().mockResolvedValue({
@@ -305,7 +306,7 @@ describe("memory block resolution", () => {
 
   it("returns no block when the turn carries no user text", async () => {
     const retrieve = vi.fn();
-    const resolve = createMemoryBlockResolver({ authorize: () => authorization, createProfile, retrieve });
+    const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization, createProfile, retrieve });
 
     expect(await resolve(context(privateAuth), TEST_TURN_ID)).toBeNull();
     expect(retrieve).not.toHaveBeenCalled();
@@ -319,7 +320,7 @@ describe("memory block resolution", () => {
         { memoryRef: "mem_third", content: "Другая версия" },
       ],
     }];
-    const resolve = createMemoryBlockResolver({ authorize: () => authorization, createProfile,
+    const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization, createProfile,
       retrieve: vi.fn().mockResolvedValue({ memories, retrievedClaimIds: [],
         threads: { threads: [], totalCharacters: 0 } }),
     });
@@ -338,6 +339,7 @@ describe("memory block resolution", () => {
 
   it("discloses unavailable memory instead of throwing on authorization failure", async () => {
     const resolve = createMemoryBlockResolver({
+      reportFailure: vi.fn(),
       authorize: () => {
         throw new Error("AGENT_MEMORY_CONTEXT_INVALID: нет области памяти");
       },
@@ -356,6 +358,7 @@ describe("memory block resolution", () => {
 
   it("discloses unavailable memory instead of throwing on retrieval failure", async () => {
     const resolve = createMemoryBlockResolver({
+      reportFailure: vi.fn(),
       authorize: () => authorization,
       createProfile,
       retrieve: vi.fn().mockRejectedValue(new Error("embedding service down")),
@@ -388,6 +391,7 @@ describe("memory block resolution", () => {
       totalCharacters: 0,
     });
     const resolve = createMemoryBlockResolver({
+      reportFailure: vi.fn(),
       authorize: () => authorization,
       createProfile: profile,
       retrieve,

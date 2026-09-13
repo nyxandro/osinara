@@ -7,14 +7,13 @@
  * Key construct:
  * - The runtime event supplies the durable turn ID used to bind writable profile subject refs.
  *
- * The transport moves this ephemeral block after history without persisting it, so volatile
- * retrieval does not invalidate the prefix formed by permanent instructions and past messages.
+ * Eve keeps this system block outside history for the entire turn and clears it on the next turn.
  */
 import { defineDynamic, defineInstructions } from "eve/instructions";
 
 import { resolveMemoryBlock } from "../lib/prompt/turn-blocks.js";
 import { isMemoryReviewSession } from "../lib/memory-review/memory-review-session.js";
-import { ephemeralMemoryContext } from "../lib/model-turn-context.js";
+import { formatTurnMemoryContext } from "../lib/prompt/turn-memory-context.js";
 
 const INVALID_TURN_BLOCK = [
   "AGENT_MEMORY_TURN_CONTEXT_INVALID: Не удалось проверить идентификатор текущего хода.",
@@ -34,10 +33,10 @@ export default defineDynamic({
       if (isMemoryReviewSession(ctx)) return null;
       // Eve exposes the durable turn identity on the lifecycle event, not the resolve context.
       const turnId = turnIdFromEvent(event);
-      if (turnId === null) return defineInstructions({ markdown: INVALID_TURN_BLOCK });
+      if (turnId === null) return defineInstructions({ content: INVALID_TURN_BLOCK, role: "system" });
       const markdown = await resolveMemoryBlock(ctx, turnId);
       if (markdown === null) return null;
-      return defineInstructions({ markdown: ephemeralMemoryContext(markdown) });
+      return defineInstructions({ content: formatTurnMemoryContext(markdown), role: "system" });
     },
   },
 });

@@ -11,6 +11,8 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 import { classifyGoogleWorkspaceCommand } from "./google-workspace-command-policy.js";
+import { GROUP_SAFE_SKILL_DEFINITIONS } from "../group-skills/group-skill-definitions.js";
+import { GOOGLE_WORKSPACE_EXECUTION_GUIDE } from "./google-workspace-skill-instructions.js";
 
 const serviceSkills = [
   "gws-calendar",
@@ -55,6 +57,20 @@ function exampleArgv(command: string): string[] {
 }
 
 describe("Google Workspace gws skill packages", () => {
+  it("loads the execution contract with every individual Google skill and validates its JSON calls", async () => {
+    for (const name of serviceSkills) {
+      const skill = GROUP_SAFE_SKILL_DEFINITIONS[name];
+      expect(skill.markdown.startsWith(GOOGLE_WORKSPACE_EXECUTION_GUIDE)).toBe(true);
+      for (const line of skill.markdown.split("\n").filter(line => line.startsWith('{"argv":'))) {
+        expect(() => classifyGoogleWorkspaceCommand(JSON.parse(line).argv), `${name}: ${line}`).not.toThrow();
+      }
+    }
+    for (const name of ["gws-gmail", "gws-gmail-triage", "gws-calendar-agenda"]) {
+      const examples = (await readSkill(name)).split("\n").filter(line => line.startsWith('{"argv":'));
+      expect(examples.length).toBeGreaterThan(0);
+      for (const line of examples) expect(classifyGoogleWorkspaceCommand(JSON.parse(line).argv)).toBe("read");
+    }
+  });
   it("installs official googleworkspace/cli service packages", async () => {
     await Promise.all(
       serviceSkills.map(async (skillName) => {

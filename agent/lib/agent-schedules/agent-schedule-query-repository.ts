@@ -16,11 +16,12 @@ import {
   rowToAgentSchedule,
 } from "./agent-schedule-record.js";
 import { AGENT_SCHEDULE_COLUMNS } from "./agent-schedule-repository-helpers.js";
+import { LAST_RUN_PROJECTION, rowToScheduleListItem, type ScheduleListItem, type ScheduleListRow } from "./agent-schedule-run-observation.js";
 
 export async function listAgentSchedules(
   auth: AgentScheduleAuthorization,
   options: { cursor?: string; limit: number },
-): Promise<{ items: AgentScheduleRecord[]; nextCursor: string | null }> {
+): Promise<{ items: ScheduleListItem[]; nextCursor: string | null }> {
   if (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > AGENT_SCHEDULE_LIST_MAX_LIMIT) {
     throw new AppError("AGENT_SCHEDULE_LIMIT_INVALID", "Некорректный размер страницы расписаний");
   }
@@ -29,8 +30,8 @@ export async function listAgentSchedules(
     "AGENT_SCHEDULE_CURSOR_INVALID",
     "Не удалось продолжить просмотр агентных расписаний",
   );
-  const result = await database().query<AgentScheduleRow>(
-    `SELECT ${AGENT_SCHEDULE_COLUMNS}
+  const result = await database().query<ScheduleListRow>(
+    `SELECT ${AGENT_SCHEDULE_COLUMNS}, ${LAST_RUN_PROJECTION}
        FROM agent_schedules AS schedule
       WHERE schedule.family_id = $1
         AND EXISTS (
@@ -50,7 +51,7 @@ export async function listAgentSchedules(
   const rows = result.rows.slice(0, options.limit);
   const last = rows.at(-1);
   return {
-    items: rows.map(rowToAgentSchedule),
+    items: rows.map(rowToScheduleListItem),
     nextCursor: hasNext && last ? encodeDateUuidCursor(last.created_at, last.id) : null,
   };
 }

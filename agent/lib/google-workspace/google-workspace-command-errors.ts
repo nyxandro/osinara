@@ -15,6 +15,7 @@ const MAX_ARGUMENT_LENGTH = 64 * 1024;
 export function googleWorkspaceCommandForbidden(
   reason = "Команда или route отсутствует в проверенном allowlist.",
   correction = "Сверьте trusted skill и передайте API resource и method отдельными аргументами; этот отказ не означает, что OAuth-профиль доступен только для чтения.",
+  example?: Readonly<Record<string, unknown>>,
 ): AppError {
   return new ModelFacingError({
     category: "input",
@@ -23,6 +24,7 @@ export function googleWorkspaceCommandForbidden(
     reason,
     retryable: true,
     sideEffectStatus: "not_started",
+    ...(example ? { example } : {}),
   });
 }
 

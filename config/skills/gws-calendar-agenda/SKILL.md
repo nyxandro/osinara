@@ -15,8 +15,10 @@ Show upcoming events across all calendars
 
 ## Usage
 
-```bash
-gws calendar +agenda
+Call `execute_google_workspace`:
+
+```json
+{"argv":["calendar","+agenda"]}
 ```
 
 ## Flags
@@ -32,12 +34,11 @@ gws calendar +agenda
 
 ## Examples
 
-```bash
-gws calendar +agenda
-gws calendar +agenda --today
-gws calendar +agenda --week
-gws calendar +agenda --days 3 --calendar 'Work'
-gws calendar +agenda --today --timezone America/New_York
+```json
+{"argv":["calendar","+agenda","--today"]}
+{"argv":["calendar","+agenda","--week"]}
+{"argv":["calendar","+agenda","--days","3","--calendar","Work"]}
+{"argv":["calendar","+agenda","--today","--timezone","America/New_York"]}
 ```
 
 ## Tips

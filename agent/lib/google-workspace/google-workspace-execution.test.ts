@@ -77,10 +77,12 @@ describe("execute_google_workspace approval", () => {
     });
   });
 
-  it("tells the model to keep API route segments in separate argv entries", () => {
-    expect(toolDescription()).toContain('"calendar", "events", "list"');
-    expect(toolDescription()).toContain("manage_gmail_message");
-    expect(toolDescription()).toContain("не объединяйте их через точку");
+  it("offers executable read examples through the actual approval boundary", () => {
+    const examples = [...toolDescription().matchAll(/\[[^\[\]]+\]/gu)].map(match => JSON.parse(match[0]) as string[]);
+    expect(examples.some(argv => argv[0] === "gmail" && argv[1] === "+triage")).toBe(true);
+    expect(examples.some(argv => argv[0] === "calendar")).toBe(true);
+    expect(examples.some(argv => argv[0] === "schema")).toBe(true);
+    for (const argv of examples) expect(approval(argv)).toBe("not-applicable");
   });
 
   it("denies a replayed raw Gmail deletion before resolving credentials", async () => {
