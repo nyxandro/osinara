@@ -3,6 +3,7 @@ import type { Session } from "eve/channels";
 import type { SessionAuth } from "eve/context";
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
+import { recoverDatabaseBookkeeping } from "./database-recovery.js";
 
 export function runtimeHandoffSession(session: Session, admissionId: string): Pick<Session, "respond"> {
   return {
@@ -33,9 +34,9 @@ export async function completeRuntimeHandoff(auth: SessionAuth, sessionId: strin
     throw new AppError("AGENT_RUNTIME_HANDOFF_INVALID", "Не удалось проверить завершение служебной операции");
   }
   // The native coalescer preserves the exact consumed delivery IDs, never guessed from requests.
-  await database().query("DELETE FROM runtime_admission_holders WHERE id=ANY($1::uuid[]) AND eve_session_id=$2", [ids, sessionId]);
+  await recoverDatabaseBookkeeping(() => database().query("DELETE FROM runtime_admission_holders WHERE id=ANY($1::uuid[]) AND eve_session_id=$2", [ids, sessionId]));
 }
 
 export async function completeRuntimeSessionHandoffs(sessionId: string): Promise<void> {
-  await database().query("DELETE FROM runtime_admission_holders WHERE eve_session_id=$1", [sessionId]);
+  await recoverDatabaseBookkeeping(() => database().query("DELETE FROM runtime_admission_holders WHERE eve_session_id=$1", [sessionId]));
 }

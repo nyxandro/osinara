@@ -28,6 +28,7 @@ import {
 import { sessionLifecycleEventRepository } from "./session-lifecycle-event-repository.js";
 import { sessionRetentionRepository } from "./session-retention-repository.js";
 import { sessionTaskCleanupRepository } from "./session-task-cleanup-repository.js";
+import { prepareAuthorizedResponse } from "./session-response-preparation.js";
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1_000;
 
@@ -263,6 +264,7 @@ async function rotateSession(
 }
 
 export const sessionRepository = {
+  prepareAuthorizedResponse,
   ...sessionRouteRepository,
   ...sessionLifecycleEventRepository,
   ...sessionRetentionRepository,

@@ -71,7 +71,8 @@ async function terminalizeStaleDispatchingBatches(client: PoolClient, now: Date)
     `UPDATE memory_review_batches
         SET status = 'ambiguous', diagnostic_code = $2,
             completed_at = $1, updated_at = $1, lease_token = NULL, lease_expires_at = NULL
-      WHERE batch_kind = 'background' AND status = 'dispatching' AND lease_expires_at <= $1
+       WHERE batch_kind = 'background' AND status = 'dispatching' AND lease_expires_at <= $1
+         AND recovery_protocol=0
       RETURNING id, application_session_id`,
     [now, DISPATCH_TIMEOUT_AMBIGUOUS],
   );
@@ -202,6 +203,7 @@ export const memoryReviewDispatchTerminalRepository = {
     batchId: string;
     diagnosticCode: string;
     eveSessionId: string;
+    continuationToken?: string;
   }): Promise<void> {
     if (isRecoverableModelCode(input.diagnosticCode)) {
       await failBackgroundReview(input);
@@ -212,6 +214,12 @@ export const memoryReviewDispatchTerminalRepository = {
       await client.query("BEGIN");
       // Match recovery/writer fencing order: batch first, then the exact application session.
       await client.query("SELECT id FROM memory_review_batches WHERE id = $1 FOR UPDATE", [input.batchId]);
+      if (input.continuationToken !== undefined) {
+        const current = await client.query(`SELECT 1 FROM memory_review_batches batch
+          JOIN conversation_sessions session ON session.id=batch.application_session_id
+          WHERE batch.id=$1 AND session.continuation_token=$2`, [input.batchId, input.continuationToken]);
+        if (current.rowCount !== 1) { await client.query("COMMIT"); return; }
+      }
       const session = await client.query<{ id: string }>(
         `SELECT app_session.id
            FROM conversation_sessions AS app_session

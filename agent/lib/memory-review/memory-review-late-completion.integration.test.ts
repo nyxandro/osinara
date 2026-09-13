@@ -60,9 +60,10 @@ describeWithDatabase("memory review completion after session rotation", () => {
       replyToSequenceId: "1", sequenceId: "2", status: "inserted",
     });
     const handler = createTelegramMessageHandler({
-      ...deps, conversations: conversationRepository, session: sessionRepository, memoryReview: memoryReviewRepository,
+      ...deps, conversations: conversationRepository, session: { ...sessionRepository,
+        prepareAuthorizedResponse: async () => ({ ...original,nativeSessionId: "eve-pending" }) }, memoryReview: memoryReviewRepository,
     });
-    const result = await handler(telegramContext().context, {
+    const result = await handler({ ...telegramContext().context,ingressRecovery: { updateId: "2",dispatchId: crypto.randomUUID() } }, {
       ...groupMessage("да"), messageId: "2",
       from: { firstName: "User", id: "agent-memory-author", isBot: false },
       replyToMessage: {

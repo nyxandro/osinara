@@ -44,6 +44,11 @@ import { waitForSessionBoundary } from "./telegram-session-boundary.js";
 import { runTelegramProcessing, TelegramProcessingTimeout } from "./telegram-processing-deadline.js";
 import { recoverTelegramIngress } from "./telegram-ingress-recovery.js";
 import { combineTelegramMediaGroup } from "./telegram-media-group.js";
+import { telegramDispatchControl } from "./telegram-ingress-dispatch-control.js";
+import { resumeTelegramResponse } from "./telegram-response-recovery.js";
+import { recoverUnboundTelegramPreparation } from "./telegram-preparation-recovery.js";
+import { recordOperationalIncident } from "./operational-incidents/owner-alerts.js";
+import { isDatabaseUnavailable, waitForApplicationDatabase } from "./database-recovery.js";
 
 const telegramUpdateIdSchema = z.union([z.number().int().nonnegative().safe(), z.string().regex(/^\d+$/)]);
 const telegramVoiceSchema = z.object({
@@ -60,6 +65,7 @@ const telegramVoiceSchema = z.object({
 });
 
 interface DurableIngressDependencies {
+  reportFailure: typeof recordOperationalIncident;
   acceptMedia(
     message: Pick<TelegramMessage, "chat">,
     updateId: string,
@@ -198,7 +204,6 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
 
   async function drain(
     dispatch: TelegramVerifiedUpdateContext["dispatch"],
-    notifyTimeout: TelegramVerifiedUpdateContext["notifyTimeout"],
     attachSession: TelegramDrainContext["attachSession"],
   ): Promise<void> {
     while (true) {
@@ -241,6 +246,24 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
         if (waitedForSlot) await dependencies.repository.renewLease(claim.updateId, claim.leaseToken, dependencies.leaseMilliseconds);
 
         if (claim.dispatchStarted) {
+          if (claim.recoveryProtocol === 1 && claim.dispatchBinding === null) {
+            const recovery = await recoverUnboundTelegramPreparation(claim.updateId, claim.leaseToken);
+            if (recovery === "released") continue;
+            if (recovery === "bound") {
+              await dependencies.repository.release(claim.updateId, claim.leaseToken, {
+                code: "AGENT_TELEGRAM_BINDING_RECOVERED", message: "Сохранённая привязка исполнения найдена",
+              });
+              continue;
+            }
+          }
+          if (claim.recoveryProtocol === 1 && (acceptedUpdate.kind === "callback_query" || claim.responseAdmission) && !claim.executionBound) {
+            const settled = await resumeTelegramResponse({ claim,update: acceptedUpdate,dispatch,repository: dependencies.repository,
+              signal: heartbeatController.signal,
+              admissionMilliseconds: dependencies.admissionMilliseconds ?? TELEGRAM_INGRESS_ADMISSION_TIMEOUT_MS,
+              cancellationMilliseconds: dependencies.cancellationMilliseconds ?? TELEGRAM_INGRESS_CANCELLATION_GRACE_MS,
+            });
+            if (settled) continue;
+          }
           const recovered = await recoverTelegramIngress({
             dispatch: claim.dispatchBinding,
             cancel: claim.recoveryCancelRequested,
@@ -316,7 +339,7 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
             control.signal.throwIfAborted();
             await dependencies.repository.beginDispatch(claim.updateId, claim.leaseToken, control.dispatchId);
             control.signal.throwIfAborted();
-            const session = await dispatch(withCaptionlessAttachmentText(update), control);
+            const session = await dispatch(withCaptionlessAttachmentText(update),telegramDispatchControl(control));
             if (!session) return null;
             dispatchedSessionId = session.id;
             control.observeSession(session);
@@ -340,6 +363,17 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
           completion.nextEventIndex,
         );
       } catch (error) {
+        if (isAppError(error) && error.code === "AGENT_TELEGRAM_LEASE_LOST") {
+          console.info(JSON.stringify({ code: "AGENT_TELEGRAM_OBSERVER_TRANSFERRED",updateId: claim.updateId }));
+          continue;
+        }
+        if (isDatabaseUnavailable(error)) {
+          await waitForApplicationDatabase();
+          await dependencies.repository.release(claim.updateId, claim.leaseToken, {
+            code: "AGENT_TELEGRAM_DATABASE_RECOVERY", message: "Соединение восстановлено. Продолжается проверка исходного запроса",
+          });
+          continue;
+        }
         // A reclaimed dispatch marker is ambiguous: another durable execution may still be alive.
         // Do not admit the next message merely because automatic redelivery was refused.
         if (isAppError(error) && error.code === "AGENT_TELEGRAM_DISPATCH_RECOVERY_REQUIRED") {
@@ -365,23 +399,11 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
         // A lost observer has no trustworthy cursor. Do not reuse that canonical session and
         // accidentally consume its late waiting event as the next message's completion.
         await dependencies.repository.fail(claim.updateId, claim.leaseToken, failure, dispatchedSessionId);
-        if (error instanceof TelegramProcessingTimeout ||
-          (isAppError(error) && (error.code === "AGENT_TELEGRAM_MEDIA_GROUP_LATE" ||
-            error.code === "AGENT_TELEGRAM_MEDIA_GROUP_INVALID"))) {
-          const update = parseTelegramUpdate(claim.payload);
-          if (update) {
-            let noticeTimer: ReturnType<typeof setTimeout> | undefined;
-            const noticeController = new AbortController();
-            try {
-              await Promise.race([notifyTimeout(update, failure.message, noticeController.signal), new Promise<never>((_resolve, reject) => {
-                noticeTimer = setTimeout(() => reject(new Error("Telegram timeout notice did not settle")), TELEGRAM_INGRESS_CANCELLATION_GRACE_MS);
-              })]);
-            } catch (noticeError) {
-              console.error(JSON.stringify({ code: "AGENT_TELEGRAM_TIMEOUT_NOTICE_FAILED", updateId: claim.updateId,
-                errorName: noticeError instanceof Error ? noticeError.name : "UnknownError" }));
-            } finally { clearTimeout(noticeTimer); noticeController.abort(); }
-          }
-        }
+        const failedUpdate = parseTelegramUpdate(claim.payload);
+        const origin = failedUpdate?.kind === "message" ? failedUpdate.message : failedUpdate?.callbackQuery.message;
+        await dependencies.reportFailure({ key: `telegram:${claim.updateId}`, code: failure.code,
+          summary: failure.message, context: { updateId: claim.updateId, queueId: claim.queueId,
+            chatId: origin?.chat.id ?? null, eveSessionId: dispatchedSessionId ?? null } });
       } finally {
         releaseSlot?.();
         heartbeatController.abort();
@@ -393,7 +415,7 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
   function scheduleDrain(context: TelegramDrainContext): void {
     // PostgreSQL leases only the first non-terminal item of each queue. Independent drainers
     // let another chat progress while a slow turn runs, without overtaking this chat's head.
-    context.waitUntil(drain(context.dispatch, context.notifyTimeout, context.attachSession));
+    context.waitUntil(drain(context.dispatch, context.attachSession));
   }
 
   const handleVerifiedUpdate = async function handleVerifiedUpdate(
@@ -433,6 +455,7 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
 const authorizeTelegramVoice = createTelegramVoiceAuthorizer(telegramRepository);
 
 export const handleTelegramDurableIngress = createTelegramDurableIngress({
+  reportFailure: recordOperationalIncident,
   acceptMedia(message, incomingUpdateId, mediaKind) {
     return telegramIngressRepository.acceptMedia({
       chatId: message.chat.id,

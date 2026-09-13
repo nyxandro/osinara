@@ -228,13 +228,14 @@ describeWithDatabase("memory review dispatch repository", () => {
     expect(recovered).toEqual(first);
   });
 
-  it("terminalizes a stale dispatch marker and its one-shot application session", async () => {
+  it("terminalizes a legacy stale dispatch marker and its one-shot application session", async () => {
     const { claim } = await claimBackgroundBatch();
     const session = await memoryReviewSessionRepository.prepare(
       claim,
       new Date("2026-08-12T10:00:01.000Z"),
     );
     await memoryReviewDispatchRepository.markDispatchStarted(claim, session.id);
+    await database().query("UPDATE memory_review_batches SET recovery_protocol=0 WHERE id=$1", [claim.batchId]);
 
     await memoryReviewDispatchRepository.claimPending({
       leaseMilliseconds: 60_000,

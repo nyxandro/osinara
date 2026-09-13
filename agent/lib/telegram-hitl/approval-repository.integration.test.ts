@@ -14,6 +14,8 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, database } from "../database.js";
 import { sessionRepository } from "../sessions/session-repository.js";
 import { telegramHitlApprovalRepository } from "./approval-repository.js";
+import { telegramIngressRepository } from "../telegram-ingress-repository.js";
+import { bindTelegramIngressTurn } from "../telegram-ingress-binding.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 const url = process.env.DATABASE_URL;
@@ -25,6 +27,7 @@ const OWNER_TELEGRAM_ID = "hitl-owner";
 
 async function fixture(
   options: {
+    freeform?: boolean;
     messageMode?: "addressed_only" | "owner_only";
     scope?: "family" | "group";
     type?: "external" | "family_private";
@@ -71,13 +74,14 @@ async function fixture(
   await sessionRepository.registerRouteAlias(session.id, "-1001:55:88");
   await telegramHitlApprovalRepository.register({
     applicationSessionId: session.id,
-    kind: "tool-approval" as const,
-    callbackData: ["eve:0", "eve:1"],
-    callbackOptions: [
+    kind: options.freeform ? "question" : "tool-approval",
+    callbackData: options.freeform ? [] : ["eve:0", "eve:1"],
+    callbackOptions: options.freeform ? [] : [
       { callbackData: "eve:0", label: "Да, подтвердить", optionId: "approve" },
       { callbackData: "eve:1", label: "Нет, отклонить", optionId: "deny" },
     ],
     eveSessionId: "wrun_hitl",
+    eveTurnId: "turn_0",
     requestId: "approval-request-1",
     promptText: "Подтвердите тестовое действие",
     telegramChatId: "-1001",
@@ -97,6 +101,45 @@ describeWithDatabase("Telegram HITL approval repository", () => {
     await database().query("TRUNCATE telegram_hitl_approvals, conversation_session_routes, conversation_sessions, telegram_groups, family_memberships, users, families CASCADE");
   });
   afterAll(async () => closeDatabase());
+
+  it("atomically binds a consumed callback and permits recovery only for its identical verified update", async () => {
+    await fixture();
+    await database().query("TRUNCATE telegram_ingress_queues CASCADE");
+    await telegramIngressRepository.enqueue({ updateId: "900", continuationKey: "-1001:55:", payload: { update_id: 900,
+      callback_query: { id: "callback-900", data: "eve:0", from: { id: OWNER_TELEGRAM_ID } } } });
+    const claim = (await telegramIngressRepository.claimNext(60000))!;
+    const dispatchId = crypto.randomUUID();
+    await telegramIngressRepository.beginDispatch(claim.updateId,claim.leaseToken,dispatchId);
+    const input = { baseContinuationToken: "-1001:55:88", callbackData: "eve:0", telegramChatId: "-1001",
+      telegramMessageId: "88", telegramUserId: OWNER_TELEGRAM_ID,
+      ingress: { updateId: "900", dispatchId, callbackQueryId: "callback-900" } };
+    expect((await telegramHitlApprovalRepository.claimCallback(input)).status).toBe("authorized");
+    expect((await database().query("SELECT response_session_id,response_turn_id,dispatch_turn_id FROM telegram_ingress_updates WHERE update_id=900")).rows)
+      .toEqual([{ response_session_id: "wrun_hitl",response_turn_id: "turn_0",dispatch_turn_id: null }]);
+    await bindTelegramIngressTurn({ initiator: null,current: { authenticator: "telegram",principalId: OWNER_TELEGRAM_ID,principalType: "user",
+      attributes: { osinaraTelegramUpdateId: "900",osinaraTelegramIngressId: dispatchId } } },"wrun_hitl","turn_1");
+    expect((await database().query("SELECT response_turn_id,dispatch_turn_id FROM telegram_ingress_updates WHERE update_id=900")).rows)
+      .toEqual([{ response_turn_id: "turn_0",dispatch_turn_id: "turn_1" }]);
+    expect(await telegramHitlApprovalRepository.claimCallback(input)).toMatchObject({ status: "authorized",replayed: true });
+    await expect(telegramHitlApprovalRepository.claimCallback({ ...input,callbackData: "eve:1" }))
+      .rejects.toThrow("AGENT_TELEGRAM_CALLBACK_ATTEMPT_STALE");
+    expect(await telegramHitlApprovalRepository.claimCallback({ ...input,ingress: { ...input.ingress,callbackQueryId: "another" } }))
+      .toEqual({ status: "expired" });
+  });
+  it("retains the meaning of the same text answer when preparation resumes after consumption", async () => {
+    await fixture({ freeform: true });
+    await database().query("TRUNCATE telegram_ingress_queues CASCADE");
+    await telegramIngressRepository.enqueue({ updateId: "901",continuationKey: "-1001:55:",payload: { update_id: 901,
+      message: { message_id: 100,chat: { id: "-1001" },from: { id: OWNER_TELEGRAM_ID },reply_to_message: { message_id: 88 },text: "Да" } } });
+    const claim = (await telegramIngressRepository.claimNext(60000))!;
+    const dispatchId=crypto.randomUUID();
+    await telegramIngressRepository.beginDispatch("901",claim.leaseToken,dispatchId);
+    const input = { baseContinuationToken: "-1001:55:88",telegramChatId: "-1001",telegramMessageId: "88",telegramUserId: OWNER_TELEGRAM_ID,
+      ingress: { updateId: "901",dispatchId } };
+    expect(await telegramHitlApprovalRepository.authorizeReply(input)).toBe("authorized");
+    expect(await telegramHitlApprovalRepository.authorizeReply(input)).toBe("authorized");
+    expect((await database().query("SELECT response_turn_id FROM telegram_ingress_updates WHERE update_id=901")).rows[0].response_turn_id).toBe("turn_0");
+  });
 
   it("rejects another group member without consuming the initiator's approval", async () => {
     const current = await fixture();
@@ -355,7 +398,7 @@ describeWithDatabase("Telegram HITL approval repository", () => {
   });
 
   it("protects and atomically consumes a text reply from the expected identity", async () => {
-    await fixture();
+    await fixture({ freeform: true });
 
     await expect(
       telegramHitlApprovalRepository.authorizeReply({
@@ -390,6 +433,14 @@ describeWithDatabase("Telegram HITL approval repository", () => {
         telegramUserId: OWNER_TELEGRAM_ID,
       }),
     ).resolves.toBe("not_applicable");
+  });
+
+  it("does not consume an approval button when its message receives an ordinary text reply", async () => {
+    await fixture();
+    expect(await telegramHitlApprovalRepository.authorizeReply({ baseContinuationToken: "-1001:55:88",telegramChatId: "-1001",
+      telegramMessageId: "88",telegramUserId: OWNER_TELEGRAM_ID })).toBe("not_applicable");
+    expect((await telegramHitlApprovalRepository.claimCallback({ baseContinuationToken: "-1001:55:88",telegramChatId: "-1001",
+      telegramMessageId: "88",telegramUserId: OWNER_TELEGRAM_ID,callbackData: "eve:0" })).status).toBe("authorized");
   });
 
   it("treats a removed ordinary alias as canonical ancestry while a task awaits approval", async () => {

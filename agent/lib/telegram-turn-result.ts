@@ -38,6 +38,7 @@ export function buildTelegramTurnResult(input: {
     replyTelegramUserId: string | null;
   };
   replyHandling: "message" | undefined;
+  responseSessionId?: string;
   storedAttachments: readonly StoredTelegramAttachment[];
   timelineEntryId: string;
   turnContext: PreparedTelegramGroupTurnContext;
@@ -60,6 +61,7 @@ export function buildTelegramTurnResult(input: {
     auth: {
       attributes: {
         applicationSessionId: input.appSession.id,
+        ...(input.responseSessionId === undefined ? {} : { osinaraTelegramResponseSessionId: input.responseSessionId }),
         familyId: input.access.familyId,
         ...(input.access.groupId ? { groupId: input.access.groupId } : {}),
         ...(input.group ? { groupType: input.group.type } : {}),

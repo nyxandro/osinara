@@ -12,6 +12,7 @@ import { closeDatabase, database } from "../database.js";
 import { sessionRepository } from "../sessions/session-repository.js";
 import { agentScheduleDispatchRepository } from "./agent-schedule-dispatch-repository.js";
 import { agentScheduleRepository } from "./agent-schedule-repository.js";
+import { admitScheduledAgentTurn, recoverUnstartedAgentSchedules } from "./agent-schedule-recovery.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 const url = process.env.DATABASE_URL;
@@ -91,6 +92,29 @@ describeWithDatabase("agent schedule repositories", () => {
     );
   });
   afterAll(async () => closeDatabase());
+
+  it("recovers a pre-model handoff of the same occurrence and fences the late old run", async () => {
+    const fixture = await createFixture();
+    const now = new Date();
+    const schedule = await agentScheduleRepository.create(privateAuth(fixture, "owner"), {
+      firstRunAt: new Date(now.getTime()-1000), operationKey: "recover-handoff", recurrence: { kind: "once" },
+      scenarioPrompt: "Проверь новости", scope: "personal", timezone: "Europe/Moscow", title: "Проверка", userRequest: "Проверь новости",
+    });
+    const job = (await agentScheduleDispatchRepository.claimDue({ now, limit: 10, leaseMilliseconds: 60000 }))[0]!;
+    const session = await sessionRepository.prepareTurn({ baseContinuationToken: `schedule:${job.runId}`,
+      familyId: fixture.familyId, groupId: null, kind: "scheduled", now, scope: "personal", telegramForumTopicId: null, userId: fixture.ownerId });
+    await agentScheduleDispatchRepository.markDispatchStarted(job, { applicationSessionId: session.id });
+    await database().query("UPDATE agent_schedules SET lease_expires_at=now()-interval '1 second' WHERE id=$1", [schedule.id]);
+    const client = await database().connect();
+    try { await client.query("BEGIN"); await recoverUnstartedAgentSchedules(client, now); await client.query("COMMIT"); }
+    finally { client.release(); }
+    await expect(admitScheduledAgentTurn({ runId: job.runId, applicationSessionId: session.id, eveSessionId: "late", eveTurnId: "turn_0" }))
+      .rejects.toThrow("AGENT_SCHEDULE_ATTEMPT_STALE");
+    const next = (await agentScheduleDispatchRepository.claimDue({ now: new Date(), limit: 10, leaseMilliseconds: 60000 }))[0]!;
+    expect(next.id).toBe(schedule.id);
+    expect(next.runId).toBe(job.runId);
+    expect(next.nextRunAt).toBe(job.nextRunAt);
+  });
 
   it("creates and lists a personal scheduled agent scenario", async () => {
     const fixture = await createFixture();
@@ -371,6 +395,8 @@ describeWithDatabase("agent schedule repositories", () => {
       applicationSessionId: prepared.id,
       eveSessionId: "eve-schedule-long-running",
     });
+    await admitScheduledAgentTurn({ runId: claimed!.runId, applicationSessionId: prepared.id,
+      eveSessionId: "eve-schedule-long-running", eveTurnId: "turn_0" });
 
     await expect(agentScheduleDispatchRepository.claimDue({
       leaseMilliseconds: 1_000,
@@ -386,7 +412,7 @@ describeWithDatabase("agent schedule repositories", () => {
     });
   });
 
-  it("does not retry an expired lease after Eve handoff may have started", async () => {
+  it("does not retry a legacy expired lease after Eve handoff may have started", async () => {
     const fixture = await createFixture();
     const auth = privateAuth(fixture, "member");
     await agentScheduleRepository.create(auth, {
@@ -417,6 +443,7 @@ describeWithDatabase("agent schedule repositories", () => {
     await agentScheduleDispatchRepository.markDispatchStarted(claimed!, {
       applicationSessionId: prepared.id,
     });
+    await database().query("UPDATE agent_schedule_runs SET recovery_protocol=0 WHERE id=$1", [claimed!.runId]);
 
     await expect(agentScheduleDispatchRepository.claimDue({
       leaseMilliseconds: 1_000,

@@ -10,7 +10,7 @@ export default defineEval({
     assert.equal(process.env.RUN_DATABASE_INTEGRATION_TESTS, "true");
     assert.equal(new URL(process.env.DATABASE_URL!).pathname, "/osinara_test");
     const db = database();
-    await db.query("TRUNCATE users, families CASCADE");
+    await db.query("TRUNCATE users, families, operational_incidents CASCADE");
     const family = (await db.query<{ id: string }>("INSERT INTO families(name) VALUES ('Telegram conversation test') RETURNING id")).rows[0]!;
     const chatId = -900_000_101;
     const familyChatId = -900_000_102;
@@ -101,10 +101,11 @@ export default defineEval({
         "SELECT body FROM telegram_conversation_test_deliveries",
       )).rows;
       const notices = deliveries.filter((d) => !d.body.text.startsWith("reply-conversation-probe-"));
-      assert.equal(notices.length, 2);
+      assert.equal(notices.length, 1);
       assert.equal(notices.filter((d) => d.body.text.startsWith("AGENT_PROFILE_PROJECTION_POLICY_NOTICE:")).length, 1);
       assert.equal(notices.filter((d) => d.body.text === "Нейросеть сейчас недоступна.\n\nПопробуйте повторить запрос чуть позже." &&
-        d.body.reply_parameters?.message_id === failingOrdinal).length, 1);
+        d.body.reply_parameters?.message_id === failingOrdinal).length, 0);
+      assert.equal((await db.query("SELECT 1 FROM operational_incidents WHERE operation_key=$1", [`telegram:${900_000_000+failingOrdinal}`])).rowCount, 1);
       assert.equal(deliveries.length - notices.length, turnCount + 1);
       for (let ordinal = 1; ordinal <= turnCount + 2; ordinal += 1) {
         const replies = deliveries.filter((d) => JSON.stringify(d.body).includes(`reply-conversation-probe-${ordinal}\"`));
@@ -178,8 +179,10 @@ export default defineEval({
       await db.query("DROP FUNCTION telegram_test_reject_binding()");
 
       let previousCancellationSession: string | undefined;
-      for (const cancellationOrdinal of [turnCount + 4, turnCount + 5, turnCount + 6]) {
-      const afterQuestion = cancellationOrdinal === turnCount + 6;
+      for (const cancellationOrdinal of [turnCount + 4, turnCount + 5, turnCount + 6,SESSION_MAX_COMPLETED_TURNS + 16]) {
+      const textAnswer = cancellationOrdinal === SESSION_MAX_COMPLETED_TURNS + 16;
+      const afterQuestion = cancellationOrdinal === turnCount + 6 || textAnswer;
+      if (textAnswer) await db.query("UPDATE conversation_sessions SET rotation_requested_at=now() WHERE eve_session_id=$1", [previousCancellationSession]);
       let ingressUpdateId = 900_000_000 + cancellationOrdinal;
       let cancellationSessionId: string | undefined;
       await t.target.fetch("/eve/v1/telegram", {
@@ -205,13 +208,29 @@ export default defineEval({
         parked.event("input.requested");
         const cursor = (await db.query<{ next_event_index: number }>("SELECT next_event_index FROM eve_session_event_cursors WHERE eve_session_id=$1", [parkedSessionId])).rows[0]!;
         cursors.set(parkedSessionId, Number(cursor.next_event_index));
-        const prompt = (await db.query<{ id: number; body: { reply_markup: { inline_keyboard: { callback_data: string }[][] } } }>(
-          "SELECT id,body FROM telegram_conversation_test_deliveries WHERE body->'reply_markup'->'inline_keyboard'->0->0->>'callback_data' IS NOT NULL ORDER BY id DESC LIMIT 1")).rows[0];
+        const prompt = (await db.query<{ id: number; body: { text: string; reply_markup: { inline_keyboard: { callback_data: string }[][] } } }>(
+          textAnswer ? "SELECT id,body FROM telegram_conversation_test_deliveries WHERE body->'reply_markup'->>'force_reply'='true' ORDER BY id DESC LIMIT 1"
+            : "SELECT id,body FROM telegram_conversation_test_deliveries WHERE body->'reply_markup'->'inline_keyboard'->0->0->>'callback_data' IS NOT NULL ORDER BY id DESC LIMIT 1")).rows[0];
         assert.ok(prompt, "Question button was not delivered");
         ingressUpdateId += 1;
+        await db.query("CREATE SEQUENCE telegram_test_handoff_fault");
+        await db.query(`CREATE FUNCTION telegram_test_handoff_fault() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN
+            IF NEW.update_id=${ingressUpdateId} AND NEW.dispatch_continuation_key IS NOT NULL
+              AND OLD.dispatch_continuation_key IS NULL AND nextval('telegram_test_handoff_fault')=1 THEN
+              RAISE EXCEPTION 'TEST_LOST_HANDOFF_AFTER_APPROVAL_COMMIT' USING ERRCODE='08006';
+            END IF;
+            RETURN NEW;
+          END $$`);
+        await db.query("CREATE TRIGGER telegram_test_handoff_fault BEFORE UPDATE ON telegram_ingress_updates FOR EACH ROW EXECUTE FUNCTION telegram_test_handoff_fault()");
         await t.target.fetch("/eve/v1/telegram", {
           method: "POST", headers: { "x-telegram-bot-api-secret-token": "conversation-test-secret" },
-          body: JSON.stringify({ update_id: ingressUpdateId, callback_query: {
+          body: JSON.stringify(textAnswer ? { update_id: ingressUpdateId,message: {
+            message_id: cancellationOrdinal+1,date: Math.floor(Date.now()/1000),chat: { id: familyChatId,type: "supergroup" },
+            from: { id: 902,first_name: "Human",is_bot: false },text: "Продолжить",
+            reply_to_message: { message_id: prompt.id,from: { id: 903,first_name: "Osinara",is_bot: true,username: "osinara_bot" },
+              chat: { id: familyChatId,type: "supergroup" },text: prompt.body.text,reply_markup: prompt.body.reply_markup },
+          } } : { update_id: ingressUpdateId, callback_query: {
             id: "cancellation-probe-answer", chat_instance: "test-chat", data: prompt.body.reply_markup.inline_keyboard[0]![0]!.callback_data,
             from: { id: 902, first_name: "Human", is_bot: false }, message: { message_id: prompt.id,
               date: Math.floor(Date.now() / 1000), chat: { id: familyChatId, type: "supergroup" } },
@@ -231,7 +250,7 @@ export default defineEval({
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
       assert.ok(modelObserved && cancellationSessionId, "Cancellation probe did not reach the model");
-      if (previousCancellationSession) assert.equal(cancellationSessionId, previousCancellationSession, "Cancellation must also work on a reused session");
+      if (previousCancellationSession && !textAnswer) assert.equal(cancellationSessionId, previousCancellationSession, "Cancellation must also work on a reused session");
       previousCancellationSession = cancellationSessionId;
       const live = t.target.watchTurn(cancellationSessionId, { startIndex: cursors.get(cancellationSessionId) ?? 0 });
       const started = await live.waitForEvent("step.started");
@@ -261,6 +280,13 @@ export default defineEval({
       assert.ok(ingressCompleted, "Native cancellation did not release its ingress item");
       const cursor = (await db.query<{ next_event_index: number }>("SELECT next_event_index FROM eve_session_event_cursors WHERE eve_session_id=$1", [cancellationSessionId])).rows[0]!;
       cursors.set(cancellationSessionId, Number(cursor.next_event_index));
+      if (afterQuestion) {
+        assert.ok(Number((await db.query("SELECT last_value FROM telegram_test_handoff_fault")).rows[0].last_value)>=2,
+          "Handoff fault did not cause a verified recovery");
+        await db.query("DROP TRIGGER telegram_test_handoff_fault ON telegram_ingress_updates");
+        await db.query("DROP FUNCTION telegram_test_handoff_fault()");
+        await db.query("DROP SEQUENCE telegram_test_handoff_fault");
+      }
       }
       t.log("verified native cancellation stops a running model without a late reply");
 
@@ -341,11 +367,14 @@ export default defineEval({
         [`%conversation-probe-${silentOrdinal}%`])).rowCount, 0, "Silent turn must deliver nothing");
       t.log("verified silent group turn delivers nothing and keeps the trigger reason");
     } finally {
+      await db.query("DROP TRIGGER IF EXISTS telegram_test_handoff_fault ON telegram_ingress_updates");
+      await db.query("DROP FUNCTION IF EXISTS telegram_test_handoff_fault()");
+      await db.query("DROP SEQUENCE IF EXISTS telegram_test_handoff_fault");
       await db.query("DROP TRIGGER IF EXISTS telegram_test_reject_binding ON conversation_sessions");
       await db.query("DROP FUNCTION IF EXISTS telegram_test_reject_binding()");
       await db.query("TRUNCATE users, families CASCADE");
       await db.query("DELETE FROM telegram_ingress_updates WHERE update_id BETWEEN $1 AND $2", [
-        900_000_001, 900_000_000 + SESSION_MAX_COMPLETED_TURNS + 15,
+        900_000_001, 900_000_000 + SESSION_MAX_COMPLETED_TURNS + 17,
       ]);
       await db.query("DROP TABLE IF EXISTS telegram_conversation_test_deliveries, telegram_conversation_test_sandboxes, telegram_conversation_test_model_calls");
       await closeDatabase();

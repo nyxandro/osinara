@@ -125,6 +125,14 @@ const POST_V0101_MIGRATIONS = [
   "091_private_telegram_media_groups.sql",
   "092_schedule_recurrence_periods.sql",
   "093_memory_review_model_recovery.sql",
+  "094_operational_recovery.sql",
+  "095_memory_dispatch_recovery.sql",
+  "096_scheduled_execution_recovery.sql",
+  "097_execution_reconciliation.sql",
+  "098_callback_recovery.sql",
+  "099_runtime_process_identity.sql",
+  "100_response_admission_coordinates.sql",
+  "101_text_response_recovery.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [

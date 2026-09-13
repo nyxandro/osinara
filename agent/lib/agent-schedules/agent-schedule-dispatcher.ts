@@ -14,6 +14,7 @@ import { type ClaimedAgentSchedule, agentScheduleDispatchRepository } from "./ag
 import { scheduledGroupHistorySnapshotRepository } from "./scheduled-group-history-snapshot-repository.js";
 import { numericMessageThreadId } from "./agent-schedule-validation.js";
 import { sessionRepository, type PreparedSession } from "../sessions/session-repository.js";
+import { isDatabaseUnavailable, recoverDatabaseBookkeeping } from "../database-recovery.js";
 
 interface AgentScheduleDispatcherRepository {
   claimDue(options: { leaseMilliseconds: number; limit: number; now: Date }): Promise<ClaimedAgentSchedule[]>;
@@ -131,6 +132,7 @@ async function dispatchOne(dependencies: AgentScheduleDispatcherDependencies, jo
       applicationSessionId: prepared.id,
     });
   } catch (error) {
+    if (isDatabaseUnavailable(error)) throw error;
     console.error(
       JSON.stringify({
         code: "AGENT_SCHEDULE_DISPATCH_MARKER_FAILED",
@@ -155,11 +157,12 @@ async function dispatchOne(dependencies: AgentScheduleDispatcherDependencies, jo
         ...(job.messageThreadId === null ? {} : { messageThreadId: numericMessageThreadId(job.messageThreadId) }),
       })
       .send(scheduledRunPrompt(job), { auth: scheduledAuth(job, prepared) });
-    await dependencies.repository.markRunning(job, {
+    await recoverDatabaseBookkeeping(() => dependencies.repository.markRunning(job, {
       applicationSessionId: prepared.id,
       eveSessionId: session.id,
-    });
+    }));
   } catch (error) {
+    if (isDatabaseUnavailable(error)) throw error;
     console.error(
       JSON.stringify({
         code: "AGENT_SCHEDULE_HANDOFF_FAILED",

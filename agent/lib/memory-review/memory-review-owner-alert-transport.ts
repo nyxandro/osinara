@@ -10,6 +10,7 @@ import { callTelegramApi } from "eve/channels/telegram";
 
 import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../../config.js";
 import { AppError } from "../app-error.js";
+import { database } from "../database.js";
 
 export class MemoryReviewOwnerAlertTransportError extends AppError {
   readonly delivery: "failed";
@@ -80,5 +81,12 @@ function productionTransport(): MemoryReviewOwnerAlertTransport {
 
 // Runtime secrets stay lazy so Eve discovery and build remain deterministic.
 export const memoryReviewOwnerAlertTransport: MemoryReviewOwnerAlertTransport = {
-  deliver: (input) => productionTransport().deliver(input),
+  async deliver(input) {
+    const owner = await database().query<{ telegram_user_id: string }>(`SELECT u.telegram_user_id
+      FROM users u JOIN family_memberships m ON m.user_id=u.id WHERE m.role='owner'`);
+    if (owner.rows.length !== 1 || owner.rows[0]!.telegram_user_id !== input.chatId) {
+      throw new AppError("AGENT_INCIDENT_RECIPIENT_REJECTED", "Получатель служебного уведомления больше не является владельцем");
+    }
+    await productionTransport().deliver(input);
+  },
 };

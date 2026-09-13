@@ -19,6 +19,7 @@ import { formatMemoryReviewBatchPrompt } from "./memory-review-prompt.js";
 import type { MemoryReviewClaim } from "./memory-review-repository.js";
 import { readMemoryReviewLaneHealth, recoverUnstartedReviewBatches } from "./memory-review-lane-recovery.js";
 import { recoverModelWaitingReviews } from "./memory-review-model-recovery.js";
+import { recoverReviewDispatches } from "./memory-review-dispatch-recovery.js";
 
 interface SourceRow {
   actor_id: string;
@@ -118,6 +119,7 @@ export const memoryReviewDispatchRepository = {
     const client = await database().connect();
     try {
       await client.query("BEGIN");
+      await recoverReviewDispatches(client, input.now);
       await terminalizeStaleMemoryReviewBatches(client, input.now);
       await materializeReadyBatches(client, input.now);
       const laneHealth = await readMemoryReviewLaneHealth(client);
@@ -215,7 +217,7 @@ export const memoryReviewDispatchRepository = {
   ): Promise<boolean> {
     const result = await database().query(
       `UPDATE memory_review_batches
-          SET status = 'dispatching', application_session_id = $3, updated_at = now()
+          SET status = 'dispatching', application_session_id = $3, recovery_protocol = 1, updated_at = now()
         WHERE id = $1 AND status = 'leased' AND lease_token = $2`,
       [batch.batchId, batch.leaseToken, applicationSessionId],
     );
@@ -236,9 +238,11 @@ export const memoryReviewDispatchRepository = {
                (status = 'running' AND eve_session_id = $4))`,
       [batch.batchId, batch.leaseToken, input.applicationSessionId, input.eveSessionId],
     );
-    if (result.rowCount !== 1) throw new AppError(
-      "AGENT_MEMORY_REVIEW_RUNNING_STATE_INVALID", "Не удалось подтвердить запуск проверки памяти",
-    );
+    if (result.rowCount !== 1) {
+      const settled = await database().query(`SELECT 1 FROM memory_review_batches WHERE id=$1 AND application_session_id=$2
+        AND eve_session_id=$3 AND status IN ('completed','failed','waiting_model','ambiguous')`, [batch.batchId,input.applicationSessionId,input.eveSessionId]);
+      if (settled.rowCount !== 1) throw new AppError("AGENT_MEMORY_REVIEW_RUNNING_STATE_INVALID", "Не удалось подтвердить запуск проверки памяти");
+    }
   },
 
 };

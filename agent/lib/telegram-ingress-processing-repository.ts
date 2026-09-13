@@ -62,7 +62,7 @@ export const telegramIngressProcessingRepository: ProcessingOperations = {
     requireUuid(dispatchId, "AGENT_TELEGRAM_DISPATCH_ID_INVALID", "Не удалось проверить идентификатор обработки сообщения");
     const started = await database().query(
       `UPDATE telegram_ingress_updates
-        SET dispatch_started_at = now(), dispatch_id = $3, updated_at = now()
+        SET dispatch_started_at = now(), dispatch_id = $3, recovery_protocol = 1, updated_at = now()
        WHERE update_id = $1 AND status = 'processing' AND lease_token = $2
          AND lease_expires_at > now() AND dispatch_started_at IS NULL
        RETURNING update_id`,

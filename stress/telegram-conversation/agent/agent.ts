@@ -34,9 +34,10 @@ const testModel = mockModel(async ({ lastUserMessage, toolResults, tools }) => {
       if (!policy) throw new Error("TEST_PROFILE_PROJECTION_GROUP_MISSING");
       return { toolCalls: [{ name: "manage_profile_projection", input: { action: "update", enabled: true, groupRef: policy.group_ref } }] };
     }
-    if (marker === `conversation-probe-${SESSION_MAX_COMPLETED_TURNS + 10}`) {
-      return { toolCalls: [{ name: "ask_question", input: { prompt: "Продолжить проверку отмены?", allowFreeform: false,
-        options: [{ id: "continue", label: "Продолжить" }] } }] };
+    if ([10,16].some(offset => marker === `conversation-probe-${SESSION_MAX_COMPLETED_TURNS + offset}`)) {
+      return { toolCalls: [{ name: "ask_question", input: ordinal === SESSION_MAX_COMPLETED_TURNS+16
+        ? { prompt: "Напишите ответ для продолжения проверки отмены",allowFreeform: true }
+        : { prompt: "Продолжить проверку отмены?", allowFreeform: false,options: [{ id: "continue", label: "Продолжить" }] } }] };
     }
     if (child && tools.some((tool) => tool.name === "agent" || tool.name === "remember")) {
       throw new Error("TEST_CHILD_ROOT_AUTHORITY_LEAK");
@@ -71,7 +72,7 @@ export default defineAgent({
         .matchAll(/conversation-probe-\d+/gu)].at(-1)?.[0];
       const answered = params.prompt.some((message) => message.role === "tool" && message.content.some((part) => part.type === "tool-result" && part.toolName === "ask_question"));
       if ([8, 9].some((offset) => marker === `conversation-probe-${SESSION_MAX_COMPLETED_TURNS + offset}`) ||
-          marker === `conversation-probe-${SESSION_MAX_COMPLETED_TURNS + 10}` && answered) {
+          [10,16].some(offset => marker === `conversation-probe-${SESSION_MAX_COMPLETED_TURNS + offset}`) && answered) {
         if (!params.abortSignal) throw new Error("TEST_MODEL_ABORT_SIGNAL_MISSING");
         await database().query("INSERT INTO telegram_conversation_test_model_calls(marker) VALUES ($1)", [marker]);
         await sleep(30_000, undefined, { signal: params.abortSignal });

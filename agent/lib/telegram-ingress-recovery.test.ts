@@ -62,7 +62,7 @@ describe("Telegram ingress recovery", () => {
 
   it("reports a confirmed interrupted turn without replaying it", async () => {
     const current = session([
-      { type: "turn.cancelled", data: { osinaraTelegramIngressId: dispatch.id } },
+      { type: "turn.failed", data: { osinaraTelegramIngressId: dispatch.id } },
       { type: "session.waiting", data: { osinaraTelegramIngressId: dispatch.id } },
     ]);
     await expect(recoverTelegramIngress({ dispatch, attach: () => current, timeoutMs: 100, cancellationMs: 20 }))

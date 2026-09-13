@@ -1,6 +1,6 @@
 /** A provider outage suspends one review, keeping its sources and conversation usable. */
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { Client } from "pg";
+import { Client, type PoolClient } from "pg";
 import { closeDatabase, database } from "../database.js";
 import { createMainAgentMemoryFixture } from "../memory-agent-write.integration-fixtures.js";
 import { memoryTurnSourceRepository } from "../memory-turn-source-repository.js";
@@ -16,6 +16,7 @@ import { recoverEmptyReviewModelFailure } from "./memory-review-model-admin.js";
 import { createConfiguredLanguageModel } from "../model-transport.js";
 import { modelRouteKey } from "../model-route.js";
 import { recoverableModelFailureCode } from "../model-failure.js";
+import { reconcileMemoryReviewExecutions } from "./memory-review-execution-reconciliation.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) throw new Error("AGENT_TEST_DATABASE_UNSAFE");
@@ -27,7 +28,7 @@ function latch() {
   return { promise, resolve };
 }
 
-async function runningReview() {
+async function runningReview(eveId = "eve-model-failure") {
   const fixture = await createMainAgentMemoryFixture();
   for (let sequence = 2; sequence <= 50; sequence++) {
     const message = await insertReviewUserMessage({ ...fixture, sequence });
@@ -36,12 +37,12 @@ async function runningReview() {
   const [batch] = await claim();
   const session = await memoryReviewSessionRepository.prepare(batch!, new Date());
   await memoryReviewDispatchRepository.markDispatchStarted(batch!, session.id);
-  await sessionRepository.bindEveSession(session.id, "eve-model-failure");
+  await sessionRepository.bindEveSession(session.id, eveId);
   await memoryReviewRepository.bindEveTurn({ batchId: batch!.batchId, applicationSessionId: session.id,
-    eveSessionId: "eve-model-failure", eveTurnId: "turn_0" });
+    eveSessionId: eveId, eveTurnId: "turn_0" });
   await memoryTurnSourceRepository.bindReview({ applicationSessionId: session.id,
     conversationId: fixture.conversationId, memoryReviewBatchId: batch!.batchId,
-    sourceEntryIds: batch!.sourceEntryIds, eveSessionId: "eve-model-failure", eveTurnId: "turn_0",
+    sourceEntryIds: batch!.sourceEntryIds, eveSessionId: eveId, eveTurnId: "turn_0",
     invokingActorId: fixture.auth.telegramActorId!, invokingActorKind: "telegram_user" });
   return { fixture, batch: batch!, session };
 }
@@ -49,6 +50,63 @@ async function runningReview() {
 (enabled ? describe : describe.skip)("memory review model recovery", () => {
   beforeEach(async () => { await database().query("TRUNCATE users, families, model_availability CASCADE"); });
   afterAll(closeDatabase);
+  it.each(["cancelled","failed"])("closes the exact application session when native %s cannot be retried", async status => {
+    const { batch,session }=await runningReview();
+    await database().query("UPDATE memory_review_batches SET infrastructure_recovery_attempts=1,updated_at=now()-interval '2 minutes' WHERE id=$1", [batch.batchId]);
+    await reconcileMemoryReviewExecutions(async () => status);
+    expect((await database().query("SELECT task_state,retired_at FROM conversation_sessions WHERE id=$1", [session.id])).rows[0])
+      .toMatchObject({ task_state: "failed",retired_at: expect.any(Date) });
+    expect((await database().query("SELECT count(*)::int AS n FROM memory_turn_source_sets WHERE memory_review_batch_id=$1", [batch.batchId])).rows[0].n).toBe(0);
+    expect((await database().query("SELECT count(*)::int AS n FROM memory_review_batch_sources WHERE batch_id=$1", [batch.batchId])).rows[0].n).toBe(50);
+  });
+  it("does not count partial memory as reviewed when Workflow completed with an agent failure", async () => {
+    const tag=crypto.randomUUID().replaceAll("-","").slice(0,26).toUpperCase();
+    const eveId=`wrun_${tag}`;
+    const { fixture,batch } = await runningReview(eveId);
+    await memoryRepository.create(fixture.auth, {
+      memoryReviewBatchId: batch.batchId,confirmation: "model_high",content: "Анна готовится к марафону",kind: "fact",scope: "family",
+      sensitivity: "normal",operationKey: "partial-native-result",source: `eve:${eveId}:turn_0`,
+      provenance: { sessionId: eveId,turnId: "turn_0" },systemActor: true,
+      explicitSource: { conversationId: fixture.conversationId,timelineEntryId: batch.sourceEntryIds[0]!,subject: { kind: "current_author" } },
+    });
+    await database().query("UPDATE memory_review_batches SET updated_at=now()-interval '2 minutes' WHERE id=$1", [batch.batchId]);
+    const native = new Client({ connectionString: process.env.WORKFLOW_POSTGRES_URL });
+    await native.connect();
+    try {
+      await native.query("INSERT INTO workflow.workflow_runs(id,name,status,deployment_id) VALUES($1,'failed-agent-test','completed','test')", [eveId]);
+      await native.query("INSERT INTO workflow.workflow_stream_chunks(id,stream_id,run_id,data,eof) VALUES($1,$2,$3,$4,false)",
+        [`chnk_${tag}`,`strm_${tag}_user`,eveId,Buffer.from(JSON.stringify({ type: "turn.failed",data: { turnId: "turn_0",code: "MODEL_CALL_FAILED" } })+"\n")]);
+      await reconcileMemoryReviewExecutions();
+      expect((await database().query("SELECT status,diagnostic_code FROM memory_review_batches WHERE id=$1", [batch.batchId])).rows)
+        .toEqual([{ status: "failed",diagnostic_code: "AGENT_MEMORY_REVIEW_PARTIAL_RESULT" }]);
+      expect(await memoryReviewRepository.getLaneCursor({ conversationId: fixture.conversationId,messageThreadId: null })).toBe("0");
+      expect((await database().query("SELECT count(*)::int AS n FROM memory_review_batch_sources WHERE batch_id=$1", [batch.batchId])).rows[0].n).toBe(50);
+    } finally {
+      await native.query("DELETE FROM workflow.workflow_stream_chunks WHERE run_id=$1", [eveId]);
+      await native.query("DELETE FROM workflow.workflow_runs WHERE id=$1", [eveId]);
+      await native.end();
+    }
+  });
+
+  it("reconciles a terminal empty native task once when its application failure event was lost", async () => {
+    const { batch } = await runningReview();
+    await database().query("UPDATE memory_review_batches SET updated_at=now()-interval '2 minutes' WHERE id=$1", [batch.batchId]);
+    const readStatus = vi.fn().mockResolvedValue("failed");
+    await reconcileMemoryReviewExecutions(readStatus);
+    await reconcileMemoryReviewExecutions(readStatus);
+    expect(readStatus).toHaveBeenCalledOnce();
+    expect((await database().query("SELECT status,infrastructure_recovery_attempts,model_recovery_generation FROM memory_review_batches WHERE id=$1", [batch.batchId])).rows)
+      .toEqual([{ status: "pending", infrastructure_recovery_attempts: 1, model_recovery_generation: 1 }]);
+    expect((await database().query("SELECT count(*)::int AS n FROM memory_review_batch_sources WHERE batch_id=$1", [batch.batchId])).rows[0].n).toBe(50);
+  });
+
+  it("leaves an actually running native task untouched regardless of observer age", async () => {
+    const { batch } = await runningReview();
+    await database().query("UPDATE memory_review_batches SET updated_at=now()-interval '2 hours' WHERE id=$1", [batch.batchId]);
+    await reconcileMemoryReviewExecutions(async () => "running");
+    expect((await database().query("SELECT status,model_recovery_generation FROM memory_review_batches WHERE id=$1", [batch.batchId])).rows)
+      .toEqual([{ status: "running", model_recovery_generation: 0 }]);
+  });
 
   it("waits after a confirmed model timeout without losing sources or retrying on every tick", async () => {
     const { batch } = await runningReview();
@@ -198,15 +256,24 @@ async function runningReview() {
     const { fixture, batch } = await runningReview();
     const reachedInsert = latch();
     const releaseInsert = latch();
-    const query = Client.prototype.query;
-    const spy = vi.spyOn(Client.prototype, "query").mockImplementation((function (this: Client, ...args: unknown[]) {
-      const execute = () => Reflect.apply(query, this, args);
-      if (typeof args[0] === "string" && args[0].includes("INSERT INTO memory_items\n")) {
-        reachedInsert.resolve();
-        return releaseInsert.promise.then(execute);
-      }
-      return execute();
-    }) as never);
+    const pool=database();
+    const wrapped=new WeakSet<object>();
+    const restore: Array<() => void> = [];
+    const acquired = (client: PoolClient) => {
+      if (wrapped.has(client)) return;
+      wrapped.add(client);
+      const query=client.query.bind(client);
+      const spy=vi.spyOn(client,"query").mockImplementation(((...args: unknown[]) => {
+        const execute=() => Reflect.apply(query,client,args);
+        if (typeof args[0] === "string" && args[0].includes("INSERT INTO memory_items\n")) {
+          reachedInsert.resolve();
+          return releaseInsert.promise.then(execute);
+        }
+        return execute();
+      }) as never);
+      restore.push(() => spy.mockRestore());
+    };
+    pool.on("acquire",acquired);
     const write = memoryRepository.create(fixture.auth, {
       memoryReviewBatchId: batch.batchId, confirmation: "model_high", content: "Запись началась до таймаута", kind: "fact",
       scope: "family", sensitivity: "normal", operationKey: "in-flight-write", source: "eve:eve-model-failure:turn_0",
@@ -228,7 +295,8 @@ async function runningReview() {
     } finally {
       releaseInsert.resolve();
       await Promise.allSettled([write, terminal]);
-      spy.mockRestore();
+      pool.off("acquire",acquired);
+      for (const undo of restore) undo();
     }
   });
 

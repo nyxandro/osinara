@@ -11,10 +11,12 @@ import { resolve } from "node:path";
 
 const fixtureRoot = resolve("stress", "workflow-postgres");
 const generatedPaths = [".eve", ".output", "eval-results", "reports"];
+const evalName = process.argv[2] ?? "retention";
+if (!["retention", "recovery"].includes(evalName) || process.argv.length > 3) throw new Error("AGENT_WORKFLOW_STRESS_INPUT_INVALID: Используйте retention или recovery");
 
 const child = spawn(
   resolve("node_modules", ".bin", "eve"),
-  ["eval", "retention", "--max-concurrency", "1", "--timeout", "2400000", "--verbose"],
+  ["eval", evalName, "--max-concurrency", "1", "--timeout", evalName === "recovery" ? "180000" : "2400000", "--verbose"],
   {
     cwd: fixtureRoot,
     env: process.env,

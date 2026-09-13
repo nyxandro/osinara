@@ -6,6 +6,8 @@
  */
 import { defineSchedule } from "eve/schedules";
 import { withRuntimeAdmission } from "../lib/runtime-maintenance.js";
+import { dispatchOperationalIncidents } from "../lib/operational-incidents/owner-alerts.js";
+import { reconcileRuntimeAdmissions } from "../lib/runtime-admission-reconciliation.js";
 
 import { dispatchPendingMemoryReviews } from "../lib/memory-review/memory-review-dispatcher.js";
 import { dispatchMemoryReviewOwnerAlerts } from
@@ -14,10 +16,11 @@ import { dispatchMemoryReviewOwnerAlerts } from
 async function dispatchMemoryReviewCycle(to: Parameters<typeof dispatchPendingMemoryReviews>[0]) {
   // Alert delivery cannot prevent an independent review claim; a second pass flushes new failures.
   const initial = await Promise.allSettled([
+    dispatchOperationalIncidents(),
     dispatchMemoryReviewOwnerAlerts(),
     dispatchPendingMemoryReviews(to),
   ]);
-  const final = await Promise.allSettled([dispatchMemoryReviewOwnerAlerts()]);
+  const final = await Promise.allSettled([dispatchMemoryReviewOwnerAlerts(), dispatchOperationalIncidents()]);
   const failures = [...initial, ...final].filter(
     (result): result is PromiseRejectedResult => result.status === "rejected",
   );
@@ -37,6 +40,7 @@ async function dispatchMemoryReviewCycle(to: Parameters<typeof dispatchPendingMe
 export default defineSchedule({
   cron: "* * * * *",
   run({ to, waitUntil }) {
+    waitUntil(reconcileRuntimeAdmissions());
     waitUntil(withRuntimeAdmission("ordinary", () => dispatchMemoryReviewCycle(to)));
   },
 });

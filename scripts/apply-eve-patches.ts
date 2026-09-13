@@ -18,6 +18,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { patchWorkflowTransport } from "./eve-patches/workflow-transport.ts";
+import { patchPostgresWorkerRecovery } from "./eve-patches/postgres-worker-recovery.ts";
 import { patchSkillSync } from "./eve-patches/skill-sync.ts";
 import { patchHitlContext } from "./eve-patches/hitl-context.ts";
 import { patchStreamRecovery } from "./eve-patches/stream-recovery.ts";
@@ -138,6 +139,7 @@ await patchWorkflowTransport(replaceExact);
 await patchSkillSync(replaceExact);
 await patchHitlContext(replaceExact);
 await patchStreamRecovery(replaceExact);
+await patchPostgresWorkerRecovery(replaceExact);
 await patchTelegramDispatchControl(replaceExact);
 await patchModelInactivity(replaceExact);
 
@@ -386,12 +388,12 @@ await replaceExact(
 await replaceExact(
   runtimePaths.telegram,
   "let u=parseTelegramUpdate(c);return u===null?new Response(`ok`):u.kind===`message`?(o(dispatchMessage({config:e,message:u.message,onMessage:n,uploadPolicy:t,from:a})),new Response(`ok`)):(o(dispatchCallbackQuery({config:e,query:u.callbackQuery,from:a})),new Response(`ok`))",
-  "let u=parseTelegramUpdate(c);if(u===null)return new Response(`ok`);let d=(l,g)=>{g?.signal.throwIfAborted();let f=g?osinaraTelegramDispatchFrom(a,osinaraResolveSession,g):a;return l.kind===`message`?dispatchMessage({config:e,message:l.message,onMessage:n,uploadPolicy:t,from:f}):dispatchCallbackQuery({config:e,query:l.callbackQuery,from:f})};return e.onVerifiedUpdate!==void 0?e.onVerifiedUpdate({attachSession:osinaraAttachSession,dispatch:d,notifyTimeout:(u,t,s)=>osinaraTelegramTimeoutNotice(e,u,t,s),raw:c,update:u,waitUntil:o}):(o(d(u)),new Response(`ok`))",
+  "let u=parseTelegramUpdate(c);if(u===null)return new Response(`ok`);let d=(l,g)=>{g?.signal.throwIfAborted();let f=g?osinaraTelegramDispatchFrom(a,osinaraResolveSession,g):a;return l.kind===`message`?dispatchMessage({config:e,message:l.message,onMessage:g?.prepareMessage&&n?((c,m)=>g.prepareMessage(c,m,n)):n,uploadPolicy:t,from:f}):dispatchCallbackQuery({config:osinaraTelegramCallbackConfig(e,g),query:l.callbackQuery,from:f})};return e.onVerifiedUpdate!==void 0?e.onVerifiedUpdate({attachSession:osinaraAttachSession,dispatch:d,raw:c,update:u,waitUntil:o}):(o(d(u)),new Response(`ok`))",
 );
 await replaceExact(
   runtimePaths.telegram,
   "})],async receive",
-  "}),...e.onDrain===void 0?[]:[POST(e.drainRoute??`/eve/v1/telegram-drain`,async(r,{from:a,attachSession:osinaraAttachSession,resolveSession:osinaraResolveSession,waitUntil:o})=>{if(await verifyInbound(r,e.credentials)===null)return new Response(`unauthorized`,{status:401});let d=(l,g)=>{g?.signal.throwIfAborted();let f=g?osinaraTelegramDispatchFrom(a,osinaraResolveSession,g):a;return l.kind===`message`?dispatchMessage({config:e,message:l.message,onMessage:n,uploadPolicy:t,from:f}):dispatchCallbackQuery({config:e,query:l.callbackQuery,from:f})};return e.onDrain({attachSession:osinaraAttachSession,dispatch:d,notifyTimeout:(u,t,s)=>osinaraTelegramTimeoutNotice(e,u,t,s),waitUntil:o})})]],async receive",
+  "}),...e.onDrain===void 0?[]:[POST(e.drainRoute??`/eve/v1/telegram-drain`,async(r,{from:a,attachSession:osinaraAttachSession,resolveSession:osinaraResolveSession,waitUntil:o})=>{if(await verifyInbound(r,e.credentials)===null)return new Response(`unauthorized`,{status:401});let d=(l,g)=>{g?.signal.throwIfAborted();let f=g?osinaraTelegramDispatchFrom(a,osinaraResolveSession,g):a;return l.kind===`message`?dispatchMessage({config:e,message:l.message,onMessage:g?.prepareMessage&&n?((c,m)=>g.prepareMessage(c,m,n)):n,uploadPolicy:t,from:f}):dispatchCallbackQuery({config:osinaraTelegramCallbackConfig(e,g),query:l.callbackQuery,from:f})};return e.onDrain({attachSession:osinaraAttachSession,dispatch:d,waitUntil:o})})]],async receive",
 );
 
 // Bot API 10.0 lets a bot see other bots' group messages, but Eve still drops every bot sender
@@ -448,6 +450,9 @@ await replaceExact(
 );
 const telegramHookDeclarations = `/** Deadline controls supplied only by the verified application ingress. */
 export interface TelegramDispatchControl {
+    readonly prepareCallback?: (context: TelegramContext, query: TelegramCallbackQuery, token: string, prepare: (context: TelegramContext, query: TelegramCallbackQuery, token: string) => Promise<TelegramHitlCallbackResult>) => Promise<TelegramHitlCallbackResult>;
+    readonly prepareMessage?: (context: TelegramContext, message: TelegramMessage, prepare: (context: TelegramContext, message: TelegramMessage) => Promise<TelegramInboundResult>) => Promise<TelegramInboundResult>;
+    readonly beforeDispatch?: (continuationToken: string, kind: "send" | "respond") => Promise<void>;
     readonly updateId?: string;
     readonly signal: AbortSignal;
     readonly deadlineAt: string;
@@ -460,14 +465,12 @@ export interface TelegramVerifiedUpdateContext {
     readonly raw: JsonObject;
     readonly update: TelegramUpdate;
     readonly dispatch: (update: TelegramUpdate, control?: TelegramDispatchControl) => Promise<Session | null | undefined>;
-    readonly notifyTimeout: (update: TelegramUpdate, text: string, signal: AbortSignal) => Promise<unknown>;
     readonly waitUntil: (task: Promise<unknown>) => void;
 }
 /** Internal drain hook context using the native verified Telegram dispatcher. */
 export interface TelegramDrainContext {
     readonly attachSession: (sessionId: string) => Session;
     readonly dispatch: (update: TelegramUpdate, control?: TelegramDispatchControl) => Promise<Session | null | undefined>;
-    readonly notifyTimeout: (update: TelegramUpdate, text: string, signal: AbortSignal) => Promise<unknown>;
     readonly waitUntil: (task: Promise<unknown>) => void;
 }
 /** Application-authenticated result for a Telegram HITL callback. */

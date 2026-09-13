@@ -51,17 +51,12 @@ it("stamps the application deadline and resolves only the selected continuation"
   expect(state.resolveSession).toHaveBeenCalledWith("authorized-target");
 });
 
-it("sends one cancellable timeout notice to the verified forum topic and message", async () => {
-  const controller = new AbortController();
-  const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
-    controller.abort(new Error("TEST_NOTICE_TIMEOUT"));
-    init?.signal?.throwIfAborted();
-    return Response.json({ ok: true, result: { message_id: 999 } });
-  });
+it("does not expose a direct diagnostic sender to a group or forum topic", async () => {
+  const fetch = vi.fn();
   const channel = telegramChannel({ api: { fetch: fetch as typeof globalThis.fetch },
     credentials: { botToken: "test-token", webhookSecretToken: "secret" },
     onVerifiedUpdate: async (ctx) => {
-      await (ctx.notifyTimeout as (...args: unknown[]) => Promise<unknown>)(ctx.update, "AGENT_TELEGRAM_PROCESSING_TIMEOUT: Запрос остановлен", controller.signal);
+      expect(ctx).not.toHaveProperty("notifyTimeout");
       return new Response("ok");
     },
   });
@@ -69,9 +64,6 @@ it("sends one cancellable timeout notice to the verified forum topic and message
   await expect(route.handler(new Request("https://test.invalid/eve/v1/telegram", { method: "POST",
     headers: { "x-telegram-bot-api-secret-token": "secret" }, body: JSON.stringify({ ...raw,
       message: { ...raw.message, chat: { id: -1001, type: "supergroup" }, is_topic_message: true, message_thread_id: 42 },
-    }) }), { from: vi.fn(), resolveSession: vi.fn(), waitUntil: vi.fn() })).rejects.toThrow("TEST_NOTICE_TIMEOUT");
-  expect(fetch).toHaveBeenCalledTimes(1);
-  const request = fetch.mock.calls[0]![1]!;
-  expect(request.signal?.aborted).toBe(true);
-  expect(JSON.parse(String(request.body))).toMatchObject({ chat_id: "-1001", message_thread_id: 42, reply_parameters: { message_id: 7 } });
+    }) }), { from: vi.fn(), resolveSession: vi.fn(), waitUntil: vi.fn() })).resolves.toBeInstanceOf(Response);
+  expect(fetch).not.toHaveBeenCalled();
 });

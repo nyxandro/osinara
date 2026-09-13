@@ -17,7 +17,6 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { telegramChannel } from "eve/channels/telegram";
 
 import { handleTelegramDurableIngress } from "../lib/telegram-durable-ingress.js";
-import { formatTelegramTurnFailure } from "../lib/telegram-interface.js";
 import { TELEGRAM_EVE_UPLOAD_POLICY } from "../lib/telegram-message-policy.js";
 import { handleTelegramMessage } from "../lib/telegram-on-message.js";
 import { completedTelegramOutput } from "../lib/telegram-progress.js";
@@ -26,7 +25,6 @@ import { deliverTelegramProgressNotice } from "../lib/telegram-progress-notice.j
 import { asidePauseMilliseconds } from "../lib/telegram-aside-pacing.js";
 import { stripTelegramAsideDirectives } from "../lib/telegram-authored-split.js";
 import { deliverTelegramFinalOutput } from "../lib/telegram-final-delivery.js";
-import { telegramFinalDeliveryRepository } from "../lib/telegram-final-delivery-repository.js";
 import { bindTelegramIngressTurn } from "../lib/telegram-ingress-binding.js";
 import { completeRuntimeHandoff, completeRuntimeSessionHandoffs } from "../lib/runtime-handoff.js";
 import { prepareTelegramTurn } from "../lib/telegram-turn-preparation.js";
@@ -55,8 +53,8 @@ import {
   scheduledTelegramTargetMatches,
 } from "../lib/agent-schedules/scheduled-telegram-target.js";
 import { telegramGroupJournalRepository } from "../lib/telegram-group-journal-repository.js";
-import { postTelegramMessageWithoutContinuationChange } from "../lib/telegram-stable-delivery.js";
-import { shouldNotifyTelegramFailure } from "../lib/telegram-failure-notification.js";
+import { recordTelegramFailure } from "../lib/operational-incidents/telegram-failure.js";
+import { recoverDatabaseBookkeeping } from "../lib/database-recovery.js";
 import { AppError, isAppError } from "../lib/app-error.js";
 import { conversationTimelineRepository } from "../lib/conversation-timeline-repository.js";
 import { setTelegramMessageReaction } from "../lib/telegram-message-reaction.js";
@@ -305,12 +303,12 @@ export default telegramChannel({
       const reviewBatchId = await resolveMemoryReviewBatch(ctx);
       let reviewFailureReplayed = false;
       if (reviewBatchId) {
-        const terminal = await memoryReviewRepository.failRunning({
+        const terminal = await recoverDatabaseBookkeeping(() => memoryReviewRepository.failRunning({
           batchId: reviewBatchId,
           diagnosticCode: data.code,
           eveSessionId: ctx.session.id,
           eveTurnId: ctx.session.turn.id,
-        });
+        }));
         reviewFailureReplayed = terminal === "replayed";
       }
       const sessionId = applicationSessionId(ctx);
@@ -355,26 +353,10 @@ export default telegramChannel({
           );
         }
       }
-      // Terminal diagnostics are private-only even when the failed turn belonged to a shared chat.
-      const privateChat = channel.state.chatType === "private";
-      notifyFailure = notifyFailure && shouldNotifyTelegramFailure(channel, data.code);
-      // A final send that started may already be visible; never append a second failure message.
-      const finalDeliveryMayBeVisible = notifyFailure &&
-        await telegramFinalDeliveryRepository.shouldSuppressFailureMessage(
-          ctx.session.id,
-          ctx.session.turn.id,
-        );
-      if (!finalDeliveryMayBeVisible && notifyFailure) {
-        const replyParameters = isScheduledSession(ctx)
-          ? undefined
-          : telegramTurnReplyParameters(channel.state, ctx);
-        const failureMessageId = await postTelegramMessageWithoutContinuationChange(channel, {
-          ...(replyParameters === undefined ? {} : { reply_parameters: replyParameters }),
-          text: formatTelegramTurnFailure(data, { includeDiagnostics: privateChat }),
-        });
-        if (!isScheduledSession(ctx)) {
-          await registerTelegramDeliveredMessageRoutes(channel, ctx, [failureMessageId]);
-        }
+      if (notifyFailure) {
+        const updateId = ctx.session.auth.current?.attributes.osinaraTelegramUpdateId;
+        await recordTelegramFailure({ sessionId: ctx.session.id, turnId: ctx.session.turn.id,
+          ...(typeof updateId === "string" ? { updateId } : {}), code: data.code, chatId: channel.telegram.chatId });
       }
       if (!reviewBatchId) await sessionRepository.recordTurnFailed(sessionId, ctx.session.id);
       await telegramHitlApprovalRepository.clearForEveSession(sessionId, ctx.session.id);
@@ -408,12 +390,12 @@ export default telegramChannel({
       if (!awaitingApproval) {
         // Completion verifies review evidence before release; a parked HITL turn retains its source set.
         if (reviewBatchId) {
-          await memoryReviewRepository.completeBatch({
+          await recoverDatabaseBookkeeping(() => memoryReviewRepository.completeBatch({
             batchId: reviewBatchId,
             completedAt: new Date(),
             eveSessionId: ctx.session.id,
             eveTurnId: ctx.session.turn.id,
-          });
+          }));
         }
         await releaseMemoryTurnSources(ctx);
       }

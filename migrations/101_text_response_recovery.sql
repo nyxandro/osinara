@@ -1,0 +1,1 @@
+ALTER TABLE telegram_hitl_approvals ADD COLUMN consumed_reply_update_id bigint;

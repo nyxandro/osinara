@@ -258,6 +258,7 @@ export function createTelegramInputRequestHandler(dependencies: InputRequestDepe
         callbackData: callbacks,
         callbackOptions: options,
         eveSessionId: ctx.session.id,
+        eveTurnId: ctx.session.turn.id,
         requestId: localizedRequest.requestId,
         promptText: localizedRequest.prompt,
         telegramChatId: chatId,

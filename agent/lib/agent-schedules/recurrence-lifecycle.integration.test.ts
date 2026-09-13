@@ -2,6 +2,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, database } from "../database.js";
 import { sessionRepository } from "../sessions/session-repository.js";
+import { admitScheduledAgentTurn } from "./agent-schedule-recovery.js";
 import { reminderRepository } from "../reminders/reminder-repository.js";
 import { reminderDispatchRepository } from "../reminders/reminder-dispatch-repository.js";
 import { agentScheduleRepository } from "./agent-schedule-repository.js";
@@ -83,6 +84,7 @@ for (const target of ["reminder", "agent"] as const) {
       });
       await agentScheduleDispatchRepository.markDispatchStarted(job!, { applicationSessionId: session.id });
       await agentScheduleDispatchRepository.markRunning(job!, { applicationSessionId: session.id, eveSessionId: job!.runId });
+      await admitScheduledAgentTurn({ runId: job!.runId, applicationSessionId: session.id, eveSessionId: job!.runId, eveTurnId: "turn_0" });
       // A later minute tick must not launch another copy of the same running scenario.
       expect(await agentScheduleDispatchRepository.claimDue({ ...options, now: new Date(after) })).toEqual([]);
       await agentScheduleDispatchRepository.completeDeliveredRun({

@@ -171,6 +171,7 @@ async function insertBatch(
     lane: LaneRow;
     predecessorSequence: string;
     sources: readonly SourceRow[];
+    preparationEntryId?: string;
   },
 ): Promise<MemoryReviewBatchSummary> {
   const first = input.sources[0];
@@ -185,14 +186,14 @@ async function insertBatch(
   const inserted = await client.query<{ id: string }>(
     `INSERT INTO memory_review_batches
        (lane_id, conversation_id, batch_kind, status, predecessor_sequence,
-        from_sequence, through_sequence, source_count, application_session_id, started_at)
+         from_sequence, through_sequence, source_count, application_session_id, started_at, preparation_entry_id)
      VALUES ($1, $2, $3::memory_review_batch_kind, $4::memory_review_batch_status,
              $5, $6, $7, $8, $9,
-             CASE WHEN $3::memory_review_batch_kind = 'interactive' THEN now() ELSE NULL END)
+              CASE WHEN $3::memory_review_batch_kind = 'interactive' THEN now() ELSE NULL END, $10)
      RETURNING id`,
     [input.lane.id, input.lane.conversation_id, input.batchKind, status,
       input.predecessorSequence, first.sequence_id, last.sequence_id, input.sources.length,
-      input.applicationSessionId],
+       input.applicationSessionId, input.preparationEntryId ?? null],
   );
   const batchId = inserted.rows[0]!.id;
   await client.query(
@@ -319,6 +320,20 @@ export const memoryReviewRepository = {
       );
       await lockConversation(client, current.conversation_id);
       const lane = await laneForUpdate(client, current.conversation_id, current.message_thread_id, "0");
+      const prepared = await client.query<{ id: string; through_sequence: string; source_count: number }>(
+        `SELECT id,through_sequence::text,source_count FROM memory_review_batches WHERE lane_id=$1
+          AND application_session_id=$2 AND preparation_entry_id=$3 AND batch_kind='interactive'
+          AND status='running' AND eve_turn_id IS NULL FOR UPDATE`, [lane.id,input.applicationSessionId,input.timelineEntryId]);
+      if (prepared.rows[0]) {
+        const batch = prepared.rows[0];
+        const sources = await client.query<SourceRow>(`SELECT ${SOURCE_COLUMNS} FROM memory_review_batch_sources source
+          JOIN telegram_group_messages message ON message.id=source.timeline_entry_id WHERE source.batch_id=$1 ORDER BY source.timeline_sequence`, [batch.id]);
+        if (sources.rows.length !== batch.source_count) throw new AppError("AGENT_MEMORY_REVIEW_SOURCE_SET_INVALID", "Нарушен состав сохранённого пакета памяти");
+        await client.query("COMMIT");
+        return { batchId: batch.id, entries: sources.rows.map(projectSource), messageThreadId: lane.message_thread_id,
+          sourceCount: batch.source_count, sourceEntryIds: sources.rows.map(source => source.id), status: "running" as const,
+          throughSequence: batch.through_sequence };
+      }
       if (await laneBlocked(client, lane)) {
         await client.query("COMMIT");
         return null;
@@ -358,6 +373,7 @@ export const memoryReviewRepository = {
       const batch = await insertBatch(client, {
         applicationSessionId: input.applicationSessionId,
         batchKind: "interactive",
+        preparationEntryId: input.timelineEntryId,
         lane,
         predecessorSequence: predecessor,
         sources,

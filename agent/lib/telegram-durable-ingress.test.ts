@@ -66,6 +66,7 @@ function ingress(
   },
 ) {
   return createTelegramDurableIngress({
+    reportFailure: vi.fn(),
     acceptMedia: vi.fn().mockResolvedValue(true),
     authorizeVoice: vi.fn().mockResolvedValue(true),
     botUsername: "osinara_bot",
@@ -160,6 +161,7 @@ describe("createTelegramDurableIngress", () => {
     const update = parseTelegramUpdate(raw);
     if (!update) throw new Error("AGENT_TEST_TELEGRAM_UPDATE_INVALID: Не создано тестовое обновление");
     const handle = createTelegramDurableIngress({
+      reportFailure: vi.fn(),
       acceptMedia: vi.fn().mockResolvedValue(true),
       authorizeVoice: vi.fn().mockResolvedValue(true),
       botUsername: "osinara_bot",
@@ -246,6 +248,7 @@ describe("createTelegramDurableIngress", () => {
     const update = parseTelegramUpdate(raw);
     if (!update) throw new Error("AGENT_TEST_TELEGRAM_UPDATE_INVALID: Не создано тестовое обновление");
     const handle = createTelegramDurableIngress({
+      reportFailure: vi.fn(),
       acceptMedia: vi.fn().mockResolvedValue(true),
       authorizeVoice: vi.fn().mockResolvedValue(false),
       botUsername: "osinara_bot",
@@ -402,6 +405,7 @@ describe("createTelegramDurableIngress", () => {
       throw new Error("AGENT_TEST_TELEGRAM_UPDATE_INVALID: Не создано тестовое сообщение");
     }
     const handle = createTelegramDurableIngress({
+      reportFailure: vi.fn(),
       acceptMedia,
       authorizeVoice: vi.fn(),
       botUsername: "osinara_bot",
@@ -447,6 +451,7 @@ describe("createTelegramDurableIngress", () => {
     const dispatch = vi.fn().mockResolvedValue(null);
     let backgroundTask: Promise<unknown> | undefined;
     const handle = createTelegramDurableIngress({
+      reportFailure: vi.fn(),
       acceptMedia: vi.fn().mockResolvedValue(true),
       authorizeVoice: vi.fn(),
       botUsername: "osinara_bot",

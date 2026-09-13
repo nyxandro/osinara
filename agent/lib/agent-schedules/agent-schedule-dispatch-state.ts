@@ -76,7 +76,7 @@ export async function beginAgentScheduleDispatch(
 
     const run = await client.query(
       `UPDATE agent_schedule_runs
-          SET status = 'dispatching', dispatch_started_at = now(),
+          SET status = 'dispatching', dispatch_started_at = now(), recovery_protocol = 1,
               application_session_id = $4, updated_at = now()
         WHERE id = $1 AND schedule_id = $2 AND lease_token = $3 AND status = 'claimed'`,
       [job.runId, job.id, job.leaseToken, input.applicationSessionId],
@@ -109,8 +109,8 @@ export async function markAgentScheduleRunning(
   const terminal = await database().query(
     `SELECT 1 FROM agent_schedule_runs
       WHERE id = $1 AND schedule_id = $2 AND lease_token = $3
-        AND application_session_id = $4 AND status IN ('completed', 'failed', 'ambiguous')`,
-    [job.runId, job.id, job.leaseToken, input.applicationSessionId],
+        AND application_session_id = $4 AND (status IN ('completed', 'failed', 'ambiguous') OR (status='running' AND eve_session_id=$5))`,
+    [job.runId, job.id, job.leaseToken, input.applicationSessionId, input.eveSessionId],
   );
   if (terminal.rowCount !== 1) {
     throw new AppError("AGENT_SCHEDULE_LEASE_STALE", "Запуск расписания уже неактуален");

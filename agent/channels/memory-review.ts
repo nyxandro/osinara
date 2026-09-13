@@ -24,6 +24,7 @@ import { applicationSessionId } from "../lib/sessions/session-context.js";
 import { sessionRepository } from "../lib/sessions/session-repository.js";
 import { isHookConflictFailure } from "../lib/telegram-session-failure.js";
 import { recoverableModelFailureCode } from "../lib/model-failure.js";
+import { recoverDatabaseBookkeeping } from "../lib/database-recovery.js";
 
 export default defineChannel<undefined, void, { batchId: string }>({
   // Eve 0.32 discovers authored receive targets only when the channel owns a route. This route is
@@ -66,12 +67,12 @@ export default defineChannel<undefined, void, { batchId: string }>({
       if (!batchId) throw new Error(
         "AGENT_MEMORY_REVIEW_CONTEXT_INVALID: Completed review turn has no batch",
       );
-      const terminal = await memoryReviewRepository.completeBatch({
+      const terminal = await recoverDatabaseBookkeeping(() => memoryReviewRepository.completeBatch({
         batchId,
         completedAt: new Date(),
         eveSessionId: ctx.session.id,
         eveTurnId: ctx.session.turn.id,
-      });
+      }));
       await releaseMemoryTurnSources(ctx);
       if (terminal === "replayed") return;
     },
@@ -80,24 +81,24 @@ export default defineChannel<undefined, void, { batchId: string }>({
       if (!batchId) throw new Error(
         "AGENT_MEMORY_REVIEW_CONTEXT_INVALID: Failed review turn has no batch",
       );
-      const terminal = await memoryReviewRepository.failRunning({
+      const terminal = await recoverDatabaseBookkeeping(() => memoryReviewRepository.failRunning({
         batchId,
         diagnosticCode: recoverableModelFailureCode(data) ?? data.code,
         eveSessionId: ctx.session.id,
         eveTurnId: ctx.session.turn.id,
-      });
+      }));
       await releaseMemoryTurnSources(ctx);
       if (terminal === "replayed") return;
     },
     async "turn.cancelled"(_data, _channel, ctx) {
       const batchId = memoryReviewBatchId(ctx);
       if (!batchId) return;
-      const terminal = await memoryReviewRepository.failRunning({
+      const terminal = await recoverDatabaseBookkeeping(() => memoryReviewRepository.failRunning({
         batchId,
         diagnosticCode: "AGENT_MEMORY_REVIEW_TURN_CANCELLED",
         eveSessionId: ctx.session.id,
         eveTurnId: ctx.session.turn.id,
-      });
+      }));
       await releaseMemoryTurnSources(ctx);
       if (terminal === "replayed") return;
     },
@@ -112,6 +113,7 @@ export default defineChannel<undefined, void, { batchId: string }>({
       );
       await memoryReviewDispatchRepository.markSessionAmbiguous({
         batchId,
+        continuationToken: channel.continuation!.token,
         diagnosticCode: recoverableModelFailureCode(data) ?? "AGENT_MEMORY_REVIEW_SESSION_FAILED_AMBIGUOUS",
         eveSessionId: data.sessionId,
       });

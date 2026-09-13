@@ -7,6 +7,22 @@ interface StreamSource {
 }
 const STREAM_IDLE_POLL_MS = 1_000;
 
+function postgresStreamFailure(error: unknown): unknown {
+  const visited=new Set<unknown>();
+  let cause=error;
+  while (cause instanceof Error && !visited.has(cause)) {
+    visited.add(cause);
+    const code="code" in cause ? cause.code : undefined;
+    if (typeof code === "string" && ["ECONNRESET","ECONNREFUSED","EPIPE","ETIMEDOUT","57P01","57P02","57P03","08006"].includes(code) ||
+      ["Connection terminated unexpectedly","Connection terminated","Client has encountered a connection error and is not queryable"].includes(cause.message)) {
+      return Object.assign(new Error("AGENT_DATABASE_UNAVAILABLE: PostgreSQL event stream connection was interrupted", { cause: error }),
+        { code: "AGENT_DATABASE_UNAVAILABLE" });
+    }
+    cause=cause.cause;
+  }
+  return error;
+}
+
 export function createPagedStream(source: StreamSource, startIndex = 0): ReadableStream<Uint8Array<ArrayBuffer>> {
   if (!Number.isSafeInteger(startIndex)) throw new Error("AGENT_WORKFLOW_STREAM_INDEX_INVALID: Stream index must be a safe integer");
   let finished = false, initialized = false, revision = 0, skip = 0;
@@ -48,7 +64,7 @@ export function createPagedStream(source: StreamSource, startIndex = 0): Readabl
             releaseWait = wake;
           });
         }
-      } catch (error) { cleanup(); controller.error(error); }
+      } catch (error) { cleanup(); controller.error(postgresStreamFailure(error)); }
     },
     cancel: cleanup,
   }, { highWaterMark: 0 });

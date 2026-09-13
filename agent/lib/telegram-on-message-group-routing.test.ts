@@ -18,6 +18,19 @@ import {
 import { createTelegramMessageHandler } from "./telegram-on-message.js";
 
 describe("createTelegramMessageHandler group routing", () => {
+  it("resumes a verified interrupted preparation even when its history row already exists", async () => {
+    const repository = repositories();
+    repository.telegram.findGroup.mockResolvedValue({ familyId: "family-1", groupId: "group-1", messageMode: "addressed_only",
+      skillAllowlist: [], telegramChatId: "group-101", toolAllowlist: [], type: "family_private" });
+    repository.telegram.findIdentity.mockResolvedValue({ familyId: "family-1", role: "member", userId: "user-1" });
+    repository.journal.record.mockResolvedValue({ entryId: "00000000-0000-4000-8000-000000000010", replyToAgent: false,
+      replyTargetUnavailable: false, replyToSequenceId: null, sequenceId: "1", status: "duplicate" });
+    const { context } = telegramContext();
+    const result = await createTelegramMessageHandler(repository)({ ...context,
+      ingressRecovery: { updateId: "42", dispatchId: "123e4567-e89b-42d3-a456-426614174000" } }, groupMessage(`@${BOT_USERNAME} ответь`));
+    expect(result?.auth?.attributes.telegramTimelineEntryId).toBe("00000000-0000-4000-8000-000000000010");
+    expect(repository.session.prepareTurn).toHaveBeenCalledOnce();
+  });
   it("silently consumes an invitation command posted in a group", async () => {
     const repository = repositories();
     const handler = createTelegramMessageHandler(repository);

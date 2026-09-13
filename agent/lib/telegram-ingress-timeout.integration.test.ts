@@ -66,6 +66,7 @@ describeWithDatabase("Telegram queue after a session timeout", () => {
       };
     });
     const ingress = createTelegramDurableIngress({
+      reportFailure: vi.fn(),
       acceptMedia: vi.fn(), authorizeVoice: vi.fn(), botUsername: "osinara_bot",
       handleSoftwareUpdateCallback: vi.fn(), leaseMilliseconds: 300,
       observerIdleMilliseconds: 300,
@@ -74,7 +75,6 @@ describeWithDatabase("Telegram queue after a session timeout", () => {
     let running: Promise<unknown> | undefined;
     await ingress.drain({
       attachSession: vi.fn(),
-      notifyTimeout: vi.fn(),
       dispatch: dispatch as unknown as TelegramDrainContext["dispatch"],
       waitUntil(task) { running = task; },
     });
@@ -106,9 +106,11 @@ describeWithDatabase("Telegram queue after a session timeout", () => {
       const claim = await telegramIngressRepository.claimNext(1000);
       if (!claim) throw new Error("TEST_INGRESS_CLAIM_MISSING");
       await telegramIngressRepository.beginDispatch(claim.updateId, claim.leaseToken, crypto.randomUUID());
+      await database().query("UPDATE telegram_ingress_updates SET recovery_protocol=0 WHERE update_id=$1", [claim.updateId]);
       await database().query("UPDATE telegram_ingress_updates SET lease_expires_at=now()-interval '1 second' WHERE update_id=$1", [claim.updateId]);
     }
     const ingress = createTelegramDurableIngress({
+      reportFailure: notifyTimeout,
       acceptMedia: vi.fn(), authorizeVoice: vi.fn(), botUsername: "osinara_bot", handleSoftwareUpdateCallback: vi.fn(),
       leaseMilliseconds: 100, cancellationMilliseconds: 50, repository: telegramIngressRepository, transcribeVoice: vi.fn(),
       observerIdleMilliseconds: 100,

@@ -286,11 +286,13 @@ export const telegramIngressRepository: TelegramIngressRepository = {
     requireFailure(failure);
     await requireActiveLease(updateId, leaseToken, async () => {
       const result = await database().query(
-        `UPDATE telegram_ingress_updates
+        `WITH released AS (UPDATE telegram_ingress_updates
          SET status = 'pending', lease_token = NULL, lease_expires_at = NULL,
-             last_error_code = $3, last_error_message = $4, updated_at = now()
-         WHERE update_id = $1 AND status = 'processing' AND lease_token = $2
-           AND lease_expires_at > now()`,
+              last_error_code = $3, last_error_message = $4, updated_at = now()
+          WHERE update_id = $1 AND status = 'processing' AND lease_token = $2
+          RETURNING update_id)
+          SELECT update_id FROM released UNION ALL
+          SELECT update_id FROM telegram_ingress_updates WHERE update_id=$1 AND status IN ('completed','failed')`,
         [updateId, leaseToken, failure.code, failure.message],
       );
       return result.rowCount ?? 0;
@@ -312,7 +314,12 @@ export const telegramIngressRepository: TelegramIngressRepository = {
            WHERE update_id = $1 AND status = 'processing' AND lease_token = $2
              AND lease_expires_at > now()
            RETURNING *
-         ), ${settleTelegramMediaGroupMembersSql}, rotated AS (
+          ), ${settleTelegramMediaGroupMembersSql}, incident AS (
+            INSERT INTO operational_incidents(operation_key,code,summary,context)
+            SELECT 'telegram:' || update_id::text,$3,left($4,1000),jsonb_build_object('updateId',update_id::text,'queueId',queue_id::text,
+              'chatId',CASE WHEN payload ? 'message' THEN payload#>>'{message,chat,id}' ELSE payload#>>'{callback_query,message,chat,id}' END)
+            FROM finished ON CONFLICT(operation_key) DO NOTHING RETURNING id
+          ), rotated AS (
            UPDATE conversation_sessions AS session SET rotation_requested_at = now()
            FROM finished WHERE session.eve_session_id = finished.eve_session_id
              AND session.kind = 'canonical' AND session.retired_at IS NULL
