@@ -92,7 +92,7 @@ Files under `/opt/osinara/tls/` (all `root:root`):
 | `.env` | `0600` | `OSINARA_HOSTNAME=…` and `OSINARA_TLS_MODE=managed` or `OSINARA_TLS_MODE=external`. |
 | `compose.yaml` | `0644` | Traefik project; present only in `managed` mode. |
 | `dynamic/` | `0750` | Traefik file-provider directory, watched for changes. |
-| `dynamic/osinara.yaml` | `0644` | Osinara router: `Host(HOSTNAME)` → `http://edge:80` with a `/eve/v1/health` health check. Written in both modes; in `external` mode it is a reference for the operator's own proxy configuration. |
+| `dynamic/osinara.yaml` | `0644` | Osinara router: `Host(HOSTNAME)` → `http://edge:80` with a `/eve/v1/health` health check. The installer substitutes the real hostname, so the file needs no environment. Written in both modes; in `external` mode it is a reference for the operator's own proxy configuration. |
 
 **Sharing the managed Traefik with other projects on the same host.** Add one file per project to
 `/opt/osinara/tls/dynamic/` (for example `yana.yaml`) with its own routers, services, and middlewares.
@@ -106,9 +106,9 @@ instead joins `osinara-production-edge-frontend` after the installation has crea
 (`docker network connect osinara-production-edge-frontend PROXY`) and forwards to `http://edge:80`;
 the installer waits up to fifteen minutes for public HTTPS in external mode to leave time for that
 step. `dynamic/osinara.yaml` is only a reference for that configuration, not a drop-in file: it uses
-the entrypoint name `websecure`, the certificate resolver name `letsencrypt`, the Go template
-`{{ env "OSINARA_HOSTNAME" }}`, and the Docker DNS name `edge`, and `/opt/osinara/tls` is readable by
-root only. Never bind-mount `/opt/osinara/tls/dynamic` into a foreign proxy before installation: Docker
+the entrypoint name `websecure`, the certificate resolver name `letsencrypt`, and the Docker DNS name
+`edge`, and `/opt/osinara/tls` is readable by root only. (The repository copy in `infra/traefik/dynamic/`
+keeps the `{{ env "OSINARA_HOSTNAME" }}` template for hosts that run Traefik with that variable.) Never bind-mount `/opt/osinara/tls/dynamic` into a foreign proxy before installation: Docker
 would create `/opt/osinara` and the installer would refuse with `OSINARA_INSTALL_EXISTING_STATE`.
 If the installation ends with `OSINARA_INSTALL_STATE_AMBIGUOUS` because public HTTPS never became
 healthy, fix the proxy, confirm `https://HOSTNAME/eve/v1/health`, and finish the Telegram webhook

@@ -13,6 +13,7 @@ import {
   parseBootstrapProcessOutput,
   parseTlsEnvironment,
   releaseEnvironmentFromManifest,
+  renderTraefikRoute,
 } from "./host-contracts.js";
 
 const digest = (name: string, character: string): string =>
@@ -89,6 +90,38 @@ describe("tls environment contract", () => {
         .toThrowError(expect.objectContaining({ code: "OSINARA_OPERATION_TLS_ENV_INVALID" }));
     },
   );
+
+  it.each([
+    "OSINARA_HOSTNAME=a.example.com\nOSINARA_HOSTNAME=b.example.com\nOSINARA_TLS_MODE=managed\n",
+    "OSINARA_HOSTNAME=a.example.com\nOSINARA_TLS_MODE=managed\nEXTRA=1\n",
+    "OSINARA_HOSTNAME=a.example.com\nOSINARA_TLS_MODE=managed\n\n\n",
+  ])("rejects duplicates, unknown entries and stray lines: %#", (text) => {
+    expect(() => parseTlsEnvironment(Buffer.from(text)))
+      .toThrowError(expect.objectContaining({ code: "OSINARA_OPERATION_TLS_ENV_INVALID" }));
+  });
+
+  it("accepts the two lines in either order", () => {
+    expect(parseTlsEnvironment(Buffer.from("OSINARA_TLS_MODE=managed\nOSINARA_HOSTNAME=a.example.com\n")))
+      .toEqual({ hostname: "a.example.com", mode: "managed" });
+  });
+
+  it("enforces DNS label and total length limits", () => {
+    const longLabel = `${"a".repeat(64)}.example.com`;
+    const longName = `${Array.from({ length: 5 }, () => "b".repeat(50)).join(".")}.example.com`;
+    for (const hostname of [longLabel, longName]) {
+      expect(() => buildTlsEnvironment({ hostname, mode: "managed" }))
+        .toThrowError(expect.objectContaining({ code: "OSINARA_INSTALL_TLS_ENV_INVALID" }));
+    }
+    expect(() => buildTlsEnvironment({ hostname: `${"a".repeat(63)}.example.com`, mode: "managed" })).not.toThrow();
+  });
+
+  it("renders the bundled Traefik route with the installed hostname", () => {
+    const template = Buffer.from('rule: \'Host(`{{ env "OSINARA_HOSTNAME" }}`)\'\n');
+
+    expect(renderTraefikRoute(template, "bot.example.com").toString("utf8")).toBe("rule: 'Host(`bot.example.com`)'\n");
+    expect(() => renderTraefikRoute(Buffer.from("rule: 'Host(`x`)'\n"), "bot.example.com"))
+      .toThrowError(expect.objectContaining({ code: "OSINARA_INSTALL_BUNDLE_ENTRY_INVALID" }));
+  });
 
   it("refuses to build a file from an unsafe hostname", () => {
     expect(() => buildTlsEnvironment({ hostname: "bad host\nOSINARA_TLS_MODE=external", mode: "managed" }))

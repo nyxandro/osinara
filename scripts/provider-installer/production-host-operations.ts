@@ -19,6 +19,7 @@ import {
   buildTlsEnvironment,
   parseBootstrapProcessOutput,
   releaseEnvironmentFromManifest,
+  renderTraefikRoute,
 } from "./host-contracts.js";
 import { probeExternalProxy } from "./external-proxy-probe.js";
 import { readInstallationBundle, validateInstallationBundle } from "./installation-bundle.js";
@@ -302,8 +303,12 @@ export function createProductionHostOperations(): HostInstallationOperations {
         if (input.tlsMode === "managed") {
           await writeRootFile(TLS_COMPOSE_PATH, requireFile("installation/traefik-compose.yaml"), 0o644);
         }
-        // The route file is written in both modes: an external Traefik can include it as-is.
-        await writeRootFile(TLS_ROUTE_PATH, requireFile("installation/traefik-osinara.yaml"), 0o644);
+        // Rendered with the real hostname: the written route must not depend on any process environment.
+        await writeRootFile(
+          TLS_ROUTE_PATH,
+          renderTraefikRoute(requireFile("installation/traefik-osinara.yaml"), input.hostname),
+          0o644,
+        );
         await writeRootFile(
           TLS_ENV_PATH,
           buildTlsEnvironment({ hostname: input.hostname, mode: input.tlsMode }),
