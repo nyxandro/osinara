@@ -163,6 +163,18 @@ owner's privileges, so the role sees counts and ages while every base table stay
 created `NOLOGIN`: after the release the operator grants it a password once, as described in
 `infra/monitoring/README.md`.
 
+Roles live in the cluster, not in the database, so `pg_dump` does not carry `osinara_metrics` with
+it. Restoring the application database into a fresh cluster therefore leaves every
+`GRANT … TO osinara_metrics` in the dump failing, and the migration is already recorded in
+`schema_migrations`, so the runner will never recreate the role. Create it before the restore:
+
+```bash
+psql -c "CREATE ROLE osinara_metrics NOLOGIN"
+```
+
+Monitoring is the only thing affected, and its absence is visible as a silent exporter rather than
+an error, which is why the step belongs in the restore procedure rather than in the migration.
+
 The collector that reads these signals runs in its own `monitoring-agent` compose project on the
 server. It is not a release artifact: `production-deploy.sh` neither knows about it nor restarts
 it, the production Compose graph does not reference it, and removing it changes nothing in the

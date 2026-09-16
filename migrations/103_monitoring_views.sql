@@ -9,10 +9,34 @@
 -- grant on the schema would also hand the role every future table in it.
 
 -- Roles live in the cluster, not the database, so a restored or recreated database can meet an
--- existing role. NOLOGIN is deliberate: the password is granted once by the operator on the server.
-DO $$ BEGIN
+-- existing role. Reusing one blindly would be the whole boundary undone: an osinara_metrics that
+-- someone had made a superuser, or a member of pg_read_all_data, would read every table the moment
+-- the operator grants it a password. An unexpected role therefore stops the migration.
+-- NOLOGIN is deliberate: the password is granted once by the operator on the server, and LOGIN on
+-- an existing role is expected rather than suspicious.
+DO $$
+DECLARE
+  unsafe text;
+BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'osinara_metrics') THEN
     CREATE ROLE osinara_metrics NOLOGIN;
+    RETURN;
+  END IF;
+
+  SELECT string_agg(finding, ', ' ORDER BY finding) INTO unsafe FROM (
+    SELECT 'SUPERUSER'   AS finding FROM pg_roles WHERE rolname = 'osinara_metrics' AND rolsuper
+    UNION ALL SELECT 'CREATEROLE'   FROM pg_roles WHERE rolname = 'osinara_metrics' AND rolcreaterole
+    UNION ALL SELECT 'CREATEDB'     FROM pg_roles WHERE rolname = 'osinara_metrics' AND rolcreatedb
+    UNION ALL SELECT 'REPLICATION'  FROM pg_roles WHERE rolname = 'osinara_metrics' AND rolreplication
+    UNION ALL SELECT 'BYPASSRLS'    FROM pg_roles WHERE rolname = 'osinara_metrics' AND rolbypassrls
+    UNION ALL SELECT 'membership in ' || granted.rolname
+      FROM pg_auth_members membership
+      JOIN pg_roles member ON member.oid = membership.member AND member.rolname = 'osinara_metrics'
+      JOIN pg_roles granted ON granted.oid = membership.roleid
+  ) AS findings;
+
+  IF unsafe IS NOT NULL THEN
+    RAISE EXCEPTION 'AGENT_METRICS_ROLE_UNSAFE: existing role osinara_metrics carries privileges beyond reading monitoring views (%)', unsafe;
   END IF;
 END $$;
 
@@ -35,13 +59,22 @@ CREATE VIEW monitoring_operational_incidents AS
   FROM operational_incidents
   GROUP BY status;
 
+-- `recent` is what alerts on: a batch that failed once stays in the table until an operator
+-- resolves it, so an all-time count would latch an alert on forever and destroy the difference
+-- between "something is wrong now" and "something went wrong once".
 CREATE VIEW monitoring_memory_review_batches AS
-  SELECT status::text AS status, count(*) AS total
+  SELECT
+    status::text AS status,
+    count(*) AS total,
+    count(*) FILTER (WHERE updated_at > now() - interval '24 hours') AS recent
   FROM memory_review_batches
   GROUP BY status;
 
 CREATE VIEW monitoring_memory_embedding_jobs AS
-  SELECT status::text AS status, count(*) AS total
+  SELECT
+    status::text AS status,
+    count(*) AS total,
+    count(*) FILTER (WHERE updated_at > now() - interval '24 hours') AS recent
   FROM memory_embedding_jobs
   GROUP BY status;
 

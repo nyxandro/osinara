@@ -8,13 +8,18 @@ services:
     image: burningalchemist/sql_exporter:0.19.5@sha256:2586aa37f140128fb92cf9b764ca30fbfab898c8740268ae1a6e1f39260f4d5d
     # The credential reaches the config only inside the container, at start. Passing it as a flag
     # would publish it in the host process list; putting it in the file would publish it in git.
+    # Every $$ below defers expansion to the container's shell: Compose interpolates before the
+    # container exists, and env_file values are not visible to that interpolation. A single quote
+    # inside the credential is doubled, because one stray quote would end the YAML string and the
+    # exporter would refuse to start with an unhelpful parser error.
     entrypoint: ["/bin/sh", "-c"]
     command:
       - >-
         set -eu;
-        : "${OSINARA_METRICS_DSN:?OSINARA_METRICS_DSN is required}";
+        : "$${OSINARA_METRICS_DSN:?OSINARA_METRICS_DSN is required}";
+        dsn=$$(printf '%s' "$$OSINARA_METRICS_DSN" | sed "s/'/''/g");
         {
-        printf "target:\n  data_source_name: '%s'\n  collectors: [osinara]\n" "$$OSINARA_METRICS_DSN";
+        printf "target:\n  data_source_name: '%s'\n  collectors: [osinara]\n" "$$dsn";
         cat /etc/sql-exporter/collectors.yaml;
         } > /tmp/sql-exporter.yaml;
         exec /bin/sql_exporter -config.file=/tmp/sql-exporter.yaml -web.listen-address=:9399
@@ -34,7 +39,9 @@ services:
         max-file: "3"
         max-size: "10m"
     tmpfs:
-      - /tmp:size=8m,mode=0700
+      # The image runs as nobody, so the rendered config needs an ordinary world-writable /tmp.
+      # A root-owned 0700 tmpfs here is a permanent crash loop with a bare "Permission denied".
+      - /tmp:size=8m,mode=1777
     volumes:
       - ./sql-exporter.yaml:/etc/sql-exporter/collectors.yaml:ro
 

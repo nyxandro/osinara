@@ -43,9 +43,9 @@ export default defineSchedule({
   cron: "* * * * *",
   run({ to, waitUntil }) {
     waitUntil(reconcileRuntimeAdmissions());
-    waitUntil(withScheduleHeartbeat(
-      "memory-review-dispatch",
-      () => withRuntimeAdmission("ordinary", () => dispatchMemoryReviewCycle(to)),
+    waitUntil(withRuntimeAdmission(
+      "ordinary",
+      () => withScheduleHeartbeat("memory-review-dispatch", () => dispatchMemoryReviewCycle(to)),
     ));
   },
 });

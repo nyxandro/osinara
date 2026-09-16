@@ -27,9 +27,9 @@ async function runScheduledSoftwareUpdateCheck(): Promise<void> {
 export default defineSchedule({
   cron: "0 */6 * * *",
   run({ waitUntil }) {
-    waitUntil(withScheduleHeartbeat(
-      "software-update-check",
-      () => withRuntimeAdmission("ordinary", () => runScheduledSoftwareUpdateCheck()),
+    waitUntil(withRuntimeAdmission(
+      "ordinary",
+      () => withScheduleHeartbeat("software-update-check", () => runScheduledSoftwareUpdateCheck()),
     ));
   },
 });

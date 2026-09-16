@@ -20,7 +20,7 @@ import { withScheduleHeartbeat } from "../lib/schedule-heartbeat.js";
 export default defineSchedule({
   cron: "* * * * *",
   run({ waitUntil }) {
-    waitUntil(withScheduleHeartbeat("reminder-dispatch", () => withRuntimeAdmission("ordinary", async () => {
+    waitUntil(withRuntimeAdmission("ordinary", () => withScheduleHeartbeat("reminder-dispatch", async () => {
       const results = await Promise.allSettled([
         dispatchDueReminders(), deleteExpiredSessions(), deleteOrphanedWorkspaces(),
         purgeSoftDeletedMemory(new Date()),

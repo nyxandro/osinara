@@ -20,6 +20,10 @@ collectors:
         query: |
           SELECT pending, processing, failed, oldest_pending_age_seconds
           FROM monitoring_telegram_ingress
+      - query_name: memory_review_batches
+        query: SELECT status, total, recent FROM monitoring_memory_review_batches
+      - query_name: memory_embedding_jobs
+        query: SELECT status, total, recent FROM monitoring_memory_embedding_jobs
       - query_name: runtime_maintenance
         query: |
           SELECT phase, 1 AS present, age_seconds
@@ -59,19 +63,35 @@ collectors:
         values: [total]
         query: SELECT status, total FROM monitoring_operational_incidents
 
+      # `total` is the standing truth, `recent` is what an alert can act on: a terminal failure
+      # never leaves these tables, so alerting on the total would latch on forever.
       - metric_name: osinara_memory_review_batches
         type: gauge
-        help: 'Group memory review batches by status.'
+        help: 'Group memory review batches by status, all time.'
         key_labels: [status]
         values: [total]
-        query: SELECT status, total FROM monitoring_memory_review_batches
+        query_ref: memory_review_batches
+
+      - metric_name: osinara_memory_review_batches_recent
+        type: gauge
+        help: 'Group memory review batches by status, changed in the last 24 hours.'
+        key_labels: [status]
+        values: [recent]
+        query_ref: memory_review_batches
 
       - metric_name: osinara_memory_embedding_jobs
         type: gauge
-        help: 'Memory indexing jobs by status; failed ones are memories search cannot find.'
+        help: 'Memory indexing jobs by status, all time.'
         key_labels: [status]
         values: [total]
-        query: SELECT status, total FROM monitoring_memory_embedding_jobs
+        query_ref: memory_embedding_jobs
+
+      - metric_name: osinara_memory_embedding_jobs_recent
+        type: gauge
+        help: 'Memory indexing jobs by status, changed in the last 24 hours.'
+        key_labels: [status]
+        values: [recent]
+        query_ref: memory_embedding_jobs
 
       - metric_name: osinara_model_last_success_age_seconds
         type: gauge

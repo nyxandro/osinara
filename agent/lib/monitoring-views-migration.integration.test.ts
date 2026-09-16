@@ -5,7 +5,12 @@
  * - `103_monitoring_views.sql`: aggregate-only views plus a read-only role for the metrics exporter.
  * - Each view is granted explicitly: a blanket schema grant would also cover future tables.
  * - The security boundary: the exporter role reads counts and ages, never a row of user content.
+ * - The role guard: an inherited role carrying wider privileges stops the migration instead of
+ *   silently becoming a credential that reads everything once the operator grants it a password.
  */
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+
 import { afterAll, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "./database.js";
@@ -68,6 +73,17 @@ describeWithDatabase("103 monitoring views migration", () => {
     }
   });
 
+  it("holds no privilege anywhere outside the monitoring views", async () => {
+    const granted = await database().query<{ table_name: string }>(
+      `SELECT DISTINCT table_name FROM information_schema.role_table_grants
+        WHERE grantee = $1 AND table_name <> ALL($2::text[])`,
+      [METRICS_ROLE, [...MONITORING_VIEWS]],
+    );
+
+    // A future view or an accidental grant elsewhere turns this credential into data access.
+    expect(granted.rows.map(({ table_name }) => table_name)).toEqual([]);
+  });
+
   it("answers every view as the exporter role itself and returns only numbers", async () => {
     const client = await database().connect();
     try {
@@ -80,7 +96,7 @@ describeWithDatabase("103 monitoring views migration", () => {
         for (const column of columns) {
           expect({ view, column }).toEqual({
             view,
-            column: expect.stringMatching(/^(pending|processing|failed|total|status|phase|schedule|route_key|oldest_pending_age_seconds|last_success_age_seconds|age_seconds)$/u),
+            column: expect.stringMatching(/^(pending|processing|failed|total|recent|status|phase|route_key|oldest_pending_age_seconds|last_success_age_seconds|age_seconds)$/u),
           });
         }
       }
@@ -99,6 +115,57 @@ describeWithDatabase("103 monitoring views migration", () => {
       });
     } finally {
       await client.query("RESET ROLE").catch(() => undefined);
+      client.release();
+    }
+  });
+
+  /** The guard is the first statement of the migration and is safe to replay on its own. */
+  async function roleGuardSql(): Promise<string> {
+    const sql = await readFile(resolve("migrations/103_monitoring_views.sql"), "utf8");
+    const end = sql.indexOf("CREATE VIEW");
+    expect(end).toBeGreaterThan(0);
+    return sql.slice(0, end);
+  }
+
+  it("stops the migration when the existing role already carries wider privileges", async () => {
+    const guard = await roleGuardSql();
+    const client = await database().connect();
+    try {
+      await expect(client.query(guard)).resolves.toBeDefined();
+
+      await client.query(`ALTER ROLE ${METRICS_ROLE} BYPASSRLS`);
+      await expect(client.query(guard)).rejects.toMatchObject({
+        message: expect.stringContaining("AGENT_METRICS_ROLE_UNSAFE"),
+      });
+    } finally {
+      await client.query(`ALTER ROLE ${METRICS_ROLE} NOBYPASSRLS`).catch(() => undefined);
+      client.release();
+    }
+  });
+
+  it("stops the migration when the existing role inherits another role's access", async () => {
+    const guard = await roleGuardSql();
+    const client = await database().connect();
+    try {
+      await client.query(`GRANT pg_read_all_data TO ${METRICS_ROLE}`);
+      await expect(client.query(guard)).rejects.toMatchObject({
+        message: expect.stringContaining("membership in pg_read_all_data"),
+      });
+    } finally {
+      await client.query(`REVOKE pg_read_all_data FROM ${METRICS_ROLE}`).catch(() => undefined);
+      client.release();
+    }
+  });
+
+  it("accepts an existing role that the operator has merely given a password", async () => {
+    const guard = await roleGuardSql();
+    const client = await database().connect();
+    try {
+      await client.query(`ALTER ROLE ${METRICS_ROLE} LOGIN`);
+      // Granting the password is the documented operator step, not a reason to fail the upgrade.
+      await expect(client.query(guard)).resolves.toBeDefined();
+    } finally {
+      await client.query(`ALTER ROLE ${METRICS_ROLE} NOLOGIN`).catch(() => undefined);
       client.release();
     }
   });

@@ -15,9 +15,9 @@ export default defineSchedule({
   cron: "* * * * *",
   run({ to, waitUntil }) {
     // Keep the cron task alive while Eve's channel source starts every claimed session.
-    waitUntil(withScheduleHeartbeat(
-      "agent-schedule-dispatch",
-      () => withRuntimeAdmission("ordinary", () => dispatchDueAgentSchedules(to)),
+    waitUntil(withRuntimeAdmission(
+      "ordinary",
+      () => withScheduleHeartbeat("agent-schedule-dispatch", () => dispatchDueAgentSchedules(to)),
     ));
   },
 });
