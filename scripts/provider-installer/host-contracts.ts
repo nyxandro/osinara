@@ -4,10 +4,11 @@
  * Exports:
  * - `releaseEnvironmentFromManifest`: validates schema v1 and emits five fresh-install image refs.
  * - `parseBootstrapProcessOutput`: validates one machine-readable bootstrap process result.
+ * - `buildTlsEnvironment` / `parseTlsEnvironment`: exact `/opt/osinara/tls/.env` contract.
  */
 import { z } from "zod";
 
-import type { InstallationExecutionResult } from "./contracts.js";
+import type { InstallationExecutionResult, TlsMode } from "./contracts.js";
 import { InstallerError } from "./errors.js";
 
 const IMAGE_DIGEST = "[0-9a-f]{64}";
@@ -73,4 +74,40 @@ export function parseBootstrapProcessOutput(bytes: Buffer): InstallationExecutio
       { cause: error },
     );
   }
+}
+
+const TLS_MODES: readonly TlsMode[] = ["managed", "external"];
+const HOSTNAME_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)+$/u;
+
+export interface TlsEnvironment {
+  readonly hostname: string;
+  readonly mode: TlsMode;
+}
+
+/** Emits the exact two-line TLS env file read by Compose and by the operational commands. */
+export function buildTlsEnvironment(input: TlsEnvironment): Buffer {
+  if (!HOSTNAME_PATTERN.test(input.hostname) || !TLS_MODES.includes(input.mode)) {
+    throw new InstallerError(
+      "OSINARA_INSTALL_TLS_ENV_INVALID",
+      "Не удалось подготовить TLS config: недопустимое имя хоста или режим публикации",
+    );
+  }
+  return Buffer.from(`OSINARA_HOSTNAME=${input.hostname}\nOSINARA_TLS_MODE=${input.mode}\n`, "utf8");
+}
+
+/** Accepts only a complete TLS env file; a missing mode is an operator migration step, not a default. */
+export function parseTlsEnvironment(bytes: Buffer): TlsEnvironment {
+  const text = bytes.toString("utf8");
+  const hostname = text.match(/^OSINARA_HOSTNAME=([^\r\n]+)$/mu)?.[1];
+  const mode = text.match(/^OSINARA_TLS_MODE=([^\r\n]+)$/mu)?.[1];
+  if (!hostname || !HOSTNAME_PATTERN.test(hostname)) {
+    throw new InstallerError("OSINARA_OPERATION_TLS_ENV_INVALID", "TLS config не содержит hostname");
+  }
+  if (!mode || !(TLS_MODES as readonly string[]).includes(mode)) {
+    throw new InstallerError(
+      "OSINARA_OPERATION_TLS_ENV_INVALID",
+      "TLS config не содержит OSINARA_TLS_MODE=managed|external; добавьте строку в /opt/osinara/tls/.env",
+    );
+  }
+  return { hostname, mode: mode as TlsMode };
 }

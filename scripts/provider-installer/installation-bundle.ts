@@ -19,10 +19,10 @@ import { InstallerError } from "./errors.js";
 const MAX_UNCOMPRESSED_BYTES = 2 * 1024 * 1024;
 const ALLOWED_ENTRIES = new Map<string, { mode: number; type: "directory" | "file" }>([
   ["installation/", { mode: 0o755, type: "directory" }],
-  ["installation/Caddyfile", { mode: 0o644, type: "file" }],
   ["installation/compose.installation.json", { mode: 0o644, type: "file" }],
-  ["installation/compose.tls.yaml", { mode: 0o644, type: "file" }],
   ["installation/osinara-deployment.json", { mode: 0o644, type: "file" }],
+  ["installation/traefik-compose.yaml", { mode: 0o644, type: "file" }],
+  ["installation/traefik-osinara.yaml", { mode: 0o644, type: "file" }],
 ]);
 
 function bundleEntryError(message: string, cause?: unknown): InstallerError {

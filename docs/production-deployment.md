@@ -69,9 +69,60 @@ control network. Every service uses bounded Docker `json-file` logging (`20m` by
 the deployment validator rejects releases that remove this bound.
 
 Fresh installation additionally creates `osinara-production-edge-frontend`. Only the application
-`edge` service and the separate Caddy project join this frontend network. Caddy never joins
+`edge` service and the TLS proxy join this frontend network. The proxy never joins
 `osinara-production-app-network`, so TLS termination cannot directly address PostgreSQL, the agent,
 embedding, workers, or sandbox egress services.
+
+## TLS proxy
+
+Since v0.24.0 the only TLS proxy shipped by Osinara is Traefik, defined once in `infra/traefik/`
+(`compose.yaml` and `dynamic/osinara.yaml`). The installer asks how HTTPS is published and records the
+answer in `/opt/osinara/tls/.env` as `OSINARA_TLS_MODE`; `osinara status`, `doctor`, `logs`, and
+`restart` read that line and refuse a file without it.
+
+| Mode | What the installer does | Preflight |
+| --- | --- | --- |
+| `managed` | Writes `/opt/osinara/tls/compose.yaml` (Traefik 3, project `osinara-tls`) and starts it after the application. | Ports `80` and `443` must be free. |
+| `external` | Writes no Compose file and starts no proxy. The operator's existing proxy must publish `https://HOSTNAME` itself. | `https://HOSTNAME/eve/v1/health` must already answer with any HTTP status; a TLS or connection error fails the install before migration. |
+
+Files under `/opt/osinara/tls/` (all `root:root`):
+
+| Path | Mode | Purpose |
+| --- | --- | --- |
+| `.env` | `0600` | `OSINARA_HOSTNAME=…` and `OSINARA_TLS_MODE=managed` or `OSINARA_TLS_MODE=external`. |
+| `compose.yaml` | `0644` | Traefik project; present only in `managed` mode. |
+| `dynamic/` | `0750` | Traefik file-provider directory, watched for changes. |
+| `dynamic/osinara.yaml` | `0644` | Osinara router: `Host(HOSTNAME)` → `http://edge:80` with a `/eve/v1/health` health check. Written in both modes so an external Traefik can include it as-is. |
+
+**Sharing the managed Traefik with other projects on the same host.** Add one file per project to
+`/opt/osinara/tls/dynamic/` (for example `yana.yaml`) with its own routers, services, and middlewares.
+Traefik picks the file up without a restart. Never edit `osinara.yaml`: a future reinstall rewrites it.
+Certificates for every hostname are issued by the same `letsencrypt` resolver.
+
+**Publishing Osinara through an external proxy.** A proxy running on the host itself (or a container
+with `network_mode: host`) forwards `https://HOSTNAME` to `http://127.0.0.1:8082`, the loopback-only
+edge port. A containerized proxy instead joins `osinara-production-edge-frontend` after the
+installation has created it (`docker network connect osinara-production-edge-frontend PROXY`) and
+forwards to `http://edge:80`; the installer waits up to fifteen minutes for public HTTPS in external
+mode to leave time for that step.
+
+**Migrating a host installed before v0.24.0.** Such hosts run Traefik from a single
+`/opt/osinara/tls/traefik-dynamic.yaml` and may lack `OSINARA_TLS_MODE`. As root, one time:
+
+```bash
+# the server has no repository checkout: take the files from the release asset osinara-installation.tar.gz
+tar -xzf osinara-installation.tar.gz -C /tmp installation/traefik-compose.yaml installation/traefik-osinara.yaml
+install -d -m 0750 -o root -g root /opt/osinara/tls/dynamic
+install -m 0644 -o root -g root /tmp/installation/traefik-osinara.yaml /opt/osinara/tls/dynamic/osinara.yaml
+# move every other project's routers/services/middlewares from traefik-dynamic.yaml into dynamic/<project>.yaml
+install -m 0644 -o root -g root /tmp/installation/traefik-compose.yaml /opt/osinara/tls/compose.yaml
+printf 'OSINARA_TLS_MODE=managed\n' >> /opt/osinara/tls/.env
+docker compose --env-file /opt/osinara/tls/.env --file /opt/osinara/tls/compose.yaml up -d --wait
+curl --fail https://HOSTNAME/eve/v1/health && rm /opt/osinara/tls/traefik-dynamic.yaml*
+```
+
+The `osinara-tls-traefik-data` volume (ACME storage) is preserved by that restart; certificates are
+not reissued.
 
 Eve `0.40.0` uses the official `@workflow/world-postgres` backend in the separate
 `osinara_workflow` database inside the existing PostgreSQL service. The migration gate bootstraps

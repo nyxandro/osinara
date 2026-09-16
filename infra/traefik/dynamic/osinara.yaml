@@ -1,3 +1,5 @@
+# Osinara route for the shared osinara-tls Traefik. Other projects on the same host add their own
+# file to /opt/osinara/tls/dynamic/ instead of editing this one.
 http:
   routers:
     osinara:

@@ -47,6 +47,7 @@ function prompts(overrides: Partial<PromptAdapter> = {}): PromptAdapter {
     select: vi
       .fn()
       .mockResolvedValueOnce("sslip-io")
+      .mockResolvedValueOnce("managed")
       .mockResolvedValueOnce("deepseek")
       .mockResolvedValueOnce(model.id),
     text: vi.fn(),
@@ -102,6 +103,7 @@ describe("provider installer orchestration", () => {
     expect(deps.executeInstallation).toHaveBeenCalledWith(
       expect.objectContaining({
         hostname: "8-8-8-8.sslip.io",
+        tlsMode: "managed",
         groqApiKey: null,
         modelApiKey: "model-key",
         model,
@@ -133,6 +135,7 @@ describe("provider installer orchestration", () => {
       select: vi
         .fn()
         .mockResolvedValueOnce("custom-domain")
+        .mockResolvedValueOnce("managed")
         .mockResolvedValueOnce("deepseek")
         .mockResolvedValueOnce(model.id),
       text: vi.fn().mockResolvedValue("Bot.Example.com"),
@@ -164,6 +167,7 @@ describe("provider installer orchestration", () => {
       select: vi
         .fn()
         .mockResolvedValueOnce("sslip-io")
+        .mockResolvedValueOnce("managed")
         .mockResolvedValueOnce("openrouter")
         .mockResolvedValueOnce(secondModel.id)
         .mockResolvedValueOnce("enabled:adaptive"),
@@ -189,7 +193,7 @@ describe("provider installer orchestration", () => {
       }),
     );
     expect(multiPrompts.select).toHaveBeenNthCalledWith(
-      4,
+      5,
       "Выберите reasoning для Router Model",
       [
         { label: "Низкое усилие рассуждений", value: "effort:low" },
@@ -207,6 +211,7 @@ describe("provider installer orchestration", () => {
     const select = vi
       .fn()
       .mockResolvedValueOnce("sslip-io")
+      .mockResolvedValueOnce("managed")
       .mockResolvedValueOnce("minimax")
       .mockResolvedValueOnce(modelWithoutReasoning.id);
     const deps = dependencies({
@@ -216,7 +221,7 @@ describe("provider installer orchestration", () => {
 
     await runInteractiveInstaller(deps);
 
-    expect(select).toHaveBeenCalledTimes(3);
+    expect(select).toHaveBeenCalledTimes(4);
     expect(deps.validateModel).toHaveBeenCalledWith(
       "minimax",
       "model-key",
@@ -244,6 +249,7 @@ describe("provider installer orchestration", () => {
         select: vi
           .fn()
           .mockResolvedValueOnce("sslip-io")
+          .mockResolvedValueOnce("managed")
           .mockResolvedValueOnce("deepseek")
           .mockResolvedValueOnce(modelWithChoices.id)
           .mockResolvedValueOnce("effort:max"),
@@ -342,6 +348,7 @@ describe("provider installer orchestration", () => {
         select: vi
           .fn()
           .mockResolvedValueOnce("sslip-io")
+          .mockResolvedValueOnce("managed")
           .mockResolvedValueOnce("deepseek")
           .mockResolvedValueOnce("stale-model-id"),
       }),
