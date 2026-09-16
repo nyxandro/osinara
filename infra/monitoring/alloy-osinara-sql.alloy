@@ -1,0 +1,17 @@
+// Tells the generic collector on this server to scrape Osinara's database metrics.
+//
+// Copy into /opt/monitoring-agent/alloy/ only on the server that runs Osinara. On any other host
+// the target would never resolve, and its permanent failure would raise an alert about an exporter
+// that was never supposed to exist there.
+
+prometheus.scrape "osinara_sql" {
+  targets = [
+    {
+      __address__ = "sql-exporter:9399",
+    },
+  ]
+
+  job_name        = "osinara-sql-exporter"
+  scrape_interval = "30s"
+  forward_to      = [prometheus.remote_write.hub.receiver]
+}

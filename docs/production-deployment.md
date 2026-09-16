@@ -146,6 +146,40 @@ During the one-time cutover from the Eve `0.32.0` local world, the controller ar
 `osinara-production-eve-workflow-data-v032` volume and preserves it for explicit rollback after the
 PostgreSQL-backed candidate passes health checks.
 
+## External monitoring
+
+Since v0.25.0 the application publishes two signals for an external observer, and neither is part
+of the deployment contract.
+
+`AGENT_SCHEDULE_TICK` is written to the log after every completed cycle of the four periodic
+dispatchers. A stopped scheduler raises no error of its own, so the absence of this line is the
+only evidence that reminders, scheduled scenarios, memory review or update checks stopped running.
+
+Migration `103_monitoring_views.sql` creates the aggregate-only `monitoring_*` views and the
+`osinara_metrics` role, granted SELECT on each of them explicitly and on nothing else. A blanket
+grant on the schema was avoided because it would also cover every table added later. The views execute with the
+owner's privileges, so the role sees counts and ages while every base table stays closed to it;
+`agent/lib/monitoring-views-migration.integration.test.ts` verifies both directions. The role is
+created `NOLOGIN`: after the release the operator grants it a password once, as described in
+`infra/monitoring/README.md`.
+
+Roles live in the cluster, not in the database, so `pg_dump` does not carry `osinara_metrics` with
+it. Restoring the application database into a fresh cluster therefore leaves every
+`GRANT … TO osinara_metrics` in the dump failing, and the migration is already recorded in
+`schema_migrations`, so the runner will never recreate the role. Create it before the restore:
+
+```bash
+psql -c "CREATE ROLE osinara_metrics NOLOGIN"
+```
+
+Monitoring is the only thing affected, and its absence is visible as a silent exporter rather than
+an error, which is why the step belongs in the restore procedure rather than in the migration.
+
+The collector that reads these signals runs in its own `monitoring-agent` compose project on the
+server. It is not a release artifact: `production-deploy.sh` neither knows about it nor restarts
+it, the production Compose graph does not reference it, and removing it changes nothing in the
+application. `infra/monitoring/` holds only the three files that describe what Osinara exposes.
+
 ## Server files
 
 Release `v0.15.2` adds a checksum-bound standalone installer for clean GNU/Linux x86_64 hosts using
