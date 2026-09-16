@@ -146,6 +146,27 @@ During the one-time cutover from the Eve `0.32.0` local world, the controller ar
 `osinara-production-eve-workflow-data-v032` volume and preserves it for explicit rollback after the
 PostgreSQL-backed candidate passes health checks.
 
+## External monitoring
+
+Since v0.25.0 the application publishes two signals for an external observer, and neither is part
+of the deployment contract.
+
+`AGENT_SCHEDULE_TICK` is written to the log after every completed cycle of the four periodic
+dispatchers. A stopped scheduler raises no error of its own, so the absence of this line is the
+only evidence that reminders, scheduled scenarios, memory review or update checks stopped running.
+
+Migration `103_monitoring_views.sql` creates schema `monitoring` with aggregate-only views and the
+`osinara_metrics` role, which may read those views and nothing else. The views execute with the
+owner's privileges, so the role sees counts and ages while every base table stays closed to it;
+`agent/lib/monitoring-views-migration.integration.test.ts` verifies both directions. The role is
+created `NOLOGIN`: after the release the operator grants it a password once, as described in
+`infra/monitoring/README.md`.
+
+The collector that reads these signals runs in its own `monitoring-agent` compose project on the
+server. It is not a release artifact: `production-deploy.sh` neither knows about it nor restarts
+it, the production Compose graph does not reference it, and removing it changes nothing in the
+application. `infra/monitoring/` holds only the three files that describe what Osinara exposes.
+
 ## Server files
 
 Release `v0.15.2` adds a checksum-bound standalone installer for clean GNU/Linux x86_64 hosts using

@@ -3,9 +3,11 @@
  *
  * Export:
  * - Default schedule that delivers severe alerts and starts ready 50-message task sessions.
+ * - Records a completed cycle for external monitoring; a failed cycle records nothing.
  */
 import { defineSchedule } from "eve/schedules";
 import { withRuntimeAdmission } from "../lib/runtime-maintenance.js";
+import { withScheduleHeartbeat } from "../lib/schedule-heartbeat.js";
 import { dispatchOperationalIncidents } from "../lib/operational-incidents/owner-alerts.js";
 import { reconcileRuntimeAdmissions } from "../lib/runtime-admission-reconciliation.js";
 
@@ -41,6 +43,9 @@ export default defineSchedule({
   cron: "* * * * *",
   run({ to, waitUntil }) {
     waitUntil(reconcileRuntimeAdmissions());
-    waitUntil(withRuntimeAdmission("ordinary", () => dispatchMemoryReviewCycle(to)));
+    waitUntil(withScheduleHeartbeat(
+      "memory-review-dispatch",
+      () => withRuntimeAdmission("ordinary", () => dispatchMemoryReviewCycle(to)),
+    ));
   },
 });

@@ -1,0 +1,102 @@
+# Application metrics read out of Osinara's database through the aggregate-only `monitoring` views.
+#
+# The `target` block is NOT here: it carries the credential and is written at container start from
+# OSINARA_METRICS_DSN, so the password never enters this repository, a compose file or a process
+# listing. See infra/monitoring/README.md.
+#
+# Every query reads a view created by migration 103. Nothing here may touch a base table: the
+# osinara_metrics role has no privilege on them, and a query that tried would fail closed.
+global:
+  min_interval: 30s
+  scrape_timeout: 10s
+  max_connections: 2
+  max_idle_connections: 2
+
+collectors:
+  - collector_name: osinara
+
+    queries:
+      - query_name: telegram_ingress
+        query: |
+          SELECT pending, processing, failed, oldest_pending_age_seconds
+          FROM monitoring.telegram_ingress
+      - query_name: runtime_maintenance
+        query: |
+          SELECT phase, 1 AS present, age_seconds
+          FROM monitoring.runtime_maintenance
+
+    metrics:
+      # How long the oldest unanswered message has waited. The single most user-visible number.
+      - metric_name: osinara_ingress_oldest_pending_age_seconds
+        type: gauge
+        help: 'Age in seconds of the oldest Telegram update still waiting to be processed.'
+        values: [oldest_pending_age_seconds]
+        query_ref: telegram_ingress
+
+      - metric_name: osinara_ingress_pending
+        type: gauge
+        help: 'Telegram updates accepted but not yet processed.'
+        values: [pending]
+        query_ref: telegram_ingress
+
+      - metric_name: osinara_ingress_processing
+        type: gauge
+        help: 'Telegram updates currently being processed.'
+        values: [processing]
+        query_ref: telegram_ingress
+
+      - metric_name: osinara_ingress_failed
+        type: gauge
+        help: 'Telegram updates whose processing ended in failure.'
+        values: [failed]
+        query_ref: telegram_ingress
+
+      # Diagnostics the application owes the owner. Anything stuck in pending means that channel is mute.
+      - metric_name: osinara_operational_incidents
+        type: gauge
+        help: 'Operational incidents by delivery status.'
+        key_labels: [status]
+        values: [total]
+        query: SELECT status, total FROM monitoring.operational_incidents
+
+      - metric_name: osinara_memory_review_batches
+        type: gauge
+        help: 'Group memory review batches by status.'
+        key_labels: [status]
+        values: [total]
+        query: SELECT status, total FROM monitoring.memory_review_batches
+
+      - metric_name: osinara_memory_embedding_jobs
+        type: gauge
+        help: 'Memory indexing jobs by status; failed ones are memories search cannot find.'
+        key_labels: [status]
+        values: [total]
+        query: SELECT status, total FROM monitoring.memory_embedding_jobs
+
+      - metric_name: osinara_model_last_success_age_seconds
+        type: gauge
+        help: 'Age in seconds of the last confirmed successful model call per route.'
+        key_labels: [route_key]
+        values: [last_success_age_seconds]
+        query: SELECT route_key, last_success_age_seconds FROM monitoring.model_availability
+
+      # A phase other than ready means the application is not accepting work right now.
+      - metric_name: osinara_runtime_maintenance_phase
+        type: gauge
+        help: 'Current runtime admission phase, 1 for the active phase.'
+        key_labels: [phase]
+        values: [present]
+        query_ref: runtime_maintenance
+
+      - metric_name: osinara_runtime_maintenance_age_seconds
+        type: gauge
+        help: 'Seconds since the runtime admission phase last changed.'
+        values: [age_seconds]
+        query_ref: runtime_maintenance
+
+      - metric_name: osinara_agent_schedule_runs_24h
+        type: gauge
+        help: 'Scheduled agent runs in the last 24 hours by status.'
+        key_labels: [status]
+        values: [total]
+        query: SELECT status, total FROM monitoring.agent_schedule_runs

@@ -3,11 +3,13 @@
  *
  * Export:
  * - Default six-hour handler schedule with no model or channel session.
+ * - Records a completed cycle for external monitoring; a failed cycle records nothing.
  */
 import { defineSchedule } from "eve/schedules";
 
 import { runSoftwareUpdateCheck } from "../lib/software-updates/release-checker.js";
 import { withRuntimeAdmission } from "../lib/runtime-maintenance.js";
+import { withScheduleHeartbeat } from "../lib/schedule-heartbeat.js";
 
 async function runScheduledSoftwareUpdateCheck(): Promise<void> {
   try {
@@ -25,6 +27,9 @@ async function runScheduledSoftwareUpdateCheck(): Promise<void> {
 export default defineSchedule({
   cron: "0 */6 * * *",
   run({ waitUntil }) {
-    waitUntil(withRuntimeAdmission("ordinary", () => runScheduledSoftwareUpdateCheck()));
+    waitUntil(withScheduleHeartbeat(
+      "software-update-check",
+      () => withRuntimeAdmission("ordinary", () => runScheduledSoftwareUpdateCheck()),
+    ));
   },
 });

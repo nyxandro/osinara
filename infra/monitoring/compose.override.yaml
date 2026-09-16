@@ -1,0 +1,45 @@
+# Osinara's addition to the generic collector on this server.
+#
+# Docker Compose loads compose.override.yaml automatically, so copying this file and its two
+# companions into /opt/monitoring-agent/ is the whole installation. The generic collector stays
+# unchanged and keeps working on servers that do not run Osinara.
+services:
+  sql-exporter:
+    image: burningalchemist/sql_exporter:0.19.5@sha256:2586aa37f140128fb92cf9b764ca30fbfab898c8740268ae1a6e1f39260f4d5d
+    # The credential reaches the config only inside the container, at start. Passing it as a flag
+    # would publish it in the host process list; putting it in the file would publish it in git.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        set -eu;
+        : "${OSINARA_METRICS_DSN:?OSINARA_METRICS_DSN is required}";
+        {
+        printf "target:\n  data_source_name: '%s'\n  collectors: [osinara]\n" "$$OSINARA_METRICS_DSN";
+        cat /etc/sql-exporter/collectors.yaml;
+        } > /tmp/sql-exporter.yaml;
+        exec /bin/sql_exporter -config.file=/tmp/sql-exporter.yaml -web.listen-address=:9399
+    env_file:
+      - ./osinara-metrics.env
+    mem_limit: 96m
+    networks:
+      - agent
+      - osinara
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-file: "3"
+        max-size: "10m"
+    tmpfs:
+      - /tmp:size=8m,mode=0700
+    volumes:
+      - ./sql-exporter.yaml:/etc/sql-exporter/collectors.yaml:ro
+
+networks:
+  # Created by the application's own deployment; the collector only joins it to reach PostgreSQL.
+  osinara:
+    external: true
+    name: osinara-production-app-network
