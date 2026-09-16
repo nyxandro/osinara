@@ -39,6 +39,7 @@ function input(overrides: Partial<InstallationExecutionInput> = {}): Installatio
     },
     groqApiKey: null,
     hostname: "8-8-8-8.sslip.io",
+    tlsMode: "managed",
     internalSecrets: {
       invitationSigningSecret: "invitation_secret_abcdefghijklmnopqrstuvwxyz",
       postgresPassword: "postgres_secret_abcdefghijklmnopqrstuvwxyz",
@@ -104,7 +105,10 @@ describe("createHostInstallationExecutor", () => {
     expect(staged).toMatchObject({
       hostname: "8-8-8-8.sslip.io",
       releaseVersion: "0.15.3",
+      tlsMode: "managed",
     });
+    expect(ops.preflight).toHaveBeenCalledWith({ hostname: "8-8-8-8.sslip.io", tlsMode: "managed" });
+    expect(ops.pullImages).toHaveBeenCalledWith({ hostname: "8-8-8-8.sslip.io", tlsMode: "managed" });
     const environment = staged?.environmentBytes.toString("utf8");
     expect(environment).toContain("MODEL_API_KEY='model-secret'\n");
     expect(environment).toContain("PUBLIC_BASE_URL='https://8-8-8-8.sslip.io'\n");
@@ -118,6 +122,21 @@ describe("createHostInstallationExecutor", () => {
       schemaVersion: 4,
       voice: { enabled: false },
     });
+  });
+
+  it("never starts the bundled Traefik when the operator chose an external proxy", async () => {
+    const events: string[] = [];
+    const ops = operations(events);
+
+    await createHostInstallationExecutor(ops)({ ...input(), tlsMode: "external" });
+
+    expect(ops.startTls).not.toHaveBeenCalled();
+    expect(ops.preflight).toHaveBeenCalledWith({ hostname: "8-8-8-8.sslip.io", tlsMode: "external" });
+    expect(events).toEqual([
+      "bundle", "prerequisites", "lock", "clean", "stage", "preflight", "pull",
+      "migration-marker", "application", "https", "bootstrap", "webhook", "commit", "unlock",
+    ]);
+    expect(vi.mocked(ops.stage).mock.calls[0]?.[0]).toMatchObject({ tlsMode: "external" });
   });
 
   it("removes attempt-created state when preflight fails before migration", async () => {

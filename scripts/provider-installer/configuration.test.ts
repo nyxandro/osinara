@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   MODEL_PROVIDER_OPTIONS,
+  TLS_MODE_OPTIONS,
   buildOwnerBootstrapOutput,
   generateInternalSecrets,
   requireCredential,
@@ -24,6 +25,10 @@ describe("provider installer configuration", () => {
       "opencode-go",
       "openrouter",
     ]);
+  });
+
+  it("offers exactly the two HTTPS publication modes without a default", () => {
+    expect(TLS_MODE_OPTIONS.map(({ value }) => value)).toEqual(["managed", "external"]);
   });
 
   it("generates each required internal secret independently", () => {

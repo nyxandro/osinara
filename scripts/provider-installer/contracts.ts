@@ -6,6 +6,8 @@
  * - Executor input/output contracts separating setup validation from host mutation.
  */
 export type AddressMode = "sslip-io" | "custom-domain";
+/** `managed`: installer runs its own Traefik; `external`: an existing host proxy publishes Osinara. */
+export type TlsMode = "managed" | "external";
 export type ModelProvider = "deepseek" | "minimax" | "neuraldeep" | "opencode-go" | "openrouter";
 export type ModelProtocol = "anthropic-messages" | "openai-chat-completions";
 export type ReasoningEffort =
@@ -108,6 +110,7 @@ export interface InstallationExecutionInput {
   reasoningSelection: ReasoningSelectionMarker;
   telegramBotToken: string;
   telegramBotUsername: string;
+  tlsMode: TlsMode;
 }
 
 export interface InstallationExecutionResult {

@@ -2,7 +2,7 @@
  * Provider installer configuration primitives.
  *
  * Exports:
- * - `ADDRESS_MODE_OPTIONS` and `MODEL_PROVIDER_OPTIONS`: interactive choices without defaults.
+ * - `ADDRESS_MODE_OPTIONS`, `TLS_MODE_OPTIONS` and `MODEL_PROVIDER_OPTIONS`: interactive choices without defaults.
  * - `requireCredential`: strict required secret validation.
  * - `generateInternalSecrets`: independent required internal credentials.
  * - `buildOwnerBootstrapOutput`: stable post-install owner deep-link contract.
@@ -13,6 +13,7 @@ import type {
   ModelProvider,
   OwnerBootstrapOutput,
   PromptOption,
+  TlsMode,
 } from "./contracts.ts";
 import { InstallerError } from "./errors.ts";
 
@@ -23,6 +24,11 @@ const TELEGRAM_USERNAME_PATTERN = /^[A-Za-z0-9_]{5,32}$/u;
 export const ADDRESS_MODE_OPTIONS: readonly PromptOption<AddressMode>[] = [
   { label: "Автоматический адрес sslip.io", value: "sslip-io" },
   { label: "Собственный домен", value: "custom-domain" },
+];
+
+export const TLS_MODE_OPTIONS: readonly PromptOption<TlsMode>[] = [
+  { label: "Установить Traefik от Osinara (порты 80 и 443 свободны)", value: "managed" },
+  { label: "Использовать уже работающий на сервере обратный прокси", value: "external" },
 ];
 
 export const MODEL_PROVIDER_OPTIONS: readonly PromptOption<ModelProvider>[] = [

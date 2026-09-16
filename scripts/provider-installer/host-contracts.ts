@@ -4,10 +4,12 @@
  * Exports:
  * - `releaseEnvironmentFromManifest`: validates schema v1 and emits five fresh-install image refs.
  * - `parseBootstrapProcessOutput`: validates one machine-readable bootstrap process result.
+ * - `buildTlsEnvironment` / `parseTlsEnvironment`: exact `/opt/osinara/tls/.env` contract.
+ * - `renderTraefikRoute`: hostname substitution for the bundled Traefik route file.
  */
 import { z } from "zod";
 
-import type { InstallationExecutionResult } from "./contracts.js";
+import type { InstallationExecutionResult, TlsMode } from "./contracts.js";
 import { InstallerError } from "./errors.js";
 
 const IMAGE_DIGEST = "[0-9a-f]{64}";
@@ -73,4 +75,72 @@ export function parseBootstrapProcessOutput(bytes: Buffer): InstallationExecutio
       { cause: error },
     );
   }
+}
+
+const TLS_MODES: readonly TlsMode[] = ["managed", "external"];
+// DNS limits: 63 characters per label, 253 for the whole name.
+const HOSTNAME_PATTERN = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/u;
+const TRAEFIK_HOSTNAME_PLACEHOLDER = '{{ env "OSINARA_HOSTNAME" }}';
+
+export interface TlsEnvironment {
+  readonly hostname: string;
+  readonly mode: TlsMode;
+}
+
+/** Emits the exact two-line TLS env file read by Compose and by the operational commands. */
+export function buildTlsEnvironment(input: TlsEnvironment): Buffer {
+  if (!HOSTNAME_PATTERN.test(input.hostname) || !TLS_MODES.includes(input.mode)) {
+    throw new InstallerError(
+      "OSINARA_INSTALL_TLS_ENV_INVALID",
+      "Не удалось подготовить TLS config: недопустимое имя хоста или режим публикации",
+    );
+  }
+  return Buffer.from(`OSINARA_HOSTNAME=${input.hostname}\nOSINARA_TLS_MODE=${input.mode}\n`, "utf8");
+}
+
+/**
+ * Accepts only the exact two-line file: unknown entries and duplicates are rejected, and a missing
+ * mode is an operator migration step, not a default.
+ */
+export function parseTlsEnvironment(bytes: Buffer): TlsEnvironment {
+  const lines = bytes.toString("utf8").split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  const values = new Map<string, string>();
+  for (const line of lines) {
+    const entry = /^(OSINARA_HOSTNAME|OSINARA_TLS_MODE)=([^\r\n]+)$/u.exec(line);
+    if (!entry || values.has(entry[1]!)) {
+      throw new InstallerError(
+        "OSINARA_OPERATION_TLS_ENV_INVALID",
+        "TLS config должен содержать ровно две строки: OSINARA_HOSTNAME и OSINARA_TLS_MODE",
+      );
+    }
+    values.set(entry[1]!, entry[2]!);
+  }
+  const hostname = values.get("OSINARA_HOSTNAME");
+  const mode = values.get("OSINARA_TLS_MODE");
+  if (!hostname || !HOSTNAME_PATTERN.test(hostname)) {
+    throw new InstallerError("OSINARA_OPERATION_TLS_ENV_INVALID", "TLS config не содержит корректный hostname");
+  }
+  if (!mode || !(TLS_MODES as readonly string[]).includes(mode)) {
+    throw new InstallerError(
+      "OSINARA_OPERATION_TLS_ENV_INVALID",
+      "TLS config не содержит OSINARA_TLS_MODE=managed|external; добавьте строку в /opt/osinara/tls/.env",
+    );
+  }
+  return { hostname, mode: mode as TlsMode };
+}
+
+/**
+ * Substitutes the hostname into the bundled Traefik route so the written file needs no environment:
+ * an external proxy never receives `OSINARA_HOSTNAME`, and the managed one does not need it either.
+ */
+export function renderTraefikRoute(template: Buffer, hostname: string): Buffer {
+  const text = template.toString("utf8");
+  if (!HOSTNAME_PATTERN.test(hostname) || !text.includes(TRAEFIK_HOSTNAME_PLACEHOLDER)) {
+    throw new InstallerError(
+      "OSINARA_INSTALL_BUNDLE_ENTRY_INVALID",
+      "Installation bundle содержит маршрут Traefik без ожидаемого места для имени хоста",
+    );
+  }
+  return Buffer.from(text.replaceAll(TRAEFIK_HOSTNAME_PLACEHOLDER, hostname), "utf8");
 }

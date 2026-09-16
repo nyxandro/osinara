@@ -69,9 +69,75 @@ control network. Every service uses bounded Docker `json-file` logging (`20m` by
 the deployment validator rejects releases that remove this bound.
 
 Fresh installation additionally creates `osinara-production-edge-frontend`. Only the application
-`edge` service and the separate Caddy project join this frontend network. Caddy never joins
+`edge` service and the TLS proxy join this frontend network. The proxy never joins
 `osinara-production-app-network`, so TLS termination cannot directly address PostgreSQL, the agent,
 embedding, workers, or sandbox egress services.
+
+## TLS proxy
+
+Since v0.24.0 the only TLS proxy shipped by Osinara is Traefik, defined once in `infra/traefik/`
+(`compose.yaml` and `dynamic/osinara.yaml`). The installer asks how HTTPS is published and records the
+answer in `/opt/osinara/tls/.env` as `OSINARA_TLS_MODE`; `osinara status`, `doctor`, `logs`, and
+`restart` read that line and refuse a file without it.
+
+| Mode | What the installer does | Preflight |
+| --- | --- | --- |
+| `managed` | Writes `/opt/osinara/tls/compose.yaml` (Traefik 3, project `osinara-tls`) and starts it after the application. | Ports `80`, `443` and `8082` must be free. |
+| `external` | Writes no Compose file and starts no proxy. The operator's existing proxy must publish `https://HOSTNAME` itself. | Port `8082` must be free. The installer briefly answers `127.0.0.1:8082/eve/v1/health` with a random token and requests `https://HOSTNAME/eve/v1/health`: the token proves a host-level proxy forwards end to end; `502`/`503`/`504` is accepted from a containerized proxy whose upstream `edge` does not exist yet; any other answer (`OSINARA_INSTALL_EXTERNAL_PROXY_MISROUTED`) or no answer (`OSINARA_INSTALL_EXTERNAL_PROXY_UNREACHABLE`) fails the install before migration. |
+
+Files under `/opt/osinara/tls/` (all `root:root`):
+
+| Path | Mode | Purpose |
+| --- | --- | --- |
+| `.env` | `0600` | `OSINARA_HOSTNAME=…` and `OSINARA_TLS_MODE=managed` or `OSINARA_TLS_MODE=external`. |
+| `compose.yaml` | `0644` | Traefik project; present only in `managed` mode. |
+| `dynamic/` | `0750` | Traefik file-provider directory, watched for changes. |
+| `dynamic/osinara.yaml` | `0644` | Osinara router: `Host(HOSTNAME)` → `http://edge:80` with a `/eve/v1/health` health check. The installer substitutes the real hostname, so the file needs no environment. Written in both modes; in `external` mode it is a reference for the operator's own proxy configuration. |
+
+**Sharing the managed Traefik with other projects on the same host.** Add one file per project to
+`/opt/osinara/tls/dynamic/` (for example `yana.yaml`) with its own routers, services, and middlewares.
+Traefik picks the file up without a restart. Never edit `osinara.yaml`: a future reinstall rewrites it.
+Certificates for every hostname are issued by the same `letsencrypt` resolver.
+
+**Publishing Osinara through an external proxy.** Configure the proxy before running the installer.
+A proxy running on the host itself (or a container with `network_mode: host`) forwards
+`https://HOSTNAME` to `http://127.0.0.1:8082`, the loopback-only edge port. A containerized proxy
+instead joins `osinara-production-edge-frontend` after the installation has created it
+(`docker network connect osinara-production-edge-frontend PROXY`) and forwards to `http://edge:80`;
+the installer waits up to fifteen minutes for public HTTPS in external mode to leave time for that
+step. `dynamic/osinara.yaml` is only a reference for that configuration, not a drop-in file: it uses
+the entrypoint name `websecure`, the certificate resolver name `letsencrypt`, and the Docker DNS name
+`edge`, and `/opt/osinara/tls` is readable by root only. (The repository copy in `infra/traefik/dynamic/`
+keeps the `{{ env "OSINARA_HOSTNAME" }}` template for hosts that run Traefik with that variable.) Never bind-mount `/opt/osinara/tls/dynamic` into a foreign proxy before installation: Docker
+would create `/opt/osinara` and the installer would refuse with `OSINARA_INSTALL_EXISTING_STATE`.
+If the installation ends with `OSINARA_INSTALL_STATE_AMBIGUOUS` because public HTTPS never became
+healthy, fix the proxy, confirm `https://HOSTNAME/eve/v1/health`, and finish the Telegram webhook
+registration manually with `setWebhook` using the secret token from `/opt/osinara/.env`; the
+installer never reruns after its migration marker.
+
+**Hosts installed before v0.24.0 (optional).** Such hosts run Traefik from a single
+`/opt/osinara/tls/traefik-dynamic.yaml` and their `tls/.env` lacks `OSINARA_TLS_MODE`. Nothing in the
+release touches that proxy: the deploy controller manages only `osinara-production`, and hosts set up
+by the bridge controller have no `osinara` CLI. Switching to the directory layout is worthwhile only
+when another project is added to the same Traefik or to keep the host aligned with this document.
+As root, one time:
+
+```bash
+# the server has no repository checkout: take the files from the release asset osinara-installation.tar.gz
+tar -xzf osinara-installation.tar.gz -C /tmp installation/traefik-compose.yaml installation/traefik-osinara.yaml
+install -d -m 0750 -o root -g root /opt/osinara/tls/dynamic
+install -m 0644 -o root -g root /tmp/installation/traefik-osinara.yaml /opt/osinara/tls/dynamic/osinara.yaml
+# move every other project's routers/services/middlewares from traefik-dynamic.yaml into dynamic/<project>.yaml
+install -m 0644 -o root -g root /tmp/installation/traefik-compose.yaml /opt/osinara/tls/compose.yaml
+sed -i -e '$a\' /opt/osinara/tls/.env                       # guarantee a trailing newline first
+grep -q '^OSINARA_TLS_MODE=' /opt/osinara/tls/.env || printf 'OSINARA_TLS_MODE=managed\n' >> /opt/osinara/tls/.env
+chmod 0600 /opt/osinara/tls/.env
+docker compose --env-file /opt/osinara/tls/.env --file /opt/osinara/tls/compose.yaml up -d --wait
+curl --fail https://HOSTNAME/eve/v1/health && rm /opt/osinara/tls/traefik-dynamic.yaml*
+```
+
+The `osinara-tls-traefik-data` volume (ACME storage) is preserved by that restart; certificates are
+not reissued.
 
 Eve `0.40.0` uses the official `@workflow/world-postgres` backend in the separate
 `osinara_workflow` database inside the existing PostgreSQL service. The migration gate bootstraps
