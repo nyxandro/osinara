@@ -106,8 +106,12 @@ installation has created it (`docker network connect osinara-production-edge-fro
 forwards to `http://edge:80`; the installer waits up to fifteen minutes for public HTTPS in external
 mode to leave time for that step.
 
-**Migrating a host installed before v0.24.0.** Such hosts run Traefik from a single
-`/opt/osinara/tls/traefik-dynamic.yaml` and may lack `OSINARA_TLS_MODE`. As root, one time:
+**Hosts installed before v0.24.0 (optional).** Such hosts run Traefik from a single
+`/opt/osinara/tls/traefik-dynamic.yaml` and their `tls/.env` lacks `OSINARA_TLS_MODE`. Nothing in the
+release touches that proxy: the deploy controller manages only `osinara-production`, and hosts set up
+by the bridge controller have no `osinara` CLI. Switching to the directory layout is worthwhile only
+when another project is added to the same Traefik or to keep the host aligned with this document.
+As root, one time:
 
 ```bash
 # the server has no repository checkout: take the files from the release asset osinara-installation.tar.gz
