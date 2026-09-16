@@ -20,6 +20,7 @@ import {
   parseBootstrapProcessOutput,
   releaseEnvironmentFromManifest,
 } from "./host-contracts.js";
+import { probeExternalProxy } from "./external-proxy-probe.js";
 import { readInstallationBundle, validateInstallationBundle } from "./installation-bundle.js";
 import { recoverPreMigrationInstallationAttempt } from "./installation-attempt.js";
 import { acquireInstallationLock } from "./installation-lock.js";
@@ -41,10 +42,10 @@ const TLS_ENV_PATH = `${TLS_DIR}/.env`;
 const TLS_COMPOSE_PATH = `${TLS_DIR}/compose.yaml`;
 const TLS_DYNAMIC_DIR = `${TLS_DIR}/dynamic`;
 const TLS_ROUTE_PATH = `${TLS_DYNAMIC_DIR}/osinara.yaml`;
+const EDGE_LOOPBACK_PORT = 8082;
 const HTTPS_ATTEMPTS = 60;
 // An operator attaching their own proxy needs time to connect it after the edge appears.
 const EXTERNAL_HTTPS_ATTEMPTS = 180;
-const EXTERNAL_PROXY_PROBE_TIMEOUT_MS = 10_000;
 const HTTPS_INTERVAL_MS = 5_000;
 const COMMAND_TIMEOUT_MS = 15 * 60 * 1_000;
 const PRODUCTION_DOCKER_RESOURCES = [
@@ -117,30 +118,13 @@ async function assertPortAvailable(port: number): Promise<void> {
     const server = createServer();
     server.once("error", (error) => reject(new InstallerError(
       "OSINARA_INSTALL_PORT_UNAVAILABLE",
-      `Порт ${port} занят. Освободите порты 80 и 443 перед установкой`,
+      `Порт ${port} занят. Освободите его перед установкой`,
       { cause: error },
     )));
     server.listen({ host: "0.0.0.0", port, exclusive: true }, () => {
       server.close((error) => error ? reject(error) : resolve());
     });
   });
-}
-
-/** Any HTTP answer (even 502 before the edge exists) proves the operator's proxy terminates this hostname. */
-async function assertExternalProxyAnswers(hostname: string): Promise<void> {
-  try {
-    await fetch(`https://${hostname}/eve/v1/health`, {
-      redirect: "manual",
-      signal: AbortSignal.timeout(EXTERNAL_PROXY_PROBE_TIMEOUT_MS),
-    });
-  } catch (error) {
-    throw new InstallerError(
-      "OSINARA_INSTALL_EXTERNAL_PROXY_UNREACHABLE",
-      `Существующий прокси не отвечает по https://${hostname}. Настройте на нём пересылку этого имени в Osinara `
-        + "(127.0.0.1:8082 с хоста либо edge:80 в сети osinara-production-edge-frontend) и повторите установку",
-      { cause: error },
-    );
-  }
 }
 
 async function requirePhysicalRootDirectory(path: string): Promise<void> {
@@ -251,7 +235,7 @@ export function createProductionHostOperations(): HostInstallationOperations {
       await writeRootFile(MIGRATION_MARKER_PATH, Buffer.from("migration-started\n", "ascii"), 0o600);
     },
     preflight: async (input: HostTlsInput) => {
-      await assertPortAvailable(8082);
+      await assertPortAvailable(EDGE_LOOPBACK_PORT);
       await dockerCompose(COMPOSE_PATH, [ENV_PATH, RELEASE_ENV_PATH], ["config", "--quiet"]);
       if (input.tlsMode === "managed") {
         await assertPortAvailable(80);
@@ -259,7 +243,7 @@ export function createProductionHostOperations(): HostInstallationOperations {
         await dockerCompose(TLS_COMPOSE_PATH, [TLS_ENV_PATH], ["config", "--quiet"]);
         return;
       }
-      await assertExternalProxyAnswers(input.hostname);
+      await probeExternalProxy({ fetch: globalThis.fetch, hostname: input.hostname, listenPort: EDGE_LOOPBACK_PORT });
     },
     pullImages: async (input: HostTlsInput) => {
       await dockerCompose(COMPOSE_PATH, [ENV_PATH, RELEASE_ENV_PATH], ["pull", "--quiet"]);
