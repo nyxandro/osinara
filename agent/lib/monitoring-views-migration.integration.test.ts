@@ -3,6 +3,7 @@
  *
  * Constructs:
  * - `103_monitoring_views.sql`: aggregate-only views plus a read-only role for the metrics exporter.
+ * - Each view is granted explicitly: a blanket schema grant would also cover future tables.
  * - The security boundary: the exporter role reads counts and ages, never a row of user content.
  */
 import { afterAll, describe, expect, it } from "vitest";
@@ -14,13 +15,13 @@ const describeWithDatabase = integrationTestsEnabled ? describe : describe.skip;
 
 const METRICS_ROLE = "osinara_metrics";
 const MONITORING_VIEWS = [
-  "agent_schedule_runs",
-  "memory_embedding_jobs",
-  "memory_review_batches",
-  "model_availability",
-  "operational_incidents",
-  "runtime_maintenance",
-  "telegram_ingress",
+  "monitoring_agent_schedule_runs",
+  "monitoring_memory_embedding_jobs",
+  "monitoring_memory_review_batches",
+  "monitoring_model_availability",
+  "monitoring_operational_incidents",
+  "monitoring_runtime_maintenance",
+  "monitoring_telegram_ingress",
 ] as const;
 // Reading any of these would turn an infrastructure credential into access to family data.
 const FORBIDDEN_TABLES = [
@@ -51,7 +52,7 @@ describeWithDatabase("103 monitoring views migration", () => {
     for (const view of MONITORING_VIEWS) {
       const granted = await database().query<{ allowed: boolean }>(
         "SELECT has_table_privilege($1, $2, 'SELECT') AS allowed",
-        [METRICS_ROLE, `monitoring.${view}`],
+        [METRICS_ROLE, `public.${view}`],
       );
       expect({ view, allowed: granted.rows[0]?.allowed }).toEqual({ view, allowed: true });
     }
@@ -72,7 +73,7 @@ describeWithDatabase("103 monitoring views migration", () => {
     try {
       await client.query(`SET ROLE ${METRICS_ROLE}`);
       for (const view of MONITORING_VIEWS) {
-        const result = await client.query(`SELECT * FROM monitoring.${view}`);
+        const result = await client.query(`SELECT * FROM public.${view}`);
         const columns = result.fields.map((field) => field.name).sort();
         expect({ view, empty: columns.length === 0 }).toEqual({ view, empty: false });
         // Identifiers of things, never their contents: route_key is a hash, phase and status are enums.
@@ -109,7 +110,7 @@ describeWithDatabase("103 monitoring views migration", () => {
       const result = await client.query<{
         oldest_pending_age_seconds: string;
         pending: string;
-      }>("SELECT pending, oldest_pending_age_seconds FROM monitoring.telegram_ingress");
+      }>("SELECT pending, oldest_pending_age_seconds FROM public.monitoring_telegram_ingress");
 
       expect(result.rowCount).toBe(1);
       expect(Number(result.rows[0]?.pending)).toBeGreaterThanOrEqual(0);

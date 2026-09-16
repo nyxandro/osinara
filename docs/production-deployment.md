@@ -155,8 +155,9 @@ of the deployment contract.
 dispatchers. A stopped scheduler raises no error of its own, so the absence of this line is the
 only evidence that reminders, scheduled scenarios, memory review or update checks stopped running.
 
-Migration `103_monitoring_views.sql` creates schema `monitoring` with aggregate-only views and the
-`osinara_metrics` role, which may read those views and nothing else. The views execute with the
+Migration `103_monitoring_views.sql` creates the aggregate-only `monitoring_*` views and the
+`osinara_metrics` role, granted SELECT on each of them explicitly and on nothing else. A blanket
+grant on the schema was avoided because it would also cover every table added later. The views execute with the
 owner's privileges, so the role sees counts and ages while every base table stays closed to it;
 `agent/lib/monitoring-views-migration.integration.test.ts` verifies both directions. The role is
 created `NOLOGIN`: after the release the operator grants it a password once, as described in
