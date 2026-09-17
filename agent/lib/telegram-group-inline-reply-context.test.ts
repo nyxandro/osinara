@@ -60,6 +60,18 @@ describe("inline group reply context", () => {
     expect(result.currentMessageEnvelope).not.toContain("67890");
   });
 
+  it("names the highlighted fragment next to the full inline reply text", async () => {
+    const result = await preparer([entry("98", "Я не рассылала чужие фото в чат на сорок человек")])({
+      ...input, replyQuotedText: "чат на сорок человек",
+    });
+    expect(envelope(result.currentMessageEnvelope)).toEqual({
+      sourceSequence: "100", triggeredBy: "reply_to_agent", senderDisplayName: "Максим Функ", senderUsername: "WangW19",
+      replyToSequenceId: "98", text: "Добавь и выполни",
+      replyTo: { senderKind: "user", senderDisplayName: "Nikita Pastukhov", text: "Я не рассылала чужие фото в чат на сорок человек" },
+      replyQuotedText: "чат на сорок человек",
+    });
+  });
+
   it.each(["agent_self", "telegram_bot", "telegram_channel"] as const)("preserves the actual sender kind: %s", async (actorKind) => {
     const result = await preparer([{ ...entry("98", "Ответ"), actorKind, senderDisplayName: "Осинара" }])(input);
     expect(envelope(result.currentMessageEnvelope).replyTo).toEqual({
@@ -95,7 +107,7 @@ describe("inline group reply context", () => {
   });
 
   it("preserves the existing verified Telegram snapshot when the journal target is absent", async () => {
-    const snapshot = { contentText: "Исходное сообщение", quotedText: "сообщение", senderDisplayName: "Анна", senderUsername: "anna" };
+    const snapshot = { contentText: "Исходное сообщение", senderDisplayName: "Анна", senderUsername: "anna" };
     const result = await preparer([])({ ...input, replyToSequenceId: null, replyTargetUnavailable: true, replyTargetSnapshot: snapshot });
     expect(envelope(result.currentMessageEnvelope)).toHaveProperty("replyTargetSnapshot", snapshot);
     expect(envelope(result.currentMessageEnvelope)).not.toHaveProperty("replyTo");

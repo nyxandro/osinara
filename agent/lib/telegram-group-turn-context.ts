@@ -43,6 +43,8 @@ interface PrepareTelegramGroupTurnContextInput {
   groupId: string | null;
   messageText: string;
   messageThreadId: string | null;
+  /** Exact fragment of the reply target the author highlighted in Telegram, when they did. */
+  replyQuotedText?: string | null;
   replyTargetSnapshot?: TelegramReplyTargetSnapshot | null;
   replyTargetUnavailable: boolean;
   replyToSequenceId: string | null;
@@ -97,6 +99,7 @@ function currentTelegramMessageEnvelope(
     | "currentSenderUsername"
     | "currentSequence"
     | "messageText"
+    | "replyQuotedText"
     | "replyTargetSnapshot"
     | "replyTargetUnavailable"
     | "replyToSequenceId"
@@ -130,6 +133,7 @@ function currentTelegramMessageEnvelope(
       senderDisplayName: inlineReply.senderDisplayName,
       text: inlineReply.contentText,
     } } : {}),
+    ...(input.replyQuotedText ? { replyQuotedText: input.replyQuotedText } : {}),
     text: input.messageText,
   });
   return `${CURRENT_MESSAGE_OPEN_TAG}\n${currentMessage}\n${CURRENT_MESSAGE_CLOSE_TAG}`;

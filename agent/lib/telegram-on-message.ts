@@ -51,7 +51,7 @@ import {
 } from "./telegram-reply-routing.js";
 import { authorizeTelegramReply } from "./telegram-reply-authorization.js";
 import { telegramReplyAttachmentTarget } from "./telegram-reply-attachment.js";
-import { telegramReplyTargetSnapshot } from "./telegram-reply-target-snapshot.js";
+import { telegramReplyTargetProjection } from "./telegram-reply-target-snapshot.js";
 import {
   productionTelegramMessageRepositories,
   type TelegramMessageRepositories,
@@ -392,9 +392,13 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
         now: turnStartedAt,
       })
       : null;
+    // One verification of the reply target serves both projections: its full text is needed only
+    // when the application cannot resolve the target itself, the highlighted fragment always.
+    const replyTarget = telegramReplyTargetProjection(message);
     const replyTargetSnapshot = inboundTimeline?.replyTargetUnavailable
-      ? telegramReplyTargetSnapshot(message)
+      ? replyTarget.snapshot
       : null;
+    const replyQuotedText = replyTarget.quotedText;
     const preparedGroupTurnContext = inboundTimeline
       ? await repositories.groupContext.prepare({
           applicationSessionId: appSession.id,
@@ -414,6 +418,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
           groupId: group?.groupId ?? null,
           messageText: dispatchText,
           messageThreadId: forumTopicId,
+          ...(replyQuotedText === null ? {} : { replyQuotedText }),
           ...(replyTargetSnapshot === null ? {} : { replyTargetSnapshot }),
           replyTargetUnavailable: inboundTimeline.replyTargetUnavailable,
           replyToSequenceId: inboundTimeline.replyToSequenceId,

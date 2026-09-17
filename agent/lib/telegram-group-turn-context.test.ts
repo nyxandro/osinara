@@ -215,7 +215,6 @@ describe("Telegram group turn context", () => {
       currentSequence: "101",
       replyTargetSnapshot: {
         contentText: "У меня настроен vless, ссылочку кинул в streisand",
-        quotedText: "streisand",
         senderDisplayName: "nlp_daily",
         senderUsername: "nlp_daily",
       },
@@ -223,9 +222,87 @@ describe("Telegram group turn context", () => {
     });
 
     expect(result.durableMessage).toContain('"replyTargetSnapshot":{');
-    expect(result.durableMessage).toContain('"quotedText":"streisand"');
     expect(result.durableMessage).toContain("У меня настроен vless");
     expect(result.durableMessage).not.toContain('"replyTargetUnavailable":true');
+    expect(result.durableMessage).not.toContain("replyToSequenceId");
+  });
+
+  it("keeps the highlighted fragment beside the unavailable target it belongs to", async () => {
+    const prepare = createTelegramGroupTurnContextPreparer(dependencies("100"));
+
+    const result = await prepare({
+      ...input,
+      currentSequence: "101",
+      replyQuotedText: "ссылочку кинул в streisand",
+      replyTargetSnapshot: {
+        contentText: "У меня настроен vless, ссылочку кинул в streisand",
+        senderDisplayName: "nlp_daily",
+        senderUsername: "nlp_daily",
+      },
+      replyTargetUnavailable: true,
+    });
+
+    expect(result.durableMessage).toContain('"replyQuotedText":"ссылочку кинул в streisand"');
+    expect(result.durableMessage).toContain('"replyTargetSnapshot":{');
+  });
+
+  it("keeps the highlighted fragment of a reply target resolved through the timeline", async () => {
+    const deps = dependencies("99");
+    deps.journal.listIncremental.mockResolvedValue({
+      entries: [entry("100", "Я не рассылала чужие пикантные фото в чат на сорок человек")],
+      omittedBeforeSequence: null,
+    });
+    const prepare = createTelegramGroupTurnContextPreparer(deps);
+
+    const result = await prepare({
+      ...input,
+      currentSequence: "101",
+      messageText: "опа, а шо это значит",
+      replyQuotedText: "чат на сорок человек",
+      replyToSequenceId: "100",
+    });
+
+    expect(result.durableMessage).toContain('"replyQuotedText":"чат на сорок человек"');
+    expect(result.durableMessage).toContain('"replyToSequenceId":"100"');
+    expect(currentTelegramMessageText(result.durableMessage)).toBe("опа, а шо это значит");
+  });
+
+  it("keeps the highlighted fragment of a private reply re-delivered without its linkage", async () => {
+    // The duplicate branch of a private conversation reports no reply linkage, while the raw reply
+    // target was already verified upstream.
+    const timeline = { listIncremental: vi.fn(), listRecent: vi.fn().mockResolvedValue([]) };
+    const prepare = createTelegramGroupTurnContextPreparer({ ...dependencies(null), timeline });
+    const { triggeredBy: _omitted, ...privateInput } = input;
+
+    const result = await prepare({
+      ...privateInput,
+      conversationId: "conversation-personal-1",
+      currentSequence: "101",
+      groupId: null,
+      replyQuotedText: "чат на сорок человек",
+    });
+
+    expect(result.durableMessage).toContain('"replyQuotedText":"чат на сорок человек"');
+  });
+
+  it("keeps the highlighted fragment when its target does not fit the context budget", async () => {
+    const deps = dependencies("99");
+    deps.journal.listIncremental.mockResolvedValue({
+      entries: [entry("100", "ц".repeat(12_000))],
+      omittedBeforeSequence: null,
+    });
+    const prepare = createTelegramGroupTurnContextPreparer(deps);
+
+    const result = await prepare({
+      ...input,
+      currentSequence: "101",
+      replyQuotedText: "чат на сорок человек",
+      replyToSequenceId: "100",
+    });
+
+    // The evicted target leaves the fragment as its only trace; the envelope still denies a guess.
+    expect(result.durableMessage).toContain('"replyTargetUnavailable":true');
+    expect(result.durableMessage).toContain('"replyQuotedText":"чат на сорок человек"');
     expect(result.durableMessage).not.toContain("replyToSequenceId");
   });
 
