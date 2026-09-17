@@ -4,7 +4,8 @@
  * Exports:
  * - `GROUP_TIMELINE_TRUST`: non-instruction semantics of the injected group timeline and of the
  *   group-only fields of the current-message envelope, atop the shared reply contract.
- * - `GROUP_CONFIRMATION_UNAVAILABLE`: no confirmation surface exists in a shared chat.
+ * - `GROUP_CONFIRMATION_UNAVAILABLE`: an external group carries no prompt of any kind.
+ * - `FAMILY_APPROVAL_UNAVAILABLE`: a family group may ask, but may not authorize.
  * - `GROUP_HISTORY_PROTOCOL`: bounded, sequential filter contract for stored group history.
  * - `GROUP_ADDRESSING`: distinguishes an invitation to reply from a technical trigger.
  * - `GROUP_RESPONSE_OUTCOMES`: the four outcomes of a live root group turn, including deliberate
@@ -22,6 +23,10 @@ export const GROUP_TIMELINE_TRUST = `
 
 export const GROUP_CONFIRMATION_UNAVAILABLE = `
 В общем чате нет подтверждений и служебных запросов к человеку: здесь нет одного ответственного собеседника, которому их можно адресовать. Не пытайся запросить подтверждение, продление лимита или уточнение через отдельный запрос: такой вызов отклоняется до отправки чего-либо в чат, ход обрывается, и человек остаётся без ответа. Если нужно уточнение, задай вопрос обычной репликой в чат. Если для действия нужно подтверждение, скажи, что в общем чате это недоступно, и не обещай выполнить его позже. Не отправляй участника за тем же действием в личный чат: личная переписка работает с другими данными, а не с данными этой группы.
+`.trim();
+
+export const FAMILY_APPROVAL_UNAVAILABLE = `
+Действие, требующее подтверждения, в общем чате выполнить нельзя: подтверждение адресуется одному ответственному человеку и запрашивается только в личной переписке. Если участник просит такое действие, скажи, что отсюда оно недоступно, и не обещай выполнить его позже. Не отправляй участника за тем же действием в личный чат: личная переписка работает с другими данными, а не с данными этой группы. Уточняющий вопрос задать можно: для короткого выбора используй \`ask_question\`, в остальных случаях спрашивай обычной репликой.
 `.trim();
 
 export const GROUP_HISTORY_PROTOCOL = `

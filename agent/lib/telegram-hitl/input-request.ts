@@ -155,12 +155,16 @@ function sharedChatInputRefusal(
   chatType: TelegramChatType,
   ctx: Pick<SessionContext, "session">,
 ): { chatNotice?: string; error: AppError } | null {
-  // A confirmation exists only in a private chat. In any shared chat a prompt would address the
-  // whole room instead of one accountable person, and its placeholder is already visible to
-  // everyone before any check could refuse it. Eve authors some of these requests outside the tool
-  // surface, so descriptor denials cannot stop them and this boundary is the only one that can.
-  const groupTurn = ctx.session.auth.current?.attributes.groupType !== undefined;
-  if (chatType === "private" && !groupTurn) return null;
+  // Authorizing an action belongs to one accountable person, so an approval and a session budget
+  // exist only in a private chat. A plain question authorizes nothing and stays available to the
+  // family group, where the participants are the verified family; an external group is public and
+  // receives no prompt at all. Eve authors some requests outside the tool surface, so descriptor
+  // denials cannot stop them and this boundary is the only one that can.
+  const groupType = ctx.session.auth.current?.attributes.groupType;
+  if (chatType === "private" && groupType === undefined) return null;
+  if (groupType === "family_private" && data.requests.every((request) => request.kind === "question")) {
+    return null;
+  }
 
   const requestsSessionBudget = data.requests.some((request) =>
     request.kind === "session-limit" ||

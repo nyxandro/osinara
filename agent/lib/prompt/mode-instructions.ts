@@ -39,8 +39,8 @@ import {
   externalPurposeSection,
 } from "./external-fragments.js";
 import {
+  FAMILY_APPROVAL_UNAVAILABLE,
   GROUP_ADDRESSING,
-  GROUP_CONFIRMATION_UNAVAILABLE,
   GROUP_HISTORY_PROTOCOL,
   GROUP_RESPONSE_OUTCOMES,
   GROUP_TIMELINE_TRUST,
@@ -177,7 +177,7 @@ ${GROUP_TIMELINE_TRUST}
 ${GROUP_HISTORY_PROTOCOL}`,
   `## Подтверждения действий
 
-${GROUP_CONFIRMATION_UNAVAILABLE}`,
+${FAMILY_APPROVAL_UNAVAILABLE}`,
   trustedWorkspaceRules("family"),
   WORKSPACE_ARTIFACT_LOOKUP,
   trustedCredentialRules("family"),

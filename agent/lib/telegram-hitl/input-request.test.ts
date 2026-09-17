@@ -34,8 +34,8 @@ describe("createTelegramInputRequestHandler", () => {
     {
       code: "AGENT_EXTERNAL_APPROVAL_FORBIDDEN",
       groupType: "external",
-      kind: "tool-approval",
-      signal: "a framework question Eve authors outside the tool surface",
+      kind: "question",
+      signal: "a framework question, which a public chat cannot carry either",
       toolName: "ask_question",
     },
     {
@@ -582,6 +582,138 @@ describe("createTelegramInputRequestHandler", () => {
       }],
     } as never, channel, ctx)).rejects.toThrow("AGENT_EXTERNAL_APPROVAL_FORBIDDEN");
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("asks the family group a plain question, which authorizes nothing", async () => {
+    const parkSession = vi.fn();
+    const register = vi.fn();
+    const request = vi.fn().mockImplementation(async (method: string) => method === "sendMessage"
+      ? { body: { ok: true, result: { message_id: 95 } }, ok: true, status: 200 }
+      : { body: {}, ok: true, status: 200 });
+    const handler = createTelegramInputRequestHandler({
+      approvals: { register },
+      parkSession,
+      present: async (input) => input,
+      registerMessageRoutes: vi.fn(),
+    });
+    const channel = {
+      state: {
+        botUsername: "osinara_bot",
+        chatId: "-1001",
+        chatType: "supergroup",
+        conversationId: "77",
+        hitlCallbacks: {},
+        messageThreadId: null,
+        nextHitlCallbackId: 0,
+        pendingFreeformReplies: {},
+        triggeringUserId: "101",
+      },
+      telegram: { request },
+    } as unknown as TelegramEventContext;
+    const ctx = {
+      session: {
+        auth: {
+          current: {
+            attributes: {
+              applicationSessionId: "app-session-1",
+              groupId: "group-1",
+              groupType: "family_private",
+              telegramChatId: "-1001",
+              telegramChatType: "supergroup",
+              telegramUserId: "101",
+            },
+            authenticator: "telegram",
+            principalId: "user-1",
+            principalType: "user",
+          },
+          initiator: null,
+        },
+        id: "wrun_hitl",
+        turn: { id: "turn-1", sequence: 1 },
+      },
+    } as unknown as SessionContext;
+
+    await handler({
+      requests: [{
+        action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "ask_question" },
+        display: "text",
+        kind: "question",
+        options: [{ id: "yes", label: "Да", style: "primary" }],
+        prompt: "Какой вариант выбрать?",
+        requestId: "request-question",
+      }],
+    } as never, channel, ctx);
+
+    expect(parkSession).toHaveBeenCalled();
+    expect(register).toHaveBeenCalledWith(expect.objectContaining({ telegramChatType: "supergroup" }));
+  });
+
+  it("still refuses an authorization in the family group even next to a question", async () => {
+    const parkSession = vi.fn();
+    const handler = createTelegramInputRequestHandler({
+      approvals: { register: vi.fn() },
+      parkSession,
+      present: vi.fn(),
+      registerMessageRoutes: vi.fn(),
+    });
+    const channel = {
+      state: {
+        botUsername: "osinara_bot",
+        chatId: "-1001",
+        chatType: "supergroup",
+        conversationId: "77",
+        hitlCallbacks: {},
+        messageThreadId: null,
+        nextHitlCallbackId: 0,
+        pendingFreeformReplies: {},
+        triggeringUserId: "101",
+      },
+      telegram: { request: vi.fn() },
+    } as unknown as TelegramEventContext;
+    const ctx = {
+      session: {
+        auth: {
+          current: {
+            attributes: {
+              applicationSessionId: "app-session-1",
+              groupType: "family_private",
+              telegramChatId: "-1001",
+              telegramChatType: "supergroup",
+              telegramUserId: "101",
+            },
+            authenticator: "telegram",
+            principalId: "user-1",
+            principalType: "user",
+          },
+          initiator: null,
+        },
+        id: "wrun_hitl",
+        turn: { id: "turn-1", sequence: 1 },
+      },
+    } as unknown as SessionContext;
+
+    // One batch may carry both: an approval inside it must not ride in on the question.
+    await expect(handler({
+      requests: [
+        {
+          action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "ask_question" },
+          display: "text",
+          kind: "question",
+          options: [],
+          prompt: "Какой вариант выбрать?",
+          requestId: "request-question",
+        },
+        {
+          action: { callId: "call-2", input: {}, kind: "tool-call", toolName: "manage_gmail_message" },
+          display: "confirmation",
+          kind: "tool-approval",
+          options: [],
+          prompt: "Approve tool call",
+          requestId: "request-approval",
+        },
+      ],
+    } as never, channel, ctx)).rejects.toThrow("AGENT_EXTERNAL_APPROVAL_FORBIDDEN");
+    expect(parkSession).not.toHaveBeenCalled();
   });
 
   it("does not park a session when semantic presentation fails", async () => {
