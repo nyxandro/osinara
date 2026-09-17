@@ -7,14 +7,15 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
+import { groupApprovalDenial } from "../telegram-hitl/approval-surface.js";
 import { requireWorkspaceAuthorization } from "./workspace-context.js";
 import { validateWorkspacePath } from "./workspace-path.js";
 import { workspaceRepository } from "./workspace-repository.js";
 
 export const removeGroupFileTool = defineTool({
-  approval: ({ toolInput }) => {
+  approval: ({ session, toolInput }) => {
     validateWorkspacePath(toolInput?.path ?? "");
-    return "user-approval";
+    return groupApprovalDenial({ session }) ?? "user-approval";
   },
   description: [
     "Безвозвратно удалить один файл из workspace текущей внешней группы.",

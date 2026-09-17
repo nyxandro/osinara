@@ -75,7 +75,9 @@ describe("trusted mode tool surfaces", () => {
   });
 
   it("gives a family group the shared tools plus group history and attachments only", () => {
-    expect(names({ environment: "family" })).toEqual([...TRUSTED_MODE_TOOL_NAMES, ...FAMILY_ONLY_TOOL_NAMES].sort());
+    // The family group is trusted but shared, so the framework question is the one overridden name.
+    expect(names({ environment: "family" }))
+      .toEqual(["ask_question", ...TRUSTED_MODE_TOOL_NAMES, ...FAMILY_ONLY_TOOL_NAMES].sort());
     expect(names({ environment: "family" })).not.toContain("manage_external_group_schedule");
   });
 
@@ -109,12 +111,13 @@ describe("trusted mode tool surfaces", () => {
     }
   });
 
-  it("emits no denial stubs in a trusted zone", () => {
-    for (const environment of ["private", "family"] as const) {
-      for (const denied of FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS) {
-        expect(names({ environment }), `${environment} must not override ${denied}`).not.toContain(denied);
-      }
+  it("overrides a framework built-in only where the chat cannot carry it", () => {
+    for (const denied of FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS) {
+      expect(names({ environment: "private" }), `private must not override ${denied}`)
+        .not.toContain(denied);
     }
+    // Bash stays available to the family group; only the prompt-bound question cannot be delivered.
+    expect(names({ environment: "family" })).not.toContain("bash");
   });
 
   it("keeps HITL approval configuration after dynamic emission", () => {
@@ -336,6 +339,15 @@ describe("external group tool surface", () => {
     for (const toolName of ["ask_question", "bash"]) {
       await expect(surface[toolName]!.execute({}, {} as never), `${toolName} must be denied`).rejects.toThrowError(/AGENT_GROUP_TOOL_FORBIDDEN/);
     }
+  });
+
+  it("denies the framework question in the family group, where no prompt can be shown", async () => {
+    const family = buildModeToolSurface({ environment: "family" });
+    const privateChat = buildModeToolSurface({ environment: "private" });
+
+    await expect(family.ask_question!.execute({}, {} as never))
+      .rejects.toThrowError(/AGENT_SHARED_CHAT_QUESTION_FORBIDDEN/);
+    expect(privateChat.ask_question).toBeUndefined();
   });
 
   it("denies a capability revoked after descriptor resolution despite a stale auth grant", async () => {

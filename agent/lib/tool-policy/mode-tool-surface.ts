@@ -245,6 +245,23 @@ function deniedTool(toolName: string): AnyToolDefinition {
   }) as unknown as AnyToolDefinition;
 }
 
+// Eve registers `ask_question` for every mode and 0.40.0 cannot hide a framework descriptor. In a
+// shared chat its prompt has no accountable addressee and the channel refuses it, which would end
+// the turn with nothing delivered, so the family group receives an explicit denial instead.
+function sharedChatQuestionDenied(): AnyToolDefinition {
+  return defineTool({
+    description:
+      "Недоступно в общем чате: уточняющий вопрос задаётся обычной репликой в чат, а не отдельным запросом.",
+    inputSchema: DENIED_TOOL_INPUT,
+    async execute() {
+      throw new AppError(
+        "AGENT_SHARED_CHAT_QUESTION_FORBIDDEN",
+        "В общем чате уточнение запрашивается обычным сообщением. Задайте вопрос репликой в чат",
+      );
+    },
+  }) as unknown as AnyToolDefinition;
+}
+
 function allowedDirectTool(capability: DirectExternalToolName, definition: AnyToolDefinition): AnyToolDefinition {
   return defineTool({
     ...definition,
@@ -375,6 +392,7 @@ const TRUSTED_SURFACES: Readonly<Record<"family" | "private", ToolMap>> = {
   family: wrapModelFacingToolMap({
     ...TRUSTED_MODE_TOOLS,
     ...FAMILY_ONLY_TOOLS,
+    ask_question: sharedChatQuestionDenied(),
   }),
   private: wrapModelFacingToolMap({
     ...TRUSTED_MODE_TOOLS,

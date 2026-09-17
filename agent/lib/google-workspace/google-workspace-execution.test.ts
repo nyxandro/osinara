@@ -27,10 +27,39 @@ const familyAuth = {
   workspaceId: "00000000-0000-4000-8000-000000000004",
 };
 
-function approval(argv: string[]) {
+const PRIVATE_TURN = {
+  session: {
+    auth: {
+      current: {
+        attributes: { telegramChatId: "101", telegramChatType: "private", telegramUserId: "101" },
+        authenticator: "telegram",
+        principalId: "user-1",
+        principalType: "user",
+      },
+    },
+  },
+} as never;
+
+const FAMILY_GROUP_TURN = {
+  session: {
+    auth: {
+      current: {
+        attributes: {
+          groupId: "group-1", groupType: "family_private",
+          telegramChatId: "-1001", telegramChatType: "supergroup", telegramUserId: "101",
+        },
+        authenticator: "telegram",
+        principalId: "user-1",
+        principalType: "user",
+      },
+    },
+  },
+} as never;
+
+function approval(argv: string[], turn: never = PRIVATE_TURN) {
   return (executeGoogleWorkspace as unknown as {
-    approval: (context: { toolInput?: { argv: string[] } }) => unknown;
-  }).approval({ toolInput: { argv } });
+    approval: (context: { session: unknown; toolInput?: { argv: string[] } }) => unknown;
+  }).approval({ session: (turn as { session: unknown }).session, toolInput: { argv } });
 }
 
 function toolDescription(): string {
@@ -56,6 +85,13 @@ function dependencies(auth: GoogleIntegrationAuthorization = personalAuth) {
 }
 
 describe("execute_google_workspace approval", () => {
+  it("keeps reading available in a group turn and denies only the mutation", () => {
+    expect(approval(["calendar", "events", "list", "--params", "{}"], FAMILY_GROUP_TURN))
+      .toBe("not-applicable");
+    expect(approval(["calendar", "events", "insert", "--json", "{}"], FAMILY_GROUP_TURN))
+      .toMatchObject({ reason: expect.stringContaining("AGENT_APPROVAL_SURFACE_UNAVAILABLE"), type: "denied" });
+  });
+
   it("requires approval for every mutation and denies unreviewed commands", () => {
     expect(approval(["calendar", "events", "list", "--params", "{}"])).toBe(
       "not-applicable",

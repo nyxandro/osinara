@@ -2,7 +2,8 @@
  * Structured Gmail message mutation tool tests.
  *
  * Constructs covered:
- * - Every supported message-state action requires Eve HITL.
+ * - Every supported message-state action requires Eve HITL in a private chat.
+ * - A group turn is refused as an ordinary tool denial, because no confirmation can be shown there.
  * - The backend, not the model, compiles the exact gws argv after approval.
  * - Only the published action/messageId/profileRef contract reaches execution.
  */
@@ -13,13 +14,52 @@ import manageGmailMessage, {
   createGmailMessageManager,
 } from "../tools/manage_gmail_message.js";
 
-function approvalFor(input: Record<string, unknown>) {
+const PRIVATE_TURN = {
+  session: {
+    auth: {
+      current: {
+        attributes: { telegramChatId: "101", telegramChatType: "private", telegramUserId: "101" },
+        authenticator: "telegram",
+        principalId: "user-1",
+        principalType: "user",
+      },
+    },
+  },
+} as never;
+
+const FAMILY_GROUP_TURN = {
+  session: {
+    auth: {
+      current: {
+        attributes: {
+          groupId: "group-1", groupType: "family_private",
+          telegramChatId: "-1001", telegramChatType: "supergroup", telegramUserId: "101",
+        },
+        authenticator: "telegram",
+        principalId: "user-1",
+        principalType: "user",
+      },
+    },
+  },
+} as never;
+
+function approvalFor(input: Record<string, unknown>, turn: never = PRIVATE_TURN) {
   return (manageGmailMessage as unknown as {
-    approval: (context: { toolInput: Record<string, unknown> }) => unknown;
-  }).approval({ toolInput: input });
+    approval: (context: { session: unknown; toolInput: Record<string, unknown> }) => unknown;
+  }).approval({ session: (turn as { session: unknown }).session, toolInput: input });
 }
 
 describe("manage_gmail_message", () => {
+  it("denies a message mutation in a group turn instead of losing the turn to a refused prompt", () => {
+    const denial = approvalFor(
+      { action: "trash", messageId: "18f", profileRef: "gws_personal" },
+      FAMILY_GROUP_TURN,
+    ) as { reason: string; type: string };
+
+    expect(denial.type).toBe("denied");
+    expect(denial.reason).toContain("AGENT_APPROVAL_SURFACE_UNAVAILABLE");
+  });
+
   it("publishes only structured message-state actions", () => {
     const schema = z.toJSONSchema((manageGmailMessage as unknown as {
       inputSchema: Parameters<typeof z.toJSONSchema>[0];

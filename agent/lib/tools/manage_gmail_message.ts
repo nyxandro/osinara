@@ -9,6 +9,7 @@ import {
   requireGmailMessageInput,
 } from "../google-workspace/gmail-message-contract.js";
 import { executeGoogleWorkspace } from "../google-workspace/google-workspace-executor.js";
+import { groupApprovalDenial } from "../telegram-hitl/approval-surface.js";
 
 interface GmailMessageManagerDependencies {
   execute(
@@ -30,9 +31,9 @@ export function createGmailMessageManager(dependencies: GmailMessageManagerDepen
 const manageGmailMessage = createGmailMessageManager({ execute: executeGoogleWorkspace });
 
 export default defineTool({
-  approval: ({ toolInput }) => {
+  approval: ({ session, toolInput }) => {
     requireGmailMessageInput(toolInput);
-    return "user-approval";
+    return groupApprovalDenial({ session }) ?? "user-approval";
   },
   description: [
     "Изменить состояние одного точного Gmail-письма: корзина, безвозвратное удаление, восстановление, прочитано или не прочитано.",

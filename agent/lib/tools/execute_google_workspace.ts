@@ -9,6 +9,7 @@ import { z } from "zod";
 
 import { AppError } from "../app-error.js";
 import { classifyModelFacingGoogleWorkspaceCommand } from "../google-workspace/google-workspace-command-policy.js";
+import { groupApprovalDenial } from "../telegram-hitl/approval-surface.js";
 import {
   executeGoogleWorkspace,
 } from "../google-workspace/google-workspace-executor.js";
@@ -22,11 +23,12 @@ const commandSchema = z.object({
 }).strict();
 
 export default defineTool({
-  approval: ({ toolInput }) => {
+  approval: ({ session, toolInput }) => {
     try {
-      return classifyModelFacingGoogleWorkspaceCommand(toolInput?.argv ?? []) === "mutation"
-        ? "user-approval"
-        : "not-applicable";
+      if (classifyModelFacingGoogleWorkspaceCommand(toolInput?.argv ?? []) !== "mutation") {
+        return "not-applicable";
+      }
+      return groupApprovalDenial({ session }) ?? "user-approval";
     } catch (error) {
       return {
         type: "denied",
