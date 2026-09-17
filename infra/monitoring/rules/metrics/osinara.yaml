@@ -107,6 +107,20 @@ groups:
           description: 'Приложение потеряло соединение с PostgreSQL. Сообщения пользователей не обрабатываются или обрабатываются частично.'
           runbook: 'Проверить контейнер postgres, его проверку здоровья и журнал на предмет аварийного перезапуска.'
 
+      # Осинара сама отклонила цель ответа: сообщение, на которое ответил человек, не принадлежит
+      # текущему чату, либо разобранный и сырой апдейт назвали разные сообщения. Ни того, ни другого
+      # Telegram в норме не присылает, поэтому одной строки достаточно для тревоги: это либо смена
+      # формата Bot API, либо подделанный апдейт.
+      - alert: OsinaraReplyTargetRejected
+        expr: sum(sum_over_time(log_code_lines_1m{project="osinara-production", code="AGENT_TELEGRAM_REPLY_TARGET_REJECTED"}[15m])) > 0
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Отклонена цель ответа в Telegram'
+          description: 'Приложение отказалось принять сообщение, на которое отвечал человек: оно из другого чата либо идентификаторы в апдейте разошлись. Для пользователя ответ теряет контекст цитаты. В штатной работе этого не бывает.'
+          runbook: 'В строке есть reason: foreign_chat — цель из другого чата, identity_mismatch — расхождение внутри апдейта. Разовый случай разбирать по telegramChatId и telegramReplyTargetMessageId; массовые identity_mismatch означают смену формата Bot API или разбора в Eve.'
+
       - alert: OsinaraIncidentDeliveryUnconfirmed
         expr: sum(sum_over_time(log_code_lines_1m{project="osinara-production", code="AGENT_INCIDENT_DELIVERY_UNCONFIRMED"}[15m])) > 0
         labels:
