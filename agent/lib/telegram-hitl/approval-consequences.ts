@@ -2,7 +2,7 @@
  * Consequence wording shared by approval composition and settlement.
  *
  * Exports:
- * - `DEFAULT_CONSEQUENCE`, `GOOGLE_WORKSPACE_CONSEQUENCE`, `SCHEDULE_CONSEQUENCES`.
+ * - `DEFAULT_CONSEQUENCE`, `GOOGLE_WORKSPACE_CONSEQUENCE`, and the group policy sentences.
  * - `allApprovalConsequences`: every sentence a settled prompt may need stripped.
  *
  * Key constructs:
@@ -29,15 +29,6 @@ export const GROUP_TOOLS_BASH_CONSEQUENCE =
 export const GROUP_TOOLS_NO_BASH_CONSEQUENCE =
   "Права группы будут заменены указанным списком. Bash и все скиллы, которым он нужен, будут отключены. Текущие процессы группы будут остановлены, её файлы сохранятся.";
 
-export const SCHEDULE_CONSEQUENCES: Readonly<Record<string, string>> = {
-  create: "Будет создан новый автоматический запуск агента по указанному сценарию.",
-  delete: "Расписание и все его будущие автоматические запуски будут удалены.",
-  pause: "Будущие автоматические запуски остановятся до ручного возобновления.",
-  resume: "Автоматические запуски возобновятся по сохранённому расписанию.",
-  run_now: "Сценарий будет запущен один раз сейчас; обычное расписание не изменится.",
-  update: "Сохранённые параметры расписания будут заменены указанными изменениями.",
-};
-
 export function allApprovalConsequences(): string[] {
   return [
     DEFAULT_CONSEQUENCE,
@@ -45,6 +36,5 @@ export function allApprovalConsequences(): string[] {
     PROFILE_PROJECTION_DISABLE_CONSEQUENCE,
     GOOGLE_WORKSPACE_CONSEQUENCE,
     GROUP_SKILLS_BASH_CONSEQUENCE, GROUP_SKILLS_CONSEQUENCE, GROUP_TOOLS_BASH_CONSEQUENCE, GROUP_TOOLS_NO_BASH_CONSEQUENCE,
-    ...Object.values(SCHEDULE_CONSEQUENCES),
   ];
 }
