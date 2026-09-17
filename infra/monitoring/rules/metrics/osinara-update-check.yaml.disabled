@@ -1,0 +1,20 @@
+# Enable by renaming to .yaml once the six-hourly software update check has run at least once
+# since the release (around 06:00 UTC). Before that the series has never existed and the rule
+# fires the moment it is loaded.
+groups:
+  - name: osinara-heartbeat-six-hourly
+    interval: 30s
+    rules:
+      - alert: OsinaraSchedulerHeartbeatMissing
+        expr: >-
+          absent_over_time(osinara_schedule_tick_1m{schedule="software-update-check"}[7h])
+          and on() present_over_time(log_lines_1m{project="osinara-production"}[5m])
+        labels:
+          severity: warning
+          project: osinara-production
+          schedule: software-update-check
+        annotations:
+          summary: 'Проверка обновлений не выполнялась более 7 часов'
+          description: 'Расписание с шагом в 6 часов пропустило цикл. Предложения обновлений перестанут приходить владельцу.'
+          runbook: 'Проверить логи agent на AGENT_SOFTWARE_UPDATE_CHECK_FAILED и доступность GitHub с сервера.'
+
