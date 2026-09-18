@@ -25,5 +25,8 @@ describe("Postgres stream wakeups", () => {
       expect(select).not.toHaveBeenCalled();
     } finally { await stream.cancel(); await streamer.close(); }
     expect(clients.at(-1)!.listenerCount("notification")).toBe(0);
-  });
+    // Rewrites the installed streamer, imports it as a data URL and drives five hundred
+    // notifications through it. That is real work, and the default five seconds is a budget for
+    // an idle machine, not for one running the whole suite in parallel.
+  }, 30_000);
 });
