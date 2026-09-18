@@ -215,6 +215,13 @@ describe("deployment noise window", () => {
     // before here. Opening earlier would keep production alerts suppressed around the clock.
     expect(main.indexOf("open_deploy_window")).toBeGreaterThan(main.indexOf("claim_approved_proposal"));
     expect(main.indexOf("open_deploy_window")).toBeLessThan(main.indexOf("stop_current_services"));
+    // Every stretch that can run long gets a fresh window: the image pull has no bound of its
+    // own, and the backup runs while the containers are already down. A window opened once at the
+    // start could expire mid-downtime and hand the duty agent the outage it was meant to explain.
+    const stop = main.indexOf("stop_current_services");
+    const migration = main.indexOf("MIGRATION_STARTED=1");
+    expect(main.lastIndexOf("open_deploy_window", stop)).toBeGreaterThan(main.indexOf("preflight_backup"));
+    expect(main.lastIndexOf("open_deploy_window", migration)).toBeGreaterThan(stop);
     // The exit trap belongs to the lock owner, so closing can never cut another deployment short.
     expect(main.indexOf("trap 'close_deploy_window")).toBeGreaterThan(main.indexOf("flock -n 9"));
   });
