@@ -50,7 +50,10 @@ describe("Eve Telegram verified ingress patch", () => {
     await expect(execFileAsync(process.execPath, patchCommand)).resolves.toMatchObject({ stderr: patchStderr });
 
     await expect(readFile(indexTypesPath, "utf8")).resolves.toBe(before);
-  });
+    // Two child Node processes with TypeScript stripped on the fly: about four tenths of a second
+    // alone. Inside the full suite this competes with four hundred other files for the CPU, and
+    // the default five seconds says less about this test than about how loaded the machine is.
+  }, 30_000);
 
   it("pins the reviewed runtime and public type seam exactly once", async () => {
     const patchSource = await readFile("scripts/apply-eve-patches.ts", "utf8");
@@ -221,7 +224,10 @@ describe("Eve Telegram verified ingress patch", () => {
     } finally {
       await rm(root, { force: true, recursive: true });
     }
-  }, 15_000);
+    // Copies about 57 MB of packages into a temporary tree, then spawns the patch against it.
+    // Alone the whole test takes a bit over two seconds; the fifteen it used to have is what it
+    // timed out on once the full suite had every other worker competing for the same disk.
+  }, 60_000);
 
   it("fails fast when the installed Eve version does not match", async () => {
     const root = await mkdtemp(join(tmpdir(), "osinara-eve-version-mismatch-"));
@@ -241,7 +247,10 @@ describe("Eve Telegram verified ingress patch", () => {
     } finally {
       await rm(root, { force: true, recursive: true });
     }
-  }, 15_000);
+    // Copies the 40 MB of `eve` into a temporary tree, then spawns the patch against it. Alone
+    // the whole test takes about a second and a half, and the same disk contention is what made
+    // its previous fifteen seconds too tight.
+  }, 60_000);
 
   it("propagates input.requested handler failures instead of parking an unbound approval", async () => {
     const error = new Error("AGENT_APPROVAL_STORAGE_FAILED");

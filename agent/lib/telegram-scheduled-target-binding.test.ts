@@ -17,6 +17,7 @@ const dependencies = vi.hoisted(() => ({
   failRun: vi.fn(),
   failRunForNotification: vi.fn(),
   postStableMessage: vi.fn(),
+  recordTelegramFailure: vi.fn(),
   recordTurnFailed: vi.fn(),
   releaseMemoryTurnSources: vi.fn(),
   scheduledDelivery: {
@@ -55,6 +56,11 @@ vi.mock("./agent-schedules/scheduled-session.js", () => ({
 vi.mock("./sessions/session-context.js", () => ({
   applicationSessionId: vi.fn(() => "application-session-1"),
   registerTelegramDeliveredMessageRoutes: vi.fn(),
+}));
+// Recording the incident is the last step of a notified failure, and it reads the database first.
+// Without this the test needs a live PostgreSQL to pass, which is why it only ever went green in CI.
+vi.mock("./operational-incidents/telegram-failure.js", () => ({
+  recordTelegramFailure: dependencies.recordTelegramFailure,
 }));
 vi.mock("./sessions/session-repository.js", () => ({
   sessionRepository: {
@@ -234,6 +240,9 @@ describe("scheduled Telegram target binding", () => {
     );
     expect(dependencies.failRunForNotification).not.toHaveBeenCalled();
     expect(dependencies.postStableMessage).not.toHaveBeenCalled();
+    // The other half of "never notify a target that was not approved": no owner-facing incident
+    // either, or the unrelated chat would learn about a failure that has nothing to do with it.
+    expect(dependencies.recordTelegramFailure).not.toHaveBeenCalled();
     expect(dependencies.recordTurnFailed).toHaveBeenCalledWith(
       "application-session-1",
       "eve-session-1",
@@ -256,6 +265,17 @@ describe("scheduled Telegram target binding", () => {
 
     expect(dependencies.failRunForNotification).toHaveBeenCalledOnce();
     expect(dependencies.postStableMessage).not.toHaveBeenCalled();
+    // The run is terminalized quietly, but the owner-facing incident is still recorded: that is
+    // what "without publishing a failure message" means here, and it is the reason the handler
+    // reaches the incident recorder at all.
+    // Checked exactly, chat included: binding the incident to the right chat is what this whole
+    // file is about, and a loose match would let "recorded against someone else's chat" pass.
+    expect(dependencies.recordTelegramFailure).toHaveBeenCalledWith({
+      chatId: "-100111",
+      code: "AGENT_MODEL_FAILED",
+      sessionId: "eve-session-1",
+      turnId: "turn-1",
+    });
     expect(dependencies.recordTurnFailed).toHaveBeenCalledWith(
       "application-session-1",
       "eve-session-1",
