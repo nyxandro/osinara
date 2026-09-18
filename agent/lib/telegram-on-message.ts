@@ -485,6 +485,8 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       profileSignals,
       profileReplyTimelineSequence: inboundTimeline.replyToSequenceId,
       replyHandling,
+      replyQuotedText,
+      resumesPendingTask,
       ...(responseSessionId === undefined ? {} : { responseSessionId }),
       storedAttachments,
       timelineEntryId: inboundTimeline.entryId,
