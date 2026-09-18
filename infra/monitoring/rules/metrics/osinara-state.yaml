@@ -1,0 +1,81 @@
+# Alerts that read Osinara's database through sql-exporter.
+# The six-hourly update check heartbeat waits in osinara-update-check.yaml.disabled until that
+# schedule has run at least once since the release.
+groups:
+  - name: osinara-state
+    interval: 30s
+    rules:
+      - alert: OsinaraIngressStuck
+        expr: osinara_ingress_oldest_pending_age_seconds > 600
+        labels:
+          severity: critical
+          project: osinara-production
+        annotations:
+          summary: 'Сообщение пользователя ждёт обработки более 10 минут'
+          description: 'Очередь входящих сообщений не разбирается. Для семьи это выглядит как молчащий ассистент.'
+          runbook: 'Проверить контейнеры agent и telegram-ingress-worker, затем npm-команду telegram-ingress-admin inspect внутри контейнера.'
+
+      - alert: OsinaraIncidentsPendingStuck
+        expr: osinara_operational_incidents{status="pending"} > 0
+        for: 15m
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Уведомления о сбоях не уходят владельцу 15 минут'
+          description: 'В очереди диагностики есть неотправленные записи: продуктовый канал оповещения владельца не работает.'
+          runbook: 'Проверить диспетчер memory-review-dispatch и доступность Telegram с сервера.'
+
+      - alert: OsinaraMemoryReviewStuck
+        expr: sum(osinara_memory_review_batches_recent{status=~"waiting_model|failed|ambiguous"}) > 0
+        for: 30m
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Проверка памяти групп остановлена на {{ $value }} пакетах'
+          description: 'Пакеты сообщений не прошли проверку: групповая память перестаёт пополняться, но исходные сообщения сохранены.'
+          runbook: 'memory-review-admin inspect внутри контейнера agent; разбирать голову очереди.'
+
+      - alert: OsinaraEmbeddingJobsFailed
+        expr: osinara_memory_embedding_jobs_recent{status="failed"} > 0
+        for: 10m
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Задачи индексации памяти в состоянии ошибки: {{ $value }}'
+          description: 'Эти воспоминания не находятся поиском, пока задачи не будут переисполнены.'
+          runbook: 'Проверить memory-embedding, затем команду memory:reindex по согласованию с владельцем.'
+
+      - alert: OsinaraRuntimeMaintenanceStuck
+        expr: osinara_runtime_maintenance_phase{phase!="ready"} == 1
+        for: 15m
+        labels:
+          severity: critical
+          project: osinara-production
+        annotations:
+          summary: 'Приложение более 15 минут не принимает работу: режим {{ $labels.phase }}'
+          description: 'Режим обслуживания включён дольше обычного окна выкладки. Новые сообщения не начинают обрабатываться.'
+          runbook: 'Проверить, идёт ли деплой; при его отсутствии смотреть таблицу runtime_maintenance и держателей допуска.'
+
+      - alert: OsinaraModelSuccessStale
+        expr: min(osinara_model_last_success_age_seconds) > 43200
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Ни одного успешного ответа модели более 12 часов'
+          description: 'Либо семья не писала боту почти сутки, либо доступ к модели потерян. Порог выбран так, чтобы обычная ночь его не задевала.'
+          runbook: 'Написать боту тестовое сообщение; при отсутствии ответа проверить ключ модели и доступность провайдера.'
+
+      - alert: OsinaraSqlExporterDown
+        expr: up{job="osinara-sql-exporter"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Сборщик метрик из базы Osinara не отвечает'
+          description: 'Прикладные метрики не обновляются, поэтому часть тревог этого проекта сейчас слепа.'
+          runbook: 'Проверить контейнер sql-exporter, пароль роли osinara_metrics и доступность сети osinara-production-app-network.'

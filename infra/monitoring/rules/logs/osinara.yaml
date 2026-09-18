@@ -1,0 +1,24 @@
+# Recording rules over Osinara's own structured logs.
+#
+# Enable only after the Osinara release that emits AGENT_SCHEDULE_TICK: until then the
+# heartbeat series never appears and its absence alert would fire continuously.
+groups:
+  - name: logs-osinara
+    type: vlogs
+    interval: 1m
+    rules:
+      # Proof that the minute dispatchers completed a cycle: process, database and scheduler
+      # are all alive. Silence here is the signal, so the alert lives in MetricsQL.
+      - record: osinara_schedule_tick_1m
+        expr: 'project:"osinara-production" code:"AGENT_SCHEDULE_TICK" | stats by (schedule) count() as value'
+
+      # Memory pipeline outcomes, one series per outcome, used for both failure alerts and trends.
+      - record: osinara_memory_write_1m
+        expr: 'project:"osinara-production" code:~"AGENT_MEMORY_WRITE_(SUCCEEDED|FAILED)" | stats by (code, scope) count() as value'
+
+      - record: osinara_memory_retrieval_failed_1m
+        expr: 'project:"osinara-production" code:"AGENT_MEMORY_RETRIEVAL_METRICS" outcome:"failed" | stats by (failurePhase) count() as value'
+
+      # Model transport degradation: 429 and 5xx answers that the agent retried or surfaced.
+      - record: osinara_model_transient_1m
+        expr: 'project:"osinara-production" code:"AGENT_MODEL_TRANSIENT_RESPONSE" | stats by (statusCode) count() as value'
