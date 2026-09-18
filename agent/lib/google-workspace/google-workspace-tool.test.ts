@@ -60,11 +60,40 @@ function managerDependencies() {
   };
 }
 
-function approvalFor(input: Record<string, unknown>) {
+const PRIVATE_TURN = {
+  session: {
+    auth: {
+      current: {
+        attributes: { telegramChatId: "101", telegramChatType: "private", telegramUserId: "101" },
+        authenticator: "telegram",
+        principalId: "user-1",
+        principalType: "user",
+      },
+    },
+  },
+} as never;
+
+const FAMILY_GROUP_TURN = {
+  session: {
+    auth: {
+      current: {
+        attributes: {
+          groupId: "group-1", groupType: "family_private",
+          telegramChatId: "-1001", telegramChatType: "supergroup", telegramUserId: "101",
+        },
+        authenticator: "telegram",
+        principalId: "user-1",
+        principalType: "user",
+      },
+    },
+  },
+} as never;
+
+function approvalFor(input: Record<string, unknown>, turn: never = PRIVATE_TURN) {
   const approval = (manageGoogleWorkspaceConnection as unknown as {
-    approval: (context: { toolInput: Record<string, unknown> }) => unknown;
+    approval: (context: { session: unknown; toolInput: Record<string, unknown> }) => unknown;
   }).approval;
-  return approval({ toolInput: input });
+  return approval({ session: (turn as { session: unknown }).session, toolInput: input });
 }
 
 describe("manage_google_workspace_connection policy", () => {
@@ -78,6 +107,12 @@ describe("manage_google_workspace_connection policy", () => {
       action: { enum: ["connect", "disconnect", "status"], type: "string" },
     });
     expect(schema.properties).not.toHaveProperty("command");
+  });
+
+  it("denies a disconnect in a group turn and leaves read-only actions untouched", () => {
+    expect(approvalFor({ action: "status" }, FAMILY_GROUP_TURN)).toBe("not-applicable");
+    expect(approvalFor({ action: "disconnect" }, FAMILY_GROUP_TURN))
+      .toMatchObject({ reason: expect.stringContaining("AGENT_APPROVAL_SURFACE_UNAVAILABLE"), type: "denied" });
   });
 
   it("requires approval only to disconnect the durable profile", () => {

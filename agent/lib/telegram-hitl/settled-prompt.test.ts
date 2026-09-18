@@ -11,7 +11,6 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_CONSEQUENCE,
   GOOGLE_WORKSPACE_CONSEQUENCE,
-  SCHEDULE_CONSEQUENCES,
 } from "./approval-consequences.js";
 import { buildApprovalMessage } from "./approval-message.js";
 import { boundSettledPrompt, settledPromptText } from "./settled-prompt.js";
@@ -37,36 +36,6 @@ describe("settledPromptText", () => {
     });
     expect(settledPromptText(prompt)).toBe(
       "Подтверждение: изменение в Google Workspace.\n\nСервис: Gmail",
-    );
-  });
-
-  it.each(Object.entries(SCHEDULE_CONSEQUENCES))(
-    "removes the %s schedule consequence",
-    (_action, consequence) => {
-      const prompt = buildApprovalMessage({
-        actionLabel: "действие с расписанием",
-        consequence,
-        facts: ["Расписание: Утренние новости"],
-      });
-      expect(settledPromptText(prompt)).toBe(
-        "Подтверждение: действие с расписанием.\n\nРасписание: Утренние новости",
-      );
-    },
-  );
-
-  it("also settles a schedule prompt composed by the previous release", () => {
-    // Такое окно может висеть pending через этот деплой; без снятия оно противоречило бы решению.
-    const legacy = [
-      "Подтверждение действия",
-      "",
-      "Действие: Приостановить агентное расписание",
-      "Расписание: Утренние новости",
-      "",
-      `Что произойдёт: ${SCHEDULE_CONSEQUENCES.pause}`,
-    ].join("\n");
-
-    expect(settledPromptText(legacy)).toBe(
-      "Подтверждение действия\n\nДействие: Приостановить агентное расписание\nРасписание: Утренние новости",
     );
   });
 

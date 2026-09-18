@@ -1,0 +1,133 @@
+# Alerts for Osinara that depend only on its logs, which arrive as soon as the application runs.
+# Alerts that need the database exporter live in osinara-state.yaml.disabled.
+groups:
+  - name: osinara-heartbeat
+    interval: 30s
+    rules:
+      # One rule per dispatcher: silence is the only signal a stopped scheduler produces.
+      # Each is gated on the application still writing logs, so enabling this file, restarting the
+      # hub, or a server that is simply gone does not fire four scheduler alerts at once. A dead
+      # server is already covered by HostDown and ContainerExited.
+      - alert: OsinaraSchedulerHeartbeatMissing
+        expr: >-
+          absent_over_time(osinara_schedule_tick_1m{schedule="reminder-dispatch"}[5m])
+          and on() present_over_time(log_lines_1m{project="osinara-production"}[5m])
+        labels:
+          severity: critical
+          project: osinara-production
+          schedule: reminder-dispatch
+        annotations:
+          summary: 'Напоминания не обрабатываются 5 минут'
+          description: 'Ежеминутный диспетчер напоминаний не отчитался об успешном цикле. Напоминания, уборка сессий и рабочих областей не выполняются.'
+          runbook: 'Проверить контейнер agent: живой ли процесс, отвечает ли база. Искать в логах AGENT_SCHEDULE_TICK и ошибки того же периода.'
+
+      - alert: OsinaraSchedulerHeartbeatMissing
+        expr: >-
+          absent_over_time(osinara_schedule_tick_1m{schedule="agent-schedule-dispatch"}[5m])
+          and on() present_over_time(log_lines_1m{project="osinara-production"}[5m])
+        labels:
+          severity: critical
+          project: osinara-production
+          schedule: agent-schedule-dispatch
+        annotations:
+          summary: 'Автономные сценарии по расписанию не запускаются 5 минут'
+          description: 'Ежеминутный диспетчер пользовательских сценариев не отчитался об успешном цикле.'
+          runbook: 'То же, что и для напоминаний: контейнер agent и доступность базы.'
+
+      - alert: OsinaraSchedulerHeartbeatMissing
+        expr: >-
+          absent_over_time(osinara_schedule_tick_1m{schedule="memory-review-dispatch"}[5m])
+          and on() present_over_time(log_lines_1m{project="osinara-production"}[5m])
+        labels:
+          severity: critical
+          project: osinara-production
+          schedule: memory-review-dispatch
+        annotations:
+          summary: 'Проверка памяти групп и доставка инцидентов остановлены 5 минут'
+          description: 'Диспетчер проверки памяти не отчитался об успешном цикле. Владелец перестанет получать и продуктовые уведомления о сбоях.'
+          runbook: 'Проверить контейнер agent и таблицу operational_incidents на скопившиеся записи pending.'
+
+  - name: osinara-logs
+    interval: 30s
+    rules:
+      # Everything structured that is not a routine notice. The exclusion is an explicit list of
+      # the codes Osinara emits through console.info, not a suffix pattern: a pattern silently
+      # reclassifies codes nobody checked, and AGENT_TELEGRAM_SILENT_TURN alone would have raised
+      # this alert during ordinary family conversation. A code missing from the list counts as a
+      # problem, which is the safe direction and prompts adding it here deliberately.
+      - alert: OsinaraErrorBurst
+        expr: >-
+          sum by (host) (sum_over_time(log_code_lines_1m{project="osinara-production",
+          code!~"AGENT_(SCHEDULE_TICK|TELEGRAM_SILENT_TURN|MEMORY_PURGE_COMPLETED|DATABASE_BOOKKEEPING_RECOVERY|RUNTIME_DEAD_PROCESS_RECONCILED|TELEGRAM_INGRESS_RECOVERED|TELEGRAM_OBSERVER_TRANSFERRED|TELEGRAM_BINDING_RECOVERED|TELEGRAM_DATABASE_RECOVERY|MEMORY_WRITE_SUCCEEDED|MODEL_CALL_METRICS|TOOL_CALL_METRICS|SKILL_SYNC_METRICS|MEMORY_SEARCH_METRICS|MEMORY_RETRIEVAL_METRICS|MEMORY_REVIEW_LANE_METRICS)"}[5m])) > 10
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Osinara записала {{ $value }} ошибок с кодом за 5 минут'
+          description: 'Всплеск ошибок приложения. Для пользователя это обычно выглядит как неотвеченные сообщения или потерянные действия.'
+          runbook: 'Сгруппировать строки по полю code за этот период и разбирать самый частый код.'
+
+      - alert: OsinaraMemoryUnavailable
+        expr: sum(sum_over_time(log_code_lines_1m{project="osinara-production", code="AGENT_MEMORY_UNAVAILABLE"}[5m])) > 0
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Osinara отвечала без доступа к памяти'
+          description: 'При подготовке ответа не удалось прочитать долговременную память: ассистент отвечает, но не помнит контекст семьи.'
+          runbook: 'Проверить базу и сервис эмбеддингов memory-embedding; в строке есть поле failurePhase с фазой сбоя.'
+
+      - alert: OsinaraEmbeddingFailed
+        expr: sum(sum_over_time(log_code_lines_1m{project="osinara-production", code=~"AGENT_MEMORY_EMBEDDING_.+"}[5m])) > 0
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Индексация новых воспоминаний завершилась ошибкой'
+          description: 'Воспоминание сохранено, но не проиндексировано: поиск по нему работать не будет, пока задача не выполнится.'
+          runbook: 'Проверить контейнеры memory-embedding и memory-embedding-worker, затем счётчик osinara_memory_embedding_jobs со статусом failed.'
+
+      - alert: OsinaraModelTransientBurst
+        expr: sum(sum_over_time(osinara_model_transient_1m[10m])) > 5
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Поставщик модели ответил ошибкой {{ $value }} раз за 10 минут'
+          description: 'Провайдер отвечает кодами 429 или 5xx. Ответы приходят медленнее, часть ходов может обрываться.'
+          runbook: 'Проверить статус провайдера и поле statusCode в строках AGENT_MODEL_TRANSIENT_RESPONSE.'
+
+      - alert: OsinaraDatabaseConnectionLost
+        expr: sum(sum_over_time(log_code_lines_1m{project="osinara-production", code=~"AGENT_(DATABASE_CONNECTION_LOST|WORKFLOW_NOTIFY_CONNECTION_LOST)"}[5m])) > 0
+        labels:
+          severity: critical
+          project: osinara-production
+        annotations:
+          summary: 'Разорвано соединение с базой данных'
+          description: 'Приложение потеряло соединение с PostgreSQL. Сообщения пользователей не обрабатываются или обрабатываются частично.'
+          runbook: 'Проверить контейнер postgres, его проверку здоровья и журнал на предмет аварийного перезапуска.'
+
+      # Осинара сама отклонила цель ответа: сообщение, на которое ответил человек, не принадлежит
+      # текущему чату, либо разобранный и сырой апдейт назвали разные сообщения. Ни того, ни другого
+      # Telegram в норме не присылает, поэтому одной строки достаточно для тревоги: это либо смена
+      # формата Bot API, либо подделанный апдейт.
+      - alert: OsinaraReplyTargetRejected
+        expr: sum(sum_over_time(log_code_lines_1m{project="osinara-production", code="AGENT_TELEGRAM_REPLY_TARGET_REJECTED"}[15m])) > 0
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Отклонена цель ответа в Telegram'
+          description: 'Приложение отказалось принять сообщение, на которое отвечал человек: оно из другого чата либо идентификаторы в апдейте разошлись. Для пользователя ответ теряет контекст цитаты. В штатной работе этого не бывает.'
+          runbook: 'В строке есть reason: foreign_chat — цель из другого чата, identity_mismatch — расхождение внутри апдейта. Разовый случай разбирать по telegramChatId и telegramReplyTargetMessageId; массовые identity_mismatch означают смену формата Bot API или разбора в Eve.'
+
+      - alert: OsinaraIncidentDeliveryUnconfirmed
+        expr: sum(sum_over_time(log_code_lines_1m{project="osinara-production", code="AGENT_INCIDENT_DELIVERY_UNCONFIRMED"}[15m])) > 0
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Не подтверждена доставка продуктового уведомления владельцу'
+          description: 'Osinara не смогла достоверно доставить владельцу сообщение о сбое. Владелец мог не узнать о проблеме.'
+          runbook: 'Проверить доступность Telegram с сервера и статусы в таблице operational_incidents.'
+

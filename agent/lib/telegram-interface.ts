@@ -14,7 +14,6 @@ import {
 
 
 const TOOL_ACTION_LABELS: Readonly<Record<string, string>> = {
-  remember: "сохранить запись в общей или чувствительной памяти",
   remove_group_file: "удалить файл внешней группы",
 };
 
@@ -22,36 +21,9 @@ const MANAGED_ACTION_LABELS: Readonly<Record<string, Readonly<Record<string, str
   manage_google_workspace_connection: {
     disconnect: "отключить Google Workspace от текущей области",
   },
-  manage_agent_schedule: {
-    create: "создать агентное расписание",
-    delete: "удалить агентное расписание",
-    pause: "приостановить агентное расписание",
-    resume: "возобновить агентное расписание",
-    run_now: "запустить агентное расписание сейчас",
-    update: "изменить агентное расписание",
-  },
-  manage_external_group_schedule: {
-    create: "создать автоматизацию внешней группы",
-    delete: "удалить автоматизацию внешней группы",
-    pause: "приостановить автоматизацию внешней группы",
-    resume: "возобновить автоматизацию внешней группы",
-    run_now: "запустить автоматизацию внешней группы сейчас",
-    update: "изменить автоматизацию внешней группы",
-  },
   manage_family_invitation: {
     approve: "добавить участника в семью",
     create: "создать приглашение в семейного агента",
-  },
-  manage_memory: {
-    delete: "удалить запись из памяти",
-    edit: "исправить запись в памяти",
-  },
-  manage_reminder: {
-    create: "создать напоминание",
-    delete: "удалить напоминание",
-    pause: "приостановить напоминание",
-    resume: "возобновить напоминание",
-    update: "изменить напоминание",
   },
   manage_telegram_group: {
     register:
@@ -61,9 +33,6 @@ const MANAGED_ACTION_LABELS: Readonly<Record<string, Readonly<Record<string, str
     update_policy:
       "изменить политику внешней Telegram-группы. Группа и бот останутся подключены",
     update_skills: "изменить список skills внешней Telegram-группы",
-  },
-  notification_settings: {
-    set: "изменить настройки уведомлений",
   },
 };
 
@@ -117,27 +86,6 @@ interface FailureData {
   code: string;
   details?: Readonly<Record<string, unknown>>;
   message?: string;
-}
-
-function reminderRecurrenceLines(value: unknown): string[] {
-  if (value === null) return ["Повторение: без повтора"];
-  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-  const recurrence = value as Record<string, unknown>;
-  return typeof recurrence.unit === "string" && typeof recurrence.interval === "number"
-    ? [`Повторение: ${recurrence.unit}, интервал ${recurrence.interval}`]
-    : [];
-}
-
-function agentScheduleRecurrenceLines(value: unknown): string[] {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-  const recurrence = value as Record<string, unknown>;
-  if (recurrence.kind === "once") return ["Периодичность: один раз"];
-  if (typeof recurrence.kind !== "string" || typeof recurrence.interval !== "number") return [];
-  const days = Array.isArray(recurrence.daysOfWeek) &&
-      recurrence.daysOfWeek.every((day) => typeof day === "number")
-    ? `, дни ${recurrence.daysOfWeek.join(", ")}`
-    : "";
-  return [`Периодичность: ${recurrence.kind}, интервал ${recurrence.interval}${days}`];
 }
 
 function approvalParameterLines(toolName: string, input: Record<string, unknown>): string[] {
@@ -204,76 +152,8 @@ function approvalParameterLines(toolName: string, input: Record<string, unknown>
         ...line("Кандидат", "candidateDisplayName"),
         ...line("Telegram user ID", "candidateTelegramUserId"),
       ];
-    case "manage_memory":
-      return input.action === "edit"
-        ? [
-            ...line("ID записи", "id"),
-            ...line("Новое значение", "content"),
-            ...line("Тип памяти", "kind"),
-            ...line("Чувствительность", "sensitivity"),
-          ]
-        : line("ID записи", "id");
-    case "remember":
-      return [
-        ...line("Область", "scope"),
-        ...line("Содержимое", "content"),
-        ...line("Чувствительность", "sensitivity"),
-      ];
-    case "manage_agent_schedule":
-      return [
-        ...line("ID", "id"),
-        ...line("Название", "title"),
-        ...line("Назначение", "userRequest"),
-        ...line("Первый запуск", "firstRunAt"),
-        ...line("Следующий запуск", "nextRunAt"),
-        ...line("Часовой пояс", "timezone"),
-        ...line("Область", "scope"),
-        ...agentScheduleRecurrenceLines(input.recurrence),
-        ...line("Сценарий", "scenarioPrompt"),
-      ];
-    case "manage_external_group_schedule": {
-      const capabilities = Array.isArray(input.capabilityAllowlist)
-        ? input.capabilityAllowlist.filter((item): item is string => typeof item === "string").join(", ")
-        : null;
-      return [
-        ...line("ID", "id"),
-        ...line("Telegram chat ID", "telegramChatId"),
-        ...line("Название", "title"),
-        ...line("Назначение", "userRequest"),
-        ...line("Первый запуск", "firstRunAt"),
-        ...line("Следующий запуск", "nextRunAt"),
-        ...line("Часовой пояс", "timezone"),
-        ...(typeof input.historyWindowDays === "number"
-          ? [`Окно истории, дней: ${input.historyWindowDays}`]
-          : input.historyWindowDays === null ||
-              (input.action === "create" && input.historyWindowDays === undefined)
-            ? ["Окно истории: отключено"]
-            : []),
-        ...(capabilities === null ? [] : [`Разрешённые возможности: ${capabilities || "нет"}`]),
-        ...agentScheduleRecurrenceLines(input.recurrence),
-        ...line("Сценарий", "scenarioPrompt"),
-      ];
-    }
-    case "manage_reminder":
-      return [
-        ...line("ID", "id"),
-        ...line("Текст", "content"),
-        ...line("Время запуска", "firstRunAt"),
-        ...(input.action === "create" ? line("Часовой пояс", "timezone") : []),
-        ...(input.action === "create" ? line("Область", "scope") : []),
-        ...reminderRecurrenceLines(input.recurrence),
-      ];
     case "remove_group_file":
       return line("Путь", "path");
-    case "notification_settings":
-      return [
-        ...line("Часовой пояс", "timezone"),
-        ...(input.quietStart === null && input.quietEnd === null
-          ? ["Тихие часы: отключены"]
-          : typeof input.quietStart === "string" && typeof input.quietEnd === "string"
-          ? [`Тихие часы: ${safe(input.quietStart)}–${safe(input.quietEnd)}`]
-          : []),
-      ];
     default:
       return [];
   }

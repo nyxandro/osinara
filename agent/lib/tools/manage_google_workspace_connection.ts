@@ -10,6 +10,7 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 import { googleAccountRepository } from "../google-workspace/google-account-repository.js";
+import { groupApprovalDenial } from "../telegram-hitl/approval-surface.js";
 import type { GoogleIntegrationScope } from "../google-workspace/google-integration-contract.js";
 import { resolveGoogleWorkspaceAuthorization } from "../google-workspace/google-workspace-context.js";
 import {
@@ -160,8 +161,10 @@ const manageGoogleWorkspaceConnection = createGoogleWorkspaceConnectionManager({
 });
 
 export default defineTool({
-  approval: ({ toolInput }) =>
-    toolInput?.action === "disconnect" ? "user-approval" : "not-applicable",
+  approval: ({ session, toolInput }) =>
+    toolInput?.action === "disconnect"
+      ? groupApprovalDenial({ session }) ?? "user-approval"
+      : "not-applicable",
   description:
     "Управлять OAuth-профилем Google Workspace текущей personal/family области. Используй {\"action\":\"status\"} для connected/ready/missingScopes, {\"action\":\"connect\"} для защищённой OAuth-ссылки и {\"action\":\"disconnect\"} только по явной просьбе с Eve HITL. connect не означает ready до завершения OAuth. Команды Google выполняются только через execute_google_workspace; COMMAND_FORBIDDEN не означает read-only OAuth.",
   inputSchema: connectionSchema,

@@ -273,6 +273,104 @@ describe("createTelegramMessageHandler group routing", () => {
     }));
   });
 
+  it("passes the highlighted fragment of a journaled reply target", async () => {
+    const repository = repositories();
+    repository.telegram.findGroup.mockResolvedValue({
+      familyId: "family-1",
+      groupId: "group-1",
+      messageMode: "addressed_only",
+      skillAllowlist: [],
+      telegramChatId: "group-101",
+      toolAllowlist: [],
+      type: "external",
+    });
+    repository.journal.record.mockResolvedValue({
+      entryId: "00000000-0000-4000-8000-000000000014",
+      replyToAgent: true,
+      replyTargetUnavailable: false,
+      replyToSequenceId: "8",
+      sequenceId: "14",
+      status: "inserted",
+    });
+    const handler = createTelegramMessageHandler(repository);
+    const message = {
+      ...groupMessage("опа, а шо это значит"),
+      messageId: "14",
+      raw: {
+        date: 1_786_542_434,
+        quote: { is_manual: true, position: 44, text: "чат на сорок человек" },
+        reply_to_message: {
+          chat: { id: "group-101", title: "Группа", type: "group" },
+          from: { first_name: "Осинара", id: 777, is_bot: true, username: BOT_USERNAME },
+          message_id: 8,
+          text: "Я не рассылала чужие пикантные фото в чат на сорок человек",
+        },
+      },
+      replyToMessage: {
+        chat: { id: "group-101", title: "Группа", type: "group" as const },
+        from: { firstName: "Осинара", id: "777", isBot: true, username: BOT_USERNAME },
+        messageId: "8",
+      },
+    };
+
+    await handler(telegramContext().context, message);
+
+    expect(repository.groupContext.prepare).toHaveBeenCalledWith(expect.objectContaining({
+      replyQuotedText: "чат на сорок человек",
+      replyTargetUnavailable: false,
+      replyToSequenceId: "8",
+      triggeredBy: "reply_to_agent",
+    }));
+  });
+
+  it("keeps a reply target from another chat out of the prepared turn", async () => {
+    const repository = repositories();
+    repository.telegram.findGroup.mockResolvedValue({
+      familyId: "family-1",
+      groupId: "group-1",
+      messageMode: "addressed_only",
+      skillAllowlist: [],
+      telegramChatId: "group-101",
+      toolAllowlist: [],
+      type: "external",
+    });
+    repository.journal.record.mockResolvedValue({
+      entryId: "00000000-0000-4000-8000-000000000015",
+      replyToAgent: false,
+      replyTargetUnavailable: true,
+      replyToSequenceId: null,
+      sequenceId: "15",
+      status: "inserted",
+    });
+    const handler = createTelegramMessageHandler(repository);
+    const message = {
+      ...groupMessage(`@${BOT_USERNAME} а чо это`),
+      messageId: "15",
+      raw: {
+        date: 1_786_542_434,
+        quote: { text: "фрагмент чужой переписки" },
+        reply_to_message: {
+          chat: { id: "group-909", title: "Другая группа", type: "group" },
+          from: { first_name: "Сергей", id: 202, is_bot: false },
+          message_id: 77,
+          text: "Текст из другой переписки",
+        },
+      },
+      replyToMessage: {
+        chat: { id: "group-909", title: "Другая группа", type: "group" as const },
+        from: { firstName: "Сергей", id: "telegram-202", isBot: false },
+        messageId: "77",
+      },
+    };
+
+    await handler(telegramContext().context, message);
+
+    const [prepared] = repository.groupContext.prepare.mock.calls[0] as [Record<string, unknown>];
+    expect(prepared).not.toHaveProperty("replyQuotedText");
+    expect(prepared).not.toHaveProperty("replyTargetSnapshot");
+    expect(prepared).toMatchObject({ replyTargetUnavailable: true, replyToSequenceId: null });
+  });
+
   it("passes a verified raw reply snapshot when the target was not journaled", async () => {
     const repository = repositories();
     repository.telegram.findGroup.mockResolvedValue({
@@ -316,9 +414,9 @@ describe("createTelegramMessageHandler group routing", () => {
     await handler(telegramContext().context, message);
 
     expect(repository.groupContext.prepare).toHaveBeenCalledWith(expect.objectContaining({
+      replyQuotedText: "streisand",
       replyTargetSnapshot: {
         contentText: "У меня настроен vless, ссылочку кинул в streisand",
-        quotedText: "streisand",
         senderDisplayName: "nlp_daily",
         senderUsername: "nlp_daily",
       },

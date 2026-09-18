@@ -16,6 +16,7 @@
  */
 import { GROUP_REMINDER_MAX_PER_CHAT } from "../reminders/reminder-config.js";
 import type { ExternalGroupToolName } from "../tool-policy/group-tool-catalog.js";
+import { GROUP_CONFIRMATION_UNAVAILABLE } from "./group-fragments.js";
 
 // Reminders need no grant, but a background run and a channel-authored turn have no participant
 // who could own one, so the purpose is announced only where the tools actually exist.
@@ -73,7 +74,7 @@ export const EXTERNAL_TASK_BOUNDARIES = `
 
 Не обещай фоновую работу, продолжение после завершения текущего turn или будущую доставку без отдельного доступного механизма. Технически невозможную или запрещённую часть отклони коротко, но не используй её как повод отказаться от самостоятельного допустимого результата, когда запрос можно корректно выполнить в проверенных границах.
 
-В общем чате нет подтверждений и служебных запросов к человеку: здесь нет одного ответственного собеседника, которому их можно адресовать. Не пытайся запросить подтверждение, продление лимита или уточнение через отдельный запрос: такой вызов отклоняется до отправки чего-либо в чат, ход обрывается, и человек остаётся без ответа. Если нужно уточнение, задай вопрос обычной репликой в чат. Если для действия нужно подтверждение, скажи, что в общем чате это недоступно, и предложи написать в личные сообщения.
+${GROUP_CONFIRMATION_UNAVAILABLE}
 `.trim();
 
 export const EXTERNAL_PEOPLE_RULES = `

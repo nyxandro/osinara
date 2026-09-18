@@ -6,11 +6,13 @@
  * - `handleTelegramInputRequested`: production Eve `input.requested` event handler.
  *
  * Key constructs:
- * - External session-budget continuations fail before parking or Telegram delivery.
+ * - A prompt exists only in a private chat: every shared-chat request, including a session-budget
+ *   continuation, fails before parking or Telegram delivery.
  */
 import {
   registerTelegramFreeformPrompt,
   renderTelegramInputRequest,
+  type TelegramChatType,
   type TelegramEventContext,
 } from "eve/channels/telegram";
 import type { InputRequestKind } from "eve/client";
@@ -138,28 +140,51 @@ function numberedPromptChunk(chunk: string, index: number, total: number): strin
   return total === 1 ? chunk : `Часть ${index + 1} из ${total}\n\n${chunk}`;
 }
 
-function assertInputRequestPolicy(data: InputRequestedData, ctx: Pick<SessionContext, "session">) {
-  const externalGroup = ctx.session.auth.current?.attributes.groupType === "external";
-  if (!externalGroup) return;
+const SESSION_LIMIT_CHAT_NOTICE =
+  "Задача оказалась слишком длинной для одного хода, и продолжить её в общем чате нельзя. Разбейте запрос на части и отправьте заново.";
 
-  // An external group has no confirmation surface at all: a prompt there would address a public
-  // chat instead of one accountable person, and its placeholder would already be visible to
-  // everyone before any check could refuse it. Eve authors some of these requests outside the tool
-  // surface, so descriptor denials cannot stop them and this boundary is the only one that can.
+/**
+ * Returns the refusal for a prompt this chat cannot carry, or null when it may be shown.
+ *
+ * A refused tool approval reaches the model as a tool denial, which it explains itself. A session
+ * budget is authored by Eve outside the tool surface, so nothing would reach the chat at all: that
+ * one refusal carries a plain notice the caller delivers before ending the turn.
+ */
+function sharedChatInputRefusal(
+  data: InputRequestedData,
+  chatType: TelegramChatType,
+  ctx: Pick<SessionContext, "session">,
+): { chatNotice?: string; error: AppError } | null {
+  // Authorizing an action belongs to one accountable person, so an approval and a session budget
+  // exist only in a private chat. A plain question authorizes nothing and stays available to the
+  // family group, where the participants are the verified family; an external group is public and
+  // receives no prompt at all. Eve authors some requests outside the tool surface, so descriptor
+  // denials cannot stop them and this boundary is the only one that can.
+  const groupType = ctx.session.auth.current?.attributes.groupType;
+  if (chatType === "private" && groupType === undefined) return null;
+  if (groupType === "family_private" && data.requests.every((request) => request.kind === "question")) {
+    return null;
+  }
+
   const requestsSessionBudget = data.requests.some((request) =>
     request.kind === "session-limit" ||
     request.action.toolName === SESSION_LIMIT_CONTINUATION_TOOL_NAME
   );
   if (requestsSessionBudget) {
-    throw new AppError(
-      "AGENT_EXTERNAL_SESSION_LIMIT_FORBIDDEN",
-      "Агент остановил слишком длинную задачу во внешней группе. Разбейте запрос на части и отправьте его заново",
-    );
+    return {
+      chatNotice: SESSION_LIMIT_CHAT_NOTICE,
+      error: new AppError(
+        "AGENT_EXTERNAL_SESSION_LIMIT_FORBIDDEN",
+        "Агент остановил слишком длинную задачу в общем чате. Разбейте запрос на части и отправьте его заново",
+      ),
+    };
   }
-  throw new AppError(
-    "AGENT_EXTERNAL_APPROVAL_FORBIDDEN",
-    "В общем чате нельзя запрашивать подтверждение. Напишите агенту в личные сообщения",
-  );
+  return {
+    error: new AppError(
+      "AGENT_EXTERNAL_APPROVAL_FORBIDDEN",
+      "В общем чате нельзя запрашивать подтверждение. Напишите агенту в личные сообщения",
+    ),
+  };
 }
 
 export function createTelegramInputRequestHandler(dependencies: InputRequestDependencies) {
@@ -172,7 +197,14 @@ export function createTelegramInputRequestHandler(dependencies: InputRequestDepe
     const caller = ctx.session.auth.current;
     const telegramUserId = caller?.attributes.telegramUserId;
     const chatId = channel.state.chatId;
-    const chatType = channel.state.chatType;
+    // A scheduled run opens its session before any Telegram response, so the channel has not
+    // anchored a chat type yet. The stored schedule already carries the verified one, and it is
+    // admitted only for the same chat the channel is about to post into.
+    const attributeChatType = caller?.attributes.telegramChatType;
+    const chatType = channel.state.chatType ??
+      (caller?.attributes.telegramChatId === chatId && typeof attributeChatType === "string"
+        ? attributeChatType
+        : undefined);
     if (
       caller?.authenticator !== "telegram" ||
       typeof telegramUserId !== "string" ||
@@ -193,8 +225,15 @@ export function createTelegramInputRequestHandler(dependencies: InputRequestDepe
       );
     }
 
-    // Policy is evaluated before semantic presentation, session parking, persistence, or network I/O.
-    assertInputRequestPolicy(data, ctx);
+    // Policy is evaluated before semantic presentation, session parking, persistence, or approval
+    // I/O. Only a plain notice may precede the refusal, and it binds nothing.
+    const refusal = sharedChatInputRefusal(data, chatType, ctx);
+    if (refusal) {
+      if (refusal.chatNotice !== undefined) {
+        await postTelegramMessageWithoutContinuationChange(channel, refusal.chatNotice);
+      }
+      throw refusal.error;
+    }
 
     // Resolve trusted semantic subjects before parking so presentation failures remain recoverable.
     const localizedRequests: Array<{

@@ -206,11 +206,8 @@ export function stripApprovalConsequence(
   consequences: Iterable<string>,
 ): string {
   for (const consequence of consequences) {
-    for (const suffix of [`\n\n${consequence}`, `\n\nЧто произойдёт: ${consequence}`]) {
-      // Вторая форма — окно расписания прошлого релиза: такие промпты могут висеть pending
-      // через этот деплой и без снятия продолжили бы противоречить решению.
-      if (prompt.endsWith(suffix)) return prompt.slice(0, -suffix.length);
-    }
+    const suffix = `\n\n${consequence}`;
+    if (prompt.endsWith(suffix)) return prompt.slice(0, -suffix.length);
   }
   return prompt;
 }
