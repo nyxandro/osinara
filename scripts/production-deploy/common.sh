@@ -14,6 +14,15 @@ readonly LOCK_FILE="/run/lock/osinara-production-deploy.lock"
 readonly HEALTH_URL="http://127.0.0.1:8082/eve/v1/health"
 readonly HEALTH_ATTEMPTS=60
 readonly HEALTH_INTERVAL_SECONDS=5
+# A release stops and restarts every production container, which the observability hub reads as
+# an outage unless the release says otherwise. The monitoring collector ships *.prom files from
+# this directory to the hub, and the osinara-production alert rules stand down while the published
+# deadline is still ahead. A deadline rather than a flag: a deployment killed without running its
+# exit trap has to restore alerting by itself instead of silencing production for good.
+readonly DEPLOY_WINDOW_METRIC="/var/lib/monitoring-agent/textfile/osinara-deploy-window.prom"
+# Observed releases need eleven to eighteen minutes from image pull to a healthy edge. The window
+# is republished before migration, so this also bounds how long a killed deployment stays silent.
+readonly DEPLOY_WINDOW_SECONDS=1800
 readonly RELEASE_IMAGE_VARIABLES=(
   OSINARA_APP_IMAGE
   OSINARA_CLI_PROXY_IMAGE
@@ -165,6 +174,66 @@ wait_for_health() {
     sleep "$HEALTH_INTERVAL_SECONDS"
   done
   fail "DEPLOY_HEALTH_TIMEOUT" "Released edge did not become healthy within the bounded wait"
+}
+
+# Announces that release noise on osinara-production is expected until the published deadline.
+# Called again before migration so the slow phases each get a full window of their own.
+open_deploy_window() {
+  publish_deploy_window "$1" "$(($(date +%s) + DEPLOY_WINDOW_SECONDS))"
+}
+
+# Ends the window now. Runs on every exit path of the lock owner, so a release that failed stops
+# being suppressed at once: a half-installed release is exactly what has to become visible.
+# Nothing published means nothing to close. Without this the ordinary timer tick, which reaches
+# here about once a minute and finds no release to make, would report a problem every time on a
+# host that has no collector at all.
+close_deploy_window() {
+  [[ -f "$1" ]] || return 0
+  publish_deploy_window "$1" "$(date +%s)"
+}
+
+# Monitoring is optional infrastructure that the application does not depend on. Storage that is
+# absent or unwritable is recorded and the release continues: aborting an owner-approved
+# deployment over a suppression hint would trade a cosmetic problem for a real one.
+publish_deploy_window() {
+  local metric_file="$1"
+  local deadline="$2"
+  local directory temporary
+  directory="$(dirname "$metric_file")"
+  if [[ ! -d "$directory" || ! -w "$directory" ]]; then
+    log_event "DEPLOY_WINDOW_METRIC_UNAVAILABLE" \
+      "Collector directory ${directory} is absent or read-only; release alerts stay active"
+    return 0
+  fi
+  if ! temporary="$(mktemp "${metric_file}.XXXXXX" 2>/dev/null)"; then
+    log_event "DEPLOY_WINDOW_METRIC_UNAVAILABLE" \
+      "Could not create a sample next to ${metric_file}; release alerts stay active"
+    return 0
+  fi
+  # A sample the collector reads half-written is a parse error, and a parse error costs at least
+  # this file's metrics and may cost the whole directory's, so what the collector can see is only
+  # ever replaced whole.
+  if render_deploy_window_sample "$deadline" >"$temporary" &&
+    chmod 0644 "$temporary" &&
+    mv -f "$temporary" "$metric_file"; then
+    return 0
+  fi
+  # `|| true` is not decoration: the script runs under an ERR trap, and a read-only filesystem
+  # fails the removal as readily as it failed the move. A bare failure here would abort an
+  # owner-approved release over a suppression hint, which is the one thing this must never do.
+  rm -f "$temporary" || true
+  log_event "DEPLOY_WINDOW_METRIC_UNAVAILABLE" \
+    "Could not publish ${metric_file}; release alerts stay active"
+  return 0
+}
+
+render_deploy_window_sample() {
+  local deadline="$1"
+  printf '# HELP deploy_window_end_timestamp_seconds %s\n' \
+    'Unix time until which release noise is expected for this project.'
+  printf '# TYPE deploy_window_end_timestamp_seconds gauge\n'
+  printf 'deploy_window_end_timestamp_seconds{project="osinara-production"} %s\n' \
+    "$deadline"
 }
 
 send_telegram_notification() {
