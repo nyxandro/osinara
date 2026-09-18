@@ -7,12 +7,11 @@
  * Constructs covered:
  * - The published metric carries a deadline, so a killed deployment cannot silence alerts forever.
  * - Closing the window is immediate, which is how a failed release becomes visible at once.
- * - Absent or unwritable collector storage is recorded and never aborts an approved release.
+ * - Absent collector storage and every way the write can fail never abort an approved release.
  * - The entrypoint opens the window only once a deployment is certain and closes it on every exit.
  * - The systemd unit grants the write access that `ProtectSystem=strict` would otherwise deny.
  */
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { chmodSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -47,7 +46,6 @@ function readDeadline(metricPath: string) {
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
-    chmodSync(directory, 0o700);
     rmSync(directory, { force: true, recursive: true });
   }
 });
@@ -119,27 +117,10 @@ describe("deployment noise window", () => {
     expect(existsSync(metricPath)).toBe(false);
   });
 
-  it("records unwritable collector storage and still completes the deployment", () => {
-    const directory = makeDirectory("osinara-window-readonly-");
-    const metricPath = join(directory, "osinara-deploy-window.prom");
-    writeFileSync(metricPath, "stale\n", "utf8");
-    chmodSync(directory, 0o500);
-
-    const result = runShell(`
-      source scripts/production-deploy/common.sh
-      open_deploy_window ${JSON.stringify(metricPath)}
-      printf 'deployment-continues\\n'
-    `);
-
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("deployment-continues");
-    expect(result.stderr).toContain("DEPLOY_WINDOW_METRIC_UNAVAILABLE");
-  });
-
   // The deployment runs under `set -Eeuo pipefail` with an ERR trap that aborts the release and
-  // reports an ambiguous result to the owner. These two branches are the ones a real server
-  // reaches — the readable/writable guard above cannot fail for root — so they are exercised
-  // under exactly those shell settings.
+  // reports an ambiguous result to the owner. Directory permissions cannot express any of this:
+  // the deployment is root, for whom every directory is writable. Only attempting the write tells
+  // the truth, so each way it can fail is exercised under exactly those shell settings.
   it.each([
     // A filesystem the kernel remounted read-only after a disk error: the directory passed the
     // guard, and then every write against it fails, the cleanup of the temporary file included.

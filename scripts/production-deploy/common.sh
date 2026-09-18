@@ -200,9 +200,12 @@ publish_deploy_window() {
   local deadline="$2"
   local directory temporary
   directory="$(dirname "$metric_file")"
-  if [[ ! -d "$directory" || ! -w "$directory" ]]; then
+  # Only presence is worth asking about: the deployment runs as root, for whom a writability test
+  # on a directory is always true. Whether the write can actually happen is answered below, by
+  # attempting it.
+  if [[ ! -d "$directory" ]]; then
     log_event "DEPLOY_WINDOW_METRIC_UNAVAILABLE" \
-      "Collector directory ${directory} is absent or read-only; release alerts stay active"
+      "Collector directory ${directory} is absent; release alerts stay active"
     return 0
   fi
   if ! temporary="$(mktemp "${metric_file}.XXXXXX" 2>/dev/null)"; then
