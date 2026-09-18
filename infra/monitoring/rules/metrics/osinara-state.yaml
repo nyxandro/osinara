@@ -5,8 +5,23 @@ groups:
   - name: osinara-state
     interval: 30s
     rules:
+      # Two rules here stand down while a release is running, and only these two: the queue does
+      # stop draining and the exporter does lose its database while the containers are down, and
+      # neither is an incident then. The deadline is published by production-deploy.sh and expires
+      # on its own. OsinaraRuntimeMaintenanceStuck below is deliberately left alone: it is what
+      # notices a release that came back up but never left maintenance. A release whose containers
+      # never returned at all is not its case — that one has no database to report from, and it
+      # surfaces as ContainerExited once the window is closed.
+      #
+      # The queue rule stands down for its own threshold beyond the window as well. It measures how
+      # long the oldest unprocessed message has been waiting, so a message that arrived just before
+      # admission was frozen is already ten minutes old when the application returns, and draining
+      # it takes a full model turn per message. Without the grace the alert would fire on a healthy
+      # release the moment the window closed — the same noise, moved fifteen minutes later.
       - alert: OsinaraIngressStuck
-        expr: osinara_ingress_oldest_pending_age_seconds > 600
+        expr: >-
+          osinara_ingress_oldest_pending_age_seconds > 600
+          unless on() deploy_window_end_timestamp_seconds{project="osinara-production"} + 600 > time()
         labels:
           severity: critical
           project: osinara-production
@@ -70,7 +85,9 @@ groups:
           runbook: 'Написать боту тестовое сообщение; при отсутствии ответа проверить ключ модели и доступность провайдера.'
 
       - alert: OsinaraSqlExporterDown
-        expr: up{job="osinara-sql-exporter"} == 0
+        expr: >-
+          up{job="osinara-sql-exporter"} == 0
+          unless on() deploy_window_end_timestamp_seconds{project="osinara-production"} > time()
         for: 5m
         labels:
           severity: warning
