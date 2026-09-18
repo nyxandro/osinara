@@ -40,10 +40,17 @@ describe("installation bundle", () => {
     expect(firstBytes.equals(secondBytes)).toBe(true);
     await expect(validateInstallationBundle(firstBytes)).resolves.toBeUndefined();
     const files = await readInstallationBundle(firstBytes);
-    const tlsCompose = files.get("installation/compose.tls.yaml")!.toString("utf8");
+    const tlsCompose = files.get("installation/traefik-compose.yaml")!.toString("utf8");
+    expect(tlsCompose).toContain("image: traefik:");
     expect(tlsCompose).toContain("      - edge-frontend\n");
     expect(tlsCompose).not.toContain("      - app-network\n");
     expect(tlsCompose).toContain("name: osinara-production-edge-frontend");
+    // Per-project route files let other projects on the same host share this proxy without edits.
+    expect(tlsCompose).toContain("--providers.file.directory=/etc/traefik/dynamic");
+    expect(tlsCompose).toContain("/opt/osinara/tls/dynamic:/etc/traefik/dynamic:ro");
+    const route = files.get("installation/traefik-osinara.yaml")!.toString("utf8");
+    expect(route).toContain("url: http://edge:80");
+    expect(route).toContain('Host(`{{ env "OSINARA_HOSTNAME" }}`)');
   });
 
   it("rejects an archive containing a symbolic link", async () => {

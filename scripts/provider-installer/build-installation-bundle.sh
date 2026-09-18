@@ -50,10 +50,10 @@ install -m 0644 "$INSTALLATION_COMPOSE" \
   "${WORK_DIR}/installation/compose.installation.json"
 install -m 0644 "$DEPLOYMENT_MANIFEST" \
   "${WORK_DIR}/installation/osinara-deployment.json"
-install -m 0644 "${PROJECT_ROOT}/infra/installer/Caddyfile" \
-  "${WORK_DIR}/installation/Caddyfile"
-install -m 0644 "${PROJECT_ROOT}/infra/installer/compose.tls.yaml" \
-  "${WORK_DIR}/installation/compose.tls.yaml"
+install -m 0644 "${PROJECT_ROOT}/infra/traefik/compose.yaml" \
+  "${WORK_DIR}/installation/traefik-compose.yaml"
+install -m 0644 "${PROJECT_ROOT}/infra/traefik/dynamic/osinara.yaml" \
+  "${WORK_DIR}/installation/traefik-osinara.yaml"
 tar --create --gzip \
   --directory "$WORK_DIR" \
   --format=gnu \

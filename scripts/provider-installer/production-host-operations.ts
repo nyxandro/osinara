@@ -6,15 +6,22 @@
  *
  * Key constructs:
  * - Exact `/opt/osinara` paths, recoverable attempt state, durable migration marker, and process lock.
- * - Digest-only application Compose plus an isolated pinned Caddy project.
+ * - Digest-only application Compose plus an isolated pinned Traefik project (`managed` TLS mode), or
+ *   verification that an operator-owned proxy already answers for the hostname (`external` TLS mode).
  * - Bounded health checks and subprocess output without shell interpolation.
  */
 import { constants } from "node:fs";
 import { chmod, chown, lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 
-import type { HostInstallationOperations, HostInstallationStageInput } from "./host-executor.js";
-import { parseBootstrapProcessOutput, releaseEnvironmentFromManifest } from "./host-contracts.js";
+import type { HostInstallationOperations, HostInstallationStageInput, HostTlsInput } from "./host-executor.js";
+import {
+  buildTlsEnvironment,
+  parseBootstrapProcessOutput,
+  releaseEnvironmentFromManifest,
+  renderTraefikRoute,
+} from "./host-contracts.js";
+import { probeExternalProxy } from "./external-proxy-probe.js";
 import { readInstallationBundle, validateInstallationBundle } from "./installation-bundle.js";
 import { recoverPreMigrationInstallationAttempt } from "./installation-attempt.js";
 import { acquireInstallationLock } from "./installation-lock.js";
@@ -33,9 +40,13 @@ const COMPOSE_PATH = `${BASE_DIR}/compose.installation.json`;
 const MANIFEST_PATH = `${BASE_DIR}/osinara-deployment.json`;
 const TLS_DIR = `${BASE_DIR}/tls`;
 const TLS_ENV_PATH = `${TLS_DIR}/.env`;
-const TLS_COMPOSE_PATH = `${TLS_DIR}/compose.tls.yaml`;
-const CADDYFILE_PATH = `${TLS_DIR}/Caddyfile`;
+const TLS_COMPOSE_PATH = `${TLS_DIR}/compose.yaml`;
+const TLS_DYNAMIC_DIR = `${TLS_DIR}/dynamic`;
+const TLS_ROUTE_PATH = `${TLS_DYNAMIC_DIR}/osinara.yaml`;
+const EDGE_LOOPBACK_PORT = 8082;
 const HTTPS_ATTEMPTS = 60;
+// An operator attaching their own proxy needs time to connect it after the edge appears.
+const EXTERNAL_HTTPS_ATTEMPTS = 180;
 const HTTPS_INTERVAL_MS = 5_000;
 const COMMAND_TIMEOUT_MS = 15 * 60 * 1_000;
 const PRODUCTION_DOCKER_RESOURCES = [
@@ -50,7 +61,7 @@ const PRODUCTION_DOCKER_RESOURCES = [
   "osinara-production-edge-frontend",
   "osinara-production-sandbox-control",
   "osinara-production-sandbox-egress",
-  "osinara-tls-caddy-data",
+  "osinara-tls-traefik-data",
 ] as const;
 
 async function writeRootFile(path: string, bytes: Buffer, mode: number): Promise<void> {
@@ -108,7 +119,7 @@ async function assertPortAvailable(port: number): Promise<void> {
     const server = createServer();
     server.once("error", (error) => reject(new InstallerError(
       "OSINARA_INSTALL_PORT_UNAVAILABLE",
-      `Порт ${port} занят. Освободите порты 80 и 443 перед установкой`,
+      `Порт ${port} занят. Освободите его перед установкой`,
       { cause: error },
     )));
     server.listen({ host: "0.0.0.0", port, exclusive: true }, () => {
@@ -224,16 +235,22 @@ export function createProductionHostOperations(): HostInstallationOperations {
       // Atomic write plus file and parent-directory fsync makes the no-cleanup boundary durable.
       await writeRootFile(MIGRATION_MARKER_PATH, Buffer.from("migration-started\n", "ascii"), 0o600);
     },
-    preflight: async () => {
-      await assertPortAvailable(80);
-      await assertPortAvailable(443);
-      await assertPortAvailable(8082);
+    preflight: async (input: HostTlsInput) => {
+      await assertPortAvailable(EDGE_LOOPBACK_PORT);
       await dockerCompose(COMPOSE_PATH, [ENV_PATH, RELEASE_ENV_PATH], ["config", "--quiet"]);
-      await dockerCompose(TLS_COMPOSE_PATH, [TLS_ENV_PATH], ["config", "--quiet"]);
+      if (input.tlsMode === "managed") {
+        await assertPortAvailable(80);
+        await assertPortAvailable(443);
+        await dockerCompose(TLS_COMPOSE_PATH, [TLS_ENV_PATH], ["config", "--quiet"]);
+        return;
+      }
+      await probeExternalProxy({ fetch: globalThis.fetch, hostname: input.hostname, listenPort: EDGE_LOOPBACK_PORT });
     },
-    pullImages: async () => {
+    pullImages: async (input: HostTlsInput) => {
       await dockerCompose(COMPOSE_PATH, [ENV_PATH, RELEASE_ENV_PATH], ["pull", "--quiet"]);
-      await dockerCompose(TLS_COMPOSE_PATH, [TLS_ENV_PATH], ["pull", "--quiet"]);
+      if (input.tlsMode === "managed") {
+        await dockerCompose(TLS_COMPOSE_PATH, [TLS_ENV_PATH], ["pull", "--quiet"]);
+      }
     },
     rollbackPreparedState: async () => {
       if (!ownsBaseDirectory) {
@@ -271,17 +288,32 @@ export function createProductionHostOperations(): HostInstallationOperations {
         await mkdir(TLS_DIR, { mode: 0o750 });
         await chown(TLS_DIR, 0, 0);
         await chmod(TLS_DIR, 0o750);
+        await mkdir(TLS_DYNAMIC_DIR, { mode: 0o750 });
+        await chown(TLS_DYNAMIC_DIR, 0, 0);
+        await chmod(TLS_DYNAMIC_DIR, 0o750);
         await requirePhysicalRootDirectory(BASE_DIR);
         await requirePhysicalRootDirectory(ATTEMPT_DIR);
         await requirePhysicalRootDirectory(TLS_DIR);
+        await requirePhysicalRootDirectory(TLS_DYNAMIC_DIR);
         await writeRootFile(ENV_PATH, input.environmentBytes, 0o600);
         await writeRootFile(MODEL_CONFIG_PATH, input.modelConfigBytes, 0o644);
         await writeRootFile(RELEASE_ENV_PATH, releaseEnvironment, 0o600);
         await writeRootFile(COMPOSE_PATH, requireFile("installation/compose.installation.json"), 0o644);
         await writeRootFile(MANIFEST_PATH, requireFile("installation/osinara-deployment.json"), 0o644);
-        await writeRootFile(CADDYFILE_PATH, requireFile("installation/Caddyfile"), 0o644);
-        await writeRootFile(TLS_COMPOSE_PATH, requireFile("installation/compose.tls.yaml"), 0o644);
-        await writeRootFile(TLS_ENV_PATH, Buffer.from(`OSINARA_HOSTNAME=${input.hostname}\n`), 0o600);
+        if (input.tlsMode === "managed") {
+          await writeRootFile(TLS_COMPOSE_PATH, requireFile("installation/traefik-compose.yaml"), 0o644);
+        }
+        // Rendered with the real hostname: the written route must not depend on any process environment.
+        await writeRootFile(
+          TLS_ROUTE_PATH,
+          renderTraefikRoute(requireFile("installation/traefik-osinara.yaml"), input.hostname),
+          0o644,
+        );
+        await writeRootFile(
+          TLS_ENV_PATH,
+          buildTlsEnvironment({ hostname: input.hostname, mode: input.tlsMode }),
+          0o600,
+        );
       } catch (error) {
         await cleanupOwnedBaseDirectory();
         throw error;
@@ -298,9 +330,10 @@ export function createProductionHostOperations(): HostInstallationOperations {
       ]);
     },
     validateBundle: validateInstallationBundle,
-    waitForPublicHttps: async (hostname) => {
-      const url = `https://${hostname}/eve/v1/health`;
-      for (let attempt = 1; attempt <= HTTPS_ATTEMPTS; attempt += 1) {
+    waitForPublicHttps: async (input: HostTlsInput) => {
+      const url = `https://${input.hostname}/eve/v1/health`;
+      const attempts = input.tlsMode === "external" ? EXTERNAL_HTTPS_ATTEMPTS : HTTPS_ATTEMPTS;
+      for (let attempt = 1; attempt <= attempts; attempt += 1) {
         try {
           const response = await fetch(url, {
             redirect: "error",
@@ -310,11 +343,11 @@ export function createProductionHostOperations(): HostInstallationOperations {
         } catch {
           // ACME issuance is asynchronous; the bounded outer loop owns the only allowed wait.
         }
-        if (attempt < HTTPS_ATTEMPTS) await sleep(HTTPS_INTERVAL_MS);
+        if (attempt < attempts) await sleep(HTTPS_INTERVAL_MS);
       }
       throw new InstallerError(
         "OSINARA_INSTALL_HTTPS_HEALTH_TIMEOUT",
-        `Публичный HTTPS ${hostname} не стал доступен за отведённое время. Проверьте DNS и порты 80/443`,
+        `Публичный HTTPS ${input.hostname} не стал доступен за отведённое время. Проверьте DNS, порты 80/443 и настройку прокси`,
       );
     },
   };

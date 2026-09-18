@@ -7,6 +7,8 @@
  * - `createHostInstallationExecutor`: orders reversible preparation and irreversible migration work.
  *
  * Key constructs:
+ * - TLS mode is an operator decision: `managed` starts the bundled Traefik, `external` only verifies
+ *   that an existing host proxy already answers for the hostname.
  * - Candidate model/environment generation without legacy proxy credentials.
  * - Full rollback only before migrations can mutate durable PostgreSQL state.
  * - Durable migration-start marker and explicit ambiguous terminal state after that boundary.
@@ -18,6 +20,7 @@ import { buildModelProviderConfig } from "../../agent/lib/provider-catalog/model
 import type {
   InstallationExecutionInput,
   InstallationExecutionResult,
+  TlsMode,
 } from "./contracts.js";
 import { InstallerError } from "./errors.js";
 
@@ -27,6 +30,12 @@ export interface HostInstallationStageInput {
   readonly hostname: string;
   readonly modelConfigBytes: Buffer;
   readonly releaseVersion: string;
+  readonly tlsMode: TlsMode;
+}
+
+export interface HostTlsInput {
+  readonly hostname: string;
+  readonly tlsMode: TlsMode;
 }
 
 export interface HostInstallationOperations {
@@ -41,14 +50,14 @@ export interface HostInstallationOperations {
   }) => Promise<void>;
   readonly createOwnerBootstrap: () => Promise<InstallationExecutionResult>;
   readonly markMigrationStarted: () => Promise<void>;
-  readonly preflight: () => Promise<void>;
-  readonly pullImages: () => Promise<void>;
+  readonly preflight: (input: HostTlsInput) => Promise<void>;
+  readonly pullImages: (input: HostTlsInput) => Promise<void>;
   readonly rollbackPreparedState: () => Promise<void>;
   readonly stage: (input: HostInstallationStageInput) => Promise<void>;
   readonly startApplication: () => Promise<void>;
   readonly startTls: () => Promise<void>;
   readonly validateBundle: (archive: Uint8Array) => Promise<void>;
-  readonly waitForPublicHttps: (hostname: string) => Promise<void>;
+  readonly waitForPublicHttps: (input: HostTlsInput) => Promise<void>;
 }
 
 function requireExactArchiveChecksum(input: InstallationExecutionInput): void {
@@ -116,6 +125,7 @@ export function createHostInstallationExecutor(
     let primaryError: unknown;
     try {
       await operations.assertCleanState();
+      const tls: HostTlsInput = { hostname: input.hostname, tlsMode: input.tlsMode };
       let stagingCompleted = false;
       try {
         await operations.stage({
@@ -124,10 +134,11 @@ export function createHostInstallationExecutor(
           hostname: input.hostname,
           modelConfigBytes: buildModelConfig(input),
           releaseVersion: input.assets.version,
+          tlsMode: input.tlsMode,
         });
         stagingCompleted = true;
-        await operations.preflight();
-        await operations.pullImages();
+        await operations.preflight(tls);
+        await operations.pullImages(tls);
       } catch (error) {
         if (stagingCompleted) {
           try {
@@ -151,8 +162,9 @@ export function createHostInstallationExecutor(
         // Marker durability is part of the irreversible boundary and must immediately precede Compose.
         await operations.markMigrationStarted();
         await operations.startApplication();
-        await operations.startTls();
-        await operations.waitForPublicHttps(input.hostname);
+        // An external proxy is the operator's; the installer only waits for it to publish the edge.
+        if (input.tlsMode === "managed") await operations.startTls();
+        await operations.waitForPublicHttps(tls);
         const bootstrap = await operations.createOwnerBootstrap();
         await operations.configureWebhook({
           hostname: input.hostname,

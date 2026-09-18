@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 import { discoverPublicIpv4, normalizeSslipHostname, validateCustomHostname } from "./address.ts";
 import {
   ADDRESS_MODE_OPTIONS,
+  TLS_MODE_OPTIONS,
   MODEL_PROVIDER_OPTIONS,
   buildOwnerBootstrapOutput,
   generateInternalSecrets,
@@ -212,6 +213,11 @@ export async function runInteractiveInstaller(
           publicIpv4,
           dependencies.resolveIpv4,
         );
+  // The host decides nothing here: an occupied port 443 is verified later against this explicit choice.
+  const tlsMode = await dependencies.prompts.select(
+    "Как публиковать HTTPS для Osinara",
+    TLS_MODE_OPTIONS,
+  );
   const provider = await dependencies.prompts.select(
     "Выберите поставщика модели",
     MODEL_PROVIDER_OPTIONS,
@@ -258,6 +264,7 @@ export async function runInteractiveInstaller(
       reasoningSelection,
       telegramBotToken,
       telegramBotUsername: telegramBot.username,
+      tlsMode,
     }),
   );
   const ownerBootstrap = buildOwnerBootstrapOutput({
