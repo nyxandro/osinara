@@ -16,7 +16,8 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=read-only
 ProtectSystem=strict
-ReadWritePaths=/opt/osinara /run/lock
+# The leading dash keeps monitoring optional: a host without the collector still deploys.
+ReadWritePaths=/opt/osinara /run/lock -/var/lib/monitoring-agent/textfile
 
 [Install]
 WantedBy=multi-user.target

@@ -1,5 +1,5 @@
 # Alerts for Osinara that depend only on its logs, which arrive as soon as the application runs.
-# Alerts that need the database exporter live in osinara-state.yaml.disabled.
+# Alerts that need the database exporter live in osinara-state.yaml.
 groups:
   - name: osinara-heartbeat
     interval: 30s
@@ -8,10 +8,21 @@ groups:
       # Each is gated on the application still writing logs, so enabling this file, restarting the
       # hub, or a server that is simply gone does not fire four scheduler alerts at once. A dead
       # server is already covered by HostDown and ContainerExited.
+      #
+      # Each is also stood down while a release is running: the deployment stops every container,
+      # and dispatchers that are supposed to be down are not an incident. The deadline is published
+      # by production-deploy.sh and expires on its own, so a deployment that dies without closing it
+      # cannot silence these rules for longer than one release takes. The project is named in the
+      # selector because the left side carries no `project` label to match on: without it, a
+      # release of any other project on the server would stand these rules down too.
+      # Only rules about the present state stand down. The log-burst rules below count lines that
+      # were already written, and suppressing those would hide a burst that happened just before
+      # the release started.
       - alert: OsinaraSchedulerHeartbeatMissing
         expr: >-
           absent_over_time(osinara_schedule_tick_1m{schedule="reminder-dispatch"}[5m])
           and on() present_over_time(log_lines_1m{project="osinara-production"}[5m])
+          unless on() deploy_window_end_timestamp_seconds{project="osinara-production"} > time()
         labels:
           severity: critical
           project: osinara-production
@@ -25,6 +36,7 @@ groups:
         expr: >-
           absent_over_time(osinara_schedule_tick_1m{schedule="agent-schedule-dispatch"}[5m])
           and on() present_over_time(log_lines_1m{project="osinara-production"}[5m])
+          unless on() deploy_window_end_timestamp_seconds{project="osinara-production"} > time()
         labels:
           severity: critical
           project: osinara-production
@@ -38,6 +50,7 @@ groups:
         expr: >-
           absent_over_time(osinara_schedule_tick_1m{schedule="memory-review-dispatch"}[5m])
           and on() present_over_time(log_lines_1m{project="osinara-production"}[5m])
+          unless on() deploy_window_end_timestamp_seconds{project="osinara-production"} > time()
         labels:
           severity: critical
           project: osinara-production

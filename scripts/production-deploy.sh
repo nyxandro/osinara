@@ -140,7 +140,10 @@ main() {
     return 0
   fi
   WORK_DIR="$(mktemp -d "${BASE_DIR}/.deploy.XXXXXX")"
-  trap cleanup_runtime_files EXIT
+  # Only the lock owner ends the window, so no exit can cut a running release short. Every timer
+  # tick that finds nothing to do still passes here, which is what clears a window left behind by
+  # a deployment killed before its trap ran: it expires on its own, but usually within a minute.
+  trap 'close_deploy_window "$DEPLOY_WINDOW_METRIC"; cleanup_runtime_files' EXIT
 
   if [[ "$INITIAL_MODE" -eq 1 ]]; then
     require_semver "$REQUESTED_VERSION"
@@ -153,6 +156,10 @@ main() {
     [[ "$CLAIM_FOUND" -eq 1 ]] || return 0
     require_upgrade_from_current
   fi
+
+  # A deployment is certain from here on. Almost every timer tick returns above without an
+  # approved proposal, and announcing the window there would suppress production alerts all day.
+  open_deploy_window "$DEPLOY_WINDOW_METRIC"
 
   download_and_validate_release "$REQUESTED_VERSION"
   if [[ "$INITIAL_MODE" -eq 0 ]]; then
@@ -168,11 +175,19 @@ main() {
     recheck_claim_owner
     preflight_backup
     prepare_runtime_update
+    # Downtime starts on the next line and lasts through the backup. The window opened before the
+    # download has been running through image pull, which has no bound of its own, so it is
+    # refreshed here: an unusually slow pull must not leave the stop itself looking like an outage.
+    open_deploy_window "$DEPLOY_WINDOW_METRIC"
     stop_current_services
     create_postgres_backup
     snapshot_durable_volumes
     prune_old_deploy_backups
   fi
+
+  # Image pull and backup have already consumed part of the window; migration and the health
+  # wait get a full one, so a long release never starts alerting on its own last minutes.
+  open_deploy_window "$DEPLOY_WINDOW_METRIC"
 
   MIGRATION_STARTED=1
   provision_v0160_codex_bridge
