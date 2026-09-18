@@ -175,6 +175,10 @@ main() {
     recheck_claim_owner
     preflight_backup
     prepare_runtime_update
+    # Downtime starts on the next line and lasts through the backup. The window opened before the
+    # download has been running through image pull, which has no bound of its own, so it is
+    # refreshed here: an unusually slow pull must not leave the stop itself looking like an outage.
+    open_deploy_window "$DEPLOY_WINDOW_METRIC"
     stop_current_services
     create_postgres_backup
     snapshot_durable_volumes
