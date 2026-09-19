@@ -103,10 +103,24 @@ describe("memory embedding client", () => {
 
   it("rejects provider errors and vectors with the wrong dimensions", async () => {
     process.env.MEMORY_EMBEDDING_BASE_URL = "http://embedding-worker:80";
+    // A busy service and a rejected text are told apart by status: only the first is worth
+    // another attempt later, and the job queue decides that from this code alone.
     await expect(
       embedMemoryPassages(
         ["текст"],
         vi.fn().mockResolvedValue(new Response("unavailable", { status: 503 })),
+      ),
+    ).rejects.toThrowError(/AGENT_MEMORY_EMBEDDING_PROVIDER_BUSY/);
+    await expect(
+      embedMemoryPassages(
+        ["текст"],
+        vi.fn().mockResolvedValue(new Response("too many requests", { status: 429 })),
+      ),
+    ).rejects.toThrowError(/AGENT_MEMORY_EMBEDDING_PROVIDER_BUSY/);
+    await expect(
+      embedMemoryPassages(
+        ["текст"],
+        vi.fn().mockResolvedValue(new Response("payload too large", { status: 413 })),
       ),
     ).rejects.toThrowError(/AGENT_MEMORY_EMBEDDING_PROVIDER_FAILED/);
     await expect(

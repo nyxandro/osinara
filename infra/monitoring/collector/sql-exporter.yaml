@@ -4,7 +4,8 @@
 # OSINARA_METRICS_DSN, so the password never enters this repository, a compose file or a process
 # listing. See infra/monitoring/README.md.
 #
-# Every query reads a view created by migration 103. Nothing here may touch a base table: the
+# Every query reads a monitoring view created by a migration — 103 for most of them, 105 for the
+# memory index state. Nothing here may touch a base table: the
 # osinara_metrics role has no privilege on them, and a query that tried would fail closed.
 global:
   min_interval: 30s
@@ -24,6 +25,8 @@ collectors:
         query: SELECT status, total, recent FROM monitoring_memory_review_batches
       - query_name: memory_embedding_jobs
         query: SELECT status, total, recent FROM monitoring_memory_embedding_jobs
+      - query_name: memory_index_state
+        query: SELECT embedding_status, total FROM monitoring_memory_index_state
       - query_name: runtime_maintenance
         query: |
           SELECT phase, 1 AS present, age_seconds
@@ -92,6 +95,15 @@ collectors:
         key_labels: [status]
         values: [recent]
         query_ref: memory_embedding_jobs
+
+      # Standing state, not recent activity: a record stuck outside `indexed` stays invisible to
+      # semantic search until someone acts, however long ago its indexing job failed.
+      - metric_name: osinara_memory_index_state
+        type: gauge
+        help: 'Active memory records by embedding index state.'
+        key_labels: [embedding_status]
+        values: [total]
+        query_ref: memory_index_state
 
       - metric_name: osinara_model_last_success_age_seconds
         type: gauge

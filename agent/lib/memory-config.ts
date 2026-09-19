@@ -81,6 +81,21 @@ export const MEMORY_EMBEDDING_LEASE_MILLISECONDS = 120_000;
 export const MEMORY_EMBEDDING_JOB_BATCH_SIZE = 4;
 export const MEMORY_EMBEDDING_PROVIDER_BATCH_SIZE = 8;
 
+// A record that never reaches `indexed` is invisible to semantic search forever, so a failure that
+// was only the service being away must not be terminal. The retry is tied to the recorded reason,
+// not to a timer: these two codes are the cases where the text was never rejected — the service was
+// unreachable, or it answered that it was overloaded. Everything else stays terminal, including a
+// plain rejected request, which may be input the model refuses and would spin forever, and an
+// expired lease, whose ending is simply unknown. Both return to the queue by operator reindex.
+export const MEMORY_EMBEDDING_TRANSIENT_ERROR_CODES = [
+  "AGENT_MEMORY_EMBEDDING_PROVIDER_BUSY",
+  "AGENT_MEMORY_EMBEDDING_PROVIDER_UNAVAILABLE",
+] as const;
+// One original attempt plus two retries. The delay is a guard, not the trigger: without it the
+// idle-polling worker would burn both retries in the same second the service went down.
+export const MEMORY_EMBEDDING_MAX_ATTEMPTS = 3;
+export const MEMORY_EMBEDDING_RETRY_DELAY_MILLISECONDS = 5 * 60 * 1_000;
+
 // Character bounds guarantee E5's 512-token limit even for adversarial punctuation-heavy text.
 export const MEMORY_EMBEDDING_CHUNK_MAX_CHARACTERS = 400;
 export const MEMORY_EMBEDDING_CHUNK_MIN_BOUNDARY_CHARACTERS = 280;
