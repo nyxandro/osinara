@@ -9,6 +9,7 @@ import { database } from "../database.js";
 import type { PoolClient } from "pg";
 import type { TelegramGroupJournalEntry } from "../telegram-group-journal-context.js";
 import {
+  MEMORY_REVIEW_BATCH_MAX_AGE_MILLISECONDS,
   MEMORY_REVIEW_BATCH_SIZE,
 } from "./memory-review-config.js";
 import {
@@ -52,7 +53,10 @@ function project(row: SourceRow): TelegramGroupJournalEntry {
 }
 
 async function materializeReadyBatches(client: PoolClient, now: Date): Promise<void> {
-  // This is the crash-recovery path for a committed 50th message whose inline observer did not run.
+  // Two jobs: the crash-recovery path for a committed 50th message whose inline observer did not
+  // run, and the only path that releases a short batch in a group too quiet to ever fill one.
+  // The inline observer cannot do the second one: it runs on an incoming message, and a silent
+  // group has none.
   const lanes = await client.query<{
     conversation_id: string;
     id: string;
@@ -77,8 +81,8 @@ async function materializeReadyBatches(client: PoolClient, now: Date): Promise<v
       [lane.id, lane.processed_through_sequence],
     );
     if (existing.rows[0]) continue;
-    const sources = await client.query<{ id: string; sequence_id: string }>(
-      `SELECT message.id, message.sequence_id::text
+    const sources = await client.query<{ id: string; sent_at: Date; sequence_id: string }>(
+      `SELECT message.id, message.sequence_id::text, message.sent_at
          FROM telegram_group_messages AS message
         WHERE message.conversation_id = $1 AND message.actor_kind IN ('user', 'telegram_bot')
           AND message.message_thread_id IS NOT DISTINCT FROM $2::bigint
@@ -87,16 +91,23 @@ async function materializeReadyBatches(client: PoolClient, now: Date): Promise<v
       [lane.conversation_id, lane.message_thread_id, lane.processed_through_sequence,
         MEMORY_REVIEW_BATCH_SIZE],
     );
-    if (sources.rows.length < MEMORY_REVIEW_BATCH_SIZE) continue;
+    if (sources.rows.length === 0) continue;
+    // Whichever comes first: a full batch, or a backlog whose oldest message has waited too long.
+    // Below the size limit this window holds the whole backlog, so its minimum is the lane's own
+    // `oldestUnreviewedAt` — the same instant the lane metrics report.
+    const oldestSentAt = Math.min(...sources.rows.map((source) => source.sent_at.getTime()));
+    const aged = now.getTime() - oldestSentAt >= MEMORY_REVIEW_BATCH_MAX_AGE_MILLISECONDS;
+    if (sources.rows.length < MEMORY_REVIEW_BATCH_SIZE && !aged) continue;
     const first = sources.rows[0]!;
     const last = sources.rows.at(-1)!;
     const batch = await client.query<{ id: string }>(
       `INSERT INTO memory_review_batches
          (lane_id, conversation_id, batch_kind, status, predecessor_sequence,
-          from_sequence, through_sequence, source_count)
-       VALUES ($1, $2, 'background', 'pending', $3, $4, $5, $6) RETURNING id`,
+          from_sequence, through_sequence, source_count, aged_release_at)
+       VALUES ($1, $2, 'background', 'pending', $3, $4, $5, $6, $7) RETURNING id`,
       [lane.id, lane.conversation_id, lane.processed_through_sequence,
-        first.sequence_id, last.sequence_id, sources.rows.length],
+        first.sequence_id, last.sequence_id, sources.rows.length,
+        sources.rows.length < MEMORY_REVIEW_BATCH_SIZE ? now : null],
     );
     await client.query(
       `INSERT INTO memory_review_batch_sources

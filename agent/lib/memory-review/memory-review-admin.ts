@@ -13,7 +13,7 @@ export async function inspectMemoryReviewLanes() {
     diagnosticCode: string | null; processedThroughSequence: string; waitingSources: number;
     fromSequence: string | null; throughSequence: string | null; sourceCount: number | null;
     modelRouteKey: string | null; modelRecoveryGeneration: number | null;
-    waitingSince: Date | null; lastModelSuccessAt: Date | null;
+    waitingSince: Date | null; lastModelSuccessAt: Date | null; agedReleaseAt: Date | null;
     eveSessionId: string | null; eveTurnId: string | null;
   }>(
     `SELECT lane.id AS "laneId", telegram_group.title AS "groupTitle",
@@ -24,6 +24,7 @@ export async function inspectMemoryReviewLanes() {
              batch.source_count AS "sourceCount",
              batch.model_route_key AS "modelRouteKey", batch.model_recovery_generation AS "modelRecoveryGeneration",
              batch.waiting_since AS "waitingSince", health.observed_at AS "lastModelSuccessAt",
+             batch.aged_release_at AS "agedReleaseAt",
              batch.eve_session_id AS "eveSessionId", batch.eve_turn_id AS "eveTurnId",
             (SELECT count(*)::integer FROM telegram_group_messages AS message
               WHERE message.conversation_id = lane.conversation_id
