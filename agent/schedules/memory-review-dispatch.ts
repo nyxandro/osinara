@@ -2,7 +2,8 @@
  * Eve minute dispatcher for durable silent memory-review batches.
  *
  * Export:
- * - Default schedule that delivers severe alerts and starts ready 50-message task sessions.
+ * - Default schedule that delivers severe alerts and starts ready task sessions: a full
+ *   50-message batch, or a shorter one whose oldest message has waited out its age limit.
  * - Records a completed cycle for external monitoring; a failed cycle records nothing.
  */
 import { defineSchedule } from "eve/schedules";
