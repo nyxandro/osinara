@@ -312,7 +312,7 @@ describe("memory block resolution", () => {
     expect(retrieve).not.toHaveBeenCalled();
   });
 
-  it("logs selected refs and text volume without logging the question or memory content", async () => {
+  it("logs selected refs, text volume, and branch numbers without the question or memory content", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const memories = [{ memoryRef: "mem_first", content: "Частная запись", kind: "fact" }, {
       type: "unresolved_conflict", versions: [
@@ -320,8 +320,22 @@ describe("memory block resolution", () => {
         { memoryRef: "mem_third", content: "Другая версия" },
       ],
     }];
+    const diagnostics = {
+      candidateLimitHit: true,
+      queryCharacters: "Личный вопрос".length,
+      queryChunks: 1,
+      russianCandidates: 3,
+      russianMatched: 3,
+      russianTopRank: 0.42,
+      semanticCandidates: 0,
+      semanticMatched: 41,
+      semanticTopSimilarity: 0.71,
+      simpleCandidates: 0,
+      simpleMatched: 0,
+      simpleTopRank: null,
+    };
     const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization, createProfile,
-      retrieve: vi.fn().mockResolvedValue({ memories, retrievedClaimIds: [],
+      retrieve: vi.fn().mockResolvedValue({ diagnostics, memories, retrievedClaimIds: [],
         threads: { threads: [], totalCharacters: 0 } }),
     });
     try {
@@ -331,7 +345,7 @@ describe("memory block resolution", () => {
         memoryRefs: ["mem_first", "mem_second", "mem_third"],
         memoryCharacters: "Частная записьПервая версияДругая версия".length,
         memorySerializedCharacters: JSON.stringify(memories).length,
-        profileCharacters: 0, threadRefs: [],
+        profileCharacters: 0, threadRefs: [], ...diagnostics,
       });
       expect(JSON.stringify(logged)).not.toMatch(/Личный вопрос|Частная запись|Первая версия|Другая версия/u);
     } finally { info.mockRestore(); }

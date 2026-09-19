@@ -5,6 +5,7 @@
  * - `formatRetrievedMemoryInstructions`: describes the active retrieval pipeline to the model.
  * - `latestUserText`: extracts the newest user text from Eve model history.
  * - `memoryRetrievalQuery`: selects the addressed text to search by for the current turn.
+ * - `MemoryRetrievalDiagnostics`: log-only numbers about the query and each search branch.
  * - `retrieveRelevantMemories`: embeds a query locally and runs scoped hybrid search.
  * - `retrieveMemoryTurnContext`: adds activated source-backed thread briefs to ordinary retrieval.
  */
@@ -12,6 +13,8 @@ import type { SessionAuth } from "eve/context";
 import type { ModelMessage } from "ai";
 
 import { embedMemoryQuery } from "./memory-embedding-client.js";
+import { chunkMemoryQuery } from "./memory-embedding-chunks.js";
+import type { MemoryRetrievalBranchDiagnostics } from "./memory-retrieval-ranking.js";
 import type { MemoryAuthorization } from "./memory-context.js";
 import type { ModelMemory } from "./model-memory.js";
 import { EVIDENCE_KIND_LEGEND, toModelMemory } from "./model-memory.js";
@@ -26,6 +29,30 @@ import { MemoryContextFailure, type MemoryContextPhase } from "./memory-context-
 export type ModelMemoryContextItem = ModelMemory | (MemoryConflictGroup & {
   type: "unresolved_conflict";
 });
+
+/**
+ * Everything measurable about one retrieval, as numbers only. It travels beside the memories and
+ * never inside them: the model sees records, the log sees why those records were the ones found.
+ */
+export interface MemoryRetrievalDiagnostics extends MemoryRetrievalBranchDiagnostics {
+  queryCharacters: number;
+  queryChunks: number;
+}
+
+/**
+ * The chunking is deterministic and text-local, so measuring it here costs a string scan and keeps
+ * `embedMemoryQuery` free of a diagnostics return type that every other caller would have to carry.
+ */
+function queryDiagnostics(
+  query: string,
+  branches: MemoryRetrievalBranchDiagnostics,
+): MemoryRetrievalDiagnostics {
+  return {
+    ...branches,
+    queryCharacters: query.length,
+    queryChunks: chunkMemoryQuery(query).length,
+  };
+}
 
 export function formatRetrievedMemoryInstructions(
   memories: readonly ModelMemoryContextItem[],
@@ -49,6 +76,7 @@ export function formatRetrievedMemoryInstructions(
 }
 
 export interface MemoryTurnContext {
+  diagnostics: MemoryRetrievalDiagnostics;
   memories: ModelMemoryContextItem[];
   retrievedClaimIds: string[];
   threads: MemoryThreadContext;
@@ -96,13 +124,19 @@ export function memoryRetrievalQuery(
 export async function retrieveRelevantMemories(
   auth: MemoryAuthorization,
   query: string,
-): Promise<ModelMemoryContextItem[]> {
+): Promise<{
+  diagnostics: MemoryRetrievalDiagnostics;
+  memories: ModelMemoryContextItem[];
+}> {
   const embedding = await embedMemoryQuery(query);
   const retrieval = await memoryRetrievalRepository.searchWithConflictClosure(auth, query, embedding);
-  return [
-    ...retrieval.results.map((result) => toModelMemory(result.memory, result.sourceEvidence)),
-    ...retrieval.conflicts.map((conflict) => ({ ...conflict, type: "unresolved_conflict" as const })),
-  ];
+  return {
+    diagnostics: queryDiagnostics(query, retrieval.diagnostics),
+    memories: [
+      ...retrieval.results.map((result) => toModelMemory(result.memory, result.sourceEvidence)),
+      ...retrieval.conflicts.map((conflict) => ({ ...conflict, type: "unresolved_conflict" as const })),
+    ],
+  };
 }
 
 export async function retrieveMemoryTurnContext(
@@ -126,7 +160,12 @@ export async function retrieveMemoryTurnContext(
       retrievedClaimIds: retrieval.results.map((result) => result.memory.id),
       skillHints,
     });
-    return { memories, retrievedClaimIds: retrieval.relatedClaimIds, threads };
+    return {
+      diagnostics: queryDiagnostics(query, retrieval.diagnostics),
+      memories,
+      retrievedClaimIds: retrieval.relatedClaimIds,
+      threads,
+    };
   } catch (error) {
     throw new MemoryContextFailure(phase, error);
   }

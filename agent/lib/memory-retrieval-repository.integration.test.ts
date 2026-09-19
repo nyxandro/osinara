@@ -6,6 +6,7 @@
  * - Personal and family authorization is applied before ranking.
  * - Unresolved conflict closure loads both authorized versions even when one has no retrieval score.
  * - Conflict closure withholds base results when authorization changes between repository queries.
+ * - Branch diagnostics report pre-threshold scores and post-threshold candidate counts.
  */
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -14,6 +15,7 @@ import { closeDatabase, database } from "./database.js";
 import {
   MEMORY_EMBEDDING_DIMENSIONS,
   MEMORY_EMBEDDING_MODEL_VERSION,
+  MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY,
 } from "./memory-config.js";
 import { memoryRetrievalRepository } from "./memory-retrieval-repository.js";
 
@@ -89,7 +91,7 @@ describeWithDatabase("memoryRetrievalRepository", () => {
     await insert(auth.userId!, auth.telegramActorId, "Любимый транспорт — поезд", [vector(0, 1)], "irrelevant");
     await insert(otherUserId, "search-other", "Скрытая аллергия на орехи", [vector(1, 0)], "hidden");
 
-    const results = await memoryRetrievalRepository.search(
+    const { results } = await memoryRetrievalRepository.search(
       auth,
       "орехами",
       vector(1, 0),
@@ -100,6 +102,48 @@ describeWithDatabase("memoryRetrievalRepository", () => {
       .toHaveLength(1);
     expect(results.map((result) => result.memory.content)).not.toContain("Скрытая аллергия на орехи");
     expect(results[0]?.evidence.russianMorphologyRank).not.toBeNull();
+  });
+
+  it("reports the branch scores that the thresholds cut off, even when nothing is returned", async () => {
+    const memory = await database().query<{ id: string }>(
+      `INSERT INTO memory_items
+         (family_id, owner_user_id, author_user_id, author_telegram_user_id, scope, kind,
+          content, source, confirmation, sensitivity, operation_key, embedding_status)
+       VALUES ($1, $2, $2, $3, 'personal', 'fact', 'Пользователь не ест орехи',
+               'test:diagnostics', 'user_confirmed', 'normal', 'diagnostics', 'indexed')
+       RETURNING id`,
+      [auth.familyId, auth.userId, auth.telegramUserId],
+    );
+    await database().query(
+      `INSERT INTO memory_embedding_chunks
+         (memory_item_id, chunk_index, content, start_offset, end_offset, embedding, embedding_model)
+       VALUES ($1, 0, 'Пользователь не ест орехи', 0, 25, $2::vector, $3)`,
+      [memory.rows[0]!.id, `[${vector(0, 1).join(",")}]`, MEMORY_EMBEDDING_MODEL_VERSION],
+    );
+
+    // Orthogonal query vector and unrelated wording: every branch scores below its own gate.
+    const { diagnostics, results } = await memoryRetrievalRepository.search(
+      auth,
+      "велосипед",
+      vector(1, 0),
+    );
+
+    expect(results).toEqual([]);
+    expect(diagnostics.semanticTopSimilarity).not.toBeNull();
+    expect(diagnostics.semanticTopSimilarity!)
+      .toBeLessThan(MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY);
+    expect(diagnostics).toMatchObject({
+      candidateLimitHit: false,
+      russianCandidates: 0,
+      russianMatched: 0,
+      russianTopRank: null,
+      // The semantic branch did look at the record and scored it; the gate is what dropped it.
+      semanticCandidates: 0,
+      semanticMatched: 1,
+      simpleCandidates: 0,
+      simpleMatched: 0,
+      simpleTopRank: null,
+    });
   });
 
   it("loads an unresolved low-score conflict partner as one complete opaque group", async () => {
@@ -207,7 +251,7 @@ describeWithDatabase("memoryRetrievalRepository", () => {
       "код сейфа 1234",
       vector(1, 0),
     );
-    expect(beforeRevocation.map((result) => result.memory.id)).toEqual(expect.arrayContaining([
+    expect(beforeRevocation.results.map((result) => result.memory.id)).toEqual(expect.arrayContaining([
       first.rows[0]!.id,
       ordinary.rows[0]!.id,
     ]));
@@ -238,7 +282,7 @@ describeWithDatabase("memoryRetrievalRepository", () => {
         auth,
         "код сейфа 1234",
         vector(1, 0),
-      )).resolves.toEqual({ conflicts: [], relatedClaimIds: [], results: [] });
+      )).resolves.toMatchObject({ conflicts: [], relatedClaimIds: [], results: [] });
       expect(revoked).toBe(true);
     } finally {
       querySpy.mockRestore();

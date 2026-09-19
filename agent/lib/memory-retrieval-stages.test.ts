@@ -11,7 +11,15 @@ import { memoryFailureCode } from "./memory-context-failure.js";
 describe("memory retrieval failure provenance", () => {
   beforeEach(() => {
     mocks.embedding.mockReset().mockResolvedValue([1]);
-    mocks.search.mockReset().mockResolvedValue({ results: [], conflicts: [], relatedClaimIds: [] });
+    mocks.search.mockReset().mockResolvedValue({
+      conflicts: [], relatedClaimIds: [], results: [],
+      diagnostics: {
+        candidateLimitHit: false,
+        russianCandidates: 0, russianMatched: 0, russianTopRank: null,
+        semanticCandidates: 0, semanticMatched: 0, semanticTopSimilarity: null,
+        simpleCandidates: 0, simpleMatched: 0, simpleTopRank: null,
+      },
+    });
     mocks.threads.mockReset().mockResolvedValue({ threads: [], totalCharacters: 0 });
   });
   it.each(["embedding", "search", "threads"] as const)("keeps the original %s failure and never continues to later stages", async phase => {
@@ -22,5 +30,10 @@ describe("memory retrieval failure provenance", () => {
     await result.catch(error => expect(memoryFailureCode(error)).toBe("AGENT_TEST_DEPENDENCY_FAILED"));
     if (phase === "embedding") expect(mocks.search).not.toHaveBeenCalled();
     if (phase !== "threads") expect(mocks.threads).not.toHaveBeenCalled();
+  });
+  it("carries the branch numbers of a successful turn together with the query's own", async () => {
+    const context = await retrieveMemoryTurnContext({} as MemoryAuthorization, "private query", []);
+    expect(context.diagnostics)
+      .toMatchObject({ queryCharacters: "private query".length, queryChunks: 1, simpleMatched: 0 });
   });
 });

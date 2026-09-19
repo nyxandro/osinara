@@ -139,7 +139,7 @@ describeEval("memory retrieval eval v1", () => {
   it("meets the versioned R1 quality gates and prints the measured result", async () => {
     const evaluated: EvaluatedQuery[] = [];
     for (const query of MEMORY_RETRIEVAL_EVAL_QUERIES_V1) {
-      const results = await memoryRetrievalRepository.search(
+      const { results } = await memoryRetrievalRepository.search(
         auth,
         query.text,
         await embedMemoryQuery(query.text),
@@ -235,7 +235,7 @@ describeEval("memory retrieval eval v1", () => {
   it("measures identity hard-negative abstention while preserving exact controls", async () => {
     const evaluated: EvaluatedQuery[] = [];
     for (const query of MEMORY_RETRIEVAL_EVAL_QUERIES_V2) {
-      const results = await memoryRetrievalRepository.search(
+      const { results } = await memoryRetrievalRepository.search(
         auth,
         query.text,
         await embedMemoryQuery(query.text),

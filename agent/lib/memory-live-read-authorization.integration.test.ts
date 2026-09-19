@@ -230,7 +230,7 @@ async function createExternalGroupFixture(suffix: string): Promise<ReadFixture> 
 async function expectReadable(fixture: ReadFixture): Promise<void> {
   const briefs = createMemoryThreadBriefRepository();
   expect((await memoryListRepository.list(fixture.auth, { limit: 20 })).items.length).toBeGreaterThan(0);
-  expect((await memoryRetrievalRepository.search(fixture.auth, "ремонт", QUERY_VECTOR)).length)
+  expect((await memoryRetrievalRepository.search(fixture.auth, "ремонт", QUERY_VECTOR)).results.length)
     .toBeGreaterThan(0);
   expect((await memoryRetrievalRepository.searchWithConflictClosure(
     fixture.auth,
@@ -255,12 +255,12 @@ async function expectDenied(fixture: ReadFixture): Promise<void> {
   await expect(memoryListRepository.list(fixture.auth, { limit: 20 }))
     .resolves.toMatchObject({ items: [] });
   await expect(memoryRetrievalRepository.search(fixture.auth, "ремонт", QUERY_VECTOR))
-    .resolves.toEqual([]);
+    .resolves.toMatchObject({ results: [] });
   await expect(memoryRetrievalRepository.searchWithConflictClosure(
     fixture.auth,
     "ремонт",
     QUERY_VECTOR,
-  )).resolves.toEqual({ conflicts: [], relatedClaimIds: [], results: [] });
+  )).resolves.toMatchObject({ conflicts: [], relatedClaimIds: [], results: [] });
   await expect(memoryThreadQueryRepository.list(fixture.auth, { limit: 20 }))
     .resolves.toMatchObject({ items: [] });
   await expect(memoryThreadQueryRepository.search(fixture.auth, "ремонт", 20)).resolves.toEqual([]);
