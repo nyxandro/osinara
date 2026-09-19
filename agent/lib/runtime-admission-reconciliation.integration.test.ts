@@ -6,7 +6,11 @@ import { reconcileRuntimeAdmissions, runtimeProcessIdentity } from "./runtime-ad
 const suite = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true" ? describe : describe.skip;
 suite("runtime admission reconciliation", () => {
   beforeEach(async () => { await database().query("TRUNCATE runtime_admission_holders"); });
-  afterAll(closeDatabase);
+  // The holders table is global: a file that leaves rows behind breaks whichever suite counts them next.
+  afterAll(async () => {
+    await database().query("TRUNCATE runtime_admission_holders");
+    await closeDatabase();
+  });
   it("proves process death instead of expiring live or unidentified holders", async () => {
     const current = await runtimeProcessIdentity();
     const child = spawn(process.execPath,["--import","tsx","--input-type=module","-e",
