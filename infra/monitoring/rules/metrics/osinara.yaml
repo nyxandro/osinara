@@ -134,7 +134,7 @@ groups:
         annotations:
           summary: 'Поиск памяти возвращает пустую подборку в {{ $value | humanizePercentage }} ходов за сутки'
           description: 'Ассистент почти всегда отвечает, не получив ни одной записи памяти. Для семьи это выглядит как забывчивость: он не помнит того, о чём ему рассказывали.'
-          runbook: 'В строках AGENT_MEMORY_RETRIEVAL_METRICS смотреть semanticTopSimilarity, simpleTopRank и russianTopRank: все около нуля — сломан сервис эмбеддингов или FTS; счета высокие, а *Matched больше нуля при нулевых *Candidates — отсекают пороги поиска.'
+          runbook: 'В строках AGENT_MEMORY_RETRIEVAL_METRICS смотреть semanticTopSimilarity, simpleTopRank и russianTopRank: все около нуля — сломан сервис эмбеддингов или FTS; счета высокие, а *Matched больше нуля при нулевых *Qualified — отсекают пороги поиска.'
 
       - alert: OsinaraEmbeddingFailed
         expr: sum(sum_over_time(log_code_lines_1m{project="osinara-production", code=~"AGENT_MEMORY_EMBEDDING_.+"}[5m])) > 0

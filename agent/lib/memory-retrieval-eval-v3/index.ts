@@ -22,12 +22,13 @@
  * - **Group memory.** The measurement runs as the owner in a private chat, where group records are
  *   not authorized at all; adding them would measure access rules, not retrieval quality, and the
  *   access rules have their own integration tests.
- * - **Subject columns.** Subjects live inside the record text; `subject_label` and `subject_user_id`
- *   are empty, so the profile projection path is untouched. The work that puts a subject header
- *   into the vector will need them and should add them together with the change it measures.
- * - **Wall-clock drift.** The fused score carries a recency term computed from `now()`, so the
- *   pinned numbers are not eternal: the corpus dates are fixed and the term keeps shrinking. The
- *   spread is around 1e-4 against a rank step of 1.6e-2, which is why the numbers hold in practice
+ * - **Subject identity columns.** `subject_label` here is fixture metadata, not a stored column:
+ *   the harness feeds it to `memoryEmbeddingInput` so the indexed text carries the same subject
+ *   header production writes. In the database `subject_label` and `subject_user_id` stay empty, so
+ *   the profile projection path is untouched and its own tests own it.
+ * - **Wall-clock drift.** The fused score is multiplied by the forgetting curve, computed from
+ *   `now()` against a fixed corpus, so the pinned numbers are not eternal. The corpus is even in
+ *   age and the multiplier moves every record together, which is why the numbers hold in practice
  *   rather than by construction.
  */
 import { MEMORY_RETRIEVAL_EVAL_RECORDS_EVENTS_V3 } from "./records-events.js";
@@ -68,15 +69,25 @@ export const MEMORY_RETRIEVAL_EVAL_RECORDS_V3: readonly MemoryRetrievalEvalRecor
  * `typoRecallAt12` = 1 is the opposite kind of result: all five typos, including distorted proper
  * nouns, are recovered by the existing three branches, which is evidence against adding a fourth
  * one on trigrams (#199).
+ *
+ * Two numbers here are lower than they were before the long fixtures were repaired, and the
+ * pipeline did not change between the two measurements. The long queries had been written against
+ * a 400-character chunk limit; when the limit rose to 900 they fitted into one chunk, and the
+ * category went on reporting numbers for a case it no longer contained. Restored to genuinely
+ * multi-chunk length, `longQueryFullCoverageRate` fell from 0.667 to 0.333 and
+ * `expectedInTopThreeRate` from 0.94 to 0.84. The earlier pair was not wrong arithmetic; it was an
+ * easier question than the one the name promised. A long rambling message still finds most of its
+ * topics — `longQueryRecallAt12` holds at 0.833 — but covering *all* of them is where the pipeline
+ * actually stands, and that is now visible instead of averaged away.
  */
 export const MEMORY_RETRIEVAL_R1_BASELINE_V3 = {
   botAddressRecallAt12: 1,
   emojiMarkupRecallAt12: 1,
   exactRecallAt12: 1,
-  expectedInTopThreeRate: 0.94,
+  expectedInTopThreeRate: 0.84,
   lexicalBranchFireRate: 0.86,
   liveShapeLexicalFireRate: 0.917,
-  longQueryFullCoverageRate: 0.667,
+  longQueryFullCoverageRate: 0.333,
   longQueryRecallAt12: 0.833,
   mixedLanguageRecallAt12: 1,
   multiTopicFullCoverageRate: 0.6,
@@ -94,6 +105,11 @@ export const MEMORY_RETRIEVAL_R1_BASELINE_V3 = {
 /**
  * What the same corpus measured before wave 2, kept so the effect of that work stays visible in
  * the repository rather than only in a merged pull request.
+ *
+ * Measured on the fixtures as they were then, with long queries around four hundred characters.
+ * For the two long-query numbers this is therefore no longer the same question asked twice: the
+ * fixtures were repaired afterwards, and `longQueryFullCoverageRate` above is measured on messages
+ * that genuinely span several chunks. The other rows compare directly.
  */
 export const MEMORY_RETRIEVAL_BASELINE_V3_BEFORE_WAVE_2 = {
   expectedInTopThreeRate: 0.816,
