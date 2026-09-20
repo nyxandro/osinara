@@ -15,6 +15,11 @@
  * written, which is the best evidence there is. The 196 episodes stored before this existed have
  * no event date and never will, and that is accepted rather than filled in afterwards.
  *
+ * The fallback day is read in the person's own timezone. The database runs on UTC, and a chat at
+ * +3 would otherwise see everything written between midnight and three in the morning as belonging
+ * to the previous day. A person who has not set a timezone is read as UTC, which is the server's
+ * own clock and the only honest answer when nobody said otherwise.
+ *
  * Ageing is deliberately left alone. A trip from ten years ago, told today, is fresh knowledge,
  * and the forgetting curve keeps reading `created_at`; mixing the two axes would hide what a
  * person has only just said.
@@ -52,7 +57,7 @@ export function normalizeMemoryEventDate(value: string): string {
 export const memoryEventWindowRepository = {
   async search(
     auth: MemoryAuthorization,
-    window: { from: string; to: string },
+    window: { from: string; timezone: string | null; to: string },
   ): Promise<ReferencedMemoryItem[]> {
     const from = normalizeMemoryEventDate(window.from);
     const to = normalizeMemoryEventDate(window.to);
@@ -72,10 +77,15 @@ export const memoryEventWindowRepository = {
        WHERE item.family_id = $1 AND item.claim_status = 'active'
          AND ${liveMemoryReadPredicate({ alias: "item", personalIdentityColumn: "owner_user_id" })}
          -- The event date when the conversation gave one, otherwise the day it was written down.
-         AND COALESCE(item.occurred_on, item.created_at::date) BETWEEN $5::date AND $6::date
-       ORDER BY COALESCE(item.occurred_on, item.created_at::date) DESC, ref.memory_ref DESC
-       LIMIT $7`,
-      [auth.familyId, auth.scopes, auth.userId, auth.groupId, from, to, MEMORY_EVENT_WINDOW_LIMIT],
+         -- That day is read in the person's own timezone: the database runs on UTC, and for a
+         -- +3 chat everything written after midnight local would otherwise land on yesterday.
+         AND COALESCE(item.occurred_on, (item.created_at AT TIME ZONE $7)::date)
+             BETWEEN $5::date AND $6::date
+       ORDER BY COALESCE(item.occurred_on, (item.created_at AT TIME ZONE $7)::date) DESC,
+                item.created_at DESC, ref.memory_ref DESC
+       LIMIT $8`,
+      [auth.familyId, auth.scopes, auth.userId, auth.groupId, from, to,
+        window.timezone ?? "UTC", MEMORY_EVENT_WINDOW_LIMIT],
     );
     return result.rows.map(rowToReferencedMemory);
   },

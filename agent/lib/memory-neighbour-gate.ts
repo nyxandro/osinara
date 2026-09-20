@@ -22,6 +22,10 @@
  * `distinctFrom`. A neighbour it has not named stops the write again, so a blanket declaration
  * carried over from an earlier turn cannot wave through something new.
  *
+ * The gate can only see records the indexing worker has already reached, so two paraphrases
+ * written inside one turn do not stop each other. That gap is covered from the other side: the
+ * silent review is shown what the conversation already stores before it starts writing at all.
+ *
  * The threshold is 0.93, measured rather than chosen: over 1030 active non-episode records on
  * production, a gate at 0.90 would stop 360 writes with 3.8 neighbours each, at 0.92 — 164, at
  * 0.93 — 100 with 1.3 neighbours, at 0.95 — 33. At 0.93 it stops about a tenth of writes, above
@@ -34,9 +38,10 @@ import { embedMemoryPassages } from "./memory-embedding-client.js";
 import { memoryEmbeddingInput } from "./memory-embedding-header.js";
 import { MEMORY_EMBEDDING_MODEL_VERSION } from "./memory-config.js";
 import type { MemoryKind } from "./memory-record.js";
+import { memoryFailureCode } from "./memory-context-failure.js";
 import { ModelFacingError } from "./model-facing-error.js";
 
-export const MEMORY_NEIGHBOUR_SIMILARITY = 0.93;
+const MEMORY_NEIGHBOUR_SIMILARITY = 0.93;
 export const MEMORY_NEIGHBOUR_CANDIDATE_LIMIT = 5;
 
 interface NeighbourRow {
@@ -49,7 +54,7 @@ interface NeighbourRow {
  * An episode is about one moment, and two similar trips are two trips; repeats there are the
  * normal shape of the data, not a defect, so the gate never looks at them.
  */
-export function memoryNeighbourGateApplies(kind: MemoryKind): boolean {
+function memoryNeighbourGateApplies(kind: MemoryKind): boolean {
   return kind !== "episode";
 }
 
@@ -77,7 +82,14 @@ export async function embedMemoryNeighbourProbe(input: {
       }),
     ]);
     return embeddings[0] ?? null;
-  } catch {
+  } catch (error) {
+    // Written down once, because a gate that quietly stopped working looks exactly like a memory
+    // where nothing is ever a duplicate, and nobody would notice for weeks.
+    console.warn(JSON.stringify({
+      code: "AGENT_MEMORY_NEIGHBOUR_PROBE_SKIPPED",
+      causeCode: memoryFailureCode(error) ?? "UNCLASSIFIED_EMBEDDING_ERROR",
+      kind: input.kind,
+    }));
     return null;
   }
 }
@@ -86,6 +98,8 @@ export async function requireMemoryNeighbourDecision(
   client: PoolClient,
   input: {
     declaredRefs: readonly string[];
+    familyId: string;
+    memoryProjectId: string | null;
     probe: number[] | null;
     scope: string;
     scopePartitionKey: string;
@@ -103,20 +117,26 @@ export async function requireMemoryNeighbourDecision(
      JOIN memory_items AS item ON item.id = chunk.memory_item_id
      JOIN memory_item_refs AS ref ON ref.memory_item_id = item.id
      WHERE item.claim_status = 'active' AND item.kind <> 'episode'
-       AND item.scope = $2::memory_scope AND item.scope_partition_key = $3
-       AND item.subject_user_id IS NOT DISTINCT FROM $4
-       AND item.subject_participant_id IS NOT DISTINCT FROM $5
-       AND item.subject_conversation_id IS NOT DISTINCT FROM $6
-       AND item.subject_label IS NOT DISTINCT FROM $7
-       AND chunk.embedding_model = $8
+       -- The refusal hands the model the text of what it found, so this query carries the family
+       -- explicitly rather than trusting the partition to imply it.
+       AND item.family_id = $2
+       AND item.scope = $3::memory_scope AND item.scope_partition_key = $4
+       AND item.memory_project_id IS NOT DISTINCT FROM $5
+       AND item.subject_user_id IS NOT DISTINCT FROM $6
+       AND item.subject_participant_id IS NOT DISTINCT FROM $7
+       AND item.subject_conversation_id IS NOT DISTINCT FROM $8
+       AND item.subject_label IS NOT DISTINCT FROM $9
+       AND chunk.embedding_model = $10
      GROUP BY ref.memory_ref, item.content
-     HAVING max(1 - (chunk.embedding <=> $1::vector)) >= $9
+     HAVING max(1 - (chunk.embedding <=> $1::vector)) >= $11
      ORDER BY similarity DESC
-     LIMIT $10`,
+     LIMIT $12`,
     [
       `[${input.probe.join(",")}]`,
+      input.familyId,
       input.scope,
       input.scopePartitionKey,
+      input.memoryProjectId,
       input.subjectUserId,
       input.subjectParticipantId,
       input.subjectConversationId,

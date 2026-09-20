@@ -65,7 +65,7 @@ export const memoryListRepository = {
     ]);
     const cursor = decodeCursor(options.cursor, cursorBinding);
     const result = await database().query<MemoryListRow>(
-      `SELECT item.id, item.attribute, item.claim_status, item.author_user_id, item.author_telegram_user_id, item.scope, item.kind,
+      `SELECT item.id, item.attribute, item.occurred_on, item.claim_status, item.author_user_id, item.author_telegram_user_id, item.scope, item.kind,
                item.content, item.source, item.confirmation, item.sensitivity,
                item.message_thread_id, item.embedding_status, item.created_at, item.updated_at,
                ref.memory_ref,

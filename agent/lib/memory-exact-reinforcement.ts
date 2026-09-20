@@ -45,7 +45,7 @@ export async function reinforceExactClaim(
   });
   await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [duplicateLock]);
   const duplicate = await client.query<ReferencedMemoryRow>(
-    `SELECT item.id, item.attribute, item.author_user_id, item.author_telegram_user_id, item.scope,
+    `SELECT item.id, item.attribute, item.occurred_on, item.author_user_id, item.author_telegram_user_id, item.scope,
             item.kind, item.content, item.source, item.confirmation, item.sensitivity,
             item.message_thread_id, item.embedding_status, item.created_at, item.updated_at,
             ref.memory_ref

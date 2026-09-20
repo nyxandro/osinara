@@ -27,6 +27,9 @@ export function formatMemoryExportFiles(memoryExport: MemoryExport): {
     `- ID: \`${record.id}\``,
     `- Область: \`${record.scope}\``,
     ...(record.attribute === null ? [] : [`- Свойство: \`${record.attribute}\``]),
+    ...(record.occurredOn === null ? [] : [`- Когда произошло: ${record.occurredOn}`]),
+    // Without this line two versions of one property read as two equal facts in the document.
+    ...(record.status === undefined ? [] : [`- Состояние: \`${record.status}\` (не текущая версия)`]),
     `- Создано: ${record.createdAt}`,
     `- Обновлено: ${record.updatedAt}`,
     `- Подтверждение: \`${record.confirmation}\``,

@@ -14,14 +14,11 @@ import { fenceReviewMemoryWrite } from "./memory-review/memory-review-attempt.js
 import type { MemoryAuthorization, MemoryScope } from "./memory-context.js";
 import { reinforceExactClaim } from "./memory-exact-reinforcement.js";
 import {
-  normalizeMemoryAttribute,
+  lockMemoryAttributeSlot,
   supersedeMemoryAttributeSlot,
 } from "./memory-attribute-slot.js";
-import {
-  embedMemoryNeighbourProbe,
-  requireMemoryNeighbourDecision,
-} from "./memory-neighbour-gate.js";
-import { normalizeMemoryEventDate } from "./memory-event-window-repository.js";
+import { requireMemoryNeighbourDecision } from "./memory-neighbour-gate.js";
+import { prepareMemoryWriteGuards } from "./memory-write-guards.js";
 import { enforceMemoryQuota } from "./memory-quota.js";
 import {
   memoryOperationHash,
@@ -120,7 +117,7 @@ async function existingCreate(
     throw new AppError("AGENT_MEMORY_REPLAY_COMPLETED", "Исходная запись памяти уже удалена");
   }
   const result = await client.query<ReferencedMemoryRow>(
-    `SELECT item.id, item.attribute, item.author_user_id, item.author_telegram_user_id, item.scope, item.kind,
+    `SELECT item.id, item.attribute, item.occurred_on, item.author_user_id, item.author_telegram_user_id, item.scope, item.kind,
             item.content, item.source, item.confirmation, item.sensitivity, item.message_thread_id,
             item.embedding_status, item.created_at, item.updated_at, ref.memory_ref
      FROM memory_items AS item
@@ -259,15 +256,9 @@ export async function createMemoryClaim(
     reservation = preflight.reservation;
   }
   let titleEmbedding: Awaited<ReturnType<typeof embedMemoryThreadTitle>>;
-  // Both embeddings are taken before the transaction opens: a network call inside one would hold
-  // the write locks for as long as the service takes to answer.
-  const neighbourProbe = await embedMemoryNeighbourProbe({
-    content: input.content,
-    kind: input.kind,
-    subjectLabel: input.explicitSource?.subject.kind === "label"
-      ? input.explicitSource.subject.label
-      : null,
-  });
+  // Refusals and the neighbour probe both belong before the transaction: one must cost nothing,
+  // the other must not hold write locks across a network call.
+  const guards = await prepareMemoryWriteGuards(input);
   try {
     titleEmbedding = await embedMemoryThreadTitle(input.thread);
   } catch (error) {
@@ -336,13 +327,6 @@ export async function createMemoryClaim(
         ? auth.groupId!
         : auth.familyId;
     const contentNormalized = prepared?.contentNormalized ?? normalizeMemoryClaimContent(input.content);
-    // Both are checked before anything is written: a refusal must cost nothing.
-    const attribute = input.attribute === undefined
-      ? null
-      : normalizeMemoryAttribute(input.attribute, input.kind);
-    const occurredOn = input.occurredOn === undefined
-      ? null
-      : normalizeMemoryEventDate(input.occurredOn);
     const reinforced = await reinforceExactClaim(client, auth, {
       contentNormalized,
       memoryProjectId: threadWrite?.identity.memoryProjectId ?? null,
@@ -379,7 +363,9 @@ export async function createMemoryClaim(
     // nothing because no record has been created yet.
     await requireMemoryNeighbourDecision(client, {
       declaredRefs: input.distinctFrom ?? [],
-      probe: neighbourProbe,
+      familyId: auth.familyId,
+      memoryProjectId: threadWrite?.identity.memoryProjectId ?? null,
+      probe: guards.neighbourProbe,
       scope: input.scope,
       scopePartitionKey,
       subjectConversationId: prepared?.subjectConversationId ?? null,
@@ -387,6 +373,19 @@ export async function createMemoryClaim(
       subjectParticipantId: prepared?.subjectParticipantId ?? null,
       subjectUserId: prepared?.subjectUserId ?? null,
     });
+    // Taken before the insert: an interactive turn and the silent review can write the same slot
+    // at the same moment, and neither would see the other's uncommitted version.
+    if (guards.attribute !== null) {
+      await lockMemoryAttributeSlot(client, {
+        attribute: guards.attribute,
+        memoryProjectId: threadWrite?.identity.memoryProjectId ?? null,
+        scope: input.scope,
+        scopePartitionKey,
+        subjectLabel: prepared?.subjectLabel ?? null,
+        subjectParticipantId: prepared?.subjectParticipantId ?? null,
+        subjectUserId: prepared?.subjectUserId ?? null,
+      });
+    }
     await enforceMemoryQuota(client, auth, input.scope);
     const endorsedByUserId = prepared?.primaryAuthorUserId ?? null;
     const result = await client.query<Omit<ReferencedMemoryRow, "memory_ref">>(
@@ -418,8 +417,8 @@ export async function createMemoryClaim(
             (prepared.subjectUserId !== null || prepared.subjectParticipantId !== null),
           "active",
           null,
-          attribute,
-          occurredOn],
+          guards.attribute,
+          guards.occurredOn],
     );
     const row = result.rows[0];
     if (!row) throw new AppError("AGENT_MEMORY_WRITE_FAILED", "Не удалось сохранить запись памяти");
@@ -441,7 +440,7 @@ export async function createMemoryClaim(
     }
     // The previous holder of this slot yields its place only after the new version exists, so the
     // memory is never left without an answer to the property even for the length of a transaction.
-    const superseded = attribute === null
+    const superseded = guards.attribute === null
       ? []
       : await supersedeMemoryAttributeSlot(client, row.id);
     await insertCreateOperation(client, auth, input, inputHash, row.id, threadWrite);

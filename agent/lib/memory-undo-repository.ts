@@ -14,7 +14,7 @@ import type { PoolClient } from "pg";
 
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
-import { restoreMemoryAttributeSlot } from "./memory-attribute-slot.js";
+import { releaseMemoryAttributeSlot } from "./memory-attribute-slot.js";
 import type { MemoryAuthorization } from "./memory-context.js";
 import { memoryOperationHash, type MemoryOperationProvenance, type MemoryRow } from "./memory-record.js";
 
@@ -34,7 +34,7 @@ interface MutationOperationRow {
   mutation_kind: "create" | "delete" | "update";
 }
 
-const MEMORY_COLUMNS = `item.id, item.attribute, item.author_user_id, item.author_telegram_user_id, item.scope,
+const MEMORY_COLUMNS = `item.id, item.attribute, item.occurred_on, item.author_user_id, item.author_telegram_user_id, item.scope,
   item.kind, item.content, item.source, item.confirmation, item.sensitivity,
   item.message_thread_id, item.embedding_status, item.created_at, item.updated_at`;
 
@@ -208,7 +208,7 @@ export const memoryUndoRepository = {
       );
       // Отмена возвращает и то, что запись вытеснила: иначе отказ от ошибочной новой версии
       // стоил бы человеку прежнего факта, оставшегося замещённым навсегда.
-      await restoreMemoryAttributeSlot(client, id);
+      await releaseMemoryAttributeSlot(client, id);
       // Отмена создания тоже мягкая: единый путь означает, что ни одна операция памяти не уносит
       // данные безвозвратно, а ретенция вычищает мягко удалённое позже.
       await client.query(

@@ -198,7 +198,7 @@ export const memoryReviewDispatchRepository = {
         const entries = sources.rows.map(project);
         // What this conversation already stores and already read, so the review has a third
         // option besides saving and not saving.
-        const context = await selectMemoryReviewContext({
+        const context = await selectMemoryReviewContext(client, {
           conversationId: row.conversation_id,
           familyId: row.family_id,
           predecessorSequence: row.predecessor_sequence,

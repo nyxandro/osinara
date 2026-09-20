@@ -7,7 +7,7 @@
  */
 import type { PoolClient } from "pg";
 import { AppError } from "./app-error.js";
-import { restoreMemoryAttributeSlot } from "./memory-attribute-slot.js";
+import { releaseMemoryAttributeSlot } from "./memory-attribute-slot.js";
 import { database } from "./database.js";
 import { createMemoryClaim } from "./memory-claim-writer.js";
 import { insertClaimEvidence } from "./claim-evidence-writer.js";
@@ -103,7 +103,7 @@ async function selectAuthorizedMemory(
 ): Promise<MutationMemoryRow | null> {
   // Scope predicates run in the same lookup that resolves the opaque ref to an internal UUID.
   const result = await client.query<MutationMemoryRow>(
-    `SELECT item.id, item.attribute, item.author_user_id, item.author_telegram_user_id, item.scope, item.kind,
+    `SELECT item.id, item.attribute, item.occurred_on, item.author_user_id, item.author_telegram_user_id, item.scope, item.kind,
             item.content, item.source, item.confirmation, item.sensitivity, item.message_thread_id,
              item.embedding_status, item.created_at, item.updated_at, ref.memory_ref,
              item.owner_user_id, item.group_id, item.origin_conversation_id,
@@ -265,7 +265,7 @@ export const memoryRepository = {
       // Вытесненные этой записью версии возвращаются: удаление сменщицы не должно оставлять
       // прежний факт замещённым навсегда. `superseded_by` снимается с самой строки, потому что
       // `retracted` по форме жизненного цикла не может на кого-то ссылаться.
-      await restoreMemoryAttributeSlot(client, memory.id);
+      await releaseMemoryAttributeSlot(client, memory.id);
       await client.query(
         `UPDATE memory_items_all
             SET deleted_at = now(), claim_status = 'retracted', superseded_by = NULL
@@ -345,7 +345,7 @@ export const memoryRepository = {
       // Вытесненные этой записью версии возвращаются: удаление сменщицы не должно оставлять
       // прежний факт замещённым навсегда. `superseded_by` снимается с самой строки, потому что
       // `retracted` по форме жизненного цикла не может на кого-то ссылаться.
-      await restoreMemoryAttributeSlot(client, memory.id);
+      await releaseMemoryAttributeSlot(client, memory.id);
       await client.query(
         `UPDATE memory_items_all
             SET deleted_at = now(), claim_status = 'retracted', superseded_by = NULL
@@ -433,7 +433,7 @@ export const memoryRepository = {
              sensitivity, operation_key, provenance_state, origin_conversation_id,
              subject_family_id, subject_user_id, subject_participant_id, subject_conversation_id,
              subject_label, memory_project_id, save_approved, endorsed_by_user_id, endorsed_at,
-             content_normalized, profile_eligible)
+             content_normalized, profile_eligible, attribute, occurred_on)
           SELECT family_id, owner_user_id, group_id, $2, $3, scope, COALESCE($4, kind), $5,
                   'explicit_correction', $9, $10, 'user_confirmed',
                   COALESCE($6, sensitivity), $7, 'evidenced', $11,
@@ -441,10 +441,16 @@ export const memoryRepository = {
                  subject_conversation_id, subject_label, memory_project_id, true, $2,
                  CASE WHEN $2::uuid IS NULL THEN NULL ELSE now() END,
                   $8,
-                  profile_eligible AND COALESCE($6, sensitivity) = 'normal'
+                  profile_eligible AND COALESCE($6, sensitivity) = 'normal',
+                  -- The corrected version is the same claim in better words: it keeps the slot it
+                  -- held and the day it happened, or the next version of that property would
+                  -- replace nothing and the record would fall out of its own period.
+                  CASE WHEN COALESCE($4, kind) = 'episode' THEN NULL ELSE attribute END,
+                  occurred_on
          FROM memory_items WHERE id = $1 AND claim_status = 'active'
-         RETURNING id, author_user_id, author_telegram_user_id, scope, kind, content, source,
-                   confirmation, sensitivity, message_thread_id, embedding_status, created_at, updated_at`,
+         RETURNING id, attribute, occurred_on, author_user_id, author_telegram_user_id, scope,
+                   kind, content, source, confirmation, sensitivity, message_thread_id,
+                   embedding_status, created_at, updated_at`,
         [memory.id, auth.userId, memory.scope === "group" ? auth.telegramUserId : null,
           input.kind ?? null, input.content, input.sensitivity ?? null, input.operationKey,
            normalizeMemoryClaimContent(input.content), primarySource.sourceMessageId,

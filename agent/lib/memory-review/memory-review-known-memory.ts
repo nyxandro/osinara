@@ -17,8 +17,13 @@
  *
  * Both are bounded on purpose. Everything here is paid for on every batch, and a conversation that
  * has been running for a year would otherwise carry its whole memory into every prompt.
+ *
+ * Both run on the caller's connection: the dispatcher holds an open transaction with row leases
+ * while it builds a batch, and taking a second connection from the pool there is how a busy
+ * dispatcher deadlocks itself against its own leases.
  */
-import { database } from "../database.js";
+import type { PoolClient } from "pg";
+
 import {
   MEMORY_REVIEW_KNOWN_RECORD_LIMIT,
   MEMORY_REVIEW_REVIEWED_TAIL_LIMIT,
@@ -47,14 +52,14 @@ export interface MemoryReviewContext {
  * has no single question to search by, and recency is where the duplicates are — 58% of production
  * memory was written on three active days.
  */
-export async function selectMemoryReviewContext(input: {
+export async function selectMemoryReviewContext(client: PoolClient, input: {
   conversationId: string;
   familyId: string;
   scope: string;
   scopePartitionKey: string;
   predecessorSequence: string;
 }): Promise<MemoryReviewContext> {
-  const known = await database().query<{
+  const known = await client.query<{
     attribute: string | null;
     content: string;
     kind: string;
@@ -65,11 +70,13 @@ export async function selectMemoryReviewContext(input: {
      JOIN memory_item_refs AS ref ON ref.memory_item_id = item.id
      WHERE item.family_id = $1 AND item.scope = $2::memory_scope
        AND item.scope_partition_key = $3 AND item.claim_status = 'active'
+       -- The review may only write normal records, so it is never shown a sensitive one.
+       AND item.sensitivity = 'normal'
      ORDER BY item.created_at DESC, item.id DESC
      LIMIT $4`,
     [input.familyId, input.scope, input.scopePartitionKey, MEMORY_REVIEW_KNOWN_RECORD_LIMIT],
   );
-  const reviewed = await database().query<{
+  const reviewed = await client.query<{
     content_text: string;
     sender_display_name: string;
     sequence_id: string;

@@ -8,7 +8,11 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 import { requireMemoryAuthorization } from "../memory-context.js";
-import { memoryEventWindowRepository } from "../memory-event-window-repository.js";
+import { currentTimeRepository } from "../current-time-repository.js";
+import {
+  memoryEventWindowRepository,
+  MEMORY_EVENT_WINDOW_LIMIT,
+} from "../memory-event-window-repository.js";
 import {
   retrieveRelevantMemories,
   type MemoryRetrievalDiagnostics,
@@ -28,6 +32,7 @@ export default defineTool({
     "Если для такого вопроса автоматической подборки недостаточно, вызови инструмент до трёх раз с разными смысловыми формулировками и остановись, когда контекста достаточно или новые релевантные факты больше не находятся.",
     "Для просьбы вспомнить прошлое или дать ту ссылку сначала восстанови предмет по явному названию или описанию из видимой переписки; пустая автоматическая подборка не доказывает отсутствие записи.",
     "Для вопроса про период (что было в августе, о чём договорились на прошлой неделе) задавай from и to: тогда отбор идёт по дате события, а у записей без неё по дате появления. В этом режиме query не участвует в отборе.",
+    `Период возвращает не больше ${MEMORY_EVENT_WINDOW_LIMIT} записей, самые поздние по дате события. Если их ровно столько, период мог не поместиться целиком: сузь его и повтори.`,
   ].join(" "),
   inputSchema: z.object({
     from: DAY.optional().describe("Начало периода, ГГГГ-ММ-ДД: отбирает записи по дате события"),
@@ -45,6 +50,11 @@ export default defineTool({
       if (from !== undefined || to !== undefined) {
         const window = await memoryEventWindowRepository.search(auth, {
           from: from ?? EARLIEST_SEARCHABLE_DAY,
+          // A record without an event date falls back to the day it appeared, and which day that
+          // was depends on where the person lives, not on where the database runs.
+          timezone: auth.userId === null
+            ? null
+            : await currentTimeRepository.findUserTimezone(auth.userId, auth.familyId),
           to: to ?? LATEST_SEARCHABLE_DAY,
         });
         found = window.map((item) => toModelMemory(item));

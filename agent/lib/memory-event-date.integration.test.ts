@@ -77,7 +77,7 @@ describeWithDatabase("memory event date", () => {
     });
 
     const found = await memoryEventWindowRepository.search(owner, {
-      from: "2026-08-01", to: "2026-08-31",
+      from: "2026-08-01", timezone: "Europe/Moscow", to: "2026-08-31",
     });
 
     expect(found.map((item) => item.id)).toEqual([august.id]);
@@ -88,7 +88,7 @@ describeWithDatabase("memory event date", () => {
     const undated = await remember({ content: "Что-то было", key: "event-4" });
 
     const today = new Date().toISOString().slice(0, 10);
-    const found = await memoryEventWindowRepository.search(owner, { from: today, to: today });
+    const found = await memoryEventWindowRepository.search(owner, { from: today, timezone: "UTC", to: today });
 
     expect(found.map((item) => item.id)).toContain(undated.id);
   });

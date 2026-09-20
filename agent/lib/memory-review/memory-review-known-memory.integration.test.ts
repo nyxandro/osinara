@@ -12,6 +12,7 @@
  * The measurement in #204 counts 865 pairs of records about one subject at similarity 0.90 or
  * above on 1464 indexed records.
  */
+import type { PoolClient } from "pg";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "../database.js";
@@ -27,8 +28,10 @@ describeWithDatabase("memory review known memory", () => {
   let groupId: string;
   let otherFamilyId: string;
   let otherGroupId: string;
+  let client: PoolClient;
 
   beforeEach(async () => {
+    client ??= await database().connect();
     await database().query(
       "TRUNCATE memory_items_all, telegram_group_messages, application_conversations, telegram_groups, family_memberships, users, families CASCADE",
     );
@@ -57,7 +60,10 @@ describeWithDatabase("memory review known memory", () => {
     conversationId = conversation.rows[0]!.id;
   });
 
-  afterAll(async () => closeDatabase());
+  afterAll(async () => {
+    client.release();
+    await closeDatabase();
+  });
 
   async function store(content: string, family = familyId, partition = groupId): Promise<void> {
     await database().query(
@@ -84,7 +90,7 @@ describeWithDatabase("memory review known memory", () => {
   it("shows the records this conversation already stored", async () => {
     await store("Аня не ест глютен");
 
-    const context = await selectMemoryReviewContext({
+    const context = await selectMemoryReviewContext(client, {
       conversationId, familyId, scope: "group", scopePartitionKey: groupId, predecessorSequence: "10",
     });
 
@@ -96,7 +102,7 @@ describeWithDatabase("memory review known memory", () => {
     await message(2, "Второе");
     await message(3, "Третье, уже в текущем пакете");
 
-    const context = await selectMemoryReviewContext({
+    const context = await selectMemoryReviewContext(client, {
       conversationId, familyId, scope: "group", scopePartitionKey: groupId, predecessorSequence: "2",
     });
 
@@ -106,7 +112,7 @@ describeWithDatabase("memory review known memory", () => {
   it("never reaches into another family's memory", async () => {
     await store("Чужой семейный факт", otherFamilyId, otherGroupId);
 
-    const context = await selectMemoryReviewContext({
+    const context = await selectMemoryReviewContext(client, {
       conversationId, familyId, scope: "group", scopePartitionKey: groupId, predecessorSequence: "10",
     });
 
@@ -118,7 +124,7 @@ describeWithDatabase("memory review known memory", () => {
       await store(`Факт номер ${index}`);
     }
 
-    const context = await selectMemoryReviewContext({
+    const context = await selectMemoryReviewContext(client, {
       conversationId, familyId, scope: "group", scopePartitionKey: groupId, predecessorSequence: "10",
     });
 

@@ -8,6 +8,9 @@
  * - A different subject, a different scope, or no slot at all leaves the old record alone.
  * - Undoing the create puts the previous version back into use.
  * - The retired version leaves the ordinary list but is still reachable as history.
+ * - Correcting a record keeps its slot, so the next version still replaces it.
+ * - Removing a middle version hands its history to the current one instead of reviving it.
+ * - Removing a corrected record does not bring back the wording that was corrected.
  *
  * The danger this file is really about is the second one from the issue: a slot named too widely
  * («еда») would silently retire independent facts. That is why every test here asserts what was
@@ -196,6 +199,43 @@ describeWithDatabase("memory attribute slot", () => {
     expect(current.items.map((item) => item.id)).not.toContain(old.id);
     expect(history.items.find((item) => item.id === old.id))
       .toMatchObject({ attribute: "кофе", status: "superseded" });
+  });
+
+  it("keeps the slot when the record is corrected, not replaced", async () => {
+    // The neighbour gate tells the model to correct rather than duplicate, so a correction that
+    // dropped the slot would quietly switch the replacement rule off for that property.
+    const first = await remember({
+      attribute: "место работы", auth: owner, content: "Работает в «Ладоге»", key: "slot-17",
+    });
+    const source = await createMemoryCorrectionSource(owner, "personal");
+
+    const corrected = await memoryRepository.updateByRef(owner, {
+      content: "Работает в «Ладоге» ведущим инженером",
+      memoryRef: first.memoryRef,
+      operationKey: "slot-17-edit",
+      source,
+    });
+
+    expect(corrected.attribute).toBe("место работы");
+  });
+
+  it("hands history to the current version when a middle one is removed", async () => {
+    const oldest = await remember({
+      attribute: "кофе", auth: owner, content: "С двумя ложками", key: "slot-18",
+    });
+    const middle = await remember({
+      attribute: "кофе", auth: owner, content: "С одной ложкой", key: "slot-19",
+    });
+    const current = await remember({
+      attribute: "кофе", auth: owner, content: "Без сахара", key: "slot-20",
+    });
+
+    await memoryRepository.deleteByRef(owner, middle.memoryRef, "slot-19-delete");
+
+    // Two active records in one slot would be the very thing the slot exists to prevent.
+    expect(await statusOf(oldest.id))
+      .toEqual({ claim_status: "superseded", content: "С двумя ложками", superseded_by: current.id });
+    expect((await statusOf(current.id)).claim_status).toBe("active");
   });
 
   it("refuses a slot longer than a name", async () => {
