@@ -23,6 +23,12 @@ try {
           SELECT 1 FROM memory_embedding_chunks AS chunk
           WHERE chunk.memory_item_id = item.id AND chunk.embedding_model <> $1
         )
+        -- A record indexed from its bare text: the vector carries no subject, so it is still
+        -- confusable with a record about somebody else that happens to read the same way.
+        OR EXISTS (
+          SELECT 1 FROM memory_embedding_chunks AS chunk
+          WHERE chunk.memory_item_id = item.id AND chunk.embedding_input = chunk.content
+        )
      FOR UPDATE`,
     [MEMORY_EMBEDDING_MODEL_VERSION],
   );

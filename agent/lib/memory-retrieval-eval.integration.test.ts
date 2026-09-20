@@ -29,6 +29,7 @@ import {
   MEMORY_RETRIEVAL_EVAL_RECORDS_V2,
   MEMORY_RETRIEVAL_R1_BASELINE_V2,
 } from "./memory-retrieval-eval-fixture.v2.js";
+import { memoryEmbeddingInput } from "./memory-embedding-header.js";
 import { memoryRetrievalRepository } from "./memory-retrieval-repository.js";
 import { prepareMemoryQuery } from "./memory-query-preparation.js";
 import type { MemoryAuthorization } from "./memory-context.js";
@@ -103,7 +104,11 @@ describeEval("memory retrieval eval v1", () => {
       embeddings.push(...await embedMemoryPassages(
         EVAL_RECORDS
           .slice(offset, offset + MEMORY_EMBEDDING_PROVIDER_BATCH_SIZE)
-          .map((record) => record.content),
+          // The same text production sends: the chunk carrying the subject it is about.
+          .map((record) => memoryEmbeddingInput(record.content, {
+            kind: "fact",
+            subjectLabel: record.subjectLabel ?? null,
+          })),
       ));
     }
 
@@ -120,11 +125,16 @@ describeEval("memory retrieval eval v1", () => {
       );
       await database().query(
         `INSERT INTO memory_embedding_chunks
-           (memory_item_id, chunk_index, content, start_offset, end_offset, embedding, embedding_model)
-         VALUES ($1, 0, $2, 0, $3, $4::vector, $5)`,
+           (memory_item_id, chunk_index, content, embedding_input, start_offset, end_offset,
+            embedding, embedding_model)
+         VALUES ($1, 0, $2, $3, 0, $4, $5::vector, $6)`,
         [
           inserted.rows[0]!.id,
           record.content,
+          memoryEmbeddingInput(record.content, {
+            kind: "fact",
+            subjectLabel: record.subjectLabel ?? null,
+          }),
           record.content.length,
           `[${embeddings[index]!.join(",")}]`,
           MEMORY_EMBEDDING_MODEL_VERSION,

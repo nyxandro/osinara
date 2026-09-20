@@ -12,6 +12,7 @@
  */
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
+import type { MemoryKind } from "./memory-record.js";
 import {
   MEMORY_EMBEDDING_DIMENSIONS,
   MEMORY_EMBEDDING_MAX_ATTEMPTS,
@@ -23,14 +24,18 @@ import {
 export interface MemoryEmbeddingJob {
   attempts: number;
   content: string;
+  kind: MemoryKind;
   leaseToken: string;
   memoryItemId: string;
+  subjectLabel: string | null;
 }
 
 export interface IndexedMemoryEmbeddingChunk {
   chunkIndex: number;
   content: string;
   embedding: readonly number[];
+  /** The text that actually went to the model: the chunk with its subject header. */
+  embeddingInput: string;
   endOffset: number;
   startOffset: number;
 }
@@ -80,8 +85,10 @@ export const memoryIndexRepository = {
       const result = await client.query<{
         attempts: number;
         content: string;
+        kind: MemoryKind;
         lease_token: string;
         memory_item_id: string;
+        subject_label: string | null;
       }>(
         `WITH candidates AS (
            SELECT job.memory_item_id
@@ -101,7 +108,8 @@ export const memoryIndexRepository = {
          FROM candidates, memory_items AS item
          WHERE job.memory_item_id = candidates.memory_item_id
            AND item.id = job.memory_item_id
-         RETURNING job.memory_item_id, job.attempts, job.lease_token::text, item.content`,
+         RETURNING job.memory_item_id, job.attempts, job.lease_token::text, item.content,
+                   item.kind, item.subject_label`,
         [
           limit,
           leaseMilliseconds,
@@ -114,8 +122,10 @@ export const memoryIndexRepository = {
       return result.rows.map((row) => ({
         attempts: row.attempts,
         content: row.content,
+        kind: row.kind,
         leaseToken: row.lease_token,
         memoryItemId: row.memory_item_id,
+        subjectLabel: row.subject_label,
       }));
     } catch (error) {
       await client.query("ROLLBACK");
@@ -144,7 +154,8 @@ export const memoryIndexRepository = {
         !Number.isInteger(chunk.startOffset) ||
         !Number.isInteger(chunk.endOffset) ||
         chunk.startOffset < 0 ||
-        chunk.endOffset <= chunk.startOffset
+        chunk.endOffset <= chunk.startOffset ||
+        !chunk.embeddingInput.includes(chunk.content)
       ) {
         throw new AppError(
           "AGENT_MEMORY_EMBEDDING_CHUNKS_INVALID",
@@ -182,9 +193,11 @@ export const memoryIndexRepository = {
       for (const chunk of validatedChunks) {
         await client.query(
           `INSERT INTO memory_embedding_chunks
-             (memory_item_id, chunk_index, content, start_offset, end_offset, embedding, embedding_model)
-           VALUES ($1, $2, $3, $4, $5, $6::vector, $7)`,
-          [memoryItemId, chunk.chunkIndex, chunk.content, chunk.startOffset, chunk.endOffset, chunk.vector, modelVersion],
+             (memory_item_id, chunk_index, content, embedding_input, start_offset, end_offset,
+              embedding, embedding_model)
+           VALUES ($1, $2, $3, $4, $5, $6, $7::vector, $8)`,
+          [memoryItemId, chunk.chunkIndex, chunk.content, chunk.embeddingInput, chunk.startOffset,
+           chunk.endOffset, chunk.vector, modelVersion],
         );
       }
       await client.query(

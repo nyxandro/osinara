@@ -81,8 +81,9 @@ describeWithDatabase("memoryRetrievalRepository", () => {
       for (const [chunkIndex, embedding] of embeddings.entries()) {
         await database().query(
           `INSERT INTO memory_embedding_chunks
-             (memory_item_id, chunk_index, content, start_offset, end_offset, embedding, embedding_model)
-           VALUES ($1, $2, $3, 0, $4, $5::vector, $6)`,
+             (memory_item_id, chunk_index, content, embedding_input, start_offset, end_offset,
+            embedding, embedding_model)
+           VALUES ($1, $2, $3, $3, 0, $4, $5::vector, $6)`,
           [memory.rows[0]!.id, chunkIndex, `${content}:${chunkIndex}`, content.length, `[${embedding.join(",")}]`, MEMORY_EMBEDDING_MODEL_VERSION],
         );
       }
@@ -116,8 +117,9 @@ describeWithDatabase("memoryRetrievalRepository", () => {
     );
     await database().query(
       `INSERT INTO memory_embedding_chunks
-         (memory_item_id, chunk_index, content, start_offset, end_offset, embedding, embedding_model)
-       VALUES ($1, 0, 'Пользователь не ест орехи', 0, 25, $2::vector, $3)`,
+         (memory_item_id, chunk_index, content, embedding_input, start_offset, end_offset,
+            embedding, embedding_model)
+       VALUES ($1, 0, 'Пользователь не ест орехи', 'Пользователь не ест орехи', 0, 25, $2::vector, $3)`,
       [memory.rows[0]!.id, `[${vector(0, 1).join(",")}]`, MEMORY_EMBEDDING_MODEL_VERSION],
     );
 
@@ -168,8 +170,9 @@ describeWithDatabase("memoryRetrievalRepository", () => {
     );
     await database().query(
       `INSERT INTO memory_embedding_chunks
-         (memory_item_id, chunk_index, content, start_offset, end_offset, embedding, embedding_model)
-       VALUES ($1, 0, 'Код домофона 1234', 0, 18, $2::vector, $3)`,
+         (memory_item_id, chunk_index, content, embedding_input, start_offset, end_offset,
+            embedding, embedding_model)
+       VALUES ($1, 0, 'Код домофона 1234', 'Код домофона 1234', 0, 18, $2::vector, $3)`,
       [first.rows[0]!.id, `[${vector(1, 0).join(",")}]`, MEMORY_EMBEDDING_MODEL_VERSION],
     );
     await database().query(
@@ -228,8 +231,9 @@ describeWithDatabase("memoryRetrievalRepository", () => {
     );
     await database().query(
       `INSERT INTO memory_embedding_chunks
-         (memory_item_id, chunk_index, content, start_offset, end_offset, embedding, embedding_model)
-       VALUES ($1, 0, 'Код сейфа 1234', 0, 14, $2::vector, $3)`,
+         (memory_item_id, chunk_index, content, embedding_input, start_offset, end_offset,
+            embedding, embedding_model)
+       VALUES ($1, 0, 'Код сейфа 1234', 'Код сейфа 1234', 0, 14, $2::vector, $3)`,
       [first.rows[0]!.id, `[${vector(1, 0).join(",")}]`, MEMORY_EMBEDDING_MODEL_VERSION],
     );
     await database().query(
@@ -241,8 +245,9 @@ describeWithDatabase("memoryRetrievalRepository", () => {
     );
     await database().query(
       `INSERT INTO memory_embedding_chunks
-         (memory_item_id, chunk_index, content, start_offset, end_offset, embedding, embedding_model)
-       VALUES ($1, 0, 'Обычная заметка про сейф', 0, 25, $2::vector, $3)`,
+         (memory_item_id, chunk_index, content, embedding_input, start_offset, end_offset,
+            embedding, embedding_model)
+       VALUES ($1, 0, 'Обычная заметка про сейф', 'Обычная заметка про сейф', 0, 25, $2::vector, $3)`,
       [ordinary.rows[0]!.id, `[${vector(1, 0).join(",")}]`, MEMORY_EMBEDDING_MODEL_VERSION],
     );
 

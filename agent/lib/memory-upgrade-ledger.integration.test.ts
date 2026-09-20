@@ -138,6 +138,8 @@ const POST_V0101_MIGRATIONS = [
   "104_memory_review_aged_release.sql",
   "105_memory_index_state_view.sql",
   "106_memory_search_vector_yo_folding.sql",
+  "107_memory_vector_index_iterative_scan.sql",
+  "108_memory_embedding_input.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [

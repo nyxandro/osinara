@@ -74,6 +74,7 @@ describeWithDatabase("memoryIndexRepository", () => {
           chunkIndex: 0,
           content: "Поездка",
           embedding: Array.from({ length: MEMORY_EMBEDDING_DIMENSIONS }, () => 0.125),
+          embeddingInput: "Вид: факт. Поездка",
           endOffset: 7,
           startOffset: 0,
         },
@@ -81,6 +82,7 @@ describeWithDatabase("memoryIndexRepository", () => {
           chunkIndex: 1,
           content: "в Казань",
           embedding: Array.from({ length: MEMORY_EMBEDDING_DIMENSIONS }, () => 0.25),
+          embeddingInput: "Вид: факт. в Казань",
           endOffset: 16,
           startOffset: 8,
         },
@@ -199,6 +201,7 @@ describeWithDatabase("memoryIndexRepository", () => {
           chunkIndex: 0,
           content: "Поездка в Казань",
           embedding: Array.from({ length: MEMORY_EMBEDDING_DIMENSIONS }, () => 0),
+          embeddingInput: "Вид: факт. Поездка в Казань",
           endOffset: 16,
           startOffset: 0,
         }],
@@ -224,6 +227,7 @@ describeWithDatabase("memoryIndexRepository", () => {
       chunks.map((chunk) => ({
         ...chunk,
         embedding: Array.from({ length: MEMORY_EMBEDDING_DIMENSIONS }, () => 0.125),
+        embeddingInput: `Вид: факт. ${chunk.content}`,
       })),
       MEMORY_EMBEDDING_MODEL_VERSION,
     )).resolves.toBe(true);

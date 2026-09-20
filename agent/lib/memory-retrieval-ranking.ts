@@ -22,9 +22,9 @@ export interface MemoryRetrievalBranchEvidence {
  * needed to calibrate a gate:
  *
  * - `*Matched` — what the branch found before its own threshold: zero means not one word of the
- *   question appears in any record the viewer may read. For the semantic branch it is every
- *   indexed record in that set, by construction — a denominator rather than a signal, and it drops
- *   only when indexing itself is broken.
+ *   question appears in any record the viewer may read. For the semantic branch it is how many
+ *   records the nearest-chunk lookup reached, which is bounded by the candidate limit rather than
+ *   by the corpus, and falls below it only when the viewer's memory holds fewer records than that.
  * - `*Qualified` — what passed the threshold, counted before the candidate limit. Together with
  *   `*Matched` this says how much the gate cut, which is the one thing a log needs to recalibrate
  *   it; capped at the limit it would hide exactly that.

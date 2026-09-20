@@ -60,10 +60,10 @@ export const MEMORY_RETRIEVAL_EVAL_RECORDS_V3: readonly MemoryRetrievalEvalRecor
  *   records, at 0.781 to 0.791 against a gate of 0.78. A gate at 0.80 makes this 1.0 — and costs
  *   memory-retrieval-v1 both of its pure paraphrases, whose nearest true answer sits at 0.79002.
  *   The two distributions touch. Measured, not argued; see #196.
- * - `semanticParaphraseRecallAt12` = 0.667 and `longQueryRecallAt12` = 0.833. The right record is
- *   scored well above the gate — 0.844, 0.797, 0.862 — and still loses its place among twelve to
- *   records that share more words with the question. On this corpus size the gate is no longer
- *   what loses a paraphrase; the composition of the twelve slots is.
+ * - `semanticParaphraseRecallAt12` = 0.833 and `longQueryRecallAt12` = 0.833. Each loses one
+ *   query, and in both the right record is scored well above the gate and still loses its place
+ *   among twelve to records that share more words with the question. On this corpus size the gate
+ *   is no longer what loses a paraphrase; the composition of the twelve slots is.
  *
  * `typoRecallAt12` = 1 is the opposite kind of result: all five typos, including distorted proper
  * nouns, are recovered by the existing three branches, which is evidence against adding a fourth
@@ -73,11 +73,11 @@ export const MEMORY_RETRIEVAL_R1_BASELINE_V3 = {
   botAddressRecallAt12: 1,
   emojiMarkupRecallAt12: 1,
   exactRecallAt12: 1,
-  expectedInTopThreeRate: 0.9,
+  expectedInTopThreeRate: 0.94,
   lexicalBranchFireRate: 0.86,
   liveShapeLexicalFireRate: 0.917,
   longQueryFullCoverageRate: 0.667,
-  longQueryRecallAt12: 1,
+  longQueryRecallAt12: 0.833,
   mixedLanguageRecallAt12: 1,
   multiTopicFullCoverageRate: 0.6,
   multiTopicRecallAt12: 1,
@@ -85,7 +85,7 @@ export const MEMORY_RETRIEVAL_R1_BASELINE_V3 = {
   negativeEmptyRate: 0.5,
   positiveRecallAt12: 0.96,
   russianMorphologyRecallAt12: 1,
-  semanticParaphraseRecallAt12: 0.667,
+  semanticParaphraseRecallAt12: 0.833,
   typoRecallAt12: 1,
   voiceTranscriptRecallAt12: 1,
   yoSpellingRecallAt12: 1,

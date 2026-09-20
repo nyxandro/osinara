@@ -164,10 +164,10 @@ function rowToBranchDiagnostics(row: DiagnosticsColumns): MemoryRetrievalBranchD
   const semanticQualified = requiredCount(row.semantic_qualified);
   const simpleQualified = requiredCount(row.simple_qualified);
   return {
-    // Counted among those that passed the gate, before the limit applies: that is what the limit
-    // actually cuts. Counting matches instead would make the flag permanently true, because the
-    // semantic branch matches every indexed record before its threshold.
-    candidateLimitHit: [russianQualified, semanticQualified, simpleQualified]
+    // Only the word branches can hit it. The semantic branch asks the index for exactly that many
+    // nearest chunks, so what it passes on is bounded by the limit rather than cut by it, and
+    // including it here would make the flag say nothing.
+    candidateLimitHit: [russianQualified, simpleQualified]
       .some((count) => count > MEMORY_RETRIEVAL_CANDIDATE_LIMIT),
     russianMatched: requiredCount(row.russian_matched),
     russianQualified,
@@ -212,61 +212,12 @@ function rowToScoredResult(row: RetrievalRow): ScoredMemoryRetrievalResult {
   };
 }
 
-export const memoryRetrievalRepository = {
-  async search(
-    auth: MemoryAuthorization,
-    query: string,
-    queryEmbeddings: readonly (readonly number[])[],
-    limit = MEMORY_RETRIEVAL_LIMIT,
-  ): Promise<{
-    diagnostics: MemoryRetrievalBranchDiagnostics;
-    results: ScoredMemoryRetrievalResult[];
-  }> {
-    const normalizedQuery = query.trim();
-    if (!normalizedQuery) {
-      throw new AppError("AGENT_MEMORY_QUERY_INVALID", "Для поиска памяти нужен непустой запрос");
-    }
-    if (!Number.isInteger(limit) || limit < 1 || limit > MEMORY_RETRIEVAL_LIMIT) {
-      throw new AppError("AGENT_MEMORY_LIMIT_INVALID", "Некорректный лимит поиска памяти");
-    }
-
-    // NOT MATERIALIZED keeps authorization in every inlined branch while allowing physical indexes.
-    //
-    // Both word branches build their condition as a disjunction of the query's own lexemes rather
-    // than through `websearch_to_tsquery`, which joins every token with AND. A live question —
-    // «Проверь, когда у меня ближайшее дежурство, и когда мы меняем резину» — then demanded that
-    // one record contain all of those words at once, and no record ever does, so the branch
-    // silently returned nothing and `ts_rank_cd` never got to do its job of ranking by how many
-    // words matched and how close together they sit.
-    //
-    // The exact branch takes its terms from the same `to_tsvector('simple', ...)` that builds its
-    // indexed column, so every term is a lexeme that column can actually hold, and then drops the
-    // ones the Russian dictionary calls stop words — «и», «у», «за». With OR a stop word would
-    // match nearly every record and drown the codes and names this branch exists for. The
-    // morphological branch takes the stems its own configuration produced, where stop words are
-    // already gone.
-    //
-    // Both branches then assemble their disjunction with `to_tsquery('simple', ...)`, which is not
-    // a mistake: the terms are already lexemes of their own column, and the Russian configuration
-    // would stem them a second time. «решен» becomes «реш», stops matching the column it came
-    // from, and the branch goes quiet on a record that contains the word verbatim — the same
-    // failure as the AND condition, one step lower.
-    //
-    // Words are counted by position, not by lexeme. One hyphenated token or a URL yields several
-    // lexemes at the same position, and counting those as separate words would let a single
-    // «e-mail» clear a gate that asks for two of the question's words.
-    //
-    // The semantic branch compares a record with every piece of the query and keeps the closest
-    // pair. A long message is cut into chunks before embedding, and folding those chunks into one
-    // average vector put the question about the roof and the question about the medicine at a
-    // point that resembles neither; the record about either one then fell below the gate.
-    //
-    // The branch CTEs are split in two on purpose: `*_matched` is what the branch found at all and
-    // feeds the pre-threshold diagnostics, `*_evidence` is what survived the gate and the candidate
-    // limit. Diagnostics are joined with LEFT JOIN LATERAL so an empty result still returns one row
-    // carrying the numbers — an empty retrieval is exactly the case worth explaining.
-    const result = await database().query<DiagnosticsColumns & ({ id: null } | RetrievalRow)>(
-      `WITH authorized AS NOT MATERIALIZED (
+/**
+ * The one statement the semantic branch runs, exported so a test can read its plan from the same
+ * text the product executes instead of from a copy that can drift away from it.
+ */
+export function memoryRetrievalSearchStatement(): string {
+  return `WITH authorized AS NOT MATERIALIZED (
           SELECT item.*, ref.memory_ref
           FROM memory_items AS item
           JOIN memory_item_refs AS ref ON ref.memory_item_id = item.id
@@ -343,18 +294,28 @@ export const memoryRetrievalRepository = {
                 row_number() OVER (ORDER BY relevance DESC, updated_at DESC, id DESC) AS ordinal
          FROM russian_evidence
        ),
-       semantic_distances AS (
-         SELECT authorized.id, MIN(chunk.embedding <=> query_vector) AS distance,
-                 authorized.updated_at
-         FROM authorized
-         JOIN memory_embedding_chunks AS chunk ON chunk.memory_item_id = authorized.id
-         CROSS JOIN unnest($9::vector[]) AS query_vector
-         WHERE authorized.embedding_status = 'indexed' AND chunk.embedding_model = $10
-         GROUP BY authorized.id, authorized.updated_at
-        ),
+       semantic_nearest AS (
+         SELECT nearest.memory_item_id, nearest.distance
+         FROM unnest($9::vector[]) AS query_vector,
+         LATERAL (
+           SELECT chunk.memory_item_id, chunk.embedding <=> query_vector AS distance
+           FROM memory_embedding_chunks AS chunk
+           WHERE chunk.embedding_model = $10
+             AND EXISTS (
+               SELECT 1 FROM authorized
+               WHERE authorized.id = chunk.memory_item_id
+                 AND authorized.embedding_status = 'indexed'
+             )
+           ORDER BY chunk.embedding <=> query_vector
+           LIMIT $6
+         ) AS nearest
+       ),
        semantic_matched AS (
-         SELECT id, updated_at, 1 - distance AS similarity
-         FROM semantic_distances
+         SELECT authorized.id, authorized.updated_at,
+                1 - MIN(semantic_nearest.distance) AS similarity
+         FROM semantic_nearest
+         JOIN authorized ON authorized.id = semantic_nearest.memory_item_id
+         GROUP BY authorized.id, authorized.updated_at
        ),
        semantic_evidence AS (
          SELECT id, updated_at, similarity
@@ -438,24 +399,105 @@ export const memoryRetrievalRepository = {
        ) AS source_evidence ON true
        ) AS ranked ON true
        ORDER BY ranked.fused_score DESC NULLS LAST, ranked.updated_at DESC NULLS LAST,
-                ranked.id DESC NULLS LAST`,
-      [
-        auth.familyId,
-        auth.scopes,
-        auth.userId,
-        auth.groupId,
-        normalizedQuery,
-        MEMORY_RETRIEVAL_CANDIDATE_LIMIT,
-        MEMORY_RETRIEVAL_MIN_SIMPLE_LEXICAL_TERM_MATCHES,
-        MEMORY_RETRIEVAL_MIN_RUSSIAN_MORPHOLOGY_TERM_MATCHES,
-        vectorArrayLiterals(queryEmbeddings),
-        MEMORY_EMBEDDING_MODEL_VERSION,
-        MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY,
-        MEMORY_RETRIEVAL_RRF_RANK_OFFSET,
-        MEMORY_RETRIEVAL_CONFIRMATION_BOOST,
-        MEMORY_RETRIEVAL_RECENCY_BOOST,
-        MEMORY_RETRIEVAL_RECENCY_DECAY_SECONDS,
-      ],
+                ranked.id DESC NULLS LAST`;
+}
+
+/** The parameters that statement takes, in its own order, so a test can bind them the same way. */
+export function memoryRetrievalSearchParameters(
+  auth: MemoryAuthorization,
+  normalizedQuery: string,
+  queryEmbeddings: readonly (readonly number[])[],
+): unknown[] {
+  return [
+    auth.familyId,
+    auth.scopes,
+    auth.userId,
+    auth.groupId,
+    normalizedQuery,
+    MEMORY_RETRIEVAL_CANDIDATE_LIMIT,
+    MEMORY_RETRIEVAL_MIN_SIMPLE_LEXICAL_TERM_MATCHES,
+    MEMORY_RETRIEVAL_MIN_RUSSIAN_MORPHOLOGY_TERM_MATCHES,
+    vectorArrayLiterals(queryEmbeddings),
+    MEMORY_EMBEDDING_MODEL_VERSION,
+    MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY,
+    MEMORY_RETRIEVAL_RRF_RANK_OFFSET,
+    MEMORY_RETRIEVAL_CONFIRMATION_BOOST,
+    MEMORY_RETRIEVAL_RECENCY_BOOST,
+    MEMORY_RETRIEVAL_RECENCY_DECAY_SECONDS,
+  ];
+}
+
+export const memoryRetrievalRepository = {
+  async search(
+    auth: MemoryAuthorization,
+    query: string,
+    queryEmbeddings: readonly (readonly number[])[],
+    limit = MEMORY_RETRIEVAL_LIMIT,
+  ): Promise<{
+    diagnostics: MemoryRetrievalBranchDiagnostics;
+    results: ScoredMemoryRetrievalResult[];
+  }> {
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) {
+      throw new AppError("AGENT_MEMORY_QUERY_INVALID", "Для поиска памяти нужен непустой запрос");
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > MEMORY_RETRIEVAL_LIMIT) {
+      throw new AppError("AGENT_MEMORY_LIMIT_INVALID", "Некорректный лимит поиска памяти");
+    }
+
+    // NOT MATERIALIZED keeps authorization in every inlined branch while allowing physical indexes.
+    //
+    // Both word branches build their condition as a disjunction of the query's own lexemes rather
+    // than through `websearch_to_tsquery`, which joins every token with AND. A live question —
+    // «Проверь, когда у меня ближайшее дежурство, и когда мы меняем резину» — then demanded that
+    // one record contain all of those words at once, and no record ever does, so the branch
+    // silently returned nothing and `ts_rank_cd` never got to do its job of ranking by how many
+    // words matched and how close together they sit.
+    //
+    // The exact branch takes its terms from the same `to_tsvector('simple', ...)` that builds its
+    // indexed column, so every term is a lexeme that column can actually hold, and then drops the
+    // ones the Russian dictionary calls stop words — «и», «у», «за». With OR a stop word would
+    // match nearly every record and drown the codes and names this branch exists for. The
+    // morphological branch takes the stems its own configuration produced, where stop words are
+    // already gone.
+    //
+    // Both branches then assemble their disjunction with `to_tsquery('simple', ...)`, which is not
+    // a mistake: the terms are already lexemes of their own column, and the Russian configuration
+    // would stem them a second time. «решен» becomes «реш», stops matching the column it came
+    // from, and the branch goes quiet on a record that contains the word verbatim — the same
+    // failure as the AND condition, one step lower.
+    //
+    // Words are counted by position, not by lexeme. One hyphenated token or a URL yields several
+    // lexemes at the same position, and counting those as separate words would let a single
+    // «e-mail» clear a gate that asks for two of the question's words.
+    //
+    // The semantic branch asks for the nearest chunks and only then folds them into records. That
+    // order is what the vector index can serve: pgvector applies HNSW to «order by distance, take
+    // n» and to nothing else, and the previous form hid the distance under MIN() with a GROUP BY,
+    // so the index built on day one went unused by every query. The access rules stay inside the
+    // lookup, as a condition on each chunk, and `hnsw.iterative_scan` — set on the database by
+    // migration 107 — keeps the index handing over candidates until enough of them pass.
+    //
+    // It asks per piece of the query, not once for their average. A long message is cut into
+    // chunks before embedding, and averaging them put the question about the roof and the question
+    // about the medicine at a point that resembles neither.
+    //
+    // What this branch offers is the nearest chunks, so a record holding several of them takes
+    // more than one place among them: at production's 1.16 chunks per record the forty nearest
+    // chunks come from about thirty-four records rather than forty. With one query vector the set
+    // is still exactly the closest records by their best chunk — if A's best chunk beats B's and
+    // B made the forty, so did A. With several query vectors that is no longer guaranteed: a
+    // record can arrive through a worse pair while its best pair missed that vector's forty, and
+    // then its similarity is understated. It needs a record with many chunks crowded around one
+    // vector, which the measured corpora do not produce.
+    //
+    // The branch CTEs are split in two on purpose: `*_matched` is what the branch found at all and
+    // feeds the pre-threshold diagnostics, `*_evidence` is what survived the gate and the candidate
+    // limit. Diagnostics are joined with LEFT JOIN LATERAL so an empty result still returns one row
+    // carrying the numbers — an empty retrieval is exactly the case worth explaining.
+    const result = await database().query<DiagnosticsColumns & ({ id: null } | RetrievalRow)>(
+      memoryRetrievalSearchStatement(),
+      memoryRetrievalSearchParameters(auth, normalizedQuery, queryEmbeddings),
     );
     // `diagnostics` is a SELECT without FROM and the join is LEFT LATERAL, so the statement always
     // returns at least this row. The guard exists to make a future edit that breaks that invariant

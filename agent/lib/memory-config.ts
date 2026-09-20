@@ -116,7 +116,17 @@ export const MEMORY_EMBEDDING_TRANSIENT_ERROR_CODES = [
 export const MEMORY_EMBEDDING_MAX_ATTEMPTS = 3;
 export const MEMORY_EMBEDDING_RETRY_DELAY_MILLISECONDS = 5 * 60 * 1_000;
 
-// Character bounds guarantee E5's 512-token limit even for adversarial punctuation-heavy text.
-export const MEMORY_EMBEDDING_CHUNK_MAX_CHARACTERS = 400;
-export const MEMORY_EMBEDDING_CHUNK_MIN_BOUNDARY_CHARACTERS = 280;
-export const MEMORY_EMBEDDING_CHUNK_OVERLAP_CHARACTERS = 80;
+// E5's own window. The service runs with truncation off, so a passage past this comes back as an
+// error and the record never enters the semantic index at all.
+export const MEMORY_EMBEDDING_MAX_TOKENS = 512;
+// Chosen from a measurement of this model's tokenizer rather than from the worst case it could
+// meet. On the evaluation corpus ordinary Russian runs 2.7 characters per token, its first
+// percentile is 2.0, text with links and codes 2.4; nine hundred characters is therefore about
+// 450 tokens for text of that shape, inside the window with the passage prefix and some room.
+// The shapes that fall outside — a line of single letters at 1.5, a script with a token per
+// character — are caught by the token check before sending and cut again, so the limit no longer
+// has to be the worst case for every record to be safe. The previous 400 spent a third of the
+// window on every ordinary record to buy that safety.
+export const MEMORY_EMBEDDING_CHUNK_MAX_CHARACTERS = 900;
+export const MEMORY_EMBEDDING_CHUNK_MIN_BOUNDARY_CHARACTERS = 630;
+export const MEMORY_EMBEDDING_CHUNK_OVERLAP_CHARACTERS = 180;

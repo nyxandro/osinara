@@ -9,7 +9,12 @@
 import { isAppError } from "../agent/lib/app-error.js";
 import { closeDatabase } from "../agent/lib/database.js";
 import { chunkMemoryContent } from "../agent/lib/memory-embedding-chunks.js";
-import { embedMemoryPassages } from "../agent/lib/memory-embedding-client.js";
+import { fitMemoryChunksToTokenLimit } from "../agent/lib/memory-embedding-fitting.js";
+import { memoryEmbeddingInput } from "../agent/lib/memory-embedding-header.js";
+import {
+  countMemoryPassageTokens,
+  embedMemoryPassages,
+} from "../agent/lib/memory-embedding-client.js";
 import {
   MEMORY_EMBEDDING_JOB_BATCH_SIZE,
   MEMORY_EMBEDDING_LEASE_MILLISECONDS,
@@ -50,11 +55,30 @@ async function processBatch(): Promise<number> {
       }));
     }
     try {
-      const chunks = chunkMemoryContent(job.content);
+      // The model sees the chunk with its subject header; the stored chunk stays an exact slice
+      // of the record, so the index can always be checked against the text it came from.
+      const withHeader = (chunk: { content: string }) => memoryEmbeddingInput(chunk.content, job);
+      const fitted = await fitMemoryChunksToTokenLimit({
+        chunks: chunkMemoryContent(job.content),
+        content: job.content,
+        measure: (candidates) => countMemoryPassageTokens(candidates.map(withHeader)),
+        onSplit: (tokens) => console.info(JSON.stringify({
+          code: "AGENT_MEMORY_INDEX_CHUNK_RESPLIT",
+          memoryItemId: job.memoryItemId,
+          tokens,
+        })),
+      });
+      const chunks = fitted.map((chunk, index) => ({
+        ...chunk,
+        chunkIndex: index,
+        embeddingInput: withHeader(chunk),
+      }));
       const embeddings: number[][] = [];
       for (let offset = 0; offset < chunks.length; offset += MEMORY_EMBEDDING_PROVIDER_BATCH_SIZE) {
         embeddings.push(...await embedMemoryPassages(
-          chunks.slice(offset, offset + MEMORY_EMBEDDING_PROVIDER_BATCH_SIZE).map((chunk) => chunk.content),
+          chunks
+            .slice(offset, offset + MEMORY_EMBEDDING_PROVIDER_BATCH_SIZE)
+            .map((chunk) => chunk.embeddingInput),
         ));
       }
       const completed = await memoryIndexRepository.complete(
