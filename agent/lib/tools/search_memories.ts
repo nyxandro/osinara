@@ -23,11 +23,13 @@ export default defineTool({
     let result: Awaited<ReturnType<typeof retrieveRelevantMemories>> | null = null;
     try {
       result = await retrieveRelevantMemories(requireMemoryAuthorization(ctx), query);
-      return result;
+      return result.memories;
     } finally {
       console.info(JSON.stringify({ code: "AGENT_MEMORY_SEARCH_METRICS",
         sessionId: ctx.session.id, turnId: ctx.session.turn.id, callId: ctx.callId,
-        outcome: result === null ? "failed" : "succeeded", ...memorySelectionMetrics(result),
+        outcome: result === null ? "failed" : "succeeded",
+        ...memorySelectionMetrics(result === null ? null : result.memories),
+        ...result?.diagnostics,
         durationMs: Math.round(performance.now() - started),
       }));
     }

@@ -1,3 +1,12 @@
+# Оверлей для прогона замеров качества поиска памяти. Сервис эмбеддингов объявлен в
+# compose.test.yaml под профилем workers, поэтому профиль нужно включить явно — без него
+# compose скажет, что сервис не определён:
+#
+#   docker compose -f compose.test.yaml -f compose.memory-retrieval-eval.yaml --profile workers \
+#     run --rm tests npx vitest run agent/lib/memory-retrieval-eval-v3
+#
+# Первый запуск скачивает модель в том memory-retrieval-eval-model, дальше прогон v3 занимает
+# около девяти секунд на 240 записях и 58 запросах.
 services:
   memory-embedding:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07

@@ -2,7 +2,8 @@
  * PostgreSQL hybrid long-term memory retrieval.
  *
  * Export:
- * - `memoryRetrievalRepository.search`: authorized thresholded active-claim retrieval.
+ * - `memoryRetrievalRepository.search`: authorized thresholded active-claim retrieval plus
+ *   log-only branch diagnostics measured in the same statement.
  * - `memoryRetrievalRepository.searchWithConflictClosure`: score-independent complete conflict groups.
  */
 import { AppError } from "./app-error.js";
@@ -28,8 +29,21 @@ import { externalProfileProjectionPredicate } from "./external-profile-projectio
 import type { ModelMemoryEvidence } from "./model-memory.js";
 import {
   collapseExactDuplicateRetrievalResults,
+  type MemoryRetrievalBranchDiagnostics,
   type ScoredMemoryRetrievalResult,
 } from "./memory-retrieval-ranking.js";
+
+interface DiagnosticsColumns {
+  russian_matched: number | string;
+  russian_qualified: number | string;
+  russian_top_rank: number | string | null;
+  semantic_matched: number | string;
+  semantic_qualified: number | string;
+  semantic_top_similarity: number | string | null;
+  simple_matched: number | string;
+  simple_qualified: number | string;
+  simple_top_rank: number | string | null;
+}
 
 interface RetrievalRow extends ReferencedMemoryRow {
   fused_score: number | string;
@@ -123,6 +137,40 @@ function optionalScore(value: number | string | null): number | null {
   return value === null ? null : requiredScore(value);
 }
 
+/** A non-integer count means the statement's shape changed, not that a value is missing. */
+function requiredCount(value: number | string): number {
+  const count = Number(value);
+  if (!Number.isInteger(count) || count < 0) {
+    throw new AppError(
+      "AGENT_MEMORY_RETRIEVAL_DIAGNOSTICS_INVALID",
+      "Не удалось измерить работу поиска памяти. Повторите запрос",
+    );
+  }
+  return count;
+}
+
+function rowToBranchDiagnostics(row: DiagnosticsColumns): MemoryRetrievalBranchDiagnostics {
+  const russianQualified = requiredCount(row.russian_qualified);
+  const semanticQualified = requiredCount(row.semantic_qualified);
+  const simpleQualified = requiredCount(row.simple_qualified);
+  return {
+    // Counted among those that passed the gate, before the limit applies: that is what the limit
+    // actually cuts. Counting matches instead would make the flag permanently true, because the
+    // semantic branch matches every indexed record before its threshold.
+    candidateLimitHit: [russianQualified, semanticQualified, simpleQualified]
+      .some((count) => count > MEMORY_RETRIEVAL_CANDIDATE_LIMIT),
+    russianMatched: requiredCount(row.russian_matched),
+    russianQualified,
+    russianTopRank: optionalScore(row.russian_top_rank),
+    semanticMatched: requiredCount(row.semantic_matched),
+    semanticQualified,
+    semanticTopSimilarity: optionalScore(row.semantic_top_similarity),
+    simpleMatched: requiredCount(row.simple_matched),
+    simpleQualified,
+    simpleTopRank: optionalScore(row.simple_top_rank),
+  };
+}
+
 function rowToScoredResult(row: RetrievalRow): ScoredMemoryRetrievalResult {
   return {
     evidence: {
@@ -160,7 +208,10 @@ export const memoryRetrievalRepository = {
     query: string,
     queryEmbedding: readonly number[],
     limit = MEMORY_RETRIEVAL_LIMIT,
-  ): Promise<ScoredMemoryRetrievalResult[]> {
+  ): Promise<{
+    diagnostics: MemoryRetrievalBranchDiagnostics;
+    results: ScoredMemoryRetrievalResult[];
+  }> {
     const normalizedQuery = query.trim();
     if (!normalizedQuery) {
       throw new AppError("AGENT_MEMORY_QUERY_INVALID", "Для поиска памяти нужен непустой запрос");
@@ -170,7 +221,11 @@ export const memoryRetrievalRepository = {
     }
 
     // NOT MATERIALIZED keeps authorization in every inlined branch while allowing physical indexes.
-    const result = await database().query<RetrievalRow>(
+    // The branch CTEs are split in two on purpose: `*_matched` is what the branch found at all and
+    // feeds the pre-threshold diagnostics, `*_evidence` is what survived the gate and the candidate
+    // limit. Diagnostics are joined with LEFT JOIN LATERAL so an empty result still returns one row
+    // carrying the numbers — an empty retrieval is exactly the case worth explaining.
+    const result = await database().query<DiagnosticsColumns & ({ id: null } | RetrievalRow)>(
       `WITH authorized AS NOT MATERIALIZED (
           SELECT item.*, ref.memory_ref
           FROM memory_items AS item
@@ -178,14 +233,15 @@ export const memoryRetrievalRepository = {
            WHERE item.family_id = $1 AND item.claim_status = 'active'
              AND ${authorizedClaimPredicate("item")}
        ),
+       simple_matched AS (
+         SELECT id, updated_at,
+                ts_rank_cd(search_vector, websearch_to_tsquery('simple', $5)) AS relevance
+         FROM authorized
+         WHERE search_vector @@ websearch_to_tsquery('simple', $5)
+       ),
        simple_evidence AS (
          SELECT id, updated_at, relevance
-         FROM (
-           SELECT id, updated_at,
-                  ts_rank_cd(search_vector, websearch_to_tsquery('simple', $5)) AS relevance
-           FROM authorized
-           WHERE search_vector @@ websearch_to_tsquery('simple', $5)
-         ) AS matched
+         FROM simple_matched
          WHERE relevance >= $7
          ORDER BY relevance DESC, updated_at DESC, id DESC
           LIMIT $6
@@ -195,14 +251,15 @@ export const memoryRetrievalRepository = {
                 row_number() OVER (ORDER BY relevance DESC, updated_at DESC, id DESC) AS ordinal
          FROM simple_evidence
        ),
+       russian_matched AS (
+         SELECT id, updated_at,
+                ts_rank_cd(russian_search_vector, websearch_to_tsquery('russian', $5)) AS relevance
+         FROM authorized
+         WHERE russian_search_vector @@ websearch_to_tsquery('russian', $5)
+       ),
        russian_evidence AS (
          SELECT id, updated_at, relevance
-         FROM (
-           SELECT id, updated_at,
-                  ts_rank_cd(russian_search_vector, websearch_to_tsquery('russian', $5)) AS relevance
-           FROM authorized
-           WHERE russian_search_vector @@ websearch_to_tsquery('russian', $5)
-         ) AS matched
+         FROM russian_matched
          WHERE relevance >= $8
          ORDER BY relevance DESC, updated_at DESC, id DESC
          LIMIT $6
@@ -220,10 +277,14 @@ export const memoryRetrievalRepository = {
          WHERE authorized.embedding_status = 'indexed' AND chunk.embedding_model = $10
          GROUP BY authorized.id, authorized.updated_at
         ),
-       semantic_evidence AS (
+       semantic_matched AS (
          SELECT id, updated_at, 1 - distance AS similarity
          FROM semantic_distances
-         WHERE 1 - distance >= $11
+       ),
+       semantic_evidence AS (
+         SELECT id, updated_at, similarity
+         FROM semantic_matched
+         WHERE similarity >= $11
          ORDER BY similarity DESC, updated_at DESC, id DESC
          LIMIT $6
        ),
@@ -238,7 +299,26 @@ export const memoryRetrievalRepository = {
          SELECT id FROM russian_morphology
          UNION
          SELECT id FROM semantic
+       ),
+       diagnostics AS (
+         SELECT (SELECT max(relevance) FROM simple_matched) AS simple_top_rank,
+                (SELECT max(relevance) FROM russian_matched) AS russian_top_rank,
+                (SELECT max(similarity) FROM semantic_matched) AS semantic_top_similarity,
+                (SELECT count(*) FROM simple_matched) AS simple_matched,
+                (SELECT count(*) FROM russian_matched) AS russian_matched,
+                (SELECT count(*) FROM semantic_matched) AS semantic_matched,
+                (SELECT count(*) FROM simple_matched WHERE relevance >= $7) AS simple_qualified,
+                (SELECT count(*) FROM russian_matched WHERE relevance >= $8) AS russian_qualified,
+                (SELECT count(*) FROM semantic_matched WHERE similarity >= $11)
+                  AS semantic_qualified
        )
+       SELECT diagnostics.simple_top_rank, diagnostics.russian_top_rank,
+              diagnostics.semantic_top_similarity, diagnostics.simple_matched,
+              diagnostics.russian_matched, diagnostics.semantic_matched,
+              diagnostics.simple_qualified, diagnostics.russian_qualified,
+              diagnostics.semantic_qualified, ranked.*
+       FROM diagnostics
+       LEFT JOIN LATERAL (
        SELECT authorized.id, authorized.author_user_id, authorized.author_telegram_user_id,
               authorized.scope, authorized.kind, authorized.content, authorized.source,
                authorized.confirmation, authorized.sensitivity, authorized.message_thread_id,
@@ -277,7 +357,9 @@ export const memoryRetrievalRepository = {
          WHERE claim_id = authorized.id AND evidence_role = 'primary'
          ORDER BY observed_at, id LIMIT 1
        ) AS source_evidence ON true
-       ORDER BY fused_score DESC, authorized.updated_at DESC, authorized.id DESC`,
+       ) AS ranked ON true
+       ORDER BY ranked.fused_score DESC NULLS LAST, ranked.updated_at DESC NULLS LAST,
+                ranked.id DESC NULLS LAST`,
       [
         auth.familyId,
         auth.scopes,
@@ -296,8 +378,24 @@ export const memoryRetrievalRepository = {
         MEMORY_RETRIEVAL_RECENCY_DECAY_SECONDS,
       ],
     );
-    // Duplicate collapse is read-only and happens after global rank, preserving its representative.
-    return collapseExactDuplicateRetrievalResults(result.rows.map(rowToScoredResult), limit);
+    // `diagnostics` is a SELECT without FROM and the join is LEFT LATERAL, so the statement always
+    // returns at least this row. The guard exists to make a future edit that breaks that invariant
+    // fail loudly instead of silently logging a search that was never measured.
+    const head = result.rows[0];
+    if (head === undefined) {
+      throw new AppError(
+        "AGENT_MEMORY_RETRIEVAL_DIAGNOSTICS_INVALID",
+        "Не удалось измерить работу поиска памяти. Повторите запрос",
+      );
+    }
+    const scored = result.rows
+      .filter((row): row is DiagnosticsColumns & RetrievalRow => row.id !== null)
+      .map(rowToScoredResult);
+    return {
+      diagnostics: rowToBranchDiagnostics(head),
+      // Duplicate collapse is read-only and happens after global rank, keeping its representative.
+      results: collapseExactDuplicateRetrievalResults(scored, limit),
+    };
   },
 
   async searchWithConflictClosure(
@@ -307,12 +405,18 @@ export const memoryRetrievalRepository = {
     limit = MEMORY_RETRIEVAL_LIMIT,
   ): Promise<{
     conflicts: MemoryConflictGroup[];
+    diagnostics: MemoryRetrievalBranchDiagnostics;
     relatedClaimIds: string[];
     results: ScoredMemoryRetrievalResult[];
   }> {
-    const results = await memoryRetrievalRepository.search(auth, query, queryEmbedding, limit);
+    const { diagnostics, results } = await memoryRetrievalRepository.search(
+      auth,
+      query,
+      queryEmbedding,
+      limit,
+    );
     const selectedIds = results.map((result) => result.memory.id);
-    if (selectedIds.length === 0) return { conflicts: [], relatedClaimIds: [], results };
+    if (selectedIds.length === 0) return { conflicts: [], diagnostics, relatedClaimIds: [], results };
 
     // Detect an inaccessible partner without selecting any partner content or metadata. Opaque refs
     // are capabilities, not authorization: one visible side of an unresolved conflict is withheld.
@@ -440,6 +544,7 @@ export const memoryRetrievalRepository = {
     }));
     return {
       conflicts,
+      diagnostics,
       relatedClaimIds: [...new Set([
         ...results.filter((result) => !blockedIds.has(result.memory.id))
           .filter((result) => finalOrdinaryIds.has(result.memory.id))

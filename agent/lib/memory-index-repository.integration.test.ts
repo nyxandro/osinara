@@ -4,6 +4,7 @@
  * Constructs covered:
  * - Pending records are leased once and atomically completed with all E5 chunks.
  * - Stale lease results cannot overwrite a newer memory version.
+ * - A failure that was only the service being away returns to the queue, bounded and delayed.
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -11,6 +12,7 @@ import { closeDatabase, database } from "./database.js";
 import {
   MEMORY_EMBEDDING_DIMENSIONS,
   MEMORY_EMBEDDING_LEASE_MILLISECONDS,
+  MEMORY_EMBEDDING_MAX_ATTEMPTS,
   MEMORY_EMBEDDING_MODEL_VERSION,
 } from "./memory-config.js";
 import { memoryIndexRepository } from "./memory-index-repository.js";
@@ -111,6 +113,72 @@ describeWithDatabase("memoryIndexRepository", () => {
       },
     ]);
     await expect(memoryIndexRepository.claim(8, MEMORY_EMBEDDING_LEASE_MILLISECONDS)).resolves.toEqual([]);
+  });
+
+  /** Moves a job's clock back so the bounded retry delay counts as elapsed. */
+  async function backdateJob(memoryItemId: string): Promise<void> {
+    await database().query(
+      "UPDATE memory_embedding_jobs SET updated_at = now() - interval '1 hour' WHERE memory_item_id = $1",
+      [memoryItemId],
+    );
+  }
+
+  it("returns a record to the queue when only the embedding service was away", async () => {
+    const memoryId = await insertPendingMemory();
+    const [first] = await memoryIndexRepository.claim(1, MEMORY_EMBEDDING_LEASE_MILLISECONDS);
+    await memoryIndexRepository.fail(
+      memoryId,
+      first!.leaseToken,
+      "AGENT_MEMORY_EMBEDDING_PROVIDER_UNAVAILABLE",
+    );
+
+    // Still failed, and still invisible to semantic search, until the delay has passed.
+    await expect(memoryIndexRepository.claim(1, MEMORY_EMBEDDING_LEASE_MILLISECONDS))
+      .resolves.toEqual([]);
+    await backdateJob(memoryId);
+    const [retried] = await memoryIndexRepository.claim(1, MEMORY_EMBEDDING_LEASE_MILLISECONDS);
+
+    expect(retried).toMatchObject({
+      attempts: 2,
+      content: "Поездка в Казань",
+      memoryItemId: memoryId,
+    });
+  });
+
+  it.each([
+    ["текст отвергнут сервисом", "AGENT_MEMORY_EMBEDDING_PROVIDER_FAILED"],
+    ["исход попытки неизвестен", "AGENT_MEMORY_EMBEDDING_LEASE_EXPIRED"],
+  ])("never retries when %s", async (_reason, errorCode) => {
+    const memoryId = await insertPendingMemory();
+    const [job] = await memoryIndexRepository.claim(1, MEMORY_EMBEDDING_LEASE_MILLISECONDS);
+    await memoryIndexRepository.fail(memoryId, job!.leaseToken, errorCode);
+    await backdateJob(memoryId);
+
+    await expect(memoryIndexRepository.claim(1, MEMORY_EMBEDDING_LEASE_MILLISECONDS))
+      .resolves.toEqual([]);
+  });
+
+  it("counts every attempt and stops at the bound instead of retrying forever", async () => {
+    const memoryId = await insertPendingMemory();
+    const observedAttempts: number[] = [];
+
+    // The loop is what proves the bound: each pass fails for the same transient reason and is
+    // allowed back in, so a counter that stopped advancing would never leave this loop.
+    for (let pass = 0; pass < MEMORY_EMBEDDING_MAX_ATTEMPTS + 1; pass += 1) {
+      const [job] = await memoryIndexRepository.claim(1, MEMORY_EMBEDDING_LEASE_MILLISECONDS);
+      if (job === undefined) break;
+      observedAttempts.push(job.attempts);
+      await memoryIndexRepository.fail(
+        memoryId,
+        job.leaseToken,
+        "AGENT_MEMORY_EMBEDDING_PROVIDER_BUSY",
+      );
+      await backdateJob(memoryId);
+    }
+
+    expect(observedAttempts).toEqual(
+      Array.from({ length: MEMORY_EMBEDDING_MAX_ATTEMPTS }, (_, index) => index + 1),
+    );
   });
 
   it("rejects a stale completion after an edit resets the job", async () => {

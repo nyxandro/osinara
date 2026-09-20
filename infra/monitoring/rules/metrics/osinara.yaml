@@ -71,7 +71,7 @@ groups:
       - alert: OsinaraErrorBurst
         expr: >-
           sum by (host) (sum_over_time(log_code_lines_1m{project="osinara-production",
-          code!~"AGENT_(SCHEDULE_TICK|TELEGRAM_SILENT_TURN|MEMORY_PURGE_COMPLETED|DATABASE_BOOKKEEPING_RECOVERY|RUNTIME_DEAD_PROCESS_RECONCILED|TELEGRAM_INGRESS_RECOVERED|TELEGRAM_OBSERVER_TRANSFERRED|TELEGRAM_BINDING_RECOVERED|TELEGRAM_DATABASE_RECOVERY|MEMORY_WRITE_SUCCEEDED|MODEL_CALL_METRICS|TOOL_CALL_METRICS|SKILL_SYNC_METRICS|MEMORY_SEARCH_METRICS|MEMORY_RETRIEVAL_METRICS|MEMORY_REVIEW_LANE_METRICS)"}[5m])) > 10
+          code!~"AGENT_(SCHEDULE_TICK|TELEGRAM_SILENT_TURN|MEMORY_PURGE_COMPLETED|DATABASE_BOOKKEEPING_RECOVERY|RUNTIME_DEAD_PROCESS_RECONCILED|TELEGRAM_INGRESS_RECOVERED|TELEGRAM_OBSERVER_TRANSFERRED|TELEGRAM_BINDING_RECOVERED|TELEGRAM_DATABASE_RECOVERY|MEMORY_WRITE_SUCCEEDED|MEMORY_INDEX_RETRY_CLAIMED|MODEL_CALL_METRICS|TOOL_CALL_METRICS|SKILL_SYNC_METRICS|MEMORY_SEARCH_METRICS|MEMORY_RETRIEVAL_METRICS|MEMORY_REVIEW_LANE_METRICS)"}[5m])) > 10
         labels:
           severity: warning
           project: osinara-production
@@ -89,6 +89,31 @@ groups:
           summary: 'Osinara отвечала без доступа к памяти'
           description: 'При подготовке ответа не удалось прочитать долговременную память: ассистент отвечает, но не помнит контекст семьи.'
           runbook: 'Проверить базу и сервис эмбеддингов memory-embedding; в строке есть поле failurePhase с фазой сбоя.'
+
+      # Memory answered, but with nothing in hand. A single empty turn is normal: the model is told
+      # outright that an irrelevant question may return an empty selection, and a family chat
+      # contains plenty of questions that are not about memory. What is not normal is most of a
+      # day's turns coming back empty — measured production behaviour is 0 empty out of 29, every
+      # one of them filling all twelve slots.
+      #
+      # Hence the deliberately dull shape: a whole day, at least ten searches in it, and more than
+      # half of them empty. A broken embedder or a retrieval change that cuts everything makes every
+      # turn empty, so it clears 60% the moment ten turns have happened. The accepted cost is that a
+      # very quiet day never reaches ten searches and the rule stays silent until traffic returns;
+      # an outright failure is already covered by OsinaraEmbeddingFailed and OsinaraMemoryUnavailable,
+      # and this rule exists for the quiet degradation those two cannot see.
+      - alert: OsinaraMemoryRetrievalEmpty
+        expr: >-
+          sum(sum_over_time(osinara_memory_retrieval_empty_1m[24h]))
+          / sum(sum_over_time(osinara_memory_retrieval_succeeded_1m[24h])) > 0.6
+          and sum(sum_over_time(osinara_memory_retrieval_succeeded_1m[24h])) >= 10
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Поиск памяти возвращает пустую подборку в {{ $value | humanizePercentage }} ходов за сутки'
+          description: 'Ассистент почти всегда отвечает, не получив ни одной записи памяти. Для семьи это выглядит как забывчивость: он не помнит того, о чём ему рассказывали.'
+          runbook: 'В строках AGENT_MEMORY_RETRIEVAL_METRICS смотреть semanticTopSimilarity, simpleTopRank и russianTopRank: все около нуля — сломан сервис эмбеддингов или FTS; счета высокие, а *Matched больше нуля при нулевых *Candidates — отсекают пороги поиска.'
 
       - alert: OsinaraEmbeddingFailed
         expr: sum(sum_over_time(log_code_lines_1m{project="osinara-production", code=~"AGENT_MEMORY_EMBEDDING_.+"}[5m])) > 0

@@ -38,6 +38,17 @@ async function processBatch(): Promise<number> {
 
   // Each parent is all-or-nothing: provider batches are bounded, then every chunk commits together.
   for (const job of jobs) {
+    if (job.attempts > 1) {
+      // A retry happens only after a recorded transient outage, so it must be visible: without
+      // this line, a record quietly cycling between failed and leased looks like an idle worker.
+      console.info(JSON.stringify({
+        // Deliberately outside the AGENT_MEMORY_EMBEDDING_* family: that prefix is what the
+        // embedding-failure alert watches, and a retry is a recovery step, not a new failure.
+        code: "AGENT_MEMORY_INDEX_RETRY_CLAIMED",
+        attempts: job.attempts,
+        memoryItemId: job.memoryItemId,
+      }));
+    }
     try {
       const chunks = chunkMemoryContent(job.content);
       const embeddings: number[][] = [];

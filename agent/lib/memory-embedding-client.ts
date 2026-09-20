@@ -91,6 +91,15 @@ async function embedMemoryTexts(
     });
   }
   if (!response.ok) {
+    // The same TEI instance serves live retrieval, so an indexing call can meet a busy service
+    // rather than a rejected text. The two need different codes: one is worth another attempt
+    // later, the other never will be, and the HTTP status is the only place that difference exists.
+    if (response.status === 408 || response.status === 429 || response.status >= 500) {
+      throw new AppError(
+        "AGENT_MEMORY_EMBEDDING_PROVIDER_BUSY",
+        "Локальный сервис памяти сейчас перегружен. Повторите попытку позже",
+      );
+    }
     throw new AppError(
       "AGENT_MEMORY_EMBEDDING_PROVIDER_FAILED",
       "Локальный сервис памяти не смог обработать текст. Повторите попытку позже",

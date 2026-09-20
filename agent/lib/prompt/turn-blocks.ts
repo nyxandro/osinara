@@ -33,6 +33,7 @@ import {
   formatRetrievedMemoryInstructions,
   memoryRetrievalQuery,
   retrieveMemoryTurnContext,
+  type MemoryRetrievalDiagnostics,
   type MemoryTurnContext,
 } from "../memory-retrieval.js";
 import {
@@ -259,6 +260,7 @@ export function createMemoryBlockResolver(dependencies: {
     const started = performance.now();
     let outcome = "skipped";
     let memories: number | null = null;
+    let diagnostics: MemoryRetrievalDiagnostics | null = null;
     let selection = memorySelectionMetrics(null);
     let profileCharacters: number | null = null;
     let profileMemoryRefs: string[] | null = null;
@@ -279,6 +281,7 @@ export function createMemoryBlockResolver(dependencies: {
         applicationThreadSkillHints(ctx.messages),
       );
       memories = context.memories.length;
+      diagnostics = context.diagnostics;
       outcome = "succeeded";
       phase = "profile";
       const profileInput = telegramProfileInput(ctx, context.retrievedClaimIds, turnId);
@@ -318,7 +321,7 @@ export function createMemoryBlockResolver(dependencies: {
       return MEMORY_UNAVAILABLE_BLOCK;
     } finally {
       console.info(JSON.stringify({ code: "AGENT_MEMORY_RETRIEVAL_METRICS", sessionId: ctx.session.id,
-        turnId, outcome, memories, ...selection, profileCharacters, profileMemoryRefs,
+        turnId, outcome, memories, ...selection, ...diagnostics, profileCharacters, profileMemoryRefs,
         threadRefs, threadCharacters, failurePhase: outcome === "failed" ? phase : null, causeCode,
         durationMs: Math.round(performance.now() - started) }));
     }

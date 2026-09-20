@@ -19,6 +19,19 @@ groups:
       - record: osinara_memory_retrieval_failed_1m
         expr: 'project:"osinara-production" code:"AGENT_MEMORY_RETRIEVAL_METRICS" outcome:"failed" | stats by (failurePhase) count() as value'
 
+      # Two halves of the same ratio: how many turns searched memory successfully, and how many of
+      # them came back with nothing. Every measured production turn returned the full twelve
+      # records, so a high empty share means either the embedding service broke or a retrieval
+      # change started cutting too much. The ratio itself lives in the alert.
+      # Both are grouped by `outcome`, like every other rule here: it is the one label the filter
+      # already fixes, and grouping keeps the emitted series shaped like its neighbours instead of
+      # relying on how an ungrouped `stats` row is turned into a series.
+      - record: osinara_memory_retrieval_succeeded_1m
+        expr: 'project:"osinara-production" code:"AGENT_MEMORY_RETRIEVAL_METRICS" outcome:"succeeded" | stats by (outcome) count() as value'
+
+      - record: osinara_memory_retrieval_empty_1m
+        expr: 'project:"osinara-production" code:"AGENT_MEMORY_RETRIEVAL_METRICS" outcome:"succeeded" memories:"0" | stats by (outcome) count() as value'
+
       # Model transport degradation: 429 and 5xx answers that the agent retried or surfaced.
       - record: osinara_model_transient_1m
         expr: 'project:"osinara-production" code:"AGENT_MODEL_TRANSIENT_RESPONSE" | stats by (statusCode) count() as value'

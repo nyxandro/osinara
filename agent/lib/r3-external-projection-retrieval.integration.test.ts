@@ -191,11 +191,11 @@ describeWithDatabase("R3 external projection retrieval", () => {
 
     await expect(memoryRetrievalRepository.search(
       fixture.ownerAuth, "проектор", QUERY_VECTOR,
-    )).resolves.toEqual([]);
+    )).resolves.toMatchObject({ results: [] });
     await enablePolicy(
       fixture.ownerAuth, fixture.externalA.groupId, "External A", "enable-a-retrieval",
     );
-    const enabledA = await memoryRetrievalRepository.search(
+    const { results: enabledA } = await memoryRetrievalRepository.search(
       fixture.ownerAuth, "проектор", QUERY_VECTOR,
     );
     expect(enabledA.map((result) => result.memory.content)).toEqual([
@@ -231,7 +231,7 @@ describeWithDatabase("R3 external projection retrieval", () => {
        RETURNING id`,
       [fixture.ownerAuth.familyId, fixture.ownerUserId, fixture.personalConversationId],
     );
-    const independent = await memoryRetrievalRepository.search(
+    const { results: independent } = await memoryRetrievalRepository.search(
       fixture.ownerAuth, "проектор Альфа", QUERY_VECTOR,
     );
     expect(independent.map((result) => result.memory.content)).toEqual(expect.arrayContaining([
@@ -266,7 +266,7 @@ describeWithDatabase("R3 external projection retrieval", () => {
       participantId: fixture.externalA.selfParticipantId,
       telegramUserId: "9702",
     });
-    const afterDeparture = await memoryRetrievalRepository.search(
+    const { results: afterDeparture } = await memoryRetrievalRepository.search(
       fixture.ownerAuth, "проектор", QUERY_VECTOR,
     );
     expect(afterDeparture.map((result) => result.memory.content)).toEqual(expect.arrayContaining([
@@ -279,7 +279,7 @@ describeWithDatabase("R3 external projection retrieval", () => {
     const externalAAuth: MemoryAuthorization = {
       ...fixture.ownerAuth, groupId: fixture.externalA.groupId, scopes: ["group"],
     };
-    const externalAResults = await memoryRetrievalRepository.search(
+    const { results: externalAResults } = await memoryRetrievalRepository.search(
       externalAAuth, "проектор", QUERY_VECTOR,
     );
     expect(externalAResults.map((result) => result.memory.content)).toEqual(expect.arrayContaining([
@@ -292,7 +292,7 @@ describeWithDatabase("R3 external projection retrieval", () => {
     await enablePolicy(
       fixture.ownerAuth, fixture.externalB.groupId, "External B", "enable-b-retrieval",
     );
-    const bothEnabled = await memoryRetrievalRepository.search(
+    const { results: bothEnabled } = await memoryRetrievalRepository.search(
       fixture.ownerAuth, "проектор", QUERY_VECTOR,
     );
     const privateContents = bothEnabled.map((result) => result.memory.content);

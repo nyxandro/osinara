@@ -1,0 +1,164 @@
+/**
+ * V3 corpus, part four: what happened and what was agreed.
+ *
+ * Export:
+ * - `MEMORY_RETRIEVAL_EVAL_RECORDS_EVENTS_V3`: trips, appointments, and decisions with dates.
+ *
+ * Episodes are what a long live question usually asks about, and they are also where recency and
+ * near-duplicate wording collide: the same trip appears from two angles, and two different years
+ * of the same yearly event sit next to each other.
+ */
+import type { MemoryRetrievalEvalRecordV3 } from "./types.js";
+
+export const MEMORY_RETRIEVAL_EVAL_RECORDS_EVENTS_V3: readonly MemoryRetrievalEvalRecordV3[] = [
+  { content: "В июле ездили в Суздаль на три дня, жили в гостевом доме у реки.",
+    key: "trip-suzdal", kind: "episode", scope: "family", updatedAt: "2025-07-06" },
+  { content: "В Суздале Алёна потеряла панаму, купили новую на рынке.",
+    key: "trip-suzdal-hat", kind: "episode", scope: "family", updatedAt: "2025-07-07" },
+  { content: "В прошлом августе ездили в Калязин, ночевали одну ночь.",
+    key: "trip-kalyazin", kind: "episode", scope: "family", updatedAt: "2025-07-08" },
+  { content: "Дорога до Суздаля заняла четыре часа с одной остановкой.",
+    key: "trip-suzdal-road", kind: "episode", scope: "family", updatedAt: "2025-07-09" },
+  { content: "Дорога до Калязина заняла три часа, встали в пробке на выезде.",
+    key: "trip-kalyazin-road", kind: "episode", scope: "family", updatedAt: "2025-07-10" },
+  { content: "Поездку на море отложили на следующий год из-за дежурств.",
+    key: "sea-trip-postponed", kind: "episode", scope: "family", updatedAt: "2025-07-11" },
+  { content: "Договорились копить на поездку на море с сентября.",
+    key: "sea-trip-saving", kind: "fact", scope: "family", updatedAt: "2025-07-12" },
+  { content: "Фёдор ложился в больницу в мае, выписали через неделю.",
+    key: "fedor-hospital", kind: "episode", scope: "family", updatedAt: "2025-07-13" },
+  { content: "После выписки Фёдору назначили контроль давления дважды в день.",
+    key: "fedor-followup", kind: "episode", scope: "family", updatedAt: "2025-07-14" },
+  { content: "Пётр ломал руку зимой, гипс сняли через шесть недель.",
+    key: "petr-arm", kind: "episode", scope: "family", updatedAt: "2025-07-15" },
+  { content: "После перелома Пётр год не играл в теннис, вернулся весной.",
+    key: "petr-arm-recovery", kind: "episode", scope: "family", updatedAt: "2025-07-16" },
+  { content: "Алёна выступала на отчётном концерте в апреле, заняла второе место.",
+    key: "alena-concert", kind: "episode", scope: "family", updatedAt: "2025-07-17" },
+  { content: "На концерте в позапрошлом году Алёна выступала в паре и была третьей.",
+    key: "alena-concert-previous", kind: "episode", scope: "family", updatedAt: "2025-07-18" },
+  { content: "Родительское собрание у Алёны прошло в сентябре, следующее в декабре.",
+    key: "alena-parent-meeting", kind: "episode", scope: "family", updatedAt: "2025-07-19" },
+  { content: "Родительское собрание у Петра перенесли на неделю позже.",
+    key: "petr-parent-meeting", kind: "episode", scope: "family", updatedAt: "2025-07-20" },
+  { content: "Ксения приезжала на майские, привезла саженцы смородины.",
+    key: "ksenia-may-visit", kind: "episode", scope: "family", updatedAt: "2025-07-21" },
+  { content: "Саженцы смородины посадили у забора со стороны соседей.",
+    key: "currant-planting", kind: "episode", scope: "family", updatedAt: "2025-07-22" },
+  { content: "Яблоню на даче обрезали в марте, в этом году урожай хороший.",
+    key: "apple-tree", kind: "episode", scope: "family", updatedAt: "2025-07-23" },
+  { content: "Крышу сарая на даче перекрыли в июне, работал мастер из посёлка.",
+    key: "shed-roof", kind: "episode", scope: "family", updatedAt: "2025-07-24" },
+  { content: "Забор на даче красили всей семьёй в выходные, ушло шесть банок.",
+    key: "fence-painting", kind: "episode", scope: "family", updatedAt: "2025-07-25" },
+  { content: "Машину били на парковке в феврале, чинили по страховке.",
+    key: "car-accident", kind: "episode", scope: "family", updatedAt: "2025-07-26" },
+  { content: "После ремонта машина стоит на подземной парковке, место 41.",
+    key: "parking-spot", kind: "fact", scope: "family", updatedAt: "2025-07-27" },
+  { content: "Прошлым летом машина глохла на трассе, меняли топливный насос.",
+    key: "car-breakdown", kind: "episode", scope: "family", updatedAt: "2025-07-28" },
+  { content: "Кота Тихона нашли на даче котёнком шесть лет назад.",
+    key: "cat-adoption", kind: "episode", scope: "family", updatedAt: "2025-07-29" },
+  { content: "Тихон убегал в подъезд прошлой осенью, нашли через два часа.",
+    key: "cat-escape", kind: "episode", scope: "family", updatedAt: "2025-07-30" },
+  { content: "Переезд в эту квартиру был четыре года назад, в конце октября.",
+    key: "moving-in", kind: "episode", scope: "family", updatedAt: "2025-07-31" },
+  { content: "Ремонт в детской делали через год после переезда.",
+    key: "kids-room-renovation", kind: "episode", scope: "family", updatedAt: "2025-08-01" },
+  { content: "Кухню переделывать пока не стали, решили отложить на два года.",
+    key: "kitchen-postponed", kind: "fact", scope: "family", updatedAt: "2025-08-02" },
+  { content: "Стиральная машина ломалась весной, меняли подшипник по гарантии.",
+    key: "washer-repair", kind: "episode", scope: "family", updatedAt: "2025-08-03" },
+  { content: "Холодильник покупали новый в январе, старый отдали на дачу.",
+    key: "fridge-purchase", kind: "episode", scope: "family", updatedAt: "2025-08-04" },
+  { content: "Договорились, что телефон за столом никто не достаёт.",
+    key: "table-phone-rule", kind: "fact", scope: "family", updatedAt: "2025-08-05" },
+  { content: "Договорились, что экранное время детей — не больше двух часов в день.",
+    key: "screen-time-rule", kind: "fact", scope: "family", updatedAt: "2025-08-06" },
+  { content: "Решили, что зимние каникулы проводим дома, а не в поездке.",
+    key: "winter-holidays", kind: "fact", scope: "family", updatedAt: "2025-08-07" },
+  { content: "Решили не заводить вторую кошку, Тихон плохо переносит чужих.",
+    key: "no-second-cat", kind: "fact", scope: "family", updatedAt: "2025-08-08" },
+  { content: "Подарок Фёдору на юбилей выбирали вместе, купили кресло.",
+    key: "fedor-gift", kind: "episode", scope: "family", updatedAt: "2025-08-09" },
+  { content: "Подарок Марине на день рождения дети делали своими руками.",
+    key: "marina-gift", kind: "episode", scope: "family", updatedAt: "2025-08-10" },
+  { content: "Новый год встречали дома вчетвером, Ксения приехала второго.",
+    key: "new-year", kind: "episode", scope: "family", updatedAt: "2025-08-11" },
+  { content: "На даче Новый год не встречают: дорога зимой плохая.",
+    key: "no-dacha-new-year", kind: "fact", scope: "family", updatedAt: "2025-08-12" },
+  { content: "Пётр сдавал экзамен по математике в мае, готовился три месяца.",
+    key: "petr-math-exam", kind: "episode", scope: "family", updatedAt: "2025-08-13" },
+  { content: "Репетитора по математике нашли через классного руководителя.",
+    key: "math-tutor", kind: "episode", scope: "family", updatedAt: "2025-08-14" },
+  { content: "Репетитор занимается с Петром по субботам утром, час.",
+    key: "tutor-schedule", kind: "fact", scope: "family", updatedAt: "2025-08-15" },
+  { content: "Алёна начала ходить в бассейн в сентябре, два раза в неделю.",
+    key: "alena-swimming", kind: "fact", scope: "family", updatedAt: "2025-08-16" },
+  { content: "Абонемент в бассейн оплачен до конца учебного года.",
+    key: "pool-subscription", kind: "fact", scope: "family", updatedAt: "2025-08-17" },
+  { content: "Прививки детям делают в поликлинике на Северной, в первую смену.",
+    key: "kids-vaccination", kind: "fact", scope: "family", updatedAt: "2025-08-18" },
+  { content: "Диспансеризацию Марина проходит на работе, в феврале.",
+    key: "marina-checkup", kind: "fact", scope: "family", updatedAt: "2025-08-19" },
+  { content: "Олег сдавал анализы в июне, всё в норме кроме железа.",
+    key: "oleg-tests", kind: "episode", scope: "personal", updatedAt: "2025-08-20" },
+  { content: "После анализов Олегу назначили железо курсом на два месяца.",
+    key: "oleg-iron", kind: "episode", scope: "personal", updatedAt: "2025-08-21" },
+  { content: "Стоматолога вся семья посещает раз в полгода, врач Соловьёв.",
+    key: "dentist", kind: "fact", scope: "family", updatedAt: "2025-08-22" },
+  { content: "Петру ставили брекеты два года назад, снимать в следующем году.",
+    key: "petr-braces", kind: "episode", scope: "family", updatedAt: "2025-08-23" },
+  { content: "Очки Марине выписывали в оптике на Луговой, рецепт от прошлого года.",
+    key: "marina-glasses-prescription", kind: "fact", scope: "family", updatedAt: "2025-08-24" },
+  { content: "В сентябре обсуждали, что делать с балконом, ничего не решили.",
+    key: "balcony-discussion", kind: "episode", scope: "family", updatedAt: "2025-08-25" },
+  { content: "Обсуждали покупку посудомойки побольше, отложили до распродажи.",
+    key: "dishwasher-discussion", kind: "episode", scope: "family", updatedAt: "2025-08-26" },
+  { content: "Пётр просил велосипед получше к весне, договорились обсудить в марте.",
+    key: "petr-bicycle-request", kind: "episode", scope: "family", updatedAt: "2025-08-27" },
+  { content: "Алёна просила щенка, объяснили почему пока нельзя.",
+    key: "alena-puppy-request", kind: "episode", scope: "family", updatedAt: "2025-08-28" },
+  { content: "Соседи сверху делали ремонт весной, шумели два месяца.",
+    key: "neighbours-renovation", kind: "episode", scope: "family", updatedAt: "2025-08-29" },
+  { content: "С соседкой из двадцать первой договорились присматривать за котом.",
+    key: "neighbour-cat-sitting", kind: "fact", scope: "family", updatedAt: "2025-08-30" },
+  { content: "Отключение горячей воды было в июле, десять дней.",
+    key: "hot-water-outage", kind: "episode", scope: "family", updatedAt: "2025-08-31" },
+  { content: "Свет отключали на час в августе, авария на подстанции.",
+    key: "power-outage", kind: "episode", scope: "family", updatedAt: "2025-09-01" },
+  { content: "Лифт в подъезде меняли летом, ходили пешком три недели.",
+    key: "elevator-replacement", kind: "episode", scope: "family", updatedAt: "2025-09-02" },
+  { content: "Общее собрание жильцов было в июне, решали про шлагбаум.",
+    key: "residents-meeting", kind: "episode", scope: "family", updatedAt: "2025-09-03" },
+
+  // Три длинные записи: 7% боевой памяти длиннее 400 символов, то есть режется на несколько
+  // кусков. Без них корпус измерял бы только одноку́сковую индексацию.
+  {
+    content: "Итог разговора про ремонт кухни. Смотрели три варианта: полная переделка с " +
+      "переносом мойки, замена только фасадов и столешницы, и промежуточный вариант с новой " +
+      "техникой без смены мебели. Полная переделка упирается в перенос труб и согласование, " +
+      "поэтому от неё отказались. Договорились, что в ближайшие два года трогать кухню не " +
+      "будем, а деньги откладываем на поездку на море. Если холодильник снова начнёт шуметь, " +
+      "меняем его отдельно и не привязываем к ремонту.",
+    key: "kitchen-discussion-summary", kind: "episode", scope: "family", updatedAt: "2025-09-04",
+  },
+  {
+    content: "Разбор поездки в Суздаль, чтобы в следующий раз собраться быстрее. Выехали позже " +
+      "запланированного почти на час, потому что искали запасной ключ и зарядку для телефона. " +
+      "В дороге останавливались один раз, этого хватило. Гостевой дом у реки понравился всем, " +
+      "но кормили только завтраком, и ужин приходилось искать в городе. На обратном пути " +
+      "попали в пробку на въезде. Вывод на будущее: вещи собирать накануне вечером, ужин " +
+      "бронировать заранее, выезжать до семи утра.",
+    key: "suzdal-trip-summary", kind: "episode", scope: "family", updatedAt: "2025-09-05",
+  },
+  {
+    content: "Что решили по учёбе старшего на этот год. Математику подтягиваем с репетитором по " +
+      "субботам, остальные предметы он ведёт сам и просит не вмешиваться без его просьбы. " +
+      "Оценки при младшей сестре не обсуждаем — это его отдельная просьба, и её соблюдаем. " +
+      "Настольный теннис оставляем два раза в неделю, несмотря на нагрузку: он сам настоял, и " +
+      "после перелома это заодно восстановление. Если к декабрю по математике не будет " +
+      "сдвига, возвращаемся к разговору и ищем другого репетитора.",
+    key: "petr-study-plan", kind: "episode", scope: "family", updatedAt: "2025-09-06",
+  },
+] as const;
