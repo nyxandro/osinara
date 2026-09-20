@@ -153,7 +153,8 @@ export function createMemoryThreadBriefRepository() {
   return {
     async activate(input: {
     auth: MemoryAuthorization;
-    queryEmbedding: readonly number[];
+    /** Null when the embedding service was unreachable: threads then activate without similarity. */
+    queryEmbedding: readonly number[] | null;
     retrievedClaimIds: readonly string[];
     skillHints: readonly string[];
   }): Promise<MemoryThreadContext> {
@@ -198,7 +199,8 @@ export function createMemoryThreadBriefRepository() {
                 retrieval_hits DESC, thread.updated_at DESC
         LIMIT $10`,
       [input.auth.familyId, input.auth.scopes, input.auth.userId, input.auth.groupId,
-        input.retrievedClaimIds, vectorLiteral(input.queryEmbedding), hints,
+        input.retrievedClaimIds,
+        input.queryEmbedding === null ? null : vectorLiteral(input.queryEmbedding), hints,
          MEMORY_EMBEDDING_MODEL_VERSION, THREAD_TITLE_MIN_SEMANTIC_SIMILARITY,
          THREAD_CONTEXT_MAX_THREADS],
     );

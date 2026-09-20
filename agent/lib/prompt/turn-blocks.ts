@@ -322,7 +322,9 @@ export function createMemoryBlockResolver(dependencies: {
       phase = "format";
       return [
         ...(profile === null ? [] : [formatProfileViewContext(profile)]),
-        formatRetrievedMemoryInstructions(context.memories, context.threads),
+        formatRetrievedMemoryInstructions(
+          context.memories, context.threads, context.diagnostics.semanticBranchAvailable,
+        ),
       ].join("\n\n");
     } catch (error) {
       outcome = "failed";

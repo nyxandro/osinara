@@ -110,13 +110,12 @@ function vectorLiteral(vector: readonly number[]): string {
   return `[${vector.join(",")}]`;
 }
 
+/**
+ * An empty list is a real state, not a failure: the embedding service was unreachable and the
+ * search runs on words alone. `unnest` over an empty array yields no rows, so the semantic branch
+ * contributes nothing and rank fusion adds up whatever the other two found.
+ */
 function vectorArrayLiterals(vectors: readonly (readonly number[])[]): string[] {
-  if (vectors.length === 0) {
-    throw new AppError(
-      "AGENT_MEMORY_EMBEDDING_VECTOR_INVALID",
-      "Не удалось выполнить смысловой поиск по памяти",
-    );
-  }
   return vectors.map(vectorLiteral);
 }
 

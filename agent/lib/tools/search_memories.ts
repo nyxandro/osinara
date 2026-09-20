@@ -33,6 +33,7 @@ export default defineTool({
     "Для просьбы вспомнить прошлое или дать ту ссылку сначала восстанови предмет по явному названию или описанию из видимой переписки; пустая автоматическая подборка не доказывает отсутствие записи.",
     "Для вопроса про период (что было в августе, о чём договорились на прошлой неделе) задавай from и to: тогда отбор идёт по дате события, а у записей без неё по дате появления. В этом режиме query не участвует в отборе.",
     `Период возвращает не больше ${MEMORY_EVENT_WINDOW_LIMIT} записей, самые поздние по дате события. Если их ровно столько, период мог не поместиться целиком: сузь его и повтори.`,
+    "Обычно результат это массив записей. Если вместо него пришёл объект с полем incompleteSelection, подбор собран только по словам и неполон: скажи об этом человеку, а не делай вывод, что сведения нет.",
   ].join(" "),
   inputSchema: z.object({
     from: DAY.optional().describe("Начало периода, ГГГГ-ММ-ДД: отбирает записи по дате события"),
@@ -63,6 +64,14 @@ export default defineTool({
       const result = await retrieveRelevantMemories(auth, query);
       found = result.memories;
       diagnostics = result.diagnostics;
+      // Without the semantic branch a paraphrase simply does not match, and an empty result read
+      // as «этого нет» is worse than no answer at all.
+      if (!result.diagnostics.semanticBranchAvailable) {
+        return {
+          incompleteSelection: "Смысловая ветка поиска сейчас недоступна: найдено только по точным словам, перефразированный вопрос мог не найтись. Не делай вывода, что сведения нет.",
+          items: found,
+        };
+      }
       return found;
     } finally {
       console.info(JSON.stringify({ code: "AGENT_MEMORY_SEARCH_METRICS",

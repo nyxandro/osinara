@@ -291,6 +291,7 @@ describe("memory block resolution", () => {
       createProfile,
       openSelectionWindow: async () => 1,
       retrieve: vi.fn().mockResolvedValue({
+        diagnostics: { semanticBranchAvailable: true },
         memories: [],
         retrievedClaimIds: [],
         threads: { threads: [], totalCharacters: 0 },
@@ -394,6 +395,7 @@ describe("memory block resolution", () => {
 
   it("builds the same-turn profile from verified signals and retrieval-related claim identities", async () => {
     const retrieve = vi.fn().mockResolvedValue({
+      diagnostics: { semanticBranchAvailable: true },
       memories: [],
       retrievedClaimIds: ["claim-related"],
       threads: { threads: [], totalCharacters: 0 },

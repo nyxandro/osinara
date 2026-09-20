@@ -27,7 +27,11 @@ import { currentTelegramMessageText } from "./telegram-group-turn-context.js";
 import { escapeUntrustedContextJson } from "./untrusted-context-json.js";
 import { memoryThreadBriefRepository } from "./memory-thread-brief-repository.js";
 import type { MemoryThreadContext } from "./memory-thread-context.js";
-import { MemoryContextFailure, type MemoryContextPhase } from "./memory-context-failure.js";
+import {
+  MemoryContextFailure,
+  memoryFailureCode,
+  type MemoryContextPhase,
+} from "./memory-context-failure.js";
 
 export type ModelMemoryContextItem = ModelMemory | (MemoryConflictGroup & {
   type: "unresolved_conflict";
@@ -40,6 +44,8 @@ export type ModelMemoryContextItem = ModelMemory | (MemoryConflictGroup & {
 export interface MemoryRetrievalDiagnostics extends MemoryRetrievalBranchDiagnostics {
   queryCharacters: number;
   queryChunks: number;
+  /** False when the query vector could not be computed and only the word branches ran. */
+  semanticBranchAvailable: boolean;
 }
 
 /**
@@ -49,20 +55,49 @@ export interface MemoryRetrievalDiagnostics extends MemoryRetrievalBranchDiagnos
 function queryDiagnostics(
   query: string,
   branches: MemoryRetrievalBranchDiagnostics,
+  semanticBranchAvailable: boolean,
 ): MemoryRetrievalDiagnostics {
   return {
     ...branches,
     queryCharacters: query.length,
     queryChunks: chunkMemoryQuery(query).length,
+    semanticBranchAvailable,
   };
+}
+
+/**
+ * The query vector, or none. One unreachable service used to cost the whole turn its memory: the
+ * vector was taken before the database was touched, and a failure there became «память недоступна»
+ * — although two of the three branches search text in PostgreSQL and would have found the exact
+ * names, numbers and file names the person asked about.
+ *
+ * There is no retry. The service is already unwell, and a second wait would be paid by the person
+ * at exactly the wrong moment; the failure is written down once and the search goes on without it.
+ */
+async function embedQueryOrDegrade(prepared: string): Promise<readonly (readonly number[])[]> {
+  try {
+    return await embedMemoryQueryChunks(prepared);
+  } catch (error) {
+    console.error(JSON.stringify({
+      code: "AGENT_MEMORY_SEMANTIC_BRANCH_UNAVAILABLE",
+      causeCode: memoryFailureCode(error) ?? "UNCLASSIFIED_EMBEDDING_ERROR",
+      queryCharacters: prepared.length,
+    }));
+    return [];
+  }
 }
 
 export function formatRetrievedMemoryInstructions(
   memories: readonly ModelMemoryContextItem[],
   threads?: MemoryThreadContext,
+  /** Absent means the whole pipeline ran; false says the word branches ran alone. */
+  semanticBranchAvailable = true,
 ): string {
   return [
     "Технический факт: эти записи до вызова модели отобраны сервером в разрешённых областях памяти.",
+    ...(semanticBranchAvailable ? [] : [
+      "Внимание: смысловая ветка поиска сейчас недоступна, подборка собрана только по словам и поэтому неполная. Перефразированный вопрос мог не найтись. Не делай вывода, что сведения нет: скажи, что сейчас можешь искать только по точным словам, и предложи назвать их.",
+    ]),
     "Используется активный pipeline текущей реализации: индексированный русский морфологический FTS, отдельный simple FTS для точных имён, чисел и тикеров, а также multilingual E5 semantic search по локальным 384-мерным embeddings в pgvector.",
     "Каждая ветка применяет к собственному evidence калиброванный порог до объединения рангов; поэтому нерелевантный запрос может вернуть пустую подборку. Точные дубликаты сервер схлопывает только при чтении без изменения записей.",
     "Ты получаешь уже найденный результат и не выполняешь самостоятельный отбор по ключевым словам. Не утверждай, что векторный поиск отключён или только планируется.",
@@ -135,14 +170,14 @@ export async function retrieveRelevantMemories(
   memories: ModelMemoryContextItem[];
 }> {
   const prepared = prepareMemoryQuery(query);
-  const embeddings = await embedMemoryQueryChunks(prepared);
+  const embeddings = await embedQueryOrDegrade(prepared);
   const retrieval = await memoryRetrievalRepository.searchWithConflictClosure(
     auth,
     prepared,
     embeddings,
   );
   return {
-    diagnostics: queryDiagnostics(prepared, retrieval.diagnostics),
+    diagnostics: queryDiagnostics(prepared, retrieval.diagnostics, embeddings.length > 0),
     memories: [
       ...retrieval.results.map((result) => toModelMemory(result.memory, result.sourceEvidence)),
       ...retrieval.conflicts.map((conflict) => ({ ...conflict, type: "unresolved_conflict" as const })),
@@ -161,7 +196,7 @@ export async function retrieveMemoryTurnContext(
   const prepared = prepareMemoryQuery(query);
   let phase: MemoryContextPhase = "embedding";
   try {
-    const embeddings = await embedMemoryQueryChunks(prepared);
+    const embeddings = await embedQueryOrDegrade(prepared);
     phase = "search";
     const retrieval = await memoryRetrievalRepository.searchWithConflictClosure(
       auth,
@@ -182,13 +217,14 @@ export async function retrieveMemoryTurnContext(
     const threads = await memoryThreadBriefRepository.activate({
       auth,
       // Thread activation holds one vector by contract, so the pieces fold back into their
-      // centroid here — locally, without asking the embedding service a second time.
-      queryEmbedding: memoryQueryCentroid(embeddings),
+      // centroid here — locally, without asking the embedding service a second time. Without a
+      // vector threads still activate by what the search retrieved and by skill hints.
+      queryEmbedding: embeddings.length === 0 ? null : memoryQueryCentroid(embeddings),
       retrievedClaimIds: retrieval.results.map((result) => result.memory.id),
       skillHints,
     });
     return {
-      diagnostics: queryDiagnostics(prepared, retrieval.diagnostics),
+      diagnostics: queryDiagnostics(prepared, retrieval.diagnostics, embeddings.length > 0),
       memories,
       retrievedClaimIds: retrieval.relatedClaimIds,
       threads,
