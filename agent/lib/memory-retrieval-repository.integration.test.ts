@@ -94,7 +94,7 @@ describeWithDatabase("memoryRetrievalRepository", () => {
     const { results } = await memoryRetrievalRepository.search(
       auth,
       "орехами",
-      vector(1, 0),
+      [vector(1, 0)],
     );
 
     expect(results[0]?.memory.content).toBe("Пользователь не ест орехи");
@@ -125,7 +125,7 @@ describeWithDatabase("memoryRetrievalRepository", () => {
     const { diagnostics, results } = await memoryRetrievalRepository.search(
       auth,
       "велосипед",
-      vector(1, 0),
+      [vector(1, 0)],
     );
 
     expect(results).toEqual([]);
@@ -183,7 +183,7 @@ describeWithDatabase("memoryRetrievalRepository", () => {
     const result = await memoryRetrievalRepository.searchWithConflictClosure(
       auth,
       "домофон 1234",
-      vector(1, 0),
+      [vector(1, 0)],
     );
 
     expect(result.conflicts).toHaveLength(1);
@@ -249,7 +249,7 @@ describeWithDatabase("memoryRetrievalRepository", () => {
     const beforeRevocation = await memoryRetrievalRepository.search(
       auth,
       "код сейфа 1234",
-      vector(1, 0),
+      [vector(1, 0)],
     );
     expect(beforeRevocation.results.map((result) => result.memory.id)).toEqual(expect.arrayContaining([
       first.rows[0]!.id,
@@ -281,7 +281,7 @@ describeWithDatabase("memoryRetrievalRepository", () => {
       await expect(memoryRetrievalRepository.searchWithConflictClosure(
         auth,
         "код сейфа 1234",
-        vector(1, 0),
+        [vector(1, 0)],
       )).resolves.toMatchObject({ conflicts: [], relatedClaimIds: [], results: [] });
       expect(revoked).toBe(true);
     } finally {

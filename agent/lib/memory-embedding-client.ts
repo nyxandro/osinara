@@ -3,7 +3,9 @@
  *
  * Exports:
  * - `embedMemoryPassages`: embeds indexed chunks with the E5 passage protocol.
- * - `embedMemoryQuery`: embeds retrieval queries with the E5 query protocol.
+ * - `embedMemoryQueryChunks`: embeds each piece of a retrieval query separately.
+ * - `embedMemoryQuery`: folds those pieces into one vector for callers that need a single one.
+ * - `memoryQueryCentroid`: the same folding over pieces already fetched.
  */
 import { AppError } from "./app-error.js";
 import { ModelFacingError } from "./model-facing-error.js";
@@ -172,10 +174,15 @@ export async function embedMemoryPassages(
   );
 }
 
-export async function embedMemoryQuery(
+/**
+ * Every piece of the query as its own vector. A long message is cut into chunks before embedding,
+ * and the pieces are kept apart on purpose: a record about one of its topics should be compared
+ * with the piece about that topic, not with an average of all of them.
+ */
+export async function embedMemoryQueryChunks(
   query: string,
   fetchImplementation: typeof fetch = fetch,
-): Promise<number[]> {
+): Promise<number[][]> {
   const chunks = chunkMemoryQuery(query);
   const embeddings: number[][] = [];
   for (let offset = 0; offset < chunks.length; offset += MEMORY_EMBEDDING_PROVIDER_BATCH_SIZE) {
@@ -186,7 +193,29 @@ export async function embedMemoryQuery(
       fetchImplementation,
     ));
   }
-  if (embeddings.length === 1) return embeddings[0]!;
+  return embeddings;
+}
+
+/**
+ * One vector for the whole query. Callers that can only hold a single vector — thread activation
+ * and thread search — use this; memory retrieval keeps the pieces apart instead.
+ */
+export async function embedMemoryQuery(
+  query: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<number[]> {
+  return memoryQueryCentroid(await embedMemoryQueryChunks(query, fetchImplementation));
+}
+
+/** Folds query chunks into one vector without asking the service again. */
+export function memoryQueryCentroid(embeddings: readonly (readonly number[])[]): number[] {
+  if (embeddings.length === 0) {
+    throw new AppError(
+      "AGENT_MEMORY_EMBEDDING_RESPONSE_INVALID",
+      "Локальный сервис памяти не вернул ни одного вектора запроса",
+    );
+  }
+  if (embeddings.length === 1) return [...embeddings[0]!];
 
   // A normalized centroid gives every query fragment influence without dropping long-message content.
   const centroid = Array.from({ length: MEMORY_EMBEDDING_DIMENSIONS }, (_, dimension) =>

@@ -13,7 +13,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "../database.js";
-import { embedMemoryPassages, embedMemoryQuery } from "../memory-embedding-client.js";
+import { embedMemoryPassages, embedMemoryQueryChunks } from "../memory-embedding-client.js";
 import { chunkMemoryContent } from "../memory-embedding-chunks.js";
 import {
   MEMORY_EMBEDDING_MODEL_VERSION,
@@ -21,8 +21,10 @@ import {
   MEMORY_RETRIEVAL_LIMIT,
 } from "../memory-config.js";
 import { memoryRetrievalRepository } from "../memory-retrieval-repository.js";
+import { prepareMemoryQuery } from "../memory-query-preparation.js";
 import type { MemoryAuthorization } from "../memory-context.js";
 import {
+  MEMORY_RETRIEVAL_BASELINE_V3_BEFORE_WAVE_2,
   MEMORY_RETRIEVAL_EVAL_FIXTURE_VERSION_V3,
   MEMORY_RETRIEVAL_EVAL_QUERIES_V3,
   MEMORY_RETRIEVAL_EVAL_RECORDS_V3,
@@ -68,9 +70,11 @@ interface EvaluatedQueryV3 {
   foundExpectedKeys: string[];
   hit: boolean;
   matched: { russian: number; semantic: number; simple: number };
+  qualified: { russian: number; semantic: number; simple: number };
   query: MemoryRetrievalEvalQueryV3;
   resultKeys: string[];
   topPositionHit: boolean;
+  topRanks: { russian: number | null; simple: number | null };
   topSimilarity: number | null;
 }
 
@@ -201,10 +205,13 @@ describeEval("memory retrieval eval v3", () => {
   it("measures recall per live query shape and pins the result", async () => {
     const evaluated: EvaluatedQueryV3[] = [];
     for (const query of MEMORY_RETRIEVAL_EVAL_QUERIES_V3) {
+      // The same text the product searches by: preparation runs before retrieval in production,
+      // so a measurement that skipped it would grade a pipeline nobody runs.
+      const prepared = prepareMemoryQuery(query.text);
       const { diagnostics, results } = await memoryRetrievalRepository.search(
         auth,
-        query.text,
-        await embedMemoryQuery(query.text),
+        prepared,
+        await embedMemoryQueryChunks(prepared),
         EVAL_RESULT_LIMIT,
       );
       const resultKeys = results.map((result) => {
@@ -237,11 +244,17 @@ describeEval("memory retrieval eval v3", () => {
           semantic: diagnostics.semanticMatched,
           simple: diagnostics.simpleMatched,
         },
+        qualified: {
+          russian: diagnostics.russianQualified,
+          semantic: diagnostics.semanticQualified,
+          simple: diagnostics.simpleQualified,
+        },
         query,
         resultKeys,
         topPositionHit: query.expectedKeys.some((key) =>
           resultKeys.slice(0, EVAL_TOP_POSITIONS).includes(key)
         ),
+        topRanks: { russian: diagnostics.russianTopRank, simple: diagnostics.simpleTopRank },
         topSimilarity: diagnostics.semanticTopSimilarity,
       });
     }
@@ -300,5 +313,11 @@ describeEval("memory retrieval eval v3", () => {
 
     expect(MEMORY_RETRIEVAL_EVAL_RECORDS_V3.length).toBeGreaterThanOrEqual(200);
     expect(metrics).toEqual(MEMORY_RETRIEVAL_R1_BASELINE_V3);
+    // Candidate selection was changed to lift exactly these numbers. A later change that quietly
+    // gives the gain back has to fail here rather than be noticed months later in a chat.
+    for (const [name, before] of Object.entries(MEMORY_RETRIEVAL_BASELINE_V3_BEFORE_WAVE_2)) {
+      expect({ name, improved: metrics[name as keyof typeof metrics] >= before })
+        .toEqual({ name, improved: true });
+    }
   }, EVAL_MEASUREMENT_TIMEOUT_MILLISECONDS);
 });

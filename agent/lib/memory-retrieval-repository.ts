@@ -14,9 +14,9 @@ import {
   MEMORY_RETRIEVAL_CANDIDATE_LIMIT,
   MEMORY_RETRIEVAL_CONFIRMATION_BOOST,
   MEMORY_RETRIEVAL_LIMIT,
-  MEMORY_RETRIEVAL_MIN_RUSSIAN_MORPHOLOGY_RANK,
+  MEMORY_RETRIEVAL_MIN_RUSSIAN_MORPHOLOGY_TERM_MATCHES,
   MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY,
-  MEMORY_RETRIEVAL_MIN_SIMPLE_LEXICAL_RANK,
+  MEMORY_RETRIEVAL_MIN_SIMPLE_LEXICAL_TERM_MATCHES,
   MEMORY_RETRIEVAL_RECENCY_BOOST,
   MEMORY_RETRIEVAL_RECENCY_DECAY_SECONDS,
   MEMORY_RETRIEVAL_RRF_RANK_OFFSET,
@@ -106,6 +106,16 @@ function vectorLiteral(vector: readonly number[]): string {
     );
   }
   return `[${vector.join(",")}]`;
+}
+
+function vectorArrayLiterals(vectors: readonly (readonly number[])[]): string[] {
+  if (vectors.length === 0) {
+    throw new AppError(
+      "AGENT_MEMORY_EMBEDDING_VECTOR_INVALID",
+      "Не удалось выполнить смысловой поиск по памяти",
+    );
+  }
+  return vectors.map(vectorLiteral);
 }
 
 function authorizedClaimPredicate(alias: "a" | "b" | "item" | "partner"): string {
@@ -206,7 +216,7 @@ export const memoryRetrievalRepository = {
   async search(
     auth: MemoryAuthorization,
     query: string,
-    queryEmbedding: readonly number[],
+    queryEmbeddings: readonly (readonly number[])[],
     limit = MEMORY_RETRIEVAL_LIMIT,
   ): Promise<{
     diagnostics: MemoryRetrievalBranchDiagnostics;
@@ -221,6 +231,36 @@ export const memoryRetrievalRepository = {
     }
 
     // NOT MATERIALIZED keeps authorization in every inlined branch while allowing physical indexes.
+    //
+    // Both word branches build their condition as a disjunction of the query's own lexemes rather
+    // than through `websearch_to_tsquery`, which joins every token with AND. A live question —
+    // «Проверь, когда у меня ближайшее дежурство, и когда мы меняем резину» — then demanded that
+    // one record contain all of those words at once, and no record ever does, so the branch
+    // silently returned nothing and `ts_rank_cd` never got to do its job of ranking by how many
+    // words matched and how close together they sit.
+    //
+    // The exact branch takes its terms from the same `to_tsvector('simple', ...)` that builds its
+    // indexed column, so every term is a lexeme that column can actually hold, and then drops the
+    // ones the Russian dictionary calls stop words — «и», «у», «за». With OR a stop word would
+    // match nearly every record and drown the codes and names this branch exists for. The
+    // morphological branch takes the stems its own configuration produced, where stop words are
+    // already gone.
+    //
+    // Both branches then assemble their disjunction with `to_tsquery('simple', ...)`, which is not
+    // a mistake: the terms are already lexemes of their own column, and the Russian configuration
+    // would stem them a second time. «решен» becomes «реш», stops matching the column it came
+    // from, and the branch goes quiet on a record that contains the word verbatim — the same
+    // failure as the AND condition, one step lower.
+    //
+    // Words are counted by position, not by lexeme. One hyphenated token or a URL yields several
+    // lexemes at the same position, and counting those as separate words would let a single
+    // «e-mail» clear a gate that asks for two of the question's words.
+    //
+    // The semantic branch compares a record with every piece of the query and keeps the closest
+    // pair. A long message is cut into chunks before embedding, and folding those chunks into one
+    // average vector put the question about the roof and the question about the medicine at a
+    // point that resembles neither; the record about either one then fell below the gate.
+    //
     // The branch CTEs are split in two on purpose: `*_matched` is what the branch found at all and
     // feeds the pre-threshold diagnostics, `*_evidence` is what survived the gate and the candidate
     // limit. Diagnostics are joined with LEFT JOIN LATERAL so an empty result still returns one row
@@ -233,16 +273,44 @@ export const memoryRetrievalRepository = {
            WHERE item.family_id = $1 AND item.claim_status = 'active'
              AND ${authorizedClaimPredicate("item")}
        ),
+       simple_lexemes AS (
+         SELECT lexeme, positions
+         FROM unnest(to_tsvector('simple', translate($5, 'ёЁ', 'еЕ')))
+         WHERE ts_lexize('russian_stem', lexeme) <> '{}'
+       ),
+       russian_lexemes AS (
+         SELECT lexeme, positions FROM unnest(to_tsvector('russian', $5))
+       ),
+       simple_query AS (
+         SELECT array_agg(lexeme) AS terms,
+                to_tsquery('simple', string_agg(quote_literal(lexeme), ' | ')) AS query,
+                (SELECT count(DISTINCT word)
+                 FROM simple_lexemes AS counted, unnest(counted.positions) AS word) AS word_count
+         FROM simple_lexemes
+       ),
+       russian_query AS (
+         SELECT array_agg(lexeme) AS terms,
+                to_tsquery('simple', string_agg(quote_literal(lexeme), ' | ')) AS query,
+                (SELECT count(DISTINCT word)
+                 FROM russian_lexemes AS counted, unnest(counted.positions) AS word) AS word_count
+         FROM russian_lexemes
+       ),
        simple_matched AS (
-         SELECT id, updated_at,
-                ts_rank_cd(search_vector, websearch_to_tsquery('simple', $5)) AS relevance
-         FROM authorized
-         WHERE search_vector @@ websearch_to_tsquery('simple', $5)
+         SELECT authorized.id, authorized.updated_at,
+                ts_rank_cd(authorized.search_vector, simple_query.query) AS relevance,
+                (SELECT count(DISTINCT word)
+                 FROM simple_lexemes, unnest(simple_lexemes.positions) AS word
+                 WHERE tsvector_to_array(authorized.search_vector) @> ARRAY[simple_lexemes.lexeme])
+                  AS matched_terms,
+                LEAST($7::bigint, simple_query.word_count) AS required_terms
+         FROM authorized, simple_query
+         WHERE simple_query.query IS NOT NULL
+           AND authorized.search_vector @@ simple_query.query
        ),
        simple_evidence AS (
          SELECT id, updated_at, relevance
          FROM simple_matched
-         WHERE relevance >= $7
+         WHERE matched_terms >= required_terms
          ORDER BY relevance DESC, updated_at DESC, id DESC
           LIMIT $6
         ),
@@ -252,15 +320,21 @@ export const memoryRetrievalRepository = {
          FROM simple_evidence
        ),
        russian_matched AS (
-         SELECT id, updated_at,
-                ts_rank_cd(russian_search_vector, websearch_to_tsquery('russian', $5)) AS relevance
-         FROM authorized
-         WHERE russian_search_vector @@ websearch_to_tsquery('russian', $5)
+         SELECT authorized.id, authorized.updated_at,
+                ts_rank_cd(authorized.russian_search_vector, russian_query.query) AS relevance,
+                (SELECT count(DISTINCT word)
+                 FROM russian_lexemes, unnest(russian_lexemes.positions) AS word
+                 WHERE tsvector_to_array(authorized.russian_search_vector)
+                   @> ARRAY[russian_lexemes.lexeme]) AS matched_terms,
+                LEAST($8::bigint, russian_query.word_count) AS required_terms
+         FROM authorized, russian_query
+         WHERE russian_query.query IS NOT NULL
+           AND authorized.russian_search_vector @@ russian_query.query
        ),
        russian_evidence AS (
          SELECT id, updated_at, relevance
          FROM russian_matched
-         WHERE relevance >= $8
+         WHERE matched_terms >= required_terms
          ORDER BY relevance DESC, updated_at DESC, id DESC
          LIMIT $6
        ),
@@ -270,10 +344,11 @@ export const memoryRetrievalRepository = {
          FROM russian_evidence
        ),
        semantic_distances AS (
-         SELECT authorized.id, MIN(chunk.embedding <=> $9::vector) AS distance,
+         SELECT authorized.id, MIN(chunk.embedding <=> query_vector) AS distance,
                  authorized.updated_at
          FROM authorized
          JOIN memory_embedding_chunks AS chunk ON chunk.memory_item_id = authorized.id
+         CROSS JOIN unnest($9::vector[]) AS query_vector
          WHERE authorized.embedding_status = 'indexed' AND chunk.embedding_model = $10
          GROUP BY authorized.id, authorized.updated_at
         ),
@@ -307,9 +382,13 @@ export const memoryRetrievalRepository = {
                 (SELECT count(*) FROM simple_matched) AS simple_matched,
                 (SELECT count(*) FROM russian_matched) AS russian_matched,
                 (SELECT count(*) FROM semantic_matched) AS semantic_matched,
-                (SELECT count(*) FROM simple_matched WHERE relevance >= $7) AS simple_qualified,
-                (SELECT count(*) FROM russian_matched WHERE relevance >= $8) AS russian_qualified,
-                (SELECT count(*) FROM semantic_matched WHERE similarity >= $11)
+                (SELECT count(*) FROM simple_matched WHERE matched_terms >= required_terms)
+                  AS simple_qualified,
+                (SELECT count(*) FROM russian_matched WHERE matched_terms >= required_terms)
+                  AS russian_qualified,
+                (SELECT count(*) FROM semantic_matched
+                  WHERE similarity >= $11
+                  )
                   AS semantic_qualified
        )
        SELECT diagnostics.simple_top_rank, diagnostics.russian_top_rank,
@@ -367,9 +446,9 @@ export const memoryRetrievalRepository = {
         auth.groupId,
         normalizedQuery,
         MEMORY_RETRIEVAL_CANDIDATE_LIMIT,
-        MEMORY_RETRIEVAL_MIN_SIMPLE_LEXICAL_RANK,
-        MEMORY_RETRIEVAL_MIN_RUSSIAN_MORPHOLOGY_RANK,
-        vectorLiteral(queryEmbedding),
+        MEMORY_RETRIEVAL_MIN_SIMPLE_LEXICAL_TERM_MATCHES,
+        MEMORY_RETRIEVAL_MIN_RUSSIAN_MORPHOLOGY_TERM_MATCHES,
+        vectorArrayLiterals(queryEmbeddings),
         MEMORY_EMBEDDING_MODEL_VERSION,
         MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY,
         MEMORY_RETRIEVAL_RRF_RANK_OFFSET,
@@ -401,7 +480,7 @@ export const memoryRetrievalRepository = {
   async searchWithConflictClosure(
     auth: MemoryAuthorization,
     query: string,
-    queryEmbedding: readonly number[],
+    queryEmbeddings: readonly (readonly number[])[],
     limit = MEMORY_RETRIEVAL_LIMIT,
   ): Promise<{
     conflicts: MemoryConflictGroup[];
@@ -412,7 +491,7 @@ export const memoryRetrievalRepository = {
     const { diagnostics, results } = await memoryRetrievalRepository.search(
       auth,
       query,
-      queryEmbedding,
+      queryEmbeddings,
       limit,
     );
     const selectedIds = results.map((result) => result.memory.id);

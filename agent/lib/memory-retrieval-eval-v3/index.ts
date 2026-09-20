@@ -6,6 +6,7 @@
  * - `MEMORY_RETRIEVAL_EVAL_RECORDS_V3`: the whole synthetic family corpus.
  * - `MEMORY_RETRIEVAL_EVAL_QUERIES_V3`: the queries measured against it.
  * - `MEMORY_RETRIEVAL_R1_BASELINE_V3`: measured current behaviour, failures included.
+ * - `MEMORY_RETRIEVAL_BASELINE_V3_BEFORE_WAVE_2`: the same corpus before candidate selection changed.
  * - `MEMORY_RETRIEVAL_V3_FUTURE_GATES`: acceptance targets for the retrieval work that follows.
  *
  * Why this fixture exists: v1 and v2 hold about twenty-five records and short clean questions, and
@@ -47,22 +48,22 @@ export const MEMORY_RETRIEVAL_EVAL_RECORDS_V3: readonly MemoryRetrievalEvalRecor
 ];
 
 /**
- * Measured on the pinned E5 model against this exact corpus. Five of these numbers are
- * acknowledged debt, not achievements:
+ * Measured on the pinned E5 model against this exact corpus, after the candidate-selection work of
+ * wave 2. What the word branches do is no longer the debt here; what remains is abstention:
  *
- * - `liveShapeLexicalFireRate` = 0. On a live-shaped message — addressed to the bot, carrying
- *   emoji, dictated, long, or multi-topic — the word branches contribute to the answer in zero of
- *   twenty-one cases. Not rarely: never. «Проверь, когда у меня ближайшее дежурство, и когда мы
- *   меняем резину» contains «дежурство» and «резину» verbatim, and both branches stay silent,
- *   because the question is turned into a conjunction of every word in it. That is #192, measured.
  * - `nearMissEmptyRate` = 0. Every question whose answer is absent but whose neighbour is almost
- *   right still returns records, at similarities of 0.824 to 0.858 against a gate of 0.78. Asked
- *   for the code to a garage that was never mentioned, the search offers the code to the gate.
- * - `longQueryFullCoverageRate` = 0 and `multiTopicFullCoverageRate` = 0.2. A message that asks
- *   about several things surfaces one of them and drops the rest. That is #194.
+ *   right still returns records, at similarities of 0.824 to 0.858. Asked for the code to a garage
+ *   that was never mentioned, the search offers the code to the gate. No similarity threshold can
+ *   fix this: those numbers sit inside the range of genuine answers. It needs a signal that says
+ *   *what the record is about*, which is the subject header of #193.
  * - `negativeEmptyRate` = 0.5. Half the questions that are not about memory at all still return
- *   records, at 0.781 to 0.791 against the same 0.78 gate. On twenty-five records the gate held;
- *   on two hundred and forty three it barely does. That is #196.
+ *   records, at 0.781 to 0.791 against a gate of 0.78. A gate at 0.80 makes this 1.0 — and costs
+ *   memory-retrieval-v1 both of its pure paraphrases, whose nearest true answer sits at 0.79002.
+ *   The two distributions touch. Measured, not argued; see #196.
+ * - `semanticParaphraseRecallAt12` = 0.667 and `longQueryRecallAt12` = 0.833. The right record is
+ *   scored well above the gate — 0.844, 0.797, 0.862 — and still loses its place among twelve to
+ *   records that share more words with the question. On this corpus size the gate is no longer
+ *   what loses a paraphrase; the composition of the twelve slots is.
  *
  * `typoRecallAt12` = 1 is the opposite kind of result: all five typos, including distorted proper
  * nouns, are recovered by the existing three branches, which is evidence against adding a fourth
@@ -72,17 +73,17 @@ export const MEMORY_RETRIEVAL_R1_BASELINE_V3 = {
   botAddressRecallAt12: 1,
   emojiMarkupRecallAt12: 1,
   exactRecallAt12: 1,
-  expectedInTopThreeRate: 0.816,
-  lexicalBranchFireRate: 0.245,
-  liveShapeLexicalFireRate: 0,
-  longQueryFullCoverageRate: 0,
-  longQueryRecallAt12: 0.6,
+  expectedInTopThreeRate: 0.9,
+  lexicalBranchFireRate: 0.86,
+  liveShapeLexicalFireRate: 0.917,
+  longQueryFullCoverageRate: 0.667,
+  longQueryRecallAt12: 1,
   mixedLanguageRecallAt12: 1,
-  multiTopicFullCoverageRate: 0.2,
-  multiTopicRecallAt12: 0.8,
+  multiTopicFullCoverageRate: 0.6,
+  multiTopicRecallAt12: 1,
   nearMissEmptyRate: 0,
   negativeEmptyRate: 0.5,
-  positiveRecallAt12: 0.898,
+  positiveRecallAt12: 0.96,
   russianMorphologyRecallAt12: 1,
   semanticParaphraseRecallAt12: 0.667,
   typoRecallAt12: 1,
@@ -91,13 +92,26 @@ export const MEMORY_RETRIEVAL_R1_BASELINE_V3 = {
 } as const;
 
 /**
+ * What the same corpus measured before wave 2, kept so the effect of that work stays visible in
+ * the repository rather than only in a merged pull request.
+ */
+export const MEMORY_RETRIEVAL_BASELINE_V3_BEFORE_WAVE_2 = {
+  expectedInTopThreeRate: 0.816,
+  lexicalBranchFireRate: 0.245,
+  liveShapeLexicalFireRate: 0,
+  longQueryFullCoverageRate: 0,
+  longQueryRecallAt12: 0.6,
+  multiTopicFullCoverageRate: 0.2,
+  multiTopicRecallAt12: 0.8,
+  positiveRecallAt12: 0.898,
+} as const;
+
+/**
  * Targets for the retrieval work that follows, not gates today. They become gates only together
  * with the change each of them measures; until then the baseline above is what the test pins.
  */
 export const MEMORY_RETRIEVAL_V3_FUTURE_GATES = {
-  liveShapeLexicalFireRateMinimum: 0.6,
-  multiTopicFullCoverageRateMinimum: 0.6,
   nearMissEmptyRateMinimum: 0.6,
   negativeEmptyRateMinimum: 0.8,
-  positiveRecallAt12Minimum: 0.898,
+  semanticParaphraseRecallAt12Minimum: 0.833,
 } as const;
