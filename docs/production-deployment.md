@@ -342,6 +342,25 @@ deployed only from an `approved` proposal that is still bound to the exact priva
 of the single global owner. The target version must be strictly newer than the version in the
 current release manifest.
 
+## Memory reindex after an embedding change
+
+Migrations never recompute embeddings, and a record keeps the vector it was indexed with. When a
+release changes what goes into a vector — the text of a chunk, its size, or the header in front of
+it — the stored vectors describe the previous rules, and until they are recomputed the semantic
+branch finds those records by the old text. Nothing fails and nothing is logged; searches quietly
+return less.
+
+Releases carrying such a change say so in `docs/releases/vVERSION.md`. After the deployment reports
+healthy, run once inside the running agent container:
+
+```bash
+docker compose -p osinara-production exec agent npm run memory:reindex
+```
+
+It re-queues every active record for the indexing worker; on the current corpus this takes minutes,
+and `osinara_memory_index_state` returns to `indexed` for all of them when it is done. The first
+release that needs it is the one containing the chunk-size and subject-header change.
+
 ## Failure semantics
 
 Claiming sets a unique deployment lease whose lifetime exceeds the bounded systemd execution
