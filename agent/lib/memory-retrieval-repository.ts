@@ -17,11 +17,10 @@ import {
   MEMORY_RETRIEVAL_MIN_RUSSIAN_MORPHOLOGY_TERM_MATCHES,
   MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY,
   MEMORY_RETRIEVAL_MIN_SIMPLE_LEXICAL_TERM_MATCHES,
-  MEMORY_RETRIEVAL_RECENCY_BOOST,
-  MEMORY_RETRIEVAL_RECENCY_DECAY_SECONDS,
   MEMORY_RETRIEVAL_RECENT_SHOW_WINDOW_TURNS,
   MEMORY_RETRIEVAL_RRF_RANK_OFFSET,
 } from "./memory-config.js";
+import { MEMORY_RETENTION_BASE_DAYS, MEMORY_RETENTION_FLOOR } from "./memory-forgetting.js";
 import type { MemorySelectionWindow } from "./memory-show-journal.js";
 import type { MemoryAuthorization } from "./memory-context.js";
 import { liveMemoryReadPredicate } from "./memory-live-read-authorization.js";
@@ -229,10 +228,10 @@ export function memoryRetrievalSearchStatement(): string {
              AND ${authorizedClaimPredicate("item")}
              -- What the automatic selection already showed in the last few turns of this
              -- conversation. Null for the explicit search, which must keep seeing everything.
-             AND ($16::uuid IS NULL OR NOT EXISTS (
+             AND ($17::uuid IS NULL OR NOT EXISTS (
                SELECT 1 FROM memory_retrieval_shows AS shown
-               WHERE shown.conversation_id = $16 AND shown.claim_id = item.id
-                 AND shown.turn_ordinal > $17::bigint - $18::bigint
+               WHERE shown.conversation_id = $17 AND shown.claim_id = item.id
+                 AND shown.turn_ordinal > $18::bigint - $19::bigint
              ))
        ),
        simple_lexemes AS (
@@ -355,8 +354,8 @@ export function memoryRetrievalSearchStatement(): string {
                 (SELECT count(*) FROM russian_matched) AS russian_matched,
                 (SELECT count(*) FROM semantic_matched) AS semantic_matched,
                 (SELECT count(DISTINCT shown.claim_id) FROM memory_retrieval_shows AS shown
-                  WHERE shown.conversation_id = $16
-                    AND shown.turn_ordinal > $17::bigint - $18::bigint) AS recently_shown,
+                  WHERE shown.conversation_id = $17
+                    AND shown.turn_ordinal > $18::bigint - $19::bigint) AS recently_shown,
                 (SELECT count(*) FROM simple_matched WHERE matched_terms >= required_terms)
                   AS simple_qualified,
                 (SELECT count(*) FROM russian_matched WHERE matched_terms >= required_terms)
@@ -393,11 +392,18 @@ export function memoryRetrievalSearchStatement(): string {
                  source_evidence.author_participant_id AS source_author_participant_id,
                  COALESCE(source_evidence.author_telegram_user_id,
                           authorized.author_telegram_user_id) AS source_author_telegram_user_id,
-               (COALESCE(1.0 / ($12::double precision + simple_lexical.ordinal), 0) +
-                COALESCE(1.0 / ($12::double precision + russian_morphology.ordinal), 0) +
-                COALESCE(1.0 / ($12::double precision + semantic.ordinal), 0) +
-                CASE WHEN authorized.confirmation = 'user_confirmed' THEN $13::double precision ELSE 0 END +
-                $14::double precision / (1 + EXTRACT(EPOCH FROM (now() - authorized.updated_at)) / $15))
+               ((COALESCE(1.0 / ($12::double precision + simple_lexical.ordinal), 0) +
+                 COALESCE(1.0 / ($12::double precision + russian_morphology.ordinal), 0) +
+                 COALESCE(1.0 / ($12::double precision + semantic.ordinal), 0) +
+                 CASE WHEN authorized.confirmation = 'user_confirmed'
+                      THEN $13::double precision ELSE 0 END)
+                * ($14::double precision + (1 - $14::double precision) * exp(
+                    -GREATEST(EXTRACT(EPOCH FROM (now() - authorized.created_at)) / 86400, 0)
+                    / ((CASE authorized.kind
+                          WHEN 'episode' THEN $15::double precision
+                          ELSE $16::double precision END)
+                       * (1 + ln(1 + GREATEST(authorized.usage_count, 0))))
+                  )))
                  AS fused_score
        FROM candidates
        JOIN authorized USING (id)
@@ -437,8 +443,9 @@ export function memoryRetrievalSearchParameters(
     MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY,
     MEMORY_RETRIEVAL_RRF_RANK_OFFSET,
     MEMORY_RETRIEVAL_CONFIRMATION_BOOST,
-    MEMORY_RETRIEVAL_RECENCY_BOOST,
-    MEMORY_RETRIEVAL_RECENCY_DECAY_SECONDS,
+    MEMORY_RETENTION_FLOOR,
+    MEMORY_RETENTION_BASE_DAYS.episode,
+    MEMORY_RETENTION_BASE_DAYS.fact,
     window?.conversationId ?? null,
     window?.turnOrdinal ?? 0,
     MEMORY_RETRIEVAL_RECENT_SHOW_WINDOW_TURNS,
@@ -489,6 +496,10 @@ export const memoryRetrievalRepository = {
     // Words are counted by position, not by lexeme. One hyphenated token or a URL yields several
     // lexemes at the same position, and counting those as separate words would let a single
     // «e-mail» clear a gate that asks for two of the question's words.
+    //
+    // Age is a multiplier on the fused rank, not a term added to it, and the same curve lives in
+    // `memory-forgetting.ts` for everything outside SQL. Two copies of one formula drift silently,
+    // so a test walks a grid of ages, kinds and use counts through both and compares them.
     //
     // The semantic branch asks for the nearest chunks and only then folds them into records. That
     // order is what the vector index can serve: pgvector applies HNSW to «order by distance, take

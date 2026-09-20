@@ -94,8 +94,9 @@ export const MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY = 0.78;
 export const MEMORY_RETRIEVAL_RECENT_SHOW_WINDOW_TURNS = 3;
 export const MEMORY_RETRIEVAL_RRF_RANK_OFFSET = 60;
 export const MEMORY_RETRIEVAL_CONFIRMATION_BOOST = 0.001;
-export const MEMORY_RETRIEVAL_RECENCY_BOOST = 0.0005;
-export const MEMORY_RETRIEVAL_RECENCY_DECAY_SECONDS = 31_557_600;
+// Freshness used to be a term added to the fused score, and at 0.0005 against a rank step of
+// 0.0164 it was a tie-breaker wearing the name of a ranking factor. It is now a multiplier over
+// the whole score, and the curve lives in `memory-forgetting.ts`.
 
 export const MEMORY_EMBEDDING_DIMENSIONS = 384;
 export const MEMORY_EMBEDDING_MODEL = "intfloat/multilingual-e5-small";
