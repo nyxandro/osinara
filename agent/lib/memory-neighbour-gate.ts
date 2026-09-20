@@ -4,7 +4,8 @@
  * Exports:
  * - `MEMORY_NEIGHBOUR_SIMILARITY`: how close is close enough to be worth stopping for.
  * - `MEMORY_NEIGHBOUR_CANDIDATE_LIMIT`: how many neighbours the refusal may name.
- * - `embedMemoryNeighbourProbe`: the vector the gate compares with, or null when it cannot.
+ * - `MemoryNeighbourProbe`: the vector the gate compares with, or null when there is none.
+ * - `memoryNeighbourProbePassage`: the text that vector is built from.
  * - `requireMemoryNeighbourDecision`: the gate itself, run inside the write transaction.
  *
  * Saving a claim checks only for an identical string today, so «Аня не ест глютен» and «у Ани
@@ -34,11 +35,9 @@
 import type { PoolClient } from "pg";
 
 import { chunkMemoryContent } from "./memory-embedding-chunks.js";
-import { embedMemoryPassages } from "./memory-embedding-client.js";
 import { memoryEmbeddingInput } from "./memory-embedding-header.js";
 import { MEMORY_EMBEDDING_MODEL_VERSION } from "./memory-config.js";
 import type { MemoryKind } from "./memory-record.js";
-import { memoryFailureCode } from "./memory-context-failure.js";
 import { ModelFacingError } from "./model-facing-error.js";
 
 const MEMORY_NEIGHBOUR_SIMILARITY = 0.93;
@@ -58,40 +57,28 @@ function memoryNeighbourGateApplies(kind: MemoryKind): boolean {
   return kind !== "episode";
 }
 
+/** The vector the gate compares with, or null when there is nothing to compare. */
+export type MemoryNeighbourProbe = readonly number[] | null;
+
 /**
- * The probe is embedded the way the stored chunks are, header and all, or the comparison would be
- * measuring the header rather than the text. Only the opening chunk is used: a rephrasing of a
- * record shows there, and one call per write is the whole budget this check may spend.
- *
- * A failure returns null on purpose. This is a helper check, and an embedding service that is down
- * must never cost the person a memory; the write then behaves exactly as it did before the gate.
+ * The text the probe is built from, embedded the way the stored chunks are, header and all, or the
+ * comparison would be measuring the header rather than the text. Only the opening chunk is used: a
+ * rephrasing of a record shows there, and the whole check may spend one passage, not one per piece.
  */
-export async function embedMemoryNeighbourProbe(input: {
+export function memoryNeighbourProbePassage(input: {
   content: string;
+  explicitSource?: { subject: { kind: string; label?: string } };
   kind: MemoryKind;
-  subjectLabel: string | null;
-}): Promise<number[] | null> {
+}): string | null {
   if (!memoryNeighbourGateApplies(input.kind)) return null;
   const opening = chunkMemoryContent(input.content)[0];
   if (opening === undefined) return null;
-  try {
-    const embeddings = await embedMemoryPassages([
-      memoryEmbeddingInput(opening.content, {
-        kind: input.kind,
-        subjectLabel: input.subjectLabel,
-      }),
-    ]);
-    return embeddings[0] ?? null;
-  } catch (error) {
-    // Written down once, because a gate that quietly stopped working looks exactly like a memory
-    // where nothing is ever a duplicate, and nobody would notice for weeks.
-    console.warn(JSON.stringify({
-      code: "AGENT_MEMORY_NEIGHBOUR_PROBE_SKIPPED",
-      causeCode: memoryFailureCode(error) ?? "UNCLASSIFIED_EMBEDDING_ERROR",
-      kind: input.kind,
-    }));
-    return null;
-  }
+  return memoryEmbeddingInput(opening.content, {
+    kind: input.kind,
+    subjectLabel: input.explicitSource?.subject.kind === "label"
+      ? input.explicitSource.subject.label ?? null
+      : null,
+  });
 }
 
 export async function requireMemoryNeighbourDecision(
@@ -100,7 +87,7 @@ export async function requireMemoryNeighbourDecision(
     declaredRefs: readonly string[];
     familyId: string;
     memoryProjectId: string | null;
-    probe: number[] | null;
+    probe: MemoryNeighbourProbe;
     scope: string;
     scopePartitionKey: string;
     subjectConversationId: string | null;

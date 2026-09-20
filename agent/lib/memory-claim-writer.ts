@@ -41,7 +41,6 @@ import {
   type MemoryThreadCreationReservation,
 } from "./memory-thread-creation-attempts.js";
 import {
-  embedMemoryThreadTitle,
   isMemoryThreadCandidateError,
   materializeMemoryThreadWrite,
   prepareMemoryThreadWrite,
@@ -255,17 +254,17 @@ export async function createMemoryClaim(
     if (replay) return replay;
     reservation = preflight.reservation;
   }
-  let titleEmbedding: Awaited<ReturnType<typeof embedMemoryThreadTitle>>;
-  // Refusals and the neighbour probe both belong before the transaction: one must cost nothing,
-  // the other must not hold write locks across a network call.
-  const guards = await prepareMemoryWriteGuards(input);
+  // Refusals and both embeddings belong before the transaction: a refusal must cost nothing, and a
+  // network call must not hold write locks for as long as the service takes to answer.
+  let guards: Awaited<ReturnType<typeof prepareMemoryWriteGuards>>;
   try {
-    titleEmbedding = await embedMemoryThreadTitle(input.thread);
+    guards = await prepareMemoryWriteGuards(input);
   } catch (error) {
     // An explicit failed call may retry; a crash instead leaves a bounded lease for safe takeover.
     if (reservation) await releaseReservationAfterEmbeddingFailure(auth, reservation);
     throw error;
   }
+  const titleEmbedding = guards.threadTitleEmbedding;
   const client = await database().connect();
   let savepointCreated = false;
   let resolvingCandidate = false;
