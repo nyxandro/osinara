@@ -19,6 +19,20 @@ export const MEMORY_REVIEW_ABANDONED_TURN_TIMEOUT_MILLISECONDS = 60 * 60 * 1_000
  */
 export const MEMORY_REVIEW_BATCH_MAX_AGE_MILLISECONDS = 12 * 60 * 60 * 1_000;
 export const MEMORY_REVIEW_BATCH_SIZE = 50;
+/**
+ * How much of the existing memory the review is shown before its batch. The block is what stops
+ * the review writing down a fact it already wrote in other words, and every record in it is paid
+ * for on every batch, so it is small and recent rather than complete.
+ *
+ * Measured on production: a message averages 139 characters and a batch holds fifty of them, so
+ * the batch itself costs roughly fourteen thousand characters with its JSON. A record averages
+ * 239 characters, so fifteen of them add about four and a half thousand — near a third more per
+ * batch. At the observed rate of about 237 batches a month that is a few hundred thousand extra
+ * tokens, against 865 pairs of near-duplicate records the review keeps producing.
+ */
+export const MEMORY_REVIEW_KNOWN_RECORD_LIMIT = 15;
+/** How many already-reviewed messages precede the batch, so the model sees where it begins. */
+export const MEMORY_REVIEW_REVIEWED_TAIL_LIMIT = 5;
 export const MEMORY_REVIEW_DISPATCH_BATCH_SIZE = 10;
 export const MEMORY_REVIEW_DISPATCH_LEASE_MILLISECONDS = 60 * 1_000;
 export const MEMORY_REVIEW_INTERACTIVE_START_TIMEOUT_MILLISECONDS = 15 * 60 * 1_000;
