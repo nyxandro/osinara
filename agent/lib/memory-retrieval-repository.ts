@@ -392,7 +392,8 @@ export function memoryRetrievalSearchStatement(): string {
               diagnostics.semantic_qualified, diagnostics.recently_shown, ranked.*
        FROM diagnostics
        LEFT JOIN LATERAL (
-       SELECT authorized.id, authorized.author_user_id, authorized.author_telegram_user_id,
+       SELECT authorized.id, authorized.attribute, authorized.occurred_on, authorized.author_user_id,
+              authorized.author_telegram_user_id,
               authorized.scope, authorized.kind, authorized.content, authorized.source,
                authorized.confirmation, authorized.sensitivity, authorized.message_thread_id,
                authorized.embedding_status, authorized.created_at, authorized.updated_at,

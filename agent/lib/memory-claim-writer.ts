@@ -13,6 +13,12 @@ import { database } from "./database.js";
 import { fenceReviewMemoryWrite } from "./memory-review/memory-review-attempt.js";
 import type { MemoryAuthorization, MemoryScope } from "./memory-context.js";
 import { reinforceExactClaim } from "./memory-exact-reinforcement.js";
+import {
+  lockMemoryAttributeSlot,
+  supersedeMemoryAttributeSlot,
+} from "./memory-attribute-slot.js";
+import { requireMemoryNeighbourDecision } from "./memory-neighbour-gate.js";
+import { prepareMemoryWriteGuards } from "./memory-write-guards.js";
 import { enforceMemoryQuota } from "./memory-quota.js";
 import {
   memoryOperationHash,
@@ -35,7 +41,6 @@ import {
   type MemoryThreadCreationReservation,
 } from "./memory-thread-creation-attempts.js";
 import {
-  embedMemoryThreadTitle,
   isMemoryThreadCandidateError,
   materializeMemoryThreadWrite,
   prepareMemoryThreadWrite,
@@ -111,7 +116,7 @@ async function existingCreate(
     throw new AppError("AGENT_MEMORY_REPLAY_COMPLETED", "Исходная запись памяти уже удалена");
   }
   const result = await client.query<ReferencedMemoryRow>(
-    `SELECT item.id, item.author_user_id, item.author_telegram_user_id, item.scope, item.kind,
+    `SELECT item.id, item.attribute, item.occurred_on, item.author_user_id, item.author_telegram_user_id, item.scope, item.kind,
             item.content, item.source, item.confirmation, item.sensitivity, item.message_thread_id,
             item.embedding_status, item.created_at, item.updated_at, ref.memory_ref
      FROM memory_items AS item
@@ -249,14 +254,17 @@ export async function createMemoryClaim(
     if (replay) return replay;
     reservation = preflight.reservation;
   }
-  let titleEmbedding: Awaited<ReturnType<typeof embedMemoryThreadTitle>>;
+  // Refusals and both embeddings belong before the transaction: a refusal must cost nothing, and a
+  // network call must not hold write locks for as long as the service takes to answer.
+  let guards: Awaited<ReturnType<typeof prepareMemoryWriteGuards>>;
   try {
-    titleEmbedding = await embedMemoryThreadTitle(input.thread);
+    guards = await prepareMemoryWriteGuards(input);
   } catch (error) {
     // An explicit failed call may retry; a crash instead leaves a bounded lease for safe takeover.
     if (reservation) await releaseReservationAfterEmbeddingFailure(auth, reservation);
     throw error;
   }
+  const titleEmbedding = guards.threadTitleEmbedding;
   const client = await database().connect();
   let savepointCreated = false;
   let resolvingCandidate = false;
@@ -349,6 +357,34 @@ export async function createMemoryClaim(
       };
     }
 
+    // After the exact repeat has had its chance to reinforce and before anything is written: an
+    // identical text is not a decision for the model to make, and a refusal here costs the person
+    // nothing because no record has been created yet.
+    await requireMemoryNeighbourDecision(client, {
+      declaredRefs: input.distinctFrom ?? [],
+      familyId: auth.familyId,
+      memoryProjectId: threadWrite?.identity.memoryProjectId ?? null,
+      probe: guards.neighbourProbe,
+      scope: input.scope,
+      scopePartitionKey,
+      subjectConversationId: prepared?.subjectConversationId ?? null,
+      subjectLabel: prepared?.subjectLabel ?? null,
+      subjectParticipantId: prepared?.subjectParticipantId ?? null,
+      subjectUserId: prepared?.subjectUserId ?? null,
+    });
+    // Taken before the insert: an interactive turn and the silent review can write the same slot
+    // at the same moment, and neither would see the other's uncommitted version.
+    if (guards.attribute !== null) {
+      await lockMemoryAttributeSlot(client, {
+        attribute: guards.attribute,
+        memoryProjectId: threadWrite?.identity.memoryProjectId ?? null,
+        scope: input.scope,
+        scopePartitionKey,
+        subjectLabel: prepared?.subjectLabel ?? null,
+        subjectParticipantId: prepared?.subjectParticipantId ?? null,
+        subjectUserId: prepared?.subjectUserId ?? null,
+      });
+    }
     await enforceMemoryQuota(client, auth, input.scope);
     const endorsedByUserId = prepared?.primaryAuthorUserId ?? null;
     const result = await client.query<Omit<ReferencedMemoryRow, "memory_ref">>(
@@ -358,12 +394,14 @@ export async function createMemoryClaim(
           sensitivity, operation_key, origin_conversation_id, subject_participant_id,
            subject_conversation_id, subject_user_id, subject_label, memory_project_id, save_approved,
            endorsed_by_user_id, endorsed_at, provenance_state, content_normalized, profile_eligible,
-           claim_status, duplicate_of)
+           claim_status, duplicate_of, attribute, occurred_on)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
                 $15, $16, $17, $18, $19, $20, $21, $22,
-                CASE WHEN $22::uuid IS NULL THEN NULL ELSE now() END, $23, $24, $25, $26, $27)
-       RETURNING id, author_user_id, author_telegram_user_id, scope, kind, content, source,
-                 confirmation, sensitivity, message_thread_id, embedding_status, created_at, updated_at`,
+                CASE WHEN $22::uuid IS NULL THEN NULL ELSE now() END, $23, $24, $25, $26, $27,
+                $28, $29::date)
+       RETURNING id, attribute, occurred_on, author_user_id, author_telegram_user_id, scope, kind,
+                 content, source, confirmation, sensitivity, message_thread_id, embedding_status,
+                 created_at, updated_at`,
       [auth.familyId, ownerUserId, groupId, authorUserId,
         prepared?.primaryAuthorTelegramUserId ?? (input.scope === "group" ? auth.telegramUserId : null),
         input.scope, input.kind, input.content, input.source, input.sourceEventId ?? null,
@@ -377,7 +415,9 @@ export async function createMemoryClaim(
           prepared !== null && input.sensitivity === "normal" &&
             (prepared.subjectUserId !== null || prepared.subjectParticipantId !== null),
           "active",
-          null],
+          null,
+          guards.attribute,
+          guards.occurredOn],
     );
     const row = result.rows[0];
     if (!row) throw new AppError("AGENT_MEMORY_WRITE_FAILED", "Не удалось сохранить запись памяти");
@@ -397,6 +437,11 @@ export async function createMemoryClaim(
         "Не удалось создать безопасную ссылку на запись памяти",
       );
     }
+    // The previous holder of this slot yields its place only after the new version exists, so the
+    // memory is never left without an answer to the property even for the length of a transaction.
+    const superseded = guards.attribute === null
+      ? []
+      : await supersedeMemoryAttributeSlot(client, row.id);
     await insertCreateOperation(client, auth, input, inputHash, row.id, threadWrite);
     await client.query("INSERT INTO memory_embedding_jobs (memory_item_id) VALUES ($1)", [row.id]);
     await client.query(
@@ -407,10 +452,15 @@ export async function createMemoryClaim(
         input.scope, input.kind, input.sensitivity],
     );
     await completeThreadOutcome(client, auth, input, reservation, resolvingCandidate);
+    const supersededRefs = superseded.length === 0 ? [] : (await client.query<{ memory_ref: string }>(
+      "SELECT memory_ref FROM memory_item_refs WHERE memory_item_id = ANY($1::uuid[])",
+      [superseded],
+    )).rows.map((reference) => reference.memory_ref);
     await client.query("COMMIT");
     return {
       ...rowToReferencedMemory({ ...row, memory_ref: memoryRef }),
       ...(threadWrite ? { thread: threadWrite.result } : {}),
+      ...(supersededRefs.length === 0 ? {} : { supersededRefs }),
     };
   } catch (error) {
     if (reservation && savepointCreated) {
