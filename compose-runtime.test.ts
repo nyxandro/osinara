@@ -19,6 +19,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  MEMORY_EMBEDDING_WORKER_READY_PATH,
+  MEMORY_EMBEDDING_WORKER_STALE_MILLISECONDS,
   MEMORY_EXTRACTION_WORKER_READY_PATH,
   MEMORY_EXTRACTION_WORKER_STABILITY_MILLISECONDS,
 } from "./agent/lib/memory-config.js";
@@ -186,6 +188,28 @@ describe("Docker Compose runtime wiring", () => {
         );
       }
     }
+  });
+
+  it("lets a hung indexing worker become an unhealthy container", () => {
+    // A live process doing nothing is the one failure this worker had no signal for: it exits
+    // nothing, logs nothing, and the memories it should have indexed simply stop being findable.
+    const compose = readFileSync(new URL("compose.production.yaml", projectRoot), "utf8");
+    const serviceStart = compose.indexOf("\n  memory-embedding-worker:\n");
+    const nextServiceOffset = compose.slice(serviceStart + 1).search(/\n  \S/u);
+    const worker = compose.slice(
+      serviceStart,
+      nextServiceOffset === -1 ? undefined : serviceStart + nextServiceOffset + 1,
+    );
+    const workerScript = readFileSync(
+      new URL("scripts/memory-embedding-worker.ts", projectRoot), "utf8",
+    );
+
+    expect(serviceStart).toBeGreaterThanOrEqual(0);
+    expect(worker).toContain("healthcheck:");
+    expect(worker).toContain(MEMORY_EMBEDDING_WORKER_READY_PATH);
+    expect(worker).toContain(String(MEMORY_EMBEDDING_WORKER_STALE_MILLISECONDS));
+    expect(workerScript).toContain("MEMORY_EMBEDDING_WORKER_READY_PATH");
+    expect(workerScript).toContain("AGENT_MEMORY_EMBEDDING_WORKER_STARTED");
   });
 
   it("keeps a controller-compatible memory worker without extraction or provider calls", () => {

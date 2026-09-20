@@ -204,8 +204,8 @@ docker compose -f compose.test.yaml up --build --abort-on-container-exit --exit-
 TypeScript на Node 24 · [Eve](https://eve.dev/docs) `0.40.0` · PostgreSQL 17 + pgvector ·
 Docker Compose · Groq Whisper · локальные эмбеддинги E5 · Telegram как единственный канал.
 
-Архитектурные заметки и рантбуки — в [`docs/`](docs/), правила разработки — в [`CLAUDE.md`](CLAUDE.md)
-и [`AGENTS.md`](AGENTS.md), деплой — в [`docs/production-deployment.md`](docs/production-deployment.md).
+Архитектурные заметки и рантбуки — в [`docs/`](docs/), правила разработки — в [`AGENTS.md`](AGENTS.md),
+деплой — в [`docs/production-deployment.md`](docs/production-deployment.md).
 
 ## Безопасность
 

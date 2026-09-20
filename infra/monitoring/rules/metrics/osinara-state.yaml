@@ -52,9 +52,12 @@ groups:
           description: 'Пакеты сообщений не прошли проверку: групповая память перестаёт пополняться, но исходные сообщения сохранены.'
           runbook: 'memory-review-admin inspect внутри контейнера agent; разбирать голову очереди.'
 
+      # The wait clears the bounded retry window: one attempt plus two retries five minutes apart.
+      # A job that fails for an overloaded or unreachable service fixes itself inside it, and
+      # raising the operator before that would page them for something already being handled.
       - alert: OsinaraEmbeddingJobsFailed
         expr: osinara_memory_embedding_jobs_recent{status="failed"} > 0
-        for: 10m
+        for: 20m
         labels:
           severity: warning
           project: osinara-production
@@ -62,6 +65,37 @@ groups:
           summary: 'Задачи индексации памяти в состоянии ошибки: {{ $value }}'
           description: 'Эти воспоминания не находятся поиском, пока задачи не будут переисполнены.'
           runbook: 'Проверить memory-embedding, затем команду memory:reindex по согласованию с владельцем.'
+
+      # Not a duplicate of OsinaraEmbeddingJobsFailed: that one watches jobs changed in the last
+      # day and goes quiet by itself, while the record it left behind stays out of semantic search
+      # forever. This one latches on purpose and only clears when the record is actually indexed.
+      # The wait is longer than the bounded retry window (one attempt plus two retries five minutes
+      # apart), so it means the retries did not help, not that they are still running.
+      - alert: OsinaraMemoryRecordsUnindexed
+        expr: sum(osinara_memory_index_state{embedding_status!="indexed"}) > 0
+        for: 20m
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Смысловой поиск не видит {{ $value }} записей памяти'
+          description: 'Эти сведения сохранены и видны в списке памяти, но поиск по смыслу их не находит и не найдёт, пока они не будут проиндексированы. Снаружи это выглядит как обычный промах поиска.'
+          runbook: 'Проверить контейнеры memory-embedding и memory-embedding-worker, затем last_error_code в memory_embedding_jobs. После устранения причины — npm run memory:reindex внутри контейнера agent.'
+
+      # A hung indexing worker stays a live process, so nothing exits and nothing is logged. While
+      # there is work, this is the number that tells the two apart: on a live loop a job waits
+      # seconds, on a stopped one the age grows without bound. Ten minutes is far longer than any
+      # honest backlog of one batch and short enough that the owner notices the same day.
+      - alert: OsinaraMemoryIndexingStalled
+        expr: osinara_memory_embedding_oldest_pending_age_seconds > 600
+        for: 10m
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Индексация памяти стоит: самая старая задача ждёт {{ $value | humanizeDuration }}'
+          description: 'Новые воспоминания сохраняются, но смысловой поиск их не находит. Снаружи это выглядит как обычный промах поиска.'
+          runbook: 'docker ps для memory-embedding-worker: состояние unhealthy означает вставший цикл. Затем docker logs --tail 100 и last_error_code в memory_embedding_jobs.'
 
       - alert: OsinaraRuntimeMaintenanceStuck
         expr: osinara_runtime_maintenance_phase{phase!="ready"} == 1

@@ -23,6 +23,8 @@ export type MemoryRetrievalEvalCategory =
 export interface MemoryRetrievalEvalRecord {
   content: string;
   key: string;
+  /** What the record is about, as it would be stored on the record itself. */
+  subjectLabel?: string;
   updatedAt: string;
 }
 
@@ -148,8 +150,12 @@ export const MEMORY_RETRIEVAL_EVAL_QUERIES_V1: readonly MemoryRetrievalEvalQuery
     text: "Где лежит термомтетр?",
   },
   {
+    // Either half of the duplicate pair is a correct answer: they are the same sentence, and which
+    // of the two represents the cluster is decided by rank. Pinning one of them would measure the
+    // ranking of identical text; what this query is for is `duplicateResultsAt5`, which still
+    // requires that only one of the pair takes a slot.
     category: "exact",
-    expectedKeys: ["duplicate-old"],
+    expectedKeys: ["duplicate-old", "duplicate-new"],
     key: "duplicate-pollution",
     text: "Что врач рекомендует пить утром?",
   },

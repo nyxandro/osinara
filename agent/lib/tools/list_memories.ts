@@ -17,9 +17,13 @@ export default defineTool({
     "Постранично показать записи долговременной памяти, доступные в текущем чате.",
     "Результат: {items,nextCursor}; items содержит текущую страницу, а nextCursor нужно без изменений",
     "передать в следующий вызов. Значение null означает, что записей больше нет.",
+    "history=true добавляет прежние версии свойств (status=superseded) — например когда спрашивают, что было раньше.",
   ].join(" "),
   inputSchema: z.object({
     cursor: z.string().optional(),
+    history: z.boolean().optional().describe(
+      "Показать также прежние версии свойств: записи со status=superseded. По умолчанию только текущие",
+    ),
     limit: z.number().int().min(1).max(MEMORY_LIST_MAX_LIMIT).default(MEMORY_LIST_DEFAULT_LIMIT),
     scope: z.enum(["personal", "family", "group"]).optional(),
   }),

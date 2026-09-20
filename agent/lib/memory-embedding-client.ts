@@ -3,7 +3,10 @@
  *
  * Exports:
  * - `embedMemoryPassages`: embeds indexed chunks with the E5 passage protocol.
- * - `embedMemoryQuery`: embeds retrieval queries with the E5 query protocol.
+ * - `embedMemoryQueryChunks`: embeds each piece of a retrieval query separately.
+ * - `embedMemoryQuery`: folds those pieces into one vector for callers that need a single one.
+ * - `memoryQueryCentroid`: the same folding over pieces already fetched.
+ * - `countMemoryPassageTokens`: how many tokens each passage costs, before it is sent to embed.
  */
 import { AppError } from "./app-error.js";
 import { ModelFacingError } from "./model-facing-error.js";
@@ -91,6 +94,15 @@ async function embedMemoryTexts(
     });
   }
   if (!response.ok) {
+    // The same TEI instance serves live retrieval, so an indexing call can meet a busy service
+    // rather than a rejected text. The two need different codes: one is worth another attempt
+    // later, the other never will be, and the HTTP status is the only place that difference exists.
+    if (response.status === 408 || response.status === 429 || response.status >= 500) {
+      throw new AppError(
+        "AGENT_MEMORY_EMBEDDING_PROVIDER_BUSY",
+        "Локальный сервис памяти сейчас перегружен. Повторите попытку позже",
+      );
+    }
     throw new AppError(
       "AGENT_MEMORY_EMBEDDING_PROVIDER_FAILED",
       "Локальный сервис памяти не смог обработать текст. Повторите попытку позже",
@@ -153,6 +165,54 @@ async function embedMemoryTexts(
   return ordered as number[][];
 }
 
+/**
+ * The model's window is counted in tokens and the service is configured not to truncate, so a
+ * passage that overflows comes back as an error and the record silently stays out of the semantic
+ * index. Counting first is what lets the chunker cut again instead of losing the record.
+ */
+export async function countMemoryPassageTokens(
+  texts: readonly string[],
+  fetchImplementation: typeof fetch = fetch,
+): Promise<number[]> {
+  if (texts.length === 0) return [];
+  const endpoint = new URL("/tokenize", requireEmbeddingBaseUrl()).toString();
+  let response: Response;
+  try {
+    response = await fetchImplementation(endpoint, {
+      body: JSON.stringify({ inputs: texts.map((text) => `${E5_PASSAGE_PREFIX}${text}`) }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+      signal: AbortSignal.timeout(EMBEDDING_REQUEST_TIMEOUT_MILLISECONDS),
+    });
+  } catch (error) {
+    console.error(JSON.stringify({
+      code: "AGENT_MEMORY_EMBEDDING_PROVIDER_UNAVAILABLE",
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    throw new AppError(
+      "AGENT_MEMORY_EMBEDDING_PROVIDER_UNAVAILABLE",
+      "Локальный сервис памяти недоступен. Повторите попытку позже",
+    );
+  }
+  if (!response.ok) {
+    throw new AppError(
+      response.status === 408 || response.status === 429 || response.status >= 500
+        ? "AGENT_MEMORY_EMBEDDING_PROVIDER_BUSY"
+        : "AGENT_MEMORY_EMBEDDING_PROVIDER_FAILED",
+      "Локальный сервис памяти не смог посчитать размер текста. Повторите попытку позже",
+    );
+  }
+  const payload = await response.json() as unknown;
+  if (!Array.isArray(payload) || payload.length !== texts.length ||
+    !payload.every((tokens) => Array.isArray(tokens))) {
+    throw new AppError(
+      "AGENT_MEMORY_EMBEDDING_RESPONSE_INVALID",
+      "Локальный сервис памяти вернул некорректный размер текста",
+    );
+  }
+  return payload.map((tokens) => (tokens as unknown[]).length);
+}
+
 export async function embedMemoryPassages(
   texts: readonly string[],
   fetchImplementation: typeof fetch = fetch,
@@ -163,10 +223,15 @@ export async function embedMemoryPassages(
   );
 }
 
-export async function embedMemoryQuery(
+/**
+ * Every piece of the query as its own vector. A long message is cut into chunks before embedding,
+ * and the pieces are kept apart on purpose: a record about one of its topics should be compared
+ * with the piece about that topic, not with an average of all of them.
+ */
+export async function embedMemoryQueryChunks(
   query: string,
   fetchImplementation: typeof fetch = fetch,
-): Promise<number[]> {
+): Promise<number[][]> {
   const chunks = chunkMemoryQuery(query);
   const embeddings: number[][] = [];
   for (let offset = 0; offset < chunks.length; offset += MEMORY_EMBEDDING_PROVIDER_BATCH_SIZE) {
@@ -177,7 +242,29 @@ export async function embedMemoryQuery(
       fetchImplementation,
     ));
   }
-  if (embeddings.length === 1) return embeddings[0]!;
+  return embeddings;
+}
+
+/**
+ * One vector for the whole query. Callers that can only hold a single vector — thread activation
+ * and thread search — use this; memory retrieval keeps the pieces apart instead.
+ */
+export async function embedMemoryQuery(
+  query: string,
+  fetchImplementation: typeof fetch = fetch,
+): Promise<number[]> {
+  return memoryQueryCentroid(await embedMemoryQueryChunks(query, fetchImplementation));
+}
+
+/** Folds query chunks into one vector without asking the service again. */
+export function memoryQueryCentroid(embeddings: readonly (readonly number[])[]): number[] {
+  if (embeddings.length === 0) {
+    throw new AppError(
+      "AGENT_MEMORY_EMBEDDING_RESPONSE_INVALID",
+      "Локальный сервис памяти не вернул ни одного вектора запроса",
+    );
+  }
+  if (embeddings.length === 1) return [...embeddings[0]!];
 
   // A normalized centroid gives every query fragment influence without dropping long-message content.
   const centroid = Array.from({ length: MEMORY_EMBEDDING_DIMENSIONS }, (_, dimension) =>

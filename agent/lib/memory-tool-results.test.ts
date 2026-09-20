@@ -60,6 +60,22 @@ import searchMemories from "./tools/search_memories.js";
 
 const MEMORY_ID = "00000000-0000-4000-8000-000000000001";
 const MEMORY_REF = "mem_0123456789abcdef0123456789abcdef";
+const SEARCH_DIAGNOSTICS = {
+  candidateLimitHit: false,
+  queryCharacters: 3,
+  queryChunks: 1,
+  recentlyShown: 0,
+  russianQualified: 1,
+  russianMatched: 1,
+  russianTopRank: 0.2,
+  semanticBranchAvailable: true,
+  semanticQualified: 1,
+  semanticMatched: 3,
+  semanticTopSimilarity: 0.81,
+  simpleQualified: 0,
+  simpleMatched: 0,
+  simpleTopRank: null,
+};
 const internalMemory = {
   author: { status: "current_member", telegramUserId: "7100000001", userId: "user-1" },
   confirmation: "user_confirmed",
@@ -386,7 +402,7 @@ describe("model-facing memory tool results", () => {
       sensitivity: "normal",
       updatedAt: internalMemory.updatedAt,
     };
-    retrieveMemories.mockResolvedValue([safeMemory]);
+    retrieveMemories.mockResolvedValue({ diagnostics: SEARCH_DIAGNOSTICS, memories: [safeMemory] });
 
     await expect(executeNonStreamingTool(searchMemories, { query: "чай" }, context))
       .resolves.toEqual([safeMemory]);
@@ -396,13 +412,14 @@ describe("model-facing memory tool results", () => {
   it("records an explicit search without logging its query or result text", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const found = [{ memoryRef: MEMORY_REF, content: "Частный факт" }];
-    retrieveMemories.mockResolvedValue(found);
+    retrieveMemories.mockResolvedValue({ diagnostics: SEARCH_DIAGNOSTICS, memories: found });
     try {
       await executeNonStreamingTool(searchMemories, { query: "Частный запрос" }, context);
       expect(JSON.parse(info.mock.calls[0]![0] as string)).toMatchObject({
         code: "AGENT_MEMORY_SEARCH_METRICS", sessionId: context.session.id,
         turnId: context.session.turn.id, callId: context.callId, outcome: "succeeded",
         memoryRefs: [MEMORY_REF], memoryCharacters: "Частный факт".length,
+        ...SEARCH_DIAGNOSTICS,
       });
       expect(JSON.stringify(info.mock.calls)).not.toMatch(/Частный запрос|Частный факт/u);
     } finally { info.mockRestore(); }

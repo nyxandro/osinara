@@ -75,7 +75,10 @@ vi.mock("./telegram-hitl/approval-repository.js", () => ({
   telegramHitlApprovalRepository: { clearForEveSession: dependencies.clearApprovals },
 }));
 vi.mock("./telegram-progress.js", () => ({
-  completedTelegramOutput: vi.fn(() => ({ kind: "message", message: "Секретная сводка" })),
+  telegramOutputWithoutMemoryDirective: vi.fn(() => ({
+    declaration: { answer: "Секретная сводка", declared: false, memoryRefs: [] },
+    output: { kind: "message", message: "Секретная сводка" },
+  })),
 }));
 vi.mock("./telegram-stable-delivery.js", () => ({
   postTelegramMessageWithoutContinuationChange: dependencies.postStableMessage,

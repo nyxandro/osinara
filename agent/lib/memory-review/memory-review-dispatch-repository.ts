@@ -9,13 +9,18 @@ import { database } from "../database.js";
 import type { PoolClient } from "pg";
 import type { TelegramGroupJournalEntry } from "../telegram-group-journal-context.js";
 import {
+  MEMORY_REVIEW_BATCH_MAX_AGE_MILLISECONDS,
   MEMORY_REVIEW_BATCH_SIZE,
 } from "./memory-review-config.js";
 import {
   memoryReviewDispatchTerminalRepository,
   terminalizeStaleMemoryReviewBatches,
 } from "./memory-review-dispatch-terminal-repository.js";
-import { formatMemoryReviewBatchPrompt } from "./memory-review-prompt.js";
+import {
+  formatMemoryReviewBatchPrompt,
+  formatMemoryReviewContext,
+} from "./memory-review-prompt.js";
+import { selectMemoryReviewContext } from "./memory-review-known-memory.js";
 import type { MemoryReviewClaim } from "./memory-review-repository.js";
 import { readMemoryReviewLaneHealth, recoverUnstartedReviewBatches } from "./memory-review-lane-recovery.js";
 import { recoverModelWaitingReviews } from "./memory-review-model-recovery.js";
@@ -52,7 +57,10 @@ function project(row: SourceRow): TelegramGroupJournalEntry {
 }
 
 async function materializeReadyBatches(client: PoolClient, now: Date): Promise<void> {
-  // This is the crash-recovery path for a committed 50th message whose inline observer did not run.
+  // Two jobs: the crash-recovery path for a committed 50th message whose inline observer did not
+  // run, and the only path that releases a short batch in a group too quiet to ever fill one.
+  // The inline observer cannot do the second one: it runs on an incoming message, and a silent
+  // group has none.
   const lanes = await client.query<{
     conversation_id: string;
     id: string;
@@ -77,8 +85,8 @@ async function materializeReadyBatches(client: PoolClient, now: Date): Promise<v
       [lane.id, lane.processed_through_sequence],
     );
     if (existing.rows[0]) continue;
-    const sources = await client.query<{ id: string; sequence_id: string }>(
-      `SELECT message.id, message.sequence_id::text
+    const sources = await client.query<{ id: string; sent_at: Date; sequence_id: string }>(
+      `SELECT message.id, message.sequence_id::text, message.sent_at
          FROM telegram_group_messages AS message
         WHERE message.conversation_id = $1 AND message.actor_kind IN ('user', 'telegram_bot')
           AND message.message_thread_id IS NOT DISTINCT FROM $2::bigint
@@ -87,16 +95,23 @@ async function materializeReadyBatches(client: PoolClient, now: Date): Promise<v
       [lane.conversation_id, lane.message_thread_id, lane.processed_through_sequence,
         MEMORY_REVIEW_BATCH_SIZE],
     );
-    if (sources.rows.length < MEMORY_REVIEW_BATCH_SIZE) continue;
+    if (sources.rows.length === 0) continue;
+    // Whichever comes first: a full batch, or a backlog whose oldest message has waited too long.
+    // Below the size limit this window holds the whole backlog, so its minimum is the lane's own
+    // `oldestUnreviewedAt` — the same instant the lane metrics report.
+    const oldestSentAt = Math.min(...sources.rows.map((source) => source.sent_at.getTime()));
+    const aged = now.getTime() - oldestSentAt >= MEMORY_REVIEW_BATCH_MAX_AGE_MILLISECONDS;
+    if (sources.rows.length < MEMORY_REVIEW_BATCH_SIZE && !aged) continue;
     const first = sources.rows[0]!;
     const last = sources.rows.at(-1)!;
     const batch = await client.query<{ id: string }>(
       `INSERT INTO memory_review_batches
          (lane_id, conversation_id, batch_kind, status, predecessor_sequence,
-          from_sequence, through_sequence, source_count)
-       VALUES ($1, $2, 'background', 'pending', $3, $4, $5, $6) RETURNING id`,
+          from_sequence, through_sequence, source_count, aged_release_at)
+       VALUES ($1, $2, 'background', 'pending', $3, $4, $5, $6, $7) RETURNING id`,
       [lane.id, lane.conversation_id, lane.processed_through_sequence,
-        first.sequence_id, last.sequence_id, sources.rows.length],
+        first.sequence_id, last.sequence_id, sources.rows.length,
+        sources.rows.length < MEMORY_REVIEW_BATCH_SIZE ? now : null],
     );
     await client.query(
       `INSERT INTO memory_review_batch_sources
@@ -127,6 +142,7 @@ export const memoryReviewDispatchRepository = {
         conversation_id: string; family_id: string; group_id: string;
         group_type: "external" | "family_private"; id: string; lease_token: string;
         message_thread_id: string | null; owner_telegram_user_id: string; owner_user_id: string;
+        predecessor_sequence: string;
         scope: "family" | "group"; telegram_chat_id: string;
         source_count: number;
         telegram_chat_type: "group" | "supergroup"; through_sequence: string;
@@ -151,7 +167,8 @@ export const memoryReviewDispatchRepository = {
             AND telegram_group.id = conversation.telegram_group_id
             AND membership.family_id = conversation.family_id AND membership.role = 'owner'
             AND owner.id = membership.user_id
-          RETURNING batch.id, batch.conversation_id, batch.through_sequence::text, batch.source_count,
+          RETURNING batch.id, batch.conversation_id, batch.through_sequence::text,
+                   batch.predecessor_sequence::text, batch.source_count,
                    batch.lease_token::text, lane.message_thread_id::text,
                    conversation.family_id, conversation.scope::text,
                    telegram_group.id AS group_id, telegram_group.type::text AS group_type,
@@ -179,12 +196,25 @@ export const memoryReviewDispatchRepository = {
           "Пакет проверки памяти не содержит ожидаемые сообщения",
         );
         const entries = sources.rows.map(project);
+        // What this conversation already stores and already read, so the review has a third
+        // option besides saving and not saving.
+        const context = await selectMemoryReviewContext(client, {
+          conversationId: row.conversation_id,
+          familyId: row.family_id,
+          predecessorSequence: row.predecessor_sequence,
+          scope: row.scope,
+          scopePartitionKey: row.scope === "group" ? row.group_id : row.family_id,
+        });
+        const contextBlocks = formatMemoryReviewContext(context);
         claims.push({
           batchId: row.id, conversationId: row.conversation_id, entries,
           familyId: row.family_id, groupId: row.group_id, groupType: row.group_type,
           leaseToken: row.lease_token, messageThreadId: row.message_thread_id,
           ownerTelegramUserId: row.owner_telegram_user_id, ownerUserId: row.owner_user_id,
-          prompt: formatMemoryReviewBatchPrompt(entries), scope: row.scope,
+          prompt: contextBlocks
+            ? `${contextBlocks}\n${formatMemoryReviewBatchPrompt(entries)}`
+            : formatMemoryReviewBatchPrompt(entries),
+          scope: row.scope,
           sourceCount: entries.length, sourceEntryIds: sources.rows.map((source) => source.id),
           status: "pending", telegramChatId: row.telegram_chat_id,
           telegramChatType: row.telegram_chat_type,

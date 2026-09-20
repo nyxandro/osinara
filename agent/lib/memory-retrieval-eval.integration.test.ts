@@ -10,13 +10,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "./database.js";
-import { embedMemoryPassages, embedMemoryQuery } from "./memory-embedding-client.js";
+import { embedMemoryPassages, embedMemoryQueryChunks } from "./memory-embedding-client.js";
 import {
   MEMORY_EMBEDDING_MODEL_VERSION,
   MEMORY_EMBEDDING_PROVIDER_BATCH_SIZE,
-  MEMORY_RETRIEVAL_MIN_RUSSIAN_MORPHOLOGY_RANK,
   MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY,
-  MEMORY_RETRIEVAL_MIN_SIMPLE_LEXICAL_RANK,
 } from "./memory-config.js";
 import {
   MEMORY_RETRIEVAL_R0_BASELINE_V1,
@@ -31,7 +29,9 @@ import {
   MEMORY_RETRIEVAL_EVAL_RECORDS_V2,
   MEMORY_RETRIEVAL_R1_BASELINE_V2,
 } from "./memory-retrieval-eval-fixture.v2.js";
+import { memoryEmbeddingInput } from "./memory-embedding-header.js";
 import { memoryRetrievalRepository } from "./memory-retrieval-repository.js";
+import { prepareMemoryQuery } from "./memory-query-preparation.js";
 import type { MemoryAuthorization } from "./memory-context.js";
 
 const enabled = process.env.RUN_MEMORY_RETRIEVAL_EVALS === "true";
@@ -104,7 +104,11 @@ describeEval("memory retrieval eval v1", () => {
       embeddings.push(...await embedMemoryPassages(
         EVAL_RECORDS
           .slice(offset, offset + MEMORY_EMBEDDING_PROVIDER_BATCH_SIZE)
-          .map((record) => record.content),
+          // The same text production sends: the chunk carrying the subject it is about.
+          .map((record) => memoryEmbeddingInput(record.content, {
+            kind: "fact",
+            subjectLabel: record.subjectLabel ?? null,
+          })),
       ));
     }
 
@@ -121,11 +125,16 @@ describeEval("memory retrieval eval v1", () => {
       );
       await database().query(
         `INSERT INTO memory_embedding_chunks
-           (memory_item_id, chunk_index, content, start_offset, end_offset, embedding, embedding_model)
-         VALUES ($1, 0, $2, 0, $3, $4::vector, $5)`,
+           (memory_item_id, chunk_index, content, embedding_input, start_offset, end_offset,
+            embedding, embedding_model)
+         VALUES ($1, 0, $2, $3, 0, $4, $5::vector, $6)`,
         [
           inserted.rows[0]!.id,
           record.content,
+          memoryEmbeddingInput(record.content, {
+            kind: "fact",
+            subjectLabel: record.subjectLabel ?? null,
+          }),
           record.content.length,
           `[${embeddings[index]!.join(",")}]`,
           MEMORY_EMBEDDING_MODEL_VERSION,
@@ -139,21 +148,22 @@ describeEval("memory retrieval eval v1", () => {
   it("meets the versioned R1 quality gates and prints the measured result", async () => {
     const evaluated: EvaluatedQuery[] = [];
     for (const query of MEMORY_RETRIEVAL_EVAL_QUERIES_V1) {
-      const results = await memoryRetrievalRepository.search(
+      const prepared = prepareMemoryQuery(query.text);
+      const { results } = await memoryRetrievalRepository.search(
         auth,
-        query.text,
-        await embedMemoryQuery(query.text),
+        prepared,
+        await embedMemoryQueryChunks(prepared),
         EVAL_RESULT_LIMIT,
       );
-      // Every exposed attribution must carry branch-local evidence that already passed its gate.
+      // Every exposed attribution must carry branch-local evidence. The word branches gate on the
+      // share of question terms the record holds, not on the rank they expose, so only the
+      // semantic gate can be checked against the score itself.
       for (const result of results) {
         if (result.evidence.simpleLexicalRank !== null) {
-          expect(result.evidence.simpleLexicalRank)
-            .toBeGreaterThanOrEqual(MEMORY_RETRIEVAL_MIN_SIMPLE_LEXICAL_RANK);
+          expect(result.evidence.simpleLexicalRank).toBeGreaterThan(0);
         }
         if (result.evidence.russianMorphologyRank !== null) {
-          expect(result.evidence.russianMorphologyRank)
-            .toBeGreaterThanOrEqual(MEMORY_RETRIEVAL_MIN_RUSSIAN_MORPHOLOGY_RANK);
+          expect(result.evidence.russianMorphologyRank).toBeGreaterThan(0);
         }
         if (result.evidence.semanticSimilarity !== null) {
           expect(result.evidence.semanticSimilarity)
@@ -235,10 +245,11 @@ describeEval("memory retrieval eval v1", () => {
   it("measures identity hard-negative abstention while preserving exact controls", async () => {
     const evaluated: EvaluatedQuery[] = [];
     for (const query of MEMORY_RETRIEVAL_EVAL_QUERIES_V2) {
-      const results = await memoryRetrievalRepository.search(
+      const prepared = prepareMemoryQuery(query.text);
+      const { results } = await memoryRetrievalRepository.search(
         auth,
-        query.text,
-        await embedMemoryQuery(query.text),
+        prepared,
+        await embedMemoryQueryChunks(prepared),
         EVAL_RESULT_LIMIT,
       );
       const resultKeys = results.map((result) =>

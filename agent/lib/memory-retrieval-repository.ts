@@ -2,7 +2,8 @@
  * PostgreSQL hybrid long-term memory retrieval.
  *
  * Export:
- * - `memoryRetrievalRepository.search`: authorized thresholded active-claim retrieval.
+ * - `memoryRetrievalRepository.search`: authorized thresholded active-claim retrieval plus
+ *   log-only branch diagnostics measured in the same statement.
  * - `memoryRetrievalRepository.searchWithConflictClosure`: score-independent complete conflict groups.
  */
 import { AppError } from "./app-error.js";
@@ -13,13 +14,14 @@ import {
   MEMORY_RETRIEVAL_CANDIDATE_LIMIT,
   MEMORY_RETRIEVAL_CONFIRMATION_BOOST,
   MEMORY_RETRIEVAL_LIMIT,
-  MEMORY_RETRIEVAL_MIN_RUSSIAN_MORPHOLOGY_RANK,
+  MEMORY_RETRIEVAL_MIN_RUSSIAN_MORPHOLOGY_TERM_MATCHES,
   MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY,
-  MEMORY_RETRIEVAL_MIN_SIMPLE_LEXICAL_RANK,
-  MEMORY_RETRIEVAL_RECENCY_BOOST,
-  MEMORY_RETRIEVAL_RECENCY_DECAY_SECONDS,
+  MEMORY_RETRIEVAL_MIN_SIMPLE_LEXICAL_TERM_MATCHES,
+  MEMORY_RETRIEVAL_RECENT_SHOW_WINDOW_TURNS,
   MEMORY_RETRIEVAL_RRF_RANK_OFFSET,
 } from "./memory-config.js";
+import { memoryRetentionSqlExpression } from "./memory-forgetting.js";
+import type { MemorySelectionWindow } from "./memory-show-journal.js";
 import type { MemoryAuthorization } from "./memory-context.js";
 import { liveMemoryReadPredicate } from "./memory-live-read-authorization.js";
 import type { ReferencedMemoryRow } from "./memory-record.js";
@@ -28,8 +30,22 @@ import { externalProfileProjectionPredicate } from "./external-profile-projectio
 import type { ModelMemoryEvidence } from "./model-memory.js";
 import {
   collapseExactDuplicateRetrievalResults,
+  type MemoryRetrievalBranchDiagnostics,
   type ScoredMemoryRetrievalResult,
 } from "./memory-retrieval-ranking.js";
+
+interface DiagnosticsColumns {
+  russian_matched: number | string;
+  russian_qualified: number | string;
+  russian_top_rank: number | string | null;
+  semantic_matched: number | string;
+  recently_shown: number | string | null;
+  semantic_qualified: number | string;
+  semantic_top_similarity: number | string | null;
+  simple_matched: number | string;
+  simple_qualified: number | string;
+  simple_top_rank: number | string | null;
+}
 
 interface RetrievalRow extends ReferencedMemoryRow {
   fused_score: number | string;
@@ -94,6 +110,15 @@ function vectorLiteral(vector: readonly number[]): string {
   return `[${vector.join(",")}]`;
 }
 
+/**
+ * An empty list is a real state, not a failure: the embedding service was unreachable and the
+ * search runs on words alone. `unnest` over an empty array yields no rows, so the semantic branch
+ * contributes nothing and rank fusion adds up whatever the other two found.
+ */
+function vectorArrayLiterals(vectors: readonly (readonly number[])[]): string[] {
+  return vectors.map(vectorLiteral);
+}
+
 function authorizedClaimPredicate(alias: "a" | "b" | "item" | "partner"): string {
   // The projection branch is deliberately part of the pre-ranking predicate. Exact participant
   // linkage and the live policy admit only the current private user's normal self claims; an
@@ -121,6 +146,41 @@ function requiredScore(value: number | string): number {
 
 function optionalScore(value: number | string | null): number | null {
   return value === null ? null : requiredScore(value);
+}
+
+/** A non-integer count means the statement's shape changed, not that a value is missing. */
+function requiredCount(value: number | string): number {
+  const count = Number(value);
+  if (!Number.isInteger(count) || count < 0) {
+    throw new AppError(
+      "AGENT_MEMORY_RETRIEVAL_DIAGNOSTICS_INVALID",
+      "Не удалось измерить работу поиска памяти. Повторите запрос",
+    );
+  }
+  return count;
+}
+
+function rowToBranchDiagnostics(row: DiagnosticsColumns): MemoryRetrievalBranchDiagnostics {
+  const russianQualified = requiredCount(row.russian_qualified);
+  const semanticQualified = requiredCount(row.semantic_qualified);
+  const simpleQualified = requiredCount(row.simple_qualified);
+  return {
+    // Only the word branches can hit it. The semantic branch asks the index for exactly that many
+    // nearest chunks, so what it passes on is bounded by the limit rather than cut by it, and
+    // including it here would make the flag say nothing.
+    candidateLimitHit: [russianQualified, simpleQualified]
+      .some((count) => count > MEMORY_RETRIEVAL_CANDIDATE_LIMIT),
+    russianMatched: requiredCount(row.russian_matched),
+    russianQualified,
+    russianTopRank: optionalScore(row.russian_top_rank),
+    semanticMatched: requiredCount(row.semantic_matched),
+    semanticQualified,
+    semanticTopSimilarity: optionalScore(row.semantic_top_similarity),
+    recentlyShown: row.recently_shown === null ? 0 : requiredCount(row.recently_shown),
+    simpleMatched: requiredCount(row.simple_matched),
+    simpleQualified,
+    simpleTopRank: optionalScore(row.simple_top_rank),
+  };
 }
 
 function rowToScoredResult(row: RetrievalRow): ScoredMemoryRetrievalResult {
@@ -154,39 +214,84 @@ function rowToScoredResult(row: RetrievalRow): ScoredMemoryRetrievalResult {
   };
 }
 
-export const memoryRetrievalRepository = {
-  async search(
-    auth: MemoryAuthorization,
-    query: string,
-    queryEmbedding: readonly number[],
-    limit = MEMORY_RETRIEVAL_LIMIT,
-  ): Promise<ScoredMemoryRetrievalResult[]> {
-    const normalizedQuery = query.trim();
-    if (!normalizedQuery) {
-      throw new AppError("AGENT_MEMORY_QUERY_INVALID", "Для поиска памяти нужен непустой запрос");
-    }
-    if (!Number.isInteger(limit) || limit < 1 || limit > MEMORY_RETRIEVAL_LIMIT) {
-      throw new AppError("AGENT_MEMORY_LIMIT_INVALID", "Некорректный лимит поиска памяти");
-    }
+/**
+ * Which journal rows the window covers: the last few turns of this conversation, this turn itself
+ * excluded. A second pass over one turn finds its own shows already written, and hiding them would
+ * answer the person from a different half of their memory than the first pass used.
+ *
+ * The selection filter and the metric that reports how much the filter removed read the same text,
+ * because two copies of one predicate drift and the number stops describing the behaviour.
+ */
+const RECENT_SHOW_PREDICATE = `shown.conversation_id = $14
+                 AND shown.turn_ordinal > $15::bigint - $16::bigint
+                 AND shown.turn_ordinal < $15::bigint`;
 
-    // NOT MATERIALIZED keeps authorization in every inlined branch while allowing physical indexes.
-    const result = await database().query<RetrievalRow>(
-      `WITH authorized AS NOT MATERIALIZED (
+/**
+ * The forgetting curve as the ranking applies it: one source, shared with the TypeScript copy that
+ * explains the numbers and with the test that proves the two agree.
+ */
+export const MEMORY_RETENTION_EXPRESSION = memoryRetentionSqlExpression({
+  ageDays: "EXTRACT(EPOCH FROM (now() - authorized.created_at)) / 86400",
+  kind: "authorized.kind",
+  usageCount: "authorized.usage_count",
+});
+
+/**
+ * The one statement the semantic branch runs, exported so a test can read its plan from the same
+ * text the product executes instead of from a copy that can drift away from it.
+ */
+export function memoryRetrievalSearchStatement(): string {
+  return `WITH authorized AS NOT MATERIALIZED (
           SELECT item.*, ref.memory_ref
           FROM memory_items AS item
           JOIN memory_item_refs AS ref ON ref.memory_item_id = item.id
            WHERE item.family_id = $1 AND item.claim_status = 'active'
              AND ${authorizedClaimPredicate("item")}
+             -- What the automatic selection already showed in the last few turns of this
+             -- conversation. Null for the explicit search, which must keep seeing everything.
+             AND ($14::uuid IS NULL OR NOT EXISTS (
+               SELECT 1 FROM memory_retrieval_shows AS shown
+               WHERE shown.claim_id = item.id AND ${RECENT_SHOW_PREDICATE}
+             ))
+       ),
+       simple_lexemes AS (
+         SELECT lexeme, positions
+         FROM unnest(to_tsvector('simple', translate($5, 'ёЁ', 'еЕ')))
+         WHERE ts_lexize('russian_stem', lexeme) <> '{}'
+       ),
+       russian_lexemes AS (
+         SELECT lexeme, positions FROM unnest(to_tsvector('russian', $5))
+       ),
+       simple_query AS (
+         SELECT array_agg(lexeme) AS terms,
+                to_tsquery('simple', string_agg(quote_literal(lexeme), ' | ')) AS query,
+                (SELECT count(DISTINCT word)
+                 FROM simple_lexemes AS counted, unnest(counted.positions) AS word) AS word_count
+         FROM simple_lexemes
+       ),
+       russian_query AS (
+         SELECT array_agg(lexeme) AS terms,
+                to_tsquery('simple', string_agg(quote_literal(lexeme), ' | ')) AS query,
+                (SELECT count(DISTINCT word)
+                 FROM russian_lexemes AS counted, unnest(counted.positions) AS word) AS word_count
+         FROM russian_lexemes
+       ),
+       simple_matched AS (
+         SELECT authorized.id, authorized.updated_at,
+                ts_rank_cd(authorized.search_vector, simple_query.query) AS relevance,
+                (SELECT count(DISTINCT word)
+                 FROM simple_lexemes, unnest(simple_lexemes.positions) AS word
+                 WHERE tsvector_to_array(authorized.search_vector) @> ARRAY[simple_lexemes.lexeme])
+                  AS matched_terms,
+                LEAST($7::bigint, simple_query.word_count) AS required_terms
+         FROM authorized, simple_query
+         WHERE simple_query.query IS NOT NULL
+           AND authorized.search_vector @@ simple_query.query
        ),
        simple_evidence AS (
          SELECT id, updated_at, relevance
-         FROM (
-           SELECT id, updated_at,
-                  ts_rank_cd(search_vector, websearch_to_tsquery('simple', $5)) AS relevance
-           FROM authorized
-           WHERE search_vector @@ websearch_to_tsquery('simple', $5)
-         ) AS matched
-         WHERE relevance >= $7
+         FROM simple_matched
+         WHERE matched_terms >= required_terms
          ORDER BY relevance DESC, updated_at DESC, id DESC
           LIMIT $6
         ),
@@ -195,15 +300,22 @@ export const memoryRetrievalRepository = {
                 row_number() OVER (ORDER BY relevance DESC, updated_at DESC, id DESC) AS ordinal
          FROM simple_evidence
        ),
+       russian_matched AS (
+         SELECT authorized.id, authorized.updated_at,
+                ts_rank_cd(authorized.russian_search_vector, russian_query.query) AS relevance,
+                (SELECT count(DISTINCT word)
+                 FROM russian_lexemes, unnest(russian_lexemes.positions) AS word
+                 WHERE tsvector_to_array(authorized.russian_search_vector)
+                   @> ARRAY[russian_lexemes.lexeme]) AS matched_terms,
+                LEAST($8::bigint, russian_query.word_count) AS required_terms
+         FROM authorized, russian_query
+         WHERE russian_query.query IS NOT NULL
+           AND authorized.russian_search_vector @@ russian_query.query
+       ),
        russian_evidence AS (
          SELECT id, updated_at, relevance
-         FROM (
-           SELECT id, updated_at,
-                  ts_rank_cd(russian_search_vector, websearch_to_tsquery('russian', $5)) AS relevance
-           FROM authorized
-           WHERE russian_search_vector @@ websearch_to_tsquery('russian', $5)
-         ) AS matched
-         WHERE relevance >= $8
+         FROM russian_matched
+         WHERE matched_terms >= required_terms
          ORDER BY relevance DESC, updated_at DESC, id DESC
          LIMIT $6
        ),
@@ -212,18 +324,33 @@ export const memoryRetrievalRepository = {
                 row_number() OVER (ORDER BY relevance DESC, updated_at DESC, id DESC) AS ordinal
          FROM russian_evidence
        ),
-       semantic_distances AS (
-         SELECT authorized.id, MIN(chunk.embedding <=> $9::vector) AS distance,
-                 authorized.updated_at
-         FROM authorized
-         JOIN memory_embedding_chunks AS chunk ON chunk.memory_item_id = authorized.id
-         WHERE authorized.embedding_status = 'indexed' AND chunk.embedding_model = $10
+       semantic_nearest AS (
+         SELECT nearest.memory_item_id, nearest.distance
+         FROM unnest($9::vector[]) AS query_vector,
+         LATERAL (
+           SELECT chunk.memory_item_id, chunk.embedding <=> query_vector AS distance
+           FROM memory_embedding_chunks AS chunk
+           WHERE chunk.embedding_model = $10
+             AND EXISTS (
+               SELECT 1 FROM authorized
+               WHERE authorized.id = chunk.memory_item_id
+                 AND authorized.embedding_status = 'indexed'
+             )
+           ORDER BY chunk.embedding <=> query_vector
+           LIMIT $6
+         ) AS nearest
+       ),
+       semantic_matched AS (
+         SELECT authorized.id, authorized.updated_at,
+                1 - MIN(semantic_nearest.distance) AS similarity
+         FROM semantic_nearest
+         JOIN authorized ON authorized.id = semantic_nearest.memory_item_id
          GROUP BY authorized.id, authorized.updated_at
-        ),
+       ),
        semantic_evidence AS (
-         SELECT id, updated_at, 1 - distance AS similarity
-         FROM semantic_distances
-         WHERE 1 - distance >= $11
+         SELECT id, updated_at, similarity
+         FROM semantic_matched
+         WHERE similarity >= $11
          ORDER BY similarity DESC, updated_at DESC, id DESC
          LIMIT $6
        ),
@@ -238,8 +365,34 @@ export const memoryRetrievalRepository = {
          SELECT id FROM russian_morphology
          UNION
          SELECT id FROM semantic
+       ),
+       diagnostics AS (
+         SELECT (SELECT max(relevance) FROM simple_matched) AS simple_top_rank,
+                (SELECT max(relevance) FROM russian_matched) AS russian_top_rank,
+                (SELECT max(similarity) FROM semantic_matched) AS semantic_top_similarity,
+                (SELECT count(*) FROM simple_matched) AS simple_matched,
+                (SELECT count(*) FROM russian_matched) AS russian_matched,
+                (SELECT count(*) FROM semantic_matched) AS semantic_matched,
+                (SELECT count(DISTINCT shown.claim_id) FROM memory_retrieval_shows AS shown
+                  WHERE ${RECENT_SHOW_PREDICATE}) AS recently_shown,
+                (SELECT count(*) FROM simple_matched WHERE matched_terms >= required_terms)
+                  AS simple_qualified,
+                (SELECT count(*) FROM russian_matched WHERE matched_terms >= required_terms)
+                  AS russian_qualified,
+                (SELECT count(*) FROM semantic_matched
+                  WHERE similarity >= $11
+                  )
+                  AS semantic_qualified
        )
-       SELECT authorized.id, authorized.author_user_id, authorized.author_telegram_user_id,
+       SELECT diagnostics.simple_top_rank, diagnostics.russian_top_rank,
+              diagnostics.semantic_top_similarity, diagnostics.simple_matched,
+              diagnostics.russian_matched, diagnostics.semantic_matched,
+              diagnostics.simple_qualified, diagnostics.russian_qualified,
+              diagnostics.semantic_qualified, diagnostics.recently_shown, ranked.*
+       FROM diagnostics
+       LEFT JOIN LATERAL (
+       SELECT authorized.id, authorized.attribute, authorized.occurred_on, authorized.author_user_id,
+              authorized.author_telegram_user_id,
               authorized.scope, authorized.kind, authorized.content, authorized.source,
                authorized.confirmation, authorized.sensitivity, authorized.message_thread_id,
                authorized.embedding_status, authorized.created_at, authorized.updated_at,
@@ -259,11 +412,12 @@ export const memoryRetrievalRepository = {
                  source_evidence.author_participant_id AS source_author_participant_id,
                  COALESCE(source_evidence.author_telegram_user_id,
                           authorized.author_telegram_user_id) AS source_author_telegram_user_id,
-               (COALESCE(1.0 / ($12::double precision + simple_lexical.ordinal), 0) +
-                COALESCE(1.0 / ($12::double precision + russian_morphology.ordinal), 0) +
-                COALESCE(1.0 / ($12::double precision + semantic.ordinal), 0) +
-                CASE WHEN authorized.confirmation = 'user_confirmed' THEN $13::double precision ELSE 0 END +
-                $14::double precision / (1 + EXTRACT(EPOCH FROM (now() - authorized.updated_at)) / $15))
+               ((COALESCE(1.0 / ($12::double precision + simple_lexical.ordinal), 0) +
+                 COALESCE(1.0 / ($12::double precision + russian_morphology.ordinal), 0) +
+                 COALESCE(1.0 / ($12::double precision + semantic.ordinal), 0) +
+                 CASE WHEN authorized.confirmation = 'user_confirmed'
+                      THEN $13::double precision ELSE 0 END)
+                * ${MEMORY_RETENTION_EXPRESSION})
                  AS fused_score
        FROM candidates
        JOIN authorized USING (id)
@@ -277,42 +431,156 @@ export const memoryRetrievalRepository = {
          WHERE claim_id = authorized.id AND evidence_role = 'primary'
          ORDER BY observed_at, id LIMIT 1
        ) AS source_evidence ON true
-       ORDER BY fused_score DESC, authorized.updated_at DESC, authorized.id DESC`,
-      [
-        auth.familyId,
-        auth.scopes,
-        auth.userId,
-        auth.groupId,
-        normalizedQuery,
-        MEMORY_RETRIEVAL_CANDIDATE_LIMIT,
-        MEMORY_RETRIEVAL_MIN_SIMPLE_LEXICAL_RANK,
-        MEMORY_RETRIEVAL_MIN_RUSSIAN_MORPHOLOGY_RANK,
-        vectorLiteral(queryEmbedding),
-        MEMORY_EMBEDDING_MODEL_VERSION,
-        MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY,
-        MEMORY_RETRIEVAL_RRF_RANK_OFFSET,
-        MEMORY_RETRIEVAL_CONFIRMATION_BOOST,
-        MEMORY_RETRIEVAL_RECENCY_BOOST,
-        MEMORY_RETRIEVAL_RECENCY_DECAY_SECONDS,
-      ],
+       ) AS ranked ON true
+       ORDER BY ranked.fused_score DESC NULLS LAST, ranked.updated_at DESC NULLS LAST,
+                ranked.id DESC NULLS LAST`;
+}
+
+/** The parameters that statement takes, in its own order, so a test can bind them the same way. */
+export function memoryRetrievalSearchParameters(
+  auth: MemoryAuthorization,
+  normalizedQuery: string,
+  queryEmbeddings: readonly (readonly number[])[],
+  window: MemorySelectionWindow | null = null,
+): unknown[] {
+  return [
+    auth.familyId,
+    auth.scopes,
+    auth.userId,
+    auth.groupId,
+    normalizedQuery,
+    MEMORY_RETRIEVAL_CANDIDATE_LIMIT,
+    MEMORY_RETRIEVAL_MIN_SIMPLE_LEXICAL_TERM_MATCHES,
+    MEMORY_RETRIEVAL_MIN_RUSSIAN_MORPHOLOGY_TERM_MATCHES,
+    vectorArrayLiterals(queryEmbeddings),
+    MEMORY_EMBEDDING_MODEL_VERSION,
+    MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY,
+    MEMORY_RETRIEVAL_RRF_RANK_OFFSET,
+    MEMORY_RETRIEVAL_CONFIRMATION_BOOST,
+    window?.conversationId ?? null,
+    window?.turnOrdinal ?? 0,
+    MEMORY_RETRIEVAL_RECENT_SHOW_WINDOW_TURNS,
+  ];
+}
+
+export const memoryRetrievalRepository = {
+  async search(
+    auth: MemoryAuthorization,
+    query: string,
+    queryEmbeddings: readonly (readonly number[])[],
+    limit = MEMORY_RETRIEVAL_LIMIT,
+    window: MemorySelectionWindow | null = null,
+  ): Promise<{
+    diagnostics: MemoryRetrievalBranchDiagnostics;
+    results: ScoredMemoryRetrievalResult[];
+  }> {
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) {
+      throw new AppError("AGENT_MEMORY_QUERY_INVALID", "Для поиска памяти нужен непустой запрос");
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > MEMORY_RETRIEVAL_LIMIT) {
+      throw new AppError("AGENT_MEMORY_LIMIT_INVALID", "Некорректный лимит поиска памяти");
+    }
+
+    // NOT MATERIALIZED keeps authorization in every inlined branch while allowing physical indexes.
+    //
+    // Both word branches build their condition as a disjunction of the query's own lexemes rather
+    // than through `websearch_to_tsquery`, which joins every token with AND. A live question —
+    // «Проверь, когда у меня ближайшее дежурство, и когда мы меняем резину» — then demanded that
+    // one record contain all of those words at once, and no record ever does, so the branch
+    // silently returned nothing and `ts_rank_cd` never got to do its job of ranking by how many
+    // words matched and how close together they sit.
+    //
+    // The exact branch takes its terms from the same `to_tsvector('simple', ...)` that builds its
+    // indexed column, so every term is a lexeme that column can actually hold, and then drops the
+    // ones the Russian dictionary calls stop words — «и», «у», «за». With OR a stop word would
+    // match nearly every record and drown the codes and names this branch exists for. The
+    // morphological branch takes the stems its own configuration produced, where stop words are
+    // already gone.
+    //
+    // Both branches then assemble their disjunction with `to_tsquery('simple', ...)`, which is not
+    // a mistake: the terms are already lexemes of their own column, and the Russian configuration
+    // would stem them a second time. «решен» becomes «реш», stops matching the column it came
+    // from, and the branch goes quiet on a record that contains the word verbatim — the same
+    // failure as the AND condition, one step lower.
+    //
+    // Words are counted by position, not by lexeme. One hyphenated token or a URL yields several
+    // lexemes at the same position, and counting those as separate words would let a single
+    // «e-mail» clear a gate that asks for two of the question's words.
+    //
+    // Age is a multiplier on the fused rank, not a term added to it, and the same curve lives in
+    // `memory-forgetting.ts` for everything outside SQL. Two copies of one formula drift silently,
+    // so a test walks a grid of ages, kinds and use counts through both and compares them.
+    //
+    // The semantic branch asks for the nearest chunks and only then folds them into records. That
+    // order is what the vector index can serve: pgvector applies HNSW to «order by distance, take
+    // n» and to nothing else, and the previous form hid the distance under MIN() with a GROUP BY,
+    // so the index built on day one went unused by every query. The access rules stay inside the
+    // lookup, as a condition on each chunk, and `hnsw.iterative_scan` — set on the database by
+    // migration 107 — keeps the index handing over candidates until enough of them pass.
+    //
+    // It asks per piece of the query, not once for their average. A long message is cut into
+    // chunks before embedding, and averaging them put the question about the roof and the question
+    // about the medicine at a point that resembles neither.
+    //
+    // What this branch offers is the nearest chunks, so a record holding several of them takes
+    // more than one place among them: at production's 1.16 chunks per record the forty nearest
+    // chunks come from about thirty-four records rather than forty. With one query vector the set
+    // is still exactly the closest records by their best chunk — if A's best chunk beats B's and
+    // B made the forty, so did A. With several query vectors that is no longer guaranteed: a
+    // record can arrive through a worse pair while its best pair missed that vector's forty, and
+    // then its similarity is understated. It needs a record with many chunks crowded around one
+    // vector, which the measured corpora do not produce.
+    //
+    // The branch CTEs are split in two on purpose: `*_matched` is what the branch found at all and
+    // feeds the pre-threshold diagnostics, `*_evidence` is what survived the gate and the candidate
+    // limit. Diagnostics are joined with LEFT JOIN LATERAL so an empty result still returns one row
+    // carrying the numbers — an empty retrieval is exactly the case worth explaining.
+    const result = await database().query<DiagnosticsColumns & ({ id: null } | RetrievalRow)>(
+      memoryRetrievalSearchStatement(),
+      memoryRetrievalSearchParameters(auth, normalizedQuery, queryEmbeddings, window),
     );
-    // Duplicate collapse is read-only and happens after global rank, preserving its representative.
-    return collapseExactDuplicateRetrievalResults(result.rows.map(rowToScoredResult), limit);
+    // `diagnostics` is a SELECT without FROM and the join is LEFT LATERAL, so the statement always
+    // returns at least this row. The guard exists to make a future edit that breaks that invariant
+    // fail loudly instead of silently logging a search that was never measured.
+    const head = result.rows[0];
+    if (head === undefined) {
+      throw new AppError(
+        "AGENT_MEMORY_RETRIEVAL_DIAGNOSTICS_INVALID",
+        "Не удалось измерить работу поиска памяти. Повторите запрос",
+      );
+    }
+    const scored = result.rows
+      .filter((row): row is DiagnosticsColumns & RetrievalRow => row.id !== null)
+      .map(rowToScoredResult);
+    return {
+      diagnostics: rowToBranchDiagnostics(head),
+      // Duplicate collapse is read-only and happens after global rank, keeping its representative.
+      results: collapseExactDuplicateRetrievalResults(scored, limit),
+    };
   },
 
   async searchWithConflictClosure(
     auth: MemoryAuthorization,
     query: string,
-    queryEmbedding: readonly number[],
+    queryEmbeddings: readonly (readonly number[])[],
     limit = MEMORY_RETRIEVAL_LIMIT,
+    window: MemorySelectionWindow | null = null,
   ): Promise<{
     conflicts: MemoryConflictGroup[];
+    diagnostics: MemoryRetrievalBranchDiagnostics;
     relatedClaimIds: string[];
     results: ScoredMemoryRetrievalResult[];
   }> {
-    const results = await memoryRetrievalRepository.search(auth, query, queryEmbedding, limit);
+    const { diagnostics, results } = await memoryRetrievalRepository.search(
+      auth,
+      query,
+      queryEmbeddings,
+      limit,
+      window,
+    );
     const selectedIds = results.map((result) => result.memory.id);
-    if (selectedIds.length === 0) return { conflicts: [], relatedClaimIds: [], results };
+    if (selectedIds.length === 0) return { conflicts: [], diagnostics, relatedClaimIds: [], results };
 
     // Detect an inaccessible partner without selecting any partner content or metadata. Opaque refs
     // are capabilities, not authorization: one visible side of an unresolved conflict is withheld.
@@ -440,6 +708,7 @@ export const memoryRetrievalRepository = {
     }));
     return {
       conflicts,
+      diagnostics,
       relatedClaimIds: [...new Set([
         ...results.filter((result) => !blockedIds.has(result.memory.id))
           .filter((result) => finalOrdinaryIds.has(result.memory.id))

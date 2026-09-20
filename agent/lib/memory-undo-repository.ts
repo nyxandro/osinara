@@ -14,6 +14,7 @@ import type { PoolClient } from "pg";
 
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
+import { releaseMemoryAttributeSlot } from "./memory-attribute-slot.js";
 import type { MemoryAuthorization } from "./memory-context.js";
 import { memoryOperationHash, type MemoryOperationProvenance, type MemoryRow } from "./memory-record.js";
 
@@ -33,7 +34,7 @@ interface MutationOperationRow {
   mutation_kind: "create" | "delete" | "update";
 }
 
-const MEMORY_COLUMNS = `item.id, item.author_user_id, item.author_telegram_user_id, item.scope,
+const MEMORY_COLUMNS = `item.id, item.attribute, item.occurred_on, item.author_user_id, item.author_telegram_user_id, item.scope,
   item.kind, item.content, item.source, item.confirmation, item.sensitivity,
   item.message_thread_id, item.embedding_status, item.created_at, item.updated_at`;
 
@@ -205,11 +206,14 @@ export const memoryUndoRepository = {
                  jsonb_build_object('scope', $4::text, 'kind', $5::text, 'reason', 'immediate_undo'))`,
         [auth.familyId, auth.userId, id, memory.scope, memory.kind],
       );
+      // Отмена возвращает и то, что запись вытеснила: иначе отказ от ошибочной новой версии
+      // стоил бы человеку прежнего факта, оставшегося замещённым навсегда.
+      await releaseMemoryAttributeSlot(client, id);
       // Отмена создания тоже мягкая: единый путь означает, что ни одна операция памяти не уносит
       // данные безвозвратно, а ретенция вычищает мягко удалённое позже.
       await client.query(
         `UPDATE memory_items_all
-            SET deleted_at = now(), claim_status = 'retracted'
+            SET deleted_at = now(), claim_status = 'retracted', superseded_by = NULL
           WHERE id = $1 AND deleted_at IS NULL`,
         [id],
       );

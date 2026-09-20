@@ -6,6 +6,7 @@
  * - Personal and family authorization is applied before ranking.
  * - Unresolved conflict closure loads both authorized versions even when one has no retrieval score.
  * - Conflict closure withholds base results when authorization changes between repository queries.
+ * - Branch diagnostics report pre-threshold scores, matches, and what passed each gate.
  */
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -14,6 +15,7 @@ import { closeDatabase, database } from "./database.js";
 import {
   MEMORY_EMBEDDING_DIMENSIONS,
   MEMORY_EMBEDDING_MODEL_VERSION,
+  MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY,
 } from "./memory-config.js";
 import { memoryRetrievalRepository } from "./memory-retrieval-repository.js";
 
@@ -79,8 +81,9 @@ describeWithDatabase("memoryRetrievalRepository", () => {
       for (const [chunkIndex, embedding] of embeddings.entries()) {
         await database().query(
           `INSERT INTO memory_embedding_chunks
-             (memory_item_id, chunk_index, content, start_offset, end_offset, embedding, embedding_model)
-           VALUES ($1, $2, $3, 0, $4, $5::vector, $6)`,
+             (memory_item_id, chunk_index, content, embedding_input, start_offset, end_offset,
+            embedding, embedding_model)
+           VALUES ($1, $2, $3, $3, 0, $4, $5::vector, $6)`,
           [memory.rows[0]!.id, chunkIndex, `${content}:${chunkIndex}`, content.length, `[${embedding.join(",")}]`, MEMORY_EMBEDDING_MODEL_VERSION],
         );
       }
@@ -89,10 +92,10 @@ describeWithDatabase("memoryRetrievalRepository", () => {
     await insert(auth.userId!, auth.telegramActorId, "Любимый транспорт — поезд", [vector(0, 1)], "irrelevant");
     await insert(otherUserId, "search-other", "Скрытая аллергия на орехи", [vector(1, 0)], "hidden");
 
-    const results = await memoryRetrievalRepository.search(
+    const { results } = await memoryRetrievalRepository.search(
       auth,
       "орехами",
-      vector(1, 0),
+      [vector(1, 0)],
     );
 
     expect(results[0]?.memory.content).toBe("Пользователь не ест орехи");
@@ -100,6 +103,50 @@ describeWithDatabase("memoryRetrievalRepository", () => {
       .toHaveLength(1);
     expect(results.map((result) => result.memory.content)).not.toContain("Скрытая аллергия на орехи");
     expect(results[0]?.evidence.russianMorphologyRank).not.toBeNull();
+  });
+
+  it("reports the branch scores that the thresholds cut off, even when nothing is returned", async () => {
+    const memory = await database().query<{ id: string }>(
+      `INSERT INTO memory_items
+         (family_id, owner_user_id, author_user_id, author_telegram_user_id, scope, kind,
+          content, source, confirmation, sensitivity, operation_key, embedding_status)
+       VALUES ($1, $2, $2, $3, 'personal', 'fact', 'Пользователь не ест орехи',
+               'test:diagnostics', 'user_confirmed', 'normal', 'diagnostics', 'indexed')
+       RETURNING id`,
+      [auth.familyId, auth.userId, auth.telegramUserId],
+    );
+    await database().query(
+      `INSERT INTO memory_embedding_chunks
+         (memory_item_id, chunk_index, content, embedding_input, start_offset, end_offset,
+            embedding, embedding_model)
+       VALUES ($1, 0, 'Пользователь не ест орехи', 'Пользователь не ест орехи', 0, 25, $2::vector, $3)`,
+      [memory.rows[0]!.id, `[${vector(0, 1).join(",")}]`, MEMORY_EMBEDDING_MODEL_VERSION],
+    );
+
+    // Orthogonal query vector and unrelated wording: every branch scores below its own gate.
+    const { diagnostics, results } = await memoryRetrievalRepository.search(
+      auth,
+      "велосипед",
+      [vector(1, 0)],
+    );
+
+    expect(results).toEqual([]);
+    expect(diagnostics.semanticTopSimilarity).not.toBeNull();
+    expect(diagnostics.semanticTopSimilarity!)
+      .toBeLessThan(MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY);
+    expect(diagnostics).toMatchObject({
+      candidateLimitHit: false,
+      recentlyShown: 0,
+      russianQualified: 0,
+      russianMatched: 0,
+      russianTopRank: null,
+      // The semantic branch did look at the record and scored it; the gate is what dropped it.
+      semanticQualified: 0,
+      semanticMatched: 1,
+      simpleQualified: 0,
+      simpleMatched: 0,
+      simpleTopRank: null,
+    });
   });
 
   it("loads an unresolved low-score conflict partner as one complete opaque group", async () => {
@@ -124,8 +171,9 @@ describeWithDatabase("memoryRetrievalRepository", () => {
     );
     await database().query(
       `INSERT INTO memory_embedding_chunks
-         (memory_item_id, chunk_index, content, start_offset, end_offset, embedding, embedding_model)
-       VALUES ($1, 0, 'Код домофона 1234', 0, 18, $2::vector, $3)`,
+         (memory_item_id, chunk_index, content, embedding_input, start_offset, end_offset,
+            embedding, embedding_model)
+       VALUES ($1, 0, 'Код домофона 1234', 'Код домофона 1234', 0, 18, $2::vector, $3)`,
       [first.rows[0]!.id, `[${vector(1, 0).join(",")}]`, MEMORY_EMBEDDING_MODEL_VERSION],
     );
     await database().query(
@@ -139,7 +187,7 @@ describeWithDatabase("memoryRetrievalRepository", () => {
     const result = await memoryRetrievalRepository.searchWithConflictClosure(
       auth,
       "домофон 1234",
-      vector(1, 0),
+      [vector(1, 0)],
     );
 
     expect(result.conflicts).toHaveLength(1);
@@ -184,8 +232,9 @@ describeWithDatabase("memoryRetrievalRepository", () => {
     );
     await database().query(
       `INSERT INTO memory_embedding_chunks
-         (memory_item_id, chunk_index, content, start_offset, end_offset, embedding, embedding_model)
-       VALUES ($1, 0, 'Код сейфа 1234', 0, 14, $2::vector, $3)`,
+         (memory_item_id, chunk_index, content, embedding_input, start_offset, end_offset,
+            embedding, embedding_model)
+       VALUES ($1, 0, 'Код сейфа 1234', 'Код сейфа 1234', 0, 14, $2::vector, $3)`,
       [first.rows[0]!.id, `[${vector(1, 0).join(",")}]`, MEMORY_EMBEDDING_MODEL_VERSION],
     );
     await database().query(
@@ -197,17 +246,18 @@ describeWithDatabase("memoryRetrievalRepository", () => {
     );
     await database().query(
       `INSERT INTO memory_embedding_chunks
-         (memory_item_id, chunk_index, content, start_offset, end_offset, embedding, embedding_model)
-       VALUES ($1, 0, 'Обычная заметка про сейф', 0, 25, $2::vector, $3)`,
+         (memory_item_id, chunk_index, content, embedding_input, start_offset, end_offset,
+            embedding, embedding_model)
+       VALUES ($1, 0, 'Обычная заметка про сейф', 'Обычная заметка про сейф', 0, 25, $2::vector, $3)`,
       [ordinary.rows[0]!.id, `[${vector(1, 0).join(",")}]`, MEMORY_EMBEDDING_MODEL_VERSION],
     );
 
     const beforeRevocation = await memoryRetrievalRepository.search(
       auth,
       "код сейфа 1234",
-      vector(1, 0),
+      [vector(1, 0)],
     );
-    expect(beforeRevocation.map((result) => result.memory.id)).toEqual(expect.arrayContaining([
+    expect(beforeRevocation.results.map((result) => result.memory.id)).toEqual(expect.arrayContaining([
       first.rows[0]!.id,
       ordinary.rows[0]!.id,
     ]));
@@ -237,8 +287,8 @@ describeWithDatabase("memoryRetrievalRepository", () => {
       await expect(memoryRetrievalRepository.searchWithConflictClosure(
         auth,
         "код сейфа 1234",
-        vector(1, 0),
-      )).resolves.toEqual({ conflicts: [], relatedClaimIds: [], results: [] });
+        [vector(1, 0)],
+      )).resolves.toMatchObject({ conflicts: [], relatedClaimIds: [], results: [] });
       expect(revoked).toBe(true);
     } finally {
       querySpy.mockRestore();

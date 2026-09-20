@@ -5,7 +5,6 @@
  * - `TelegramInboundMediaKind`: strict none/photo/readable-text/unsupported-media decision.
  * - `classifyTelegramInboundMedia`: fail-closed classifier over raw and Eve-parsed media.
  * - `hasTelegramInboundMedia`: identifies file-bearing updates without downloading their bytes.
- * - `isAgentNameMentioned`: recognizes agent-name stems with any suffix at Unicode word boundaries.
  * - `isMessageAddressedToBot`: preserves private, mention, and reply behavior.
  * - `telegramGroupTurnTrigger`: names the technical signal that woke the agent in a group.
  * - `replyToAgentTrigger`: folds a journal-proven reply to the agent into that signal.
@@ -15,6 +14,7 @@
  */
 import type { TelegramMessage } from "eve/channels/telegram";
 
+import { isAgentNameMentioned } from "./agent-name.js";
 import { isTelegramImageDocumentCandidate } from "./attachments/telegram-vision-attachment.js";
 import { isReadableTextDocumentCandidate } from "./attachments/attachment-policy.js";
 
@@ -43,9 +43,6 @@ export type TelegramGroupTurnTrigger = "mention" | "name_in_text" | "reply_to_ag
 const TELEGRAM_COMMAND_PATTERN =
   /^\/[A-Za-z0-9_]{1,32}(?:@[A-Za-z0-9_]{5,32})?(?:\s|$)/u;
 const TELEGRAM_MENTION_PATTERN = /(?:^|[^A-Za-z0-9_])@(?<target>[A-Za-z0-9_]+)/gu;
-const AGENT_NAME_PATTERN =
-  /(?:^|[^\p{L}\p{N}_])(?:осинар|асинар|азинар|озинар|синаар|osinar|asinar)\p{L}*(?=$|[^\p{L}\p{N}_])/iu;
-
 // The application persists authorized files and exposes trusted workspace paths. Eve must not
 // forward a second copy to the text-only primary model; vision runs through the dedicated tool.
 export const TELEGRAM_EVE_UPLOAD_POLICY = "disabled" as const;
@@ -169,10 +166,6 @@ export function isReplyToBot(
     message.replyToMessage?.from?.isBot &&
       message.replyToMessage.from.username?.toLowerCase() === botUsername.toLowerCase(),
   );
-}
-
-export function isAgentNameMentioned(text: string): boolean {
-  return AGENT_NAME_PATTERN.test(text);
 }
 
 export function isTelegramSlashCommand(text: string): boolean {

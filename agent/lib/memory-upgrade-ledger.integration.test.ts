@@ -135,6 +135,16 @@ const POST_V0101_MIGRATIONS = [
   "101_text_response_recovery.sql",
   "102_agent_schedule_limits.sql",
   "103_monitoring_views.sql",
+  "104_memory_review_aged_release.sql",
+  "105_memory_index_state_view.sql",
+  "106_memory_search_vector_yo_folding.sql",
+  "107_memory_vector_index_iterative_scan.sql",
+  "108_memory_embedding_input.sql",
+  "109_memory_retrieval_shows.sql",
+  "110_memory_usage_counter.sql",
+  "111_memory_attribute_slot.sql",
+  "112_memory_occurred_on.sql",
+  "113_memory_embedding_backlog_view.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [

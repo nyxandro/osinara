@@ -5,24 +5,37 @@
  * - `MemoryEmbeddingJob`: leased text awaiting local embedding.
  * - `IndexedMemoryEmbeddingChunk`: complete source chunk and vector.
  * - `memoryIndexRepository`: claim, complete, and terminal-failure operations.
+ *
+ * Claiming also returns a record whose earlier failure was recorded as a transient service outage,
+ * bounded by an attempt count and a delay; every other failure stays terminal until an operator
+ * requeues it.
  */
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
+import type { MemoryKind } from "./memory-record.js";
 import {
   MEMORY_EMBEDDING_DIMENSIONS,
+  MEMORY_EMBEDDING_MAX_ATTEMPTS,
   MEMORY_EMBEDDING_MODEL_VERSION,
+  MEMORY_EMBEDDING_RETRY_DELAY_MILLISECONDS,
+  MEMORY_EMBEDDING_TRANSIENT_ERROR_CODES,
 } from "./memory-config.js";
 
 export interface MemoryEmbeddingJob {
+  attempts: number;
   content: string;
+  kind: MemoryKind;
   leaseToken: string;
   memoryItemId: string;
+  subjectLabel: string | null;
 }
 
 export interface IndexedMemoryEmbeddingChunk {
   chunkIndex: number;
   content: string;
   embedding: readonly number[];
+  /** The text that actually went to the model: the chunk with its subject header. */
+  embeddingInput: string;
   endOffset: number;
   startOffset: number;
 }
@@ -49,7 +62,8 @@ export const memoryIndexRepository = {
     try {
       await client.query("BEGIN");
 
-      // An expired lease is ambiguous; without an explicit retry policy it becomes terminally failed.
+      // An expired lease says nothing about how the attempt ended, and an unclear ending is not
+      // permission to run it again, so it stays terminally failed and waits for an operator.
       const expired = await client.query<{ memory_item_id: string }>(
         `UPDATE memory_embedding_jobs
          SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
@@ -65,34 +79,53 @@ export const memoryIndexRepository = {
         );
       }
 
+      // Two claimable states: a fresh job, and a job whose recorded reason says the text was never
+      // rejected. The retry is bounded by `attempts` and held back by the delay, so a service that
+      // stays down costs two more calls per record rather than a loop.
       const result = await client.query<{
+        attempts: number;
         content: string;
+        kind: MemoryKind;
         lease_token: string;
         memory_item_id: string;
+        subject_label: string | null;
       }>(
         `WITH candidates AS (
            SELECT job.memory_item_id
            FROM memory_embedding_jobs AS job
-           WHERE job.status = 'pending' AND job.attempts = 0
+           WHERE (job.status = 'pending' AND job.attempts = 0)
+              OR (job.status = 'failed' AND job.attempts < $3
+                  AND job.last_error_code = ANY($4::text[])
+                  AND job.updated_at < now() - ($5::text || ' milliseconds')::interval)
            ORDER BY job.created_at, job.memory_item_id
            FOR UPDATE SKIP LOCKED
            LIMIT $1
          )
          UPDATE memory_embedding_jobs AS job
-         SET status = 'leased', attempts = 1, lease_token = gen_random_uuid(),
+         SET status = 'leased', attempts = job.attempts + 1, lease_token = gen_random_uuid(),
              lease_expires_at = now() + ($2::text || ' milliseconds')::interval,
              updated_at = now()
          FROM candidates, memory_items AS item
          WHERE job.memory_item_id = candidates.memory_item_id
            AND item.id = job.memory_item_id
-         RETURNING job.memory_item_id, job.lease_token::text, item.content`,
-        [limit, leaseMilliseconds],
+         RETURNING job.memory_item_id, job.attempts, job.lease_token::text, item.content,
+                   item.kind, item.subject_label`,
+        [
+          limit,
+          leaseMilliseconds,
+          MEMORY_EMBEDDING_MAX_ATTEMPTS,
+          [...MEMORY_EMBEDDING_TRANSIENT_ERROR_CODES],
+          MEMORY_EMBEDDING_RETRY_DELAY_MILLISECONDS,
+        ],
       );
       await client.query("COMMIT");
       return result.rows.map((row) => ({
+        attempts: row.attempts,
         content: row.content,
+        kind: row.kind,
         leaseToken: row.lease_token,
         memoryItemId: row.memory_item_id,
+        subjectLabel: row.subject_label,
       }));
     } catch (error) {
       await client.query("ROLLBACK");
@@ -121,7 +154,8 @@ export const memoryIndexRepository = {
         !Number.isInteger(chunk.startOffset) ||
         !Number.isInteger(chunk.endOffset) ||
         chunk.startOffset < 0 ||
-        chunk.endOffset <= chunk.startOffset
+        chunk.endOffset <= chunk.startOffset ||
+        !chunk.embeddingInput.includes(chunk.content)
       ) {
         throw new AppError(
           "AGENT_MEMORY_EMBEDDING_CHUNKS_INVALID",
@@ -159,9 +193,11 @@ export const memoryIndexRepository = {
       for (const chunk of validatedChunks) {
         await client.query(
           `INSERT INTO memory_embedding_chunks
-             (memory_item_id, chunk_index, content, start_offset, end_offset, embedding, embedding_model)
-           VALUES ($1, $2, $3, $4, $5, $6::vector, $7)`,
-          [memoryItemId, chunk.chunkIndex, chunk.content, chunk.startOffset, chunk.endOffset, chunk.vector, modelVersion],
+             (memory_item_id, chunk_index, content, embedding_input, start_offset, end_offset,
+              embedding, embedding_model)
+           VALUES ($1, $2, $3, $4, $5, $6, $7::vector, $8)`,
+          [memoryItemId, chunk.chunkIndex, chunk.content, chunk.embeddingInput, chunk.startOffset,
+           chunk.endOffset, chunk.vector, modelVersion],
         );
       }
       await client.query(

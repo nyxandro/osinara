@@ -3,6 +3,7 @@
  *
  * Constructs:
  * - `103_monitoring_views.sql`: aggregate-only views plus a read-only role for the metrics exporter.
+ * - `105_memory_index_state_view.sql`: standing count of records the semantic branch cannot see.
  * - Each view is granted explicitly: a blanket schema grant would also cover future tables.
  * - The security boundary: the exporter role reads counts and ages, never a row of user content.
  * - The role guard: an inherited role carrying wider privileges stops the migration instead of
@@ -21,7 +22,9 @@ const describeWithDatabase = integrationTestsEnabled ? describe : describe.skip;
 const METRICS_ROLE = "osinara_metrics";
 const MONITORING_VIEWS = [
   "monitoring_agent_schedule_runs",
+  "monitoring_memory_embedding_backlog",
   "monitoring_memory_embedding_jobs",
+  "monitoring_memory_index_state",
   "monitoring_memory_review_batches",
   "monitoring_model_availability",
   "monitoring_operational_incidents",
@@ -36,7 +39,7 @@ const FORBIDDEN_TABLES = [
   "public.users",
 ] as const;
 
-describeWithDatabase("103 monitoring views migration", () => {
+describeWithDatabase("monitoring views migrations", () => {
   afterAll(async () => {
     await database().query("RESET ROLE").catch(() => undefined);
     await closeDatabase();
@@ -96,7 +99,7 @@ describeWithDatabase("103 monitoring views migration", () => {
         for (const column of columns) {
           expect({ view, column }).toEqual({
             view,
-            column: expect.stringMatching(/^(pending|processing|failed|total|recent|status|phase|route_key|oldest_pending_age_seconds|last_success_age_seconds|age_seconds)$/u),
+            column: expect.stringMatching(/^(pending|processing|failed|total|recent|status|phase|route_key|embedding_status|oldest_pending_age_seconds|last_success_age_seconds|age_seconds)$/u),
           });
         }
       }
@@ -167,6 +170,46 @@ describeWithDatabase("103 monitoring views migration", () => {
     } finally {
       await client.query(`ALTER ROLE ${METRICS_ROLE} NOLOGIN`).catch(() => undefined);
       client.release();
+    }
+  });
+
+  it("counts a record the semantic branch cannot see as a standing failed state", async () => {
+    const family = await database().query<{ id: string }>(
+      "INSERT INTO families (name) VALUES ('Состояние индекса') RETURNING id",
+    );
+    const user = await database().query<{ id: string }>(
+      `INSERT INTO users (telegram_user_id, display_name)
+       VALUES ('index-state-owner', 'Владелец') RETURNING id`,
+    );
+    await database().query(
+      "INSERT INTO family_memberships (family_id, user_id, role) VALUES ($1, $2, 'owner')",
+      [family.rows[0]!.id, user.rows[0]!.id],
+    );
+    await database().query(
+      `INSERT INTO memory_items
+         (family_id, owner_user_id, author_user_id, author_telegram_user_id, scope, kind,
+          content, source, confirmation, sensitivity, operation_key, embedding_status)
+       VALUES ($1, $2, $2, 'index-state-owner', 'personal', 'fact', 'Непроиндексированное сведение',
+               'test:index-state', 'user_confirmed', 'normal', 'index-state', 'failed')`,
+      [family.rows[0]!.id, user.rows[0]!.id],
+    );
+
+    const client = await database().connect();
+    try {
+      await client.query(`SET ROLE ${METRICS_ROLE}`);
+      const result = await client.query<{ embedding_status: string; total: string }>(
+        "SELECT embedding_status, total FROM public.monitoring_memory_index_state",
+      );
+
+      const failed = result.rows.find((row) => row.embedding_status === "failed");
+      expect(Number(failed?.total)).toBeGreaterThanOrEqual(1);
+    } finally {
+      await client.query("RESET ROLE").catch(() => undefined);
+      client.release();
+      // Integration files share one database and some of them count rows without a filter,
+      // so this fixture removes itself instead of shifting a neighbouring test's totals.
+      await database().query("DELETE FROM families WHERE id = $1", [family.rows[0]!.id]);
+      await database().query("DELETE FROM users WHERE id = $1", [user.rows[0]!.id]);
     }
   });
 

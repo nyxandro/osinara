@@ -33,8 +33,10 @@ import {
   formatRetrievedMemoryInstructions,
   memoryRetrievalQuery,
   retrieveMemoryTurnContext,
+  type MemoryRetrievalDiagnostics,
   type MemoryTurnContext,
 } from "../memory-retrieval.js";
+import { memoryShowJournal, type MemorySelectionWindow } from "../memory-show-journal.js";
 import {
   MemoryContextFailure, memoryFailureCode, recordMemoryContextIncident,
   type MemoryContextIncident, type MemoryContextPhase,
@@ -249,16 +251,19 @@ export function createMemoryBlockResolver(dependencies: {
   reportFailure: (incident: MemoryContextIncident) => Promise<void>;
   authorize: (ctx: TurnBlockContext) => MemoryAuthorization;
   createProfile: (auth: MemoryAuthorization, input: CreateProfileViewInput) => Promise<ProfileView>;
+  openSelectionWindow: (conversationId: string, eveSessionId: string, turnId: string) => Promise<number>;
   retrieve: (
     auth: MemoryAuthorization,
     query: string,
     skillHints: readonly string[],
+    window: MemorySelectionWindow | null,
   ) => Promise<MemoryTurnContext>;
 }) {
   return async function resolve(ctx: TurnBlockContext, turnId: string): Promise<string | null> {
     const started = performance.now();
     let outcome = "skipped";
     let memories: number | null = null;
+    let diagnostics: MemoryRetrievalDiagnostics | null = null;
     let selection = memorySelectionMetrics(null);
     let profileCharacters: number | null = null;
     let profileMemoryRefs: string[] | null = null;
@@ -269,16 +274,39 @@ export function createMemoryBlockResolver(dependencies: {
     try {
       const authorization = dependencies.authorize(ctx);
       phase = "query";
-      const query = memoryRetrievalQuery(ctx.session.auth, ctx.messages,
-        ctx.channel?.kind === "subagent" || Boolean(ctx.session.parent));
+      const delegated = ctx.channel?.kind === "subagent" || Boolean(ctx.session.parent);
+      const query = memoryRetrievalQuery(ctx.session.auth, ctx.messages, delegated);
       if (query === null) return null;
       phase = "retrieval";
+      // The window exists only where there is a conversation to remember inside; a scheduled run
+      // has none, and then the selection behaves as it always did. A turn is identified by the Eve
+      // session together with its id: Eve numbers turns inside a session and replaces the session
+      // every fifty of them, so `turn_0` comes round again inside one long conversation.
+      //
+      // A delegated child inherits the parent's verified auth, conversation included, but it is
+      // not a turn of the conversation: it runs inside one. Giving it a window would let its work
+      // hide records from the person's next question and would spend turn numbers nobody spoke in.
+      const conversationId = delegated
+        ? undefined
+        : ctx.session.auth.current?.attributes.telegramConversationId;
+      const window = typeof conversationId === "string"
+        ? {
+          conversationId,
+          eveSessionId: ctx.session.id,
+          turnId,
+          turnOrdinal: await dependencies.openSelectionWindow(
+            conversationId, ctx.session.id, turnId,
+          ),
+        }
+        : null;
       const context = await dependencies.retrieve(
         authorization,
         query,
         applicationThreadSkillHints(ctx.messages),
+        window,
       );
       memories = context.memories.length;
+      diagnostics = context.diagnostics;
       outcome = "succeeded";
       phase = "profile";
       const profileInput = telegramProfileInput(ctx, context.retrievedClaimIds, turnId);
@@ -294,7 +322,9 @@ export function createMemoryBlockResolver(dependencies: {
       phase = "format";
       return [
         ...(profile === null ? [] : [formatProfileViewContext(profile)]),
-        formatRetrievedMemoryInstructions(context.memories, context.threads),
+        formatRetrievedMemoryInstructions(
+          context.memories, context.threads, context.diagnostics.semanticBranchAvailable,
+        ),
       ].join("\n\n");
     } catch (error) {
       outcome = "failed";
@@ -318,7 +348,7 @@ export function createMemoryBlockResolver(dependencies: {
       return MEMORY_UNAVAILABLE_BLOCK;
     } finally {
       console.info(JSON.stringify({ code: "AGENT_MEMORY_RETRIEVAL_METRICS", sessionId: ctx.session.id,
-        turnId, outcome, memories, ...selection, profileCharacters, profileMemoryRefs,
+        turnId, outcome, memories, ...selection, ...diagnostics, profileCharacters, profileMemoryRefs,
         threadRefs, threadCharacters, failurePhase: outcome === "failed" ? phase : null, causeCode,
         durationMs: Math.round(performance.now() - started) }));
     }
@@ -408,6 +438,7 @@ export const resolveMemoryBlock = createMemoryBlockResolver({
   reportFailure: recordMemoryContextIncident,
   authorize: requireMemoryAuthorization,
   createProfile: profileViewRepository.create,
+  openSelectionWindow: memoryShowJournal.openTurn,
   retrieve: retrieveMemoryTurnContext,
 });
 

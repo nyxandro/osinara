@@ -87,8 +87,10 @@ describeWithDatabase("soft-deleted memory", () => {
     const id = await insertFact("факт с эмбеддингом");
     await database().query(
       `INSERT INTO memory_embedding_chunks
-         (memory_item_id, chunk_index, content, start_offset, end_offset, embedding, embedding_model)
-       VALUES ($1, 0, 'факт с эмбеддингом', 0, 18, array_fill(0.1, ARRAY[384])::vector, 'e5')`,
+         (memory_item_id, chunk_index, content, embedding_input, start_offset, end_offset,
+            embedding, embedding_model)
+       VALUES ($1, 0, 'факт с эмбеддингом', 'факт с эмбеддингом', 0, 18,
+               array_fill(0.1, ARRAY[384])::vector, 'e5')`,
       [id],
     );
     const ragCount = async (): Promise<number> => {
