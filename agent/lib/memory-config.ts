@@ -29,6 +29,19 @@ export const CONVERSATION_TIMELINE_SELECTION_MAX_ENTRIES = 50;
 // The retired service remains until the installed production controller removes its process contract.
 export const MEMORY_EXTRACTION_WORKER_IDLE_MILLISECONDS = 1_000;
 export const MEMORY_EXTRACTION_WORKER_READY_PATH = "/tmp/osinara-memory-extraction-worker-ready";
+/**
+ * The embedding worker touches this file on every pass of its loop, and its healthcheck requires
+ * it to be fresh. Without it a hung worker was indistinguishable from a healthy one: the process
+ * stays alive, memories keep being written, and they quietly stop being findable by meaning.
+ */
+export const MEMORY_EMBEDDING_WORKER_READY_PATH = "/tmp/osinara-memory-embedding-worker-ready";
+/**
+ * How stale the readiness mark may be before the container is called unhealthy. The mark is
+ * touched after every job, and one job may spend a tokenizer call and a batch of embeddings, each
+ * bounded by the client's own thirty-second timeout. Ninety seconds therefore sits above an
+ * honest slow job and still catches a hung loop inside two minutes.
+ */
+export const MEMORY_EMBEDDING_WORKER_STALE_MILLISECONDS = 90_000;
 export const MEMORY_EXTRACTION_WORKER_STABILITY_MILLISECONDS = 30_000;
 export const MEMORY_EVIDENCE_SNIPPET_MAX_CHARACTERS = 1_000;
 

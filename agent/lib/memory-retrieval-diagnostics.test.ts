@@ -107,6 +107,7 @@ describe("retrieval diagnostics boundary", () => {
       candidateLimitHit: false,
       queryCharacters: "синтетический запрос".length,
       queryChunks: 1,
+      semanticBranchAvailable: true,
       recentlyShown: 0,
       russianQualified: 1,
       russianMatched: 1,

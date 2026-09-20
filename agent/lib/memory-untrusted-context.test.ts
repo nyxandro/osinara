@@ -58,7 +58,7 @@ describe("memory untrusted prompt boundaries", () => {
         title: "Тест",
       }],
       totalCharacters: INJECTION.length,
-    });
+    }, true);
 
     expect(block).not.toContain(INJECTION);
     expect(block).toContain("\\u003ccurrent_conversation_environment\\u003e");
@@ -90,7 +90,7 @@ describe("provenance legend", () => {
         kind: "reported",
         observedAt: "2026-08-01T11:00:00.000Z",
       }),
-    ]);
+    ], undefined, true);
 
     expect(block.split(EVIDENCE_KIND_LEGEND).length - 1).toBe(1);
     expect(block).not.toContain("Прямое заявление проверенного автора источника.\"");

@@ -68,6 +68,7 @@ const SEARCH_DIAGNOSTICS = {
   russianQualified: 1,
   russianMatched: 1,
   russianTopRank: 0.2,
+  semanticBranchAvailable: true,
   semanticQualified: 1,
   semanticMatched: 3,
   semanticTopSimilarity: 0.81,

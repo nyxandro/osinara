@@ -1,7 +1,11 @@
 /** Root-only operator recovery inside the trusted backend container; never executes a model. */
 import { AppError } from "../agent/lib/app-error.js";
 import { closeDatabase } from "../agent/lib/database.js";
-import { inspectMemoryReviewLanes, skipUnboundMemoryReviewBatch } from "../agent/lib/memory-review/memory-review-admin.js";
+import {
+  inspectMemoryReviewLanes,
+  skipPartialMemoryReviewBatch,
+  skipUnboundMemoryReviewBatch,
+} from "../agent/lib/memory-review/memory-review-admin.js";
 import { recoverEmptyReviewModelFailure } from "../agent/lib/memory-review/memory-review-model-admin.js";
 import { isConfiguredEveSessionTerminal } from "../agent/lib/sessions/workflow-postgres-session-storage.js";
 import { modelRouteKey } from "../agent/lib/model-route.js";
@@ -17,6 +21,10 @@ try {
     const result = await skipUnboundMemoryReviewBatch({ batchId, reason });
     console.log(JSON.stringify({ code: "AGENT_MEMORY_REVIEW_OPERATOR_SKIPPED", batchId, ...result,
       message: "Согласованный пропуск зафиксирован. Проверьте следующую голову очереди командой inspect" }));
+  } else if (action === "skip-partial" && batchId && reason && extra.length === 0) {
+    const result = await skipPartialMemoryReviewBatch({ batchId, reason });
+    console.log(JSON.stringify({ code: "AGENT_MEMORY_REVIEW_OPERATOR_SKIPPED_PARTIAL", batchId, ...result,
+      message: "Пакет пропущен, уже записанные воспоминания оставлены. Остаток его диапазона разобран не будет" }));
   } else if (action === "recover-model" && batchId && reason && extra.length === 2) {
     const { modelProviderConfig } = await import("../agent/lib/model-provider-config.js");
     const outcome = await recoverEmptyReviewModelFailure({ batchId, expectedEveSessionId: reason,
@@ -26,7 +34,7 @@ try {
     console.log(JSON.stringify({ code: "AGENT_MEMORY_REVIEW_RECOVERY_WAITING", batchId, outcome,
       message: "Пакет ожидает нового успешного обращения к модели. Повтор запустит штатный диспетчер" }));
   } else {
-    throw new AppError("AGENT_MEMORY_REVIEW_ADMIN_USAGE", "Используйте inspect, skip-unbound ID ПРИЧИНА или recover-model ID EVE_SESSION_ID КОД_СБОЯ ПРИЧИНА");
+    throw new AppError("AGENT_MEMORY_REVIEW_ADMIN_USAGE", "Используйте inspect, skip-unbound ID ПРИЧИНА, skip-partial ID ПРИЧИНА или recover-model ID EVE_SESSION_ID КОД_СБОЯ ПРИЧИНА");
   }
 } catch (error) {
   console.error(error);

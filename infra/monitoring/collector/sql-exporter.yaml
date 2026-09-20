@@ -27,6 +27,10 @@ collectors:
         query: SELECT status, total, recent FROM monitoring_memory_embedding_jobs
       - query_name: memory_index_state
         query: SELECT embedding_status, total FROM monitoring_memory_index_state
+      - query_name: memory_embedding_backlog
+        query: |
+          SELECT pending, oldest_pending_age_seconds
+          FROM monitoring_memory_embedding_backlog
       - query_name: runtime_maintenance
         query: |
           SELECT phase, 1 AS present, age_seconds
@@ -104,6 +108,21 @@ collectors:
         key_labels: [embedding_status]
         values: [total]
         query_ref: memory_index_state
+
+      # The only number that tells a working indexing worker from a hung one while there is work:
+      # it stays near zero on a live loop and grows linearly on a stopped one. With an empty queue
+      # it says nothing, and that case is covered from the other side by osinara_memory_index_state.
+      - metric_name: osinara_memory_embedding_oldest_pending_age_seconds
+        type: gauge
+        help: 'Age in seconds of the oldest memory record still waiting to be indexed.'
+        values: [oldest_pending_age_seconds]
+        query_ref: memory_embedding_backlog
+
+      - metric_name: osinara_memory_embedding_pending
+        type: gauge
+        help: 'Memory records waiting for the indexing worker.'
+        values: [pending]
+        query_ref: memory_embedding_backlog
 
       - metric_name: osinara_model_last_success_age_seconds
         type: gauge

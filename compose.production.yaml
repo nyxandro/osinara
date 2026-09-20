@@ -65,9 +65,15 @@ services:
       CLI_PROXY_API_KEY: ${CLI_PROXY_API_KEY:?CLI_PROXY_API_KEY is required}
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent --show-error --header \"Authorization: Bearer $${CLI_PROXY_API_KEY}\" http://127.0.0.1:8317/v1/models >/dev/null"]
-      interval: 5s
+      # Этот компонент пишет строку журнала на каждый запрос, и отключить её нечем: журнал ведёт
+      # сторонний бинарник. Опрос раз в пять секунд давал 100 194 строки за неделю из 355 135 по
+      # всему проекту. Пока контейнер поднимается, проверка идёт часто; дальше раз в полминуты —
+      # этого хватает, чтобы заметить смерть процесса, и в шесть раз меньше шума.
+      interval: 30s
+      start_period: 100s
+      start_interval: 2s
       timeout: 5s
-      retries: 20
+      retries: 3
     networks:
       - app-network
     read_only: true
@@ -153,6 +159,14 @@ services:
       MEMORY_EMBEDDING_BASE_URL: http://memory-embedding:80
     networks:
       - app-network
+    # Без этого зависший воркер неотличим от исправного: процесс жив, воспоминания пишутся,
+    # но перестают находиться смысловым поиском, и снаружи это выглядит как обычный промах.
+    healthcheck:
+      test: ["CMD", "node", "-e", "const fs=require('node:fs'),p='/tmp/osinara-memory-embedding-worker-ready';if(!fs.existsSync(p)||Date.now()-fs.statSync(p).mtimeMs>90000)process.exit(1)"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
     restart: unless-stopped
     logging: *bounded-json-logs
 

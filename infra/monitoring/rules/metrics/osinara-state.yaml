@@ -82,6 +82,21 @@ groups:
           description: 'Эти сведения сохранены и видны в списке памяти, но поиск по смыслу их не находит и не найдёт, пока они не будут проиндексированы. Снаружи это выглядит как обычный промах поиска.'
           runbook: 'Проверить контейнеры memory-embedding и memory-embedding-worker, затем last_error_code в memory_embedding_jobs. После устранения причины — npm run memory:reindex внутри контейнера agent.'
 
+      # A hung indexing worker stays a live process, so nothing exits and nothing is logged. While
+      # there is work, this is the number that tells the two apart: on a live loop a job waits
+      # seconds, on a stopped one the age grows without bound. Ten minutes is far longer than any
+      # honest backlog of one batch and short enough that the owner notices the same day.
+      - alert: OsinaraMemoryIndexingStalled
+        expr: osinara_memory_embedding_oldest_pending_age_seconds > 600
+        for: 10m
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Индексация памяти стоит: самая старая задача ждёт {{ $value | humanizeDuration }}'
+          description: 'Новые воспоминания сохраняются, но смысловой поиск их не находит. Снаружи это выглядит как обычный промах поиска.'
+          runbook: 'docker ps для memory-embedding-worker: состояние unhealthy означает вставший цикл. Затем docker logs --tail 100 и last_error_code в memory_embedding_jobs.'
+
       - alert: OsinaraRuntimeMaintenanceStuck
         expr: osinara_runtime_maintenance_phase{phase!="ready"} == 1
         for: 15m

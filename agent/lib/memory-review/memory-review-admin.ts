@@ -1,10 +1,20 @@
-/** Trusted operator recovery for a completed review with missing source binding; never replays Eve. */
+/**
+ * Trusted operator recovery for a stuck memory review; never replays Eve.
+ *
+ * Exports:
+ * - `inspectMemoryReviewLanes`: the head of every lane and how much is waiting behind it.
+ * - `skipUnboundMemoryReviewBatch`: the narrow skip for a head whose sources lost their binding.
+ * - `skipPartialMemoryReviewBatch`: the skip for a head that failed after writing part of its
+ *   memories, which neither of the other commands would take.
+ */
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
+import { isRecoverableModelCode } from "../model-failure.js";
 import { advanceCompletedChain } from "./memory-review-terminal-repository.js";
 
 const SOURCE_MISSING = "AGENT_MEMORY_REVIEW_SOURCE_BINDING_MISSING";
 const OPERATOR_SKIPPED = "AGENT_MEMORY_REVIEW_OPERATOR_SKIPPED";
+const PARTIAL_SKIPPED = "AGENT_MEMORY_REVIEW_OPERATOR_SKIPPED_PARTIAL";
 const UUID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu;
 
 export async function inspectMemoryReviewLanes() {
@@ -142,6 +152,135 @@ export async function skipUnboundMemoryReviewBatch(input: { batchId: string; rea
     );
     await client.query("COMMIT");
     return { outcome: "skipped", processedThroughSequence: cursor };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * The way out of the one state that had none: a head that failed after writing part of its
+ * memories. `skip-unbound` refuses it because its diagnostic code is different, and
+ * `recover-model` refuses it by construction as soon as any memory was written — correctly, since
+ * a replay would write those memories a second time. The lane then stopped until somebody edited
+ * the production database by hand.
+ *
+ * What is kept and what is lost is a product decision, not a technical one, and it is taken here
+ * in the form the issue recommends: **what was written stays, the rest of the range is never
+ * reviewed**. The alternative — rolling the written memories back — would need a way to undo a
+ * review write that does not exist, and the third option, reading the conversation to decide
+ * record by record, puts its content in front of an operator, which the project's boundaries
+ * avoid. The choice, the reason and how much memory was kept all go into the audit record.
+ *
+ * The command refuses a batch that `skip-unbound` or `recover-model` would take without losing
+ * anything: each of those proves its own case is safe, while this one throws away the rest of the
+ * range and proves nothing, which is why it demands a reason in the operator's own words.
+ */
+export async function skipPartialMemoryReviewBatch(input: { batchId: string; reason: string }): Promise<{
+  keptMemories: number; outcome: "replayed" | "skipped"; processedThroughSequence: string;
+}> {
+  if (!UUID_PATTERN.test(input.batchId) || !input.reason.trim() || input.reason.length > 2_000) {
+    throw new AppError(
+      "AGENT_MEMORY_REVIEW_PARTIAL_SKIP_INPUT_INVALID",
+      "Укажите точный ID пакета и причину пропуска до двух тысяч символов",
+    );
+  }
+  const client = await database().connect();
+  try {
+    await client.query("BEGIN");
+    const locked = await client.query<{
+      id: string; lane_id: string; conversation_id: string; application_session_id: string | null;
+      status: string; diagnostic_code: string | null; eve_session_id: string | null;
+      eve_turn_id: string | null; predecessor_sequence: string; from_sequence: string;
+      through_sequence: string; source_count: number;
+    }>(
+      `SELECT id, lane_id, conversation_id, application_session_id, status::text, diagnostic_code,
+              eve_session_id, eve_turn_id, predecessor_sequence::text, from_sequence::text,
+              through_sequence::text, source_count
+         FROM memory_review_batches WHERE id = $1 FOR UPDATE`, [input.batchId],
+    );
+    const batch = locked.rows[0];
+    if (!batch) throw new AppError(
+      "AGENT_MEMORY_REVIEW_PARTIAL_SKIP_NOT_FOUND", "Пакет не найден. Повторите inspect и проверьте ID",
+    );
+    const lane = await client.query<{ processed_through_sequence: string }>(
+      "SELECT processed_through_sequence::text FROM memory_review_lanes WHERE id = $1 FOR UPDATE",
+      [batch.lane_id],
+    );
+    // Only what a reader of memory would still see: a soft-deleted record is not «kept».
+    const countKept = async () => (await client.query<{ kept: number }>(
+      "SELECT count(*)::integer AS kept FROM memory_items WHERE source = $1",
+      [`eve:${batch.eve_session_id}:${batch.eve_turn_id}`],
+    )).rows[0]!.kept;
+    // A repeat of the same command is the same answer, and it must not move the cursor twice.
+    if (batch.status === "skipped" && batch.diagnostic_code === PARTIAL_SKIPPED) {
+      const keptMemories = await countKept();
+      await client.query("COMMIT");
+      return {
+        keptMemories,
+        outcome: "replayed",
+        processedThroughSequence: lane.rows[0]!.processed_through_sequence,
+      };
+    }
+    if (!["ambiguous", "failed"].includes(batch.status) || !batch.eve_session_id ||
+        !batch.eve_turn_id ||
+        lane.rows[0]!.processed_through_sequence !== batch.predecessor_sequence) throw new AppError(
+      "AGENT_MEMORY_REVIEW_PARTIAL_SKIP_STATE_INVALID",
+      "Пропуск доступен только для первого завершённого с ошибкой пакета очереди. Повторите inspect",
+    );
+    const keptMemories = await countKept();
+    // Both refusals point at a command that loses nothing: `skip-unbound` replays a batch whose
+    // sources lost their binding, `recover-model` returns a recoverable model failure to the
+    // ordinary queue. This command throws away the rest of the range, so it must not be the easy
+    // answer to a case somebody else can actually recover.
+    if (keptMemories === 0 && batch.diagnostic_code === SOURCE_MISSING) throw new AppError(
+      "AGENT_MEMORY_REVIEW_PARTIAL_SKIP_NOT_APPLICABLE",
+      "Этот случай разбирает команда skip-unbound: она проверяет, что пропуск безопасен",
+    );
+    if (keptMemories === 0 && isRecoverableModelCode(batch.diagnostic_code ?? "")) throw new AppError(
+      "AGENT_MEMORY_REVIEW_PARTIAL_SKIP_NOT_APPLICABLE",
+      "Записей памяти нет, а сбой модели восстановим: используйте recover-model, он вернёт пакет в очередь без потерь",
+    );
+    if (batch.application_session_id) {
+      const session = await client.query<{ retired_at: Date | null }>(
+        "SELECT retired_at FROM conversation_sessions WHERE id = $1", [batch.application_session_id],
+      );
+      if (session.rows[0]?.retired_at == null) throw new AppError(
+        "AGENT_MEMORY_REVIEW_PARTIAL_SKIP_SESSION_ACTIVE",
+        "Сессия пакета ещё не закрыта. Сначала проверьте завершение её работы",
+      );
+    }
+    await client.query(
+      `UPDATE memory_review_batches SET status = 'skipped', diagnostic_code = $2,
+         updated_at = now(), lease_token = NULL, lease_expires_at = NULL WHERE id = $1`,
+      [batch.id, PARTIAL_SKIPPED],
+    );
+    await advanceCompletedChain(client, batch.lane_id);
+    // Every other terminal path releases the source rows, and they are what holds a group's
+    // messages back from ordinary pruning. The memories already written keep their own binding.
+    await client.query("DELETE FROM memory_review_batch_sources WHERE batch_id = $1", [batch.id]);
+    const advanced = await client.query<{ processed_through_sequence: string }>(
+      "SELECT processed_through_sequence::text FROM memory_review_lanes WHERE id = $1",
+      [batch.lane_id],
+    );
+    const cursor = advanced.rows[0]!.processed_through_sequence;
+    await client.query(
+      `INSERT INTO audit_events (family_id, event_type, subject_id, metadata)
+       SELECT family_id, 'memory_review.operator_skipped_partial', $2,
+         jsonb_build_object('reason', $3::text, 'operator', 'root-cli',
+           'originalDiagnosticCode', $4::text, 'keptMemories', $5::integer,
+           'eveSessionId', $6::text, 'eveTurnId', $7::text, 'fromSequence', $8::text,
+           'throughSequence', $9::text, 'sourceCount', $10::integer,
+           'processedThroughSequence', $11::text)
+       FROM application_conversations WHERE id = $1`,
+      [batch.conversation_id, batch.id, input.reason.trim(), batch.diagnostic_code, keptMemories,
+        batch.eve_session_id, batch.eve_turn_id, batch.from_sequence, batch.through_sequence,
+        batch.source_count, cursor],
+    );
+    await client.query("COMMIT");
+    return { keptMemories, outcome: "skipped", processedThroughSequence: cursor };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
