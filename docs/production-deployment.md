@@ -207,6 +207,21 @@ entrypoint must be `root:root 0750`. The script rejects symlinks or different me
 sources a module. It creates `/opt/osinara/releases`, `/opt/osinara/backups`, and the atomic
 `/opt/osinara/release.env`.
 
+These files are placed by the operator and **no release updates them**: a change under
+`scripts/production-deploy/` reaches the server only when it is installed by hand. After merging
+such a change, copy it across and let the next minute poll pick it up:
+
+```bash
+sudo install -o root -g root -m 0640 scripts/production-deploy/<module>.sh \
+  /opt/osinara/bin/production-deploy/<module>.sh
+# the entrypoint itself is 0750
+sudo install -o root -g root -m 0750 scripts/production-deploy.sh \
+  /opt/osinara/bin/production-deploy.sh
+```
+
+A release in flight holds the lock, so install between releases and verify with
+`diff` against the repository afterwards.
+
 `/opt/osinara/.env` must be exactly `root:root 0600`. Before v0.15.2 it contains the required
 `DEEPSEEK_API_KEY`; during the v0.15.2 bridge it gains `MODEL_API_KEY` with the exact same credential
 token while retaining `DEEPSEEK_API_KEY` for the rollback window. It also contains

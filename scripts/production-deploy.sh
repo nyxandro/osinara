@@ -141,8 +141,9 @@ main() {
   fi
   WORK_DIR="$(mktemp -d "${BASE_DIR}/.deploy.XXXXXX")"
   # Only the lock owner ends the window, so no exit can cut a running release short. Every timer
-  # tick that finds nothing to do still passes here, which is what clears a window left behind by
-  # a deployment killed before its trap ran: it expires on its own, but usually within a minute.
+  # tick that finds nothing to do still passes here, which is how a window left behind by a
+  # deployment killed before its trap ran gets cleared within a minute instead of running its full
+  # length. A tick that finds the window already closed writes nothing: see `close_deploy_window`.
   trap 'close_deploy_window "$DEPLOY_WINDOW_METRIC"; cleanup_runtime_files' EXIT
 
   if [[ "$INITIAL_MODE" -eq 1 ]]; then
