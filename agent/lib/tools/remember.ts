@@ -12,6 +12,10 @@ import { memoryRepository } from "../memory-repository.js";
 import { logMemoryWriteEvent } from "../memory-observability.js";
 import { resolveMemoryTurnSource } from "../memory-turn-source.js";
 import { toModelMemory } from "../model-memory.js";
+import {
+  MemoryNeighbourRefusal,
+  memoryNeighbourRefusalResult,
+} from "../memory-neighbour-gate.js";
 import { rememberInputSchema } from "../remember-contract.js";
 import { memoryReviewBatchId } from "../memory-review/memory-review-session.js";
 
@@ -73,6 +77,19 @@ export default defineTool({
         ...(input.thread === undefined ? {} : { thread: input.thread }),
       });
     } catch (error) {
+      // A stop for review is the product working, not a failure: answered, not thrown. Thrown, it
+      // would be logged by the framework with its whole payload, and the neighbours it names are
+      // memory content — it would leave the application for the log store on every refusal.
+      if (error instanceof MemoryNeighbourRefusal) {
+        logMemoryWriteEvent({
+          code: "AGENT_MEMORY_WRITE_DEFERRED",
+          errorCode: "AGENT_MEMORY_SIMILAR_RECORD_EXISTS",
+          scope,
+          sourceKind: source?.isCurrent === true ? "current" : requestedSourceKind,
+          threadAction: input.thread?.action ?? "none",
+        });
+        return memoryNeighbourRefusalResult(error);
+      }
       const errorCode = isAppError(error)
         ? error.code
         : typeof error === "object" && error !== null &&
