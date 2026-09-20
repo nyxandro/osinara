@@ -21,6 +21,7 @@ import {
   embedMemoryNeighbourProbe,
   requireMemoryNeighbourDecision,
 } from "./memory-neighbour-gate.js";
+import { normalizeMemoryEventDate } from "./memory-event-window-repository.js";
 import { enforceMemoryQuota } from "./memory-quota.js";
 import {
   memoryOperationHash,
@@ -335,10 +336,13 @@ export async function createMemoryClaim(
         ? auth.groupId!
         : auth.familyId;
     const contentNormalized = prepared?.contentNormalized ?? normalizeMemoryClaimContent(input.content);
-    // The slot name is checked before anything is written: a refusal must cost nothing.
+    // Both are checked before anything is written: a refusal must cost nothing.
     const attribute = input.attribute === undefined
       ? null
       : normalizeMemoryAttribute(input.attribute, input.kind);
+    const occurredOn = input.occurredOn === undefined
+      ? null
+      : normalizeMemoryEventDate(input.occurredOn);
     const reinforced = await reinforceExactClaim(client, auth, {
       contentNormalized,
       memoryProjectId: threadWrite?.identity.memoryProjectId ?? null,
@@ -392,12 +396,13 @@ export async function createMemoryClaim(
           sensitivity, operation_key, origin_conversation_id, subject_participant_id,
            subject_conversation_id, subject_user_id, subject_label, memory_project_id, save_approved,
            endorsed_by_user_id, endorsed_at, provenance_state, content_normalized, profile_eligible,
-           claim_status, duplicate_of, attribute)
+           claim_status, duplicate_of, attribute, occurred_on)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
                 $15, $16, $17, $18, $19, $20, $21, $22,
-                CASE WHEN $22::uuid IS NULL THEN NULL ELSE now() END, $23, $24, $25, $26, $27, $28)
-       RETURNING id, attribute, author_user_id, author_telegram_user_id, scope, kind, content,
-                 source, confirmation, sensitivity, message_thread_id, embedding_status,
+                CASE WHEN $22::uuid IS NULL THEN NULL ELSE now() END, $23, $24, $25, $26, $27,
+                $28, $29::date)
+       RETURNING id, attribute, occurred_on, author_user_id, author_telegram_user_id, scope, kind,
+                 content, source, confirmation, sensitivity, message_thread_id, embedding_status,
                  created_at, updated_at`,
       [auth.familyId, ownerUserId, groupId, authorUserId,
         prepared?.primaryAuthorTelegramUserId ?? (input.scope === "group" ? auth.telegramUserId : null),
@@ -413,7 +418,8 @@ export async function createMemoryClaim(
             (prepared.subjectUserId !== null || prepared.subjectParticipantId !== null),
           "active",
           null,
-          attribute],
+          attribute,
+          occurredOn],
     );
     const row = result.rows[0];
     if (!row) throw new AppError("AGENT_MEMORY_WRITE_FAILED", "Не удалось сохранить запись памяти");

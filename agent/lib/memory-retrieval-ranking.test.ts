@@ -22,6 +22,7 @@ function result(
 ): ScoredMemoryRetrievalResult {
   const memory: ReferencedMemoryItem = {
     attribute: null,
+    occurredOn: null,
     author: { status: "current_member", telegramUserId: "synthetic", userId: "synthetic" },
     confirmation: "user_confirmed",
     content,

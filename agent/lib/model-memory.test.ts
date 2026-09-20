@@ -13,6 +13,7 @@ describe("toModelMemory", () => {
   it("returns the exact model-safe DTO without internal identifiers or processing metadata", () => {
     const projected = toModelMemory({
       attribute: null,
+    occurredOn: null,
     author: {
         status: "current_member",
         telegramUserId: "7100000001",

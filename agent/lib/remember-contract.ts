@@ -106,6 +106,9 @@ function createRememberInputSchema(scope: z.ZodType<"family" | "group" | "person
       ),
     content: z.string().min(1).max(MEMORY_CONTENT_MAX_CHARACTERS).describe("Одно самостоятельное конкретное сведение без догадок; сохраняй известные даты, контекст и точный URL для полезной ссылки"),
     kind: z.enum(["profile", "preference", "fact", "episode", "family_shared"]).describe("profile: устойчивые сведения о человеке; preference: предпочтения; episode: отдельное событие или опыт; fact: прочие факты, планы, ресурсы; family_shared: общесемейные сведения"),
+    occurredOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional().describe(
+      "День, когда событие произошло, в формате ГГГГ-ММ-ДД, если он известен из разговора. Не вычисляй его из расплывчатых слов вроде «давно» или «тем летом» и не подставляй сегодняшнюю дату: не уверена — не указывай вовсе",
+    ),
     scope: scope.describe("Разрешённая область памяти текущего trust zone"),
     sensitivity: z.enum(["normal", "sensitive"]).describe("Чувствительность сохраняемого сведения"),
     sourceSequence: z.string().regex(TIMELINE_SEQUENCE_PATTERN).refine(

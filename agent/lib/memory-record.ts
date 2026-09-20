@@ -55,6 +55,8 @@ export interface MemoryItem {
   attribute: string | null;
   /** Present only when the record is no longer the current one; absent means active. */
   status?: "duplicate" | "retracted" | "superseded";
+  /** The day the event happened, as the conversation gave it; null when it was never known. */
+  occurredOn: string | null;
   author: {
     status: "current_member" | "former_member" | "telegram_user";
     telegramUserId: string | null;
@@ -87,6 +89,8 @@ export interface CreateMemoryInput {
   attribute?: string;
   /** Refs of the close neighbours the model has read and declared separate from this one. */
   distinctFrom?: readonly string[];
+  /** The day the event happened, when the conversation gave it; never guessed. */
+  occurredOn?: string;
   confirmation: MemoryConfirmation;
   content: string;
   explicitSource?: CreateMemoryExplicitSourceInput;
@@ -112,6 +116,7 @@ export interface MemoryRow {
   attribute: string | null;
   /** Selected only where a reader may see more than the current version. */
   claim_status?: "active" | "duplicate" | "retracted" | "superseded";
+  occurred_on?: Date | string | null;
   author_telegram_user_id: string | null;
   author_user_id: string | null;
   confirmation: MemoryConfirmation;
@@ -131,9 +136,19 @@ export interface ReferencedMemoryRow extends MemoryRow {
   memory_ref: string;
 }
 
+/** PostgreSQL hands a `date` back as a local `Date`; only its day is meaningful. */
+function memoryEventDay(value: Date | string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") return value.slice(0, 10);
+  const month = `${value.getMonth() + 1}`.padStart(2, "0");
+  const day = `${value.getDate()}`.padStart(2, "0");
+  return `${value.getFullYear()}-${month}-${day}`;
+}
+
 export function rowToMemory(row: MemoryRow): MemoryItem {
   return {
     attribute: row.attribute ?? null,
+    occurredOn: memoryEventDay(row.occurred_on),
     ...(row.claim_status === undefined || row.claim_status === "active"
       ? {}
       : { status: row.claim_status }),

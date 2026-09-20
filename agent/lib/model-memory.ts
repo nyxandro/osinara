@@ -40,6 +40,8 @@ export interface ModelMemory {
   sensitivity: MemorySensitivity;
   /** Present only when this is not the current version of its property. */
   status?: MemoryItem["status"];
+  /** The day the event happened, when it is known; absent means only the day it was written. */
+  occurredOn?: string;
   /** Present only when the record actually changed after it was written. */
   updatedAt?: string;
   evidence?: ModelMemoryEvidence;
@@ -73,6 +75,7 @@ export function toModelMemory(
     scope: memory.scope,
     sensitivity: memory.sensitivity,
     ...(memory.status === undefined ? {} : { status: memory.status }),
+    ...(memory.occurredOn === null ? {} : { occurredOn: memory.occurredOn }),
     ...(memory.updatedAt === memory.createdAt ? {} : { updatedAt: memory.updatedAt }),
     ...(evidence === undefined ? {} : { evidence }),
   };
