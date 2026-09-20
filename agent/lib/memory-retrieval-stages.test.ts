@@ -15,9 +15,9 @@ describe("memory retrieval failure provenance", () => {
       conflicts: [], relatedClaimIds: [], results: [],
       diagnostics: {
         candidateLimitHit: false,
-        russianCandidates: 0, russianMatched: 0, russianTopRank: null,
-        semanticCandidates: 0, semanticMatched: 0, semanticTopSimilarity: null,
-        simpleCandidates: 0, simpleMatched: 0, simpleTopRank: null,
+        russianQualified: 0, russianMatched: 0, russianTopRank: null,
+        semanticQualified: 0, semanticMatched: 0, semanticTopSimilarity: null,
+        simpleQualified: 0, simpleMatched: 0, simpleTopRank: null,
       },
     });
     mocks.threads.mockReset().mockResolvedValue({ threads: [], totalCharacters: 0 });

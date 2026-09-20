@@ -25,13 +25,13 @@ describe("retrieval diagnostics boundary", () => {
     embedQuery.mockReset().mockResolvedValue([1, 0]);
     searchWithConflictClosure.mockReset().mockResolvedValue({ conflicts: [], diagnostics: {
       candidateLimitHit: false,
-      russianCandidates: 1,
+      russianQualified: 1,
       russianMatched: 1,
       russianTopRank: 0.1,
-      semanticCandidates: 1,
+      semanticQualified: 1,
       semanticMatched: 4,
       semanticTopSimilarity: 0.83,
-      simpleCandidates: 0,
+      simpleQualified: 0,
       simpleMatched: 2,
       simpleTopRank: 0.01,
     }, results: [{
@@ -106,13 +106,13 @@ describe("retrieval diagnostics boundary", () => {
       candidateLimitHit: false,
       queryCharacters: "синтетический запрос".length,
       queryChunks: 1,
-      russianCandidates: 1,
+      russianQualified: 1,
       russianMatched: 1,
       russianTopRank: 0.1,
-      semanticCandidates: 1,
+      semanticQualified: 1,
       semanticMatched: 4,
       semanticTopSimilarity: 0.83,
-      simpleCandidates: 0,
+      simpleQualified: 0,
       simpleMatched: 2,
       simpleTopRank: 0.01,
     });

@@ -34,14 +34,14 @@ import {
 } from "./memory-retrieval-ranking.js";
 
 interface DiagnosticsColumns {
-  russian_candidates: number | string;
   russian_matched: number | string;
+  russian_qualified: number | string;
   russian_top_rank: number | string | null;
-  semantic_candidates: number | string;
   semantic_matched: number | string;
+  semantic_qualified: number | string;
   semantic_top_similarity: number | string | null;
-  simple_candidates: number | string;
   simple_matched: number | string;
+  simple_qualified: number | string;
   simple_top_rank: number | string | null;
 }
 
@@ -150,22 +150,23 @@ function requiredCount(value: number | string): number {
 }
 
 function rowToBranchDiagnostics(row: DiagnosticsColumns): MemoryRetrievalBranchDiagnostics {
-  const russianMatched = requiredCount(row.russian_matched);
-  const semanticMatched = requiredCount(row.semantic_matched);
-  const simpleMatched = requiredCount(row.simple_matched);
+  const russianQualified = requiredCount(row.russian_qualified);
+  const semanticQualified = requiredCount(row.semantic_qualified);
+  const simpleQualified = requiredCount(row.simple_qualified);
   return {
-    // Measured before the limit, so this says the limit actually cut something, rather than that a
-    // branch happened to end on exactly the limit after its own threshold had already trimmed it.
-    candidateLimitHit: [russianMatched, semanticMatched, simpleMatched]
+    // Counted among those that passed the gate, before the limit applies: that is what the limit
+    // actually cuts. Counting matches instead would make the flag permanently true, because the
+    // semantic branch matches every indexed record before its threshold.
+    candidateLimitHit: [russianQualified, semanticQualified, simpleQualified]
       .some((count) => count > MEMORY_RETRIEVAL_CANDIDATE_LIMIT),
-    russianCandidates: requiredCount(row.russian_candidates),
-    russianMatched,
+    russianMatched: requiredCount(row.russian_matched),
+    russianQualified,
     russianTopRank: optionalScore(row.russian_top_rank),
-    semanticCandidates: requiredCount(row.semantic_candidates),
-    semanticMatched,
+    semanticMatched: requiredCount(row.semantic_matched),
+    semanticQualified,
     semanticTopSimilarity: optionalScore(row.semantic_top_similarity),
-    simpleCandidates: requiredCount(row.simple_candidates),
-    simpleMatched,
+    simpleMatched: requiredCount(row.simple_matched),
+    simpleQualified,
     simpleTopRank: optionalScore(row.simple_top_rank),
   };
 }
@@ -306,15 +307,16 @@ export const memoryRetrievalRepository = {
                 (SELECT count(*) FROM simple_matched) AS simple_matched,
                 (SELECT count(*) FROM russian_matched) AS russian_matched,
                 (SELECT count(*) FROM semantic_matched) AS semantic_matched,
-                (SELECT count(*) FROM simple_lexical) AS simple_candidates,
-                (SELECT count(*) FROM russian_morphology) AS russian_candidates,
-                (SELECT count(*) FROM semantic) AS semantic_candidates
+                (SELECT count(*) FROM simple_matched WHERE relevance >= $7) AS simple_qualified,
+                (SELECT count(*) FROM russian_matched WHERE relevance >= $8) AS russian_qualified,
+                (SELECT count(*) FROM semantic_matched WHERE similarity >= $11)
+                  AS semantic_qualified
        )
        SELECT diagnostics.simple_top_rank, diagnostics.russian_top_rank,
               diagnostics.semantic_top_similarity, diagnostics.simple_matched,
               diagnostics.russian_matched, diagnostics.semantic_matched,
-              diagnostics.simple_candidates,
-              diagnostics.russian_candidates, diagnostics.semantic_candidates, ranked.*
+              diagnostics.simple_qualified, diagnostics.russian_qualified,
+              diagnostics.semantic_qualified, ranked.*
        FROM diagnostics
        LEFT JOIN LATERAL (
        SELECT authorized.id, authorized.author_user_id, authorized.author_telegram_user_id,

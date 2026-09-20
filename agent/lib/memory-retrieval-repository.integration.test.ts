@@ -6,7 +6,7 @@
  * - Personal and family authorization is applied before ranking.
  * - Unresolved conflict closure loads both authorized versions even when one has no retrieval score.
  * - Conflict closure withholds base results when authorization changes between repository queries.
- * - Branch diagnostics report pre-threshold scores and post-threshold candidate counts.
+ * - Branch diagnostics report pre-threshold scores, matches, and what passed each gate.
  */
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -134,13 +134,13 @@ describeWithDatabase("memoryRetrievalRepository", () => {
       .toBeLessThan(MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY);
     expect(diagnostics).toMatchObject({
       candidateLimitHit: false,
-      russianCandidates: 0,
+      russianQualified: 0,
       russianMatched: 0,
       russianTopRank: null,
       // The semantic branch did look at the record and scored it; the gate is what dropped it.
-      semanticCandidates: 0,
+      semanticQualified: 0,
       semanticMatched: 1,
-      simpleCandidates: 0,
+      simpleQualified: 0,
       simpleMatched: 0,
       simpleTopRank: null,
     });
