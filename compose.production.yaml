@@ -162,11 +162,11 @@ services:
     # Без этого зависший воркер неотличим от исправного: процесс жив, воспоминания пишутся,
     # но перестают находиться смысловым поиском, и снаружи это выглядит как обычный промах.
     healthcheck:
-      test: ["CMD", "node", "-e", "const fs=require('node:fs'),p='/tmp/osinara-memory-embedding-worker-ready';if(!fs.existsSync(p)||Date.now()-fs.statSync(p).mtimeMs>30000)process.exit(1)"]
-      interval: 10s
+      test: ["CMD", "node", "-e", "const fs=require('node:fs'),p='/tmp/osinara-memory-embedding-worker-ready';if(!fs.existsSync(p)||Date.now()-fs.statSync(p).mtimeMs>90000)process.exit(1)"]
+      interval: 15s
       timeout: 3s
       retries: 3
-      start_period: 30s
+      start_period: 60s
     restart: unless-stopped
     logging: *bounded-json-logs
 

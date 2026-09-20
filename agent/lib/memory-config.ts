@@ -36,11 +36,12 @@ export const MEMORY_EXTRACTION_WORKER_READY_PATH = "/tmp/osinara-memory-extracti
  */
 export const MEMORY_EMBEDDING_WORKER_READY_PATH = "/tmp/osinara-memory-embedding-worker-ready";
 /**
- * How stale the readiness mark may be before the container is called unhealthy. The loop polls
- * every second when idle and a batch is bounded, so half a minute is far longer than any honest
- * pass and short enough to notice within a deploy window.
+ * How stale the readiness mark may be before the container is called unhealthy. The mark is
+ * touched after every job, and one job may spend a tokenizer call and a batch of embeddings, each
+ * bounded by the client's own thirty-second timeout. Ninety seconds therefore sits above an
+ * honest slow job and still catches a hung loop inside two minutes.
  */
-export const MEMORY_EMBEDDING_WORKER_STALE_MILLISECONDS = 30_000;
+export const MEMORY_EMBEDDING_WORKER_STALE_MILLISECONDS = 90_000;
 export const MEMORY_EXTRACTION_WORKER_STABILITY_MILLISECONDS = 30_000;
 export const MEMORY_EVIDENCE_SNIPPET_MAX_CHARACTERS = 1_000;
 

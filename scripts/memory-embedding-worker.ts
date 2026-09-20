@@ -38,6 +38,11 @@ function errorCode(error: unknown): string {
   return isAppError(error) ? error.code : "AGENT_MEMORY_EMBEDDING_UNEXPECTED";
 }
 
+/** The heartbeat: touched after every job, so a slow pass is not mistaken for a stuck one. */
+async function markAlive(): Promise<void> {
+  await writeFile(MEMORY_EMBEDDING_WORKER_READY_PATH, "ready\n", { encoding: "utf8", mode: 0o600 });
+}
+
 async function processBatch(): Promise<number> {
   const jobs = await memoryIndexRepository.claim(
     MEMORY_EMBEDDING_JOB_BATCH_SIZE,
@@ -47,6 +52,7 @@ async function processBatch(): Promise<number> {
 
   // Each parent is all-or-nothing: provider batches are bounded, then every chunk commits together.
   for (const job of jobs) {
+    await markAlive();
     if (job.attempts > 1) {
       // A retry happens only after a recorded transient outage, so it must be visible: without
       // this line, a record quietly cycling between failed and leased looks like an idle worker.
@@ -138,12 +144,9 @@ console.info(JSON.stringify({
 try {
   while (!stopping) {
     const processed = await processBatch();
-    // Touched on every pass, not only when there was work: an idle worker is healthy, a stuck one
-    // is not, and only the loop itself knows the difference.
-    await writeFile(MEMORY_EMBEDDING_WORKER_READY_PATH, "ready\n", {
-      encoding: "utf8",
-      mode: 0o600,
-    });
+    // Also on an empty pass: an idle worker is healthy, a stuck one is not, and only the loop
+    // itself knows the difference.
+    await markAlive();
     if (processed === 0) await sleep(IDLE_POLL_MILLISECONDS);
   }
 } catch (error) {

@@ -89,9 +89,9 @@ async function embedQueryOrDegrade(prepared: string): Promise<readonly (readonly
 
 export function formatRetrievedMemoryInstructions(
   memories: readonly ModelMemoryContextItem[],
-  threads?: MemoryThreadContext,
-  /** Absent means the whole pipeline ran; false says the word branches ran alone. */
-  semanticBranchAvailable = true,
+  threads: MemoryThreadContext | undefined,
+  /** False says the word branches ran alone, and the model must not read empty as absent. */
+  semanticBranchAvailable: boolean,
 ): string {
   return [
     "Технический факт: эти записи до вызова модели отобраны сервером в разрешённых областях памяти.",
@@ -194,10 +194,10 @@ export async function retrieveMemoryTurnContext(
 ): Promise<MemoryTurnContext> {
   // One cleaned text for both: the word branches and the vector see the same question.
   const prepared = prepareMemoryQuery(query);
-  let phase: MemoryContextPhase = "embedding";
+  // Not `embedding`: that step no longer fails the turn, it degrades and says so in the log.
+  let phase: MemoryContextPhase = "search";
   try {
     const embeddings = await embedQueryOrDegrade(prepared);
-    phase = "search";
     const retrieval = await memoryRetrievalRepository.searchWithConflictClosure(
       auth,
       prepared,

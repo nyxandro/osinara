@@ -9,6 +9,7 @@
  */
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
+import { isRecoverableModelCode } from "../model-failure.js";
 import { advanceCompletedChain } from "./memory-review-terminal-repository.js";
 
 const SOURCE_MISSING = "AGENT_MEMORY_REVIEW_SOURCE_BINDING_MISSING";
@@ -173,8 +174,9 @@ export async function skipUnboundMemoryReviewBatch(input: { batchId: string; rea
  * record by record, puts its content in front of an operator, which the project's boundaries
  * avoid. The choice, the reason and how much memory was kept all go into the audit record.
  *
- * The command deliberately refuses a batch the narrow commands cover. Each of those proves its own
- * case is safe to replay; this one proves nothing and says so, which is why it demands a reason.
+ * The command refuses a batch that `skip-unbound` or `recover-model` would take without losing
+ * anything: each of those proves its own case is safe, while this one throws away the rest of the
+ * range and proves nothing, which is why it demands a reason in the operator's own words.
  */
 export async function skipPartialMemoryReviewBatch(input: { batchId: string; reason: string }): Promise<{
   keptMemories: number; outcome: "replayed" | "skipped"; processedThroughSequence: string;
@@ -207,13 +209,14 @@ export async function skipPartialMemoryReviewBatch(input: { batchId: string; rea
       "SELECT processed_through_sequence::text FROM memory_review_lanes WHERE id = $1 FOR UPDATE",
       [batch.lane_id],
     );
-    const kept = await client.query<{ kept: number }>(
-      "SELECT count(*)::integer AS kept FROM memory_items_all WHERE source = $1",
+    // Only what a reader of memory would still see: a soft-deleted record is not «kept».
+    const countKept = async () => (await client.query<{ kept: number }>(
+      "SELECT count(*)::integer AS kept FROM memory_items WHERE source = $1",
       [`eve:${batch.eve_session_id}:${batch.eve_turn_id}`],
-    );
-    const keptMemories = kept.rows[0]!.kept;
+    )).rows[0]!.kept;
     // A repeat of the same command is the same answer, and it must not move the cursor twice.
     if (batch.status === "skipped" && batch.diagnostic_code === PARTIAL_SKIPPED) {
+      const keptMemories = await countKept();
       await client.query("COMMIT");
       return {
         keptMemories,
@@ -227,9 +230,18 @@ export async function skipPartialMemoryReviewBatch(input: { batchId: string; rea
       "AGENT_MEMORY_REVIEW_PARTIAL_SKIP_STATE_INVALID",
       "Пропуск доступен только для первого завершённого с ошибкой пакета очереди. Повторите inspect",
     );
-    if (batch.diagnostic_code === SOURCE_MISSING && keptMemories === 0) throw new AppError(
+    const keptMemories = await countKept();
+    // Both refusals point at a command that loses nothing: `skip-unbound` replays a batch whose
+    // sources lost their binding, `recover-model` returns a recoverable model failure to the
+    // ordinary queue. This command throws away the rest of the range, so it must not be the easy
+    // answer to a case somebody else can actually recover.
+    if (keptMemories === 0 && batch.diagnostic_code === SOURCE_MISSING) throw new AppError(
       "AGENT_MEMORY_REVIEW_PARTIAL_SKIP_NOT_APPLICABLE",
       "Этот случай разбирает команда skip-unbound: она проверяет, что пропуск безопасен",
+    );
+    if (keptMemories === 0 && isRecoverableModelCode(batch.diagnostic_code ?? "")) throw new AppError(
+      "AGENT_MEMORY_REVIEW_PARTIAL_SKIP_NOT_APPLICABLE",
+      "Записей памяти нет, а сбой модели восстановим: используйте recover-model, он вернёт пакет в очередь без потерь",
     );
     if (batch.application_session_id) {
       const session = await client.query<{ retired_at: Date | null }>(
@@ -242,11 +254,13 @@ export async function skipPartialMemoryReviewBatch(input: { batchId: string; rea
     }
     await client.query(
       `UPDATE memory_review_batches SET status = 'skipped', diagnostic_code = $2,
-         completed_at = COALESCE(completed_at, now()), updated_at = now(),
-         lease_token = NULL, lease_expires_at = NULL WHERE id = $1`,
+         updated_at = now(), lease_token = NULL, lease_expires_at = NULL WHERE id = $1`,
       [batch.id, PARTIAL_SKIPPED],
     );
     await advanceCompletedChain(client, batch.lane_id);
+    // Every other terminal path releases the source rows, and they are what holds a group's
+    // messages back from ordinary pruning. The memories already written keep their own binding.
+    await client.query("DELETE FROM memory_review_batch_sources WHERE batch_id = $1", [batch.id]);
     const advanced = await client.query<{ processed_through_sequence: string }>(
       "SELECT processed_through_sequence::text FROM memory_review_lanes WHERE id = $1",
       [batch.lane_id],

@@ -22,6 +22,7 @@ const describeWithDatabase = integrationTestsEnabled ? describe : describe.skip;
 const METRICS_ROLE = "osinara_metrics";
 const MONITORING_VIEWS = [
   "monitoring_agent_schedule_runs",
+  "monitoring_memory_embedding_backlog",
   "monitoring_memory_embedding_jobs",
   "monitoring_memory_index_state",
   "monitoring_memory_review_batches",

@@ -194,8 +194,10 @@ export function createMemoryThreadBriefRepository() {
          OR (thread.title_embedding_model = $8
            AND 1 - (thread.title_embedding <=> $6::vector) >= $9))
        ORDER BY skill_hint DESC,
-                (thread.title_embedding_model = $8 AND
-                  1 - (thread.title_embedding <=> $6::vector) >= $9) DESC,
+                -- Without a query vector the comparison is NULL, and NULLs sort first under DESC:
+                -- threads with a current title embedding would jump ahead of better-matching ones.
+                COALESCE(thread.title_embedding_model = $8 AND
+                  1 - (thread.title_embedding <=> $6::vector) >= $9, false) DESC,
                 retrieval_hits DESC, thread.updated_at DESC
         LIMIT $10`,
       [input.auth.familyId, input.auth.scopes, input.auth.userId, input.auth.groupId,
