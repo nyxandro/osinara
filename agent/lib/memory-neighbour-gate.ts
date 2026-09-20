@@ -7,6 +7,8 @@
  * - `MemoryNeighbourProbe`: the vector the gate compares with, or null when there is none.
  * - `memoryNeighbourProbePassage`: the text that vector is built from.
  * - `requireMemoryNeighbourDecision`: the gate itself, run inside the write transaction.
+ * - `MemoryNeighbourRefusal`: the stop, which is a product outcome and not a failure.
+ * - `memoryNeighbourRefusalResult`: what the model is answered with instead.
  *
  * Saving a claim checks only for an identical string today, so «Аня не ест глютен» and «у Ани
  * непереносимость глютена» become two records. Nobody sees the second one appear, but both queue
@@ -38,7 +40,6 @@ import { chunkMemoryContent } from "./memory-embedding-chunks.js";
 import { memoryEmbeddingInput } from "./memory-embedding-header.js";
 import { MEMORY_EMBEDDING_MODEL_VERSION } from "./memory-config.js";
 import type { MemoryKind } from "./memory-record.js";
-import { ModelFacingError } from "./model-facing-error.js";
 
 const MEMORY_NEIGHBOUR_SIMILARITY = 0.93;
 export const MEMORY_NEIGHBOUR_CANDIDATE_LIMIT = 5;
@@ -137,11 +138,34 @@ export async function requireMemoryNeighbourDecision(
     .filter((row) => !input.declaredRefs.includes(row.memory_ref));
   if (undeclared.length === 0) return;
 
-  const listed = undeclared
-    .map((row) => `${row.memory_ref}: «${row.content}»`)
-    .join("; ");
-  throw new ModelFacingError({
-    category: "conflict",
+  throw new MemoryNeighbourRefusal(undeclared.map((row) => ({
+    content: row.content,
+    memoryRef: row.memory_ref,
+  })));
+}
+
+/**
+ * Not an error, however it travels. Stopping a write because the model should look at what is
+ * already stored is the product working, and the neighbours it has to look at are memory content.
+ * Thrown as its own class so the tool boundary can turn it into an ordinary answer: an error would
+ * be logged by the framework with its whole payload, and the family's records would leave the
+ * application for a log store with different retention and a different circle of access.
+ */
+export class MemoryNeighbourRefusal extends Error {
+  /** The stable code, so a caller that only classifies failures reads this one like any other. */
+  readonly code = "AGENT_MEMORY_SIMILAR_RECORD_EXISTS";
+
+  constructor(readonly neighbours: readonly { content: string; memoryRef: string }[]) {
+    // The message carries the code alone: the neighbours are memory content, and a message is the
+    // part that ends up in a log when something up the stack decides this was a failure.
+    super("AGENT_MEMORY_SIMILAR_RECORD_EXISTS");
+    this.name = "MemoryNeighbourRefusal";
+  }
+}
+
+/** The answer the model gets instead of the refusal, with the texts it has to read. */
+export function memoryNeighbourRefusalResult(refusal: MemoryNeighbourRefusal) {
+  return {
     code: "AGENT_MEMORY_SIMILAR_RECORD_EXISTS",
     correction: [
       "Прочитай эти записи и выбери одно из трёх.",
@@ -149,10 +173,9 @@ export async function requireMemoryNeighbourDecision(
       "Другое свойство того же человека — задай attribute, короткое имя свойства, и сохрани как новую версию именно этого свойства.",
       "Действительно отдельное сведение — повтори вызов, перечислив в distinctFrom все memoryRef из этого списка.",
     ].join(" "),
-    example: { distinctFrom: undeclared.map((row) => row.memory_ref) },
-    field: "content",
-    reason: `В памяти уже есть близкие по смыслу записи о том же субъекте: ${listed}`,
-    retryable: true,
-    sideEffectStatus: "not_started",
-  });
+    distinctFrom: refusal.neighbours.map((one) => one.memoryRef),
+    reason: "В памяти уже есть близкие по смыслу записи о том же субъекте.",
+    saved: false,
+    similar: refusal.neighbours,
+  };
 }
