@@ -4,8 +4,11 @@
  * Constructs:
  * - Claims bounded PostgreSQL batches and calls the pinned local TEI service.
  * - Completes each lease atomically or records one terminal failure without hidden retries.
+ * - Publishes readiness on every pass so a hung loop becomes an unhealthy container.
  * - Stops gracefully on SIGINT/SIGTERM and releases the database pool.
  */
+import { rm, writeFile } from "node:fs/promises";
+
 import { isAppError } from "../agent/lib/app-error.js";
 import { closeDatabase } from "../agent/lib/database.js";
 import { chunkMemoryContent } from "../agent/lib/memory-embedding-chunks.js";
@@ -20,6 +23,7 @@ import {
   MEMORY_EMBEDDING_LEASE_MILLISECONDS,
   MEMORY_EMBEDDING_MODEL_VERSION,
   MEMORY_EMBEDDING_PROVIDER_BATCH_SIZE,
+  MEMORY_EMBEDDING_WORKER_READY_PATH,
 } from "../agent/lib/memory-config.js";
 import { memoryIndexRepository } from "../agent/lib/memory-index-repository.js";
 
@@ -120,9 +124,26 @@ process.once("SIGTERM", () => {
   stopping = true;
 });
 
+// A container restart reuses its writable layer, so stale readiness must be cleared before work.
+await rm(MEMORY_EMBEDDING_WORKER_READY_PATH, { force: true });
+// One line at start, and only at start. It removes the ambiguity this worker used to live in:
+// an empty log meant «no errors», and that is exactly what a hung process looks like too. The
+// heartbeat is the readiness file, not the log — a pulse in the log would drown the codes.
+console.info(JSON.stringify({
+  code: "AGENT_MEMORY_EMBEDDING_WORKER_STARTED",
+  batchSize: MEMORY_EMBEDDING_JOB_BATCH_SIZE,
+  model: MEMORY_EMBEDDING_MODEL_VERSION,
+}));
+
 try {
   while (!stopping) {
     const processed = await processBatch();
+    // Touched on every pass, not only when there was work: an idle worker is healthy, a stuck one
+    // is not, and only the loop itself knows the difference.
+    await writeFile(MEMORY_EMBEDDING_WORKER_READY_PATH, "ready\n", {
+      encoding: "utf8",
+      mode: 0o600,
+    });
     if (processed === 0) await sleep(IDLE_POLL_MILLISECONDS);
   }
 } catch (error) {
