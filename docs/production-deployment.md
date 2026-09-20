@@ -354,12 +354,18 @@ Releases carrying such a change say so in `docs/releases/vVERSION.md`. After the
 healthy, run once inside the running agent container:
 
 ```bash
-docker compose -p osinara-production exec agent npm run memory:reindex
+docker exec osinara-production-agent-1 node /app/.runtime/scripts/reindex-memory.js
 ```
 
-It re-queues every active record for the indexing worker; on the current corpus this takes minutes,
-and `osinara_memory_index_state` returns to `indexed` for all of them when it is done. The first
-release that needs it is the one containing the chunk-size and subject-header change.
+It re-queues every active record for the indexing worker; on the current corpus this takes about
+half an hour, and `osinara_memory_index_state` returns to `indexed` for all of them when it is done.
+
+The command runs the compiled operator script, the same way `memory-review-admin.js` is run. It is
+**not** `npm run memory:reindex`: the image contains `agent/`, `config/` and `migrations/`, but no
+`scripts/` directory, so the npm script resolves to a file that is not there. Earlier releases
+documented the npm form and it never worked; the compiled script ships from v0.27.1 onward, and the
+reindex for v0.27.0 itself was performed by running the same logic through `tsx` against
+`/app/agent/lib`.
 
 ## Failure semantics
 
