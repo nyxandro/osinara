@@ -289,6 +289,7 @@ describe("memory block resolution", () => {
       reportFailure: vi.fn(),
       authorize: () => authorization,
       createProfile,
+      openSelectionWindow: async () => 1,
       retrieve: vi.fn().mockResolvedValue({
         memories: [],
         retrievedClaimIds: [],
@@ -306,7 +307,8 @@ describe("memory block resolution", () => {
 
   it("returns no block when the turn carries no user text", async () => {
     const retrieve = vi.fn();
-    const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization, createProfile, retrieve });
+    const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization, createProfile,
+      openSelectionWindow: async () => 1, retrieve });
 
     expect(await resolve(context(privateAuth), TEST_TURN_ID)).toBeNull();
     expect(retrieve).not.toHaveBeenCalled();
@@ -324,6 +326,7 @@ describe("memory block resolution", () => {
       candidateLimitHit: true,
       queryCharacters: "Личный вопрос".length,
       queryChunks: 1,
+      recentlyShown: 0,
       russianQualified: 3,
       russianMatched: 3,
       russianTopRank: 0.42,
@@ -335,6 +338,7 @@ describe("memory block resolution", () => {
       simpleTopRank: null,
     };
     const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization, createProfile,
+      openSelectionWindow: async () => 1,
       retrieve: vi.fn().mockResolvedValue({ diagnostics, memories, retrievedClaimIds: [],
         threads: { threads: [], totalCharacters: 0 } }),
     });
@@ -354,6 +358,7 @@ describe("memory block resolution", () => {
   it("discloses unavailable memory instead of throwing on authorization failure", async () => {
     const resolve = createMemoryBlockResolver({
       reportFailure: vi.fn(),
+      openSelectionWindow: async () => 1,
       authorize: () => {
         throw new Error("AGENT_MEMORY_CONTEXT_INVALID: нет области памяти");
       },
@@ -375,6 +380,7 @@ describe("memory block resolution", () => {
       reportFailure: vi.fn(),
       authorize: () => authorization,
       createProfile,
+      openSelectionWindow: async () => 1,
       retrieve: vi.fn().mockRejectedValue(new Error("embedding service down")),
     });
 
@@ -408,6 +414,7 @@ describe("memory block resolution", () => {
       reportFailure: vi.fn(),
       authorize: () => authorization,
       createProfile: profile,
+      openSelectionWindow: async () => 1,
       retrieve,
     });
     const telegramAuth = auth({

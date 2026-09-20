@@ -24,7 +24,7 @@ describe("memory failure ownership", () => {
     if (phase === "retrieval") retrieve.mockRejectedValue(error);
     const resolve = createMemoryBlockResolver({
       authorize: () => { if (phase === "authorization") throw error; return authorization; },
-      retrieve, createProfile, reportFailure,
+      openSelectionWindow: async () => 1, retrieve, createProfile, reportFailure,
     });
     const ctx = phase !== "profile" ? context : { ...context, session: { ...context.session, auth: {
       ...context.session.auth, current: { ...context.session.auth.current!, attributes: {
@@ -44,6 +44,7 @@ describe("memory failure ownership", () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const resolve = createMemoryBlockResolver({ authorize: () => authorization,
+        openSelectionWindow: async () => 1,
         retrieve: vi.fn().mockRejectedValue(new Error("unavailable")), createProfile: vi.fn(),
         reportFailure: vi.fn().mockRejectedValue(new Error("incident DB down")),
       });

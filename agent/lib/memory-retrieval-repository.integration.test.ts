@@ -136,6 +136,7 @@ describeWithDatabase("memoryRetrievalRepository", () => {
       .toBeLessThan(MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY);
     expect(diagnostics).toMatchObject({
       candidateLimitHit: false,
+      recentlyShown: 0,
       russianQualified: 0,
       russianMatched: 0,
       russianTopRank: null,
