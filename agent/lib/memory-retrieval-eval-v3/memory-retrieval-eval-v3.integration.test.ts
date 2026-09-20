@@ -21,6 +21,7 @@ import {
   MEMORY_RETRIEVAL_LIMIT,
 } from "../memory-config.js";
 import { memoryRetrievalRepository } from "../memory-retrieval-repository.js";
+import { memoryEmbeddingInput } from "../memory-embedding-header.js";
 import { prepareMemoryQuery } from "../memory-query-preparation.js";
 import type { MemoryAuthorization } from "../memory-context.js";
 import {
@@ -153,7 +154,11 @@ describeEval("memory retrieval eval v3", () => {
       embeddings.push(...await embedMemoryPassages(
         flatChunks
           .slice(offset, offset + MEMORY_EMBEDDING_PROVIDER_BATCH_SIZE)
-          .map((entry) => entry.chunk.content),
+          // The same text production sends: the chunk carrying the subject it is about.
+          .map((entry) => memoryEmbeddingInput(entry.chunk.content, {
+            kind: entry.record.kind,
+            subjectLabel: entry.record.subjectLabel ?? null,
+          })),
       ));
     }
 
@@ -185,12 +190,17 @@ describeEval("memory retrieval eval v3", () => {
     for (const [index, entry] of flatChunks.entries()) {
       await database().query(
         `INSERT INTO memory_embedding_chunks
-           (memory_item_id, chunk_index, content, start_offset, end_offset, embedding, embedding_model)
-         VALUES ($1, $2, $3, $4, $5, $6::vector, $7)`,
+           (memory_item_id, chunk_index, content, embedding_input, start_offset, end_offset,
+            embedding, embedding_model)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::vector, $8)`,
         [
           insertedIds.get(entry.record.key),
           entry.chunk.chunkIndex,
           entry.chunk.content,
+          memoryEmbeddingInput(entry.chunk.content, {
+            kind: entry.record.kind,
+            subjectLabel: entry.record.subjectLabel ?? null,
+          }),
           entry.chunk.startOffset,
           entry.chunk.endOffset,
           `[${embeddings[index]!.join(",")}]`,

@@ -46,6 +46,8 @@ export interface MemoryRetrievalEvalRecordV3 {
   key: string;
   kind: MemoryKind;
   scope: MemoryRetrievalEvalScopeV3;
+  /** What the record is about, as it would be stored on the record itself. */
+  subjectLabel?: string;
   updatedAt: string;
 }
 

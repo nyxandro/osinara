@@ -9,6 +9,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  MEMORY_EMBEDDING_CHUNK_MAX_CHARACTERS,
   MEMORY_EMBEDDING_DIMENSIONS,
   MEMORY_EMBEDDING_MODEL,
 } from "./memory-config.js";
@@ -84,13 +85,19 @@ describe("memory embedding client", () => {
         model: MEMORY_EMBEDDING_MODEL,
       });
     });
-    const query = Array.from({ length: 50 }, (_, index) => `подробность-${index}`).join(" ");
+    // Long enough to outgrow the chunk limit several times over, whatever that limit is set to.
+    const wordsPerChunk = Math.ceil(MEMORY_EMBEDDING_CHUNK_MAX_CHARACTERS / 14);
+    const query = Array.from({ length: wordsPerChunk * 3 }, (_, index) => `подробность-${index}`)
+      .join(" ");
 
     await expect(embedMemoryQuery(query, fetchMock)).resolves.toEqual(vector);
     const requests = fetchMock.mock.calls.map((call) => JSON.parse(String(call[1]?.body)) as { input: string[] });
     const inputs = requests.flatMap((request) => request.input);
     expect(inputs.length).toBeGreaterThan(1);
-    expect(inputs.every((input) => input.startsWith("query: ") && input.length <= 407)).toBe(true);
+    expect(inputs.every((input) =>
+      input.startsWith("query: ") &&
+      input.length <= MEMORY_EMBEDDING_CHUNK_MAX_CHARACTERS + "query: ".length,
+    )).toBe(true);
   });
 
   it("fails fast when the environment-specific worker URL is absent", async () => {

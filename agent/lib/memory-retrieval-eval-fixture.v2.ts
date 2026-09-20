@@ -20,21 +20,25 @@ export const MEMORY_RETRIEVAL_EVAL_RECORDS_V2: readonly MemoryRetrievalEvalRecor
   {
     content: "Репозиторий проекта Orca: https://code.example/orca/runtime.",
     key: "orca-repository",
+    subjectLabel: "Проект Orca",
     updatedAt: "2026-08-01T10:00:00.000Z",
   },
   {
     content: "Документация фреймворка Eve опубликована по адресу https://docs.example/eve.",
     key: "eve-documentation",
+    subjectLabel: "Фреймворк Eve",
     updatedAt: "2026-08-02T10:00:00.000Z",
   },
   {
     content: "Навык Pinecone Reader установлен локально из проверенного пакета навыков.",
     key: "local-skill-package",
+    subjectLabel: "Навык Pinecone Reader",
     updatedAt: "2026-08-03T10:00:00.000Z",
   },
   {
     content: "Ссылка на макет семейного календаря: https://design.example/family-calendar.",
     key: "calendar-design-link",
+    subjectLabel: "Семейный календарь",
     updatedAt: "2026-08-04T10:00:00.000Z",
   },
 ] as const;
@@ -79,8 +83,12 @@ export const MEMORY_RETRIEVAL_EVAL_QUERIES_V2: readonly MemoryRetrievalEvalQuery
 ] as const;
 
 // Pinned PostgreSQL/E5 measurement makes the known false-positive gap explicit and reproducible.
+// The quarter is what naming the subject inside the vector bought: «Что известно про ассистента
+// Иву?» no longer answers with the documentation of a framework called Eve. The three that remain
+// ask about a project the corpus holds nothing about, and the search still offers the nearest
+// neighbour it does hold.
 export const MEMORY_RETRIEVAL_R1_BASELINE_V2 = {
-  hardNegativeEmptyRate: 0,
+  hardNegativeEmptyRate: 0.25,
   hardNegativeQueries: 4,
   identityControlRecallAt5: 1,
 } as const;

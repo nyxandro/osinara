@@ -78,8 +78,9 @@ async function indexClaim(claimId: string): Promise<void> {
   );
   await database().query(
     `INSERT INTO memory_embedding_chunks
-       (memory_item_id, chunk_index, content, start_offset, end_offset, embedding, embedding_model)
-     SELECT id, 0, content, 0, char_length(content), $2::vector, $3
+       (memory_item_id, chunk_index, content, embedding_input, start_offset, end_offset,
+            embedding, embedding_model)
+     SELECT id, 0, content, content, 0, char_length(content), $2::vector, $3
      FROM memory_items WHERE id = $1`,
     [claimId, `[${QUERY_VECTOR.join(",")}]`, MEMORY_EMBEDDING_MODEL_VERSION],
   );

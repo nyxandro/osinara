@@ -6,6 +6,7 @@
  * - `embedMemoryQueryChunks`: embeds each piece of a retrieval query separately.
  * - `embedMemoryQuery`: folds those pieces into one vector for callers that need a single one.
  * - `memoryQueryCentroid`: the same folding over pieces already fetched.
+ * - `countMemoryPassageTokens`: how many tokens each passage costs, before it is sent to embed.
  */
 import { AppError } from "./app-error.js";
 import { ModelFacingError } from "./model-facing-error.js";
@@ -162,6 +163,54 @@ async function embedMemoryTexts(
     );
   }
   return ordered as number[][];
+}
+
+/**
+ * The model's window is counted in tokens and the service is configured not to truncate, so a
+ * passage that overflows comes back as an error and the record silently stays out of the semantic
+ * index. Counting first is what lets the chunker cut again instead of losing the record.
+ */
+export async function countMemoryPassageTokens(
+  texts: readonly string[],
+  fetchImplementation: typeof fetch = fetch,
+): Promise<number[]> {
+  if (texts.length === 0) return [];
+  const endpoint = new URL("/tokenize", requireEmbeddingBaseUrl()).toString();
+  let response: Response;
+  try {
+    response = await fetchImplementation(endpoint, {
+      body: JSON.stringify({ inputs: texts.map((text) => `${E5_PASSAGE_PREFIX}${text}`) }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+      signal: AbortSignal.timeout(EMBEDDING_REQUEST_TIMEOUT_MILLISECONDS),
+    });
+  } catch (error) {
+    console.error(JSON.stringify({
+      code: "AGENT_MEMORY_EMBEDDING_PROVIDER_UNAVAILABLE",
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    throw new AppError(
+      "AGENT_MEMORY_EMBEDDING_PROVIDER_UNAVAILABLE",
+      "Локальный сервис памяти недоступен. Повторите попытку позже",
+    );
+  }
+  if (!response.ok) {
+    throw new AppError(
+      response.status === 408 || response.status === 429 || response.status >= 500
+        ? "AGENT_MEMORY_EMBEDDING_PROVIDER_BUSY"
+        : "AGENT_MEMORY_EMBEDDING_PROVIDER_FAILED",
+      "Локальный сервис памяти не смог посчитать размер текста. Повторите попытку позже",
+    );
+  }
+  const payload = await response.json() as unknown;
+  if (!Array.isArray(payload) || payload.length !== texts.length ||
+    !payload.every((tokens) => Array.isArray(tokens))) {
+    throw new AppError(
+      "AGENT_MEMORY_EMBEDDING_RESPONSE_INVALID",
+      "Локальный сервис памяти вернул некорректный размер текста",
+    );
+  }
+  return payload.map((tokens) => (tokens as unknown[]).length);
 }
 
 export async function embedMemoryPassages(

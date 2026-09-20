@@ -23,6 +23,8 @@ export type MemoryRetrievalEvalCategory =
 export interface MemoryRetrievalEvalRecord {
   content: string;
   key: string;
+  /** What the record is about, as it would be stored on the record itself. */
+  subjectLabel?: string;
   updatedAt: string;
 }
 
