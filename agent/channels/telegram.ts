@@ -24,6 +24,7 @@ import { logTelegramSilentTurn } from "../lib/telegram-silent-turn.js";
 import { deliverTelegramProgressNotice } from "../lib/telegram-progress-notice.js";
 import { asidePauseMilliseconds } from "../lib/telegram-aside-pacing.js";
 import { stripTelegramAsideDirectives } from "../lib/telegram-authored-split.js";
+import { applyMemoryUsageDirective } from "../lib/memory-usage-report.js";
 import { deliverTelegramFinalOutput } from "../lib/telegram-final-delivery.js";
 import { bindTelegramIngressTurn } from "../lib/telegram-ingress-binding.js";
 import { completeRuntimeHandoff, completeRuntimeSessionHandoffs } from "../lib/runtime-handoff.js";
@@ -141,7 +142,15 @@ export default telegramChannel({
       const replyParameters = isScheduledSession(ctx)
         ? undefined
         : telegramTurnReplyParameters(channel.state, ctx);
-      const durableText = stripTelegramAsideDirectives(message);
+      // The memory-usage line is transport syntax like the aside directive: it is read, counted,
+      // and removed before anything is sent or stored.
+      const answered = await applyMemoryUsageDirective({
+        auth: ctx.session.auth,
+        sessionId,
+        text: message,
+        turnId: ctx.session.turn.id,
+      });
+      const durableText = stripTelegramAsideDirectives(answered);
       let sentMessages: Awaited<ReturnType<typeof deliverTelegramFinalOutput>>;
       try {
         sentMessages = await deliverTelegramFinalOutput({
@@ -153,7 +162,7 @@ export default telegramChannel({
           },
           eveSessionId: ctx.session.id,
           eveTurnId: ctx.session.turn.id,
-          markdown: isScheduledSession(ctx) ? durableText : message,
+          markdown: isScheduledSession(ctx) ? durableText : answered,
           sendChunk: async (chunk, ordinal) => {
             // An authored aside is a second thought, so it arrives after a visible typing pause.
             if (chunk.pacing === "aside") {

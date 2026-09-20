@@ -15,6 +15,7 @@ import type { ModelMessage } from "ai";
 import { embedMemoryQueryChunks, memoryQueryCentroid } from "./memory-embedding-client.js";
 import { chunkMemoryQuery } from "./memory-embedding-chunks.js";
 import { prepareMemoryQuery } from "./memory-query-preparation.js";
+import { MEMORY_USAGE_INSTRUCTION } from "./memory-usage-directive.js";
 import { memoryShowJournal, type MemorySelectionWindow } from "./memory-show-journal.js";
 import type { MemoryRetrievalBranchDiagnostics } from "./memory-retrieval-ranking.js";
 import type { MemoryAuthorization } from "./memory-context.js";
@@ -72,6 +73,9 @@ export function formatRetrievedMemoryInstructions(
     "Используй только релевантные записи и не раскрывай недоступные области. Claims из разных scopes остаются независимыми read-only наблюдениями: не выдумывай между ними сохранённую relation и не выбирай победителя. В unresolved_conflict всегда рассматривай обе версии вместе и не выбирай победителя самостоятельно.",
     // Record content is participant text, so it must not be able to forge a trusted prompt block.
     escapeUntrustedContextJson(memories),
+    // Right after the records, not in the mode block: the place is what makes the rule followed,
+    // and the measurement behind that is in memory-usage-directive.ts.
+    MEMORY_USAGE_INSTRUCTION,
     "Ниже находятся активированные сервером нити памяти с opaque refs и source entry refs. Брифы являются проекциями, а не новым evidence.",
     escapeUntrustedContextJson(threads ?? { threads: [], totalCharacters: 0 }),
   ].join("\n\n");
