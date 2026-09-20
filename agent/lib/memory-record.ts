@@ -85,6 +85,8 @@ export interface CreateMemoryInput {
   memoryReviewBatchId?: string;
   /** Short name of the subject's property this record is about; absent for an episode. */
   attribute?: string;
+  /** Refs of the close neighbours the model has read and declared separate from this one. */
+  distinctFrom?: readonly string[];
   confirmation: MemoryConfirmation;
   content: string;
   explicitSource?: CreateMemoryExplicitSourceInput;

@@ -14,6 +14,8 @@
 import { z } from "zod";
 
 import { MEMORY_ATTRIBUTE_MAX_CHARACTERS } from "./memory-attribute-slot.js";
+import { MEMORY_NEIGHBOUR_CANDIDATE_LIMIT } from "./memory-neighbour-gate.js";
+import { MEMORY_REF_PATTERN } from "./model-memory.js";
 import {
   THREAD_PURPOSE_MAX_CHARACTERS,
   THREAD_TITLE_MAX_CHARACTERS,
@@ -98,6 +100,10 @@ function createRememberInputSchema(scope: z.ZodType<"family" | "group" | "person
       "Короткое имя свойства субъекта, о котором запись: «кофе», «место работы», «размер обуви». Не значение свойства и не пересказ содержания. Ставь его, когда свойство со временем меняется и новая запись отменяет прежнюю; новая запись того же субъекта с тем же именем переводит прежнюю в историю. Не ставь общее имя вроде «еда» — оно уберёт из активной памяти независимые сведения. Для kind=episode поле недопустимо",
     ),
     basis: z.enum(["agent_inferred", "user_requested"]).describe("agent_inferred: сама отобрала сведение из сообщения, не догадка; user_requested: автор прямо попросил сохранить"),
+    distinctFrom: z.array(z.string().regex(MEMORY_REF_PATTERN)).max(MEMORY_NEIGHBOUR_CANDIDATE_LIMIT)
+      .optional().describe(
+        "Только в ответ на отказ AGENT_MEMORY_SIMILAR_RECORD_EXISTS: memoryRef показанных близких записей, которые ты прочитала и считаешь другими сведениями. Не заполняй заранее",
+      ),
     content: z.string().min(1).max(MEMORY_CONTENT_MAX_CHARACTERS).describe("Одно самостоятельное конкретное сведение без догадок; сохраняй известные даты, контекст и точный URL для полезной ссылки"),
     kind: z.enum(["profile", "preference", "fact", "episode", "family_shared"]).describe("profile: устойчивые сведения о человеке; preference: предпочтения; episode: отдельное событие или опыт; fact: прочие факты, планы, ресурсы; family_shared: общесемейные сведения"),
     scope: scope.describe("Разрешённая область памяти текущего trust zone"),

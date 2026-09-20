@@ -17,6 +17,10 @@ import {
   normalizeMemoryAttribute,
   supersedeMemoryAttributeSlot,
 } from "./memory-attribute-slot.js";
+import {
+  embedMemoryNeighbourProbe,
+  requireMemoryNeighbourDecision,
+} from "./memory-neighbour-gate.js";
 import { enforceMemoryQuota } from "./memory-quota.js";
 import {
   memoryOperationHash,
@@ -254,6 +258,15 @@ export async function createMemoryClaim(
     reservation = preflight.reservation;
   }
   let titleEmbedding: Awaited<ReturnType<typeof embedMemoryThreadTitle>>;
+  // Both embeddings are taken before the transaction opens: a network call inside one would hold
+  // the write locks for as long as the service takes to answer.
+  const neighbourProbe = await embedMemoryNeighbourProbe({
+    content: input.content,
+    kind: input.kind,
+    subjectLabel: input.explicitSource?.subject.kind === "label"
+      ? input.explicitSource.subject.label
+      : null,
+  });
   try {
     titleEmbedding = await embedMemoryThreadTitle(input.thread);
   } catch (error) {
@@ -357,6 +370,19 @@ export async function createMemoryClaim(
       };
     }
 
+    // After the exact repeat has had its chance to reinforce and before anything is written: an
+    // identical text is not a decision for the model to make, and a refusal here costs the person
+    // nothing because no record has been created yet.
+    await requireMemoryNeighbourDecision(client, {
+      declaredRefs: input.distinctFrom ?? [],
+      probe: neighbourProbe,
+      scope: input.scope,
+      scopePartitionKey,
+      subjectConversationId: prepared?.subjectConversationId ?? null,
+      subjectLabel: prepared?.subjectLabel ?? null,
+      subjectParticipantId: prepared?.subjectParticipantId ?? null,
+      subjectUserId: prepared?.subjectUserId ?? null,
+    });
     await enforceMemoryQuota(client, auth, input.scope);
     const endorsedByUserId = prepared?.primaryAuthorUserId ?? null;
     const result = await client.query<Omit<ReferencedMemoryRow, "memory_ref">>(
