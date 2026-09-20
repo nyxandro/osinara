@@ -63,10 +63,30 @@ export const PROFILE_CONTEXT_MAX_SUBJECT_CHARACTERS = 8_000;
 export const PROFILE_SELECTION_DORMANCY_MILLISECONDS = 60 * 24 * 60 * 60 * 1_000;
 export const PROFILE_PROJECTION_NOTICE_LEASE_MILLISECONDS = 5 * 60 * 1_000;
 
-// Branch gates are calibrated by memory-retrieval-v1 and apply before reciprocal-rank fusion.
-export const MEMORY_RETRIEVAL_MIN_SIMPLE_LEXICAL_RANK = 0.05;
-export const MEMORY_RETRIEVAL_MIN_RUSSIAN_MORPHOLOGY_RANK = 0.05;
+// Branch gates apply before reciprocal-rank fusion.
+//
+// The word branches count how many of the question's own distinctive words the record contains,
+// and require two of them — or the whole question, when it was a single word like «4271».
+//
+// A rank cannot serve as the gate once the branches match on OR instead of AND: one matched word
+// scores the same whether the question was one word long or ten, so «4271» and «Сколько стоит
+// билет на поезд до Владивостока?» both land at 0.1. A share of the question does not work either,
+// and the measurement says so: at half the words, a long multi-topic message stops matching
+// anything, because no single record holds half of a question about three different things.
+// Two words is what separates «код домофона в подъезде» from a chance hit on «курс» in a question
+// about the exchange rate. Calibrated on memory-retrieval-v3; the two branches do different jobs,
+// so they keep separate names even while they carry the same number today.
+export const MEMORY_RETRIEVAL_MIN_SIMPLE_LEXICAL_TERM_MATCHES = 2;
+export const MEMORY_RETRIEVAL_MIN_RUSSIAN_MORPHOLOGY_TERM_MATCHES = 2;
+// Measured twice and left where it was. On memory-retrieval-v3 every off-topic question scores at
+// most 0.791, which tempts a gate at 0.80 — and at 0.80 memory-retrieval-v1 loses both of its pure
+// paraphrases, whose nearest true answer sits at 0.79002. The two distributions touch, so no single
+// number both admits a paraphrase and refuses a question that is not about memory at all. That is
+// the answer to #196: abstention has to come from a signal other than this similarity.
 export const MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY = 0.78;
+// A floating cutoff relative to the best semantic match was tried here and removed: on both
+// fixtures it changed no measured number. It can only trim one query's own tail, and an off-topic
+// question has a low best score, so its tail is measured against that same low score.
 export const MEMORY_RETRIEVAL_RRF_RANK_OFFSET = 60;
 export const MEMORY_RETRIEVAL_CONFIRMATION_BOOST = 0.001;
 export const MEMORY_RETRIEVAL_RECENCY_BOOST = 0.0005;

@@ -12,8 +12,9 @@
 import type { SessionAuth } from "eve/context";
 import type { ModelMessage } from "ai";
 
-import { embedMemoryQuery } from "./memory-embedding-client.js";
+import { embedMemoryQueryChunks, memoryQueryCentroid } from "./memory-embedding-client.js";
 import { chunkMemoryQuery } from "./memory-embedding-chunks.js";
+import { prepareMemoryQuery } from "./memory-query-preparation.js";
 import type { MemoryRetrievalBranchDiagnostics } from "./memory-retrieval-ranking.js";
 import type { MemoryAuthorization } from "./memory-context.js";
 import type { ModelMemory } from "./model-memory.js";
@@ -128,10 +129,15 @@ export async function retrieveRelevantMemories(
   diagnostics: MemoryRetrievalDiagnostics;
   memories: ModelMemoryContextItem[];
 }> {
-  const embedding = await embedMemoryQuery(query);
-  const retrieval = await memoryRetrievalRepository.searchWithConflictClosure(auth, query, embedding);
+  const prepared = prepareMemoryQuery(query);
+  const embeddings = await embedMemoryQueryChunks(prepared);
+  const retrieval = await memoryRetrievalRepository.searchWithConflictClosure(
+    auth,
+    prepared,
+    embeddings,
+  );
   return {
-    diagnostics: queryDiagnostics(query, retrieval.diagnostics),
+    diagnostics: queryDiagnostics(prepared, retrieval.diagnostics),
     memories: [
       ...retrieval.results.map((result) => toModelMemory(result.memory, result.sourceEvidence)),
       ...retrieval.conflicts.map((conflict) => ({ ...conflict, type: "unresolved_conflict" as const })),
@@ -144,11 +150,17 @@ export async function retrieveMemoryTurnContext(
   query: string,
   skillHints: readonly string[],
 ): Promise<MemoryTurnContext> {
+  // One cleaned text for both: the word branches and the vector see the same question.
+  const prepared = prepareMemoryQuery(query);
   let phase: MemoryContextPhase = "embedding";
   try {
-    const embedding = await embedMemoryQuery(query);
+    const embeddings = await embedMemoryQueryChunks(prepared);
     phase = "search";
-    const retrieval = await memoryRetrievalRepository.searchWithConflictClosure(auth, query, embedding);
+    const retrieval = await memoryRetrievalRepository.searchWithConflictClosure(
+      auth,
+      prepared,
+      embeddings,
+    );
     const memories: ModelMemoryContextItem[] = [
       ...retrieval.results.map((result) => toModelMemory(result.memory, result.sourceEvidence)),
       ...retrieval.conflicts.map((conflict) => ({ ...conflict, type: "unresolved_conflict" as const })),
@@ -156,12 +168,14 @@ export async function retrieveMemoryTurnContext(
     phase = "threads";
     const threads = await memoryThreadBriefRepository.activate({
       auth,
-      queryEmbedding: embedding,
+      // Thread activation holds one vector by contract, so the pieces fold back into their
+      // centroid here — locally, without asking the embedding service a second time.
+      queryEmbedding: memoryQueryCentroid(embeddings),
       retrievedClaimIds: retrieval.results.map((result) => result.memory.id),
       skillHints,
     });
     return {
-      diagnostics: queryDiagnostics(query, retrieval.diagnostics),
+      diagnostics: queryDiagnostics(prepared, retrieval.diagnostics),
       memories,
       retrievedClaimIds: retrieval.relatedClaimIds,
       threads,

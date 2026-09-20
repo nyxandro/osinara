@@ -13,7 +13,7 @@ const { embedQuery, searchWithConflictClosure } = vi.hoisted(() => ({
   searchWithConflictClosure: vi.fn(),
 }));
 
-vi.mock("./memory-embedding-client.js", () => ({ embedMemoryQuery: embedQuery }));
+vi.mock("./memory-embedding-client.js", () => ({ embedMemoryQueryChunks: embedQuery }));
 vi.mock("./memory-retrieval-repository.js", () => ({
   memoryRetrievalRepository: { searchWithConflictClosure },
 }));
@@ -22,7 +22,7 @@ import { retrieveRelevantMemories } from "./memory-retrieval.js";
 
 describe("retrieval diagnostics boundary", () => {
   beforeEach(() => {
-    embedQuery.mockReset().mockResolvedValue([1, 0]);
+    embedQuery.mockReset().mockResolvedValue([[1, 0]]);
     searchWithConflictClosure.mockReset().mockResolvedValue({ conflicts: [], diagnostics: {
       candidateLimitHit: false,
       russianQualified: 1,
