@@ -26,6 +26,7 @@ export function formatMemoryExportFiles(memoryExport: MemoryExport): {
     "",
     `- ID: \`${record.id}\``,
     `- Область: \`${record.scope}\``,
+    ...(record.attribute === null ? [] : [`- Свойство: \`${record.attribute}\``]),
     `- Создано: ${record.createdAt}`,
     `- Обновлено: ${record.updatedAt}`,
     `- Подтверждение: \`${record.confirmation}\``,

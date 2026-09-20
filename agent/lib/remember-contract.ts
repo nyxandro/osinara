@@ -13,6 +13,7 @@
  */
 import { z } from "zod";
 
+import { MEMORY_ATTRIBUTE_MAX_CHARACTERS } from "./memory-attribute-slot.js";
 import {
   THREAD_PURPOSE_MAX_CHARACTERS,
   THREAD_TITLE_MAX_CHARACTERS,
@@ -93,6 +94,9 @@ export const memoryThreadSchema = z.discriminatedUnion("action", [
 
 function createRememberInputSchema(scope: z.ZodType<"family" | "group" | "personal">) {
   return z.object({
+    attribute: z.string().trim().min(1).max(MEMORY_ATTRIBUTE_MAX_CHARACTERS).optional().describe(
+      "Короткое имя свойства субъекта, о котором запись: «кофе», «место работы», «размер обуви». Не значение свойства и не пересказ содержания. Ставь его, когда свойство со временем меняется и новая запись отменяет прежнюю; новая запись того же субъекта с тем же именем переводит прежнюю в историю. Не ставь общее имя вроде «еда» — оно уберёт из активной памяти независимые сведения. Для kind=episode поле недопустимо",
+    ),
     basis: z.enum(["agent_inferred", "user_requested"]).describe("agent_inferred: сама отобрала сведение из сообщения, не догадка; user_requested: автор прямо попросил сохранить"),
     content: z.string().min(1).max(MEMORY_CONTENT_MAX_CHARACTERS).describe("Одно самостоятельное конкретное сведение без догадок; сохраняй известные даты, контекст и точный URL для полезной ссылки"),
     kind: z.enum(["profile", "preference", "fact", "episode", "family_shared"]).describe("profile: устойчивые сведения о человеке; preference: предпочтения; episode: отдельное событие или опыт; fact: прочие факты, планы, ресурсы; family_shared: общесемейные сведения"),
@@ -127,6 +131,14 @@ function createRememberInputSchema(scope: z.ZodType<"family" | "group" | "person
         code: "custom",
         message: "AGENT_MEMORY_THREAD_INPUT_INVALID: Project identity недоступна в личной записи",
         path: ["thread", "identity"],
+      });
+    }
+    if (input.attribute !== undefined && input.kind === "episode") {
+      context.addIssue({
+        code: "custom",
+        message:
+          "AGENT_MEMORY_ATTRIBUTE_INVALID: Событие не имеет свойства, которое меняется со временем",
+        path: ["attribute"],
       });
     }
     if (input.sourceSequence !== undefined && input.sensitivity === "sensitive") {

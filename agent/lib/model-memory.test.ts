@@ -12,7 +12,8 @@ import { toModelMemory } from "./model-memory.js";
 describe("toModelMemory", () => {
   it("returns the exact model-safe DTO without internal identifiers or processing metadata", () => {
     const projected = toModelMemory({
-      author: {
+      attribute: null,
+    author: {
         status: "current_member",
         telegramUserId: "7100000001",
         userId: "00000000-0000-4000-8000-000000000002",

@@ -21,6 +21,7 @@ function result(
   exactDuplicateIdentity = "personal:user-1:subject:user-1",
 ): ScoredMemoryRetrievalResult {
   const memory: ReferencedMemoryItem = {
+    attribute: null,
     author: { status: "current_member", telegramUserId: "synthetic", userId: "synthetic" },
     confirmation: "user_confirmed",
     content,

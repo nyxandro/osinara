@@ -7,6 +7,7 @@
  */
 import type { PoolClient } from "pg";
 import { AppError } from "./app-error.js";
+import { restoreMemoryAttributeSlot } from "./memory-attribute-slot.js";
 import { database } from "./database.js";
 import { createMemoryClaim } from "./memory-claim-writer.js";
 import { insertClaimEvidence } from "./claim-evidence-writer.js";
@@ -102,7 +103,7 @@ async function selectAuthorizedMemory(
 ): Promise<MutationMemoryRow | null> {
   // Scope predicates run in the same lookup that resolves the opaque ref to an internal UUID.
   const result = await client.query<MutationMemoryRow>(
-    `SELECT item.id, item.author_user_id, item.author_telegram_user_id, item.scope, item.kind,
+    `SELECT item.id, item.attribute, item.author_user_id, item.author_telegram_user_id, item.scope, item.kind,
             item.content, item.source, item.confirmation, item.sensitivity, item.message_thread_id,
              item.embedding_status, item.created_at, item.updated_at, ref.memory_ref,
              item.owner_user_id, item.group_id, item.origin_conversation_id,
@@ -261,9 +262,13 @@ export const memoryRepository = {
       // `memory_items` скрывает такую строку от всех чтений и от векторной выдачи.
       // Заявление помечается отозванным, поэтому существующие триггеры снимают проекции нитей и
       // подтверждённых исходов ровно так же, как это делал каскад физического удаления.
+      // Вытесненные этой записью версии возвращаются: удаление сменщицы не должно оставлять
+      // прежний факт замещённым навсегда. `superseded_by` снимается с самой строки, потому что
+      // `retracted` по форме жизненного цикла не может на кого-то ссылаться.
+      await restoreMemoryAttributeSlot(client, memory.id);
       await client.query(
         `UPDATE memory_items_all
-            SET deleted_at = now(), claim_status = 'retracted'
+            SET deleted_at = now(), claim_status = 'retracted', superseded_by = NULL
           WHERE id = $1 AND deleted_at IS NULL`,
         [memory.id],
       );
@@ -337,9 +342,13 @@ export const memoryRepository = {
       // `memory_items` скрывает такую строку от всех чтений и от векторной выдачи.
       // Заявление помечается отозванным, поэтому существующие триггеры снимают проекции нитей и
       // подтверждённых исходов ровно так же, как это делал каскад физического удаления.
+      // Вытесненные этой записью версии возвращаются: удаление сменщицы не должно оставлять
+      // прежний факт замещённым навсегда. `superseded_by` снимается с самой строки, потому что
+      // `retracted` по форме жизненного цикла не может на кого-то ссылаться.
+      await restoreMemoryAttributeSlot(client, memory.id);
       await client.query(
         `UPDATE memory_items_all
-            SET deleted_at = now(), claim_status = 'retracted'
+            SET deleted_at = now(), claim_status = 'retracted', superseded_by = NULL
           WHERE id = $1 AND deleted_at IS NULL`,
         [memory.id],
       );

@@ -51,6 +51,10 @@ export interface MemoryOperationProvenance {
 }
 
 export interface MemoryItem {
+  /** Short name of the subject's property, when the record holds a slot. */
+  attribute: string | null;
+  /** Present only when the record is no longer the current one; absent means active. */
+  status?: "duplicate" | "retracted" | "superseded";
   author: {
     status: "current_member" | "former_member" | "telegram_user";
     telegramUserId: string | null;
@@ -71,12 +75,16 @@ export interface MemoryItem {
 
 export interface ReferencedMemoryItem extends MemoryItem {
   memoryRef: string;
+  /** Opaque refs of the previous versions this write retired, in the order they were retired. */
+  supersededRefs?: string[];
   sourceEvidence?: ModelMemoryEvidence;
   thread?: MemoryThreadWriteResult;
 }
 
 export interface CreateMemoryInput {
   memoryReviewBatchId?: string;
+  /** Short name of the subject's property this record is about; absent for an episode. */
+  attribute?: string;
   confirmation: MemoryConfirmation;
   content: string;
   explicitSource?: CreateMemoryExplicitSourceInput;
@@ -99,6 +107,9 @@ export interface CreateMemoryExplicitSourceInput {
 }
 
 export interface MemoryRow {
+  attribute: string | null;
+  /** Selected only where a reader may see more than the current version. */
+  claim_status?: "active" | "duplicate" | "retracted" | "superseded";
   author_telegram_user_id: string | null;
   author_user_id: string | null;
   confirmation: MemoryConfirmation;
@@ -120,6 +131,10 @@ export interface ReferencedMemoryRow extends MemoryRow {
 
 export function rowToMemory(row: MemoryRow): MemoryItem {
   return {
+    attribute: row.attribute ?? null,
+    ...(row.claim_status === undefined || row.claim_status === "active"
+      ? {}
+      : { status: row.claim_status }),
     author: {
       status:
         row.scope === "group"

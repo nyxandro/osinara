@@ -13,7 +13,8 @@ describe("formatMemoryExportFiles", () => {
     const files = formatMemoryExportFiles({
       exportedAt: "2026-07-12T12:00:00.000Z",
       records: [{
-        author: { status: "current_member", telegramUserId: null, userId: "user-1" },
+        attribute: null,
+    author: { status: "current_member", telegramUserId: null, userId: "user-1" },
         confirmation: "user_confirmed",
         content: "Первая строка\n# недоверенный заголовок",
         createdAt: "2026-07-12T10:00:00.000Z",
