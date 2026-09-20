@@ -36,6 +36,7 @@ import {
   type MemoryRetrievalDiagnostics,
   type MemoryTurnContext,
 } from "../memory-retrieval.js";
+import { memoryShowJournal, type MemorySelectionWindow } from "../memory-show-journal.js";
 import {
   MemoryContextFailure, memoryFailureCode, recordMemoryContextIncident,
   type MemoryContextIncident, type MemoryContextPhase,
@@ -250,10 +251,12 @@ export function createMemoryBlockResolver(dependencies: {
   reportFailure: (incident: MemoryContextIncident) => Promise<void>;
   authorize: (ctx: TurnBlockContext) => MemoryAuthorization;
   createProfile: (auth: MemoryAuthorization, input: CreateProfileViewInput) => Promise<ProfileView>;
+  openSelectionWindow: (conversationId: string, turnId: string) => Promise<number>;
   retrieve: (
     auth: MemoryAuthorization,
     query: string,
     skillHints: readonly string[],
+    window: MemorySelectionWindow | null,
   ) => Promise<MemoryTurnContext>;
 }) {
   return async function resolve(ctx: TurnBlockContext, turnId: string): Promise<string | null> {
@@ -275,10 +278,21 @@ export function createMemoryBlockResolver(dependencies: {
         ctx.channel?.kind === "subagent" || Boolean(ctx.session.parent));
       if (query === null) return null;
       phase = "retrieval";
+      // The window exists only where there is a conversation to remember inside. A scheduled run
+      // or a delegated child has none, and then the selection behaves as it always did.
+      const conversationId = ctx.session.auth.current?.attributes.telegramConversationId;
+      const window = typeof conversationId === "string"
+        ? {
+          conversationId,
+          turnId,
+          turnOrdinal: await dependencies.openSelectionWindow(conversationId, turnId),
+        }
+        : null;
       const context = await dependencies.retrieve(
         authorization,
         query,
         applicationThreadSkillHints(ctx.messages),
+        window,
       );
       memories = context.memories.length;
       diagnostics = context.diagnostics;
@@ -411,6 +425,7 @@ export const resolveMemoryBlock = createMemoryBlockResolver({
   reportFailure: recordMemoryContextIncident,
   authorize: requireMemoryAuthorization,
   createProfile: profileViewRepository.create,
+  openSelectionWindow: memoryShowJournal.openTurn,
   retrieve: retrieveMemoryTurnContext,
 });
 

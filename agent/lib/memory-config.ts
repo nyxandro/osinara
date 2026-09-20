@@ -87,6 +87,11 @@ export const MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY = 0.78;
 // A floating cutoff relative to the best semantic match was tried here and removed: on both
 // fixtures it changed no measured number. It can only trim one query's own tail, and an off-topic
 // question has a low best score, so its tail is measured against that same low score.
+// How many turns back the automatic selection remembers what it already showed. Three is short
+// enough that a record the conversation keeps needing comes back within a couple of exchanges, and
+// long enough to stop the immediate repeat that measured as half of all shows. The explicit search
+// is not bounded by it at all: a deliberate lookup must see everything.
+export const MEMORY_RETRIEVAL_RECENT_SHOW_WINDOW_TURNS = 3;
 export const MEMORY_RETRIEVAL_RRF_RANK_OFFSET = 60;
 export const MEMORY_RETRIEVAL_CONFIRMATION_BOOST = 0.001;
 export const MEMORY_RETRIEVAL_RECENCY_BOOST = 0.0005;

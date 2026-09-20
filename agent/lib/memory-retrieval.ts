@@ -15,6 +15,7 @@ import type { ModelMessage } from "ai";
 import { embedMemoryQueryChunks, memoryQueryCentroid } from "./memory-embedding-client.js";
 import { chunkMemoryQuery } from "./memory-embedding-chunks.js";
 import { prepareMemoryQuery } from "./memory-query-preparation.js";
+import { memoryShowJournal, type MemorySelectionWindow } from "./memory-show-journal.js";
 import type { MemoryRetrievalBranchDiagnostics } from "./memory-retrieval-ranking.js";
 import type { MemoryAuthorization } from "./memory-context.js";
 import type { ModelMemory } from "./model-memory.js";
@@ -149,6 +150,8 @@ export async function retrieveMemoryTurnContext(
   auth: MemoryAuthorization,
   query: string,
   skillHints: readonly string[],
+  /** Absent for a turn with no conversation of its own: nothing to remember showing into. */
+  window: MemorySelectionWindow | null = null,
 ): Promise<MemoryTurnContext> {
   // One cleaned text for both: the word branches and the vector see the same question.
   const prepared = prepareMemoryQuery(query);
@@ -160,7 +163,13 @@ export async function retrieveMemoryTurnContext(
       auth,
       prepared,
       embeddings,
+      undefined,
+      window,
     );
+    // Written after the selection is built, so the window holds what this turn actually offered.
+    if (window !== null) {
+      await memoryShowJournal.recordShown(window, retrieval.relatedClaimIds);
+    }
     const memories: ModelMemoryContextItem[] = [
       ...retrieval.results.map((result) => toModelMemory(result.memory, result.sourceEvidence)),
       ...retrieval.conflicts.map((conflict) => ({ ...conflict, type: "unresolved_conflict" as const })),

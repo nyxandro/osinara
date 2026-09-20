@@ -19,8 +19,10 @@ import {
   MEMORY_RETRIEVAL_MIN_SIMPLE_LEXICAL_TERM_MATCHES,
   MEMORY_RETRIEVAL_RECENCY_BOOST,
   MEMORY_RETRIEVAL_RECENCY_DECAY_SECONDS,
+  MEMORY_RETRIEVAL_RECENT_SHOW_WINDOW_TURNS,
   MEMORY_RETRIEVAL_RRF_RANK_OFFSET,
 } from "./memory-config.js";
+import type { MemorySelectionWindow } from "./memory-show-journal.js";
 import type { MemoryAuthorization } from "./memory-context.js";
 import { liveMemoryReadPredicate } from "./memory-live-read-authorization.js";
 import type { ReferencedMemoryRow } from "./memory-record.js";
@@ -38,6 +40,7 @@ interface DiagnosticsColumns {
   russian_qualified: number | string;
   russian_top_rank: number | string | null;
   semantic_matched: number | string;
+  recently_shown: number | string | null;
   semantic_qualified: number | string;
   semantic_top_similarity: number | string | null;
   simple_matched: number | string;
@@ -175,6 +178,7 @@ function rowToBranchDiagnostics(row: DiagnosticsColumns): MemoryRetrievalBranchD
     semanticMatched: requiredCount(row.semantic_matched),
     semanticQualified,
     semanticTopSimilarity: optionalScore(row.semantic_top_similarity),
+    recentlyShown: row.recently_shown === null ? 0 : requiredCount(row.recently_shown),
     simpleMatched: requiredCount(row.simple_matched),
     simpleQualified,
     simpleTopRank: optionalScore(row.simple_top_rank),
@@ -223,6 +227,13 @@ export function memoryRetrievalSearchStatement(): string {
           JOIN memory_item_refs AS ref ON ref.memory_item_id = item.id
            WHERE item.family_id = $1 AND item.claim_status = 'active'
              AND ${authorizedClaimPredicate("item")}
+             -- What the automatic selection already showed in the last few turns of this
+             -- conversation. Null for the explicit search, which must keep seeing everything.
+             AND ($16::uuid IS NULL OR NOT EXISTS (
+               SELECT 1 FROM memory_retrieval_shows AS shown
+               WHERE shown.conversation_id = $16 AND shown.claim_id = item.id
+                 AND shown.turn_ordinal > $17::bigint - $18::bigint
+             ))
        ),
        simple_lexemes AS (
          SELECT lexeme, positions
@@ -343,6 +354,9 @@ export function memoryRetrievalSearchStatement(): string {
                 (SELECT count(*) FROM simple_matched) AS simple_matched,
                 (SELECT count(*) FROM russian_matched) AS russian_matched,
                 (SELECT count(*) FROM semantic_matched) AS semantic_matched,
+                (SELECT count(DISTINCT shown.claim_id) FROM memory_retrieval_shows AS shown
+                  WHERE shown.conversation_id = $16
+                    AND shown.turn_ordinal > $17::bigint - $18::bigint) AS recently_shown,
                 (SELECT count(*) FROM simple_matched WHERE matched_terms >= required_terms)
                   AS simple_qualified,
                 (SELECT count(*) FROM russian_matched WHERE matched_terms >= required_terms)
@@ -356,7 +370,7 @@ export function memoryRetrievalSearchStatement(): string {
               diagnostics.semantic_top_similarity, diagnostics.simple_matched,
               diagnostics.russian_matched, diagnostics.semantic_matched,
               diagnostics.simple_qualified, diagnostics.russian_qualified,
-              diagnostics.semantic_qualified, ranked.*
+              diagnostics.semantic_qualified, diagnostics.recently_shown, ranked.*
        FROM diagnostics
        LEFT JOIN LATERAL (
        SELECT authorized.id, authorized.author_user_id, authorized.author_telegram_user_id,
@@ -407,6 +421,7 @@ export function memoryRetrievalSearchParameters(
   auth: MemoryAuthorization,
   normalizedQuery: string,
   queryEmbeddings: readonly (readonly number[])[],
+  window: MemorySelectionWindow | null = null,
 ): unknown[] {
   return [
     auth.familyId,
@@ -424,6 +439,9 @@ export function memoryRetrievalSearchParameters(
     MEMORY_RETRIEVAL_CONFIRMATION_BOOST,
     MEMORY_RETRIEVAL_RECENCY_BOOST,
     MEMORY_RETRIEVAL_RECENCY_DECAY_SECONDS,
+    window?.conversationId ?? null,
+    window?.turnOrdinal ?? 0,
+    MEMORY_RETRIEVAL_RECENT_SHOW_WINDOW_TURNS,
   ];
 }
 
@@ -433,6 +451,7 @@ export const memoryRetrievalRepository = {
     query: string,
     queryEmbeddings: readonly (readonly number[])[],
     limit = MEMORY_RETRIEVAL_LIMIT,
+    window: MemorySelectionWindow | null = null,
   ): Promise<{
     diagnostics: MemoryRetrievalBranchDiagnostics;
     results: ScoredMemoryRetrievalResult[];
@@ -497,7 +516,7 @@ export const memoryRetrievalRepository = {
     // carrying the numbers — an empty retrieval is exactly the case worth explaining.
     const result = await database().query<DiagnosticsColumns & ({ id: null } | RetrievalRow)>(
       memoryRetrievalSearchStatement(),
-      memoryRetrievalSearchParameters(auth, normalizedQuery, queryEmbeddings),
+      memoryRetrievalSearchParameters(auth, normalizedQuery, queryEmbeddings, window),
     );
     // `diagnostics` is a SELECT without FROM and the join is LEFT LATERAL, so the statement always
     // returns at least this row. The guard exists to make a future edit that breaks that invariant
@@ -524,6 +543,7 @@ export const memoryRetrievalRepository = {
     query: string,
     queryEmbeddings: readonly (readonly number[])[],
     limit = MEMORY_RETRIEVAL_LIMIT,
+    window: MemorySelectionWindow | null = null,
   ): Promise<{
     conflicts: MemoryConflictGroup[];
     diagnostics: MemoryRetrievalBranchDiagnostics;
@@ -535,6 +555,7 @@ export const memoryRetrievalRepository = {
       query,
       queryEmbeddings,
       limit,
+      window,
     );
     const selectedIds = results.map((result) => result.memory.id);
     if (selectedIds.length === 0) return { conflicts: [], diagnostics, relatedClaimIds: [], results };

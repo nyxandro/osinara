@@ -64,6 +64,7 @@ const SEARCH_DIAGNOSTICS = {
   candidateLimitHit: false,
   queryCharacters: 3,
   queryChunks: 1,
+  recentlyShown: 0,
   russianQualified: 1,
   russianMatched: 1,
   russianTopRank: 0.2,
