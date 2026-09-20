@@ -5,12 +5,23 @@
  * - `CompletedTelegramOutput`: final message, silent reaction, deliberate silence, or interim
  *   progress decision.
  * - `completedTelegramOutput`: validates model output before Telegram delivery.
+ * - `telegramOutputWithoutMemoryDirective`: the same decision, taken on text the memory-usage
+ *   line has already been removed from, plus what that line named.
+ *
+ * The memory-usage line is transport syntax and the model writes it on every step that produces
+ * text — the progress note before a tool call and the message carrying a reaction directive
+ * included. It is removed here, ahead of the decision, so no branch can deliver it and so a
+ * reaction is still recognized as the whole message it has to be.
  *
  * Provider adapters route typed reasoning parts to dedicated Eve events that this delivery
  * policy never receives.
  */
 import { AppError } from "./app-error.js";
 import { EVE_EMPTY_DELIVERY_MARKER } from "./eve-empty-delivery.js";
+import {
+  readMemoryUsageDirective,
+  type MemoryUsageDeclaration,
+} from "./memory-usage-directive.js";
 import { stripTelegramAsideDirectives } from "./telegram-authored-split.js";
 import {
   isTelegramMessageReactionEmoji,
@@ -70,4 +81,22 @@ export function completedTelegramOutput(data: {
   // An answer made of transport directives alone has no visible content to deliver.
   if (!stripTelegramAsideDirectives(message)) return null;
   return { kind: "message", message };
+}
+
+export function telegramOutputWithoutMemoryDirective(data: {
+  finishReason: string;
+  message?: string | null;
+}): { declaration: MemoryUsageDeclaration; output: CompletedTelegramOutput | null } {
+  // `null` is the model's deliberate silence and has to stay `null` all the way through.
+  if (typeof data.message !== "string") {
+    return {
+      declaration: { answer: "", declared: false, memoryRefs: [] },
+      output: completedTelegramOutput(data),
+    };
+  }
+  const declaration = readMemoryUsageDirective(data.message);
+  return {
+    declaration,
+    output: completedTelegramOutput({ ...data, message: declaration.answer }),
+  };
 }

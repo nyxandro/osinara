@@ -6,6 +6,7 @@
  * - A record shown in this turn is counted once per turn it was named in.
  * - A ref the turn never showed is rejected and changes nothing.
  * - A ref from an earlier turn of the same conversation is rejected too.
+ * - Processing one turn twice counts the record once.
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -13,6 +14,7 @@ import { closeDatabase, database } from "./database.js";
 import { memoryShowJournal } from "./memory-show-journal.js";
 import { memoryUsageRepository } from "./memory-usage-repository.js";
 
+const SESSION = "wrun_usage";
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 const describeWithDatabase = enabled ? describe : describe.skip;
 
@@ -78,41 +80,86 @@ describeWithDatabase("memory usage counter", () => {
   it("counts a record the turn had shown and refuses one it had not", async () => {
     const window = {
       conversationId,
+      eveSessionId: SESSION,
       turnId: "turn-1",
-      turnOrdinal: await memoryShowJournal.openTurn(conversationId, "turn-1"),
+      turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
     };
     await memoryShowJournal.recordShown(window, [shownId]);
 
     const outcome = await memoryUsageRepository.recordUsed(window, [shownRef, hiddenRef]);
 
-    expect(outcome).toEqual({ rejected: [hiddenRef], used: [shownRef] });
+    expect(outcome).toEqual({ counted: [shownRef], rejected: [hiddenRef], used: [shownRef] });
     expect(await usageOf(shownId)).toEqual({ count: 1, used: true });
   });
 
   it("refuses a ref that belongs to an earlier turn of the same conversation", async () => {
     const first = {
       conversationId,
+      eveSessionId: SESSION,
       turnId: "turn-1",
-      turnOrdinal: await memoryShowJournal.openTurn(conversationId, "turn-1"),
+      turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
     };
     await memoryShowJournal.recordShown(first, [shownId]);
     const second = {
       conversationId,
+      eveSessionId: SESSION,
       turnId: "turn-2",
-      turnOrdinal: await memoryShowJournal.openTurn(conversationId, "turn-2"),
+      turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-2"),
     };
 
     const outcome = await memoryUsageRepository.recordUsed(second, [shownRef]);
 
-    expect(outcome).toEqual({ rejected: [shownRef], used: [] });
+    expect(outcome).toEqual({ counted: [], rejected: [shownRef], used: [] });
+    expect(await usageOf(shownId)).toEqual({ count: 0, used: false });
+  });
+
+  it("counts one record once when the same turn is processed again", async () => {
+    // The delivery barrier stops the message going out twice; the counter needs its own guard,
+    // because it moves before that barrier is reached.
+    const window = {
+      conversationId,
+      eveSessionId: SESSION,
+      turnId: "turn-1",
+      turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
+    };
+    await memoryShowJournal.recordShown(window, [shownId]);
+    await memoryUsageRepository.recordUsed(window, [shownRef]);
+
+    const again = await memoryUsageRepository.recordUsed(window, [shownRef]);
+
+    expect(again).toEqual({ counted: [], rejected: [], used: [shownRef] });
+    expect(await usageOf(shownId)).toEqual({ count: 1, used: true });
+  });
+
+  it("refuses a ref whose turn name repeats in a later session", async () => {
+    // `turn_0` comes round again after a session rotation; the record it showed then is not this
+    // turn's evidence, and the barrier has to tell the two apart.
+    const first = {
+      conversationId,
+      eveSessionId: "wrun_first",
+      turnId: "turn_0",
+      turnOrdinal: await memoryShowJournal.openTurn(conversationId, "wrun_first", "turn_0"),
+    };
+    await memoryShowJournal.recordShown(first, [shownId]);
+    const rotated = {
+      conversationId,
+      eveSessionId: "wrun_second",
+      turnId: "turn_0",
+      turnOrdinal: await memoryShowJournal.openTurn(conversationId, "wrun_second", "turn_0"),
+    };
+
+    const outcome = await memoryUsageRepository.recordUsed(rotated, [shownRef]);
+
+    expect(outcome).toEqual({ counted: [], rejected: [shownRef], used: [] });
     expect(await usageOf(shownId)).toEqual({ count: 0, used: false });
   });
 
   it("leaves reinforcement alone: observing a fact again is not the same as using it", async () => {
     const window = {
       conversationId,
+      eveSessionId: SESSION,
       turnId: "turn-1",
-      turnOrdinal: await memoryShowJournal.openTurn(conversationId, "turn-1"),
+      turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
     };
     await memoryShowJournal.recordShown(window, [shownId]);
     await memoryUsageRepository.recordUsed(window, [shownRef]);
@@ -128,10 +175,12 @@ describeWithDatabase("memory usage counter", () => {
   it("does nothing at all when the model named no records", async () => {
     const window = {
       conversationId,
+      eveSessionId: SESSION,
       turnId: "turn-1",
-      turnOrdinal: await memoryShowJournal.openTurn(conversationId, "turn-1"),
+      turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
     };
 
-    expect(await memoryUsageRepository.recordUsed(window, [])).toEqual({ rejected: [], used: [] });
+    expect(await memoryUsageRepository.recordUsed(window, []))
+      .toEqual({ counted: [], rejected: [], used: [] });
   });
 });

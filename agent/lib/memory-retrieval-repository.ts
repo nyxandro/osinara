@@ -20,7 +20,7 @@ import {
   MEMORY_RETRIEVAL_RECENT_SHOW_WINDOW_TURNS,
   MEMORY_RETRIEVAL_RRF_RANK_OFFSET,
 } from "./memory-config.js";
-import { MEMORY_RETENTION_BASE_DAYS, MEMORY_RETENTION_FLOOR } from "./memory-forgetting.js";
+import { memoryRetentionSqlExpression } from "./memory-forgetting.js";
 import type { MemorySelectionWindow } from "./memory-show-journal.js";
 import type { MemoryAuthorization } from "./memory-context.js";
 import { liveMemoryReadPredicate } from "./memory-live-read-authorization.js";
@@ -216,6 +216,28 @@ function rowToScoredResult(row: RetrievalRow): ScoredMemoryRetrievalResult {
 }
 
 /**
+ * Which journal rows the window covers: the last few turns of this conversation, this turn itself
+ * excluded. A second pass over one turn finds its own shows already written, and hiding them would
+ * answer the person from a different half of their memory than the first pass used.
+ *
+ * The selection filter and the metric that reports how much the filter removed read the same text,
+ * because two copies of one predicate drift and the number stops describing the behaviour.
+ */
+const RECENT_SHOW_PREDICATE = `shown.conversation_id = $14
+                 AND shown.turn_ordinal > $15::bigint - $16::bigint
+                 AND shown.turn_ordinal < $15::bigint`;
+
+/**
+ * The forgetting curve as the ranking applies it: one source, shared with the TypeScript copy that
+ * explains the numbers and with the test that proves the two agree.
+ */
+export const MEMORY_RETENTION_EXPRESSION = memoryRetentionSqlExpression({
+  ageDays: "EXTRACT(EPOCH FROM (now() - authorized.created_at)) / 86400",
+  kind: "authorized.kind",
+  usageCount: "authorized.usage_count",
+});
+
+/**
  * The one statement the semantic branch runs, exported so a test can read its plan from the same
  * text the product executes instead of from a copy that can drift away from it.
  */
@@ -228,10 +250,9 @@ export function memoryRetrievalSearchStatement(): string {
              AND ${authorizedClaimPredicate("item")}
              -- What the automatic selection already showed in the last few turns of this
              -- conversation. Null for the explicit search, which must keep seeing everything.
-             AND ($17::uuid IS NULL OR NOT EXISTS (
+             AND ($14::uuid IS NULL OR NOT EXISTS (
                SELECT 1 FROM memory_retrieval_shows AS shown
-               WHERE shown.conversation_id = $17 AND shown.claim_id = item.id
-                 AND shown.turn_ordinal > $18::bigint - $19::bigint
+               WHERE shown.claim_id = item.id AND ${RECENT_SHOW_PREDICATE}
              ))
        ),
        simple_lexemes AS (
@@ -354,8 +375,7 @@ export function memoryRetrievalSearchStatement(): string {
                 (SELECT count(*) FROM russian_matched) AS russian_matched,
                 (SELECT count(*) FROM semantic_matched) AS semantic_matched,
                 (SELECT count(DISTINCT shown.claim_id) FROM memory_retrieval_shows AS shown
-                  WHERE shown.conversation_id = $17
-                    AND shown.turn_ordinal > $18::bigint - $19::bigint) AS recently_shown,
+                  WHERE ${RECENT_SHOW_PREDICATE}) AS recently_shown,
                 (SELECT count(*) FROM simple_matched WHERE matched_terms >= required_terms)
                   AS simple_qualified,
                 (SELECT count(*) FROM russian_matched WHERE matched_terms >= required_terms)
@@ -397,13 +417,7 @@ export function memoryRetrievalSearchStatement(): string {
                  COALESCE(1.0 / ($12::double precision + semantic.ordinal), 0) +
                  CASE WHEN authorized.confirmation = 'user_confirmed'
                       THEN $13::double precision ELSE 0 END)
-                * ($14::double precision + (1 - $14::double precision) * exp(
-                    -GREATEST(EXTRACT(EPOCH FROM (now() - authorized.created_at)) / 86400, 0)
-                    / ((CASE authorized.kind
-                          WHEN 'episode' THEN $15::double precision
-                          ELSE $16::double precision END)
-                       * (1 + ln(1 + GREATEST(authorized.usage_count, 0))))
-                  )))
+                * ${MEMORY_RETENTION_EXPRESSION})
                  AS fused_score
        FROM candidates
        JOIN authorized USING (id)
@@ -443,9 +457,6 @@ export function memoryRetrievalSearchParameters(
     MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY,
     MEMORY_RETRIEVAL_RRF_RANK_OFFSET,
     MEMORY_RETRIEVAL_CONFIRMATION_BOOST,
-    MEMORY_RETENTION_FLOOR,
-    MEMORY_RETENTION_BASE_DAYS.episode,
-    MEMORY_RETENTION_BASE_DAYS.fact,
     window?.conversationId ?? null,
     window?.turnOrdinal ?? 0,
     MEMORY_RETRIEVAL_RECENT_SHOW_WINDOW_TURNS,

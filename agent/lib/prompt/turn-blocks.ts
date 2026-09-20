@@ -251,7 +251,7 @@ export function createMemoryBlockResolver(dependencies: {
   reportFailure: (incident: MemoryContextIncident) => Promise<void>;
   authorize: (ctx: TurnBlockContext) => MemoryAuthorization;
   createProfile: (auth: MemoryAuthorization, input: CreateProfileViewInput) => Promise<ProfileView>;
-  openSelectionWindow: (conversationId: string, turnId: string) => Promise<number>;
+  openSelectionWindow: (conversationId: string, eveSessionId: string, turnId: string) => Promise<number>;
   retrieve: (
     auth: MemoryAuthorization,
     query: string,
@@ -274,18 +274,29 @@ export function createMemoryBlockResolver(dependencies: {
     try {
       const authorization = dependencies.authorize(ctx);
       phase = "query";
-      const query = memoryRetrievalQuery(ctx.session.auth, ctx.messages,
-        ctx.channel?.kind === "subagent" || Boolean(ctx.session.parent));
+      const delegated = ctx.channel?.kind === "subagent" || Boolean(ctx.session.parent);
+      const query = memoryRetrievalQuery(ctx.session.auth, ctx.messages, delegated);
       if (query === null) return null;
       phase = "retrieval";
-      // The window exists only where there is a conversation to remember inside. A scheduled run
-      // or a delegated child has none, and then the selection behaves as it always did.
-      const conversationId = ctx.session.auth.current?.attributes.telegramConversationId;
+      // The window exists only where there is a conversation to remember inside; a scheduled run
+      // has none, and then the selection behaves as it always did. A turn is identified by the Eve
+      // session together with its id: Eve numbers turns inside a session and replaces the session
+      // every fifty of them, so `turn_0` comes round again inside one long conversation.
+      //
+      // A delegated child inherits the parent's verified auth, conversation included, but it is
+      // not a turn of the conversation: it runs inside one. Giving it a window would let its work
+      // hide records from the person's next question and would spend turn numbers nobody spoke in.
+      const conversationId = delegated
+        ? undefined
+        : ctx.session.auth.current?.attributes.telegramConversationId;
       const window = typeof conversationId === "string"
         ? {
           conversationId,
+          eveSessionId: ctx.session.id,
           turnId,
-          turnOrdinal: await dependencies.openSelectionWindow(conversationId, turnId),
+          turnOrdinal: await dependencies.openSelectionWindow(
+            conversationId, ctx.session.id, turnId,
+          ),
         }
         : null;
       const context = await dependencies.retrieve(

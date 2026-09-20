@@ -3,9 +3,12 @@
  *
  * Constructs covered:
  * - `109_memory_retrieval_shows.sql`: a turn gets its number once, however many times it runs.
+ * - Turn names repeat after a session rotation, and the numbering has to keep rising anyway.
  * - A record shown inside the window is kept out of the next automatic selection.
+ * - A second pass over one turn sees what the first pass showed, not the opposite of it.
  * - It comes back on its own once the window has moved past it.
  * - The explicit search is not bounded by the window at all.
+ * - The journal stays bounded instead of growing by twelve rows a turn forever.
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -14,11 +17,13 @@ import {
   MEMORY_EMBEDDING_DIMENSIONS,
   MEMORY_EMBEDDING_MODEL_VERSION,
   MEMORY_RETRIEVAL_RECENT_SHOW_WINDOW_TURNS,
+  MEMORY_RETRIEVAL_SHOW_JOURNAL_RETAINED_TURNS,
 } from "./memory-config.js";
 import { memoryRetrievalRepository } from "./memory-retrieval-repository.js";
 import { memoryShowJournal } from "./memory-show-journal.js";
 import type { MemoryAuthorization } from "./memory-context.js";
 
+const SESSION = "wrun_shows_first";
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 const describeWithDatabase = enabled ? describe : describe.skip;
 
@@ -83,18 +88,30 @@ describeWithDatabase("memory show journal", () => {
   afterAll(async () => closeDatabase());
 
   it("numbers a turn once, however many times that turn is processed", async () => {
-    const first = await memoryShowJournal.openTurn(conversationId, "turn-a");
-    const again = await memoryShowJournal.openTurn(conversationId, "turn-a");
-    const next = await memoryShowJournal.openTurn(conversationId, "turn-b");
+    const first = await memoryShowJournal.openTurn(conversationId, SESSION, "turn-a");
+    const again = await memoryShowJournal.openTurn(conversationId, SESSION, "turn-a");
+    const next = await memoryShowJournal.openTurn(conversationId, SESSION, "turn-b");
 
     expect({ first, again, next }).toEqual({ first: 1, again: 1, next: 2 });
+  });
+
+  it("keeps counting up when a new session starts the turn names over", async () => {
+    // Eve numbers turns inside a session: `turn_0` of the next session is a different turn of the
+    // same conversation, and treating the two as one would freeze the window for good.
+    await memoryShowJournal.openTurn(conversationId, "wrun_first", "turn_0");
+    await memoryShowJournal.openTurn(conversationId, "wrun_first", "turn_1");
+
+    const rotated = await memoryShowJournal.openTurn(conversationId, "wrun_second", "turn_0");
+
+    expect(rotated).toBe(3);
   });
 
   it("keeps a record it just showed out of the next automatic selection", async () => {
     const first = {
       conversationId,
+      eveSessionId: SESSION,
       turnId: "turn-1",
-      turnOrdinal: await memoryShowJournal.openTurn(conversationId, "turn-1"),
+      turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
     };
     const shown = await memoryRetrievalRepository.search(
       auth, "домофон", [vector(1, 0)], undefined, first,
@@ -104,8 +121,9 @@ describeWithDatabase("memory show journal", () => {
 
     const second = {
       conversationId,
+      eveSessionId: SESSION,
       turnId: "turn-2",
-      turnOrdinal: await memoryShowJournal.openTurn(conversationId, "turn-2"),
+      turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-2"),
     };
     const repeated = await memoryRetrievalRepository.search(
       auth, "домофон", [vector(1, 0)], undefined, second,
@@ -118,18 +136,21 @@ describeWithDatabase("memory show journal", () => {
   it("offers it again once the window has moved past it", async () => {
     const first = {
       conversationId,
+      eveSessionId: SESSION,
       turnId: "turn-1",
-      turnOrdinal: await memoryShowJournal.openTurn(conversationId, "turn-1"),
+      turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
     };
     await memoryShowJournal.recordShown(first, [shownClaimId]);
     for (let turn = 2; turn <= MEMORY_RETRIEVAL_RECENT_SHOW_WINDOW_TURNS + 1; turn += 1) {
-      await memoryShowJournal.openTurn(conversationId, `turn-${turn}`);
+      await memoryShowJournal.openTurn(conversationId, SESSION, `turn-${turn}`);
     }
     const later = {
       conversationId,
+      eveSessionId: SESSION,
       turnId: `turn-${MEMORY_RETRIEVAL_RECENT_SHOW_WINDOW_TURNS + 2}`,
       turnOrdinal: await memoryShowJournal.openTurn(
         conversationId,
+        SESSION,
         `turn-${MEMORY_RETRIEVAL_RECENT_SHOW_WINDOW_TURNS + 2}`,
       ),
     };
@@ -141,11 +162,59 @@ describeWithDatabase("memory show journal", () => {
     expect(results.map((result) => result.memory.id)).toEqual([shownClaimId]);
   });
 
+  it("shows the same records again when one turn is processed twice", async () => {
+    // A retried turn keeps its number, so its own shows are already in the journal. Hiding them
+    // would give the second pass a different memory to answer from than the first one had.
+    const window = {
+      conversationId,
+      eveSessionId: SESSION,
+      turnId: "turn-1",
+      turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
+    };
+    await memoryShowJournal.recordShown(window, [shownClaimId]);
+
+    const retried = await memoryRetrievalRepository.search(
+      auth, "домофон", [vector(1, 0)], undefined,
+      {
+        conversationId,
+        eveSessionId: SESSION,
+        turnId: "turn-1",
+        turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
+      },
+    );
+
+    expect(retried.results.map((result) => result.memory.id)).toEqual([shownClaimId]);
+  });
+
+  it("drops what is older than the kept depth instead of growing without end", async () => {
+    const first = {
+      conversationId,
+      eveSessionId: SESSION,
+      turnId: "turn-1",
+      turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
+    };
+    await memoryShowJournal.recordShown(first, [shownClaimId]);
+    for (let turn = 2; turn <= MEMORY_RETRIEVAL_SHOW_JOURNAL_RETAINED_TURNS + 1; turn += 1) {
+      await memoryShowJournal.openTurn(conversationId, SESSION, `turn-${turn}`);
+    }
+
+    const shows = await database().query<{ count: string }>(
+      "SELECT count(*) FROM memory_retrieval_shows WHERE conversation_id = $1", [conversationId],
+    );
+    const turns = await database().query<{ count: string }>(
+      "SELECT count(*) FROM memory_retrieval_turns WHERE conversation_id = $1", [conversationId],
+    );
+
+    expect(Number(shows.rows[0]!.count)).toBe(0);
+    expect(Number(turns.rows[0]!.count)).toBe(MEMORY_RETRIEVAL_SHOW_JOURNAL_RETAINED_TURNS);
+  });
+
   it("never hides anything from a deliberate search", async () => {
     const first = {
       conversationId,
+      eveSessionId: SESSION,
       turnId: "turn-1",
-      turnOrdinal: await memoryShowJournal.openTurn(conversationId, "turn-1"),
+      turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
     };
     await memoryShowJournal.recordShown(first, [shownClaimId]);
 

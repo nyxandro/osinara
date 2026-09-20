@@ -4,11 +4,13 @@
  * Constructs covered:
  * - The multiplier falls with age, rises with use, and never drops through its floor.
  * - An episode fades faster than a standing property of a person.
- * - The SQL copy inside the retrieval statement agrees with the TypeScript one over a grid.
+ * - The SQL the retrieval statement multiplies by agrees with the TypeScript one over a grid.
+ * - Every kind of record the database knows has a retention, and the statement uses this SQL.
  *
- * The last one is the point of this file. The rank is computed in SQL, so the formula had to be
- * written twice, and two copies of one formula drift apart silently — nothing fails, the order of
- * results just stops meaning what the code says it means.
+ * The last two are the point of this file. The rank is computed in SQL, so the curve exists there
+ * as well, and two copies of one formula drift apart silently — nothing fails, the order of
+ * results just stops meaning what the code says it means. Both copies are built from the same
+ * function here, and the checks below prove the statement really uses it.
  */
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -17,7 +19,12 @@ import {
   MEMORY_RETENTION_BASE_DAYS,
   MEMORY_RETENTION_FLOOR,
   memoryRetentionMultiplier,
+  memoryRetentionSqlExpression,
 } from "./memory-forgetting.js";
+import {
+  MEMORY_RETENTION_EXPRESSION,
+  memoryRetrievalSearchStatement,
+} from "./memory-retrieval-repository.js";
 import type { MemoryKind } from "./memory-record.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
@@ -69,21 +76,17 @@ describeWithDatabase("the SQL copy of the forgetting curve", () => {
         usageCount,
       }))),
     );
-    // The same expression the retrieval statement multiplies its fused score by.
+    // Built by the same function the retrieval statement builds its multiplier with.
     const measured = await database().query<{ multiplier: number; ordinal: number }>(
       `SELECT input.ordinal,
-              $1::double precision + (1 - $1::double precision) * exp(
-                -GREATEST(input.age_days, 0)
-                / ((CASE input.kind WHEN 'episode' THEN $2::double precision
-                                    ELSE $3::double precision END)
-                   * (1 + ln(1 + GREATEST(input.usage_count, 0))))
-              ) AS multiplier
-       FROM unnest($4::int[], $5::text[], $6::int[])
+              ${memoryRetentionSqlExpression({
+                ageDays: "input.age_days",
+                kind: "input.kind",
+                usageCount: "input.usage_count",
+              })} AS multiplier
+       FROM unnest($1::int[], $2::text[], $3::int[])
             WITH ORDINALITY AS input(age_days, kind, usage_count, ordinal)`,
       [
-        MEMORY_RETENTION_FLOOR,
-        MEMORY_RETENTION_BASE_DAYS.episode,
-        MEMORY_RETENTION_BASE_DAYS.fact,
         cases.map((one) => one.ageDays),
         cases.map((one) => one.kind),
         cases.map((one) => one.usageCount),
@@ -99,5 +102,20 @@ describeWithDatabase("the SQL copy of the forgetting curve", () => {
       .filter((one) => Math.abs(one.expected - one.measured) > 1e-12);
 
     expect(mismatched).toEqual([]);
+  });
+
+  it("covers every kind of record the database allows", async () => {
+    // The `CASE` has no `ELSE`, so a kind missing here would make the multiplier null and drop the
+    // record out of the order without a word. This is the check that makes that impossible.
+    const stored = await database().query<{ enumlabel: MemoryKind }>(
+      "SELECT enumlabel FROM pg_enum WHERE enumtypid = 'memory_kind'::regtype ORDER BY enumlabel",
+    );
+
+    expect(stored.rows.map((row) => row.enumlabel))
+      .toEqual(Object.keys(MEMORY_RETENTION_BASE_DAYS).sort());
+  });
+
+  it("is the expression the retrieval statement actually multiplies by", () => {
+    expect(memoryRetrievalSearchStatement()).toContain(MEMORY_RETENTION_EXPRESSION);
   });
 });

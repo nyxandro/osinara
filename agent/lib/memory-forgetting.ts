@@ -4,6 +4,7 @@
  * Exports:
  * - `MEMORY_RETENTION_BASE_DAYS`: how long each kind of record stays fully available.
  * - `memoryRetentionMultiplier`: the factor applied to a record's rank.
+ * - `memoryRetentionSqlExpression`: the same curve as SQL, built from the same constants.
  *
  * Age used to be a bonus added to the score, and the number made it decorative: one branch match
  * at first place is worth about 0.0164, and the freshness bonus at most 0.0005 — three percent of
@@ -12,8 +13,10 @@
  *
  * So age becomes a multiplier instead of a term: `R = exp(-age / S)`, and the rank is scaled by
  * `floor + (1 - floor) × R`. A multiplier makes the old record yield its place; the floor makes
- * sure it only yields it, never disappears. Nothing here removes anything, and the threshold
- * applies to the automatic selection alone — a deliberate search still sees the whole memory.
+ * sure it only yields it, never disappears: nothing here removes anything, and there is no cutoff
+ * a record can fall below. Ageing applies to the deliberate search as well as to the automatic
+ * selection, because both read the same statement and both hand the model twelve records; what
+ * the search keeps is the whole corpus to choose from, not an exemption from order.
  *
  * Strength grows with use: `S = S0 × (1 + ln(1 + n))`. A record used four times lasts about 2.6
  * times longer than one never used. Today `n` is zero almost everywhere, because the signal that
@@ -38,6 +41,30 @@ export const MEMORY_RETENTION_BASE_DAYS: Record<MemoryKind, number> = {
 
 /** How much of its rank a record keeps however old it is. Ageing decides order, not existence. */
 export const MEMORY_RETENTION_FLOOR = 0.5;
+
+/**
+ * The rank is computed in SQL, so the curve has to exist there too. Building the expression here
+ * keeps one source for the constants: a kind added to the record above appears in the statement
+ * without anyone remembering to widen a `CASE`. The numbers are code constants, never input.
+ *
+ * The `CASE` has no `ELSE` on purpose. Inventing a retention for an unknown kind would hide the
+ * mistake; a test compares this record against the database enum, so a kind added on one side
+ * fails there rather than quietly ageing at somebody else's rate.
+ */
+export function memoryRetentionSqlExpression(columns: {
+  ageDays: string;
+  kind: string;
+  usageCount: string;
+}): string {
+  const strength = Object.entries(MEMORY_RETENTION_BASE_DAYS)
+    .map(([kind, days]) => `WHEN '${kind}' THEN ${days}::double precision`)
+    .join(" ");
+  return `(${MEMORY_RETENTION_FLOOR}::double precision + (1 - ${MEMORY_RETENTION_FLOOR}::double precision) * exp(
+            -GREATEST(${columns.ageDays}, 0)
+            / ((CASE ${columns.kind} ${strength} END)
+               * (1 + ln(1 + GREATEST(${columns.usageCount}, 0))))
+          ))`;
+}
 
 export function memoryRetentionMultiplier(input: {
   ageDays: number;

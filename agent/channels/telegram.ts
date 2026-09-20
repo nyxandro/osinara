@@ -19,12 +19,12 @@ import { telegramChannel } from "eve/channels/telegram";
 import { handleTelegramDurableIngress } from "../lib/telegram-durable-ingress.js";
 import { TELEGRAM_EVE_UPLOAD_POLICY } from "../lib/telegram-message-policy.js";
 import { handleTelegramMessage } from "../lib/telegram-on-message.js";
-import { completedTelegramOutput } from "../lib/telegram-progress.js";
+import { telegramOutputWithoutMemoryDirective } from "../lib/telegram-progress.js";
 import { logTelegramSilentTurn } from "../lib/telegram-silent-turn.js";
 import { deliverTelegramProgressNotice } from "../lib/telegram-progress-notice.js";
 import { asidePauseMilliseconds } from "../lib/telegram-aside-pacing.js";
 import { stripTelegramAsideDirectives } from "../lib/telegram-authored-split.js";
-import { applyMemoryUsageDirective } from "../lib/memory-usage-report.js";
+import { recordMemoryUsageDeclaration } from "../lib/memory-usage-report.js";
 import { deliverTelegramFinalOutput } from "../lib/telegram-final-delivery.js";
 import { bindTelegramIngressTurn } from "../lib/telegram-ingress-binding.js";
 import { completeRuntimeHandoff, completeRuntimeSessionHandoffs } from "../lib/runtime-handoff.js";
@@ -86,10 +86,17 @@ export default telegramChannel({
     async "message.completed"(data, channel, ctx) {
       // Model-authored pre-tool text is a user-visible progress update, not technical tool noise.
       if (isScheduledSession(ctx) && data.finishReason !== "stop") return;
-      const output = completedTelegramOutput(data);
+      const { declaration, output } = telegramOutputWithoutMemoryDirective(data);
       if (!output) return;
       const sessionId = applicationSessionId(ctx);
       if (!await sessionRepository.isCurrentEveSession(sessionId, ctx.session.id)) return;
+      // Behind the barrier: a superseded session must not move counters either.
+      await recordMemoryUsageDeclaration({
+        auth: ctx.session.auth,
+        declaration,
+        eveSessionId: ctx.session.id,
+        turnId: ctx.session.turn.id,
+      });
       if (output.kind === "silence") {
         // The model chose to deliver nothing; the trigger it stayed quiet on is the useful signal.
         logTelegramSilentTurn({
@@ -142,15 +149,7 @@ export default telegramChannel({
       const replyParameters = isScheduledSession(ctx)
         ? undefined
         : telegramTurnReplyParameters(channel.state, ctx);
-      // The memory-usage line is transport syntax like the aside directive: it is read, counted,
-      // and removed before anything is sent or stored.
-      const answered = await applyMemoryUsageDirective({
-        auth: ctx.session.auth,
-        sessionId,
-        text: message,
-        turnId: ctx.session.turn.id,
-      });
-      const durableText = stripTelegramAsideDirectives(answered);
+      const durableText = stripTelegramAsideDirectives(message);
       let sentMessages: Awaited<ReturnType<typeof deliverTelegramFinalOutput>>;
       try {
         sentMessages = await deliverTelegramFinalOutput({
@@ -162,7 +161,7 @@ export default telegramChannel({
           },
           eveSessionId: ctx.session.id,
           eveTurnId: ctx.session.turn.id,
-          markdown: isScheduledSession(ctx) ? durableText : answered,
+          markdown: isScheduledSession(ctx) ? durableText : message,
           sendChunk: async (chunk, ordinal) => {
             // An authored aside is a second thought, so it arrives after a visible typing pause.
             if (chunk.pacing === "aside") {

@@ -6,6 +6,7 @@
  * - An empty declaration is distinguishable from no declaration at all.
  * - Only well-formed refs are taken; prose around them is ignored.
  * - A line inside fenced or indented code is content, not a directive.
+ * - Every occurrence goes, not just the first one, and not just whole lines.
  */
 import { describe, expect, it } from "vitest";
 
@@ -61,6 +62,34 @@ describe("readMemoryUsageDirective", () => {
 
     expect(readMemoryUsageDirective(answer))
       .toEqual({ answer, declared: false, memoryRefs: [] });
+  });
+
+  it("removes every occurrence, not only the first line", () => {
+    const result = readMemoryUsageDirective(
+      `Ответ.\n[память: ${FIRST}]\nЕщё мысль.\n[память: ${SECOND}]`,
+    );
+
+    expect(result.answer).toBe("Ответ.\nЕщё мысль.");
+    expect(result.memoryRefs).toEqual([FIRST, SECOND]);
+  });
+
+  it("removes the directive written inside a sentence and keeps the sentence", () => {
+    const result = readMemoryUsageDirective(`Код 4271 [память: ${FIRST}] — из твоей записи.`);
+
+    expect(result.answer).toBe("Код 4271 — из твоей записи.");
+    expect({ declared: result.declared, refs: result.memoryRefs })
+      .toEqual({ declared: true, refs: [FIRST] });
+  });
+
+  it("leaves a fenced example alone, because that is code and not transport", () => {
+    const answer = `Пример строки:\n\n\`\`\`\n[память: ${FIRST}]\n\`\`\``;
+
+    expect(readMemoryUsageDirective(answer))
+      .toEqual({ answer, declared: false, memoryRefs: [] });
+  });
+
+  it("leaves nothing to deliver when the answer was only the line", () => {
+    expect(readMemoryUsageDirective(`[память: ${FIRST}]`).answer).toBe("");
   });
 
   it("keeps the rest of a long answer intact", () => {

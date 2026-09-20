@@ -6,10 +6,14 @@
  * - Pre-tool assistant chunks remain hidden because Telegram cannot render them ephemerally.
  * - Empty model steps remain invisible to avoid technical Telegram noise.
  * - Eve's `message: null` after a final step is the model's deliberate silence, not noise.
+ * - `telegramOutputWithoutMemoryDirective`: the memory-usage line leaves on every branch.
  */
 import { describe, expect, it } from "vitest";
 
-import { completedTelegramOutput } from "./telegram-progress.js";
+import {
+  completedTelegramOutput,
+  telegramOutputWithoutMemoryDirective,
+} from "./telegram-progress.js";
 
 describe("completedTelegramOutput", () => {
   it("delivers model-authored pre-tool text as an interim progress notice", () => {
@@ -91,5 +95,55 @@ describe("completedTelegramOutput", () => {
 
   it("recognizes Eve's undelivered final step as the model's deliberate silence", () => {
     expect(completedTelegramOutput({ finishReason: "stop", message: null })).toEqual({ kind: "silence" });
+  });
+});
+
+const REF = "mem_0123456789abcdef0123456789abcdef";
+
+describe("telegramOutputWithoutMemoryDirective", () => {
+  it("keeps the line out of the interim progress notice", () => {
+    const { declaration, output } = telegramOutputWithoutMemoryDirective({
+      finishReason: "tool-calls",
+      message: `Секунду, смотрю календарь.\n[память: ${REF}]`,
+    });
+
+    expect(output).toEqual({ kind: "progress", message: "Секунду, смотрю календарь." });
+    expect(declaration.memoryRefs).toEqual([REF]);
+  });
+
+  it("still recognizes a reaction when the line was appended to it", () => {
+    // The reaction directive has to be the whole message; the memory line would otherwise turn a
+    // silent reaction into AGENT_TELEGRAM_REACTION_DIRECTIVE_INVALID.
+    const { declaration, output } = telegramOutputWithoutMemoryDirective({
+      finishReason: "stop",
+      message: `<telegram-reaction>👍</telegram-reaction>\n[память: ${REF}]`,
+    });
+
+    expect(output).toEqual({ emoji: "👍", kind: "reaction" });
+    expect(declaration.memoryRefs).toEqual([REF]);
+  });
+
+  it("keeps the line out of the answer a person reads", () => {
+    const { output } = telegramOutputWithoutMemoryDirective({
+      finishReason: "stop",
+      message: `Код домофона 4271.\n\n[память: ${REF}]`,
+    });
+
+    expect(output).toEqual({ kind: "message", message: "Код домофона 4271." });
+  });
+
+  it("delivers nothing when the answer was the line and nothing else", () => {
+    expect(telegramOutputWithoutMemoryDirective({
+      finishReason: "stop",
+      message: `[память: ${REF}]`,
+    }).output).toBeNull();
+  });
+
+  it("leaves deliberate silence exactly as it was", () => {
+    expect(telegramOutputWithoutMemoryDirective({ finishReason: "stop", message: null }))
+      .toEqual({
+        declaration: { answer: "", declared: false, memoryRefs: [] },
+        output: { kind: "silence" },
+      });
   });
 });
