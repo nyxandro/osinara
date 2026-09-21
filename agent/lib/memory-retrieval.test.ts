@@ -8,14 +8,17 @@
  */
 import type { SessionAuth, SessionAuthContext } from "eve/context";
 import type { ModelMessage } from "ai";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { ModelMemory } from "./model-memory.js";
 import {
   formatRetrievedMemoryInstructions,
   latestUserText,
   memoryRetrievalQuery,
+  recordOfferedMemories,
+  type MemoryTurnContext,
 } from "./memory-retrieval.js";
+import { memoryShowJournal, type MemorySelectionWindow } from "./memory-show-journal.js";
 
 function auth(attributes: SessionAuthContext["attributes"]): SessionAuth {
   return {
@@ -193,4 +196,81 @@ describe("formatRetrievedMemoryInstructions", () => {
     expect(instructions).not.toMatch(/"(?:familyId|groupId|scopePartitionKey)"/u);
   });
 
+});
+
+describe("recordOfferedMemories", () => {
+  const window: MemorySelectionWindow = {
+    conversationId: "conversation-1",
+    eveSessionId: "session-1",
+    turnId: "turn_1",
+    turnOrdinal: 3,
+  };
+
+  function turnContext(): MemoryTurnContext {
+    return {
+      diagnostics: {} as MemoryTurnContext["diagnostics"],
+      memories: [],
+      offered: {
+        claimIdByMemoryRef: new Map([["mem_first", "claim-1"], ["mem_second", "claim-2"]]),
+        claimIdsByConflictRef: new Map([
+          ["conflict-1", ["claim-a", "claim-b"]],
+          ["conflict-2", ["claim-c", "claim-d"]],
+        ]),
+      },
+      retrievedClaimIds: [],
+      threads: { threads: [], totalCharacters: 0 } as MemoryTurnContext["threads"],
+    };
+  }
+
+  function record(memoryRef: string) {
+    return { content: "запись", kind: "fact", memoryRef } as unknown as ModelMemory;
+  }
+
+  function conflict(conflictRef: string) {
+    return {
+      conflictRef,
+      instruction: "Не выбирать версию самостоятельно",
+      versions: [{ content: "одна", memoryRef: "mem_a" }, { content: "другая", memoryRef: "mem_b" }],
+    } as never;
+  }
+
+  it("writes down only the records the turn actually offered", async () => {
+    const recordShown = vi.spyOn(memoryShowJournal, "recordShown").mockResolvedValue();
+
+    try {
+      await recordOfferedMemories(window, turnContext(), [record("mem_first")]);
+
+      expect(recordShown).toHaveBeenCalledWith(window, ["claim-1"]);
+    } finally { recordShown.mockRestore(); }
+  });
+
+  it("adds the closure of a conflict group the turn offered", async () => {
+    const recordShown = vi.spyOn(memoryShowJournal, "recordShown").mockResolvedValue();
+
+    try {
+      await recordOfferedMemories(window, turnContext(), [record("mem_first"), conflict("conflict-1")]);
+
+      expect(recordShown).toHaveBeenCalledWith(window, ["claim-1", "claim-a", "claim-b"]);
+    } finally { recordShown.mockRestore(); }
+  });
+
+  it("keeps a dropped conflict group offerable while writing down the one that survived", async () => {
+    const recordShown = vi.spyOn(memoryShowJournal, "recordShown").mockResolvedValue();
+
+    try {
+      await recordOfferedMemories(window, turnContext(), [conflict("conflict-2")]);
+
+      expect(recordShown).toHaveBeenCalledWith(window, ["claim-c", "claim-d"]);
+    } finally { recordShown.mockRestore(); }
+  });
+
+  it("writes nothing for a turn that has no conversation to remember into", async () => {
+    const recordShown = vi.spyOn(memoryShowJournal, "recordShown").mockResolvedValue();
+
+    try {
+      await recordOfferedMemories(null, turnContext(), [record("mem_first")]);
+
+      expect(recordShown).not.toHaveBeenCalled();
+    } finally { recordShown.mockRestore(); }
+  });
 });

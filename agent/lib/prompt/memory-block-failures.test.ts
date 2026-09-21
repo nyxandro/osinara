@@ -22,10 +22,12 @@ describe("memory failure ownership", () => {
     const reportFailure = vi.fn().mockResolvedValue(undefined);
     const retrieve = vi.fn().mockResolvedValue({ memories: [], retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } });
     const createProfile = vi.fn().mockRejectedValue(error);
+    const recordOffered = vi.fn();
     if (phase === "retrieval") retrieve.mockRejectedValue(error);
     const resolve = createMemoryBlockResolver({
       authorize: () => { if (phase === "authorization") throw error; return authorization; },
-      openSelectionWindow: async () => 1, retrieve, createProfile, reportFailure,
+      openSelectionWindow: async () => 1, recordOffered, retrieve, createProfile,
+      reportFailure,
     });
     const ctx = phase !== "profile" ? context : { ...context, session: { ...context.session, auth: {
       ...context.session.auth, current: { ...context.session.auth.current!, attributes: {
@@ -38,6 +40,9 @@ describe("memory failure ownership", () => {
       causeCode: "AGENT_TEST_MEMORY_FAILED", phase, runId: "run", scheduleId: "schedule", sessionId: "session", turnId: "turn_0",
     });
     expect(JSON.stringify(reportFailure.mock.calls)).not.toMatch(/private|частный/);
+    // A turn that never reached the model must leave the show journal alone: a record written down
+    // there is hidden from the next turns of the conversation.
+    expect(recordOffered).not.toHaveBeenCalled();
     if (phase === "authorization") expect(retrieve).not.toHaveBeenCalled();
   });
 
@@ -46,7 +51,7 @@ describe("memory failure ownership", () => {
     // notice would deliver a rule about behaviour as if a person had just said it.
     const shared = {
       authorize: () => authorization, createProfile: vi.fn(), openSelectionWindow: async () => 1,
-      reportFailure: vi.fn(),
+      recordOffered: vi.fn(), reportFailure: vi.fn(),
     };
     const retrieved = await createMemoryBlockResolver({
       ...shared,
@@ -69,7 +74,7 @@ describe("memory failure ownership", () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const resolve = createMemoryBlockResolver({ authorize: () => authorization,
-        openSelectionWindow: async () => 1,
+        openSelectionWindow: async () => 1, recordOffered: vi.fn(),
         retrieve: vi.fn().mockRejectedValue(new Error("unavailable")), createProfile: vi.fn(),
         reportFailure: vi.fn().mockRejectedValue(new Error("incident DB down")),
       });

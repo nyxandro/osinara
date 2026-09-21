@@ -3,6 +3,7 @@
  *
  * Exports:
  * - `formatRetrievedMemoryInstructions`: describes the active retrieval pipeline to the model.
+ * - `recordOfferedMemories`: writes the show journal once the block budget picked what fits.
  * - `latestUserText`: extracts the newest user text from Eve model history.
  * - `memoryRetrievalQuery`: selects the addressed text to search by for the current turn.
  * - `MemoryRetrievalDiagnostics`: log-only numbers about the query and each search branch.
@@ -119,8 +120,19 @@ export function formatRetrievedMemoryInstructions(
 export interface MemoryTurnContext {
   diagnostics: MemoryRetrievalDiagnostics;
   memories: ModelMemoryContextItem[];
+  /**
+   * What the show journal needs once the block budget has decided which records fit. The journal
+   * excludes a shown record from the next turns of the conversation, so a record dropped by the
+   * budget must not be written down: it was never put in front of the model.
+   */
+  offered: MemoryTurnOffer;
   retrievedClaimIds: string[];
   threads: MemoryThreadContext;
+}
+
+export interface MemoryTurnOffer {
+  claimIdByMemoryRef: ReadonlyMap<string, string>;
+  claimIdsByConflictRef: ReadonlyMap<string, readonly string[]>;
 }
 
 export function latestUserText(messages: readonly ModelMessage[]): string | null {
@@ -205,10 +217,6 @@ export async function retrieveMemoryTurnContext(
       undefined,
       window,
     );
-    // Written after the selection is built, so the window holds what this turn actually offered.
-    if (window !== null) {
-      await memoryShowJournal.recordShown(window, retrieval.relatedClaimIds);
-    }
     const memories: ModelMemoryContextItem[] = [
       ...retrieval.results.map((result) => toModelMemory(result.memory, result.sourceEvidence)),
       ...retrieval.conflicts.map((conflict) => ({ ...conflict, type: "unresolved_conflict" as const })),
@@ -226,10 +234,40 @@ export async function retrieveMemoryTurnContext(
     return {
       diagnostics: queryDiagnostics(prepared, retrieval.diagnostics, embeddings.length > 0),
       memories,
+      offered: {
+        claimIdByMemoryRef: new Map(
+          retrieval.results.map((result) => [result.memory.memoryRef, result.memory.id] as const),
+        ),
+        claimIdsByConflictRef: retrieval.claimIdsByConflictRef,
+      },
       retrievedClaimIds: retrieval.relatedClaimIds,
       threads,
     };
   } catch (error) {
     throw new MemoryContextFailure(phase, error);
   }
+}
+
+/**
+ * Writes down what the turn put in front of the model, after the block budget dropped whatever did
+ * not fit. A record written down without being shown disappears from the next turns of the
+ * conversation, and the usage counter only credits what the journal holds, so this list has to be
+ * exactly what the block carried.
+ */
+export async function recordOfferedMemories(
+  window: MemorySelectionWindow | null,
+  context: MemoryTurnContext,
+  offered: readonly ModelMemoryContextItem[],
+): Promise<void> {
+  if (window === null) return;
+  const claimIds: string[] = [];
+  for (const item of offered) {
+    if ("versions" in item) {
+      claimIds.push(...(context.offered.claimIdsByConflictRef.get(item.conflictRef) ?? []));
+      continue;
+    }
+    const claimId = context.offered.claimIdByMemoryRef.get(item.memoryRef);
+    if (claimId !== undefined) claimIds.push(claimId);
+  }
+  await memoryShowJournal.recordShown(window, [...new Set(claimIds)]);
 }
