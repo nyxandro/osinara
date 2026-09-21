@@ -42,6 +42,16 @@ export const MEMORY_EMBEDDING_WORKER_READY_PATH = "/tmp/osinara-memory-embedding
  * honest slow job and still catches a hung loop inside two minutes.
  */
 export const MEMORY_EMBEDDING_WORKER_STALE_MILLISECONDS = 90_000;
+/**
+ * The codes this subsystem writes that are not failures. `OsinaraEmbeddingFailed` watches the
+ * whole `AGENT_MEMORY_EMBEDDING_` family, because fifteen of its sixteen codes are failures; the
+ * sixteenth says the indexer is alive. Anything normal has to be named here and excluded in the
+ * rule, or a healthy start reads to the duty reader as a broken index.
+ */
+export const MEMORY_EMBEDDING_WORKER_STARTED_CODE = "AGENT_MEMORY_EMBEDDING_WORKER_STARTED";
+export const MEMORY_EMBEDDING_LIFECYCLE_CODES = [
+  MEMORY_EMBEDDING_WORKER_STARTED_CODE,
+] as const;
 export const MEMORY_EXTRACTION_WORKER_STABILITY_MILLISECONDS = 30_000;
 export const MEMORY_EVIDENCE_SNIPPET_MAX_CHARACTERS = 1_000;
 

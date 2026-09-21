@@ -209,7 +209,7 @@ describe("Docker Compose runtime wiring", () => {
     expect(worker).toContain(MEMORY_EMBEDDING_WORKER_READY_PATH);
     expect(worker).toContain(String(MEMORY_EMBEDDING_WORKER_STALE_MILLISECONDS));
     expect(workerScript).toContain("MEMORY_EMBEDDING_WORKER_READY_PATH");
-    expect(workerScript).toContain("AGENT_MEMORY_EMBEDDING_WORKER_STARTED");
+    expect(workerScript).toContain("MEMORY_EMBEDDING_WORKER_STARTED_CODE");
   });
 
   it("keeps a controller-compatible memory worker without extraction or provider calls", () => {
