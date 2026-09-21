@@ -111,7 +111,7 @@ docker compose -f compose.test.yaml up --build --abort-on-container-exit --exit-
 
 ## Деплой и документация
 
-В корне `docs/` оставлять только `openviking-memory-analysis.md` и `production-deployment.md`.
+В корне `docs/` оставлять только `production-deployment.md`.
 Отчёты о работе давать в чате; отдельные документы создавать только по прямому запросу владельца.
 
 Перед подготовкой релиза или любыми действиями с production прочитать
