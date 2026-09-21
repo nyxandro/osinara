@@ -3,6 +3,7 @@
  *
  * Exports:
  * - `formatRetrievedMemoryInstructions`: describes the active retrieval pipeline to the model.
+ * - `recordOfferedMemories`: writes the show journal once the block budget picked what fits.
  * - `latestUserText`: extracts the newest user text from Eve model history.
  * - `memoryRetrievalQuery`: selects the addressed text to search by for the current turn.
  * - `MemoryRetrievalDiagnostics`: log-only numbers about the query and each search branch.
@@ -131,9 +132,7 @@ export interface MemoryTurnContext {
 
 export interface MemoryTurnOffer {
   claimIdByMemoryRef: ReadonlyMap<string, string>;
-  /** Conflict closure ids; they cannot be attributed to one group from the model-facing data. */
-  conflictClaimIds: readonly string[];
-  conflictGroups: number;
+  claimIdsByConflictRef: ReadonlyMap<string, readonly string[]>;
 }
 
 export function latestUserText(messages: readonly ModelMessage[]): string | null {
@@ -232,17 +231,14 @@ export async function retrieveMemoryTurnContext(
       retrievedClaimIds: retrieval.results.map((result) => result.memory.id),
       skillHints,
     });
-    const claimIdByMemoryRef = new Map(
-      retrieval.results.map((result) => [result.memory.memoryRef, result.memory.id] as const),
-    );
-    const ordinaryIds = new Set(claimIdByMemoryRef.values());
     return {
       diagnostics: queryDiagnostics(prepared, retrieval.diagnostics, embeddings.length > 0),
       memories,
       offered: {
-        claimIdByMemoryRef,
-        conflictClaimIds: retrieval.relatedClaimIds.filter((id) => !ordinaryIds.has(id)),
-        conflictGroups: retrieval.conflicts.length,
+        claimIdByMemoryRef: new Map(
+          retrieval.results.map((result) => [result.memory.memoryRef, result.memory.id] as const),
+        ),
+        claimIdsByConflictRef: retrieval.claimIdsByConflictRef,
       },
       retrievedClaimIds: retrieval.relatedClaimIds,
       threads,
@@ -254,10 +250,9 @@ export async function retrieveMemoryTurnContext(
 
 /**
  * Writes down what the turn put in front of the model, after the block budget dropped whatever did
- * not fit. Under-writing is the safe direction: a record left out of the journal can be offered
- * again, while a record written down without being shown disappears from the next turns of the
- * conversation. That is why a partly dropped conflict closure is left unwritten — the model-facing
- * group carries refs, not claim ids, so its share of the closure cannot be told apart.
+ * not fit. A record written down without being shown disappears from the next turns of the
+ * conversation, and the usage counter only credits what the journal holds, so this list has to be
+ * exactly what the block carried.
  */
 export async function recordOfferedMemories(
   window: MemorySelectionWindow | null,
@@ -266,17 +261,13 @@ export async function recordOfferedMemories(
 ): Promise<void> {
   if (window === null) return;
   const claimIds: string[] = [];
-  let conflictGroups = 0;
   for (const item of offered) {
     if ("versions" in item) {
-      conflictGroups += 1;
+      claimIds.push(...(context.offered.claimIdsByConflictRef.get(item.conflictRef) ?? []));
       continue;
     }
     const claimId = context.offered.claimIdByMemoryRef.get(item.memoryRef);
     if (claimId !== undefined) claimIds.push(claimId);
   }
-  if (conflictGroups === context.offered.conflictGroups) {
-    claimIds.push(...context.offered.conflictClaimIds);
-  }
-  await memoryShowJournal.recordShown(window, claimIds);
+  await memoryShowJournal.recordShown(window, [...new Set(claimIds)]);
 }

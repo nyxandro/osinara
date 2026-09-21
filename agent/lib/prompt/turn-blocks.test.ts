@@ -328,8 +328,8 @@ describe("memory block resolution", () => {
       expect(markdown).not.toContain("mem_third:");
       expect(markdown).not.toContain("mem_fourth:");
       expect(JSON.parse(info.mock.calls[0]![0] as string)).toMatchObject({
-        code: "AGENT_MEMORY_RETRIEVAL_METRICS", droppedMemories: 2, memories: 2,
-        memoryRefs: ["mem_first", "mem_second"],
+        code: "AGENT_MEMORY_RETRIEVAL_METRICS", droppedMemories: 2, memories: 4,
+        offeredMemories: 2, memoryRefs: ["mem_first", "mem_second"],
       });
     } finally { info.mockRestore(); }
   });
@@ -363,6 +363,39 @@ describe("memory block resolution", () => {
     const [window, , offered] = recordOffered.mock.calls[0]!;
     expect(window).toMatchObject({ turnId: TEST_TURN_ID, turnOrdinal: 7 });
     expect(offered).toEqual([memories[0], memories[1]]);
+  });
+
+  it("says so in the log when the profile and threads fill the ceiling by themselves", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const profileAuth = auth({
+      memoryScopes: ["personal", "family"],
+      telegramConversationId: "conversation-1",
+      telegramTurnStartedAt: "2026-08-08T10:00:00.000Z",
+      telegramUserId: "101",
+    });
+    const subjects = [{ claims: [{ content: "я".repeat(40_000), memoryRef: "mem_profile" }] }];
+    const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization,
+      createProfile: vi.fn().mockResolvedValue({ subjects }),
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(),
+      retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true },
+        memories: [{ content: "важная запись", kind: "fact", memoryRef: "mem_first" }],
+        offered: { claimIdByMemoryRef: new Map(), claimIdsByConflictRef: new Map() },
+        retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } }),
+    });
+
+    try {
+      const markdown = await resolve(
+        context(profileAuth, [{ content: "что купить?", role: "user" }] as ModelMessage[]),
+        TEST_TURN_ID,
+      );
+
+      // The best match stays: an over-full profile must not leave the turn with no memory at all.
+      expect(markdown).toContain("важная запись");
+      expect(JSON.parse(warn.mock.calls[0]![0] as string)).toMatchObject({
+        code: "AGENT_MEMORY_TURN_BLOCK_OVER_BUDGET", offeredMemories: 1, turnId: TEST_TURN_ID,
+      });
+    } finally { info.mockRestore(); warn.mockRestore(); }
   });
 
   it("returns no block when the turn carries no user text", async () => {

@@ -22,10 +22,11 @@ describe("memory failure ownership", () => {
     const reportFailure = vi.fn().mockResolvedValue(undefined);
     const retrieve = vi.fn().mockResolvedValue({ memories: [], retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } });
     const createProfile = vi.fn().mockRejectedValue(error);
+    const recordOffered = vi.fn();
     if (phase === "retrieval") retrieve.mockRejectedValue(error);
     const resolve = createMemoryBlockResolver({
       authorize: () => { if (phase === "authorization") throw error; return authorization; },
-      openSelectionWindow: async () => 1, recordOffered: vi.fn(), retrieve, createProfile,
+      openSelectionWindow: async () => 1, recordOffered, retrieve, createProfile,
       reportFailure,
     });
     const ctx = phase !== "profile" ? context : { ...context, session: { ...context.session, auth: {
@@ -39,6 +40,9 @@ describe("memory failure ownership", () => {
       causeCode: "AGENT_TEST_MEMORY_FAILED", phase, runId: "run", scheduleId: "schedule", sessionId: "session", turnId: "turn_0",
     });
     expect(JSON.stringify(reportFailure.mock.calls)).not.toMatch(/private|частный/);
+    // A turn that never reached the model must leave the show journal alone: a record written down
+    // there is hidden from the next turns of the conversation.
+    expect(recordOffered).not.toHaveBeenCalled();
     if (phase === "authorization") expect(retrieve).not.toHaveBeenCalled();
   });
 

@@ -73,16 +73,26 @@ describe("applyTurnMemoryBudget", () => {
     expect(result.droppedMemories).toBe(1);
   });
 
-  it("returns no records rather than a truncated one when the rest of the block fills the budget", () => {
-    const memories = [record("mem_first", 4_000)];
+  it("keeps the best match even when the rest of the block already fills the budget", () => {
+    const memories = [record("mem_first", 4_000), record("mem_second", 4_000)];
 
     const result = applyTurnMemoryBudget({
       memories,
       otherCharacters: MEMORY_TURN_BLOCK_MAX_CHARACTERS,
     });
 
-    expect(result.memories).toEqual([]);
+    expect(result.memories).toEqual([memories[0]]);
     expect(result.droppedMemories).toBe(1);
+    expect(result.overBudget).toBe(true);
+  });
+
+  it("reports a block that fits so the caller stays quiet", () => {
+    const result = applyTurnMemoryBudget({
+      memories: [record("mem_first", 1_000)],
+      otherCharacters: 1_000,
+    });
+
+    expect(result.overBudget).toBe(false);
   });
 
   it("measures the block the same way the retrieval metrics line does", () => {

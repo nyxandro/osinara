@@ -73,7 +73,7 @@ import {
 import { scheduledGroupHistoryAccess } from "../agent-schedules/scheduled-group-history-context.js";
 import { isScheduledSession } from "../agent-schedules/scheduled-session.js";
 import { modeInstructions } from "./mode-instructions.js";
-import { applyTurnMemoryBudget } from "./turn-memory-budget.js";
+import { applyTurnMemoryBudget, turnMemoryBlockCharacters } from "./turn-memory-budget.js";
 import { formatTurnMemoryContext } from "./turn-memory-context.js";
 
 export interface TurnBlockContext {
@@ -276,7 +276,8 @@ export function createMemoryBlockResolver(dependencies: {
     let diagnostics: MemoryRetrievalDiagnostics | null = null;
     let selection = memorySelectionMetrics(null);
     let profileCharacters: number | null = null;
-    let droppedMemories = 0;
+    let droppedMemories: number | null = null;
+    let offeredMemories: number | null = null;
     let profileMemoryRefs: string[] | null = null;
     let threadRefs: string[] | null = null;
     let threadCharacters: number | null = null;
@@ -316,6 +317,7 @@ export function createMemoryBlockResolver(dependencies: {
         applicationThreadSkillHints(ctx.messages),
         window,
       );
+      memories = context.memories.length;
       diagnostics = context.diagnostics;
       outcome = "succeeded";
       phase = "profile";
@@ -335,8 +337,19 @@ export function createMemoryBlockResolver(dependencies: {
         otherCharacters: profileCharacters + threadCharacters,
       });
       droppedMemories = budget.droppedMemories;
-      memories = budget.memories.length;
+      offeredMemories = budget.memories.length;
       selection = memorySelectionMetrics(budget.memories);
+      if (budget.overBudget) {
+        // Not trimming any more: the profile and threads filled the ceiling by themselves, so the
+        // block ships over budget with the best match kept. Their own limits count rendered text
+        // while this one counts the serialized block, which is how they can outgrow it.
+        console.warn(JSON.stringify({
+          code: "AGENT_MEMORY_TURN_BLOCK_OVER_BUDGET",
+          blockCharacters: turnMemoryBlockCharacters(budget.memories, profileCharacters + threadCharacters),
+          droppedMemories, offeredMemories, profileCharacters, threadCharacters,
+          sessionId: ctx.session.id, turnId,
+        }));
+      }
       // The journal hears about the selection only now: a record the budget dropped was never put
       // in front of the model, and writing it down would hide it from the next turns.
       phase = "journal";
@@ -372,8 +385,8 @@ export function createMemoryBlockResolver(dependencies: {
       return MEMORY_UNAVAILABLE_BLOCK;
     } finally {
       console.info(JSON.stringify({ code: "AGENT_MEMORY_RETRIEVAL_METRICS", sessionId: ctx.session.id,
-        turnId, outcome, memories, droppedMemories, ...selection, ...diagnostics, profileCharacters,
-        profileMemoryRefs,
+        turnId, outcome, memories, offeredMemories, droppedMemories, ...selection, ...diagnostics,
+        profileCharacters, profileMemoryRefs,
         threadRefs, threadCharacters, failurePhase: outcome === "failed" ? phase : null, causeCode,
         durationMs: Math.round(performance.now() - started) }));
     }

@@ -206,17 +206,16 @@ describe("recordOfferedMemories", () => {
     turnOrdinal: 3,
   };
 
-  function turnContext(
-    conflictGroups: number,
-    conflictClaimIds: readonly string[] = ["claim-a", "claim-b"],
-  ): MemoryTurnContext {
+  function turnContext(): MemoryTurnContext {
     return {
       diagnostics: {} as MemoryTurnContext["diagnostics"],
       memories: [],
       offered: {
         claimIdByMemoryRef: new Map([["mem_first", "claim-1"], ["mem_second", "claim-2"]]),
-        conflictClaimIds,
-        conflictGroups,
+        claimIdsByConflictRef: new Map([
+          ["conflict-1", ["claim-a", "claim-b"]],
+          ["conflict-2", ["claim-c", "claim-d"]],
+        ]),
       },
       retrievedClaimIds: [],
       threads: { threads: [], totalCharacters: 0 } as MemoryTurnContext["threads"],
@@ -227,39 +226,41 @@ describe("recordOfferedMemories", () => {
     return { content: "запись", kind: "fact", memoryRef } as unknown as ModelMemory;
   }
 
-  const conflict = {
-    conflictRef: "conflict-1",
-    instruction: "Не выбирать версию самостоятельно",
-    versions: [{ content: "одна", memoryRef: "mem_a" }, { content: "другая", memoryRef: "mem_b" }],
-  } as never;
+  function conflict(conflictRef: string) {
+    return {
+      conflictRef,
+      instruction: "Не выбирать версию самостоятельно",
+      versions: [{ content: "одна", memoryRef: "mem_a" }, { content: "другая", memoryRef: "mem_b" }],
+    } as never;
+  }
 
   it("writes down only the records the turn actually offered", async () => {
     const recordShown = vi.spyOn(memoryShowJournal, "recordShown").mockResolvedValue();
 
     try {
-      await recordOfferedMemories(window, turnContext(0, []), [record("mem_first")]);
+      await recordOfferedMemories(window, turnContext(), [record("mem_first")]);
 
       expect(recordShown).toHaveBeenCalledWith(window, ["claim-1"]);
     } finally { recordShown.mockRestore(); }
   });
 
-  it("adds the conflict closure when every conflict group survived the budget", async () => {
+  it("adds the closure of a conflict group the turn offered", async () => {
     const recordShown = vi.spyOn(memoryShowJournal, "recordShown").mockResolvedValue();
 
     try {
-      await recordOfferedMemories(window, turnContext(1), [record("mem_first"), conflict]);
+      await recordOfferedMemories(window, turnContext(), [record("mem_first"), conflict("conflict-1")]);
 
       expect(recordShown).toHaveBeenCalledWith(window, ["claim-1", "claim-a", "claim-b"]);
     } finally { recordShown.mockRestore(); }
   });
 
-  it("keeps the conflict closure offerable when a conflict group was dropped", async () => {
+  it("keeps a dropped conflict group offerable while writing down the one that survived", async () => {
     const recordShown = vi.spyOn(memoryShowJournal, "recordShown").mockResolvedValue();
 
     try {
-      await recordOfferedMemories(window, turnContext(2), [record("mem_first"), conflict]);
+      await recordOfferedMemories(window, turnContext(), [conflict("conflict-2")]);
 
-      expect(recordShown).toHaveBeenCalledWith(window, ["claim-1"]);
+      expect(recordShown).toHaveBeenCalledWith(window, ["claim-c", "claim-d"]);
     } finally { recordShown.mockRestore(); }
   });
 
@@ -267,7 +268,7 @@ describe("recordOfferedMemories", () => {
     const recordShown = vi.spyOn(memoryShowJournal, "recordShown").mockResolvedValue();
 
     try {
-      await recordOfferedMemories(null, turnContext(0, []), [record("mem_first")]);
+      await recordOfferedMemories(null, turnContext(), [record("mem_first")]);
 
       expect(recordShown).not.toHaveBeenCalled();
     } finally { recordShown.mockRestore(); }
