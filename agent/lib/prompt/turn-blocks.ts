@@ -5,7 +5,8 @@
  * - `TurnBlockContext`: the minimal Eve resolve context a block resolver reads.
  * - `createModeBlockResolver` / `resolveModeBlock`: verified mode rulebook for the current turn.
  * - `createReactionSetBlockResolver` / `resolveReactionSetBlock`: reaction set announced in history.
- * - `createMemoryBlockResolver` / `resolveMemoryBlock`: authorized long-term memory records.
+ * - `createMemoryBlockResolver` / `resolveMemoryBlock`: authorized long-term memory records,
+ *   wrapped in the payload markers; a memory service notice is returned unwrapped.
  * - `createPreferenceBlockResolver` / `resolvePreferenceBlock`: one editable chat prompt.
  *
  * Key constructs:
@@ -70,6 +71,7 @@ import {
 import { scheduledGroupHistoryAccess } from "../agent-schedules/scheduled-group-history-context.js";
 import { isScheduledSession } from "../agent-schedules/scheduled-session.js";
 import { modeInstructions } from "./mode-instructions.js";
+import { formatTurnMemoryContext } from "./turn-memory-context.js";
 
 export interface TurnBlockContext {
   readonly channel?: { readonly kind?: string };
@@ -320,12 +322,14 @@ export function createMemoryBlockResolver(dependencies: {
       threadRefs = context.threads.threads.map((thread) => thread.threadRef);
       threadCharacters = JSON.stringify(context.threads).length;
       phase = "format";
-      return [
+      // Only retrieved data carries the payload markers. The unavailable notice below is a rule
+      // about behaviour, so it stays unwrapped and keeps its place in the instruction prefix.
+      return formatTurnMemoryContext([
         ...(profile === null ? [] : [formatProfileViewContext(profile)]),
         formatRetrievedMemoryInstructions(
           context.memories, context.threads, context.diagnostics.semanticBranchAvailable,
         ),
-      ].join("\n\n");
+      ].join("\n\n"));
     } catch (error) {
       outcome = "failed";
       if (error instanceof MemoryContextFailure) phase = error.phase;

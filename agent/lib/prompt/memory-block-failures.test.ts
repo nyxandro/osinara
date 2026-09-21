@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AppError } from "../app-error.js";
 import { createMemoryBlockResolver, type TurnBlockContext } from "./turn-blocks.js";
 import type { MemoryAuthorization } from "../memory-context.js";
+import { TURN_MEMORY_OPEN_TAG } from "./turn-memory-context.js";
 
 const authorization: MemoryAuthorization = {
   familyId: "family", groupId: null, role: "owner", scopes: ["personal"],
@@ -38,6 +39,30 @@ describe("memory failure ownership", () => {
     });
     expect(JSON.stringify(reportFailure.mock.calls)).not.toMatch(/private|частный/);
     if (phase === "authorization") expect(retrieve).not.toHaveBeenCalled();
+  });
+
+  it("marks retrieved data as a payload and leaves a service notice unmarked", async () => {
+    // The markers are what `turn-memory-projection.ts` moves into the conversation. Marking a
+    // notice would deliver a rule about behaviour as if a person had just said it.
+    const shared = {
+      authorize: () => authorization, createProfile: vi.fn(), openSelectionWindow: async () => 1,
+      reportFailure: vi.fn(),
+    };
+    const retrieved = await createMemoryBlockResolver({
+      ...shared,
+      retrieve: vi.fn().mockResolvedValue({
+        diagnostics: { semanticBranchAvailable: true }, memories: [], retrievedClaimIds: [],
+        threads: { threads: [], totalCharacters: 0 },
+      }),
+    })(context, "turn_0");
+    const notice = await createMemoryBlockResolver({
+      ...shared,
+      retrieve: vi.fn().mockRejectedValue(new Error("embedding service down")),
+    })(context, "turn_0");
+
+    expect(retrieved).toContain(TURN_MEMORY_OPEN_TAG);
+    expect(notice).toContain("AGENT_MEMORY_UNAVAILABLE");
+    expect(notice).not.toContain(TURN_MEMORY_OPEN_TAG);
   });
 
   it("keeps the explicit unavailable block if the incident database is also unavailable", async () => {
