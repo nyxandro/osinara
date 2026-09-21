@@ -41,6 +41,46 @@ const REMOVED_ANTIVIRUS_PATHS = [
   "agent/lib/attachments/clamav-scanner.test.ts",
 ] as const;
 
+/**
+ * Peak resident memory of the embedding service under a saturating load, measured on a six-core
+ * host with the pinned image and model. Memory is set by the number of math threads and barely
+ * moves with the CPU budget: two and three cores differed by eleven megabytes, one and three math
+ * threads by four hundred. Three threads do not fit a gigabyte at all — the container is killed
+ * while it is still loading the model.
+ */
+const MEASURED_PEAK_MEGABYTES: Readonly<Record<number, number>> = { 1: 820, 2: 870, 3: 1250 };
+
+interface EmbeddingService {
+  clientBatchSize: number;
+  concurrentRequests: number;
+  mathThreads: number;
+  memoryLimitMegabytes: number;
+}
+
+function embeddingService(file: string): EmbeddingService {
+  const compose = readFileSync(new URL(file, projectRoot), "utf8");
+  const start = compose.indexOf("\n  memory-embedding:\n");
+  const rest = compose.slice(start + 1);
+  const next = rest.indexOf("\n  memory-");
+  const block = next === -1 ? rest : rest.slice(0, next);
+  const flag = (name: string) => {
+    const value = block.match(new RegExp(`- --${name}\\n\\s+- "?(\\d+)"?`, "u"))?.[1];
+    if (value === undefined) throw new Error(`${file}: --${name} is not set on memory-embedding`);
+    return Number(value);
+  };
+  const setting = (pattern: RegExp, name: string) => {
+    const value = block.match(pattern)?.[1];
+    if (value === undefined) throw new Error(`${file}: ${name} is not set on memory-embedding`);
+    return Number(value);
+  };
+  return {
+    clientBatchSize: flag("max-client-batch-size"),
+    concurrentRequests: flag("max-concurrent-requests"),
+    mathThreads: setting(/OMP_NUM_THREADS: "(\d+)"/u, "OMP_NUM_THREADS"),
+    memoryLimitMegabytes: setting(/mem_limit: (\d+)m/u, "mem_limit"),
+  };
+}
+
 describe("Docker Compose runtime wiring", () => {
   it("wires the agent to a healthy persistent Codex subscription gateway", () => {
     const localCompose = readFileSync(new URL("compose.yaml", projectRoot), "utf8");
@@ -84,15 +124,43 @@ describe("Docker Compose runtime wiring", () => {
     expect(compose).toContain(`      WORKFLOW_QUEUE_NAMESPACE: ${expectedNamespace}\n`);
   });
 
-  it("pins the multilingual E5 model and bounds its CPU and memory", () => {
-    const compose = readFileSync(new URL("compose.yaml", projectRoot), "utf8");
+  it.each(["compose.yaml", "compose.production.yaml"])(
+    "pins the multilingual E5 model in %s",
+    (file) => {
+      const compose = readFileSync(new URL(file, projectRoot), "utf8");
 
-    expect(compose).toContain("      - intfloat/multilingual-e5-small\n");
-    expect(compose).toContain("      - 614241f622f53c4eeff9890bdc4f31cfecc418b3\n");
-    expect(compose).toContain("    mem_limit: 1536m\n");
-    expect(compose).toContain("    cpus: 1.5\n");
-    expect(compose).toContain("      - --auto-truncate=false\n");
-  });
+      expect(compose).toContain("      - intfloat/multilingual-e5-small\n");
+      expect(compose).toContain("      - 614241f622f53c4eeff9890bdc4f31cfecc418b3\n");
+      expect(compose).toContain("      - --auto-truncate=false\n");
+    },
+  );
+
+  it.each(["compose.yaml", "compose.production.yaml"])(
+    "leaves room in %s for a client batch and the searches beside it",
+    (file) => {
+      const service = embeddingService(file);
+
+      // A client batch occupies one queue slot per input. At a limit equal to the batch size one
+      // indexing batch fills the queue, and a search arriving beside it is refused outright rather
+      // than queued: the turn loses its semantic branch and the person sees forgetfulness. Measured
+      // on a saturating indexer, a limit equal to the batch refused 15 searches out of 60; twice
+      // the batch refused none.
+      expect(service.concurrentRequests).toBeGreaterThanOrEqual(2 * service.clientBatchSize);
+    },
+  );
+
+  it.each(["compose.yaml", "compose.production.yaml"])(
+    "keeps the memory limit in %s above what its thread count needs",
+    (file) => {
+      const service = embeddingService(file);
+      const peak = MEASURED_PEAK_MEGABYTES[service.mathThreads];
+
+      expect(peak, `no measurement for ${service.mathThreads} math threads`).toBeDefined();
+      // Raising threads without raising the limit does not degrade: the container never finishes
+      // loading the model, and semantic search is gone until someone reads the logs.
+      expect(service.memoryLimitMegabytes).toBeGreaterThanOrEqual(Math.ceil(peak! * 1.15));
+    },
+  );
 
   it("keeps antivirus and the separate document parser out of the runtime", () => {
     const compose = readFileSync(new URL("compose.yaml", projectRoot), "utf8");

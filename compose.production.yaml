@@ -27,26 +27,36 @@ services:
 
   memory-embedding:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07
-    cpus: 1.0
-    mem_limit: 1536m
+    # Sized by measurement on a six-core host, not by guess. Memory is set by the math threads
+    # alone: three cores cost eleven megabytes more than two, while a third math thread costs four
+    # hundred and does not fit a gigabyte at all — the container is killed while loading the model.
+    # Two threads peak at 870 MB under a saturating load. The CPU budget is separate and cheap:
+    # tokenization and request handling use the third core without touching that peak, and it buys
+    # 45% more indexing throughput and a third off the wait when a search queues behind a batch.
+    cpus: 3.0
+    mem_limit: 1024m
     command:
       - --model-id
       - intfloat/multilingual-e5-small
       - --revision
       - 614241f622f53c4eeff9890bdc4f31cfecc418b3
       - --tokenization-workers
-      - "1"
+      - "2"
       - --max-client-batch-size
       - "8"
+      # One queue slot per input, so a client batch of eight fills a limit of eight and the search
+      # arriving beside it is refused rather than queued — the turn silently loses its semantic
+      # branch. Measured against a saturating indexer: at eight, 15 searches out of 60 were refused;
+      # at sixteen, none, at no cost in memory.
       - --max-concurrent-requests
-      - "8"
+      - "16"
       - --max-batch-requests
       - "8"
       - --max-batch-tokens
       - "4096"
       - --auto-truncate=false
     environment:
-      OMP_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "2"
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost/health"]
       interval: 5s
