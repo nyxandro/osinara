@@ -24,6 +24,7 @@ import {
   MEMORY_EMBEDDING_MODEL_VERSION,
   MEMORY_EMBEDDING_PROVIDER_BATCH_SIZE,
   MEMORY_EMBEDDING_WORKER_READY_PATH,
+  MEMORY_EMBEDDING_WORKER_STARTED_CODE,
 } from "../agent/lib/memory-config.js";
 import { memoryIndexRepository } from "../agent/lib/memory-index-repository.js";
 
@@ -136,7 +137,7 @@ await rm(MEMORY_EMBEDDING_WORKER_READY_PATH, { force: true });
 // an empty log meant «no errors», and that is exactly what a hung process looks like too. The
 // heartbeat is the readiness file, not the log — a pulse in the log would drown the codes.
 console.info(JSON.stringify({
-  code: "AGENT_MEMORY_EMBEDDING_WORKER_STARTED",
+  code: MEMORY_EMBEDDING_WORKER_STARTED_CODE,
   batchSize: MEMORY_EMBEDDING_JOB_BATCH_SIZE,
   model: MEMORY_EMBEDDING_MODEL_VERSION,
 }));
