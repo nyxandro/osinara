@@ -21,6 +21,18 @@ export const MEMORY_LIST_DEFAULT_LIMIT = 20;
 export const MEMORY_LIST_MAX_LIMIT = 50;
 export const MEMORY_RETRIEVAL_LIMIT = 12;
 export const MEMORY_RETRIEVAL_CANDIDATE_LIMIT = 40;
+/**
+ * Total size of the turn memory block: retrieved records, profile, and threads together. The three
+ * parts are bounded separately, and their sum was bounded by nothing — worst case 76 000 characters.
+ * Since the block left the cached prefix it is the only piece the model recomputes on every
+ * message, so this number is turn latency and input cost.
+ *
+ * Chosen from 17 production turns measured on 2026-09-21 (median 21 601, second largest 29 608,
+ * largest 41 012): above the observed band so it trims outliers rather than normal turns.
+ * `droppedMemories` in `AGENT_MEMORY_RETRIEVAL_METRICS` shows when it starts cutting in normal
+ * operation, which is the evidence to retune it.
+ */
+export const MEMORY_TURN_BLOCK_MAX_CHARACTERS = 36_000;
 export const MEMORY_INCIDENT_STATEMENT_TIMEOUT_MS = 1_000;
 export const MEMORY_INCIDENT_QUERY_TIMEOUT_MS = 1_500;
 

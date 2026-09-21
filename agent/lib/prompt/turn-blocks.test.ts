@@ -289,7 +289,7 @@ describe("memory block resolution", () => {
       reportFailure: vi.fn(),
       authorize: () => authorization,
       createProfile,
-      openSelectionWindow: async () => 1,
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(),
       retrieve: vi.fn().mockResolvedValue({
         diagnostics: { semanticBranchAvailable: true },
         memories: [],
@@ -306,10 +306,69 @@ describe("memory block resolution", () => {
     expect(markdown).toContain("активный pipeline текущей реализации");
   });
 
+  it("drops the lowest-ranked records when the block outgrows its budget and counts them", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const memories = ["mem_first", "mem_second", "mem_third", "mem_fourth"].map((memoryRef) => ({
+      content: `${memoryRef}:${"я".repeat(12_000)}`, kind: "fact", memoryRef,
+    }));
+    const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization,
+      createProfile, openSelectionWindow: async () => 1, recordOffered: vi.fn(),
+      retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true }, memories,
+        retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } }),
+    });
+
+    try {
+      const markdown = await resolve(
+        context(privateAuth, [{ content: "что купить?", role: "user" }] as ModelMessage[]),
+        TEST_TURN_ID,
+      );
+
+      expect(markdown).toContain("mem_first:");
+      expect(markdown).toContain("mem_second:");
+      expect(markdown).not.toContain("mem_third:");
+      expect(markdown).not.toContain("mem_fourth:");
+      expect(JSON.parse(info.mock.calls[0]![0] as string)).toMatchObject({
+        code: "AGENT_MEMORY_RETRIEVAL_METRICS", droppedMemories: 2, memories: 2,
+        memoryRefs: ["mem_first", "mem_second"],
+      });
+    } finally { info.mockRestore(); }
+  });
+
+  it("tells the show journal only about the records that survived the budget", async () => {
+    const memories = ["mem_first", "mem_second", "mem_third", "mem_fourth"].map((memoryRef) => ({
+      content: `${memoryRef}:${"я".repeat(12_000)}`, kind: "fact", memoryRef,
+    }));
+    const recordOffered = vi.fn();
+    const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization,
+      createProfile: vi.fn().mockResolvedValue({ subjects: [] }),
+      openSelectionWindow: async () => 7, recordOffered,
+      retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true }, memories,
+        offered: { claimIdByMemoryRef: new Map(), conflictClaimIds: [], conflictGroups: 0 },
+        retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } }),
+    });
+
+    const conversationAuth = auth({
+      memoryScopes: ["personal", "family"],
+      telegramConversationId: "conversation-1",
+      telegramTurnStartedAt: "2026-08-08T10:00:00.000Z",
+      telegramUserId: "101",
+    });
+
+    await resolve(
+      context(conversationAuth, [{ content: "что купить?", role: "user" }] as ModelMessage[]),
+      TEST_TURN_ID,
+    );
+
+    expect(recordOffered).toHaveBeenCalledTimes(1);
+    const [window, , offered] = recordOffered.mock.calls[0]!;
+    expect(window).toMatchObject({ turnId: TEST_TURN_ID, turnOrdinal: 7 });
+    expect(offered).toEqual([memories[0], memories[1]]);
+  });
+
   it("returns no block when the turn carries no user text", async () => {
     const retrieve = vi.fn();
     const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization, createProfile,
-      openSelectionWindow: async () => 1, retrieve });
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(), retrieve });
 
     expect(await resolve(context(privateAuth), TEST_TURN_ID)).toBeNull();
     expect(retrieve).not.toHaveBeenCalled();
@@ -339,7 +398,7 @@ describe("memory block resolution", () => {
       simpleTopRank: null,
     };
     const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization, createProfile,
-      openSelectionWindow: async () => 1,
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(),
       retrieve: vi.fn().mockResolvedValue({ diagnostics, memories, retrievedClaimIds: [],
         threads: { threads: [], totalCharacters: 0 } }),
     });
@@ -359,7 +418,7 @@ describe("memory block resolution", () => {
   it("discloses unavailable memory instead of throwing on authorization failure", async () => {
     const resolve = createMemoryBlockResolver({
       reportFailure: vi.fn(),
-      openSelectionWindow: async () => 1,
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(),
       authorize: () => {
         throw new Error("AGENT_MEMORY_CONTEXT_INVALID: нет области памяти");
       },
@@ -381,7 +440,7 @@ describe("memory block resolution", () => {
       reportFailure: vi.fn(),
       authorize: () => authorization,
       createProfile,
-      openSelectionWindow: async () => 1,
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(),
       retrieve: vi.fn().mockRejectedValue(new Error("embedding service down")),
     });
 
@@ -416,7 +475,7 @@ describe("memory block resolution", () => {
       reportFailure: vi.fn(),
       authorize: () => authorization,
       createProfile: profile,
-      openSelectionWindow: async () => 1,
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(),
       retrieve,
     });
     const telegramAuth = auth({

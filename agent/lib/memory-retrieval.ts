@@ -119,8 +119,21 @@ export function formatRetrievedMemoryInstructions(
 export interface MemoryTurnContext {
   diagnostics: MemoryRetrievalDiagnostics;
   memories: ModelMemoryContextItem[];
+  /**
+   * What the show journal needs once the block budget has decided which records fit. The journal
+   * excludes a shown record from the next turns of the conversation, so a record dropped by the
+   * budget must not be written down: it was never put in front of the model.
+   */
+  offered: MemoryTurnOffer;
   retrievedClaimIds: string[];
   threads: MemoryThreadContext;
+}
+
+export interface MemoryTurnOffer {
+  claimIdByMemoryRef: ReadonlyMap<string, string>;
+  /** Conflict closure ids; they cannot be attributed to one group from the model-facing data. */
+  conflictClaimIds: readonly string[];
+  conflictGroups: number;
 }
 
 export function latestUserText(messages: readonly ModelMessage[]): string | null {
@@ -205,10 +218,6 @@ export async function retrieveMemoryTurnContext(
       undefined,
       window,
     );
-    // Written after the selection is built, so the window holds what this turn actually offered.
-    if (window !== null) {
-      await memoryShowJournal.recordShown(window, retrieval.relatedClaimIds);
-    }
     const memories: ModelMemoryContextItem[] = [
       ...retrieval.results.map((result) => toModelMemory(result.memory, result.sourceEvidence)),
       ...retrieval.conflicts.map((conflict) => ({ ...conflict, type: "unresolved_conflict" as const })),
@@ -223,13 +232,51 @@ export async function retrieveMemoryTurnContext(
       retrievedClaimIds: retrieval.results.map((result) => result.memory.id),
       skillHints,
     });
+    const claimIdByMemoryRef = new Map(
+      retrieval.results.map((result) => [result.memory.memoryRef, result.memory.id] as const),
+    );
+    const ordinaryIds = new Set(claimIdByMemoryRef.values());
     return {
       diagnostics: queryDiagnostics(prepared, retrieval.diagnostics, embeddings.length > 0),
       memories,
+      offered: {
+        claimIdByMemoryRef,
+        conflictClaimIds: retrieval.relatedClaimIds.filter((id) => !ordinaryIds.has(id)),
+        conflictGroups: retrieval.conflicts.length,
+      },
       retrievedClaimIds: retrieval.relatedClaimIds,
       threads,
     };
   } catch (error) {
     throw new MemoryContextFailure(phase, error);
   }
+}
+
+/**
+ * Writes down what the turn put in front of the model, after the block budget dropped whatever did
+ * not fit. Under-writing is the safe direction: a record left out of the journal can be offered
+ * again, while a record written down without being shown disappears from the next turns of the
+ * conversation. That is why a partly dropped conflict closure is left unwritten — the model-facing
+ * group carries refs, not claim ids, so its share of the closure cannot be told apart.
+ */
+export async function recordOfferedMemories(
+  window: MemorySelectionWindow | null,
+  context: MemoryTurnContext,
+  offered: readonly ModelMemoryContextItem[],
+): Promise<void> {
+  if (window === null) return;
+  const claimIds: string[] = [];
+  let conflictGroups = 0;
+  for (const item of offered) {
+    if ("versions" in item) {
+      conflictGroups += 1;
+      continue;
+    }
+    const claimId = context.offered.claimIdByMemoryRef.get(item.memoryRef);
+    if (claimId !== undefined) claimIds.push(claimId);
+  }
+  if (conflictGroups === context.offered.conflictGroups) {
+    claimIds.push(...context.offered.conflictClaimIds);
+  }
+  await memoryShowJournal.recordShown(window, claimIds);
 }
