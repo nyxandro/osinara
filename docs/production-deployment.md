@@ -55,8 +55,9 @@ current canonical `main` ref; it does not permit a branch build or bypass releas
 
 Each non-initial deployment retains the previous restore point until the new PostgreSQL dumps
 and durable-volume archives are complete and checksum-verified. Only then does it remove older
-rolling copies and the historical initial migration backup, leaving one verified previous-release
-backup. Checksum paths are relative and remain valid after the atomic directory rename. Capacity
+rolling copies and the historical initial migration backup, keeping the three most recent verified
+release backups. One copy alone is no restore point for damage noticed a day or two late: by then
+the only copy holds it too. Three sets cost about 11 GB on the current host. Checksum paths are relative and remain valid after the atomic directory rename. Capacity
 preflight must fit both the existing and new copies; insufficient space never triggers early deletion.
 After a successful health
 check and terminal success record it removes local first-party Osinara image references older than
