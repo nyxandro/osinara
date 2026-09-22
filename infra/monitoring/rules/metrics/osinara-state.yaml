@@ -97,14 +97,17 @@ groups:
           description: 'Новые воспоминания сохраняются, но смысловой поиск их не находит. Снаружи это выглядит как обычный промах поиска.'
           runbook: 'docker ps для memory-embedding-worker: состояние unhealthy означает вставший цикл. Затем docker logs --tail 100 и last_error_code в memory_embedding_jobs.'
 
+      # A healthy release keeps maintenance on for its whole backup: v0.27.1 took ~13 minutes,
+      # v0.28.0 ~20. At 15 minutes this critical alert fired on every normal release and meant
+      # nothing; 30 leaves room for a release while still catching one that never came back.
       - alert: OsinaraRuntimeMaintenanceStuck
         expr: osinara_runtime_maintenance_phase{phase!="ready"} == 1
-        for: 15m
+        for: 30m
         labels:
           severity: critical
           project: osinara-production
         annotations:
-          summary: 'Приложение более 15 минут не принимает работу: режим {{ $labels.phase }}'
+          summary: 'Приложение более 30 минут не принимает работу: режим {{ $labels.phase }}'
           description: 'Режим обслуживания включён дольше обычного окна выкладки. Новые сообщения не начинают обрабатываться.'
           runbook: 'Проверить, идёт ли деплой; при его отсутствии смотреть таблицу runtime_maintenance и держателей допуска.'
 
