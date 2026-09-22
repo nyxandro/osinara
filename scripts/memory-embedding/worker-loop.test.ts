@@ -4,6 +4,7 @@
  * Constructs covered:
  * - A database restart is a pause for the worker, not the end of the process.
  * - Anything the classifier does not call a database outage still ends the run.
+ * - A shutdown cancels the wait instead of sitting it out past the container grace period.
  * - An outage is not a verdict on the memory: it must not become a terminal failure.
  */
 import { describe, expect, it, vi } from "vitest";
@@ -27,14 +28,22 @@ function databaseOutage(): Error {
   );
 }
 
+/** Stands in for the real wait: it returns when the database answers, or when the process stops. */
+function waitHonouringSignal(resolves: boolean) {
+  return vi.fn((signal: AbortSignal) => resolves
+    ? Promise.resolve()
+    : new Promise<void>((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }));
+}
+
 function dependencies(overrides: Partial<Parameters<typeof runEmbeddingWorkerLoop>[0]> = {}) {
   return {
-    isStopping: () => true,
     markAlive: vi.fn(async () => undefined),
-    stopRequested: new Promise<void>(() => undefined),
     processBatch: vi.fn(async () => 0),
     sleep: vi.fn(async () => undefined),
-    waitForDatabase: vi.fn(async () => undefined),
+    stopSignal: AbortSignal.abort(),
+    waitForDatabase: waitHonouringSignal(true),
     ...overrides,
   };
 }
@@ -42,11 +51,13 @@ function dependencies(overrides: Partial<Parameters<typeof runEmbeddingWorkerLoo
 describe("runEmbeddingWorkerLoop", () => {
   it("waits out a database restart and keeps working instead of dying", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const stop = new AbortController();
     let passes = 0;
     const deps = dependencies({
-      isStopping: () => passes >= 2,
+      stopSignal: stop.signal,
       processBatch: vi.fn(async () => {
         passes += 1;
+        if (passes >= 2) stop.abort();
         if (passes === 1) throw databaseOutage();
         return 0;
       }),
@@ -63,7 +74,7 @@ describe("runEmbeddingWorkerLoop", () => {
 
   it("ends the run on a failure that is not a database outage", async () => {
     const deps = dependencies({
-      isStopping: () => false,
+      stopSignal: new AbortController().signal,
       processBatch: vi.fn(async () => { throw new AppError("AGENT_MEMORY_EMBEDDING_UNEXPECTED", "сломалось"); }),
     });
 
@@ -75,7 +86,7 @@ describe("runEmbeddingWorkerLoop", () => {
 
   it("gives up when the database does not come back inside its budget", async () => {
     const deps = dependencies({
-      isStopping: () => false,
+      stopSignal: new AbortController().signal,
       processBatch: vi.fn(async () => { throw databaseOutage(); }),
       waitForDatabase: vi.fn(async () => { throw databaseOutage(); }),
     });
@@ -86,13 +97,17 @@ describe("runEmbeddingWorkerLoop", () => {
 
   it("does not spin when the probe passes but the work keeps failing", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const stop = new AbortController();
     let passes = 0;
     // `SELECT 1` on an open pooled connection succeeds while a new connection is refused: with
     // `too many clients` the probe returns at once and the claim keeps failing.
-    // The last pass meets the stop request and returns before pausing, so it is not counted.
     const deps = dependencies({
-      isStopping: () => passes >= 4,
-      processBatch: vi.fn(async () => { passes += 1; throw databaseOutage(); }),
+      stopSignal: stop.signal,
+      processBatch: vi.fn(async () => {
+        passes += 1;
+        if (passes >= 3) stop.abort();
+        throw databaseOutage();
+      }),
     });
 
     try {
@@ -106,32 +121,34 @@ describe("runEmbeddingWorkerLoop", () => {
   });
 
   it("stops without waiting out the database when the container is being shut down", async () => {
-    // Docker gives this container ten seconds after SIGTERM; the wait budget is sixty. Sitting in
-    // the wait means the process is killed instead of releasing its pool.
-    let stopping = false;
-    let releaseStop!: () => void;
-    const stopRequested = new Promise<void>((resolve) => { releaseStop = resolve; });
+    // Docker gives this container ten seconds after SIGTERM; the wait budget is sixty. A wait that
+    // is merely no longer awaited keeps its timer, and the process is killed instead of exiting.
+    const stop = new AbortController();
     const deps = dependencies({
-      isStopping: () => stopping,
+      stopSignal: stop.signal,
       processBatch: vi.fn(async () => { throw databaseOutage(); }),
-      stopRequested,
-      waitForDatabase: vi.fn(() => new Promise<void>(() => undefined)),
+      waitForDatabase: waitHonouringSignal(false),
     });
 
     const loop = runEmbeddingWorkerLoop(deps);
     await vi.waitFor(() => expect(deps.waitForDatabase).toHaveBeenCalled());
-    stopping = true;
-    releaseStop();
+    stop.abort();
 
     await expect(loop).resolves.toBeUndefined();
     expect(deps.processBatch).toHaveBeenCalledTimes(1);
+    expect(deps.sleep).not.toHaveBeenCalled();
   });
 
   it("sleeps only when a pass found nothing to do", async () => {
+    const stop = new AbortController();
     let passes = 0;
     const deps = dependencies({
-      isStopping: () => passes >= 2,
-      processBatch: vi.fn(async () => { passes += 1; return passes === 1 ? 3 : 0; }),
+      stopSignal: stop.signal,
+      processBatch: vi.fn(async () => {
+        passes += 1;
+        if (passes >= 2) stop.abort();
+        return passes === 1 ? 3 : 0;
+      }),
     });
 
     await runEmbeddingWorkerLoop(deps);
