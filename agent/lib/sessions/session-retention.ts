@@ -35,14 +35,14 @@ async function deleteExpiredSessionsUnderLock(): Promise<number> {
   // The existing minute lifecycle hook bounds abandoned task rows before physical Eve deletion.
   await sessionRepository.retireAbandonedTasks(new Date());
   let deleted = 0;
-  let parked = 0;
+  let parkedThisSweep = 0;
   while (true) {
     const claim = await sessionRepository.claimExpiredForDeletion(new Date());
     if (!claim) {
-      if (parked > 0) {
+      if (parkedThisSweep > 0) {
         // The sweep no longer stops, so this line is the only place the pile stays visible.
         console.warn(JSON.stringify({
-          code: "AGENT_SESSION_RETENTION_PARKED", deleted, parked,
+          code: "AGENT_SESSION_RETENTION_PARKED", deleted, parkedThisSweep,
         }));
       }
       return deleted;
@@ -69,7 +69,7 @@ async function deleteExpiredSessionsUnderLock(): Promise<number> {
       }
       // This schedule is the boundary: persist the context and keep sweeping. Stopping here left
       // every later expired session untouched and dropped the dispatcher's heartbeat for a minute.
-      parked += 1;
+      parkedThisSweep += 1;
       await settled(claim, () =>
         sessionRepository.failDeletion(claim.id, claim.leaseToken, errorCode, new Date()));
       console.error(JSON.stringify({

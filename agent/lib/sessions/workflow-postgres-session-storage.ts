@@ -8,7 +8,9 @@
  * Invariants:
  * - Table names come from the pinned package's public exported schema.
  * - The run row is locked and removed last; any failure rolls the transaction back.
- * - Existing hooks block deletion so Workflow token-retention semantics cannot be shortened.
+ * - Hooks of a live run block deletion so Workflow token-retention semantics cannot be shortened;
+ *   an abandoned run never reaches the terminal transition that would release them, so its hooks
+ *   are removed with it.
  */
 import { EVE_RUN_ABANDONED_AFTER_HOURS } from "../../config.js";
 import { createApplicationDatabasePool } from "../database-client.js";
