@@ -57,11 +57,19 @@ export async function deletePostgresEveSession(
   await client.query("BEGIN");
   try {
     // Lock the primary row before proving that application retirement cannot race active Workflow.
-    // Abandonment is decided by PostgreSQL against its own clock: `updated_at` carries no zone.
+    // Abandonment is decided by PostgreSQL against its own clock; the timestamps carry no zone.
+    //
+    // Activity is the run's own event stream, not `workflow_runs.updated_at`: that column moves on
+    // creation, start, terminal transition and attribute writes, so a live run can keep it weeks
+    // old while working. A run whose newest event is a day old is not working.
     const run = await client.query(
-      `SELECT status::text AS status,
-              updated_at < (now() AT TIME ZONE 'UTC') - ($2 || ' hours')::interval AS abandoned
-         FROM workflow.workflow_runs WHERE id = $1 FOR UPDATE`,
+      `SELECT run.status::text AS status,
+              COALESCE(
+                (SELECT max(event.created_at) FROM workflow.workflow_events AS event
+                  WHERE event.run_id = run.id),
+                run.updated_at
+              ) < (now() AT TIME ZONE 'UTC') - ($2 || ' hours')::interval AS abandoned
+         FROM workflow.workflow_runs AS run WHERE run.id = $1 FOR UPDATE OF run`,
       [runId, String(EVE_RUN_ABANDONED_AFTER_HOURS)],
     );
     const status = run.rows[0]?.status;
@@ -71,10 +79,11 @@ export async function deletePostgresEveSession(
         `Не найдены данные удаляемой Eve-сессии ${runId}`,
       );
     }
+    const abandoned = run.rows[0]?.abandoned === true;
     if (!TERMINAL_RUN_STATUSES.has(status)) {
-      // The guard exists to protect a scenario that is still working. A run untouched for a day is
-      // not one: it never reached a terminal status and nothing will move it there.
-      if (run.rows[0]?.abandoned !== true) {
+      // The guard exists to protect a scenario that is still working. A run with no event for a
+      // day is not one: it never reached a terminal status and nothing will move it there.
+      if (!abandoned) {
         throw new AppError(
           "AGENT_EVE_SESSION_STORAGE_ACTIVE",
           `Eve-сессия ${runId} ещё выполняется и не может быть удалена`,
@@ -86,16 +95,21 @@ export async function deletePostgresEveSession(
       }));
     }
 
-    // Hooks carry externally reusable tokens; only Workflow may end their retention window.
-    const hook = await client.query(
-      "SELECT EXISTS (SELECT 1 FROM workflow.workflow_hooks WHERE run_id = $1) AS exists",
-      [runId],
-    );
-    if (hook.rows[0]?.exists === true) {
-      throw new AppError(
-        "AGENT_EVE_SESSION_HOOK_RETENTION_ACTIVE",
-        `Eve-сессия ${runId} ещё содержит защищённые Workflow hooks`,
+    // Hooks carry externally reusable tokens; only Workflow may end their retention window — and
+    // it does, at the terminal transition: on production not one completed run holds a hook while
+    // every stuck one does. An abandoned run never reaches that transition, so its hooks would
+    // outlive it forever and this deletion would refuse the session for good. They go with it.
+    if (!abandoned) {
+      const hook = await client.query(
+        "SELECT EXISTS (SELECT 1 FROM workflow.workflow_hooks WHERE run_id = $1) AS exists",
+        [runId],
       );
+      if (hook.rows[0]?.exists === true) {
+        throw new AppError(
+          "AGENT_EVE_SESSION_HOOK_RETENTION_ACTIVE",
+          `Eve-сессия ${runId} ещё содержит защищённые Workflow hooks`,
+        );
+      }
     }
 
     // Public schema has no foreign keys, so remove every per-run projection before the run itself.
