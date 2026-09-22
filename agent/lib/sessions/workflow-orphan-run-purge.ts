@@ -22,6 +22,7 @@
  * Invariants:
  * - Only a finished run goes, and only after WORKFLOW_ORPHAN_RUN_PURGE_AFTER_HOURS.
  * - A session root is never touched here; it has no `$rootRunId` pointing elsewhere.
+ * - A run without both lineage attributes as strings stays: its parent cannot be proven gone.
  * - A run holding hooks stays: only Workflow may end their retention window.
  * - Each run is re-checked under its row lock and removed in its own transaction.
  */
@@ -43,7 +44,8 @@ const ORPHAN_CONDITION = `
   run.status IN ('completed', 'failed', 'cancelled')
   AND COALESCE(run.completed_at, run.updated_at)
       < (now() AT TIME ZONE 'UTC') - ($1 || ' hours')::interval
-  AND run.attributes ? '$rootRunId'
+  AND jsonb_typeof(run.attributes->'$rootRunId') = 'string'
+  AND jsonb_typeof(run.attributes->'$parentRunId') = 'string'
   AND run.attributes->>'$rootRunId' <> run.id
   AND NOT EXISTS (SELECT 1 FROM workflow.workflow_runs AS root
                    WHERE root.id = run.attributes->>'$rootRunId')

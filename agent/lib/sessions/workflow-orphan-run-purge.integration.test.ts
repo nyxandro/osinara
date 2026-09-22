@@ -29,9 +29,10 @@ const OLD_ROOT = "wrun_01M0B0RPHANRVNPVRGETEST008";
 const SECOND_ORPHAN = "wrun_01M0B0RPHANRVNPVRGETEST009";
 const NESTED_LIVE_TURN = "wrun_01M0B0RPHANRVNPVRGETEST010";
 const UNSTAMPED_ORPHAN = "wrun_01M0B0RPHANRVNPVRGETEST011";
+const PARENTLESS_ORPHAN = "wrun_01M0B0RPHANRVNPVRGETEST012";
 const FIXTURES = [
   LIVE_ROOT, DELETED_ROOT, ORPHAN_TURN, LIVE_TURN, RECENT_ORPHAN, SLEEPING_ORPHAN_TIMER,
-  HOOKED_ORPHAN, OLD_ROOT, SECOND_ORPHAN, NESTED_LIVE_TURN, UNSTAMPED_ORPHAN,
+  HOOKED_ORPHAN, OLD_ROOT, SECOND_ORPHAN, NESTED_LIVE_TURN, UNSTAMPED_ORPHAN, PARENTLESS_ORPHAN,
 ];
 const PER_RUN_TABLES = [
   "workflow_stream_chunks", "workflow_waits", "workflow_hooks", "workflow_steps",
@@ -40,10 +41,11 @@ const PER_RUN_TABLES = [
 
 async function insertRun(runId: string, input: {
   status: string; rootRunId: string | null; finishedHoursAgo: number | null;
-  name?: string; updatedHoursAgo?: number; parentRunId?: string;
+  name?: string; updatedHoursAgo?: number; parentRunId?: string | null;
 }) {
+  const parentRunId = input.parentRunId === undefined ? input.rootRunId : input.parentRunId;
   const attributes = input.rootRunId === null ? {} : {
-    $rootRunId: input.rootRunId, $parentRunId: input.parentRunId ?? input.rootRunId,
+    $rootRunId: input.rootRunId, ...(parentRunId === null ? {} : { $parentRunId: parentRunId }),
   };
   await pool!.query(
     `INSERT INTO workflow.workflow_runs
@@ -151,6 +153,10 @@ describeWithDatabase("purgeOrphanedWorkflowRuns against Workflow storage", () =>
     await insertRun(NESTED_LIVE_TURN, {
       status: "completed", rootRunId: DELETED_ROOT, parentRunId: LIVE_ROOT, finishedHoursAgo: OLD_ENOUGH,
     });
+    // Without a recorded parent there is nothing to prove gone, so the run is not an orphan.
+    await insertRun(PARENTLESS_ORPHAN, {
+      status: "completed", rootRunId: DELETED_ROOT, parentRunId: null, finishedHoursAgo: OLD_ENOUGH,
+    });
     // Session roots are retired by application session retention, never by this purge.
     await insertRun(OLD_ROOT, {
       status: "completed", rootRunId: null, finishedHoursAgo: OLD_ENOUGH * 10, name: "workflow//eve//workflowEntry",
@@ -159,7 +165,8 @@ describeWithDatabase("purgeOrphanedWorkflowRuns against Workflow storage", () =>
     await expect(purge(10)).resolves.toBe(0);
 
     for (const runId of [
-      LIVE_ROOT, LIVE_TURN, RECENT_ORPHAN, SLEEPING_ORPHAN_TIMER, HOOKED_ORPHAN, NESTED_LIVE_TURN, OLD_ROOT,
+      LIVE_ROOT, LIVE_TURN, RECENT_ORPHAN, SLEEPING_ORPHAN_TIMER, HOOKED_ORPHAN, NESTED_LIVE_TURN,
+      PARENTLESS_ORPHAN, OLD_ROOT,
     ]) {
       await expect(runExists(runId)).resolves.toBe(true);
     }
