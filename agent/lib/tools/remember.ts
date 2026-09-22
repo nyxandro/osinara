@@ -7,7 +7,11 @@
 import { defineTool } from "eve/tools";
 import { AppError, isAppError } from "../app-error.js";
 import { requireAllowedMemoryContent } from "../memory-content-policy.js";
-import { requireMemoryAuthorization, requireWritableScope } from "../memory-context.js";
+import {
+  requireMemoryAuthorization,
+  requireWritableScope,
+  type MemoryScope,
+} from "../memory-context.js";
 import { memoryRepository } from "../memory-repository.js";
 import { logMemoryWriteEvent } from "../memory-observability.js";
 import { resolveMemoryTurnSource } from "../memory-turn-source.js";
@@ -32,8 +36,22 @@ export default defineTool({
   inputSchema: rememberInputSchema,
   async execute(input, ctx) {
     const authorization = requireMemoryAuthorization(ctx);
-    const scope = requireWritableScope(authorization, input.scope);
     const requestedSourceKind = input.sourceSequence === undefined ? "current" : "delta";
+    let scope: MemoryScope;
+    try {
+      scope = requireWritableScope(authorization, input.scope);
+    } catch (error) {
+      // A refused scope is a failed write like any other: the reason lived only in an unstructured
+      // framework stack, so a background run losing a fact left nothing to search the log by.
+      logMemoryWriteEvent({
+        code: "AGENT_MEMORY_WRITE_FAILED",
+        errorCode: isAppError(error) ? error.code : "AGENT_MEMORY_WRITE_UNEXPECTED",
+        scope: input.scope,
+        sourceKind: requestedSourceKind,
+        threadAction: input.thread?.action ?? "none",
+      });
+      throw error;
+    }
     let source: Awaited<ReturnType<typeof resolveMemoryTurnSource>> | null = null;
     let item: Awaited<ReturnType<typeof memoryRepository.create>>;
     try {

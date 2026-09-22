@@ -2,17 +2,25 @@
  * Silent group memory-review model context.
  *
  * Exports:
- * - `MEMORY_REVIEW_INSTRUCTIONS`: fixed least-privilege review contract.
+ * - `memoryReviewInstructions`: least-privilege review contract for the one authorized scope.
  * - `formatMemoryReviewBatchPrompt`: renders exact timeline sources without a character limit.
  * - `formatInteractiveMemoryReviewSelection`: identifies review sources in a merged timeline.
  * - `formatMemoryReviewContext`: what this conversation already stored and already read.
  */
+import type { MemoryScope } from "../memory-context.js";
 import type { TelegramGroupJournalEntry } from "../telegram-group-journal-context.js";
 import type { MemoryReviewContext } from "./memory-review-known-memory.js";
 import { MEMORY_SELECTION_RULES } from "../prompt/common-fragments.js";
 import { escapeUntrustedContextJson } from "../untrusted-context-json.js";
 
-export const MEMORY_REVIEW_INSTRUCTIONS = `
+/** A background run is authorized for exactly one memory scope; the model is told which one. */
+export function memoryReviewInstructions(scope: MemoryScope): string {
+  return `${REVIEW_CONTRACT}
+
+Все отобранные сведения сохраняй в scope "${scope}": этот прогон разбирает именно её. Другие области памяти здесь недоступны и инструментом не принимаются.`;
+}
+
+const REVIEW_CONTRACT = `
 # Текущий режим: тихая проверка памяти группы
 
 Это внутренний root-agent turn. Проверь ровно сообщения, чьи \`sourceSequence\` перечислены в блоке \`<memory_review_source_selection>\` (не более 50). Не отправляй ответ в Telegram и не обращайся к участникам.

@@ -5,10 +5,12 @@
  * - `memoryReviewBatchId`: validates the optional trusted batch marker.
  * - `memoryReviewBatchIdFromContinuationToken`: resolves context-free internal failures.
  * - `isMemoryReviewSession`: identifies only internal background review turns.
+ * - `memoryReviewScope`: the single verified memory scope a background review run may write into.
  */
 import type { SessionContext } from "eve/context";
 
 import { AppError } from "../app-error.js";
+import type { MemoryScope } from "../memory-context.js";
 
 const REVIEW_CONTINUATION_PATTERN = /^memory-review:([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?::attempt:[1-9]\d*)?$/iu;
 
@@ -50,4 +52,19 @@ export function isMemoryReviewSession(
     );
   }
   return mode === "background";
+}
+
+/** The dispatcher authorizes a review run for exactly one scope; anything else is a broken run. */
+export function memoryReviewScope(
+  ctx: { session: { auth: SessionContext["session"]["auth"] } },
+): MemoryScope {
+  const scopes = ctx.session.auth.current?.attributes.memoryScopes;
+  const scope = Array.isArray(scopes) && scopes.length === 1 ? scopes[0] : undefined;
+  if (scope !== "family" && scope !== "group" && scope !== "personal") {
+    throw new AppError(
+      "AGENT_MEMORY_REVIEW_CONTEXT_INVALID",
+      "Не удалось определить область памяти проверки",
+    );
+  }
+  return scope;
 }

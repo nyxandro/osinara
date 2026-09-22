@@ -19,7 +19,8 @@ import {
   MEMORY_REVIEW_DENIED_TOOL_NAMES,
   buildMemoryReviewToolSurface,
 } from "./memory-review-tool-surface.js";
-import { MEMORY_REVIEW_INSTRUCTIONS } from "./memory-review-prompt.js";
+import { memoryReviewInstructions } from "./memory-review-prompt.js";
+import { memoryReviewScope } from "./memory-review-session.js";
 import { memoryReviewBatchIdFromContinuationToken } from "./memory-review-session.js";
 
 function externalAuth(): SessionAuth {
@@ -52,7 +53,7 @@ describe("memory review model surface", () => {
   });
 
   it("contains only memory capabilities plus explicit framework denials", () => {
-    const names = Object.keys(buildMemoryReviewToolSurface()).sort();
+    const names = Object.keys(buildMemoryReviewToolSurface("family")).sort();
 
     expect(names).toEqual([
       ...MEMORY_REVIEW_DENIED_TOOL_NAMES,
@@ -68,7 +69,7 @@ describe("memory review model surface", () => {
   });
 
   it("omits external memory descriptors that are not currently granted", () => {
-    const names = Object.keys(buildMemoryReviewToolSurface(new Set(["list_memories"]))).sort();
+    const names = Object.keys(buildMemoryReviewToolSurface("family", new Set(["list_memories"]))).sort();
 
     expect(names).toContain("list_memories");
     expect(names).not.toContain("remember");
@@ -82,7 +83,7 @@ describe("memory review model surface", () => {
     "search_memories",
     "search_memory_threads",
   ] as const)("re-checks live external authorization before executing %s", async (toolName) => {
-    const surface = buildMemoryReviewToolSurface(new Set([toolName]));
+    const surface = buildMemoryReviewToolSurface("family", new Set([toolName]));
     authorizeCurrentExternalGroupCapability.mockRejectedValueOnce(
       new Error("AGENT_GROUP_TOOL_FORBIDDEN"),
     );
@@ -104,12 +105,51 @@ describe("memory review model surface", () => {
   });
 
   it("states the exact silent and source-backed review contract", () => {
-    expect(MEMORY_REVIEW_INSTRUCTIONS).toContain("не более 50");
-    expect(MEMORY_REVIEW_INSTRUCTIONS).toContain("<memory_review_source_selection>");
-    expect(MEMORY_REVIEW_INSTRUCTIONS).toContain("sourceSequence");
-    expect(MEMORY_REVIEW_INSTRUCTIONS).toContain("Не отправляй ответ в Telegram");
-    expect(MEMORY_REVIEW_INSTRUCTIONS).toContain("sensitivity: normal");
-    expect(MEMORY_REVIEW_INSTRUCTIONS).not.toMatch(/[—–«»]/u);
+    const instructions = memoryReviewInstructions("family");
+    expect(instructions).toContain("не более 50");
+    expect(instructions).toContain("<memory_review_source_selection>");
+    expect(instructions).toContain("sourceSequence");
+    expect(instructions).toContain("Не отправляй ответ в Telegram");
+    expect(instructions).toContain("sensitivity: normal");
+    expect(instructions).not.toMatch(/[—–«»]/u);
+  });
+
+  it("names the one memory scope this review turn is allowed to write into", () => {
+    // The background run carries exactly one authorized scope, and the tool description shows
+    // `personal` in its example: without this line the model picks a scope the backend refuses.
+    expect(memoryReviewInstructions("family")).toContain('scope "family"');
+    expect(memoryReviewInstructions("group")).toContain('scope "group"');
+    expect(memoryReviewInstructions("group")).not.toMatch(/[—–«»]/u);
+  });
+
+  it("gives the review run a remember that accepts only its own scope", () => {
+    const surface = buildMemoryReviewToolSurface("family");
+    const schema = (surface.remember as unknown as {
+      inputSchema: { safeParse: (value: unknown) => { success: boolean } };
+    }).inputSchema;
+    const payload = {
+      basis: "agent_inferred", content: "Мама работает в школе", kind: "fact",
+      sensitivity: "normal", sourceSequence: "42", subject: { kind: "current_author" },
+    };
+
+    expect(schema.safeParse({ ...payload, scope: "family" }).success).toBe(true);
+    // Three parallel calls into a forbidden scope are then impossible, not merely discouraged.
+    expect(schema.safeParse({ ...payload, scope: "personal" }).success).toBe(false);
+    expect(schema.safeParse({ ...payload, scope: "group" }).success).toBe(false);
+  });
+
+  it("refuses to guess the review scope when the run does not carry exactly one", () => {
+    const withScopes = (memoryScopes: unknown) => ({
+      session: { auth: { current: { attributes: { memoryScopes } } } },
+    }) as never;
+
+    expect(memoryReviewScope(withScopes(["group"]))).toBe("group");
+    expect(() => memoryReviewScope(withScopes(["family", "personal"]))).toThrowError(
+      /AGENT_MEMORY_REVIEW_CONTEXT_INVALID/u,
+    );
+    expect(() => memoryReviewScope(withScopes(undefined))).toThrowError(
+      /AGENT_MEMORY_REVIEW_CONTEXT_INVALID/u,
+    );
   });
 
   it("resolves only an exact internal review continuation", () => {
