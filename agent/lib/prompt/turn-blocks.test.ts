@@ -309,7 +309,7 @@ describe("memory block resolution", () => {
   it("drops the lowest-ranked records when the block outgrows its budget and counts them", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const memories = ["mem_first", "mem_second", "mem_third", "mem_fourth"].map((memoryRef) => ({
-      content: `${memoryRef}:${"я".repeat(12_000)}`, kind: "fact", memoryRef,
+      content: `${memoryRef}:${"я".repeat(18_000)}`, kind: "fact", memoryRef,
     }));
     const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization,
       createProfile, openSelectionWindow: async () => 1, recordOffered: vi.fn(),
@@ -336,7 +336,7 @@ describe("memory block resolution", () => {
 
   it("tells the show journal only about the records that survived the budget", async () => {
     const memories = ["mem_first", "mem_second", "mem_third", "mem_fourth"].map((memoryRef) => ({
-      content: `${memoryRef}:${"я".repeat(12_000)}`, kind: "fact", memoryRef,
+      content: `${memoryRef}:${"я".repeat(18_000)}`, kind: "fact", memoryRef,
     }));
     const recordOffered = vi.fn();
     const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization,
