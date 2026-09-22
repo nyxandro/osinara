@@ -87,6 +87,24 @@ describe("deleteExpiredSessions", () => {
     expect(values.lockRelease).toHaveBeenLastCalledWith(true);
   });
 
+  it("keeps sweeping when a lease is lost under a session", async () => {
+    values.claimExpiredForDeletion.mockReset();
+    values.claimExpiredForDeletion
+      .mockResolvedValueOnce({ eveSessionId: "wrun_01KXB392VJ8YY13JMJ9YZAF5QR", id: "lost", leaseToken: "lease-1" })
+      .mockResolvedValueOnce({ eveSessionId: "wrun_01KXB392VJ8YY13JMJ9YZAF5QS", id: "healthy", leaseToken: "lease-2" })
+      .mockResolvedValue(null);
+    values.deletePostgresEveSession.mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
+    values.completeDeletion
+      .mockRejectedValueOnce(new AppError("AGENT_SESSION_RETENTION_LEASE_LOST", "аренда потеряна"))
+      .mockResolvedValueOnce(undefined);
+    // The row is no longer ours, so recording the failure on it fails for the same reason.
+    values.failDeletion
+      .mockRejectedValueOnce(new AppError("AGENT_SESSION_RETENTION_LEASE_LOST", "аренда потеряна"));
+
+    // Losing a lease is the very failure this sweep exists to survive: another worker took the row.
+    await expect(deleteExpiredSessions()).resolves.toBe(1);
+  });
+
   it("keeps sweeping the rest of the queue when one session refuses deletion", async () => {
     values.claimExpiredForDeletion.mockReset();
     values.claimExpiredForDeletion

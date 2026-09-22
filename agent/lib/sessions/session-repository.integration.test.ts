@@ -412,6 +412,15 @@ describeWithDatabase("session repository", () => {
       new Date("2026-01-03T02:00:00.000Z"),
     );
     expect(retry).toMatchObject({ eveSessionId: "wrun_retry", id: current.id });
+
+    // A run already absent from Workflow storage is the other failure that resolves by itself.
+    await sessionRepository.failDeletion(
+      retry!.id, retry!.leaseToken, "AGENT_EVE_SESSION_STORAGE_MISSING",
+      new Date("2026-01-03T02:00:01.000Z"),
+    );
+    await expect(sessionRepository.claimExpiredForDeletion(
+      new Date("2026-01-03T04:00:00.000Z"),
+    )).resolves.toMatchObject({ id: current.id });
   });
 
   it("clears active and retired group cursors when a Telegram trust zone is recreated", async () => {

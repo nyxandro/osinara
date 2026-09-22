@@ -10,11 +10,15 @@ import { AppError } from "../app-error.js";
 import { database } from "../database.js";
 
 /**
- * The one cleanup failure that resolves without a human: the Workflow run had not reached a
- * terminal status yet. Every other code parks the session for an operator, deliberately — a
- * corrupt storage row must not be retried in a loop.
+ * The cleanup failures that resolve without a human: the Workflow run had not reached a terminal
+ * status yet, or its storage is already gone and there is nothing left to delete. Every other code
+ * parks the session for an operator, deliberately — a corrupt storage row must not be retried in a
+ * loop.
  */
-const RETRYABLE_CLEANUP_ERROR_CODE = "AGENT_EVE_SESSION_STORAGE_ACTIVE";
+const RETRYABLE_CLEANUP_ERROR_CODES = [
+  "AGENT_EVE_SESSION_STORAGE_ACTIVE",
+  "AGENT_EVE_SESSION_STORAGE_MISSING",
+];
 
 export interface SessionRetentionClaim {
   eveSessionId: string;
@@ -37,7 +41,7 @@ export const sessionRetentionRepository = {
           SELECT id FROM conversation_sessions
             WHERE retired_at IS NOT NULL AND delete_after <= $1
               AND retention_hold = false AND eve_session_id IS NOT NULL
-              AND (cleanup_error_code IS NULL OR cleanup_error_code = $4)
+              AND (cleanup_error_code IS NULL OR cleanup_error_code = ANY($4))
               -- The lease timestamp carries the backoff for a retryable failure, so a run that was
               -- still busy is offered again later instead of waiting for a human forever.
               AND (retention_lease_expires_at IS NULL OR retention_lease_expires_at <= $1)
@@ -45,7 +49,7 @@ export const sessionRetentionRepository = {
            LIMIT 1 FOR UPDATE SKIP LOCKED
         )
       RETURNING id, eve_session_id, retention_lease_token`,
-      [now, leaseToken, leaseExpiresAt, RETRYABLE_CLEANUP_ERROR_CODE],
+      [now, leaseToken, leaseExpiresAt, RETRYABLE_CLEANUP_ERROR_CODES],
     );
     const row = result.rows[0];
     return row
