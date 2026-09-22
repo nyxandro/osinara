@@ -22,6 +22,7 @@ const pool = enabled && url ? createApplicationDatabasePool({ connectionString: 
 const ACTIVE_RUN = "wrun_01M0AZKZAKTGSH4QQZBBCJK001";
 const ABANDONED_RUN = "wrun_01M0AZKZAKTGSH4QQZBBCJK002";
 const TERMINAL_HOOKED_RUN = "wrun_01M0AZKZAKTGSH4QQZBBCJK003";
+const SLEEPING_RUN = "wrun_01M0AZKZAKTGSH4QQZBBCJK004";
 
 async function insertRun(runId: string, status: string, eventAgeHours: number | null) {
   await pool!.query(
@@ -46,6 +47,14 @@ async function insertHook(runId: string) {
   );
 }
 
+async function insertWait(runId: string, resumeInHours: number) {
+  await pool!.query(
+    `INSERT INTO workflow.workflow_waits (wait_id, run_id, status, resume_at)
+     VALUES ($1, $2, 'waiting', (now() AT TIME ZONE 'UTC') + ($3 || ' hours')::interval)`,
+    [`wait-${runId}`, runId, String(resumeInHours)],
+  );
+}
+
 async function runExists(runId: string): Promise<boolean> {
   const result = await pool!.query("SELECT 1 FROM workflow.workflow_runs WHERE id = $1", [runId]);
   return result.rowCount === 1;
@@ -62,7 +71,8 @@ async function withClient(runId: string) {
 
 describeWithDatabase("deletePostgresEveSession against Workflow storage", () => {
   beforeEach(async () => {
-    for (const runId of [ACTIVE_RUN, ABANDONED_RUN, TERMINAL_HOOKED_RUN]) {
+    for (const runId of [ACTIVE_RUN, ABANDONED_RUN, TERMINAL_HOOKED_RUN, SLEEPING_RUN]) {
+      await pool!.query("DELETE FROM workflow.workflow_waits WHERE run_id = $1", [runId]);
       await pool!.query("DELETE FROM workflow.workflow_hooks WHERE run_id = $1", [runId]);
       await pool!.query("DELETE FROM workflow.workflow_events WHERE run_id = $1", [runId]);
       await pool!.query("DELETE FROM workflow.workflow_runs WHERE id = $1", [runId]);
@@ -88,6 +98,16 @@ describeWithDatabase("deletePostgresEveSession against Workflow storage", () => 
     await expect(pool!.query(
       "SELECT 1 FROM workflow.workflow_hooks WHERE run_id = $1", [ABANDONED_RUN],
     )).resolves.toMatchObject({ rowCount: 0 });
+  });
+
+  it("refuses a silent run that Workflow is scheduled to wake up later", async () => {
+    // Half the stuck runs on production sleep on a future resume, some of them a month ahead:
+    // silence is not abandonment while Workflow still intends to come back to the run.
+    await insertRun(SLEEPING_RUN, "running", EVE_RUN_ABANDONED_AFTER_HOURS * 10);
+    await insertWait(SLEEPING_RUN, 48);
+
+    await expect(withClient(SLEEPING_RUN)).rejects.toThrowError(/AGENT_EVE_SESSION_STORAGE_ACTIVE/u);
+    await expect(runExists(SLEEPING_RUN)).resolves.toBe(true);
   });
 
   it("keeps refusing a terminal run whose hooks are still held", async () => {

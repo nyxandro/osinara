@@ -66,14 +66,25 @@ export async function deletePostgresEveSession(
     //
     // Activity is the run's own event stream, not `workflow_runs.updated_at`: that column moves on
     // creation, start, terminal transition and attribute writes, so a live run can keep it weeks
-    // old while working. A run whose newest event is a day old is not working.
+    // old while working.
+    //
+    // Silence alone is not abandonment either. A run can sleep on a scheduled resume — on
+    // production half the stuck runs do, some of them a month ahead — and Workflow still intends
+    // to come back to it. Abandoned means both: no event for the whole window, and nothing left
+    // that says the run will be woken up.
     const run = await client.query(
       `SELECT run.status::text AS status,
               COALESCE(
                 (SELECT max(event.created_at) FROM workflow.workflow_events AS event
                   WHERE event.run_id = run.id),
                 run.updated_at
-              ) < (now() AT TIME ZONE 'UTC') - ($2 || ' hours')::interval AS abandoned
+              ) < (now() AT TIME ZONE 'UTC') - ($2 || ' hours')::interval
+              AND NOT EXISTS (
+                SELECT 1 FROM workflow.workflow_waits AS wait
+                 WHERE wait.run_id = run.id AND wait.status = 'waiting'
+                   AND (wait.resume_at IS NULL
+                        OR wait.resume_at > (now() AT TIME ZONE 'UTC'))
+              ) AS abandoned
          FROM workflow.workflow_runs AS run WHERE run.id = $1 FOR UPDATE OF run`,
       [runId, String(EVE_RUN_ABANDONED_AFTER_HOURS)],
     );
