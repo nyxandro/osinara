@@ -107,8 +107,10 @@ async function processBatch(): Promise<number> {
         message: "Memory embedding completion was rejected",
       }));
     } catch (error) {
-      // The database being away is not a verdict on this memory: let the loop wait it out and the
-      // lease expire, instead of dropping the record out of semantic search for good.
+      // The database being away is not a verdict on this memory, so it is not recorded as one:
+      // the loop waits the outage out and the lease expires on its own. The record still leaves
+      // the semantic index until an operator reindexes it — returning the lease is the other half
+      // of #254 and is not decided here — but the reason written down is now the true one.
       if (!isTerminalJobFailure(error)) throw error;
       const code = errorCode(error);
       console.error(JSON.stringify({

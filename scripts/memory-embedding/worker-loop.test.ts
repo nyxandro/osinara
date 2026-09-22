@@ -76,6 +76,26 @@ describe("runEmbeddingWorkerLoop", () => {
     await expect(runEmbeddingWorkerLoop(deps)).rejects.toThrowError(/AGENT_DATABASE_UNAVAILABLE/u);
   });
 
+  it("does not spin when the probe passes but the work keeps failing", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    let passes = 0;
+    // `SELECT 1` on an open pooled connection succeeds while a new connection is refused: with
+    // `too many clients` the probe returns at once and the claim keeps failing.
+    const deps = dependencies({
+      isStopping: () => passes >= 3,
+      processBatch: vi.fn(async () => { passes += 1; throw databaseOutage(); }),
+    });
+
+    try {
+      await runEmbeddingWorkerLoop(deps);
+
+      expect(deps.sleep).toHaveBeenCalledTimes(3);
+      expect(deps.markAlive).toHaveBeenCalled();
+      // One line on entering the wait, not one per turn of the loop.
+      expect(info.mock.calls.length).toBe(1);
+    } finally { info.mockRestore(); }
+  });
+
   it("sleeps only when a pass found nothing to do", async () => {
     let passes = 0;
     const deps = dependencies({

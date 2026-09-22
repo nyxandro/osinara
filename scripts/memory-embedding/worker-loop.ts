@@ -12,7 +12,8 @@
  *   inbound message path already uses for exactly this, and its budget is bounded: past that the
  *   container restart is the right answer after all.
  */
-import { isDatabaseUnavailable } from "../../agent/lib/database-errors.js";
+import { isDatabaseUnavailable } from "../../agent/lib/database-recovery.js";
+import { MEMORY_EMBEDDING_WORKER_WAITING_CODE } from "../../agent/lib/memory-config.js";
 
 export interface EmbeddingWorkerLoopDependencies {
   isStopping: () => boolean;
@@ -36,20 +37,32 @@ export function isTerminalJobFailure(error: unknown): boolean {
 export async function runEmbeddingWorkerLoop(
   dependencies: EmbeddingWorkerLoopDependencies,
 ): Promise<void> {
+  let waiting = false;
   while (!dependencies.isStopping()) {
     let processed: number;
     try {
       processed = await dependencies.processBatch();
     } catch (error) {
       if (!isDatabaseUnavailable(error)) throw error;
-      // Visible on purpose: a silent pause and a hung worker look the same from outside.
-      console.info(JSON.stringify({
-        code: "AGENT_MEMORY_EMBEDDING_WORKER_WAITING",
-        errorName: error instanceof Error ? error.name : "UnknownError",
-      }));
+      // Visible on purpose, and once: a silent pause and a hung worker look the same from outside,
+      // while a line per turn of the loop would bury the codes that matter.
+      if (!waiting) {
+        console.info(JSON.stringify({
+          code: MEMORY_EMBEDDING_WORKER_WAITING_CODE,
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        }));
+        waiting = true;
+      }
+      // The heartbeat belongs here too: waiting for the database is the process working correctly,
+      // and the readiness file does not depend on the database.
+      await dependencies.markAlive();
       await dependencies.waitForDatabase();
+      // The probe can pass while the work still fails — `too many clients` answers `SELECT 1` on an
+      // open connection and refuses a new one — and then this loop would spin without the pause.
+      await dependencies.sleep(IDLE_POLL_MILLISECONDS);
       continue;
     }
+    waiting = false;
     // Also on an empty pass: an idle worker is healthy, a stuck one is not, and only the loop
     // itself knows the difference.
     await dependencies.markAlive();
