@@ -9,7 +9,16 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { AppError } from "../../agent/lib/app-error.js";
+import { MEMORY_EMBEDDING_WORKER_WAITING_CODE } from "../../agent/lib/memory-config.js";
 import { isTerminalJobFailure, runEmbeddingWorkerLoop } from "./worker-loop.js";
+
+/** Other modules log during a full run, so the line is found by its code, not by its position. */
+function waitingLines(info: { mock: { calls: unknown[][] } }): Array<Record<string, unknown>> {
+  return info.mock.calls
+    .map((call) => { try { return JSON.parse(String(call[0])); } catch { return null; } })
+    .filter((line): line is Record<string, unknown> =>
+      line !== null && line.code === MEMORY_EMBEDDING_WORKER_WAITING_CODE);
+}
 
 function databaseOutage(): Error {
   return new AppError(
@@ -47,9 +56,7 @@ describe("runEmbeddingWorkerLoop", () => {
 
       expect(deps.waitForDatabase).toHaveBeenCalledTimes(1);
       expect(deps.processBatch).toHaveBeenCalledTimes(2);
-      expect(JSON.parse(info.mock.calls[0]![0] as string)).toMatchObject({
-        code: "AGENT_MEMORY_EMBEDDING_WORKER_WAITING",
-      });
+      expect(waitingLines(info)).toHaveLength(1);
     } finally { info.mockRestore(); }
   });
 
@@ -92,7 +99,7 @@ describe("runEmbeddingWorkerLoop", () => {
       expect(deps.sleep).toHaveBeenCalledTimes(3);
       expect(deps.markAlive).toHaveBeenCalled();
       // One line on entering the wait, not one per turn of the loop.
-      expect(info.mock.calls.length).toBe(1);
+      expect(waitingLines(info)).toHaveLength(1);
     } finally { info.mockRestore(); }
   });
 
