@@ -21,7 +21,7 @@ import { createApplicationDatabasePool } from "../database-client.js";
 
 import { AppError } from "../app-error.js";
 
-const EVE_RUN_ID_PATTERN = /^wrun_[A-Z0-9]{26}$/u;
+export const EVE_RUN_ID_PATTERN = /^wrun_[A-Z0-9]{26}$/u;
 const TERMINAL_RUN_STATUSES = new Set(["cancelled", "completed", "failed"]);
 
 /** Read-only proof used by the explicit operator recovery, without re-enqueuing a Workflow run. */

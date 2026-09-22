@@ -44,7 +44,8 @@ export const SESSION_RETENTION_ROUTINE_CODES = [
 // Deleting a session removes only its root run; its turns, subagents and timer stay behind. On
 // production 2026-09-22 they were 2016 of 2300 runs and ~75% of the Workflow database the release
 // backup copies while the assistant is down. A finished run waits this long before it goes:
-// Workflow still delivers the wake-up it armed for the run, at most a day ahead as observed there.
+// Workflow still delivers the wake-up it armed for the run, and a single wake-up is queued at most
+// `WAIT_CONTINUATION_MAX_DELAY_SECONDS` (23 h in the pinned Workflow core) ahead.
 export const WORKFLOW_ORPHAN_RUN_PURGE_AFTER_HOURS = 48;
 // One minute's share, so the first pass after a release drains the backlog over ~40 minutes
 // instead of deleting a gigabyte of history in one go.

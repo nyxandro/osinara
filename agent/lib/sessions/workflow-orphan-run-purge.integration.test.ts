@@ -27,9 +27,11 @@ const SLEEPING_ORPHAN_TIMER = "wrun_01M0B0RPHANRVNPVRGETEST006";
 const HOOKED_ORPHAN = "wrun_01M0B0RPHANRVNPVRGETEST007";
 const OLD_ROOT = "wrun_01M0B0RPHANRVNPVRGETEST008";
 const SECOND_ORPHAN = "wrun_01M0B0RPHANRVNPVRGETEST009";
+const NESTED_LIVE_TURN = "wrun_01M0B0RPHANRVNPVRGETEST010";
+const UNSTAMPED_ORPHAN = "wrun_01M0B0RPHANRVNPVRGETEST011";
 const FIXTURES = [
   LIVE_ROOT, DELETED_ROOT, ORPHAN_TURN, LIVE_TURN, RECENT_ORPHAN, SLEEPING_ORPHAN_TIMER,
-  HOOKED_ORPHAN, OLD_ROOT, SECOND_ORPHAN,
+  HOOKED_ORPHAN, OLD_ROOT, SECOND_ORPHAN, NESTED_LIVE_TURN, UNSTAMPED_ORPHAN,
 ];
 const PER_RUN_TABLES = [
   "workflow_stream_chunks", "workflow_waits", "workflow_hooks", "workflow_steps",
@@ -38,9 +40,11 @@ const PER_RUN_TABLES = [
 
 async function insertRun(runId: string, input: {
   status: string; rootRunId: string | null; finishedHoursAgo: number | null;
-  name?: string; updatedHoursAgo?: number;
+  name?: string; updatedHoursAgo?: number; parentRunId?: string;
 }) {
-  const attributes = input.rootRunId === null ? {} : { $rootRunId: input.rootRunId };
+  const attributes = input.rootRunId === null ? {} : {
+    $rootRunId: input.rootRunId, $parentRunId: input.parentRunId ?? input.rootRunId,
+  };
   await pool!.query(
     `INSERT INTO workflow.workflow_runs
        (id, deployment_id, status, name, attributes, completed_at, updated_at)
@@ -69,6 +73,12 @@ async function insertPayload(runId: string) {
      VALUES ($1, $2, '\\x00'::bytea, true, $3)`,
     [`chunk-${runId}`, `stream-${runId}`, runId],
   );
+  await pool!.query(
+    `INSERT INTO workflow.workflow_waits (wait_id, run_id, status, completed_at)
+     VALUES ($1, $2, 'completed', now() AT TIME ZONE 'UTC')`,
+    [`wait-${runId}`, runId],
+  );
+  await pool!.query("INSERT INTO workflow.workflow_event_slots (run_id) VALUES ($1)", [runId]);
 }
 
 async function runExists(runId: string): Promise<boolean> {
@@ -136,6 +146,11 @@ describeWithDatabase("purgeOrphanedWorkflowRuns against Workflow storage", () =>
        VALUES ($1, 'hook-orphan', 'token', 'owner', 'project', 'test')`,
       [HOOKED_ORPHAN],
     );
+    // Workflow inherits the root from the step that started a run: a session started from inside
+    // a deleted session's turn carries that root while its direct parent is still alive.
+    await insertRun(NESTED_LIVE_TURN, {
+      status: "completed", rootRunId: DELETED_ROOT, parentRunId: LIVE_ROOT, finishedHoursAgo: OLD_ENOUGH,
+    });
     // Session roots are retired by application session retention, never by this purge.
     await insertRun(OLD_ROOT, {
       status: "completed", rootRunId: null, finishedHoursAgo: OLD_ENOUGH * 10, name: "workflow//eve//workflowEntry",
@@ -143,9 +158,20 @@ describeWithDatabase("purgeOrphanedWorkflowRuns against Workflow storage", () =>
 
     await expect(purge(10)).resolves.toBe(0);
 
-    for (const runId of [LIVE_ROOT, LIVE_TURN, RECENT_ORPHAN, SLEEPING_ORPHAN_TIMER, HOOKED_ORPHAN, OLD_ROOT]) {
+    for (const runId of [
+      LIVE_ROOT, LIVE_TURN, RECENT_ORPHAN, SLEEPING_ORPHAN_TIMER, HOOKED_ORPHAN, NESTED_LIVE_TURN, OLD_ROOT,
+    ]) {
       await expect(runExists(runId)).resolves.toBe(true);
     }
+  });
+
+  it("dates a finished run without a completion time by its last update", async () => {
+    await insertRun(UNSTAMPED_ORPHAN, {
+      status: "cancelled", rootRunId: DELETED_ROOT, finishedHoursAgo: null, updatedHoursAgo: OLD_ENOUGH,
+    });
+
+    await expect(purge(10)).resolves.toBe(1);
+    await expect(runExists(UNSTAMPED_ORPHAN)).resolves.toBe(false);
   });
 
   it("removes at most one batch per pass and continues on the next pass", async () => {

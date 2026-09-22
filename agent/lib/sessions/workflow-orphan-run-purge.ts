@@ -10,6 +10,15 @@
  * rest stayed forever. A run whose root is gone belongs to a session nobody can continue: the
  * conversation history lives in the root, and a new message starts a new session.
  *
+ * The direct parent must be gone as well. Workflow inherits `$rootRunId` from the step that
+ * started a run, so a session ever started from inside another session's turn would carry the
+ * caller's root while being alive itself. Requiring the parent too keeps such a session whole;
+ * a subagent's own turns then go one pass after the subagent run.
+ *
+ * Unfinished orphans are left alone. A session timer finishes by itself at its deadline — Eve
+ * treats the missing session as an inactive target — and is purged afterwards. None other exist on
+ * production; one that appeared would stay until someone looks at why it never finished.
+ *
  * Invariants:
  * - Only a finished run goes, and only after WORKFLOW_ORPHAN_RUN_PURGE_AFTER_HOURS.
  * - A session root is never touched here; it has no `$rootRunId` pointing elsewhere.
@@ -23,7 +32,11 @@ import {
 } from "../../config.js";
 import { AppError } from "../app-error.js";
 import { createApplicationDatabasePool } from "../database-client.js";
-import { deleteWorkflowRunRows, type WorkflowQueryClient } from "./workflow-postgres-session-storage.js";
+import {
+  EVE_RUN_ID_PATTERN,
+  deleteWorkflowRunRows,
+  type WorkflowQueryClient,
+} from "./workflow-postgres-session-storage.js";
 
 // `$1` is the age in hours. Timestamps carry no zone, so PostgreSQL compares on its own UTC clock.
 const ORPHAN_CONDITION = `
@@ -34,6 +47,8 @@ const ORPHAN_CONDITION = `
   AND run.attributes->>'$rootRunId' <> run.id
   AND NOT EXISTS (SELECT 1 FROM workflow.workflow_runs AS root
                    WHERE root.id = run.attributes->>'$rootRunId')
+  AND NOT EXISTS (SELECT 1 FROM workflow.workflow_runs AS parent
+                   WHERE parent.id = run.attributes->>'$parentRunId')
   AND NOT EXISTS (SELECT 1 FROM workflow.workflow_hooks AS hook WHERE hook.run_id = run.id)`;
 
 export async function purgeOrphanedWorkflowRuns(
@@ -50,7 +65,7 @@ export async function purgeOrphanedWorkflowRuns(
   let purged = 0;
   for (const row of candidates.rows) {
     const runId = row.id;
-    if (typeof runId !== "string") {
+    if (typeof runId !== "string" || !EVE_RUN_ID_PATTERN.test(runId)) {
       throw new AppError("AGENT_WORKFLOW_ORPHAN_RUN_ID_INVALID", "Некорректный идентификатор запуска Workflow");
     }
     await client.query("BEGIN");
