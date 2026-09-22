@@ -2,9 +2,9 @@
  * Memory authorization boundary tests.
  *
  * Constructs covered:
- * - A refused scope is written to the log with the scopes involved and without memory content.
+ * - A scope the chat does not carry is refused; the refusal is logged by the `remember` boundary.
  */
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { requireWritableScope, type MemoryAuthorization } from "./memory-context.js";
 
@@ -24,20 +24,9 @@ describe("requireWritableScope", () => {
     expect(requireWritableScope(authorization, "family")).toBe("family");
   });
 
-  it("records the refused scope so a denied write can be found by its code", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-
-    try {
-      expect(() => requireWritableScope(authorization, "personal")).toThrowError(
-        /AGENT_MEMORY_SCOPE_DENIED/u,
-      );
-
-      expect(JSON.parse(warn.mock.calls[0]![0] as string)).toEqual({
-        allowedScopes: ["family"],
-        code: "AGENT_MEMORY_SCOPE_DENIED",
-        requestedScope: "personal",
-        role: "owner",
-      });
-    } finally { warn.mockRestore(); }
+  it("refuses a scope the chat does not carry", () => {
+    expect(() => requireWritableScope(authorization, "personal")).toThrowError(
+      /AGENT_MEMORY_SCOPE_DENIED/u,
+    );
   });
 });

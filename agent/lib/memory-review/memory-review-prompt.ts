@@ -13,15 +13,11 @@ import type { MemoryReviewContext } from "./memory-review-known-memory.js";
 import { MEMORY_SELECTION_RULES } from "../prompt/common-fragments.js";
 import { escapeUntrustedContextJson } from "../untrusted-context-json.js";
 
-/**
- * A background review run is authorized for exactly one memory scope, and nothing told the model
- * which one: the `remember` description shows `personal` in its example, so a family lane kept
- * producing writes the backend refused and the reviewed fact was lost without a trace.
- */
+/** A background run is authorized for exactly one memory scope; the model is told which one. */
 export function memoryReviewInstructions(scope: MemoryScope): string {
   return `${REVIEW_CONTRACT}
 
-Сохраняй только в scope "${scope}". Другие области памяти в этом прогоне недоступны, и вызов с другой областью будет отклонён, а сведение потеряно. Если сведение не подходит этой области, не сохраняй его.`;
+Все отобранные сведения сохраняй в scope "${scope}": этот прогон разбирает именно её. Другие области памяти здесь недоступны и инструментом не принимаются.`;
 }
 
 const REVIEW_CONTRACT = `

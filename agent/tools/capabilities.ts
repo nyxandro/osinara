@@ -29,7 +29,10 @@ import {
   buildModeToolSurface,
   buildSubagentToolSurface,
 } from "../lib/tool-policy/mode-tool-surface.js";
-import { isMemoryReviewSession } from "../lib/memory-review/memory-review-session.js";
+import {
+  isMemoryReviewSession,
+  memoryReviewScope,
+} from "../lib/memory-review/memory-review-session.js";
 import { buildMemoryReviewToolSurface } from "../lib/memory-review/memory-review-tool-surface.js";
 import { isTelegramChannelSession } from "../lib/telegram-session-actor.js";
 
@@ -37,15 +40,18 @@ export default defineDynamic({
   events: {
     "step.started": async (_event, ctx) => {
       if (isMemoryReviewSession(ctx)) {
+        const reviewScope = memoryReviewScope(ctx);
         if (ctx.session.auth.current?.attributes.groupType !== "external") {
-          return buildMemoryReviewToolSurface();
+          return buildMemoryReviewToolSurface(reviewScope);
         }
         const identity = resolveExternalGroupPolicyIdentity(ctx.session.auth);
         const snapshot = resolveExternalGroupToolPolicy(ctx.session.auth);
-        if (!identity || !snapshot.restricted) return buildMemoryReviewToolSurface(new Set());
+        if (!identity || !snapshot.restricted) {
+          return buildMemoryReviewToolSurface(reviewScope, new Set());
+        }
         try {
           const current = await loadCurrentExternalGroupCapabilities(identity);
-          return buildMemoryReviewToolSurface(new Set(
+          return buildMemoryReviewToolSurface(reviewScope, new Set(
             [...snapshot.allowed].filter((name) => current.has(name)),
           ));
         } catch (error) {
@@ -54,7 +60,7 @@ export default defineDynamic({
             error: error instanceof Error ? error.message : String(error),
             groupId: identity.groupId,
           }));
-          return buildMemoryReviewToolSurface(new Set());
+          return buildMemoryReviewToolSurface(reviewScope, new Set());
         }
       }
       const auth = ctx.session.auth;

@@ -53,7 +53,7 @@ describe("memory review model surface", () => {
   });
 
   it("contains only memory capabilities plus explicit framework denials", () => {
-    const names = Object.keys(buildMemoryReviewToolSurface()).sort();
+    const names = Object.keys(buildMemoryReviewToolSurface("family")).sort();
 
     expect(names).toEqual([
       ...MEMORY_REVIEW_DENIED_TOOL_NAMES,
@@ -69,7 +69,7 @@ describe("memory review model surface", () => {
   });
 
   it("omits external memory descriptors that are not currently granted", () => {
-    const names = Object.keys(buildMemoryReviewToolSurface(new Set(["list_memories"]))).sort();
+    const names = Object.keys(buildMemoryReviewToolSurface("family", new Set(["list_memories"]))).sort();
 
     expect(names).toContain("list_memories");
     expect(names).not.toContain("remember");
@@ -83,7 +83,7 @@ describe("memory review model surface", () => {
     "search_memories",
     "search_memory_threads",
   ] as const)("re-checks live external authorization before executing %s", async (toolName) => {
-    const surface = buildMemoryReviewToolSurface(new Set([toolName]));
+    const surface = buildMemoryReviewToolSurface("family", new Set([toolName]));
     authorizeCurrentExternalGroupCapability.mockRejectedValueOnce(
       new Error("AGENT_GROUP_TOOL_FORBIDDEN"),
     );
@@ -120,6 +120,22 @@ describe("memory review model surface", () => {
     expect(memoryReviewInstructions("family")).toContain('scope "family"');
     expect(memoryReviewInstructions("group")).toContain('scope "group"');
     expect(memoryReviewInstructions("group")).not.toMatch(/[—–«»]/u);
+  });
+
+  it("gives the review run a remember that accepts only its own scope", () => {
+    const surface = buildMemoryReviewToolSurface("family");
+    const schema = (surface.remember as unknown as {
+      inputSchema: { safeParse: (value: unknown) => { success: boolean } };
+    }).inputSchema;
+    const payload = {
+      basis: "agent_inferred", content: "Мама работает в школе", kind: "fact",
+      sensitivity: "normal", sourceSequence: "42", subject: { kind: "current_author" },
+    };
+
+    expect(schema.safeParse({ ...payload, scope: "family" }).success).toBe(true);
+    // Three parallel calls into a forbidden scope are then impossible, not merely discouraged.
+    expect(schema.safeParse({ ...payload, scope: "personal" }).success).toBe(false);
+    expect(schema.safeParse({ ...payload, scope: "group" }).success).toBe(false);
   });
 
   it("refuses to guess the review scope when the run does not carry exactly one", () => {

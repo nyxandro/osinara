@@ -4,6 +4,7 @@
  * Exports:
  * - `memorySubjectSchema`: explicit current-author, verified-ref, label, or subjectless intent.
  * - `memoryThreadSchema`: atomic thread create/attach contract.
+ * - `createRememberInputSchema`: the contract narrowed to the scopes one surface may write into.
  * - `rememberInputSchema`: trusted personal/family/group tool input.
  * - `externalRememberInputSchema`: exact external-group presentation contract.
  * - `RememberInput`: parsed trusted tool input type.
@@ -94,7 +95,7 @@ export const memoryThreadSchema = z.discriminatedUnion("action", [
   ),
 ]);
 
-function createRememberInputSchema(scope: z.ZodType<"family" | "group" | "personal">) {
+export function createRememberInputSchema(scope: z.ZodType<"family" | "group" | "personal">) {
   return z.object({
     attribute: z.string().trim().min(1).max(MEMORY_ATTRIBUTE_MAX_CHARACTERS).optional().describe(
       "Короткое имя свойства субъекта, о котором запись: «кофе», «место работы», «размер обуви». Не значение свойства и не пересказ содержания. Ставь его, когда свойство со временем меняется и новая запись отменяет прежнюю; новая запись того же субъекта с тем же именем переводит прежнюю в историю. Не ставь общее имя вроде «еда» — оно уберёт из активной памяти независимые сведения. У записи без субъекта (subject.kind=none) имя свойства действует на всю область памяти, поэтому там оно должно быть особенно точным. Для kind=episode поле недопустимо",
