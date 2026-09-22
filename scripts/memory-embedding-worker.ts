@@ -4,6 +4,7 @@
  * Constructs:
  * - Claims bounded PostgreSQL batches and calls the pinned local TEI service.
  * - Completes each lease atomically or records one terminal failure without hidden retries.
+ * - A database restart is a pause, not the end: the pass loop waits for it inside a bounded budget.
  * - Publishes readiness on every pass so a hung loop becomes an unhealthy container.
  * - Stops gracefully on SIGINT/SIGTERM and releases the database pool.
  */
@@ -11,6 +12,7 @@ import { rm, writeFile } from "node:fs/promises";
 
 import { isAppError } from "../agent/lib/app-error.js";
 import { closeDatabase } from "../agent/lib/database.js";
+import { waitForApplicationDatabase } from "../agent/lib/database-recovery.js";
 import { chunkMemoryContent } from "../agent/lib/memory-embedding-chunks.js";
 import { fitMemoryChunksToTokenLimit } from "../agent/lib/memory-embedding-fitting.js";
 import { memoryEmbeddingInput } from "../agent/lib/memory-embedding-header.js";
@@ -24,11 +26,13 @@ import {
   MEMORY_EMBEDDING_MODEL_VERSION,
   MEMORY_EMBEDDING_PROVIDER_BATCH_SIZE,
   MEMORY_EMBEDDING_WORKER_READY_PATH,
+  MEMORY_EMBEDDING_WORKER_STARTED_CODE,
 } from "../agent/lib/memory-config.js";
 import { memoryIndexRepository } from "../agent/lib/memory-index-repository.js";
+import { isTerminalJobFailure, runEmbeddingWorkerLoop } from "./memory-embedding/worker-loop.js";
 
-const IDLE_POLL_MILLISECONDS = 1_000;
-let stopping = false;
+// One controller for the whole shutdown: the pass loop and the database wait read the same signal.
+const stopController = new AbortController();
 
 function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -104,6 +108,11 @@ async function processBatch(): Promise<number> {
         message: "Memory embedding completion was rejected",
       }));
     } catch (error) {
+      // The database being away is not a verdict on this memory, so it is not recorded as one:
+      // the loop waits the outage out and the lease expires on its own. The record still leaves
+      // the semantic index until an operator reindexes it — returning the lease is the other half
+      // of #254 and is not decided here — but the reason written down is now the true one.
+      if (!isTerminalJobFailure(error)) throw error;
       const code = errorCode(error);
       console.error(JSON.stringify({
         code,
@@ -123,12 +132,9 @@ async function processBatch(): Promise<number> {
   return jobs.length;
 }
 
-process.once("SIGINT", () => {
-  stopping = true;
-});
-process.once("SIGTERM", () => {
-  stopping = true;
-});
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.once(signal, () => stopController.abort());
+}
 
 // A container restart reuses its writable layer, so stale readiness must be cleared before work.
 await rm(MEMORY_EMBEDDING_WORKER_READY_PATH, { force: true });
@@ -136,19 +142,19 @@ await rm(MEMORY_EMBEDDING_WORKER_READY_PATH, { force: true });
 // an empty log meant «no errors», and that is exactly what a hung process looks like too. The
 // heartbeat is the readiness file, not the log — a pulse in the log would drown the codes.
 console.info(JSON.stringify({
-  code: "AGENT_MEMORY_EMBEDDING_WORKER_STARTED",
+  code: MEMORY_EMBEDDING_WORKER_STARTED_CODE,
   batchSize: MEMORY_EMBEDDING_JOB_BATCH_SIZE,
   model: MEMORY_EMBEDDING_MODEL_VERSION,
 }));
 
 try {
-  while (!stopping) {
-    const processed = await processBatch();
-    // Also on an empty pass: an idle worker is healthy, a stuck one is not, and only the loop
-    // itself knows the difference.
-    await markAlive();
-    if (processed === 0) await sleep(IDLE_POLL_MILLISECONDS);
-  }
+  await runEmbeddingWorkerLoop({
+    markAlive,
+    processBatch,
+    sleep,
+    stopSignal: stopController.signal,
+    waitForDatabase: waitForApplicationDatabase,
+  });
 } catch (error) {
   console.error(JSON.stringify({
     code: "AGENT_MEMORY_EMBEDDING_WORKER_FAILED",

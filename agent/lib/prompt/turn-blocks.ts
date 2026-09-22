@@ -5,7 +5,8 @@
  * - `TurnBlockContext`: the minimal Eve resolve context a block resolver reads.
  * - `createModeBlockResolver` / `resolveModeBlock`: verified mode rulebook for the current turn.
  * - `createReactionSetBlockResolver` / `resolveReactionSetBlock`: reaction set announced in history.
- * - `createMemoryBlockResolver` / `resolveMemoryBlock`: authorized long-term memory records.
+ * - `createMemoryBlockResolver` / `resolveMemoryBlock`: authorized long-term memory records,
+ *   wrapped in the payload markers; a memory service notice is returned unwrapped.
  * - `createPreferenceBlockResolver` / `resolvePreferenceBlock`: one editable chat prompt.
  *
  * Key constructs:
@@ -32,9 +33,11 @@ import {
 import {
   formatRetrievedMemoryInstructions,
   memoryRetrievalQuery,
+  recordOfferedMemories,
   retrieveMemoryTurnContext,
   type MemoryRetrievalDiagnostics,
   type MemoryTurnContext,
+  type ModelMemoryContextItem,
 } from "../memory-retrieval.js";
 import { memoryShowJournal, type MemorySelectionWindow } from "../memory-show-journal.js";
 import {
@@ -70,6 +73,8 @@ import {
 import { scheduledGroupHistoryAccess } from "../agent-schedules/scheduled-group-history-context.js";
 import { isScheduledSession } from "../agent-schedules/scheduled-session.js";
 import { modeInstructions } from "./mode-instructions.js";
+import { applyTurnMemoryBudget } from "./turn-memory-budget.js";
+import { formatTurnMemoryContext } from "./turn-memory-context.js";
 
 export interface TurnBlockContext {
   readonly channel?: { readonly kind?: string };
@@ -252,6 +257,12 @@ export function createMemoryBlockResolver(dependencies: {
   authorize: (ctx: TurnBlockContext) => MemoryAuthorization;
   createProfile: (auth: MemoryAuthorization, input: CreateProfileViewInput) => Promise<ProfileView>;
   openSelectionWindow: (conversationId: string, eveSessionId: string, turnId: string) => Promise<number>;
+  recordOffered: (
+    window: MemorySelectionWindow | null,
+    context: MemoryTurnContext,
+    offered: readonly ModelMemoryContextItem[],
+    shownElsewhereRefs: readonly string[],
+  ) => Promise<void>;
   retrieve: (
     auth: MemoryAuthorization,
     query: string,
@@ -266,6 +277,8 @@ export function createMemoryBlockResolver(dependencies: {
     let diagnostics: MemoryRetrievalDiagnostics | null = null;
     let selection = memorySelectionMetrics(null);
     let profileCharacters: number | null = null;
+    let droppedMemories: number | null = null;
+    let offeredMemories: number | null = null;
     let profileMemoryRefs: string[] | null = null;
     let threadRefs: string[] | null = null;
     let threadCharacters: number | null = null;
@@ -313,19 +326,44 @@ export function createMemoryBlockResolver(dependencies: {
       const profile = profileInput === null
         ? null
         : await dependencies.createProfile(authorization, profileInput);
-      selection = memorySelectionMetrics(context.memories);
       profileCharacters = profile === null ? 0 : JSON.stringify(profile.subjects).length;
       profileMemoryRefs = profile === null ? []
         : profile.subjects.flatMap((subject) => subject.claims.map((claim) => claim.memoryRef));
       threadRefs = context.threads.threads.map((thread) => thread.threadRef);
       threadCharacters = JSON.stringify(context.threads).length;
-      phase = "format";
-      return [
+      // The block is the one part of the request the model recomputes every message, so its total
+      // size is bounded here. The budget measures what the model will actually receive: each
+      // candidate goes through the same formatter, wrapper and escaping included.
+      //
+      // Only retrieved data carries the payload markers. The unavailable notice below is a rule
+      // about behaviour, so it stays unwrapped and keeps its place in the instruction prefix.
+      const renderBlock = (memories: readonly ModelMemoryContextItem[]) => formatTurnMemoryContext([
         ...(profile === null ? [] : [formatProfileViewContext(profile)]),
         formatRetrievedMemoryInstructions(
-          context.memories, context.threads, context.diagnostics.semanticBranchAvailable,
+          memories, context.threads, context.diagnostics.semanticBranchAvailable,
         ),
-      ].join("\n\n");
+      ].join("\n\n"));
+      const budget = applyTurnMemoryBudget({ memories: context.memories, render: renderBlock });
+      droppedMemories = budget.droppedMemories;
+      offeredMemories = budget.memories.length;
+      selection = memorySelectionMetrics(budget.memories);
+      // The journal hears about the selection only now: a record the budget dropped was never put
+      // in front of the model, and writing it down would hide it from the next turns.
+      phase = "journal";
+      await dependencies.recordOffered(window, context, budget.memories, profileMemoryRefs);
+      phase = "format";
+      const block = renderBlock(budget.memories);
+      if (budget.overBudget) {
+        // Not trimming any more: the profile and threads filled the ceiling by themselves, so the
+        // block ships over budget with the best match kept. Their own limits count rendered text
+        // while this one counts the assembled block, which is how they can outgrow it.
+        console.warn(JSON.stringify({
+          code: "AGENT_MEMORY_TURN_BLOCK_OVER_BUDGET", blockCharacters: block.length,
+          droppedMemories, offeredMemories, profileCharacters, threadCharacters,
+          sessionId: ctx.session.id, turnId,
+        }));
+      }
+      return block;
     } catch (error) {
       outcome = "failed";
       if (error instanceof MemoryContextFailure) phase = error.phase;
@@ -348,7 +386,8 @@ export function createMemoryBlockResolver(dependencies: {
       return MEMORY_UNAVAILABLE_BLOCK;
     } finally {
       console.info(JSON.stringify({ code: "AGENT_MEMORY_RETRIEVAL_METRICS", sessionId: ctx.session.id,
-        turnId, outcome, memories, ...selection, ...diagnostics, profileCharacters, profileMemoryRefs,
+        turnId, outcome, memories, offeredMemories, droppedMemories, ...selection, ...diagnostics,
+        profileCharacters, profileMemoryRefs,
         threadRefs, threadCharacters, failurePhase: outcome === "failed" ? phase : null, causeCode,
         durationMs: Math.round(performance.now() - started) }));
     }
@@ -439,6 +478,7 @@ export const resolveMemoryBlock = createMemoryBlockResolver({
   authorize: requireMemoryAuthorization,
   createProfile: profileViewRepository.create,
   openSelectionWindow: memoryShowJournal.openTurn,
+  recordOffered: recordOfferedMemories,
   retrieve: retrieveMemoryTurnContext,
 });
 

@@ -1,4 +1,5 @@
 import { expect, it, vi } from "vitest";
+
 import { runTelegramProcessing } from "./telegram-processing-deadline.js";
 import { isDatabaseUnavailable, normalizePostgresError } from "./database-errors.js";
 import { AppError } from "./app-error.js";
@@ -31,4 +32,14 @@ it("does not cancel the execution after another observer takes over the expired 
     execute: async control => { control.observeSession({ id: "live",cancel,getEventStream: vi.fn() }); throw transferred; },
   })).rejects.toBe(transferred);
   expect(cancel).not.toHaveBeenCalled();
+});
+
+it("gives up waiting for the database the moment the process is asked to stop", async () => {
+  // Docker gives a worker ten seconds after SIGTERM while this wait is allowed sixty. A wait that
+  // only stops being awaited keeps its timer, and the process is killed instead of exiting.
+  const { waitForApplicationDatabase } = await import("./database-recovery.js");
+  const controller = new AbortController();
+  controller.abort();
+
+  await expect(waitForApplicationDatabase(controller.signal)).rejects.toThrowError(/abort/iu);
 });

@@ -55,8 +55,9 @@ current canonical `main` ref; it does not permit a branch build or bypass releas
 
 Each non-initial deployment retains the previous restore point until the new PostgreSQL dumps
 and durable-volume archives are complete and checksum-verified. Only then does it remove older
-rolling copies and the historical initial migration backup, leaving one verified previous-release
-backup. Checksum paths are relative and remain valid after the atomic directory rename. Capacity
+rolling copies and the historical initial migration backup, keeping the three most recent verified
+release backups. One copy alone is no restore point for damage noticed a day or two late: by then
+the only copy holds it too. Three sets cost about 11 GB on the current host. Checksum paths are relative and remain valid after the atomic directory rename. Capacity
 preflight must fit both the existing and new copies; insufficient space never triggers early deletion.
 After a successful health
 check and terminal success record it removes local first-party Osinara image references older than
@@ -206,6 +207,21 @@ six-image controller into the fresh layout. Existing bridge servers prepare thes
 entrypoint must be `root:root 0750`. The script rejects symlinks or different metadata before it
 sources a module. It creates `/opt/osinara/releases`, `/opt/osinara/backups`, and the atomic
 `/opt/osinara/release.env`.
+
+These files are placed by the operator and **no release updates them**: a change under
+`scripts/production-deploy/` reaches the server only when it is installed by hand. After merging
+such a change, copy it across and let the next minute poll pick it up:
+
+```bash
+sudo install -o root -g root -m 0640 scripts/production-deploy/<module>.sh \
+  /opt/osinara/bin/production-deploy/<module>.sh
+# the entrypoint itself is 0750
+sudo install -o root -g root -m 0750 scripts/production-deploy.sh \
+  /opt/osinara/bin/production-deploy.sh
+```
+
+A release in flight holds the lock, so install between releases and verify with
+`diff` against the repository afterwards.
 
 `/opt/osinara/.env` must be exactly `root:root 0600`. Before v0.15.2 it contains the required
 `DEEPSEEK_API_KEY`; during the v0.15.2 bridge it gains `MODEL_API_KEY` with the exact same credential

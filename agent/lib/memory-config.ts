@@ -21,6 +21,22 @@ export const MEMORY_LIST_DEFAULT_LIMIT = 20;
 export const MEMORY_LIST_MAX_LIMIT = 50;
 export const MEMORY_RETRIEVAL_LIMIT = 12;
 export const MEMORY_RETRIEVAL_CANDIDATE_LIMIT = 40;
+/**
+ * Total size of the assembled turn memory block: retrieved records, profile and threads together
+ * with the instructions, tags and escaping around them. The three payload parts are bounded
+ * separately, and their sum was bounded by nothing — worst case 76 000 characters of payload.
+ * Since the block left the cached prefix it is the only piece the model recomputes on every
+ * message, so this number is turn latency and input cost.
+ *
+ * Payload measured on 17 production turns 2026-09-21: median 21 601, second largest 29 608,
+ * largest 41 012. The wrapper measured on the same code is 2 505 characters, so 40 000 sits above
+ * the second largest turn with its wrapper and below the largest — it trims the top turn of that
+ * sample, the one carrying 37 910 characters of records alone, and leaves the rest untouched.
+ * One day of traffic is a thin sample, so `droppedMemories` and `offeredMemories` in
+ * `AGENT_MEMORY_RETRIEVAL_METRICS` are the evidence to retune it: cutting more than the occasional
+ * outlier means this is too low.
+ */
+export const MEMORY_TURN_BLOCK_MAX_CHARACTERS = 40_000;
 export const MEMORY_INCIDENT_STATEMENT_TIMEOUT_MS = 1_000;
 export const MEMORY_INCIDENT_QUERY_TIMEOUT_MS = 1_500;
 
@@ -42,6 +58,18 @@ export const MEMORY_EMBEDDING_WORKER_READY_PATH = "/tmp/osinara-memory-embedding
  * honest slow job and still catches a hung loop inside two minutes.
  */
 export const MEMORY_EMBEDDING_WORKER_STALE_MILLISECONDS = 90_000;
+/**
+ * The codes this subsystem writes that are not failures. `OsinaraEmbeddingFailed` watches the
+ * whole `AGENT_MEMORY_EMBEDDING_` family, because fifteen of its sixteen codes are failures; the
+ * sixteenth says the indexer is alive. Anything normal has to be named here and excluded in the
+ * rule, or a healthy start reads to the duty reader as a broken index.
+ */
+export const MEMORY_EMBEDDING_WORKER_STARTED_CODE = "AGENT_MEMORY_EMBEDDING_WORKER_STARTED";
+export const MEMORY_EMBEDDING_WORKER_WAITING_CODE = "AGENT_MEMORY_EMBEDDING_WORKER_WAITING";
+export const MEMORY_EMBEDDING_LIFECYCLE_CODES = [
+  MEMORY_EMBEDDING_WORKER_STARTED_CODE,
+  MEMORY_EMBEDDING_WORKER_WAITING_CODE,
+] as const;
 export const MEMORY_EXTRACTION_WORKER_STABILITY_MILLISECONDS = 30_000;
 export const MEMORY_EVIDENCE_SNIPPET_MAX_CHARACTERS = 1_000;
 

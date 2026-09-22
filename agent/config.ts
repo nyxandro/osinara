@@ -25,6 +25,23 @@ export const SESSION_GROUP_ROTATION_LOCK_HASH_SEED = 3;
 export const SESSION_MAX_COMPLETED_TURNS = 50;
 export const SESSION_RETENTION_LEASE_MS = 15 * 60 * 1_000;
 export const SESSION_RETENTION_DAYS = 1;
+// A cleanup that failed is tried again later instead of parking the session for good: the usual
+// reason is a Workflow run that had not finished yet, and that changes on its own.
+export const SESSION_RETENTION_RETRY_MS = 60 * 60 * 1_000;
+/**
+ * Cleanup lines that report normal operation, declared once so the error-burst alert can exclude
+ * them by the same names the code writes. The first sweep after a release drains the whole backlog
+ * of abandoned runs and writes one line per run, which is many times that alert's threshold.
+ */
+export const EVE_RUN_ABANDONED_DELETED_CODE = "AGENT_EVE_SESSION_ABANDONED_RUN_DELETED";
+export const SESSION_RETENTION_STORAGE_ABSENT_CODE = "AGENT_SESSION_RETENTION_STORAGE_ABSENT";
+export const SESSION_RETENTION_ROUTINE_CODES = [
+  EVE_RUN_ABANDONED_DELETED_CODE,
+  SESSION_RETENTION_STORAGE_ABSENT_CODE,
+] as const;
+// Beyond this a non-terminal Workflow run is treated as abandoned rather than live. Measured on
+// production 2026-09-22 over 1710 completed runs: p99 lasted 16 minutes, the longest 4h 08m.
+export const EVE_RUN_ABANDONED_AFTER_HOURS = 24;
 export const SESSION_TASK_ABANDONED_DAYS = 7;
 export const SESSION_TASK_MAX_ACTIVE_PER_GROUP_TOPIC = 25;
 export const SESSION_TASK_SWEEP_BATCH_SIZE = 100;

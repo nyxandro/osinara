@@ -3,7 +3,10 @@
 # Drains application work, stops writers, then snapshots PostgreSQL and irreconstructible volumes.
 
 readonly BACKUP_RESERVE_BYTES=$((512 * 1024 * 1024))
-readonly RETAINED_DEPLOY_BACKUP_COUNT=1
+# Three deploy snapshots, not one. A single copy means damage noticed a day late has no state to
+# go back to: the only copy already contains it. Measured on the production host 2026-09-22, one
+# set is about 3.7 GB of 93 GB free, so two extra sets cost roughly eight percent of the free disk.
+readonly RETAINED_DEPLOY_BACKUP_COUNT=3
 readonly LEGACY_INITIAL_MIGRATION_BACKUP_NAME="initial-migration-v0.1.1"
 readonly DEPLOY_BACKUP_NAME_PATTERN='^[0-9]{8}T[0-9]{6}Z-to-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 readonly LEGACY_EVE_VOLUME="osinara-production-workflow-data"

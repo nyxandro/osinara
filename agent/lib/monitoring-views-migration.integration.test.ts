@@ -4,6 +4,8 @@
  * Constructs:
  * - `103_monitoring_views.sql`: aggregate-only views plus a read-only role for the metrics exporter.
  * - `105_memory_index_state_view.sql`: standing count of records the semantic branch cannot see.
+ * - `114_memory_embedding_jobs_view_all_statuses.sql`: the indexing counter a runbook sends the
+ *   duty reader to must answer with zeros, not with the silence an empty queue used to give.
  * - Each view is granted explicitly: a blanket schema grant would also cover future tables.
  * - The security boundary: the exporter role reads counts and ages, never a row of user content.
  * - The role guard: an inherited role carrying wider privileges stops the migration instead of
@@ -107,6 +109,43 @@ describeWithDatabase("monitoring views migrations", () => {
       await client.query("RESET ROLE").catch(() => undefined);
       client.release();
     }
+  });
+
+  it("reports every indexing status even when no job is waiting", async () => {
+    // A runbook step that sends the duty reader to a counter which disappears with an empty queue
+    // answers «no failures», «no metric» and «wrong query» with the same silence.
+    //
+    // Emptying the whole table is the subject of this check, not a fixture: the view has to answer
+    // exactly then. Integration files run one after another, so no neighbour loses its rows.
+    await database().query("DELETE FROM memory_embedding_jobs");
+
+    const result = await database().query<{ status: string; total: string; recent: string }>(
+      "SELECT status, total, recent FROM monitoring_memory_embedding_jobs ORDER BY status",
+    );
+
+    expect(result.rows).toEqual([
+      { status: "failed", total: "0", recent: "0" },
+      { status: "leased", total: "0", recent: "0" },
+      { status: "pending", total: "0", recent: "0" },
+    ]);
+  });
+
+  it("keeps the reported statuses in step with the ones the table allows", async () => {
+    // The view lists the statuses itself, so a new one would vanish from the metric in the same
+    // silence this check exists to remove. Let the build notice it instead of the duty reader.
+    const constraint = await database().query<{ definition: string }>(
+      `SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+        WHERE conrelid = 'memory_embedding_jobs'::regclass AND conname = 'memory_embedding_jobs_status_check'`,
+    );
+    const allowed = [...constraint.rows[0]!.definition.matchAll(/'([a-z_]+)'::text/gu)]
+      .map((match) => match[1]!).sort();
+    expect(allowed.length).toBeGreaterThan(0);
+
+    const reported = await database().query<{ status: string }>(
+      "SELECT status FROM monitoring_memory_embedding_jobs ORDER BY status",
+    );
+
+    expect(reported.rows.map((row) => row.status)).toEqual(allowed);
   });
 
   it("refuses a direct read of user content when acting as the exporter role", async () => {

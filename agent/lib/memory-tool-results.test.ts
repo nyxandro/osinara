@@ -16,19 +16,21 @@ const {
   createMemory,
   listMemories,
   logMemoryWriteEvent,
+  requireWritableScope,
   resolveMemoryTurnSource,
   retrieveMemories,
 } = vi.hoisted(() => ({
   createMemory: vi.fn(),
   listMemories: vi.fn(),
   logMemoryWriteEvent: vi.fn(),
+  requireWritableScope: vi.fn((_authorization: unknown, scope: string) => scope),
   resolveMemoryTurnSource: vi.fn(),
   retrieveMemories: vi.fn(),
 }));
 
 vi.mock("./memory-context.js", () => ({
   requireMemoryAuthorization: () => ({ familyId: "family-1", scopes: ["personal"] }),
-  requireWritableScope: (_authorization: unknown, scope: string) => scope,
+  requireWritableScope,
 }));
 vi.mock("./memory-content-policy.js", () => ({
   requireAllowedMemoryContent: (content: string) => content,
@@ -54,6 +56,7 @@ vi.mock("./session-auth.js", () => ({
     },
   }),
 }));
+import { AppError } from "./app-error.js";
 import listMemoriesTool from "./tools/list_memories.js";
 import { MemoryNeighbourRefusal } from "./memory-neighbour-gate.js";
 import remember from "./tools/remember.js";
@@ -147,6 +150,35 @@ describe("model-facing memory tool results", () => {
     });
     retrieveMemories.mockReset();
     logMemoryWriteEvent.mockReset();
+    requireWritableScope.mockReset();
+    requireWritableScope.mockImplementation((_authorization: unknown, scope: string) => scope);
+  });
+
+  it("counts a refused scope as a failed write instead of losing it in a framework stack", async () => {
+    requireWritableScope.mockImplementation(() => {
+      throw new AppError("AGENT_MEMORY_SCOPE_DENIED", "Эта область памяти недоступна в текущем чате");
+    });
+    const input = {
+      basis: "agent_inferred" as const,
+      content: internalMemory.content,
+      kind: "fact" as const,
+      scope: "family" as const,
+      sensitivity: "normal" as const,
+      subject: { kind: "current_author" as const },
+    };
+
+    await expect(executeNonStreamingTool(remember, input, context)).rejects.toThrowError(
+      /AGENT_MEMORY_SCOPE_DENIED/u,
+    );
+
+    expect(logMemoryWriteEvent).toHaveBeenCalledWith({
+      code: "AGENT_MEMORY_WRITE_FAILED",
+      errorCode: "AGENT_MEMORY_SCOPE_DENIED",
+      scope: "family",
+      sourceKind: "current",
+      threadAction: "none",
+    });
+    expect(createMemory).not.toHaveBeenCalled();
   });
 
   it("persists an inferred sensitive memory without fabricating user confirmation", async () => {

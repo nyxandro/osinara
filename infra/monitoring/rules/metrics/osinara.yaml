@@ -18,11 +18,27 @@ groups:
       # Only rules about the present state stand down. The log-burst rules below count lines that
       # were already written, and suppressing those would hide a burst that happened just before
       # the release started.
+      #
+      # The hold exists because the window and the metric do not resume together. The window closes
+      # when the deployment finishes and the containers are already writing logs by then, but this
+      # metric comes back only at the end of a chain, and every link of it is bounded by config:
+      # up to 60s until the next whole minute, because each dispatcher is `cron: "* * * * *"`;
+      # up to 60s of aggregation, because the log rule group runs at `interval: 1m`;
+      # up to 30s of evaluation, because this group runs at `interval: 30s`.
+      # On top of those two and a half minutes sits the first cycle's own duration, which nothing
+      # bounds: the memory review dispatcher drains whatever the downtime accumulated. Five minutes
+      # is therefore room to spare rather than a fit — three would have survived the release of
+      # 2026-09-20 by half a minute and nothing else.
+      # Without a hold, one evaluation inside that gap woke the duty reader with three critical
+      # alerts on every single release. The cost is stated plainly: a real dispatcher outage is now
+      # reported about ten minutes in rather than five, which is still ahead of the family noticing
+      # and no later than OsinaraIngressStuck.
       - alert: OsinaraSchedulerHeartbeatMissing
         expr: >-
           absent_over_time(osinara_schedule_tick_1m{schedule="reminder-dispatch"}[5m])
           and on() present_over_time(log_lines_1m{project="osinara-production"}[5m])
           unless on() deploy_window_end_timestamp_seconds{project="osinara-production"} > time()
+        for: 5m
         labels:
           severity: critical
           project: osinara-production
@@ -37,6 +53,7 @@ groups:
           absent_over_time(osinara_schedule_tick_1m{schedule="agent-schedule-dispatch"}[5m])
           and on() present_over_time(log_lines_1m{project="osinara-production"}[5m])
           unless on() deploy_window_end_timestamp_seconds{project="osinara-production"} > time()
+        for: 5m
         labels:
           severity: critical
           project: osinara-production
@@ -51,6 +68,7 @@ groups:
           absent_over_time(osinara_schedule_tick_1m{schedule="memory-review-dispatch"}[5m])
           and on() present_over_time(log_lines_1m{project="osinara-production"}[5m])
           unless on() deploy_window_end_timestamp_seconds{project="osinara-production"} > time()
+        for: 5m
         labels:
           severity: critical
           project: osinara-production
@@ -71,7 +89,7 @@ groups:
       - alert: OsinaraErrorBurst
         expr: >-
           sum by (host) (sum_over_time(log_code_lines_1m{project="osinara-production",
-          code!~"AGENT_(SCHEDULE_TICK|TELEGRAM_SILENT_TURN|MEMORY_PURGE_COMPLETED|DATABASE_BOOKKEEPING_RECOVERY|RUNTIME_DEAD_PROCESS_RECONCILED|TELEGRAM_INGRESS_RECOVERED|TELEGRAM_OBSERVER_TRANSFERRED|TELEGRAM_BINDING_RECOVERED|TELEGRAM_DATABASE_RECOVERY|MEMORY_WRITE_SUCCEEDED|MEMORY_WRITE_DEFERRED|MEMORY_INDEX_RETRY_CLAIMED|MEMORY_INDEX_CHUNK_RESPLIT|MEMORY_USAGE_DIRECTIVE|MEMORY_EMBEDDING_WORKER_STARTED|MODEL_CALL_METRICS|TOOL_CALL_METRICS|SKILL_SYNC_METRICS|MEMORY_SEARCH_METRICS|MEMORY_RETRIEVAL_METRICS|MEMORY_REVIEW_LANE_METRICS)"}[5m])) > 10
+          code!~"AGENT_(SCHEDULE_TICK|TELEGRAM_SILENT_TURN|MEMORY_PURGE_COMPLETED|DATABASE_BOOKKEEPING_RECOVERY|RUNTIME_DEAD_PROCESS_RECONCILED|TELEGRAM_INGRESS_RECOVERED|TELEGRAM_OBSERVER_TRANSFERRED|TELEGRAM_BINDING_RECOVERED|TELEGRAM_DATABASE_RECOVERY|MEMORY_WRITE_SUCCEEDED|MEMORY_WRITE_DEFERRED|MEMORY_INDEX_RETRY_CLAIMED|MEMORY_INDEX_CHUNK_RESPLIT|MEMORY_USAGE_DIRECTIVE|MEMORY_EMBEDDING_WORKER_STARTED|MEMORY_EMBEDDING_WORKER_WAITING|MODEL_CALL_METRICS|TOOL_CALL_METRICS|SKILL_SYNC_METRICS|MEMORY_SEARCH_METRICS|MEMORY_RETRIEVAL_METRICS|MEMORY_REVIEW_LANE_METRICS|EVE_SESSION_ABANDONED_RUN_DELETED|SESSION_RETENTION_STORAGE_ABSENT)"}[5m])) > 10
         labels:
           severity: warning
           project: osinara-production
@@ -136,15 +154,30 @@ groups:
           description: 'Ассистент почти всегда отвечает, не получив ни одной записи памяти. Для семьи это выглядит как забывчивость: он не помнит того, о чём ему рассказывали.'
           runbook: 'В строках AGENT_MEMORY_RETRIEVAL_METRICS смотреть semanticTopSimilarity, simpleTopRank и russianTopRank: все около нуля — сломан сервис эмбеддингов или FTS; счета высокие, а *Matched больше нуля при нулевых *Qualified — отсекают пороги поиска.'
 
+      # The family is matched by prefix because fifteen of its sixteen codes are failures. The
+      # sixteenth says the indexer started, which it does on every release — and for a whole day
+      # that healthy start was the only thing this alert ever counted. Codes that mean normal
+      # operation are declared in agent/lib/memory-config.ts, and a test holds this exclusion and
+      # the one in OsinaraErrorBurst to that list: add a code there without excluding it in both and
+      # the build fails, not the duty reader.
+      #
+      # Still skewed, and left that way on purpose: the family also covers AGENT_MEMORY_EMBEDDING_
+      # PROVIDER_* written by the agent while *reading* memory for an answer, which this summary
+      # calls an indexing failure. Splitting read from write needs a service label this rule cannot
+      # be shown to have; #239 carries the detail.
       - alert: OsinaraEmbeddingFailed
-        expr: sum(sum_over_time(log_code_lines_1m{project="osinara-production", code=~"AGENT_MEMORY_EMBEDDING_.+"}[5m])) > 0
+        expr: >-
+          sum(sum_over_time(log_code_lines_1m{project="osinara-production",
+          code=~"AGENT_MEMORY_EMBEDDING_.+",
+          code!="AGENT_MEMORY_EMBEDDING_WORKER_STARTED",
+          code!="AGENT_MEMORY_EMBEDDING_WORKER_WAITING"}[5m])) > 0
         labels:
           severity: warning
           project: osinara-production
         annotations:
           summary: 'Индексация новых воспоминаний завершилась ошибкой'
           description: 'Воспоминание сохранено, но не проиндексировано: поиск по нему работать не будет, пока задача не выполнится.'
-          runbook: 'Проверить контейнеры memory-embedding и memory-embedding-worker, затем счётчик osinara_memory_embedding_jobs со статусом failed.'
+          runbook: 'Проверить контейнеры memory-embedding и memory-embedding-worker, затем osinara_memory_embedding_jobs со статусом failed и osinara_memory_embedding_pending. Обе величины существуют всегда: пустой ответ означает, что метрика не собирается, а не что отказов нет.'
 
       - alert: OsinaraModelTransientBurst
         expr: sum(sum_over_time(osinara_model_transient_1m[10m])) > 5

@@ -368,6 +368,61 @@ describeWithDatabase("session repository", () => {
     )).resolves.toMatchObject({ rowCount: 0 });
   });
 
+  it("tries a failed cleanup again later instead of parking the session for good", async () => {
+    const f = await fixture();
+    const current = await sessionRepository.prepareTurn({
+      baseContinuationToken: "104::",
+      kind: "canonical",
+      telegramForumTopicId: null,
+      familyId: f.familyId,
+      groupId: null,
+      now: new Date("2026-01-01T00:00:00.000Z"),
+      scope: "personal",
+      userId: f.userId,
+    });
+    await sessionRepository.bindEveSession(current.id, "wrun_retry");
+    await sessionRepository.requestRotation(current.id);
+    await sessionRepository.prepareTurn({
+      baseContinuationToken: "104::",
+      kind: "canonical",
+      telegramForumTopicId: null,
+      familyId: f.familyId,
+      groupId: null,
+      now: new Date("2026-01-02T00:00:00.000Z"),
+      scope: "personal",
+      userId: f.userId,
+    });
+
+    const first = await sessionRepository.claimExpiredForDeletion(
+      new Date("2026-01-03T00:00:01.000Z"),
+    );
+    expect(first).toMatchObject({ eveSessionId: "wrun_retry", id: current.id });
+    await sessionRepository.failDeletion(
+      first!.id, first!.leaseToken, "AGENT_EVE_SESSION_STORAGE_ACTIVE",
+      new Date("2026-01-03T00:00:02.000Z"),
+    );
+
+    // The usual reason a cleanup fails is a run that had not finished yet, so the session waits
+    // out the backoff and is offered again rather than staying behind for good.
+    await expect(sessionRepository.claimExpiredForDeletion(
+      new Date("2026-01-03T00:30:00.000Z"),
+    )).resolves.toBeNull();
+
+    const retry = await sessionRepository.claimExpiredForDeletion(
+      new Date("2026-01-03T02:00:00.000Z"),
+    );
+    expect(retry).toMatchObject({ eveSessionId: "wrun_retry", id: current.id });
+
+    // A run already absent from Workflow storage is the other failure that resolves by itself.
+    await sessionRepository.failDeletion(
+      retry!.id, retry!.leaseToken, "AGENT_EVE_SESSION_STORAGE_MISSING",
+      new Date("2026-01-03T02:00:01.000Z"),
+    );
+    await expect(sessionRepository.claimExpiredForDeletion(
+      new Date("2026-01-03T04:00:00.000Z"),
+    )).resolves.toMatchObject({ id: current.id });
+  });
+
   it("clears active and retired group cursors when a Telegram trust zone is recreated", async () => {
     await verifyGroupTrustZoneRecreation(await fixture());
   });

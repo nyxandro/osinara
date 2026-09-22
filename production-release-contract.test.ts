@@ -199,7 +199,7 @@ describe("production container contract", () => {
     expect(compose.match(/logging: \*bounded-json-logs/g)).toHaveLength(12);
   });
 
-  it("limits Docker control to the runner and tunes pinned TEI for one CPU", () => {
+  it("limits Docker control to the runner and pins every production image", () => {
     const compose = readProjectFile("compose.production.yaml");
     const agent = service(compose, "agent", "migrate");
     const runner = service(compose, "sandbox-runner", "sandbox-egress-proxy");
@@ -219,11 +219,11 @@ describe("production container contract", () => {
     expect(compose).toContain(
       "ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07",
     );
-    expect(compose).toContain("    cpus: 1.0\n");
-    expect(compose).toContain('      OMP_NUM_THREADS: "1"\n');
-    expect(compose).toContain('      - "1"\n      - --max-client-batch-size');
     expect(compose).toContain("      - intfloat/multilingual-e5-small\n");
     expect(compose).toContain("      - 614241f622f53c4eeff9890bdc4f31cfecc418b3\n");
+    // The embedding service's CPU, memory and queue settings are not frozen here as literals:
+    // `compose-runtime.test.ts` holds them to the measurement they came from, so a future change
+    // has to move them together instead of matching a number nobody can explain.
   });
 });
 

@@ -567,6 +567,7 @@ export const memoryRetrievalRepository = {
     limit = MEMORY_RETRIEVAL_LIMIT,
     window: MemorySelectionWindow | null = null,
   ): Promise<{
+    claimIdsByConflictRef: ReadonlyMap<string, readonly string[]>;
     conflicts: MemoryConflictGroup[];
     diagnostics: MemoryRetrievalBranchDiagnostics;
     relatedClaimIds: string[];
@@ -580,7 +581,11 @@ export const memoryRetrievalRepository = {
       window,
     );
     const selectedIds = results.map((result) => result.memory.id);
-    if (selectedIds.length === 0) return { conflicts: [], diagnostics, relatedClaimIds: [], results };
+    if (selectedIds.length === 0) {
+      return {
+        claimIdsByConflictRef: new Map(), conflicts: [], diagnostics, relatedClaimIds: [], results,
+      };
+    }
 
     // Detect an inaccessible partner without selecting any partner content or metadata. Opaque refs
     // are capabilities, not authorization: one visible side of an unresolved conflict is withheld.
@@ -707,6 +712,11 @@ export const memoryRetrievalRepository = {
       }],
     }));
     return {
+      // Keyed by the same ref the model-facing group carries, so a caller that kept or dropped one
+      // group can say exactly which claims it put in front of the model.
+      claimIdsByConflictRef: new Map(
+        finalClosure.map((row) => [row.conflict_ref, [row.a_id, row.b_id] as readonly string[]]),
+      ),
       conflicts,
       diagnostics,
       relatedClaimIds: [...new Set([

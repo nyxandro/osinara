@@ -8,8 +8,14 @@
  * Invariants:
  * - Table names come from the pinned package's public exported schema.
  * - The run row is locked and removed last; any failure rolls the transaction back.
- * - Existing hooks block deletion so Workflow token-retention semantics cannot be shortened.
+ * - Hooks of a live run block deletion so Workflow token-retention semantics cannot be shortened;
+ *   an abandoned run never reaches the terminal transition that would release them, so its hooks
+ *   are removed with it.
  */
+import {
+  EVE_RUN_ABANDONED_AFTER_HOURS,
+  EVE_RUN_ABANDONED_DELETED_CODE,
+} from "../../config.js";
 import { createApplicationDatabasePool } from "../database-client.js";
 
 import { AppError } from "../app-error.js";
@@ -56,9 +62,35 @@ export async function deletePostgresEveSession(
   await client.query("BEGIN");
   try {
     // Lock the primary row before proving that application retirement cannot race active Workflow.
+    // Abandonment is decided by PostgreSQL against its own clock; the timestamps carry no zone.
+    //
+    // Activity is the run's own event stream, not `workflow_runs.updated_at`: that column moves on
+    // creation, start, terminal transition and attribute writes, so a live run can keep it weeks
+    // old while working.
+    //
+    // Silence alone is not abandonment either. A run can sleep on a scheduled resume — on
+    // production half the stuck runs do, some of them a month ahead — and Workflow still intends
+    // to come back to it. Abandoned means both: no event for the whole window, and nothing left
+    // that says the run will be woken up. A wait already due counts too, for the same window: the
+    // scheduler is about to fire it and write events as it does, and Workflow's event writes do not
+    // take this row lock. A wake-up overdue by more than the window is a lost queue job, not a
+    // pending one, and protecting it would park the session for good. A wait with no resume time
+    // waits on an outside callback of unknown length and always protects.
     const run = await client.query(
-      "SELECT status::text AS status FROM workflow.workflow_runs WHERE id = $1 FOR UPDATE",
-      [runId],
+      `SELECT run.status::text AS status,
+              COALESCE(
+                (SELECT max(event.created_at) FROM workflow.workflow_events AS event
+                  WHERE event.run_id = run.id),
+                run.updated_at
+              ) < (now() AT TIME ZONE 'UTC') - ($2 || ' hours')::interval
+              AND NOT EXISTS (
+                SELECT 1 FROM workflow.workflow_waits AS wait
+                 WHERE wait.run_id = run.id AND wait.status = 'waiting'
+                   AND (wait.resume_at IS NULL
+                        OR wait.resume_at > (now() AT TIME ZONE 'UTC') - ($2 || ' hours')::interval)
+              ) AS abandoned
+         FROM workflow.workflow_runs AS run WHERE run.id = $1 FOR UPDATE OF run`,
+      [runId, String(EVE_RUN_ABANDONED_AFTER_HOURS)],
     );
     const status = run.rows[0]?.status;
     if (typeof status !== "string") {
@@ -67,23 +99,35 @@ export async function deletePostgresEveSession(
         `Не найдены данные удаляемой Eve-сессии ${runId}`,
       );
     }
+    // Age is only ever asked about a run that never finished: a terminal run is finished whatever
+    // its last event says, and its hooks keep the retention window Workflow gave them.
+    const abandoned = !TERMINAL_RUN_STATUSES.has(status) && run.rows[0]?.abandoned === true;
     if (!TERMINAL_RUN_STATUSES.has(status)) {
-      throw new AppError(
-        "AGENT_EVE_SESSION_STORAGE_ACTIVE",
-        `Eve-сессия ${runId} ещё выполняется и не может быть удалена`,
-      );
+      // The guard exists to protect a scenario that is still working. A run with no event for a
+      // day is not one: it never reached a terminal status and nothing will move it there.
+      if (!abandoned) {
+        throw new AppError(
+          "AGENT_EVE_SESSION_STORAGE_ACTIVE",
+          `Eve-сессия ${runId} ещё выполняется и не может быть удалена`,
+        );
+      }
     }
 
-    // Hooks carry externally reusable tokens; only Workflow may end their retention window.
-    const hook = await client.query(
-      "SELECT EXISTS (SELECT 1 FROM workflow.workflow_hooks WHERE run_id = $1) AS exists",
-      [runId],
-    );
-    if (hook.rows[0]?.exists === true) {
-      throw new AppError(
-        "AGENT_EVE_SESSION_HOOK_RETENTION_ACTIVE",
-        `Eve-сессия ${runId} ещё содержит защищённые Workflow hooks`,
+    // Hooks carry externally reusable tokens; only Workflow may end their retention window — and
+    // it does, at the terminal transition: on production not one completed run holds a hook while
+    // every stuck one does. An abandoned run never reaches that transition, so its hooks would
+    // outlive it forever and this deletion would refuse the session for good. They go with it.
+    if (!abandoned) {
+      const hook = await client.query(
+        "SELECT EXISTS (SELECT 1 FROM workflow.workflow_hooks WHERE run_id = $1) AS exists",
+        [runId],
       );
+      if (hook.rows[0]?.exists === true) {
+        throw new AppError(
+          "AGENT_EVE_SESSION_HOOK_RETENTION_ACTIVE",
+          `Eve-сессия ${runId} ещё содержит защищённые Workflow hooks`,
+        );
+      }
     }
 
     // Public schema has no foreign keys, so remove every per-run projection before the run itself.
@@ -108,6 +152,13 @@ export async function deletePostgresEveSession(
       );
     }
     await client.query("COMMIT");
+    // Written only after the commit: a rolled-back deletion must not be reported as done.
+    if (abandoned) {
+      console.warn(JSON.stringify({
+        code: EVE_RUN_ABANDONED_DELETED_CODE, runId, status,
+        abandonedAfterHours: EVE_RUN_ABANDONED_AFTER_HOURS,
+      }));
+    }
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
