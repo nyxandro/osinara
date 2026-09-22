@@ -84,6 +84,14 @@ export function requireWritableScope(
   requestedScope: MemoryScope,
 ): MemoryScope {
   if (!authorization.scopes.includes(requestedScope)) {
+    // Authorization is the owning boundary here: without this line the reason lived only in an
+    // unstructured framework stack, and a background run losing a fact left nothing to search for.
+    console.warn(JSON.stringify({
+      allowedScopes: authorization.scopes,
+      code: "AGENT_MEMORY_SCOPE_DENIED",
+      requestedScope,
+      role: authorization.role,
+    }));
     throw new AppError(
       "AGENT_MEMORY_SCOPE_DENIED",
       "Эта область памяти недоступна в текущем чате",
