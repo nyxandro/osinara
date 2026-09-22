@@ -12,7 +12,10 @@
  *   an abandoned run never reaches the terminal transition that would release them, so its hooks
  *   are removed with it.
  */
-import { EVE_RUN_ABANDONED_AFTER_HOURS } from "../../config.js";
+import {
+  EVE_RUN_ABANDONED_AFTER_HOURS,
+  EVE_RUN_ABANDONED_DELETED_CODE,
+} from "../../config.js";
 import { createApplicationDatabasePool } from "../database-client.js";
 
 import { AppError } from "../app-error.js";
@@ -92,7 +95,7 @@ export async function deletePostgresEveSession(
         );
       }
       console.warn(JSON.stringify({
-        code: "AGENT_EVE_SESSION_ABANDONED_RUN_DELETED", runId, status,
+        code: EVE_RUN_ABANDONED_DELETED_CODE, runId, status,
         abandonedAfterHours: EVE_RUN_ABANDONED_AFTER_HOURS,
       }));
     }

@@ -4,6 +4,7 @@
  * Export:
  * - `deleteExpiredSessions`: globally serializes, leases, and physically deletes retired Eve sessions.
  */
+import { SESSION_RETENTION_STORAGE_ABSENT_CODE } from "../../config.js";
 import { isAppError } from "../app-error.js";
 import { database } from "../database.js";
 import { sessionRepository } from "./session-repository.js";
@@ -61,7 +62,7 @@ async function deleteExpiredSessionsUnderLock(): Promise<number> {
         if (await settled(claim, () => sessionRepository.completeDeletion(claim.id, claim.leaseToken))) {
           deleted += 1;
           console.info(JSON.stringify({
-            code: "AGENT_SESSION_RETENTION_STORAGE_ABSENT",
+            code: SESSION_RETENTION_STORAGE_ABSENT_CODE,
             applicationSessionId: claim.id, eveSessionId: claim.eveSessionId,
           }));
         }

@@ -17,6 +17,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import { SESSION_RETENTION_ROUTINE_CODES } from "./agent/config.js";
 import { MEMORY_EMBEDDING_LIFECYCLE_CODES } from "./agent/lib/memory-config.js";
 
 const projectRoot = new URL("./", import.meta.url);
@@ -92,6 +93,17 @@ describe("osinara alert rules", () => {
       }
     },
   );
+
+  it("keeps OsinaraErrorBurst off the codes a healthy session cleanup writes", () => {
+    const [block] = alertBlocks("OsinaraErrorBurst");
+
+    // The first sweep after release deletes the whole backlog of abandoned runs and writes one
+    // line per run: on production that is 290 lines, twenty-nine times this alert's threshold.
+    expect(SESSION_RETENTION_ROUTINE_CODES.length).toBeGreaterThan(0);
+    for (const code of SESSION_RETENTION_ROUTINE_CODES) {
+      expect(excludesCode(block!, code), `OsinaraErrorBurst still counts ${code}`).toBe(true);
+    }
+  });
 
   it("announces the worker through the shared constant, not a second literal", () => {
     const worker = read("scripts/memory-embedding-worker.ts");
