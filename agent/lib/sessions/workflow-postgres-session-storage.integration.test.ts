@@ -110,8 +110,9 @@ describeWithDatabase("deletePostgresEveSession against Workflow storage", () => 
     await expect(runExists(SLEEPING_RUN)).resolves.toBe(true);
   });
 
-  it("keeps refusing a terminal run whose hooks are still held", async () => {
-    await insertRun(TERMINAL_HOOKED_RUN, "completed", 1);
+  it("keeps refusing a terminal run whose hooks are still held, however old it is", async () => {
+    // Age says nothing about a finished run: its hooks keep their retention window either way.
+    await insertRun(TERMINAL_HOOKED_RUN, "completed", EVE_RUN_ABANDONED_AFTER_HOURS * 10);
     await insertHook(TERMINAL_HOOKED_RUN);
 
     await expect(withClient(TERMINAL_HOOKED_RUN)).rejects.toThrowError(

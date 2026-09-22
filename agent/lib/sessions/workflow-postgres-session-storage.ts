@@ -95,7 +95,9 @@ export async function deletePostgresEveSession(
         `Не найдены данные удаляемой Eve-сессии ${runId}`,
       );
     }
-    const abandoned = run.rows[0]?.abandoned === true;
+    // Age is only ever asked about a run that never finished: a terminal run is finished whatever
+    // its last event says, and its hooks keep the retention window Workflow gave them.
+    const abandoned = !TERMINAL_RUN_STATUSES.has(status) && run.rows[0]?.abandoned === true;
     if (!TERMINAL_RUN_STATUSES.has(status)) {
       // The guard exists to protect a scenario that is still working. A run with no event for a
       // day is not one: it never reached a terminal status and nothing will move it there.

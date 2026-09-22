@@ -97,12 +97,12 @@ describe("deleteExpiredSessions", () => {
     values.completeDeletion
       .mockRejectedValueOnce(new AppError("AGENT_SESSION_RETENTION_LEASE_LOST", "аренда потеряна"))
       .mockResolvedValueOnce(undefined);
-    // The row is no longer ours, so recording the failure on it fails for the same reason.
-    values.failDeletion
-      .mockRejectedValueOnce(new AppError("AGENT_SESSION_RETENTION_LEASE_LOST", "аренда потеряна"));
 
     // Losing a lease is the very failure this sweep exists to survive: another worker took the row.
     await expect(deleteExpiredSessions()).resolves.toBe(1);
+
+    // The row belongs to that other worker now; recording a failure on it is not ours to do.
+    expect(values.failDeletion).not.toHaveBeenCalled();
   });
 
   it("keeps sweeping the rest of the queue when one session refuses deletion", async () => {
