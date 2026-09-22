@@ -4,6 +4,7 @@
  * Constructs:
  * - Claims bounded PostgreSQL batches and calls the pinned local TEI service.
  * - Completes each lease atomically or records one terminal failure without hidden retries.
+ * - A database restart is a pause, not the end: the pass loop waits for it inside a bounded budget.
  * - Publishes readiness on every pass so a hung loop becomes an unhealthy container.
  * - Stops gracefully on SIGINT/SIGTERM and releases the database pool.
  */
@@ -11,6 +12,7 @@ import { rm, writeFile } from "node:fs/promises";
 
 import { isAppError } from "../agent/lib/app-error.js";
 import { closeDatabase } from "../agent/lib/database.js";
+import { waitForApplicationDatabase } from "../agent/lib/database-recovery.js";
 import { chunkMemoryContent } from "../agent/lib/memory-embedding-chunks.js";
 import { fitMemoryChunksToTokenLimit } from "../agent/lib/memory-embedding-fitting.js";
 import { memoryEmbeddingInput } from "../agent/lib/memory-embedding-header.js";
@@ -27,8 +29,8 @@ import {
   MEMORY_EMBEDDING_WORKER_STARTED_CODE,
 } from "../agent/lib/memory-config.js";
 import { memoryIndexRepository } from "../agent/lib/memory-index-repository.js";
+import { isTerminalJobFailure, runEmbeddingWorkerLoop } from "./memory-embedding/worker-loop.js";
 
-const IDLE_POLL_MILLISECONDS = 1_000;
 let stopping = false;
 
 function sleep(milliseconds: number): Promise<void> {
@@ -105,6 +107,11 @@ async function processBatch(): Promise<number> {
         message: "Memory embedding completion was rejected",
       }));
     } catch (error) {
+      // The database being away is not a verdict on this memory, so it is not recorded as one:
+      // the loop waits the outage out and the lease expires on its own. The record still leaves
+      // the semantic index until an operator reindexes it — returning the lease is the other half
+      // of #254 and is not decided here — but the reason written down is now the true one.
+      if (!isTerminalJobFailure(error)) throw error;
       const code = errorCode(error);
       console.error(JSON.stringify({
         code,
@@ -143,13 +150,13 @@ console.info(JSON.stringify({
 }));
 
 try {
-  while (!stopping) {
-    const processed = await processBatch();
-    // Also on an empty pass: an idle worker is healthy, a stuck one is not, and only the loop
-    // itself knows the difference.
-    await markAlive();
-    if (processed === 0) await sleep(IDLE_POLL_MILLISECONDS);
-  }
+  await runEmbeddingWorkerLoop({
+    isStopping: () => stopping,
+    markAlive,
+    processBatch,
+    sleep,
+    waitForDatabase: waitForApplicationDatabase,
+  });
 } catch (error) {
   console.error(JSON.stringify({
     code: "AGENT_MEMORY_EMBEDDING_WORKER_FAILED",

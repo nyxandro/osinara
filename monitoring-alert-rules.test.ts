@@ -106,7 +106,8 @@ describe("osinara alert rules", () => {
   });
 
   it("announces the worker through the shared constant, not a second literal", () => {
-    const worker = read("scripts/memory-embedding-worker.ts");
+    const worker = read("scripts/memory-embedding-worker.ts")
+      + read("scripts/memory-embedding/worker-loop.ts");
 
     // Two copies of the same code drift apart silently: the rule would keep excluding the old
     // spelling while the worker wrote the new one, and the alert would fire on a healthy start.
