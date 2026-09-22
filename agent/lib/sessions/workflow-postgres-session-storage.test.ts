@@ -31,6 +31,37 @@ describe("deletePostgresEveSession", () => {
     expect(client.query).not.toHaveBeenCalled();
   });
 
+  it("deletes a run left non-terminal long past any live execution", async () => {
+    // The status guard protects a live scenario; a run with no activity for a day is not one.
+    const abandoned = clientWithRows([
+      [], [{ abandoned: true, status: "running" }],
+      [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [],
+    ]);
+
+    await expect(deletePostgresEveSession(runId, abandoned)).resolves.toBeUndefined();
+
+    expect(abandoned.query).toHaveBeenLastCalledWith("COMMIT");
+    // Activity is the run's own event stream: `updated_at` barely moves after a run starts.
+    const statusQuery = abandoned.query.mock.calls[1]![0] as string;
+    expect(statusQuery).toMatch(/workflow_events/u);
+    expect(statusQuery).toMatch(/abandoned/u);
+  });
+
+  it("takes the hooks of an abandoned run with it instead of parking the session", async () => {
+    // Workflow drops hooks when a run reaches a terminal status; on production not one completed
+    // run holds any, while every stuck one does. Keeping them would park the session for good.
+    const abandoned = clientWithRows([
+      [], [{ abandoned: true, status: "running" }],
+      [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [],
+    ]);
+
+    await expect(deletePostgresEveSession(runId, abandoned)).resolves.toBeUndefined();
+
+    const statements = abandoned.query.mock.calls.map((call) => call[0] as string);
+    expect(statements).toContain("DELETE FROM workflow.workflow_hooks WHERE run_id = $1");
+    expect(statements.some((text) => /SELECT EXISTS/u.test(text))).toBe(false);
+  });
+
   it("requires an existing terminal run without retained hooks", async () => {
     const missing = clientWithRows([[], []]);
     await expect(deletePostgresEveSession(runId, missing)).rejects.toThrowError(
