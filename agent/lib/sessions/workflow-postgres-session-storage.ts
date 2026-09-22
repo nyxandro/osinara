@@ -71,7 +71,8 @@ export async function deletePostgresEveSession(
     // Silence alone is not abandonment either. A run can sleep on a scheduled resume — on
     // production half the stuck runs do, some of them a month ahead — and Workflow still intends
     // to come back to it. Abandoned means both: no event for the whole window, and nothing left
-    // that says the run will be woken up.
+    // that says the run will be woken up. A wait already due counts too: the scheduler is about to
+    // fire it and write events as it does, and Workflow's event writes do not take this row lock.
     const run = await client.query(
       `SELECT run.status::text AS status,
               COALESCE(
@@ -82,8 +83,6 @@ export async function deletePostgresEveSession(
               AND NOT EXISTS (
                 SELECT 1 FROM workflow.workflow_waits AS wait
                  WHERE wait.run_id = run.id AND wait.status = 'waiting'
-                   AND (wait.resume_at IS NULL
-                        OR wait.resume_at > (now() AT TIME ZONE 'UTC'))
               ) AS abandoned
          FROM workflow.workflow_runs AS run WHERE run.id = $1 FOR UPDATE OF run`,
       [runId, String(EVE_RUN_ABANDONED_AFTER_HOURS)],
@@ -107,10 +106,6 @@ export async function deletePostgresEveSession(
           `Eve-сессия ${runId} ещё выполняется и не может быть удалена`,
         );
       }
-      console.warn(JSON.stringify({
-        code: EVE_RUN_ABANDONED_DELETED_CODE, runId, status,
-        abandonedAfterHours: EVE_RUN_ABANDONED_AFTER_HOURS,
-      }));
     }
 
     // Hooks carry externally reusable tokens; only Workflow may end their retention window — and
@@ -152,6 +147,13 @@ export async function deletePostgresEveSession(
       );
     }
     await client.query("COMMIT");
+    // Written only after the commit: a rolled-back deletion must not be reported as done.
+    if (abandoned) {
+      console.warn(JSON.stringify({
+        code: EVE_RUN_ABANDONED_DELETED_CODE, runId, status,
+        abandonedAfterHours: EVE_RUN_ABANDONED_AFTER_HOURS,
+      }));
+    }
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

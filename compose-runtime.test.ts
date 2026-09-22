@@ -53,6 +53,7 @@ const MEASURED_PEAK_MEGABYTES: Readonly<Record<number, number>> = { 1: 820, 2: 8
 interface EmbeddingService {
   clientBatchSize: number;
   concurrentRequests: number;
+  cpus: number;
   mathThreads: number;
   memoryLimitMegabytes: number;
 }
@@ -76,6 +77,7 @@ function embeddingService(file: string): EmbeddingService {
   return {
     clientBatchSize: flag("max-client-batch-size"),
     concurrentRequests: flag("max-concurrent-requests"),
+    cpus: setting(/\bcpus: (\d+(?:\.\d+)?)/u, "cpus"),
     mathThreads: setting(/OMP_NUM_THREADS: "(\d+)"/u, "OMP_NUM_THREADS"),
     memoryLimitMegabytes: setting(/mem_limit: (\d+)m/u, "mem_limit"),
   };
@@ -146,6 +148,18 @@ describe("Docker Compose runtime wiring", () => {
       // on a saturating indexer, a limit equal to the batch refused 15 searches out of 60; twice
       // the batch refused none.
       expect(service.concurrentRequests).toBeGreaterThanOrEqual(2 * service.clientBatchSize);
+    },
+  );
+
+  it.each(["compose.yaml", "compose.production.yaml"])(
+    "gives %s a core beyond the math threads for tokenization and intake",
+    (file) => {
+      const service = embeddingService(file);
+
+      // On one core an indexing batch held the service for 2.8 seconds and a search arriving then
+      // waited behind it, 5 to 22 seconds against a 30-second client ceiling. Tokenization and
+      // request intake need a core the math threads do not occupy.
+      expect(service.cpus).toBeGreaterThan(service.mathThreads);
     },
   );
 

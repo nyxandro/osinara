@@ -238,7 +238,7 @@ describe("recordOfferedMemories", () => {
     const recordShown = vi.spyOn(memoryShowJournal, "recordShown").mockResolvedValue();
 
     try {
-      await recordOfferedMemories(window, turnContext(), [record("mem_first")]);
+      await recordOfferedMemories(window, turnContext(), [record("mem_first")], []);
 
       expect(recordShown).toHaveBeenCalledWith(window, ["claim-1"]);
     } finally { recordShown.mockRestore(); }
@@ -248,7 +248,7 @@ describe("recordOfferedMemories", () => {
     const recordShown = vi.spyOn(memoryShowJournal, "recordShown").mockResolvedValue();
 
     try {
-      await recordOfferedMemories(window, turnContext(), [record("mem_first"), conflict("conflict-1")]);
+      await recordOfferedMemories(window, turnContext(), [record("mem_first"), conflict("conflict-1")], []);
 
       expect(recordShown).toHaveBeenCalledWith(window, ["claim-1", "claim-a", "claim-b"]);
     } finally { recordShown.mockRestore(); }
@@ -258,9 +258,31 @@ describe("recordOfferedMemories", () => {
     const recordShown = vi.spyOn(memoryShowJournal, "recordShown").mockResolvedValue();
 
     try {
-      await recordOfferedMemories(window, turnContext(), [conflict("conflict-2")]);
+      await recordOfferedMemories(window, turnContext(), [conflict("conflict-2")], []);
 
       expect(recordShown).toHaveBeenCalledWith(window, ["claim-c", "claim-d"]);
+    } finally { recordShown.mockRestore(); }
+  });
+
+  it("writes down a retrieved record the profile still shows after the budget dropped it", async () => {
+    const recordShown = vi.spyOn(memoryShowJournal, "recordShown").mockResolvedValue();
+
+    try {
+      // The budget kept only the first record, but the profile view renders the second one too.
+      await recordOfferedMemories(window, turnContext(), [record("mem_first")], ["mem_second"]);
+
+      expect(recordShown).toHaveBeenCalledWith(window, ["claim-1", "claim-2"]);
+    } finally { recordShown.mockRestore(); }
+  });
+
+  it("does not write down profile claims this retrieval did not bring", async () => {
+    const recordShown = vi.spyOn(memoryShowJournal, "recordShown").mockResolvedValue();
+
+    try {
+      // A standing profile claim was never a candidate of this search, so it has no place here.
+      await recordOfferedMemories(window, turnContext(), [record("mem_first")], ["mem_unrelated"]);
+
+      expect(recordShown).toHaveBeenCalledWith(window, ["claim-1"]);
     } finally { recordShown.mockRestore(); }
   });
 
@@ -268,7 +290,7 @@ describe("recordOfferedMemories", () => {
     const recordShown = vi.spyOn(memoryShowJournal, "recordShown").mockResolvedValue();
 
     try {
-      await recordOfferedMemories(null, turnContext(), [record("mem_first")]);
+      await recordOfferedMemories(null, turnContext(), [record("mem_first")], []);
 
       expect(recordShown).not.toHaveBeenCalled();
     } finally { recordShown.mockRestore(); }

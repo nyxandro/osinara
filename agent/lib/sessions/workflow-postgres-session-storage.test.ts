@@ -47,6 +47,28 @@ describe("deletePostgresEveSession", () => {
     expect(statusQuery).toMatch(/abandoned/u);
   });
 
+  it("reports an abandoned run as deleted only once the deletion committed", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    // The run row vanishes under the delete, so the transaction rolls back after every child DELETE.
+    const rows: Array<Record<string, unknown>[]> = [
+      [], [{ abandoned: true, status: "running" }], [], [], [], [], [], [],
+    ];
+    const query = vi.fn(async (text: string) => ({
+      rowCount: text.startsWith("DELETE FROM workflow.workflow_runs") ? 0 : 1,
+      rows: rows.shift() ?? [],
+    }));
+
+    try {
+      await expect(deletePostgresEveSession(runId, { query })).rejects.toThrowError(
+        /AGENT_EVE_SESSION_STORAGE_DELETE_INCOMPLETE/u,
+      );
+
+      expect(query).toHaveBeenLastCalledWith("ROLLBACK");
+      expect(warn.mock.calls.map((call) => String(call[0]))
+        .some((line) => line.includes("ABANDONED_RUN_DELETED"))).toBe(false);
+    } finally { warn.mockRestore(); }
+  });
+
   it("takes the hooks of an abandoned run with it instead of parking the session", async () => {
     // Workflow drops hooks when a run reaches a terminal status; on production not one completed
     // run holds any, while every stuck one does. Keeping them would park the session for good.

@@ -8,7 +8,7 @@
  * The statement behind this is the one that removes production data, and a unit test cannot see
  * whether PostgreSQL accepts it: the client there is a mock that returns prepared rows.
  */
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { EVE_RUN_ABANDONED_AFTER_HOURS } from "../../config.js";
 import { createApplicationDatabasePool } from "../database-client.js";
@@ -23,6 +23,7 @@ const ACTIVE_RUN = "wrun_01M0AZKZAKTGSH4QQZBBCJK001";
 const ABANDONED_RUN = "wrun_01M0AZKZAKTGSH4QQZBBCJK002";
 const TERMINAL_HOOKED_RUN = "wrun_01M0AZKZAKTGSH4QQZBBCJK003";
 const SLEEPING_RUN = "wrun_01M0AZKZAKTGSH4QQZBBCJK004";
+const DUE_RUN = "wrun_01M0AZKZAKTGSH4QQZBBCJK005";
 
 async function insertRun(runId: string, status: string, eventAgeHours: number | null) {
   await pool!.query(
@@ -69,15 +70,19 @@ async function withClient(runId: string) {
   }
 }
 
+/** Before and after each case: a failed or interrupted test must not leave rows for the next one. */
+async function removeFixtures() {
+  for (const runId of [ACTIVE_RUN, ABANDONED_RUN, TERMINAL_HOOKED_RUN, SLEEPING_RUN, DUE_RUN]) {
+    await pool!.query("DELETE FROM workflow.workflow_waits WHERE run_id = $1", [runId]);
+    await pool!.query("DELETE FROM workflow.workflow_hooks WHERE run_id = $1", [runId]);
+    await pool!.query("DELETE FROM workflow.workflow_events WHERE run_id = $1", [runId]);
+    await pool!.query("DELETE FROM workflow.workflow_runs WHERE id = $1", [runId]);
+  }
+}
+
 describeWithDatabase("deletePostgresEveSession against Workflow storage", () => {
-  beforeEach(async () => {
-    for (const runId of [ACTIVE_RUN, ABANDONED_RUN, TERMINAL_HOOKED_RUN, SLEEPING_RUN]) {
-      await pool!.query("DELETE FROM workflow.workflow_waits WHERE run_id = $1", [runId]);
-      await pool!.query("DELETE FROM workflow.workflow_hooks WHERE run_id = $1", [runId]);
-      await pool!.query("DELETE FROM workflow.workflow_events WHERE run_id = $1", [runId]);
-      await pool!.query("DELETE FROM workflow.workflow_runs WHERE id = $1", [runId]);
-    }
-  });
+  beforeEach(removeFixtures);
+  afterEach(removeFixtures);
 
   afterAll(async () => { await pool?.end(); });
 
@@ -108,6 +113,16 @@ describeWithDatabase("deletePostgresEveSession against Workflow storage", () => 
 
     await expect(withClient(SLEEPING_RUN)).rejects.toThrowError(/AGENT_EVE_SESSION_STORAGE_ACTIVE/u);
     await expect(runExists(SLEEPING_RUN)).resolves.toBe(true);
+  });
+
+  it("refuses a silent run whose wake-up is already due but not fired yet", async () => {
+    // The scheduler is about to resume it and will write events as it does. Deleting now would race
+    // that write, so any wait still marked waiting keeps the run, due or not.
+    await insertRun(DUE_RUN, "running", EVE_RUN_ABANDONED_AFTER_HOURS * 10);
+    await insertWait(DUE_RUN, -1);
+
+    await expect(withClient(DUE_RUN)).rejects.toThrowError(/AGENT_EVE_SESSION_STORAGE_ACTIVE/u);
+    await expect(runExists(DUE_RUN)).resolves.toBe(true);
   });
 
   it("keeps refusing a terminal run whose hooks are still held, however old it is", async () => {

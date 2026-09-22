@@ -49,9 +49,29 @@ function alertBlocks(name: string): string[] {
     .filter((block) => block.split("\n", 1)[0]!.trim() === name);
 }
 
+/**
+ * The value of one key of the rule itself, read at the indentation of `expr:`, with a folded
+ * scalar's continuation lines included. Text inside annotations sits deeper and never matches.
+ */
+function ruleField(block: string, key: string): string | null {
+  const lines = block.split("\n");
+  const indent = /^( +)expr:/mu.exec(block)?.[1];
+  if (indent === undefined) return null;
+  const start = lines.findIndex((line) => line.startsWith(`${indent}${key}:`));
+  if (start === -1) return null;
+  const inline = lines[start]!.slice(indent.length + key.length + 1).trim();
+  if (!/^[>|]-?$/u.test(inline)) return inline;
+  const continuation: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.trim() !== "" && !line.startsWith(`${indent} `)) break;
+    continuation.push(line.trim());
+  }
+  return continuation.join(" ").trim();
+}
+
 function holdMinutes(block: string): number | null {
-  const hold = block.match(/^ +for: (\d+)(m|s)$/mu);
-  if (hold === null) return null;
+  const hold = ruleField(block, "for")?.match(/^(\d+)(m|s)$/u);
+  if (hold === null || hold === undefined) return null;
   return hold[2] === "s" ? Number(hold[1]) / 60 : Number(hold[1]);
 }
 
@@ -60,10 +80,39 @@ function holdMinutes(block: string): number | null {
  * the shared `AGENT_` prefix factored out. Both forms are in use, and both count.
  */
 function excludesCode(block: string, code: string): boolean {
-  if (block.includes(`code!="${code}"`)) return true;
+  const expression = ruleField(block, "expr") ?? "";
+  if (expression.includes(`code!="${code}"`)) return true;
   const suffix = code.replace(/^AGENT_/u, "");
-  return /code!~"AGENT_\(([^"]+)\)"/u.exec(block)?.[1]?.split("|").includes(suffix) === true;
+  return /code!~"AGENT_\(([^"]+)\)"/u.exec(expression)?.[1]?.split("|").includes(suffix) === true;
 }
+
+describe("reading a rule", () => {
+  it("counts an exclusion only inside the rule's own expression", () => {
+    // A runbook that quotes the matcher must not pass for the rule actually applying it.
+    const block = [
+      "OsinaraExample",
+      "        expr: >-",
+      "          sum(log_code_lines_1m{code=~\"AGENT_MEMORY_EMBEDDING_.+\"}[5m]) > 0",
+      "        annotations:",
+      "          runbook: 'see code!=\"AGENT_MEMORY_EMBEDDING_WORKER_STARTED\"'",
+      "",
+    ].join("\n");
+
+    expect(excludesCode(block, "AGENT_MEMORY_EMBEDDING_WORKER_STARTED")).toBe(false);
+  });
+
+  it("reads the hold of the rule, not a duration mentioned in its text", () => {
+    const block = [
+      "OsinaraExample",
+      "        expr: up == 0",
+      "        annotations:",
+      "          description: 'for: 30m is what an older version used'",
+      "",
+    ].join("\n");
+
+    expect(holdMinutes(block)).toBeNull();
+  });
+});
 
 describe("osinara alert rules", () => {
   it("holds the scheduler heartbeat alerts longer than a release takes to report", () => {

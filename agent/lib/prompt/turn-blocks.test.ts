@@ -339,11 +339,13 @@ describe("memory block resolution", () => {
       content: `${memoryRef}:${"я".repeat(18_000)}`, kind: "fact", memoryRef,
     }));
     const recordOffered = vi.fn();
+    // The profile view renders a claim of the third record, which the budget is about to drop.
+    const subjects = [{ claims: [{ content: "короткое утверждение", memoryRef: "mem_third" }] }];
     const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization,
-      createProfile: vi.fn().mockResolvedValue({ subjects: [] }),
+      createProfile: vi.fn().mockResolvedValue({ subjects }),
       openSelectionWindow: async () => 7, recordOffered,
       retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true }, memories,
-        offered: { claimIdByMemoryRef: new Map(), conflictClaimIds: [], conflictGroups: 0 },
+        offered: { claimIdByMemoryRef: new Map(), claimIdsByConflictRef: new Map() },
         retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } }),
     });
 
@@ -360,9 +362,11 @@ describe("memory block resolution", () => {
     );
 
     expect(recordOffered).toHaveBeenCalledTimes(1);
-    const [window, , offered] = recordOffered.mock.calls[0]!;
+    const [window, , offered, shownElsewhere] = recordOffered.mock.calls[0]!;
     expect(window).toMatchObject({ turnId: TEST_TURN_ID, turnOrdinal: 7 });
     expect(offered).toEqual([memories[0], memories[1]]);
+    // The profile view is part of the block too; what it shows has to reach the journal as well.
+    expect(shownElsewhere).toEqual(["mem_third"]);
   });
 
   it("says so in the log when the profile and threads fill the ceiling by themselves", async () => {

@@ -261,6 +261,7 @@ export function createMemoryBlockResolver(dependencies: {
     window: MemorySelectionWindow | null,
     context: MemoryTurnContext,
     offered: readonly ModelMemoryContextItem[],
+    shownElsewhereRefs: readonly string[],
   ) => Promise<void>;
   retrieve: (
     auth: MemoryAuthorization,
@@ -349,7 +350,7 @@ export function createMemoryBlockResolver(dependencies: {
       // The journal hears about the selection only now: a record the budget dropped was never put
       // in front of the model, and writing it down would hide it from the next turns.
       phase = "journal";
-      await dependencies.recordOffered(window, context, budget.memories);
+      await dependencies.recordOffered(window, context, budget.memories, profileMemoryRefs);
       phase = "format";
       const block = renderBlock(budget.memories);
       if (budget.overBudget) {

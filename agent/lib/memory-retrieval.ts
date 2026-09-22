@@ -258,6 +258,11 @@ export async function recordOfferedMemories(
   window: MemorySelectionWindow | null,
   context: MemoryTurnContext,
   offered: readonly ModelMemoryContextItem[],
+  /**
+   * Refs the block shows through the profile view. A retrieved record the budget dropped can still
+   * reach the model there; only the ones this retrieval brought count, standing claims do not.
+   */
+  shownElsewhereRefs: readonly string[],
 ): Promise<void> {
   if (window === null) return;
   const claimIds: string[] = [];
@@ -267,6 +272,10 @@ export async function recordOfferedMemories(
       continue;
     }
     const claimId = context.offered.claimIdByMemoryRef.get(item.memoryRef);
+    if (claimId !== undefined) claimIds.push(claimId);
+  }
+  for (const ref of shownElsewhereRefs) {
+    const claimId = context.offered.claimIdByMemoryRef.get(ref);
     if (claimId !== undefined) claimIds.push(claimId);
   }
   await memoryShowJournal.recordShown(window, [...new Set(claimIds)]);

@@ -196,11 +196,15 @@ describe("deployment noise window", () => {
   it("does not abort the run when the tick finds the window already closed", () => {
     const directory = makeDirectory("osinara-window-guard-");
     const metricPath = join(directory, "osinara-deploy-window.prom");
-    runShell(`
+    const setup = runShell(`
       source scripts/production-deploy/common.sh
       open_deploy_window ${JSON.stringify(metricPath)}
       close_deploy_window ${JSON.stringify(metricPath)}
     `);
+    // Without a written sample the tick below meets no file at all, returns early and proves
+    // nothing about the guard it is meant to exercise.
+    expect(setup.status, setup.stderr).toBe(0);
+    expect(existsSync(metricPath)).toBe(true);
 
     // The guard answers "there is no window" by failing, which is the exact shape `set -e` and the
     // release's ERR trap abort on. Deciding not to write must never end a run.
@@ -255,6 +259,50 @@ describe("deployment noise window", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(readDeadline(metricPath).deadline).toBeLessThanOrEqual(after);
+  });
+
+  it("repairs a file whose last sample is fine but which carries anything else", () => {
+    const directory = makeDirectory("osinara-window-mixed-");
+    const metricPath = join(directory, "osinara-deploy-window.prom");
+    const past = Math.floor(Date.now() / 1000) - 3_600;
+    // The collector parses the file whole, so one stray line or a duplicate sample costs the valid
+    // sample next to it as well. Looking at the last sample alone would leave that for good.
+    writeFileSync(metricPath, [
+      "half a line nobody can read",
+      `deploy_window_end_timestamp_seconds{project="osinara-production"} ${past}`,
+      `deploy_window_end_timestamp_seconds{project="osinara-production"} ${past}`,
+      "",
+    ].join("\n"));
+
+    const result = runShell(`
+      source scripts/production-deploy/common.sh
+      close_deploy_window ${JSON.stringify(metricPath)}
+    `);
+
+    expect(result.status, result.stderr).toBe(0);
+    const content = readFileSync(metricPath, "utf8");
+    expect(content).not.toContain("half a line");
+    expect(content.match(/^deploy_window_end_timestamp_seconds\{/gmu)).toHaveLength(1);
+  });
+
+  it("leaves an exact closed sample untouched", () => {
+    const directory = makeDirectory("osinara-window-rest-");
+    const metricPath = join(directory, "osinara-deploy-window.prom");
+    const setup = runShell(`
+      source scripts/production-deploy/common.sh
+      publish_deploy_window ${JSON.stringify(metricPath)} 1000
+    `);
+    expect(setup.status, setup.stderr).toBe(0);
+    const before = readFileSync(metricPath, "utf8");
+
+    const result = runShell(`
+      source scripts/production-deploy/common.sh
+      close_deploy_window ${JSON.stringify(metricPath)}
+    `);
+
+    // The ordinary resting state: an old deadline the tick has no business rewriting.
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(metricPath, "utf8")).toBe(before);
   });
 
   it("clears a window a killed release left in the future", () => {
