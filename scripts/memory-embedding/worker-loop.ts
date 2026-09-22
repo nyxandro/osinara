@@ -16,11 +16,12 @@ import { isDatabaseUnavailable } from "../../agent/lib/database-recovery.js";
 import { MEMORY_EMBEDDING_WORKER_WAITING_CODE } from "../../agent/lib/memory-config.js";
 
 export interface EmbeddingWorkerLoopDependencies {
-  isStopping: () => boolean;
   markAlive: () => Promise<void>;
   processBatch: () => Promise<number>;
   sleep: (milliseconds: number) => Promise<void>;
-  waitForDatabase: () => Promise<void>;
+  /** Aborted on SIGINT and SIGTERM: one source of truth about the shutdown, shared with the wait. */
+  stopSignal: AbortSignal;
+  waitForDatabase: (signal: AbortSignal) => Promise<void>;
 }
 
 const IDLE_POLL_MILLISECONDS = 1_000;
@@ -38,7 +39,7 @@ export async function runEmbeddingWorkerLoop(
   dependencies: EmbeddingWorkerLoopDependencies,
 ): Promise<void> {
   let waiting = false;
-  while (!dependencies.isStopping()) {
+  while (!dependencies.stopSignal.aborted) {
     let processed: number;
     try {
       processed = await dependencies.processBatch();
@@ -56,7 +57,15 @@ export async function runEmbeddingWorkerLoop(
       // The heartbeat belongs here too: waiting for the database is the process working correctly,
       // and the readiness file does not depend on the database.
       await dependencies.markAlive();
-      await dependencies.waitForDatabase();
+      // Docker gives the container ten seconds after SIGTERM while this wait is allowed sixty, so
+      // the wait carries the stop signal: it is cancelled, not merely stopped being awaited.
+      try {
+        await dependencies.waitForDatabase(dependencies.stopSignal);
+      } catch (waitError) {
+        if (dependencies.stopSignal.aborted) return;
+        // The budget ran out: the container restart is the right answer after all.
+        throw waitError;
+      }
       // The probe can pass while the work still fails — `too many clients` answers `SELECT 1` on an
       // open connection and refuses a new one — and then this loop would spin without the pause.
       await dependencies.sleep(IDLE_POLL_MILLISECONDS);
