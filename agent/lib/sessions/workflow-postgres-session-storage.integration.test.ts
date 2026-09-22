@@ -24,6 +24,7 @@ const ABANDONED_RUN = "wrun_01M0AZKZAKTGSH4QQZBBCJK002";
 const TERMINAL_HOOKED_RUN = "wrun_01M0AZKZAKTGSH4QQZBBCJK003";
 const SLEEPING_RUN = "wrun_01M0AZKZAKTGSH4QQZBBCJK004";
 const DUE_RUN = "wrun_01M0AZKZAKTGSH4QQZBBCJK005";
+const LOST_WAKE_RUN = "wrun_01M0AZKZAKTGSH4QQZBBCJK006";
 
 async function insertRun(runId: string, status: string, eventAgeHours: number | null) {
   await pool!.query(
@@ -72,7 +73,9 @@ async function withClient(runId: string) {
 
 /** Before and after each case: a failed or interrupted test must not leave rows for the next one. */
 async function removeFixtures() {
-  for (const runId of [ACTIVE_RUN, ABANDONED_RUN, TERMINAL_HOOKED_RUN, SLEEPING_RUN, DUE_RUN]) {
+  for (const runId of [
+    ACTIVE_RUN, ABANDONED_RUN, TERMINAL_HOOKED_RUN, SLEEPING_RUN, DUE_RUN, LOST_WAKE_RUN,
+  ]) {
     await pool!.query("DELETE FROM workflow.workflow_waits WHERE run_id = $1", [runId]);
     await pool!.query("DELETE FROM workflow.workflow_hooks WHERE run_id = $1", [runId]);
     await pool!.query("DELETE FROM workflow.workflow_events WHERE run_id = $1", [runId]);
@@ -123,6 +126,16 @@ describeWithDatabase("deletePostgresEveSession against Workflow storage", () => 
 
     await expect(withClient(DUE_RUN)).rejects.toThrowError(/AGENT_EVE_SESSION_STORAGE_ACTIVE/u);
     await expect(runExists(DUE_RUN)).resolves.toBe(true);
+  });
+
+  it("removes a run whose wake-up was due long ago and never fired", async () => {
+    // The wake-up is a queue job with bounded attempts: once it is lost, the wait stays `waiting`
+    // forever. Protecting that for good would park the session for good and log an error hourly.
+    await insertRun(LOST_WAKE_RUN, "running", EVE_RUN_ABANDONED_AFTER_HOURS * 10);
+    await insertWait(LOST_WAKE_RUN, -EVE_RUN_ABANDONED_AFTER_HOURS * 10);
+
+    await expect(withClient(LOST_WAKE_RUN)).resolves.toBeUndefined();
+    await expect(runExists(LOST_WAKE_RUN)).resolves.toBe(false);
   });
 
   it("keeps refusing a terminal run whose hooks are still held, however old it is", async () => {

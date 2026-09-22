@@ -9,10 +9,12 @@ export { isDatabaseUnavailable } from "./database-errors.js";
 const RECOVERY_PROBE_INTERVAL_MS = 1_000;
 const RECOVERY_PROBE_BUDGET_MS = 60_000;
 // A probe stuck on a frozen server would outlive the stop signal: the signal cancels the pause
-// between probes, not a query already in flight. Two seconds stays far below Docker's ten.
+// between probes, not a query already in flight. The read timeout starts once a connection is
+// held, and acquiring one is bounded separately at five seconds, so one probe costs at most about
+// seven — still inside Docker's default ten for a service without its own stop grace period.
 const RECOVERY_PROBE_TIMEOUT_MS = 2_000;
-// node-postgres raises its own read timeout as a plain Error with exactly this message.
-const PG_QUERY_READ_TIMEOUT_MESSAGE = "Query read timeout";
+/** node-postgres raises its own read timeout as a plain Error with exactly this message. */
+export const PG_QUERY_READ_TIMEOUT_MESSAGE = "Query read timeout";
 // pg 8 reads `query_timeout` from the query config itself (lib/client.js), while its type
 // definitions declare the field only on the client config; the intersection states it honestly.
 const RECOVERY_PROBE: QueryConfig & { query_timeout: number } = {
