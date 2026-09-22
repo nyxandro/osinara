@@ -109,6 +109,22 @@ describeWithDatabase("monitoring views migrations", () => {
     }
   });
 
+  it("reports every indexing status even when no job is waiting", async () => {
+    // A runbook step that sends the duty reader to a counter which disappears with an empty queue
+    // answers «no failures», «no metric» and «wrong query» with the same silence.
+    await database().query("DELETE FROM memory_embedding_jobs");
+
+    const result = await database().query<{ status: string; total: string; recent: string }>(
+      "SELECT status, total, recent FROM monitoring_memory_embedding_jobs ORDER BY status",
+    );
+
+    expect(result.rows).toEqual([
+      { status: "failed", total: "0", recent: "0" },
+      { status: "leased", total: "0", recent: "0" },
+      { status: "pending", total: "0", recent: "0" },
+    ]);
+  });
+
   it("refuses a direct read of user content when acting as the exporter role", async () => {
     const client = await database().connect();
     try {

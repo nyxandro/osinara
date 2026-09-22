@@ -176,7 +176,7 @@ groups:
         annotations:
           summary: 'Индексация новых воспоминаний завершилась ошибкой'
           description: 'Воспоминание сохранено, но не проиндексировано: поиск по нему работать не будет, пока задача не выполнится.'
-          runbook: 'Проверить контейнеры memory-embedding и memory-embedding-worker, затем счётчик osinara_memory_embedding_jobs со статусом failed.'
+          runbook: 'Проверить контейнеры memory-embedding и memory-embedding-worker, затем osinara_memory_embedding_jobs со статусом failed и osinara_memory_embedding_pending. Обе величины существуют всегда: пустой ответ означает, что метрика не собирается, а не что отказов нет.'
 
       - alert: OsinaraModelTransientBurst
         expr: sum(sum_over_time(osinara_model_transient_1m[10m])) > 5
