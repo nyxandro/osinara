@@ -31,6 +31,20 @@ describe("deletePostgresEveSession", () => {
     expect(client.query).not.toHaveBeenCalled();
   });
 
+  it("deletes a run left non-terminal long past any live execution", async () => {
+    // The status guard protects a live scenario; a run nobody has touched for a day is not one.
+    const abandoned = clientWithRows([
+      [], [{ abandoned: true, status: "running" }], [{ exists: false }],
+      [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [],
+    ]);
+
+    await expect(deletePostgresEveSession(runId, abandoned)).resolves.toBeUndefined();
+
+    expect(abandoned.query).toHaveBeenLastCalledWith("COMMIT");
+    const statusQuery = abandoned.query.mock.calls[1]![0] as string;
+    expect(statusQuery).toMatch(/abandoned/u);
+  });
+
   it("requires an existing terminal run without retained hooks", async () => {
     const missing = clientWithRows([[], []]);
     await expect(deletePostgresEveSession(runId, missing)).rejects.toThrowError(

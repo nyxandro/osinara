@@ -10,6 +10,7 @@
  * - The run row is locked and removed last; any failure rolls the transaction back.
  * - Existing hooks block deletion so Workflow token-retention semantics cannot be shortened.
  */
+import { EVE_RUN_ABANDONED_AFTER_HOURS } from "../../config.js";
 import { createApplicationDatabasePool } from "../database-client.js";
 
 import { AppError } from "../app-error.js";
@@ -56,9 +57,12 @@ export async function deletePostgresEveSession(
   await client.query("BEGIN");
   try {
     // Lock the primary row before proving that application retirement cannot race active Workflow.
+    // Abandonment is decided by PostgreSQL against its own clock: `updated_at` carries no zone.
     const run = await client.query(
-      "SELECT status::text AS status FROM workflow.workflow_runs WHERE id = $1 FOR UPDATE",
-      [runId],
+      `SELECT status::text AS status,
+              updated_at < (now() AT TIME ZONE 'UTC') - ($2 || ' hours')::interval AS abandoned
+         FROM workflow.workflow_runs WHERE id = $1 FOR UPDATE`,
+      [runId, String(EVE_RUN_ABANDONED_AFTER_HOURS)],
     );
     const status = run.rows[0]?.status;
     if (typeof status !== "string") {
@@ -68,10 +72,18 @@ export async function deletePostgresEveSession(
       );
     }
     if (!TERMINAL_RUN_STATUSES.has(status)) {
-      throw new AppError(
-        "AGENT_EVE_SESSION_STORAGE_ACTIVE",
-        `Eve-сессия ${runId} ещё выполняется и не может быть удалена`,
-      );
+      // The guard exists to protect a scenario that is still working. A run untouched for a day is
+      // not one: it never reached a terminal status and nothing will move it there.
+      if (run.rows[0]?.abandoned !== true) {
+        throw new AppError(
+          "AGENT_EVE_SESSION_STORAGE_ACTIVE",
+          `Eve-сессия ${runId} ещё выполняется и не может быть удалена`,
+        );
+      }
+      console.warn(JSON.stringify({
+        code: "AGENT_EVE_SESSION_ABANDONED_RUN_DELETED", runId, status,
+        abandonedAfterHours: EVE_RUN_ABANDONED_AFTER_HOURS,
+      }));
     }
 
     // Hooks carry externally reusable tokens; only Workflow may end their retention window.
