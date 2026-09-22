@@ -20,6 +20,8 @@ export interface EmbeddingWorkerLoopDependencies {
   markAlive: () => Promise<void>;
   processBatch: () => Promise<number>;
   sleep: (milliseconds: number) => Promise<void>;
+  /** Settles when the process was asked to stop, so a shutdown does not sit out the wait below. */
+  stopRequested: Promise<void>;
   waitForDatabase: () => Promise<void>;
 }
 
@@ -56,7 +58,13 @@ export async function runEmbeddingWorkerLoop(
       // The heartbeat belongs here too: waiting for the database is the process working correctly,
       // and the readiness file does not depend on the database.
       await dependencies.markAlive();
-      await dependencies.waitForDatabase();
+      // Docker gives the container ten seconds after SIGTERM while this wait is allowed sixty:
+      // sitting it out means the process is killed instead of releasing its database pool.
+      const wait = dependencies.waitForDatabase();
+      // The loser of the race stays pending, and a later rejection of it would be unhandled.
+      wait.catch(() => undefined);
+      await Promise.race([wait, dependencies.stopRequested]);
+      if (dependencies.isStopping()) return;
       // The probe can pass while the work still fails — `too many clients` answers `SELECT 1` on an
       // open connection and refuses a new one — and then this loop would spin without the pause.
       await dependencies.sleep(IDLE_POLL_MILLISECONDS);

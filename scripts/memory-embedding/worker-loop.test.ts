@@ -31,6 +31,7 @@ function dependencies(overrides: Partial<Parameters<typeof runEmbeddingWorkerLoo
   return {
     isStopping: () => true,
     markAlive: vi.fn(async () => undefined),
+    stopRequested: new Promise<void>(() => undefined),
     processBatch: vi.fn(async () => 0),
     sleep: vi.fn(async () => undefined),
     waitForDatabase: vi.fn(async () => undefined),
@@ -88,8 +89,9 @@ describe("runEmbeddingWorkerLoop", () => {
     let passes = 0;
     // `SELECT 1` on an open pooled connection succeeds while a new connection is refused: with
     // `too many clients` the probe returns at once and the claim keeps failing.
+    // The last pass meets the stop request and returns before pausing, so it is not counted.
     const deps = dependencies({
-      isStopping: () => passes >= 3,
+      isStopping: () => passes >= 4,
       processBatch: vi.fn(async () => { passes += 1; throw databaseOutage(); }),
     });
 
@@ -101,6 +103,28 @@ describe("runEmbeddingWorkerLoop", () => {
       // One line on entering the wait, not one per turn of the loop.
       expect(waitingLines(info)).toHaveLength(1);
     } finally { info.mockRestore(); }
+  });
+
+  it("stops without waiting out the database when the container is being shut down", async () => {
+    // Docker gives this container ten seconds after SIGTERM; the wait budget is sixty. Sitting in
+    // the wait means the process is killed instead of releasing its pool.
+    let stopping = false;
+    let releaseStop!: () => void;
+    const stopRequested = new Promise<void>((resolve) => { releaseStop = resolve; });
+    const deps = dependencies({
+      isStopping: () => stopping,
+      processBatch: vi.fn(async () => { throw databaseOutage(); }),
+      stopRequested,
+      waitForDatabase: vi.fn(() => new Promise<void>(() => undefined)),
+    });
+
+    const loop = runEmbeddingWorkerLoop(deps);
+    await vi.waitFor(() => expect(deps.waitForDatabase).toHaveBeenCalled());
+    stopping = true;
+    releaseStop();
+
+    await expect(loop).resolves.toBeUndefined();
+    expect(deps.processBatch).toHaveBeenCalledTimes(1);
   });
 
   it("sleeps only when a pass found nothing to do", async () => {

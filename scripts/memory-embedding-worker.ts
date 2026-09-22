@@ -32,6 +32,9 @@ import { memoryIndexRepository } from "../agent/lib/memory-index-repository.js";
 import { isTerminalJobFailure, runEmbeddingWorkerLoop } from "./memory-embedding/worker-loop.js";
 
 let stopping = false;
+let requestStop!: () => void;
+// Settles on the first stop signal so a database wait in flight does not outlive the grace period.
+const stopRequested = new Promise<void>((resolve) => { requestStop = resolve; });
 
 function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -131,12 +134,12 @@ async function processBatch(): Promise<number> {
   return jobs.length;
 }
 
-process.once("SIGINT", () => {
-  stopping = true;
-});
-process.once("SIGTERM", () => {
-  stopping = true;
-});
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.once(signal, () => {
+    stopping = true;
+    requestStop();
+  });
+}
 
 // A container restart reuses its writable layer, so stale readiness must be cleared before work.
 await rm(MEMORY_EMBEDDING_WORKER_READY_PATH, { force: true });
@@ -155,6 +158,7 @@ try {
     markAlive,
     processBatch,
     sleep,
+    stopRequested,
     waitForDatabase: waitForApplicationDatabase,
   });
 } catch (error) {
