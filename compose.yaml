@@ -50,6 +50,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://osinara:${POSTGRES_PASSWORD}@postgres:5432/osinara
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY-}
       GROQ_API_KEY: ${GROQ_API_KEY-}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID-}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET-}

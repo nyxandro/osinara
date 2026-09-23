@@ -84,6 +84,10 @@ export const EXTERNAL_GROUP_CAPABILITY_CATALOG = [
   },
   { name: "search_memory_threads", usage: "искать нити памяти текущей группы по смыслу" },
   {
+    name: "send_voice_message",
+    usage: "по явной просьбе участника озвучить ответ через ElevenLabs и отправить его голосовым сообщением в текущий чат",
+  },
+  {
     name: "send_workspace_file",
     usage: "отправить файл из workspace в текущий Telegram-чат или тему",
   },

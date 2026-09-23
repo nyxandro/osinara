@@ -20,6 +20,7 @@ import {
   createReactionSetBlockResolver,
 } from "./turn-blocks.js";
 import { EVE_EMPTY_DELIVERY_MARKER } from "../eve-empty-delivery.js";
+import { VOICE_MESSAGE_RULES } from "./common-fragments.js";
 import { formatReactionSetAnnouncement } from "../telegram-reaction-announcement.js";
 import { TELEGRAM_DEFAULT_REACTIONS } from "../telegram-reaction-set.js";
 
@@ -100,14 +101,48 @@ describe("mode block resolution", () => {
     const nested = await resolve({ ...context(externalAuth), session: { auth: externalAuth, id: "session-1", parent: {} } });
     const scheduled = await resolve(context({ ...scheduledCurrent, initiator: scheduledCurrent.current }));
     const personal = await resolve(context(privateAuth));
+    const scheduledPersonalAuth = auth({ ...privateAuth.current!.attributes, scheduledRunId: "run-1" });
+    const scheduledPersonal = await resolve(context({
+      ...scheduledPersonalAuth,
+      initiator: scheduledPersonalAuth.current,
+    }));
+    const personalChild = await resolve({ ...context(privateAuth), channel: { kind: "subagent" } });
 
     // A child answers its parent, a scheduled run has no message to stay silent on, and a private
-    // chat is direct by definition: none of them may learn the silence marker.
+    // chat is direct by definition: none of them may learn the silence marker. A private root
+    // learns it only as the closing of a turn whose voice note already delivered the answer.
     expect(root).toContain(EVE_EMPTY_DELIVERY_MARKER);
     expect(child).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
     expect(nested).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
     expect(scheduled).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
-    expect(personal).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
+    expect(personal).toContain(VOICE_MESSAGE_RULES);
+    expect(personal.replace(VOICE_MESSAGE_RULES, "")).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
+    expect(scheduledPersonal).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
+    expect(personalChild).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
+  });
+
+  it("teaches voice replies only where the voice tool is emitted", async () => {
+    const resolve = (capabilities: ReadonlySet<ExternalGroupToolName>) => createModeBlockResolver({
+      loadCapabilities: vi.fn().mockResolvedValue(capabilities),
+      loadReactionPolicy: reactionPolicy,
+      loadSkills: vi.fn().mockResolvedValue(new Set()),
+    });
+    const grantedAuth = auth({
+      ...externalAuth.current!.attributes,
+      toolAllowlist: ["remember", "send_voice_message"],
+    });
+    const granted = resolve(new Set(["remember", "send_voice_message"]));
+
+    const withoutGrant = await resolve(new Set(["remember"]))(context(externalAuth));
+    const groupRoot = await granted(context(grantedAuth));
+    const groupChild = await granted({ ...context(grantedAuth), channel: { kind: "subagent" } });
+
+    expect(withoutGrant).not.toContain("send_voice_message");
+    expect(groupRoot).toContain(VOICE_MESSAGE_RULES);
+    expect(groupRoot).toContain("`send_voice_message`: по явной просьбе");
+    expect(groupRoot).toContain("- отвечать голосовым сообщением");
+    expect(groupChild).not.toContain("send_voice_message");
+    expect(groupChild).not.toContain("голосовым сообщением");
   });
 
   it("keeps every transport directive away from a subagent child", async () => {

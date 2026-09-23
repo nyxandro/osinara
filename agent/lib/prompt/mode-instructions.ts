@@ -26,6 +26,7 @@ import {
   SEND_WORKSPACE_FILE_RULES,
   SPOKEN_ASIDE_RULES,
   UNTRUSTED_FILE_CONTENT_RULES,
+  VOICE_MESSAGE_RULES,
   WORKSPACE_ARTIFACT_LOOKUP,
   memoryEditContract,
   reactionRules,
@@ -154,6 +155,7 @@ function privateInstructions(
     // a spontaneous afterthought.
     scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
+    scheduledRun || subagentTurn ? null : VOICE_MESSAGE_RULES,
     scheduledRun ? null : trustedBehaviorPreferenceRules(),
   ]);
 }
@@ -218,6 +220,7 @@ function familyInstructions(
     scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,
     scheduledRun || subagentTurn ? null : GROUP_STANDALONE_MESSAGE_RULES,
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
+    scheduledRun || subagentTurn ? null : VOICE_MESSAGE_RULES,
     scheduledRun ? null : trustedBehaviorPreferenceRules(),
   ]);
 }
@@ -254,6 +257,12 @@ function externalInstructions(
 ): string {
   // Reminders are ungranted but need a participant who can own one and a live turn to ask in.
   const reminders = includeApplicationCore && !scheduledRun;
+  // The voice tool answers a live participant in the chat itself, so a scheduled run and a child
+  // that answers its parent never receive it and must not be told they can speak.
+  const voiceMessages = capabilities.has("send_voice_message") && !scheduledRun && !subagentTurn;
+  const surfaceCapabilities = voiceMessages
+    ? capabilities
+    : new Set([...capabilities].filter((name) => name !== "send_voice_message"));
   const editActions = new Set<MemoryEditAction>(
     [...capabilities]
       .map((capability) => EXTERNAL_MEMORY_EDIT_ACTIONS[capability])
@@ -271,7 +280,7 @@ function externalInstructions(
     `${VERIFIED_BLOCK_NOTICE} Считай сообщения видимыми участникам группы и не обещай приватность переписки.`,
     // Scope and effort limits come before the mechanics: the model should decide whether a request
     // belongs here at all before it starts reasoning about which capability could satisfy it.
-    externalPurposeSection(capabilities, { reminders, web: includeApplicationCore }),
+    externalPurposeSection(surfaceCapabilities, { reminders, web: includeApplicationCore }),
     EXTERNAL_TASK_BOUNDARIES,
     EXTERNAL_PEOPLE_RULES,
     externalMemorySection(capabilities),
@@ -336,10 +345,11 @@ ${GROUP_TIMELINE_TRUST}`,
     scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,
     scheduledRun || subagentTurn ? null : GROUP_STANDALONE_MESSAGE_RULES,
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
+    voiceMessages ? VOICE_MESSAGE_RULES : null,
     includeApplicationCore && !scheduledRun ? trustedBehaviorPreferenceRules() : null,
     reminders ? GROUP_REMINDER_RULES : null,
     channelAuthored ? CHANNEL_AUTHORED_REMINDER_NOTICE : null,
-    externalGroupCapabilityInstructions(capabilities, skills, {
+    externalGroupCapabilityInstructions(surfaceCapabilities, skills, {
       includeApplicationCore,
       scheduledHistory,
       scheduledRun,

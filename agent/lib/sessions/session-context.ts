@@ -4,7 +4,7 @@
  * Exports:
  * - `applicationSessionId`: reads the application-owned ID from persisted verified auth.
  * - `registerTelegramDeliveredMessageRoutes`: stores channel-delivered message IDs as aliases.
- * - `registerTelegramMessageRoutes`: binds every delivered group message to one app session.
+ * - `registerTelegramMessageRoutes`: binds every tool-delivered message to one app session.
  * - `sandboxSessionId`: reads the stable conversation-thread ID for disposable compute.
  */
 import type { TelegramEventContext } from "eve/channels/telegram";

@@ -267,7 +267,7 @@ bring test stacks up only for a run and take them down afterwards. The disk sche
 `DEEPSEEK_API_KEY`; during the v0.15.2 bridge it gains `MODEL_API_KEY` with the exact same credential
 token while retaining `DEEPSEEK_API_KEY` for the rollback window. It also contains
 `POSTGRES_PASSWORD`, the required internal application `DATABASE_URL`, `CLI_PROXY_API_KEY`,
-`WORKFLOW_POSTGRES_URL`, `GROQ_API_KEY`,
+`WORKFLOW_POSTGRES_URL`, `GROQ_API_KEY`, the optional `ELEVENLABS_API_KEY`,
 Telegram secrets, and environment-specific integration
 settings. It must never contain or export any of the six `OSINARA_*_IMAGE` variables or
 `SANDBOX_RUNTIME_IMAGE`; those values exist only in a validated per-release `release.env`.
@@ -306,6 +306,16 @@ instead of persisting an inert grant, and a grant made while Codex was active is
 `unavailableConfiguredTools` until the provider is restored. CLIProxy is configured with
 `disable-image-generation: chat`: `/v1/images/*` remains available to the controlled application
 client, while CLIProxy cannot inject its own hidden image tool into ordinary model calls.
+
+Interactive root turns may call the application-owned `send_voice_message` boundary when the current
+message explicitly asks for a voice reply. It synthesizes one ElevenLabs `eleven_v3` Ogg Opus note
+with the pinned voice, reserves the call in `voice_message_operations` before the billable request,
+never retries an ambiguous result, stores the audio in the authorized workspace, and sends it through
+the exact-once workspace file delivery as a Telegram voice note. The optional `ELEVENLABS_API_KEY`
+only authenticates the calls: without it the tool stays visible and every call fails with
+`AGENT_VOICE_MESSAGE_CONFIG_MISSING`, after which the agent answers in text. The pinned voice is an
+ElevenLabs library voice, which the API serves only on a paid ElevenLabs plan. External groups
+receive the capability only through an owner grant; scheduled turns and subagents never receive it.
 
 The one-time v0.16.0 bridge accepts only exact v0.15.14 source state. Before migration it validates
 the root-owned OAuth seed, the exact production NeuralDeep `qwen3.8-27b` config hash, the required
