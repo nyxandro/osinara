@@ -18,9 +18,9 @@ import { fileTypeFromBuffer } from "file-type";
 import { AppError } from "../app-error.js";
 
 export const ELEVENLABS_TTS_MODEL_ID = "eleven_v3";
-// "Vika Grib": the owner's professional Russian voice from the ElevenLabs library. Library voices
-// are served over the API only on a paid plan; the free plan answers 402 `paid_plan_required`.
-export const ELEVENLABS_VOICE_ID = "gelrownZgbRhxH6LI78J";
+// "Сколько сколько?": the owner's own Voice Design voice, a grumpy, sharp-tongued old woman
+// speaking Russian. ElevenLabs recommends designed voices over professional clones for Eleven v3.
+export const ELEVENLABS_VOICE_ID = "usNkuLTgU7ioKdrKSs3V";
 // Eleven v3 accepts at most 5,000 characters in one request.
 export const VOICE_MESSAGE_TEXT_MAX_LENGTH = 5_000;
 export const VOICE_MESSAGE_MEDIA_TYPE = "audio/ogg; codecs=opus";
