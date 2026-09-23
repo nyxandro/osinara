@@ -28,8 +28,10 @@ export const VOICE_MESSAGE_MEDIA_TYPE = "audio/ogg; codecs=opus";
 const ELEVENLABS_API_BASE_URL = "https://api.elevenlabs.io";
 // Ogg Opus is the container Telegram renders as a voice note without transcoding.
 const ELEVENLABS_OUTPUT_FORMAT = "opus_48000_64";
-// Eleven v3 stability presets: 0 Creative, 0.5 Natural, 1 Robust.
-const ELEVENLABS_V3_NATURAL_STABILITY = 0.5;
+// Eleven v3 stability runs from 0 Creative through 0.5 Natural to 1 Robust. The owner chose 0.2:
+// close to Creative, which reacts most strongly to audio tags, while keeping some of Natural's
+// resistance to the hallucinated sounds and words ElevenLabs warns full Creative produces.
+const ELEVENLABS_V3_STABILITY = 0.2;
 // A full 5,000-character v3 request is a few minutes of speech and needs well under a minute.
 const ELEVENLABS_TTS_TIMEOUT_MS = 120_000;
 // 64 kbit/s Opus for the longest request stays near 4 MB; anything far beyond is not our audio.
@@ -240,7 +242,7 @@ export function createElevenLabsSpeechClient(options: ElevenLabsSpeechClientOpti
           body: JSON.stringify({
             model_id: ELEVENLABS_TTS_MODEL_ID,
             text,
-            voice_settings: { stability: ELEVENLABS_V3_NATURAL_STABILITY },
+            voice_settings: { stability: ELEVENLABS_V3_STABILITY },
           }),
           headers: { "content-type": "application/json", "xi-api-key": apiKey },
           method: "POST",

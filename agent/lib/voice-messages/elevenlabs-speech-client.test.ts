@@ -57,7 +57,7 @@ describe("ElevenLabs speech client", () => {
     expect(JSON.parse(String(request.body))).toEqual({
       model_id: ELEVENLABS_TTS_MODEL_ID,
       text: "Привет! [laughs] Это голосовое.",
-      voice_settings: { stability: 0.5 },
+      voice_settings: { stability: 0.2 },
     });
     expect(ELEVENLABS_TTS_MODEL_ID).toBe("eleven_v3");
   });
