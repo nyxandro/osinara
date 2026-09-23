@@ -223,6 +223,46 @@ sudo install -o root -g root -m 0750 scripts/production-deploy.sh \
 A release in flight holds the lock, so install between releases and verify with
 `diff` against the repository afterwards.
 
+### Memory protection on a shared host
+
+The production host also runs development: the IDE, agent sessions and test runs all live in
+`orca-remote-server.service`. At their peaks the kernel reclaimed the bot as readily as the tests,
+connections to PostgreSQL missed their five-second window, and three times the database restarted
+itself (#253). Two host settings keep the bot's working set in memory. Both are applied with
+`systemctl set-property`, which writes a drop-in under `/etc/systemd/system.control/`, takes effect
+at once without a restart, and survives a reboot. No release changes them.
+
+```bash
+# Development yields first: a soft ceiling (throttles and reclaims, never kills) and a quarter of
+# the CPU share of each bot container when both want the processor.
+sudo systemctl set-property orca-remote-server.service MemoryHigh=4G CPUWeight=25
+# Parent protection for the mem_reservation values in compose.production.yaml (300 + 800 + 900 MB).
+sudo systemctl set-property osinara.slice MemoryLow=2000M
+```
+
+Every production service runs with `cgroup_parent: osinara.slice`. Docker creates that top-level
+slice with the first container; the setting above may be applied before it exists. The slice is
+there because cgroup v2 counts a container's `memory.low` only up to what its parent protects, and
+with `memory_recursiveprot` a parent's unclaimed protection is shared among its children by usage.
+Left in `system.slice`, the bot would need protection on that slice, and whatever the three
+services did not use at the moment would go to development beside them. Inside `osinara.slice` the
+surplus stays with the bot's other containers.
+
+Sandbox containers that `sandbox-runner` creates through the Docker API stay in `system.slice` on
+purpose. They run untrusted commands under their own hard limit (2 GiB each); inside
+`osinara.slice` they would draw its surplus protection away from PostgreSQL, the agent and the
+embedding service, the more so the heavier an arbitrary command is.
+
+Keep the slice equal to the sum of the reservations: less cuts every reservation proportionally,
+and `compose-runtime.test.ts` fails when the sum and this command disagree. `memory.low` shows only
+the configured value; protection actually used shows up as the `low` counter in each container's
+`memory.events`, which grows when the kernel had to reclaim protected memory after all.
+
+The ceiling covers only what runs inside `orca-remote-server.service`. Test stacks such as
+`compose.test.yaml` and `docker build` run under Docker's own units in `system.slice`, outside it:
+bring test stacks up only for a run and take them down afterwards. The disk scheduler here is
+`mq-deadline`, which ignores I/O weights, so there is no I/O counterpart.
+
 `/opt/osinara/.env` must be exactly `root:root 0600`. Before v0.15.2 it contains the required
 `DEEPSEEK_API_KEY`; during the v0.15.2 bridge it gains `MODEL_API_KEY` with the exact same credential
 token while retaining `DEEPSEEK_API_KEY` for the rollback window. It also contains
