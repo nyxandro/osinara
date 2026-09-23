@@ -127,6 +127,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY-}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID-}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET-}
       GROQ_API_KEY: ${GROQ_API_KEY-}

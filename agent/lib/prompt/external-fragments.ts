@@ -40,6 +40,7 @@ const CAPABILITY_PURPOSES: readonly (readonly [ExternalGroupToolName, string])[]
   ["list_group_history", "поднимать более раннюю переписку этой группы"],
   ["inspect_workspace_image", "разбирать изображение, присланное в чат"],
   ["send_workspace_file", "отправить файл из рабочей папки в чат"],
+  ["send_voice_message", "отвечать голосовым сообщением, когда участник прямо об этом просит"],
   ["remove_group_file", "удалять файл из рабочей папки этой группы"],
 ];
 

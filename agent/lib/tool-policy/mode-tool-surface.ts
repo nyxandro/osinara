@@ -53,6 +53,7 @@ import readScheduledGroupHistory from "../tools/read_scheduled_group_history.js"
 import readProfileView from "../tools/read_profile_view.js";
 import searchMemories from "../tools/search_memories.js";
 import searchMemoryThreads from "../tools/search_memory_threads.js";
+import sendVoiceMessage from "../tools/send_voice_message.js";
 import sendWorkspaceFile from "../tools/send_workspace_file.js";
 import { removeGroupFileTool } from "../workspaces/remove-group-file-tool.js";
 import { controlledWebFetchTool } from "./controlled-web-fetch.js";
@@ -193,6 +194,7 @@ const EXTERNAL_DIRECT_TOOLS: Readonly<Record<DirectExternalToolName, AnyToolDefi
   remove_group_file: removeGroupFileTool as unknown as AnyToolDefinition,
   search_memories: searchMemories as unknown as AnyToolDefinition,
   search_memory_threads: searchMemoryThreads as unknown as AnyToolDefinition,
+  send_voice_message: sendVoiceMessage as unknown as AnyToolDefinition,
   send_workspace_file: sendWorkspaceFile as unknown as AnyToolDefinition,
   web_fetch: controlledWebFetchTool as unknown as AnyToolDefinition,
 };
@@ -337,6 +339,8 @@ function buildExternalToolSurface(
     if (scheduledRun && capability === "remember") continue;
     // Billable image generation requires a current interactive request, never a background run.
     if (capability === "generate_image" && !imageGenerationAllowed) continue;
+    // A voice note spends ElevenLabs credits and replaces a reply, so it needs a live participant.
+    if (scheduledRun && capability === "send_voice_message") continue;
     if (capability.startsWith("manage_memory.")) continue;
     if (capability.startsWith("manage_memory_thread.")) continue;
     if (!isExternalGroupToolName(capability)) continue;
@@ -389,6 +393,7 @@ const TRUSTED_SCHEDULED_SURFACES: Readonly<Record<"family" | "private", ToolMap>
       generate_image: _generateImage,
       manage_behavior_preference: _manageBehaviorPreference,
       remember: _remember,
+      send_voice_message: _sendVoiceMessage,
       ...readOnlyPromptSurface
     } = surface;
     return [environment, readOnlyPromptSurface];
@@ -438,7 +443,9 @@ export function buildSubagentToolSurface(input: ModeToolSurfaceInput): ToolMap {
   const effectiveInput = input.environment === "external"
     ? {
       ...input,
-      capabilities: new Set([...input.capabilities].filter((name) => name !== "generate_image")),
+      capabilities: new Set([...input.capabilities].filter((name) =>
+        name !== "generate_image" && name !== "send_voice_message"
+      )),
       skills: Object.fromEntries(Object.entries(input.skills).filter(([name]) =>
         !isImageGenerationSkillName(name)
       )),
@@ -450,6 +457,7 @@ export function buildSubagentToolSurface(input: ModeToolSurfaceInput): ToolMap {
     manage_behavior_preference: _manageBehaviorPreference,
     manage_reminder: _manageReminder,
     remember: _remember,
+    send_voice_message: _sendVoiceMessage,
     ...surface
   } = buildModeToolSurface(effectiveInput);
   return surface;
