@@ -90,13 +90,19 @@ function serviceBlock(file: string, name: string): string {
   if (start === -1) throw new Error(`${file}: service ${name} is missing`);
   const rest = compose.slice(start + 1);
   const next = rest.slice(1).search(/\n {2}[a-z][a-z-]*:\n/u);
-  return next === -1 ? rest : rest.slice(0, next + 1);
+  return `${next === -1 ? rest : rest.slice(0, next + 1)}\n`;
 }
 
+/** A size key in megabytes; a key written in any other form fails instead of being skipped. */
 function megabytes(block: string, key: string): number | undefined {
-  const value = block.match(new RegExp(`\\n {4}${key}: (\\d+)m\\n`, "u"))?.[1];
-  return value === undefined ? undefined : Number(value);
+  const line = block.match(new RegExp(`\\n {4}${key}: (.+)\\n`, "u"))?.[1];
+  if (line === undefined) return undefined;
+  const value = line.match(/^(\d+)m$/u)?.[1];
+  if (value === undefined) throw new Error(`${key}: ${line} is not written in megabytes`);
+  return Number(value);
 }
+
+const PROTECTED_SERVICES = ["postgres", "agent", "memory-embedding"] as const;
 
 describe("Docker Compose runtime wiring", () => {
   it("wires the agent to a healthy persistent Codex subscription gateway", () => {
@@ -191,7 +197,7 @@ describe("Docker Compose runtime wiring", () => {
     },
   );
 
-  it.each(["postgres", "agent", "memory-embedding"])(
+  it.each(PROTECTED_SERVICES)(
     "protects the working memory of production %s from neighbours on the host",
     (name) => {
       const block = serviceBlock("compose.production.yaml", name);
@@ -207,6 +213,24 @@ describe("Docker Compose runtime wiring", () => {
       if (limit !== undefined) expect(reservation!).toBeLessThan(limit);
     },
   );
+
+  it("keeps every production service in the slice the host protects, sized to the reservations", () => {
+    const compose = readFileSync(new URL("compose.production.yaml", projectRoot), "utf8");
+    const services = compose.slice(compose.indexOf("\nservices:\n"), compose.indexOf("\nvolumes:\n"));
+    const names = [...services.matchAll(/\n {2}([a-z][a-z-]*):\n/gu)].map((match) => match[1]!);
+    const deployGuide = readFileSync(new URL("docs/production-deployment.md", projectRoot), "utf8");
+
+    // A reservation counts only up to what its parent protects. Outside osinara.slice a service
+    // would sit in system.slice, whose protection is zero, and share any surplus with development.
+    for (const name of names) {
+      expect(serviceBlock("compose.production.yaml", name), name).toContain("\n    cgroup_parent: osinara.slice\n");
+    }
+    // The host setting is typed by hand from the guide; the sum keeps the two from drifting apart.
+    const total = PROTECTED_SERVICES
+      .map((name) => megabytes(serviceBlock("compose.production.yaml", name), "mem_reservation")!)
+      .reduce((sum, value) => sum + value, 0);
+    expect(deployGuide).toContain(`systemctl set-property osinara.slice MemoryLow=${total}M`);
+  });
 
   it("keeps antivirus and the separate document parser out of the runtime", () => {
     const compose = readFileSync(new URL("compose.yaml", projectRoot), "utf8");
