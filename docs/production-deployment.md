@@ -223,6 +223,30 @@ sudo install -o root -g root -m 0750 scripts/production-deploy.sh \
 A release in flight holds the lock, so install between releases and verify with
 `diff` against the repository afterwards.
 
+### Memory protection on a shared host
+
+The production host also runs development: the IDE, agent sessions and test runs all live in
+`orca-remote-server.service`. At their peaks the kernel reclaimed the bot as readily as the tests,
+connections to PostgreSQL missed their five-second window, and three times the database restarted
+itself (#253). Two host settings keep the bot's working set in memory. Both are applied with
+`systemctl set-property`, which writes a drop-in under `/etc/systemd/system.control/`, takes effect
+at once without a restart, and survives a reboot. No release changes them.
+
+```bash
+# Development yields first: a soft ceiling (throttles and reclaims, never kills) and a quarter of
+# the CPU share of each bot container when both want the processor.
+sudo systemctl set-property orca-remote-server.service MemoryHigh=4G CPUWeight=25
+# Parent protection for the mem_reservation values in compose.production.yaml (300 + 800 + 900 MB).
+# cgroup v2 caps a container's memory.low by its ancestors', and system.slice defaults to 0.
+sudo systemctl set-property system.slice MemoryLow=2000M
+```
+
+Keep `system.slice` equal to the sum of the reservations: less leaves part of them without effect,
+more hands the surplus to whichever `system.slice` members use memory, development included. Check
+the result with `cat /sys/fs/cgroup/system.slice/memory.low` and, per container,
+`cat /sys/fs/cgroup/system.slice/docker-<id>.scope/memory.low`. The disk scheduler here is
+`mq-deadline`, which ignores I/O weights, so there is no I/O counterpart.
+
 `/opt/osinara/.env` must be exactly `root:root 0600`. Before v0.15.2 it contains the required
 `DEEPSEEK_API_KEY`; during the v0.15.2 bridge it gains `MODEL_API_KEY` with the exact same credential
 token while retaining `DEEPSEEK_API_KEY` for the rollback window. It also contains

@@ -83,6 +83,21 @@ function embeddingService(file: string): EmbeddingService {
   };
 }
 
+/** Top-level service block of a Compose file, up to the next service at the same indentation. */
+function serviceBlock(file: string, name: string): string {
+  const compose = readFileSync(new URL(file, projectRoot), "utf8");
+  const start = compose.indexOf(`\n  ${name}:\n`);
+  if (start === -1) throw new Error(`${file}: service ${name} is missing`);
+  const rest = compose.slice(start + 1);
+  const next = rest.slice(1).search(/\n {2}[a-z][a-z-]*:\n/u);
+  return next === -1 ? rest : rest.slice(0, next + 1);
+}
+
+function megabytes(block: string, key: string): number | undefined {
+  const value = block.match(new RegExp(`\\n {4}${key}: (\\d+)m\\n`, "u"))?.[1];
+  return value === undefined ? undefined : Number(value);
+}
+
 describe("Docker Compose runtime wiring", () => {
   it("wires the agent to a healthy persistent Codex subscription gateway", () => {
     const localCompose = readFileSync(new URL("compose.yaml", projectRoot), "utf8");
@@ -173,6 +188,23 @@ describe("Docker Compose runtime wiring", () => {
       // Raising threads without raising the limit does not degrade: the container never finishes
       // loading the model, and semantic search is gone until someone reads the logs.
       expect(service.memoryLimitMegabytes).toBeGreaterThanOrEqual(Math.ceil(peak! * 1.15));
+    },
+  );
+
+  it.each(["postgres", "agent", "memory-embedding"])(
+    "protects the working memory of production %s from neighbours on the host",
+    (name) => {
+      const block = serviceBlock("compose.production.yaml", name);
+      const reservation = megabytes(block, "mem_reservation");
+      const limit = megabytes(block, "mem_limit");
+
+      // Development shares this host. Under its peaks the kernel reclaimed the bot as readily as
+      // the tests, the database stopped accepting connections within five seconds and three times
+      // restarted itself (#253). mem_reservation becomes cgroup memory.low: what the service holds
+      // below it is taken only once every unprotected neighbour has given up its share.
+      expect(reservation, `${name} has no mem_reservation`).toBeDefined();
+      expect(reservation!).toBeGreaterThan(0);
+      if (limit !== undefined) expect(reservation!).toBeLessThan(limit);
     },
   );
 

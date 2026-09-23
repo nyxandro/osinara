@@ -9,6 +9,13 @@ x-bounded-json-logs: &bounded-json-logs
 services:
   postgres:
     image: pgvector/pgvector:pg17@sha256:d2ef61f42ef767baa5a1475393303cc235bcd92febd9d7014eddb48b41f3bad0
+    # Development shares this host. At its peaks the kernel reclaimed the bot as readily as the
+    # tests, and the database missed the five-second connect window or restarted itself (#253).
+    # A reservation is cgroup memory.low, not a quota: what a service holds below it is reclaimed
+    # only after unprotected neighbours. It takes effect only while system.slice carries at least
+    # the sum of these three (2000 MB) — a host setting, see docs/production-deployment.md.
+    # PostgreSQL's own memory is ~160 MB (128 MB shared buffers); the rest keeps hot pages cached.
+    mem_reservation: 300m
     environment:
       POSTGRES_DB: osinara
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
@@ -35,6 +42,8 @@ services:
     # 45% more indexing throughput and a third off the wait when a search queues behind a batch.
     cpus: 3.0
     mem_limit: 1024m
+    # The model's steady footprint; below the limit so a load peak can still grow past it.
+    mem_reservation: 900m
     command:
       - --model-id
       - intfloat/multilingual-e5-small
@@ -98,6 +107,8 @@ services:
 
   agent:
     image: ${OSINARA_APP_IMAGE:?OSINARA_APP_IMAGE must be an exact digest reference}
+    # Steady footprint measured on production 2026-09-23: ~740 MB, 160 MB of it pushed to swap.
+    mem_reservation: 800m
     command: ["start-after-migration"]
     depends_on:
       cli-proxy-api:
