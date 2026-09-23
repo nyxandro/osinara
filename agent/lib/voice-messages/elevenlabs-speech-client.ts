@@ -209,9 +209,12 @@ async function readSpeech(response: Response): Promise<Buffer> {
   }
 }
 
+// An absent or malformed header means the cost is unknown, never that the synthesis was free.
 function characterCost(response: Response): number | null {
-  const value = Number(response.headers.get("character-cost"));
-  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+  const header = response.headers.get("character-cost")?.trim();
+  if (!header || !/^[0-9]+$/u.test(header)) return null;
+  const value = Number(header);
+  return Number.isSafeInteger(value) ? value : null;
 }
 
 export function createElevenLabsSpeechClient(options: ElevenLabsSpeechClientOptions) {

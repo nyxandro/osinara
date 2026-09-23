@@ -62,6 +62,23 @@ describe("ElevenLabs speech client", () => {
     expect(ELEVENLABS_TTS_MODEL_ID).toBe("eleven_v3");
   });
 
+  it.each([
+    ["absent", {}],
+    ["empty", { "character-cost": "" }],
+    ["not a number", { "character-cost": "n/a" }],
+  ])("records an unknown character cost when the header is %s", async (_label, headers) => {
+    const response = new Response(new Uint8Array(OGG_OPUS), {
+      headers: { "content-type": "audio/opus", ...headers },
+      status: 200,
+    });
+    const client = createElevenLabsSpeechClient({
+      apiKey: "sk_test",
+      fetch: vi.fn().mockResolvedValue(response),
+    });
+
+    await expect(client.synthesize("Текст")).resolves.toMatchObject({ characterCost: null });
+  });
+
   it("fails before the network when the API key is not configured", async () => {
     const fetchMock = vi.fn();
 
