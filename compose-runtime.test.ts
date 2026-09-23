@@ -89,7 +89,7 @@ function serviceBlock(file: string, name: string): string {
   const start = compose.indexOf(`\n  ${name}:\n`);
   if (start === -1) throw new Error(`${file}: service ${name} is missing`);
   const rest = compose.slice(start + 1);
-  const next = rest.slice(1).search(/\n {2}[a-z][a-z-]*:\n/u);
+  const next = rest.slice(1).search(/\n {2}[a-zA-Z0-9._-]+:\n/u);
   return `${next === -1 ? rest : rest.slice(0, next + 1)}\n`;
 }
 
@@ -217,7 +217,7 @@ describe("Docker Compose runtime wiring", () => {
   it("keeps every production service in the slice the host protects, sized to the reservations", () => {
     const compose = readFileSync(new URL("compose.production.yaml", projectRoot), "utf8");
     const services = compose.slice(compose.indexOf("\nservices:\n"), compose.indexOf("\nvolumes:\n"));
-    const names = [...services.matchAll(/\n {2}([a-z][a-z-]*):\n/gu)].map((match) => match[1]!);
+    const names = [...services.matchAll(/\n {2}([a-zA-Z0-9._-]+):\n/gu)].map((match) => match[1]!);
     const deployGuide = readFileSync(new URL("docs/production-deployment.md", projectRoot), "utf8");
 
     // A reservation counts only up to what its parent protects. Outside osinara.slice a service
