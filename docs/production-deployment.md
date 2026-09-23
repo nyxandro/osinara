@@ -248,6 +248,11 @@ Left in `system.slice`, the bot would need protection on that slice, and whateve
 services did not use at the moment would go to development beside them. Inside `osinara.slice` the
 surplus stays with the bot's other containers.
 
+Sandbox containers that `sandbox-runner` creates through the Docker API stay in `system.slice` on
+purpose. They run untrusted commands under their own hard limit (2 GiB each); inside
+`osinara.slice` they would draw its surplus protection away from PostgreSQL, the agent and the
+embedding service, the more so the heavier an arbitrary command is.
+
 Keep the slice equal to the sum of the reservations: less cuts every reservation proportionally,
 and `compose-runtime.test.ts` fails when the sum and this command disagree. `memory.low` shows only
 the configured value; protection actually used shows up as the `low` counter in each container's
