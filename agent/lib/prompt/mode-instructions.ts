@@ -43,6 +43,7 @@ import {
   GROUP_ADDRESSING,
   GROUP_HISTORY_PROTOCOL,
   GROUP_RESPONSE_OUTCOMES,
+  GROUP_STANDALONE_MESSAGE_RULES,
   GROUP_TIMELINE_TRUST,
 } from "./group-fragments.js";
 import {
@@ -215,6 +216,7 @@ function familyInstructions(
     ...FAMILY_INSTRUCTION_SECTIONS,
     scheduledRun || subagentTurn ? null : GROUP_RESPONSE_OUTCOMES,
     scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,
+    scheduledRun || subagentTurn ? null : GROUP_STANDALONE_MESSAGE_RULES,
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
     scheduledRun ? null : trustedBehaviorPreferenceRules(),
   ]);
@@ -332,6 +334,7 @@ ${GROUP_TIMELINE_TRUST}`,
     EXTERNAL_GROUP_MODEL_POLICY,
     scheduledRun || subagentTurn ? null : GROUP_RESPONSE_OUTCOMES,
     scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,
+    scheduledRun || subagentTurn ? null : GROUP_STANDALONE_MESSAGE_RULES,
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
     includeApplicationCore && !scheduledRun ? trustedBehaviorPreferenceRules() : null,
     reminders ? GROUP_REMINDER_RULES : null,

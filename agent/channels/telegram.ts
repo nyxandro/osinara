@@ -9,7 +9,8 @@
  * - Completed ordinary/Rich Message or silent reaction delivery without speculative chat drafts.
  * - Interim progress notices delivered at most once per assistant step of an interactive turn.
  * - Scheduled final delivery bound to its owner-approved Telegram chat and forum topic.
- * - Verified group replies anchored to the triggering member message.
+ * - Verified group replies anchored to the triggering member message, unless the model marked the
+ *   answer as a standalone message.
  * - Successfully delivered final group output persisted as one logical timeline entry.
  */
 import { setTimeout as sleep } from "node:timers/promises";
@@ -146,9 +147,12 @@ export default telegramChannel({
           telegramChatId: scheduledDelivery.telegramChatId,
         });
       }
-      const replyParameters = isScheduledSession(ctx)
+      // The reply context is verified even when unused: a standalone answer is the model's choice
+      // and must not switch off the integrity check. The chat and topic stay bound to the turn.
+      const turnReplyParameters = isScheduledSession(ctx)
         ? undefined
         : telegramTurnReplyParameters(channel.state, ctx);
+      const replyParameters = output.standalone ? undefined : turnReplyParameters;
       const durableText = stripTelegramAsideDirectives(message);
       let sentMessages: Awaited<ReturnType<typeof deliverTelegramFinalOutput>>;
       try {

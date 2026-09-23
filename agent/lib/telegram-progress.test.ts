@@ -6,6 +6,7 @@
  * - Pre-tool assistant chunks remain hidden because Telegram cannot render them ephemerally.
  * - Empty model steps remain invisible to avoid technical Telegram noise.
  * - Eve's `message: null` after a final step is the model's deliberate silence, not noise.
+ * - The model may mark a final answer as a standalone message instead of a reply.
  * - `telegramOutputWithoutMemoryDirective`: the memory-usage line leaves on every branch.
  */
 import { describe, expect, it } from "vitest";
@@ -51,13 +52,13 @@ describe("completedTelegramOutput", () => {
   it("keeps aside directives inside a final answer for the presentation layer", () => {
     expect(
       completedTelegramOutput({ finishReason: "stop", message: "Готово\n[[split]]\nкстати" }),
-    ).toEqual({ kind: "message", message: "Готово\n[[split]]\nкстати" });
+    ).toEqual({ kind: "message", message: "Готово\n[[split]]\nкстати", standalone: false });
   });
 
   it("trims surrounding whitespace from a delivered message", () => {
     expect(
       completedTelegramOutput({ finishReason: "stop", message: "\n\nГотовый ответ  " }),
-    ).toEqual({ kind: "message", message: "Готовый ответ" });
+    ).toEqual({ kind: "message", message: "Готовый ответ", standalone: false });
   });
 
   it.each(["👍", "❤", "❤️", "🔥", "🥰", "🤔", "🤯", "🫡", "👀", "🖕", "1️⃣", "🇺🇸"])(
@@ -91,6 +92,31 @@ describe("completedTelegramOutput", () => {
     { finishReason: "stop" },
   ])("does not expose an empty technical step %#", (data) => {
     expect(completedTelegramOutput(data)).toBeNull();
+  });
+
+  it("delivers an answer marked by the model as a standalone message without the directive", () => {
+    expect(
+      completedTelegramOutput({ finishReason: "stop", message: "[[no-reply]]\nСоседи, домофон снова сломан." }),
+    ).toEqual({ kind: "message", message: "Соседи, домофон снова сломан.", standalone: true });
+  });
+
+  it("does not deliver an answer made of the standalone directive alone", () => {
+    expect(completedTelegramOutput({ finishReason: "stop", message: "[[no-reply]]" })).toBeNull();
+  });
+
+  it("still recognizes a reaction written next to the standalone directive", () => {
+    expect(
+      completedTelegramOutput({
+        finishReason: "stop",
+        message: "[[no-reply]]\n<telegram-reaction>👍</telegram-reaction>",
+      }),
+    ).toEqual({ emoji: "👍", kind: "reaction" });
+  });
+
+  it("keeps the standalone directive out of an interim progress notice", () => {
+    expect(
+      completedTelegramOutput({ finishReason: "tool-calls", message: "[[no-reply]]\nСекунду, ищу." }),
+    ).toEqual({ kind: "progress", message: "Секунду, ищу." });
   });
 
   it("recognizes Eve's undelivered final step as the model's deliberate silence", () => {
@@ -129,7 +155,7 @@ describe("telegramOutputWithoutMemoryDirective", () => {
       message: `Код домофона 4271.\n\n[память: ${REF}]`,
     });
 
-    expect(output).toEqual({ kind: "message", message: "Код домофона 4271." });
+    expect(output).toEqual({ kind: "message", message: "Код домофона 4271.", standalone: false });
   });
 
   it("delivers nothing when the answer was the line and nothing else", () => {
