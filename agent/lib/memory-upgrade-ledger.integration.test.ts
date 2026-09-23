@@ -146,6 +146,7 @@ const POST_V0101_MIGRATIONS = [
   "112_memory_occurred_on.sql",
   "113_memory_embedding_backlog_view.sql",
   "114_memory_embedding_jobs_view_all_statuses.sql",
+  "115_voice_message_operations.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [

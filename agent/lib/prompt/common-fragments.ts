@@ -10,6 +10,7 @@
  * - `MEMORY_EXACT_DUPLICATE_HANDLING`: server-owned exact reinforcement guidance.
  * - `IMAGE_INSPECTION_CONTRACT`: single-source payload rule for the vision tool.
  * - `SEND_WORKSPACE_FILE_RULES`: explicit-request delivery rules for workspace files.
+ * - `VOICE_MESSAGE_RULES`: explicit-request voice replies, spoken text, closing, and text recovery.
  * - `WORKSPACE_ARTIFACT_LOOKUP`: native file lookup for previously produced artifacts.
  * - `UNTRUSTED_FILE_CONTENT_RULES`: fail-closed handling of agent instructions inside files.
  * - `reactionRules`: reaction surface of the current chat, or nothing when it has none.
@@ -23,6 +24,7 @@
  * provider-reported value is interpolated into prompt text: the reaction set of the current chat
  * is announced as its own history message instead.
  */
+import { EVE_EMPTY_DELIVERY_MARKER } from "../eve-empty-delivery.js";
 import { REACTION_SET_OPEN_TAG } from "../telegram-reaction-announcement.js";
 
 export type MemoryEditAction = "delete" | "edit" | "undo";
@@ -178,6 +180,20 @@ export const IMAGE_INSPECTION_CONTRACT =
 
 export const SEND_WORKSPACE_FILE_RULES =
   "По явной просьбе отправить файл вызови только `send_workspace_file`, передав актуальный относительный путь: tool сам безопасно читает физический файл. `photo` используй только для изображения, которое должно отображаться фотографией, иначе `document`. Если пользователь просит подпись под изображением, передай её в `caption`; длинный самостоятельный текст отправляй обычным сообщением, а не подписью.";
+
+// A delivered voice note is the whole answer, so this is the one place a private chat learns the
+// empty-delivery marker: it closes a turn whose reply already reached the chat, never a silence.
+export const VOICE_MESSAGE_RULES = `
+## Голосовые сообщения
+
+Отвечай голосовым через \`send_voice_message\` только когда текущее сообщение явно просит ответить голосом или прислать голосовое. Без такой просьбы отвечай текстом, даже если собеседник сам прислал голосовое; одна просьба о голосе не переводит следующие ответы в голос.
+
+Пиши \`text\` как живую устную речь на языке ответа: без Markdown, списков, таблиц, эмодзи, ссылок и кода. Числа, даты, единицы и сокращения записывай так, как их нужно произнести. Держи голосовое коротким, примерно до полутора тысяч символов, если человек не просил рассказать подробно: каждый символ расходует кредиты ElevenLabs. Звуковые теги в квадратных скобках на английском, например \`[laughs]\`, \`[whispers]\` или \`[sighs]\`, ставь редко и только там, где они уместны по смыслу. Ссылки, адреса, код и другие данные, которые неудобно слушать, передай в \`caption\`. Не пиши перед вызовом отбивку о том, что записываешь голосовое.
+
+Успешно отправленное голосовое и есть твой ответ: после него заверши ход ровно строкой \`${EVE_EMPTY_DELIVERY_MARKER}\` без другого текста и не пересказывай голосовое сообщением. Здесь эта строка означает не молчание, а то, что ответ уже доставлен.
+
+Если \`send_voice_message\` вернул ошибку, не вызывай его повторно в этом ходе: ответь на ту же просьбу обычным текстом и первой фразой коротко скажи, что голосовое сейчас не получилось, опираясь на \`reason\` ошибки, поэтому отвечаешь текстом.
+`.trim();
 
 export const WORKSPACE_ARTIFACT_LOOKUP =
   "Если пользователь ссылается на ранее полученный или созданный файл, а его содержимого нет в текущем контексте, найди вероятные артефакты в доступном workspace через `glob`, `grep` и `read_file`. Не считай поиск по памяти поиском по содержимому файлов и не читай несвязанные файлы без необходимости.";

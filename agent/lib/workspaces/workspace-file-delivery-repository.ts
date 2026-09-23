@@ -6,6 +6,7 @@
  * - `createWorkspaceFileDeliveryRepository`: PostgreSQL idempotence around external delivery.
  * - `workspaceFileDeliveryRepository`: production repository.
  */
+import type { WorkspaceFilePresentation } from "../attachments/telegram-workspace-file-delivery.js";
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
 import type { WorkspaceBinaryFile } from "./workspace-binary-repository.js";
@@ -26,7 +27,7 @@ interface BinaryReader {
 interface DeliveryRow {
   content_sha256: string;
   file_path: string;
-  presentation: "document" | "photo";
+  presentation: WorkspaceFilePresentation;
   requested_by: string | null;
   status: "completed" | "failed" | "started";
   telegram_chat_id: string;
@@ -50,7 +51,7 @@ function assertReplayMatches(
   input: {
     chatId: string;
     messageThreadId?: number;
-    presentation: "document" | "photo";
+    presentation: WorkspaceFilePresentation;
   },
 ): void {
   const matches = row.workspace_id === binary.workspaceId &&
@@ -75,7 +76,7 @@ export function createWorkspaceFileDeliveryRepository(binaryReader: BinaryReader
       messageThreadId?: number;
       operationKey: string;
       path: string;
-      presentation: "document" | "photo";
+      presentation: WorkspaceFilePresentation;
       scope: WorkspaceScope;
     }): Promise<WorkspaceFileDeliveryReservation> {
       // Read authorization and an immutable byte snapshot before reserving the external side effect.
