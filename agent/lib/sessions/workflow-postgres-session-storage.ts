@@ -3,6 +3,7 @@
  *
  * Exports:
  * - `deletePostgresEveSession`: atomically deletes one verified terminal run via a query client.
+ * - `deleteWorkflowRunRows`: removes one already-vetted run with its per-run rows.
  * - `deleteConfiguredPostgresEveSession`: fail-fast environment boundary for scheduled retention.
  *
  * Invariants:
@@ -20,7 +21,7 @@ import { createApplicationDatabasePool } from "../database-client.js";
 
 import { AppError } from "../app-error.js";
 
-const EVE_RUN_ID_PATTERN = /^wrun_[A-Z0-9]{26}$/u;
+export const EVE_RUN_ID_PATTERN = /^wrun_[A-Z0-9]{26}$/u;
 const TERMINAL_RUN_STATUSES = new Set(["cancelled", "completed", "failed"]);
 
 /** Read-only proof used by the explicit operator recovery, without re-enqueuing a Workflow run. */
@@ -41,7 +42,7 @@ export async function readConfiguredEveRunStatus(runId: string): Promise<string 
   } finally { await client.end(); }
 }
 
-interface WorkflowQueryClient {
+export interface WorkflowQueryClient {
   query(
     text: string,
     values?: readonly unknown[],
@@ -130,27 +131,7 @@ export async function deletePostgresEveSession(
       }
     }
 
-    // Public schema has no foreign keys, so remove every per-run projection before the run itself.
-    for (const statement of [
-      "DELETE FROM workflow.workflow_stream_chunks WHERE run_id = $1",
-      "DELETE FROM workflow.workflow_waits WHERE run_id = $1",
-      "DELETE FROM workflow.workflow_hooks WHERE run_id = $1",
-      "DELETE FROM workflow.workflow_steps WHERE run_id = $1",
-      "DELETE FROM workflow.workflow_events WHERE run_id = $1",
-      "DELETE FROM workflow.workflow_event_slots WHERE run_id = $1",
-    ]) {
-      await client.query(statement, [runId]);
-    }
-    const deletedRun = await client.query(
-      "DELETE FROM workflow.workflow_runs WHERE id = $1",
-      [runId],
-    );
-    if (deletedRun.rowCount !== 1) {
-      throw new AppError(
-        "AGENT_EVE_SESSION_STORAGE_DELETE_INCOMPLETE",
-        `Не удалось удалить данные Eve-сессии ${runId}`,
-      );
-    }
+    await deleteWorkflowRunRows(runId, client);
     await client.query("COMMIT");
     // Written only after the commit: a rolled-back deletion must not be reported as done.
     if (abandoned) {
@@ -162,6 +143,37 @@ export async function deletePostgresEveSession(
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
+  }
+}
+
+/**
+ * Removes one run with every per-run row, inside the caller's transaction and after the caller
+ * has locked the run and proven it may go.
+ */
+export async function deleteWorkflowRunRows(
+  runId: string,
+  client: WorkflowQueryClient,
+): Promise<void> {
+  // Public schema has no foreign keys, so remove every per-run projection before the run itself.
+  for (const statement of [
+    "DELETE FROM workflow.workflow_stream_chunks WHERE run_id = $1",
+    "DELETE FROM workflow.workflow_waits WHERE run_id = $1",
+    "DELETE FROM workflow.workflow_hooks WHERE run_id = $1",
+    "DELETE FROM workflow.workflow_steps WHERE run_id = $1",
+    "DELETE FROM workflow.workflow_events WHERE run_id = $1",
+    "DELETE FROM workflow.workflow_event_slots WHERE run_id = $1",
+  ]) {
+    await client.query(statement, [runId]);
+  }
+  const deletedRun = await client.query(
+    "DELETE FROM workflow.workflow_runs WHERE id = $1",
+    [runId],
+  );
+  if (deletedRun.rowCount !== 1) {
+    throw new AppError(
+      "AGENT_EVE_SESSION_STORAGE_DELETE_INCOMPLETE",
+      `Не удалось удалить данные Eve-сессии ${runId}`,
+    );
   }
 }
 

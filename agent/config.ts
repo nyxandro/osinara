@@ -35,10 +35,21 @@ export const SESSION_RETENTION_RETRY_MS = 60 * 60 * 1_000;
  */
 export const EVE_RUN_ABANDONED_DELETED_CODE = "AGENT_EVE_SESSION_ABANDONED_RUN_DELETED";
 export const SESSION_RETENTION_STORAGE_ABSENT_CODE = "AGENT_SESSION_RETENTION_STORAGE_ABSENT";
+export const WORKFLOW_ORPHAN_RUNS_PURGED_CODE = "AGENT_WORKFLOW_ORPHAN_RUNS_PURGED";
 export const SESSION_RETENTION_ROUTINE_CODES = [
   EVE_RUN_ABANDONED_DELETED_CODE,
   SESSION_RETENTION_STORAGE_ABSENT_CODE,
+  WORKFLOW_ORPHAN_RUNS_PURGED_CODE,
 ] as const;
+// Deleting a session removes only its root run; its turns, subagents and timer stay behind. On
+// production 2026-09-22 they were 2016 of 2300 runs and ~75% of the Workflow database the release
+// backup copies while the assistant is down. A finished run waits this long before it goes:
+// Workflow still delivers the wake-up it armed for the run, and a single wake-up is queued at most
+// `WAIT_CONTINUATION_MAX_DELAY_SECONDS` (23 h in the pinned Workflow core) ahead.
+export const WORKFLOW_ORPHAN_RUN_PURGE_AFTER_HOURS = 48;
+// One minute's share, so the first pass after a release drains the backlog over ~40 minutes
+// instead of deleting a gigabyte of history in one go.
+export const WORKFLOW_ORPHAN_RUN_PURGE_BATCH = 50;
 // Beyond this a non-terminal Workflow run is treated as abandoned rather than live. Measured on
 // production 2026-09-22 over 1710 completed runs: p99 lasted 16 minutes, the longest 4h 08m.
 export const EVE_RUN_ABANDONED_AFTER_HOURS = 24;

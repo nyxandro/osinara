@@ -83,6 +83,27 @@ function embeddingService(file: string): EmbeddingService {
   };
 }
 
+/** Top-level service block of a Compose file, up to the next service at the same indentation. */
+function serviceBlock(file: string, name: string): string {
+  const compose = readFileSync(new URL(file, projectRoot), "utf8");
+  const start = compose.indexOf(`\n  ${name}:\n`);
+  if (start === -1) throw new Error(`${file}: service ${name} is missing`);
+  const rest = compose.slice(start + 1);
+  const next = rest.slice(1).search(/\n {2}[a-zA-Z0-9._-]+:\n/u);
+  return `${next === -1 ? rest : rest.slice(0, next + 1)}\n`;
+}
+
+/** A size key in megabytes; a key written in any other form fails instead of being skipped. */
+function megabytes(block: string, key: string): number | undefined {
+  const line = block.match(new RegExp(`\\n {4}${key}: (.+)\\n`, "u"))?.[1];
+  if (line === undefined) return undefined;
+  const value = line.match(/^(\d+)m$/u)?.[1];
+  if (value === undefined) throw new Error(`${key}: ${line} is not written in megabytes`);
+  return Number(value);
+}
+
+const PROTECTED_SERVICES = ["postgres", "agent", "memory-embedding"] as const;
+
 describe("Docker Compose runtime wiring", () => {
   it("wires the agent to a healthy persistent Codex subscription gateway", () => {
     const localCompose = readFileSync(new URL("compose.yaml", projectRoot), "utf8");
@@ -175,6 +196,41 @@ describe("Docker Compose runtime wiring", () => {
       expect(service.memoryLimitMegabytes).toBeGreaterThanOrEqual(Math.ceil(peak! * 1.15));
     },
   );
+
+  it.each(PROTECTED_SERVICES)(
+    "protects the working memory of production %s from neighbours on the host",
+    (name) => {
+      const block = serviceBlock("compose.production.yaml", name);
+      const reservation = megabytes(block, "mem_reservation");
+      const limit = megabytes(block, "mem_limit");
+
+      // Development shares this host. Under its peaks the kernel reclaimed the bot as readily as
+      // the tests, the database stopped accepting connections within five seconds and three times
+      // restarted itself (#253). mem_reservation becomes cgroup memory.low: what the service holds
+      // below it is taken only once every unprotected neighbour has given up its share.
+      expect(reservation, `${name} has no mem_reservation`).toBeDefined();
+      expect(reservation!).toBeGreaterThan(0);
+      if (limit !== undefined) expect(reservation!).toBeLessThan(limit);
+    },
+  );
+
+  it("keeps every production service in the slice the host protects, sized to the reservations", () => {
+    const compose = readFileSync(new URL("compose.production.yaml", projectRoot), "utf8");
+    const services = compose.slice(compose.indexOf("\nservices:\n"), compose.indexOf("\nvolumes:\n"));
+    const names = [...services.matchAll(/\n {2}([a-zA-Z0-9._-]+):\n/gu)].map((match) => match[1]!);
+    const deployGuide = readFileSync(new URL("docs/production-deployment.md", projectRoot), "utf8");
+
+    // A reservation counts only up to what its parent protects. Outside osinara.slice a service
+    // would sit in system.slice, whose protection is zero, and share any surplus with development.
+    for (const name of names) {
+      expect(serviceBlock("compose.production.yaml", name), name).toContain("\n    cgroup_parent: osinara.slice\n");
+    }
+    // The host setting is typed by hand from the guide; the sum keeps the two from drifting apart.
+    const total = PROTECTED_SERVICES
+      .map((name) => megabytes(serviceBlock("compose.production.yaml", name), "mem_reservation")!)
+      .reduce((sum, value) => sum + value, 0);
+    expect(deployGuide).toContain(`systemctl set-property osinara.slice MemoryLow=${total}M`);
+  });
 
   it("keeps antivirus and the separate document parser out of the runtime", () => {
     const compose = readFileSync(new URL("compose.yaml", projectRoot), "utf8");
