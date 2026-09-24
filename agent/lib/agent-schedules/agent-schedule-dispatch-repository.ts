@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `ClaimedAgentSchedule`: leased, authorization-revalidated proactive agent run.
- * - `agentScheduleDispatchRepository`: claim, side-effect markers, run completion, and failure.
+ * - `agentScheduleDispatchRepository`: claim, side-effect markers, run completion, silence and failure.
  */
 import type { PoolClient } from "pg";
 
@@ -31,6 +31,7 @@ import {
   failAgentScheduleRunByIdentityForNotification,
   failAgentScheduleRunForNotification,
 } from "./agent-schedule-run-failure.js";
+import { completeSilentAgentScheduleRun } from "./agent-schedule-run-silence.js";
 import {
   beginAgentScheduleDispatch,
   markAgentScheduleRunning,
@@ -444,6 +445,7 @@ export const agentScheduleDispatchRepository = {
     }
   },
 
+  completeSilentRun: completeSilentAgentScheduleRun,
   failRun: failAgentScheduleRun,
   failRunByIdentityForNotification: failAgentScheduleRunByIdentityForNotification,
   failRunForNotification: failAgentScheduleRunForNotification,

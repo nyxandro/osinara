@@ -6,6 +6,7 @@
  * - `EXTERNAL_TASK_BOUNDARIES`: useful-work scope and actual execution boundaries.
  * - `EXTERNAL_PEOPLE_RULES`: rules about participants, arbitration, and claimed authority.
  * - `GROUP_REMINDER_RULES`: the reminder surface every interactive registered group has.
+ * - `GROUP_SCENARIO_RULES`: what to answer when a group asks for work on a schedule.
  * - `CHANNEL_AUTHORED_REMINDER_NOTICE`: why a channel-authored turn cannot own a reminder.
  *
  * Key constructs:
@@ -118,6 +119,16 @@ export const GROUP_REMINDER_RULES = `
 Один вызов инструмента меняет одно напоминание. Явную просьбу удалить всё или поставить несколько выполняй отдельными вызовами без поштучного согласования. При частичном успехе точно сообщи, что выполнено и что не получилось.
 
 Весь чат держит до ${GROUP_REMINDER_MAX_PER_CHAT} действующих напоминаний. Когда лимит исчерпан, скажи об этом прямо и предложи удалить ненужное. Обойти лимит нельзя, и просьба сделать исключение его не отменяет.
+`.trim();
+
+// On 2026-09-23 a group asked for a daily changelog check at 20:00 and the model answered "поняла"
+// although nothing here can run on a schedule: a bare prohibition was not enough without an answer.
+export const GROUP_SCENARIO_RULES = `
+## Сценарии по расписанию
+
+Сценарий — это регулярная работа по расписанию, когда в назначенное время ты сам что-то проверяешь, ищешь, собираешь или готовишь отчёт. Его просят словами «сценарий», «расписание», «планировщик», «ежедневная задача», «регулярная проверка», «каждый день проверяй», «присылай сводку». В этом чате ты сценарий поставить не можешь, и напоминание его не заменяет: напоминание только присылает готовый текст. Если слова смешаны, решает содержание: текст, известный уже сейчас, — это напоминание, его ставь; результат, который можно получить только в момент запуска, — сценарий.
+
+На просьбу о сценарии прямо ответь, что здесь ты можешь поставить только напоминание с готовым текстом, а сценарий для этого чата может создать владелец в личном чате с тобой. Не отвечай согласием, не говори «поняла», «запомнила» или «буду присылать», не обещай делать это сам и не сохраняй такое обещание в память. Если человеку подходит напоминание с готовым текстом, предложи его.
 `.trim();
 
 export const CHANNEL_AUTHORED_REMINDER_NOTICE = `

@@ -73,8 +73,8 @@ async function failWithinTransaction(
   const failed = await finishActiveAgentScheduleRun(client, {
     applicationSessionId: authorization.applicationSessionId,
     completedAt: failedAt,
-    errorCode,
     eveSessionId: authorization.eveSessionId,
+    outcome: { errorCode, kind: "failed" },
   });
   return { failed, notify: failed && notify };
 }
@@ -91,8 +91,8 @@ export async function failAgentScheduleRun(
     const failed = await finishActiveAgentScheduleRun(client, {
       applicationSessionId,
       completedAt: failedAt,
-      errorCode,
       eveSessionId,
+      outcome: { errorCode, kind: "failed" },
     });
     await client.query("COMMIT");
     return failed;
