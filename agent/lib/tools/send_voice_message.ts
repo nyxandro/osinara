@@ -85,7 +85,7 @@ const inputSchema = z.object({
   caption: z.string().trim().min(1).max(VOICE_CAPTION_MAX_LENGTH).optional()
     .describe("Необязательная подпись под голосовым: ссылки, адреса, код и другие данные, которые неудобно слушать"),
   text: z.string().trim().min(1).max(VOICE_MESSAGE_TEXT_MAX_LENGTH)
-    .describe("Готовый текст, который будет произнесён голосом, без Markdown, ссылок и эмодзи"),
+    .describe("Живая устная речь для Eleven v3 с английскими тегами подачи в квадратных скобках, без Markdown, ссылок и эмодзи"),
 }).strict();
 
 type SendVoiceMessageInput = z.infer<typeof inputSchema>;
