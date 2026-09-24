@@ -16,7 +16,7 @@ import { requireProfileProjectionUpdate } from "../profile-projection-input.js";
 import { telegramGroupAdministrationRepository } from "../telegram-group-administration-repository.js";
 import { requireManageTelegramGroupInput } from "../tools/manage_telegram_group.js";
 import { skillRequiresBash } from "../group-skills/group-skill-catalog.js";
-import type { GmailMessageApprovalSubject } from "../google-workspace/gmail-message-approval.js";
+import type { GmailMessagesApprovalSubject } from "../google-workspace/gmail-message-approval.js";
 import { loadGmailMessageApproval } from "../google-workspace/gmail-message-approval.js";
 import { requireGmailMessageInput } from "../google-workspace/gmail-message-contract.js";
 import {
@@ -33,95 +33,22 @@ import {
   buildApprovalMessage,
   googleWorkspaceFacts,
 } from "./approval-message.js";
+import { gmailApprovalOptions, gmailApprovalPrompt } from "./gmail-approval-prompt.js";
 
 interface ApprovalPresentationDependencies {
   findProfileProjectionGroup(groupRef: string, ctx: Pick<SessionContext, "session">): Promise<string | null>;
   findGroupTitle(telegramChatId: string, ctx: Pick<SessionContext, "session">): Promise<string | null>;
-  findGmailMessage(
-    messageId: string,
+  findGmailMessages(
+    messageIds: readonly string[],
     profileRef: string,
     ctx: Pick<SessionContext, "session">,
-  ): Promise<GmailMessageApprovalSubject>;
+  ): Promise<GmailMessagesApprovalSubject>;
 }
 
 export type TelegramApprovalPresenter = (
   request: TelegramInputRequest,
   ctx: Pick<SessionContext, "session">,
 ) => Promise<TelegramInputRequest>;
-
-const GMAIL_MESSAGE_ACTIONS = {
-  delete: {
-    action: "Безвозвратно удалить письмо Gmail",
-    consequence: "Письмо будет удалено навсегда. Его нельзя будет восстановить.",
-  },
-  mark_read: {
-    action: "Отметить письмо Gmail прочитанным",
-    consequence: "Письмо больше не будет отмечено как непрочитанное.",
-  },
-  mark_unread: {
-    action: "Отметить письмо Gmail непрочитанным",
-    consequence: "Письмо будет отмечено как непрочитанное.",
-  },
-  restore: {
-    action: "Восстановить письмо Gmail из корзины",
-    consequence: "Письмо будет возвращено из корзины.",
-  },
-  trash: {
-    action: "Переместить письмо в корзину Gmail",
-    consequence: "Письмо будет перемещено в корзину. Его можно будет восстановить.",
-  },
-} as const;
-
-function approvalValue(value: string | null, missing: string, maxCharacters = 500): string {
-  if (value === null) return missing;
-  const normalized = value.replace(/[\p{Cc}\p{Cf}]+/gu, " ").replace(/\s+/gu, " ").trim();
-  if (!normalized) return missing;
-  return normalized.length <= maxCharacters
-    ? normalized
-    : `${normalized.slice(0, maxCharacters - 1).trimEnd()}…`;
-}
-
-function gmailMessagePrompt(
-  actionName: keyof typeof GMAIL_MESSAGE_ACTIONS,
-  message: GmailMessageApprovalSubject,
-): string {
-  const action = GMAIL_MESSAGE_ACTIONS[actionName];
-  return [
-    "Подтверждение действия",
-    "",
-    `Действие: ${action.action}`,
-    `Профиль: ${message.scope === "personal" ? "личный" : "семейный"}`,
-    `Почтовый ящик: ${approvalValue(message.profileDisplayName, "не определён")}`,
-    `Отправитель: ${approvalValue(message.from, "не указан")}`,
-    `Тема: ${approvalValue(message.subject, "без темы")}`,
-    `Дата: ${approvalValue(message.date, "не указана")}`,
-    `Фрагмент письма: ${approvalValue(message.snippet, "не предоставлен Gmail", 240)}`,
-    `Gmail ID: ${message.id}`,
-    "",
-    `Что произойдёт: ${action.consequence}`,
-  ].join("\n");
-}
-
-function gmailMessageOptions(
-  request: TelegramInputRequest,
-  actionName: keyof typeof GMAIL_MESSAGE_ACTIONS,
-): TelegramInputRequest["options"] {
-  const approveLabels: Readonly<Record<keyof typeof GMAIL_MESSAGE_ACTIONS, string>> = {
-    delete: "Удалить навсегда",
-    mark_read: "Отметить прочитанным",
-    mark_unread: "Отметить непрочитанным",
-    restore: "Восстановить письмо",
-    trash: "Переместить в корзину",
-  };
-  return request.options?.map((option) => ({
-    ...option,
-    label: option.id === "approve"
-      ? approveLabels[actionName]
-      : option.id === "deny" || option.id === "cancel"
-        ? "Отменить"
-        : option.label,
-  }));
-}
 
 const GROUP_MESSAGE_MODES = {
   owner_only: "Запуск только по обращению владельца; контекст всех сообщений (owner_only)",
@@ -193,11 +120,11 @@ export function createTelegramApprovalPresenter(
       request.action.toolName === "manage_gmail_message"
     ) {
       const input = requireGmailMessageInput(request.action.input);
-      const message = await dependencies.findGmailMessage(input.messageId, input.profileRef, ctx);
+      const subject = await dependencies.findGmailMessages(input.messageIds, input.profileRef, ctx);
       return {
         ...localized,
-        options: gmailMessageOptions(localized, input.action),
-        prompt: gmailMessagePrompt(input.action, message),
+        options: gmailApprovalOptions(localized, input.action, input.messageIds.length),
+        prompt: gmailApprovalPrompt(input.action, input.messageIds, subject),
       };
     }
     if (
@@ -231,5 +158,5 @@ export const presentTelegramApproval = createTelegramApprovalPresenter({
     });
     return groups.find((group) => group.telegramChatId === telegramChatId)?.title ?? null;
   },
-  findGmailMessage: loadGmailMessageApproval,
+  findGmailMessages: loadGmailMessageApproval,
 });
