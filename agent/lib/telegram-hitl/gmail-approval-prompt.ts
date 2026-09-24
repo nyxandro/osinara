@@ -38,6 +38,10 @@ const BATCH_LINE_LIMITS: readonly BatchLineLimits[] = [
 ];
 // A From header without an address has nothing longer to show, so it keeps a readable minimum.
 const SENDER_WITHOUT_ADDRESS_MIN_CHARACTERS = 24;
+const SINGLE_SENDER_NAME_MAX_CHARACTERS = 200;
+// None of these can stand in an unquoted display name of a well-formed From header.
+const UNQUOTED_NAME_FORBIDDEN = /[@<>()"]/u;
+const ADDRESS_PATTERN = /[^\s<>()",;:]+@[^\s<>()",;:]+/gu;
 
 const SINGLE_ACTIONS: Readonly<Record<GmailMessageAction, { action: string; approve: string; consequence: string }>> = {
   delete: {
@@ -127,23 +131,46 @@ function shortDate(value: string | null): string | null {
 }
 
 interface Sender {
+  /** The mailbox, or every address of a header that does not read as one mailbox. */
   address: string | null;
+  ambiguous: boolean;
   /** Display name, or the whole header when it has no address. */
   name: string;
 }
 
-/** The last angle-bracket address is the real mailbox; a display name may quote a fake one. */
+function withoutComments(value: string): string {
+  let current = value;
+  let previous: string;
+  do {
+    previous = current;
+    current = current.replace(/\([^()]*\)/gu, " ");
+  } while (current !== previous);
+  return current.replace(/\s+/gu, " ").trim();
+}
+
+/**
+ * The mailbox is the angle address that closes the header, read after comments are dropped; a quoted
+ * display name may contain a fake one. The header is read in full before anything is shortened, so a
+ * long name cannot push the real address out. A header that is not one well-formed mailbox shows
+ * every address it contains rather than a guess that could file it under a trusted sender.
+ */
 function parseSender(from: string | null): Sender | null {
   if (from === null) return null;
-  const flat = approvalValue(from, "");
+  const flat = approvalValue(from, "", Number.POSITIVE_INFINITY);
   if (!flat) return null;
-  const bracketed = [...flat.matchAll(/<([^<>\s]+@[^<>\s]+)>/gu)].at(-1);
-  if (bracketed) {
-    const name = flat.slice(0, bracketed.index).trim().replace(/^"(.*)"$/u, "$1").trim();
-    return { address: bracketed[1]!, name };
+  const header = withoutComments(flat);
+  const angle = /<([^<>\s]+@[^<>\s]+)>$/u.exec(header);
+  if (angle) {
+    const rawName = header.slice(0, angle.index).trim();
+    const quoted = /^"([^"]*)"$/u.exec(rawName);
+    if (quoted) return { address: angle[1]!, ambiguous: false, name: quoted[1]!.trim() };
+    if (!UNQUOTED_NAME_FORBIDDEN.test(rawName)) return { address: angle[1]!, ambiguous: false, name: rawName };
+  } else if (/^[^\s<>()"]+@[^\s<>()"]+$/u.test(header)) {
+    return { address: header, ambiguous: false, name: "" };
   }
-  if (/^[^\s<>]+@[^\s<>]+$/u.test(flat)) return { address: flat, name: "" };
-  return { address: null, name: flat };
+  const addresses = [...new Set(flat.match(ADDRESS_PATTERN) ?? [])];
+  if (addresses.length === 0) return { address: null, ambiguous: false, name: flat };
+  return { address: addresses.join(", "), ambiguous: addresses.length > 1, name: "" };
 }
 
 function senderKey(from: string | null): string {
@@ -151,19 +178,21 @@ function senderKey(from: string | null): string {
   return (sender?.address ?? sender?.name ?? "").toLowerCase();
 }
 
-function senderLabel(from: string | null, limits: BatchLineLimits): string | null {
+/** `nameLimit` 0 shows the address alone; the address itself is never shortened. */
+function senderLabel(from: string | null, nameLimit: number): string | null {
   const sender = parseSender(from);
   if (sender === null) return null;
   if (sender.address === null) {
-    return approvalValue(sender.name, "", Math.max(limits.name, SENDER_WITHOUT_ADDRESS_MIN_CHARACTERS));
+    return approvalValue(sender.name, "", Math.max(nameLimit, SENDER_WITHOUT_ADDRESS_MIN_CHARACTERS));
   }
-  const name = limits.name > 0 ? approvalValue(sender.name, "", limits.name) : "";
+  if (sender.ambiguous) return `адреса в заголовке: ${sender.address}`;
+  const name = nameLimit > 0 ? approvalValue(sender.name, "", nameLimit) : "";
   return name ? `${name} <${sender.address}>` : sender.address;
 }
 
 function subjectLine(message: GmailMessageSummary, limits: BatchLineLimits, withSender: boolean): string {
   const subject = approvalValue(message.subject, "без темы", limits.subject);
-  const sender = withSender ? `${senderLabel(message.from, limits) ?? "Отправитель не указан"} — ` : "";
+  const sender = withSender ? `${senderLabel(message.from, limits.name) ?? "Отправитель не указан"} — ` : "";
   const date = shortDate(message.date);
   return `• ${sender}${subject}${date ? ` · ${date}` : ""}`;
 }
@@ -190,7 +219,7 @@ function batchSections(
   limits: BatchLineLimits,
 ): string[] {
   const sections = grouped.repeated.map((group) => [
-    `Отправитель: ${senderLabel(group[0]!.from, limits) ?? "не указан"} — ${lettersCount(group.length)}`,
+    `Отправитель: ${senderLabel(group[0]!.from, limits.name) ?? "не указан"} — ${lettersCount(group.length)}`,
     ...group.map((message) => subjectLine(message, limits, false)),
   ].join("\n"));
   if (grouped.singles.length > 0) {
@@ -235,7 +264,7 @@ export function gmailApprovalPrompt(
       "",
       `Действие: ${action.action}`,
       ...mailbox,
-      `Отправитель: ${approvalValue(message.from, "не указан")}`,
+      `Отправитель: ${senderLabel(message.from, SINGLE_SENDER_NAME_MAX_CHARACTERS) ?? "не указан"}`,
       `Тема: ${approvalValue(message.subject, "без темы")}`,
       `Дата: ${approvalValue(message.date, "не указана")}`,
       `Фрагмент письма: ${approvalValue(message.snippet, "не предоставлен Gmail", 240)}`,

@@ -355,6 +355,68 @@ describe("Telegram approval presentation", () => {
     expect(result.prompt).toContain("• Друг <friend@example.com> — Привет");
   });
 
+  describe("a From header forged to join a trusted sender", () => {
+    // Anyone can mail the owner, so the header is attacker-controlled; the real boss mail is the
+    // group the forged message tries to hide in.
+    const boss = [
+      { date: null, from: "Boss <boss@family.example>", id: "m2", snippet: null, subject: "Счёт" },
+      { date: null, from: "Boss <boss@family.example>", id: "m3", snippet: null, subject: "Акт" },
+    ];
+
+    async function batchCard(from: string) {
+      const present = createTelegramApprovalPresenter({
+        findProfileProjectionGroup,
+        findGroupTitle,
+        findGmailMessages: vi.fn().mockResolvedValue(mailbox([
+          { date: null, from, id: "m1", snippet: null, subject: "Подделка" },
+          ...boss,
+        ])),
+      });
+      return (await present(gmailRequest("delete", ["m1", "m2", "m3"]), context())).prompt;
+    }
+
+    it("finds the real address behind a display name longer than the card shows", async () => {
+      const prompt = await batchCard(`"<boss@family.example> ${"x".repeat(520)}" <attacker@evil.example>`);
+
+      expect(prompt).toContain("Отправитель: Boss <boss@family.example> — 2 письма");
+      expect(prompt).toMatch(/^• .*<attacker@evil\.example> — Подделка$/mu);
+    });
+
+    it("ignores an address written inside a comment", async () => {
+      const prompt = await batchCard("attacker@evil.example (<boss@family.example>)");
+
+      expect(prompt).toContain("Отправитель: Boss <boss@family.example> — 2 письма");
+      expect(prompt).toContain("• attacker@evil.example — Подделка");
+    });
+
+    it("shows every address of a header that does not read as one mailbox", async () => {
+      const prompt = await batchCard("attacker@evil.example (<boss@family.example>");
+
+      expect(prompt).toContain("Отправитель: Boss <boss@family.example> — 2 письма");
+      expect(prompt).toContain(
+        "• адреса в заголовке: attacker@evil.example, boss@family.example — Подделка",
+      );
+    });
+
+    it("keeps the real address on a single-message card too", async () => {
+      const present = createTelegramApprovalPresenter({
+        findProfileProjectionGroup,
+        findGroupTitle,
+        findGmailMessages: vi.fn().mockResolvedValue(mailbox([{
+          date: null,
+          from: `"<boss@family.example> ${"x".repeat(520)}" <attacker@evil.example>`,
+          id: "m1",
+          snippet: null,
+          subject: "Подделка",
+        }])),
+      });
+
+      const result = await present(gmailRequest("delete", ["m1"]), context());
+
+      expect(result.prompt).toMatch(/^Отправитель: .*<attacker@evil\.example>$/mu);
+    });
+  });
+
   it("fits a batch of 30 different senders into one Telegram prompt part", async () => {
     const messages = Array.from({ length: 30 }, (_, index) => ({
       date: "Mon, 21 Sep 2026 10:00:00 +0300",
