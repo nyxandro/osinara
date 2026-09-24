@@ -10,6 +10,7 @@
  * - One durable reservation precedes the billable synthesis; no failure is retried implicitly.
  * - A stored voice note is delivered through the exact-once workspace file delivery ledger.
  * - Every failure is returned with the owner-defined recovery path: answer the request in text.
+ * - While the voice is synthesized, the chat shows "recording a voice message" instead of typing.
  */
 import { createHash } from "node:crypto";
 
@@ -32,7 +33,14 @@ import {
   type VoiceMessageReservation,
 } from "../voice-messages/voice-message-operation-repository.js";
 import { voiceMessageFailure, voiceMessageInputError } from "../voice-messages/voice-message-errors.js";
-import { requireWorkspaceAuthorization } from "../workspaces/workspace-context.js";
+import {
+  withVoiceRecordingStatus,
+  type VoiceRecordingStatusTarget,
+} from "../voice-messages/voice-recording-status.js";
+import {
+  requireTelegramDeliveryTarget,
+  requireWorkspaceAuthorization,
+} from "../workspaces/workspace-context.js";
 import { workspaceBinaryRepository } from "../workspaces/workspace-binary-repository.js";
 import type { WorkspaceFileRecord } from "../workspaces/workspace-file-record.js";
 import type { WorkspaceAuthorization, WorkspaceScope } from "../workspaces/workspace-repository.js";
@@ -46,6 +54,7 @@ interface SendVoiceMessageDependencies {
     scope: WorkspaceScope;
     text: string;
   }, ctx: ToolContext): Promise<Record<string, unknown>>;
+  recordingStatus<T>(target: VoiceRecordingStatusTarget, operation: () => Promise<T>): Promise<T>;
   operations: {
     begin(input: {
       inputHash: string;
@@ -229,6 +238,8 @@ async function sendVoiceMessage(
 ): Promise<Record<string, unknown>> {
   const auth = requireWorkspaceAuthorization(ctx);
   const scope = currentWorkspaceScope(auth);
+  // Resolved before the reservation: a chat the voice cannot reach must not cost credits first.
+  const target = requireTelegramDeliveryTarget(ctx);
   dependencies.speech.assertConfigured();
   const workspaceId = await dependencies.workspaces.workspaceId(auth, scope);
   const path = outputPath(ctx.callId);
@@ -250,7 +261,11 @@ async function sendVoiceMessage(
   } else if (reservation.state === "failed" || reservation.state === "ambiguous") {
     throw terminalReservationError(reservation);
   } else {
-    ({ characterCost, file } = await synthesizeAndStore(dependencies, auth, scope, path, input, ctx.callId));
+    // Only synthesis runs under the status: Telegram clears it when the voice note arrives.
+    ({ characterCost, file } = await dependencies.recordingStatus(
+      target,
+      () => synthesizeAndStore(dependencies, auth, scope, path, input, ctx.callId),
+    ));
     generated = true;
   }
 
@@ -298,6 +313,7 @@ export default createSendVoiceMessageTool({
       : `Голосовое сообщение: ${input.text}\n\nПодпись: ${input.caption}`,
   }, ctx),
   operations: voiceMessageOperationRepository,
+  recordingStatus: withVoiceRecordingStatus,
   speech: elevenLabsSpeechClient,
   workspaces: workspaceBinaryRepository,
 });
