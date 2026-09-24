@@ -24,7 +24,7 @@ function request(enabled: boolean): TelegramInputRequest {
 function presenter(label: string | null = "Остриков пилит агентов") {
   const findProfileProjectionGroup = vi.fn().mockResolvedValue(label);
   return { findProfileProjectionGroup, present: createTelegramApprovalPresenter({
-    findProfileProjectionGroup, findGroupTitle: vi.fn(), findGmailMessage: vi.fn(),
+    findProfileProjectionGroup, findGroupTitle: vi.fn(), findGmailMessages: vi.fn(),
   }) };
 }
 

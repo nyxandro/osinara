@@ -70,7 +70,7 @@ describe("classifyGoogleWorkspaceCommand", () => {
       '{"userId":"me"}',
       "--json",
       '{"ids":["message-1","message-2"]}',
-    ])).toThrowError(/manage_gmail_message.*каждый messageId/u);
+    ])).toThrowError(/manage_gmail_message.*одной пачкой до 30/u);
     for (const route of [
       ["gmail", "users", "messages", "batchModify"],
       ["gmail", "users", "threads", "delete"],

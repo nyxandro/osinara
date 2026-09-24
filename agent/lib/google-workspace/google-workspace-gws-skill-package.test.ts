@@ -129,13 +129,14 @@ describe("Google Workspace gws skill packages", () => {
     expect(people).toContain("metadata.sources.etag");
   });
 
-  it("routes single-message deletion through the structured Gmail boundary", async () => {
+  it("routes message state changes as one batch through the structured Gmail boundary", async () => {
     const gmail = await readSkill("gws-gmail");
 
     expect(gmail).toContain("manage_gmail_message");
-    expect(gmail).toContain('{"action":"trash","messageId":"MESSAGE_ID","profileRef":"PROFILE_REF"}');
-    expect(gmail).toContain('{"action":"delete","messageId":"MESSAGE_ID","profileRef":"PROFILE_REF"}');
-    expect(gmail).toContain('{"action":"mark_read","messageId":"MESSAGE_ID","profileRef":"PROFILE_REF"}');
+    expect(gmail).toContain('{"action":"trash","messageIds":["MESSAGE_ID_1","MESSAGE_ID_2"],"profileRef":"PROFILE_REF"}');
+    expect(gmail).toContain('{"action":"delete","messageIds":["MESSAGE_ID"],"profileRef":"PROFILE_REF"}');
+    expect(gmail).toContain('{"action":"mark_read","messageIds":["MESSAGE_ID_1","MESSAGE_ID_2"],"profileRef":"PROFILE_REF"}');
+    expect(gmail).not.toContain('"messageId":');
     expect(gmail).not.toContain('["gmail", "users", "messages", "trash"');
     expect(gmail).not.toContain('["gmail", "users", "messages", "delete"');
     expect(gmail).not.toContain('["gmail", "users", "messages", "modify"');
