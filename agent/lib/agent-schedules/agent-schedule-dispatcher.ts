@@ -15,6 +15,7 @@ import { scheduledGroupHistorySnapshotRepository } from "./scheduled-group-histo
 import { numericMessageThreadId } from "./agent-schedule-validation.js";
 import { sessionRepository, type PreparedSession } from "../sessions/session-repository.js";
 import { isDatabaseUnavailable, recoverDatabaseBookkeeping } from "../database-recovery.js";
+import { EVE_EMPTY_DELIVERY_MARKER } from "../eve-empty-delivery.js";
 import { localScheduledTime } from "../scheduling/local-time.js";
 
 interface AgentScheduleDispatcherRepository {
@@ -54,6 +55,7 @@ function scheduledRunPrompt(job: ClaimedAgentSchedule): string {
   return [
     "Выполни запланированный агентный сценарий для Telegram.",
     "Не пиши промежуточные статусы и не описывай процесс. Итоговый ответ должен быть готовым сообщением для пользователя.",
+    `Если сценарий велит ничего не присылать, когда сообщить нечего, и сейчас именно такой случай, заверши запуск ровно строкой ${EVE_EMPTY_DELIVERY_MARKER} без другого текста: это успешный запуск без сообщения, а не ошибка. Так можно, только если в этом запуске ты ничего не отправил, в том числе файлом. Любая фраза вроде «новостей нет» уйдёт в чат сообщением.`,
     "Если обязательной авторизации или данных не хватает, задай один понятный вопрос или сообщи конкретную ошибку.",
     "Сбой одной зависимости не отменяет независимые части задания. В результате явно отдели проверенные сведения от недоступных разделов; не объявляй неполную задачу полностью выполненной.",
     "<scheduled_agent_run>",
@@ -66,7 +68,7 @@ function scheduledRunPrompt(job: ClaimedAgentSchedule): string {
     `completed_runs: ${job.completedRuns}`,
     `execution_number: ${job.completedRuns + 1}`,
     `max_runs: ${job.maxRuns === null ? "unlimited" : job.maxRuns}`,
-    "execution_number — номер успешного результата, ожидаемого от этого запуска. Используй его для нумерации; счётчик хранит планировщик. При max_runs он сам завершит расписание после подтверждённой доставки последнего результата.",
+    "execution_number — номер этого выполнения; тихий запуск без сообщения тоже считается выполнением. Используй его для нумерации; счётчик хранит планировщик. При max_runs он сам завершит расписание после последнего выполнения.",
     "original_user_request:",
     job.userRequest,
     "scenario:",

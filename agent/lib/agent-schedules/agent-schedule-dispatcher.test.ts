@@ -4,9 +4,11 @@
  * Constructs covered:
  * - `createAgentScheduleDispatcher`: hands an isolated target to Eve's native channel source.
  * - A failed claimed job, including failed session cleanup, cannot block the remaining batch.
+ * - The run prompt names Eve's exact empty-delivery marker, so a scenario can skip an empty report.
  */
 import { describe, expect, it, vi } from "vitest";
 
+import { EVE_EMPTY_DELIVERY_MARKER } from "../eve-empty-delivery.js";
 import { createAgentScheduleDispatcher } from "./agent-schedule-dispatcher.js";
 import type { ClaimedAgentSchedule } from "./agent-schedule-dispatch-repository.js";
 
@@ -68,6 +70,8 @@ describe("agent schedule dispatcher", () => {
 
     expect(dispatched).toBe(1);
     expect(send.mock.calls[0]![0]).toContain("scheduled_for_local: 2026-07-17 09:00:00 Europe/Moscow");
+    // Silence is expressed only by this exact marker; any other wording is delivered as a message.
+    expect(send.mock.calls[0]![0]).toContain(EVE_EMPTY_DELIVERY_MARKER);
     expect(prepareSession).toHaveBeenCalledWith(job, "101::schedule:run-1", new Date("2026-07-17T06:00:00.000Z"));
     expect(to).toHaveBeenCalledWith(expect.any(Object), {
       chatId: "101",
