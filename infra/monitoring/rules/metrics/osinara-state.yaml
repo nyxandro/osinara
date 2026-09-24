@@ -5,9 +5,10 @@ groups:
   - name: osinara-state
     interval: 30s
     rules:
-      # Two rules here stand down while a release is running, and only these two: the queue does
-      # stop draining and the exporter does lose its database while the containers are down, and
-      # neither is an incident then. The deadline is published by production-deploy.sh and expires
+      # Three rules here stand down while a release is running, and only these three: the queue
+      # does stop draining, a turn interrupted by the release resumes afterwards, and the exporter
+      # does lose its database while the containers are down; none of it is an incident then. The
+      # deadline is published by production-deploy.sh and expires
       # on its own. OsinaraRuntimeMaintenanceStuck below is deliberately left alone: it is what
       # notices a release that came back up but never left maintenance. A release whose containers
       # never returned at all is not its case — that one has no database to report from, and it
@@ -18,17 +19,48 @@ groups:
       # admission was frozen is already ten minutes old when the application returns, and draining
       # it takes a full model turn per message. Without the grace the alert would fire on a healthy
       # release the moment the window closed — the same noise, moved fifteen minutes later.
+      #
+      # It counts only messages waiting in a chat where nothing is running. The queue is strictly
+      # ordered per chat, and in a group most of what waits behind a long turn is chatter that is
+      # only journaled: on 2026-09-23 the raw oldest age paged a silent assistant for twelve minutes
+      # while one person waited for their own long request and every other chat was answered (#272).
+      # A long turn is reported by OsinaraTurnRunningLong below, as a warning.
+      #
+      # The hold covers the moment a chat changes turns: after a long turn ends, the chat's next
+      # message counts as unserved, with its whole wait, until its own turn starts — milliseconds
+      # for chatter, seconds for a voice message being transcribed. A real stall is reported one
+      # minute later than the threshold, which is the cost of not paging on that moment.
       - alert: OsinaraIngressStuck
         expr: >-
-          osinara_ingress_oldest_pending_age_seconds > 600
+          osinara_ingress_stalled_oldest_age_seconds > 600
           unless on() deploy_window_end_timestamp_seconds{project="osinara-production"} + 600 > time()
+        for: 1m
         labels:
           severity: critical
           project: osinara-production
         annotations:
-          summary: 'Сообщение пользователя ждёт обработки более 10 минут'
-          description: 'Очередь входящих сообщений не разбирается. Для семьи это выглядит как молчащий ассистент.'
+          summary: 'Сообщение ждёт обработки более 10 минут, хотя его чат ничем не занят'
+          description: 'Очередь входящих не разбирается: сообщения не берутся в работу или все места обработки заняты другими чатами. Для семьи это выглядит как молчащий ассистент.'
           runbook: 'Проверить контейнеры agent и telegram-ingress-worker, затем npm-команду telegram-ingress-admin inspect внутри контейнера.'
+
+      # One chat is busy with a single turn; the other chats are served. Measured over 30 days on
+      # production up to 2026-09-24: 1540 turns, median 33 s, p99 about 10 minutes, three longer
+      # than 20 minutes — one of them hung and was cut off by the 35-minute observer guard. Twenty
+      # minutes therefore fires about once in ten days and still well ahead of that guard.
+      #
+      # It keeps the queue rule's grace after a release: a turn the release interrupted is resumed
+      # with its original start time, so for a while its age includes the downtime.
+      - alert: OsinaraTurnRunningLong
+        expr: >-
+          osinara_ingress_longest_running_seconds > 1200
+          unless on() deploy_window_end_timestamp_seconds{project="osinara-production"} + 600 > time()
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Один ответ ассистента готовится дольше 20 минут'
+          description: 'Чат этого запроса ждёт окончания хода, остальные чаты обслуживаются. Либо задача тяжёлая — много шагов модели и команд в песочнице, — либо ход завис.'
+          runbook: 'Найти идущий ход по строкам AGENT_MODEL_CALL_METRICS и AGENT_TOOL_CALL_METRICS за последние 20 минут: если вызовы идут, задача просто долгая; если строк нет, ход завис — telegram-ingress-admin inspect внутри контейнера agent.'
 
       - alert: OsinaraIncidentsPendingStuck
         expr: osinara_operational_incidents{status="pending"} > 0

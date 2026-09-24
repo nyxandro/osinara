@@ -101,7 +101,7 @@ describeWithDatabase("monitoring views migrations", () => {
         for (const column of columns) {
           expect({ view, column }).toEqual({
             view,
-            column: expect.stringMatching(/^(pending|processing|failed|total|recent|status|phase|route_key|embedding_status|oldest_pending_age_seconds|last_success_age_seconds|age_seconds)$/u),
+            column: expect.stringMatching(/^(pending|processing|failed|total|recent|status|phase|route_key|embedding_status|oldest_pending_age_seconds|stalled_oldest_age_seconds|longest_running_seconds|last_success_age_seconds|age_seconds)$/u),
           });
         }
       }
