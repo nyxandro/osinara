@@ -34,6 +34,7 @@ describe("sandbox egress proxy server", () => {
 
   it("handles an EPIPE from a disconnected CONNECT client", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
     const server = createSandboxEgressProxy();
     const clientSocket = new PassThrough() as unknown as Socket;
     const error = Object.assign(new Error("client disconnected"), { code: "EPIPE" });

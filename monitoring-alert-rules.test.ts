@@ -8,6 +8,10 @@
  * - Scheduler heartbeat rules hold longer than the chain that delays the metric after a release.
  * - Every rule watching the embedding family ignores the codes that report normal operation.
  * - The worker announces itself through the shared constant instead of a second literal.
+ * - The error burst ignores the sandbox proxy's records of connections that ended normally.
+ * - The critical queue alert fires on a message nobody is serving, not on a chat busy with its own
+ *   long turn; the long turn itself is a warning.
+ * - Every exporter metric the state rules read is one the exporter actually publishes.
  *
  * The rules are YAML installed on another host, so they are read as text here for the same reason
  * `production-deploy-window.test.ts` does: the two halves of each contract live in different files
@@ -19,6 +23,7 @@ import { describe, expect, it } from "vitest";
 
 import { SESSION_RETENTION_ROUTINE_CODES } from "./agent/config.js";
 import { MEMORY_EMBEDDING_LIFECYCLE_CODES } from "./agent/lib/memory-config.js";
+import { SANDBOX_EGRESS_ROUTINE_CODES } from "./services/sandbox-egress-proxy/egress-log.js";
 
 const projectRoot = new URL("./", import.meta.url);
 const read = (path: string) => readFileSync(new URL(path, projectRoot), "utf8");
@@ -41,9 +46,11 @@ const RESUME_CHAIN_MINUTES = 3;
 const MAX_HOLD_MINUTES = 10;
 
 const rules = read("infra/monitoring/rules/metrics/osinara.yaml");
+const stateRules = read("infra/monitoring/rules/metrics/osinara-state.yaml");
+const exporter = read("infra/monitoring/collector/sql-exporter.yaml");
 
-function alertBlocks(name: string): string[] {
-  return rules
+function alertBlocks(name: string, source = rules): string[] {
+  return source
     .split(/^ *- alert: /mu)
     .slice(1)
     .filter((block) => block.split("\n", 1)[0]!.trim() === name);
@@ -154,6 +161,17 @@ describe("osinara alert rules", () => {
     }
   });
 
+  it("keeps OsinaraErrorBurst off the proxy records of connections that ended normally", () => {
+    const [block] = alertBlocks("OsinaraErrorBurst");
+
+    // A browser in the sandbox closes connections constantly: over two weeks of production the
+    // proxy wrote 1255 such records, against 21 real rejections.
+    expect(SANDBOX_EGRESS_ROUTINE_CODES.length).toBeGreaterThan(0);
+    for (const code of SANDBOX_EGRESS_ROUTINE_CODES) {
+      expect(excludesCode(block!, code), `OsinaraErrorBurst still counts ${code}`).toBe(true);
+    }
+  });
+
   it("announces the worker through the shared constant, not a second literal", () => {
     const worker = read("scripts/memory-embedding-worker.ts")
       + read("scripts/memory-embedding/worker-loop.ts");
@@ -163,6 +181,57 @@ describe("osinara alert rules", () => {
     expect(worker).toContain("code: MEMORY_EMBEDDING_WORKER_STARTED_CODE");
     for (const code of MEMORY_EMBEDDING_LIFECYCLE_CODES) {
       expect(worker, `${code} is spelled out a second time here`).not.toContain(`"${code}"`);
+    }
+  });
+});
+
+describe("osinara state alert rules", () => {
+  it("raises the critical queue alert only for a message nobody is serving", () => {
+    const [block] = alertBlocks("OsinaraIngressStuck", stateRules);
+    const expression = ruleField(block!, "expr") ?? "";
+
+    // Group chatter that is only journaled queues behind a long turn in its own chat. Counting it
+    // paged the owner about a silent assistant while every other chat was being answered (#272).
+    expect(expression).toContain("osinara_ingress_stalled_oldest_age_seconds");
+    expect(expression).not.toContain("osinara_ingress_oldest_pending_age_seconds");
+    expect(block).toMatch(/severity: critical/u);
+  });
+
+  it("holds the critical queue alert past the moment a chat changes turns", () => {
+    const [block] = alertBlocks("OsinaraIngressStuck", stateRules);
+    const hold = holdMinutes(block!);
+
+    // When a long turn ends, the chat's next message counts as unserved with its whole wait until
+    // its own turn starts: milliseconds for chatter, seconds for a voice message being transcribed.
+    // A single evaluation landing there must not page; two more at the group's 30s interval clear it.
+    expect(hold, "a single evaluation can page").not.toBeNull();
+    expect(hold!).toBeGreaterThanOrEqual(1);
+    expect(hold!, "a hold delays a real outage too").toBeLessThanOrEqual(2);
+  });
+
+  it("reports a turn that runs too long as a warning, not as a silent assistant", () => {
+    const [block] = alertBlocks("OsinaraTurnRunningLong", stateRules);
+
+    expect(block, "the long-turn warning is missing").toBeDefined();
+    expect(ruleField(block!, "expr")).toContain("osinara_ingress_longest_running_seconds");
+    expect(block).toMatch(/severity: warning/u);
+  });
+
+  it("reads only metrics the exporter publishes", () => {
+    const published = new Set(
+      [...exporter.matchAll(/^ *- metric_name: (osinara_[a-z0-9_]+)$/gmu)].map((match) => match[1]!),
+    );
+    const blocks = stateRules.split(/^ *- alert: /mu).slice(1);
+    expect(blocks.length).toBeGreaterThan(0);
+
+    // The rules run on the hub and the exporter on the application server. A renamed metric on
+    // either side leaves an alert that can never fire, and nothing reports it.
+    for (const block of blocks) {
+      const alert = block.split("\n", 1)[0]!.trim();
+      for (const [metric] of (ruleField(block, "expr") ?? "").matchAll(/osinara_[a-z0-9_]+/gu)) {
+        expect({ alert, metric, published: published.has(metric) })
+          .toEqual({ alert, metric, published: true });
+      }
     }
   });
 });
