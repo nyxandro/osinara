@@ -5,7 +5,7 @@
 # listing. See infra/monitoring/README.md.
 #
 # Every query reads a monitoring view created by a migration — 103 for most of them, 105 for the
-# memory index state. Nothing here may touch a base table: the
+# memory index state, 116 for the ingress service columns. Nothing here may touch a base table: the
 # osinara_metrics role has no privilege on them, and a query that tried would fail closed.
 global:
   min_interval: 30s
@@ -20,6 +20,12 @@ collectors:
       - query_name: telegram_ingress
         query: |
           SELECT pending, processing, failed, oldest_pending_age_seconds
+          FROM monitoring_telegram_ingress
+      # A query of its own, so that a collector installed before the release that adds these
+      # columns loses only these two metrics, not the whole ingress family above.
+      - query_name: telegram_ingress_service
+        query: |
+          SELECT stalled_oldest_age_seconds, longest_running_seconds
           FROM monitoring_telegram_ingress
       - query_name: memory_review_batches
         query: SELECT status, total, recent FROM monitoring_memory_review_batches
@@ -37,7 +43,8 @@ collectors:
           FROM monitoring_runtime_maintenance
 
     metrics:
-      # How long the oldest unanswered message has waited. The single most user-visible number.
+      # How long the oldest waiting message has waited, including group chatter that only queues
+      # behind a long turn in its own chat. Kept for trends; alerts read the two metrics below.
       - metric_name: osinara_ingress_oldest_pending_age_seconds
         type: gauge
         help: 'Age in seconds of the oldest Telegram update still waiting to be processed.'
@@ -61,6 +68,20 @@ collectors:
         help: 'Telegram updates whose processing ended in failure.'
         values: [failed]
         query_ref: telegram_ingress
+
+      # Nonzero only when a message waits in a chat where nothing is running: the worker does not
+      # take work, a queue is blocked, or every processing slot is held by another chat.
+      - metric_name: osinara_ingress_stalled_oldest_age_seconds
+        type: gauge
+        help: 'Age in seconds of the oldest Telegram update waiting in a chat where no turn is running.'
+        values: [stalled_oldest_age_seconds]
+        query_ref: telegram_ingress_service
+
+      - metric_name: osinara_ingress_longest_running_seconds
+        type: gauge
+        help: 'Duration in seconds of the longest Telegram turn currently running.'
+        values: [longest_running_seconds]
+        query_ref: telegram_ingress_service
 
       # Diagnostics the application owes the owner. Anything stuck in pending means that channel is mute.
       - metric_name: osinara_operational_incidents

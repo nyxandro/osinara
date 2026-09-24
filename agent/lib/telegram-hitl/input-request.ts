@@ -35,6 +35,7 @@ import {
   telegramHitlApprovalRepository,
   type TelegramHitlApprovalRepository,
 } from "./approval-repository.js";
+import { HITL_PROMPT_CHUNK_CHARACTERS } from "./approval-message.js";
 import {
   presentTelegramApproval,
   type TelegramApprovalPresenter,
@@ -61,7 +62,6 @@ interface InputRequestDependencies {
 }
 
 const HITL_PREPARING_MESSAGE = "Подготавливаю безопасный запрос подтверждения.";
-const HITL_PROMPT_CHUNK_CHARACTERS = 3_000;
 const SESSION_LIMIT_CONTINUATION_TOOL_NAME = "session_limit_continuation";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
