@@ -105,6 +105,10 @@ export default telegramChannel({
           eveSessionId: ctx.session.id,
           eveTurnId: ctx.session.turn.id,
         });
+        // A scenario may skip an empty report: the run is done, so turn completion finds nothing to fail.
+        if (isScheduledSession(ctx)) {
+          await agentScheduleDispatchRepository.completeSilentRun(sessionId, ctx.session.id, new Date());
+        }
         return;
       }
       if (output.kind === "progress") {
