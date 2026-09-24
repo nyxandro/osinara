@@ -7,13 +7,18 @@
  *   inside every five-second window Telegram keeps a chat action alive.
  * - The status stops with the operation and never outlives it, even with a request in flight.
  * - The status is presentation only: its failure never fails the voice note.
+ * - The production status is Telegram's `record_voice` action in the same chat and topic.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const telegram = vi.hoisted(() => ({ sendTelegramChatAction: vi.fn() }));
+vi.mock("eve/channels/telegram", () => telegram);
 
 import {
   VOICE_RECORDING_STATUS_CONFIRM_MS,
   VOICE_RECORDING_STATUS_REFRESH_MS,
   createVoiceRecordingStatus,
+  withVoiceRecordingStatus,
 } from "./voice-recording-status.js";
 
 const TARGET = { chatId: "-1001", messageThreadId: 7 };
@@ -82,6 +87,29 @@ describe("voice recording status", () => {
     await expect(running).resolves.toBe("voice");
   });
 
+  it("waits for every status request in flight, not only the latest", async () => {
+    const first = deferred<void>();
+    const sendAction = vi.fn()
+      .mockReturnValueOnce(first.promise)
+      .mockResolvedValue(undefined);
+    const withStatus = createVoiceRecordingStatus(sendAction);
+    const synthesis = deferred<string>();
+    let settled = false;
+
+    const running = withStatus(TARGET, () => synthesis.promise).then((value) => {
+      settled = true;
+      return value;
+    });
+    await vi.advanceTimersByTimeAsync(VOICE_RECORDING_STATUS_CONFIRM_MS);
+    expect(sendAction).toHaveBeenCalledTimes(2);
+    synthesis.resolve("voice");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+
+    first.resolve();
+    await expect(running).resolves.toBe("voice");
+  });
+
   it("delivers the voice note when the status cannot be shown and reports it once", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const sendAction = vi.fn().mockRejectedValue(new Error("Telegram unavailable"));
@@ -109,5 +137,34 @@ describe("voice recording status", () => {
     await expect(withStatus(TARGET, async () => { throw failure; })).rejects.toBe(failure);
     await vi.advanceTimersByTimeAsync(VOICE_RECORDING_STATUS_REFRESH_MS * 3);
     expect(sendAction).toHaveBeenCalledTimes(1);
+  });
+
+  describe("production status", () => {
+    it("sends Telegram's record_voice action to the same chat and topic", async () => {
+      telegram.sendTelegramChatAction.mockResolvedValue({ body: { ok: true }, ok: true, status: 200 });
+
+      await withVoiceRecordingStatus(TARGET, async () => "voice");
+
+      expect(telegram.sendTelegramChatAction).toHaveBeenCalledWith({
+        action: "record_voice",
+        chatId: "-1001",
+        fetch: expect.any(Function),
+        messageThreadId: 7,
+      });
+    });
+
+    it("reports a refused status with the provider status so causes stay distinguishable", async () => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      telegram.sendTelegramChatAction.mockResolvedValue({ body: { ok: false }, ok: false, status: 403 });
+
+      await expect(withVoiceRecordingStatus(TARGET, async () => "voice")).resolves.toBe("voice");
+
+      expect(JSON.parse(log.mock.calls[0]![0] as string)).toEqual({
+        code: "AGENT_VOICE_RECORDING_STATUS_FAILED",
+        errorCode: "AGENT_VOICE_RECORDING_STATUS_REJECTED",
+        errorName: "AppError",
+        providerStatus: 403,
+      });
+    });
   });
 });

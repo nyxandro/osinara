@@ -13,12 +13,13 @@
  * - Eve shows its own typing status when the model requests the tool, and it may arrive just after
  *   the first recording status; the early repeat puts "recording" back within a second.
  * - The status is presentation only. A failed status call never fails the voice note; it is
- *   reported once per operation, because every repeat fails for the same reason.
+ *   reported once per operation, because every repeat fails for the same reason. Each call has a
+ *   short timeout of its own, since the voice note waits for every call still in flight.
  */
 import { sendTelegramChatAction } from "eve/channels/telegram";
 
-import { AppError } from "../app-error.js";
-import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../../config.js";
+import { AppError, isAppError } from "../app-error.js";
+import { TELEGRAM_CHAT_ACTION_TIMEOUT_MS } from "../../config.js";
 
 export const VOICE_RECORDING_STATUS_CONFIRM_MS = 1_000;
 export const VOICE_RECORDING_STATUS_REFRESH_MS = 4_000;
@@ -32,22 +33,31 @@ export interface VoiceRecordingStatusTarget {
 
 type SendRecordingAction = (target: VoiceRecordingStatusTarget) => Promise<void>;
 
+class RecordingStatusRejected extends AppError {
+  constructor(readonly providerStatus: number) {
+    super("AGENT_VOICE_RECORDING_STATUS_REJECTED", "Telegram не показал статус записи голосового сообщения");
+  }
+}
+
 export function createVoiceRecordingStatus(sendAction: SendRecordingAction) {
   return async function withRecordingStatus<T>(
     target: VoiceRecordingStatusTarget,
     operation: () => Promise<T>,
   ): Promise<T> {
     let failureReported = false;
-    let inFlight: Promise<void> = Promise.resolve();
+    const inFlight = new Set<Promise<void>>();
     const show = () => {
-      inFlight = sendAction(target).catch((error: unknown) => {
+      const request = sendAction(target).catch((error: unknown) => {
         if (failureReported) return;
         failureReported = true;
         console.error(JSON.stringify({
           code: "AGENT_VOICE_RECORDING_STATUS_FAILED",
+          errorCode: isAppError(error) ? error.code : undefined,
           errorName: error instanceof Error ? error.name : "UnknownError",
+          providerStatus: error instanceof RecordingStatusRejected ? error.providerStatus : undefined,
         }));
-      });
+      }).finally(() => inFlight.delete(request));
+      inFlight.add(request);
     };
     show();
     let refresh: ReturnType<typeof setInterval> | undefined;
@@ -60,7 +70,7 @@ export function createVoiceRecordingStatus(sendAction: SendRecordingAction) {
     } finally {
       clearTimeout(confirm);
       clearInterval(refresh);
-      await inFlight;
+      await Promise.all(inFlight);
     }
   };
 }
@@ -70,13 +80,8 @@ export const withVoiceRecordingStatus = createVoiceRecordingStatus(async (target
     action: RECORD_VOICE_ACTION,
     chatId: target.chatId,
     fetch: (request, init) =>
-      fetch(request, { ...init, signal: AbortSignal.timeout(TELEGRAM_API_REQUEST_TIMEOUT_MS) }),
+      fetch(request, { ...init, signal: AbortSignal.timeout(TELEGRAM_CHAT_ACTION_TIMEOUT_MS) }),
     ...(target.messageThreadId === undefined ? {} : { messageThreadId: target.messageThreadId }),
   });
-  if (!response.ok) {
-    throw new AppError(
-      "AGENT_VOICE_RECORDING_STATUS_REJECTED",
-      "Telegram не показал статус записи голосового сообщения",
-    );
-  }
+  if (!response.ok) throw new RecordingStatusRejected(response.status);
 });

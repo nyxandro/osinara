@@ -34,7 +34,7 @@ const FILE = {
 };
 const INPUT = { text: "Привет! [laughs] Завтра будет солнечно." };
 
-function context(): ToolContext {
+function context(attributes: Record<string, string> = {}): ToolContext {
   return {
     callId: CALL_ID,
     session: {
@@ -45,6 +45,7 @@ function context(): ToolContext {
             role: "owner",
             telegramChatId: "101",
             telegramChatType: "private",
+            ...attributes,
           },
           authenticator: "telegram",
           principalId: "user-1",
@@ -165,6 +166,28 @@ describe("send_voice_message", () => {
     // would show "recording" under a voice that is already there.
     expect(events).toEqual(["status on", "synthesize", "status off", "deliver"]);
     expect(deps.recordingStatus).toHaveBeenCalledWith({ chatId: "101" }, expect.any(Function));
+  });
+
+  it("shows the recording status in the forum topic the voice goes to", async () => {
+    const deps = dependencies();
+    const tool = createSendVoiceMessageTool(deps as never);
+
+    await tool.execute(INPUT, context({ telegramMessageThreadId: "7" }));
+
+    expect(deps.recordingStatus).toHaveBeenCalledWith(
+      { chatId: "101", messageThreadId: 7 },
+      expect.any(Function),
+    );
+  });
+
+  it("refuses a chat it cannot deliver to before reserving or paying for synthesis", async () => {
+    const deps = dependencies();
+    const tool = createSendVoiceMessageTool(deps as never);
+
+    await failure(tool.execute(INPUT, context({ telegramMessageThreadId: "not-a-topic" })));
+
+    expect(deps.operations.begin).not.toHaveBeenCalled();
+    expect(deps.speech.synthesize).not.toHaveBeenCalled();
   });
 
   it("rejects a model-supplied scope and an over-long text before any reservation", async () => {
