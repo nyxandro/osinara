@@ -37,6 +37,7 @@ import {
   EXTERNAL_PEOPLE_RULES,
   EXTERNAL_TASK_BOUNDARIES,
   GROUP_REMINDER_RULES,
+  GROUP_SCENARIO_RULES,
   externalPurposeSection,
 } from "./external-fragments.js";
 import {
@@ -57,6 +58,7 @@ import {
   VOICE_TRANSCRIPTION_RULES,
   trustedBehaviorPreferenceRules,
   trustedCredentialRules,
+  REMINDER_SCENARIO_BOUNDARY,
   trustedReminderRules,
   trustedScheduleRules,
   trustedWorkspaceRules,
@@ -126,6 +128,7 @@ ${IMAGE_INSPECTION_CONTRACT} Для записи из \`<workspace_attachments>\
 ${SEND_WORKSPACE_FILE_RULES}
 
 ${OFFICE_DOCUMENT_RULES}`,
+  REMINDER_SCENARIO_BOUNDARY,
   trustedReminderRules("personal"),
   trustedScheduleRules("personal"),
   PROACTIVE_DELIVERY_RULES,
@@ -198,6 +201,7 @@ ${IMAGE_INSPECTION_CONTRACT} Для изображения из \`<telegram_atta
 ${SEND_WORKSPACE_FILE_RULES}
 
 ${OFFICE_DOCUMENT_RULES}`,
+  REMINDER_SCENARIO_BOUNDARY,
   trustedReminderRules("family"),
   trustedScheduleRules("family"),
   PROACTIVE_DELIVERY_RULES,
@@ -348,6 +352,7 @@ ${GROUP_TIMELINE_TRUST}`,
     voiceMessages ? VOICE_MESSAGE_RULES : null,
     includeApplicationCore && !scheduledRun ? trustedBehaviorPreferenceRules() : null,
     reminders ? GROUP_REMINDER_RULES : null,
+    reminders ? GROUP_SCENARIO_RULES : null,
     channelAuthored ? CHANNEL_AUTHORED_REMINDER_NOTICE : null,
     externalGroupCapabilityInstructions(surfaceCapabilities, skills, {
       includeApplicationCore,
