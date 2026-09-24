@@ -7,6 +7,7 @@
  * - Provider refusals such as exhausted credits become terminal ledger states and tell the model
  *   to answer the same request in text instead of retrying the voice note.
  * - An unconfirmed Telegram delivery is reported as possibly delivered, never as a clean failure.
+ * - The chat shows "recording a voice message" while the voice is synthesized, not while it is sent.
  */
 import { createHash } from "node:crypto";
 
@@ -33,7 +34,7 @@ const FILE = {
 };
 const INPUT = { text: "Привет! [laughs] Завтра будет солнечно." };
 
-function context(): ToolContext {
+function context(attributes: Record<string, string> = {}): ToolContext {
   return {
     callId: CALL_ID,
     session: {
@@ -44,6 +45,7 @@ function context(): ToolContext {
             role: "owner",
             telegramChatId: "101",
             telegramChatType: "private",
+            ...attributes,
           },
           authenticator: "telegram",
           principalId: "user-1",
@@ -70,6 +72,7 @@ function dependencies() {
       sideEffectStatus: "completed",
       telegramMessageId: "91",
     }),
+    recordingStatus: vi.fn(async (_target: unknown, operation: () => Promise<unknown>) => await operation()),
     operations: {
       begin: vi.fn().mockResolvedValue({ state: "execute", workspaceId: "workspace-1" }),
       complete: vi.fn().mockResolvedValue(undefined),
@@ -134,6 +137,57 @@ describe("send_voice_message", () => {
       scope: "personal",
       text: INPUT.text,
     }, expect.anything());
+  });
+
+  it("shows the recording status in the current chat only while the voice is synthesized", async () => {
+    const deps = dependencies();
+    const events: string[] = [];
+    deps.recordingStatus.mockImplementation(async (_target, operation) => {
+      events.push("status on");
+      try {
+        return await operation();
+      } finally {
+        events.push("status off");
+      }
+    });
+    deps.speech.synthesize.mockImplementation(async () => {
+      events.push("synthesize");
+      return { bytes: Buffer.from("voice bytes"), characterCost: 38, mediaType: "audio/ogg; codecs=opus" };
+    });
+    deps.deliver.mockImplementation(async () => {
+      events.push("deliver");
+      return { delivered: true, telegramMessageId: "91" };
+    });
+    const tool = createSendVoiceMessageTool(deps as never);
+
+    await tool.execute(INPUT, context());
+
+    // Telegram clears a chat action when the bot's message arrives; one sent after the voice note
+    // would show "recording" under a voice that is already there.
+    expect(events).toEqual(["status on", "synthesize", "status off", "deliver"]);
+    expect(deps.recordingStatus).toHaveBeenCalledWith({ chatId: "101" }, expect.any(Function));
+  });
+
+  it("shows the recording status in the forum topic the voice goes to", async () => {
+    const deps = dependencies();
+    const tool = createSendVoiceMessageTool(deps as never);
+
+    await tool.execute(INPUT, context({ telegramMessageThreadId: "7" }));
+
+    expect(deps.recordingStatus).toHaveBeenCalledWith(
+      { chatId: "101", messageThreadId: 7 },
+      expect.any(Function),
+    );
+  });
+
+  it("refuses a chat it cannot deliver to before reserving or paying for synthesis", async () => {
+    const deps = dependencies();
+    const tool = createSendVoiceMessageTool(deps as never);
+
+    await failure(tool.execute(INPUT, context({ telegramMessageThreadId: "not-a-topic" })));
+
+    expect(deps.operations.begin).not.toHaveBeenCalled();
+    expect(deps.speech.synthesize).not.toHaveBeenCalled();
   });
 
   it("rejects a model-supplied scope and an over-long text before any reservation", async () => {
@@ -250,6 +304,7 @@ describe("send_voice_message", () => {
     });
     expect(deps.speech.synthesize).not.toHaveBeenCalled();
     expect(deps.workspaces.writeBinary).not.toHaveBeenCalled();
+    expect(deps.recordingStatus).not.toHaveBeenCalled();
     expect(deps.deliver).toHaveBeenCalledOnce();
   });
 

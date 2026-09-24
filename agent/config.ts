@@ -69,6 +69,8 @@ export const SOFTWARE_UPDATE_MANIFEST_MAX_BYTES = 64 * 1024;
 export const MEMORY_SOFT_DELETE_RETENTION_DAYS = 30;
 export const MEMORY_SOFT_DELETE_PURGE_BATCH_SIZE = 200;
 export const TELEGRAM_API_REQUEST_TIMEOUT_MS = 15_000;
+// A chat action is presentation only, yet a voice note waits for one in flight before it is sent.
+export const TELEGRAM_CHAT_ACTION_TIMEOUT_MS = 3_000;
 // An unanswered approval parks the Eve turn indefinitely: Eve keeps `session.waiting` for as long
 // as it takes. The confirmation window bounds that wait so one ignored prompt cannot freeze a chat.
 export const TELEGRAM_HITL_APPROVAL_TIMEOUT_MS = 5 * 60 * 1_000;
