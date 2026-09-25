@@ -60,6 +60,12 @@ export interface TelegramIngressClaim {
   voice: TelegramIngressVoice | null;
 }
 
+/** How long a private chat must be quiet before its head is claimed, and the most it may wait. */
+export interface TelegramPrivateBurstWindow {
+  maxWaitMilliseconds: number;
+  quietMilliseconds: number;
+}
+
 export interface TelegramIngressRepository {
   acceptMedia(input: {
     chatId: string;
@@ -69,7 +75,7 @@ export interface TelegramIngressRepository {
   }): Promise<boolean>;
   beginVoiceTranscription(updateId: string, leaseToken: string): Promise<"completed" | "started">;
   beginDispatch(updateId: string, leaseToken: string, dispatchId: string): Promise<void>;
-  claimNext(leaseMilliseconds: number): Promise<TelegramIngressClaim | null>;
+  claimNext(leaseMilliseconds: number, burst: TelegramPrivateBurstWindow): Promise<TelegramIngressClaim | null>;
   complete(updateId: string, leaseToken: string): Promise<void>;
   completeWithSession(
     updateId: string,
@@ -88,6 +94,8 @@ export interface TelegramIngressRepository {
   renewLease(updateId: string, leaseToken: string, leaseMilliseconds: number): Promise<Date>;
   sessionEventStreamCursor(sessionId: string): Promise<number>;
   saveVoiceTranscript(updateId: string, leaseToken: string, transcript: string): Promise<void>;
+  /** Milliseconds until the next private chat held by the burst window is ready; null when none is. */
+  privateBurstReadyIn(burst: TelegramPrivateBurstWindow): Promise<number | null>;
 }
 
 export interface ClaimRow {

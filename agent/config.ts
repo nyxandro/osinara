@@ -101,6 +101,10 @@ export const TELEGRAM_INGRESS_CALLBACK_CONCURRENCY = 2;
 // Wake-up turns run on their own slot, so a long wake-up never takes a message's place; at most
 // this many wake-up turns run at once across all chats.
 export const TELEGRAM_INGRESS_WAKEUP_CONCURRENCY = 1;
+// A person often sends several messages in a row. A private chat's turn starts only after the chat
+// has been quiet this long, so the whole burst is answered at once; a steady stream waits at most the cap.
+export const TELEGRAM_PRIVATE_BURST_QUIET_MS = 2_000;
+export const TELEGRAM_PRIVATE_BURST_MAX_WAIT_MS = 20_000;
 export const TELEGRAM_MAX_INBOUND_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 // A logical private message can be a Telegram media group (up to ten files).
 export const TELEGRAM_MAX_ATTACHMENTS_PER_MESSAGE = 10;

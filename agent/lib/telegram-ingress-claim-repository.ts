@@ -1,10 +1,17 @@
 /** FIFO claims and immutable album snapshots, serialized with enqueue and wake-ups by the exact queue row. */
 import { TELEGRAM_INGRESS_RECOVERY_MAX_ATTEMPTS } from "../config.js";
 import { database } from "./database.js";
-import { type ClaimRow, mapTelegramIngressClaim, requireLeaseMilliseconds } from "./telegram-ingress-contract.js";
+import {
+  type ClaimRow,
+  mapTelegramIngressClaim,
+  requireLeaseMilliseconds,
+  type TelegramPrivateBurstWindow,
+} from "./telegram-ingress-contract.js";
+import { requireTelegramPrivateBurstWindow } from "./telegram-private-burst.js";
 
-export async function claimNextTelegramIngress(leaseMilliseconds: number) {
+export async function claimNextTelegramIngress(leaseMilliseconds: number, burst: TelegramPrivateBurstWindow) {
   requireLeaseMilliseconds(leaseMilliseconds);
+  requireTelegramPrivateBurstWindow(burst);
   const client = await database().connect();
   try {
     await client.query("BEGIN");
@@ -37,6 +44,16 @@ export async function claimNextTelegramIngress(leaseMilliseconds: number) {
                AND (earlier.media_group_leader_id IS NULL OR earlier.media_group_late)
                AND earlier.status IN ('pending', 'processing')
            )
+           -- A private chat still receiving a burst is left alone until it has been quiet for the
+           -- window, or the cap has passed since its head arrived. Only a new message waits for it.
+           -- A button press has no message and must compare as not private, never as unknown.
+           AND NOT (item.status = 'pending' AND (item.payload #>> '{message,chat,type}') IS NOT DISTINCT FROM 'private'
+             AND item.received_at > now() - ($4 * interval '1 millisecond')
+             AND EXISTS (
+               SELECT 1 FROM telegram_ingress_updates latest
+                WHERE latest.queue_id = item.queue_id AND latest.status = 'pending'
+                  AND latest.received_at > now() - ($3 * interval '1 millisecond')
+             ))
            -- A wake-up turn of this chat owns the lane until its item is terminal, like an earlier update.
            -- The mark lives on the locked queue row, so a wake-up claimed concurrently is rechecked here.
            AND queue.active_wakeup_id IS NULL
@@ -61,7 +78,7 @@ export async function claimNextTelegramIngress(leaseMilliseconds: number) {
            item.response_session_id,item.response_turn_id,item.response_start_index::text,
           item.voice_file_id, item.voice_file_size::text, item.voice_mime_type,
           item.voice_transcript, item.media_group_key, item.media_group_late, candidate.current_continuation_key`,
-      [leaseMilliseconds, TELEGRAM_INGRESS_RECOVERY_MAX_ATTEMPTS],
+      [leaseMilliseconds, TELEGRAM_INGRESS_RECOVERY_MAX_ATTEMPTS, burst.quietMilliseconds, burst.maxWaitMilliseconds],
     );
     const row = result.rows[0];
     const claim = row ? mapTelegramIngressClaim(row) : null;

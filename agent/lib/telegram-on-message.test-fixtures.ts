@@ -165,6 +165,9 @@ export function repositories() {
     turnInterjections: {
       findDeliveredContentKind: vi.fn().mockResolvedValue(null),
     },
+    privateBursts: {
+      hasFollowingMessage: vi.fn().mockResolvedValue(false),
+    },
     conversationWakeups: {
       listPlanned: vi.fn().mockResolvedValue([]),
     },

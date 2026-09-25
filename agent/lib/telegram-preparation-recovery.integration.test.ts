@@ -5,6 +5,7 @@ import { telegramIngressRepository as repository } from "./telegram-ingress-repo
 import { bindTelegramIngressTurn } from "./telegram-ingress-binding.js";
 import { recoverUnboundTelegramPreparation } from "./telegram-preparation-recovery.js";
 import { closeExpiredUnboundTelegramIngress } from "./telegram-ingress-recovery-admin.js";
+import { NO_BURST_WAIT } from "./telegram-ingress.test-fixtures.js";
 
 const suite = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true" ? describe : describe.skip;
 suite("interrupted Telegram preparation", () => {
@@ -13,7 +14,7 @@ suite("interrupted Telegram preparation", () => {
   async function started() {
     await repository.enqueue({ updateId: "42", continuationKey: "101::", payload: { update_id: 42,
       message: { message_id: 42, date: 1700000000, chat: { id: 101, type: "private" }, text: "request" } } });
-    const claim = (await repository.claimNext(60000))!;
+    const claim = (await repository.claimNext(60000, NO_BURST_WAIT))!;
     const dispatchId = crypto.randomUUID();
     await repository.beginDispatch("42", claim.leaseToken, dispatchId);
     return { claim, dispatchId };
@@ -25,7 +26,7 @@ suite("interrupted Telegram preparation", () => {
     const auth = { initiator: null, current: { authenticator: "telegram", principalId: "101", principalType: "user",
       attributes: { osinaraTelegramUpdateId: "42", osinaraTelegramIngressId: dispatchId } } };
     await expect(bindTelegramIngressTurn(auth, "eve-old", "turn_0")).rejects.toThrow("AGENT_TELEGRAM_DISPATCH_BINDING_REJECTED");
-    expect((await repository.claimNext(60000))?.dispatchStarted).toBe(false);
+    expect((await repository.claimNext(60000, NO_BURST_WAIT))?.dispatchStarted).toBe(false);
   });
   it("never releases a turn that has acquired its durable execution binding", async () => {
     const { claim, dispatchId } = await started();

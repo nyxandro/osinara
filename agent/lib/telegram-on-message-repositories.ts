@@ -46,6 +46,7 @@ import type {
 } from "./workspaces/workspace-repository.js";
 import { memoryReviewRepository } from "./memory-review/memory-review-repository.js";
 import { turnInterjectionRepository } from "./turn-interjection/turn-interjection-repository.js";
+import { telegramPrivateBurstRepository } from "./telegram-private-burst.js";
 import { conversationWakeupContextRepository } from "./conversation-wakeups/conversation-wakeup-context.js";
 
 export interface TelegramMessageRepositories {
@@ -81,6 +82,7 @@ export interface TelegramMessageRepositories {
   telegram: TelegramRepository;
   timeline: Pick<typeof conversationTimelineRepository, "recordInbound">;
   turnInterjections: Pick<typeof turnInterjectionRepository, "findDeliveredContentKind">;
+  privateBursts: Pick<typeof telegramPrivateBurstRepository, "hasFollowingMessage">;
   conversationWakeups: Pick<typeof conversationWakeupContextRepository, "listPlanned">;
 }
 
@@ -104,5 +106,6 @@ export const productionTelegramMessageRepositories = {
   timeline: conversationTimelineRepository,
   threadNotices: productionMemoryThreadNotices,
   turnInterjections: turnInterjectionRepository,
+  privateBursts: telegramPrivateBurstRepository,
   conversationWakeups: conversationWakeupContextRepository,
 } satisfies TelegramMessageRepositories;

@@ -8,6 +8,7 @@ import { bindTelegramIngressTurn } from "./telegram-ingress-binding.js";
 import { createTelegramDurableIngress } from "./telegram-durable-ingress.js";
 import { requestTelegramIngressRecovery } from "./telegram-ingress-recovery-admin.js";
 import { withRuntimeAdmission } from "./runtime-maintenance.js";
+import { NO_BURST_WAIT } from "./telegram-ingress.test-fixtures.js";
 
 const describeDatabase = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true" ? describe : describe.skip;
 const id = "123e4567-e89b-42d3-a456-426614174000";
@@ -39,7 +40,7 @@ describeDatabase("Telegram restart recovery", () => {
 
   it.each(["lease-expired", "quarantined", "interrupted"])("reattaches %s execution and releases the next message without repeating work", async (failure) => {
     await enqueue("1"); await enqueue("2");
-    const old = (await repository.claimNext(60000))!;
+    const old = (await repository.claimNext(60000, NO_BURST_WAIT))!;
     await repository.beginDispatch(old.updateId, old.leaseToken, id);
     await database().query("INSERT INTO eve_session_event_cursors(eve_session_id,next_event_index) VALUES ('eve-1', 10)");
     await bindTelegramIngressTurn(auth(), "eve-1", "turn_7");
@@ -73,7 +74,7 @@ describeDatabase("Telegram restart recovery", () => {
 
   it("rejects binding to another attempt or session and never overwrites provenance", async () => {
     await enqueue("1");
-    const claim = (await repository.claimNext(60000))!;
+    const claim = (await repository.claimNext(60000, NO_BURST_WAIT))!;
     await repository.beginDispatch("1", claim.leaseToken, id);
     await expect(bindTelegramIngressTurn(auth("1", crypto.randomUUID()), "eve-1", "turn_1"))
       .rejects.toThrow("AGENT_TELEGRAM_DISPATCH_BINDING_REJECTED");
@@ -87,61 +88,61 @@ describeDatabase("Telegram restart recovery", () => {
   });
   it("binds a partial approval boundary even when Eve does not start a new turn", async () => {
     await enqueue("1", true);
-    const claim = (await repository.claimNext(60000))!;
+    const claim = (await repository.claimNext(60000, NO_BURST_WAIT))!;
     await repository.beginDispatch("1", claim.leaseToken, id);
     await database().query("INSERT INTO eve_session_event_cursors(eve_session_id,next_event_index) VALUES ('eve-1', 20)");
     await bindTelegramIngressTurn(auth(), "eve-1", "turn_9", true);
     await database().query("UPDATE telegram_ingress_updates SET lease_expires_at=now()-interval '1 second' WHERE update_id=1");
-    expect((await repository.claimNext(60000))?.dispatchBinding)
+    expect((await repository.claimNext(60000, NO_BURST_WAIT))?.dispatchBinding)
       .toEqual({ id, sessionId: "eve-1", turnId: "turn_9", cursor: 20 });
   });
 
   it("does not infer a safe rerun for persisted legacy or unbound starts", async () => {
     await enqueue("1"); await enqueue("2");
-    const claim = (await repository.claimNext(60000))!;
+    const claim = (await repository.claimNext(60000, NO_BURST_WAIT))!;
     await database().query("UPDATE telegram_ingress_updates SET dispatch_started_at=now() WHERE update_id=1");
     await repository.fail("1", claim.leaseToken, { code: "AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED", message: "legacy start" });
-    expect(await repository.claimNext(60000)).toBeNull();
+    expect(await repository.claimNext(60000, NO_BURST_WAIT)).toBeNull();
   });
 
   it("admits callbacks while draining but neither callbacks nor new messages when frozen", async () => {
     await enqueue("1", true); await enqueue("2");
     await database().query("UPDATE runtime_maintenance SET phase='draining',owner_token=$1", [id]);
-    const callback = await repository.claimNext(60000);
+    const callback = await repository.claimNext(60000, NO_BURST_WAIT);
     expect(callback?.updateId).toBe("1");
     await repository.complete("1", callback!.leaseToken);
-    expect(await repository.claimNext(60000)).toBeNull();
+    expect(await repository.claimNext(60000, NO_BURST_WAIT)).toBeNull();
     await database().query("UPDATE runtime_maintenance SET phase='frozen'");
     await enqueue("3", true);
-    expect(await repository.claimNext(60000)).toBeNull();
+    expect(await repository.claimNext(60000, NO_BURST_WAIT)).toBeNull();
     await database().query("UPDATE runtime_maintenance SET phase='ready',owner_token=NULL");
-    expect((await repository.claimNext(60000))?.updateId).toBe("2");
+    expect((await repository.claimNext(60000, NO_BURST_WAIT))?.updateId).toBe("2");
   });
 
   it("bounds automatic recovery, and an audited operator request never erases quarantine", async () => {
     await enqueue("1"); await enqueue("2");
-    let claim = (await repository.claimNext(60000))!;
+    let claim = (await repository.claimNext(60000, NO_BURST_WAIT))!;
     await repository.beginDispatch("1", claim.leaseToken, id);
     await bindTelegramIngressTurn(auth(), "eve-1", "turn_1");
     const failure = { code: "AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED", message: "test" };
     await repository.fail("1", claim.leaseToken, failure);
     for (let attempt = 0; attempt < 3; attempt++) {
-      claim = (await repository.claimNext(60000))!;
+      claim = (await repository.claimNext(60000, NO_BURST_WAIT))!;
       expect(claim.updateId).toBe("1");
       await repository.fail("1", claim.leaseToken, failure);
     }
-    expect(await repository.claimNext(60000)).toBeNull();
+    expect(await repository.claimNext(60000, NO_BURST_WAIT)).toBeNull();
     await requestTelegramIngressRecovery("1", "cancel", "Operator verified the blocked request");
     const state = (await database().query("SELECT status,last_error_code,recovery_cancel_requested FROM telegram_ingress_updates WHERE update_id=1")).rows[0];
     expect(state).toEqual({ status: "failed", last_error_code: failure.code, recovery_cancel_requested: true });
     expect((await database().query("SELECT action FROM telegram_ingress_recovery_events WHERE update_id=1")).rows)
       .toEqual([{ action: "cancel" }]);
-    expect((await repository.claimNext(60000))?.updateId).toBe("1");
+    expect((await repository.claimNext(60000, NO_BURST_WAIT))?.updateId).toBe("1");
   });
 
   it("rejects operator recovery of an unbound legacy marker", async () => {
     await enqueue("1");
-    const claim = (await repository.claimNext(60000))!;
+    const claim = (await repository.claimNext(60000, NO_BURST_WAIT))!;
     await database().query("UPDATE telegram_ingress_updates SET dispatch_started_at=now() WHERE update_id=1");
     await repository.fail("1", claim.leaseToken, { code: "AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED", message: "legacy" });
     await expect(requestTelegramIngressRecovery("1", "observe", "Inspect old dispatch"))

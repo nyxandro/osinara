@@ -19,3 +19,6 @@ export function correlatedDispatch(dispatch: TelegramDrainContext["dispatch"]): 
     };
   };
 }
+
+/** Claims at once: for tests of behavior other than the private-chat burst window. */
+export const NO_BURST_WAIT = { maxWaitMilliseconds: 0, quietMilliseconds: 0 } as const;

@@ -11,6 +11,8 @@
  * - An unknown non-HITL callback never reaches Eve when no application handler claims it.
  * - One failed item releases its own record and the drain keeps going.
  * - A session that never reaches a boundary releases the queue within one lease.
+ * - A private chat still receiving a burst is claimed the moment its quiet window ends, not at the
+ *   next poll, with the configured window.
  */
 import type { TelegramVerifiedUpdateContext } from "eve/channels/telegram";
 import { parseTelegramUpdate } from "eve/channels/telegram";
@@ -137,6 +139,7 @@ function repository() {
       renewLease: vi.fn(),
       sessionEventStreamCursor: vi.fn().mockResolvedValue(0),
       saveVoiceTranscript: vi.fn(),
+      privateBurstReadyIn: vi.fn().mockResolvedValue(null),
     } satisfies TelegramIngressRepository,
   };
 }
@@ -303,6 +306,25 @@ describe("createTelegramDurableIngress", () => {
     expect(dispatch).not.toHaveBeenCalled();
     expect(storage.value.beginDispatch).not.toHaveBeenCalled();
     expect(storage.value.complete).toHaveBeenCalledWith("1002", storage.claim.leaseToken);
+  });
+
+  it("claims a private chat the moment its burst window ends", async () => {
+    const storage = repository();
+    storage.value.claimNext = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(storage.claim)
+      .mockResolvedValueOnce(null);
+    storage.value.privateBurstReadyIn = vi.fn().mockResolvedValueOnce(30).mockResolvedValue(null);
+    const dispatch = vi.fn().mockResolvedValue({
+      getEventStream: async () => new ReadableStream({ start(controller) { controller.enqueue({ type: "session.waiting" }); } }),
+      id: "session-1",
+    });
+
+    await runDrain(ingress(storage, { dispatch }), voicePayload(), dispatch);
+
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(storage.value.claimNext).toHaveBeenCalledWith(60_000, { maxWaitMilliseconds: 20_000, quietMilliseconds: 2_000 });
+    expect(storage.value.privateBurstReadyIn).toHaveBeenCalledWith({ maxWaitMilliseconds: 20_000, quietMilliseconds: 2_000 });
   });
 
   it("keeps draining the queue after one item fails", async () => {
