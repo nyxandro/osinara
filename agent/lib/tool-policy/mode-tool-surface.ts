@@ -12,6 +12,8 @@
  *   work in the current trust zone has no descriptor at all rather than a denial stub.
  * - External groups additionally deny the framework built-ins Eve always registers, and re-check
  *   every granted capability at execution time against the live database policy.
+ * - Interactive private and family surfaces re-emit the sandbox built-ins, so that every tool result
+ *   there can carry the messages the turn's author sent meanwhile. Scheduled surfaces do not.
  */
 import type { SkillDefinition } from "eve/skills";
 import { defineTool, type ToolContext, type ToolDefinition } from "eve/tools";
@@ -62,6 +64,7 @@ import { authorizeCurrentExternalGroupCapability } from "./external-group-live-p
 import { resolveExternalGroupPolicyIdentity } from "./external-group-policy.js";
 import { EXTERNAL_GROUP_REMINDER_TOOLS } from "./external-group-reminder-tools.js";
 import { scheduledExternalTool } from "./scheduled-external-tool.js";
+import { withTurnInterjectionSurface } from "../turn-interjection/turn-interjection-surface.js";
 import {
   FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS,
   UNVERIFIED_CONTEXT_DENIALS,
@@ -375,7 +378,7 @@ function allowlistKey(allowed: ReadonlySet<ExternalGroupToolName>): string {
   return [...allowed].sort().join("\0");
 }
 
-const TRUSTED_SURFACES: Readonly<Record<"family" | "private", ToolMap>> = {
+const TRUSTED_APPLICATION_SURFACES: Readonly<Record<"family" | "private", ToolMap>> = {
   family: wrapModelFacingToolMap({
     ...TRUSTED_MODE_TOOLS,
     ...FAMILY_ONLY_TOOLS,
@@ -386,8 +389,14 @@ const TRUSTED_SURFACES: Readonly<Record<"family" | "private", ToolMap>> = {
   }),
 };
 
+// An interactive turn also receives, with each tool result, the messages its author sent meanwhile.
+const TRUSTED_SURFACES: Readonly<Record<"family" | "private", ToolMap>> = {
+  family: withTurnInterjectionSurface(TRUSTED_APPLICATION_SURFACES.family),
+  private: withTurnInterjectionSurface(TRUSTED_APPLICATION_SURFACES.private),
+};
+
 const TRUSTED_SCHEDULED_SURFACES: Readonly<Record<"family" | "private", ToolMap>> = Object.fromEntries(
-  Object.entries(TRUSTED_SURFACES).map(([environment, surface]) => {
+  Object.entries(TRUSTED_APPLICATION_SURFACES).map(([environment, surface]) => {
     // A scheduled turn can read chat instructions but has no user source for prompt or memory writes.
     const {
       generate_image: _generateImage,

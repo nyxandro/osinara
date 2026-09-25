@@ -33,7 +33,7 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
     await database().query("INSERT INTO family_memberships(family_id,user_id,role) VALUES ($1,$2,'owner')", [familyId, userId]);
     const auth = { familyId, userId, role: "owner" as const, forumTopicId: null, groupId: null, groupType: null,
       messageThreadId: null, telegramChatId: "123", telegramChatType: "private" as const, telegramUserId: "123" };
-    const schedule = await schedules.create(auth, { firstRunAt: new Date("2026-09-14T12:00:00Z"),
+    const schedule = await schedules.create(auth, { executionContext: "isolated", firstRunAt: new Date("2026-09-14T12:00:00Z"),
       operationKey: "create", recurrence: { kind: "minutely", interval: 1 }, maxRuns,
       scenarioPrompt: "Проверь чейнжлог и напиши, только если там что-то стоящее", scope: "personal",
       timezone: "UTC", title: "Чейнжлог", userRequest: "Скипай несущественное" });

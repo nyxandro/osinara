@@ -148,6 +148,8 @@ const POST_V0101_MIGRATIONS = [
   "114_memory_embedding_jobs_view_all_statuses.sql",
   "115_voice_message_operations.sql",
   "116_monitoring_telegram_ingress_stall.sql",
+  "117_telegram_turn_interjections.sql",
+  "118_conversation_schedules.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [
