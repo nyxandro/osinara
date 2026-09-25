@@ -39,6 +39,7 @@ import {
 import {
   type ExternalScheduleCapability,
   parseExternalScheduleCapabilities,
+  requireGrantedExternalScheduleCapabilities,
 } from "./external-agent-schedule-policy.js";
 
 const HISTORY_WINDOW_MAX_DAYS = 365;
@@ -174,15 +175,7 @@ function requireCapabilitySubset(
       "Не удалось проверить полный список возможностей автоматизации",
     );
   }
-  for (const capability of scheduled) {
-    if (!currentGroup.has(capability)) {
-      throw new AppError(
-        "AGENT_EXTERNAL_SCHEDULE_CAPABILITY_NOT_GRANTED",
-        `В целевой группе сейчас не разрешена capability ${capability}`,
-      );
-    }
-  }
-  return [...scheduled];
+  return requireGrantedExternalScheduleCapabilities(scheduled, currentGroup);
 }
 
 function status(row: ExternalScheduleStatusRow) {
