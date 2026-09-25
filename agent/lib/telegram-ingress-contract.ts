@@ -54,10 +54,23 @@ export interface TelegramIngressClaim {
   payload: Record<string, unknown>;
   queueId: string;
   mediaGroupPayloads?: Record<string, unknown>[];
+  /** A private burst in chat order, head first; handled as one message like an album. */
+  burstPayloads?: Record<string, unknown>[];
   mediaGroupLate?: boolean;
   transcript: string | null;
   updateId: string;
   voice: TelegramIngressVoice | null;
+}
+
+/**
+ * Private-chat bursts: how long a chat must be quiet before its head is claimed, the most it may
+ * wait, and how large the burst that the head then takes along may grow.
+ */
+export interface TelegramPrivateBurstPolicy {
+  maxCharacters: number;
+  maxMessages: number;
+  maxWaitMilliseconds: number;
+  quietMilliseconds: number;
 }
 
 export interface TelegramIngressRepository {
@@ -69,7 +82,7 @@ export interface TelegramIngressRepository {
   }): Promise<boolean>;
   beginVoiceTranscription(updateId: string, leaseToken: string): Promise<"completed" | "started">;
   beginDispatch(updateId: string, leaseToken: string, dispatchId: string): Promise<void>;
-  claimNext(leaseMilliseconds: number): Promise<TelegramIngressClaim | null>;
+  claimNext(leaseMilliseconds: number, burst: TelegramPrivateBurstPolicy): Promise<TelegramIngressClaim | null>;
   complete(updateId: string, leaseToken: string): Promise<void>;
   completeWithSession(
     updateId: string,
@@ -88,6 +101,8 @@ export interface TelegramIngressRepository {
   renewLease(updateId: string, leaseToken: string, leaseMilliseconds: number): Promise<Date>;
   sessionEventStreamCursor(sessionId: string): Promise<number>;
   saveVoiceTranscript(updateId: string, leaseToken: string, transcript: string): Promise<void>;
+  /** Milliseconds until the next private chat held by the burst window is ready; null when none is. */
+  privateBurstReadyIn(burst: TelegramPrivateBurstPolicy): Promise<number | null>;
 }
 
 export interface ClaimRow {

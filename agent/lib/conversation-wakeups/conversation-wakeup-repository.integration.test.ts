@@ -35,6 +35,7 @@ import { conversationWakeupRepository } from "./conversation-wakeup-repository.j
 import { CONVERSATION_CHANGED_CODE } from "./conversation-wakeup-transitions.js";
 import { conversationWakeupRunRepository } from "./conversation-wakeup-run-repository.js";
 import { conversationCanonicalRouteToken } from "./conversation-wakeup-turn.js";
+import { NO_BURSTS } from "../telegram-ingress.test-fixtures.js";
 
 const integrationTestsEnabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 const integrationDatabaseUrl = process.env.DATABASE_URL;
@@ -77,7 +78,7 @@ async function laneMark(): Promise<string | null> {
 }
 
 async function finishMessage(updateId: string) {
-  const claim = await telegramIngressRepository.claimNext(LEASE);
+  const claim = await telegramIngressRepository.claimNext(LEASE, NO_BURSTS);
   expect(claim?.updateId).toBe(updateId);
   await telegramIngressRepository.complete(claim!.updateId, claim!.leaseToken);
 }
@@ -170,7 +171,7 @@ describeWithDatabase("conversation wake-ups", () => {
     expect(await laneMark()).toBe(claim!.id);
 
     await enqueueMessage("1002");
-    expect(await telegramIngressRepository.claimNext(LEASE)).toBeNull();
+    expect(await telegramIngressRepository.claimNext(LEASE, NO_BURSTS)).toBeNull();
 
     const prepared = await conversationWakeupRepository.prepare(claim!, conversationCanonicalRouteToken);
     expect(prepared).toMatchObject({
@@ -183,7 +184,7 @@ describeWithDatabase("conversation wake-ups", () => {
 
     const cursor = await database().query("SELECT next_event_index FROM eve_session_event_cursors WHERE eve_session_id = 'ses_eve_1'");
     expect(Number(cursor.rows[0].next_event_index)).toBe(7);
-    expect((await telegramIngressRepository.claimNext(LEASE))?.updateId).toBe("1002");
+    expect((await telegramIngressRepository.claimNext(LEASE, NO_BURSTS))?.updateId).toBe("1002");
   });
 
   it("is left alone by the scheduler's own recoveries while it waits", async () => {
@@ -277,7 +278,7 @@ describeWithDatabase("conversation wake-ups", () => {
     await database().query("UPDATE telegram_ingress_wakeups SET lease_expires_at = now() - interval '1 second'");
 
     // The wake-up still owns the lane, so only its own recovery can free it for the message.
-    expect(await telegramIngressRepository.claimNext(LEASE)).toBeNull();
+    expect(await telegramIngressRepository.claimNext(LEASE, NO_BURSTS)).toBeNull();
     expect((await conversationWakeupRepository.claimNext(LEASE))?.id).toBe(claim!.id);
   });
 
@@ -409,9 +410,9 @@ describeWithDatabase("conversation wake-ups", () => {
       const wakeupId = (await database().query<{ id: string }>("SELECT id::text FROM telegram_ingress_wakeups")).rows[0]!.id;
       await holder.query("BEGIN");
       await holder.query("UPDATE telegram_ingress_queues SET active_wakeup_id = $1", [wakeupId]);
-      expect(await telegramIngressRepository.claimNext(LEASE)).toBeNull();
+      expect(await telegramIngressRepository.claimNext(LEASE, NO_BURSTS)).toBeNull();
       await holder.query("COMMIT");
-      expect(await telegramIngressRepository.claimNext(LEASE)).toBeNull();
+      expect(await telegramIngressRepository.claimNext(LEASE, NO_BURSTS)).toBeNull();
     } finally {
       holder.release();
     }
@@ -503,6 +504,22 @@ describeWithDatabase("conversation wake-ups", () => {
     await agentScheduleRepository.update(auth, selfPaused.id, { enabled: false, operationKey: "pause-self" });
     const after = await conversationWakeupContextRepository.listPlanned("1000", familyId, auth.userId);
     expect(after.map((wakeup) => wakeup.scheduleId)).toEqual([open.id]);
+  });
+
+  it("is not blocked by a burst member once its stuck head was closed", async () => {
+    await createWakeup();
+    await enqueueMessage("1001", "первое");
+    await enqueueMessage("1002", "второе");
+    const head = await telegramIngressRepository.claimNext(LEASE, { ...NO_BURSTS, maxCharacters: 6_000, maxMessages: 2 });
+    expect(head?.burstPayloads).toHaveLength(2);
+    await telegramIngressRepository.fail(head!.updateId, head!.leaseToken, {
+      code: "AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED", message: "Не удалось подтвердить остановку запроса",
+    });
+    // The owner closes the stuck head; its member keeps the copied code.
+    await database().query("UPDATE telegram_ingress_updates SET last_error_code = 'AGENT_TELEGRAM_RECOVERY_CLOSED' WHERE update_id = 1001");
+    await queueDue();
+
+    expect(await conversationWakeupRepository.claimNext(LEASE)).not.toBeNull();
   });
 
   it("keeps a deploy waiting while a wake-up turn runs", async () => {
