@@ -20,6 +20,7 @@
  * - The planned-wakeups block lists the author's open and self-paused wake-ups only.
  */
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -52,6 +53,16 @@ async function enqueueMessage(updateId: string, text = `text ${updateId}`) {
     },
     updateId,
   });
+}
+
+// The exact readiness query the deploy runs before it stops services.
+const deployReadinessSql = /app_idle="\$\(psql_current <<'SQL'\n([\s\S]*?)\nSQL/u.exec(
+  readFileSync(new URL("../../../scripts/production-deploy/backup.sh", import.meta.url), "utf8"),
+)?.[1];
+
+async function deployReadiness(): Promise<unknown> {
+  if (!deployReadinessSql) throw new Error("TEST_DEPLOY_READINESS_SQL_MISSING");
+  return Object.values((await database().query(deployReadinessSql)).rows[0])[0];
 }
 
 function handoff(admissionDeadlineAt = new Date(Date.now() + 5 * 60_000)) {
@@ -487,6 +498,18 @@ describeWithDatabase("conversation wake-ups", () => {
 
     const planned = await conversationWakeupContextRepository.listPlanned("1000", familyId, auth.userId);
     expect(planned.map((wakeup) => wakeup.scheduleId).sort()).toEqual([open.id, selfPaused.id].sort());
+  });
+
+  it("keeps a deploy waiting while a wake-up turn runs", async () => {
+    await createWakeup();
+    await queueDue();
+    expect(await deployReadiness()).toBe("idle");
+    const claim = await conversationWakeupRepository.claimNext(LEASE);
+    expect(await deployReadiness()).toBe("busy");
+    await conversationWakeupRepository.prepare(claim!, conversationCanonicalRouteToken);
+    await conversationWakeupRepository.markDispatched(claim!, "ses_eve_1", handoff());
+    await conversationWakeupRepository.complete(claim!, "ses_eve_1", 3);
+    expect(await deployReadiness()).toBe("idle");
   });
 
   it("rebinds a wake-up to the current conversation when it is run now", async () => {
