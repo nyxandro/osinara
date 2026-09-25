@@ -28,11 +28,13 @@ function buildInput(overrides: Partial<TurnResultInput> = {}) {
     lazyAttachment: null,
     message: { chat: { id: "555", type: "private" }, messageId: "42" },
     pendingDelivery: null,
+    plannedWakeups: [],
     profileReplyTimelineSequence: null,
     profileSignals: { explicitMentionTelegramUserIds: [], replyTelegramUserId: null },
     replyHandling: undefined,
     replyQuotedText: null,
     resumesPendingTask: false,
+    shownDuringTurn: null,
     storedAttachments: [],
     timelineEntryId: "entry-1",
     turnContext: {
@@ -41,6 +43,7 @@ function buildInput(overrides: Partial<TurnResultInput> = {}) {
       omittedBeforeSequence: null,
       visibleEntryIds: ["entry-1"],
     },
+    turnInterjectionMarker: null,
     turnStartedAt: new Date("2026-09-18T12:00:00.000Z"),
     ...overrides,
   } as unknown as TurnResultInput;

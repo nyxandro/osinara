@@ -153,7 +153,7 @@ describeWithDatabase("session repository", () => {
     });
     expect(pinned.id).toBe(current.id);
 
-    await sessionRepository.recordTurnCompleted(current.id, "wrun_old", false);
+    await sessionRepository.recordTurnCompleted(current.id, "wrun_old", false, true);
     const rotated = await sessionRepository.prepareTurn({
       baseContinuationToken: "102::",
       kind: "canonical",
@@ -236,7 +236,7 @@ describeWithDatabase("session repository", () => {
     await expect(sessionRepository.bindEveSession(current.id, oldRoot)).resolves.toBe("recorded");
     await expect(sessionRepository.bindEveSession(current.id, newRoot)).resolves.toBe("recorded");
     await sessionRepository.markPendingOperation(current.id, true);
-    await expect(sessionRepository.recordTurnCompleted(current.id, oldRoot, false)).resolves.toBe("stale");
+    await expect(sessionRepository.recordTurnCompleted(current.id, oldRoot, false, true)).resolves.toBe("stale");
     await expect(sessionRepository.recordTurnFailed(current.id, oldRoot)).resolves.toBe("stale");
     await expect(sessionRepository.recordSessionFailedByContinuationToken(
       current.continuationToken,

@@ -60,7 +60,7 @@ for (const target of ["reminder", "agent"] as const) {
         ? await reminderRepository.create(auth, {
           content: "Напоминание", firstRunAt, operationKey: "create", recurrence: { unit, interval } as never, scope: "personal", timezone,
         })
-        : await agentScheduleRepository.create(auth, {
+        : await agentScheduleRepository.create(auth, { executionContext: "isolated",
           title: "Сценарий", scenarioPrompt: "Проверь ресурс", userRequest: "Проверяй по расписанию", firstRunAt,
           operationKey: "create", recurrence: { kind: unit, interval } as never, scope: "personal", timezone,
         });

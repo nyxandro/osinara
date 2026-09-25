@@ -22,6 +22,10 @@ import {
 import { escapeUntrustedContextJson } from "./untrusted-context-json.js";
 import { alreadySeenTurnContext, turnInterjectionMarkerContext } from "./turn-interjection/turn-interjection-block.js";
 import { TURN_INTERJECTION_MARKER_ATTRIBUTE } from "./turn-interjection/turn-interjection-scope.js";
+import {
+  formatPlannedWakeupsContext,
+  type PlannedConversationWakeup,
+} from "./conversation-wakeups/conversation-wakeup-context.js";
 import type { TurnInterjectionContentKind } from "./turn-interjection/turn-interjection-repository.js";
 
 // Named `replyQuotedText` on purpose: the model already has the contract for that field from the
@@ -47,6 +51,8 @@ export function buildTelegramTurnResult(input: {
   lazyAttachment: (TelegramGroupAttachmentSummary & { telegramMessageId: string }) | null;
   message: TelegramMessage;
   pendingDelivery: { context: string; cursor: string } | null;
+  /** Open wake-ups of this chat's conversation, so the message can be related to them. */
+  plannedWakeups: readonly PlannedConversationWakeup[];
   profileReplyTimelineSequence: string | null;
   profileSignals: {
     explicitMentionTelegramUserIds: readonly string[];
@@ -81,6 +87,8 @@ export function buildTelegramTurnResult(input: {
   if (input.pendingDelivery) context.push(input.pendingDelivery.context);
   if (input.shownDuringTurn) context.push(alreadySeenTurnContext(input.shownDuringTurn));
   if (input.turnInterjectionMarker) context.push(turnInterjectionMarkerContext(input.turnInterjectionMarker));
+  const plannedWakeups = formatPlannedWakeupsContext(input.plannedWakeups);
+  if (plannedWakeups) context.push(plannedWakeups);
   // A reply that resumes a pending confirmation is delivered by Eve as an answer to its own
   // question, built from the raw message text: the prepared envelope never reaches the model, and
   // the highlighted fragment goes with it. Context is delivered on that path, so the fragment is

@@ -98,6 +98,9 @@ export const TELEGRAM_INGRESS_RECOVERY_MAX_ATTEMPTS = 3;
 // Bound expensive turns on the single-process deployment without letting groups occupy button slots.
 export const TELEGRAM_INGRESS_MESSAGE_CONCURRENCY = 2;
 export const TELEGRAM_INGRESS_CALLBACK_CONCURRENCY = 2;
+// Wake-up turns run on their own slot, so a long wake-up never takes a message's place; at most
+// this many wake-up turns run at once across all chats.
+export const TELEGRAM_INGRESS_WAKEUP_CONCURRENCY = 1;
 export const TELEGRAM_MAX_INBOUND_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 // A logical private message can be a Telegram media group (up to ten files).
 export const TELEGRAM_MAX_ATTACHMENTS_PER_MESSAGE = 10;

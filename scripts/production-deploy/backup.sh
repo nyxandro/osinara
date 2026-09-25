@@ -69,6 +69,8 @@ SQL
 
 runtime_is_idle() {
   local app_idle workflow_idle
+  # A wake-up turn runs in the chat's lane like a message. The running release may predate the
+  # wake-up table, so that query is built at execution time and runs only where the table exists.
   app_idle="$(psql_current <<'SQL'
 SELECT CASE
  WHEN EXISTS (SELECT 1 FROM conversation_sessions WHERE retired_at IS NULL AND pending_operation)
@@ -76,6 +78,10 @@ SELECT CASE
  WHEN EXISTS (SELECT 1 FROM runtime_admission_holders)
    OR EXISTS (SELECT 1 FROM telegram_ingress_updates WHERE status = 'processing'
      OR last_error_code = 'AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED')
+   OR CASE WHEN to_regclass('public.telegram_ingress_wakeups') IS NULL THEN false
+     ELSE (xpath('/row/busy/text()', query_to_xml(
+       'SELECT EXISTS (SELECT 1 FROM telegram_ingress_wakeups WHERE status = ''processing'') AS busy',
+       false, true, '')))[1]::text = 'true' END
    OR EXISTS (SELECT 1 FROM conversation_sessions WHERE retired_at IS NULL
      AND kind IN ('scheduled', 'proactive') AND task_state IN ('pending', 'running'))
    THEN 'busy'

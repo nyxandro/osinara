@@ -165,6 +165,9 @@ export function repositories() {
     turnInterjections: {
       findDeliveredContentKind: vi.fn().mockResolvedValue(null),
     },
+    conversationWakeups: {
+      listPlanned: vi.fn().mockResolvedValue([]),
+    },
     timeline: {
       recordInbound: vi.fn().mockResolvedValue({
         entryId: "00000000-0000-4000-8000-000000000011",

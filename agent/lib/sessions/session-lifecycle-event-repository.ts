@@ -168,12 +168,14 @@ export const sessionLifecycleEventRepository = {
     id: string,
     eveSessionId: string,
     pendingOperation: boolean,
+    /** A wake-up turn answers no person, so it does not spend the conversation's turn budget. */
+    countsTowardRotation: boolean,
   ): Promise<SessionEventResult> {
     const recorded = await applyTerminalMutation({
       id,
       sql:
       `UPDATE conversation_sessions
-          SET completed_turns = completed_turns + 1,
+          SET completed_turns = completed_turns + CASE WHEN $5 THEN 1 ELSE 0 END,
               last_activity_at = now(), pending_operation = $3,
               eve_session_id = $2,
               task_state = CASE
@@ -188,7 +190,7 @@ export const sessionLifecycleEventRepository = {
               END
         WHERE id = $1 AND retired_at IS NULL
            AND (eve_session_id IS NULL OR eve_session_id <= $2)`,
-      parameters: [id, eveSessionId, pendingOperation, SESSION_RETENTION_DAYS],
+      parameters: [id, eveSessionId, pendingOperation, SESSION_RETENTION_DAYS, countsTowardRotation],
     });
     if (recorded) return "recorded";
     return await classifyMissedSessionEvent(
