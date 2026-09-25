@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
+import { bash, glob, grep, readFile, writeFile } from "eve/tools/defaults";
 
 import { buildMemoryReviewToolSurface } from "./memory-review/memory-review-tool-surface.js";
 import { EXTERNAL_GROUP_TOOL_NAMES } from "./tool-policy/group-tool-catalog.js";
@@ -28,6 +29,7 @@ const REQUIRED_CORE_RULES = [
   "sideEffectStatus",
 ] as const;
 const TOTAL_DESCRIPTION_MAX_CHARACTERS = 25_000;
+const NATIVE_DESCRIPTIONS = new Set([bash, glob, grep, readFile, writeFile].map((definition) => definition.description));
 
 function surfaces() {
   const externalInput = {
@@ -55,7 +57,9 @@ describe("model-facing tool contracts", () => {
   it("walks every emitted mode surface and requires a complete compact descriptor", () => {
     for (const [surfaceName, surface] of Object.entries(surfaces())) {
       expect(Object.keys(surface).length, `${surfaceName} must emit tools`).toBeGreaterThan(0);
+      // A framework built-in re-emitted unchanged was already in the prompt before it was emitted.
       const totalDescriptionCharacters = Object.values(surface)
+        .filter((definition) => !NATIVE_DESCRIPTIONS.has(definition.description))
         .reduce((total, definition) => total + definition.description.length, 0);
       expect(totalDescriptionCharacters, `${surfaceName} total prompt size`)
         .toBeLessThanOrEqual(TOTAL_DESCRIPTION_MAX_CHARACTERS);

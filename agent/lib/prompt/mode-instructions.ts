@@ -13,6 +13,7 @@
 import { EXTERNAL_GROUP_MODEL_POLICY } from "../external-group-model-policy.js";
 import { externalGroupCapabilityInstructions } from "../tool-policy/external-group-capability-instructions.js";
 import type { ExternalGroupToolName } from "../tool-policy/group-tool-catalog.js";
+import { TURN_INTERJECTION_RULES } from "../turn-interjection/turn-interjection-block.js";
 
 import type { GroupSafeSkillName } from "../group-skills/group-skill-catalog.js";
 import {
@@ -159,6 +160,7 @@ function privateInstructions(
     scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
     scheduledRun || subagentTurn ? null : VOICE_MESSAGE_RULES,
+    scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
     scheduledRun ? null : trustedBehaviorPreferenceRules(),
   ]);
 }
@@ -225,6 +227,7 @@ function familyInstructions(
     scheduledRun || subagentTurn ? null : GROUP_STANDALONE_MESSAGE_RULES,
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
     scheduledRun || subagentTurn ? null : VOICE_MESSAGE_RULES,
+    scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
     scheduledRun ? null : trustedBehaviorPreferenceRules(),
   ]);
 }

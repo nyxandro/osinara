@@ -22,6 +22,8 @@ vi.mock("./external-group-live-policy.js", () => ({
 }));
 
 import { FAMILY_ONLY_TOOL_NAMES, PRIVATE_ONLY_TOOL_NAMES, TRUSTED_MODE_TOOL_NAMES, buildModeToolSurface, buildSubagentToolSurface } from "./mode-tool-surface.js";
+import { bash as nativeBash, glob as nativeGlob, grep as nativeGrep, readFile as nativeReadFile, writeFile as nativeWriteFile } from "eve/tools/defaults";
+import { TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES } from "../turn-interjection/turn-interjection-surface.js";
 import { ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, EXTERNAL_GROUP_BASE_TOOLS, EXTERNAL_GROUP_TOOL_NAMES, FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS, type ExternalGroupToolName } from "./group-tool-catalog.js";
 
 function names(input: Parameters<typeof buildModeToolSurface>[0]): string[] {
@@ -53,7 +55,9 @@ function externalAuth(toolAllowlist: readonly string[]): SessionAuth {
 
 describe("trusted mode tool surfaces", () => {
   it("gives a private chat the shared tools plus owner administration only", () => {
-    expect(names({ environment: "private" })).toEqual([...TRUSTED_MODE_TOOL_NAMES, ...PRIVATE_ONLY_TOOL_NAMES].sort());
+    expect(names({ environment: "private" })).toEqual(
+      [...TRUSTED_MODE_TOOL_NAMES, ...PRIVATE_ONLY_TOOL_NAMES, ...TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES].sort(),
+    );
     expect(names({ environment: "private" })).toContain("manage_external_group_schedule");
   });
 
@@ -75,7 +79,9 @@ describe("trusted mode tool surfaces", () => {
   });
 
   it("gives a family group the shared tools plus group history and attachments only", () => {
-    expect(names({ environment: "family" })).toEqual([...TRUSTED_MODE_TOOL_NAMES, ...FAMILY_ONLY_TOOL_NAMES].sort());
+    expect(names({ environment: "family" })).toEqual(
+      [...TRUSTED_MODE_TOOL_NAMES, ...FAMILY_ONLY_TOOL_NAMES, ...TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES].sort(),
+    );
     expect(names({ environment: "family" })).not.toContain("manage_external_group_schedule");
   });
 
@@ -111,9 +117,28 @@ describe("trusted mode tool surfaces", () => {
 
   it("emits no denial stubs in a trusted zone", () => {
     for (const environment of ["private", "family"] as const) {
+      const surface = buildModeToolSurface({ environment });
       for (const denied of FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS) {
+        // Bash is re-emitted only as Eve's own tool so its results can carry waiting messages.
+        if (denied === "bash") {
+          expect(surface.bash?.description, `${environment} must keep the native bash`).toBe(nativeBash.description);
+          continue;
+        }
         expect(names({ environment }), `${environment} must not override ${denied}`).not.toContain(denied);
       }
+    }
+  });
+
+  it("re-emits native sandbox tools unchanged in interactive trusted zones only", () => {
+    const native = { bash: nativeBash, glob: nativeGlob, grep: nativeGrep, read_file: nativeReadFile, write_file: nativeWriteFile };
+    for (const environment of ["private", "family"] as const) {
+      const surface = buildModeToolSurface({ environment });
+      for (const [name, definition] of Object.entries(native)) {
+        expect(surface[name]?.description, `${environment}.${name}`).toBe(definition.description);
+        expect(surface[name]?.inputSchema, `${environment}.${name}`).toBe(definition.inputSchema);
+      }
+      const scheduled = buildModeToolSurface({ environment, scheduledRun: true });
+      for (const name of TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES) expect(scheduled).not.toHaveProperty(name);
     }
   });
 
@@ -227,10 +252,13 @@ describe("external group tool surface", () => {
       skills: {},
     });
 
-    for (const nativeTool of ["glob", "grep", "read_file", "write_file"]) {
+    for (const nativeTool of ["glob", "grep", "read_file", "write_file"] as const) {
       expect(surface).toHaveProperty(nativeTool);
-      expect(buildModeToolSurface({ environment: "private" })).not.toHaveProperty(nativeTool);
-      expect(buildModeToolSurface({ environment: "family" })).not.toHaveProperty(nativeTool);
+      // Trusted zones keep the framework's own tool; only the external group gets a guarded one.
+      for (const environment of ["private", "family"] as const) {
+        expect(buildModeToolSurface({ environment })[nativeTool]?.description)
+          .not.toBe(surface[nativeTool]!.description);
+      }
     }
     expect(surface).toHaveProperty("bash");
   });

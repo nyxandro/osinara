@@ -20,6 +20,9 @@ import {
   formatTelegramAttachmentReferences,
 } from "./telegram-on-message-context.js";
 import { escapeUntrustedContextJson } from "./untrusted-context-json.js";
+import { alreadySeenTurnContext, turnInterjectionMarkerContext } from "./turn-interjection/turn-interjection-block.js";
+import { TURN_INTERJECTION_MARKER_ATTRIBUTE } from "./turn-interjection/turn-interjection-scope.js";
+import type { TurnInterjectionContentKind } from "./turn-interjection/turn-interjection-repository.js";
 
 // Named `replyQuotedText` on purpose: the model already has the contract for that field from the
 // ordinary turn envelope, so the same words mean the same thing on this path.
@@ -55,9 +58,13 @@ export function buildTelegramTurnResult(input: {
   /** True when the reply answers a pending confirmation, which Eve resumes with the raw text alone. */
   resumesPendingTask: boolean;
   responseSessionId?: string;
+  /** What a running turn already saw of this message, when it was shown with a tool result. */
+  shownDuringTurn: TurnInterjectionContentKind | null;
   storedAttachments: readonly StoredTelegramAttachment[];
   timelineEntryId: string;
   turnContext: PreparedTelegramGroupTurnContext;
+  /** Announced to the model here, so only a block carrying it counts as the author's new message. */
+  turnInterjectionMarker: string | null;
   turnStartedAt: Date;
 }): TelegramInboundResult {
   const context = [
@@ -72,6 +79,8 @@ export function buildTelegramTurnResult(input: {
   }
   if (input.lazyAttachment) context.push(formatTelegramAttachmentReferences([input.lazyAttachment]));
   if (input.pendingDelivery) context.push(input.pendingDelivery.context);
+  if (input.shownDuringTurn) context.push(alreadySeenTurnContext(input.shownDuringTurn));
+  if (input.turnInterjectionMarker) context.push(turnInterjectionMarkerContext(input.turnInterjectionMarker));
   // A reply that resumes a pending confirmation is delivered by Eve as an answer to its own
   // question, built from the raw message text: the prepared envelope never reaches the model, and
   // the highlighted fragment goes with it. Context is delivered on that path, so the fragment is
@@ -114,6 +123,9 @@ export function buildTelegramTurnResult(input: {
           ? {}
           : { telegramProfileReplyTimelineSequence: input.profileReplyTimelineSequence }),
         telegramTurnStartedAt: input.turnStartedAt.toISOString(),
+        ...(input.turnInterjectionMarker === null
+          ? {}
+          : { [TURN_INTERJECTION_MARKER_ATTRIBUTE]: input.turnInterjectionMarker }),
         ...(input.message.messageThreadId === undefined
           ? {}
           : { telegramMessageThreadId: String(input.message.messageThreadId) }),
