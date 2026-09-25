@@ -105,6 +105,9 @@ export const TELEGRAM_INGRESS_WAKEUP_CONCURRENCY = 1;
 // has been quiet this long, so the whole burst is answered at once; a steady stream waits at most the cap.
 export const TELEGRAM_PRIVATE_BURST_QUIET_MS = 2_000;
 export const TELEGRAM_PRIVATE_BURST_MAX_WAIT_MS = 20_000;
+// One burst is one model message: it stays well inside the turn's 12 000-character message budget.
+export const TELEGRAM_PRIVATE_BURST_MAX_MESSAGES = 10;
+export const TELEGRAM_PRIVATE_BURST_MAX_CHARACTERS = 6_000;
 export const TELEGRAM_MAX_INBOUND_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 // A logical private message can be a Telegram media group (up to ten files).
 export const TELEGRAM_MAX_ATTACHMENTS_PER_MESSAGE = 10;

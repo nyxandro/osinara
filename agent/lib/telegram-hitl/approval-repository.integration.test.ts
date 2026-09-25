@@ -16,7 +16,7 @@ import { sessionRepository } from "../sessions/session-repository.js";
 import { telegramHitlApprovalRepository } from "./approval-repository.js";
 import { telegramIngressRepository } from "../telegram-ingress-repository.js";
 import { bindTelegramIngressTurn } from "../telegram-ingress-binding.js";
-import { NO_BURST_WAIT } from "../telegram-ingress.test-fixtures.js";
+import { NO_BURSTS } from "../telegram-ingress.test-fixtures.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 const url = process.env.DATABASE_URL;
@@ -108,7 +108,7 @@ describeWithDatabase("Telegram HITL approval repository", () => {
     await database().query("TRUNCATE telegram_ingress_queues CASCADE");
     await telegramIngressRepository.enqueue({ updateId: "900", continuationKey: "-1001:55:", payload: { update_id: 900,
       callback_query: { id: "callback-900", data: "eve:0", from: { id: OWNER_TELEGRAM_ID } } } });
-    const claim = (await telegramIngressRepository.claimNext(60000, NO_BURST_WAIT))!;
+    const claim = (await telegramIngressRepository.claimNext(60000, NO_BURSTS))!;
     const dispatchId = crypto.randomUUID();
     await telegramIngressRepository.beginDispatch(claim.updateId,claim.leaseToken,dispatchId);
     const input = { baseContinuationToken: "-1001:55:88", callbackData: "eve:0", telegramChatId: "-1001",
@@ -132,7 +132,7 @@ describeWithDatabase("Telegram HITL approval repository", () => {
     await database().query("TRUNCATE telegram_ingress_queues CASCADE");
     await telegramIngressRepository.enqueue({ updateId: "901",continuationKey: "-1001:55:",payload: { update_id: 901,
       message: { message_id: 100,chat: { id: "-1001" },from: { id: OWNER_TELEGRAM_ID },reply_to_message: { message_id: 88 },text: "Да" } } });
-    const claim = (await telegramIngressRepository.claimNext(60000, NO_BURST_WAIT))!;
+    const claim = (await telegramIngressRepository.claimNext(60000, NO_BURSTS))!;
     const dispatchId=crypto.randomUUID();
     await telegramIngressRepository.beginDispatch("901",claim.leaseToken,dispatchId);
     const input = { baseContinuationToken: "-1001:55:88",telegramChatId: "-1001",telegramMessageId: "88",telegramUserId: OWNER_TELEGRAM_ID,

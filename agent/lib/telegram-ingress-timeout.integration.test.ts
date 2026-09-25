@@ -6,7 +6,7 @@ import { createMainAgentMemoryFixture } from "./memory-agent-write.integration-f
 import { sessionRepository } from "./sessions/session-repository.js";
 import { createTelegramDurableIngress } from "./telegram-durable-ingress.js";
 import { telegramIngressRepository } from "./telegram-ingress-repository.js";
-import { NO_BURST_WAIT } from "./telegram-ingress.test-fixtures.js";
+import { NO_BURSTS } from "./telegram-ingress.test-fixtures.js";
 
 const describeWithDatabase = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true" ? describe : describe.skip;
 
@@ -104,7 +104,7 @@ describeWithDatabase("Telegram queue after a session timeout", () => {
     } : null);
     const notifyTimeout = vi.fn();
     if (failure === "crash") {
-      const claim = await telegramIngressRepository.claimNext(1000, NO_BURST_WAIT);
+      const claim = await telegramIngressRepository.claimNext(1000, NO_BURSTS);
       if (!claim) throw new Error("TEST_INGRESS_CLAIM_MISSING");
       await telegramIngressRepository.beginDispatch(claim.updateId, claim.leaseToken, crypto.randomUUID());
       await database().query("UPDATE telegram_ingress_updates SET recovery_protocol=0 WHERE update_id=$1", [claim.updateId]);
@@ -129,6 +129,6 @@ describeWithDatabase("Telegram queue after a session timeout", () => {
       { status: "pending", last_error_code: null },
       { status: "completed", last_error_code: null },
     ]);
-    expect(await telegramIngressRepository.claimNext(1000, NO_BURST_WAIT)).toBeNull();
+    expect(await telegramIngressRepository.claimNext(1000, NO_BURSTS)).toBeNull();
   });
 });

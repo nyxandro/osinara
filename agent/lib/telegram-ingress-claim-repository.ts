@@ -5,13 +5,13 @@ import {
   type ClaimRow,
   mapTelegramIngressClaim,
   requireLeaseMilliseconds,
-  type TelegramPrivateBurstWindow,
+  type TelegramPrivateBurstPolicy,
 } from "./telegram-ingress-contract.js";
-import { requireTelegramPrivateBurstWindow } from "./telegram-private-burst.js";
+import { joinTelegramBurst, requireTelegramPrivateBurstPolicy } from "./telegram-private-burst.js";
 
-export async function claimNextTelegramIngress(leaseMilliseconds: number, burst: TelegramPrivateBurstWindow) {
+export async function claimNextTelegramIngress(leaseMilliseconds: number, burst: TelegramPrivateBurstPolicy) {
   requireLeaseMilliseconds(leaseMilliseconds);
-  requireTelegramPrivateBurstWindow(burst);
+  requireTelegramPrivateBurstPolicy(burst);
   const client = await database().connect();
   try {
     await client.query("BEGIN");
@@ -51,7 +51,7 @@ export async function claimNextTelegramIngress(leaseMilliseconds: number, burst:
              AND item.received_at > now() - ($4 * interval '1 millisecond')
              AND EXISTS (
                SELECT 1 FROM telegram_ingress_updates latest
-                WHERE latest.queue_id = item.queue_id AND latest.status = 'pending'
+                WHERE latest.queue_id = item.queue_id AND latest.status = 'pending' AND latest.payload ? 'message'
                   AND latest.received_at > now() - ($3 * interval '1 millisecond')
              ))
            -- A wake-up turn of this chat owns the lane until its item is terminal, like an earlier update.
@@ -82,6 +82,14 @@ export async function claimNextTelegramIngress(leaseMilliseconds: number, burst:
     );
     const row = result.rows[0];
     const claim = row ? mapTelegramIngressClaim(row) : null;
+    // A private head takes the messages already waiting behind it into the same turn. An album and
+    // a late album member are handled as they always were.
+    if (claim && row && row.media_group_key === null && !row.media_group_late) {
+      const joined = await joinTelegramBurst(client, {
+        dispatchStarted: claim.dispatchStarted, payload: claim.payload, queueId: claim.queueId, updateId: claim.updateId,
+      }, burst);
+      if (joined) claim.burstPayloads = joined;
+    }
     if (claim && row && row.media_group_key !== null) {
       const members = await client.query<{ payload: Record<string, unknown> }>(
         `SELECT payload FROM telegram_ingress_updates

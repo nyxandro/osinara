@@ -35,7 +35,7 @@ import { conversationWakeupRepository } from "./conversation-wakeup-repository.j
 import { CONVERSATION_CHANGED_CODE } from "./conversation-wakeup-transitions.js";
 import { conversationWakeupRunRepository } from "./conversation-wakeup-run-repository.js";
 import { conversationCanonicalRouteToken } from "./conversation-wakeup-turn.js";
-import { NO_BURST_WAIT } from "../telegram-ingress.test-fixtures.js";
+import { NO_BURSTS } from "../telegram-ingress.test-fixtures.js";
 
 const integrationTestsEnabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 const integrationDatabaseUrl = process.env.DATABASE_URL;
@@ -78,7 +78,7 @@ async function laneMark(): Promise<string | null> {
 }
 
 async function finishMessage(updateId: string) {
-  const claim = await telegramIngressRepository.claimNext(LEASE, NO_BURST_WAIT);
+  const claim = await telegramIngressRepository.claimNext(LEASE, NO_BURSTS);
   expect(claim?.updateId).toBe(updateId);
   await telegramIngressRepository.complete(claim!.updateId, claim!.leaseToken);
 }
@@ -171,7 +171,7 @@ describeWithDatabase("conversation wake-ups", () => {
     expect(await laneMark()).toBe(claim!.id);
 
     await enqueueMessage("1002");
-    expect(await telegramIngressRepository.claimNext(LEASE, NO_BURST_WAIT)).toBeNull();
+    expect(await telegramIngressRepository.claimNext(LEASE, NO_BURSTS)).toBeNull();
 
     const prepared = await conversationWakeupRepository.prepare(claim!, conversationCanonicalRouteToken);
     expect(prepared).toMatchObject({
@@ -184,7 +184,7 @@ describeWithDatabase("conversation wake-ups", () => {
 
     const cursor = await database().query("SELECT next_event_index FROM eve_session_event_cursors WHERE eve_session_id = 'ses_eve_1'");
     expect(Number(cursor.rows[0].next_event_index)).toBe(7);
-    expect((await telegramIngressRepository.claimNext(LEASE, NO_BURST_WAIT))?.updateId).toBe("1002");
+    expect((await telegramIngressRepository.claimNext(LEASE, NO_BURSTS))?.updateId).toBe("1002");
   });
 
   it("is left alone by the scheduler's own recoveries while it waits", async () => {
@@ -278,7 +278,7 @@ describeWithDatabase("conversation wake-ups", () => {
     await database().query("UPDATE telegram_ingress_wakeups SET lease_expires_at = now() - interval '1 second'");
 
     // The wake-up still owns the lane, so only its own recovery can free it for the message.
-    expect(await telegramIngressRepository.claimNext(LEASE, NO_BURST_WAIT)).toBeNull();
+    expect(await telegramIngressRepository.claimNext(LEASE, NO_BURSTS)).toBeNull();
     expect((await conversationWakeupRepository.claimNext(LEASE))?.id).toBe(claim!.id);
   });
 
@@ -410,9 +410,9 @@ describeWithDatabase("conversation wake-ups", () => {
       const wakeupId = (await database().query<{ id: string }>("SELECT id::text FROM telegram_ingress_wakeups")).rows[0]!.id;
       await holder.query("BEGIN");
       await holder.query("UPDATE telegram_ingress_queues SET active_wakeup_id = $1", [wakeupId]);
-      expect(await telegramIngressRepository.claimNext(LEASE, NO_BURST_WAIT)).toBeNull();
+      expect(await telegramIngressRepository.claimNext(LEASE, NO_BURSTS)).toBeNull();
       await holder.query("COMMIT");
-      expect(await telegramIngressRepository.claimNext(LEASE, NO_BURST_WAIT)).toBeNull();
+      expect(await telegramIngressRepository.claimNext(LEASE, NO_BURSTS)).toBeNull();
     } finally {
       holder.release();
     }

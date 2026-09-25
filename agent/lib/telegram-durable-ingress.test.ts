@@ -13,6 +13,7 @@
  * - A session that never reaches a boundary releases the queue within one lease.
  * - A private chat still receiving a burst is claimed the moment its quiet window ends, not at the
  *   next poll, with the configured window.
+ * - A claimed burst reaches Eve as one message carrying every part in chat order.
  */
 import type { TelegramVerifiedUpdateContext } from "eve/channels/telegram";
 import { parseTelegramUpdate } from "eve/channels/telegram";
@@ -323,8 +324,30 @@ describe("createTelegramDurableIngress", () => {
     await runDrain(ingress(storage, { dispatch }), voicePayload(), dispatch);
 
     expect(dispatch).toHaveBeenCalledTimes(1);
-    expect(storage.value.claimNext).toHaveBeenCalledWith(60_000, { maxWaitMilliseconds: 20_000, quietMilliseconds: 2_000 });
-    expect(storage.value.privateBurstReadyIn).toHaveBeenCalledWith({ maxWaitMilliseconds: 20_000, quietMilliseconds: 2_000 });
+    expect(storage.value.claimNext).toHaveBeenCalledWith(60_000, { maxCharacters: 6_000, maxMessages: 10, maxWaitMilliseconds: 20_000, quietMilliseconds: 2_000 });
+    expect(storage.value.privateBurstReadyIn).toHaveBeenCalledWith({ maxCharacters: 6_000, maxMessages: 10, maxWaitMilliseconds: 20_000, quietMilliseconds: 2_000 });
+  });
+
+  it("hands a claimed burst to Eve as one message with every part in order", async () => {
+    const storage = repository();
+    const part = (id: number, text: string) => ({
+      message: { chat: { id: 101, type: "private" }, date: 1_700_000_000, from: { first_name: "Анна", id: 101, is_bot: false }, message_id: id, text },
+      update_id: id,
+    });
+    const burst = [part(1101, "напомни завтра в 9 позвонить маме"), part(1102, "и добавь молоко в список"), part(1103, "спасибо")];
+    storage.value.claimNext = vi.fn()
+      .mockResolvedValueOnce({ ...storage.claim, burstPayloads: burst, payload: burst[0], updateId: "1101", voice: null })
+      .mockResolvedValueOnce(null);
+    const dispatch = vi.fn().mockResolvedValue({
+      getEventStream: async () => new ReadableStream({ start(controller) { controller.enqueue({ type: "session.waiting" }); } }),
+      id: "session-1",
+    });
+
+    await runDrain(ingress(storage, { dispatch }), voicePayload(), dispatch);
+
+    const [update] = dispatch.mock.calls[0]!;
+    expect(update.message.messageId).toBe("1101");
+    expect(update.message.text).toBe("напомни завтра в 9 позвонить маме\n\nи добавь молоко в список\n\nспасибо");
   });
 
   it("keeps draining the queue after one item fails", async () => {

@@ -24,6 +24,8 @@ import { Sema } from "async-sema";
 import {
   TELEGRAM_INGRESS_CALLBACK_CONCURRENCY,
   TELEGRAM_INGRESS_WAKEUP_CONCURRENCY,
+  TELEGRAM_PRIVATE_BURST_MAX_CHARACTERS,
+  TELEGRAM_PRIVATE_BURST_MAX_MESSAGES,
   TELEGRAM_PRIVATE_BURST_MAX_WAIT_MS,
   TELEGRAM_PRIVATE_BURST_QUIET_MS,
   TELEGRAM_INGRESS_CANCELLATION_GRACE_MS,
@@ -34,7 +36,7 @@ import {
 } from "../config.js";
 import { AppError, isAppError } from "./app-error.js";
 import { transcribeTelegramVoice } from "./groq-voice-transcription.js";
-import { type TelegramIngressRepository, type TelegramPrivateBurstWindow } from "./telegram-ingress-contract.js";
+import { type TelegramIngressRepository, type TelegramPrivateBurstPolicy } from "./telegram-ingress-contract.js";
 import { waitForHeldPrivateChat } from "./telegram-private-burst.js";
 import { telegramIngressRepository } from "./telegram-ingress-repository.js";
 import {
@@ -49,6 +51,7 @@ import { waitForSessionBoundary } from "./telegram-session-boundary.js";
 import { runTelegramProcessing, TelegramProcessingTimeout } from "./telegram-processing-deadline.js";
 import { recoverTelegramIngress } from "./telegram-ingress-recovery.js";
 import { combineTelegramMediaGroup } from "./telegram-media-group.js";
+import { combineTelegramBurst } from "./telegram-private-burst-message.js";
 import { telegramDispatchControl } from "./telegram-ingress-dispatch-control.js";
 import { resumeTelegramResponse } from "./telegram-response-recovery.js";
 import { recoverUnboundTelegramPreparation } from "./telegram-preparation-recovery.js";
@@ -91,7 +94,7 @@ interface DurableIngressDependencies {
     slots: Sema;
   }): Promise<boolean>;
   admissionMilliseconds?: number;
-  privateBurst?: TelegramPrivateBurstWindow;
+  privateBurst?: TelegramPrivateBurstPolicy;
   observerIdleMilliseconds?: number;
   cancellationMilliseconds?: number;
   repository: TelegramIngressRepository;
@@ -191,6 +194,8 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
   const callbackSlots = new Sema(TELEGRAM_INGRESS_CALLBACK_CONCURRENCY);
   const wakeupSlots = new Sema(TELEGRAM_INGRESS_WAKEUP_CONCURRENCY);
   const privateBurst = dependencies.privateBurst ?? {
+    maxCharacters: TELEGRAM_PRIVATE_BURST_MAX_CHARACTERS,
+    maxMessages: TELEGRAM_PRIVATE_BURST_MAX_MESSAGES,
     maxWaitMilliseconds: TELEGRAM_PRIVATE_BURST_MAX_WAIT_MS,
     quietMilliseconds: TELEGRAM_PRIVATE_BURST_QUIET_MS,
   };
@@ -254,7 +259,8 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
             "Один из файлов пришёл после начала обработки пачки и не был обработан. Отправьте его отдельно с нужной просьбой");
         }
         const acceptedUpdate = claim.mediaGroupPayloads
-          ? combineTelegramMediaGroup(claim.mediaGroupPayloads) : parseTelegramUpdate(payload);
+          ? combineTelegramMediaGroup(claim.mediaGroupPayloads)
+          : claim.burstPayloads ? combineTelegramBurst(claim.burstPayloads) : parseTelegramUpdate(payload);
         if (!acceptedUpdate) {
           await dependencies.repository.complete(claim.updateId, claim.leaseToken);
           continue;

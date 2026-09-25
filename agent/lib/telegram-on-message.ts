@@ -315,17 +315,6 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
     const resumesPendingTask = replyAuthorization.resumesPendingTask;
     verifiedReplyRoute = replyAuthorization.verifiedReplyRoute;
 
-    // A private message with another one already waiting behind it is part of a burst: it stays in
-    // the conversation and the burst's last message starts the one turn that answers all of them.
-    // Files are handed to the model only with their own turn, a command acts on its own, and an
-    // answer to a pending confirmation resumes that action, so each of them keeps its turn.
-    if (ctx.ingressRecovery && message.chat.type === "private" && !resumesPendingTask &&
-      message.attachments.length === 0 && !isTelegramSlashCommand(dispatchText) &&
-      await repositories.privateBursts.hasFollowingMessage(ctx.ingressRecovery.updateId)) {
-      console.info(JSON.stringify({ code: "AGENT_TELEGRAM_MESSAGE_JOINED_BURST", updateId: ctx.ingressRecovery.updateId }));
-      return null;
-    }
-
     // Context snapshots and one-time notices are consumed only after reply/HITL authorization has
     // proved that this accepted message will continue into an agent turn.
     const profileSignals = actor.kind !== "telegram_channel"
