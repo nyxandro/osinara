@@ -22,7 +22,7 @@ import type { ToolContext } from "eve/tools";
 import { AppError } from "../app-error.js";
 import type { TelegramVoiceFile } from "../groq-voice-transcription.js";
 import { groupCanonicalContinuationToken } from "../sessions/group-canonical-token.js";
-import { telegramInboundText } from "../telegram-group-message-storage.js";
+import { telegramForumTopicId, telegramInboundText } from "../telegram-group-message-storage.js";
 import {
   classifyTelegramInboundMedia,
   isMessageAddressedToBot,
@@ -129,6 +129,11 @@ async function landsInThisConversation(message: TelegramMessage, collection: Col
     telegramChatId: collection.scope.telegramChatId,
   })) return false;
   const { scope } = collection;
+  // A group message belongs to the conversation of its own forum topic, whatever its queue.
+  if (scope.groupId !== null) {
+    const topic = telegramForumTopicId(message);
+    if ((topic === null ? null : Number(topic)) !== scope.telegramForumTopicId) return false;
+  }
   const token = scope.groupId === null
     ? telegramBaseContinuationToken(message)
     : groupCanonicalContinuationToken(scope.groupId, scope.telegramForumTopicId);

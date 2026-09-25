@@ -258,6 +258,23 @@ describe("createTurnInterjectionCollector", () => {
     expect(events).toEqual(["release", "claim:502=text", "returned:502"]);
   });
 
+  it("leaves a group message of another forum topic waiting", async () => {
+    const topicMessage = (updateId: string, topic: number) => candidate(updateId, {
+      chat: { id: -2001, is_forum: true, type: "supergroup" },
+      is_topic_message: true,
+      message_thread_id: topic,
+      text: `@${BOT} стоп`,
+    });
+    candidates = [topicMessage("501", 9), topicMessage("502", 7)];
+    const { collect } = createTurnInterjectionCollector(dependencies);
+
+    const block = await collect(toolContext({ ...GROUP_ATTRIBUTES, telegramForumTopicId: "7", telegramMessageThreadId: "7" }));
+
+    expect(blockMessages(block)).toHaveLength(1);
+    expect(events).toEqual(["release", "claim:502=text", "returned:502"]);
+    expect(dependencies.repository.routeSessionId).toHaveBeenCalledWith("osinara:group:group-1:topic:7");
+  });
+
   it("does not let messages it will not show fill the window", async () => {
     candidates = [
       ...Array.from({ length: 12 }, (_, index) => groupCandidate(String(501 + index), `болтовня ${index}`)),
