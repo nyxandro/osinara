@@ -5,7 +5,7 @@
  * - `BehaviorPreferenceAuthorization`: exact conversation, actor, source, and sequence.
  * - `BehaviorPreferenceReadAuthorization`: interactive source or server-authored scheduled target.
  * - `requireBehaviorPreferenceAuthorization`: projects trusted Telegram auth or fails closed.
- * - `requireBehaviorPreferenceReadAuthorization`: also admits read-only scheduled delivery auth.
+ * - `requireBehaviorPreferenceReadAuthorization`: also admits read-only scheduled and wake-up auth.
  */
 import type { SessionContext } from "eve/context";
 import type { DynamicResolveContext } from "eve/instructions";
@@ -13,6 +13,7 @@ import type { DynamicResolveContext } from "eve/instructions";
 import { scheduledDeliveryMetadata } from "./agent-schedules/scheduled-session.js";
 import { AppError } from "./app-error.js";
 import { resolveSessionCaller } from "./session-auth.js";
+import { conversationWakeupRunId } from "./conversation-wakeups/conversation-wakeup-turn.js";
 
 export interface BehaviorPreferenceAuthorization {
   conversationId: string;
@@ -25,7 +26,7 @@ export interface BehaviorPreferenceBoundChatReadAuthorization {
   actorUserId: string;
   familyId: string;
   groupId: string | null;
-  kind: "scheduled" | "approval";
+  kind: "approval" | "scheduled" | "wakeup";
   scope: "family" | "group" | "personal";
   telegramChatId: string;
 }
@@ -95,6 +96,25 @@ export function requireBehaviorPreferenceReadAuthorization(
     return { actorUserId: caller.principalId, familyId: attrs.familyId,
       groupId: scope === "personal" ? null : attrs.groupId as string,
       kind: "approval", scope, telegramChatId: attrs.telegramChatId };
+  }
+  // A wake-up turn continues its chat's conversation, but answers no message: read the chat's prompt.
+  if (conversationWakeupRunId(ctx.session.auth) !== null) {
+    const family = attrs?.groupType === "family_private" && typeof attrs.groupId === "string";
+    if (
+      caller?.authenticator !== "telegram" || caller.principalType !== "user" ||
+      typeof attrs?.familyId !== "string" || typeof attrs.telegramChatId !== "string" ||
+      (!family && attrs.telegramChatType !== "private")
+    ) {
+      throw contextError();
+    }
+    return {
+      actorUserId: caller.principalId,
+      familyId: attrs.familyId,
+      groupId: family ? attrs.groupId as string : null,
+      kind: "wakeup",
+      scope: family ? "family" : "personal",
+      telegramChatId: attrs.telegramChatId,
+    };
   }
   // Scheduled runs carry a server-authored delivery target but intentionally have no user message.
   const scheduled = scheduledDeliveryMetadata(ctx);

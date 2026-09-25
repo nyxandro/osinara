@@ -119,6 +119,7 @@ describe("telegram memory review turn binding", () => {
       "application-session-1",
       "eve-session-1",
       false,
+      true,
     );
   });
 

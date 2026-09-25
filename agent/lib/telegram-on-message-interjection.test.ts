@@ -7,6 +7,7 @@
  *   shown only as a notice (voice without transcript, a file) says so instead.
  * - A message never delivered to this conversation, or prepared outside the ingress, carries neither.
  * - An external group and a bot author never get a marker, so their queue is never consulted.
+ * - A trusted turn learns the wake-ups waiting in its chat.
  */
 import { describe, expect, it } from "vitest";
 
@@ -66,6 +67,21 @@ describe("turn interjection preparation", () => {
     expect(result).not.toBeNull();
     expect(result?.auth?.attributes).not.toHaveProperty("telegramTurnInterjectionMarker");
     expect(result?.context?.join("\n")).not.toContain("turn_interjection_marker");
+  });
+
+  it("tells a trusted turn which wake-ups wait in its chat", async () => {
+    const repository = ownerRepositories();
+    repository.conversationWakeups.listPlanned.mockResolvedValue([{
+      completedRuns: 1, lastErrorCode: null, maxRuns: 6, nextRunAt: new Date("2026-09-25T10:10:00Z"),
+      pauseRequested: false, scheduleId: "s1", status: "active", timezone: "UTC", title: "Доставка кофе",
+    }]);
+    const handler = createTelegramMessageHandler(repository);
+
+    const result = await handler({ ...telegramContext().context, ingressRecovery: INGRESS }, privateMessage("кофе привезли"));
+
+    expect(repository.conversationWakeups.listPlanned).toHaveBeenCalledWith("501", "family-1", "user-1");
+    expect(result?.context?.join("\n")).toContain("<planned_wakeups>");
+    expect(result?.context?.join("\n")).toContain("Доставка кофе");
   });
 
   it("prepares no marker outside the durable ingress", async () => {

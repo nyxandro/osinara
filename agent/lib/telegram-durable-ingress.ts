@@ -5,6 +5,7 @@
  * - `createTelegramDurableIngress`: verified Eve hook that persists before ACK and drains FIFO.
  * - `handleTelegramDurableIngress`: production hook with PostgreSQL and Groq dependencies.
  * - Application software-update callbacks complete before native Eve dispatch begins.
+ * - A chat queue with no waiting update may run one due wake-up of its own conversation.
  */
 import type {
   TelegramDrainContext,
@@ -22,6 +23,7 @@ import { Sema } from "async-sema";
 
 import {
   TELEGRAM_INGRESS_CALLBACK_CONCURRENCY,
+  TELEGRAM_INGRESS_WAKEUP_CONCURRENCY,
   TELEGRAM_INGRESS_CANCELLATION_GRACE_MS,
   TELEGRAM_INGRESS_ADMISSION_TIMEOUT_MS,
   TELEGRAM_INGRESS_OBSERVER_IDLE_MS,
@@ -49,6 +51,9 @@ import { resumeTelegramResponse } from "./telegram-response-recovery.js";
 import { recoverUnboundTelegramPreparation } from "./telegram-preparation-recovery.js";
 import { recordOperationalIncident } from "./operational-incidents/owner-alerts.js";
 import { isDatabaseUnavailable, waitForApplicationDatabase } from "./database-recovery.js";
+import { AGENT_SCHEDULE_CONVERSATION_ADMISSION_MILLISECONDS } from "./agent-schedules/agent-schedule-config.js";
+import { createConversationWakeupProcessor } from "./conversation-wakeups/conversation-wakeup-drain.js";
+import { conversationWakeupRepository } from "./conversation-wakeups/conversation-wakeup-repository.js";
 
 const telegramUpdateIdSchema = z.union([z.number().int().nonnegative().safe(), z.string().regex(/^\d+$/)]);
 const telegramVoiceSchema = z.object({
@@ -77,6 +82,11 @@ interface DurableIngressDependencies {
     query: Extract<TelegramUpdate, { kind: "callback_query" }>["callbackQuery"],
   ): Promise<boolean>;
   leaseMilliseconds: number;
+  /** Runs at most one due wake-up of an idle chat queue on the wake-up slots, never a message slot. */
+  processConversationWakeup?(input: {
+    attachSession: TelegramDrainContext["attachSession"];
+    slots: Sema;
+  }): Promise<boolean>;
   admissionMilliseconds?: number;
   observerIdleMilliseconds?: number;
   cancellationMilliseconds?: number;
@@ -175,6 +185,7 @@ function withTranscript(payload: Record<string, unknown>, transcript: string): R
 export function createTelegramDurableIngress(dependencies: DurableIngressDependencies) {
   const messageSlots = new Sema(TELEGRAM_INGRESS_MESSAGE_CONCURRENCY);
   const callbackSlots = new Sema(TELEGRAM_INGRESS_CALLBACK_CONCURRENCY);
+  const wakeupSlots = new Sema(TELEGRAM_INGRESS_WAKEUP_CONCURRENCY);
   async function maintainLease(
     updateId: string,
     leaseToken: string,
@@ -208,7 +219,11 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
   ): Promise<void> {
     while (true) {
       const claim = await dependencies.repository.claimNext(dependencies.leaseMilliseconds);
-      if (!claim) return;
+      if (!claim) {
+        // Messages go first; a wake-up takes a chat queue only when that queue holds none.
+        if (await dependencies.processConversationWakeup?.({ attachSession, slots: wakeupSlots })) continue;
+        return;
+      }
       const heartbeatController = new AbortController();
       let heartbeatError: unknown;
       const heartbeat = maintainLease(
@@ -455,6 +470,17 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
 const authorizeTelegramVoice = createTelegramVoiceAuthorizer(telegramRepository);
 
 export const handleTelegramDurableIngress = createTelegramDurableIngress({
+  processConversationWakeup: ({ attachSession, slots }) => createConversationWakeupProcessor({
+    admissionMilliseconds: AGENT_SCHEDULE_CONVERSATION_ADMISSION_MILLISECONDS,
+    attachSession,
+    cancellationMilliseconds: TELEGRAM_INGRESS_CANCELLATION_GRACE_MS,
+    leaseMilliseconds: TELEGRAM_INGRESS_LEASE_MS,
+    now: () => new Date(),
+    observerIdleMilliseconds: TELEGRAM_INGRESS_OBSERVER_IDLE_MS,
+    readCursor: (eveSessionId) => telegramIngressRepository.sessionEventStreamCursor(eveSessionId),
+    repository: conversationWakeupRepository,
+    slots,
+  })(),
   reportFailure: recordOperationalIncident,
   acceptMedia(message, incomingUpdateId, mediaKind) {
     return telegramIngressRepository.acceptMedia({

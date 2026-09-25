@@ -251,7 +251,7 @@ describeWithDatabase("Telegram HITL approval repository", () => {
     const current = await fixture();
 
     await expect(telegramHitlApprovalRepository.hasPendingForSession(current.sessionId, "wrun_hitl")).resolves.toBe(true);
-    await expect(sessionRepository.recordTurnCompleted(current.sessionId, "wrun_hitl", true)).resolves.toBe("recorded");
+    await expect(sessionRepository.recordTurnCompleted(current.sessionId, "wrun_hitl", true, true)).resolves.toBe("recorded");
     await expect(
       telegramHitlApprovalRepository.claimCallback({
         baseContinuationToken: "-1001:55:88",

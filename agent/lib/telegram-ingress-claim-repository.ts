@@ -1,4 +1,4 @@
-/** FIFO claims and immutable album snapshots, serialized with enqueue by the exact queue row. */
+/** FIFO claims and immutable album snapshots, serialized with enqueue and wake-ups by the exact queue row. */
 import { TELEGRAM_INGRESS_RECOVERY_MAX_ATTEMPTS } from "../config.js";
 import { database } from "./database.js";
 import { type ClaimRow, mapTelegramIngressClaim, requireLeaseMilliseconds } from "./telegram-ingress-contract.js";
@@ -37,6 +37,9 @@ export async function claimNextTelegramIngress(leaseMilliseconds: number) {
                AND (earlier.media_group_leader_id IS NULL OR earlier.media_group_late)
                AND earlier.status IN ('pending', 'processing')
            )
+           -- A wake-up turn of this chat owns the lane until its item is terminal, like an earlier update.
+           -- The mark lives on the locked queue row, so a wake-up claimed concurrently is rechecked here.
+           AND queue.active_wakeup_id IS NULL
          ORDER BY item.update_id
          FOR UPDATE OF item, queue SKIP LOCKED
          LIMIT 1

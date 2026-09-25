@@ -9,6 +9,8 @@
 import { createHash } from "node:crypto";
 
 export type AgentScheduleScope = "family" | "group" | "personal";
+/** `conversation`: a turn in the chat's own session; `isolated`: a separate empty session. */
+export type AgentScheduleExecutionContext = "conversation" | "isolated";
 export type AgentScheduleStatus = "active" | "completed" | "failed" | "leased" | "paused";
 export const AGENT_SCHEDULE_SIMPLE_RECURRENCE_KINDS = ["daily", "minutely", "hourly", "monthly", "yearly"] as const;
 export type AgentScheduleSimpleRecurrenceKind = (typeof AGENT_SCHEDULE_SIMPLE_RECURRENCE_KINDS)[number];
@@ -21,6 +23,7 @@ export type AgentScheduleRecurrence =
 
 export interface AgentScheduleRow {
   completed_runs: number;
+  execution_context: AgentScheduleExecutionContext;
   max_runs: number | null;
   pause_requested: boolean;
   created_at: Date;
@@ -45,6 +48,7 @@ export interface AgentScheduleRow {
 
 export interface AgentScheduleRecord {
   completedRuns: number;
+  executionContext: AgentScheduleExecutionContext;
   maxRuns: number | null;
   pauseRequested: boolean;
   createdAt: string;
@@ -77,6 +81,7 @@ function rowRecurrence(row: AgentScheduleRow): AgentScheduleRecurrence {
 export function rowToAgentSchedule(row: AgentScheduleRow): AgentScheduleRecord {
   return {
     completedRuns: row.completed_runs,
+    executionContext: row.execution_context,
     maxRuns: row.max_runs,
     pauseRequested: row.pause_requested,
     createdAt: row.created_at.toISOString(),

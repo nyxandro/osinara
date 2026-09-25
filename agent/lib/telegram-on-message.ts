@@ -396,6 +396,11 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       actor.kind === "telegram_user" && (group === null || group.type === "family_private")
       ? createTurnInterjectionMarker()
       : null;
+    // The same trusted turns learn which of the author's wake-ups wait in this chat, to relate the
+    // message to them; a person without an account has none.
+    const plannedWakeups = ctx.ingressRecovery && turnInterjectionMarker !== null && access.userId !== null
+      ? await repositories.conversationWakeups.listPlanned(ctx.ingressRecovery.updateId, access.familyId, access.userId)
+      : [];
     const deliveryAuthorization = telegramProactiveDeliveryAuthorization(decision, message);
     const pendingDeliveries = deliveryAuthorization
       ? await repositories.proactiveDeliveries.listPendingContext({
@@ -499,6 +504,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       replyHandling,
       replyQuotedText,
       resumesPendingTask,
+      plannedWakeups,
       shownDuringTurn,
       turnInterjectionMarker,
       ...(responseSessionId === undefined ? {} : { responseSessionId }),

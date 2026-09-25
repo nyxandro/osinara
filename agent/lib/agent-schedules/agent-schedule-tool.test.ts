@@ -48,6 +48,7 @@ const context = { callId: "call-1" } as ToolContext;
 const scheduleId = "00000000-0000-4000-8000-000000000001";
 const validDailyCreatePayload = {
   action: "create",
+  executionContext: "isolated",
   firstRunAt: "2026-07-15T23:33:00+03:00",
   recurrence: { interval: 1, kind: "daily" },
   scenarioPrompt: "Собери главные новости о новых ИИ-моделях за последние 24 часа.",
@@ -109,6 +110,18 @@ describe("manage_agent_schedule", () => {
       }
     },
   );
+
+  it("requires the agent to choose where the schedule runs and passes the choice through", async () => {
+    const { executionContext: _executionContext, ...withoutContext } = validDailyCreatePayload;
+    await expect(manageAgentSchedule.execute(withoutContext, context)).rejects.toThrow("executionContext");
+    expect(createSchedule).not.toHaveBeenCalled();
+
+    await manageAgentSchedule.execute({ ...validDailyCreatePayload, executionContext: "conversation", maxRuns: 6 }, context);
+    expect(createSchedule).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ executionContext: "conversation", maxRuns: 6 }),
+    );
+  });
 
   it("routes a valid daily schedule payload into the repository", async () => {
     await expect(manageAgentSchedule.execute(validDailyCreatePayload, context)).resolves.toEqual({

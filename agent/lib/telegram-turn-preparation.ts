@@ -12,6 +12,7 @@ import { memoryReviewRepository } from "./memory-review/memory-review-repository
 import { bindMemoryTurnSources } from "./memory-turn-source.js";
 import { proactiveDeliveryRepository } from "./proactive-deliveries/proactive-delivery-repository.js";
 import { admitScheduledAgentTurn } from "./agent-schedules/agent-schedule-recovery.js";
+import { admitConversationWakeupTurn } from "./conversation-wakeups/conversation-wakeup-events.js";
 
 export const prepareTelegramTurn: TelegramChannelEvents["turn.started"] = async (_data, channel, ctx) => {
   requireTelegramAdmissionDeadline(ctx.session.auth);
@@ -21,6 +22,7 @@ export const prepareTelegramTurn: TelegramChannelEvents["turn.started"] = async 
   if (!ctx.session.parent && typeof scheduledRunId === "string") await admitScheduledAgentTurn({
     runId: scheduledRunId, applicationSessionId: sessionId, eveSessionId: ctx.session.id, eveTurnId: ctx.session.turn.id,
   });
+  await admitConversationWakeupTurn(ctx);
   await sessionRepository.bindEveSession(sessionId, ctx.session.id);
   // Provider reaction policy is refreshed for later instruction resolution, never guessed.
   if (!isScheduledSession(ctx)) await refreshTelegramReactionPolicy(channel.telegram);
