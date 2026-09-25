@@ -5,6 +5,8 @@
  * - `AgentScheduleCreateInput` and `AgentScheduleUpdateInput`: validated mutation inputs.
  * - `agentScheduleRepository`: replay-safe create/list/update/delete/run-now operations.
  */
+import type { PoolClient } from "pg";
+
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
 import { isPauseOnlyUpdate, requireAgentScheduleMaxRuns, requireScheduleLimitConsistency, requireScheduleLimitRemaining } from "./agent-schedule-limits.js";
@@ -12,6 +14,7 @@ import { advanceReactivatedSchedule } from "./agent-schedule-next-occurrence.js"
 import type { AgentScheduleAuthorization } from "./agent-schedule-context.js";
 import { recurrenceValues } from "./agent-schedule-recurrence.js";
 import {
+  type AgentScheduleExecutionContext,
   type AgentScheduleRecord,
   type AgentScheduleRecurrence,
   type AgentScheduleRow,
@@ -41,12 +44,22 @@ import {
   requireAgentScheduleUserRequest,
 } from "./agent-schedule-validation.js";
 import {
+  type ConversationBinding,
+  isConversationWakeupIdle,
+  rebindConversationSchedule,
+  requireConversationBinding,
+  requireConversationCapacity,
+  requireConversationRunLimit,
+  requireExecutionContext,
+} from "./agent-schedule-conversation.js";
+import {
   type ExternalScheduleCapability,
   requireExternalScheduleHistoryWindowDays,
   requireUpdatedExternalScheduleCapabilities,
 } from "./external-agent-schedule-policy.js";
 
 export interface AgentScheduleCreateInput {
+  executionContext: AgentScheduleExecutionContext;
   maxRuns?: number | null;
   firstRunAt: Date;
   operationKey: string;
@@ -101,6 +114,8 @@ export const agentScheduleRepository = {
     const recurrenceValue = recurrenceValues(recurrence);
     const maxRuns = requireAgentScheduleMaxRuns(input.maxRuns);
     requireScheduleLimitConsistency(maxRuns === undefined ? null : maxRuns, 0, recurrence.kind);
+    const conversation = requireExecutionContext(input.executionContext) === "conversation";
+    if (conversation) requireConversationRunLimit(maxRuns);
     const inputHash = agentScheduleOperationHash({
       ...input,
       firstRunAt: firstRunAt.toISOString(),
@@ -143,14 +158,21 @@ export const agentScheduleRepository = {
           );
         }
       }
+      let binding: ConversationBinding | null = null;
+      if (conversation) {
+        binding = await requireConversationBinding(client, auth);
+        await requireConversationCapacity(client, auth.familyId, binding.ingressQueueId, null);
+      }
       const inserted = await client.query<AgentScheduleRow>(
         `INSERT INTO agent_schedules
            (family_id, owner_user_id, author_user_id, group_id, scope, title,
             user_request, scenario_prompt, timezone, recurrence_kind,
             recurrence_interval, recurrence_days_of_week, recurrence_anchor_local, recurrence_anchor_at,
-              next_run_at, telegram_chat_id, telegram_chat_type, message_thread_id, forum_topic_id, max_runs)
+              next_run_at, telegram_chat_id, telegram_chat_type, message_thread_id, forum_topic_id, max_runs,
+              execution_context, conversation_session_id, ingress_queue_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-                  $13::timestamptz AT TIME ZONE $9, $13, $13, $14, $15, $16::bigint, $17::bigint, $18)
+                  $13::timestamptz AT TIME ZONE $9, $13, $13, $14, $15, $16::bigint, $17::bigint, $18,
+                  $19, $20::uuid, $21::uuid)
          RETURNING ${AGENT_SCHEDULE_COLUMNS}`,
         [
           auth.familyId,
@@ -171,6 +193,9 @@ export const agentScheduleRepository = {
           input.scope === "personal" ? null : auth.messageThreadId,
           input.scope === "personal" ? null : auth.forumTopicId,
           maxRuns === undefined ? null : maxRuns,
+          input.executionContext,
+          binding?.conversationSessionId ?? null,
+          binding?.ingressQueueId ?? null,
         ],
       );
       const schedule = inserted.rows[0]!;
@@ -296,6 +321,7 @@ export const agentScheduleRepository = {
       } as AgentScheduleRecurrence;
       const recurrenceValue = recurrenceValues(nextRecurrence);
       const nextMaxRuns = maxRuns === undefined ? schedule.max_runs : maxRuns;
+      if (schedule.execution_context === "conversation") requireConversationRunLimit(nextMaxRuns);
       requireScheduleLimitConsistency(nextMaxRuns, schedule.completed_runs, nextRecurrence.kind);
       if (input.enabled === true) requireScheduleLimitRemaining(nextMaxRuns, schedule.completed_runs);
       const capabilityAllowlist = await requireUpdatedExternalScheduleCapabilities(
@@ -303,6 +329,9 @@ export const agentScheduleRepository = {
         schedule,
         input.capabilityAllowlist,
       );
+      if (input.enabled === true && schedule.execution_context === "conversation") {
+        await rebindConversationSchedule(client, auth, schedule);
+      }
       const scheduleChanged = nextRunAt !== undefined || recurrence !== undefined;
       const updated = await client.query<AgentScheduleRow>(
         `UPDATE agent_schedules
@@ -322,7 +351,10 @@ export const agentScheduleRepository = {
                             WHEN $10 = true THEN 'active'::agent_schedule_status ELSE status END,
                pause_requested = (status = 'leased' AND $10 = false), max_runs = $13,
               attempts = CASE WHEN $8 OR $10 = true THEN 0 ELSE attempts END,
-              last_error_code = CASE WHEN $8 OR $10 = true THEN NULL ELSE last_error_code END,
+              -- A person pausing a wake-up that paused by itself takes it off the agent's resume list.
+              last_error_code = CASE WHEN $8 OR $10 = true THEN NULL
+                                     WHEN $10 = false AND status = 'paused' AND execution_context = 'conversation' THEN NULL
+                                     ELSE last_error_code END,
               history_window_days = $11,
               tool_allowlist = $12,
               updated_at = now()
@@ -391,7 +423,9 @@ export const agentScheduleRepository = {
       if (requiredScope !== undefined && schedule.scope !== requiredScope) {
         throw new AppError("AGENT_SCHEDULE_NOT_FOUND", "Агентное расписание не найдено");
       }
-      if (schedule.status === "leased") {
+      // A wake-up with no turn in progress goes away with its schedule: one still waiting in the chat
+      // queue never started, and one whose observer was lost would otherwise keep it leased for good.
+      if (schedule.status === "leased" && !await isConversationWakeupIdle(client, id)) {
         throw new AppError(
           "AGENT_SCHEDULE_RUN_IN_PROGRESS",
           "Запланированный сценарий сейчас выполняется. Повторите удаление после завершения",
@@ -450,6 +484,7 @@ export const agentScheduleRepository = {
         );
       }
       requireScheduleLimitRemaining(schedule.max_runs, schedule.completed_runs);
+      if (schedule.execution_context === "conversation") await rebindConversationSchedule(client, auth, schedule);
       const updated = await client.query<AgentScheduleRow>(
         `UPDATE agent_schedules
             SET status = 'active', next_run_at = now(), attempts = 0,

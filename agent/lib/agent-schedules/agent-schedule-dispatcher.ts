@@ -4,6 +4,9 @@
  * Exports:
  * - `createAgentScheduleDispatcher`: injectable deterministic lease-to-Eve handoff processor.
  * - `dispatchDueAgentSchedules`: production dispatcher used by the Eve minute schedule.
+ *
+ * A conversation occurrence is not started here: it waits in its chat's queue and runs as a turn of
+ * that chat's own conversation once the queue is free.
  */
 import { telegramContinuationToken } from "eve/channels/telegram";
 import type { ScheduleToFn } from "eve/schedules";
@@ -17,6 +20,7 @@ import { sessionRepository, type PreparedSession } from "../sessions/session-rep
 import { isDatabaseUnavailable, recoverDatabaseBookkeeping } from "../database-recovery.js";
 import { EVE_EMPTY_DELIVERY_MARKER } from "../eve-empty-delivery.js";
 import { localScheduledTime } from "../scheduling/local-time.js";
+import { conversationWakeupRepository } from "../conversation-wakeups/conversation-wakeup-repository.js";
 
 interface AgentScheduleDispatcherRepository {
   claimDue(options: { leaseMilliseconds: number; limit: number; now: Date }): Promise<ClaimedAgentSchedule[]>;
@@ -27,6 +31,8 @@ interface AgentScheduleDispatcherRepository {
 
 interface AgentScheduleDispatcherDependencies {
   discardSession(applicationSessionId: string): Promise<void>;
+  /** Hands a conversation occurrence to its chat queue instead of starting a session here. */
+  enqueueConversation(job: ClaimedAgentSchedule): Promise<"parked" | "queued">;
   prepareHistory(job: ClaimedAgentSchedule): Promise<unknown>;
   prepareSession(job: ClaimedAgentSchedule, baseContinuationToken: string, now: Date): Promise<PreparedSession>;
   repository: AgentScheduleDispatcherRepository;
@@ -117,6 +123,11 @@ function scheduledAuth(job: ClaimedAgentSchedule, prepared: PreparedSession) {
 }
 
 async function dispatchOne(dependencies: AgentScheduleDispatcherDependencies, job: ClaimedAgentSchedule, now: Date): Promise<void> {
+  if (job.executionContext === "conversation") {
+    const outcome = await dependencies.enqueueConversation(job);
+    console.info(JSON.stringify({ code: "AGENT_SCHEDULE_CONVERSATION_ENQUEUED", outcome, runId: job.runId, scheduleId: job.id }));
+    return;
+  }
   if (job.scope === "group" && job.historyWindowDays !== null) {
     try {
       await dependencies.prepareHistory(job);
@@ -217,6 +228,7 @@ export function createAgentScheduleDispatcher(dependencies: AgentScheduleDispatc
 export function dispatchDueAgentSchedules(to: ScheduleToFn, now = new Date()): Promise<number> {
   return createAgentScheduleDispatcher({
     discardSession: (applicationSessionId) => sessionRepository.retireUnstartedScheduledSession(applicationSessionId),
+    enqueueConversation: (job) => conversationWakeupRepository.enqueue(job),
     prepareHistory: (job) =>
       scheduledGroupHistorySnapshotRepository.prepare({
         groupId: job.groupId!,

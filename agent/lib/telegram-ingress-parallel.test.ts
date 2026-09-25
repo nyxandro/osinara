@@ -45,6 +45,46 @@ describe("independent Telegram queue progress", () => {
     expect(repository.fail).toHaveBeenCalledTimes(failure === "none" ? 0 : 1);
     expect(dispatched.includes(ordinary)).toBe(failure !== "lease");
   });
+  it("keeps every message slot for messages while a wake-up turn runs", async () => {
+    let releaseWakeup!: () => void, releaseMessages!: () => void;
+    const wakeupGate = new Promise<void>(resolve => { releaseWakeup = resolve; });
+    const messageGate = new Promise<void>(resolve => { releaseMessages = resolve; });
+    const items: unknown[] = [];
+    let wakeupRunning = false, wakeupDone = false;
+    const dispatched: number[] = [], work: Promise<unknown>[] = [];
+    const repository = { claimNext: vi.fn(async () => items.shift() ?? null), beginDispatch: vi.fn(), renewLease: vi.fn(),
+      sessionEventStreamCursor: vi.fn(async () => 0), completeWithSession: vi.fn(), fail: vi.fn() };
+    const handler = createTelegramDurableIngress({ reportFailure: vi.fn(), repository: repository as unknown as TelegramIngressRepository,
+      botUsername: "osinara_bot", leaseMilliseconds: 60_000, acceptMedia: vi.fn(), authorizeVoice: vi.fn(),
+      handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), transcribeVoice: vi.fn(),
+      processConversationWakeup: vi.fn(async ({ slots }) => {
+        if (wakeupDone || slots.tryAcquire() === undefined) return false;
+        wakeupRunning = true;
+        await wakeupGate;
+        slots.release();
+        wakeupDone = true;
+        return true;
+      }) });
+    const dispatch = correlatedDispatch(async update => {
+      const id = Number(update.kind === "message" ? update.message.messageId : 0);
+      dispatched.push(id);
+      return { id: String(id), getEventStream: async () => new ReadableStream({ async start(controller) {
+        await messageGate; controller.enqueue({ type: "session.waiting" }); controller.close();
+      } }) } as never;
+    });
+    const drain = () => handler.drain({ attachSession: vi.fn(), waitUntil: task => { work.push(task); }, dispatch });
+    try {
+      await drain();
+      await vi.waitFor(() => expect(wakeupRunning).toBe(true));
+      for (let id = 1; id <= TELEGRAM_INGRESS_MESSAGE_CONCURRENCY; id++) {
+        const from = { id: 100 + id, first_name: "User", is_bot: false };
+        items.push({ updateId: String(id), queueId: String(id), leaseToken: String(id), voice: null, transcript: null,
+          payload: { update_id: id, message: { message_id: id, date: 1700000000, text: "request", from, chat: { id: -id, type: "group" } } } });
+        await drain();
+      }
+      await vi.waitFor(() => expect(dispatched).toHaveLength(TELEGRAM_INGRESS_MESSAGE_CONCURRENCY));
+    } finally { releaseMessages(); releaseWakeup(); await Promise.all(work); }
+  });
   it("processes four private buttons before a slow group finishes without overtaking either queue", async () => {
     const items = [
       { id: 1, chat: -100, status: "pending" }, { id: 2, chat: -100, status: "pending" },

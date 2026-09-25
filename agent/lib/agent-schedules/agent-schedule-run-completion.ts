@@ -70,6 +70,8 @@ export async function finishActiveAgentScheduleRun(
     completedAt: Date;
     eveSessionId: string;
     outcome: AgentScheduleRunOutcome;
+    /** A conversation run shares its session with ordinary turns, so it is also selected by id. */
+    runId?: string;
   },
 ): Promise<boolean> {
   const active = await client.query<ActiveRunRow>(
@@ -79,7 +81,8 @@ export async function finishActiveAgentScheduleRun(
               SELECT 1 FROM telegram_final_deliveries delivery
               WHERE delivery.application_session_id = run.application_session_id
                 AND delivery.eve_session_id = run.eve_session_id
-                AND (run.eve_turn_id IS NULL OR delivery.eve_turn_id = run.eve_turn_id)
+                -- A conversation run shares its session with every ordinary turn: only its own turn counts.
+                AND (delivery.eve_turn_id = run.eve_turn_id OR (run.eve_turn_id IS NULL AND run.recovery_protocol <> 2))
                 AND (delivery.status IN ('started','ambiguous','delivered') OR EXISTS (
                   SELECT 1 FROM telegram_final_delivery_chunks chunk WHERE chunk.delivery_id = delivery.id
                 ))
@@ -90,8 +93,9 @@ export async function finishActiveAgentScheduleRun(
         AND run.eve_session_id = $2
         AND run.status = 'running'
         AND schedule.status = 'leased'
+        AND ($3::uuid IS NULL OR run.id = $3::uuid)
       FOR UPDATE OF run, schedule`,
-    [input.applicationSessionId, input.eveSessionId],
+    [input.applicationSessionId, input.eveSessionId, input.runId ?? null],
   );
   const row = active.rows[0];
   if (!row) return false;

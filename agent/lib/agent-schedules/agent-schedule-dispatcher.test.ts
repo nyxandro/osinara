@@ -5,6 +5,7 @@
  * - `createAgentScheduleDispatcher`: hands an isolated target to Eve's native channel source.
  * - A failed claimed job, including failed session cleanup, cannot block the remaining batch.
  * - The run prompt names Eve's exact empty-delivery marker, so a scenario can skip an empty report.
+ * - A conversation occurrence is handed to its chat queue and never starts a session here.
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -14,6 +15,7 @@ import type { ClaimedAgentSchedule } from "./agent-schedule-dispatch-repository.
 
 const job: ClaimedAgentSchedule = {
   completedRuns: 0,
+  executionContext: "isolated",
   maxRuns: null,
   authorUserId: "user-1",
   capabilityAllowlist: [],
@@ -61,7 +63,7 @@ describe("agent schedule dispatcher", () => {
     const to = vi.fn().mockReturnValue({ send });
 
     const dispatched = await createAgentScheduleDispatcher({
-      discardSession: vi.fn(),
+      discardSession: vi.fn(), enqueueConversation: vi.fn(),
       prepareHistory: vi.fn(),
       prepareSession,
       repository,
@@ -129,7 +131,7 @@ describe("agent schedule dispatcher", () => {
     const to = vi.fn().mockReturnValue({ send });
 
     await createAgentScheduleDispatcher({
-      discardSession: vi.fn(),
+      discardSession: vi.fn(), enqueueConversation: vi.fn(),
       prepareHistory,
       prepareSession,
       repository,
@@ -168,6 +170,7 @@ describe("agent schedule dispatcher", () => {
 
     await createAgentScheduleDispatcher({
       discardSession,
+      enqueueConversation: vi.fn(),
       prepareHistory: vi.fn(),
       prepareSession: vi.fn().mockResolvedValue({
         continuationToken: "101::schedule:run-1",
@@ -196,6 +199,7 @@ describe("agent schedule dispatcher", () => {
 
     await createAgentScheduleDispatcher({
       discardSession,
+      enqueueConversation: vi.fn(),
       prepareHistory: vi.fn(),
       prepareSession: vi.fn().mockResolvedValue({
         continuationToken: "101::schedule:run-1",
@@ -232,7 +236,7 @@ describe("agent schedule dispatcher", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     const dispatched = await createAgentScheduleDispatcher({
-      discardSession: vi.fn(),
+      discardSession: vi.fn(), enqueueConversation: vi.fn(),
       prepareHistory: vi.fn(),
       prepareSession: vi.fn().mockImplementation(async (claimedJob: ClaimedAgentSchedule) => ({
         continuationToken: `101::schedule:${claimedJob.runId}`,
@@ -274,6 +278,7 @@ describe("agent schedule dispatcher", () => {
 
     await createAgentScheduleDispatcher({
       discardSession,
+      enqueueConversation: vi.fn(),
       prepareHistory: vi.fn(),
       prepareSession: vi.fn().mockImplementation(async (claimedJob: ClaimedAgentSchedule) => ({
         continuationToken: `101::schedule:${claimedJob.runId}`,
@@ -294,5 +299,36 @@ describe("agent schedule dispatcher", () => {
     });
     expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("AGENT_SCHEDULE_DISPATCH_FAILED"));
     consoleError.mockRestore();
+  });
+});
+
+describe("conversation occurrences", () => {
+  it("hands the occurrence to its chat queue without preparing a session or contacting Eve", async () => {
+    const conversationJob: ClaimedAgentSchedule = { ...job, executionContext: "conversation", maxRuns: 6 };
+    const repository = {
+      claimDue: vi.fn().mockResolvedValue([conversationJob]),
+      failClaim: vi.fn(),
+      markDispatchStarted: vi.fn(),
+      markRunning: vi.fn(),
+    };
+    const enqueueConversation = vi.fn().mockResolvedValue("queued");
+    const prepareSession = vi.fn();
+    const to = vi.fn();
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const dispatched = await createAgentScheduleDispatcher({
+      discardSession: vi.fn(),
+      enqueueConversation,
+      prepareHistory: vi.fn(),
+      prepareSession,
+      repository,
+      to,
+    })(new Date("2026-07-17T06:00:00.000Z"));
+
+    expect(dispatched).toBe(1);
+    expect(enqueueConversation).toHaveBeenCalledWith(conversationJob);
+    expect(prepareSession).not.toHaveBeenCalled();
+    expect(repository.markDispatchStarted).not.toHaveBeenCalled();
+    expect(to).not.toHaveBeenCalled();
   });
 });

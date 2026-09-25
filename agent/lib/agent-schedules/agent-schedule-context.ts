@@ -11,6 +11,8 @@ import { AppError } from "../app-error.js";
 import { resolveSessionCaller } from "../session-auth.js";
 
 export interface AgentScheduleAuthorization {
+  /** Conversation of the current turn; a schedule that runs in the conversation binds to it. */
+  applicationSessionId?: string;
   forumTopicId: string | null;
   familyId: string;
   groupId: string | null;
@@ -19,6 +21,8 @@ export interface AgentScheduleAuthorization {
   role: "member" | "owner" | "recovery_owner";
   telegramChatId: string;
   telegramChatType: "group" | "private" | "supergroup";
+  /** Ingress update of the current turn; it names the chat queue a conversation run waits in. */
+  telegramUpdateId?: string;
   telegramUserId: string;
   userId: string;
 }
@@ -55,6 +59,9 @@ export function requireAgentScheduleAuthorization(
   }
 
   return {
+    ...(typeof attributes.applicationSessionId === "string"
+      ? { applicationSessionId: attributes.applicationSessionId }
+      : {}),
     familyId: attributes.familyId,
     forumTopicId: typeof attributes.telegramForumTopicId === "string"
       ? attributes.telegramForumTopicId
@@ -67,6 +74,9 @@ export function requireAgentScheduleAuthorization(
     role: role as AgentScheduleAuthorization["role"],
     telegramChatId: attributes.telegramChatId,
     telegramChatType: chatType as AgentScheduleAuthorization["telegramChatType"],
+    ...(typeof attributes.osinaraTelegramUpdateId === "string"
+      ? { telegramUpdateId: attributes.osinaraTelegramUpdateId }
+      : {}),
     telegramUserId: attributes.telegramUserId,
     userId: caller.principalId,
   };
