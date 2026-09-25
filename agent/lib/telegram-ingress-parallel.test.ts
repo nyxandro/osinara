@@ -22,6 +22,7 @@ describe("independent Telegram queue progress", () => {
     const dispatched: number[] = [], completed: number[] = [], work: Promise<unknown>[] = [];
     const repository = { claimNext: vi.fn(async () => items.shift() ?? null), beginDispatch: vi.fn(),
       renewLease: vi.fn(async (id: string) => { if (failure === "lease" && id === String(ordinary)) throw new Error("expected test lease loss"); }),
+      privateBurstReadyIn: vi.fn(async () => null),
       sessionEventStreamCursor: vi.fn(async () => 0), completeWithSession: vi.fn(async (id: string) => { completed.push(Number(id)); }), fail: vi.fn() };
     const handler = createTelegramDurableIngress({ reportFailure: vi.fn(), repository: repository as unknown as TelegramIngressRepository,
       botUsername: "osinara_bot", leaseMilliseconds: 60_000, acceptMedia: vi.fn(), authorizeVoice: vi.fn(),
@@ -53,6 +54,7 @@ describe("independent Telegram queue progress", () => {
     let wakeupRunning = false, wakeupDone = false;
     const dispatched: number[] = [], work: Promise<unknown>[] = [];
     const repository = { claimNext: vi.fn(async () => items.shift() ?? null), beginDispatch: vi.fn(), renewLease: vi.fn(),
+      privateBurstReadyIn: vi.fn(async () => null),
       sessionEventStreamCursor: vi.fn(async () => 0), completeWithSession: vi.fn(), fail: vi.fn() };
     const handler = createTelegramDurableIngress({ reportFailure: vi.fn(), repository: repository as unknown as TelegramIngressRepository,
       botUsername: "osinara_bot", leaseMilliseconds: 60_000, acceptMedia: vi.fn(), authorizeVoice: vi.fn(),
@@ -116,6 +118,7 @@ describe("independent Telegram queue progress", () => {
         cursors.set(sessionId, next);
         await finish(id);
       }),
+      privateBurstReadyIn: vi.fn(async () => null),
       sessionEventStreamCursor: vi.fn(async (id: string) => cursors.get(id) ?? 0), fail: vi.fn(), renewLease: vi.fn(),
       acceptMedia: vi.fn(), beginVoiceTranscription: vi.fn(), enqueue: vi.fn(),
       rekeyQueue: vi.fn(), release: vi.fn(), saveVoiceTranscript: vi.fn(),

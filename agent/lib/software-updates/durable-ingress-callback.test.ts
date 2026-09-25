@@ -50,6 +50,7 @@ describe("software update callback durable ingress", () => {
       rekeyQueue: vi.fn(),
       release: vi.fn(),
       renewLease: vi.fn(),
+      privateBurstReadyIn: vi.fn(async () => null),
       sessionEventStreamCursor: vi.fn().mockResolvedValue(0),
       saveVoiceTranscript: vi.fn(),
     } satisfies TelegramIngressRepository;

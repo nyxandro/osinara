@@ -22,6 +22,7 @@ import {
 import { telegramIngressProcessingRepository } from "./telegram-ingress-processing-repository.js";
 import { telegramIngressSessionCursorRepository } from "./telegram-ingress-session-cursor-repository.js";
 import { claimNextTelegramIngress } from "./telegram-ingress-claim-repository.js";
+import { telegramPrivateBurstRepository } from "./telegram-private-burst.js";
 import { registerTelegramMediaGroupMember, settleTelegramMediaGroupMembersSql } from "./telegram-media-group-repository.js";
 
 const IGNORED_MEDIA_REASON = "external_media";
@@ -246,6 +247,8 @@ export const telegramIngressRepository: TelegramIngressRepository = {
   },
 
   claimNext: claimNextTelegramIngress,
+
+  privateBurstReadyIn: (burst) => telegramPrivateBurstRepository.readyInMilliseconds(burst),
 
   async renewLease(updateId, leaseToken, leaseMilliseconds) {
     requireLeaseMilliseconds(leaseMilliseconds);
