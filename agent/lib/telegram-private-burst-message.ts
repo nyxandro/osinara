@@ -22,6 +22,7 @@ import type { TelegramWorkspaceAttachment } from "./attachments/telegram-workspa
 import type { TelegramPrivateBurstPolicy } from "./telegram-ingress-contract.js";
 import { telegramInboundText } from "./telegram-group-message-storage.js";
 import { isTelegramSlashCommand } from "./telegram-message-policy.js";
+import { escapeUntrustedContextJson } from "./untrusted-context-json.js";
 
 export interface TelegramBurstCandidate {
   /** Whether a running turn of this chat already saw this message with a tool result. */
@@ -57,17 +58,19 @@ export function selectTelegramBurstMembers(
 ): string[] {
   const leader = burstMessage(head);
   if (!leader) return [];
-  let characters = partText(leader).length;
+  const texts = [partText(leader)];
   let attachments = leader.attachments.length;
   const members: string[] = [];
   for (const follower of followers) {
     if (members.length + 1 >= limits.maxMessages) break;
     const message = burstMessage(follower);
     if (!message) break;
-    const nextCharacters = characters + PART_SEPARATOR.length + partText(message).length;
+    const nextTexts = [...texts, partText(message)];
     const nextAttachments = attachments + message.attachments.length;
-    if (nextCharacters > limits.maxCharacters || nextAttachments > TELEGRAM_MAX_ATTACHMENTS_PER_MESSAGE) break;
-    characters = nextCharacters;
+    // Measured as the model receives it: escaped markup can take several times its raw length.
+    if (escapeUntrustedContextJson(nextTexts.filter(Boolean).join(PART_SEPARATOR)).length > limits.maxCharacters ||
+      nextAttachments > TELEGRAM_MAX_ATTACHMENTS_PER_MESSAGE) break;
+    texts.push(partText(message));
     attachments = nextAttachments;
     members.push(follower.updateId);
   }

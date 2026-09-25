@@ -83,6 +83,10 @@ describe("selectTelegramBurstMembers", () => {
     const overflows = candidate(message({ text: "c".repeat(1_000) }));
     expect(selectTelegramBurstMembers(head, [fits, overflows], LIMITS)).toEqual([fits.updateId]);
 
+    // Markup is escaped for the model, so a text full of it takes far more than its raw length.
+    const markup = candidate(message({ text: "<".repeat(900) }));
+    expect(selectTelegramBurstMembers(candidate(message({ text: "<".repeat(900) })), [markup], LIMITS)).toEqual([]);
+
     const many = Array.from({ length: 12 }, () => candidate(message({ text: "да" })));
     expect(selectTelegramBurstMembers(candidate(message({ text: "раз" })), many, LIMITS)).toHaveLength(9);
   });

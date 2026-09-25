@@ -7,7 +7,8 @@
  * - Buttons and groups are never held, and a button press does not extend a message's wait.
  * - The drain learns exactly when the next held chat becomes ready, and nothing when none is held.
  * - The followers belong to the head: no other claim takes them, and they complete and fail with it.
- * - Once handed to Eve the burst is fixed; a message arriving later starts the next burst.
+ * - Once handed to Eve, or prepared, or joined at all, the burst is fixed; a message arriving later
+ *   starts the next burst, even after a revoked attempt returned the head to the queue.
  * - A button press behind a message ends the burst.
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -139,6 +140,28 @@ describeWithDatabase("private-chat bursts", () => {
     const next = await telegramIngressRepository.claimNext(LEASE, BURST);
     expect(next?.updateId).toBe("7063");
     expect(next?.burstPayloads).toBeUndefined();
+  });
+
+  it("keeps a prepared burst fixed after its unstarted attempt was revoked", async () => {
+    await privateText("7071", "первое");
+    await privateText("7072", "второе");
+    await receivedSecondsAgo(3, "7071", "7072");
+    const head = await telegramIngressRepository.claimNext(LEASE, BURST);
+    expect(burstIds(head?.burstPayloads)).toEqual([7071, 7072]);
+    // The prepared attempt is revoked before Eve admitted a turn, exactly as preparation recovery does.
+    await database().query(
+      `UPDATE telegram_ingress_updates SET preparation_completed_at = now(), preparation_result = 'null'::jsonb,
+         status = 'pending', lease_token = NULL, lease_expires_at = NULL, dispatch_id = NULL, dispatch_started_at = NULL
+       WHERE update_id = 7071`,
+    );
+    await privateText("7073", "пришло после подготовки");
+    await receivedSecondsAgo(3, "7071", "7072", "7073");
+
+    const reclaimed = await telegramIngressRepository.claimNext(LEASE, BURST);
+    expect(burstIds(reclaimed?.burstPayloads)).toEqual([7071, 7072]);
+    await telegramIngressRepository.complete(reclaimed!.updateId, reclaimed!.leaseToken);
+    expect(await statusOf("7073")).toBe("pending");
+    expect((await telegramIngressRepository.claimNext(LEASE, BURST))?.updateId).toBe("7073");
   });
 
   it("holds a steady stream no longer than the cap, then takes all of it", async () => {

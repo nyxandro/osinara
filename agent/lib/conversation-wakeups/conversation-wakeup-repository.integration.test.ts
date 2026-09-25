@@ -506,6 +506,22 @@ describeWithDatabase("conversation wake-ups", () => {
     expect(after.map((wakeup) => wakeup.scheduleId)).toEqual([open.id]);
   });
 
+  it("is not blocked by a burst member once its stuck head was closed", async () => {
+    await createWakeup();
+    await enqueueMessage("1001", "первое");
+    await enqueueMessage("1002", "второе");
+    const head = await telegramIngressRepository.claimNext(LEASE, { ...NO_BURSTS, maxCharacters: 6_000, maxMessages: 2 });
+    expect(head?.burstPayloads).toHaveLength(2);
+    await telegramIngressRepository.fail(head!.updateId, head!.leaseToken, {
+      code: "AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED", message: "Не удалось подтвердить остановку запроса",
+    });
+    // The owner closes the stuck head; its member keeps the copied code.
+    await database().query("UPDATE telegram_ingress_updates SET last_error_code = 'AGENT_TELEGRAM_RECOVERY_CLOSED' WHERE update_id = 1001");
+    await queueDue();
+
+    expect(await conversationWakeupRepository.claimNext(LEASE)).not.toBeNull();
+  });
+
   it("keeps a deploy waiting while a wake-up turn runs", async () => {
     await createWakeup();
     await queueDue();

@@ -14,7 +14,7 @@
  *   burst is complete before its turn starts. A steady stream is claimed once the cap has passed.
  * - The followers bind to the head exactly like the photos of one album: no claim takes them, and
  *   they complete, fail and recover together with the head.
- * - The burst is fixed once the head was handed to Eve; a message arriving later starts the next one.
+ * - The burst is fixed at the head's first claim; a message arriving later starts the next one.
  */
 import type { PoolClient } from "pg";
 
@@ -75,10 +75,7 @@ export async function waitForHeldPrivateChat(
 const DELIVERED_SQL = `EXISTS (SELECT 1 FROM telegram_turn_interjections seen
   WHERE seen.update_id = candidate.update_id AND seen.delivered_at IS NOT NULL)`;
 
-/**
- * Returns the payloads of the head's burst in chat order, or null for a message handled alone. New
- * followers join only while the head has never been handed to Eve; after that the burst is fixed.
- */
+/** Returns the payloads of the head's burst in chat order, or null for a message handled alone. */
 export async function joinTelegramBurst(
   client: PoolClient,
   head: { dispatchStarted: boolean; payload: Record<string, unknown>; queueId: string; updateId: string },
@@ -86,7 +83,16 @@ export async function joinTelegramBurst(
 ): Promise<Record<string, unknown>[] | null> {
   const chat = (head.payload.message as { chat?: { type?: unknown } } | undefined)?.chat;
   if (chat?.type !== "private") return null;
-  if (!head.dispatchStarted) {
+  // Followers join once, at the first claim of a head that was never prepared: a prepared result is
+  // replayed after a revoked attempt, so a message joined later would be settled without being seen.
+  const state = await client.query<{ joined: boolean; prepared: boolean }>(
+    `SELECT head.preparation_completed_at IS NOT NULL AS prepared,
+            EXISTS (SELECT 1 FROM telegram_ingress_updates member WHERE member.media_group_leader_id = head.update_id) AS joined
+       FROM telegram_ingress_updates head WHERE head.update_id = $1`,
+    [head.updateId],
+  );
+  const sealed = head.dispatchStarted || state.rows[0]?.prepared !== false || state.rows[0]?.joined !== false;
+  if (!sealed) {
     const found = await client.query<{ delivered: boolean; payload: Record<string, unknown>; update_id: string }>(
       `SELECT candidate.update_id::text, candidate.payload, ${DELIVERED_SQL} AS delivered
          FROM telegram_ingress_updates candidate
