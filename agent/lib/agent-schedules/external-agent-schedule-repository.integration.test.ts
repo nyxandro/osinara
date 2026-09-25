@@ -150,6 +150,39 @@ describeWithDatabase("external agent schedule repository", () => {
     )).rejects.toMatchObject({ code: "AGENT_EXTERNAL_SCHEDULE_CAPABILITY_NOT_GRANTED" });
   });
 
+  it("lets a scenario read pages in a group whose policy lists only granted tools", async () => {
+    // Since v0.21.0 page reading is a baseline tool of every external group and the group policy no
+    // longer stores it, so requiring it there made page-reading scenarios impossible to create.
+    const setup = await fixture();
+    await database().query("UPDATE telegram_groups SET tool_allowlist = ARRAY['send_workspace_file'] WHERE id = $1",
+      [setup.groupId]);
+    const authorization = { familyId: setup.familyId, requestedBy: setup.ownerId };
+    const input = {
+      capabilityAllowlist: ["web_fetch", "send_workspace_file"] as const,
+      firstRunAt: new Date("2026-08-17T18:10:00.000Z"),
+      operationKey: "baseline-web-fetch",
+      recurrence: { interval: 1, kind: "daily" as const },
+      scenarioPrompt: "Проверь чейнжлог и напиши, только если там что-то стоящее.",
+      telegramChatId: "-100-external-schedule",
+      timezone: "Europe/Moscow",
+      title: "Чейнжлог",
+      userRequest: "Раз в день проверяй чейнжлог",
+    };
+
+    const created = await externalAgentScheduleRepository.create(authorization, {
+      ...input, capabilityAllowlist: [...input.capabilityAllowlist],
+    });
+    expect(created.capabilityAllowlist).toEqual(["web_fetch", "send_workspace_file"]);
+    await expect(externalAgentScheduleRepository.update(authorization, created.id, {
+      capabilityAllowlist: ["web_fetch"],
+      operationKey: "baseline-web-fetch-update",
+    })).resolves.toMatchObject({ capabilityAllowlist: ["web_fetch"] });
+    // Only the baseline tool is exempt: a real grant the group does not hold is still refused.
+    await expect(externalAgentScheduleRepository.create(authorization, {
+      ...input, capabilityAllowlist: ["web_fetch", "search_memories"], operationKey: "baseline-plus-ungranted",
+    })).rejects.toMatchObject({ code: "AGENT_EXTERNAL_SCHEDULE_CAPABILITY_NOT_GRANTED" });
+  });
+
   it("updates lifecycle state without changing the registered destination", async () => {
     const setup = await fixture();
     const authorization = { familyId: setup.familyId, requestedBy: setup.ownerId };
