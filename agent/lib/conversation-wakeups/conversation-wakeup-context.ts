@@ -59,7 +59,8 @@ export const conversationWakeupContextRepository = {
           AND schedule.execution_context = 'conversation'
           AND (schedule.status IN ('active', 'leased') OR
             (schedule.status = 'paused' AND schedule.last_error_code = ANY($5::text[])))
-        ORDER BY schedule.next_run_at, schedule.id
+        -- Open wake-ups first, so paused ones never crowd a live one out of the bounded list.
+        ORDER BY schedule.status = 'paused', schedule.next_run_at, schedule.id
         LIMIT $4`,
       [requireUpdateId(updateId), familyId, authorUserId, PLANNED_WAKEUPS_LIMIT, SELF_PAUSED_CODES],
     );

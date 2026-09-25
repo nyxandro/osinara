@@ -497,7 +497,12 @@ describeWithDatabase("conversation wake-ups", () => {
     await database().query("UPDATE agent_schedules SET author_user_id = $2 WHERE id = $1", [foreign.id, other]);
 
     const planned = await conversationWakeupContextRepository.listPlanned("1000", familyId, auth.userId);
-    expect(planned.map((wakeup) => wakeup.scheduleId).sort()).toEqual([open.id, selfPaused.id].sort());
+    expect(planned.map((wakeup) => wakeup.scheduleId)).toEqual([open.id, selfPaused.id]);
+
+    // Pausing it by hand takes the self-paused one off the list the agent offers to resume.
+    await agentScheduleRepository.update(auth, selfPaused.id, { enabled: false, operationKey: "pause-self" });
+    const after = await conversationWakeupContextRepository.listPlanned("1000", familyId, auth.userId);
+    expect(after.map((wakeup) => wakeup.scheduleId)).toEqual([open.id]);
   });
 
   it("keeps a deploy waiting while a wake-up turn runs", async () => {

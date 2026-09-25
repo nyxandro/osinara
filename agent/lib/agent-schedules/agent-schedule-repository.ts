@@ -351,7 +351,10 @@ export const agentScheduleRepository = {
                             WHEN $10 = true THEN 'active'::agent_schedule_status ELSE status END,
                pause_requested = (status = 'leased' AND $10 = false), max_runs = $13,
               attempts = CASE WHEN $8 OR $10 = true THEN 0 ELSE attempts END,
-              last_error_code = CASE WHEN $8 OR $10 = true THEN NULL ELSE last_error_code END,
+              -- A person pausing a wake-up that paused by itself takes it off the agent's resume list.
+              last_error_code = CASE WHEN $8 OR $10 = true THEN NULL
+                                     WHEN $10 = false AND status = 'paused' AND execution_context = 'conversation' THEN NULL
+                                     ELSE last_error_code END,
               history_window_days = $11,
               tool_allowlist = $12,
               updated_at = now()
