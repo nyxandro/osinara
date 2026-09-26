@@ -243,9 +243,12 @@ export function createControlledWebFetch(dependencies: ControlledWebFetchDepende
         }
         if (!response.ok) {
           await response.body?.cancel();
+          // The status tells a blocked site from an invented address or an outage; the path and
+          // query may carry tokens, so only the origin reaches the log.
           throw new AppError(
             "AGENT_WEB_FETCH_RESPONSE_FAILED",
-            "Сайт не отдал доступную страницу. Проверьте адрес или попробуйте позже",
+            `Сайт не отдал доступную страницу: HTTP ${response.status}. Проверьте адрес или попробуйте позже`,
+            { details: { origin: currentUrl.origin, status: response.status } },
           );
         }
 
