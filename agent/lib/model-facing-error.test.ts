@@ -58,17 +58,32 @@ describe("ModelFacingError", () => {
     expect(unknown.contract.sideEffectStatus).toBe("unknown");
   });
 
-  it("marks coded refusals as expected and keeps dependency failures unexpected", () => {
+  it("marks bad-input, not-found, access and conflict refusals as expected", () => {
     const normalize = (error: Error) => normalizeModelFacingError(error, { toolName: "remember" });
 
     expect(normalize(new AppError("AGENT_MEMORY_SUBJECT_REF_INVALID", "Ссылка недоступна")).isExpectedRefusal)
       .toBe(true);
-    expect(normalize(new AppError("AGENT_WEB_FETCH_RESPONSE_FAILED", "HTTP 403")).isExpectedRefusal).toBe(true);
+    expect(normalize(new AppError("AGENT_MEMORY_NOT_FOUND", "Нет записи")).isExpectedRefusal).toBe(true);
     expect(normalize(new AppError("AGENT_GROUP_TOOL_FORBIDDEN", "Нет доступа")).isExpectedRefusal).toBe(true);
-    // Infrastructure failures and unknown exceptions must stay loud in Eve's own log.
+    expect(normalize(new AppError("AGENT_MEMORY_THREAD_STALE", "Нить изменилась")).isExpectedRefusal).toBe(true);
+  });
+
+  it("keeps operation and dependency failures loud unless the thrower marks a refusal", () => {
+    const normalize = (error: Error) => normalizeModelFacingError(error, { toolName: "search_memory_threads" });
+
+    // `operation` is the fallback category, so a broken integration lands there too.
+    expect(normalize(new AppError("AGENT_MEMORY_EMBEDDING_MODEL_MISMATCH", "Модель другая")).isExpectedRefusal)
+      .toBe(false);
     expect(normalize(new AppError("AGENT_DATABASE_UNAVAILABLE", "База недоступна")).isExpectedRefusal)
       .toBe(false);
     expect(normalize(new Error("connect ECONNREFUSED")).isExpectedRefusal).toBe(false);
+    expect(new ModelFacingError({
+      category: "dependency", code: "AGENT_WEB_SEARCH_RATE_LIMITED", correction: "Продолжите без поиска.",
+      reason: "Лимит поиска исчерпан.", retryable: false, sideEffectStatus: "not_started",
+    }).isExpectedRefusal).toBe(false);
+    // A site that said no is an answer, not a failure of the application.
+    expect(normalize(new AppError("AGENT_WEB_FETCH_RESPONSE_FAILED", "HTTP 403", { isExpectedRefusal: true }))
+      .isExpectedRefusal).toBe(true);
   });
 
   it("preserves a generic AGENT code without exposing its untrusted message suffix", () => {

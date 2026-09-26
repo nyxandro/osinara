@@ -226,6 +226,7 @@ describe("controlled external-group web fetch", () => {
     expect(failure).toMatchObject({
       code: "AGENT_WEB_FETCH_RESPONSE_FAILED",
       details: { origin: "https://news.example.com", status: 403 },
+      isExpectedRefusal: true,
     });
     expect((failure as AppError).message).toContain("HTTP 403");
     expect((failure as AppError).message).not.toContain("example.com");

@@ -43,7 +43,7 @@ describe("Eve tool-failure logging patch", () => {
   it("does not print a stack for a coded refusal the tool boundary already recorded", async () => {
     const { log, logError } = await installedLogger();
 
-    log(failed(normalize(new AppError("AGENT_WEB_FETCH_RESPONSE_FAILED", "HTTP 403"))));
+    log(failed(normalize(new AppError("AGENT_WEB_FETCH_RESPONSE_FAILED", "HTTP 403", { isExpectedRefusal: true }))));
     log(failed(normalize(new AppError("AGENT_MEMORY_SUBJECT_REF_INVALID", "Ссылка недоступна"))));
 
     expect(logError).not.toHaveBeenCalled();
@@ -51,6 +51,7 @@ describe("Eve tool-failure logging patch", () => {
 
   it.each([
     ["dependency failure", normalize(new AppError("AGENT_DATABASE_UNAVAILABLE", "База недоступна"))],
+    ["unmarked operation failure", normalize(new AppError("AGENT_MEMORY_EMBEDDING_MODEL_MISMATCH", "Модель другая"))],
     ["unknown exception", normalize(new Error("connect ECONNREFUSED"))],
     ["foreign error", new Error("framework failure")],
     ["lookalike without the class", Object.assign(new Error("x"), { isExpectedRefusal: true })],

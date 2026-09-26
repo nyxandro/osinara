@@ -75,22 +75,26 @@ function correctionFor(category: ModelFacingErrorCategory, code: string, toolNam
   return "Не повторяйте вызов автоматически. Сообщите пользователю о сбое и дождитесь нового запроса.";
 }
 
+/**
+ * Refusals caused by the call itself: bad arguments, a stale or unknown ref, no access, a conflict.
+ * Eve's multi-line stack for them only fed the unstructured-problem alert (#289, #302). `operation`
+ * is the fallback category, so a broken integration lands there too: it stays loud unless the
+ * thrower marks the refusal explicitly. Dependency failures and unknown exceptions always stay loud.
+ */
+const EXPECTED_REFUSAL_CATEGORIES: ReadonlySet<ModelFacingErrorCategory> = new Set([
+  "authorization", "conflict", "input", "not_found",
+]);
+
 export class ModelFacingError extends AppError {
   readonly contract: Readonly<ModelFacingErrorContract>;
 
-  /**
-   * A deliberate refusal with a stable code: bad arguments, no access, not found, a site that said
-   * no. Eve's multi-line stack for it only feeds the unstructured-problem alert (#289, #302).
-   * Dependency failures, including the fallback for unknown exceptions, stay unexpected and loud.
-   */
-  readonly isExpectedRefusal: boolean;
-
-  constructor(contract: ModelFacingErrorContract) {
+  constructor(contract: ModelFacingErrorContract, options?: { readonly isExpectedRefusal?: boolean }) {
     // JSON keeps the correction contract machine-readable inside Eve's tool-error text channel.
-    super(contract.code, JSON.stringify(contract));
+    super(contract.code, JSON.stringify(contract), {
+      isExpectedRefusal: EXPECTED_REFUSAL_CATEGORIES.has(contract.category) || options?.isExpectedRefusal === true,
+    });
     this.name = "ModelFacingError";
     this.contract = Object.freeze({ ...contract });
-    this.isExpectedRefusal = contract.category !== "dependency";
   }
 }
 
@@ -119,7 +123,7 @@ export function normalizeModelFacingError(
       reason,
       retryable: canCorrect,
       sideEffectStatus: canCorrect || category === "authorization" ? "not_started" : "unknown",
-    });
+    }, { isExpectedRefusal: error instanceof AppError && error.isExpectedRefusal });
   }
   return new ModelFacingError({
     category: "dependency",

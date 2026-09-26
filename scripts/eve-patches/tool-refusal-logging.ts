@@ -1,8 +1,8 @@
 /**
  * Eve prints every tool exception with a multi-line stack. For an expected coded refusal the tool
  * boundary already wrote one `AGENT_TOOL_CALL_METRICS` line with the code, and the stack only
- * trips the unstructured-problem alert (#289, #302). Dependency failures and unknown exceptions
- * are not marked as expected refusals and keep Eve's native log.
+ * trips the unstructured-problem alert (#289, #302). Only refusals caused by the call itself, or
+ * explicitly marked by the thrower, carry `isExpectedRefusal`; every other failure keeps Eve's log.
  */
 import { resolve } from "node:path";
 
