@@ -3,7 +3,8 @@
  *
  * Exports:
  * - `ModelFacingErrorContract`: correction-loop fields serialized for the model.
- * - `ModelFacingError`: safe application error carrying that complete contract.
+ * - `ModelFacingError`: safe application error carrying that complete contract; `isExpectedRefusal`
+ *   tells the patched Eve logger that the tool boundary's metrics line already recorded the code.
  * - `normalizeModelFacingError`: converts legacy and unexpected failures without leaking internals.
  */
 import { AppError } from "./app-error.js";
@@ -77,11 +78,19 @@ function correctionFor(category: ModelFacingErrorCategory, code: string, toolNam
 export class ModelFacingError extends AppError {
   readonly contract: Readonly<ModelFacingErrorContract>;
 
+  /**
+   * A deliberate refusal with a stable code: bad arguments, no access, not found, a site that said
+   * no. Eve's multi-line stack for it only feeds the unstructured-problem alert (#289, #302).
+   * Dependency failures, including the fallback for unknown exceptions, stay unexpected and loud.
+   */
+  readonly isExpectedRefusal: boolean;
+
   constructor(contract: ModelFacingErrorContract) {
     // JSON keeps the correction contract machine-readable inside Eve's tool-error text channel.
     super(contract.code, JSON.stringify(contract));
     this.name = "ModelFacingError";
     this.contract = Object.freeze({ ...contract });
+    this.isExpectedRefusal = contract.category !== "dependency";
   }
 }
 

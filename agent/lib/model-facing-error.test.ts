@@ -4,6 +4,7 @@
  * Constructs covered:
  * - `ModelFacingError`: stable structured remediation visible to the model.
  * - `normalizeModelFacingError`: safe conversion of unexpected dependency failures.
+ * - `isExpectedRefusal`: coded refusals are expected, dependency failures are not.
  */
 import { describe, expect, it } from "vitest";
 
@@ -55,6 +56,19 @@ describe("ModelFacingError", () => {
     expect(unknown.contract.code).toBe("AGENT_TOOL_DEPENDENCY_FAILED");
     expect(unknown.message).not.toContain("10.0.0.4");
     expect(unknown.contract.sideEffectStatus).toBe("unknown");
+  });
+
+  it("marks coded refusals as expected and keeps dependency failures unexpected", () => {
+    const normalize = (error: Error) => normalizeModelFacingError(error, { toolName: "remember" });
+
+    expect(normalize(new AppError("AGENT_MEMORY_SUBJECT_REF_INVALID", "Ссылка недоступна")).isExpectedRefusal)
+      .toBe(true);
+    expect(normalize(new AppError("AGENT_WEB_FETCH_RESPONSE_FAILED", "HTTP 403")).isExpectedRefusal).toBe(true);
+    expect(normalize(new AppError("AGENT_GROUP_TOOL_FORBIDDEN", "Нет доступа")).isExpectedRefusal).toBe(true);
+    // Infrastructure failures and unknown exceptions must stay loud in Eve's own log.
+    expect(normalize(new AppError("AGENT_DATABASE_UNAVAILABLE", "База недоступна")).isExpectedRefusal)
+      .toBe(false);
+    expect(normalize(new Error("connect ECONNREFUSED")).isExpectedRefusal).toBe(false);
   });
 
   it("preserves a generic AGENT code without exposing its untrusted message suffix", () => {
