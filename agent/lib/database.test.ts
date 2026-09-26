@@ -29,7 +29,7 @@ describe("application database pool", () => {
     const [config] = createApplicationDatabasePool.mock.calls[0] as unknown as [{
       connectionTimeoutMillis: number; max: number; min: number;
     }];
-    expect(config.min).toBeGreaterThan(0);
+    expect(config.min).toBe(3);
     expect(config.min).toBeLessThanOrEqual(config.max);
     expect(config.connectionTimeoutMillis).toBe(5_000);
   });
