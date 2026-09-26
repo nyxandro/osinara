@@ -14,6 +14,7 @@
  * - Telegram public types: exposes only the reviewed application seams.
  * - Dynamic instructions: previews the current message before it is appended to durable history.
  * - Skills/HITL: bulk materialization and single-pass context-only approval continuations.
+ * - Tool refusal logging: no stack for a coded refusal already recorded by the tool boundary.
  */
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -24,6 +25,7 @@ import { patchHitlContext } from "./eve-patches/hitl-context.ts";
 import { patchStreamRecovery } from "./eve-patches/stream-recovery.ts";
 import { patchTelegramDispatchControl } from "./eve-patches/telegram-dispatch-control.ts";
 import { patchModelInactivity } from "./eve-patches/model-inactivity.ts";
+import { patchToolRefusalLogging } from "./eve-patches/tool-refusal-logging.ts";
 
 const EXPECTED_EVE_VERSION = "0.40.0";
 // The Docker dependencies stage runs this script before `agent/` exists, so the marker is a
@@ -142,6 +144,7 @@ await patchStreamRecovery(replaceExact);
 await patchPostgresWorkerRecovery(replaceExact);
 await patchTelegramDispatchControl(replaceExact);
 await patchModelInactivity(replaceExact);
+await patchToolRefusalLogging(replaceExact);
 
 // Silence in an ordinary chat relies on Eve's empty-delivery marker, which Eve documents only to
 // scheduled and task turns. The prompt teaches the exact string; the runtime must keep honouring

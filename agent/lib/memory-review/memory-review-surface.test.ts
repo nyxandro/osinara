@@ -5,9 +5,11 @@
  * - Internal review turns expose memory reads and `remember`, but override every unrelated built-in.
  * - Review instructions require all 50 sources, forbid sensitive writes, and suppress chat output.
  * - Live authorization failures use the common structured model-facing error contract.
+ * - Review `remember` offers only subjects that need no profile view.
  */
 import type { SessionAuth } from "eve/context";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 const authorizeCurrentExternalGroupCapability = vi.hoisted(() => vi.fn());
 
@@ -20,6 +22,7 @@ import {
   buildMemoryReviewToolSurface,
 } from "./memory-review-tool-surface.js";
 import { memoryReviewInstructions } from "./memory-review-prompt.js";
+import { rememberInputSchema } from "../remember-contract.js";
 import { memoryReviewScope } from "./memory-review-session.js";
 import { memoryReviewBatchIdFromContinuationToken } from "./memory-review-session.js";
 
@@ -136,6 +139,32 @@ describe("memory review model surface", () => {
     // Three parallel calls into a forbidden scope are then impossible, not merely discouraged.
     expect(schema.safeParse({ ...payload, scope: "personal" }).success).toBe(false);
     expect(schema.safeParse({ ...payload, scope: "group" }).success).toBe(false);
+  });
+
+  it("offers the review run only subjects it can resolve without a profile view", () => {
+    // A background run never has profile views, so a verified_ref there is refused every time (#289).
+    const schema = (buildMemoryReviewToolSurface("group").remember as unknown as {
+      inputSchema: { safeParse: (value: unknown) => { success: boolean } };
+    }).inputSchema;
+    const payload = {
+      basis: "agent_inferred", content: "Любит походы", kind: "preference", scope: "group",
+      sensitivity: "normal", sourceSequence: "42",
+    };
+    const verifiedRef = { kind: "verified_ref", subjectRef: `subj_${"a".repeat(32)}` };
+
+    for (const subject of [{ kind: "current_author" }, { kind: "label", label: "Оля" }, { kind: "none" }]) {
+      expect(schema.safeParse({ ...payload, subject }).success).toBe(true);
+    }
+    expect(schema.safeParse({ ...payload, subject: verifiedRef }).success).toBe(false);
+    // Some providers serialize the nested subject into a string; that path must refuse it too.
+    expect(schema.safeParse({ ...payload, subject: JSON.stringify(verifiedRef) }).success).toBe(false);
+    expect(schema.safeParse({ ...payload, subject: JSON.stringify({ kind: "current_author" }) }).success)
+      .toBe(true);
+    // Conversation turns do issue profile views and keep the verified reference.
+    expect(rememberInputSchema.safeParse({ ...payload, subject: verifiedRef }).success).toBe(true);
+    // Nothing the model reads, including the serialized-string pattern, may still offer it.
+    expect(JSON.stringify(z.toJSONSchema(schema as never, { io: "input" }))).not.toContain("verified_ref");
+    expect(JSON.stringify(z.toJSONSchema(rememberInputSchema, { io: "input" }))).toContain("verified_ref");
   });
 
   it("refuses to guess the review scope when the run does not carry exactly one", () => {

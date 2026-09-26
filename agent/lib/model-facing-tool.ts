@@ -2,7 +2,8 @@
  * Common model-facing execution boundary for Eve tools.
  *
  * Exports:
- * - `wrapModelFacingTool`: preserves a descriptor while normalizing every thrown error.
+ * - `wrapModelFacingTool`: preserves a descriptor while normalizing every thrown error and records
+ *   each call, with the failure code and log-only details, in one `AGENT_TOOL_CALL_METRICS` line.
  *
  * Key construct:
  * - The generic call contract is stated once in `agent/instructions.md`, so a descriptor carries
@@ -11,6 +12,7 @@
  */
 import { defineTool, type ToolDefinition } from "eve/tools";
 
+import { AppError } from "./app-error.js";
 import { normalizeModelFacingError } from "./model-facing-error.js";
 
 type AnyToolDefinition = ToolDefinition<any, any>;
@@ -36,15 +38,20 @@ export function wrapModelFacingTool(
     async execute(input, ctx) {
       const started = performance.now();
       let outcome = "succeeded";
+      let failure: { errorCode: string; errorDetails?: AppError["details"] } | undefined;
       try {
         return await definition.execute(input, ctx);
       } catch (error) {
         outcome = "failed";
-        throw normalizeModelFacingError(error, { toolName });
+        const normalized = normalizeModelFacingError(error, { toolName });
+        // The single structured record of a failed call: Eve skips its stack for expected refusals.
+        failure = { errorCode: normalized.contract.code };
+        if (error instanceof AppError && error.details !== undefined) failure.errorDetails = error.details;
+        throw normalized;
       } finally {
         console.info(JSON.stringify({ code: "AGENT_TOOL_CALL_METRICS", toolName, outcome,
           sessionId: ctx?.session?.id ?? null, turnId: ctx?.session?.turn?.id ?? null,
-          callId: ctx?.callId ?? null, durationMs: Math.round(performance.now() - started) }));
+          callId: ctx?.callId ?? null, durationMs: Math.round(performance.now() - started), ...failure }));
       }
     },
   });
