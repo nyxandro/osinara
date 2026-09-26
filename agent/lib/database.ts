@@ -19,7 +19,9 @@ export function database(): Pool {
     );
   }
   if (pool === null) {
-    pool = createApplicationDatabasePool({ connectionString, max: 10, connectionTimeoutMillis: 5_000 });
+    // `min` keeps a few connections past pg-pool's 10-second idle close. Under memory pressure
+    // PostgreSQL cannot start a new backend within the connect timeout, while open ones keep working (#285).
+    pool = createApplicationDatabasePool({ connectionString, max: 10, min: 3, connectionTimeoutMillis: 5_000 });
   }
   return pool;
 }

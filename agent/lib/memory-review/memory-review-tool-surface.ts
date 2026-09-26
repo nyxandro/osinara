@@ -45,7 +45,8 @@ const deniedInput = z.record(z.string(), z.unknown());
  * group already gets its remember this way, and a model cannot name a scope it cannot express.
  */
 function reviewRememberSchema(scope: MemoryScope) {
-  return createRememberInputSchema(z.literal(scope)).refine(
+  // Review turns get no profile views: a verified_ref there was refused on every call (#289).
+  return createRememberInputSchema(z.literal(scope), { verifiedRefs: false }).refine(
     (input) => input.basis === "agent_inferred" && input.sensitivity === "normal" &&
       input.sourceSequence !== undefined,
     {
