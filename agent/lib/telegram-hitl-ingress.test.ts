@@ -27,6 +27,7 @@ function fixture(count: number) {
     claimNext: vi.fn(async () => claims.shift() ?? null), complete: vi.fn(),
     completeWithSession: vi.fn(), enqueue: vi.fn(), fail: vi.fn(), rekeyQueue: vi.fn(),
     release: vi.fn(), renewLease: vi.fn(), saveVoiceTranscript: vi.fn(),
+    privateBurstReadyIn: vi.fn(async () => null),
     sessionEventStreamCursor: vi.fn().mockResolvedValueOnce(0).mockResolvedValueOnce(2),
   } satisfies TelegramIngressRepository;
   const dispatch = vi.fn();

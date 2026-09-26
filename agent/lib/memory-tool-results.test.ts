@@ -16,19 +16,21 @@ const {
   createMemory,
   listMemories,
   logMemoryWriteEvent,
+  requireWritableScope,
   resolveMemoryTurnSource,
   retrieveMemories,
 } = vi.hoisted(() => ({
   createMemory: vi.fn(),
   listMemories: vi.fn(),
   logMemoryWriteEvent: vi.fn(),
+  requireWritableScope: vi.fn((_authorization: unknown, scope: string) => scope),
   resolveMemoryTurnSource: vi.fn(),
   retrieveMemories: vi.fn(),
 }));
 
 vi.mock("./memory-context.js", () => ({
   requireMemoryAuthorization: () => ({ familyId: "family-1", scopes: ["personal"] }),
-  requireWritableScope: (_authorization: unknown, scope: string) => scope,
+  requireWritableScope,
 }));
 vi.mock("./memory-content-policy.js", () => ({
   requireAllowedMemoryContent: (content: string) => content,
@@ -54,7 +56,9 @@ vi.mock("./session-auth.js", () => ({
     },
   }),
 }));
+import { AppError } from "./app-error.js";
 import listMemoriesTool from "./tools/list_memories.js";
+import { MemoryNeighbourRefusal } from "./memory-neighbour-gate.js";
 import remember from "./tools/remember.js";
 import searchMemories from "./tools/search_memories.js";
 
@@ -64,9 +68,11 @@ const SEARCH_DIAGNOSTICS = {
   candidateLimitHit: false,
   queryCharacters: 3,
   queryChunks: 1,
+  recentlyShown: 0,
   russianQualified: 1,
   russianMatched: 1,
   russianTopRank: 0.2,
+  semanticBranchAvailable: true,
   semanticQualified: 1,
   semanticMatched: 3,
   semanticTopSimilarity: 0.81,
@@ -144,6 +150,35 @@ describe("model-facing memory tool results", () => {
     });
     retrieveMemories.mockReset();
     logMemoryWriteEvent.mockReset();
+    requireWritableScope.mockReset();
+    requireWritableScope.mockImplementation((_authorization: unknown, scope: string) => scope);
+  });
+
+  it("counts a refused scope as a failed write instead of losing it in a framework stack", async () => {
+    requireWritableScope.mockImplementation(() => {
+      throw new AppError("AGENT_MEMORY_SCOPE_DENIED", "Эта область памяти недоступна в текущем чате");
+    });
+    const input = {
+      basis: "agent_inferred" as const,
+      content: internalMemory.content,
+      kind: "fact" as const,
+      scope: "family" as const,
+      sensitivity: "normal" as const,
+      subject: { kind: "current_author" as const },
+    };
+
+    await expect(executeNonStreamingTool(remember, input, context)).rejects.toThrowError(
+      /AGENT_MEMORY_SCOPE_DENIED/u,
+    );
+
+    expect(logMemoryWriteEvent).toHaveBeenCalledWith({
+      code: "AGENT_MEMORY_WRITE_FAILED",
+      errorCode: "AGENT_MEMORY_SCOPE_DENIED",
+      scope: "family",
+      sourceKind: "current",
+      threadAction: "none",
+    });
+    expect(createMemory).not.toHaveBeenCalled();
   });
 
   it("persists an inferred sensitive memory without fabricating user confirmation", async () => {
@@ -251,6 +286,7 @@ describe("model-facing memory tool results", () => {
       },
     }, context);
 
+    if (!("item" in result)) throw new Error("remember returned the neighbour refusal");
     expect(result.item).toEqual({
       authorStatus: "current_member",
       confirmation: "user_confirmed",
@@ -435,5 +471,28 @@ describe("model-facing memory tool results", () => {
         outcome: "failed", memoryRefs: null, memoryCharacters: null,
       });
     } finally { info.mockRestore(); }
+  });
+
+  it("answers a neighbour stop instead of failing, so memory text never reaches the log", async () => {
+    // A thrown refusal is logged by the framework with its whole payload, and the neighbours it
+    // names are memory content: the family's records would leave the application on every stop.
+    const failed: unknown[] = [];
+    vi.mocked(logMemoryWriteEvent).mockImplementation((event) => void failed.push(event));
+    createMemory.mockRejectedValue(new MemoryNeighbourRefusal([
+      { content: "Не ест глютен", memoryRef: MEMORY_REF },
+    ]));
+    resolveMemoryTurnSource.mockResolvedValue({
+      conversationId: "c", isCurrent: true, isReview: false,
+      messageThreadId: null, sourceMessageId: "1", timelineEntryId: "t",
+    });
+
+    const result = await executeNonStreamingTool(remember, {
+      basis: "user_requested", content: "У Ани непереносимость глютена", kind: "fact",
+      scope: "personal", sensitivity: "normal", subject: { kind: "current_author" },
+    }, context);
+
+    expect(result).toMatchObject({ code: "AGENT_MEMORY_SIMILAR_RECORD_EXISTS", saved: false });
+    expect(JSON.stringify(failed)).not.toContain("глютен");
+    expect(failed.at(-1)).toMatchObject({ code: "AGENT_MEMORY_WRITE_DEFERRED" });
   });
 });

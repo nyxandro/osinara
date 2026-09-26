@@ -37,6 +37,8 @@ export interface MemoryRetrievalBranchDiagnostics {
   russianMatched: number;
   russianQualified: number;
   russianTopRank: number | null;
+  /** Records the last few turns of this conversation already put in front of the model. */
+  recentlyShown: number;
   semanticMatched: number;
   semanticQualified: number;
   semanticTopSimilarity: number | null;

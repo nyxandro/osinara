@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AppError } from "../app-error.js";
 import { createMemoryBlockResolver, type TurnBlockContext } from "./turn-blocks.js";
 import type { MemoryAuthorization } from "../memory-context.js";
+import { TURN_MEMORY_OPEN_TAG } from "./turn-memory-context.js";
 
 const authorization: MemoryAuthorization = {
   familyId: "family", groupId: null, role: "owner", scopes: ["personal"],
@@ -21,10 +22,12 @@ describe("memory failure ownership", () => {
     const reportFailure = vi.fn().mockResolvedValue(undefined);
     const retrieve = vi.fn().mockResolvedValue({ memories: [], retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } });
     const createProfile = vi.fn().mockRejectedValue(error);
+    const recordOffered = vi.fn();
     if (phase === "retrieval") retrieve.mockRejectedValue(error);
     const resolve = createMemoryBlockResolver({
       authorize: () => { if (phase === "authorization") throw error; return authorization; },
-      retrieve, createProfile, reportFailure,
+      openSelectionWindow: async () => 1, recordOffered, retrieve, createProfile,
+      reportFailure,
     });
     const ctx = phase !== "profile" ? context : { ...context, session: { ...context.session, auth: {
       ...context.session.auth, current: { ...context.session.auth.current!, attributes: {
@@ -37,13 +40,41 @@ describe("memory failure ownership", () => {
       causeCode: "AGENT_TEST_MEMORY_FAILED", phase, runId: "run", scheduleId: "schedule", sessionId: "session", turnId: "turn_0",
     });
     expect(JSON.stringify(reportFailure.mock.calls)).not.toMatch(/private|частный/);
+    // A turn that never reached the model must leave the show journal alone: a record written down
+    // there is hidden from the next turns of the conversation.
+    expect(recordOffered).not.toHaveBeenCalled();
     if (phase === "authorization") expect(retrieve).not.toHaveBeenCalled();
+  });
+
+  it("marks retrieved data as a payload and leaves a service notice unmarked", async () => {
+    // The markers are what `turn-memory-projection.ts` moves into the conversation. Marking a
+    // notice would deliver a rule about behaviour as if a person had just said it.
+    const shared = {
+      authorize: () => authorization, createProfile: vi.fn(), openSelectionWindow: async () => 1,
+      recordOffered: vi.fn(), reportFailure: vi.fn(),
+    };
+    const retrieved = await createMemoryBlockResolver({
+      ...shared,
+      retrieve: vi.fn().mockResolvedValue({
+        diagnostics: { semanticBranchAvailable: true }, memories: [], retrievedClaimIds: [],
+        threads: { threads: [], totalCharacters: 0 },
+      }),
+    })(context, "turn_0");
+    const notice = await createMemoryBlockResolver({
+      ...shared,
+      retrieve: vi.fn().mockRejectedValue(new Error("embedding service down")),
+    })(context, "turn_0");
+
+    expect(retrieved).toContain(TURN_MEMORY_OPEN_TAG);
+    expect(notice).toContain("AGENT_MEMORY_UNAVAILABLE");
+    expect(notice).not.toContain(TURN_MEMORY_OPEN_TAG);
   });
 
   it("keeps the explicit unavailable block if the incident database is also unavailable", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const resolve = createMemoryBlockResolver({ authorize: () => authorization,
+        openSelectionWindow: async () => 1, recordOffered: vi.fn(),
         retrieve: vi.fn().mockRejectedValue(new Error("unavailable")), createProfile: vi.fn(),
         reportFailure: vi.fn().mockRejectedValue(new Error("incident DB down")),
       });

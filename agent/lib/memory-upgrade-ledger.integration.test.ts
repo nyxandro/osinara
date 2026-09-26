@@ -140,6 +140,16 @@ const POST_V0101_MIGRATIONS = [
   "106_memory_search_vector_yo_folding.sql",
   "107_memory_vector_index_iterative_scan.sql",
   "108_memory_embedding_input.sql",
+  "109_memory_retrieval_shows.sql",
+  "110_memory_usage_counter.sql",
+  "111_memory_attribute_slot.sql",
+  "112_memory_occurred_on.sql",
+  "113_memory_embedding_backlog_view.sql",
+  "114_memory_embedding_jobs_view_all_statuses.sql",
+  "115_voice_message_operations.sql",
+  "116_monitoring_telegram_ingress_stall.sql",
+  "117_telegram_turn_interjections.sql",
+  "118_conversation_schedules.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [

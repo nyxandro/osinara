@@ -5,7 +5,7 @@
 # listing. See infra/monitoring/README.md.
 #
 # Every query reads a monitoring view created by a migration — 103 for most of them, 105 for the
-# memory index state. Nothing here may touch a base table: the
+# memory index state, 116 for the ingress service columns. Nothing here may touch a base table: the
 # osinara_metrics role has no privilege on them, and a query that tried would fail closed.
 global:
   min_interval: 30s
@@ -21,19 +21,30 @@ collectors:
         query: |
           SELECT pending, processing, failed, oldest_pending_age_seconds
           FROM monitoring_telegram_ingress
+      # A query of its own, so that a collector installed before the release that adds these
+      # columns loses only these two metrics, not the whole ingress family above.
+      - query_name: telegram_ingress_service
+        query: |
+          SELECT stalled_oldest_age_seconds, longest_running_seconds
+          FROM monitoring_telegram_ingress
       - query_name: memory_review_batches
         query: SELECT status, total, recent FROM monitoring_memory_review_batches
       - query_name: memory_embedding_jobs
         query: SELECT status, total, recent FROM monitoring_memory_embedding_jobs
       - query_name: memory_index_state
         query: SELECT embedding_status, total FROM monitoring_memory_index_state
+      - query_name: memory_embedding_backlog
+        query: |
+          SELECT pending, oldest_pending_age_seconds
+          FROM monitoring_memory_embedding_backlog
       - query_name: runtime_maintenance
         query: |
           SELECT phase, 1 AS present, age_seconds
           FROM monitoring_runtime_maintenance
 
     metrics:
-      # How long the oldest unanswered message has waited. The single most user-visible number.
+      # How long the oldest waiting message has waited, including group chatter that only queues
+      # behind a long turn in its own chat. Kept for trends; alerts read the two metrics below.
       - metric_name: osinara_ingress_oldest_pending_age_seconds
         type: gauge
         help: 'Age in seconds of the oldest Telegram update still waiting to be processed.'
@@ -57,6 +68,20 @@ collectors:
         help: 'Telegram updates whose processing ended in failure.'
         values: [failed]
         query_ref: telegram_ingress
+
+      # Nonzero only when a message waits in a chat where nothing is running: the worker does not
+      # take work, a queue is blocked, or every processing slot is held by another chat.
+      - metric_name: osinara_ingress_stalled_oldest_age_seconds
+        type: gauge
+        help: 'Age in seconds of the oldest Telegram update waiting in a chat where no turn is running.'
+        values: [stalled_oldest_age_seconds]
+        query_ref: telegram_ingress_service
+
+      - metric_name: osinara_ingress_longest_running_seconds
+        type: gauge
+        help: 'Duration in seconds of the longest Telegram turn currently running.'
+        values: [longest_running_seconds]
+        query_ref: telegram_ingress_service
 
       # Diagnostics the application owes the owner. Anything stuck in pending means that channel is mute.
       - metric_name: osinara_operational_incidents
@@ -104,6 +129,21 @@ collectors:
         key_labels: [embedding_status]
         values: [total]
         query_ref: memory_index_state
+
+      # The only number that tells a working indexing worker from a hung one while there is work:
+      # it stays near zero on a live loop and grows linearly on a stopped one. With an empty queue
+      # it says nothing, and that case is covered from the other side by osinara_memory_index_state.
+      - metric_name: osinara_memory_embedding_oldest_pending_age_seconds
+        type: gauge
+        help: 'Age in seconds of the oldest memory record still waiting to be indexed.'
+        values: [oldest_pending_age_seconds]
+        query_ref: memory_embedding_backlog
+
+      - metric_name: osinara_memory_embedding_pending
+        type: gauge
+        help: 'Memory records waiting for the indexing worker.'
+        values: [pending]
+        query_ref: memory_embedding_backlog
 
       - metric_name: osinara_model_last_success_age_seconds
         type: gauge

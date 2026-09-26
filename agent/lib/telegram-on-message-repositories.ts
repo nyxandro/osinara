@@ -45,6 +45,8 @@ import type {
   WorkspaceScope,
 } from "./workspaces/workspace-repository.js";
 import { memoryReviewRepository } from "./memory-review/memory-review-repository.js";
+import { turnInterjectionRepository } from "./turn-interjection/turn-interjection-repository.js";
+import { conversationWakeupContextRepository } from "./conversation-wakeups/conversation-wakeup-context.js";
 
 export interface TelegramMessageRepositories {
   attachmentReferences: Pick<TelegramGroupAttachmentRepository, "captureReplyTarget" | "record">;
@@ -78,6 +80,8 @@ export interface TelegramMessageRepositories {
   session: Pick<typeof sessionRepository, "hasRoute" | "prepareTurn" | "prepareAuthorizedResponse">;
   telegram: TelegramRepository;
   timeline: Pick<typeof conversationTimelineRepository, "recordInbound">;
+  turnInterjections: Pick<typeof turnInterjectionRepository, "findDeliveredContentKind">;
+  conversationWakeups: Pick<typeof conversationWakeupContextRepository, "listPlanned">;
 }
 
 // Production wiring stays separate from authorization flow so tests can replace every side effect.
@@ -99,4 +103,6 @@ export const productionTelegramMessageRepositories = {
   telegram: telegramRepository,
   timeline: conversationTimelineRepository,
   threadNotices: productionMemoryThreadNotices,
+  turnInterjections: turnInterjectionRepository,
+  conversationWakeups: conversationWakeupContextRepository,
 } satisfies TelegramMessageRepositories;

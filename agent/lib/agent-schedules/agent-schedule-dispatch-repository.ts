@@ -3,11 +3,12 @@
  *
  * Exports:
  * - `ClaimedAgentSchedule`: leased, authorization-revalidated proactive agent run.
- * - `agentScheduleDispatchRepository`: claim, side-effect markers, run completion, and failure.
+ * - `agentScheduleDispatchRepository`: claim, side-effect markers, run completion, silence and failure.
  */
 import type { PoolClient } from "pg";
 
 import { AppError } from "../app-error.js";
+import { recoverOrphanedConversationRuns } from "../conversation-wakeups/conversation-wakeup-orphans.js";
 import { database } from "../database.js";
 import { recoverUnstartedAgentSchedules } from "./agent-schedule-recovery.js";
 import { recordOperationalIncident } from "../operational-incidents/owner-alerts.js";
@@ -31,6 +32,7 @@ import {
   failAgentScheduleRunByIdentityForNotification,
   failAgentScheduleRunForNotification,
 } from "./agent-schedule-run-failure.js";
+import { completeSilentAgentScheduleRun } from "./agent-schedule-run-silence.js";
 import {
   beginAgentScheduleDispatch,
   markAgentScheduleRunning,
@@ -38,6 +40,7 @@ import {
 
 export interface ClaimedAgentSchedule {
   completedRuns: number;
+  executionContext: "conversation" | "isolated";
   maxRuns: number | null;
   authorUserId: string;
   capabilityAllowlist: string[];
@@ -70,6 +73,7 @@ interface ClaimOptions {
 
 interface CandidateRow {
   completed_runs: number;
+  execution_context: "conversation" | "isolated";
   max_runs: number | null;
   author_user_id: string;
   family_id: string;
@@ -138,6 +142,7 @@ export const agentScheduleDispatchRepository = {
     try {
       await client.query("BEGIN");
       await recoverUnstartedAgentSchedules(client, options.now);
+      await recoverOrphanedConversationRuns(client, options.now);
 
       // Only an unfinished Eve handoff expires; a confirmed running workflow owns its lifecycle.
       const ambiguous = await client.query<{ family_id: string; id: string; lease_token: string }>(
@@ -284,7 +289,8 @@ export const agentScheduleDispatchRepository = {
                 schedule.next_run_at, schedule.telegram_chat_id, schedule.telegram_chat_type,
                  schedule.message_thread_id::text, schedule.forum_topic_id::text,
                  schedule.history_window_days, schedule.tool_allowlist,
-                 membership.role, users.telegram_user_id, schedule.max_runs, schedule.completed_runs
+                 membership.role, users.telegram_user_id, schedule.max_runs, schedule.completed_runs,
+                 schedule.execution_context
            FROM agent_schedules AS schedule
            JOIN family_memberships AS membership
              ON membership.family_id = schedule.family_id AND membership.user_id = schedule.author_user_id
@@ -347,6 +353,7 @@ export const agentScheduleDispatchRepository = {
         }
         claimed.push({
           completedRuns: candidate.completed_runs,
+          executionContext: candidate.execution_context,
           maxRuns: candidate.max_runs,
           authorUserId: candidate.author_user_id,
           capabilityAllowlist: candidate.tool_allowlist,
@@ -444,6 +451,7 @@ export const agentScheduleDispatchRepository = {
     }
   },
 
+  completeSilentRun: completeSilentAgentScheduleRun,
   failRun: failAgentScheduleRun,
   failRunByIdentityForNotification: failAgentScheduleRunByIdentityForNotification,
   failRunForNotification: failAgentScheduleRunForNotification,

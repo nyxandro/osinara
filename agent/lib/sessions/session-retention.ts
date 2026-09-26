@@ -4,6 +4,7 @@
  * Export:
  * - `deleteExpiredSessions`: globally serializes, leases, and physically deletes retired Eve sessions.
  */
+import { SESSION_RETENTION_STORAGE_ABSENT_CODE } from "../../config.js";
 import { isAppError } from "../app-error.js";
 import { database } from "../database.js";
 import { sessionRepository } from "./session-repository.js";
@@ -35,25 +36,73 @@ async function deleteExpiredSessionsUnderLock(): Promise<number> {
   // The existing minute lifecycle hook bounds abandoned task rows before physical Eve deletion.
   await sessionRepository.retireAbandonedTasks(new Date());
   let deleted = 0;
+  let parkedThisSweep = 0;
   while (true) {
     const claim = await sessionRepository.claimExpiredForDeletion(new Date());
-    if (!claim) return deleted;
+    if (!claim) {
+      if (parkedThisSweep > 0) {
+        // The sweep no longer stops, so this line is the only place the pile stays visible.
+        console.warn(JSON.stringify({
+          code: "AGENT_SESSION_RETENTION_PARKED", deleted, parkedThisSweep,
+        }));
+      }
+      return deleted;
+    }
 
     try {
       await deleteConfiguredPostgresEveSession(claim.eveSessionId);
-      await sessionRepository.completeDeletion(claim.id, claim.leaseToken);
-      deleted += 1;
+      if (await settled(claim, () => sessionRepository.completeDeletion(claim.id, claim.leaseToken))) {
+        deleted += 1;
+      }
     } catch (error) {
-      // This schedule is the boundary: persist context and rethrow so the failure is observable.
       const errorCode = isAppError(error) ? error.code : "AGENT_SESSION_RETENTION_DELETE_FAILED";
-      await sessionRepository.failDeletion(claim.id, claim.leaseToken, errorCode);
-      console.error("Session retention deletion failed", {
+      // Workflow no longer holds the run, so there is nothing left to delete there and the
+      // application row would otherwise wait for storage that will never answer.
+      if (errorCode === "AGENT_EVE_SESSION_STORAGE_MISSING") {
+        if (await settled(claim, () => sessionRepository.completeDeletion(claim.id, claim.leaseToken))) {
+          deleted += 1;
+          console.info(JSON.stringify({
+            code: SESSION_RETENTION_STORAGE_ABSENT_CODE,
+            applicationSessionId: claim.id, eveSessionId: claim.eveSessionId,
+          }));
+        }
+        continue;
+      }
+      // This schedule is the boundary: persist the context and keep sweeping. Stopping here left
+      // every later expired session untouched and dropped the dispatcher's heartbeat for a minute.
+      parkedThisSweep += 1;
+      await settled(claim, () =>
+        sessionRepository.failDeletion(claim.id, claim.leaseToken, errorCode, new Date()));
+      console.error(JSON.stringify({
+        code: "AGENT_SESSION_RETENTION_DELETE_FAILED",
         applicationSessionId: claim.id,
-        error,
         errorCode,
         eveSessionId: claim.eveSessionId,
-      });
-      throw error;
+        error: error instanceof Error ? error.message : String(error),
+      }));
     }
+  }
+}
+
+/**
+ * Bookkeeping on a row whose lease another worker already took fails for that reason alone, and
+ * that failure must not end the sweep: the row is simply someone else's now.
+ */
+async function settled(
+  claim: { eveSessionId: string; id: string },
+  operation: () => Promise<void>,
+): Promise<boolean> {
+  try {
+    await operation();
+    return true;
+  } catch (error) {
+    if (isAppError(error) && error.code === "AGENT_SESSION_RETENTION_LEASE_LOST") {
+      console.warn(JSON.stringify({
+        code: "AGENT_SESSION_RETENTION_LEASE_LOST",
+        applicationSessionId: claim.id, eveSessionId: claim.eveSessionId,
+      }));
+      return false;
+    }
+    throw error;
   }
 }

@@ -16,7 +16,8 @@ import readMemoryThread from "../tools/read_memory_thread.js";
 import remember from "../tools/remember.js";
 import searchMemories from "../tools/search_memories.js";
 import searchMemoryThreads from "../tools/search_memory_threads.js";
-import { rememberInputSchema } from "../remember-contract.js";
+import { createRememberInputSchema } from "../remember-contract.js";
+import type { MemoryScope } from "../memory-context.js";
 import { authorizeCurrentExternalGroupCapability } from "../tool-policy/external-group-live-policy.js";
 import { resolveExternalGroupPolicyIdentity } from "../tool-policy/external-group-policy.js";
 import type { ExternalGroupToolName } from "../tool-policy/group-tool-catalog.js";
@@ -38,14 +39,22 @@ export const MEMORY_REVIEW_DENIED_TOOL_NAMES = [
 ] as const;
 
 const deniedInput = z.record(z.string(), z.unknown());
-const reviewRememberSchema = rememberInputSchema.refine(
-  (input) => input.basis === "agent_inferred" && input.sensitivity === "normal" &&
-    input.sourceSequence !== undefined,
-  {
-    message:
-      "AGENT_MEMORY_REVIEW_INPUT_INVALID: Для тихой проверки обязательны sourceSequence, basis agent_inferred и sensitivity normal",
-  },
-);
+
+/**
+ * The run is authorized for exactly one scope, so the schema admits only that one: an external
+ * group already gets its remember this way, and a model cannot name a scope it cannot express.
+ */
+function reviewRememberSchema(scope: MemoryScope) {
+  // Review turns get no profile views: a verified_ref there was refused on every call (#289).
+  return createRememberInputSchema(z.literal(scope), { verifiedRefs: false }).refine(
+    (input) => input.basis === "agent_inferred" && input.sensitivity === "normal" &&
+      input.sourceSequence !== undefined,
+    {
+      message:
+        "AGENT_MEMORY_REVIEW_INPUT_INVALID: Для тихой проверки обязательны sourceSequence, basis agent_inferred и sensitivity normal",
+    },
+  );
+}
 
 function deniedTool(name: string): AnyTool {
   return defineTool({
@@ -60,14 +69,14 @@ function deniedTool(name: string): AnyTool {
   }) as unknown as AnyTool;
 }
 
-function reviewRemember(): AnyTool {
+function reviewRemember(scope: MemoryScope): AnyTool {
   const definition = remember as unknown as AnyTool;
   return defineTool({
     ...definition,
     approval: () => "not-applicable",
     description:
       "Сохранить одно конкретное сведение из sourceSequence текущего тихого batch: факт, предпочтение, личный опыт, событие, план или полезную ссылку с контекстом. Особая важность не требуется, догадки запрещены. Разрешена только normal sensitivity.",
-    inputSchema: reviewRememberSchema,
+    inputSchema: reviewRememberSchema(scope),
     async execute(input, ctx) {
       if (ctx.session.auth.current?.attributes.groupType === "external") {
         const identity = resolveExternalGroupPolicyIdentity(ctx.session.auth);
@@ -104,6 +113,7 @@ function reviewRead(
 }
 
 export function buildMemoryReviewToolSurface(
+  scope: MemoryScope,
   externalCapabilities?: ReadonlySet<ExternalGroupToolName>,
 ): Readonly<Record<string, AnyTool>> {
   const allowed = (name: ExternalGroupToolName) =>
@@ -124,7 +134,7 @@ export function buildMemoryReviewToolSurface(
       readMemoryThread as unknown as AnyTool,
     );
   }
-  if (allowed("remember")) surface.remember = reviewRemember();
+  if (allowed("remember")) surface.remember = reviewRemember(scope);
   if (allowed("search_memories")) {
     surface.search_memories = reviewRead(
       "search_memories",

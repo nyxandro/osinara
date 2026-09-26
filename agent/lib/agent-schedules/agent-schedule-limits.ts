@@ -34,7 +34,7 @@ export function isPauseOnlyUpdate(input: AgentScheduleUpdateInput): boolean {
 }
 
 export const AGENT_SCHEDULE_LIMIT_DESCRIPTION =
-  "Для N выполнений передай maxRuns:N в create/update: это общий лимит успешных запусков с подтверждённой доставкой, включая completedRuns. " +
+  "Для N выполнений передай maxRuns:N в create/update: это общий лимит успешных запусков, включая тихие без сообщения и completedRuns. " +
   "Например, 10 раз раз в минуту: recurrence:{kind:'minutely',interval:1}, maxRuns:10. " +
   "Без maxRuns повтор не ограничен; maxRuns:null снимает лимит. Лимит не сбрасывается паузой, resume или run_now. " +
   "После достижения лимита расписание завершится автоматически без дополнительного запуска; не создавай файл-счётчик. " +

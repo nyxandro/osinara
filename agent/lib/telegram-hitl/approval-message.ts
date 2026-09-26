@@ -6,6 +6,7 @@
  * - `genericApprovalFacts`: bounded readable fields for a tool without a reviewed description.
  * - `approvalFact`, `sanitizeApprovalLine`: sanitized application-derived lines, never shortened.
  * - `googleWorkspaceFacts`: decoded service, command, flags and parameters plus the exact command.
+ * - `HITL_PROMPT_CHUNK_CHARACTERS`: the longest prompt Telegram delivery sends as one message.
  *
  * Key constructs:
  * - Facts are derived from the same input that will execute, so the text cannot describe one action
@@ -16,6 +17,8 @@
 import { AppError } from "../app-error.js";
 import { DEFAULT_CONSEQUENCE } from "./approval-consequences.js";
 
+// Longer prompts are delivered as numbered parts, and only the last part carries the buttons.
+export const HITL_PROMPT_CHUNK_CHARACTERS = 3_000;
 const PURPOSE_MAX_CHARACTERS = 300;
 const GENERIC_FACT_LIMIT = 8;
 const GENERIC_VALUE_MAX_CHARACTERS = 180;

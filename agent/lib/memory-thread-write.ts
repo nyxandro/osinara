@@ -2,7 +2,7 @@
  * Atomic main-agent memory-thread write boundary.
  *
  * Exports:
- * - `embedMemoryThreadTitle`: validates and embeds a requested title before database mutation.
+ * - `requireMemoryThreadTitle`: validates a requested title before the write embeds anything.
  * - `prepareMemoryThreadWrite`: resolves an authorized thread/project/subject identity in transaction.
  * - `materializeMemoryThreadWrite`: links the committed claim and records an opaque result and audit.
  */
@@ -10,7 +10,6 @@ import type { PoolClient } from "pg";
 
 import { AppError } from "./app-error.js";
 import type { PreparedClaimEvidence } from "./claim-evidence-writer.js";
-import { embedMemoryPassages } from "./memory-embedding-client.js";
 import {
   MEMORY_EMBEDDING_DIMENSIONS,
   MEMORY_EMBEDDING_MODEL_VERSION,
@@ -102,15 +101,19 @@ function vectorLiteral(vector: readonly number[]): string {
   return `[${vector.join(",")}]`;
 }
 
-export async function embedMemoryThreadTitle(
+/**
+ * The title a thread creation needs embedded, checked but not yet sent. Embedding happens once
+ * for the whole write, together with the neighbour probe, so one claim costs one request.
+ */
+export function requireMemoryThreadTitle(
   input: CreateMemoryThreadInput | undefined,
-): Promise<readonly number[] | null> {
+): string | null {
   if (!input || input.action !== "create") return null;
   if (!input.title.trim() || input.title.length > THREAD_TITLE_MAX_CHARACTERS ||
     !input.purpose.trim() || input.purpose.length > THREAD_PURPOSE_MAX_CHARACTERS) {
     throw invalidInput("Название или назначение нити памяти не соответствует допустимым границам");
   }
-  return (await embedMemoryPassages([input.title]))[0]!;
+  return input.title;
 }
 
 async function loadThread(

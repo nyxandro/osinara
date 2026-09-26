@@ -7,11 +7,19 @@
 import { defineTool } from "eve/tools";
 import { AppError, isAppError } from "../app-error.js";
 import { requireAllowedMemoryContent } from "../memory-content-policy.js";
-import { requireMemoryAuthorization, requireWritableScope } from "../memory-context.js";
+import {
+  requireMemoryAuthorization,
+  requireWritableScope,
+  type MemoryScope,
+} from "../memory-context.js";
 import { memoryRepository } from "../memory-repository.js";
 import { logMemoryWriteEvent } from "../memory-observability.js";
 import { resolveMemoryTurnSource } from "../memory-turn-source.js";
 import { toModelMemory } from "../model-memory.js";
+import {
+  MemoryNeighbourRefusal,
+  memoryNeighbourRefusalResult,
+} from "../memory-neighbour-gate.js";
 import { rememberInputSchema } from "../remember-contract.js";
 import { memoryReviewBatchId } from "../memory-review/memory-review-session.js";
 
@@ -20,13 +28,30 @@ export default defineTool({
     "Сохранить одно конкретное сведение только из проверенного сообщения текущего хода: факт, предпочтение, личный опыт, событие, план или полезную ссылку с контекстом. Не требуй особой важности или просьбы запомнить; не сохраняй догадки и поручения без содержательных фактов.",
     "При самостоятельном отборе используй basis=agent_inferred, при прямой просьбе сохранить сведение basis=user_requested. Пример самостоятельного сохранения: {\"basis\":\"agent_inferred\",\"content\":\"...\",\"kind\":\"fact\",\"scope\":\"personal\",\"sensitivity\":\"normal\",\"subject\":{\"kind\":\"current_author\"}}.",
     "В группе sourceSequence выбирает ровно одно сообщение видимой дельты. Для существующей нити используй thread.action=attach и threadRef только из list/search/read_memory_thread; thread.action=create создаёт нить атомарно.",
-    "Результат содержит item.memoryRef, optional thread и notice для немедленного undo.",
+    "Для события с известной датой задавай occurredOn: это день, когда оно произошло, а не день разговора. Дату не угадывай: не известна из сообщения, оставь поле пустым.",
+    "Для свойства, которое со временем меняется (предпочтение, место работы, адрес), задавай attribute — короткое имя свойства. Новая запись того же субъекта с тем же attribute переводит прежнюю в историю; прежняя не удаляется и видна в списке памяти.",
+    "Если в памяти уже есть близкое по смыслу сведение о том же субъекте, вызов отклоняется с AGENT_MEMORY_SIMILAR_RECORD_EXISTS и списком таких записей: прочитай их и реши сама — обновить существующую, задать attribute или перечислить их в distinctFrom и сохранить отдельно.",
+    "Результат содержит item.memoryRef, optional thread, supersededRefs для замещённых версий и notice для немедленного undo.",
   ].join(" "),
   inputSchema: rememberInputSchema,
   async execute(input, ctx) {
     const authorization = requireMemoryAuthorization(ctx);
-    const scope = requireWritableScope(authorization, input.scope);
     const requestedSourceKind = input.sourceSequence === undefined ? "current" : "delta";
+    let scope: MemoryScope;
+    try {
+      scope = requireWritableScope(authorization, input.scope);
+    } catch (error) {
+      // A refused scope is a failed write like any other: the reason lived only in an unstructured
+      // framework stack, so a background run losing a fact left nothing to search the log by.
+      logMemoryWriteEvent({
+        code: "AGENT_MEMORY_WRITE_FAILED",
+        errorCode: isAppError(error) ? error.code : "AGENT_MEMORY_WRITE_UNEXPECTED",
+        scope: input.scope,
+        sourceKind: requestedSourceKind,
+        threadAction: input.thread?.action ?? "none",
+      });
+      throw error;
+    }
     let source: Awaited<ReturnType<typeof resolveMemoryTurnSource>> | null = null;
     let item: Awaited<ReturnType<typeof memoryRepository.create>>;
     try {
@@ -45,6 +70,9 @@ export default defineTool({
       }
       item = await memoryRepository.create(authorization, {
         ...(reviewBatchId === null ? {} : { memoryReviewBatchId: reviewBatchId }),
+        ...(input.attribute === undefined ? {} : { attribute: input.attribute }),
+        ...(input.distinctFrom === undefined ? {} : { distinctFrom: input.distinctFrom }),
+        ...(input.occurredOn === undefined ? {} : { occurredOn: input.occurredOn }),
         // A request to save another participant's delta message is not that author's endorsement.
         confirmation: input.basis === "user_requested" && source.isCurrent
           ? "user_confirmed"
@@ -67,6 +95,19 @@ export default defineTool({
         ...(input.thread === undefined ? {} : { thread: input.thread }),
       });
     } catch (error) {
+      // A stop for review is the product working, not a failure: answered, not thrown. Thrown, it
+      // would be logged by the framework with its whole payload, and the neighbours it names are
+      // memory content — it would leave the application for the log store on every refusal.
+      if (error instanceof MemoryNeighbourRefusal) {
+        logMemoryWriteEvent({
+          code: "AGENT_MEMORY_WRITE_DEFERRED",
+          errorCode: "AGENT_MEMORY_SIMILAR_RECORD_EXISTS",
+          scope,
+          sourceKind: source?.isCurrent === true ? "current" : requestedSourceKind,
+          threadAction: input.thread?.action ?? "none",
+        });
+        return memoryNeighbourRefusalResult(error);
+      }
       const errorCode = isAppError(error)
         ? error.code
         : typeof error === "object" && error !== null &&
@@ -90,6 +131,7 @@ export default defineTool({
     });
     return {
       item: toModelMemory(item),
+      ...(item.supersededRefs === undefined ? {} : { supersededRefs: item.supersededRefs }),
       ...(item.thread === undefined ? {} : { thread: item.thread }),
       notice: `Сохранено в область «${scope}». Для немедленной отмены используй manage_memory с action undo и memoryRef ${item.memoryRef}.`,
     };

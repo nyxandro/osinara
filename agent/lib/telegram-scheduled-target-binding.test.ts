@@ -5,6 +5,7 @@
  * - `message.completed` rejects a channel target that differs from scheduled auth before delivery.
  * - Scheduled final-delivery failures persist their primary stable code before terminal fallback.
  * - `turn.failed` terminalizes a mismatched run without notifying the unrelated active target.
+ * - A scheduled run the model deliberately left silent closes as a successful run without delivery.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,6 +14,8 @@ const dependencies = vi.hoisted(() => ({
   channelConfig: null as Record<string, any> | null,
   clearApprovals: vi.fn(),
   completeDeliveredRun: vi.fn(),
+  completeSilentRun: vi.fn(),
+  completedOutput: null as Record<string, unknown> | null,
   deliverFinalOutput: vi.fn(),
   failRun: vi.fn(),
   failRunForNotification: vi.fn(),
@@ -45,6 +48,7 @@ vi.mock("./agent-schedules/agent-schedule-dispatch-repository.js", () => ({
   agentScheduleDispatchRepository: {
     authorizeDelivery: dependencies.authorizeDelivery,
     completeDeliveredRun: dependencies.completeDeliveredRun,
+    completeSilentRun: dependencies.completeSilentRun,
     failRun: dependencies.failRun,
     failRunForNotification: dependencies.failRunForNotification,
   },
@@ -75,7 +79,7 @@ vi.mock("./telegram-hitl/approval-repository.js", () => ({
   telegramHitlApprovalRepository: { clearForEveSession: dependencies.clearApprovals },
 }));
 vi.mock("./telegram-progress.js", () => ({
-  completedTelegramOutput: vi.fn(() => ({ kind: "message", message: "Секретная сводка" })),
+  telegramOutputWithoutMemoryDirective: vi.fn(() => dependencies.completedOutput),
 }));
 vi.mock("./telegram-stable-delivery.js", () => ({
   postTelegramMessageWithoutContinuationChange: dependencies.postStableMessage,
@@ -98,6 +102,7 @@ vi.mock("./memory-review/memory-review-repository.js", () => ({
 
 await import("../channels/telegram.js");
 const { AppError } = await import("./app-error.js");
+const { isScheduledSession } = await import("./agent-schedules/scheduled-session.js");
 
 const context = {
   session: {
@@ -130,6 +135,10 @@ function matchingChannel() {
 describe("scheduled Telegram target binding", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    dependencies.completedOutput = {
+      declaration: { answer: "Секретная сводка", declared: false, memoryRefs: [] },
+      output: { kind: "message", message: "Секретная сводка" },
+    };
     dependencies.deliverFinalOutput.mockResolvedValue([{ messageId: "telegram-message-1" }]);
     dependencies.failRun.mockResolvedValue(true);
     dependencies.failRunForNotification.mockResolvedValue(true);
@@ -150,6 +159,42 @@ describe("scheduled Telegram target binding", () => {
 
     expect(dependencies.authorizeDelivery).not.toHaveBeenCalled();
     expect(dependencies.deliverFinalOutput).not.toHaveBeenCalled();
+  });
+
+  it("closes a run the model deliberately left silent as a successful run without delivery", async () => {
+    // A scenario may say to skip an empty report; the run is done, not a delivery that went missing.
+    dependencies.completedOutput = {
+      declaration: { answer: "", declared: false, memoryRefs: [] },
+      output: { kind: "silence" },
+    };
+    dependencies.completeSilentRun.mockResolvedValue(true);
+    const handler = dependencies.channelConfig?.events?.["message.completed"];
+
+    await handler({ finishReason: "stop", message: null }, matchingChannel(), context);
+
+    expect(dependencies.completeSilentRun).toHaveBeenCalledWith(
+      "application-session-1",
+      "eve-session-1",
+      expect.any(Date),
+    );
+    expect(dependencies.authorizeDelivery).not.toHaveBeenCalled();
+    expect(dependencies.deliverFinalOutput).not.toHaveBeenCalled();
+  });
+
+  it("leaves schedules alone when an ordinary conversation turn stays silent", async () => {
+    vi.mocked(isScheduledSession).mockReturnValue(false);
+    dependencies.completedOutput = {
+      declaration: { answer: "", declared: false, memoryRefs: [] },
+      output: { kind: "silence" },
+    };
+    const handler = dependencies.channelConfig?.events?.["message.completed"];
+    try {
+      await handler({ finishReason: "stop", message: null }, matchingChannel(), context);
+    } finally {
+      vi.mocked(isScheduledSession).mockReturnValue(true);
+    }
+
+    expect(dependencies.completeSilentRun).not.toHaveBeenCalled();
   });
 
   it("rejects a completed result when only the Telegram topic differs", async () => {

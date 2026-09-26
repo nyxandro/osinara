@@ -10,6 +10,7 @@
  * - Explicit MiniMax compatibility preserves provider web-search payloads across Anthropic parsing.
  * - Retryable physical provider responses are logged before AI SDK applies its bounded retry policy.
  * - OpenAI Chat Completions carries explicit provider-native thinking controls when configured.
+ * - Turn memory is projected into the turn tail so the instruction prefix stays reusable.
  */
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
@@ -29,6 +30,7 @@ import { createModelCallMetrics } from "./model-call-metrics.js";
 import type { SuccessfulModelCall } from "./model-availability-repository.js";
 import { modelRouteKey } from "./model-route.js";
 import { modelSuccessObserver } from "./model-success-observer.js";
+import { projectTurnMemory } from "./prompt/turn-memory-projection.js";
 
 export interface ConfiguredLanguageModelOptions {
   readonly apiKey: string;
@@ -173,7 +175,7 @@ function createTransportDefaultsMiddleware(
         ...params,
         maxOutputTokens: params.maxOutputTokens ?? maxOutputTokens,
         prompt: transport.protocol === "openai-chat-completions"
-          ? removeUnresolvedOpenAIToolCalls(params.prompt)
+          ? projectTurnMemory(removeUnresolvedOpenAIToolCalls(params.prompt))
           : params.prompt,
         providerOptions: {
           ...params.providerOptions,

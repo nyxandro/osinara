@@ -9,8 +9,11 @@
  * - Completed ordinary/Rich Message or silent reaction delivery without speculative chat drafts.
  * - Interim progress notices delivered at most once per assistant step of an interactive turn.
  * - Scheduled final delivery bound to its owner-approved Telegram chat and forum topic.
- * - Verified group replies anchored to the triggering member message.
+ * - Verified group replies anchored to the triggering member message, unless the model marked the
+ *   answer as a standalone message.
  * - Successfully delivered final group output persisted as one logical timeline entry.
+ * - A wake-up turn runs as an ordinary turn of its conversation without progress notices or
+ *   reactions, closes its schedule run on completion, and spends no conversation turn budget.
  */
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -19,11 +22,12 @@ import { telegramChannel } from "eve/channels/telegram";
 import { handleTelegramDurableIngress } from "../lib/telegram-durable-ingress.js";
 import { TELEGRAM_EVE_UPLOAD_POLICY } from "../lib/telegram-message-policy.js";
 import { handleTelegramMessage } from "../lib/telegram-on-message.js";
-import { completedTelegramOutput } from "../lib/telegram-progress.js";
+import { telegramOutputWithoutMemoryDirective } from "../lib/telegram-progress.js";
 import { logTelegramSilentTurn } from "../lib/telegram-silent-turn.js";
 import { deliverTelegramProgressNotice } from "../lib/telegram-progress-notice.js";
 import { asidePauseMilliseconds } from "../lib/telegram-aside-pacing.js";
 import { stripTelegramAsideDirectives } from "../lib/telegram-authored-split.js";
+import { recordMemoryUsageDeclaration } from "../lib/memory-usage-report.js";
 import { deliverTelegramFinalOutput } from "../lib/telegram-final-delivery.js";
 import { bindTelegramIngressTurn } from "../lib/telegram-ingress-binding.js";
 import { completeRuntimeHandoff, completeRuntimeSessionHandoffs } from "../lib/runtime-handoff.js";
@@ -65,6 +69,10 @@ import { resolveMemoryReviewBatch } from "../lib/memory-review/memory-review-tur
 import { memoryReviewRepository } from "../lib/memory-review/memory-review-repository.js";
 import { memoryReviewDispatchRepository } from "../lib/memory-review/memory-review-dispatch-repository.js";
 import { accountlessActorApprovalError } from "../lib/telegram-session-actor.js";
+import {
+  finishConversationWakeupTurn,
+  isConversationWakeupTurn,
+} from "../lib/conversation-wakeups/conversation-wakeup-events.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -84,11 +92,19 @@ export default telegramChannel({
     },
     async "message.completed"(data, channel, ctx) {
       // Model-authored pre-tool text is a user-visible progress update, not technical tool noise.
-      if (isScheduledSession(ctx) && data.finishReason !== "stop") return;
-      const output = completedTelegramOutput(data);
+      // A background run — scheduled or a wake-up — reports only its result, or stays silent.
+      if ((isScheduledSession(ctx) || isConversationWakeupTurn(ctx)) && data.finishReason !== "stop") return;
+      const { declaration, output } = telegramOutputWithoutMemoryDirective(data);
       if (!output) return;
       const sessionId = applicationSessionId(ctx);
       if (!await sessionRepository.isCurrentEveSession(sessionId, ctx.session.id)) return;
+      // Behind the barrier: a superseded session must not move counters either.
+      await recordMemoryUsageDeclaration({
+        auth: ctx.session.auth,
+        declaration,
+        eveSessionId: ctx.session.id,
+        turnId: ctx.session.turn.id,
+      });
       if (output.kind === "silence") {
         // The model chose to deliver nothing; the trigger it stayed quiet on is the useful signal.
         logTelegramSilentTurn({
@@ -96,6 +112,10 @@ export default telegramChannel({
           eveSessionId: ctx.session.id,
           eveTurnId: ctx.session.turn.id,
         });
+        // A scenario may skip an empty report: the run is done, so turn completion finds nothing to fail.
+        if (isScheduledSession(ctx)) {
+          await agentScheduleDispatchRepository.completeSilentRun(sessionId, ctx.session.id, new Date());
+        }
         return;
       }
       if (output.kind === "progress") {
@@ -111,6 +131,11 @@ export default telegramChannel({
       }
       const currentAttributes = ctx.session.auth.current?.attributes;
       const scheduledDelivery = scheduledDeliveryMetadata(ctx);
+      if (output.kind === "reaction" && isConversationWakeupTurn(ctx)) {
+        // A wake-up answers no message, so a reaction has nothing to attach to and is not sent.
+        logTelegramSilentTurn({ auth: ctx.session.auth.current, eveSessionId: ctx.session.id, eveTurnId: ctx.session.turn.id });
+        return;
+      }
       if (output.kind === "reaction") {
         const telegramMessageId = currentAttributes?.telegramMessageId;
         if (isScheduledSession(ctx) || typeof telegramMessageId !== "string") {
@@ -138,9 +163,12 @@ export default telegramChannel({
           telegramChatId: scheduledDelivery.telegramChatId,
         });
       }
-      const replyParameters = isScheduledSession(ctx)
+      // The reply context is verified even when unused: a standalone answer is the model's choice
+      // and must not switch off the integrity check. The chat and topic stay bound to the turn.
+      const turnReplyParameters = isScheduledSession(ctx)
         ? undefined
         : telegramTurnReplyParameters(channel.state, ctx);
+      const replyParameters = output.standalone ? undefined : turnReplyParameters;
       const durableText = stripTelegramAsideDirectives(message);
       let sentMessages: Awaited<ReturnType<typeof deliverTelegramFinalOutput>>;
       try {
@@ -300,6 +328,8 @@ export default telegramChannel({
     async "turn.failed"(data, channel, ctx) {
       // Terminal failure releases the temporary timeline retention after all tool writes have stopped.
       await releaseMemoryTurnSources(ctx);
+      // First, so a failing failure notice below cannot leave the wake-up's schedule leased for good.
+      await finishConversationWakeupTurn(ctx, data.code);
       const reviewBatchId = await resolveMemoryReviewBatch(ctx);
       let reviewFailureReplayed = false;
       if (reviewBatchId) {
@@ -375,6 +405,7 @@ export default telegramChannel({
           eveTurnId: ctx.session.turn.id,
         });
       }
+      await finishConversationWakeupTurn(ctx, "AGENT_CONVERSATION_WAKEUP_CANCELLED");
       // A cancelled turn is not a failure and its session keeps serving the replacement turn, so
       // only its own approval rows are released here.
       await telegramHitlApprovalRepository.clearForEveSession(
@@ -408,8 +439,10 @@ export default telegramChannel({
           new Date(),
         );
       }
+      // A parked wake-up has already asked its question; the run is done either way.
+      await finishConversationWakeupTurn(ctx, null);
       if (!reviewBatchId) {
-        await sessionRepository.recordTurnCompleted(sessionId, ctx.session.id, awaitingApproval);
+        await sessionRepository.recordTurnCompleted(sessionId, ctx.session.id, awaitingApproval, !isConversationWakeupTurn(ctx));
       }
       if (!awaitingApproval) {
         await telegramHitlApprovalRepository.clearForEveSession(sessionId, ctx.session.id);

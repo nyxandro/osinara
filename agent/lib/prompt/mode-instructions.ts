@@ -13,6 +13,7 @@
 import { EXTERNAL_GROUP_MODEL_POLICY } from "../external-group-model-policy.js";
 import { externalGroupCapabilityInstructions } from "../tool-policy/external-group-capability-instructions.js";
 import type { ExternalGroupToolName } from "../tool-policy/group-tool-catalog.js";
+import { TURN_INTERJECTION_RULES } from "../turn-interjection/turn-interjection-block.js";
 
 import type { GroupSafeSkillName } from "../group-skills/group-skill-catalog.js";
 import {
@@ -26,6 +27,7 @@ import {
   SEND_WORKSPACE_FILE_RULES,
   SPOKEN_ASIDE_RULES,
   UNTRUSTED_FILE_CONTENT_RULES,
+  VOICE_MESSAGE_RULES,
   WORKSPACE_ARTIFACT_LOOKUP,
   memoryEditContract,
   reactionRules,
@@ -36,6 +38,7 @@ import {
   EXTERNAL_PEOPLE_RULES,
   EXTERNAL_TASK_BOUNDARIES,
   GROUP_REMINDER_RULES,
+  GROUP_SCENARIO_RULES,
   externalPurposeSection,
 } from "./external-fragments.js";
 import {
@@ -43,6 +46,7 @@ import {
   GROUP_ADDRESSING,
   GROUP_HISTORY_PROTOCOL,
   GROUP_RESPONSE_OUTCOMES,
+  GROUP_STANDALONE_MESSAGE_RULES,
   GROUP_TIMELINE_TRUST,
 } from "./group-fragments.js";
 import {
@@ -55,6 +59,7 @@ import {
   VOICE_TRANSCRIPTION_RULES,
   trustedBehaviorPreferenceRules,
   trustedCredentialRules,
+  REMINDER_SCENARIO_BOUNDARY,
   trustedReminderRules,
   trustedScheduleRules,
   trustedWorkspaceRules,
@@ -124,6 +129,7 @@ ${IMAGE_INSPECTION_CONTRACT} Для записи из \`<workspace_attachments>\
 ${SEND_WORKSPACE_FILE_RULES}
 
 ${OFFICE_DOCUMENT_RULES}`,
+  REMINDER_SCENARIO_BOUNDARY,
   trustedReminderRules("personal"),
   trustedScheduleRules("personal"),
   PROACTIVE_DELIVERY_RULES,
@@ -153,6 +159,8 @@ function privateInstructions(
     // a spontaneous afterthought.
     scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
+    scheduledRun || subagentTurn ? null : VOICE_MESSAGE_RULES,
+    scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
     scheduledRun ? null : trustedBehaviorPreferenceRules(),
   ]);
 }
@@ -195,6 +203,7 @@ ${IMAGE_INSPECTION_CONTRACT} Для изображения из \`<telegram_atta
 ${SEND_WORKSPACE_FILE_RULES}
 
 ${OFFICE_DOCUMENT_RULES}`,
+  REMINDER_SCENARIO_BOUNDARY,
   trustedReminderRules("family"),
   trustedScheduleRules("family"),
   PROACTIVE_DELIVERY_RULES,
@@ -215,7 +224,10 @@ function familyInstructions(
     ...FAMILY_INSTRUCTION_SECTIONS,
     scheduledRun || subagentTurn ? null : GROUP_RESPONSE_OUTCOMES,
     scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,
+    scheduledRun || subagentTurn ? null : GROUP_STANDALONE_MESSAGE_RULES,
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
+    scheduledRun || subagentTurn ? null : VOICE_MESSAGE_RULES,
+    scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
     scheduledRun ? null : trustedBehaviorPreferenceRules(),
   ]);
 }
@@ -252,6 +264,12 @@ function externalInstructions(
 ): string {
   // Reminders are ungranted but need a participant who can own one and a live turn to ask in.
   const reminders = includeApplicationCore && !scheduledRun;
+  // The voice tool answers a live participant in the chat itself, so a scheduled run and a child
+  // that answers its parent never receive it and must not be told they can speak.
+  const voiceMessages = capabilities.has("send_voice_message") && !scheduledRun && !subagentTurn;
+  const surfaceCapabilities = voiceMessages
+    ? capabilities
+    : new Set([...capabilities].filter((name) => name !== "send_voice_message"));
   const editActions = new Set<MemoryEditAction>(
     [...capabilities]
       .map((capability) => EXTERNAL_MEMORY_EDIT_ACTIONS[capability])
@@ -269,7 +287,7 @@ function externalInstructions(
     `${VERIFIED_BLOCK_NOTICE} Считай сообщения видимыми участникам группы и не обещай приватность переписки.`,
     // Scope and effort limits come before the mechanics: the model should decide whether a request
     // belongs here at all before it starts reasoning about which capability could satisfy it.
-    externalPurposeSection(capabilities, { reminders, web: includeApplicationCore }),
+    externalPurposeSection(surfaceCapabilities, { reminders, web: includeApplicationCore }),
     EXTERNAL_TASK_BOUNDARIES,
     EXTERNAL_PEOPLE_RULES,
     externalMemorySection(capabilities),
@@ -332,11 +350,14 @@ ${GROUP_TIMELINE_TRUST}`,
     EXTERNAL_GROUP_MODEL_POLICY,
     scheduledRun || subagentTurn ? null : GROUP_RESPONSE_OUTCOMES,
     scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,
+    scheduledRun || subagentTurn ? null : GROUP_STANDALONE_MESSAGE_RULES,
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
+    voiceMessages ? VOICE_MESSAGE_RULES : null,
     includeApplicationCore && !scheduledRun ? trustedBehaviorPreferenceRules() : null,
     reminders ? GROUP_REMINDER_RULES : null,
+    reminders ? GROUP_SCENARIO_RULES : null,
     channelAuthored ? CHANNEL_AUTHORED_REMINDER_NOTICE : null,
-    externalGroupCapabilityInstructions(capabilities, skills, {
+    externalGroupCapabilityInstructions(surfaceCapabilities, skills, {
       includeApplicationCore,
       scheduledHistory,
       scheduledRun,

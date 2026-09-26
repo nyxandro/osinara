@@ -139,7 +139,7 @@ describeWithDatabase("canonical group session repository", () => {
       requesterTelegramUserId: "canonical-owner",
       requesterUserId: f.userId,
     });
-    await sessionRepository.recordTurnCompleted(newer.id, "wrun_newer_task", false);
+    await sessionRepository.recordTurnCompleted(newer.id, "wrun_newer_task", false, true);
 
     const [recovered, concurrent] = await Promise.all([
       sessionRepository.prepareTurn(canonicalInput(f, null)),
@@ -240,7 +240,7 @@ describeWithDatabase("canonical group session repository", () => {
 
     try {
       const terminal = terminalPath === "completed"
-        ? sessionRepository.recordTurnCompleted(canonical.id, "wrun_atomic_terminal", false)
+        ? sessionRepository.recordTurnCompleted(canonical.id, "wrun_atomic_terminal", false, true)
         : terminalPath === "failed"
         ? sessionRepository.recordTurnFailed(canonical.id, "wrun_atomic_terminal")
         : sessionRepository.recordSessionFailedByContinuationToken(
@@ -281,7 +281,7 @@ describeWithDatabase("canonical group session repository", () => {
     if (failed) {
       await sessionRepository.recordTurnFailed(canonical.id, "wrun_terminal_task");
     } else {
-      await sessionRepository.recordTurnCompleted(canonical.id, "wrun_terminal_task", false);
+      await sessionRepository.recordTurnCompleted(canonical.id, "wrun_terminal_task", false, true);
     }
 
     await expect(database().query(

@@ -55,8 +55,9 @@ current canonical `main` ref; it does not permit a branch build or bypass releas
 
 Each non-initial deployment retains the previous restore point until the new PostgreSQL dumps
 and durable-volume archives are complete and checksum-verified. Only then does it remove older
-rolling copies and the historical initial migration backup, leaving one verified previous-release
-backup. Checksum paths are relative and remain valid after the atomic directory rename. Capacity
+rolling copies and the historical initial migration backup, keeping the three most recent verified
+release backups. One copy alone is no restore point for damage noticed a day or two late: by then
+the only copy holds it too. Three sets cost about 11 GB on the current host. Checksum paths are relative and remain valid after the atomic directory rename. Capacity
 preflight must fit both the existing and new copies; insufficient space never triggers early deletion.
 After a successful health
 check and terminal success record it removes local first-party Osinara image references older than
@@ -207,11 +208,66 @@ entrypoint must be `root:root 0750`. The script rejects symlinks or different me
 sources a module. It creates `/opt/osinara/releases`, `/opt/osinara/backups`, and the atomic
 `/opt/osinara/release.env`.
 
+These files are placed by the operator and **no release updates them**: a change under
+`scripts/production-deploy/` reaches the server only when it is installed by hand. After merging
+such a change, copy it across and let the next minute poll pick it up:
+
+```bash
+sudo install -o root -g root -m 0640 scripts/production-deploy/<module>.sh \
+  /opt/osinara/bin/production-deploy/<module>.sh
+# the entrypoint itself is 0750
+sudo install -o root -g root -m 0750 scripts/production-deploy.sh \
+  /opt/osinara/bin/production-deploy.sh
+```
+
+A release in flight holds the lock, so install between releases and verify with
+`diff` against the repository afterwards.
+
+### Memory protection on a shared host
+
+The production host also runs development: the IDE, agent sessions and test runs all live in
+`orca-remote-server.service`. At their peaks the kernel reclaimed the bot as readily as the tests,
+connections to PostgreSQL missed their five-second window, and three times the database restarted
+itself (#253). Two host settings keep the bot's working set in memory. Both are applied with
+`systemctl set-property`, which writes a drop-in under `/etc/systemd/system.control/`, takes effect
+at once without a restart, and survives a reboot. No release changes them.
+
+```bash
+# Development yields first: a soft ceiling (throttles and reclaims, never kills) and a quarter of
+# the CPU share of each bot container when both want the processor.
+sudo systemctl set-property orca-remote-server.service MemoryHigh=4G CPUWeight=25
+# Parent protection for the mem_reservation values in compose.production.yaml (300 + 800 + 900 MB).
+sudo systemctl set-property osinara.slice MemoryLow=2000M
+```
+
+Every production service runs with `cgroup_parent: osinara.slice`. Docker creates that top-level
+slice with the first container; the setting above may be applied before it exists. The slice is
+there because cgroup v2 counts a container's `memory.low` only up to what its parent protects, and
+with `memory_recursiveprot` a parent's unclaimed protection is shared among its children by usage.
+Left in `system.slice`, the bot would need protection on that slice, and whatever the three
+services did not use at the moment would go to development beside them. Inside `osinara.slice` the
+surplus stays with the bot's other containers.
+
+Sandbox containers that `sandbox-runner` creates through the Docker API stay in `system.slice` on
+purpose. They run untrusted commands under their own hard limit (2 GiB each); inside
+`osinara.slice` they would draw its surplus protection away from PostgreSQL, the agent and the
+embedding service, the more so the heavier an arbitrary command is.
+
+Keep the slice equal to the sum of the reservations: less cuts every reservation proportionally,
+and `compose-runtime.test.ts` fails when the sum and this command disagree. `memory.low` shows only
+the configured value; protection actually used shows up as the `low` counter in each container's
+`memory.events`, which grows when the kernel had to reclaim protected memory after all.
+
+The ceiling covers only what runs inside `orca-remote-server.service`. Test stacks such as
+`compose.test.yaml` and `docker build` run under Docker's own units in `system.slice`, outside it:
+bring test stacks up only for a run and take them down afterwards. The disk scheduler here is
+`mq-deadline`, which ignores I/O weights, so there is no I/O counterpart.
+
 `/opt/osinara/.env` must be exactly `root:root 0600`. Before v0.15.2 it contains the required
 `DEEPSEEK_API_KEY`; during the v0.15.2 bridge it gains `MODEL_API_KEY` with the exact same credential
 token while retaining `DEEPSEEK_API_KEY` for the rollback window. It also contains
 `POSTGRES_PASSWORD`, the required internal application `DATABASE_URL`, `CLI_PROXY_API_KEY`,
-`WORKFLOW_POSTGRES_URL`, `GROQ_API_KEY`,
+`WORKFLOW_POSTGRES_URL`, `GROQ_API_KEY`, the optional `ELEVENLABS_API_KEY`,
 Telegram secrets, and environment-specific integration
 settings. It must never contain or export any of the six `OSINARA_*_IMAGE` variables or
 `SANDBOX_RUNTIME_IMAGE`; those values exist only in a validated per-release `release.env`.
@@ -250,6 +306,16 @@ instead of persisting an inert grant, and a grant made while Codex was active is
 `unavailableConfiguredTools` until the provider is restored. CLIProxy is configured with
 `disable-image-generation: chat`: `/v1/images/*` remains available to the controlled application
 client, while CLIProxy cannot inject its own hidden image tool into ordinary model calls.
+
+Interactive root turns may call the application-owned `send_voice_message` boundary when the current
+message explicitly asks for a voice reply. It synthesizes one ElevenLabs `eleven_v3` Ogg Opus note
+with the pinned voice, reserves the call in `voice_message_operations` before the billable request,
+never retries an ambiguous result, stores the audio in the authorized workspace, and sends it through
+the exact-once workspace file delivery as a Telegram voice note. The optional `ELEVENLABS_API_KEY`
+only authenticates the calls: without it the tool stays visible and every call fails with
+`AGENT_VOICE_MESSAGE_CONFIG_MISSING`, after which the agent answers in text. The pinned voice is an
+ElevenLabs library voice, which the API serves only on a paid ElevenLabs plan. External groups
+receive the capability only through an owner grant; scheduled turns and subagents never receive it.
 
 The one-time v0.16.0 bridge accepts only exact v0.15.14 source state. Before migration it validates
 the root-owned OAuth seed, the exact production NeuralDeep `qwen3.8-27b` config hash, the required
@@ -341,6 +407,31 @@ Only after that manual deployment succeeds, enable `osinara-deploy.timer`. Futur
 deployed only from an `approved` proposal that is still bound to the exact private Telegram chat
 of the single global owner. The target version must be strictly newer than the version in the
 current release manifest.
+
+## Memory reindex after an embedding change
+
+Migrations never recompute embeddings, and a record keeps the vector it was indexed with. When a
+release changes what goes into a vector — the text of a chunk, its size, or the header in front of
+it — the stored vectors describe the previous rules, and until they are recomputed the semantic
+branch finds those records by the old text. Nothing fails and nothing is logged; searches quietly
+return less.
+
+Releases carrying such a change say so in `docs/releases/vVERSION.md`. After the deployment reports
+healthy, run once inside the running agent container:
+
+```bash
+docker exec osinara-production-agent-1 node /app/.runtime/scripts/reindex-memory.js
+```
+
+It re-queues every active record for the indexing worker; on the current corpus this takes about
+half an hour, and `osinara_memory_index_state` returns to `indexed` for all of them when it is done.
+
+The command runs the compiled operator script, the same way `memory-review-admin.js` is run. It is
+**not** `npm run memory:reindex`: the image contains `agent/`, `config/` and `migrations/`, but no
+`scripts/` directory, so the npm script resolves to a file that is not there. Earlier releases
+documented the npm form and it never worked; the compiled script ships from v0.27.1 onward, and the
+reindex for v0.27.0 itself was performed by running the same logic through `tsx` against
+`/app/agent/lib`.
 
 ## Failure semantics
 

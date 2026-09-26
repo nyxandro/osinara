@@ -25,6 +25,34 @@ export const SESSION_GROUP_ROTATION_LOCK_HASH_SEED = 3;
 export const SESSION_MAX_COMPLETED_TURNS = 50;
 export const SESSION_RETENTION_LEASE_MS = 15 * 60 * 1_000;
 export const SESSION_RETENTION_DAYS = 1;
+// A cleanup that failed is tried again later instead of parking the session for good: the usual
+// reason is a Workflow run that had not finished yet, and that changes on its own.
+export const SESSION_RETENTION_RETRY_MS = 60 * 60 * 1_000;
+/**
+ * Cleanup lines that report normal operation, declared once so the error-burst alert can exclude
+ * them by the same names the code writes. The first sweep after a release drains the whole backlog
+ * of abandoned runs and writes one line per run, which is many times that alert's threshold.
+ */
+export const EVE_RUN_ABANDONED_DELETED_CODE = "AGENT_EVE_SESSION_ABANDONED_RUN_DELETED";
+export const SESSION_RETENTION_STORAGE_ABSENT_CODE = "AGENT_SESSION_RETENTION_STORAGE_ABSENT";
+export const WORKFLOW_ORPHAN_RUNS_PURGED_CODE = "AGENT_WORKFLOW_ORPHAN_RUNS_PURGED";
+export const SESSION_RETENTION_ROUTINE_CODES = [
+  EVE_RUN_ABANDONED_DELETED_CODE,
+  SESSION_RETENTION_STORAGE_ABSENT_CODE,
+  WORKFLOW_ORPHAN_RUNS_PURGED_CODE,
+] as const;
+// Deleting a session removes only its root run; its turns, subagents and timer stay behind. On
+// production 2026-09-22 they were 2016 of 2300 runs and ~75% of the Workflow database the release
+// backup copies while the assistant is down. A finished run waits this long before it goes:
+// Workflow still delivers the wake-up it armed for the run, and a single wake-up is queued at most
+// `WAIT_CONTINUATION_MAX_DELAY_SECONDS` (23 h in the pinned Workflow core) ahead.
+export const WORKFLOW_ORPHAN_RUN_PURGE_AFTER_HOURS = 48;
+// One minute's share, so the first pass after a release drains the backlog over ~40 minutes
+// instead of deleting a gigabyte of history in one go.
+export const WORKFLOW_ORPHAN_RUN_PURGE_BATCH = 50;
+// Beyond this a non-terminal Workflow run is treated as abandoned rather than live. Measured on
+// production 2026-09-22 over 1710 completed runs: p99 lasted 16 minutes, the longest 4h 08m.
+export const EVE_RUN_ABANDONED_AFTER_HOURS = 24;
 export const SESSION_TASK_ABANDONED_DAYS = 7;
 export const SESSION_TASK_MAX_ACTIVE_PER_GROUP_TOPIC = 25;
 export const SESSION_TASK_SWEEP_BATCH_SIZE = 100;
@@ -41,6 +69,8 @@ export const SOFTWARE_UPDATE_MANIFEST_MAX_BYTES = 64 * 1024;
 export const MEMORY_SOFT_DELETE_RETENTION_DAYS = 30;
 export const MEMORY_SOFT_DELETE_PURGE_BATCH_SIZE = 200;
 export const TELEGRAM_API_REQUEST_TIMEOUT_MS = 15_000;
+// A chat action is presentation only, yet a voice note waits for one in flight before it is sent.
+export const TELEGRAM_CHAT_ACTION_TIMEOUT_MS = 3_000;
 // An unanswered approval parks the Eve turn indefinitely: Eve keeps `session.waiting` for as long
 // as it takes. The confirmation window bounds that wait so one ignored prompt cannot freeze a chat.
 export const TELEGRAM_HITL_APPROVAL_TIMEOUT_MS = 5 * 60 * 1_000;
@@ -68,6 +98,16 @@ export const TELEGRAM_INGRESS_RECOVERY_MAX_ATTEMPTS = 3;
 // Bound expensive turns on the single-process deployment without letting groups occupy button slots.
 export const TELEGRAM_INGRESS_MESSAGE_CONCURRENCY = 2;
 export const TELEGRAM_INGRESS_CALLBACK_CONCURRENCY = 2;
+// Wake-up turns run on their own slot, so a long wake-up never takes a message's place; at most
+// this many wake-up turns run at once across all chats.
+export const TELEGRAM_INGRESS_WAKEUP_CONCURRENCY = 1;
+// A person often sends several messages in a row. A private chat's turn starts only after the chat
+// has been quiet this long, so the whole burst is answered at once; a steady stream waits at most the cap.
+export const TELEGRAM_PRIVATE_BURST_QUIET_MS = 2_000;
+export const TELEGRAM_PRIVATE_BURST_MAX_WAIT_MS = 20_000;
+// One burst is one model message: it stays well inside the turn's 12 000-character message budget.
+export const TELEGRAM_PRIVATE_BURST_MAX_MESSAGES = 10;
+export const TELEGRAM_PRIVATE_BURST_MAX_CHARACTERS = 6_000;
 export const TELEGRAM_MAX_INBOUND_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 // A logical private message can be a Telegram media group (up to ten files).
 export const TELEGRAM_MAX_ATTACHMENTS_PER_MESSAGE = 10;

@@ -10,6 +10,8 @@
  * - Timeline-proven agent replies can start a fresh message turn after application session rotation.
  * - One server-clock snapshot anchors all time-sensitive work and model context in an accepted turn.
  * - Registered groups project the verified dynamic skill policy into turn auth.
+ * - A message a running turn already saw with a tool result carries a trusted notice, so its own
+ *   turn does not repeat the work.
  * - Production side-effect adapters are assembled in `telegram-on-message-repositories.ts`.
  */
 import type {
@@ -60,6 +62,7 @@ import { prepareTelegramMemoryReviewTurn } from "./memory-review/telegram-memory
 import { telegramInboundActor } from "./telegram-inbound-actor.js";
 import type { TelegramPreparationContext } from "./telegram-ingress-preparation.js";
 import type { PreparedSession } from "./sessions/session-repository.js";
+import { createTurnInterjectionMarker } from "./turn-interjection/turn-interjection-block.js";
 
 // Every accepted group turn owes the model its trigger; reaching dispatch without one is a bug.
 function requireGroupTurnTrigger(
@@ -384,6 +387,20 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       telegramForumTopicId: verifiedForumTopicId,
       ...resolvedSessionScope,
     });
+    // A running turn of this same conversation may already have seen this message with a tool result.
+    const shownDuringTurn = ctx.ingressRecovery
+      ? await repositories.turnInterjections.findDeliveredContentKind(ctx.ingressRecovery.updateId, appSession.id)
+      : null;
+    // Messages its author sends while this turn works can reach it only in the trusted zones.
+    const turnInterjectionMarker = ctx.ingressRecovery && !resumesPendingTask &&
+      actor.kind === "telegram_user" && (group === null || group.type === "family_private")
+      ? createTurnInterjectionMarker()
+      : null;
+    // The same trusted turns learn which of the author's wake-ups wait in this chat, to relate the
+    // message to them; a person without an account has none.
+    const plannedWakeups = ctx.ingressRecovery && turnInterjectionMarker !== null && access.userId !== null
+      ? await repositories.conversationWakeups.listPlanned(ctx.ingressRecovery.updateId, access.familyId, access.userId)
+      : [];
     const deliveryAuthorization = telegramProactiveDeliveryAuthorization(decision, message);
     const pendingDeliveries = deliveryAuthorization
       ? await repositories.proactiveDeliveries.listPendingContext({
@@ -487,6 +504,9 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       replyHandling,
       replyQuotedText,
       resumesPendingTask,
+      plannedWakeups,
+      shownDuringTurn,
+      turnInterjectionMarker,
       ...(responseSessionId === undefined ? {} : { responseSessionId }),
       storedAttachments,
       timelineEntryId: inboundTimeline.entryId,

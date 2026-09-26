@@ -20,6 +20,7 @@ import {
   createReactionSetBlockResolver,
 } from "./turn-blocks.js";
 import { EVE_EMPTY_DELIVERY_MARKER } from "../eve-empty-delivery.js";
+import { VOICE_MESSAGE_RULES } from "./common-fragments.js";
 import { formatReactionSetAnnouncement } from "../telegram-reaction-announcement.js";
 import { TELEGRAM_DEFAULT_REACTIONS } from "../telegram-reaction-set.js";
 
@@ -100,14 +101,48 @@ describe("mode block resolution", () => {
     const nested = await resolve({ ...context(externalAuth), session: { auth: externalAuth, id: "session-1", parent: {} } });
     const scheduled = await resolve(context({ ...scheduledCurrent, initiator: scheduledCurrent.current }));
     const personal = await resolve(context(privateAuth));
+    const scheduledPersonalAuth = auth({ ...privateAuth.current!.attributes, scheduledRunId: "run-1" });
+    const scheduledPersonal = await resolve(context({
+      ...scheduledPersonalAuth,
+      initiator: scheduledPersonalAuth.current,
+    }));
+    const personalChild = await resolve({ ...context(privateAuth), channel: { kind: "subagent" } });
 
     // A child answers its parent, a scheduled run has no message to stay silent on, and a private
-    // chat is direct by definition: none of them may learn the silence marker.
+    // chat is direct by definition: none of them may learn the silence marker. A private root
+    // learns it only as the closing of a turn whose voice note already delivered the answer.
     expect(root).toContain(EVE_EMPTY_DELIVERY_MARKER);
     expect(child).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
     expect(nested).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
     expect(scheduled).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
-    expect(personal).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
+    expect(personal).toContain(VOICE_MESSAGE_RULES);
+    expect(personal.replace(VOICE_MESSAGE_RULES, "")).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
+    expect(scheduledPersonal).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
+    expect(personalChild).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
+  });
+
+  it("teaches voice replies only where the voice tool is emitted", async () => {
+    const resolve = (capabilities: ReadonlySet<ExternalGroupToolName>) => createModeBlockResolver({
+      loadCapabilities: vi.fn().mockResolvedValue(capabilities),
+      loadReactionPolicy: reactionPolicy,
+      loadSkills: vi.fn().mockResolvedValue(new Set()),
+    });
+    const grantedAuth = auth({
+      ...externalAuth.current!.attributes,
+      toolAllowlist: ["remember", "send_voice_message"],
+    });
+    const granted = resolve(new Set(["remember", "send_voice_message"]));
+
+    const withoutGrant = await resolve(new Set(["remember"]))(context(externalAuth));
+    const groupRoot = await granted(context(grantedAuth));
+    const groupChild = await granted({ ...context(grantedAuth), channel: { kind: "subagent" } });
+
+    expect(withoutGrant).not.toContain("send_voice_message");
+    expect(groupRoot).toContain(VOICE_MESSAGE_RULES);
+    expect(groupRoot).toContain("`send_voice_message`: по явной просьбе");
+    expect(groupRoot).toContain("- отвечать голосовым сообщением");
+    expect(groupChild).not.toContain("send_voice_message");
+    expect(groupChild).not.toContain("голосовым сообщением");
   });
 
   it("keeps every transport directive away from a subagent child", async () => {
@@ -289,7 +324,9 @@ describe("memory block resolution", () => {
       reportFailure: vi.fn(),
       authorize: () => authorization,
       createProfile,
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(),
       retrieve: vi.fn().mockResolvedValue({
+        diagnostics: { semanticBranchAvailable: true },
         memories: [],
         retrievedClaimIds: [],
         threads: { threads: [], totalCharacters: 0 },
@@ -304,9 +341,106 @@ describe("memory block resolution", () => {
     expect(markdown).toContain("активный pipeline текущей реализации");
   });
 
+  it("drops the lowest-ranked records when the block outgrows its budget and counts them", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const memories = ["mem_first", "mem_second", "mem_third", "mem_fourth"].map((memoryRef) => ({
+      content: `${memoryRef}:${"я".repeat(18_000)}`, kind: "fact", memoryRef,
+    }));
+    const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization,
+      createProfile, openSelectionWindow: async () => 1, recordOffered: vi.fn(),
+      retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true }, memories,
+        retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } }),
+    });
+
+    try {
+      const markdown = await resolve(
+        context(privateAuth, [{ content: "что купить?", role: "user" }] as ModelMessage[]),
+        TEST_TURN_ID,
+      );
+
+      expect(markdown).toContain("mem_first:");
+      expect(markdown).toContain("mem_second:");
+      expect(markdown).not.toContain("mem_third:");
+      expect(markdown).not.toContain("mem_fourth:");
+      expect(JSON.parse(info.mock.calls[0]![0] as string)).toMatchObject({
+        code: "AGENT_MEMORY_RETRIEVAL_METRICS", droppedMemories: 2, memories: 4,
+        offeredMemories: 2, memoryRefs: ["mem_first", "mem_second"],
+      });
+    } finally { info.mockRestore(); }
+  });
+
+  it("tells the show journal only about the records that survived the budget", async () => {
+    const memories = ["mem_first", "mem_second", "mem_third", "mem_fourth"].map((memoryRef) => ({
+      content: `${memoryRef}:${"я".repeat(18_000)}`, kind: "fact", memoryRef,
+    }));
+    const recordOffered = vi.fn();
+    // The profile view renders a claim of the third record, which the budget is about to drop.
+    const subjects = [{ claims: [{ content: "короткое утверждение", memoryRef: "mem_third" }] }];
+    const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization,
+      createProfile: vi.fn().mockResolvedValue({ subjects }),
+      openSelectionWindow: async () => 7, recordOffered,
+      retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true }, memories,
+        offered: { claimIdByMemoryRef: new Map(), claimIdsByConflictRef: new Map() },
+        retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } }),
+    });
+
+    const conversationAuth = auth({
+      memoryScopes: ["personal", "family"],
+      telegramConversationId: "conversation-1",
+      telegramTurnStartedAt: "2026-08-08T10:00:00.000Z",
+      telegramUserId: "101",
+    });
+
+    await resolve(
+      context(conversationAuth, [{ content: "что купить?", role: "user" }] as ModelMessage[]),
+      TEST_TURN_ID,
+    );
+
+    expect(recordOffered).toHaveBeenCalledTimes(1);
+    const [window, , offered, shownElsewhere] = recordOffered.mock.calls[0]!;
+    expect(window).toMatchObject({ turnId: TEST_TURN_ID, turnOrdinal: 7 });
+    expect(offered).toEqual([memories[0], memories[1]]);
+    // The profile view is part of the block too; what it shows has to reach the journal as well.
+    expect(shownElsewhere).toEqual(["mem_third"]);
+  });
+
+  it("says so in the log when the profile and threads fill the ceiling by themselves", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const profileAuth = auth({
+      memoryScopes: ["personal", "family"],
+      telegramConversationId: "conversation-1",
+      telegramTurnStartedAt: "2026-08-08T10:00:00.000Z",
+      telegramUserId: "101",
+    });
+    const subjects = [{ claims: [{ content: "я".repeat(40_000), memoryRef: "mem_profile" }] }];
+    const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization,
+      createProfile: vi.fn().mockResolvedValue({ subjects }),
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(),
+      retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true },
+        memories: [{ content: "важная запись", kind: "fact", memoryRef: "mem_first" }],
+        offered: { claimIdByMemoryRef: new Map(), claimIdsByConflictRef: new Map() },
+        retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } }),
+    });
+
+    try {
+      const markdown = await resolve(
+        context(profileAuth, [{ content: "что купить?", role: "user" }] as ModelMessage[]),
+        TEST_TURN_ID,
+      );
+
+      // The best match stays: an over-full profile must not leave the turn with no memory at all.
+      expect(markdown).toContain("важная запись");
+      expect(JSON.parse(warn.mock.calls[0]![0] as string)).toMatchObject({
+        code: "AGENT_MEMORY_TURN_BLOCK_OVER_BUDGET", offeredMemories: 1, turnId: TEST_TURN_ID,
+      });
+    } finally { info.mockRestore(); warn.mockRestore(); }
+  });
+
   it("returns no block when the turn carries no user text", async () => {
     const retrieve = vi.fn();
-    const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization, createProfile, retrieve });
+    const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization, createProfile,
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(), retrieve });
 
     expect(await resolve(context(privateAuth), TEST_TURN_ID)).toBeNull();
     expect(retrieve).not.toHaveBeenCalled();
@@ -324,6 +458,7 @@ describe("memory block resolution", () => {
       candidateLimitHit: true,
       queryCharacters: "Личный вопрос".length,
       queryChunks: 1,
+      recentlyShown: 0,
       russianQualified: 3,
       russianMatched: 3,
       russianTopRank: 0.42,
@@ -335,6 +470,7 @@ describe("memory block resolution", () => {
       simpleTopRank: null,
     };
     const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization, createProfile,
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(),
       retrieve: vi.fn().mockResolvedValue({ diagnostics, memories, retrievedClaimIds: [],
         threads: { threads: [], totalCharacters: 0 } }),
     });
@@ -354,6 +490,7 @@ describe("memory block resolution", () => {
   it("discloses unavailable memory instead of throwing on authorization failure", async () => {
     const resolve = createMemoryBlockResolver({
       reportFailure: vi.fn(),
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(),
       authorize: () => {
         throw new Error("AGENT_MEMORY_CONTEXT_INVALID: нет области памяти");
       },
@@ -375,6 +512,7 @@ describe("memory block resolution", () => {
       reportFailure: vi.fn(),
       authorize: () => authorization,
       createProfile,
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(),
       retrieve: vi.fn().mockRejectedValue(new Error("embedding service down")),
     });
 
@@ -388,6 +526,7 @@ describe("memory block resolution", () => {
 
   it("builds the same-turn profile from verified signals and retrieval-related claim identities", async () => {
     const retrieve = vi.fn().mockResolvedValue({
+      diagnostics: { semanticBranchAvailable: true },
       memories: [],
       retrievedClaimIds: ["claim-related"],
       threads: { threads: [], totalCharacters: 0 },
@@ -408,6 +547,7 @@ describe("memory block resolution", () => {
       reportFailure: vi.fn(),
       authorize: () => authorization,
       createProfile: profile,
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(),
       retrieve,
     });
     const telegramAuth = auth({

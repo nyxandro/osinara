@@ -41,6 +41,7 @@ OWNER_CHAT_ID=""
 LEASE_TOKEN=""
 TERMINAL_RECORDED=0
 MIGRATION_STARTED=0
+DEPLOY_WINDOW_OPENED=0
 CURRENT_SERVICES_STOPPED=0
 FAILURE_HANDLING=0
 WORK_DIR=""
@@ -92,7 +93,7 @@ require_server_boundary() {
   install -d -o root -g root -m 0750 "$RELEASES_DIR" "$BACKUPS_DIR"
 
   local command
-  for command in cmp curl df docker find flock install jq mktemp mv readlink \
+  for command in awk cmp curl df docker find flock install jq mktemp mv readlink \
     sha256sum sort stat tail tar; do
     command -v "$command" >/dev/null ||
       fail "DEPLOY_COMMAND_MISSING" "Required command is unavailable: ${command}"
@@ -179,17 +180,47 @@ wait_for_health() {
 # Announces that release noise on osinara-production is expected until the published deadline.
 # Called again before migration so the slow phases each get a full window of their own.
 open_deploy_window() {
+  DEPLOY_WINDOW_OPENED=1
   publish_deploy_window "$1" "$(($(date +%s) + DEPLOY_WINDOW_SECONDS))"
 }
 
-# Ends the window now. Runs on every exit path of the lock owner, so a release that failed stops
-# being suppressed at once: a half-installed release is exactly what has to become visible.
-# Nothing published means nothing to close. Without this the ordinary timer tick, which reaches
-# here about once a minute and finds no release to make, would report a problem every time on a
-# host that has no collector at all.
+# Ends the window now, so a release that failed stops being suppressed at once: a half-installed
+# release is exactly what has to become visible.
+#
+# Writes only when there is a window to end. The trap that calls this is armed before the early
+# returns, so it also runs on the ordinary timer tick that finds no release to make — about once a
+# minute, forever. Stamping the mark with the current time on those ticks is what silenced
+# `OsinaraIngressStuck`: that rule allows ten minutes of grace on top of the mark for the queue to
+# drain after a release, and a mark refreshed every minute never falls that far behind. The alert
+# that exists for "the assistant stopped answering people" stood down around the clock.
 close_deploy_window() {
   [[ -f "$1" ]] || return 0
+  if [[ "$DEPLOY_WINDOW_OPENED" -eq 0 ]] && ! deploy_window_needs_closing "$1"; then
+    return 0
+  fi
   publish_deploy_window "$1" "$(date +%s)"
+}
+
+# True while the published sample still stands for something this tick has to end: a deadline
+# ahead of now, which is what a release killed between opening its window and reaching its trap
+# leaves behind, or a file that is not exactly one sample of ours, which the collector cannot read
+# either and which one valid write repairs for good. A deadline already behind us, in a file this
+# script wrote, is the ordinary resting state and must be left exactly as it is.
+deploy_window_needs_closing() {
+  local published
+  published="$(awk '/^deploy_window_end_timestamp_seconds\{/ { value = $NF } END { print value }' \
+    "$1" 2>/dev/null)" || return 0
+  # `10#` keeps a hand-edited leading zero from being read as octal and printing a shell error.
+  [[ "$published" =~ ^[0-9]+$ ]] || return 0
+  # The collector parses the file whole: a stray line or a duplicate sample next to a valid last
+  # one still costs that valid sample. Only a byte-exact render of our own sample is left alone.
+  if ! render_deploy_window_sample "$published" | cmp -s - "$1"; then
+    return 0
+  fi
+  if (( 10#$published > $(date +%s) )); then
+    return 0
+  fi
+  return 1
 }
 
 # Monitoring is optional infrastructure that the application does not depend on. Storage that is

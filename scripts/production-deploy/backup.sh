@@ -3,7 +3,10 @@
 # Drains application work, stops writers, then snapshots PostgreSQL and irreconstructible volumes.
 
 readonly BACKUP_RESERVE_BYTES=$((512 * 1024 * 1024))
-readonly RETAINED_DEPLOY_BACKUP_COUNT=1
+# Three deploy snapshots, not one. A single copy means damage noticed a day late has no state to
+# go back to: the only copy already contains it. Measured on the production host 2026-09-22, one
+# set is about 3.7 GB of 93 GB free, so two extra sets cost roughly eight percent of the free disk.
+readonly RETAINED_DEPLOY_BACKUP_COUNT=3
 readonly LEGACY_INITIAL_MIGRATION_BACKUP_NAME="initial-migration-v0.1.1"
 readonly DEPLOY_BACKUP_NAME_PATTERN='^[0-9]{8}T[0-9]{6}Z-to-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 readonly LEGACY_EVE_VOLUME="osinara-production-workflow-data"
@@ -66,6 +69,8 @@ SQL
 
 runtime_is_idle() {
   local app_idle workflow_idle
+  # A wake-up turn runs in the chat's lane like a message. The running release may predate the
+  # wake-up table, so that query is built at execution time and runs only where the table exists.
   app_idle="$(psql_current <<'SQL'
 SELECT CASE
  WHEN EXISTS (SELECT 1 FROM conversation_sessions WHERE retired_at IS NULL AND pending_operation)
@@ -73,6 +78,10 @@ SELECT CASE
  WHEN EXISTS (SELECT 1 FROM runtime_admission_holders)
    OR EXISTS (SELECT 1 FROM telegram_ingress_updates WHERE status = 'processing'
      OR last_error_code = 'AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED')
+   OR CASE WHEN to_regclass('public.telegram_ingress_wakeups') IS NULL THEN false
+     ELSE (xpath('/row/busy/text()', query_to_xml(
+       'SELECT EXISTS (SELECT 1 FROM telegram_ingress_wakeups WHERE status = ''processing'') AS busy',
+       false, true, '')))[1]::text = 'true' END
    OR EXISTS (SELECT 1 FROM conversation_sessions WHERE retired_at IS NULL
      AND kind IN ('scheduled', 'proactive') AND task_state IN ('pending', 'running'))
    THEN 'busy'

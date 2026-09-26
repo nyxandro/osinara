@@ -8,7 +8,17 @@ x-bounded-json-logs: &bounded-json-logs
 
 services:
   postgres:
+    cgroup_parent: osinara.slice
     image: pgvector/pgvector:pg17@sha256:d2ef61f42ef767baa5a1475393303cc235bcd92febd9d7014eddb48b41f3bad0
+    # Development shares this host. At its peaks the kernel reclaimed the bot as readily as the
+    # tests, and the database missed the five-second connect window or restarted itself (#253).
+    # A reservation is cgroup memory.low, not a quota: what a service holds below it is reclaimed
+    # only after unprotected neighbours. It counts only up to what the parent protects, so every
+    # service runs in its own osinara.slice, which the host gives the sum of the three reservations
+    # (2000 MB, docs/production-deployment.md). Protection a service does not use stays inside
+    # the slice instead of going to development in system.slice.
+    # PostgreSQL's own memory is ~160 MB (128 MB shared buffers); the rest keeps hot pages cached.
+    mem_reservation: 300m
     environment:
       POSTGRES_DB: osinara
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
@@ -26,27 +36,40 @@ services:
       - postgres-data:/var/lib/postgresql/data
 
   memory-embedding:
+    cgroup_parent: osinara.slice
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07
-    cpus: 1.0
-    mem_limit: 1536m
+    # Sized by measurement on a six-core host, not by guess. Memory is set by the math threads
+    # alone: three cores cost eleven megabytes more than two, while a third math thread costs four
+    # hundred and does not fit a gigabyte at all — the container is killed while loading the model.
+    # Two threads peak at 870 MB under a saturating load. The CPU budget is separate and cheap:
+    # tokenization and request handling use the third core without touching that peak, and it buys
+    # 45% more indexing throughput and a third off the wait when a search queues behind a batch.
+    cpus: 3.0
+    mem_limit: 1024m
+    # The model's steady footprint. Docker refuses a reservation that is not below the limit.
+    mem_reservation: 900m
     command:
       - --model-id
       - intfloat/multilingual-e5-small
       - --revision
       - 614241f622f53c4eeff9890bdc4f31cfecc418b3
       - --tokenization-workers
-      - "1"
+      - "2"
       - --max-client-batch-size
       - "8"
+      # One queue slot per input, so a client batch of eight fills a limit of eight and the search
+      # arriving beside it is refused rather than queued — the turn silently loses its semantic
+      # branch. Measured against a saturating indexer: at eight, 15 searches out of 60 were refused;
+      # at sixteen, none, at no cost in memory.
       - --max-concurrent-requests
-      - "8"
+      - "16"
       - --max-batch-requests
       - "8"
       - --max-batch-tokens
       - "4096"
       - --auto-truncate=false
     environment:
-      OMP_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "2"
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost/health"]
       interval: 5s
@@ -60,14 +83,21 @@ services:
       - memory-embedding-model-e5:/data
 
   cli-proxy-api:
+    cgroup_parent: osinara.slice
     image: ${OSINARA_CLI_PROXY_IMAGE:?OSINARA_CLI_PROXY_IMAGE must be an exact digest reference}
     environment:
       CLI_PROXY_API_KEY: ${CLI_PROXY_API_KEY:?CLI_PROXY_API_KEY is required}
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent --show-error --header \"Authorization: Bearer $${CLI_PROXY_API_KEY}\" http://127.0.0.1:8317/v1/models >/dev/null"]
-      interval: 5s
+      # Этот компонент пишет строку журнала на каждый запрос, и отключить её нечем: журнал ведёт
+      # сторонний бинарник. Опрос раз в пять секунд давал 100 194 строки за неделю из 355 135 по
+      # всему проекту. Пока контейнер поднимается, проверка идёт часто; дальше раз в полминуты —
+      # этого хватает, чтобы заметить смерть процесса, и в шесть раз меньше шума.
+      interval: 30s
+      start_period: 100s
+      start_interval: 2s
       timeout: 5s
-      retries: 20
+      retries: 3
     networks:
       - app-network
     read_only: true
@@ -81,7 +111,10 @@ services:
       - cli-proxy-auth:/var/lib/cli-proxy-api/auth
 
   agent:
+    cgroup_parent: osinara.slice
     image: ${OSINARA_APP_IMAGE:?OSINARA_APP_IMAGE must be an exact digest reference}
+    # Steady footprint measured on production 2026-09-23: ~740 MB, 160 MB of it pushed to swap.
+    mem_reservation: 800m
     command: ["start-after-migration"]
     depends_on:
       cli-proxy-api:
@@ -94,6 +127,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY-}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID-}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET-}
       GROQ_API_KEY: ${GROQ_API_KEY-}
@@ -127,6 +161,7 @@ services:
       - workspace-data:/app/workspaces
 
   migrate:
+    cgroup_parent: osinara.slice
     image: ${OSINARA_APP_IMAGE:?OSINARA_APP_IMAGE must be an exact digest reference}
     depends_on:
       postgres:
@@ -141,6 +176,7 @@ services:
     logging: *bounded-json-logs
 
   memory-embedding-worker:
+    cgroup_parent: osinara.slice
     image: ${OSINARA_APP_IMAGE:?OSINARA_APP_IMAGE must be an exact digest reference}
     depends_on:
       memory-embedding:
@@ -153,10 +189,19 @@ services:
       MEMORY_EMBEDDING_BASE_URL: http://memory-embedding:80
     networks:
       - app-network
+    # Без этого зависший воркер неотличим от исправного: процесс жив, воспоминания пишутся,
+    # но перестают находиться смысловым поиском, и снаружи это выглядит как обычный промах.
+    healthcheck:
+      test: ["CMD", "node", "-e", "const fs=require('node:fs'),p='/tmp/osinara-memory-embedding-worker-ready';if(!fs.existsSync(p)||Date.now()-fs.statSync(p).mtimeMs>90000)process.exit(1)"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
     restart: unless-stopped
     logging: *bounded-json-logs
 
   memory-extraction-worker:
+    cgroup_parent: osinara.slice
     image: ${OSINARA_APP_IMAGE:?OSINARA_APP_IMAGE must be an exact digest reference}
     depends_on:
       migrate:
@@ -172,6 +217,7 @@ services:
     logging: *bounded-json-logs
 
   telegram-ingress-worker:
+    cgroup_parent: osinara.slice
     image: ${OSINARA_APP_IMAGE:?OSINARA_APP_IMAGE must be an exact digest reference}
     depends_on:
       agent:
@@ -186,6 +232,7 @@ services:
     logging: *bounded-json-logs
 
   edge:
+    cgroup_parent: osinara.slice
     image: ${OSINARA_EDGE_IMAGE:?OSINARA_EDGE_IMAGE must be an exact digest reference}
     depends_on:
       agent:
@@ -204,6 +251,7 @@ services:
     logging: *bounded-json-logs
 
   sandbox-runtime-image:
+    cgroup_parent: osinara.slice
     image: ${SANDBOX_RUNTIME_IMAGE:?SANDBOX_RUNTIME_IMAGE must be an exact digest reference}
     command: ["true"]
     network_mode: none
@@ -211,6 +259,7 @@ services:
     logging: *bounded-json-logs
 
   sandbox-runner:
+    cgroup_parent: osinara.slice
     image: ${OSINARA_SANDBOX_RUNNER_IMAGE:?OSINARA_SANDBOX_RUNNER_IMAGE must be an exact digest reference}
     depends_on:
       sandbox-egress-proxy:
@@ -240,6 +289,7 @@ services:
       - workspace-data:/runner/workspaces
 
   sandbox-egress-proxy:
+    cgroup_parent: osinara.slice
     image: ${OSINARA_SANDBOX_EGRESS_PROXY_IMAGE:?OSINARA_SANDBOX_EGRESS_PROXY_IMAGE must be an exact digest reference}
     cap_drop:
       - ALL

@@ -79,6 +79,28 @@ describe("requireBehaviorPreferenceAuthorization", () => {
     }
   });
 
+  it("reads the chat's prompt for a wake-up turn that answers no message", () => {
+    const wakeup = (attributes: Record<string, unknown>) => context({
+      applicationSessionId: "application-session-1",
+      conversationScheduleRunId: "run-1",
+      familyId: "family-1",
+      telegramChatId: "101",
+      telegramChatType: "private",
+      telegramConversationId: "conversation-1",
+      telegramUserId: "101",
+      ...attributes,
+    });
+
+    expect(requireBehaviorPreferenceReadAuthorization(wakeup({}))).toEqual({
+      actorUserId: "user-1", familyId: "family-1", groupId: null, kind: "wakeup", scope: "personal", telegramChatId: "101",
+    });
+    expect(requireBehaviorPreferenceReadAuthorization(wakeup({
+      groupId: "group-1", groupType: "family_private", telegramChatId: "-2001", telegramChatType: "supergroup",
+    }))).toMatchObject({ groupId: "group-1", kind: "wakeup", scope: "family" });
+    // No mutation source exists in a wake-up, so style changes stay refused.
+    expect(() => requireBehaviorPreferenceAuthorization(wakeup({}))).toThrow("AGENT_BEHAVIOR_PREFERENCE_CONTEXT_INVALID");
+  });
+
   it("projects a scheduled chat as read-only authorization without a timeline source", () => {
     const scheduledAttributes = {
       applicationSessionId: "application-session-1",

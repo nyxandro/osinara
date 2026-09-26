@@ -12,6 +12,8 @@
  *   work in the current trust zone has no descriptor at all rather than a denial stub.
  * - External groups additionally deny the framework built-ins Eve always registers, and re-check
  *   every granted capability at execution time against the live database policy.
+ * - Interactive private and family surfaces re-emit the sandbox built-ins, so that every tool result
+ *   there can carry the messages the turn's author sent meanwhile. Scheduled surfaces do not.
  */
 import type { SkillDefinition } from "eve/skills";
 import { defineTool, type ToolContext, type ToolDefinition } from "eve/tools";
@@ -53,6 +55,7 @@ import readScheduledGroupHistory from "../tools/read_scheduled_group_history.js"
 import readProfileView from "../tools/read_profile_view.js";
 import searchMemories from "../tools/search_memories.js";
 import searchMemoryThreads from "../tools/search_memory_threads.js";
+import sendVoiceMessage from "../tools/send_voice_message.js";
 import sendWorkspaceFile from "../tools/send_workspace_file.js";
 import { removeGroupFileTool } from "../workspaces/remove-group-file-tool.js";
 import { controlledWebFetchTool } from "./controlled-web-fetch.js";
@@ -61,6 +64,7 @@ import { authorizeCurrentExternalGroupCapability } from "./external-group-live-p
 import { resolveExternalGroupPolicyIdentity } from "./external-group-policy.js";
 import { EXTERNAL_GROUP_REMINDER_TOOLS } from "./external-group-reminder-tools.js";
 import { scheduledExternalTool } from "./scheduled-external-tool.js";
+import { withTurnInterjectionSurface } from "../turn-interjection/turn-interjection-surface.js";
 import {
   FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS,
   UNVERIFIED_CONTEXT_DENIALS,
@@ -193,6 +197,7 @@ const EXTERNAL_DIRECT_TOOLS: Readonly<Record<DirectExternalToolName, AnyToolDefi
   remove_group_file: removeGroupFileTool as unknown as AnyToolDefinition,
   search_memories: searchMemories as unknown as AnyToolDefinition,
   search_memory_threads: searchMemoryThreads as unknown as AnyToolDefinition,
+  send_voice_message: sendVoiceMessage as unknown as AnyToolDefinition,
   send_workspace_file: sendWorkspaceFile as unknown as AnyToolDefinition,
   web_fetch: controlledWebFetchTool as unknown as AnyToolDefinition,
 };
@@ -337,6 +342,8 @@ function buildExternalToolSurface(
     if (scheduledRun && capability === "remember") continue;
     // Billable image generation requires a current interactive request, never a background run.
     if (capability === "generate_image" && !imageGenerationAllowed) continue;
+    // A voice note spends ElevenLabs credits and replaces a reply, so it needs a live participant.
+    if (scheduledRun && capability === "send_voice_message") continue;
     if (capability.startsWith("manage_memory.")) continue;
     if (capability.startsWith("manage_memory_thread.")) continue;
     if (!isExternalGroupToolName(capability)) continue;
@@ -371,7 +378,7 @@ function allowlistKey(allowed: ReadonlySet<ExternalGroupToolName>): string {
   return [...allowed].sort().join("\0");
 }
 
-const TRUSTED_SURFACES: Readonly<Record<"family" | "private", ToolMap>> = {
+const TRUSTED_APPLICATION_SURFACES: Readonly<Record<"family" | "private", ToolMap>> = {
   family: wrapModelFacingToolMap({
     ...TRUSTED_MODE_TOOLS,
     ...FAMILY_ONLY_TOOLS,
@@ -382,13 +389,20 @@ const TRUSTED_SURFACES: Readonly<Record<"family" | "private", ToolMap>> = {
   }),
 };
 
+// An interactive turn also receives, with each tool result, the messages its author sent meanwhile.
+const TRUSTED_SURFACES: Readonly<Record<"family" | "private", ToolMap>> = {
+  family: withTurnInterjectionSurface(TRUSTED_APPLICATION_SURFACES.family),
+  private: withTurnInterjectionSurface(TRUSTED_APPLICATION_SURFACES.private),
+};
+
 const TRUSTED_SCHEDULED_SURFACES: Readonly<Record<"family" | "private", ToolMap>> = Object.fromEntries(
-  Object.entries(TRUSTED_SURFACES).map(([environment, surface]) => {
+  Object.entries(TRUSTED_APPLICATION_SURFACES).map(([environment, surface]) => {
     // A scheduled turn can read chat instructions but has no user source for prompt or memory writes.
     const {
       generate_image: _generateImage,
       manage_behavior_preference: _manageBehaviorPreference,
       remember: _remember,
+      send_voice_message: _sendVoiceMessage,
       ...readOnlyPromptSurface
     } = surface;
     return [environment, readOnlyPromptSurface];
@@ -438,7 +452,9 @@ export function buildSubagentToolSurface(input: ModeToolSurfaceInput): ToolMap {
   const effectiveInput = input.environment === "external"
     ? {
       ...input,
-      capabilities: new Set([...input.capabilities].filter((name) => name !== "generate_image")),
+      capabilities: new Set([...input.capabilities].filter((name) =>
+        name !== "generate_image" && name !== "send_voice_message"
+      )),
       skills: Object.fromEntries(Object.entries(input.skills).filter(([name]) =>
         !isImageGenerationSkillName(name)
       )),
@@ -450,6 +466,7 @@ export function buildSubagentToolSurface(input: ModeToolSurfaceInput): ToolMap {
     manage_behavior_preference: _manageBehaviorPreference,
     manage_reminder: _manageReminder,
     remember: _remember,
+    send_voice_message: _sendVoiceMessage,
     ...surface
   } = buildModeToolSurface(effectiveInput);
   return surface;

@@ -12,6 +12,7 @@ import { AppError } from "./app-error.js";
 import type { MemoryAuthorization } from "./memory-context.js";
 import { memoryTurnSourceRepository } from "./memory-turn-source-repository.js";
 import { resolveTelegramSessionActor } from "./telegram-session-actor.js";
+import { conversationWakeupRunId } from "./conversation-wakeups/conversation-wakeup-turn.js";
 
 const POSITIVE_SEQUENCE_PATTERN = /^[1-9]\d*$/u;
 const POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807n;
@@ -41,6 +42,8 @@ export async function bindMemoryTurnSources(ctx: TurnContext): Promise<void> {
   const visibleTimelineEntryIds = attributes?.telegramTimelineVisibleEntryIds;
   // Scheduled prompts have no verified Telegram message that could serve as memory evidence.
   if (typeof attributes?.scheduledRunId === "string" && attributes.scheduledRunId) return;
+  // Neither has a wake-up turn: it answers the agent's own schedule, not a person's message.
+  if (conversationWakeupRunId(ctx.session.auth) !== null) return;
 
   // Eve resumes an approved tool in the same durable turn but supplies freshly revalidated callback
   // auth without replaying the original message metadata. Accept only the exact retained binding.
