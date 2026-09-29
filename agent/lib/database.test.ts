@@ -27,10 +27,13 @@ describe("application database pool", () => {
     // Under memory pressure PostgreSQL could not start a backend within the connect timeout,
     // while already open connections kept working (#285).
     const [config] = createApplicationDatabasePool.mock.calls[0] as unknown as [{
-      connectionTimeoutMillis: number; max: number; min: number;
+      connectionTimeoutMillis: number; max: number; min: number; options?: string;
     }];
     expect(config.min).toBe(3);
     expect(config.min).toBeLessThanOrEqual(config.max);
     expect(config.connectionTimeoutMillis).toBe(5_000);
+    // Only the optional model success observation may commit without waiting for the disk (#311).
+    // Everything on this pool, from accepting a Telegram update onward, must stay durable.
+    expect(config.options).toBeUndefined();
   });
 });

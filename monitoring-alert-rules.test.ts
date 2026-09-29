@@ -11,6 +11,8 @@
  * - The error burst ignores the sandbox proxy's records of connections that ended normally.
  * - The critical queue alert fires on a message nobody is serving, not on a chat busy with its own
  *   long turn; the long turn itself is a warning.
+ * - Messages that keep failing in one chat raise a warning whatever the chat's pace.
+ * - A scheduled scenario that failed or whose delivery is unconfirmed raises a warning.
  * - Every exporter metric the state rules read is one the exporter actually publishes.
  *
  * The rules are YAML installed on another host, so they are read as text here for the same reason
@@ -214,6 +216,32 @@ describe("osinara state alert rules", () => {
 
     expect(block, "the long-turn warning is missing").toBeDefined();
     expect(ruleField(block!, "expr")).toContain("osinara_ingress_longest_running_seconds");
+    expect(block).toMatch(/severity: warning/u);
+  });
+
+  it("raises a warning when messages keep failing at the pace of an ordinary conversation", () => {
+    const [block] = alertBlocks("OsinaraIngressFailing", stateRules);
+    expect(block, "no rule watches messages that ended in failure").toBeDefined();
+    const expression = ruleField(block!, "expr") ?? "";
+
+    // A failed message is final at once, so the queue never stalls, and a chat writing a few
+    // messages a minute never reaches a burst threshold: #306 lost 204 messages over three hours
+    // while the burst alerts flickered with the group's pace (#307).
+    expect(expression).toMatch(/^delta\(osinara_ingress_failed\[1h\]\) >= 2$/u);
+    // The metric counts rows, not events: a manual recovery lowers it, and increase() would read
+    // that drop as a counter reset and report the whole remaining count as new failures.
+    expect(expression).not.toContain("increase(");
+    expect(block).toMatch(/severity: warning/u);
+  });
+
+  it("reports a scheduled scenario that failed or whose delivery is unconfirmed", () => {
+    const [block] = alertBlocks("OsinaraScheduleRunFailed", stateRules);
+    expect(block, "no rule watches failed scheduled scenarios").toBeDefined();
+    const expression = ruleField(block!, "expr") ?? "";
+
+    // Each such run is a scenario the family did not receive; both terminal states count.
+    expect(expression).toContain("osinara_agent_schedule_runs_24h");
+    expect(expression).toContain('status=~"failed|ambiguous"');
     expect(block).toMatch(/severity: warning/u);
   });
 
