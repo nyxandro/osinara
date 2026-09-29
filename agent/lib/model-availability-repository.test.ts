@@ -40,11 +40,15 @@ describe("successful model call observation", () => {
     await recordSuccessfulModelCall(signal);
 
     // The host disk occasionally takes over two seconds to confirm a synchronous write, even when
-    // idle, and the answer waits for this observation: every such commit lost the mark (#311).
-    // A crash can lose only the last fraction of a second of marks, and any later ordinary commit
-    // that acts on one flushes it too, because the journal is written in order.
-    const config = client.config as { options?: string; query_timeout?: number; statement_timeout?: number };
+    // idle, and the answer waits for this observation: each time the client gave up, logged a
+    // failure and held the answer back two seconds, while the commit finished once the disk
+    // answered (#311). A crash can lose only the latest marks, and any later ordinary commit that
+    // acts on one flushes it too, because the journal is written in order.
+    const config = client.config as {
+      connectionTimeoutMillis?: number; options?: string; query_timeout?: number; statement_timeout?: number;
+    };
     expect(config.options).toBe("-c synchronous_commit=off");
+    expect(config.connectionTimeoutMillis).toBe(2_000);
     expect(config.query_timeout).toBe(2_000);
     expect(config.statement_timeout).toBe(2_000);
     expect(client.query).toHaveBeenCalledOnce();
