@@ -62,6 +62,42 @@ groups:
           description: 'Чат этого запроса ждёт окончания хода, остальные чаты обслуживаются. Либо задача тяжёлая — много шагов модели и команд в песочнице, — либо ход завис.'
           runbook: 'Найти идущий ход по строкам AGENT_MODEL_CALL_METRICS и AGENT_TOOL_CALL_METRICS за последние 20 минут: если вызовы идут, задача просто долгая; если строк нет, ход завис — telegram-ingress-admin inspect внутри контейнера agent.'
 
+      # A message that fails is final at once, so the queue never stalls and the rules above stay
+      # quiet; a chat writing a few messages a minute never reaches a burst threshold either. On
+      # 2026-09-28 one group lost 204 messages over three hours while the burst alerts came and went
+      # with the group's pace (#306, #307). The count rose steadily all that time.
+      #
+      # delta, not increase: the metric counts rows, and a manual recovery lowers it; increase()
+      # reads that drop as a counter reset and reports the remaining count as new failures.
+      #
+      # Two within an hour, because single failures are background: over 2026-07-12..09-27, outside
+      # the two incidents, there were 0-4 a day, and two within an hour happened about nine times,
+      # each time a chat that was actually broken. Replayed over 2026-09-16..09-28 the rule stayed
+      # silent until 18:05 on the 28th, then held until an hour after the last failure at 21:09.
+      - alert: OsinaraIngressFailing
+        expr: delta(osinara_ingress_failed[1h]) >= 2
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'За последний час не обработано сообщений: {{ $value }}'
+          description: 'Входящие сообщения заканчиваются ошибкой, и повторно бот их не разберёт. Обычно это один сломанный чат: там бот перестал видеть сообщения, остальные чаты работают.'
+          runbook: 'Сгруппировать строки AGENT_TELEGRAM_INGRESS_FAILED за последний час по тексту ошибки; в telegram_ingress_updates со status=failed посмотреть queue_id и last_error_code.'
+
+      # Each such run is a scenario the family did not receive: fifteen failed between 2026-07-17
+      # and 09-02 with no alert at all. Failed and ambiguous runs are final, nothing picks them up
+      # again, so there is no hold. The metric counts the last 24 hours, so the alert stays on for
+      # a day after the failure, like the other recent-window rules here.
+      - alert: OsinaraScheduleRunFailed
+        expr: sum(osinara_agent_schedule_runs_24h{status=~"failed|ambiguous"}) > 0
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Сценарии по расписанию не выполнены за сутки: {{ $value }}'
+          description: 'Автономный сценарий не дошёл до семьи или его доставка не подтверждена: человек не получил то, что ждал по расписанию.'
+          runbook: 'В agent_schedule_runs со status failed или ambiguous за сутки посмотреть error_code и schedule_id; затем строки агента в момент scheduled_for.'
+
       - alert: OsinaraIncidentsPendingStuck
         expr: osinara_operational_incidents{status="pending"} > 0
         for: 15m
