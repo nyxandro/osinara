@@ -35,6 +35,7 @@ import { formatAvailableSkillsSection } from "../prompt/skills-section.js";
 import { composeSystemPrompt } from "../prompt/system-prompt.js";
 import { instructionTurnMessages, resolveTurnInstructions, turnInputMessages } from "../prompt/turn-instructions.js";
 import type { RuntimeSandboxSession } from "../sandbox/types.js";
+import { clearReadFileState, sessionToolState } from "../session/tool-state.js";
 import type { ToolContext, ToolDefinition } from "../tool.js";
 import {
   claimTurn, completeStep, finishTurn, inJournalTransaction, loadStep, loadTurn, markHistoryStarted,
@@ -109,11 +110,15 @@ function systemPrompt(agent: RuntimeAgent, prepared: PreparedTurn): string {
 function toolContexts(runtime: TurnRuntime, turn: TurnRecord, abortSignal: AbortSignal) {
   let sandbox: Promise<RuntimeSandboxSession> | undefined;
   const session = { auth: turn.auth, id: turn.sessionId, turn: { id: turn.id, sequence: turn.sequence } };
+  const state = sessionToolState(runtime.database, turn.sessionId);
+  const skills = requirePrepared(turn).skills.map((skill) => skill.name);
   return (call: { readonly callId: string; readonly toolName: string }): ToolContext => ({
     abortSignal,
     callId: call.callId,
     getSandbox: () => (sandbox ??= runtime.sandbox({ auth: turn.auth, id: turn.sessionId })),
     session,
+    skills,
+    state,
     toolName: call.toolName,
   });
 }
@@ -223,9 +228,11 @@ async function compactIfNeeded(runtime: TurnRuntime, input: {
   }
   const todo = todoCompactionMessage(input.history.todo);
   const messages = todo === undefined ? compacted : [...compacted, todo];
-  // The turn input is part of the compacted history now, so it is not appended again.
+  // The turn input is part of the compacted history now, so it is not appended again. What the
+  // model read is summarized away, so a write must read the file again (Eve's compaction reset).
   await inJournalTransaction(runtime.database, async (client) => {
     await replaceSessionHistory(client, { messages, sessionId: input.turn.sessionId, turnId: input.turn.id });
+    await clearReadFileState(client, input.turn.sessionId);
     await markHistoryStarted(client, input.turn.id);
   });
   return messages;

@@ -18,6 +18,7 @@
  */
 import type { JsonObject } from "./json.js";
 import type { SessionContext } from "./context.js";
+import type { SessionToolState } from "./session/tool-state.js";
 import type { InferStandardOutput, StandardJSONSchemaV1, StandardSchemaV1 } from "./standard-schema.js";
 
 export type ToolInputSchema<TInput = unknown> =
@@ -44,6 +45,10 @@ export type ToolContext = SessionContext & {
   readonly abortSignal: AbortSignal;
   /** Id of this tool call; stable across a replay after a crash, so it keys exactly-once barriers. */
   readonly callId: string;
+  /** Names of the skills listed to the model in this turn; `load_skill` loads only these. */
+  readonly skills: readonly string[];
+  /** Session state of the built-in tools (todo list, read-before-write stamps). */
+  readonly state: SessionToolState;
   readonly toolName: string;
 };
 

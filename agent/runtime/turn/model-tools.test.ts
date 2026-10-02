@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildModeToolSurface } from "../../lib/tool-policy/mode-tool-surface.js";
 import { defineTool, type ToolDefinition } from "../tool.js";
+import * as builtIns from "../tools/defaults.js";
 import { unpackReferenceFile, type ReferenceFile } from "../testing/model-request-reference.js";
 import { BUILT_IN_TOOL_ORDER, orderStepTools, toModelToolSet } from "./model-tools.js";
 
@@ -69,6 +70,19 @@ describe("model-facing tool definitions", () => {
     const sent = await providerTools(toModelToolSet(orderStepTools(application)));
 
     expect(sent.length).toBeGreaterThan(30);
+    for (const tool of sent) expect(JSON.stringify(tool), tool.name).toBe(JSON.stringify(recorded.get(tool.name)));
+  });
+
+  it("reach the model exactly as Eve sent its built-in tools", async () => {
+    const recorded = new Map((await recordedTools("private-first")).map((tool) => [tool.name, tool]));
+    const tools = {
+      ask_question: builtIns.askQuestion, bash: builtIns.bash, glob: builtIns.glob, grep: builtIns.grep,
+      load_skill: builtIns.loadSkill, read_file: builtIns.readFile, todo: builtIns.todo, write_file: builtIns.writeFile,
+    };
+
+    const sent = await providerTools(toModelToolSet(orderStepTools(tools)));
+
+    expect(sent.map((tool) => tool.name)).toEqual(["ask_question", "bash", "read_file", "write_file", "todo", "load_skill", "glob", "grep"]);
     for (const tool of sent) expect(JSON.stringify(tool), tool.name).toBe(JSON.stringify(recorded.get(tool.name)));
   });
 

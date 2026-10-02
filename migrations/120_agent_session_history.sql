@@ -11,6 +11,12 @@
 -- - announced_skills — набор скиллов, уже объявленный модели в истории; ядро объявляет его снова
 --   только при изменении.
 -- - source — откуда взялась история: из базы Eve при переезде или создана ядром.
+-- - todo — список задач встроенного инструмента `todo`.
+-- - read_file_state — отметки встроенного `read_file` по пути файла (длина и хэш прочитанного):
+--   `write_file` не перезапишет файл, который модель не читала или который изменился после чтения.
+--   Сжатие истории их сбрасывает: прочитанное ушло из контекста.
+-- - sandbox_state — с каким набором папок и доступом сессия впервые открыла sandbox. Набор папок
+--   сессии не меняется, повторное открытие сверяется с ним.
 --
 -- agent_session_history — сообщения в формате AI SDK по порядку. Тип `json`, а не `jsonb`: он
 -- хранит текст как есть, а порядок ключей в аргументах вызова инструмента уходит провайдеру
@@ -25,6 +31,8 @@ CREATE TABLE agent_session_state (
   compaction_prompt_message_count integer CHECK (compaction_prompt_message_count >= 0),
   announced_skills json,
   todo json,
+  read_file_state jsonb NOT NULL DEFAULT '{}'::jsonb,
+  sandbox_state json,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CHECK (parent_session_id IS NULL OR parent_session_id <> session_id)

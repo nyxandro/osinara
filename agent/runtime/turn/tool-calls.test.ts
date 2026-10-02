@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { AppError } from "../../lib/app-error.js";
+import { memoryToolState } from "../session/tool-state.test-fixtures.js";
 import { defineTool, type ToolContext, type ToolDefinition } from "../tool.js";
 import { decideToolApproval, executeToolCall, resolveToolCallInput } from "./tool-calls.js";
 
@@ -10,6 +11,8 @@ const CONTEXT = {
   callId: "call-1",
   getSandbox: async () => { throw new Error("TEST_SANDBOX_UNUSED"); },
   session: { auth: { current: null, initiator: null }, id: "wrun_01M3YNFXVX5WCP17ZVB8ZTMQAR", turn: { id: "turn_01M3YNFXVX5WCP17ZVB8ZTMQAS", sequence: 0 } },
+  skills: [],
+  state: memoryToolState().state,
   toolName: "probe",
 } satisfies ToolContext;
 
