@@ -1,5 +1,6 @@
 /** Replace only Telegram network I/O. Unexpected Telegram operations fail the test. */
 import { database } from "../../../../agent/lib/database.js";
+import { REFERENCE_CHAT_IDS } from "./reference-scenarios.js";
 
 const networkFetch = globalThis.fetch;
 globalThis.fetch = async (request, init) => {
@@ -14,7 +15,12 @@ globalThis.fetch = async (request, init) => {
   const method = url.pathname.split("/").at(-1);
   const body = JSON.parse(String(init?.body));
   if (method === "getChat") {
-    return Response.json({ ok: true, result: { id: Number(body.chat_id), type: "supergroup", available_reactions: [] } });
+    const chatId = Number(body.chat_id);
+    // Reference chats allow every reaction (no list), so their requests carry the reaction set.
+    if (REFERENCE_CHAT_IDS.has(chatId)) {
+      return Response.json({ ok: true, result: { id: chatId, type: chatId > 0 ? "private" : "supergroup" } });
+    }
+    return Response.json({ ok: true, result: { id: chatId, type: "supergroup", available_reactions: [] } });
   }
   if (method === "sendChatAction") return Response.json({ ok: true, result: true });
   if (method === "answerCallbackQuery") return Response.json({ ok: true, result: true });

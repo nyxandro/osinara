@@ -3,6 +3,7 @@ import { defineSandbox } from "eve/sandbox";
 import { justbash } from "eve/sandbox/just-bash";
 import productionSandbox from "../../../agent/sandbox.js";
 import { database } from "../../../agent/lib/database.js";
+import { isMemoryReviewSession } from "../../../agent/lib/memory-review/memory-review-session.js";
 
 export default defineSandbox({
   backend: justbash(),
@@ -12,7 +13,9 @@ export default defineSandbox({
       ...input,
       async use(options) {
         const attrs = input.ctx.session.auth.current?.attributes;
-        const expected = attrs?.telegramChatType === "private" ? ["personal", "family"] :
+        // Silent memory review materializes no workspace capability at all.
+        const expected = isMemoryReviewSession(input.ctx) ? [] :
+          attrs?.telegramChatType === "private" ? ["personal", "family"] :
           attrs?.groupType === "family_private" ? ["family"] : ["group"];
         if (!options || JSON.stringify(options.mounts.map((mount) => mount.mountPoint)) !== JSON.stringify(expected)) {
           throw new Error("TEST_GROUP_MOUNTS_INVALID");

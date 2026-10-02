@@ -6,12 +6,18 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { SESSION_MAX_COMPLETED_TURNS } from "../../../agent/config.js";
 import { database } from "../../../agent/lib/database.js";
 import { EVE_EMPTY_DELIVERY_MARKER } from "../../../agent/lib/eve-empty-delivery.js";
+import { recordReferenceModelRequest } from "./lib/model-request-recorder.js";
+import { respondToReferenceRequest } from "./lib/reference-model.js";
+import { referenceRequestIdentity } from "./lib/reference-scenarios.js";
 
 // Mirrors the eval: ordinals up to this count are @mention turns in the external group.
 const EXTERNAL_MENTION_TURN_COUNT = SESSION_MAX_COMPLETED_TURNS + 4;
 const SILENT_PROBE_ORDINAL = SESSION_MAX_COMPLETED_TURNS + 15;
 
-const testModel = mockModel(async ({ lastUserMessage, toolResults, tools }) => {
+const testModel = mockModel(async (request) => {
+    const reference = referenceRequestIdentity(request.messages);
+    if (reference) return respondToReferenceRequest(request, reference);
+    const { lastUserMessage, toolResults, tools } = request;
     const marker = [...(lastUserMessage ?? "").matchAll(/conversation-probe-\d+/gu)].at(-1)?.[0];
     if (!marker) throw new Error("TEST_CURRENT_MESSAGE_MISSING");
     await database().query("INSERT INTO telegram_conversation_test_model_calls(marker) VALUES ($1)", [marker]);
@@ -67,7 +73,12 @@ export default defineAgent({
   build: { externalDependencies: ["@workflow/world-postgres"] },
   experimental: { workflow: { world: "@workflow/world-postgres" } },
   model: wrapLanguageModel({ model: testModel, middleware: {
+    async wrapGenerate({ doGenerate, params }) {
+      await recordReferenceModelRequest("generate", params);
+      return doGenerate();
+    },
     async wrapStream({ doStream, params }) {
+      await recordReferenceModelRequest("stream", params);
       const marker = [...JSON.stringify(params.prompt)
         .matchAll(/conversation-probe-\d+/gu)].at(-1)?.[0];
       const answered = params.prompt.some((message) => message.role === "tool" && message.content.some((part) => part.type === "tool-result" && part.toolName === "ask_question"));
