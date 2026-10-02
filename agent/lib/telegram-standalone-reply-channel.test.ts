@@ -11,17 +11,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const dependencies = vi.hoisted(() => ({
-  channelConfig: null as Record<string, any> | null,
   deliverFinalOutput: vi.fn(),
   recordAgentResponse: vi.fn(),
 }));
 
-vi.mock("eve/channels/telegram", () => ({
-  telegramChannel: (config: Record<string, any>) => {
-    dependencies.channelConfig = config;
-    return config;
-  },
-}));
 vi.mock("./agent-schedules/scheduled-session.js", () => ({
   isScheduledSession: vi.fn(() => false),
   scheduledDeliveryMetadata: vi.fn(() => null),
@@ -46,7 +39,7 @@ vi.mock("./conversation-timeline-repository.js", () => ({
   conversationTimelineRepository: { recordAgentResponse: vi.fn() },
 }));
 
-await import("../channels/telegram.js");
+const { telegramTurnEvents } = await import("../channels/telegram.js");
 
 const context = {
   session: {
@@ -75,7 +68,7 @@ const channel = {
 };
 
 async function complete(message: string) {
-  const handler = dependencies.channelConfig?.events?.["message.completed"];
+  const handler = (telegramTurnEvents as Record<string, any>)["message.completed"];
   await handler({ finishReason: "stop", message }, channel, context);
   return dependencies.deliverFinalOutput.mock.calls[0]?.[0];
 }
@@ -107,7 +100,7 @@ describe("group final-delivery reply binding", () => {
   });
 
   it("keeps the reply-context integrity check for a standalone answer", async () => {
-    const handler = dependencies.channelConfig?.events?.["message.completed"];
+    const handler = (telegramTurnEvents as Record<string, any>)["message.completed"];
     const foreignChannel = { ...channel, state: { chatId: "-100999", chatType: "supergroup" } };
 
     await expect(handler(

@@ -3,8 +3,9 @@
  *
  * Export:
  * - `createTurnDispatcher`: `run` runs a created turn to its end and returns its outcome; `start`
- *   does the same in the background under the deploy admission; `recover` resumes, at process
- *   start, the turns an earlier process left running; `idle` waits for background runs.
+ *   does the same in the background under the deploy admission; `recover` resumes the turns an
+ *   earlier process left running, and any whose start the deploy admission refused (it is repeated
+ *   every minute); `idle` waits for background runs.
  *
  * A session's turns run one at a time, in creation order (`claimTurn`), so a turn created while an
  * earlier one runs waits for it, as Eve's `queue` turn policy did. A turn this process already
@@ -126,7 +127,8 @@ export function createTurnDispatcher(input: {
 
   async function recover(): Promise<number> {
     await releaseOtherRunners(runtime.database, runtime.runnerId);
-    const turns = await listRunningRootTurns(runtime.database);
+    // Turns this process already runs or waits on are left alone; a repeated recovery is cheap.
+    const turns = (await listRunningRootTurns(runtime.database)).filter((turn) => !active.has(turn.id));
     for (const turn of turns) start(turn.id);
     if (turns.length > 0) console.info(JSON.stringify({ code: "AGENT_TURNS_RECOVERED", count: turns.length }));
     return turns.length;

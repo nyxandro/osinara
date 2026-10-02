@@ -10,7 +10,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const dependencies = vi.hoisted(() => ({
-  channelConfig: null as Record<string, any> | null,
   clearApprovals: vi.fn(),
   finishTurn: vi.fn(async () => true),
   hasPendingOperation: vi.fn(async () => false),
@@ -19,12 +18,6 @@ const dependencies = vi.hoisted(() => ({
   recordTurnFailed: vi.fn(),
 }));
 
-vi.mock("eve/channels/telegram", () => ({
-  telegramChannel: (config: Record<string, any>) => {
-    dependencies.channelConfig = config;
-    return config;
-  },
-}));
 vi.mock("../agent-schedules/scheduled-session.js", () => ({
   isScheduledSession: vi.fn(() => false),
   scheduledDeliveryMetadata: vi.fn(() => null),
@@ -48,7 +41,7 @@ vi.mock("../memory-turn-source.js", () => ({
   releaseMemoryTurnSources: vi.fn(),
 }));
 vi.mock("../memory-review/memory-review-repository.js", () => ({
-  memoryReviewRepository: { batchIdForTurn: vi.fn(async () => null), completeBatch: vi.fn(), failRunning: vi.fn() },
+  memoryReviewRepository: { batchForTurn: vi.fn(async () => null), completeBatch: vi.fn(), failRunning: vi.fn() },
 }));
 vi.mock("../operational-incidents/telegram-failure.js", () => ({
   recordTelegramFailure: dependencies.recordTelegramFailure,
@@ -57,7 +50,7 @@ vi.mock("./conversation-wakeup-run-repository.js", () => ({
   conversationWakeupRunRepository: { admitTurn: vi.fn(), finishTurn: dependencies.finishTurn },
 }));
 
-await import("../../channels/telegram.js");
+const { telegramTurnEvents } = await import("../../channels/telegram.js");
 
 function context(attributes: Record<string, string>) {
   return {
@@ -72,8 +65,8 @@ function context(attributes: Record<string, string>) {
 const wakeupTurn = context({ conversationScheduleRunId: "run-1", telegramChatId: "101" });
 const channel = { telegram: { chatId: "101" } };
 
-function handler(event: string) {
-  return dependencies.channelConfig?.events?.[event];
+function handler(event: "turn.cancelled" | "turn.completed" | "turn.failed") {
+  return telegramTurnEvents[event] as (data: unknown, channel: unknown, ctx: unknown) => Promise<void>;
 }
 
 describe("telegram wake-up turn lifecycle", () => {

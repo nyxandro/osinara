@@ -79,6 +79,15 @@ import { handleSoftwareUpdateCallback } from "../lib/software-updates/callback.j
 import { recordOperationalIncident } from "../lib/operational-incidents/owner-alerts.js";
 import { TELEGRAM_INGRESS_LEASE_MS } from "../config.js";
 
+/**
+ * A continuation after a human answer finishes the review its parked turn started; that turn's
+ * retained sources go with the review.
+ */
+async function releaseResumedTurnSources(ctx: Parameters<TelegramTurnEvents["turn.completed"]>[2], reviewTurnId: string): Promise<void> {
+  if (reviewTurnId === ctx.session.turn.id) return;
+  await releaseMemoryTurnSources({ session: { ...ctx.session, turn: { ...ctx.session.turn, id: reviewTurnId } } });
+}
+
 export const telegramTurnEvents: TelegramTurnEvents = {
   async "input.requested"(data, channel, ctx) {
     const refusal = accountlessActorApprovalError(ctx.session.auth);
@@ -301,16 +310,18 @@ export const telegramTurnEvents: TelegramTurnEvents = {
     await releaseMemoryTurnSources(ctx);
     // First, so a failing failure notice below cannot leave the wake-up's schedule leased for good.
     await finishConversationWakeupTurn(ctx, data.code);
-    const reviewBatchId = await resolveMemoryReviewBatch(ctx);
+    const review = await resolveMemoryReviewBatch(ctx);
+    const reviewBatchId = review?.batchId ?? null;
     let reviewFailureReplayed = false;
-    if (reviewBatchId) {
+    if (review) {
       const terminal = await recoverDatabaseBookkeeping(() => memoryReviewRepository.failRunning({
-        batchId: reviewBatchId,
+        batchId: review.batchId,
         diagnosticCode: data.code,
         eveSessionId: ctx.session.id,
-        eveTurnId: ctx.session.turn.id,
+        eveTurnId: review.eveTurnId,
       }));
       reviewFailureReplayed = terminal === "replayed";
+      await releaseResumedTurnSources(ctx, review.eveTurnId);
     }
     const sessionId = applicationSessionId(ctx);
     const scheduledDelivery = scheduledDeliveryMetadata(ctx);
@@ -363,18 +374,18 @@ export const telegramTurnEvents: TelegramTurnEvents = {
     await telegramHitlApprovalRepository.clearForEveSession(sessionId, ctx.session.id);
   },
   async "turn.cancelled"(_data, _channel, ctx) {
-    // Steering by the next chat message is the most common way a turn ends in a live group. The
-    // batch used to wait for the time bound instead, while later turns chained onto a head that
-    // would never report, so their finished work stayed unreachable from the lane cursor.
+    // A cancelled turn closes its review like a failed one: a batch waiting for the time bound let
+    // later turns chain onto a head that would never report, so their work stayed unreachable.
     await releaseMemoryTurnSources(ctx);
-    const reviewBatchId = await resolveMemoryReviewBatch(ctx);
-    if (reviewBatchId) {
+    const review = await resolveMemoryReviewBatch(ctx);
+    if (review) {
       await memoryReviewRepository.failRunning({
-        batchId: reviewBatchId,
+        batchId: review.batchId,
         diagnosticCode: "AGENT_MEMORY_REVIEW_TURN_CANCELLED",
         eveSessionId: ctx.session.id,
-        eveTurnId: ctx.session.turn.id,
+        eveTurnId: review.eveTurnId,
       });
+      await releaseResumedTurnSources(ctx, review.eveTurnId);
     }
     await finishConversationWakeupTurn(ctx, "AGENT_CONVERSATION_WAKEUP_CANCELLED");
     // A cancelled turn is not a failure and its session keeps serving the replacement turn, so
@@ -388,16 +399,18 @@ export const telegramTurnEvents: TelegramTurnEvents = {
   async "turn.completed"(_data, channel, ctx) {
     const sessionId = applicationSessionId(ctx);
     const awaitingApproval = await sessionRepository.hasPendingOperation(sessionId, ctx.session.id);
-    const reviewBatchId = await resolveMemoryReviewBatch(ctx);
+    const review = await resolveMemoryReviewBatch(ctx);
+    const reviewBatchId = review?.batchId ?? null;
     if (!awaitingApproval) {
       // Completion verifies review evidence before release; a parked HITL turn retains its source set.
-      if (reviewBatchId) {
+      if (review) {
         await recoverDatabaseBookkeeping(() => memoryReviewRepository.completeBatch({
-          batchId: reviewBatchId,
+          batchId: review.batchId,
           completedAt: new Date(),
           eveSessionId: ctx.session.id,
-          eveTurnId: ctx.session.turn.id,
+          eveTurnId: review.eveTurnId,
         }));
+        await releaseResumedTurnSources(ctx, review.eveTurnId);
       }
       await releaseMemoryTurnSources(ctx);
     }

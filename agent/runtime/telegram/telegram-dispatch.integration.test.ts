@@ -14,6 +14,7 @@ import { recordingObserver, reply, scriptedModel, testAgent, testRuntime, toolCa
 import type { TelegramChannelState, TelegramHitlCallbackResult, TelegramInboundResult } from "./channel-types.js";
 import { renderTelegramInputRequest } from "./hitl.js";
 import { parseTelegramUpdate, type TelegramCallbackQuery, type TelegramMessage } from "./inbound.js";
+import { createTelegramChannel } from "./telegram-channel.js";
 import { dispatchTelegramCallback, dispatchTelegramMessage, type TelegramChannelHooks } from "./telegram-dispatch.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
@@ -118,6 +119,33 @@ async function channelState(sessionId: string) {
     if (result.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
     expect(seen[0]?.from?.isBot).toBe(true);
     expect((await loadTurn(database(), result.turnId)).input.message).toBe("склеенная пачка");
+  });
+
+  it("gives the model a photo's caption as text and never the file itself", async () => {
+    const auth = await ownerAuth();
+    const channel = hooks({ message: () => ({ auth, continuationToken: "7::" }), transport: telegramApi().transport });
+    const photo = message("", { caption: "Что изображено?", photo: [{ file_id: "photo-1", file_size: 1_024, file_unique_id: "u-1", height: 64, width: 64 }] });
+
+    const result = await dispatchTelegramMessage(database(), channel, photo);
+
+    if (result.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
+    expect((await loadTurn(database(), result.turnId)).input.message).toBe("Что изображено?");
+  });
+
+  it("starts a turn the application sends into a chat in that address's own session", async () => {
+    const auth = await ownerAuth();
+    const channel = createTelegramChannel({
+      api: { fetch: telegramApi().transport.api.fetch }, botToken: "test-token", botUsername: "osinara_bot", database: database(),
+      events: {} as never, onHitlCallbackQuery: async () => null, onMessage: async () => null,
+    });
+
+    const started = await channel.receive({ chatId: "7", conversationId: "schedule:run-1" }, "Сценарий", { auth, kind: "scheduled" });
+
+    expect(await findContinuation(database(), { channelKind: "telegram", token: "7::schedule:run-1" })).toBe(started.sessionId);
+    expect(await loadTurn(database(), started.turnId)).toMatchObject({
+      channel: { continuationToken: "7::schedule:run-1", kind: "telegram" }, input: { context: [], message: "Сценарий" }, kind: "scheduled",
+    });
+    expect(await channelState(started.sessionId)).toMatchObject({ chatId: "7", conversationId: "schedule:run-1", messageThreadId: null });
   });
 
   it("refuses a dispatch the application did not authenticate, and creates nothing for a dropped update", async () => {

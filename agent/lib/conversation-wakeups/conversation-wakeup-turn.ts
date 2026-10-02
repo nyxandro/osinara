@@ -57,8 +57,8 @@ export function conversationCanonicalRouteToken(route: {
 }
 
 /**
- * The dispatch coordinates are the ones a Telegram message's turn carries: every event of the turn
- * is marked with the dispatch id, and Eve refuses to start the turn after the deadline.
+ * The dispatch coordinates are the ones a Telegram message's turn carries: the dispatch id, and a
+ * deadline after which the turn fails at its start instead of running late.
  */
 export function conversationWakeupAuth(
   wakeup: PreparedConversationWakeup,

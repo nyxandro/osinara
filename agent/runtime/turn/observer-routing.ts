@@ -20,10 +20,10 @@ export function routeTurnObservers(observers: Readonly<Record<string, TurnObserv
     return observer;
   }
   return {
-    turnStarted: (turn) => observerOf(turn).turnStarted(turn),
-    stepText: (event) => observerOf(event.turn).stepText(event),
-    toolsStarted: (event) => observerOf(event.turn).toolsStarted(event),
-    inputRequested: (event) => observerOf(event.turn).inputRequested(event),
-    turnFinished: (event) => observerOf(event.turn).turnFinished(event),
+    turnStarted: async (turn) => await observerOf(turn).turnStarted(turn),
+    stepText: async (event) => await observerOf(event.turn).stepText(event),
+    toolsStarted: async (event) => await observerOf(event.turn).toolsStarted(event),
+    inputRequested: async (event) => await observerOf(event.turn).inputRequested(event),
+    turnFinished: async (event) => await observerOf(event.turn).turnFinished(event),
   };
 }

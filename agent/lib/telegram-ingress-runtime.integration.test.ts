@@ -97,7 +97,7 @@ async function updates() {
       { eve_session_id: sessionId, status: "completed" },
     ]);
     expect(rows[1]!.dispatch_turn_id).not.toBe(rows[0]!.dispatch_turn_id);
-    expect(telegram.fetch.mock.calls.map(([url]) => String(url).split("/").at(-1))).toContain("answerCallbackQuery");
+    expect(telegram.fetch.mock.calls.map((call) => String((call as unknown[])[0]).split("/").at(-1))).toContain("answerCallbackQuery");
   });
 
   it("finishes a turn its update already created after a restart, without a second model call", async () => {

@@ -153,6 +153,7 @@ const POST_V0101_MIGRATIONS = [
   "119_claim_evidence_attach_time_checks.sql",
   "120_agent_session_history.sql",
   "121_agent_turn_journal.sql",
+  "122_wakeup_turn_binding.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [

@@ -15,6 +15,8 @@ import {
   createMainAgentPrivateMemoryFixture,
 } from "../memory-agent-write.integration-fixtures.js";
 import { memoryTurnSourceRepository } from "../memory-turn-source-repository.js";
+import { createSessionHistory } from "../../runtime/history/history-repository.js";
+import { newSessionId, newTurnId } from "../../runtime/ids.js";
 import { memoryReviewRepository } from "./memory-review-repository.js";
 import { memoryReviewDispatchRepository } from "./memory-review-dispatch-repository.js";
 
@@ -172,6 +174,48 @@ describeWithDatabase("memory review repository", () => {
         WHERE conversation_id = $1`,
       [fixture.conversationId],
     )).resolves.toMatchObject({ rows: [{ count: 0 }] });
+  });
+
+  it("finds the batch of a parked turn from a continuation two answers later", async () => {
+    const fixture = await createMainAgentMemoryFixture();
+    await memoryReviewRepository.initializeLane({
+      conversationId: fixture.conversationId,
+      messageThreadId: null,
+      processedThroughSequence: "1",
+    });
+    const session = await database().query<{ id: string }>(
+      `INSERT INTO conversation_sessions
+         (thread_id, generation, family_id, group_id, scope, kind, conversation_key,
+          continuation_token, started_at, last_activity_at)
+       VALUES (gen_random_uuid(), 0, $1, $2, 'family', 'canonical', 'review-continued',
+               'review-continued', now(), now()) RETURNING id`,
+      [fixture.familyId, fixture.groupId],
+    );
+    const source = await insertUserMessage({ conversationId: fixture.conversationId, groupId: fixture.groupId, sequence: 2 });
+    const batch = await memoryReviewRepository.prepareInteractiveTurn({
+      applicationSessionId: session.rows[0]!.id, groupId: fixture.groupId, timelineEntryId: source.id,
+    });
+    const runtimeSession = newSessionId();
+    await createSessionHistory(database(), {
+      announcedSkills: null, applicationSessionId: session.rows[0]!.id, channelState: null,
+      compaction: { inputTokens: null, promptMessageCount: null }, history: [], initiatorAuth: null, parentSessionId: null,
+      sandbox: null, sessionId: runtimeSession, source: "runtime", todo: null,
+    });
+    const [parked, answered, answeredAgain] = [newTurnId(), newTurnId(), newTurnId()];
+    for (const [sequence, id, resumes] of [[0, parked, null], [1, answered, parked], [2, answeredAgain, answered]] as const) {
+      await database().query(
+        `INSERT INTO agent_turns (id, session_id, sequence, kind, status, resumes_turn_id, auth, channel, input, completed_at)
+         VALUES ($1, $2, $3, 'conversation', 'completed', $4, '{}', '{"kind":"telegram"}', '{"context":[]}', now())`,
+        [id, runtimeSession, sequence, resumes],
+      );
+    }
+    await memoryReviewRepository.bindEveTurn({
+      applicationSessionId: session.rows[0]!.id, batchId: batch!.batchId, eveSessionId: runtimeSession, eveTurnId: parked,
+    });
+
+    await expect(memoryReviewRepository.batchForTurn({ eveSessionId: runtimeSession, eveTurnId: answeredAgain }))
+      .resolves.toEqual({ batchId: batch!.batchId, eveTurnId: parked });
+    await expect(memoryReviewRepository.batchForTurn({ eveSessionId: "wrun_other", eveTurnId: answeredAgain })).resolves.toBeNull();
   });
 
   it("retains active sources and advances only after successful completion", async () => {

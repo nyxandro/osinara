@@ -3,8 +3,8 @@
  *
  * Exports:
  * - `createTelegramChannel`: binds the application's hooks and handlers to the database and the
- *   Bot API; `dispatch` turns one verified update into a turn, `observer` delivers that turn's
- *   events to the application's handlers.
+ *   Bot API; `dispatch` turns one verified update into a turn, `receive` starts a turn in a chat
+ *   without one (Eve's `receive`), `observer` delivers a turn's events to the application's handlers.
  * - `telegramWebhookRoutes`: the public webhook and the internal drain route. Both verify the
  *   webhook secret; the webhook hands a parsed update to the application's ingress, which stores it
  *   before Telegram is acknowledged.
@@ -19,20 +19,38 @@ import type { RouteContext, RuntimeRoute } from "../server.js";
 import type { TurnObserver } from "../turn/run-turn.js";
 import type { JournalDatabase } from "../turn/journal-repository.js";
 import type { TelegramApiOptions } from "./api.js";
-import type { TelegramTurnEvents } from "./channel-types.js";
+import type { SessionAuthContext } from "../context.js";
+import { startChannelTurn } from "../session/channel-session.js";
+import type { TurnKind } from "../turn/turn-types.js";
+import { TELEGRAM_CHANNEL_KIND, type TelegramChannelState, type TelegramTurnEvents } from "./channel-types.js";
 import type { TelegramTransport } from "./handle.js";
 import { parseTelegramUpdate, type TelegramUpdate } from "./inbound.js";
 import {
-  dispatchTelegramCallback, dispatchTelegramMessage, type TelegramChannelHooks, type TelegramDispatchControl,
-  type TelegramDispatchResult,
+  continuationTokenFromState, dispatchTelegramCallback, dispatchTelegramMessage, turnChannel, type TelegramChannelHooks,
+  type TelegramDispatchControl, type TelegramDispatchResult,
 } from "./telegram-dispatch.js";
+import { telegramInitialState } from "./telegram-session.js";
 import { telegramTurnObserver } from "./telegram-events.js";
 import { verifyTelegramRequest } from "./verify.js";
 
 export interface TelegramChannel {
   dispatch(update: TelegramUpdate, control?: TelegramDispatchControl): Promise<TelegramDispatchResult>;
   readonly observer: TurnObserver;
+  /**
+   * A turn the application starts in a chat without an incoming message, such as a scheduled run:
+   * the address gets its own session; the caller runs the turn.
+   */
+  receive(target: TelegramReceiveTarget, message: string, options: {
+    readonly auth: SessionAuthContext;
+    readonly kind: TurnKind;
+  }): Promise<{ readonly sessionId: string; readonly turnId: string }>;
   readonly transport: TelegramTransport;
+}
+
+export interface TelegramReceiveTarget {
+  readonly chatId: string;
+  readonly conversationId?: string;
+  readonly messageThreadId?: number;
 }
 
 export function createTelegramChannel(input: {
@@ -62,6 +80,24 @@ export function createTelegramChannel(input: {
         : await dispatchTelegramCallback(input.database, hooks, update.callbackQuery, control);
     },
     observer: telegramTurnObserver({ database: input.database, events: input.events, transport }),
+    async receive(target, message, options) {
+      const state: TelegramChannelState = {
+        ...telegramInitialState(input.botUsername),
+        chatId: target.chatId,
+        conversationId: target.conversationId ?? null,
+        messageThreadId: target.messageThreadId ?? null,
+      };
+      const token = continuationTokenFromState(state);
+      const { metadata } = turnChannel(token, state);
+      return await startChannelTurn(input.database, {
+        auth: options.auth,
+        channel: { kind: TELEGRAM_CHANNEL_KIND, ...(metadata === undefined ? {} : { metadata }) },
+        channelState: { ...state },
+        input: { context: [], message },
+        kind: options.kind,
+        token,
+      });
+    },
     transport,
   };
 }

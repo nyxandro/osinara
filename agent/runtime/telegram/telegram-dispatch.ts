@@ -10,6 +10,8 @@
  *   the turn's auth, a record of the created turn in the same transaction, and a stop signal.
  * - `TelegramDispatchResult`: the turn to run (for a partial answer, the turn that keeps waiting),
  *   or nothing.
+ * - `continuationTokenFromState`, `turnChannel`: a conversation's address and a turn's channel.
+ * - `replyInputResponse`: the answer a reply to a bot message carries, if it carries one.
  *
  * Ported from eve 0.40.0 `public/channels/telegram/telegramChannel.ts` (`dispatchMessage`,
  * `dispatchCallbackQuery`, `stateFromMessage`, `stateFromCallbackQuery`,
@@ -111,7 +113,8 @@ function stateFromCallbackQuery(query: TelegramCallbackQuery, botUsername: strin
   };
 }
 
-function continuationTokenFromState(state: TelegramChannelState): string {
+/** The address of a conversation state; a private chat is addressed by its chat alone. */
+export function continuationTokenFromState(state: TelegramChannelState): string {
   return telegramContinuationToken({
     chatId: state.chatId ?? "",
     conversationId: state.chatType === "private" ? undefined : (state.conversationId ?? undefined),
@@ -126,7 +129,7 @@ function verifiedAuth(auth: SessionAuthContext | null, control: TelegramDispatch
   return control.attributes === undefined ? auth : { ...auth, attributes: { ...auth.attributes, ...control.attributes } };
 }
 
-function turnChannel(token: string, state: TelegramChannelState): TurnChannel {
+export function turnChannel(token: string, state: TelegramChannelState): TurnChannel {
   return {
     continuationToken: token,
     kind: TELEGRAM_CHANNEL_KIND,
@@ -200,6 +203,17 @@ async function respond(client: JournalClient, input: {
   return await dispatched(client, control, { sessionId, turnId: turn.id });
 }
 
+/**
+ * A non-empty reply to a bot message answers the prompt that message carried, unless the
+ * application marked it an ordinary message (Eve's rule with Osinara's `replyHandling` patch).
+ */
+export function replyInputResponse(message: TelegramMessage, result: NonNullable<TelegramInboundResult>): InputResponse | undefined {
+  const text = message.text || message.caption;
+  return result.replyHandling !== "message" && message.replyToMessage?.from?.isBot === true && text.trim().length > 0
+    ? telegramReplyInputResponse({ messageId: message.replyToMessage.messageId, text })
+    : undefined;
+}
+
 async function acknowledge(ctx: TelegramContext, callbackQueryId: string, text: string): Promise<void> {
   try {
     await ctx.telegram.answerCallbackQuery({ callbackQueryId, text });
@@ -238,9 +252,7 @@ export async function dispatchTelegramMessage(
   ];
   const text = message.text || message.caption;
   const token = result.continuationToken ?? continuationTokenFromState(state);
-  const reply = result.replyHandling !== "message" && message.replyToMessage?.from?.isBot === true && text.trim().length > 0
-    ? telegramReplyInputResponse({ messageId: message.replyToMessage.messageId, text })
-    : undefined;
+  const reply = replyInputResponse(message, result);
   return await inJournalTransaction(database, async (client) => {
     if (reply !== undefined) {
       const sessionId = await answeredSession(client, auth, token);

@@ -7,7 +7,7 @@ import {
   skipUnboundMemoryReviewBatch,
 } from "../agent/lib/memory-review/memory-review-admin.js";
 import { recoverEmptyReviewModelFailure } from "../agent/lib/memory-review/memory-review-model-admin.js";
-import { isConfiguredEveSessionTerminal } from "../agent/lib/sessions/workflow-postgres-session-storage.js";
+import { isRuntimeSessionIdle } from "../agent/lib/sessions/runtime-session-status.js";
 import { modelRouteKey } from "../agent/lib/model-route.js";
 
 try {
@@ -30,7 +30,7 @@ try {
     const outcome = await recoverEmptyReviewModelFailure({ batchId, expectedEveSessionId: reason,
       causeCode: extra[0]!, reason: extra[1]!,
       modelRouteKey: modelRouteKey(modelProviderConfig.agent.transport, modelProviderConfig.agent.models.primary.id),
-    }, { isEveSessionTerminal: isConfiguredEveSessionTerminal });
+    }, { isEveSessionTerminal: isRuntimeSessionIdle });
     console.log(JSON.stringify({ code: "AGENT_MEMORY_REVIEW_RECOVERY_WAITING", batchId, outcome,
       message: "Пакет ожидает нового успешного обращения к модели. Повтор запустит штатный диспетчер" }));
   } else {

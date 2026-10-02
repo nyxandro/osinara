@@ -102,7 +102,7 @@ export async function deliverWorkspaceFile(
     );
   }
 
-  const token = await resolveTelegramBotToken();
+  const token = await resolveTelegramBotToken(process.env.TELEGRAM_BOT_TOKEN);
   const { field, method } = TELEGRAM_METHODS[input.presentation];
   const form = new FormData();
   form.set("chat_id", input.chatId);
