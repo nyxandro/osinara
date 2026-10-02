@@ -4,7 +4,7 @@
  * Export:
  * - Owner-only candidate list used before a structured approval.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { requirePrivateTelegramOwner } from "../family-context.js";

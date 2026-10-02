@@ -16,7 +16,7 @@
  *   reported once per operation, because every repeat fails for the same reason. Each call has a
  *   short timeout of its own, since the voice note waits for every call still in flight.
  */
-import { sendTelegramChatAction } from "eve/channels/telegram";
+import { sendTelegramChatAction } from "../../runtime/telegram/api.js";
 
 import { AppError, isAppError } from "../app-error.js";
 import { TELEGRAM_CHAT_ACTION_TIMEOUT_MS } from "../../config.js";

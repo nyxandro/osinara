@@ -10,7 +10,7 @@
  * - One semantic parser validates every action before approval and execution.
  * - Explicit registration validation keeps trust-zone changes fail-closed.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { requirePrivateTelegramOwner } from "../family-context.js";

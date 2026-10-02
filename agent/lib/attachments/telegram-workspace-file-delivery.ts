@@ -6,7 +6,7 @@
  * - `telegramCaptionFits`: whether a caption stays within Telegram's limit after rendering.
  * - `deliverWorkspaceFile`: sends exact bytes as an explicit photo, document, or voice note.
  */
-import { resolveTelegramBotToken } from "eve/channels/telegram";
+import { resolveTelegramBotToken } from "../../runtime/telegram/api.js";
 
 import {
   TELEGRAM_API_REQUEST_TIMEOUT_MS,

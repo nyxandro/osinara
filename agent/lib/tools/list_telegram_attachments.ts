@@ -4,7 +4,7 @@
  * Export:
  * - Eve `list_telegram_attachments` tool for safe recent metadata in the current group topic.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import {

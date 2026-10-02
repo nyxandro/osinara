@@ -6,7 +6,7 @@
  * - `createGoogleWorkspaceConnectionManager`: injectable explicit management boundaries.
  * - `manage_google_workspace_connection`: connects, inspects, or disconnects native gws credentials.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { googleAccountRepository } from "../google-workspace/google-account-repository.js";

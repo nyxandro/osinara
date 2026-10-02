@@ -12,7 +12,7 @@
  *   because Eve replaces session auth with whatever a response supplies.
  * - A dead session is settled rather than retried: its parked turn can never resume.
  */
-import type { SessionAuthContext } from "eve/context";
+import type { SessionAuthContext } from "../../runtime/context.js";
 import type { Session } from "eve/channels";
 
 import { TELEGRAM_HITL_APPROVAL_TIMEOUT_MS } from "../../config.js";

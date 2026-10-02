@@ -5,7 +5,7 @@
  * - `createTrustedWorkerFileTools`: injectable same-name Eve wrappers for isolated tests.
  * - `TRUSTED_WORKER_FILE_TOOLS`: production wrappers with live personal/family authorization.
  */
-import type { ToolDefinition } from "eve/tools";
+import type { ToolDefinition } from "../../runtime/tool.js";
 import {
   glob as eveGlob,
   grep as eveGrep,

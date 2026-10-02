@@ -9,7 +9,7 @@
  * - `claim_evidence` still rejects evidence inserted for or moved to deleted memory, and authors
  *   that differ from their participant's user link.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { TELEGRAM_GROUP_JOURNAL_RETENTION_MESSAGES } from "../config.js";

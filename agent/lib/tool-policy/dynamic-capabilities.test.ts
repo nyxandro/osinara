@@ -29,7 +29,13 @@ import {
   UNVERIFIED_CONTEXT_DENIALS,
 } from "./group-tool-catalog.js";
 
-const EVE_TOOL_BRAND = Symbol.for("eve:tool-brand");
+// The runtime hands every surface entry to the model loop, so each must be a complete tool.
+function expectRuntimeTool(toolName: string, definition: unknown) {
+  const tool = definition as { description?: unknown; execute?: unknown; inputSchema?: unknown };
+  expect(typeof tool.description === "string" && tool.description.length > 0, `${toolName} has no description`).toBe(true);
+  expect(tool.inputSchema, `${toolName} has no input schema`).toBeTypeOf("object");
+  expect(tool.execute, `${toolName} has no executor`).toBeTypeOf("function");
+}
 
 function resolve(
   attributes: Record<string, unknown> | null,
@@ -154,12 +160,7 @@ describe("dynamic capability resolver", () => {
       familyId: "family-1",
       groupId: "group-1",
     });
-    for (const [toolName, definition] of Object.entries(surface ?? {})) {
-      expect(
-        (definition as unknown as Record<symbol, unknown>)[EVE_TOOL_BRAND],
-        `${toolName} review tool must be created through defineTool()`,
-      ).toBe(true);
-    }
+    for (const [toolName, definition] of Object.entries(surface ?? {})) expectRuntimeTool(toolName, definition);
   });
 
   it("emits load_skill only when the external group has a current skill grant", async () => {
@@ -223,18 +224,13 @@ describe("dynamic capability resolver", () => {
       telegramChatType: "supergroup",
       toolAllowlist: ["remember"],
     }],
-  ] as const)("returns only Eve-branded tools for %s mode", async (_name, attributes) => {
+  ] as const)("returns only complete runtime tools for %s mode", async (_name, attributes) => {
     loadCurrentExternalGroupCapabilities.mockResolvedValue(new Set(["remember"]));
 
     const surface = await resolve(attributes as unknown as Record<string, unknown>);
 
     expect(Object.keys(surface ?? {}).length).toBeGreaterThan(0);
-    for (const [toolName, definition] of Object.entries(surface ?? {})) {
-      expect(
-        (definition as unknown as Record<symbol, unknown>)[EVE_TOOL_BRAND],
-        `${toolName} must be created through defineTool()`,
-      ).toBe(true);
-    }
+    for (const [toolName, definition] of Object.entries(surface ?? {})) expectRuntimeTool(toolName, definition);
   });
 
   it("revokes a capability that is absent from the current database policy", async () => {

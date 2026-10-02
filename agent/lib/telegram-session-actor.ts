@@ -7,7 +7,7 @@
  * - `isTelegramChannelSession`: exact channel-service predicate for authorization boundaries.
  * - `accountlessActorApprovalError`: refusal for an actor that no human can answer for.
  */
-import type { SessionAuth } from "eve/context";
+import type { SessionAuth } from "../runtime/context.js";
 
 import { AppError } from "./app-error.js";
 import type { TelegramActorKind } from "./telegram-inbound-actor.js";

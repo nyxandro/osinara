@@ -7,7 +7,7 @@
  * - `transcribeTelegramVoice`: production Eve Telegram and Groq implementation.
  */
 import { transcribe } from "ai";
-import { downloadTelegramFile, getTelegramFile } from "eve/channels/telegram";
+import { downloadTelegramFile, getTelegramFile } from "../runtime/telegram/api.js";
 
 import {
   GROQ_TRANSCRIPTION_TIMEOUT_MS,

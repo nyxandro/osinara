@@ -4,7 +4,7 @@
  * Exports:
  * - `execute_google_workspace`: reviewed argv execution with input-aware Eve HITL.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { AppError } from "../app-error.js";

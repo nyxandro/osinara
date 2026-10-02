@@ -7,17 +7,11 @@
  * - Application software-update callbacks complete before native Eve dispatch begins.
  * - A chat queue with no waiting update may run one due wake-up of its own conversation.
  */
-import type {
-  TelegramDrainContext,
-  TelegramMessage,
-  TelegramUpdate,
-  TelegramVerifiedUpdateContext,
-} from "eve/channels/telegram";
-import {
-  parseTelegramUpdate,
-  telegramContinuationToken,
-  TELEGRAM_HITL_CALLBACK_PREFIX,
-} from "eve/channels/telegram";
+import type { TelegramDrainContext, TelegramVerifiedUpdateContext } from "eve/channels/telegram";
+import type { TelegramMessage, TelegramUpdate } from "../runtime/telegram/inbound.js";
+import { TELEGRAM_HITL_CALLBACK_PREFIX } from "eve/channels/telegram";
+import { parseTelegramUpdate } from "../runtime/telegram/inbound.js";
+import { telegramContinuationToken } from "../runtime/telegram/api.js";
 import { z } from "zod";
 import { Sema } from "async-sema";
 

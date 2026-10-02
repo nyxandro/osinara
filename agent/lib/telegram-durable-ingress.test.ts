@@ -16,7 +16,7 @@
  * - A claimed burst reaches Eve as one message carrying every part in chat order.
  */
 import type { TelegramVerifiedUpdateContext } from "eve/channels/telegram";
-import { parseTelegramUpdate } from "eve/channels/telegram";
+import { parseTelegramUpdate } from "../runtime/telegram/inbound.js";
 import { describe, expect, it, vi } from "vitest";
 
 import type { TelegramIngressRepository } from "./telegram-ingress-contract.js";

@@ -4,7 +4,7 @@
  * Export:
  * - `list_agent_schedules` returns current-user personal and family schedules.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import {

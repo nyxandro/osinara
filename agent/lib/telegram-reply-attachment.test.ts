@@ -5,7 +5,7 @@
  * - External replies expose supported text-document candidates without accepting binary documents.
  * - Exact chat binding prevents a nested reply payload from selecting another group's attachment.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { describe, expect, it } from "vitest";
 
 import type { RegisteredGroup } from "./family-access.js";

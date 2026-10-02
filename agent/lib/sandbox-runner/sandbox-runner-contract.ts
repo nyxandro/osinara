@@ -11,7 +11,7 @@
  */
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
-import type { SandboxSpawnOptions } from "eve/sandbox";
+import type { SandboxSpawnOptions } from "../../runtime/sandbox/types.js";
 
 import { z } from "zod";
 

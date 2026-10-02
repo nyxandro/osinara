@@ -7,8 +7,8 @@
  * - Interactive and scheduled requests receive aliases without changing Eve's continuation hook.
  * - Long approval prompts are delivered completely before the actionable final message.
  */
-import type { SessionContext } from "eve/context";
-import type { TelegramEventContext } from "eve/channels/telegram";
+import type { SessionContext } from "../../runtime/context.js";
+import type { TelegramEventContext } from "../../runtime/telegram/channel-types.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { createTelegramInputRequestHandler } from "./input-request.js";

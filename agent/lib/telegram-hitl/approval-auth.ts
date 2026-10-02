@@ -5,7 +5,7 @@
  * - `ApprovalAuthRow`: approval/session fields required to rebuild trusted Eve auth.
  * - `resolveCurrentApprovalAuth`: revalidates identity, membership, group, and scopes.
  */
-import type { SessionAuthContext } from "eve/context";
+import type { SessionAuthContext } from "../../runtime/context.js";
 import type { PoolClient } from "pg";
 
 type TelegramChatType = "group" | "private" | "supergroup";

@@ -6,7 +6,7 @@
  * - `createTelegramApprovalPresenter`: injectable presenter with verified subject resolution.
  * - `presentTelegramApproval`: production presenter backed by PostgreSQL repositories.
  */
-import type { SessionContext } from "eve/context";
+import type { SessionContext } from "../../runtime/context.js";
 
 import { AppError } from "../app-error.js";
 import { requirePrivateTelegramOwner } from "../family-context.js";

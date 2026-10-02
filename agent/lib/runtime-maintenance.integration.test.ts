@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "eve/channels";
-import type { SessionAuth, SessionAuthContext } from "eve/context";
+import type { SessionAuth, SessionAuthContext } from "../runtime/context.js";
 import { closeDatabase, database } from "./database.js";
 import { createMainAgentMemoryFixture } from "./memory-agent-write.integration-fixtures.js";
 import { sessionRepository } from "./sessions/session-repository.js";

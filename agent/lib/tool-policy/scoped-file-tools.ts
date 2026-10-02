@@ -9,8 +9,8 @@
 import { lstat } from "node:fs/promises";
 import { join, posix } from "node:path";
 
-import type { ToolContext, ToolDefinition } from "eve/tools";
-import { defineTool } from "eve/tools";
+import type { ToolContext, ToolDefinition } from "../../runtime/tool.js";
+import { defineTool } from "../../runtime/tool.js";
 
 import { isAppError, type AppError } from "../app-error.js";
 import { ModelFacingError } from "../model-facing-error.js";

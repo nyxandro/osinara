@@ -8,7 +8,8 @@
  * - Bootstrap claims accept only the exact one-time `/start <43-character-code>` command.
  * - Invitation claims and existing-member deep links never become ordinary model turns.
  */
-import type { TelegramContext, TelegramMessage } from "eve/channels/telegram";
+import type { TelegramContext } from "../runtime/telegram/channel-types.js";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import { telegramProfileName } from "./telegram-on-message-context.js";
 import type { TelegramMessageRepositories } from "./telegram-on-message-repositories.js";

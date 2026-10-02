@@ -1,7 +1,7 @@
 /** Dynamic memory must see this turn's input without persisting a second copy in history. */
 import { readFile } from "node:fs/promises";
 import type { ModelMessage, UserContent } from "ai";
-import type { SessionAuth } from "eve/context";
+import type { SessionAuth } from "../runtime/context.js";
 import { describe, expect, it } from "vitest";
 import { memoryRetrievalQuery } from "./memory-retrieval.js";
 

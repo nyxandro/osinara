@@ -4,7 +4,7 @@
  * Export:
  * - Eve `send_workspace_file` tool with current-scope authorization and durable delivery guard.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { sendWorkspaceFileToCurrentChat } from "../attachments/workspace-file-chat-delivery.js";

@@ -4,7 +4,7 @@
  * Export:
  * - `list_proactive_deliveries`: searches successful deliveries in the current trust zone.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import {

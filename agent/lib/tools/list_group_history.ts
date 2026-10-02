@@ -4,7 +4,7 @@
  * Export:
  * - `list_group_history`: bounded pagination and search without a model-selectable group scope.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { searchTelegramGroupHistory } from "../telegram-group-history.js";

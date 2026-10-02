@@ -1,6 +1,7 @@
 /** Checkpoint inbound preparation and fence every pre-model Telegram effect by the original update. */
 import { createHash } from "node:crypto";
-import type { TelegramContext, TelegramInboundResult, TelegramMessage } from "eve/channels/telegram";
+import type { TelegramContext, TelegramInboundResult } from "../runtime/telegram/channel-types.js";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
 import { telegramRepository } from "./telegram-repository.js";

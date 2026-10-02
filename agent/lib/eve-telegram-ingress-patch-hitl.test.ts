@@ -6,7 +6,8 @@
  * - Explicit Telegram forum topics survive parsing while reply-only pseudo topics are ignored.
  * - Application-rejected callbacks never resume the Eve session.
  */
-import { parseTelegramUpdate, telegramChannel } from "eve/channels/telegram";
+import { telegramChannel } from "eve/channels/telegram";
+import { parseTelegramUpdate } from "../runtime/telegram/inbound.js";
 import { describe, expect, it, vi } from "vitest";
 
 interface HttpRoute {

@@ -15,9 +15,9 @@
  * - Anything failing after the claim releases it, so the result goes back without a block and the
  *   message is neither lost to later calls nor reported to its own turn as already seen.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
-import { parseTelegramUpdate } from "eve/channels/telegram";
-import type { ToolContext } from "eve/tools";
+import type { TelegramMessage } from "../../runtime/telegram/inbound.js";
+import { parseTelegramUpdate } from "../../runtime/telegram/inbound.js";
+import type { ToolContext } from "../../runtime/tool.js";
 
 import { AppError } from "../app-error.js";
 import type { TelegramVoiceFile } from "../groq-voice-transcription.js";

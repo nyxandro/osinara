@@ -5,7 +5,7 @@
  * - The code-reviewed external catalog rejects unknown and duplicate persisted grants.
  * - Private chats see safe skills while groups receive only their live persisted allowlist.
  */
-import type { SessionAuth } from "eve/context";
+import type { SessionAuth } from "../../runtime/context.js";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../image-generation/image-generation-availability.js", () => ({

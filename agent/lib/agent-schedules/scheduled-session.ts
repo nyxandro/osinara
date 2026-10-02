@@ -8,7 +8,7 @@
  * - `scheduledRunIdFromContinuationToken`: recovers a run id at the context-free session failure boundary.
  * - `isScheduledSession`: identifies background agent runs that should suppress progress UI.
  */
-import type { SessionContext } from "eve/context";
+import type { SessionContext } from "../../runtime/context.js";
 
 import { AppError } from "../app-error.js";
 

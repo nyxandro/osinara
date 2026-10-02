@@ -6,11 +6,11 @@
  * - `handleTelegramSessionFailure`: records Eve's required channel-local continuation address.
  * - Hook ownership conflicts do not mutate or notify the healthy session owner.
  */
-import {
-  telegramChannel,
-  type TelegramChannelState,
-  type TelegramEventContext,
-} from "eve/channels/telegram";
+import { telegramChannel } from "eve/channels/telegram";
+import type {
+  TelegramChannelState,
+  TelegramEventContext,
+} from "../runtime/telegram/channel-types.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { formatTelegramSessionFailure } from "./telegram-interface.js";

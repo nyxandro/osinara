@@ -16,8 +16,8 @@
  * - The run attribute is distinct from an isolated scheduled run's, so every isolated-run branch
  *   keeps treating this turn as an ordinary conversation turn.
  */
-import type { SessionAuthContext } from "eve/context";
-import { telegramContinuationToken } from "eve/channels/telegram";
+import type { SessionAuthContext } from "../../runtime/context.js";
+import { telegramContinuationToken } from "../../runtime/telegram/api.js";
 
 import { formatCurrentTimeContext } from "../current-time.js";
 import { EVE_EMPTY_DELIVERY_MARKER } from "../eve-empty-delivery.js";

@@ -9,7 +9,7 @@
  * - One semantic parser validates both approval and execution inputs.
  * - Input validators prevent malformed payloads from reaching invitation side effects.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { requirePrivateTelegramOwner } from "../family-context.js";

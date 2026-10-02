@@ -17,11 +17,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
-import {
-  parseTelegramUpdate,
-  telegramChannel,
-  type TelegramInboundResult,
-} from "eve/channels/telegram";
+import { telegramChannel } from "eve/channels/telegram";
+import { parseTelegramUpdate } from "../runtime/telegram/inbound.js";
+import type { TelegramInboundResult } from "../runtime/telegram/channel-types.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { callAdapterEventHandler } from "../../node_modules/eve/dist/src/channel/adapter.js";

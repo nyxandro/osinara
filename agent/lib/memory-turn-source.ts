@@ -6,7 +6,7 @@
  * - `resolveMemoryTurnSource`: resolves current, visible-delta, or review-batch source for `remember`.
  * - `releaseMemoryTurnSources`: releases timeline retention at the terminal turn boundary.
  */
-import type { SessionContext } from "eve/context";
+import type { SessionContext } from "../runtime/context.js";
 
 import { AppError } from "./app-error.js";
 import type { MemoryAuthorization } from "./memory-context.js";

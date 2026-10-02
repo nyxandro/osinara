@@ -7,7 +7,7 @@
  * - Addressed images never pollute the isolated group workspace.
  * - Revoked, mixed, malformed, and non-image documents fail closed.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { describe, expect, it } from "vitest";
 
 import {

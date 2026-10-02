@@ -9,7 +9,7 @@
  * - Neither a failed settlement nor a failed lease release abandons the rest of the leased batch.
  * - A question is answered as "no answer", not as an option the user never saw.
  */
-import type { SessionAuthContext } from "eve/context";
+import type { SessionAuthContext } from "../../runtime/context.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { createApprovalTimeoutResolver, type TimedOutApprovalClaim } from "./approval-timeout.js";

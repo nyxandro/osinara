@@ -5,7 +5,7 @@
  * - Only opaque conflict/memory refs cross the tool boundary.
  * - Explicit choose, keep_both, and keep_unresolved actions route to one replay-safe repository.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 

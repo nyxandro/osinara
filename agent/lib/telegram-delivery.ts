@@ -4,7 +4,7 @@
  * Exports:
  * - `deliverFamilyInvitation`: sends a one-time invitation without model exposure.
  */
-import { sendTelegramMessage } from "eve/channels/telegram";
+import { sendTelegramMessage } from "../runtime/telegram/api.js";
 
 import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../config.js";
 

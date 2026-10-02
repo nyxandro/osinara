@@ -6,7 +6,7 @@
  * - `TelegramReplyTargetProjection`: everything one inbound message may say about its reply target.
  * - `telegramReplyTargetProjection`: verifies the target once, then projects its untrusted content.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 export interface TelegramReplyTargetSnapshot {
   contentText: string;

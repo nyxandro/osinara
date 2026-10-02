@@ -8,7 +8,8 @@
  * - `postTelegramMessageWithoutContinuationChange`: sends one short service message via the raw
  *   Bot API handle and returns its verified message ID without mutating channel anchor state.
  */
-import type { TelegramChatType, TelegramEventContext } from "eve/channels/telegram";
+import type { TelegramChatType } from "../runtime/telegram/inbound.js";
+import type { TelegramEventContext } from "../runtime/telegram/channel-types.js";
 
 import { AppError } from "./app-error.js";
 

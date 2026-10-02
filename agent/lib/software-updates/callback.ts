@@ -5,7 +5,7 @@
  * - `createSoftwareUpdateCallbackHandler`: exact, one-shot callback processor.
  * - `handleSoftwareUpdateCallback`: production durable-ingress callback handler.
  */
-import type { TelegramCallbackQuery } from "eve/channels/telegram";
+import type { TelegramCallbackQuery } from "../../runtime/telegram/inbound.js";
 
 import { softwareUpdateRepository } from "./repository.js";
 import { softwareUpdateTelegramTransport } from "./telegram-transport.js";

@@ -1,5 +1,9 @@
 /** Compose a private album through Eve's public attachment-array contract, preserving raw sources. */
-import { parseTelegramUpdate, type TelegramMessage, type TelegramUpdate } from "eve/channels/telegram";
+import {
+  parseTelegramUpdate,
+  type TelegramMessage,
+  type TelegramUpdate,
+} from "../runtime/telegram/inbound.js";
 import { AppError } from "./app-error.js";
 import { TELEGRAM_MAX_ATTACHMENTS_PER_MESSAGE } from "../config.js";
 import type { TelegramWorkspaceAttachment } from "./attachments/telegram-workspace-attachments.js";

@@ -8,7 +8,7 @@
  * - Turn completion releases the source binding, and subagents never receive `remember`.
  * - A durable background review writes from its exact batch source and retires cleanly.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import capabilities from "../tools/capabilities.js";
@@ -27,7 +27,6 @@ import {
 const describeWithDatabase = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true"
   ? describe
   : describe.skip;
-const EVE_TOOL_BRAND = Symbol.for("eve:tool-brand");
 
 function sessionContext(input: {
   applicationSessionId: string;
@@ -178,8 +177,6 @@ describeWithDatabase("critical main-agent memory paths", () => {
     const surface = await capabilities.events["step.started"]?.({} as never, context as never);
     expect(surface?.remember).toBeDefined();
     expect(surface?.load_skill).toBeDefined();
-    expect((surface?.remember as unknown as Record<symbol, unknown>)[EVE_TOOL_BRAND]).toBe(true);
-    expect((surface?.load_skill as unknown as Record<symbol, unknown>)[EVE_TOOL_BRAND]).toBe(true);
 
     const result = await surface!.remember!.execute({
       basis: "user_requested",
@@ -297,7 +294,7 @@ describeWithDatabase("critical main-agent memory paths", () => {
 
     // The review surface must execute the same source-backed writer used by ordinary main turns.
     const surface = await capabilities.events["step.started"]?.({} as never, context as never);
-    expect((surface?.remember as unknown as Record<symbol, unknown>)[EVE_TOOL_BRAND]).toBe(true);
+    expect(surface?.remember).toBeDefined();
     const result = await surface!.remember!.execute({
       basis: "agent_inferred",
       content: "Анна предпочитает утренние тренировки",

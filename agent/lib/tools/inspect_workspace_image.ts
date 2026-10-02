@@ -8,7 +8,7 @@
  * - Object-shaped model schema avoids root anyOf in Eve descriptors.
  * - Input validation enforces exactly one image source before workspace authorization.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { requireWorkspaceAuthorization } from "../workspaces/workspace-context.js";

@@ -4,7 +4,7 @@
  * Export:
  * - `telegramReplyAttachmentTarget`: parses one exact-chat/topic reply target without model input.
  */
-import { parseTelegramUpdate, type TelegramMessage } from "eve/channels/telegram";
+import { parseTelegramUpdate, type TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import type { RegisteredGroup } from "./family-access.js";
 import { classifyTelegramInboundMedia } from "./telegram-message-policy.js";

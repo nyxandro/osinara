@@ -14,10 +14,8 @@
  *   turn does not repeat the work.
  * - Production side-effect adapters are assembled in `telegram-on-message-repositories.ts`.
  */
-import type {
-  TelegramInboundResult,
-  TelegramMessage,
-} from "eve/channels/telegram";
+import type { TelegramInboundResult } from "../runtime/telegram/channel-types.js";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import type { StoredTelegramAttachment } from "./attachments/telegram-workspace-attachments.js";
 import { AppError } from "./app-error.js";

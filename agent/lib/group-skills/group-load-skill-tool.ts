@@ -5,7 +5,7 @@
  * - `createExternalGroupLoadSkillTool`: injectable Eve-branded wrapper for authorization tests.
  * - `externalGroupLoadSkillTool`: production `defineTool` wrapper over Eve's native skill loader.
  */
-import { defineTool, type ToolContext, type ToolDefinition } from "eve/tools";
+import { defineTool, type ToolContext, type ToolDefinition } from "../../runtime/tool.js";
 import { loadSkill } from "eve/tools/defaults";
 
 import { AppError } from "../app-error.js";

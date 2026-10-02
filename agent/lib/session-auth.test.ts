@@ -5,7 +5,7 @@
  * - `resolveSessionCaller`: trusts only the current turn identity.
  * - Durable initiator metadata never substitutes for a missing callback identity.
  */
-import type { SessionAuth, SessionAuthContext } from "eve/context";
+import type { SessionAuth, SessionAuthContext } from "../runtime/context.js";
 import { describe, expect, it } from "vitest";
 
 import { resolveSessionCaller } from "./session-auth.js";

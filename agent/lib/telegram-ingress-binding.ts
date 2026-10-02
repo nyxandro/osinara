@@ -1,5 +1,5 @@
 /** Bind verified dispatch provenance before model execution, including native HITL boundaries. */
-import type { SessionAuth } from "eve/context";
+import type { SessionAuth } from "../runtime/context.js";
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
 import { requireNonEmpty, requireUpdateId, requireUuid } from "./telegram-ingress-contract.js";

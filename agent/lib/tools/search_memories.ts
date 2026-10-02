@@ -4,7 +4,7 @@
  * Export:
  * - `search_memories` runs local embedding plus scoped PostgreSQL hybrid retrieval.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { requireMemoryAuthorization } from "../memory-context.js";

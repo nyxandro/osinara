@@ -8,7 +8,7 @@
  * A conversation occurrence is not started here: it waits in its chat's queue and runs as a turn of
  * that chat's own conversation once the queue is free.
  */
-import { telegramContinuationToken } from "eve/channels/telegram";
+import { telegramContinuationToken } from "../../runtime/telegram/api.js";
 import type { ScheduleToFn } from "eve/schedules";
 
 import telegram from "../../channels/telegram.js";

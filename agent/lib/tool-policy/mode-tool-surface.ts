@@ -15,8 +15,8 @@
  * - Interactive private and family surfaces re-emit the sandbox built-ins, so that every tool result
  *   there can carry the messages the turn's author sent meanwhile. Scheduled surfaces do not.
  */
-import type { SkillDefinition } from "eve/skills";
-import { defineTool, type ToolContext, type ToolDefinition } from "eve/tools";
+import type { SkillDefinition } from "../../runtime/skills/definition.js";
+import { defineTool, type ToolContext, type ToolDefinition } from "../../runtime/tool.js";
 import { z } from "zod";
 import { todo } from "eve/tools/defaults";
 

@@ -4,7 +4,7 @@
  * Export:
  * - `list_memory_threads`: returns model-safe summaries with opaque thread refs.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { THREAD_HISTORY_PAGE_MAX_ENTRIES } from "../memory-config.js";

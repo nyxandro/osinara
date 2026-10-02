@@ -8,7 +8,7 @@
  * - Scheduled-history instructions require the same successful application-core policy lookup.
  * - Unavailable memory is disclosed instead of looking like an empty result set.
  */
-import type { SessionAuth, SessionAuthContext } from "eve/context";
+import type { SessionAuth, SessionAuthContext } from "../../runtime/context.js";
 import type { ModelMessage } from "ai";
 import { describe, expect, it, vi } from "vitest";
 

@@ -1,6 +1,6 @@
 /** A native command's accepted receipt is not proof that its continuation has finished. */
 import type { Session } from "eve/channels";
-import type { SessionAuth } from "eve/context";
+import type { SessionAuth } from "../runtime/context.js";
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
 import { recoverDatabaseBookkeeping } from "./database-recovery.js";

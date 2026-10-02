@@ -7,7 +7,7 @@
  */
 import { extname } from "node:path";
 
-import type { TelegramAttachment } from "eve/channels/telegram";
+import type { TelegramAttachment } from "../../runtime/telegram/inbound.js";
 import { fileTypeFromBuffer } from "file-type";
 
 import { AppError } from "../app-error.js";

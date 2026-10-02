@@ -5,7 +5,7 @@
  * - `TelegramMessageRepositories`: explicit repository surface consumed by authorization handling.
  * - `productionTelegramMessageRepositories`: PostgreSQL, attachment, notice, and workspace adapters.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import { downloadTelegramAttachment } from "./attachments/telegram-attachment-download.js";
 import {

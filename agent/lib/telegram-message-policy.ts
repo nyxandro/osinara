@@ -12,7 +12,7 @@
  * - `isReplyToBot`: verifies that a Telegram reply targets this exact bot identity.
  * - `TELEGRAM_EVE_UPLOAD_POLICY`: prevents direct file delivery to the text-only primary model.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import { isAgentNameMentioned } from "./agent-name.js";
 import { isTelegramImageDocumentCandidate } from "./attachments/telegram-vision-attachment.js";

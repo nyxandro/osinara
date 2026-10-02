@@ -7,7 +7,7 @@
  *
  * Prompt composition for each trust zone is covered by `prompt/mode-instructions.test.ts`.
  */
-import type { SessionAuth, SessionAuthContext } from "eve/context";
+import type { SessionAuth, SessionAuthContext } from "../runtime/context.js";
 import { describe, expect, it } from "vitest";
 
 import { resolveConversationEnvironment } from "./conversation-environment.js";

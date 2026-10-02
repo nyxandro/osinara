@@ -6,8 +6,8 @@
  * - `requireMemoryAuthorization`: validates framework session context.
  * - `requireWritableScope`: prevents model-selected scope escalation.
  */
-import type { SessionContext } from "eve/context";
-import type { DynamicResolveContext } from "eve/instructions";
+import type { SessionContext } from "../runtime/context.js";
+import type { DynamicResolveContext } from "../runtime/context.js";
 
 import { AppError } from "./app-error.js";
 import { resolveSessionCaller } from "./session-auth.js";

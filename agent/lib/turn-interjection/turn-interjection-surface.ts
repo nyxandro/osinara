@@ -9,7 +9,7 @@
  * The built-ins are Eve's own public definitions, re-emitted unchanged under their framework names,
  * so descriptors, sandbox access, and read-before-write checks stay the framework's.
  */
-import type { ToolDefinition } from "eve/tools";
+import type { ToolDefinition } from "../../runtime/tool.js";
 import { bash, glob, grep, readFile, writeFile } from "eve/tools/defaults";
 
 import { transcribeTelegramVoice } from "../groq-voice-transcription.js";

@@ -14,13 +14,9 @@
  */
 import { createHash } from "node:crypto";
 
-import {
-  callTelegramApi,
-  type TelegramApiResponse,
-  type TelegramChannelState,
-  type TelegramChatType,
-  type TelegramHandle,
-} from "eve/channels/telegram";
+import { callTelegramApi, type TelegramApiResponse } from "../runtime/telegram/api.js";
+import type { TelegramChannelState, TelegramHandle } from "../runtime/telegram/channel-types.js";
+import type { TelegramChatType } from "../runtime/telegram/inbound.js";
 
 import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../config.js";
 import { AppError } from "./app-error.js";

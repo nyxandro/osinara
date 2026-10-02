@@ -1,5 +1,5 @@
 /** Real PostgreSQL + a restarted ingress observer: never replay model/tool/delivery work. */
-import type { SessionAuth } from "eve/context";
+import type { SessionAuth } from "../runtime/context.js";
 import type { TelegramDrainContext } from "eve/channels/telegram";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { database, closeDatabase } from "./database.js";

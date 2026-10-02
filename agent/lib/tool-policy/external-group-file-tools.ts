@@ -11,7 +11,7 @@
  * - `read_file` alone may read a currently granted dynamic skill package through canonical `$HOME`.
  * - Host-side component inspection rejects symlinks before Eve's native executor runs.
  */
-import { type ToolContext, type ToolDefinition, defineTool } from "eve/tools";
+import { type ToolContext, type ToolDefinition, defineTool } from "../../runtime/tool.js";
 import {
   glob as eveGlob,
   grep as eveGrep,

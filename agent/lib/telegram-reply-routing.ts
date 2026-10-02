@@ -5,8 +5,8 @@
  * - `telegramBaseContinuationToken`: selects a verified route or derives the native Eve base token.
  * - `telegramReplyContinuationTokens`: returns exact and reviewed historical reply-route candidates.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
-import { telegramContinuationToken } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
+import { telegramContinuationToken } from "../runtime/telegram/api.js";
 
 export function telegramBaseContinuationToken(
   message: TelegramMessage,

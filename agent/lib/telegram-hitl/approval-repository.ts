@@ -6,7 +6,7 @@
  * - `telegramHitlApprovalRepository`: PostgreSQL implementation with atomic callback claims.
  * - Approval input/result types used by Telegram channel boundaries.
  */
-import type { SessionAuthContext } from "eve/context";
+import type { SessionAuthContext } from "../../runtime/context.js";
 import type { PoolClient } from "pg";
 
 import { AppError } from "../app-error.js";

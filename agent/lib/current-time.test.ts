@@ -6,7 +6,7 @@
  * - `get_current_time`: returns configured or explicitly requested local civil time.
  * - Invalid IANA timezones fail with a stable actionable error.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const dependencies = vi.hoisted(() => ({

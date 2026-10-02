@@ -4,7 +4,7 @@
  * Export:
  * - `manage_memory_thread`: completes or reactivates an authorized thread with replay protection.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { AppError } from "../app-error.js";

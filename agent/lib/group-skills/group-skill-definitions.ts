@@ -1,7 +1,11 @@
 /** One installed skill catalog for all conversation modes, outside static Eve discovery. */
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { defineSkill, type SkillDefinition, type SkillFileContent } from "eve/skills";
+import {
+  defineSkill,
+  type SkillDefinition,
+  type SkillFileContent,
+} from "../../runtime/skills/definition.js";
 import { AppError } from "../app-error.js";
 import { GROUP_SAFE_SKILL_NAMES, SKILL_CATALOG_ROOT, type GroupSafeSkillName } from "./group-skill-catalog.js";
 import { GOOGLE_WORKSPACE_EXECUTION_GUIDE } from "../google-workspace/google-workspace-skill-instructions.js";

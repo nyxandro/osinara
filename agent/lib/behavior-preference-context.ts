@@ -7,8 +7,8 @@
  * - `requireBehaviorPreferenceAuthorization`: projects trusted Telegram auth or fails closed.
  * - `requireBehaviorPreferenceReadAuthorization`: also admits read-only scheduled and wake-up auth.
  */
-import type { SessionContext } from "eve/context";
-import type { DynamicResolveContext } from "eve/instructions";
+import type { SessionContext } from "../runtime/context.js";
+import type { DynamicResolveContext } from "../runtime/context.js";
 
 import { scheduledDeliveryMetadata } from "./agent-schedules/scheduled-session.js";
 import { AppError } from "./app-error.js";

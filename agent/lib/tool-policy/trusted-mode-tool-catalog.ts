@@ -6,7 +6,7 @@
  * - `PRIVATE_ONLY_TOOLS`, `FAMILY_ONLY_TOOLS`: trust-zone-specific definitions.
  * - Sorted tool-name arrays used by policy contracts.
  */
-import type { ToolDefinition } from "eve/tools";
+import type { ToolDefinition } from "../../runtime/tool.js";
 
 import executeGoogleWorkspace from "../tools/execute_google_workspace.js";
 import exportMemory from "../tools/export_memory.js";

@@ -4,7 +4,7 @@
  * Export:
  * - `get_memory_source`: returns a safe, currently authorized source summary for an opaque memoryRef.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { requireMemoryAuthorization } from "../memory-context.js";

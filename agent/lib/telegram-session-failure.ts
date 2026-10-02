@@ -5,7 +5,7 @@
  * - `isHookConflictFailure`: identifies Eve's expected competing-root ownership rejection.
  * - `handleTelegramSessionFailure`: records failures and queues owner-private diagnostics.
  */
-import type { TelegramEventContext } from "eve/channels/telegram";
+import type { TelegramEventContext } from "../runtime/telegram/channel-types.js";
 
 import { AppError } from "./app-error.js";
 import type { SessionEventResult } from "./sessions/session-eve-event.js";

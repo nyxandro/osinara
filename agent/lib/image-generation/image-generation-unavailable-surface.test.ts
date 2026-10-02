@@ -7,7 +7,7 @@
  * - The owner-facing grant contract drops the capability, so it cannot be enabled at all.
  * - Skill loading and tool execution fail closed before any durable or billable side effect.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../../runtime/tool.js";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("./image-generation-availability.js", () => ({

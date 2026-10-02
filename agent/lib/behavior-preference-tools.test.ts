@@ -5,7 +5,7 @@
  * - Any verified participant may rewrite the one prompt of the current chat.
  * - No owner role, memory scope, or category enters the mutation boundary.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { describe, expect, it, vi } from "vitest";
 
 const dependencies = vi.hoisted(() => ({

@@ -5,7 +5,7 @@
  * - `ReminderAuthorization`: trusted identity and current Telegram destination.
  * - `requireReminderAuthorization`: rejects app, external-group, and malformed contexts.
  */
-import type { SessionContext } from "eve/context";
+import type { SessionContext } from "../../runtime/context.js";
 
 import { AppError } from "../app-error.js";
 import { resolveSessionCaller } from "../session-auth.js";

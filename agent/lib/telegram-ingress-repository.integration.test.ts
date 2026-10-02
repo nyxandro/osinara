@@ -10,7 +10,7 @@
  * - Continuation aliases: Telegram group re-keying keeps one logical FIFO.
  * - Voice transcript persistence: paid provider results survive delivery retries.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "./database.js";

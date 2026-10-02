@@ -7,7 +7,8 @@
  * - `telegramContext`: Telegram channel context with an observable sender.
  * - `repositories`: isolated application repository doubles for message-handler tests.
  */
-import type { TelegramContext, TelegramMessage } from "eve/channels/telegram";
+import type { TelegramContext } from "../runtime/telegram/channel-types.js";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { vi } from "vitest";
 
 export const BOT_USERNAME = "osinara_bot";

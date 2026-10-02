@@ -1,5 +1,6 @@
 /** Owner-granted shell execution in the current group's isolated sandbox. */
-import { defineBashTool, defineTool } from "eve/tools";
+import { defineBashTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import type { GroupSandboxCommandOptions } from "../sandbox-runner/sandbox-runner-contract.js";
 import { AppError } from "../app-error.js";
 import { requireWorkspaceAuthorization } from "../workspaces/workspace-context.js";

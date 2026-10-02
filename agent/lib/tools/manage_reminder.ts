@@ -8,7 +8,7 @@
  * - Object-shaped model schema avoids root JSON Schema unions in Eve descriptors.
  * - Action-specific validators return actionable Russian AppError messages.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import {

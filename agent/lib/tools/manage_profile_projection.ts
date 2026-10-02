@@ -4,7 +4,7 @@
  * Export:
  * - `manage_profile_projection`: lists opaque group refs or updates one explicit opt-in policy.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 
 import { AppError } from "../app-error.js";
 import { requirePrivateTelegramOwner } from "../family-context.js";

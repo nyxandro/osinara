@@ -10,7 +10,7 @@ import {
   answerTelegramCallbackQuery,
   callTelegramApi,
   editTelegramMessageReplyMarkup,
-} from "eve/channels/telegram";
+} from "../../runtime/telegram/api.js";
 import { z } from "zod";
 
 import { SOFTWARE_UPDATE_HTTP_TIMEOUT_MS } from "../../config.js";

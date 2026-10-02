@@ -6,7 +6,7 @@
  * - Timeline reads preserve channel attribution for model context.
  * - Channel actors never materialize as human conversation participants.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "./database.js";

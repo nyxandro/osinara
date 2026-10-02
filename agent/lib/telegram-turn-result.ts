@@ -4,7 +4,8 @@
  * Exports:
  * - `buildTelegramTurnResult`: composes internal auth attributes and bounded model context.
  */
-import type { TelegramInboundResult, TelegramMessage } from "eve/channels/telegram";
+import type { TelegramInboundResult } from "../runtime/telegram/channel-types.js";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import type { StoredTelegramAttachment } from "./attachments/telegram-workspace-attachments.js";
 import { formatCurrentTimeContext } from "./current-time.js";

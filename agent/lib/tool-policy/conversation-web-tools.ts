@@ -1,5 +1,5 @@
 /** Provider-independent web tools available to every verified conversation, including children. */
-import { defineTool, type ToolContext } from "eve/tools";
+import { defineTool, type ToolContext } from "../../runtime/tool.js";
 import { z } from "zod";
 import { fetch as fetchViaProxy, ProxyAgent } from "undici";
 import { AppError } from "../app-error.js";

@@ -4,7 +4,7 @@
  * Export:
  * - `requireToolApprovalEvidence`: binds execution to the consumed exact Eve tool call.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 
 import { AppError } from "./app-error.js";
 import { memoryOperationHash } from "./memory-record.js";

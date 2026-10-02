@@ -7,7 +7,7 @@
  * - A custom model projection of the tool is preserved, including file parts.
  * - A failed tool never consults the queue, and a failed lookup never fails the tool.
  */
-import { defineTool, type ToolDefinition } from "eve/tools";
+import { defineTool, type ToolDefinition } from "../../runtime/tool.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 

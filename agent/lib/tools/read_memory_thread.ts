@@ -4,7 +4,7 @@
  * Export:
  * - `read_memory_thread`: deepens one authorized thread by at most 20 entries / 12k characters.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { THREAD_HISTORY_PAGE_MAX_ENTRIES } from "../memory-config.js";

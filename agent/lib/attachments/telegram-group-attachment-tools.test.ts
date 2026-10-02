@@ -4,7 +4,7 @@
  * Constructs covered:
  * - `list_telegram_attachments`: confines lookup to the verified current family group topic.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../../runtime/tool.js";
 import { describe, expect, it, vi } from "vitest";
 
 const calls = vi.hoisted(() => ({ list: vi.fn() }));

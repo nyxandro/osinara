@@ -1,6 +1,6 @@
 /** Turn-scoped skill visibility: installed catalog for trusted chats, exact grants for groups. */
-import type { SessionAuth } from "eve/context";
-import type { SkillDefinition } from "eve/skills";
+import type { SessionAuth } from "../../runtime/context.js";
+import type { SkillDefinition } from "../../runtime/skills/definition.js";
 import { resolveConversationEnvironment } from "../conversation-environment.js";
 import { IMAGE_GENERATION_AVAILABLE } from "../image-generation/image-generation-availability.js";
 import { IMAGE_GENERATION_SKILL_DEFINITION, IMAGE_GENERATION_SKILL_NAME } from "../image-generation/image-generation-skill.js";

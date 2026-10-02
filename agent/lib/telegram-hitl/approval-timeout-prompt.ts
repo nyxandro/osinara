@@ -7,7 +7,7 @@
  * - `createTimedOutPromptFinalizer`: dependency-injected Telegram message rewrite.
  * - `finalizeTimedOutPrompt`: production finalizer bound to the Telegram Bot API.
  */
-import { callTelegramApi } from "eve/channels/telegram";
+import { callTelegramApi } from "../../runtime/telegram/api.js";
 
 import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../../config.js";
 import { AppError } from "../app-error.js";

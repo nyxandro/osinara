@@ -6,7 +6,7 @@
  * - `createMemoryReviewOwnerAlertTransport`: injectable no-retry transport.
  * - `memoryReviewOwnerAlertTransport`: lazy production transport using the required bot token.
  */
-import { callTelegramApi } from "eve/channels/telegram";
+import { callTelegramApi } from "../../runtime/telegram/api.js";
 
 import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../../config.js";
 import { AppError } from "../app-error.js";

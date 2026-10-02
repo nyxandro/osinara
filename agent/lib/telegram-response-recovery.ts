@@ -1,5 +1,6 @@
 /** Replay only a native-deduplicated response to its fixed session, then observe its original execution. */
-import type { TelegramDrainContext, TelegramUpdate } from "eve/channels/telegram";
+import type { TelegramDrainContext } from "eve/channels/telegram";
+import type { TelegramUpdate } from "../runtime/telegram/inbound.js";
 import type { TelegramIngressClaim, TelegramIngressRepository } from "./telegram-ingress-contract.js";
 import { readConfiguredEveRunStatus } from "./sessions/workflow-postgres-session-storage.js";
 import { runTelegramProcessing, TelegramProcessingTimeout } from "./telegram-processing-deadline.js";

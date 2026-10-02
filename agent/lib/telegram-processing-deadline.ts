@@ -1,7 +1,7 @@
 /** Bound admission only; native model timers own execution. Confirm cancellation on observer loss. */
 import { setTimeout as sleep } from "node:timers/promises";
 import { randomUUID } from "node:crypto";
-import type { SessionAuth } from "eve/context";
+import type { SessionAuth } from "../runtime/context.js";
 import { AppError } from "./app-error.js";
 import { isDatabaseUnavailable } from "./database-recovery.js";
 import { waitForSessionBoundary, type BoundaryEvent, type EveSessionResult } from "./telegram-session-boundary.js";

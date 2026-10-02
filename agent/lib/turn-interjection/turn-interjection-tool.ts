@@ -11,7 +11,12 @@
  * - The lookup is an addition to the result. When it fails, the tool result is returned unchanged
  *   and the waiting message still gets its own ordinary turn, so nothing is lost.
  */
-import { defineTool, type ToolContext, type ToolDefinition, type ToolModelOutput } from "eve/tools";
+import {
+  defineTool,
+  type ToolContext,
+  type ToolDefinition,
+  type ToolModelOutput,
+} from "../../runtime/tool.js";
 
 type AnyToolDefinition = ToolDefinition<any, any>;
 

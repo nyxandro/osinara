@@ -9,14 +9,11 @@
  * - A prompt exists only in a private chat: every shared-chat request, including a session-budget
  *   continuation, fails before parking or Telegram delivery.
  */
-import {
-  registerTelegramFreeformPrompt,
-  renderTelegramInputRequest,
-  type TelegramChatType,
-  type TelegramEventContext,
-} from "eve/channels/telegram";
+import { registerTelegramFreeformPrompt, renderTelegramInputRequest } from "eve/channels/telegram";
+import type { TelegramChatType } from "../../runtime/telegram/inbound.js";
+import type { TelegramEventContext } from "../../runtime/telegram/channel-types.js";
 import type { InputRequestKind } from "eve/client";
-import type { SessionContext } from "eve/context";
+import type { SessionContext } from "../../runtime/context.js";
 
 import {
   localizeTelegramReplyMarkup,

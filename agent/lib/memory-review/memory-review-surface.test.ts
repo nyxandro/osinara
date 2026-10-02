@@ -7,7 +7,7 @@
  * - Live authorization failures use the common structured model-facing error contract.
  * - Review `remember` offers only subjects that need no profile view.
  */
-import type { SessionAuth } from "eve/context";
+import type { SessionAuth } from "../../runtime/context.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 

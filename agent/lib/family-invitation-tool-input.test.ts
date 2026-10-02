@@ -8,7 +8,7 @@
  * - Complete payload and bounded-correction guidance in the tool description.
  * - Durable fail-closed delivery when Telegram succeeds but completion persistence fails.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 

@@ -9,7 +9,7 @@
  * - Each schedule persists an explicit safe capability subset and optional retained-history window.
  * - Approval and execution share one non-throwing parser; only execution rethrows invalid input.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import {

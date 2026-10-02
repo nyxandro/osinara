@@ -4,10 +4,8 @@
  * Export:
  * - `postTelegramPlainMessageChunk`: sends one provider-sized text chunk without parse mode.
  */
-import {
-  TELEGRAM_MESSAGE_TEXT_MAX_LENGTH,
-  type TelegramEventContext,
-} from "eve/channels/telegram";
+import { TELEGRAM_MESSAGE_TEXT_MAX_LENGTH } from "../runtime/telegram/api.js";
+import type { TelegramEventContext } from "../runtime/telegram/channel-types.js";
 
 import { AppError } from "./app-error.js";
 import type { TelegramReplyParameters } from "./telegram-reply.js";

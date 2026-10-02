@@ -4,7 +4,7 @@
  * Export:
  * - `read_scheduled_group_history` reads only the snapshot bound to verified scheduled auth.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { AppError } from "../app-error.js";

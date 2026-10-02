@@ -13,7 +13,7 @@
  * - Eve 0.40 clears turn-scoped system selections on each new turn. Explicit unavailable blocks
  *   explain known failures to the model; `null` is used only when no context is needed.
  */
-import type { SessionAuth } from "eve/context";
+import type { SessionAuth } from "../../runtime/context.js";
 import type { ModelMessage } from "ai";
 
 import {

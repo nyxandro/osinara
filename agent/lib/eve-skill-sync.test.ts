@@ -1,6 +1,6 @@
 /** Exercise the installed Eve lifecycle, not a direct call to an application-only session method. */
 import { describe, expect, it, vi } from "vitest";
-import { defineSkill } from "eve/skills";
+import { defineSkill } from "../runtime/skills/definition.js";
 import { ContextContainer } from "../../node_modules/eve/dist/src/context/container.js";
 import { DynamicSkillManifestKey, SandboxKey } from "../../node_modules/eve/dist/src/context/keys.js";
 import { dispatchDynamicSkillEvent } from "../../node_modules/eve/dist/src/context/dynamic-skill-lifecycle.js";

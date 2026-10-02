@@ -4,7 +4,7 @@
  * Export:
  * - `read_profile_view`: reads the exact ordered snapshot when current access is unchanged.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { requireMemoryAuthorization } from "../memory-context.js";

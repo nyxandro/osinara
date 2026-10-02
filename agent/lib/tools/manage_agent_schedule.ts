@@ -9,7 +9,7 @@
  * - Exact nested recurrence variants describe one-time and minute-to-year schedules.
  * - A semantic parser validates execution input before trusted boundaries run.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import {

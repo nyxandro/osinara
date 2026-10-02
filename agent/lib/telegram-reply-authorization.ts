@@ -5,7 +5,7 @@
  * - `TelegramReplyAuthorizationResult`: accepted routing state for the remaining inbound turn.
  * - `authorizeTelegramReply`: separates channel conversation replies from human HITL approvals.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import type { TelegramHitlApprovalRepository } from "./telegram-hitl/approval-repository.js";
 import type { TelegramInboundActor } from "./telegram-inbound-actor.js";

@@ -5,7 +5,7 @@
  * - `MEMORY_REVIEW_DENIED_TOOL_NAMES`: native Eve tools explicitly overridden for review turns.
  * - `buildMemoryReviewToolSurface`: memory reads and source-backed normal-sensitivity writes only.
  */
-import { defineTool, type ToolDefinition } from "eve/tools";
+import { defineTool, type ToolDefinition } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { AppError } from "../app-error.js";

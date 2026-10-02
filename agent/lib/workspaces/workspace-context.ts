@@ -5,7 +5,7 @@
  * - `requireWorkspaceAuthorization`: derives scope identity only from verified Eve auth.
  * - `requireTelegramDeliveryTarget`: resolves only the current verified chat and topic.
  */
-import type { SessionContext } from "eve/context";
+import type { SessionContext } from "../../runtime/context.js";
 
 import { AppError } from "../app-error.js";
 import { resolveSessionCaller } from "../session-auth.js";

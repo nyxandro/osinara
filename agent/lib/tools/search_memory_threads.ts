@@ -4,7 +4,7 @@
  * Export:
  * - `search_memory_threads`: finds authorized broad/focused threads by title and purpose.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { THREAD_HISTORY_PAGE_MAX_ENTRIES } from "../memory-config.js";

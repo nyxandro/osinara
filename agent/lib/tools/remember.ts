@@ -4,7 +4,7 @@
  * Export:
  * - Eve `remember` tool for one main-agent source-backed claim and optional atomic thread action.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { AppError, isAppError } from "../app-error.js";
 import { requireAllowedMemoryContent } from "../memory-content-policy.js";
 import {

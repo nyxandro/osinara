@@ -4,7 +4,7 @@
  * Export:
  * - Eve `list_reminders` tool for current-user personal and family reminders.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import {

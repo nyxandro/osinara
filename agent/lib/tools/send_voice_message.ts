@@ -14,7 +14,7 @@
  */
 import { createHash } from "node:crypto";
 
-import { defineTool, type ToolContext, type ToolDefinition } from "eve/tools";
+import { defineTool, type ToolContext, type ToolDefinition } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { AppError, isAppError } from "../app-error.js";

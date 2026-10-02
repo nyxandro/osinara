@@ -10,7 +10,7 @@
  *   only what is specific to its own tool.
  * - `wrapModelFacingToolMap`: applies the boundary once to a complete mode-scoped surface.
  */
-import { defineTool, type ToolDefinition } from "eve/tools";
+import { defineTool, type ToolDefinition } from "../runtime/tool.js";
 
 import { AppError } from "./app-error.js";
 import { normalizeModelFacingError } from "./model-facing-error.js";

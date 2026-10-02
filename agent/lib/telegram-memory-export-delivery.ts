@@ -4,7 +4,7 @@
  * Export:
  * - `deliverMemoryExportFiles`: atomically sends JSON and Markdown as one media group.
  */
-import { resolveTelegramBotToken } from "eve/channels/telegram";
+import { resolveTelegramBotToken } from "../runtime/telegram/api.js";
 
 import { AppError } from "./app-error.js";
 

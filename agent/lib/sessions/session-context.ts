@@ -7,9 +7,9 @@
  * - `registerTelegramMessageRoutes`: binds every tool-delivered message to one app session.
  * - `sandboxSessionId`: reads the stable conversation-thread ID for disposable compute.
  */
-import type { TelegramEventContext } from "eve/channels/telegram";
-import { telegramContinuationToken } from "eve/channels/telegram";
-import type { SessionContext } from "eve/context";
+import type { TelegramEventContext } from "../../runtime/telegram/channel-types.js";
+import { telegramContinuationToken } from "../../runtime/telegram/api.js";
+import type { SessionContext } from "../../runtime/context.js";
 
 import { AppError } from "../app-error.js";
 import { sessionRepository } from "./session-repository.js";

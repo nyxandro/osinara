@@ -10,7 +10,7 @@
  * - `retrieveRelevantMemories`: embeds a query locally and runs scoped hybrid search.
  * - `retrieveMemoryTurnContext`: adds activated source-backed thread briefs to ordinary retrieval.
  */
-import type { SessionAuth } from "eve/context";
+import type { SessionAuth } from "../runtime/context.js";
 import type { ModelMessage } from "ai";
 
 import { embedMemoryQueryChunks, memoryQueryCentroid } from "./memory-embedding-client.js";

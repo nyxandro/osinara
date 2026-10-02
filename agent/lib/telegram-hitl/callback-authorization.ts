@@ -5,12 +5,12 @@
  * - `createTelegramHitlCallbackAuthorizer`: builds an independently testable callback guard.
  * - `authorizeTelegramHitlCallback`: production guard backed by durable PostgreSQL claims.
  */
-import {
-  telegramContinuationToken,
-  type TelegramCallbackQuery,
-  type TelegramContext,
-  type TelegramHitlCallbackResult,
-} from "eve/channels/telegram";
+import { telegramContinuationToken } from "../../runtime/telegram/api.js";
+import type { TelegramCallbackQuery } from "../../runtime/telegram/inbound.js";
+import type {
+  TelegramContext,
+  TelegramHitlCallbackResult,
+} from "../../runtime/telegram/channel-types.js";
 
 import { AppError } from "../app-error.js";
 import {

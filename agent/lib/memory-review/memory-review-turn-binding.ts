@@ -4,7 +4,7 @@
  * Export:
  * - `resolveMemoryReviewBatch`: exact durable turn binding before a caller's batch marker.
  */
-import type { SessionContext } from "eve/context";
+import type { SessionContext } from "../../runtime/context.js";
 
 import { memoryReviewBatchId } from "./memory-review-session.js";
 import { memoryReviewRepository } from "./memory-review-repository.js";

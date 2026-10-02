@@ -5,7 +5,7 @@
  * - `StoredTelegramAttachment`: trusted persistent path advertised to the model.
  * - `createTelegramWorkspaceAttachmentImporter`: download, validate, and persist pipeline.
  */
-import type { TelegramAttachment } from "eve/channels/telegram";
+import type { TelegramAttachment } from "../../runtime/telegram/inbound.js";
 
 import { TELEGRAM_MAX_ATTACHMENTS_PER_MESSAGE } from "../../config.js";
 import { AppError } from "../app-error.js";

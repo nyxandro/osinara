@@ -16,7 +16,7 @@ import {
   type RequestInit,
   type Response,
 } from "undici";
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { AppError, isAppError } from "../app-error.js";

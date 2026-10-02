@@ -5,7 +5,7 @@
  * - `manage_telegram_group.update_skills` replaces one exact group's safe allowlist after HITL.
  * - Status exposes persisted and globally available safe skills.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { listStatuses, updateSkills } = vi.hoisted(() => ({

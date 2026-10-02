@@ -4,7 +4,7 @@
  * Export:
  * - `scheduledExternalTool`: denies every tool after run, owner, or destination revocation.
  */
-import { defineTool, type ToolDefinition } from "eve/tools";
+import { defineTool, type ToolDefinition } from "../../runtime/tool.js";
 
 import { authorizeAgentScheduleExecution } from "../agent-schedules/agent-schedule-delivery-authorization.js";
 import { scheduledDeliveryMetadata } from "../agent-schedules/scheduled-session.js";

@@ -8,8 +8,8 @@
  * - HITL approval configuration survives dynamic emission.
  * - Native subagents stay unavailable externally and cannot make root-owned durable-memory decisions.
  */
-import type { SessionAuth } from "eve/context";
-import type { SkillDefinition } from "eve/skills";
+import type { SessionAuth } from "../../runtime/context.js";
+import type { SkillDefinition } from "../../runtime/skills/definition.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 

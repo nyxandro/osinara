@@ -4,7 +4,7 @@
  * Export:
  * - `manage_memory_conflict`: chooses one version, keeps both, or records an unresolved decision.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { memoryConflictRepository } from "../memory-conflict-repository.js";
