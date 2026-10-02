@@ -4,6 +4,9 @@ const { listStatuses } = vi.hoisted(() => ({ listStatuses: vi.fn() }));
 vi.mock("../telegram-group-administration-repository.js", () => ({
   telegramGroupAdministrationRepository: { listStatuses },
 }));
+vi.mock("../family-skills/family-skill-repository.js", () => ({
+  familySkillRepository: { workingSkills: vi.fn().mockResolvedValue(new Map()) },
+}));
 import { presentTelegramApproval } from "./approval-presentation.js";
 import type { TelegramInputRequest } from "../telegram-interface.js";
 

@@ -13,13 +13,12 @@
  */
 import type { DynamicResolveContext } from "../runtime/context.js";
 import { resolveConversationEnvironment } from "../lib/conversation-environment.js";
-import { selectGroupSafeSkillDefinitions } from "../lib/group-skills/group-skill-definitions.js";
+import { resolveExternalGroupSkillNames } from "../lib/group-skills/group-skill-resolver.js";
 import { scheduledGroupHistoryAccess } from "../lib/agent-schedules/scheduled-group-history-context.js";
 import { isScheduledSession } from "../lib/agent-schedules/scheduled-session.js";
 import { loadCurrentExternalGroupCapabilities } from "../lib/tool-policy/external-group-live-policy.js";
 import {
   resolveExternalGroupPolicyIdentity,
-  resolveExternalGroupSkillPolicy,
   resolveExternalGroupToolPolicy,
 } from "../lib/tool-policy/external-group-policy.js";
 import type { ExternalGroupToolName } from "../lib/tool-policy/group-tool-catalog.js";
@@ -77,7 +76,7 @@ export async function resolveToolSurface(ctx: DynamicResolveContext) {
       capabilities: new Set(),
       environment: "external",
       includeApplicationCore: false,
-      skills: {},
+      skills: new Set(),
     });
   }
   if (environment !== "external") {
@@ -99,7 +98,7 @@ export async function resolveToolSurface(ctx: DynamicResolveContext) {
       capabilities: new Set(),
       environment: "external",
       includeApplicationCore: false,
-      skills: {},
+      skills: new Set(),
     });
   }
 
@@ -110,7 +109,7 @@ export async function resolveToolSurface(ctx: DynamicResolveContext) {
       capabilities: new Set(),
       environment: "external",
       includeApplicationCore: false,
-      skills: {},
+      skills: new Set(),
     });
   }
 
@@ -131,9 +130,18 @@ export async function resolveToolSurface(ctx: DynamicResolveContext) {
     includeApplicationCore = false;
   }
 
-  // Skill descriptors use the same verified turn snapshot as the turn's skill resolver.
-  // Live execution still denies a skill that the owner revokes while this turn is running.
-  const skills = selectGroupSafeSkillDefinitions(resolveExternalGroupSkillPolicy(auth));
+  // Skills are the turn's verified list that the group's live list still grants. Live execution
+  // still denies a skill that the owner revokes while this turn is running.
+  let skills: ReadonlySet<string> = new Set();
+  try {
+    skills = await resolveExternalGroupSkillNames(auth);
+  } catch (error) {
+    console.error(JSON.stringify({
+      code: "AGENT_GROUP_SKILL_POLICY_LOOKUP_FAILED",
+      error: error instanceof Error ? error.message : String(error),
+      groupId: identity.groupId,
+    }));
+  }
   return buildSurface({
     capabilities: new Set([...policy.allowed].filter((name) => current.has(name))),
     environment: "external",

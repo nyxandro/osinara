@@ -2,7 +2,8 @@
  * Group skill policy tests.
  *
  * Constructs covered:
- * - The code-reviewed external catalog rejects unknown and duplicate persisted grants.
+ * - A persisted group list is rejected whole when a name is malformed or repeated; a well-formed
+ *   name that is no skill now is simply not given out.
  * - Private chats see safe skills while groups receive only their live persisted allowlist.
  */
 import type { SessionAuth } from "../../runtime/context.js";
@@ -48,11 +49,12 @@ function auth(
 }
 
 describe("group skill policy", () => {
-  it("lists installed skills and rejects corrupt persisted lists", () => {
+  it("lists installed skills and rejects corrupt persisted lists", async () => {
     expect(GROUP_SAFE_SKILL_NAMES).toEqual(expect.arrayContaining(["pohuy", "agent-browser", "docx", "pdf", "xlsx"]));
-    expect(parseGroupSkillAllowlist(["pohuy"])).toEqual(new Set(["pohuy"]));
-    expect(parseGroupSkillAllowlist(["unknown"])).toBeNull();
+    expect(parseGroupSkillAllowlist(["pohuy", "weather"])).toEqual(new Set(["pohuy", "weather"]));
+    expect(parseGroupSkillAllowlist(["../escape"])).toBeNull();
     expect(parseGroupSkillAllowlist(["pohuy", "pohuy"])).toBeNull();
+    expect(Object.keys(await resolveConversationSkills(auth("external", ["weather", "pohuy"])))).toEqual(["pohuy"]);
   });
 
   it("gives private and family conversations all installed skills while external grants stay exact", async () => {
@@ -103,6 +105,14 @@ describe("group skill policy", () => {
     for (const name of TRUSTED_GOOGLE_WORKSPACE_SKILL_NAMES) {
       expect(skills).not.toHaveProperty(name);
     }
+  });
+
+  // Stage 0 finding: the model saw `>-` as the description of a skill with a YAML block scalar.
+  it("reads a multi-line description of a built-in skill in full", () => {
+    const description = GROUP_SAFE_SKILL_DEFINITIONS["find-docs"]!.description;
+    expect(description).toMatch(/^Retrieves up-to-date documentation, API references, and code examples for any developer technology\. /u);
+    expect(description).toContain(" Spring Boot. Your training data");
+    expect(description).toContain("version updates.\nAlways use for: API syntax questions");
   });
 
   it("keeps every source file of a grantable external skill free of artificial punctuation", () => {

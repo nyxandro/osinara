@@ -57,22 +57,22 @@ describe("voice message tool surface", () => {
         .not.toHaveProperty("send_voice_message");
       expect(buildSubagentToolSurface({ environment })).not.toHaveProperty("send_voice_message");
     }
-    expect(buildModeToolSurface({ capabilities: new Set(), environment: "external", skills: {} }))
+    expect(buildModeToolSurface({ capabilities: new Set(), environment: "external", skills: new Set<string>() }))
       .not.toHaveProperty("send_voice_message");
-    expect(buildModeToolSurface({ capabilities: GRANTED, environment: "external", skills: {} }))
+    expect(buildModeToolSurface({ capabilities: GRANTED, environment: "external", skills: new Set<string>() }))
       .toHaveProperty("send_voice_message");
     expect(buildModeToolSurface({
       capabilities: GRANTED,
       environment: "external",
       scheduledRun: true,
-      skills: {},
+      skills: new Set<string>(),
     })).not.toHaveProperty("send_voice_message");
-    expect(buildSubagentToolSurface({ capabilities: GRANTED, environment: "external", skills: {} }))
+    expect(buildSubagentToolSurface({ capabilities: GRANTED, environment: "external", skills: new Set<string>() }))
       .not.toHaveProperty("send_voice_message");
   });
 
   it("denies an external call after live capability revocation", async () => {
-    const surface = buildModeToolSurface({ capabilities: GRANTED, environment: "external", skills: {} });
+    const surface = buildModeToolSurface({ capabilities: GRANTED, environment: "external", skills: new Set<string>() });
     const context = { session: { auth: externalAuth() } } as never;
 
     await expect(surface.send_voice_message!.execute({ text: "Привет" }, context))
@@ -84,7 +84,7 @@ describe("voice message tool surface", () => {
   });
 
   it("does not expose a workspace scope as model input", () => {
-    const schema = buildModeToolSurface({ capabilities: GRANTED, environment: "external", skills: {} })
+    const schema = buildModeToolSurface({ capabilities: GRANTED, environment: "external", skills: new Set<string>() })
       .send_voice_message!.inputSchema as z.ZodType;
 
     expect(schema.safeParse({ text: "Привет" }).success).toBe(true);

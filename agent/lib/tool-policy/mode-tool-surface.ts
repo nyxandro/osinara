@@ -18,7 +18,6 @@
  *   that every tool result there can carry the messages the turn's author sent meanwhile.
  *   Scheduled surfaces do not.
  */
-import type { SkillDefinition } from "../../runtime/skills/definition.js";
 import { defineTool, type ToolContext, type ToolDefinition } from "../../runtime/tool.js";
 import { askQuestion, bash, loadSkill, readFile, todo, writeFile } from "../../runtime/tools/defaults.js";
 import { agentTool } from "../../runtime/tools/delegate.js";
@@ -32,7 +31,7 @@ import { wrapModelFacingToolMap } from "../model-facing-tool.js";
 import { authorizeAgentScheduleDelivery } from "../agent-schedules/agent-schedule-delivery-authorization.js";
 import { scheduledDeliveryMetadata } from "../agent-schedules/scheduled-session.js";
 import { externalGroupLoadSkillTool } from "../group-skills/group-load-skill-tool.js";
-import { isGroupSafeSkillName } from "../group-skills/group-skill-catalog.js";
+import { SKILL_NAME_PATTERN } from "../../runtime/skills/package-validation.js";
 import { MEMORY_LIST_DEFAULT_LIMIT, MEMORY_LIST_MAX_LIMIT, THREAD_HISTORY_PAGE_MAX_ENTRIES } from "../memory-config.js";
 import { THREAD_REF_PATTERN } from "../memory-thread-query-repository.js";
 import { externalRememberInputSchema } from "../remember-contract.js";
@@ -93,7 +92,8 @@ export type ModeToolSurfaceInput =
       includeApplicationCore?: boolean;
       scheduledHistory?: boolean;
       scheduledRun?: boolean;
-      skills: Readonly<Record<string, SkillDefinition>>;
+      /** Names of the turn's granted skills; the surface needs only whether there are any. */
+      skills: ReadonlySet<string>;
     };
 
 type DirectExternalToolName = Exclude<
@@ -295,13 +295,13 @@ function buildExternalToolSurface(
   includeApplicationCore: boolean,
   scheduledHistory: boolean,
   scheduledRun: boolean,
-  skills: Readonly<Record<string, SkillDefinition>>,
+  skills: ReadonlySet<string>,
 ): ToolMap {
   const imageGenerationAllowed = IMAGE_GENERATION_AVAILABLE &&
     !scheduledRun && allowed.has("generate_image");
   const surface: Record<string, AnyToolDefinition> = {
     ...EXTERNAL_GROUP_FILE_TOOLS,
-    ...(Object.keys(skills).length > 0 || imageGenerationAllowed ? { load_skill: externalGroupLoadSkillTool } : {}),
+    ...(skills.size > 0 || imageGenerationAllowed ? { load_skill: externalGroupLoadSkillTool } : {}),
   };
   if (includeApplicationCore) {
     surface.web_search = conversationWebSearch as AnyToolDefinition;
@@ -424,21 +424,19 @@ export function buildModeToolSurface(input: ModeToolSurfaceInput): ToolMap {
   const includeApplicationCore = input.includeApplicationCore !== false;
   const scheduledHistory = input.scheduledHistory === true;
   const scheduledRun = input.scheduledRun === true || scheduledHistory;
-  const validatedSkills = Object.keys(input.skills).some((name) =>
-    !isGroupSafeSkillName(name) && !isImageGenerationSkillName(name)
-  ) ? {} : input.skills;
+  const validatedSkills: ReadonlySet<string> = [...input.skills].some((name) =>
+    !SKILL_NAME_PATTERN.test(name) && !isImageGenerationSkillName(name)
+  ) ? new Set() : input.skills;
   const skills = IMAGE_GENERATION_AVAILABLE &&
     !scheduledRun && allowed.has("generate_image")
     ? validatedSkills
-    : Object.fromEntries(Object.entries(validatedSkills).filter(([name]) =>
-      !isImageGenerationSkillName(name)
-    ));
+    : new Set([...validatedSkills].filter((name) => !isImageGenerationSkillName(name)));
   const key = [
     includeApplicationCore ? "core" : "failed",
     scheduledHistory ? "history" : "ordinary",
     scheduledRun ? "scheduled" : "interactive",
     allowlistKey(allowed),
-    Object.keys(skills).sort().join(","),
+    [...skills].sort().join(","),
   ].join("|");
   const cached = EXTERNAL_SURFACES.get(key);
   if (cached) return cached;
@@ -454,9 +452,7 @@ export function buildSubagentToolSurface(input: ModeToolSurfaceInput): ToolMap {
       capabilities: new Set([...input.capabilities].filter((name) =>
         name !== "generate_image" && name !== "send_voice_message"
       )),
-      skills: Object.fromEntries(Object.entries(input.skills).filter(([name]) =>
-        !isImageGenerationSkillName(name)
-      )),
+      skills: new Set([...input.skills].filter((name) => !isImageGenerationSkillName(name))),
     }
     : input;
   // Delegation is one level deep: a child has no `agent` of its own.

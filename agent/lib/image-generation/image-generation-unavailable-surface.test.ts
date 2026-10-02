@@ -17,6 +17,7 @@ vi.mock("../telegram-group-administration-repository.js", () => ({
   telegramGroupAdministrationRepository: {
     listStatuses: vi.fn().mockResolvedValue([{
       messageMode: "owner_only",
+      skillAllowlist: [],
       telegramChatId: "-1001234567890",
       title: "Внешняя группа",
       toolAllowlist: ["remember", "generate_image"],
@@ -28,6 +29,10 @@ vi.mock("../telegram-group-administration-repository.js", () => ({
     updatePolicy: vi.fn(),
     updateSkills: vi.fn(),
   },
+}));
+
+vi.mock("../family-skills/family-skill-repository.js", () => ({
+  familySkillRepository: { workingSkills: vi.fn().mockResolvedValue(new Map()) },
 }));
 
 import { createExternalGroupLoadSkillTool } from "../group-skills/group-load-skill-tool.js";
@@ -82,7 +87,7 @@ describe("unavailable subscription image generation", () => {
     const external = buildModeToolSurface({
       capabilities: new Set(["generate_image"]),
       environment: "external",
-      skills: { imagegen: {} as never },
+      skills: new Set(["imagegen"]),
     });
     const instructions = externalGroupCapabilityInstructions(
       new Set(["generate_image"]),

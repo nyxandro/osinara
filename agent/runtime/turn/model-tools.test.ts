@@ -59,6 +59,10 @@ describe("step tool order", () => {
   });
 });
 
+// Changed on purpose after Eve's requests were recorded (stage 7, family skills): a new tool, and a
+// group skill list that also names the family's own skills.
+const CHANGED_AFTER_RECORDING = new Set(["manage_skill", "manage_telegram_group"]);
+
 describe("model-facing tool definitions", () => {
   it("reach the model exactly as Eve sent the application tools of a private chat", async () => {
     const surface = buildModeToolSurface({ environment: "private", scheduledRun: false }) as Record<string, ToolDefinition>;
@@ -70,7 +74,10 @@ describe("model-facing tool definitions", () => {
     const sent = await providerTools(toModelToolSet(orderStepTools(application)));
 
     expect(sent.length).toBeGreaterThan(30);
-    for (const tool of sent) expect(JSON.stringify(tool), tool.name).toBe(JSON.stringify(recorded.get(tool.name)));
+    expect(sent.map((tool) => tool.name)).toEqual(expect.arrayContaining([...CHANGED_AFTER_RECORDING]));
+    for (const tool of sent.filter((candidate) => !CHANGED_AFTER_RECORDING.has(candidate.name))) {
+      expect(JSON.stringify(tool), tool.name).toBe(JSON.stringify(recorded.get(tool.name)));
+    }
   });
 
   it("reach the model exactly as Eve sent its built-in tools", async () => {

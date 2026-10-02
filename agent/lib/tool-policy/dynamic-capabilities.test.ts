@@ -12,9 +12,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const loadCurrentExternalGroupCapabilities = vi.hoisted(() => vi.fn());
 const authorizeCurrentExternalGroupCapability = vi.hoisted(() => vi.fn());
+const loadGroupSkillAllowlist = vi.hoisted(() => vi.fn());
 
 vi.mock("../image-generation/image-generation-availability.js", () => ({
   IMAGE_GENERATION_AVAILABLE: true,
+}));
+vi.mock("../group-skills/group-skill-repository.js", () => ({
+  groupSkillPolicyRepository: { loadGroupSkillAllowlist },
 }));
 vi.mock("./external-group-live-policy.js", () => ({
   loadCurrentExternalGroupCapabilities,
@@ -77,6 +81,8 @@ describe("dynamic capability resolver", () => {
   beforeEach(() => {
     loadCurrentExternalGroupCapabilities.mockReset();
     loadCurrentExternalGroupCapabilities.mockResolvedValue(new Set());
+    loadGroupSkillAllowlist.mockReset();
+    loadGroupSkillAllowlist.mockResolvedValue(new Set());
   });
 
   it("emits the private surface for a verified private chat", async () => {
@@ -156,7 +162,7 @@ describe("dynamic capability resolver", () => {
   });
 
   it("emits load_skill only when the external group has a current skill grant", async () => {
-    const surface = await resolve({
+    const attributes = {
       familyId: "family-1",
       groupId: "group-1",
       groupType: "external",
@@ -164,9 +170,20 @@ describe("dynamic capability resolver", () => {
       skillAllowlist: ["pohuy"],
       telegramChatType: "supergroup",
       toolAllowlist: [],
-    });
+    };
+    loadGroupSkillAllowlist.mockResolvedValue(new Set(["pohuy"]));
+    expect(await resolve(attributes)).toHaveProperty("load_skill");
+    expect(loadGroupSkillAllowlist).toHaveBeenCalledWith("group-1");
 
-    expect(surface).toHaveProperty("load_skill");
+    // A grant revoked since the turn began, or a family skill the owner disabled, is gone.
+    loadGroupSkillAllowlist.mockResolvedValue(new Set());
+    expect(await resolve(attributes)).not.toHaveProperty("load_skill");
+
+    // A failed skill lookup closes only skills; the group's other tools stay.
+    loadGroupSkillAllowlist.mockRejectedValue(new Error("database unavailable"));
+    const failed = await resolve(attributes);
+    expect(failed).not.toHaveProperty("load_skill");
+    expect(failed).toHaveProperty("web_search");
   });
 
   it("emits imagegen loading only for an interactive live generate_image grant", async () => {

@@ -3,7 +3,9 @@ import type { PoolClient } from "pg";
 import { SANDBOX_RUNNER_BASE_URL, TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED } from "../config.js";
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
-import { parseGroupSkillAllowlist, skillRequiresBash } from "./group-skills/group-skill-catalog.js";
+import { workingFamilySkills } from "./family-skills/family-skill-repository.js";
+import { requireGrantableSkills, skillGrantCatalog, skillNeedsBash } from "./family-skills/skill-grants.js";
+import { parseGroupSkillAllowlist } from "./group-skills/group-skill-catalog.js";
 import { SandboxRunnerClient } from "./sandbox-runner/runner-client.js";
 import { parseExternalGroupToolAllowlist } from "./tool-policy/group-tool-catalog.js";
 import type { TelegramGroupPolicyUpdate, TelegramGroupSkillUpdate } from "./telegram-group-administration-repository.js";
@@ -17,7 +19,10 @@ export async function stopGroupSandboxes(client: PoolClient, groupId: string): P
   for (const session of sessions.rows) await runner.stop(session.thread_id);
 }
 
-export async function updateGroupPermissions(input: TelegramGroupPolicyUpdate | TelegramGroupSkillUpdate): Promise<{ groupId: string }> {
+/** `skillsNeedBash`: the group's skills run scripts, so Bash stays (or was just) granted with them. */
+export async function updateGroupPermissions(
+  input: TelegramGroupPolicyUpdate | TelegramGroupSkillUpdate,
+): Promise<{ groupId: string; skillsNeedBash: boolean }> {
   const changingSkills = "skillAllowlist" in input;
   const providedSkills = changingSkills ? parseGroupSkillAllowlist(input.skillAllowlist) : null;
   const providedTools = "toolAllowlist" in input ? parseExternalGroupToolAllowlist(input.toolAllowlist) : null;
@@ -39,10 +44,14 @@ export async function updateGroupPermissions(input: TelegramGroupPolicyUpdate | 
     const group = result.rows[0];
     if (!group || group.family_id !== input.familyId) throw new AppError("AGENT_GROUP_NOT_FOUND", "Группа не найдена в вашей семье");
     if (group.type !== "external") throw new AppError("AGENT_GROUP_POLICY_UPDATE_UNSUPPORTED", "В семейном чате все установленные скиллы доступны автоматически");
+    // The family's skills are read under the same transaction, so the check and the grant agree.
+    const catalog = skillGrantCatalog(await workingFamilySkills(client, input.familyId));
+    if (changingSkills) requireGrantableSkills(catalog, [...providedSkills!]);
+    const needsBash = (name: string) => skillNeedsBash(catalog, name);
     let skills = changingSkills ? [...providedSkills!] : group.skill_allowlist;
     const tools = new Set(changingSkills ? group.tool_allowlist : [...providedTools!]);
-    if (changingSkills && skills.some(skillRequiresBash)) tools.add("bash");
-    if (!changingSkills && !tools.has("bash")) skills = skills.filter((name) => !skillRequiresBash(name));
+    if (changingSkills && skills.some(needsBash)) tools.add("bash");
+    if (!changingSkills && !tools.has("bash")) skills = skills.filter((name) => !needsBash(name));
     const toolAllowlist = [...tools];
     const changed = JSON.stringify(skills) !== JSON.stringify(group.skill_allowlist) ||
       JSON.stringify(toolAllowlist) !== JSON.stringify(group.tool_allowlist);
@@ -59,7 +68,7 @@ export async function updateGroupPermissions(input: TelegramGroupPolicyUpdate | 
       [input.familyId, group.id, { requestedBy: input.requestedBy, skillAllowlist: skills, toolAllowlist }],
     );
     await client.query("COMMIT");
-    return { groupId: group.id };
+    return { groupId: group.id, skillsNeedBash: skills.some(needsBash) };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

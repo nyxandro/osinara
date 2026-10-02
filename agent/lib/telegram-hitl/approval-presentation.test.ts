@@ -11,8 +11,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createTelegramApprovalPresenter } from "./approval-presentation.js";
+import { skillGrantCatalog } from "../family-skills/skill-grants.js";
 import { GROUP_SKILLS_BASH_CONSEQUENCE, GROUP_TOOLS_NO_BASH_CONSEQUENCE } from "./approval-consequences.js";
 import { HITL_PROMPT_CHUNK_CHARACTERS } from "./approval-message.js";
+
+// Family skills are not part of these cards: none exist, so the built-in catalog decides.
+const SKILL_DEPENDENCIES = { findFamilySkill: vi.fn(), findSkillGrantCatalog: vi.fn().mockResolvedValue(skillGrantCatalog(new Map())) };
 
 const findGroupTitle = vi.fn().mockResolvedValue("Тестовая группа");
 const findProfileProjectionGroup = vi.fn();
@@ -67,7 +71,7 @@ describe("Telegram approval presentation", () => {
     ["addressed_only", "Запуск по обращению любого участника; контекст всех сообщений (addressed_only)"],
     ["all", "Запуск по обращению любого участника; контекст всех сообщений (all)"],
   ])("shows the exact proposed message mode %s", async (messageMode, explanation) => {
-    const present = createTelegramApprovalPresenter({ findProfileProjectionGroup, findGroupTitle, findGmailMessages: vi.fn() });
+    const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES, findProfileProjectionGroup, findGroupTitle, findGmailMessages: vi.fn() });
     const result = await present({
       action: { callId: "group-call", kind: "tool-call", toolName: "manage_telegram_group",
         input: { action: "update_policy", telegramChatId: "-100123", messageMode, toolAllowlist: [] } },
@@ -77,7 +81,7 @@ describe("Telegram approval presentation", () => {
     expect(result.prompt).toContain(`Режим сообщений: ${explanation}`);
   });
   it("shows executable dependencies and their revocation from the exact group input", async () => {
-    const present = createTelegramApprovalPresenter({ findProfileProjectionGroup, findGroupTitle, findGmailMessages: vi.fn() });
+    const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES, findProfileProjectionGroup, findGroupTitle, findGmailMessages: vi.fn() });
     for (const [input, consequence] of [
       [{ action: "update_skills", telegramChatId: "-100123", skillAllowlist: ["agent-browser"] }, GROUP_SKILLS_BASH_CONSEQUENCE],
       [{ action: "update_policy", telegramChatId: "-100123", messageMode: "all", toolAllowlist: [] }, GROUP_TOOLS_NO_BASH_CONSEQUENCE],
@@ -111,7 +115,7 @@ describe("Telegram approval presentation", () => {
       snippet: "Короткое начало письма о результатах месяца.",
       subject: "Итоги августа",
     }]));
-    const present = createTelegramApprovalPresenter({
+    const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES,
       findProfileProjectionGroup,
       findGroupTitle,
       findGmailMessages,
@@ -150,7 +154,7 @@ describe("Telegram approval presentation", () => {
   });
 
   it("keeps untrusted Gmail headers inside their labelled lines", async () => {
-    const present = createTelegramApprovalPresenter({
+    const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES,
       findProfileProjectionGroup,
       findGroupTitle,
       findGmailMessages: vi.fn().mockResolvedValue({
@@ -191,7 +195,7 @@ describe("Telegram approval presentation", () => {
 
   it("shows the complete immutable Gmail ID without truncation", async () => {
     const messageId = "m".repeat(512);
-    const present = createTelegramApprovalPresenter({
+    const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES,
       findProfileProjectionGroup,
       findGroupTitle,
       findGmailMessages: vi.fn().mockResolvedValue(mailbox([{
@@ -228,7 +232,7 @@ describe("Telegram approval presentation", () => {
       { date: null, from: null, id: "m4", snippet: null, subject: "Счёт" },
       { date: "not a date", from: "news@ozon.ru", id: "m5", snippet: null, subject: null },
     ]));
-    const present = createTelegramApprovalPresenter({ findProfileProjectionGroup, findGroupTitle, findGmailMessages });
+    const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES, findProfileProjectionGroup, findGroupTitle, findGmailMessages });
 
     const result = await present(gmailRequest("trash", ["m1", "m2", "m3", "m4", "m5"]), context());
 
@@ -262,7 +266,7 @@ describe("Telegram approval presentation", () => {
     ["mark_read", "Отметить письма Gmail прочитанными", "Письма больше не будут отмечены как непрочитанные.", "Отметить прочитанными (2)"],
     ["mark_unread", "Отметить письма Gmail непрочитанными", "Письма будут отмечены как непрочитанные.", "Отметить непрочитанными (2)"],
   ])("names action=%s for the whole batch", async (action, actionLabel, consequence, approveLabel) => {
-    const present = createTelegramApprovalPresenter({
+    const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES,
       findProfileProjectionGroup,
       findGroupTitle,
       findGmailMessages: vi.fn().mockResolvedValue(mailbox([
@@ -282,7 +286,7 @@ describe("Telegram approval presentation", () => {
   });
 
   it("keeps untrusted headers of a batch inside their own bullet lines", async () => {
-    const present = createTelegramApprovalPresenter({
+    const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES,
       findProfileProjectionGroup,
       findGroupTitle,
       findGmailMessages: vi.fn().mockResolvedValue(mailbox([
@@ -304,7 +308,7 @@ describe("Telegram approval presentation", () => {
     const messages = Array.from({ length: 21 }, (_, index) => ({
       date: null, from: "Shop <shop@example.com>", id: `m${index}`, snippet: null, subject: `Заказ ${index}`,
     }));
-    const present = createTelegramApprovalPresenter({
+    const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES,
       findProfileProjectionGroup,
       findGroupTitle,
       findGmailMessages: vi.fn().mockResolvedValue(mailbox(messages)),
@@ -317,7 +321,7 @@ describe("Telegram approval presentation", () => {
   });
 
   it("prefixes every sender group with a backend label so a hostile From cannot forge a card line", async () => {
-    const present = createTelegramApprovalPresenter({
+    const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES,
       findProfileProjectionGroup,
       findGroupTitle,
       findGmailMessages: vi.fn().mockResolvedValue(mailbox([
@@ -337,7 +341,7 @@ describe("Telegram approval presentation", () => {
 
   it("always shows the real sender address in full while shortening a long display name", async () => {
     const from = `"PayPal <service@paypal.com> ${"Служба поддержки клиентов ".repeat(6)}" <attacker@evil.example>`;
-    const present = createTelegramApprovalPresenter({
+    const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES,
       findProfileProjectionGroup,
       findGroupTitle,
       findGmailMessages: vi.fn().mockResolvedValue(mailbox([
@@ -364,7 +368,7 @@ describe("Telegram approval presentation", () => {
     ];
 
     async function batchCard(from: string) {
-      const present = createTelegramApprovalPresenter({
+      const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES,
         findProfileProjectionGroup,
         findGroupTitle,
         findGmailMessages: vi.fn().mockResolvedValue(mailbox([
@@ -399,7 +403,7 @@ describe("Telegram approval presentation", () => {
     });
 
     it("keeps the real address on a single-message card too", async () => {
-      const present = createTelegramApprovalPresenter({
+      const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES,
         findProfileProjectionGroup,
         findGroupTitle,
         findGmailMessages: vi.fn().mockResolvedValue(mailbox([{
@@ -425,7 +429,7 @@ describe("Telegram approval presentation", () => {
       snippet: null,
       subject: `Персональная подборка товаров со скидкой до 70% только для вас — выпуск ${index}`,
     }));
-    const present = createTelegramApprovalPresenter({
+    const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES,
       findProfileProjectionGroup,
       findGroupTitle,
       findGmailMessages: vi.fn().mockResolvedValue(mailbox(messages)),
@@ -441,7 +445,7 @@ describe("Telegram approval presentation", () => {
   });
 
   it("fails closed when Gmail returns metadata for other messages than requested", async () => {
-    const present = createTelegramApprovalPresenter({
+    const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES,
       findProfileProjectionGroup,
       findGroupTitle,
       findGmailMessages: vi.fn().mockResolvedValue(mailbox([
@@ -454,7 +458,7 @@ describe("Telegram approval presentation", () => {
   });
 
   it("shows every material Google Workspace argument", async () => {
-    const present = createTelegramApprovalPresenter({
+    const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES,
       findProfileProjectionGroup,
       findGroupTitle,
       findGmailMessages: vi.fn(),

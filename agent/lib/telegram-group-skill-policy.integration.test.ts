@@ -4,7 +4,8 @@
  * Constructs covered:
  * - A current owner atomically replaces the exact family's group allowlist.
  * - Revoked ownership and another family's chat fail closed without mutation.
- * - The database constraint rejects skills outside the code-reviewed catalog.
+ * - A skill that is neither built in nor the family's working one is refused; the database
+ *   constraint rejects malformed stored names.
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -60,7 +61,7 @@ describeWithDatabase("Telegram group skill policy repository", () => {
       requestedBy: current.ownerId,
       skillAllowlist: ["pohuy"],
       telegramChatId: current.telegramChatId,
-    })).resolves.toEqual({ groupId: current.groupId });
+    })).resolves.toEqual({ groupId: current.groupId, skillsNeedBash: false });
     await expect(database().query<{ skill_allowlist: string[] }>(
       "SELECT skill_allowlist FROM telegram_groups WHERE id = $1",
       [current.groupId],
@@ -106,6 +107,10 @@ describeWithDatabase("Telegram group skill policy repository", () => {
     await expect(telegramGroupAdministrationRepository.updateSkills({
       familyId: current.familyId, requestedBy: current.ownerId,
       skillAllowlist: ["unknown"], telegramChatId: current.telegramChatId,
+    })).rejects.toThrow("AGENT_GROUP_SKILL_UNKNOWN");
+    await expect(telegramGroupAdministrationRepository.updateSkills({
+      familyId: current.familyId, requestedBy: current.ownerId,
+      skillAllowlist: ["../escape"], telegramChatId: current.telegramChatId,
     })).rejects.toThrow("AGENT_GROUP_POLICY_INVALID");
     await expect(database().query(
       "UPDATE telegram_groups SET skill_allowlist = ARRAY['../escape'] WHERE id = $1",

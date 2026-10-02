@@ -19,11 +19,9 @@ import {
   writeFile as eveWriteFile,
 } from "../../runtime/tools/defaults.js";
 
+import { SKILL_NAME_PATTERN } from "../../runtime/skills/package-validation.js";
 import { AppError } from "../app-error.js";
-import {
-  isGroupSafeSkillName,
-  type GroupSafeSkillName,
-} from "../group-skills/group-skill-catalog.js";
+import type { GroupSafeSkillName } from "../group-skills/group-skill-catalog.js";
 import { groupSkillPolicyRepository } from "../group-skills/group-skill-repository.js";
 import { requireWorkspaceAuthorization } from "../workspaces/workspace-context.js";
 import {
@@ -97,7 +95,7 @@ function parseSkillFilePath(value: unknown): SkillFilePath | null {
 
   // Every segment must remain a literal package-relative component after prefix removal.
   const [skillName, ...relativeComponents] = suffix.split("/");
-  if (skillName === undefined || !isGroupSafeSkillName(skillName)) throw forbiddenSkill();
+  if (skillName === undefined || !SKILL_NAME_PATTERN.test(skillName)) throw forbiddenSkill();
   if (
     relativeComponents.length === 0 ||
     relativeComponents.some((component) =>

@@ -13,7 +13,8 @@ import { IMAGE_GENERATION_AVAILABLE } from "../image-generation/image-generation
 import { isImageGenerationSkillName } from "../image-generation/image-generation-skill.js";
 import { authorizeCurrentExternalGroupCapability } from "../tool-policy/external-group-live-policy.js";
 import { resolveExternalGroupPolicyIdentity } from "../tool-policy/external-group-policy.js";
-import { isGroupSafeSkillName, type GroupSafeSkillName } from "./group-skill-catalog.js";
+import { SKILL_NAME_PATTERN } from "../../runtime/skills/package-validation.js";
+import type { GroupSafeSkillName } from "./group-skill-catalog.js";
 import { groupSkillPolicyRepository } from "./group-skill-repository.js";
 
 type AnyToolDefinition = ToolDefinition<any, any>;
@@ -41,7 +42,7 @@ export function createExternalGroupLoadSkillTool(
       const groupId = ctx.session.auth.current?.attributes.groupId;
       if (
         typeof skill !== "string" ||
-        (!isGroupSafeSkillName(skill) && !isImageGenerationSkillName(skill))
+        (!SKILL_NAME_PATTERN.test(skill) && !isImageGenerationSkillName(skill))
       ) throw forbidden();
       if (typeof groupId !== "string") {
         throw new AppError(
@@ -59,7 +60,8 @@ export function createExternalGroupLoadSkillTool(
         return await dependencies.executeNative(input, ctx);
       }
 
-      // Re-read after model planning so revocation wins over a stale turn-scoped descriptor.
+      // Re-read after model planning so revocation wins over a stale turn-scoped descriptor; the
+      // live list also drops a family skill the owner has disabled or deleted since.
       const allowed = await dependencies.loadGroupSkillAllowlist(groupId);
       if (!allowed.has(skill)) throw forbidden();
       return await dependencies.executeNative(input, ctx);

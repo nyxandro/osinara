@@ -43,6 +43,7 @@ const EXPECTED_TOOL_MODULES = [
   "manage_memory_thread.ts",
   "manage_profile_projection.ts",
   "manage_reminder.ts",
+  "manage_skill.ts",
   "manage_telegram_group.ts",
   "notification_settings.ts",
   "read_memory_thread.ts",

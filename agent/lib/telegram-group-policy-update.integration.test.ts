@@ -97,7 +97,7 @@ describeWithDatabase("Telegram group policy update repository", () => {
       requestedBy: fixture.ownerId,
       telegramChatId: "-100-policy",
       toolAllowlist: ["list_group_history", "search_memories"],
-    })).resolves.toEqual({ groupId });
+    })).resolves.toEqual({ groupId, skillsNeedBash: false });
     expect(stopSandbox).toHaveBeenCalledExactlyOnceWith(session.rows[0]!.thread_id);
 
     const persistedGroup = await database().query(
@@ -176,7 +176,7 @@ describeWithDatabase("Telegram group policy update repository", () => {
       requestedBy: fixture.ownerId,
       telegramChatId: "-100-public-policy",
       toolAllowlist: ["remember"],
-    })).resolves.toEqual({ groupId: group.rows[0]!.id });
+    })).resolves.toEqual({ groupId: group.rows[0]!.id, skillsNeedBash: false });
     await expect(database().query(
       "SELECT message_mode::text, tool_allowlist FROM telegram_groups WHERE id = $1",
       [group.rows[0]!.id],
