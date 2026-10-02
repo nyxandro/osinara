@@ -12,6 +12,7 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 import { askQuestion, bash, glob, grep, loadSkill, readFile, todo, writeFile } from "../runtime/tools/defaults.js";
+import { agentTool } from "../runtime/tools/delegate.js";
 
 import { buildMemoryReviewToolSurface } from "./memory-review/memory-review-tool-surface.js";
 import { EXTERNAL_GROUP_TOOL_NAMES } from "./tool-policy/group-tool-catalog.js";
@@ -30,7 +31,7 @@ const REQUIRED_CORE_RULES = [
 ] as const;
 const TOTAL_DESCRIPTION_MAX_CHARACTERS = 25_000;
 // The runtime's built-ins were in every Eve prompt anyway; the budget is the application's own.
-const NATIVE_DESCRIPTIONS = new Set([askQuestion, bash, glob, grep, loadSkill, readFile, todo, writeFile].map((definition) => definition.description));
+const NATIVE_DESCRIPTIONS = new Set([agentTool, askQuestion, bash, glob, grep, loadSkill, readFile, todo, writeFile].map((definition) => definition.description));
 
 function surfaces() {
   const externalInput = {

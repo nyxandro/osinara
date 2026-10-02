@@ -7,7 +7,7 @@
  *   to run it.
  * - `executeStepCalls`: runs the planned calls concurrently, writing the intent before each one;
  *   after a crash it reruns an interrupted call only when the tool is replay-safe, and a call whose
- *   tool is no longer granted does not run.
+ *   tool is no longer granted does not run. An `agent` call runs as a child turn (`DelegateCall`).
  * - `UNKNOWN_OUTCOME_OUTPUT`: what the model reads about a call whose outcome is unknown.
  *
  * Derived from eve 0.40.0 `harness/tool-loop.ts` (`handleStepResult`: invalid-input results,
@@ -21,7 +21,7 @@ import { approvalRequest, ASK_QUESTION_TOOL_NAME, deniedOutput, questionRequest 
 import type { ToolContext, ToolDefinition } from "../tool.js";
 import type { StepToolCall } from "./model-call.js";
 import { decideToolApproval, executeToolCall, resolveToolCallInput, type ToolResultOutput } from "./tool-calls.js";
-import type { ToolCallRecord } from "./turn-types.js";
+import type { SubagentInputRequest, ToolCallRecord } from "./turn-types.js";
 
 export type PlannedCall = Omit<ToolCallRecord, "stepIndex">;
 type AnyToolDefinition = ToolDefinition<any, any>;
@@ -93,19 +93,42 @@ export async function planStepCalls(input: {
 
 export interface CallJournal {
   markIntent(callId: string): Promise<void>;
+  /** An `agent` call waits for its child, which waits for a person. */
+  park(callId: string, request: SubagentInputRequest): Promise<void>;
   settle(callId: string, state: "completed" | "unknown", output: ToolResultOutput): Promise<void>;
 }
 
+/** Runs an `agent` call as a child turn: its result, or the child's requests when it waits. */
+export type DelegateCall = (call: ToolCallRecord) => Promise<
+  | { readonly kind: "output"; readonly output: ToolResultOutput }
+  | { readonly kind: "waiting"; readonly request: SubagentInputRequest }
+>;
+
 /** Returns every call of the step with its state after this run. */
+async function delegate(input: { readonly call: ToolCallRecord; readonly delegateCall: DelegateCall; readonly journal: CallJournal }): Promise<ToolCallRecord> {
+  const { call, journal } = input;
+  if (call.state === "planned") await journal.markIntent(call.callId);
+  const result = await input.delegateCall(call);
+  if (result.kind === "waiting") {
+    await journal.park(call.callId, result.request);
+    return { ...call, inputRequest: result.request, output: null, state: "awaiting_input" };
+  }
+  await journal.settle(call.callId, "completed", result.output);
+  return { ...call, output: result.output, state: "completed" };
+}
+
 export async function executeStepCalls(input: {
   readonly calls: readonly ToolCallRecord[];
   readonly contextFor: (call: { readonly callId: string; readonly toolName: string }) => ToolContext;
+  readonly delegateCall: DelegateCall;
   readonly journal: CallJournal;
   readonly tools: Readonly<Record<string, AnyToolDefinition>>;
 }): Promise<ToolCallRecord[]> {
   const settled = await Promise.allSettled(input.calls.map(async (call): Promise<ToolCallRecord> => {
     if (call.state !== "planned" && call.state !== "intent") return call;
     const definition = input.tools[call.toolName];
+    // The child is found by this call, so a repeated delegation waits for the same child.
+    if (definition?.runtimeAction === "subagent") return await delegate({ call, delegateCall: input.delegateCall, journal: input.journal });
     if (call.state === "intent" && definition?.replaySafe !== true) {
       await input.journal.settle(call.callId, "unknown", UNKNOWN_OUTCOME_OUTPUT);
       return { ...call, output: UNKNOWN_OUTCOME_OUTPUT, state: "unknown" };

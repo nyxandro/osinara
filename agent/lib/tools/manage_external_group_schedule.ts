@@ -299,6 +299,8 @@ const TOOL_DESCRIPTION = [
 ].join(" ");
 
 export default defineTool({
+  // Repeating it after a crash is safe: its effect is keyed on the call id.
+  replaySafe: true,
   approval: ({ toolInput }) => {
     const result = parseInput(toolInput);
     if (!result.success) return { reason: result.error.message, type: "denied" };

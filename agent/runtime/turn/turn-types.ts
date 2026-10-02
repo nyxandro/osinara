@@ -10,6 +10,7 @@
 import type { ModelMessage, UserContent } from "ai";
 
 import type { SessionAuth } from "../context.js";
+import type { JsonObject } from "../json.js";
 import type { InputRequest, InputResponse } from "../hitl/types.js";
 import type { AvailableSkillDescription } from "../prompt/skills-section.js";
 import type { ToolResultOutput } from "./tool-calls.js";
@@ -27,6 +28,8 @@ export interface TurnChannel {
 export interface TurnStartInput {
   readonly context: readonly string[];
   readonly message?: string | UserContent;
+  /** A child asked for structured output answers through `final_output` with this schema. */
+  readonly outputSchema?: JsonObject;
 }
 
 export interface PreparedTurn {
@@ -42,6 +45,8 @@ export interface TurnRecord {
   readonly auth: SessionAuth;
   readonly channel: TurnChannel;
   readonly errorCode: string | null;
+  readonly errorMessage: string | null;
+  /** The visible answer; for a child with an output schema, its structured result as JSON. */
   readonly finalText: string | null;
   /** The turn input (and anything after it) is already in the session history. */
   readonly historyStarted: boolean;
@@ -69,12 +74,22 @@ export interface TurnRecord {
  * - `completed`: the result for the model is recorded;
  * - `unknown`: the process died during an action with consequences; it is not repeated.
  */
+/**
+ * An `agent` call whose child turn waits for a person: the parent shows the child's requests and
+ * routes the answers to the child session.
+ */
+export interface SubagentInputRequest {
+  readonly childSessionId: string;
+  readonly kind: "subagent";
+  readonly requests: readonly InputRequest[];
+}
+
 export type ToolCallState = "awaiting_input" | "completed" | "intent" | "planned" | "unknown";
 
 export interface ToolCallRecord {
   readonly callId: string;
   readonly input: Record<string, unknown>;
-  readonly inputRequest: InputRequest | null;
+  readonly inputRequest: InputRequest | SubagentInputRequest | null;
   readonly inputResponse: InputResponse | null;
   readonly output: ToolResultOutput | null;
   readonly position: number;

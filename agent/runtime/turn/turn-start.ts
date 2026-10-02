@@ -5,7 +5,8 @@
  * - `startTurn`: a turn for new input. A new message dismisses a parked question: the question is
  *   answered as ignored and the new turn writes that exchange into history before its own input.
  * - `respondToInput`: records answers on the parked turn's calls. Once they release the step, the
- *   parked turn ends and a continuation turn is created; the caller runs it with `runTurn`.
+ *   parked turn ends and a continuation turn is created; the caller runs it with `runTurn`. An
+ *   answer to a request a child turn raised goes to the child's session first.
  *
  * Derived from eve 0.40.0 `harness/input-requests.ts` (`resolvePendingInput`),
  * `harness/hitl/approval-input-requests.ts`, `harness/hitl/question-input-requests.ts` and
@@ -19,13 +20,13 @@
  */
 import type { SessionAuth } from "../context.js";
 import { questionOutput, resolveApprovalOutcome, deniedOutput, stepInputResolved } from "../hitl/input-requests.js";
-import type { InputResponse } from "../hitl/types.js";
+import type { InputRequest, InputResponse } from "../hitl/types.js";
 import { newTurnId } from "../ids.js";
 import {
   addPendingContext, createTurn, findWaitingTurn, finishTurn, inJournalTransaction, loadStep, recordInputResponse,
   updateToolCall, type JournalClient, type JournalDatabase,
 } from "./journal-repository.js";
-import type { ToolCallRecord, TurnChannel, TurnKind, TurnRecord, TurnStartInput } from "./turn-types.js";
+import type { SubagentInputRequest, ToolCallRecord, TurnChannel, TurnKind, TurnRecord, TurnStartInput } from "./turn-types.js";
 
 async function parkedCalls(client: JournalClient, turn: TurnRecord): Promise<ToolCallRecord[]> {
   const recorded = await loadStep(client, turn.id, turn.nextStepIndex);
@@ -75,48 +76,71 @@ async function settleCall(client: JournalClient, turnId: string, call: ToolCallR
   await updateToolCall(client, { callId: call.callId, output: questionOutput(response), state: "completed", turnId });
 }
 
-export async function respondToInput(database: JournalDatabase, input: {
+interface RespondInput {
   /** Who answered; the continuation acts as them. */
   readonly auth: SessionAuth;
   readonly channel: TurnChannel;
   readonly context: readonly string[];
   readonly responses: readonly InputResponse[];
   readonly sessionId: string;
-}): Promise<InputResponseOutcome> {
-  return await inJournalTransaction(database, async (client) => {
-    const waiting = await findWaitingTurn(client, input.sessionId);
-    if (waiting === null) return { stale: input.responses, status: "stale" };
-    const awaiting = await parkedCalls(client, waiting);
-    const byRequest = new Map(awaiting.map((call) => [call.inputRequest!.requestId, call]));
-    const latest = new Map(input.responses.map((response) => [response.requestId, response]));
-    const stale = [...latest.values()].filter((response) => !byRequest.has(response.requestId));
-    if (stale.length === latest.size) return { stale, status: "stale" };
+}
 
-    const answers = new Map<string, InputResponse>();
-    for (const call of awaiting) {
-      const response = latest.get(call.inputRequest!.requestId) ?? call.inputResponse ?? undefined;
-      if (response === undefined) continue;
-      answers.set(call.inputRequest!.requestId, response);
-      if (latest.has(call.inputRequest!.requestId)) {
-        await recordInputResponse(client, { callId: call.callId, response, turnId: waiting.id });
-      }
+// The step of a parked turn is released once its own requests are answered (approvals all, a
+// question-only step on its first answer) and every child it waits on continued.
+async function respondWithClient(client: JournalClient, input: RespondInput): Promise<InputResponseOutcome> {
+  const waiting = await findWaitingTurn(client, input.sessionId);
+  if (waiting === null) return { stale: input.responses, status: "stale" };
+  const awaiting = await parkedCalls(client, waiting);
+  const own = awaiting.filter((call) => call.inputRequest?.kind !== "subagent");
+  const proxies = awaiting.filter((call) => call.inputRequest?.kind === "subagent");
+  const latest = new Map(input.responses.map((response) => [response.requestId, response]));
+  const ownIds = new Set(own.map((call) => (call.inputRequest as InputRequest).requestId));
+  const proxyIds = new Map(proxies.flatMap((call) =>
+    (call.inputRequest as SubagentInputRequest).requests.map((request) => [request.requestId, call] as const)));
+  const stale = [...latest.values()].filter((response) => !ownIds.has(response.requestId) && !proxyIds.has(response.requestId));
+  if (stale.length === latest.size) return { stale, status: "stale" };
+
+  const continuedProxies = new Set<string>();
+  for (const call of proxies) {
+    const request = call.inputRequest as SubagentInputRequest;
+    const forChild = request.requests.flatMap((item) => latest.has(item.requestId) ? [latest.get(item.requestId)!] : []);
+    if (forChild.length === 0) continue;
+    const child = await respondWithClient(client, { ...input, responses: forChild, sessionId: request.childSessionId });
+    if (child.status === "resumed") {
+      // The delegation runs again and waits for the child's continuation.
+      await updateToolCall(client, { callId: call.callId, output: null, state: "planned", turnId: waiting.id });
+      continuedProxies.add(call.callId);
     }
-    if (!stepInputResolved(awaiting.map((call) => call.inputRequest!), answers)) {
-      await addPendingContext(client, waiting.id, input.context);
-      return { stale, status: "waiting", turnId: waiting.id };
-    }
-    for (const call of awaiting) await settleCall(client, waiting.id, call, answers.get(call.inputRequest!.requestId));
-    await finishTurn(client, waiting.id, { finalText: null, status: "completed" });
-    const continuation = await createTurn(client, {
-      auth: input.auth,
-      channel: input.channel,
-      id: newTurnId(),
-      input: { context: [...waiting.pendingContext, ...input.context] },
-      kind: waiting.kind,
-      parent: null,
-      resumesTurnId: waiting.id,
-      sessionId: input.sessionId,
-    });
-    return { continuation, stale, status: "resumed" };
+  }
+
+  const answers = new Map<string, InputResponse>();
+  for (const call of own) {
+    const requestId = (call.inputRequest as InputRequest).requestId;
+    const response = latest.get(requestId) ?? call.inputResponse ?? undefined;
+    if (response === undefined) continue;
+    answers.set(requestId, response);
+    if (latest.has(requestId)) await recordInputResponse(client, { callId: call.callId, response, turnId: waiting.id });
+  }
+  const ownResolved = own.length === 0 || stepInputResolved(own.map((call) => call.inputRequest as InputRequest), answers);
+  if (!ownResolved || proxies.some((call) => !continuedProxies.has(call.callId))) {
+    await addPendingContext(client, waiting.id, input.context);
+    return { stale, status: "waiting", turnId: waiting.id };
+  }
+  for (const call of own) await settleCall(client, waiting.id, call, answers.get((call.inputRequest as InputRequest).requestId));
+  await finishTurn(client, waiting.id, { finalText: null, status: "completed" });
+  const continuation = await createTurn(client, {
+    auth: input.auth,
+    channel: input.channel,
+    id: newTurnId(),
+    input: { context: [...waiting.pendingContext, ...input.context], ...(waiting.input.outputSchema === undefined ? {} : { outputSchema: waiting.input.outputSchema }) },
+    kind: waiting.kind,
+    parent: null,
+    resumesTurnId: waiting.id,
+    sessionId: input.sessionId,
   });
+  return { continuation, stale, status: "resumed" };
+}
+
+export async function respondToInput(database: JournalDatabase, input: RespondInput): Promise<InputResponseOutcome> {
+  return await inJournalTransaction(database, async (client) => await respondWithClient(client, input));
 }

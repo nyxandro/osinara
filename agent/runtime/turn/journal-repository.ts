@@ -8,6 +8,7 @@
  * - `sessionAwaitsApproval`: whether a tool approval of the session is still unanswered.
  * - `recordStep`, `loadStep`, `markStepTextEmitted`, `completeStep`: one model step and its tool calls.
  * - `updateToolCall`, `recordInputResponse`: a tool call's state, result and a person's answer.
+ * - `parkToolCall`, `findChildTurn`, `latestSessionTurn`: an `agent` call waiting on its child turn.
  *
  * Writers take a client inside the caller's transaction: a step's model response, its tool calls
  * and the history it appends commit together or not at all.
@@ -21,6 +22,7 @@ import type { InputRequest, InputResponse } from "../hitl/types.js";
 import type { ToolResultOutput } from "./tool-calls.js";
 import type {
   PreparedTurn,
+  SubagentInputRequest,
   ToolCallRecord,
   ToolCallState,
   TurnChannel,
@@ -53,6 +55,7 @@ interface TurnRow {
   auth: SessionAuth;
   channel: TurnChannel;
   error_code: string | null;
+  error_message: string | null;
   final_text: string | null;
   history_started: boolean;
   id: string;
@@ -71,13 +74,15 @@ interface TurnRow {
 }
 
 const TURN_COLUMNS = `id, session_id, sequence, kind, status, parent_turn_id, parent_call_id, auth, channel, input,
-  prepared, pending_context, resumes_turn_id, history_started, next_step_index, runner_id, final_text, error_code`;
+  prepared, pending_context, resumes_turn_id, history_started, next_step_index, runner_id, final_text, error_code,
+  error_message`;
 
 function toTurn(row: TurnRow): TurnRecord {
   return {
     auth: row.auth,
     channel: row.channel,
     errorCode: row.error_code,
+    errorMessage: row.error_message,
     finalText: row.final_text,
     historyStarted: row.history_started,
     id: row.id,
@@ -180,12 +185,13 @@ export async function addPendingContext(client: JournalClient, turnId: string, c
     [JSON.stringify(context)]);
 }
 
+/** A child's request waiting behind an `agent` call counts too: it may be an approval. */
 export async function sessionAwaitsApproval(client: JournalClient, sessionId: string): Promise<boolean> {
   const row = (await client.query<{ awaits: boolean }>(
     `SELECT EXISTS (
        SELECT 1 FROM agent_turns t JOIN agent_tool_calls c ON c.turn_id = t.id
         WHERE t.session_id = $1 AND t.status = 'waiting_input'
-          AND c.state = 'awaiting_input' AND c.input_request->>'kind' = 'tool-approval'
+          AND c.state = 'awaiting_input' AND c.input_request->>'kind' IN ('tool-approval', 'subagent')
      ) AS awaits`,
     [sessionId],
   )).rows[0]!;
@@ -220,7 +226,7 @@ interface StepRow {
 interface CallRow {
   call_id: string;
   input: Record<string, unknown>;
-  input_request: InputRequest | null;
+  input_request: InputRequest | SubagentInputRequest | null;
   input_response: InputResponse | null;
   output: ToolResultOutput | null;
   position: number;
@@ -337,4 +343,39 @@ export async function markStepTextEmitted(client: JournalClient, turnId: string,
 export async function completeStep(client: JournalClient, turnId: string, stepIndex: number): Promise<void> {
   await client.query("UPDATE agent_turn_steps SET completed_at = now() WHERE turn_id = $1 AND step_index = $2", [turnId, stepIndex]);
   await updateTurn(client, turnId, "next_step_index = $2 + 1, history_started = true", [stepIndex]);
+}
+
+/** An `agent` call whose child turn waits for a person; its requests are shown by the parent. */
+export async function parkToolCall(client: JournalClient, input: {
+  readonly callId: string;
+  readonly request: SubagentInputRequest;
+  readonly turnId: string;
+}): Promise<void> {
+  const updated = await client.query(
+    `UPDATE agent_tool_calls SET state = 'awaiting_input', input_request = $3::json, output = NULL, updated_at = now()
+      WHERE turn_id = $1 AND call_id = $2`,
+    [input.turnId, input.callId, JSON.stringify(input.request)],
+  );
+  if (updated.rowCount !== 1) {
+    throw new AppError("AGENT_TOOL_CALL_NOT_FOUND", "Вызов инструмента не найден", { details: { callId: input.callId, turnId: input.turnId } });
+  }
+}
+
+/** The first turn of the child session an `agent` call started, if it did. */
+export async function findChildTurn(client: JournalClient, parentTurnId: string, callId: string): Promise<TurnRecord | null> {
+  const row = (await client.query<TurnRow>(
+    `SELECT ${TURN_COLUMNS} FROM agent_turns WHERE parent_turn_id = $1 AND parent_call_id = $2`,
+    [parentTurnId, callId],
+  )).rows[0];
+  return row ? toTurn(row) : null;
+}
+
+/** The session's newest turn: a child that continued after an answer runs in a continuation turn. */
+export async function latestSessionTurn(client: JournalClient, sessionId: string): Promise<TurnRecord> {
+  const row = (await client.query<TurnRow>(
+    `SELECT ${TURN_COLUMNS} FROM agent_turns WHERE session_id = $1 ORDER BY sequence DESC LIMIT 1`,
+    [sessionId],
+  )).rows[0];
+  if (!row) throw new AppError("AGENT_TURN_NOT_FOUND", "Ход агента не найден", { details: { sessionId } });
+  return toTurn(row);
 }

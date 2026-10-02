@@ -37,9 +37,11 @@ import { instructionTurnMessages, resolveTurnInstructions, turnInputMessages } f
 import type { RuntimeSandboxSession } from "../sandbox/types.js";
 import { clearReadFileState, sessionToolState } from "../session/tool-state.js";
 import type { ToolContext, ToolDefinition } from "../tool.js";
+import { finalOutputTool, FINAL_OUTPUT_TOOL_NAME } from "../tools/delegate.js";
+import { runChildTurn } from "./child-turns.js";
 import {
   claimTurn, completeStep, finishTurn, inJournalTransaction, loadStep, loadTurn, markHistoryStarted,
-  markStepTextEmitted, parkTurn, recordStep, savePreparedTurn, sessionAwaitsApproval, updateToolCall,
+  markStepTextEmitted, parkToolCall, parkTurn, recordStep, savePreparedTurn, sessionAwaitsApproval, updateToolCall,
   type JournalDatabase,
 } from "./journal-repository.js";
 import { compactionSettings, compactMessages, shouldCompact, todoCompactionMessage, type CompactionSummaryRequest } from "./compaction.js";
@@ -85,6 +87,11 @@ type AnyTools = Readonly<Record<string, ToolDefinition<any, any>>>;
 
 const TURN_FAILED_MESSAGE = "Не удалось выполнить ход агента. Попробуйте ещё раз";
 
+// Model-facing: a delegating parent reads it as the result of its `agent` call.
+function outputSchemaNotFulfilled(): AppError {
+  return new AppError("AGENT_SUBAGENT_OUTPUT_SCHEMA_NOT_FULFILLED", "The agent could not produce a result matching the requested schema.");
+}
+
 function stepLimitExceeded(): AppError {
   return new AppError(
     "AGENT_TURN_MODEL_STEP_LIMIT_EXCEEDED",
@@ -127,8 +134,27 @@ function toolContexts(runtime: TurnRuntime, turn: TurnRecord, abortSignal: Abort
 function callJournal(runtime: TurnRuntime, turnId: string): CallJournal {
   return {
     markIntent: (callId) => updateToolCall(runtime.database, { callId, output: null, state: "intent", turnId }),
+    park: (callId, request) => parkToolCall(runtime.database, { callId, request, turnId }),
     settle: (callId, state, output) => updateToolCall(runtime.database, { callId, output, state, turnId }),
   };
+}
+
+// The tools of one step; a child asked for structured output also gets `final_output`, last.
+async function stepTools(runtime: TurnRuntime, turn: TurnRecord, messages: readonly ModelMessage[]): Promise<AnyTools> {
+  const tools = await runtime.agent.resolveTools({ channel: turn.channel, messages, session: { auth: turn.auth, id: turn.sessionId } });
+  const schema = turn.input.outputSchema;
+  return schema === undefined ? tools : { ...tools, [FINAL_OUTPUT_TOOL_NAME]: finalOutputTool(schema) };
+}
+
+// A `final_output` call ends a structured child turn, even beside other calls (Eve's rule).
+function structuredOutput(turn: TurnRecord, response: readonly ModelMessage[]): { readonly value: unknown } | null {
+  if (turn.input.outputSchema === undefined) return null;
+  for (const message of response) {
+    if (message.role !== "assistant" || typeof message.content === "string") continue;
+    const call = message.content.find((part) => part.type === "tool-call" && part.toolName === FINAL_OUTPUT_TOOL_NAME);
+    if (call !== undefined && call.type === "tool-call" && call.input !== null && typeof call.input === "object") return { value: call.input };
+  }
+  return null;
 }
 
 function withOutputs(calls: readonly ToolCallRecord[]) {
@@ -152,6 +178,9 @@ async function runCalls(runtime: TurnRuntime, input: {
   return await executeStepCalls({
     calls: input.calls,
     contextFor: toolContexts(runtime, input.turn, input.signal),
+    delegateCall: (call) => runChildTurn(runtime, {
+      call, journalTurnId: input.journalTurnId, parent: input.turn, run: runTurn, signal: input.signal,
+    }),
     journal: callJournal(runtime, input.journalTurnId),
     tools: input.tools,
   });
@@ -193,10 +222,11 @@ async function settleParkedStep(runtime: TurnRuntime, turn: TurnRecord, signal: 
     throw new Error(`AGENT_TURN_CONTINUATION_INVALID: turn ${parked.id} has no settled parked step`);
   }
   const history = await loadSessionHistory(runtime.database, turn.sessionId);
-  const tools = await runtime.agent.resolveTools({
-    channel: turn.channel, messages: history.messages, session: { auth: turn.auth, id: turn.sessionId },
-  });
+  const tools = await stepTools(runtime, turn, history.messages);
   const calls = await runCalls(runtime, { calls: recorded.calls, journalTurnId: parked.id, signal, stepIndex: 0, tools, turn });
+  if (calls.some((call) => call.state === "awaiting_input")) {
+    throw new Error(`AGENT_TURN_CONTINUATION_INVALID: a call of turn ${parked.id} still waits after its answer`);
+  }
   const prepared = requirePrepared(turn);
   const message = turnInputMessages({ context: [], message: turn.input.message, userInstructions: [] });
   const context = turn.input.context.map((entry): ModelMessage => ({ role: "user", content: entry }));
@@ -285,9 +315,7 @@ async function runStep(runtime: TurnRuntime, turn: TurnRecord, signal: AbortSign
   const history = await loadSessionHistory(runtime.database, turn.sessionId);
   let turnInput = turn.historyStarted ? [] : turnInputMessages({ ...turn.input, userInstructions: prepared.userInstructions });
   let messages = [...history.messages, ...turnInput];
-  const tools = await runtime.agent.resolveTools({
-    channel: turn.channel, messages, session: { auth: turn.auth, id: turn.sessionId },
-  });
+  const tools = await stepTools(runtime, turn, messages);
   let recorded = await loadStep(runtime.database, turn.id, stepIndex);
   if (recorded === null) {
     if (stepIndex >= runtime.agent.maxModelSteps) throw stepLimitExceeded();
@@ -325,7 +353,20 @@ async function runStep(runtime: TurnRuntime, turn: TurnRecord, signal: AbortSign
     await markStepTextEmitted(runtime.database, turn.id, stepIndex);
   }
 
+  const structured = structuredOutput(turn, step.response);
+  if (structured !== null) {
+    const answer = JSON.stringify(structured.value);
+    await inJournalTransaction(runtime.database, async (client) => {
+      // The structured value is the turn's answer; the unexecuted call stays out of history.
+      const messages: ModelMessage[] = [...turnInput, { role: "assistant", content: answer }];
+      await appendSessionHistory(client, { messages, sessionId: turn.sessionId, turnId: turn.id });
+      await completeStep(client, turn.id, stepIndex);
+      await finishTurn(client, turn.id, { finalText: answer, status: "completed" });
+    });
+    return { status: "completed", text: answer };
+  }
   if (recorded.calls.length === 0) {
+    if (turn.input.outputSchema !== undefined) throw outputSchemaNotFulfilled();
     const text = assistantStepText(step.response);
     const silent = isEmptyDelivery({ finishReason: step.finishReason, text, toolCallCount: 0 });
     const finalText = silent ? null : text;
@@ -339,9 +380,14 @@ async function runStep(runtime: TurnRuntime, turn: TurnRecord, signal: AbortSign
   }
 
   const calls = await runCalls(runtime, { calls: recorded.calls, journalTurnId: turn.id, signal, stepIndex, tools, turn });
-  const requests = calls.flatMap((call) => call.state === "awaiting_input" && call.inputRequest !== null ? [call.inputRequest] : []);
+  const own = calls.flatMap((call) => call.state === "awaiting_input" && call.inputRequest !== null && call.inputRequest.kind !== "subagent"
+    ? [call.inputRequest] : []);
+  const proxied = calls.flatMap((call) => call.state === "awaiting_input" && call.inputRequest?.kind === "subagent"
+    ? call.inputRequest.requests : []);
+  const requests = [...own, ...proxied];
   if (requests.length > 0) {
-    const note = renderPendingApprovalsNote(requests);
+    // A child's approvals are noted in the child's history; the parent only waits for its result.
+    const note = renderPendingApprovalsNote(own);
     await inJournalTransaction(runtime.database, async (client) => {
       const parkedMessages: ModelMessage[] = note === undefined ? [] : [{ role: "user", content: note }];
       await appendSessionHistory(client, { messages: [...turnInput, ...parkedMessages], sessionId: turn.sessionId, turnId: turn.id });

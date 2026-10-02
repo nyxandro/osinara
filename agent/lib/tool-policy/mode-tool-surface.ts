@@ -10,7 +10,7 @@
  * Key constructs:
  * - Every tool is emitted per mode, the runtime's built-ins included, so a tool that cannot work in
  *   the current trust zone has no descriptor at all. Trusted modes get the built-ins Eve always
- *   registered (ask_question, bash, read_file, write_file, todo, load_skill); an external group
+ *   registered (agent, ask_question, bash, read_file, write_file, todo, load_skill); an external group
  *   gets only its own file tools, its granted capabilities and, without a verified registration,
  *   nothing beyond answering in text.
  * - External groups re-check every granted capability at execution time against the live policy.
@@ -21,6 +21,7 @@
 import type { SkillDefinition } from "../../runtime/skills/definition.js";
 import { defineTool, type ToolContext, type ToolDefinition } from "../../runtime/tool.js";
 import { askQuestion, bash, loadSkill, readFile, todo, writeFile } from "../../runtime/tools/defaults.js";
+import { agentTool } from "../../runtime/tools/delegate.js";
 import { z } from "zod";
 
 import { AppError } from "../app-error.js";
@@ -346,7 +347,10 @@ function buildExternalToolSurface(
   const effectiveSurface = scheduledRun
     ? Object.fromEntries(Object.entries(surface).map(([name, definition]) => [name, scheduledExternalTool(definition)]))
     : surface;
-  return wrapModelFacingToolMap(effectiveSurface);
+  // A verified external group delegates like any root turn (Eve's built-in, never wrapped);
+  // a child never gets it, see `buildSubagentToolSurface`.
+  const wrapped = wrapModelFacingToolMap(effectiveSurface);
+  return includeApplicationCore ? { ...wrapped, agent: agentTool as AnyToolDefinition } : wrapped;
 }
 
 function allowlistKey(allowed: ReadonlySet<ExternalGroupToolName>): string {
@@ -356,6 +360,7 @@ function allowlistKey(allowed: ReadonlySet<ExternalGroupToolName>): string {
 // What Eve registered in every trusted turn without the application asking. They stay outside the
 // model-facing error wrapper, as Eve's own tools did.
 const TRUSTED_BUILT_IN_TOOLS: ToolMap = {
+  agent: agentTool as AnyToolDefinition,
   ask_question: askQuestion as AnyToolDefinition,
   bash: bash as AnyToolDefinition,
   load_skill: loadSkill as AnyToolDefinition,
@@ -376,8 +381,10 @@ const TRUSTED_APPLICATION_SURFACES: Readonly<Record<"family" | "private", ToolMa
 };
 
 // An interactive turn also receives, with each tool result, the messages its author sent meanwhile.
-// The interjection surface brings its own sandbox built-ins; questions, todo and skills stay as is.
+// The interjection surface brings its own sandbox built-ins; delegation, questions, todo and skills
+// stay as is.
 const UNWRAPPED_BUILT_INS: ToolMap = {
+  agent: TRUSTED_BUILT_IN_TOOLS.agent!,
   ask_question: TRUSTED_BUILT_IN_TOOLS.ask_question!,
   load_skill: TRUSTED_BUILT_IN_TOOLS.load_skill!,
   todo: TRUSTED_BUILT_IN_TOOLS.todo!,
@@ -452,7 +459,9 @@ export function buildSubagentToolSurface(input: ModeToolSurfaceInput): ToolMap {
       )),
     }
     : input;
+  // Delegation is one level deep: a child has no `agent` of its own.
   const {
+    agent: _agent,
     generate_image: _generateImage,
     list_reminders: _listReminders,
     manage_behavior_preference: _manageBehaviorPreference,

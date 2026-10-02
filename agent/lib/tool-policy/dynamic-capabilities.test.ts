@@ -116,6 +116,7 @@ describe("dynamic capability resolver", () => {
     expect(Object.keys(surface ?? {}).sort()).toEqual(
       [
         ...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES,
+        "agent",
         "list_reminders",
         "manage_behavior_preference",
         "manage_reminder",

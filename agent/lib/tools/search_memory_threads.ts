@@ -12,6 +12,8 @@ import { requireMemoryAuthorization } from "../memory-context.js";
 import { memoryThreadQueryRepository } from "../memory-thread-query-repository.js";
 
 export default defineTool({
+  // Repeating it after a crash is safe: it only reads.
+  replaySafe: true,
   description: "Найти доступную нить памяти по смыслу названия или назначения; возвращает opaque threadRef.",
   inputSchema: z.object({
     limit: z.number().int().min(1).max(THREAD_HISTORY_PAGE_MAX_ENTRIES).default(10),

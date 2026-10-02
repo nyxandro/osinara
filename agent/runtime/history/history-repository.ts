@@ -8,6 +8,7 @@
  * - `saveCompactionCounters`: the provider-reported prompt size the next compaction check starts from.
  * - `replaceSessionHistory`: writes a compacted history as a new generation; old rows stay as they were.
  * - `saveAnnouncedSkills`: the skill list the session's sandbox now holds.
+ * - `loadApplicationSessionId`: the application session a runtime session belongs to.
  *
  * Writers take a client inside the caller's transaction, so a history change commits together
  * with the journal record that caused it. Appends lock the session row; two writers of one
@@ -188,4 +189,12 @@ export async function saveAnnouncedSkills(
   if (updated.rowCount !== 1) {
     throw new AppError("AGENT_SESSION_HISTORY_MISSING", "История разговора не найдена", { details: { sessionId: input.sessionId } });
   }
+}
+
+export async function loadApplicationSessionId(client: HistoryClient, sessionId: string): Promise<string> {
+  const row = (await client.query<{ application_session_id: string }>(
+    "SELECT application_session_id FROM agent_session_state WHERE session_id = $1", [sessionId],
+  )).rows[0];
+  if (!row) throw new AppError("AGENT_SESSION_HISTORY_MISSING", "История разговора не найдена", { details: { sessionId } });
+  return row.application_session_id;
 }

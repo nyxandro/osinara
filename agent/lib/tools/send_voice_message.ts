@@ -286,6 +286,8 @@ async function sendVoiceMessage(
 
 export function createSendVoiceMessageTool(dependencies: SendVoiceMessageDependencies): AnyToolDefinition {
   return defineTool({
+    // Repeating it after a crash is safe: its effect is keyed on the call id.
+    replaySafe: true,
     description: [
       "Только по явной просьбе ответить голосом: озвучить text через ElevenLabs и отправить голосовым в текущий чат.",
       "text пиши как живую речь; ссылки и данные, которые неудобно слушать, передай в caption.",

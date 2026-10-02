@@ -13,6 +13,8 @@ import { memoryRepository } from "../memory-repository.js";
 import { toModelMemory } from "../model-memory.js";
 
 export default defineTool({
+  // Repeating it after a crash is safe: it only reads.
+  replaySafe: true,
   description: [
     "Постранично показать записи долговременной памяти, доступные в текущем чате.",
     "Результат: {items,nextCursor}; items содержит текущую страницу, а nextCursor нужно без изменений",

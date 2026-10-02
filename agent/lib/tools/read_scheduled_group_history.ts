@@ -12,6 +12,8 @@ import { scheduledGroupHistoryAccess } from "../agent-schedules/scheduled-group-
 import { scheduledGroupHistorySnapshotRepository } from "../agent-schedules/scheduled-group-history-snapshot-repository.js";
 
 export default defineTool({
+  // Repeating it after a crash is safe: it only reads.
+  replaySafe: true,
   description: [
     "Последовательно читает полный durable snapshot истории текущей external-группы для этого scheduled run.",
     "Первый вызов: {}. Пока nextCursor не null, передавай его без изменений: {\"cursor\":\"...\"}.",

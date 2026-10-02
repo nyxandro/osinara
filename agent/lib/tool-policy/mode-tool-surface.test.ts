@@ -22,6 +22,7 @@ vi.mock("./external-group-live-policy.js", () => ({
 }));
 
 import { FAMILY_ONLY_TOOL_NAMES, PRIVATE_ONLY_TOOL_NAMES, TRUSTED_MODE_TOOL_NAMES, buildModeToolSurface, buildSubagentToolSurface } from "./mode-tool-surface.js";
+import { agentTool } from "../../runtime/tools/delegate.js";
 import { bash as nativeBash, glob as nativeGlob, grep as nativeGrep, readFile as nativeReadFile, writeFile as nativeWriteFile } from "../../runtime/tools/defaults.js";
 import { TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES } from "../turn-interjection/turn-interjection-surface.js";
 import { ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, EXTERNAL_GROUP_BASE_TOOLS, EXTERNAL_GROUP_TOOL_NAMES, type ExternalGroupToolName } from "./group-tool-catalog.js";
@@ -31,7 +32,7 @@ function names(input: Parameters<typeof buildModeToolSurface>[0]): string[] {
 }
 
 // Built-ins every trusted turn had in Eve that the interjection surface does not wrap.
-const UNWRAPPED_BUILT_IN_NAMES = ["ask_question", "load_skill", "todo"];
+const UNWRAPPED_BUILT_IN_NAMES = ["agent", "ask_question", "load_skill", "todo"];
 
 const POHUY_SKILL = {
   description: "pohuy",
@@ -103,7 +104,8 @@ describe("trusted mode tool surfaces", () => {
 
     expect(ordinary).not.toContain("read_scheduled_group_history");
     expect(scheduled).toContain("read_scheduled_group_history");
-    expect(scheduled).not.toContain("agent");
+    // A scheduled root turn may delegate, as Eve's implicit agent allowed.
+    expect(scheduled).toContain("agent");
   });
 
   it("never exposes another zone's tools", () => {
@@ -192,7 +194,7 @@ describe("external group tool surface", () => {
 
   it("emits only guarded baseline tools without a grant", () => {
     expect(names({ capabilities: new Set(), environment: "external", skills: {} })).toEqual(
-      [...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "list_reminders", "manage_behavior_preference", "manage_reminder", "read_profile_view"].sort(),
+      [...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent", "list_reminders", "manage_behavior_preference", "manage_reminder", "read_profile_view"].sort(),
     );
   });
 
@@ -222,14 +224,15 @@ describe("external group tool surface", () => {
     }
   });
 
-  it("does not shadow native child delegation in an interactive external group", () => {
+  it("gives an interactive external group the runtime's own delegation tool, unwrapped", () => {
     const surface = buildModeToolSurface({
       capabilities: new Set(),
       environment: "external",
       skills: {},
     });
 
-    expect(surface).not.toHaveProperty("agent");
+    expect(surface.agent).toBe(agentTool);
+    expect(buildSubagentToolSurface({ capabilities: new Set(), environment: "external", skills: {} })).not.toHaveProperty("agent");
   });
 
   it("offers load_skill only when the current turn has a granted skill", () => {
@@ -468,7 +471,7 @@ describe("external group tool surface", () => {
         environment: "external",
         skills: {},
       }),
-    ).toEqual([...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "list_reminders", "manage_behavior_preference", "manage_reminder", "read_profile_view"].sort());
+    ).toEqual([...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent", "list_reminders", "manage_behavior_preference", "manage_reminder", "read_profile_view"].sort());
   });
 
   it("exposes only group scope in external shared-tool schemas and descriptions", () => {

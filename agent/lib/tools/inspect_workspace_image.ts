@@ -89,6 +89,8 @@ const TOOL_DESCRIPTION = [
 ].join(" ");
 
 export default defineTool({
+  // Repeating it after a crash is safe: it only reads.
+  replaySafe: true,
   description: TOOL_DESCRIPTION,
   inputSchema: inspectWorkspaceImageSchema,
   async execute(input, ctx) {

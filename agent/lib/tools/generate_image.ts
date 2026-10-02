@@ -210,6 +210,8 @@ async function recoverStartedOperation(
 
 export function createGenerateImageTool(dependencies: GenerateImageDependencies): AnyToolDefinition {
   return defineTool({
+    // Repeating it after a crash is safe: its effect is keyed on the call id.
+    replaySafe: true,
     description: [
       "Когда использовать: создать одно новое raster-изображение через GPT-Image-2 и сразу отправить его в текущий Telegram-чат.",
       "Не использовать: для SVG, диаграмм из кода, редактирования существующего файла или незапрошенной фоновой генерации.",

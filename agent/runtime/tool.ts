@@ -89,6 +89,8 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> {
    * unknown outcome instead of being run again.
    */
   readonly replaySafe?: boolean;
+  /** Marks the runtime's `agent` tool: its call runs as a child turn instead of `execute`. */
+  readonly runtimeAction?: "subagent";
   /** Projects the full result into what the model sees; channel handlers still get the full result. */
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }
@@ -112,6 +114,7 @@ export function defineTool<TSchema extends StandardSchemaV1 | StandardJSONSchema
   execute(input: SchemaInput<TSchema>, ctx: ToolContext): TReturn;
   approval?: ToolDefinition<SchemaInput<TSchema>, unknown>["approval"];
   replaySafe?: boolean;
+  runtimeAction?: "subagent";
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
 }): ToolDefinitionWithExecuteReturn<SchemaInput<TSchema>, ToolOutputFromExecuteReturn<TReturn>, TReturn>;
 export function defineTool<TInput = unknown, TOutput = unknown>(

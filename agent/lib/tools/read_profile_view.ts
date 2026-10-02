@@ -13,6 +13,8 @@ import { profileViewRepository } from "../profile-view-repository.js";
 const PROFILE_VIEW_REF_PATTERN = /^view_[0-9a-f]{32}$/u;
 
 export default defineTool({
+  // Repeating it after a crash is safe: it only reads.
+  replaySafe: true,
   description:
     "Повторно прочитать точный ordered profile selection по profileViewRef; не создаёт новую выборку.",
   inputSchema: z.object({

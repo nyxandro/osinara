@@ -21,6 +21,8 @@ const TOOL_DESCRIPTION = [
 ].join(" ");
 
 export default defineTool({
+  // Repeating it after a crash is safe: it only reads.
+  replaySafe: true,
   description: TOOL_DESCRIPTION,
   inputSchema: z.object({ timezone: z.string().min(1).max(100).optional() }).strict(),
   async execute(input, ctx) {

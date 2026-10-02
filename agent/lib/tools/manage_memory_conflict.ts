@@ -27,6 +27,8 @@ function invalidInput(): AppError {
 }
 
 export default defineTool({
+  // Repeating it after a crash is safe: its effect is keyed on the call id.
+  replaySafe: true,
   description: [
     "Разрешить показанный конфликт памяти только по явному решению пользователя.",
     "choose требует conflictRef и memoryRef выбранной версии; keep_both сохраняет обе версии;",

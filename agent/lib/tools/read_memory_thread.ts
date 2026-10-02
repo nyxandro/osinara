@@ -16,6 +16,8 @@ import {
 } from "../memory-thread-query-repository.js";
 
 export default defineTool({
+  // Repeating it after a crash is safe: it only reads.
+  replaySafe: true,
   description:
     "Прочитать bounded страницу source-backed истории нити по opaque threadRef; используй cursor для углубления.",
   inputSchema: z.object({

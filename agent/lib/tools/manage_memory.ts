@@ -149,6 +149,8 @@ function currentProvenance(session: { id: string; turn: { id: string } }) {
 const TOOL_PRESENTATION = manageMemoryPresentation(MANAGE_MEMORY_ACTIONS);
 
 export default defineTool({
+  // Repeating it after a crash is safe: its effect is keyed on the call id.
+  replaySafe: true,
   approval: async ({ session, toolInput }) => {
     const parsed = requireManageMemoryInput(toolInput);
     const authorization = requireMemoryAuthorization({ session });

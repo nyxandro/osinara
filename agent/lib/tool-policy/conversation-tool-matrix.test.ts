@@ -13,10 +13,10 @@ describe("conversation tool matrix", () => {
       expect(buildSubagentToolSurface(input)).toHaveProperty("web_search");
     }
   });
-  it("permits the owner to grant Bash without disabling native group delegation", () => {
+  it("permits the owner to grant Bash while group delegation stays available", () => {
     expect(isGrantableExternalGroupToolName("bash")).toBe(true);
     const surface = buildModeToolSurface({ environment: "external", capabilities: new Set(), skills: {} });
-    expect(surface).not.toHaveProperty("agent");
+    expect(surface).toHaveProperty("agent");
     expect(surface).toHaveProperty("todo");
     expect(surface).toHaveProperty("get_current_time");
   });

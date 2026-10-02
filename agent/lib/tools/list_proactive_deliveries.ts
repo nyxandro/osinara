@@ -49,6 +49,8 @@ function requireDeliveryAuthorization(
 }
 
 export default defineTool({
+  // Repeating it after a crash is safe: it only reads.
+  replaySafe: true,
   description: [
     "Показать ранее доставленные в текущий чат напоминания и результаты агентных расписаний.",
     "Используй, когда пользователь ссылается на старый дайджест, отчёт, сводку или уведомление, которого уже нет в текущем контексте.",

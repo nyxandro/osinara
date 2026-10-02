@@ -12,6 +12,8 @@ import { memorySourceRepository } from "../memory-source-repository.js";
 import { MEMORY_REF_PATTERN } from "../model-memory.js";
 
 export default defineTool({
+  // Repeating it after a crash is safe: it only reads.
+  replaySafe: true,
   description:
     "Показать безопасное происхождение записи личного эффективного профиля по opaque memoryRef.",
   inputSchema: z.object({

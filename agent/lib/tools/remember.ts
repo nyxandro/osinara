@@ -24,6 +24,8 @@ import { rememberInputSchema } from "../remember-contract.js";
 import { memoryReviewBatchId } from "../memory-review/memory-review-session.js";
 
 export default defineTool({
+  // Repeating it after a crash is safe: its effect is keyed on the call id.
+  replaySafe: true,
   description: [
     "Сохранить одно конкретное сведение только из проверенного сообщения текущего хода: факт, предпочтение, личный опыт, событие, план или полезную ссылку с контекстом. Не требуй особой важности или просьбы запомнить; не сохраняй догадки и поручения без содержательных фактов.",
     "При самостоятельном отборе используй basis=agent_inferred, при прямой просьбе сохранить сведение basis=user_requested. Пример самостоятельного сохранения: {\"basis\":\"agent_inferred\",\"content\":\"...\",\"kind\":\"fact\",\"scope\":\"personal\",\"sensitivity\":\"normal\",\"subject\":{\"kind\":\"current_author\"}}.",

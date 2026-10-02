@@ -15,6 +15,8 @@ import { requireReminderAuthorization } from "../reminders/reminder-context.js";
 import { reminderRepository } from "../reminders/reminder-repository.js";
 
 export default defineTool({
+  // Repeating it after a crash is safe: it only reads.
+  replaySafe: true,
   description: [
     "Постранично показать доступные текущему участнику личные и семейные напоминания.",
     "Результат: {items,nextCursor}; если nextCursor не null, передай его без изменений для следующей страницы.",

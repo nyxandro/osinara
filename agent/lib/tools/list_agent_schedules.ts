@@ -15,6 +15,8 @@ import { requireAgentScheduleAuthorization } from "../agent-schedules/agent-sche
 import { agentScheduleRepository } from "../agent-schedules/agent-schedule-repository.js";
 
 export default defineTool({
+  // Repeating it after a crash is safe: it only reads.
+  replaySafe: true,
   description: [
     "Постранично показать личные и семейные агентные расписания текущего пользователя.",
     "Результат: {items,nextCursor}; если nextCursor не null, передай его без изменений для следующей страницы.",
