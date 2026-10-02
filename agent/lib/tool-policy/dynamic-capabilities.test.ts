@@ -24,9 +24,7 @@ vi.mock("./external-group-live-policy.js", () => ({
 import { resolveToolSurface } from "../../tools/capabilities.js";
 import {
   ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES,
-  FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS,
   EXTERNAL_GROUP_BASE_TOOLS,
-  UNVERIFIED_CONTEXT_DENIALS,
 } from "./group-tool-catalog.js";
 
 // The runtime hands every surface entry to the model loop, so each must be a complete tool.
@@ -103,7 +101,7 @@ describe("dynamic capability resolver", () => {
     expect(Object.keys(surface ?? {})).not.toContain("export_memory");
   });
 
-  it("emits only granted capabilities and framework denials for an external group", async () => {
+  it("emits only granted capabilities for an external group, without questions or Bash", async () => {
     loadCurrentExternalGroupCapabilities.mockResolvedValue(new Set(["remember"]));
 
     const surface = await resolve({
@@ -119,13 +117,11 @@ describe("dynamic capability resolver", () => {
       [
         ...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES,
         "list_reminders",
-        "load_skill",
         "manage_behavior_preference",
         "manage_reminder",
         "read_profile_view",
         "remember",
         ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name),
-        ...FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS,
       ].sort(),
     );
     expect(loadCurrentExternalGroupCapabilities).toHaveBeenCalledWith({
@@ -150,7 +146,7 @@ describe("dynamic capability resolver", () => {
 
     expect(Object.keys(surface ?? {})).toContain("remember");
     expect(Object.keys(surface ?? {})).not.toContain("search_memories");
-    expect(Object.keys(surface ?? {})).toContain("bash");
+    expect(Object.keys(surface ?? {})).not.toContain("bash");
     expect(loadCurrentExternalGroupCapabilities).toHaveBeenCalledWith({
       familyId: "family-1",
       groupId: "group-1",
@@ -188,7 +184,7 @@ describe("dynamic capability resolver", () => {
 
     expect(interactive?.load_skill?.description).toMatch(/available skill/iu);
     expect(interactive).toHaveProperty("generate_image");
-    expect(scheduled?.load_skill?.description).toMatch(/недоступен/iu);
+    expect(scheduled).not.toHaveProperty("load_skill");
     expect(scheduled).not.toHaveProperty("generate_image");
   });
 
@@ -257,9 +253,6 @@ describe("dynamic capability resolver", () => {
     expect(Object.keys(surface ?? {}).sort()).toEqual(
       [
         ...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES,
-        "load_skill",
-        ...FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS,
-        ...UNVERIFIED_CONTEXT_DENIALS,
       ].sort(),
     );
     expect(consoleError).toHaveBeenCalledWith(
@@ -312,9 +305,6 @@ describe("dynamic capability resolver", () => {
     expect(Object.keys(surface ?? {}).sort()).toEqual(
       [
         ...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES,
-        "load_skill",
-        ...FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS,
-        ...UNVERIFIED_CONTEXT_DENIALS,
       ].sort(),
     );
     expect(consoleError).toHaveBeenCalledWith(

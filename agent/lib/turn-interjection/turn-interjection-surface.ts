@@ -10,7 +10,7 @@
  * so descriptors, sandbox access, and read-before-write checks stay the framework's.
  */
 import type { ToolDefinition } from "../../runtime/tool.js";
-import { bash, glob, grep, readFile, writeFile } from "eve/tools/defaults";
+import { bash, glob, grep, readFile, writeFile } from "../../runtime/tools/defaults.js";
 
 import { transcribeTelegramVoice } from "../groq-voice-transcription.js";
 import { createTelegramVoiceAuthorizer } from "../telegram-voice-authorization.js";

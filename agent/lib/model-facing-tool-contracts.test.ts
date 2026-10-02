@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
-import { bash, glob, grep, readFile, writeFile } from "eve/tools/defaults";
+import { askQuestion, bash, glob, grep, loadSkill, readFile, todo, writeFile } from "../runtime/tools/defaults.js";
 
 import { buildMemoryReviewToolSurface } from "./memory-review/memory-review-tool-surface.js";
 import { EXTERNAL_GROUP_TOOL_NAMES } from "./tool-policy/group-tool-catalog.js";
@@ -29,7 +29,8 @@ const REQUIRED_CORE_RULES = [
   "sideEffectStatus",
 ] as const;
 const TOTAL_DESCRIPTION_MAX_CHARACTERS = 25_000;
-const NATIVE_DESCRIPTIONS = new Set([bash, glob, grep, readFile, writeFile].map((definition) => definition.description));
+// The runtime's built-ins were in every Eve prompt anyway; the budget is the application's own.
+const NATIVE_DESCRIPTIONS = new Set([askQuestion, bash, glob, grep, loadSkill, readFile, todo, writeFile].map((definition) => definition.description));
 
 function surfaces() {
   const externalInput = {

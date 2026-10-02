@@ -22,13 +22,16 @@ vi.mock("./external-group-live-policy.js", () => ({
 }));
 
 import { FAMILY_ONLY_TOOL_NAMES, PRIVATE_ONLY_TOOL_NAMES, TRUSTED_MODE_TOOL_NAMES, buildModeToolSurface, buildSubagentToolSurface } from "./mode-tool-surface.js";
-import { bash as nativeBash, glob as nativeGlob, grep as nativeGrep, readFile as nativeReadFile, writeFile as nativeWriteFile } from "eve/tools/defaults";
+import { bash as nativeBash, glob as nativeGlob, grep as nativeGrep, readFile as nativeReadFile, writeFile as nativeWriteFile } from "../../runtime/tools/defaults.js";
 import { TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES } from "../turn-interjection/turn-interjection-surface.js";
-import { ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, EXTERNAL_GROUP_BASE_TOOLS, EXTERNAL_GROUP_TOOL_NAMES, FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS, type ExternalGroupToolName } from "./group-tool-catalog.js";
+import { ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, EXTERNAL_GROUP_BASE_TOOLS, EXTERNAL_GROUP_TOOL_NAMES, type ExternalGroupToolName } from "./group-tool-catalog.js";
 
 function names(input: Parameters<typeof buildModeToolSurface>[0]): string[] {
   return Object.keys(buildModeToolSurface(input)).sort();
 }
+
+// Built-ins every trusted turn had in Eve that the interjection surface does not wrap.
+const UNWRAPPED_BUILT_IN_NAMES = ["ask_question", "load_skill", "todo"];
 
 const POHUY_SKILL = {
   description: "pohuy",
@@ -56,7 +59,7 @@ function externalAuth(toolAllowlist: readonly string[]): SessionAuth {
 describe("trusted mode tool surfaces", () => {
   it("gives a private chat the shared tools plus owner administration only", () => {
     expect(names({ environment: "private" })).toEqual(
-      [...TRUSTED_MODE_TOOL_NAMES, ...PRIVATE_ONLY_TOOL_NAMES, ...TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES].sort(),
+      [...TRUSTED_MODE_TOOL_NAMES, ...PRIVATE_ONLY_TOOL_NAMES, ...TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES, ...UNWRAPPED_BUILT_IN_NAMES].sort(),
     );
     expect(names({ environment: "private" })).toContain("manage_external_group_schedule");
   });
@@ -80,7 +83,7 @@ describe("trusted mode tool surfaces", () => {
 
   it("gives a family group the shared tools plus group history and attachments only", () => {
     expect(names({ environment: "family" })).toEqual(
-      [...TRUSTED_MODE_TOOL_NAMES, ...FAMILY_ONLY_TOOL_NAMES, ...TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES].sort(),
+      [...TRUSTED_MODE_TOOL_NAMES, ...FAMILY_ONLY_TOOL_NAMES, ...TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES, ...UNWRAPPED_BUILT_IN_NAMES].sort(),
     );
     expect(names({ environment: "family" })).not.toContain("manage_external_group_schedule");
   });
@@ -115,18 +118,17 @@ describe("trusted mode tool surfaces", () => {
     }
   });
 
-  it("emits no denial stubs in a trusted zone", () => {
+  it("gives trusted zones the built-ins Eve always registered, and external groups no questions or Bash", () => {
     for (const environment of ["private", "family"] as const) {
-      const surface = buildModeToolSurface({ environment });
-      for (const denied of FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS) {
-        // Bash is re-emitted only as Eve's own tool so its results can carry waiting messages.
-        if (denied === "bash") {
-          expect(surface.bash?.description, `${environment} must keep the native bash`).toBe(nativeBash.description);
-          continue;
-        }
-        expect(names({ environment }), `${environment} must not override ${denied}`).not.toContain(denied);
+      for (const scheduledRun of [false, true]) {
+        expect(names({ environment, scheduledRun }), `${environment} scheduled=${scheduledRun}`).toEqual(expect.arrayContaining([
+          "ask_question", "bash", "load_skill", "read_file", "todo", "write_file",
+        ]));
       }
     }
+    const external = names({ capabilities: new Set(), environment: "external", skills: {} });
+    expect(external).not.toContain("ask_question");
+    expect(external).not.toContain("bash");
   });
 
   it("re-emits native sandbox tools unchanged in interactive trusted zones only", () => {
@@ -137,8 +139,10 @@ describe("trusted mode tool surfaces", () => {
         expect(surface[name]?.description, `${environment}.${name}`).toBe(definition.description);
         expect(surface[name]?.inputSchema, `${environment}.${name}`).toBe(definition.inputSchema);
       }
+      // A scheduled turn keeps the plain built-ins, as Eve registered them, and no opt-in search tools.
       const scheduled = buildModeToolSurface({ environment, scheduledRun: true });
-      for (const name of TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES) expect(scheduled).not.toHaveProperty(name);
+      for (const name of ["bash", "read_file", "write_file"] as const) expect(scheduled[name], `${environment}.${name}`).toBe(native[name]);
+      for (const name of ["glob", "grep"]) expect(scheduled).not.toHaveProperty(name);
     }
   });
 
@@ -186,9 +190,9 @@ describe("external group tool surface", () => {
     });
   });
 
-  it("emits only guarded baseline tools and framework denials without a grant", () => {
+  it("emits only guarded baseline tools without a grant", () => {
     expect(names({ capabilities: new Set(), environment: "external", skills: {} })).toEqual(
-      [...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, ...FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "list_reminders", "load_skill", "manage_behavior_preference", "manage_reminder", "read_profile_view"].sort(),
+      [...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "list_reminders", "manage_behavior_preference", "manage_reminder", "read_profile_view"].sort(),
     );
   });
 
@@ -228,20 +232,15 @@ describe("external group tool surface", () => {
     expect(surface).not.toHaveProperty("agent");
   });
 
-  it("makes load_skill executable only when the current turn has a granted skill", async () => {
-    const denied = buildModeToolSurface({
-      capabilities: new Set(),
-      environment: "external",
-      skills: {},
-    }).load_skill!;
+  it("offers load_skill only when the current turn has a granted skill", () => {
+    const withoutSkills = buildModeToolSurface({ capabilities: new Set(), environment: "external", skills: {} });
     const granted = buildModeToolSurface({
       capabilities: new Set(),
       environment: "external",
       skills: { pohuy: POHUY_SKILL },
     }).load_skill!;
 
-    await expect(denied.execute({}, {} as never)).rejects.toThrowError(/AGENT_GROUP_TOOL_FORBIDDEN/u);
-    expect(denied.description).toMatch(/недоступен/iu);
+    expect(withoutSkills).not.toHaveProperty("load_skill");
     expect(granted.description).toMatch(/available skill/iu);
   });
 
@@ -260,7 +259,7 @@ describe("external group tool surface", () => {
           .not.toBe(surface[nativeTool]!.description);
       }
     }
-    expect(surface).toHaveProperty("bash");
+    expect(surface).not.toHaveProperty("bash");
   });
 
   it("emits no application tool outside the effective allowlist", () => {
@@ -354,16 +353,14 @@ describe("external group tool surface", () => {
     });
   });
 
-  it("denies every framework built-in an external group must not reach", async () => {
-    const surface = buildModeToolSurface({
-      capabilities: new Set(),
-      environment: "external",
-      skills: {},
-    });
+  it("never offers questions to an external group, and Bash only with its grant", () => {
+    const ungranted = buildModeToolSurface({ capabilities: new Set(), environment: "external", skills: {} });
+    const granted = buildModeToolSurface({ capabilities: new Set(["bash"]), environment: "external", skills: {} });
 
-    for (const toolName of ["ask_question", "bash"]) {
-      await expect(surface[toolName]!.execute({}, {} as never), `${toolName} must be denied`).rejects.toThrowError(/AGENT_GROUP_TOOL_FORBIDDEN/);
-    }
+    expect(ungranted).not.toHaveProperty("ask_question");
+    expect(ungranted).not.toHaveProperty("bash");
+    expect(granted).not.toHaveProperty("ask_question");
+    expect(granted.bash?.description).toMatch(/изолированном окружении текущей группы/u);
   });
 
   it("denies a capability revoked after descriptor resolution despite a stale auth grant", async () => {
@@ -471,7 +468,7 @@ describe("external group tool surface", () => {
         environment: "external",
         skills: {},
       }),
-    ).toEqual([...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, ...FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "list_reminders", "load_skill", "manage_behavior_preference", "manage_reminder", "read_profile_view"].sort());
+    ).toEqual([...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "list_reminders", "manage_behavior_preference", "manage_reminder", "read_profile_view"].sort());
   });
 
   it("exposes only group scope in external shared-tool schemas and descriptions", () => {

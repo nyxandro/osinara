@@ -6,7 +6,7 @@
  * - `externalGroupLoadSkillTool`: production `defineTool` wrapper over Eve's native skill loader.
  */
 import { defineTool, type ToolContext, type ToolDefinition } from "../../runtime/tool.js";
-import { loadSkill } from "eve/tools/defaults";
+import { loadSkill } from "../../runtime/tools/defaults.js";
 
 import { AppError } from "../app-error.js";
 import { IMAGE_GENERATION_AVAILABLE } from "../image-generation/image-generation-availability.js";

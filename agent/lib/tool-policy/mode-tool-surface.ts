@@ -8,17 +8,20 @@
  * - `buildSubagentToolSurface`: the same trust zone without root-owned durable writes.
  *
  * Key constructs:
- * - Application tools are emitted per mode instead of authored statically, so a tool that cannot
- *   work in the current trust zone has no descriptor at all rather than a denial stub.
- * - External groups additionally deny the framework built-ins Eve always registers, and re-check
- *   every granted capability at execution time against the live database policy.
- * - Interactive private and family surfaces re-emit the sandbox built-ins, so that every tool result
- *   there can carry the messages the turn's author sent meanwhile. Scheduled surfaces do not.
+ * - Every tool is emitted per mode, the runtime's built-ins included, so a tool that cannot work in
+ *   the current trust zone has no descriptor at all. Trusted modes get the built-ins Eve always
+ *   registered (ask_question, bash, read_file, write_file, todo, load_skill); an external group
+ *   gets only its own file tools, its granted capabilities and, without a verified registration,
+ *   nothing beyond answering in text.
+ * - External groups re-check every granted capability at execution time against the live policy.
+ * - Interactive private and family surfaces wrap the sandbox built-ins (plus glob and grep), so
+ *   that every tool result there can carry the messages the turn's author sent meanwhile.
+ *   Scheduled surfaces do not.
  */
 import type { SkillDefinition } from "../../runtime/skills/definition.js";
 import { defineTool, type ToolContext, type ToolDefinition } from "../../runtime/tool.js";
+import { askQuestion, bash, loadSkill, readFile, todo, writeFile } from "../../runtime/tools/defaults.js";
 import { z } from "zod";
-import { todo } from "eve/tools/defaults";
 
 import { AppError } from "../app-error.js";
 import { IMAGE_GENERATION_AVAILABLE } from "../image-generation/image-generation-availability.js";
@@ -65,12 +68,7 @@ import { resolveExternalGroupPolicyIdentity } from "./external-group-policy.js";
 import { EXTERNAL_GROUP_REMINDER_TOOLS } from "./external-group-reminder-tools.js";
 import { scheduledExternalTool } from "./scheduled-external-tool.js";
 import { withTurnInterjectionSurface } from "../turn-interjection/turn-interjection-surface.js";
-import {
-  FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS,
-  UNVERIFIED_CONTEXT_DENIALS,
-  isExternalGroupToolName,
-  type ExternalGroupToolName,
-} from "./group-tool-catalog.js";
+import { isExternalGroupToolName, type ExternalGroupToolName } from "./group-tool-catalog.js";
 import {
   FAMILY_ONLY_TOOLS,
   PRIVATE_ONLY_TOOLS,
@@ -96,8 +94,6 @@ export type ModeToolSurfaceInput =
       scheduledRun?: boolean;
       skills: Readonly<Record<string, SkillDefinition>>;
     };
-
-const DENIED_TOOL_INPUT = z.record(z.string(), z.unknown());
 
 type DirectExternalToolName = Exclude<
   ExternalGroupToolName,
@@ -240,16 +236,6 @@ async function withExternalGroupCapability<T>(
   return await operation();
 }
 
-function deniedTool(toolName: string): AnyToolDefinition {
-  return defineTool({
-    description: `Инструмент ${toolName} недоступен в текущей внешней группе.`,
-    inputSchema: DENIED_TOOL_INPUT,
-    async execute() {
-      throw groupToolForbidden();
-    },
-  }) as unknown as AnyToolDefinition;
-}
-
 function allowedDirectTool(capability: DirectExternalToolName, definition: AnyToolDefinition): AnyToolDefinition {
   return defineTool({
     ...definition,
@@ -314,15 +300,13 @@ function buildExternalToolSurface(
     !scheduledRun && allowed.has("generate_image");
   const surface: Record<string, AnyToolDefinition> = {
     ...EXTERNAL_GROUP_FILE_TOOLS,
-    load_skill: Object.keys(skills).length > 0 || imageGenerationAllowed
-      ? externalGroupLoadSkillTool
-      : deniedTool("load_skill"),
+    ...(Object.keys(skills).length > 0 || imageGenerationAllowed ? { load_skill: externalGroupLoadSkillTool } : {}),
   };
   if (includeApplicationCore) {
     surface.web_search = conversationWebSearch as AnyToolDefinition;
     surface.web_fetch = conversationWebFetch as AnyToolDefinition;
     surface.get_current_time = getCurrentTime as AnyToolDefinition;
-    surface.todo = todo;
+    surface.todo = todo as AnyToolDefinition;
     surface.read_profile_view = readProfileView as unknown as AnyToolDefinition;
     if (!scheduledRun) {
       surface.manage_behavior_preference = manageBehaviorPreference as unknown as AnyToolDefinition;
@@ -359,15 +343,6 @@ function buildExternalToolSurface(
     surface.manage_memory_thread = allowedMemoryThreadTool();
   }
 
-  // Eve always registers its own built-ins, and 0.40.0 cannot hide a framework descriptor, so the
-  // ones an external group must never reach stay overridden with an explicit denial.
-  for (const toolName of FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS) {
-    if (toolName === "bash" && includeApplicationCore && allowed.has("bash")) continue;
-    surface[toolName] = deniedTool(toolName);
-  }
-  if (!includeApplicationCore) {
-    for (const name of UNVERIFIED_CONTEXT_DENIALS) surface[name] = deniedTool(name);
-  }
   const effectiveSurface = scheduledRun
     ? Object.fromEntries(Object.entries(surface).map(([name, definition]) => [name, scheduledExternalTool(definition)]))
     : surface;
@@ -377,6 +352,17 @@ function buildExternalToolSurface(
 function allowlistKey(allowed: ReadonlySet<ExternalGroupToolName>): string {
   return [...allowed].sort().join("\0");
 }
+
+// What Eve registered in every trusted turn without the application asking. They stay outside the
+// model-facing error wrapper, as Eve's own tools did.
+const TRUSTED_BUILT_IN_TOOLS: ToolMap = {
+  ask_question: askQuestion as AnyToolDefinition,
+  bash: bash as AnyToolDefinition,
+  load_skill: loadSkill as AnyToolDefinition,
+  read_file: readFile as AnyToolDefinition,
+  todo: todo as AnyToolDefinition,
+  write_file: writeFile as AnyToolDefinition,
+};
 
 const TRUSTED_APPLICATION_SURFACES: Readonly<Record<"family" | "private", ToolMap>> = {
   family: wrapModelFacingToolMap({
@@ -390,9 +376,15 @@ const TRUSTED_APPLICATION_SURFACES: Readonly<Record<"family" | "private", ToolMa
 };
 
 // An interactive turn also receives, with each tool result, the messages its author sent meanwhile.
+// The interjection surface brings its own sandbox built-ins; questions, todo and skills stay as is.
+const UNWRAPPED_BUILT_INS: ToolMap = {
+  ask_question: TRUSTED_BUILT_IN_TOOLS.ask_question!,
+  load_skill: TRUSTED_BUILT_IN_TOOLS.load_skill!,
+  todo: TRUSTED_BUILT_IN_TOOLS.todo!,
+};
 const TRUSTED_SURFACES: Readonly<Record<"family" | "private", ToolMap>> = {
-  family: withTurnInterjectionSurface(TRUSTED_APPLICATION_SURFACES.family),
-  private: withTurnInterjectionSurface(TRUSTED_APPLICATION_SURFACES.private),
+  family: { ...UNWRAPPED_BUILT_INS, ...withTurnInterjectionSurface(TRUSTED_APPLICATION_SURFACES.family) },
+  private: { ...UNWRAPPED_BUILT_INS, ...withTurnInterjectionSurface(TRUSTED_APPLICATION_SURFACES.private) },
 };
 
 const TRUSTED_SCHEDULED_SURFACES: Readonly<Record<"family" | "private", ToolMap>> = Object.fromEntries(
@@ -405,7 +397,7 @@ const TRUSTED_SCHEDULED_SURFACES: Readonly<Record<"family" | "private", ToolMap>
       send_voice_message: _sendVoiceMessage,
       ...readOnlyPromptSurface
     } = surface;
-    return [environment, readOnlyPromptSurface];
+    return [environment, { ...TRUSTED_BUILT_IN_TOOLS, ...readOnlyPromptSurface }];
   }),
 ) as Record<"family" | "private", ToolMap>;
 

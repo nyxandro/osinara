@@ -17,7 +17,7 @@ import {
   grep as eveGrep,
   readFile as eveReadFile,
   writeFile as eveWriteFile,
-} from "eve/tools/defaults";
+} from "../../runtime/tools/defaults.js";
 
 import { AppError } from "../app-error.js";
 import {

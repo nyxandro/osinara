@@ -18,7 +18,6 @@ vi.mock("../tool-policy/external-group-live-policy.js", () => ({
 }));
 
 import {
-  MEMORY_REVIEW_DENIED_TOOL_NAMES,
   buildMemoryReviewToolSurface,
 } from "./memory-review-tool-surface.js";
 import { memoryReviewInstructions } from "./memory-review-prompt.js";
@@ -55,11 +54,10 @@ describe("memory review model surface", () => {
     authorizeCurrentExternalGroupCapability.mockReset();
   });
 
-  it("contains only memory capabilities plus explicit framework denials", () => {
+  it("contains only memory capabilities, no runtime built-ins", () => {
     const names = Object.keys(buildMemoryReviewToolSurface("family")).sort();
 
     expect(names).toEqual([
-      ...MEMORY_REVIEW_DENIED_TOOL_NAMES,
       "list_memories",
       "list_memory_threads",
       "read_memory_thread",
