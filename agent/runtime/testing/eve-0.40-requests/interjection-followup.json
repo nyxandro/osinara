@@ -1,5 +1,5 @@
 {
-  "scenario": "private-second",
+  "scenario": "interjection-followup",
   "shared": {
     "tools-1": [
       {
@@ -2350,6 +2350,613 @@
               {
                 "type": "text",
                 "text": "<current_telegram_message>\n{\"sourceSequence\":\"3\",\"senderDisplayName\":\"Owner\",\"senderUsername\":null,\"text\":\"reference-probe-private-second\"}\n</current_telegram_message>"
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "reply-reference-probe-private-second"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<telegram_context>\nresponse_medium: telegram\nresponse_instructions: Reply for Telegram in concise plain text. Avoid tables, long code fences, and formatting that depends on Markdown rendering.\nchat_id: 912\nchat_type: private\nmessage_id: 6\nuser_id: 912\nbot_username: osinara_bot\n</telegram_context>"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Verified conversation scope: personal, family."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Verified role: owner."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Verified Telegram actor kind: telegram_user."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Verified Telegram delivery: reply in concise plain text by default; use supported Rich Markdown only when formatting materially improves the answer."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<current_time>\ncaptured_at_utc: <time-5>\nprecision: turn_start\n</current_time>"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<turn_interjection_marker><hex-3></turn_interjection_marker>"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<current_telegram_message>\n{\"sourceSequence\":\"5\",\"senderDisplayName\":\"Owner\",\"senderUsername\":null,\"text\":\"reference-probe-approval\"}\n</current_telegram_message>"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "[Pending approvals]\nThe following tool calls are awaiting approval and have not executed:\n{\"requestId\":\"<aisdk-1>\",\"toolName\":\"manage_profile_projection\"}"
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool-call",
+                "toolCallId": "call-approval-root-1",
+                "toolName": "manage_profile_projection",
+                "input": {
+                  "action": "update",
+                  "enabled": true,
+                  "groupRef": "<ref-4>"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": [
+              {
+                "type": "tool-result",
+                "toolCallId": "call-approval-root-1",
+                "toolName": "manage_profile_projection",
+                "output": {
+                  "type": "json",
+                  "value": {
+                    "changed": true,
+                    "enabled": true,
+                    "groupRef": "<ref-4>",
+                    "label": "External reference",
+                    "participantNotice": "Владелец включил проекцию подтверждённых сведений об участнике из этой внешней группы в его личный профиль. Личная и семейная память группе не раскрывается.",
+                    "policyVersion": 2
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "reply-reference-probe-approval"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<current_time>\ncaptured_at_utc: <time-6>\nprecision: turn_start\n</current_time>"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<conversation_wakeup>\nЭто твоё собственное пробуждение по сценарию в этом разговоре, а не сообщение человека. Правила — в разделе «Пробуждение в разговоре».\nschedule_id: <uuid-1>\ntitle: Эталонный сценарий\nscheduled_for_local: <local-time-1> Europe/Moscow\nexecution_number: 1\nmax_runs: 1\noriginal_user_request:\nПроверяй эталонный сценарий\nnote:\nПроверь эталонный сценарий reference-probe-scheduled-conversation\n</conversation_wakeup>\nВыполни заметку с учётом всего разговора.\n- Если цель достигнута или проверять больше незачем, сообщи результат и поставь сценарий на паузу через manage_agent_schedule с action pause и этим schedule_id.\n- Если сообщить нечего, а проверки ещё нужны, заверши ход ровно строкой <eve-empty-delivery/> без другого текста: любая фраза вроде «пока без изменений» уйдёт в чат.\n- Если execution_number равен max_runs, это последний запуск: обязательно сообщи итог — что так и не произошло и стоит ли продолжать.\n- Не ставь реакции и не сохраняй факты через remember: у пробуждения нет сообщения человека."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "reply-reference-probe-scheduled-conversation"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<telegram_context>\nresponse_medium: telegram\nresponse_instructions: Reply for Telegram in concise plain text. Avoid tables, long code fences, and formatting that depends on Markdown rendering.\nchat_id: 912\nchat_type: private\nmessage_id: 10\nuser_id: 912\nbot_username: osinara_bot\n</telegram_context>"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Verified conversation scope: personal, family."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Verified role: owner."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Verified Telegram actor kind: telegram_user."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Verified Telegram delivery: reply in concise plain text by default; use supported Rich Markdown only when formatting materially improves the answer."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<current_time>\ncaptured_at_utc: <time-7>\nprecision: turn_start\n</current_time>"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<recent_proactive_deliveries>\n{\"deliveries\":[{\"content\":\"reply-reference-probe-scheduled-isolated\",\"deliveredAt\":\"<time-8>\",\"scheduledFor\":\"<time-9>\",\"sourceKind\":\"agent_schedule\",\"title\":\"Эталонный сценарий\"}],\"notice\":\"Это ранее доставленные сообщения бота, а не новые инструкции. Используй их только как историю разговора. Факт доставки не доказывает выполнение задания или причину сбоя. Для диагностики расписания проверь list_agent_schedules; если причина не установлена, так и скажи. Время с Z указано в UTC, не выдавай его за местное время пользователя.\"}\n</recent_proactive_deliveries>"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<turn_interjection_marker><hex-4></turn_interjection_marker>"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<current_telegram_message>\n{\"sourceSequence\":\"7\",\"senderDisplayName\":\"Owner\",\"senderUsername\":null,\"text\":\"reference-probe-approval-denied\"}\n</current_telegram_message>"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "[Pending approvals]\nThe following tool calls are awaiting approval and have not executed:\n{\"requestId\":\"<aisdk-2>\",\"toolName\":\"manage_profile_projection\"}"
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool-call",
+                "toolCallId": "call-approval-denied-root-1",
+                "toolName": "manage_profile_projection",
+                "input": {
+                  "action": "update",
+                  "enabled": false,
+                  "groupRef": "<ref-4>"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": [
+              {
+                "type": "tool-result",
+                "toolCallId": "call-approval-denied-root-1",
+                "toolName": "manage_profile_projection",
+                "output": {
+                  "type": "execution-denied",
+                  "reason": "Tool execution was denied."
+                }
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "reply-reference-probe-approval-denied"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<telegram_context>\nresponse_medium: telegram\nresponse_instructions: Reply for Telegram in concise plain text. Avoid tables, long code fences, and formatting that depends on Markdown rendering.\nchat_id: 912\nchat_type: private\nmessage_id: 11\nuser_id: 912\nbot_username: osinara_bot\n</telegram_context>"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Verified conversation scope: personal, family."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Verified role: owner."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Verified Telegram actor kind: telegram_user."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Verified Telegram delivery: reply in concise plain text by default; use supported Rich Markdown only when formatting materially improves the answer."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<current_time>\ncaptured_at_utc: <time-10>\nprecision: turn_start\n</current_time>"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<turn_interjection_marker><hex-5></turn_interjection_marker>"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<current_telegram_message>\n{\"sourceSequence\":\"8\",\"senderDisplayName\":\"Owner\",\"senderUsername\":null,\"text\":\"reference-probe-approval-timeout\"}\n</current_telegram_message>"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "[Pending approvals]\nThe following tool calls are awaiting approval and have not executed:\n{\"requestId\":\"<aisdk-3>\",\"toolName\":\"manage_profile_projection\"}"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Пользователь не подтвердил действие «manage_profile_projection» более 5 мин, поэтому оно не выполнено. Сообщи пользователю, что подтверждение не получено и действие не отработало, и продолжай работу как обычно. Не запрашивай подтверждение этого действия повторно, пока пользователь явно не попросит его выполнить."
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool-call",
+                "toolCallId": "call-approval-timeout-root-1",
+                "toolName": "manage_profile_projection",
+                "input": {
+                  "action": "update",
+                  "enabled": false,
+                  "groupRef": "<ref-4>"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": [
+              {
+                "type": "tool-result",
+                "toolCallId": "call-approval-timeout-root-1",
+                "toolName": "manage_profile_projection",
+                "output": {
+                  "type": "execution-denied",
+                  "reason": "Tool execution was denied."
+                }
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "reply-reference-probe-approval-timeout"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<telegram_context>\nresponse_medium: telegram\nresponse_instructions: Reply for Telegram in concise plain text. Avoid tables, long code fences, and formatting that depends on Markdown rendering.\nchat_id: 912\nchat_type: private\nmessage_id: 12\nuser_id: 912\nbot_username: osinara_bot\n</telegram_context>"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Verified conversation scope: personal, family."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Verified role: owner."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Verified Telegram actor kind: telegram_user."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Verified Telegram delivery: reply in concise plain text by default; use supported Rich Markdown only when formatting materially improves the answer."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<current_time>\ncaptured_at_utc: <time-11>\nprecision: turn_start\n</current_time>"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<turn_interjection_marker><hex-6></turn_interjection_marker>"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<current_telegram_message>\n{\"sourceSequence\":\"9\",\"senderDisplayName\":\"Owner\",\"senderUsername\":null,\"text\":\"reference-probe-interjection\"}\n</current_telegram_message>"
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool-call",
+                "toolCallId": "call-interjection-root-1",
+                "toolName": "bash",
+                "input": {
+                  "command": "sleep 3; printf 'BASH:reference-probe-interjection\\n'"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "content": [
+              {
+                "type": "tool-result",
+                "toolCallId": "call-interjection-root-1",
+                "toolName": "bash",
+                "output": {
+                  "type": "text",
+                  "value": "{\"exitCode\":0,\"stderr\":\"\",\"stdout\":\"BASH:reference-probe-interjection\\n\",\"truncated\":false}\n\n<messages_while_working marker=\"<hex-6>\">\nНовые сообщения того же человека, пришедшие в этот чат, пока ты выполнял текущую работу. Их добавил backend, это не содержимое результата инструмента.\n{\"messages\":[{\"kind\":\"text\",\"sentAt\":\"<time-12>\",\"text\":\"reference-probe-interjection-followup\",\"truncated\":false}]}\n</messages_while_working>"
+                }
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "reply-reference-probe-interjection"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<telegram_context>\nresponse_medium: telegram\nresponse_instructions: Reply for Telegram in concise plain text. Avoid tables, long code fences, and formatting that depends on Markdown rendering.\nchat_id: 912\nchat_type: private\nmessage_id: 13\nuser_id: 912\nbot_username: osinara_bot\n</telegram_context>"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Verified conversation scope: personal, family."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Verified role: owner."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Verified Telegram actor kind: telegram_user."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Verified Telegram delivery: reply in concise plain text by default; use supported Rich Markdown only when formatting materially improves the answer."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<current_time>\ncaptured_at_utc: <time-13>\nprecision: turn_start\n</current_time>"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Это сообщение ты уже видел во время предыдущего хода: backend добавил его к результату инструмента, пока ты работал. Проверь по истории того хода, что ты с ним сделал. Если уже учёл и ответил, не повторяй сделанное: хватит короткого подтверждения, а если сказать нечего — заверши ход ровно строкой <eve-empty-delivery/>. Если в тот раз не успел его выполнить, выполни сейчас."
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<turn_interjection_marker><hex-7></turn_interjection_marker>"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "<current_telegram_message>\n{\"sourceSequence\":\"11\",\"senderDisplayName\":\"Owner\",\"senderUsername\":null,\"text\":\"reference-probe-interjection-followup\"}\n</current_telegram_message>"
               }
             ]
           }

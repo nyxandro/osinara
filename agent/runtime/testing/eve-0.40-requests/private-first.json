@@ -432,7 +432,7 @@
             "attachmentId": {
               "type": "string",
               "format": "uuid",
-              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|<uuid-1>|<uuid-2>)$",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
               "description": "UUID вложения из <telegram_attachment_refs> или журнала; не передавай вместе с path или telegramMessageId"
             },
             "path": {
@@ -775,7 +775,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Для N выполнений передай maxRuns:N в create/update: это общий лимит успешных запусков, включая тихие без сообщения и completedRuns. Например, 10 раз раз в минуту: recurrence:{kind:'minutely',interval:1}, maxRuns:10. Без maxRuns повтор не ограничен; maxRuns:null снимает лимит. Лимит не сбрасывается паузой, resume или run_now. После достижения лимита расписание завершится автоматически без дополнительного запуска; не создавай файл-счётчик. Pause во время запуска возвращает pauseRequested:true: текущий запуск и его ответ завершаются, следующие отключены. Для остановки по условию используй pause, если управление расписанием разрешено в текущем чате. Для паузы из самого сценария используй schedule_id из scheduled_agent_run. Создать, изменить, приостановить, возобновить, запустить сейчас или удалить агентное расписание. Явной просьбы пользователя достаточно: выполняй без дополнительного подтверждения. Уточняй только недостающие или неоднозначные данные. Это не напоминание: schedule запускает агента по сценарию и отправляет итог. Существующее расписание сначала найди через list_agent_schedules. Create payload: {\"action\":\"create\",\"executionContext\":\"isolated\",\"title\":\"Дайджест: новые модели ИИ\",\"firstRunAt\":\"<time-1>\",\"timezone\":\"Europe/Moscow\",\"recurrence\":{\"kind\":\"daily\",\"interval\":1},\"scope\":\"personal\",\"scenarioPrompt\":\"Что собрать, источники, фильтры, формат итогового сообщения и когда не присылать пустой отчет\",\"userRequest\":\"ежедневно в 23:33 МСК получать сводку\"}. executionContext обязателен в create: conversation — пробуждение в этом разговоре со всей историей, чтобы продолжить текущую задачу, maxRuns тогда обязателен; isolated — отдельный запуск с пустым контекстом для самостоятельных отчётов. Update передаёт id и только реально изменяемые поля; firstRunAt, timezone, scope и executionContext в update не передавай. Pause, resume, run_now и delete передают только action и id. Не удаляй и не пересоздавай расписание для изменения времени, повторения, заголовка, сценария или исходной просьбы: используй update, сохраняя существующий id. Recurrence: once = {\"kind\":\"once\"}; повтор = {\"kind\":\"hourly\",\"interval\":1}. kind: minutely, hourly, daily, monthly, yearly означает каждые N минут, часов, дней, месяцев, лет. interval целый от 1 до 365; минимальный период 1 минута. Для недель передай {\"kind\":\"weekly\",\"interval\":1,\"daysOfWeek\":[1,2,3,4,5]}, ISO 1=понедельник ... 7=воскресенье. Как отсчитываются повторы, описано в правилах сценариев. firstRunAt и nextRunAt всегда ISO datetime с UTC offset. timezone всегда IANA, например Europe/Moscow. scope: personal только в личном чате, family только в зарегистрированной семейной группе."
+        "description": "Для N выполнений передай maxRuns:N в create/update: это общий лимит успешных запусков, включая тихие без сообщения и completedRuns. Например, 10 раз раз в минуту: recurrence:{kind:'minutely',interval:1}, maxRuns:10. Без maxRuns повтор не ограничен; maxRuns:null снимает лимит. Лимит не сбрасывается паузой, resume или run_now. После достижения лимита расписание завершится автоматически без дополнительного запуска; не создавай файл-счётчик. Pause во время запуска возвращает pauseRequested:true: текущий запуск и его ответ завершаются, следующие отключены. Для остановки по условию используй pause, если управление расписанием разрешено в текущем чате. Для паузы из самого сценария используй schedule_id из scheduled_agent_run. Создать, изменить, приостановить, возобновить, запустить сейчас или удалить агентное расписание. Явной просьбы пользователя достаточно: выполняй без дополнительного подтверждения. Уточняй только недостающие или неоднозначные данные. Это не напоминание: schedule запускает агента по сценарию и отправляет итог. Существующее расписание сначала найди через list_agent_schedules. Create payload: {\"action\":\"create\",\"executionContext\":\"isolated\",\"title\":\"Дайджест: новые модели ИИ\",\"firstRunAt\":\"2026-07-15T23:33:00+03:00\",\"timezone\":\"Europe/Moscow\",\"recurrence\":{\"kind\":\"daily\",\"interval\":1},\"scope\":\"personal\",\"scenarioPrompt\":\"Что собрать, источники, фильтры, формат итогового сообщения и когда не присылать пустой отчет\",\"userRequest\":\"ежедневно в 23:33 МСК получать сводку\"}. executionContext обязателен в create: conversation — пробуждение в этом разговоре со всей историей, чтобы продолжить текущую задачу, maxRuns тогда обязателен; isolated — отдельный запуск с пустым контекстом для самостоятельных отчётов. Update передаёт id и только реально изменяемые поля; firstRunAt, timezone, scope и executionContext в update не передавай. Pause, resume, run_now и delete передают только action и id. Не удаляй и не пересоздавай расписание для изменения времени, повторения, заголовка, сценария или исходной просьбы: используй update, сохраняя существующий id. Recurrence: once = {\"kind\":\"once\"}; повтор = {\"kind\":\"hourly\",\"interval\":1}. kind: minutely, hourly, daily, monthly, yearly означает каждые N минут, часов, дней, месяцев, лет. interval целый от 1 до 365; минимальный период 1 минута. Для недель передай {\"kind\":\"weekly\",\"interval\":1,\"daysOfWeek\":[1,2,3,4,5]}, ISO 1=понедельник ... 7=воскресенье. Как отсчитываются повторы, описано в правилах сценариев. firstRunAt и nextRunAt всегда ISO datetime с UTC offset. timezone всегда IANA, например Europe/Moscow. scope: personal только в личном чате, family только в зарегистрированной семейной группе."
       },
       {
         "type": "function",
@@ -1068,7 +1068,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Создать, изменить, приостановить, возобновить или удалить обычное напоминание с текстом уведомления. Явной просьбы пользователя достаточно: выполняй без дополнительного подтверждения. Уточняй только недостающие или неоднозначные данные. content отправляется как готовый текст без вызова модели. Не сохраняй в нём задание что-то придумать или выполнить позже; если просят сочинить сообщение, подготовь его до создания напоминания. Это не агентное расписание: если нужен будущий автономный запуск агента с исследованием или отчётом, используй manage_agent_schedule. Create payload: {\"action\":\"create\",\"content\":\"Позвонить врачу\",\"firstRunAt\":\"<time-2>\",\"timezone\":\"Europe/Moscow\",\"scope\":\"personal\",\"recurrence\":null}. Повторение: без повтора recurrence=null; повтор = {\"unit\":\"minutely\",\"interval\":5}. unit: minutely, hourly, daily, weekly, monthly, yearly; interval целый от 1 до 365. Минимум 1 минута. Минуты и часы отсчитываются как длительность, остальные периоды сохраняют местное календарное время. Отсутствующая дата переносится на последний день месяца без потери исходной даты для следующих повторов. Проверка времени минутная, пропущенные повторы не догоняются. Убрать повторение: {\"action\":\"update\",\"id\":\"<id из list_reminders>\",\"recurrence\":null}. Не удаляй и не пересоздавай напоминание для смены повторения. Update передаёт id и только изменяемые content, firstRunAt или recurrence. Pause/resume/delete передают только action и id. firstRunAt всегда ISO datetime с UTC offset, timezone всегда IANA. Перед update/pause/resume/delete сначала найди id через list_reminders."
+        "description": "Создать, изменить, приостановить, возобновить или удалить обычное напоминание с текстом уведомления. Явной просьбы пользователя достаточно: выполняй без дополнительного подтверждения. Уточняй только недостающие или неоднозначные данные. content отправляется как готовый текст без вызова модели. Не сохраняй в нём задание что-то придумать или выполнить позже; если просят сочинить сообщение, подготовь его до создания напоминания. Это не агентное расписание: если нужен будущий автономный запуск агента с исследованием или отчётом, используй manage_agent_schedule. Create payload: {\"action\":\"create\",\"content\":\"Позвонить врачу\",\"firstRunAt\":\"2026-08-01T10:00:00+03:00\",\"timezone\":\"Europe/Moscow\",\"scope\":\"personal\",\"recurrence\":null}. Повторение: без повтора recurrence=null; повтор = {\"unit\":\"minutely\",\"interval\":5}. unit: minutely, hourly, daily, weekly, monthly, yearly; interval целый от 1 до 365. Минимум 1 минута. Минуты и часы отсчитываются как длительность, остальные периоды сохраняют местное календарное время. Отсутствующая дата переносится на последний день месяца без потери исходной даты для следующих повторов. Проверка времени минутная, пропущенные повторы не догоняются. Убрать повторение: {\"action\":\"update\",\"id\":\"<id из list_reminders>\",\"recurrence\":null}. Не удаляй и не пересоздавай напоминание для смены повторения. Update передаёт id и только изменяемые content, firstRunAt или recurrence. Pause/resume/delete передают только action и id. firstRunAt всегда ISO datetime с UTC offset, timezone всегда IANA. Перед update/pause/resume/delete сначала найди id через list_reminders."
       },
       {
         "type": "function",
@@ -2419,7 +2419,7 @@
             "attachmentId": {
               "type": "string",
               "format": "uuid",
-              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|<uuid-1>|<uuid-2>)$",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
               "description": "UUID вложения из <telegram_attachment_refs> или журнала; не передавай вместе с path или telegramMessageId"
             },
             "path": {
@@ -2740,7 +2740,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Для N выполнений передай maxRuns:N в create/update: это общий лимит успешных запусков, включая тихие без сообщения и completedRuns. Например, 10 раз раз в минуту: recurrence:{kind:'minutely',interval:1}, maxRuns:10. Без maxRuns повтор не ограничен; maxRuns:null снимает лимит. Лимит не сбрасывается паузой, resume или run_now. После достижения лимита расписание завершится автоматически без дополнительного запуска; не создавай файл-счётчик. Pause во время запуска возвращает pauseRequested:true: текущий запуск и его ответ завершаются, следующие отключены. Для остановки по условию используй pause, если управление расписанием разрешено в текущем чате. Для паузы из самого сценария используй schedule_id из scheduled_agent_run. Создать, изменить, приостановить, возобновить, запустить сейчас или удалить агентное расписание. Явной просьбы пользователя достаточно: выполняй без дополнительного подтверждения. Уточняй только недостающие или неоднозначные данные. Это не напоминание: schedule запускает агента по сценарию и отправляет итог. Существующее расписание сначала найди через list_agent_schedules. Create payload: {\"action\":\"create\",\"executionContext\":\"isolated\",\"title\":\"Дайджест: новые модели ИИ\",\"firstRunAt\":\"<time-1>\",\"timezone\":\"Europe/Moscow\",\"recurrence\":{\"kind\":\"daily\",\"interval\":1},\"scope\":\"personal\",\"scenarioPrompt\":\"Что собрать, источники, фильтры, формат итогового сообщения и когда не присылать пустой отчет\",\"userRequest\":\"ежедневно в 23:33 МСК получать сводку\"}. executionContext обязателен в create: conversation — пробуждение в этом разговоре со всей историей, чтобы продолжить текущую задачу, maxRuns тогда обязателен; isolated — отдельный запуск с пустым контекстом для самостоятельных отчётов. Update передаёт id и только реально изменяемые поля; firstRunAt, timezone, scope и executionContext в update не передавай. Pause, resume, run_now и delete передают только action и id. Не удаляй и не пересоздавай расписание для изменения времени, повторения, заголовка, сценария или исходной просьбы: используй update, сохраняя существующий id. Recurrence: once = {\"kind\":\"once\"}; повтор = {\"kind\":\"hourly\",\"interval\":1}. kind: minutely, hourly, daily, monthly, yearly означает каждые N минут, часов, дней, месяцев, лет. interval целый от 1 до 365; минимальный период 1 минута. Для недель передай {\"kind\":\"weekly\",\"interval\":1,\"daysOfWeek\":[1,2,3,4,5]}, ISO 1=понедельник ... 7=воскресенье. Как отсчитываются повторы, описано в правилах сценариев. firstRunAt и nextRunAt всегда ISO datetime с UTC offset. timezone всегда IANA, например Europe/Moscow. scope: personal только в личном чате, family только в зарегистрированной семейной группе."
+        "description": "Для N выполнений передай maxRuns:N в create/update: это общий лимит успешных запусков, включая тихие без сообщения и completedRuns. Например, 10 раз раз в минуту: recurrence:{kind:'minutely',interval:1}, maxRuns:10. Без maxRuns повтор не ограничен; maxRuns:null снимает лимит. Лимит не сбрасывается паузой, resume или run_now. После достижения лимита расписание завершится автоматически без дополнительного запуска; не создавай файл-счётчик. Pause во время запуска возвращает pauseRequested:true: текущий запуск и его ответ завершаются, следующие отключены. Для остановки по условию используй pause, если управление расписанием разрешено в текущем чате. Для паузы из самого сценария используй schedule_id из scheduled_agent_run. Создать, изменить, приостановить, возобновить, запустить сейчас или удалить агентное расписание. Явной просьбы пользователя достаточно: выполняй без дополнительного подтверждения. Уточняй только недостающие или неоднозначные данные. Это не напоминание: schedule запускает агента по сценарию и отправляет итог. Существующее расписание сначала найди через list_agent_schedules. Create payload: {\"action\":\"create\",\"executionContext\":\"isolated\",\"title\":\"Дайджест: новые модели ИИ\",\"firstRunAt\":\"2026-07-15T23:33:00+03:00\",\"timezone\":\"Europe/Moscow\",\"recurrence\":{\"kind\":\"daily\",\"interval\":1},\"scope\":\"personal\",\"scenarioPrompt\":\"Что собрать, источники, фильтры, формат итогового сообщения и когда не присылать пустой отчет\",\"userRequest\":\"ежедневно в 23:33 МСК получать сводку\"}. executionContext обязателен в create: conversation — пробуждение в этом разговоре со всей историей, чтобы продолжить текущую задачу, maxRuns тогда обязателен; isolated — отдельный запуск с пустым контекстом для самостоятельных отчётов. Update передаёт id и только реально изменяемые поля; firstRunAt, timezone, scope и executionContext в update не передавай. Pause, resume, run_now и delete передают только action и id. Не удаляй и не пересоздавай расписание для изменения времени, повторения, заголовка, сценария или исходной просьбы: используй update, сохраняя существующий id. Recurrence: once = {\"kind\":\"once\"}; повтор = {\"kind\":\"hourly\",\"interval\":1}. kind: minutely, hourly, daily, monthly, yearly означает каждые N минут, часов, дней, месяцев, лет. interval целый от 1 до 365; минимальный период 1 минута. Для недель передай {\"kind\":\"weekly\",\"interval\":1,\"daysOfWeek\":[1,2,3,4,5]}, ISO 1=понедельник ... 7=воскресенье. Как отсчитываются повторы, описано в правилах сценариев. firstRunAt и nextRunAt всегда ISO datetime с UTC offset. timezone всегда IANA, например Europe/Moscow. scope: personal только в личном чате, family только в зарегистрированной семейной группе."
       },
       {
         "type": "function",
@@ -3657,7 +3657,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "<current_time>\ncaptured_at_utc: <time-3>\nprecision: turn_start\n</current_time>"
+                "text": "<current_time>\ncaptured_at_utc: <time-1>\nprecision: turn_start\n</current_time>"
               }
             ]
           },
@@ -3762,7 +3762,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "<current_time>\ncaptured_at_utc: <time-3>\nprecision: turn_start\n</current_time>"
+                "text": "<current_time>\ncaptured_at_utc: <time-1>\nprecision: turn_start\n</current_time>"
               }
             ]
           },
@@ -4010,7 +4010,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "<current_time>\ncaptured_at_utc: <time-3>\nprecision: turn_start\n</current_time>"
+                "text": "<current_time>\ncaptured_at_utc: <time-1>\nprecision: turn_start\n</current_time>"
               }
             ]
           },
@@ -4169,7 +4169,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "<current_time>\ncaptured_at_utc: <time-3>\nprecision: turn_start\n</current_time>"
+                "text": "<current_time>\ncaptured_at_utc: <time-1>\nprecision: turn_start\n</current_time>"
               }
             ]
           },
@@ -4360,7 +4360,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "<current_time>\ncaptured_at_utc: <time-3>\nprecision: turn_start\n</current_time>"
+                "text": "<current_time>\ncaptured_at_utc: <time-1>\nprecision: turn_start\n</current_time>"
               }
             ]
           },
@@ -4578,7 +4578,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "<current_time>\ncaptured_at_utc: <time-3>\nprecision: turn_start\n</current_time>"
+                "text": "<current_time>\ncaptured_at_utc: <time-1>\nprecision: turn_start\n</current_time>"
               }
             ]
           },
@@ -4747,7 +4747,7 @@
                       "authorStatus": "current_member",
                       "confirmation": "user_confirmed",
                       "content": "Владелец проверяет эталонный ход reference-probe-private-first",
-                      "createdAt": "<time-4>",
+                      "createdAt": "<time-2>",
                       "kind": "fact",
                       "memoryRef": "<ref-3>",
                       "scope": "personal",

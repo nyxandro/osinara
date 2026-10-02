@@ -5,7 +5,7 @@
  * - `defineTool`: types a tool definition from its input schema; the runtime reads it as is.
  * - `ToolDefinition`, `ToolContext`: what a tool declares and what its `execute` receives.
  * - `ToolModelOutput`: what the model sees instead of the full result, when a tool projects it.
- * - `ApprovalContext`, `ApprovalStatus`, `ApprovalPolicy`: the per-call approval decision.
+ * - `ApprovalContext`, `ApprovalStatus`: what an approval policy sees and decides per call.
  *
  * Derived from eve 0.40.0 `public/definitions/tool.ts`, `public/definitions/approval.ts` and
  * `shared/tool-definition.ts` (Apache-2.0, see NOTICE-eve). Changes:
@@ -68,10 +68,6 @@ export type ApprovalStatus =
   | { readonly type: "approved"; readonly reason?: string }
   | { readonly type: "denied"; readonly reason?: string }
   | { readonly type: "user-approval"; readonly reason?: never };
-
-export type ApprovalPolicy<TInput = Record<string, unknown>> = (
-  ctx: ApprovalContext<TInput>,
-) => ApprovalStatus | Promise<ApprovalStatus>;
 
 export interface ToolDefinition<TInput = unknown, TOutput = unknown> {
   readonly description: string;

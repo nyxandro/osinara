@@ -13,6 +13,8 @@
 export const REFERENCE_MARKER_PREFIX = "reference-probe-";
 export const REFERENCE_OWNER_TELEGRAM_ID = 912;
 export const REFERENCE_PEER_BOT_TELEGRAM_ID = 911;
+/** A person outside the family who takes part in the external group. */
+export const REFERENCE_STRANGER_TELEGRAM_ID = 914;
 export const REFERENCE_FAMILY_CHAT_ID = -910_000_102;
 export const REFERENCE_EXTERNAL_CHAT_ID = -910_000_101;
 export const REFERENCE_CHAT_IDS: ReadonlySet<number> = new Set([
@@ -30,6 +32,12 @@ export const REFERENCE_SCENARIOS = [
   "scheduled-isolated",
   "scheduled-conversation",
   "memory-review",
+  "external-stranger",
+  "approval-denied",
+  "approval-timeout",
+  "interjection",
+  "interjection-followup",
+  "empty-reply",
 ] as const;
 export type ReferenceScenario = (typeof REFERENCE_SCENARIOS)[number];
 

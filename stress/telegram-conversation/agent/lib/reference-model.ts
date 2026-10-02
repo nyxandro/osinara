@@ -20,6 +20,12 @@ import {
 } from "./reference-scenarios.js";
 
 const REVIEW_BATCH_TAG = "<untrusted_memory_review_batch>";
+// Eve's recovery notice after an empty answer (eve 0.40.0 harness/tool-loop.ts).
+const EMPTY_REPLY_NOTICE = "Your previous reply was empty and was not delivered.";
+// Scenarios whose only tool call a person refuses or lets expire; the denial is their content.
+const DENIED_SCENARIOS: ReadonlySet<ReferenceScenario> = new Set(["approval-denied", "approval-timeout"]);
+// Long enough for the next message to be queued while the command still runs.
+const INTERJECTION_COMMAND_SECONDS = 3;
 
 type ScriptStep = (request: MockModelRequest) => MockModelToolCall | Promise<MockModelToolCall>;
 
@@ -95,9 +101,19 @@ function rootScript(scenario: ReferenceScenario): readonly ScriptStep[] {
         sourceSequence: firstReviewSourceSequence(request),
         subject: { kind: "none" },
       } })];
+    case "approval-denied":
+    case "approval-timeout":
+      return [async () => ({ name: "manage_profile_projection", input: {
+        action: "update", enabled: false, groupRef: await externalGroupRef(),
+      } })];
+    case "interjection":
+      return [() => ({ name: "bash", input: { command: `sleep ${INTERJECTION_COMMAND_SECONDS}; printf 'BASH:${marker}\\n'` } })];
     case "private-second":
     case "external-bot":
     case "scheduled-conversation":
+    case "external-stranger":
+    case "interjection-followup":
+    case "empty-reply":
       return [];
   }
 }
@@ -109,8 +125,11 @@ export async function respondToReferenceRequest(
   const callIdPrefix = `call-${identity.scenario}-${identity.child ? "child" : "root"}-`;
   const own = request.toolResults.filter((result) => result.id.startsWith(callIdPrefix));
   const failed = own.find((result) => result.isError);
-  if (failed) throw new Error(`TEST_REFERENCE_TOOL_FAILED: ${JSON.stringify(failed)}`);
+  if (failed && !DENIED_SCENARIOS.has(identity.scenario)) throw new Error(`TEST_REFERENCE_TOOL_FAILED: ${JSON.stringify(failed)}`);
   const marker = referenceMarker(identity.scenario);
+  if (identity.scenario === "empty-reply" && !request.messages.some((message) => message.text.includes(EMPTY_REPLY_NOTICE))) {
+    return "";
+  }
   const script = identity.child ? [bash(marker)] : rootScript(identity.scenario);
   const step = script[own.length];
   if (step === undefined) return identity.child ? `child-${marker}` : `reply-${marker}`;

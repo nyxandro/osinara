@@ -3,10 +3,11 @@
  *
  * Drives every typical turn kind through the real webhook, queue, channel, tool surface,
  * instructions and schedules: a private chat (skill, subagent, Bash, workspace, memory), a second
- * private turn, a family group, an external group from a human and from a bot, a confirmed
- * approval, a question answered with a button, an isolated and an in-conversation scheduled run
- * and a silent background memory review of the external group. Every model request of these turns is written, normalized, to
- * `agent/runtime/testing/eve-0.40-requests/<scenario>.json`.
+ * private turn, a family group, an external group from the owner, from a bot and from a person
+ * outside the family, a confirmed, a refused and an expired approval, a question answered with a
+ * button, an isolated and an in-conversation scheduled run, a silent background memory review, a
+ * message shown to a running turn and recovery from an empty answer. Every model request of these
+ * turns is written, normalized, to `agent/runtime/testing/eve-0.40-requests/<scenario>.json`.
  */
 import assert from "node:assert/strict";
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
@@ -28,6 +29,7 @@ import {
   REFERENCE_OWNER_TELEGRAM_ID,
   REFERENCE_PEER_BOT_TELEGRAM_ID,
   REFERENCE_SCENARIOS,
+  REFERENCE_STRANGER_TELEGRAM_ID,
   type ReferenceScenario,
   referenceMarker,
 } from "../agent/lib/reference-scenarios.js";
@@ -40,6 +42,16 @@ const POLL_INTERVAL_MILLISECONDS = 100;
 const POLL_ATTEMPTS = 600;
 const OWNER = { id: REFERENCE_OWNER_TELEGRAM_ID, first_name: "Owner", is_bot: false };
 const PEER_BOT = { id: REFERENCE_PEER_BOT_TELEGRAM_ID, first_name: "Peer bot", is_bot: true, username: "peer_bot" };
+const STRANGER = { id: REFERENCE_STRANGER_TELEGRAM_ID, first_name: "Stranger", is_bot: false, username: "stranger" };
+const APPROVAL_TIMEOUT_ROUTE = "/internal/hitl-approval-timeout";
+const APPROVAL_TIMEOUT_TOKEN_HEADER = "x-osinara-internal-token";
+// One model call per scripted step plus the answer; a subagent and Eve's empty-reply recovery add theirs.
+const EXPECTED_CALLS: Readonly<Record<ReferenceScenario, number>> = {
+  "private-first": 8, "private-second": 1, "family-group": 2, "external-human": 2, "external-bot": 1,
+  approval: 2, question: 2, "scheduled-isolated": 2, "scheduled-conversation": 1, "memory-review": 2,
+  "external-stranger": 1, "approval-denied": 2, "approval-timeout": 2, interjection: 2,
+  "interjection-followup": 1, "empty-reply": 2,
+};
 
 interface Delivery {
   id: number;
@@ -106,9 +118,10 @@ export default defineEval({
           ORDER BY id DESC LIMIT 1`, [String(chatId)],
       )).rows[0]);
     }
-    function press(chatId: number, prompt: Delivery, buttonText: string): Promise<number> {
-      const button = prompt.body.reply_markup?.inline_keyboard?.flat().find((candidate) => candidate.text === buttonText);
-      assert.ok(button, `Button ${buttonText} was not delivered`);
+    function press(chatId: number, prompt: Delivery, buttonText: string | { not: string }): Promise<number> {
+      const button = prompt.body.reply_markup?.inline_keyboard?.flat().find((candidate) =>
+        typeof buttonText === "string" ? candidate.text === buttonText : candidate.text !== buttonText.not);
+      assert.ok(button, `Button ${JSON.stringify(buttonText)} was not delivered`);
       return post({ callback_query: {
         id: `reference-${prompt.id}`, chat_instance: `reference-${chatId}`, data: button.callback_data, from: OWNER,
         message: { message_id: prompt.id, date: Math.floor(Date.now() / 1_000), chat: chat(chatId) },
@@ -238,6 +251,36 @@ export default defineEval({
       });
       t.log("verified silent memory review");
 
+      await waitForIngress(await sendMessage(REFERENCE_EXTERNAL_CHAT_ID, `@osinara_bot ${referenceMarker("external-stranger")}`, { from: STRANGER }));
+      await waitForReply("external-stranger");
+      await waitForIngress(await sendMessage(REFERENCE_OWNER_TELEGRAM_ID, referenceMarker("approval-denied")));
+      await waitForIngress(await press(REFERENCE_OWNER_TELEGRAM_ID, await latestKeyboard(REFERENCE_OWNER_TELEGRAM_ID), { not: "Отключить перенос" }));
+      await waitForReply("approval-denied");
+      assert.equal((await db.query<{ enabled: boolean }>(
+        "SELECT enabled FROM external_profile_projection_policies WHERE group_id = $1", [externalGroup.id],
+      )).rows[0]?.enabled, true, "A refused approval must not change the policy");
+      await waitForIngress(await sendMessage(REFERENCE_OWNER_TELEGRAM_ID, referenceMarker("approval-timeout")));
+      await latestKeyboard(REFERENCE_OWNER_TELEGRAM_ID);
+      // Age the unanswered prompt past the timeout, then run the sweep the minute schedule would run.
+      await db.query("UPDATE telegram_hitl_approvals SET created_at = created_at - interval '1 hour' WHERE consumed_at IS NULL");
+      const swept = await t.target.fetch(APPROVAL_TIMEOUT_ROUTE, { method: "POST", headers: { [APPROVAL_TIMEOUT_TOKEN_HEADER]: "conversation-test-secret" } });
+      assert.equal(swept.status, 200);
+      await waitForReply("approval-timeout");
+      t.log("verified external stranger, refused and expired approvals");
+
+      const interjectionUpdate = await sendMessage(REFERENCE_OWNER_TELEGRAM_ID, referenceMarker("interjection"));
+      // The next message is sent while the turn's command still runs, so the turn sees it in the result.
+      await waitFor("interjection command", async () => (await db.query(
+        "SELECT 1 FROM telegram_conversation_test_model_requests WHERE scenario = 'interjection'",
+      )).rowCount === 1 ? true : undefined);
+      await sendMessage(REFERENCE_OWNER_TELEGRAM_ID, referenceMarker("interjection-followup"));
+      await waitForIngress(interjectionUpdate);
+      await waitForReply("interjection");
+      await waitForReply("interjection-followup");
+      await waitForIngress(await sendMessage(REFERENCE_OWNER_TELEGRAM_ID, referenceMarker("empty-reply")));
+      await waitForReply("empty-reply");
+      t.log("verified a message shown to a running turn and recovery from an empty answer");
+
       const rows = (await db.query<{ call_kind: ReferenceCall["kind"]; child: boolean; request: string; scenario: ReferenceScenario }>(
         "SELECT scenario, child, call_kind, request::text AS request FROM telegram_conversation_test_model_requests ORDER BY id",
       )).rows;
@@ -249,7 +292,7 @@ export default defineEval({
         const calls: ReferenceCall[] = rows.filter((row) => row.scenario === scenario).map((row) => ({
           agent: row.child ? "child" : "root", kind: row.call_kind, request: JSON.parse(row.request) as unknown,
         }));
-        assert.ok(calls.length > 0, `No model request recorded for ${scenario}`);
+        assert.equal(calls.length, EXPECTED_CALLS[scenario], `Model requests recorded for ${scenario}`);
         const normalized = normalizeReferenceCalls(calls);
         const file = JSON.stringify(packReferenceFile(scenario, normalized), null, 2);
         assert.equal(JSON.stringify(unpackReferenceFile(JSON.parse(file))), JSON.stringify(normalized),
