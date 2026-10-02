@@ -22,11 +22,12 @@ export class AppError extends Error {
   readonly details?: Readonly<Record<string, string | number>>;
 
   constructor(code: string, message: string, options?: {
+    readonly cause?: unknown;
     readonly details?: Readonly<Record<string, string | number>>;
     readonly isExpectedRefusal?: boolean;
     readonly isRetryable?: boolean;
   }) {
-    super(`${code}: ${message}`);
+    super(`${code}: ${message}`, options?.cause === undefined ? undefined : { cause: options.cause });
     this.name = "AppError";
     this.code = code;
     this.isRetryable = options?.isRetryable === true;

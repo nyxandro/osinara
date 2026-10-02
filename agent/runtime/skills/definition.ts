@@ -4,6 +4,7 @@
  * Exports:
  * - `SkillDefinition`, `SkillFileContent`: a skill's description, `SKILL.md` body and files.
  * - `defineSkill`: types a skill definition; extra keys are a compile error.
+ * - `AnnouncedSkill`: one entry of the skill list the model was last told about.
  *
  * Derived from eve 0.40.0 `public/definitions/skill.ts`, `shared/skill-definition.ts` and
  * `public/definitions/exact.ts` (Apache-2.0, see NOTICE-eve). Changes: plain objects without
@@ -17,6 +18,11 @@ export interface SkillDefinition {
   readonly markdown: string;
   readonly metadata?: Record<string, string>;
   readonly files?: Readonly<Record<string, SkillFileContent>>;
+}
+
+export interface AnnouncedSkill {
+  readonly description: string;
+  readonly name: string;
 }
 
 type ExactDefinition<TInput, TShape> = TInput & {
