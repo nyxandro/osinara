@@ -101,7 +101,7 @@ export function testAgent(tools: Readonly<Record<string, ToolDefinition<any, any
     compactionThresholdPercent: 0.75,
     instructionResolvers: [],
     maxModelSteps: 32,
-    resolveSkills: async () => ({ skillRoot: null, skills: [] }),
+    resolveSkills: async () => ({}),
     resolveTools: async () => tools,
     selectModel: ({ sessionId }) => ({
       contextWindowTokens: 200_000,
@@ -136,7 +136,7 @@ export async function newTestSession(history: readonly ModelMessage[] = []): Pro
   const { applicationSessionId } = await createApplicationSession(sessionId);
   await createSessionHistory(database(), {
     announcedSkills: null, applicationSessionId, compaction: { inputTokens: null, promptMessageCount: null },
-    history, parentSessionId: null, sessionId, source: "runtime", todo: null,
+    history, parentSessionId: null, sandbox: null, sessionId, source: "runtime", todo: null,
   });
   return sessionId;
 }

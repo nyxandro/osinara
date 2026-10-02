@@ -14,18 +14,13 @@ import type { SharedV4ProviderOptions } from "@ai-sdk/provider";
 
 import type { DynamicResolveContext } from "./context.js";
 import type { InstructionResolver } from "./prompt/turn-instructions.js";
-import type { AvailableSkillDescription } from "./prompt/skills-section.js";
+import type { SkillDefinition } from "./skills/definition.js";
 import type { ToolDefinition } from "./tool.js";
 
 export interface StepModelSelection {
   readonly contextWindowTokens: number;
   readonly model: LanguageModel;
   readonly providerOptions: SharedV4ProviderOptions | undefined;
-}
-
-export interface TurnSkills {
-  readonly skillRoot: string | null;
-  readonly skills: readonly AvailableSkillDescription[];
 }
 
 export interface RuntimeAgent {
@@ -39,7 +34,8 @@ export interface RuntimeAgent {
   readonly maxModelSteps: number;
   /** Authored tools placed right after the built-ins, before `agent` and the surface. */
   readonly staticToolNames: readonly string[];
-  resolveSkills(context: DynamicResolveContext): Promise<TurnSkills>;
+  /** The turn's skills by name; the runtime syncs their packages into the sandbox and lists them. */
+  resolveSkills(context: DynamicResolveContext): Promise<Readonly<Record<string, SkillDefinition>>>;
   /** The whole tool surface of one step; it is rebuilt before every model call. */
   resolveTools(context: DynamicResolveContext): Promise<Readonly<Record<string, ToolDefinition<any, any>>>>;
   selectModel(input: { readonly sessionId: string; readonly stepIndex: number }): StepModelSelection;

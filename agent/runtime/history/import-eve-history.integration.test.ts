@@ -51,10 +51,18 @@ async function insertTurn(sessionId: string, input: {
   return runId;
 }
 
+const SANDBOX_METADATA = {
+  access: "trusted",
+  mounts: [{ mountPoint: "personal", workspaceId: "11111111-1111-4111-8111-111111111111" }],
+  sandboxSessionId: "thread_0123456789abcdef",
+  version: 3,
+};
+
 function snapshot(sessionId: string, history: unknown[]) {
   return storeLikeWorkflow(turnStepOutput(sessionId, {
     history,
     compaction: { lastKnownInputTokens: 1200, lastKnownPromptMessageCount: history.length },
+    sandboxState: { initialized: true, session: { backendName: "osinara-scoped-runner-v3", metadata: SANDBOX_METADATA, sessionKey: "k" } },
   }, { "eve.dynamicSkillManifest": { scoped: [{ name: "pohuy", description: "Режим мата" }] } }), "zstd");
 }
 
@@ -116,6 +124,9 @@ async function inTransaction<T>(work: (client: PoolClient) => Promise<T>) {
       announcedSkills: [{ name: "pohuy", description: "Режим мата" }],
       compaction: { inputTokens: 1200, promptMessageCount: 4 },
     });
+    // The session keeps its sandbox: the same container identity and the same mounted folders.
+    expect((await database().query("SELECT sandbox_state FROM agent_session_state WHERE session_id = $1", [SESSION])).rows[0].sandbox_state)
+      .toEqual(SANDBOX_METADATA);
     expect((await loadSessionHistory(database(), IDLE_SESSION)).messages).toEqual([]);
     expect((await database().query("SELECT 1 FROM agent_session_state WHERE session_id = $1", [RETIRED_SESSION])).rowCount).toBe(0);
   });

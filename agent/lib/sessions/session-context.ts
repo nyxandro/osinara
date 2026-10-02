@@ -26,7 +26,7 @@ export function applicationSessionId(ctx: Pick<SessionContext, "session">): stri
   return id;
 }
 
-export function sandboxSessionId(ctx: Pick<SessionContext, "session">): string {
+export function sandboxSessionId(ctx: { readonly session: Pick<SessionContext["session"], "auth"> }): string {
   const id = ctx.session.auth.current?.attributes.sandboxSessionId;
   if (typeof id !== "string") {
     throw new AppError(

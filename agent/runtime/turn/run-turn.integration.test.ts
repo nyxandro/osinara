@@ -25,6 +25,18 @@ async function history(sessionId: string) {
   return (await loadSessionHistory(database(), sessionId)).messages;
 }
 
+// A sandbox whose home is "/", as on the reference bench, that records skill syncs.
+function skillSandbox() {
+  const syncs: Array<{ packages: Array<{ files: string[]; name: string }>; removed: string[] }> = [];
+  const sandbox = {
+    async run() { return { exitCode: 0, stderr: "", stdout: "/\n" }; },
+    async syncSkills(packages: ReadonlyArray<{ files: ReadonlyArray<{ relativePath: string }>; name: string }>, removed: readonly string[]) {
+      syncs.push({ packages: packages.map((pkg) => ({ files: pkg.files.map((file) => file.relativePath), name: pkg.name })), removed: [...removed] });
+    },
+  } as never;
+  return { sandbox, syncs };
+}
+
 // A process that dies mid-turn: the promise never settles and the turn keeps its runner.
 const never = <T>() => new Promise<T>(() => {});
 
@@ -283,18 +295,42 @@ async function releaseRunner(turnId: string) {
     const resolve = vi.fn((_context: unknown) => ({ content: "<osinara_turn_memory>…</osinara_turn_memory>", role: "system" as const }));
     const agent = testAgent({ note: noteTool() }, {
       instructionResolvers: [{ name: "memory", resolve }, { name: "reactions", resolve: () => ({ content: "<reaction_set/>", role: "user" }) }],
-      resolveSkills: async () => ({ skillRoot: "/.agents/skills", skills: [{ description: "Режим", name: "pohuy" }] }),
+      resolveSkills: async () => ({ pohuy: { description: "Режим", markdown: "---\nname: pohuy\n---\nтекст" } }),
     });
     const turn = await startMessageTurn(sessionId, "привет");
 
-    await runTurn(testRuntime({ agent, callModel: model.callModel, observer: recordingObserver().observer }), turn.id, RUN);
+    await runTurn({ ...testRuntime({ agent, callModel: model.callModel, observer: recordingObserver().observer }), sandbox: async () => skillSandbox().sandbox }, turn.id, RUN);
 
     expect(resolve).toHaveBeenCalledTimes(1);
     expect(resolve.mock.calls[0]![0]).toMatchObject({ messages: [{ role: "user", content: "привет" }], turnId: turn.id });
     for (const request of model.requests) {
       expect(request.system).toMatch(/^Instructions \(instructions\)\nправила\n\n<osinara_turn_memory>…<\/osinara_turn_memory>\n\nAvailable skills\n/);
+      expect(request.system).toContain("- pohuy: Режим (path: /.agents/skills/pohuy/SKILL.md)");
     }
     expect((await history(sessionId)).slice(0, 2)).toEqual([{ role: "user", content: "<reaction_set/>" }, { role: "user", content: "привет" }]);
+  });
+
+  it("syncs the turn's skills into the sandbox in one batch and removes the ones no longer granted", async () => {
+    const sessionId = await newTestSession();
+    const { sandbox, syncs } = skillSandbox();
+    let granted: Record<string, { description: string; files?: Record<string, string>; markdown: string }> = {
+      digest: { description: "Сводка", files: { "references/b.md": "b", "references/a.md": "a" }, markdown: "# digest" },
+    };
+    const agent = testAgent({}, { resolveSkills: async () => granted });
+    const run = async (text: string) => {
+      const turn = await startMessageTurn(sessionId, text);
+      await runTurn({ ...testRuntime({ agent, callModel: scriptedModel(reply("ok")).callModel, observer: recordingObserver().observer }), sandbox: async () => sandbox }, turn.id, RUN);
+    };
+
+    await run("первый");
+    granted = {};
+    await run("второй");
+    await run("третий");
+
+    expect(syncs).toEqual([
+      { packages: [{ files: ["SKILL.md", "references/a.md", "references/b.md"], name: "digest" }], removed: [] },
+      { packages: [], removed: ["digest"] },
+    ]);
   });
 
   it("compacts a long history before the step and keeps the turn input once", async () => {

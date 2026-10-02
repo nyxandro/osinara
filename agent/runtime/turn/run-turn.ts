@@ -47,6 +47,7 @@ import { assistantStepText, MODEL_INACTIVITY_TIMEOUT, type StepModelCall, type S
 import { modelCallFailure, TurnCancelledError } from "./model-errors.js";
 import { orderStepTools, toModelToolSet } from "./model-tools.js";
 import { executeStepCalls, planStepCalls, type CallJournal } from "./step-calls.js";
+import { prepareTurnSkills } from "./turn-skills.js";
 import { isEmptyDelivery, stepHistoryMessages, stepTextEvents } from "./step-history.js";
 import type { ToolResultOutput } from "./tool-calls.js";
 import type { PreparedTurn, ToolCallRecord, TurnRecord } from "./turn-types.js";
@@ -166,10 +167,17 @@ async function prepareTurn(runtime: TurnRuntime, turn: TurnRecord): Promise<Turn
     session: { auth: turn.auth, id: turn.sessionId },
     turnId: turn.id,
   };
-  const [instructions, skills] = await Promise.all([
+  const [instructions, definitions] = await Promise.all([
     resolveTurnInstructions(runtime.agent.instructionResolvers, context),
     runtime.agent.resolveSkills(context),
   ]);
+  const skills = await prepareTurnSkills({
+    database: runtime.database,
+    definitions,
+    previous: history.announcedSkills,
+    sandbox: () => runtime.sandbox({ auth: turn.auth, id: turn.sessionId }),
+    sessionId: turn.sessionId,
+  });
   const prepared: PreparedTurn = {
     instructions: instructions.system, skillRoot: skills.skillRoot, skills: skills.skills, userInstructions: instructions.user,
   };

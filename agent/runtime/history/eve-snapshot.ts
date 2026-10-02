@@ -31,6 +31,8 @@ export interface EveSessionSnapshot {
   readonly announcedSkills: readonly AnnouncedSkill[] | null;
   readonly compaction: EveCompactionCounters | null;
   readonly history: ModelMessage[];
+  /** The sandbox runner metadata Eve kept for the session; the runner backend validates it on use. */
+  readonly sandbox: Record<string, unknown> | null;
   readonly sessionId: string;
   readonly todo: Record<string, unknown> | null;
 }
@@ -39,6 +41,8 @@ const SNAPSHOT_VERSION = 1;
 const PREFIX_LENGTH = 4;
 // Eve keys the durable skill manifest by resolver slug; the application has exactly one.
 const SKILL_RESOLVER_SLUG = "scoped";
+// The only sandbox backend Osinara ran on Eve (`runner-sandbox-profile.ts`).
+const SANDBOX_BACKEND_NAME = "osinara-scoped-runner-v3";
 
 function importFailure(reason: string, cause?: unknown): AppError {
   return new AppError(
@@ -115,6 +119,18 @@ function readAnnouncedSkills(manifest: unknown): readonly AnnouncedSkill[] | nul
   return skills.map((skill) => ({ name: skill.name as string, description: skill.description as string }));
 }
 
+function readSandbox(state: unknown): Record<string, unknown> | null {
+  if (state === undefined) return null;
+  if (!isObject(state)) throw importFailure("состояние sandbox имеет неверный вид");
+  // A session that never opened its sandbox has nothing to keep.
+  if (state.initialized !== true || state.session === undefined || state.session === null) return null;
+  const session = state.session;
+  if (!isObject(session) || session.backendName !== SANDBOX_BACKEND_NAME || !isObject(session.metadata)) {
+    throw importFailure("состояние sandbox принадлежит неизвестному хранилищу");
+  }
+  return session.metadata;
+}
+
 export function decodeEveTurnStepOutput(stored: Uint8Array): EveSessionSnapshot {
   const serialized = decodeLayers(stored);
   let output: unknown;
@@ -138,6 +154,7 @@ export function decodeEveTurnStepOutput(stored: Uint8Array): EveSessionSnapshot 
     announcedSkills: readAnnouncedSkills(context["eve.dynamicSkillManifest"]),
     compaction: readCompaction(session.compaction),
     history: requireHistory(session.history),
+    sandbox: readSandbox(session.sandboxState),
     sessionId: session.sessionId,
     todo: readTodo(session.state),
   };

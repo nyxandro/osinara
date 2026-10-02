@@ -13,7 +13,7 @@ import { resolveTelegramSessionActor } from "../telegram-session-actor.js";
 import type { WorkspaceAuthorization } from "./workspace-repository.js";
 
 export function requireWorkspaceAuthorization(
-  ctx: Pick<SessionContext, "session">,
+  ctx: { readonly session: Pick<SessionContext["session"], "auth"> },
 ): WorkspaceAuthorization {
   const caller = resolveSessionCaller(ctx) ?? ctx.session.auth.current;
   const attributes = caller?.attributes;

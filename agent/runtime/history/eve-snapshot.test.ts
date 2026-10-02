@@ -11,6 +11,14 @@ const SESSION_ID = "wrun_01M3YNFXVX5WCP17ZVB8ZTMQAR";
 const turnStepOutput = (session: Record<string, unknown>, context: Record<string, unknown> = {}) =>
   snapshotOutput(SESSION_ID, session, context);
 
+const SANDBOX_METADATA = {
+  access: "trusted",
+  mounts: [{ mountPoint: "personal", workspaceId: "11111111-1111-4111-8111-111111111111" }],
+  sandboxSessionId: "thread_0123456789abcdef",
+  version: 3,
+};
+const SANDBOX_STATE = { initialized: true, session: { backendName: "osinara-scoped-runner-v3", metadata: SANDBOX_METADATA, sessionKey: "k" } };
+
 const HISTORY = [
   { role: "user", content: "<telegram_context>\nchat_id: 912\n</telegram_context>" },
   { role: "user", content: "Привет" },
@@ -26,11 +34,12 @@ const HISTORY = [
 ];
 
 describe("Eve turn step snapshot decoding", () => {
-  it.each(["zstd", "gzip", "none"] as const)("reads history, compaction counters and announced skills (%s)", (codec) => {
+  it.each(["zstd", "gzip", "none"] as const)("reads history, compaction counters, sandbox state and announced skills (%s)", (codec) => {
     const stored = storeLikeWorkflow(turnStepOutput({
       sessionId: SESSION_ID,
       history: HISTORY,
       compaction: { lastKnownInputTokens: 153733, lastKnownPromptMessageCount: 424 },
+      sandboxState: SANDBOX_STATE,
       state: { "eve.todo": { items: [{ content: "проверить", status: "pending" }] } },
     }, { "eve.dynamicSkillManifest": { scoped: [{ name: "pohuy", description: "Режим мата" }] } }), codec);
 
@@ -38,6 +47,7 @@ describe("Eve turn step snapshot decoding", () => {
       sessionId: SESSION_ID,
       history: HISTORY,
       compaction: { lastKnownInputTokens: 153733, lastKnownPromptMessageCount: 424 },
+      sandbox: SANDBOX_METADATA,
       todo: { items: [{ content: "проверить", status: "pending" }] },
       announcedSkills: [{ name: "pohuy", description: "Режим мата" }],
     });
@@ -52,7 +62,9 @@ describe("Eve turn step snapshot decoding", () => {
   it("reports absent optional state as null, not as invented values", () => {
     const decoded = decodeEveTurnStepOutput(storeLikeWorkflow(turnStepOutput({ sessionId: SESSION_ID, history: [] }), "zstd"));
 
-    expect(decoded).toEqual({ sessionId: SESSION_ID, history: [], compaction: null, todo: null, announcedSkills: null });
+    expect(decoded).toEqual({ sessionId: SESSION_ID, history: [], compaction: null, sandbox: null, todo: null, announcedSkills: null });
+    expect(decodeEveTurnStepOutput(storeLikeWorkflow(turnStepOutput({ sessionId: SESSION_ID, history: [], sandboxState: { initialized: false } }), "zstd")).sandbox)
+      .toBeNull();
   });
 
   it.each([
@@ -64,6 +76,8 @@ describe("Eve turn step snapshot decoding", () => {
     ["a step output without a session snapshot", () => storeLikeWorkflow({ action: "complete" }, "zstd")],
     ["a history entry that is not a message", () => storeLikeWorkflow(turnStepOutput({ sessionId: SESSION_ID, history: [{ role: "robot", content: "x" }] }), "zstd")],
     ["a custom serialized type such as bytes", () => storeLikeWorkflow(turnStepOutput({ sessionId: SESSION_ID, history: [{ role: "user", content: [{ type: "file", mediaType: "image/png", data: new Uint8Array([1, 2]) }] }] }), "zstd")],
+    ["sandbox state of another backend", () => storeLikeWorkflow(turnStepOutput({ sessionId: SESSION_ID, history: [], sandboxState: { initialized: true, session: { backendName: "vercel", metadata: {} } } }), "zstd")],
+    ["sandbox state without its metadata", () => storeLikeWorkflow(turnStepOutput({ sessionId: SESSION_ID, history: [], sandboxState: { initialized: true, session: { backendName: "osinara-scoped-runner-v3" } } }), "zstd")],
     ["a skill manifest from an unexpected resolver", () => storeLikeWorkflow(turnStepOutput({ sessionId: SESSION_ID, history: [] }, { "eve.dynamicSkillManifest": { other: [] } }), "zstd")],
   ])("fails with the import error code on %s", (_case, stored) => {
     expect(() => decodeEveTurnStepOutput(stored())).toThrow("AGENT_EVE_HISTORY_IMPORT_FAILED");

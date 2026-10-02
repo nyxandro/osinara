@@ -7,6 +7,7 @@
  * - `appendSessionHistory`: adds the messages a turn produced, after the current tail.
  * - `saveCompactionCounters`: the provider-reported prompt size the next compaction check starts from.
  * - `replaceSessionHistory`: writes a compacted history as a new generation; old rows stay as they were.
+ * - `saveAnnouncedSkills`: the skill list the session's sandbox now holds.
  *
  * Writers take a client inside the caller's transaction, so a history change commits together
  * with the journal record that caused it. Appends lock the session row; two writers of one
@@ -32,6 +33,8 @@ export interface NewSessionHistory {
   readonly compaction: CompactionCounters;
   readonly history: readonly ModelMessage[];
   readonly parentSessionId: string | null;
+  /** Sandbox runner metadata carried over from Eve; a new session opens its sandbox on first use. */
+  readonly sandbox: Record<string, unknown> | null;
   readonly sessionId: string;
   readonly source: "eve_import" | "runtime";
   readonly todo: Record<string, unknown> | null;
@@ -72,8 +75,8 @@ export async function createSessionHistory(client: HistoryClient, input: NewSess
   const created = await client.query(
     `INSERT INTO agent_session_state
        (session_id, application_session_id, parent_session_id, source, compaction_input_tokens,
-        compaction_prompt_message_count, announced_skills, todo)
-     VALUES ($1, $2, $3, $4, $5, $6, $7::json, $8::json)
+        compaction_prompt_message_count, announced_skills, todo, sandbox_state)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::json, $8::json, $9::json)
      ON CONFLICT (session_id) DO NOTHING
      RETURNING session_id`,
     [
@@ -81,6 +84,7 @@ export async function createSessionHistory(client: HistoryClient, input: NewSess
       input.compaction.inputTokens, input.compaction.promptMessageCount,
       input.announcedSkills === null ? null : JSON.stringify(input.announcedSkills),
       input.todo === null ? null : JSON.stringify(input.todo),
+      input.sandbox === null ? null : JSON.stringify(input.sandbox),
     ],
   );
   if (created.rowCount !== 1) return false;
@@ -171,4 +175,17 @@ export async function replaceSessionHistory(
     throw new AppError("AGENT_SESSION_HISTORY_MISSING", "История разговора не найдена", { details: { sessionId: input.sessionId } });
   }
   await insertMessages(client, { firstPosition: 0, generation: state.generation, messages, sessionId: input.sessionId, turnId: input.turnId });
+}
+
+export async function saveAnnouncedSkills(
+  client: HistoryClient,
+  input: { sessionId: string; skills: readonly AnnouncedSkill[] },
+): Promise<void> {
+  const updated = await client.query(
+    "UPDATE agent_session_state SET announced_skills = $2::json, updated_at = now() WHERE session_id = $1",
+    [input.sessionId, JSON.stringify(input.skills)],
+  );
+  if (updated.rowCount !== 1) {
+    throw new AppError("AGENT_SESSION_HISTORY_MISSING", "История разговора не найдена", { details: { sessionId: input.sessionId } });
+  }
 }

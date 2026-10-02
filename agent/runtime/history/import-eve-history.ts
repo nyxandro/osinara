@@ -83,7 +83,7 @@ function newImportedHistory(
     source: "eve_import",
   } as const;
   if (snapshot === null) {
-    return { ...identity, announcedSkills: null, compaction: { inputTokens: null, promptMessageCount: null }, history: [], todo: null };
+    return { ...identity, announcedSkills: null, compaction: { inputTokens: null, promptMessageCount: null }, history: [], sandbox: null, todo: null };
   }
   return {
     ...identity,
@@ -95,6 +95,7 @@ function newImportedHistory(
         promptMessageCount: counter(snapshot.compaction.lastKnownPromptMessageCount),
       },
     history: snapshot.history,
+    sandbox: snapshot.sandbox,
     todo: snapshot.todo,
   };
 }
