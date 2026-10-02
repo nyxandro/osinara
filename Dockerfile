@@ -35,8 +35,6 @@ FROM dependencies AS test
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes jq \
     && rm -rf /var/lib/apt/lists/*
-COPY stress/telegram-conversation/package.json stress/telegram-conversation/package-lock.json ./stress/telegram-conversation/
-RUN npm ci --ignore-scripts --prefix stress/telegram-conversation
 COPY . .
 CMD ["npm", "test"]
 

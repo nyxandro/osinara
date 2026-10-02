@@ -133,7 +133,8 @@ async function lockApproval(
             s.owner_user_id,
             s.pending_operation,
             s.retired_at,
-            s.scope
+            s.scope,
+            s.thread_id
        FROM telegram_hitl_approvals a
        JOIN conversation_sessions s ON s.id = a.application_session_id
       WHERE a.telegram_chat_id = $1

@@ -368,6 +368,7 @@ describeWithDatabase("Telegram HITL approval repository", () => {
       scope: "group",
       type: "external",
     });
+    const thread = (await database().query<{ thread_id: string }>("SELECT thread_id FROM conversation_sessions LIMIT 1")).rows[0]!;
 
     await expect(
       telegramHitlApprovalRepository.claimCallback({
@@ -377,7 +378,7 @@ describeWithDatabase("Telegram HITL approval repository", () => {
         telegramMessageId: "88",
         telegramUserId: OWNER_TELEGRAM_ID,
       }),
-    ).resolves.toMatchObject({ status: "authorized" });
+    ).resolves.toMatchObject({ auth: { attributes: { sandboxSessionId: thread.thread_id } }, status: "authorized" });
   });
 
   it("rejects an owner-only external approval after owner-role revocation", async () => {
