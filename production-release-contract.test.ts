@@ -80,20 +80,33 @@ describe("production container contract", () => {
       "FROM eceasy/cli-proxy-api@sha256:591a09c19de769be09a2e56277365cd568b83fc7d98c94d2e7e7bef7069f7422 AS cli-proxy",
     );
 
-    // Eve 0.40.0 serves built output but still bundles authored modules during `eve start`.
+    // The agent runs bundled; its authored tree stays for `instructions.md` and operator `tsx` commands.
     const runtime = dockerfile.slice(dockerfile.indexOf(" AS runtime"));
     expect(runtime).toContain("COPY --from=build /app/.runtime ./.runtime");
     expect(runtime).toContain("COPY --from=build /app/agent ./agent");
+    expect(runtime).not.toMatch(/COPY --from=build \/app\/\.(eve|output)\b/);
+    expect(entrypoint).toContain("exec node .runtime/agent/main.js");
+    expect(entrypoint).not.toContain("npm run start");
     expect(runtime).not.toMatch(/COPY --from=build \/app\/(scripts|services)\b/);
     expect(entrypoint).toContain("node .runtime/scripts/migrate.js");
     expect(entrypoint).toContain("node .runtime/scripts/validate-model-provider-config.js");
     expect(entrypoint).not.toContain("npm run migrate");
   });
 
-  it("installs the version-pinned Eve patch in build and production stages", () => {
+  it("installs dependencies without Eve, its patches or install-time scripts", () => {
     const dockerfile = readProjectFile("Dockerfile");
+    const packageJson = JSON.parse(readProjectFile("package.json")) as {
+      dependencies: Record<string, string>;
+      scripts: Record<string, string>;
+    };
 
-    expect(dockerfile.match(/COPY scripts\/apply-eve-patches\.ts/g)).toHaveLength(2);
+    expect(dockerfile).not.toMatch(/apply-eve-patches|eve-patches|eve-runtime|npm run postinstall/u);
+    expect(dockerfile).toContain("RUN npm ci --ignore-scripts \\\n    && npm run install:gws");
+    expect(dockerfile).toContain("RUN npm ci --omit=dev --ignore-scripts \\\n    && npm run install:gws");
+    expect(packageJson.scripts).not.toHaveProperty("postinstall");
+    expect(packageJson.dependencies).not.toHaveProperty("eve");
+    expect(packageJson.dependencies).not.toHaveProperty("@workflow/world-postgres");
+    expect(packageJson.scripts["migrate:runtime"]).toBe("node .runtime/scripts/migrate.js && node .runtime/scripts/import-eve-history.js");
   });
 
   it("pins the official Russian root CA inside the sandbox runtime", () => {

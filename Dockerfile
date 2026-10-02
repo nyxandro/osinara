@@ -13,18 +13,13 @@ LABEL org.opencontainers.image.source="${OCI_SOURCE}" \
 FROM first-party-node AS dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
-COPY scripts/apply-eve-patches.ts ./scripts/apply-eve-patches.ts
-COPY scripts/eve-patches ./scripts/eve-patches
-COPY scripts/runtime ./scripts/runtime
-COPY scripts/eve-runtime ./scripts/eve-runtime
 COPY scripts/install-google-workspace-cli.ts ./scripts/install-google-workspace-cli.ts
 RUN npm ci --ignore-scripts \
-    && npm run postinstall \
     && npm run install:gws
 
 FROM dependencies AS build
 COPY . .
-RUN npm run typecheck && npm run build && npm run build:runtime
+RUN npm run typecheck && npm run build
 
 # Release-only artifact stage: output is one SEA executable, never a deployable container image.
 FROM build AS installer-cli-build
@@ -50,13 +45,8 @@ FROM first-party-node AS production-dependencies
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./
-COPY scripts/apply-eve-patches.ts ./scripts/apply-eve-patches.ts
-COPY scripts/eve-patches ./scripts/eve-patches
-COPY scripts/runtime ./scripts/runtime
-COPY scripts/eve-runtime ./scripts/eve-runtime
 COPY scripts/install-google-workspace-cli.ts ./scripts/install-google-workspace-cli.ts
 RUN npm ci --omit=dev --ignore-scripts \
-    && npm run postinstall \
     && npm run install:gws
 
 # Codex subscription gateway stays digest-pinned and exposes no management surface.
@@ -158,10 +148,9 @@ RUN apt-get update \
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=production-dependencies /app/node_modules ./node_modules
-COPY --from=build /app/.output ./.output
-COPY --from=build /app/.eve ./.eve
 COPY --from=build /app/.runtime ./.runtime
-# Eve `start` serves `.output` but still resolves authored modules from this tree.
+# The agent runs from `.runtime`; this tree holds its authored files (`instructions.md`) and serves the
+# operator's manual `tsx` commands after a release (the software update check).
 COPY --from=build /app/agent ./agent
 COPY --from=build /app/config ./config
 COPY --from=build /app/migrations ./migrations

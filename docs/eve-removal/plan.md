@@ -938,6 +938,36 @@
   - `.output/` и `.eve/` из образа уходят.
 - **Готово, когда** чистая установка `npm ci` проходит без `postinstall`, проверка типов и сборка
   зелёные, Docker-прогон тестов зелёный, а в `node_modules` нет `eve`.
+- **Сделано 02.10.**
+  - `package.json`: убраны `eve`, `@workflow/world-postgres`, `postinstall`; `build` собирает
+    `agent/main.ts` вместе с воркерами в `.runtime/` (бывший `build:runtime`), `dev` — `tsx watch`,
+    `start` — `node .runtime/agent/main.js`, `migrate:runtime` — миграции и затем импорт истории.
+    Явно объявлены `@ai-sdk/provider` 4.0.7 и `@ai-sdk/provider-utils` 5.0.26: код импортирует их
+    напрямую, а приходили они через `ai`; версии — те, что закрепляет `ai` 7.0.60. В lock-файле
+    ушло 72 пакета, версии остальных не изменились.
+  - Удалены `scripts/apply-eve-patches.ts`, `scripts/eve-patches/`, `scripts/eve-runtime/`,
+    `scripts/runtime/`, `scripts/migrate-workflow.ts`, `scripts/validate-eve-tool-surface-build.ts` с
+    тестами. `Dockerfile` не копирует патчи, `.output/`, `.eve/`; entrypoint запускает собранный
+    агент; nginx закрыл `/.well-known/workflow/`; из `tsconfig.json` убран `.eve`.
+  - `AGENTS.md`, `README.md`, `docs/production-deployment.md` описывают ядро вместо Eve.
+  - Проверено: в образе `npm ci` без `postinstall`, `eve` в `node_modules` нет, типы и сборка
+    зелёные; собранный агент поднимается (здоровье `ready`, webhook без секрета 401, drain 200 с
+    заголовком допуска, неизвестный адрес 404, остановка по SIGTERM); `npm run dev` поднимается;
+    тесты `scripts/`, `services/`, ядра и корневые тесты выкатки зелёные.
+- **Решения этапа 9:**
+  - `agent/instructions.md` читается из дерева проекта (`agent/` остаётся в образе): рядом с
+    собранным `main.js` его нет.
+  - Роль и базу `osinara_workflow` создавал только удалённый `migrate-workflow.ts`. Импорт истории
+    теперь подключается к базе Eve, только если у активной сессии ещё нет истории ядра: на новой
+    установке базы нет и переносить нечего, после первого релиза всё уже перенесено. Тест импорта
+    сам создаёт роль, базу и две таблицы со структурой боевой базы (снята 02.10 только чтением).
+  - Проверка простоя контроллером читает `workflow.workflow_runs`; контроллер стоит только на этом
+    сервере, где база и таблицы есть, — до фазы B так и остаётся.
+  - Запуск образа без аргументов только мигрирует: импорт делает сервис `migrate`, как в
+    `compose*.yaml`.
+- **Не сделано на этапе 9:** полный `docker compose -f compose.test.yaml up` не зелёный, пока
+  сквозной тест разговора стоит на стенде Eve (этап 10); CI ничего специфичного для Eve не делал и
+  не менялся.
 
 ### 10. Сквозная проверка в Docker
 - **Новый сквозной тест вместо стенда на Eve.** Сценарии из `stress/telegram-conversation`

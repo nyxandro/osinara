@@ -12,6 +12,7 @@
  * volatile memory payload last.
  */
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { AGENT_COMPACTION_THRESHOLD, AGENT_MAX_MODEL_STEPS_PER_TURN } from "./config.js";
 import { conversationModeInstructions } from "./instructions/conversation-mode.js";
@@ -28,7 +29,9 @@ import { resolveScopedSkills } from "./skills/scoped.js";
 import { recordTurnInterjectionDelivery } from "./lib/turn-interjection/turn-interjection-delivery.js";
 import { resolveToolSurface } from "./tools/capabilities.js";
 
-const AUTHORED_INSTRUCTIONS = { content: readFileSync(new URL("./instructions.md", import.meta.url), "utf8"), name: "instructions" };
+// Read from the project tree (the image keeps `agent/`): the bundled `.runtime/agent/main.js` has no
+// `instructions.md` next to it.
+const AUTHORED_INSTRUCTIONS = { content: readFileSync(resolve("agent/instructions.md"), "utf8"), name: "instructions" };
 
 export function createOsinaraAgent(): RuntimeAgent {
   const contextWindowTokens = modelProviderConfig.agent.models.primary.contextWindowTokens;

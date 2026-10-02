@@ -17,6 +17,9 @@
  *   `AGENT_EVE_HISTORY_SOURCE_ABSENT` is logged with the session id.
  * A snapshot that exists but cannot be read stops the whole import with
  * `AGENT_EVE_HISTORY_IMPORT_FAILED`; nothing is skipped silently.
+ *
+ * Eve's database is opened only when a session still needs its history: a new installation has
+ * no Eve database at all, and after the first release every session already lives in the runtime.
  */
 import { bindContinuation } from "../session/continuations.js";
 import { TELEGRAM_CHANNEL_KIND } from "../telegram/channel-types.js";
@@ -41,7 +44,8 @@ export interface EveHistoryImportInput {
   readonly app: HistoryClient;
   readonly dryRun: boolean;
   readonly log: (event: Record<string, unknown>) => void;
-  readonly workflow: HistoryClient;
+  /** Opens Eve's Workflow database; called at most once, and only when a session needs it. */
+  readonly workflow: () => Promise<HistoryClient>;
 }
 
 async function runtimeTableExists(app: HistoryClient): Promise<boolean> {
@@ -115,6 +119,7 @@ export async function importEveHistory(input: EveHistoryImportInput): Promise<Ev
   )).rows;
   // A dry run before the release reads a database that does not have the runtime tables yet.
   const tableExists = await runtimeTableExists(input.app);
+  let workflow: Promise<HistoryClient> | undefined;
   const results: EveHistoryImportSession[] = [];
   for (const session of sessions) {
     const imported = tableExists && (await input.app.query(
@@ -124,7 +129,7 @@ export async function importEveHistory(input: EveHistoryImportInput): Promise<Ev
       results.push({ messages: 0, outcome: "already_imported", sessionId: session.session_id });
       continue;
     }
-    const stored = await latestSnapshot(input.workflow, session.session_id);
+    const stored = await latestSnapshot(await (workflow ??= input.workflow()), session.session_id);
     const snapshot = stored === null ? null : decodeEveTurnStepOutput(stored);
     if (snapshot !== null && snapshot.sessionId !== session.session_id) {
       throw new AppError("AGENT_EVE_HISTORY_IMPORT_FAILED", "Снимок принадлежит другой сессии", {

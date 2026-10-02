@@ -1,11 +1,11 @@
 import type { PoolClient } from "pg";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createApplicationDatabasePool } from "../../lib/database-client.js";
 import { closeDatabase, database } from "../../lib/database.js";
 import { storeLikeWorkflow, turnStepOutput } from "./eve-snapshot-fixtures.js";
 import { loadSessionHistory } from "./history-repository.js";
-import { createApplicationSession } from "./history.integration-fixtures.js";
+import { createApplicationSession, ensureEveWorkflowDatabase } from "./history.integration-fixtures.js";
 import { importEveHistory } from "./import-eve-history.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
@@ -86,6 +86,7 @@ async function inTransaction<T>(work: (client: PoolClient) => Promise<T>) {
 }
 
 (enabled && workflow ? describe : describe.skip)("Eve history import", () => {
+  beforeAll(async () => { await ensureEveWorkflowDatabase(process.env.DATABASE_URL!, workflowUrl!, workflow!); });
   beforeEach(async () => {
     await database().query("TRUNCATE users, families CASCADE");
     await workflow!.query("DELETE FROM workflow.workflow_steps WHERE run_id LIKE $1", [`${RUN_PREFIX}%`]);
@@ -113,8 +114,8 @@ async function inTransaction<T>(work: (client: PoolClient) => Promise<T>) {
     await insertTurn(RETIRED_SESSION, { completedMinutesAgo: 5, steps: [{ output: snapshot(RETIRED_SESSION, FIRST_TURN), minutesAgo: 5 }] });
     const log = vi.fn();
 
-    const first = await inTransaction((app) => importEveHistory({ app, dryRun: false, log, workflow: workflow! }));
-    const second = await inTransaction((app) => importEveHistory({ app, dryRun: false, log: vi.fn(), workflow: workflow! }));
+    const first = await inTransaction((app) => importEveHistory({ app, dryRun: false, log, workflow: async () => workflow! }));
+    const second = await inTransaction((app) => importEveHistory({ app, dryRun: false, log: vi.fn(), workflow: async () => workflow! }));
 
     expect(first).toEqual([
       { messages: 4, outcome: "imported", sessionId: SESSION },
@@ -148,7 +149,7 @@ async function inTransaction<T>(work: (client: PoolClient) => Promise<T>) {
     await insertTurn(SESSION, { completedMinutesAgo: 10, steps: [{ output: snapshot(SESSION, FIRST_TURN), minutesAgo: 10 }] });
     await insertTurn(BROKEN_SESSION, { completedMinutesAgo: 10, steps: [{ output: new Uint8Array([1, 2, 3]), minutesAgo: 10 }] });
 
-    await expect(inTransaction((app) => importEveHistory({ app, dryRun: false, log: vi.fn(), workflow: workflow! })))
+    await expect(inTransaction((app) => importEveHistory({ app, dryRun: false, log: vi.fn(), workflow: async () => workflow! })))
       .rejects.toThrow("AGENT_EVE_HISTORY_IMPORT_FAILED");
     expect((await database().query("SELECT count(*)::int AS n FROM agent_session_state")).rows[0].n).toBe(0);
   });
@@ -157,8 +158,22 @@ async function inTransaction<T>(work: (client: PoolClient) => Promise<T>) {
     await createApplicationSession(SESSION);
     await insertTurn(SESSION, { completedMinutesAgo: 10, steps: [{ output: snapshot(BROKEN_SESSION, FIRST_TURN), minutesAgo: 10 }] });
 
-    await expect(inTransaction((app) => importEveHistory({ app, dryRun: false, log: vi.fn(), workflow: workflow! })))
+    await expect(inTransaction((app) => importEveHistory({ app, dryRun: false, log: vi.fn(), workflow: async () => workflow! })))
       .rejects.toThrow("AGENT_EVE_HISTORY_IMPORT_FAILED");
+  });
+
+  it("opens Eve's database only when a session still needs its history", async () => {
+    const unavailable = vi.fn(async (): Promise<never> => { throw new Error("TEST_WORKFLOW_DATABASE_ABSENT"); });
+
+    // A new installation: no conversations yet, and no Eve database either.
+    await expect(inTransaction((app) => importEveHistory({ app, dryRun: false, log: vi.fn(), workflow: unavailable }))).resolves.toEqual([]);
+    await createApplicationSession(SESSION);
+    await insertTurn(SESSION, { completedMinutesAgo: 10, steps: [{ output: snapshot(SESSION, LATEST_TURN), minutesAgo: 10 }] });
+    await inTransaction((app) => importEveHistory({ app, dryRun: false, log: vi.fn(), workflow: async () => workflow! }));
+    // Every later release: all sessions already live in the runtime.
+    await expect(inTransaction((app) => importEveHistory({ app, dryRun: false, log: vi.fn(), workflow: unavailable })))
+      .resolves.toEqual([{ messages: 0, outcome: "already_imported", sessionId: SESSION }]);
+    expect(unavailable).not.toHaveBeenCalled();
   });
 
   it("only reads and counts in a dry run, on read-only connections", async () => {
@@ -169,7 +184,7 @@ async function inTransaction<T>(work: (client: PoolClient) => Promise<T>) {
     try {
       await app.query("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY");
       await reader.query("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY");
-      expect(await importEveHistory({ app, dryRun: true, log: vi.fn(), workflow: reader }))
+      expect(await importEveHistory({ app, dryRun: true, log: vi.fn(), workflow: async () => reader }))
         .toEqual([{ messages: 4, outcome: "would_import", sessionId: SESSION }]);
     } finally {
       await app.query("SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE");

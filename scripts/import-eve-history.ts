@@ -7,7 +7,8 @@
  * - `--dry-run`: opens both databases read-only, reads and counts every snapshot, writes nothing.
  *   Run it against production before a release, so a format surprise is found before deployment.
  *
- * Requires `DATABASE_URL` (application) and `WORKFLOW_POSTGRES_URL` (Eve's Workflow database).
+ * Requires `DATABASE_URL` (application) and `WORKFLOW_POSTGRES_URL` (Eve's Workflow database). The
+ * Workflow database is connected to only when a session still needs its history.
  * Every outcome is one JSON log line with a code; a failure exits non-zero.
  */
 import pg from "pg";
@@ -28,17 +29,25 @@ if (flags.some((flag) => flag !== "--dry-run")) {
 }
 const dryRun = flags.includes("--dry-run");
 const app = new Client({ connectionString: requiredUrl("DATABASE_URL") });
-const workflow = new Client({ connectionString: requiredUrl("WORKFLOW_POSTGRES_URL") });
+const workflowUrl = requiredUrl("WORKFLOW_POSTGRES_URL");
+// Assigned inside `openWorkflow`; the cast keeps the declared type instead of narrowing to `null`.
+let workflow = null as InstanceType<typeof Client> | null;
 const log = (event: Record<string, unknown>) => console.info(JSON.stringify(event));
 
-await app.connect();
-await workflow.connect();
-try {
-  // Eve's database is only ever read; a dry run also guarantees the application database stays untouched.
+// Eve's database is only ever read.
+async function openWorkflow(): Promise<InstanceType<typeof Client>> {
+  workflow = new Client({ connectionString: workflowUrl });
+  await workflow.connect();
   await workflow.query("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY");
+  return workflow;
+}
+
+await app.connect();
+try {
+  // A dry run also guarantees the application database stays untouched.
   if (dryRun) await app.query("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY");
   await app.query("BEGIN");
-  const sessions = await importEveHistory({ app, dryRun, log, workflow }).catch(async (error: unknown) => {
+  const sessions = await importEveHistory({ app, dryRun, log, workflow: openWorkflow }).catch(async (error: unknown) => {
     await app.query("ROLLBACK");
     throw error;
   });
@@ -56,5 +65,5 @@ try {
   }));
   process.exitCode = 1;
 } finally {
-  await Promise.allSettled([app.end(), workflow.end()]);
+  await Promise.allSettled([app.end(), ...(workflow === null ? [] : [workflow.end()])]);
 }
