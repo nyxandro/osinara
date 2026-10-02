@@ -25,8 +25,10 @@ import type { ModelMessage } from "ai";
 import type { Pool } from "pg";
 
 import { AppError } from "../../lib/app-error.js";
-import type { RuntimeAgent } from "../agent-definition.js";
-import { appendSessionHistory, loadSessionHistory, saveCompactionCounters } from "../history/history-repository.js";
+import type { RuntimeAgent, StepModelSelection } from "../agent-definition.js";
+import {
+  appendSessionHistory, loadSessionHistory, replaceSessionHistory, saveCompactionCounters, type SessionHistory,
+} from "../history/history-repository.js";
 import { renderPendingApprovalsNote } from "../hitl/input-requests.js";
 import type { InputRequest } from "../hitl/types.js";
 import { formatAvailableSkillsSection } from "../prompt/skills-section.js";
@@ -39,6 +41,7 @@ import {
   markStepTextEmitted, parkTurn, recordStep, savePreparedTurn, sessionAwaitsApproval, updateToolCall,
   type JournalDatabase,
 } from "./journal-repository.js";
+import { compactionSettings, compactMessages, shouldCompact, todoCompactionMessage, type CompactionSummaryRequest } from "./compaction.js";
 import { assistantStepText, MODEL_INACTIVITY_TIMEOUT, type StepModelCall, type StepModelResponse } from "./model-call.js";
 import { modelCallFailure, TurnCancelledError } from "./model-errors.js";
 import { orderStepTools, toModelToolSet } from "./model-tools.js";
@@ -72,6 +75,8 @@ export interface TurnRuntime {
   readonly observer: TurnObserver;
   readonly runnerId: string;
   readonly sandbox: (session: { readonly auth: TurnRecord["auth"]; readonly id: string }) => Promise<RuntimeSandboxSession>;
+  /** The one summary call of a history compaction (`summarizeWithModel`). */
+  readonly summarize: (request: CompactionSummaryRequest) => Promise<string>;
 }
 
 type AnyTools = Readonly<Record<string, ToolDefinition<any, any>>>;
@@ -198,16 +203,43 @@ async function settleParkedStep(runtime: TurnRuntime, turn: TurnRecord, signal: 
   return { ...turn, historyStarted: true };
 }
 
+/** Returns the compacted prompt messages, now the session's history, or `null` when none was needed. */
+async function compactIfNeeded(runtime: TurnRuntime, input: {
+  readonly history: SessionHistory;
+  readonly messages: readonly ModelMessage[];
+  readonly selection: StepModelSelection;
+  readonly signal: AbortSignal;
+  readonly turn: TurnRecord;
+}): Promise<ModelMessage[] | null> {
+  const settings = compactionSettings(input.selection.contextWindowTokens, runtime.agent.compactionThresholdPercent);
+  if (!shouldCompact(input.messages, settings, input.history.compaction)) return null;
+  let compacted: ModelMessage[];
+  try {
+    compacted = await compactMessages(input.messages, settings, (request) => runtime.summarize({
+      ...request, abortSignal: input.signal, model: input.selection.model, providerOptions: input.selection.providerOptions,
+    }));
+  } catch (error) {
+    throw modelCallFailure(error);
+  }
+  const todo = todoCompactionMessage(input.history.todo);
+  const messages = todo === undefined ? compacted : [...compacted, todo];
+  // The turn input is part of the compacted history now, so it is not appended again.
+  await inJournalTransaction(runtime.database, async (client) => {
+    await replaceSessionHistory(client, { messages, sessionId: input.turn.sessionId, turnId: input.turn.id });
+    await markHistoryStarted(client, input.turn.id);
+  });
+  return messages;
+}
+
 async function callModel(runtime: TurnRuntime, input: {
   readonly messages: readonly ModelMessage[];
+  readonly selection: StepModelSelection;
   readonly signal: AbortSignal;
-  readonly stepIndex: number;
   readonly tools: AnyTools;
   readonly turn: TurnRecord;
 }): Promise<StepModelResponse> {
   const { agent } = runtime;
-  if (input.stepIndex >= agent.maxModelSteps) throw stepLimitExceeded();
-  const selection = agent.selectModel({ sessionId: input.turn.sessionId, stepIndex: input.stepIndex });
+  const { selection } = input;
   // While an approval waits, other turns of the session answer without tools, as Eve did.
   const toolChoice = await sessionAwaitsApproval(runtime.database, input.turn.sessionId) ? "none" : undefined;
   try {
@@ -236,14 +268,21 @@ async function runStep(runtime: TurnRuntime, turn: TurnRecord, signal: AbortSign
   const stepIndex = turn.nextStepIndex;
   const prepared = requirePrepared(turn);
   const history = await loadSessionHistory(runtime.database, turn.sessionId);
-  const turnInput = turn.historyStarted ? [] : turnInputMessages({ ...turn.input, userInstructions: prepared.userInstructions });
-  const messages = [...history.messages, ...turnInput];
+  let turnInput = turn.historyStarted ? [] : turnInputMessages({ ...turn.input, userInstructions: prepared.userInstructions });
+  let messages = [...history.messages, ...turnInput];
   const tools = await runtime.agent.resolveTools({
     channel: turn.channel, messages, session: { auth: turn.auth, id: turn.sessionId },
   });
   let recorded = await loadStep(runtime.database, turn.id, stepIndex);
   if (recorded === null) {
-    const response = await callModel(runtime, { messages, signal, stepIndex, tools, turn });
+    if (stepIndex >= runtime.agent.maxModelSteps) throw stepLimitExceeded();
+    const selection = runtime.agent.selectModel({ sessionId: turn.sessionId, stepIndex });
+    const compacted = await compactIfNeeded(runtime, { history, messages, selection, signal, turn });
+    if (compacted !== null) {
+      messages = compacted;
+      turnInput = [];
+    }
+    const response = await callModel(runtime, { messages, selection, signal, tools, turn });
     const calls = await planStepCalls({
       contextFor: toolContexts(runtime, turn, signal), response: response.messages, toolCalls: response.toolCalls, tools,
     });

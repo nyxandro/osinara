@@ -7,7 +7,7 @@ import { loadSessionHistory } from "../history/history-repository.js";
 import { defineTool } from "../tool.js";
 import { loadTurn } from "./journal-repository.js";
 import { EmptyModelResponseError } from "./model-errors.js";
-import { runTurn } from "./run-turn.js";
+import { runTurn, type TurnRuntime } from "./run-turn.js";
 import {
   newTestSession, recordingObserver, reply, scriptedModel, startMessageTurn, testAgent, testRuntime, toolCalls,
 } from "./turn.integration-fixtures.js";
@@ -295,5 +295,36 @@ async function releaseRunner(turnId: string) {
       expect(request.system).toMatch(/^Instructions \(instructions\)\nправила\n\n<osinara_turn_memory>…<\/osinara_turn_memory>\n\nAvailable skills\n/);
     }
     expect((await history(sessionId)).slice(0, 2)).toEqual([{ role: "user", content: "<reaction_set/>" }, { role: "user", content: "привет" }]);
+  });
+
+  it("compacts a long history before the step and keeps the turn input once", async () => {
+    const long = Array.from({ length: 12 }, (_, index) => [
+      { role: "user" as const, content: `вопрос ${index} ${"x".repeat(1_200)}` },
+      { role: "assistant" as const, content: [{ type: "text" as const, text: `ответ ${index} ${"y".repeat(1_200)}` }] },
+    ]).flat();
+    const sessionId = await newTestSession(long);
+    await database().query("UPDATE agent_session_state SET todo = $2::json WHERE session_id = $1",
+      [sessionId, JSON.stringify({ items: [{ content: "доделать", priority: "high", status: "pending" }] })]);
+    const summarize = vi.fn<TurnRuntime["summarize"]>(async () => "Сводка разговора");
+    const model = scriptedModel(reply("Отвечаю."));
+    const turn = await startMessageTurn(sessionId, "новый вопрос");
+
+    await runTurn(testRuntime({
+      agent: testAgent({}, { selectModel: () => ({ contextWindowTokens: 8_000, model: "test-model-unused", providerOptions: undefined }) }),
+      callModel: model.callModel, observer: recordingObserver().observer, summarize,
+    }), turn.id, RUN);
+
+    expect(summarize).toHaveBeenCalledTimes(1);
+    expect(summarize.mock.calls[0]![0]).toMatchObject({ providerOptions: undefined });
+    const sent = model.requests[0]!.messages;
+    expect(sent.slice(0, 2)).toEqual([
+      { role: "user", content: "Summary of our conversation so far:" },
+      { role: "assistant", content: "Сводка разговора" },
+    ]);
+    expect(sent.filter((message) => message.content === "новый вопрос")).toHaveLength(1);
+    expect(sent.at(-1)).toEqual({ role: "user", content: "[Your task list was preserved across context compaction]\n- [ ] [high] доделать" });
+    const stored = await loadSessionHistory(database(), sessionId);
+    expect(stored.generation).toBe(1);
+    expect(stored.messages).toEqual([...sent, { role: "assistant", content: [{ type: "text", text: "Отвечаю." }] }]);
   });
 });

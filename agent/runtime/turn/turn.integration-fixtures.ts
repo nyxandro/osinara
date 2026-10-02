@@ -118,6 +118,7 @@ export function testRuntime(input: {
   readonly callModel: TurnRuntime["callModel"];
   readonly observer: TurnObserver;
   readonly runnerId?: string;
+  readonly summarize?: TurnRuntime["summarize"];
 }): TurnRuntime {
   return {
     agent: input.agent,
@@ -126,6 +127,7 @@ export function testRuntime(input: {
     observer: input.observer,
     runnerId: input.runnerId ?? "runner-a",
     sandbox: async () => { throw new Error("TEST_SANDBOX_UNUSED"); },
+    summarize: input.summarize ?? (async () => { throw new Error("TEST_SUMMARY_UNEXPECTED"); }),
   };
 }
 

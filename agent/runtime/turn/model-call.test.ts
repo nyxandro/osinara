@@ -84,6 +84,35 @@ describe("step model call", () => {
     expect(sent.toolChoice).toEqual({ type: "none" });
   });
 
+  it("marks the cached prefix for a provider on the Anthropic protocol, the empty-answer reissue included", async () => {
+    let calls = 0;
+    const provider = new MockLanguageModelV4({
+      provider: "anthropic.messages",
+      doStream: async () => ({ stream: streamOf(textParts(calls++ === 0 ? "" : "ответ")) }),
+    });
+    const tools = {
+      bash: tool({ description: "bash", inputSchema: z.object({ command: z.string() }) }),
+      todo: tool({ description: "todo", inputSchema: z.object({}) }),
+    };
+    const messages = [
+      { role: "user" as const, content: "раньше" },
+      { role: "assistant" as const, content: [{ type: "text" as const, text: "ответ" }] },
+      { role: "user" as const, content: "привет" },
+    ];
+
+    await callStepModel(call(provider, { messages, tools }), NO_WAIT);
+
+    const marker = { anthropic: { cacheControl: { type: "ephemeral" } }, bedrock: { cachePoint: { type: "default" } } };
+    for (const sent of provider.doStreamCalls) {
+      expect(sent.prompt[0]).toEqual({ role: "system", content: "Instructions (instructions)\nправила", providerOptions: marker });
+      expect(sent.prompt.slice(1).map((message) => message.providerOptions)).toEqual(
+        sent.prompt.length === 4 ? [undefined, marker, marker] : [undefined, marker, undefined, marker],
+      );
+      expect(sent.tools?.map((definition) => "providerOptions" in definition ? definition.providerOptions : undefined)).toEqual([undefined, marker]);
+    }
+    expect(provider.doStreamCalls).toHaveLength(2);
+  });
+
   it("stops waiting for a provider that never starts answering, headers included", async () => {
     const provider = model(async (options) => await new Promise((_, reject) =>
       options.abortSignal?.addEventListener("abort", () => reject(options.abortSignal!.reason), { once: true })));

@@ -14,6 +14,7 @@
  * - A `retry`-class failure — a stream broken after it started, an inactivity window — repeats the
  *   call up to three attempts with exponential backoff. No side effect can repeat: tools run later.
  * - An empty answer is reissued once with `EMPTY_RESPONSE_NUDGE` appended to that request only.
+ * On the Anthropic protocol every attempt carries prompt-cache breakpoints (`prompt-cache.ts`).
  *
  * Derived from eve 0.40.0 `harness/tool-loop.ts` (`runModelCallWithRetries`,
  * `attemptEmptyResponseRecovery`, `isEmptyModelResponse`), `harness/messages.ts`
@@ -32,6 +33,7 @@ import {
   normalizeModelCallError,
   TurnCancelledError,
 } from "./model-errors.js";
+import { markPromptCache, usesAnthropicPromptCache } from "./prompt-cache.js";
 
 export const MODEL_INACTIVITY_TIMEOUT = Object.freeze({ firstOutputMs: 5 * 60 * 1000, gapMs: 5 * 60 * 1000 });
 export const EMPTY_RESPONSE_NUDGE =
@@ -106,16 +108,22 @@ async function callOnce(input: StepModelCall, trailingUserNote: string | undefin
     return normalizeModelCallError(error);
   };
   try {
+    const sent: ModelMessage[] = trailingUserNote === undefined
+      ? [...input.messages]
+      : [...input.messages, { role: "user", content: trailingUserNote }];
+    const request = usesAnthropicPromptCache(input.model)
+      ? markPromptCache({ messages: sent, system: input.system, tools: input.tools })
+      : { messages: sent, system: input.system, tools: input.tools };
     const result = streamText({
       abortSignal: AbortSignal.any([input.abortSignal, watchdog.signal]),
-      messages: trailingUserNote === undefined ? [...input.messages] : [...input.messages, { role: "user", content: trailingUserNote }],
+      instructions: request.system,
+      messages: request.messages,
       model: input.model,
       // Errors reach the turn through the stream; AI SDK's default would print them a second time.
       onError: () => {},
       providerOptions: input.providerOptions,
-      system: input.system,
       toolChoice: input.toolChoice,
-      tools: input.tools,
+      tools: request.tools,
     });
     for await (const part of result.stream) {
       if (part.type === "error") throw part.error;
