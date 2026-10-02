@@ -17,6 +17,9 @@
 --   Сжатие истории их сбрасывает: прочитанное ушло из контекста.
 -- - sandbox_state — с каким набором папок и доступом сессия впервые открыла sandbox. Набор папок
 --   сессии не меняется, повторное открытие сверяется с ним.
+-- - channel_state — состояние канала разговора: чат, тема, кто начал ход и кнопки подтверждений,
+--   которые ещё висят в чате. Счётчик номеров кнопок продолжается после переезда из Eve, иначе
+--   старая кнопка в чате совпала бы с новой.
 --
 -- agent_session_history — сообщения в формате AI SDK по порядку. Тип `json`, а не `jsonb`: он
 -- хранит текст как есть, а порядок ключей в аргументах вызова инструмента уходит провайдеру
@@ -33,6 +36,7 @@ CREATE TABLE agent_session_state (
   todo json,
   read_file_state jsonb NOT NULL DEFAULT '{}'::jsonb,
   sandbox_state json,
+  channel_state json,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CHECK (parent_session_id IS NULL OR parent_session_id <> session_id)
@@ -51,3 +55,16 @@ CREATE TABLE agent_session_history (
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (session_id, generation, position)
 );
+
+-- Адрес разговора в канале (например, чат и тема Telegram) → сессия ядра. Новое сообщение по адресу
+-- попадает в его сессию; новый адрес (новый разговор, смена контекста) открывает новую сессию.
+-- Перенесённые из Eve сессии получают свои адреса при импорте.
+CREATE TABLE agent_continuations (
+  channel_kind text NOT NULL CHECK (char_length(channel_kind) > 0),
+  token text NOT NULL CHECK (char_length(token) > 0),
+  session_id text NOT NULL REFERENCES agent_session_state(session_id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (channel_kind, token)
+);
+
+CREATE INDEX agent_continuations_session ON agent_continuations (session_id);

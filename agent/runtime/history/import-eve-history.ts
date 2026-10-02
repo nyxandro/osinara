@@ -18,6 +18,8 @@
  * A snapshot that exists but cannot be read stops the whole import with
  * `AGENT_EVE_HISTORY_IMPORT_FAILED`; nothing is skipped silently.
  */
+import { bindContinuation } from "../session/continuations.js";
+import { TELEGRAM_CHANNEL_KIND } from "../telegram/channel-types.js";
 import { createSessionHistory, type HistoryClient, type NewSessionHistory } from "./history-repository.js";
 import { decodeEveTurnStepOutput, type EveSessionSnapshot } from "./eve-snapshot.js";
 import { AppError } from "../../lib/app-error.js";
@@ -73,7 +75,7 @@ function counter(value: number | undefined): number | null {
 }
 
 function newImportedHistory(
-  session: { application_session_id: string; session_id: string },
+  session: { application_session_id: string; continuation_token: string; session_id: string },
   snapshot: EveSessionSnapshot | null,
 ): NewSessionHistory {
   const identity = {
@@ -83,11 +85,15 @@ function newImportedHistory(
     source: "eve_import",
   } as const;
   if (snapshot === null) {
-    return { ...identity, announcedSkills: null, compaction: { inputTokens: null, promptMessageCount: null }, history: [], sandbox: null, todo: null };
+    return {
+      ...identity, announcedSkills: null, channelState: null, compaction: { inputTokens: null, promptMessageCount: null },
+      history: [], sandbox: null, todo: null,
+    };
   }
   return {
     ...identity,
     announcedSkills: snapshot.announcedSkills,
+    channelState: snapshot.channelState,
     compaction: snapshot.compaction === null
       ? { inputTokens: null, promptMessageCount: null }
       : {
@@ -101,8 +107,8 @@ function newImportedHistory(
 }
 
 export async function importEveHistory(input: EveHistoryImportInput): Promise<EveHistoryImportSession[]> {
-  const sessions = (await input.app.query<{ application_session_id: string; session_id: string }>(
-    `SELECT id AS application_session_id, eve_session_id AS session_id FROM conversation_sessions
+  const sessions = (await input.app.query<{ application_session_id: string; continuation_token: string; session_id: string }>(
+    `SELECT id AS application_session_id, continuation_token, eve_session_id AS session_id FROM conversation_sessions
       WHERE retired_at IS NULL AND eve_session_id IS NOT NULL ORDER BY eve_session_id`,
   )).rows;
   // A dry run before the release reads a database that does not have the runtime tables yet.
@@ -124,7 +130,11 @@ export async function importEveHistory(input: EveHistoryImportInput): Promise<Ev
       });
     }
     if (snapshot === null) input.log({ code: "AGENT_EVE_HISTORY_SOURCE_ABSENT", sessionId: session.session_id });
-    if (!input.dryRun) await createSessionHistory(input.app, newImportedHistory(session, snapshot));
+    if (!input.dryRun) {
+      await createSessionHistory(input.app, newImportedHistory(session, snapshot));
+      // Every conversation session is a Telegram one; its address keeps leading to it.
+      await bindContinuation(input.app, { channelKind: TELEGRAM_CHANNEL_KIND, sessionId: session.session_id, token: session.continuation_token });
+    }
     results.push({
       messages: snapshot === null ? 0 : snapshot.history.length,
       outcome: snapshot === null ? "source_absent" : input.dryRun ? "would_import" : "imported",

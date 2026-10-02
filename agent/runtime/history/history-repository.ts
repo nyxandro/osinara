@@ -31,6 +31,8 @@ export interface CompactionCounters {
 export interface NewSessionHistory {
   readonly announcedSkills: readonly AnnouncedSkill[] | null;
   readonly applicationSessionId: string;
+  /** The channel's JSON state; carried over from Eve, or set by the channel on a new session. */
+  readonly channelState: Record<string, unknown> | null;
   readonly compaction: CompactionCounters;
   readonly history: readonly ModelMessage[];
   readonly parentSessionId: string | null;
@@ -76,8 +78,8 @@ export async function createSessionHistory(client: HistoryClient, input: NewSess
   const created = await client.query(
     `INSERT INTO agent_session_state
        (session_id, application_session_id, parent_session_id, source, compaction_input_tokens,
-        compaction_prompt_message_count, announced_skills, todo, sandbox_state)
-     VALUES ($1, $2, $3, $4, $5, $6, $7::json, $8::json, $9::json)
+        compaction_prompt_message_count, announced_skills, todo, sandbox_state, channel_state)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::json, $8::json, $9::json, $10::json)
      ON CONFLICT (session_id) DO NOTHING
      RETURNING session_id`,
     [
@@ -86,6 +88,7 @@ export async function createSessionHistory(client: HistoryClient, input: NewSess
       input.announcedSkills === null ? null : JSON.stringify(input.announcedSkills),
       input.todo === null ? null : JSON.stringify(input.todo),
       input.sandbox === null ? null : JSON.stringify(input.sandbox),
+      input.channelState === null ? null : JSON.stringify(input.channelState),
     ],
   );
   if (created.rowCount !== 1) return false;

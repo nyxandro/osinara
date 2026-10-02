@@ -63,7 +63,10 @@ function snapshot(sessionId: string, history: unknown[]) {
     history,
     compaction: { lastKnownInputTokens: 1200, lastKnownPromptMessageCount: history.length },
     sandboxState: { initialized: true, session: { backendName: "osinara-scoped-runner-v3", metadata: SANDBOX_METADATA, sessionKey: "k" } },
-  }, { "eve.dynamicSkillManifest": { scoped: [{ name: "pohuy", description: "Режим мата" }] } }), "zstd");
+  }, {
+    "eve.channel": { kind: "telegram", state: { chatId: "912", chatType: "private", conversationId: null, messageThreadId: null, nextHitlCallbackId: 8 } },
+    "eve.dynamicSkillManifest": { scoped: [{ name: "pohuy", description: "Режим мата" }] },
+  }), "zstd");
 }
 
 async function inTransaction<T>(work: (client: PoolClient) => Promise<T>) {
@@ -124,9 +127,15 @@ async function inTransaction<T>(work: (client: PoolClient) => Promise<T>) {
       announcedSkills: [{ name: "pohuy", description: "Режим мата" }],
       compaction: { inputTokens: 1200, promptMessageCount: 4 },
     });
-    // The session keeps its sandbox: the same container identity and the same mounted folders.
-    expect((await database().query("SELECT sandbox_state FROM agent_session_state WHERE session_id = $1", [SESSION])).rows[0].sandbox_state)
-      .toEqual(SANDBOX_METADATA);
+    // The session keeps its sandbox (container identity and folders), its channel state with the
+    // button counter, and its address: the next message of the chat reaches the same session.
+    const state = (await database().query("SELECT sandbox_state, channel_state FROM agent_session_state WHERE session_id = $1", [SESSION])).rows[0];
+    expect(state.sandbox_state).toEqual(SANDBOX_METADATA);
+    expect(state.channel_state).toMatchObject({ chatId: "912", nextHitlCallbackId: 8 });
+    const address = (await database().query(
+      `SELECT c.channel_kind, c.session_id FROM agent_continuations c JOIN conversation_sessions s ON s.continuation_token = c.token
+        WHERE s.eve_session_id = $1`, [SESSION])).rows;
+    expect(address).toEqual([{ channel_kind: "telegram", session_id: SESSION }]);
     expect((await loadSessionHistory(database(), IDLE_SESSION)).messages).toEqual([]);
     expect((await database().query("SELECT 1 FROM agent_session_state WHERE session_id = $1", [RETIRED_SESSION])).rowCount).toBe(0);
   });

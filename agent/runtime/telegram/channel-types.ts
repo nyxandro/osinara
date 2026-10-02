@@ -2,6 +2,7 @@
  * Telegram channel context handed to the application's channel handlers.
  *
  * Exports:
+ * - `TELEGRAM_CHANNEL_KIND`: the channel kind Telegram conversation addresses are bound under.
  * - `TelegramHandle`: Bot API calls bound to one chat, as `ctx.telegram`.
  * - `TelegramContext`, `TelegramEventContext`: handler contexts before and inside a session.
  * - `TelegramChannelState`: JSON state of one Telegram conversation, including pending prompts.
@@ -14,6 +15,9 @@
  * `acknowledgementText`).
  */
 import type { SessionAuthContext } from "../context.js";
+
+/** The channel kind of Telegram conversations; addresses are bound under it. */
+export const TELEGRAM_CHANNEL_KIND = "telegram";
 import type { InputResponse } from "../hitl/types.js";
 import type { JsonObject } from "../json.js";
 import type { TelegramApiResponse, TelegramMessageBody, TelegramMessageResult } from "./api.js";

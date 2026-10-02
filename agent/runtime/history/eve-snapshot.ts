@@ -31,6 +31,8 @@ export interface EveSessionSnapshot {
   readonly announcedSkills: readonly AnnouncedSkill[] | null;
   readonly compaction: EveCompactionCounters | null;
   readonly history: ModelMessage[];
+  /** The channel state Eve kept (chat, topic, pending buttons and their counter). */
+  readonly channelState: Record<string, unknown> | null;
   /** The sandbox runner metadata Eve kept for the session; the runner backend validates it on use. */
   readonly sandbox: Record<string, unknown> | null;
   readonly sessionId: string;
@@ -119,6 +121,15 @@ function readAnnouncedSkills(manifest: unknown): readonly AnnouncedSkill[] | nul
   return skills.map((skill) => ({ name: skill.name as string, description: skill.description as string }));
 }
 
+// Every conversation session Osinara ran on Eve was a Telegram one.
+function readChannelState(channel: unknown): Record<string, unknown> | null {
+  if (channel === undefined) return null;
+  if (!isObject(channel) || channel.kind !== "telegram" || !isObject(channel.state)) {
+    throw importFailure("состояние канала имеет неверный вид");
+  }
+  return channel.state;
+}
+
 function readSandbox(state: unknown): Record<string, unknown> | null {
   if (state === undefined) return null;
   if (!isObject(state)) throw importFailure("состояние sandbox имеет неверный вид");
@@ -152,6 +163,7 @@ export function decodeEveTurnStepOutput(stored: Uint8Array): EveSessionSnapshot 
   const context = isObject(output.serializedContext) ? output.serializedContext : {};
   return {
     announcedSkills: readAnnouncedSkills(context["eve.dynamicSkillManifest"]),
+    channelState: readChannelState(context["eve.channel"]),
     compaction: readCompaction(session.compaction),
     history: requireHistory(session.history),
     sandbox: readSandbox(session.sandboxState),
