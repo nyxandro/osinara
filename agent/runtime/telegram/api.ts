@@ -8,7 +8,7 @@
  * - `splitTelegramMessageText`: chunks within Telegram's 4096-character cap.
  *
  * Derived from eve 0.40.0 `public/channels/telegram/api.ts` (Apache-2.0, see NOTICE-eve).
- * Changes: helpers come from `../json.ts`; behavior unchanged.
+ * Changes: helpers come from `../json.ts`; the bot token has no `TELEGRAM_BOT_TOKEN` fallback.
  */
 import { isObject, parseJsonObject, type JsonObject } from "../json.js";
 import { parseTelegramChatType, type TelegramChatType } from "./inbound.js";
@@ -92,11 +92,11 @@ export function telegramContinuationToken(input: {
   return `${String(input.chatId)}:${thread}:${conversation}`;
 }
 
-/** Resolves a Telegram bot token, falling back to `TELEGRAM_BOT_TOKEN`. */
+/** The configured bot token; the application passes it explicitly, there is no environment fallback. */
 export async function resolveTelegramBotToken(token?: TelegramBotToken): Promise<string> {
-  const source = token ?? process.env.TELEGRAM_BOT_TOKEN;
-  if (!source) throw new Error("TELEGRAM_BOT_TOKEN is required.");
-  return typeof source === "function" ? await source() : source;
+  const source = typeof token === "function" ? await token() : token;
+  if (!source) throw new Error("AGENT_TELEGRAM_BOT_TOKEN_MISSING: the Telegram bot token is not configured");
+  return source;
 }
 
 /** Low-level Telegram JSON API call. */

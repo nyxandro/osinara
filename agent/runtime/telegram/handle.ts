@@ -4,11 +4,12 @@
  * Export:
  * - `buildTelegramHandle`: `post`/`sendMessage` (split over the 4096-character cap, the first message
  *   returned), `startTyping` (never throws), callback answers, reply-markup edits and raw requests.
- *   A first bot message in a group anchors the conversation and re-addresses the session to it.
+ *   A bot message in a group records itself as the conversation's anchor in the state.
  *
  * Ported from eve 0.40.0 `public/channels/telegram/telegramChannel.ts` (`buildTelegramHandle`,
- * `postTelegramMessage`) (Apache-2.0, see NOTICE-eve). Changes: re-addressing goes through the
- * `rekey` callback the channel supplies; a typing failure is logged as one JSON line.
+ * `postTelegramMessage`) (Apache-2.0, see NOTICE-eve). Changes: the session is never re-addressed
+ * after a bot message (Eve's `rekey`): Osinara keeps its own routes; a typing failure is logged as
+ * one JSON line.
  */
 import {
   answerTelegramCallbackQuery,
@@ -17,7 +18,6 @@ import {
   sendTelegramChatAction,
   sendTelegramMessage,
   splitTelegramMessageText,
-  telegramContinuationToken,
   type TelegramApiOptions,
   type TelegramMessageBody,
   type TelegramMessageResult,
@@ -36,7 +36,6 @@ function anchorsConversation(chatType: TelegramChatType | null): boolean {
 }
 
 export function buildTelegramHandle(input: {
-  readonly rekey?: (token: string) => void;
   readonly state: TelegramChannelState;
   readonly transport: TelegramTransport;
 }): TelegramHandle {
@@ -48,11 +47,6 @@ export function buildTelegramHandle(input: {
     if (state.chatType === null && posted.chatType !== undefined) state.chatType = posted.chatType;
     if (!posted.id || !anchorsConversation(chatType)) return;
     state.conversationId = posted.id;
-    if (state.chatId) {
-      input.rekey?.(telegramContinuationToken({
-        chatId: state.chatId, conversationId: posted.id, messageThreadId: state.messageThreadId ?? undefined,
-      }));
-    }
   }
 
   async function sendOne(body: TelegramMessageBody): Promise<TelegramMessageResult> {

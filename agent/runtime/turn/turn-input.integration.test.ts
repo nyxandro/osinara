@@ -8,7 +8,7 @@ import { loadTurn } from "./journal-repository.js";
 import { runTurn } from "./run-turn.js";
 import { respondToInput } from "./turn-start.js";
 import {
-  newTestSession, OWNER_AUTH, recordingObserver, reply, scriptedModel, startMessageTurn, TELEGRAM_CHANNEL, testAgent, testRuntime, toolCalls,
+  newTestSession, OWNER_AUTH, recordingObserver, reply, scriptedModel, startMessageTurn, testAgent, testRuntime, toolCalls,
 } from "./turn.integration-fixtures.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
@@ -37,7 +37,7 @@ async function history(sessionId: string) {
 }
 
 async function respond(sessionId: string, responses: Array<{ optionId?: string; requestId: string; text?: string }>, context: string[] = []) {
-  return await respondToInput(database(), { auth: OWNER_AUTH, channel: TELEGRAM_CHANNEL, context, responses, sessionId });
+  return await respondToInput(database(), { auth: OWNER_AUTH, context, responses, sessionId });
 }
 
 async function parkOnApproval(calls: Array<{ id: string; group: string }>) {

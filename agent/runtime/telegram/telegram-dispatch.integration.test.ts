@@ -101,7 +101,7 @@ async function channelState(sessionId: string) {
     expect(second.sessionId).toBe(first.sessionId);
     expect(await findContinuation(database(), { channelKind: "telegram", token: "7::" })).toBe(first.sessionId);
     expect(await channelState(first.sessionId)).toMatchObject({ chatId: "7", chatType: "private", triggeringUserId: "42" });
-    const turn = await loadTurn(database(), first.turnId!);
+    const turn = await loadTurn(database(), first.turnId);
     expect(turn.input).toEqual({ context: [expect.stringMatching(/^<telegram_context>\n[\s\S]*message_id: 100\n[\s\S]*bot_username: osinara_bot\n<\/telegram_context>$/u), "<app>контекст</app>"], message: "привет" });
     expect(turn.auth.current?.attributes).toMatchObject({ osinaraTelegramUpdateId: "1" });
     expect(turn.auth.initiator?.attributes).toMatchObject({ osinaraTelegramUpdateId: "1" });
@@ -117,7 +117,7 @@ async function channelState(sessionId: string) {
 
     if (result.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
     expect(seen[0]?.from?.isBot).toBe(true);
-    expect((await loadTurn(database(), result.turnId!)).input.message).toBe("склеенная пачка");
+    expect((await loadTurn(database(), result.turnId)).input.message).toBe("склеенная пачка");
   });
 
   it("refuses a dispatch the application did not authenticate, and creates nothing for a dropped update", async () => {
@@ -147,13 +147,13 @@ async function channelState(sessionId: string) {
     const channel = hooks({ message: () => ({ auth, continuationToken: "7::" }), transport: telegramApi().transport });
     const asked = await dispatchTelegramMessage(database(), channel, message("спроси"));
     if (asked.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
-    await runWith(asked.turnId!, { ask_question: askQuestion },
+    await runWith(asked.turnId, { ask_question: askQuestion },
       toolCalls([{ id: "call-q", input: { options: [{ id: "tea", label: "Чай" }, { id: "coffee", label: "Кофе" }], prompt: "Что?" }, name: "ask_question" }]));
 
     const answered = await dispatchTelegramMessage(database(), channel, message("кофе"));
 
     if (answered.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
-    const continuation = await loadTurn(database(), answered.turnId!);
+    const continuation = await loadTurn(database(), answered.turnId);
     expect(continuation).toMatchObject({ input: { context: [expect.stringContaining("<telegram_context>")] }, resumesTurnId: asked.turnId });
     expect(continuation.input.message).toBeUndefined();
     const { outcome } = await runWith(continuation.id, { ask_question: askQuestion }, reply("Кофе так кофе"));
@@ -169,7 +169,7 @@ async function channelState(sessionId: string) {
     const channel = hooks({ message: () => ({ auth, continuationToken: "7::" }), transport: telegramApi().transport });
     const asked = await dispatchTelegramMessage(database(), channel, message("спроси"));
     if (asked.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
-    await runWith(asked.turnId!, { ask_question: askQuestion }, toolCalls([{ id: "call-q", input: { prompt: "Как назвать?" }, name: "ask_question" }]));
+    await runWith(asked.turnId, { ask_question: askQuestion }, toolCalls([{ id: "call-q", input: { prompt: "Как назвать?" }, name: "ask_question" }]));
     await database().query(
       `UPDATE agent_session_state SET channel_state = jsonb_set(channel_state::jsonb, '{pendingFreeformReplies}', '{"900":"call-q"}')::json
         WHERE session_id = $1`,
@@ -179,7 +179,7 @@ async function channelState(sessionId: string) {
     const answer = await dispatchTelegramMessage(database(), channel, message("Барсик", REPLY_TO_PROMPT));
 
     if (answer.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
-    expect((await loadTurn(database(), answer.turnId!)).resumesTurnId).toBe(asked.turnId);
+    expect((await loadTurn(database(), answer.turnId)).resumesTurnId).toBe(asked.turnId);
     expect((await channelState(asked.sessionId)).pendingFreeformReplies).toEqual({});
   });
 
@@ -188,14 +188,14 @@ async function channelState(sessionId: string) {
     const channel = hooks({ message: () => ({ auth, continuationToken: "7::", replyHandling: "message" }), transport: telegramApi().transport });
     const asked = await dispatchTelegramMessage(database(), channel, message("спроси"));
     if (asked.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
-    await runWith(asked.turnId!, { ask_question: askQuestion },
+    await runWith(asked.turnId, { ask_question: askQuestion },
       toolCalls([{ id: "call-q", input: { options: [{ id: "tea", label: "Чай" }], prompt: "Что?" }, name: "ask_question" }]));
 
     const ordinary = await dispatchTelegramMessage(database(), channel, message("Мурка", REPLY_TO_PROMPT));
 
     if (ordinary.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
     // The new message dismisses the question it did not answer.
-    expect(await loadTurn(database(), ordinary.turnId!)).toMatchObject({ input: { message: "Мурка" }, resumesTurnId: asked.turnId });
+    expect(await loadTurn(database(), ordinary.turnId)).toMatchObject({ input: { message: "Мурка" }, resumesTurnId: asked.turnId });
   });
 
   it("acknowledges a button the application authorized and continues the turn once; a second press does nothing", async () => {
@@ -208,7 +208,7 @@ async function channelState(sessionId: string) {
     });
     const asked = await dispatchTelegramMessage(database(), channel, message("измени"));
     if (asked.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
-    const parked = await runWith(asked.turnId!, { change }, toolCalls([{ id: "call-c", input: {}, name: "change" }]));
+    const parked = await runWith(asked.turnId, { change }, toolCalls([{ id: "call-c", input: {}, name: "change" }]));
     if (parked.outcome.status !== "waiting_input") throw new Error("TEST_EXPECTED_PARK");
     const state = await channelState(asked.sessionId);
     const rendered = renderTelegramInputRequest(parked.outcome.requests[0]!, state);
@@ -221,7 +221,7 @@ async function channelState(sessionId: string) {
     if (pressed.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
     expect(again).toEqual({ status: "dropped" });
     expect(api.calls.filter((call) => call.method === "answerCallbackQuery").map((call) => call.body.text)).toEqual(["Принято", "Принято"]);
-    const continuation = await loadTurn(database(), pressed.turnId!);
+    const continuation = await loadTurn(database(), pressed.turnId);
     expect(continuation).toMatchObject({ input: { context: [] }, resumesTurnId: asked.turnId });
     expect(continuation.auth.current?.attributes).toMatchObject({ osinaraTelegramUpdateId: "2" });
   });
@@ -241,19 +241,19 @@ async function channelState(sessionId: string) {
     const channel = hooks({ callback: () => ({ auth, continuationToken: "7::" }), message: () => ({ auth, continuationToken: "7::" }), transport: telegramApi().transport });
     const asked = await dispatchTelegramMessage(database(), channel, message("измени"));
     if (asked.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
-    const parked = await runWith(asked.turnId!, { change }, toolCalls([{ id: "call-c", input: {}, name: "change" }]));
+    const parked = await runWith(asked.turnId, { change }, toolCalls([{ id: "call-c", input: {}, name: "change" }]));
     if (parked.outcome.status !== "waiting_input") throw new Error("TEST_EXPECTED_PARK");
     const state = await channelState(asked.sessionId);
     const buttons = renderTelegramInputRequest(parked.outcome.requests[0]!, state).replyMarkup!.inline_keyboard as Array<Array<{ callback_data: string }>>;
     await database().query("UPDATE agent_session_state SET channel_state = $2::json WHERE session_id = $1", [asked.sessionId, JSON.stringify(state)]);
     const cancelled = await dispatchTelegramCallback(database(), channel, press(buttons[0]![1]!.callback_data));
     if (cancelled.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
-    await runWith(cancelled.turnId!, { change }, reply("Отменил"));
+    await runWith(cancelled.turnId, { change }, reply("Отменил"));
 
     const late = await dispatchTelegramCallback(database(), channel, press(buttons[0]![0]!.callback_data));
 
     if (late.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
-    const turn = await loadTurn(database(), late.turnId!);
+    const turn = await loadTurn(database(), late.turnId);
     expect(turn.resumesTurnId).toBeNull();
     expect(turn.input.message).toBe([
       "The user submitted the following response to an earlier interactive prompt.",
@@ -272,7 +272,7 @@ async function channelState(sessionId: string) {
     const channel = hooks({ message: () => ({ auth, continuationToken: "7::" }), transport: telegramApi().transport });
     const first = await dispatchTelegramMessage(database(), channel, message("привет"));
     if (first.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
-    await runWith(first.turnId!, {}, reply("привет!"));
+    await runWith(first.turnId, {}, reply("привет!"));
     const routed = hooks({
       message: () => ({ auth: { ...auth, attributes: { ...auth.attributes, osinaraTelegramResponseSessionId: first.sessionId } }, continuationToken: "other::" }),
       transport: telegramApi().transport,

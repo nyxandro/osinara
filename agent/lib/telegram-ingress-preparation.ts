@@ -87,9 +87,3 @@ async function preparationEffect(updateId: string, dispatchId: string, ordinal: 
     [updateId, ordinal, JSON.stringify(value === undefined ? {} : { value })]);
   return value;
 }
-
-export async function recordTelegramDispatchTarget(updateId: string, dispatchId: string, continuationToken: string, kind: "send" | "respond"): Promise<void> {
-  const result = await database().query(`UPDATE telegram_ingress_updates SET dispatch_continuation_key=$3,dispatch_kind=$4
-    WHERE update_id=$1 AND dispatch_id=$2 AND status='processing' AND lease_expires_at>now()`, [updateId, dispatchId, continuationToken, kind]);
-  if (result.rowCount !== 1) throw new AppError("AGENT_TELEGRAM_LEASE_LOST", "Попытка передачи сообщения уже закрыта");
-}

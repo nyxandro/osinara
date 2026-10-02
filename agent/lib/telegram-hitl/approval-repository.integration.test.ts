@@ -15,7 +15,7 @@ import { closeDatabase, database } from "../database.js";
 import { sessionRepository } from "../sessions/session-repository.js";
 import { telegramHitlApprovalRepository } from "./approval-repository.js";
 import { telegramIngressRepository } from "../telegram-ingress-repository.js";
-import { bindTelegramIngressTurn } from "../telegram-ingress-binding.js";
+import { telegramIngressControl } from "../telegram-ingress-dispatch.js";
 import { NO_BURSTS } from "../telegram-ingress.test-fixtures.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
@@ -117,8 +117,9 @@ describeWithDatabase("Telegram HITL approval repository", () => {
     expect((await telegramHitlApprovalRepository.claimCallback(input)).status).toBe("authorized");
     expect((await database().query("SELECT response_session_id,response_turn_id,dispatch_turn_id FROM telegram_ingress_updates WHERE update_id=900")).rows)
       .toEqual([{ response_session_id: "wrun_hitl",response_turn_id: "turn_0",dispatch_turn_id: null }]);
-    await bindTelegramIngressTurn({ initiator: null,current: { authenticator: "telegram",principalId: OWNER_TELEGRAM_ID,principalType: "user",
-      attributes: { osinaraTelegramUpdateId: "900",osinaraTelegramIngressId: dispatchId } } },"wrun_hitl","turn_1");
+    const control = telegramIngressControl({ deadlineAt: new Date(Date.now() + 60_000).toISOString(), dispatchId, replaying: false,
+      signal: new AbortController().signal, updateId: "900" });
+    await control.bind!(database(), { sessionId: "wrun_hitl", turnId: "turn_1" });
     expect((await database().query("SELECT response_turn_id,dispatch_turn_id FROM telegram_ingress_updates WHERE update_id=900")).rows)
       .toEqual([{ response_turn_id: "turn_0",dispatch_turn_id: "turn_1" }]);
     expect(await telegramHitlApprovalRepository.claimCallback(input)).toMatchObject({ status: "authorized",replayed: true });

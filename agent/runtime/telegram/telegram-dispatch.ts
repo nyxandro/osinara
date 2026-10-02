@@ -8,7 +8,8 @@
  * - `TelegramChannelHooks`: the application's decisions about messages and buttons.
  * - `TelegramDispatchControl`: what the verified ingress adds — its own preparation, attributes of
  *   the turn's auth, a record of the created turn in the same transaction, and a stop signal.
- * - `TelegramDispatchResult`: the turn to run, or a recorded partial answer, or nothing.
+ * - `TelegramDispatchResult`: the turn to run (for a partial answer, the turn that keeps waiting),
+ *   or nothing.
  *
  * Ported from eve 0.40.0 `public/channels/telegram/telegramChannel.ts` (`dispatchMessage`,
  * `dispatchCallbackQuery`, `stateFromMessage`, `stateFromCallbackQuery`,
@@ -56,8 +57,11 @@ export interface TelegramChannelHooks {
 
 export interface TelegramDispatchTarget {
   readonly sessionId: string;
-  /** The turn to run; `null` when a partial answer was recorded on the waiting turn. */
-  readonly turnId: string | null;
+  /**
+   * The turn to run. A partial answer names the waiting turn that recorded it: running it returns
+   * its stored outcome.
+   */
+  readonly turnId: string;
 }
 
 export interface TelegramDispatchControl {
@@ -178,14 +182,14 @@ async function respond(client: JournalClient, input: {
   if (responses.length === 0) return DROPPED;
   const auth = await turnAuth(client, sessionId, input.auth);
   const channel = turnChannel(input.token, state);
-  const outcome = await respondWithClient(client, { auth, channel, context: input.context, responses, sessionId });
+  const outcome = await respondWithClient(client, { auth, context: input.context, responses, sessionId });
   if (outcome.status !== "stale" && outcome.stale.length > 0) {
     console.warn(JSON.stringify({
       code: "AGENT_TELEGRAM_STALE_RESPONSES_IGNORED", requestIds: outcome.stale.map((response) => response.requestId), sessionId,
     }));
   }
   if (outcome.status === "resumed") return await dispatched(client, control, { sessionId, turnId: outcome.continuation.id });
-  if (outcome.status === "waiting") return await dispatched(client, control, { sessionId, turnId: null });
+  if (outcome.status === "waiting") return await dispatched(client, control, { sessionId, turnId: outcome.turnId });
   // Every answer is for a request that no longer waits: the model hears it as new input, and it
   // never authorizes the earlier action.
   const requests = await findInputRequests(client, sessionId, outcome.stale.map((response) => response.requestId));

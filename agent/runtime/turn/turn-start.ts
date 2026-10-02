@@ -95,7 +95,6 @@ async function settleCall(client: JournalClient, turnId: string, call: ToolCallR
 interface RespondInput {
   /** Who answered; the continuation acts as them. */
   readonly auth: SessionAuth;
-  readonly channel: TurnChannel;
   readonly context: readonly string[];
   readonly responses: readonly InputResponse[];
   readonly sessionId: string;
@@ -146,7 +145,8 @@ export async function respondWithClient(client: JournalClient, input: RespondInp
   await finishTurn(client, waiting.id, { finalText: null, status: "completed" });
   const continuation = await createTurn(client, {
     auth: input.auth,
-    channel: input.channel,
+    // The continuation answers where the parked turn would have: a child stays a child.
+    channel: waiting.channel,
     id: newTurnId(),
     input: { context: [...waiting.pendingContext, ...input.context], ...(waiting.input.outputSchema === undefined ? {} : { outputSchema: waiting.input.outputSchema }) },
     kind: waiting.kind,

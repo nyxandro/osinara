@@ -14,7 +14,7 @@ export async function deliverMemoryExportFiles(
   input: { chatId: string; json: string; markdown: string },
   fetchImplementation: typeof fetch = fetch,
 ): Promise<void> {
-  const token = await resolveTelegramBotToken();
+  const token = await resolveTelegramBotToken(process.env.TELEGRAM_BOT_TOKEN);
   const form = new FormData();
   form.set("chat_id", input.chatId);
   form.set("media", JSON.stringify([

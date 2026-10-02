@@ -1,5 +1,10 @@
 /**
- * Eve Telegram channel.
+ * Osinara's Telegram channel on the runtime: the application's hooks and turn-event handlers.
+ *
+ * Exports:
+ * - `telegramTurnEvents`: what happens on each event of a Telegram turn.
+ * - `telegramChannelHooks`: application authorization of messages and buttons.
+ * - `createTelegramIngress`: the durable webhook ingress over the runtime's dispatch.
  *
  * Constructs:
  * - Verified webhook transport with durable PostgreSQL ingress.
@@ -17,10 +22,9 @@
  */
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { telegramChannel } from "eve/channels/telegram";
-
-import { handleTelegramDurableIngress } from "../lib/telegram-durable-ingress.js";
-import { TELEGRAM_EVE_UPLOAD_POLICY } from "../lib/telegram-message-policy.js";
+import type { TelegramTurnEvents } from "../runtime/telegram/channel-types.js";
+import type { TelegramChannelHooks } from "../runtime/telegram/telegram-dispatch.js";
+import { createTelegramDurableIngress, type DurableIngressDependencies } from "../lib/telegram-durable-ingress.js";
 import { handleTelegramMessage } from "../lib/telegram-on-message.js";
 import { telegramOutputWithoutMemoryDirective } from "../lib/telegram-progress.js";
 import { logTelegramSilentTurn } from "../lib/telegram-silent-turn.js";
@@ -29,8 +33,6 @@ import { asidePauseMilliseconds } from "../lib/telegram-aside-pacing.js";
 import { stripTelegramAsideDirectives } from "../lib/telegram-authored-split.js";
 import { recordMemoryUsageDeclaration } from "../lib/memory-usage-report.js";
 import { deliverTelegramFinalOutput } from "../lib/telegram-final-delivery.js";
-import { bindTelegramIngressTurn } from "../lib/telegram-ingress-binding.js";
-import { completeRuntimeHandoff, completeRuntimeSessionHandoffs } from "../lib/runtime-handoff.js";
 import { prepareTelegramTurn } from "../lib/telegram-turn-preparation.js";
 import { postTelegramRichMessageChunk } from "../lib/telegram-rich-messages.js";
 import { postTelegramPlainMessageChunk } from "../lib/telegram-plain-messages.js";
@@ -42,9 +44,6 @@ import { sessionRepository } from "../lib/sessions/session-repository.js";
 import { authorizeTelegramHitlCallback } from "../lib/telegram-hitl/callback-authorization.js";
 import { handleTelegramInputRequested } from "../lib/telegram-hitl/input-request.js";
 import { telegramHitlApprovalRepository } from "../lib/telegram-hitl/approval-repository.js";
-import {
-  handleTelegramSessionFailure,
-} from "../lib/telegram-session-failure.js";
 import { telegramTurnReplyParameters } from "../lib/telegram-reply.js";
 import { agentScheduleDispatchRepository } from "../lib/agent-schedules/agent-schedule-dispatch-repository.js";
 import {
@@ -67,417 +66,392 @@ import {
 } from "../lib/memory-turn-source.js";
 import { resolveMemoryReviewBatch } from "../lib/memory-review/memory-review-turn-binding.js";
 import { memoryReviewRepository } from "../lib/memory-review/memory-review-repository.js";
-import { memoryReviewDispatchRepository } from "../lib/memory-review/memory-review-dispatch-repository.js";
 import { accountlessActorApprovalError } from "../lib/telegram-session-actor.js";
 import {
   finishConversationWakeupTurn,
   isConversationWakeupTurn,
 } from "../lib/conversation-wakeups/conversation-wakeup-events.js";
+import { transcribeTelegramVoice } from "../lib/groq-voice-transcription.js";
+import { telegramIngressRepository } from "../lib/telegram-ingress-repository.js";
+import { createTelegramVoiceAuthorizer } from "../lib/telegram-voice-authorization.js";
+import { telegramRepository } from "../lib/telegram-repository.js";
+import { handleSoftwareUpdateCallback } from "../lib/software-updates/callback.js";
+import { recordOperationalIncident } from "../lib/operational-incidents/owner-alerts.js";
+import { TELEGRAM_INGRESS_LEASE_MS } from "../config.js";
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-
-export default telegramChannel({
-  botUsername: process.env.TELEGRAM_BOT_USERNAME as string,
-  credentials: {
-    webhookSecretToken: process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN as string,
+export const telegramTurnEvents: TelegramTurnEvents = {
+  async "input.requested"(data, channel, ctx) {
+    const refusal = accountlessActorApprovalError(ctx.session.auth);
+    if (refusal) throw refusal;
+    return await handleTelegramInputRequested(data, channel, ctx);
   },
-  drainRoute: "/eve/v1/telegram-drain",
-  // Durable ingress is FIFO; a later update must never cancel a paid or side-effecting active turn.
-  turnPolicy: "queue",
-  events: {
-    async "input.requested"(data, channel, ctx) {
-      const refusal = accountlessActorApprovalError(ctx.session.auth);
-      if (refusal) throw refusal;
-      return await handleTelegramInputRequested(data, channel, ctx);
-    },
-    async "message.completed"(data, channel, ctx) {
-      // Model-authored pre-tool text is a user-visible progress update, not technical tool noise.
-      // A background run — scheduled or a wake-up — reports only its result, or stays silent.
-      if ((isScheduledSession(ctx) || isConversationWakeupTurn(ctx)) && data.finishReason !== "stop") return;
-      const { declaration, output } = telegramOutputWithoutMemoryDirective(data);
-      if (!output) return;
-      const sessionId = applicationSessionId(ctx);
-      if (!await sessionRepository.isCurrentEveSession(sessionId, ctx.session.id)) return;
-      // Behind the barrier: a superseded session must not move counters either.
-      await recordMemoryUsageDeclaration({
-        auth: ctx.session.auth,
-        declaration,
+  async "message.completed"(data, channel, ctx) {
+    // Model-authored pre-tool text is a user-visible progress update, not technical tool noise.
+    // A background run — scheduled or a wake-up — reports only its result, or stays silent.
+    if ((isScheduledSession(ctx) || isConversationWakeupTurn(ctx)) && data.finishReason !== "stop") return;
+    const { declaration, output } = telegramOutputWithoutMemoryDirective(data);
+    if (!output) return;
+    const sessionId = applicationSessionId(ctx);
+    if (!await sessionRepository.isCurrentEveSession(sessionId, ctx.session.id)) return;
+    // Behind the barrier: a superseded session must not move counters either.
+    await recordMemoryUsageDeclaration({
+      auth: ctx.session.auth,
+      declaration,
+      eveSessionId: ctx.session.id,
+      turnId: ctx.session.turn.id,
+    });
+    if (output.kind === "silence") {
+      // The model chose to deliver nothing; the trigger it stayed quiet on is the useful signal.
+      logTelegramSilentTurn({
+        auth: ctx.session.auth.current,
         eveSessionId: ctx.session.id,
-        turnId: ctx.session.turn.id,
+        eveTurnId: ctx.session.turn.id,
       });
-      if (output.kind === "silence") {
-        // The model chose to deliver nothing; the trigger it stayed quiet on is the useful signal.
-        logTelegramSilentTurn({
-          auth: ctx.session.auth.current,
-          eveSessionId: ctx.session.id,
-          eveTurnId: ctx.session.turn.id,
-        });
-        // A scenario may skip an empty report: the run is done, so turn completion finds nothing to fail.
-        if (isScheduledSession(ctx)) {
-          await agentScheduleDispatchRepository.completeSilentRun(sessionId, ctx.session.id, new Date());
-        }
-        return;
+      // A scenario may skip an empty report: the run is done, so turn completion finds nothing to fail.
+      if (isScheduledSession(ctx)) {
+        await agentScheduleDispatchRepository.completeSilentRun(sessionId, ctx.session.id, new Date());
       }
-      if (output.kind === "progress") {
-        await deliverTelegramProgressNotice({
-          applicationSessionId: sessionId,
-          channel,
-          eveSessionId: ctx.session.id,
-          eveTurnId: ctx.session.turn.id,
-          message: output.message,
-          stepIndex: data.stepIndex,
-        });
-        return;
-      }
-      const currentAttributes = ctx.session.auth.current?.attributes;
-      const scheduledDelivery = scheduledDeliveryMetadata(ctx);
-      if (output.kind === "reaction" && isConversationWakeupTurn(ctx)) {
-        // A wake-up answers no message, so a reaction has nothing to attach to and is not sent.
-        logTelegramSilentTurn({ auth: ctx.session.auth.current, eveSessionId: ctx.session.id, eveTurnId: ctx.session.turn.id });
-        return;
-      }
-      if (output.kind === "reaction") {
-        const telegramMessageId = currentAttributes?.telegramMessageId;
-        if (isScheduledSession(ctx) || typeof telegramMessageId !== "string") {
-          throw new AppError(
-            "AGENT_TELEGRAM_REACTION_TARGET_MISSING",
-            "Не удалось определить сообщение для реакции. Отправьте обращение ещё раз",
-          );
-        }
-        await setTelegramMessageReaction(channel.telegram, telegramMessageId, output.emoji);
-        return;
-      }
-      const message = output.message;
-      if (scheduledDelivery) {
-        // Database authorization is meaningful only when it protects the exact active side-effect target.
-        requireScheduledTelegramTarget(channel.telegram, scheduledDelivery);
-        await agentScheduleDispatchRepository.authorizeDelivery({
-          applicationSessionId: sessionId,
-          eveSessionId: ctx.session.id,
-          familyId: scheduledDelivery.familyId,
-          groupId: scheduledDelivery.groupId,
-          messageThreadId: scheduledDelivery.messageThreadId,
-          ownerUserId: scheduledDelivery.ownerUserId,
-          runId: scheduledDelivery.runId,
-          scope: scheduledDelivery.scope,
-          telegramChatId: scheduledDelivery.telegramChatId,
-        });
-      }
-      // The reply context is verified even when unused: a standalone answer is the model's choice
-      // and must not switch off the integrity check. The chat and topic stay bound to the turn.
-      const turnReplyParameters = isScheduledSession(ctx)
-        ? undefined
-        : telegramTurnReplyParameters(channel.state, ctx);
-      const replyParameters = output.standalone ? undefined : turnReplyParameters;
-      const durableText = stripTelegramAsideDirectives(message);
-      let sentMessages: Awaited<ReturnType<typeof deliverTelegramFinalOutput>>;
-      try {
-        sentMessages = await deliverTelegramFinalOutput({
-          applicationSessionId: sessionId,
-          deliveryIdentity: {
-            chatId: channel.telegram.chatId,
-            messageThreadId: channel.telegram.messageThreadId ?? null,
-            replyParameters: replyParameters ?? null,
-          },
-          eveSessionId: ctx.session.id,
-          eveTurnId: ctx.session.turn.id,
-          markdown: isScheduledSession(ctx) ? durableText : message,
-          sendChunk: async (chunk, ordinal) => {
-            // An authored aside is a second thought, so it arrives after a visible typing pause.
-            if (chunk.pacing === "aside") {
-              await channel.telegram.startTyping();
-              await sleep(asidePauseMilliseconds(chunk.text));
-            }
-            return chunk.format === "plain"
-              ? await postTelegramPlainMessageChunk(
-                  chunk.text,
-                  channel,
-                  ordinal === 0 ? replyParameters : undefined,
-                )
-              : await postTelegramRichMessageChunk(
-                  chunk.text,
-                  channel.telegram,
-                  channel.state,
-                  ordinal === 0 ? replyParameters : undefined,
-                );
-          },
-        });
-      } catch (error) {
-        if (scheduledDelivery) {
-          const errorCode = isAppError(error)
-            ? error.code
-            : "AGENT_TELEGRAM_FINAL_DELIVERY_FAILED";
-          console.error(JSON.stringify({
-            code: "AGENT_SCHEDULE_FINAL_DELIVERY_FAILED",
-            deliveryErrorCode: errorCode,
-            errorName: error instanceof Error ? error.name : "UnknownError",
-            runId: scheduledDelivery.runId,
-          }));
-          try {
-            await agentScheduleDispatchRepository.failRun(
-              sessionId,
-              ctx.session.id,
-              errorCode,
-              new Date(),
-            );
-          } catch (persistenceError) {
-            // Terminal persistence is secondary: log it without replacing the actionable delivery error.
-            console.error(JSON.stringify({
-              code: "AGENT_SCHEDULE_FINAL_DELIVERY_FAILURE_PERSISTENCE_FAILED",
-              deliveryErrorCode: errorCode,
-              errorName: persistenceError instanceof Error ? persistenceError.name : "UnknownError",
-              runId: scheduledDelivery.runId,
-            }));
-          }
-        }
-        throw error;
-      }
-      const deliveredAt = new Date();
-      const groupId = scheduledDelivery?.groupId ??
-        (typeof currentAttributes?.groupId === "string" ? currentAttributes.groupId : null);
-      if (scheduledDelivery) {
-        const firstMessage = sentMessages[0];
-        if (!firstMessage) {
-          throw new Error(
-            "AGENT_SCHEDULE_DELIVERY_CONFIRMATION_MISSING: Telegram не подтвердил доставку результата расписания",
-          );
-        }
-        await agentScheduleDispatchRepository.completeDeliveredRun({
-          applicationSessionId: sessionId,
-          content: durableText,
-          deliveredAt,
-          eveSessionId: ctx.session.id,
-          familyId: scheduledDelivery.familyId,
-          groupId: scheduledDelivery.groupId,
-          messageThreadId: scheduledDelivery.messageThreadId,
-          ownerUserId: scheduledDelivery.ownerUserId,
-          runId: scheduledDelivery.runId,
-          scheduledFor: new Date(scheduledDelivery.scheduledFor),
-          scope: scheduledDelivery.scope,
-          telegramChatId: scheduledDelivery.telegramChatId,
-          telegramMessageId: firstMessage.messageId,
-          title: scheduledDelivery.title,
-        });
-      }
-      const conversationId = typeof currentAttributes?.telegramConversationId === "string"
-        ? currentAttributes.telegramConversationId
-        : null;
-      if ((conversationId || groupId) && data.finishReason === "stop") {
-        const replyToEntryId = typeof currentAttributes?.telegramTimelineEntryId === "string"
-          ? currentAttributes.telegramTimelineEntryId
-          : null;
-        const forumTopicId = scheduledDelivery?.forumTopicId ??
-          (typeof currentAttributes?.telegramForumTopicId === "string"
-            ? currentAttributes.telegramForumTopicId
-            : null);
-        // The primary delivery receipt is durable before this secondary conversation projection.
-        if (groupId) {
-          await telegramGroupJournalRepository.recordAgentResponse({
-            applicationSessionId: isScheduledSession(ctx) ? null : sessionId,
-            contentText: durableText,
-            deliveredAt,
-            groupId,
-            messageThreadId: forumTopicId,
-            replyToEntryId,
-            telegramMessageIds: sentMessages.map((sent) => sent.messageId),
-          });
-        } else if (conversationId) {
-          await conversationTimelineRepository.recordAgentResponse({
-            applicationSessionId: sessionId,
-            contentText: durableText,
-            conversationId,
-            deliveredAt,
-            messageThreadId: null,
-            replyToEntryId,
-            telegramMessageIds: sentMessages.map((sent) => sent.messageId),
-          });
-        }
-      }
-      if (!isScheduledSession(ctx)) {
-        await registerTelegramDeliveredMessageRoutes(
-          channel,
-          ctx,
-          sentMessages.map((sent) => sent.messageId),
+      return;
+    }
+    if (output.kind === "progress") {
+      await deliverTelegramProgressNotice({
+        applicationSessionId: sessionId,
+        channel,
+        eveSessionId: ctx.session.id,
+        eveTurnId: ctx.session.turn.id,
+        message: output.message,
+        stepIndex: data.stepIndex,
+      });
+      return;
+    }
+    const currentAttributes = ctx.session.auth.current?.attributes;
+    const scheduledDelivery = scheduledDeliveryMetadata(ctx);
+    if (output.kind === "reaction" && isConversationWakeupTurn(ctx)) {
+      // A wake-up answers no message, so a reaction has nothing to attach to and is not sent.
+      logTelegramSilentTurn({ auth: ctx.session.auth.current, eveSessionId: ctx.session.id, eveTurnId: ctx.session.turn.id });
+      return;
+    }
+    if (output.kind === "reaction") {
+      const telegramMessageId = currentAttributes?.telegramMessageId;
+      if (isScheduledSession(ctx) || typeof telegramMessageId !== "string") {
+        throw new AppError(
+          "AGENT_TELEGRAM_REACTION_TARGET_MISSING",
+          "Не удалось определить сообщение для реакции. Отправьте обращение ещё раз",
         );
       }
-    },
-    async "session.failed"(data, channel) {
-      await completeRuntimeSessionHandoffs(data.sessionId);
-      const failureRepository = {
-        async recordSessionFailedByContinuationToken(
-          continuationToken: string,
-          eveSessionId: string,
-        ) {
-          return await memoryReviewDispatchRepository.markInteractiveSessionAmbiguous({
-            continuationToken,
-            diagnosticCode: "AGENT_MEMORY_REVIEW_SESSION_FAILED_AMBIGUOUS",
-            eveSessionId,
-          }) ?? await sessionRepository.recordSessionFailedByContinuationToken(
-            continuationToken,
-            eveSessionId,
-          );
+      await setTelegramMessageReaction(channel.telegram, telegramMessageId, output.emoji);
+      return;
+    }
+    const message = output.message;
+    if (scheduledDelivery) {
+      // Database authorization is meaningful only when it protects the exact active side-effect target.
+      requireScheduledTelegramTarget(channel.telegram, scheduledDelivery);
+      await agentScheduleDispatchRepository.authorizeDelivery({
+        applicationSessionId: sessionId,
+        eveSessionId: ctx.session.id,
+        familyId: scheduledDelivery.familyId,
+        groupId: scheduledDelivery.groupId,
+        messageThreadId: scheduledDelivery.messageThreadId,
+        ownerUserId: scheduledDelivery.ownerUserId,
+        runId: scheduledDelivery.runId,
+        scope: scheduledDelivery.scope,
+        telegramChatId: scheduledDelivery.telegramChatId,
+      });
+    }
+    // The reply context is verified even when unused: a standalone answer is the model's choice
+    // and must not switch off the integrity check. The chat and topic stay bound to the turn.
+    const turnReplyParameters = isScheduledSession(ctx)
+      ? undefined
+      : telegramTurnReplyParameters(channel.state, ctx);
+    const replyParameters = output.standalone ? undefined : turnReplyParameters;
+    const durableText = stripTelegramAsideDirectives(message);
+    let sentMessages: Awaited<ReturnType<typeof deliverTelegramFinalOutput>>;
+    try {
+      sentMessages = await deliverTelegramFinalOutput({
+        applicationSessionId: sessionId,
+        deliveryIdentity: {
+          chatId: channel.telegram.chatId,
+          messageThreadId: channel.telegram.messageThreadId ?? null,
+          replyParameters: replyParameters ?? null,
         },
-      };
-      await handleTelegramSessionFailure(
-        data,
-        channel,
-        failureRepository,
-        agentScheduleDispatchRepository,
-      );
-    },
-    async "turn.failed"(data, channel, ctx) {
-      // Terminal failure releases the temporary timeline retention after all tool writes have stopped.
-      await releaseMemoryTurnSources(ctx);
-      // First, so a failing failure notice below cannot leave the wake-up's schedule leased for good.
-      await finishConversationWakeupTurn(ctx, data.code);
-      const reviewBatchId = await resolveMemoryReviewBatch(ctx);
-      let reviewFailureReplayed = false;
-      if (reviewBatchId) {
-        const terminal = await recoverDatabaseBookkeeping(() => memoryReviewRepository.failRunning({
-          batchId: reviewBatchId,
-          diagnosticCode: data.code,
-          eveSessionId: ctx.session.id,
-          eveTurnId: ctx.session.turn.id,
-        }));
-        reviewFailureReplayed = terminal === "replayed";
-      }
-      const sessionId = applicationSessionId(ctx);
-      const scheduledDelivery = scheduledDeliveryMetadata(ctx);
-      // The durable terminal replay still performs cleanup, but never duplicates a user message.
-      let notifyFailure = !reviewFailureReplayed;
+        eveSessionId: ctx.session.id,
+        eveTurnId: ctx.session.turn.id,
+        markdown: isScheduledSession(ctx) ? durableText : message,
+        sendChunk: async (chunk, ordinal) => {
+          // An authored aside is a second thought, so it arrives after a visible typing pause.
+          if (chunk.pacing === "aside") {
+            await channel.telegram.startTyping();
+            await sleep(asidePauseMilliseconds(chunk.text));
+          }
+          return chunk.format === "plain"
+            ? await postTelegramPlainMessageChunk(
+                chunk.text,
+                channel,
+                ordinal === 0 ? replyParameters : undefined,
+              )
+            : await postTelegramRichMessageChunk(
+                chunk.text,
+                channel.telegram,
+                channel.state,
+                ordinal === 0 ? replyParameters : undefined,
+              );
+        },
+      });
+    } catch (error) {
       if (scheduledDelivery) {
-        const failedAt = new Date();
-        if (!scheduledTelegramTargetMatches(channel.telegram, scheduledDelivery)) {
-          // Never notify a target that was not approved for this run; close it without Telegram I/O.
-          console.error(JSON.stringify({
-            activeTelegramChatId: channel.telegram.chatId,
-            activeTelegramMessageThreadId: channel.telegram.messageThreadId ?? null,
-            code: SCHEDULED_TELEGRAM_TARGET_MISMATCH_CODE,
-            expectedTelegramChatId: scheduledDelivery.telegramChatId,
-            expectedTelegramMessageThreadId: scheduledDelivery.messageThreadId,
-            runId: scheduledDelivery.runId,
-            turnErrorCode: data.code,
-          }));
+        const errorCode = isAppError(error)
+          ? error.code
+          : "AGENT_TELEGRAM_FINAL_DELIVERY_FAILED";
+        console.error(JSON.stringify({
+          code: "AGENT_SCHEDULE_FINAL_DELIVERY_FAILED",
+          deliveryErrorCode: errorCode,
+          errorName: error instanceof Error ? error.name : "UnknownError",
+          runId: scheduledDelivery.runId,
+        }));
+        try {
           await agentScheduleDispatchRepository.failRun(
             sessionId,
             ctx.session.id,
-            SCHEDULED_TELEGRAM_TARGET_MISMATCH_CODE,
-            failedAt,
+            errorCode,
+            new Date(),
           );
-          notifyFailure = false;
-        } else {
-          notifyFailure = await agentScheduleDispatchRepository.failRunForNotification(
-            {
-              applicationSessionId: sessionId,
-              eveSessionId: ctx.session.id,
-              familyId: scheduledDelivery.familyId,
-              groupId: scheduledDelivery.groupId,
-              messageThreadId: scheduledDelivery.messageThreadId,
-              ownerUserId: scheduledDelivery.ownerUserId,
-              runId: scheduledDelivery.runId,
-              scope: scheduledDelivery.scope,
-              telegramChatId: scheduledDelivery.telegramChatId,
-            },
-            data.code,
-            failedAt,
-          );
-        }
-      }
-      if (notifyFailure) {
-        const updateId = ctx.session.auth.current?.attributes.osinaraTelegramUpdateId;
-        await recordTelegramFailure({ sessionId: ctx.session.id, turnId: ctx.session.turn.id,
-          ...(typeof updateId === "string" ? { updateId } : {}), code: data.code, chatId: channel.telegram.chatId });
-      }
-      if (!reviewBatchId) await sessionRepository.recordTurnFailed(sessionId, ctx.session.id);
-      await telegramHitlApprovalRepository.clearForEveSession(sessionId, ctx.session.id);
-    },
-    async "turn.cancelled"(_data, _channel, ctx) {
-      // Steering by the next chat message is the most common way a turn ends in a live group. The
-      // batch used to wait for the time bound instead, while later turns chained onto a head that
-      // would never report, so their finished work stayed unreachable from the lane cursor.
-      await releaseMemoryTurnSources(ctx);
-      const reviewBatchId = await resolveMemoryReviewBatch(ctx);
-      if (reviewBatchId) {
-        await memoryReviewRepository.failRunning({
-          batchId: reviewBatchId,
-          diagnosticCode: "AGENT_MEMORY_REVIEW_TURN_CANCELLED",
-          eveSessionId: ctx.session.id,
-          eveTurnId: ctx.session.turn.id,
-        });
-      }
-      await finishConversationWakeupTurn(ctx, "AGENT_CONVERSATION_WAKEUP_CANCELLED");
-      // A cancelled turn is not a failure and its session keeps serving the replacement turn, so
-      // only its own approval rows are released here.
-      await telegramHitlApprovalRepository.clearForEveSession(
-        applicationSessionId(ctx),
-        ctx.session.id,
-      );
-    },
-    "turn.started": prepareTelegramTurn,
-    async "turn.completed"(_data, channel, ctx) {
-      const sessionId = applicationSessionId(ctx);
-      const awaitingApproval = await sessionRepository.hasPendingOperation(sessionId, ctx.session.id);
-      const reviewBatchId = await resolveMemoryReviewBatch(ctx);
-      if (!awaitingApproval) {
-        // Completion verifies review evidence before release; a parked HITL turn retains its source set.
-        if (reviewBatchId) {
-          await recoverDatabaseBookkeeping(() => memoryReviewRepository.completeBatch({
-            batchId: reviewBatchId,
-            completedAt: new Date(),
-            eveSessionId: ctx.session.id,
-            eveTurnId: ctx.session.turn.id,
+        } catch (persistenceError) {
+          // Terminal persistence is secondary: log it without replacing the actionable delivery error.
+          console.error(JSON.stringify({
+            code: "AGENT_SCHEDULE_FINAL_DELIVERY_FAILURE_PERSISTENCE_FAILED",
+            deliveryErrorCode: errorCode,
+            errorName: persistenceError instanceof Error ? persistenceError.name : "UnknownError",
+            runId: scheduledDelivery.runId,
           }));
         }
-        await releaseMemoryTurnSources(ctx);
       }
-      if (isScheduledSession(ctx) && !awaitingApproval) {
-        // Successful scheduled runs are completed atomically with Telegram delivery above.
+      throw error;
+    }
+    const deliveredAt = new Date();
+    const groupId = scheduledDelivery?.groupId ??
+      (typeof currentAttributes?.groupId === "string" ? currentAttributes.groupId : null);
+    if (scheduledDelivery) {
+      const firstMessage = sentMessages[0];
+      if (!firstMessage) {
+        throw new Error(
+          "AGENT_SCHEDULE_DELIVERY_CONFIRMATION_MISSING: Telegram не подтвердил доставку результата расписания",
+        );
+      }
+      await agentScheduleDispatchRepository.completeDeliveredRun({
+        applicationSessionId: sessionId,
+        content: durableText,
+        deliveredAt,
+        eveSessionId: ctx.session.id,
+        familyId: scheduledDelivery.familyId,
+        groupId: scheduledDelivery.groupId,
+        messageThreadId: scheduledDelivery.messageThreadId,
+        ownerUserId: scheduledDelivery.ownerUserId,
+        runId: scheduledDelivery.runId,
+        scheduledFor: new Date(scheduledDelivery.scheduledFor),
+        scope: scheduledDelivery.scope,
+        telegramChatId: scheduledDelivery.telegramChatId,
+        telegramMessageId: firstMessage.messageId,
+        title: scheduledDelivery.title,
+      });
+    }
+    const conversationId = typeof currentAttributes?.telegramConversationId === "string"
+      ? currentAttributes.telegramConversationId
+      : null;
+    if ((conversationId || groupId) && data.finishReason === "stop") {
+      const replyToEntryId = typeof currentAttributes?.telegramTimelineEntryId === "string"
+        ? currentAttributes.telegramTimelineEntryId
+        : null;
+      const forumTopicId = scheduledDelivery?.forumTopicId ??
+        (typeof currentAttributes?.telegramForumTopicId === "string"
+          ? currentAttributes.telegramForumTopicId
+          : null);
+      // The primary delivery receipt is durable before this secondary conversation projection.
+      if (groupId) {
+        await telegramGroupJournalRepository.recordAgentResponse({
+          applicationSessionId: isScheduledSession(ctx) ? null : sessionId,
+          contentText: durableText,
+          deliveredAt,
+          groupId,
+          messageThreadId: forumTopicId,
+          replyToEntryId,
+          telegramMessageIds: sentMessages.map((sent) => sent.messageId),
+        });
+      } else if (conversationId) {
+        await conversationTimelineRepository.recordAgentResponse({
+          applicationSessionId: sessionId,
+          contentText: durableText,
+          conversationId,
+          deliveredAt,
+          messageThreadId: null,
+          replyToEntryId,
+          telegramMessageIds: sentMessages.map((sent) => sent.messageId),
+        });
+      }
+    }
+    if (!isScheduledSession(ctx)) {
+      await registerTelegramDeliveredMessageRoutes(
+        channel,
+        ctx,
+        sentMessages.map((sent) => sent.messageId),
+      );
+    }
+  },
+  async "turn.failed"(data, channel, ctx) {
+    // Terminal failure releases the temporary timeline retention after all tool writes have stopped.
+    await releaseMemoryTurnSources(ctx);
+    // First, so a failing failure notice below cannot leave the wake-up's schedule leased for good.
+    await finishConversationWakeupTurn(ctx, data.code);
+    const reviewBatchId = await resolveMemoryReviewBatch(ctx);
+    let reviewFailureReplayed = false;
+    if (reviewBatchId) {
+      const terminal = await recoverDatabaseBookkeeping(() => memoryReviewRepository.failRunning({
+        batchId: reviewBatchId,
+        diagnosticCode: data.code,
+        eveSessionId: ctx.session.id,
+        eveTurnId: ctx.session.turn.id,
+      }));
+      reviewFailureReplayed = terminal === "replayed";
+    }
+    const sessionId = applicationSessionId(ctx);
+    const scheduledDelivery = scheduledDeliveryMetadata(ctx);
+    // The durable terminal replay still performs cleanup, but never duplicates a user message.
+    let notifyFailure = !reviewFailureReplayed;
+    if (scheduledDelivery) {
+      const failedAt = new Date();
+      if (!scheduledTelegramTargetMatches(channel.telegram, scheduledDelivery)) {
+        // Never notify a target that was not approved for this run; close it without Telegram I/O.
+        console.error(JSON.stringify({
+          activeTelegramChatId: channel.telegram.chatId,
+          activeTelegramMessageThreadId: channel.telegram.messageThreadId ?? null,
+          code: SCHEDULED_TELEGRAM_TARGET_MISMATCH_CODE,
+          expectedTelegramChatId: scheduledDelivery.telegramChatId,
+          expectedTelegramMessageThreadId: scheduledDelivery.messageThreadId,
+          runId: scheduledDelivery.runId,
+          turnErrorCode: data.code,
+        }));
         await agentScheduleDispatchRepository.failRun(
           sessionId,
           ctx.session.id,
-          "AGENT_SCHEDULE_DELIVERY_CONFIRMATION_MISSING",
-          new Date(),
+          SCHEDULED_TELEGRAM_TARGET_MISMATCH_CODE,
+          failedAt,
+        );
+        notifyFailure = false;
+      } else {
+        notifyFailure = await agentScheduleDispatchRepository.failRunForNotification(
+          {
+            applicationSessionId: sessionId,
+            eveSessionId: ctx.session.id,
+            familyId: scheduledDelivery.familyId,
+            groupId: scheduledDelivery.groupId,
+            messageThreadId: scheduledDelivery.messageThreadId,
+            ownerUserId: scheduledDelivery.ownerUserId,
+            runId: scheduledDelivery.runId,
+            scope: scheduledDelivery.scope,
+            telegramChatId: scheduledDelivery.telegramChatId,
+          },
+          data.code,
+          failedAt,
         );
       }
-      // A parked wake-up has already asked its question; the run is done either way.
-      await finishConversationWakeupTurn(ctx, null);
-      if (!reviewBatchId) {
-        await sessionRepository.recordTurnCompleted(sessionId, ctx.session.id, awaitingApproval, !isConversationWakeupTurn(ctx));
-      }
-      if (!awaitingApproval) {
-        await telegramHitlApprovalRepository.clearForEveSession(sessionId, ctx.session.id);
-      }
-    },
-    async "authorization.required"(_data, _channel, ctx) {
-      // Parking a turn requires a human to come back and answer it; an accountless actor has none.
-      const refusal = accountlessActorApprovalError(ctx.session.auth);
-      if (refusal) throw refusal;
-      const sessionId = applicationSessionId(ctx);
-      const auth = ctx.session.auth.current;
-      const telegramUserId = auth?.attributes.telegramUserId;
-      await sessionRepository.parkSession({
-        applicationSessionId: sessionId,
-        pendingRequestId: null,
-        requesterTelegramUserId: typeof telegramUserId === "string" ? telegramUserId : null,
-        requesterUserId: auth && UUID_PATTERN.test(auth.principalId) ? auth.principalId : null,
-      });
-    },
-    async "authorization.completed"(_data, _channel, ctx) {
-      await sessionRepository.resumePendingSession(applicationSessionId(ctx), ctx.session.id);
-    },
-    async "session.waiting"(_data, _channel, ctx) {
-      if (!ctx.session.parent) await bindTelegramIngressTurn(ctx.session.auth, ctx.session.id, ctx.session.turn.id, true);
-      await completeRuntimeHandoff(ctx.session.auth, ctx.session.id);
-    },
-    async "session.completed"(_data, _channel, ctx) {
-      await completeRuntimeSessionHandoffs(ctx.session.id);
-    },
+    }
+    if (notifyFailure) {
+      const updateId = ctx.session.auth.current?.attributes.osinaraTelegramUpdateId;
+      await recordTelegramFailure({ sessionId: ctx.session.id, turnId: ctx.session.turn.id,
+        ...(typeof updateId === "string" ? { updateId } : {}), code: data.code, chatId: channel.telegram.chatId });
+    }
+    if (!reviewBatchId) await sessionRepository.recordTurnFailed(sessionId, ctx.session.id);
+    await telegramHitlApprovalRepository.clearForEveSession(sessionId, ctx.session.id);
   },
-  onDrain: handleTelegramDurableIngress.drain,
+  async "turn.cancelled"(_data, _channel, ctx) {
+    // Steering by the next chat message is the most common way a turn ends in a live group. The
+    // batch used to wait for the time bound instead, while later turns chained onto a head that
+    // would never report, so their finished work stayed unreachable from the lane cursor.
+    await releaseMemoryTurnSources(ctx);
+    const reviewBatchId = await resolveMemoryReviewBatch(ctx);
+    if (reviewBatchId) {
+      await memoryReviewRepository.failRunning({
+        batchId: reviewBatchId,
+        diagnosticCode: "AGENT_MEMORY_REVIEW_TURN_CANCELLED",
+        eveSessionId: ctx.session.id,
+        eveTurnId: ctx.session.turn.id,
+      });
+    }
+    await finishConversationWakeupTurn(ctx, "AGENT_CONVERSATION_WAKEUP_CANCELLED");
+    // A cancelled turn is not a failure and its session keeps serving the replacement turn, so
+    // only its own approval rows are released here.
+    await telegramHitlApprovalRepository.clearForEveSession(
+      applicationSessionId(ctx),
+      ctx.session.id,
+    );
+  },
+  "turn.started": prepareTelegramTurn,
+  async "turn.completed"(_data, channel, ctx) {
+    const sessionId = applicationSessionId(ctx);
+    const awaitingApproval = await sessionRepository.hasPendingOperation(sessionId, ctx.session.id);
+    const reviewBatchId = await resolveMemoryReviewBatch(ctx);
+    if (!awaitingApproval) {
+      // Completion verifies review evidence before release; a parked HITL turn retains its source set.
+      if (reviewBatchId) {
+        await recoverDatabaseBookkeeping(() => memoryReviewRepository.completeBatch({
+          batchId: reviewBatchId,
+          completedAt: new Date(),
+          eveSessionId: ctx.session.id,
+          eveTurnId: ctx.session.turn.id,
+        }));
+      }
+      await releaseMemoryTurnSources(ctx);
+    }
+    if (isScheduledSession(ctx) && !awaitingApproval) {
+      // Successful scheduled runs are completed atomically with Telegram delivery above.
+      await agentScheduleDispatchRepository.failRun(
+        sessionId,
+        ctx.session.id,
+        "AGENT_SCHEDULE_DELIVERY_CONFIRMATION_MISSING",
+        new Date(),
+      );
+    }
+    // A parked wake-up has already asked its question; the run is done either way.
+    await finishConversationWakeupTurn(ctx, null);
+    if (!reviewBatchId) {
+      await sessionRepository.recordTurnCompleted(sessionId, ctx.session.id, awaitingApproval, !isConversationWakeupTurn(ctx));
+    }
+    if (!awaitingApproval) {
+      await telegramHitlApprovalRepository.clearForEveSession(sessionId, ctx.session.id);
+    }
+  },
+};
+
+export const telegramChannelHooks: Pick<TelegramChannelHooks, "onHitlCallbackQuery" | "onMessage"> = {
   onHitlCallbackQuery: authorizeTelegramHitlCallback,
   onMessage: handleTelegramMessage,
-  onVerifiedUpdate: handleTelegramDurableIngress,
-  // The application persists authorized files before dispatch. The primary model receives only
-  // trusted workspace paths and invokes the dedicated vision model when image analysis is needed.
-  uploadPolicy: TELEGRAM_EVE_UPLOAD_POLICY,
-});
+};
+
+const authorizeTelegramVoice = createTelegramVoiceAuthorizer(telegramRepository);
+
+/** The production ingress over the runtime's dispatch and turn runner. */
+export function createTelegramIngress(runtime: Pick<DurableIngressDependencies, "dispatch" | "processConversationWakeup" | "runTurn">) {
+  return createTelegramDurableIngress({
+    ...runtime,
+    acceptMedia(message, incomingUpdateId, mediaKind) {
+      return telegramIngressRepository.acceptMedia({
+        chatId: message.chat.id,
+        chatType: message.chat.type,
+        mediaKind,
+        updateId: incomingUpdateId,
+      });
+    },
+    authorizeVoice: authorizeTelegramVoice,
+    botUsername: requiredBotUsername(),
+    handleSoftwareUpdateCallback,
+    leaseMilliseconds: TELEGRAM_INGRESS_LEASE_MS,
+    reportFailure: recordOperationalIncident,
+    repository: telegramIngressRepository,
+    transcribeVoice: transcribeTelegramVoice,
+  });
+}
+
+function requiredBotUsername(): string {
+  const username = process.env.TELEGRAM_BOT_USERNAME;
+  if (!username) throw new Error("AGENT_TELEGRAM_CONFIG_MISSING: Не задано имя Telegram-бота");
+  return username;
+}

@@ -1,14 +1,14 @@
 /** Exercise the exact deploy readiness SQL against application handoff states. */
 import { readFileSync } from "node:fs";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Session } from "eve/channels";
-import type { SessionAuth, SessionAuthContext } from "../runtime/context.js";
 import { closeDatabase, database } from "./database.js";
 import { createMainAgentMemoryFixture } from "./memory-agent-write.integration-fixtures.js";
 import { sessionRepository } from "./sessions/session-repository.js";
 import { withRuntimeAdmission } from "./runtime-maintenance.js";
-import { runtimeHandoffSession, completeRuntimeHandoff, completeRuntimeSessionHandoffs } from "./runtime-handoff.js";
-import { coalesceDeliveries } from "../../node_modules/eve/dist/src/harness/messages.js";
+import { createTurnDispatcher } from "../runtime/dispatch.js";
+import {
+  newTestSession, recordingObserver, reply, scriptedModel, startMessageTurn, testAgent, testRuntime,
+} from "../runtime/turn/turn.integration-fixtures.js";
 
 const describeDatabase = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true" ? describe : describe.skip;
 const source = readFileSync(new URL("../../scripts/production-deploy/backup.sh", import.meta.url), "utf8");
@@ -53,50 +53,29 @@ describeDatabase("deploy application readiness", () => {
     expect(await readiness()).toBe("busy");
   });
 
-  it("retains a timeout continuation after accepted until its own native boundary", async () => {
-    const actor: SessionAuthContext = { authenticator: "telegram", principalId: "101", principalType: "user", attributes: {} };
-    const respond = vi.fn().mockResolvedValue({ status: "accepted", sessionId: "eve-handoff" });
-    const session = { id: "eve-handoff", respond } as unknown as Session;
-    await withRuntimeAdmission("callback", async admissionId => {
-      await runtimeHandoffSession(session, admissionId).respond([{ requestId: "approval-1", optionId: "cancel" }], { auth: actor });
+  it("stays busy while a turn started in the background runs, and idle once it ended", async () => {
+    const sessionId = await newTestSession();
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    let started!: () => void;
+    const modelCalled = new Promise<void>((resolve) => { started = resolve; });
+    const dispatcher = createTurnDispatcher({
+      admit: async (work) => await withRuntimeAdmission("callback", work),
+      runtime: testRuntime({
+        agent: testAgent({}),
+        callModel: scriptedModel(async () => { started(); await released; return reply("готово"); }).callModel,
+        observer: recordingObserver().observer,
+      }),
+      waitMilliseconds: 50,
     });
-    expect(await readiness()).toBe("busy");
-    const auth: SessionAuth = { current: respond.mock.calls[0]![1].auth, initiator: actor };
-    await completeRuntimeHandoff(auth, "another-session");
-    expect(await readiness()).toBe("busy");
-    await completeRuntimeHandoff(auth, session.id);
-    expect(await readiness()).toBe("idle");
-  });
+    const turn = await startMessageTurn(sessionId, "продолжи");
 
-  it("keeps an ambiguous timeout handoff until the exact session is terminal", async () => {
-    const actor: SessionAuthContext = { authenticator: "telegram", principalId: "101", principalType: "user", attributes: {} };
-    const session = { id: "eve-handoff", respond: vi.fn().mockRejectedValue(new Error("lost response")) } as unknown as Session;
-    await expect(withRuntimeAdmission("callback", admissionId =>
-      runtimeHandoffSession(session, admissionId).respond([{ requestId: "approval-1", optionId: "cancel" }], { auth: actor }),
-    )).rejects.toThrow("lost response");
+    dispatcher.start(turn.id);
+    await modelCalled;
     expect(await readiness()).toBe("busy");
-    await completeRuntimeSessionHandoffs(session.id);
-    expect(await readiness()).toBe("idle");
-  });
+    release();
+    await dispatcher.idle();
 
-  it("closes all responses coalesced by Eve but not a later unresolved handoff", async () => {
-    const actor: SessionAuthContext = { authenticator: "telegram", principalId: "101", principalType: "user", attributes: {} };
-    const respond = vi.fn().mockResolvedValue({ status: "accepted", sessionId: "eve-handoff" });
-    const session = { id: "eve-handoff", respond } as unknown as Session;
-    for (const requestId of ["first", "second", "first"]) {
-      await withRuntimeAdmission("callback", admissionId => runtimeHandoffSession(session, admissionId)
-        .respond([{ requestId, optionId: "cancel" }], { auth: actor }));
-    }
-    const merged = coalesceDeliveries([
-      { kind: "deliver", auth: respond.mock.calls[0]![1].auth, payloads: [] },
-      { kind: "deliver", auth: respond.mock.calls[1]![1].auth, payloads: [] },
-      { kind: "deliver", auth: actor, payloads: [] },
-    ]);
-    if (!merged.auth) throw new Error("TEST_HANDOFF_AUTH_MISSING");
-    const lastMergedAuth: SessionAuth = { current: merged.auth, initiator: actor };
-    await completeRuntimeHandoff(lastMergedAuth, session.id);
-    expect((await database().query("SELECT id FROM runtime_admission_holders")).rows)
-      .toEqual([{ id: respond.mock.calls[2]![1].auth.attributes.osinaraRuntimeHandoffIds[0] }]);
-    expect(await readiness()).toBe("busy");
+    expect(await readiness()).toBe("idle");
   });
 });

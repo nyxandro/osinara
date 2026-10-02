@@ -19,7 +19,7 @@ import type { ToolDefinition } from "../tool.js";
 import { callStepModel } from "./model-call.js";
 import { runTurn } from "./run-turn.js";
 import { respondToInput } from "./turn-start.js";
-import { newTestSession, OWNER_AUTH, recordingObserver, startMessageTurn, TELEGRAM_CHANNEL, testAgent, testRuntime } from "./turn.integration-fixtures.js";
+import { newTestSession, OWNER_AUTH, recordingObserver, startMessageTurn, testAgent, testRuntime } from "./turn.integration-fixtures.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) throw new Error("AGENT_TEST_DATABASE_UNSAFE");
@@ -153,7 +153,7 @@ async function replay(scenario: string, input: {
   if (input.respond !== undefined) {
     if (outcome.status !== "waiting_input") throw new Error(`TEST_EXPECTED_PARK: ${outcome.status}`);
     const resumed = await respondToInput(database(), {
-      auth: OWNER_AUTH, channel: TELEGRAM_CHANNEL, context: input.respond.context ?? [],
+      auth: OWNER_AUTH, context: input.respond.context ?? [],
       responses: outcome.requests.map((request) => ({ optionId: input.respond!.optionId, requestId: request.requestId })), sessionId,
     });
     if (resumed.status !== "resumed") throw new Error(`TEST_EXPECTED_RESUME: ${resumed.status}`);

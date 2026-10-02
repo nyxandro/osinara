@@ -9,7 +9,7 @@ import type { StepModelCall, StepModelResponse } from "./model-call.js";
 import { runTurn } from "./run-turn.js";
 import { respondToInput } from "./turn-start.js";
 import {
-  newTestSession, OWNER_AUTH, recordingObserver, reply, startMessageTurn, TELEGRAM_CHANNEL, testAgent, testRuntime, toolCalls,
+  newTestSession, OWNER_AUTH, recordingObserver, reply, startMessageTurn, testAgent, testRuntime, toolCalls,
 } from "./turn.integration-fixtures.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
@@ -152,13 +152,17 @@ async function childTurns() {
     expect((await loadSessionHistory(database(), sessionId)).messages).toEqual([{ role: "user", content: "отправь письмо" }]);
 
     const resumed = await respondToInput(database(), {
-      auth: OWNER_AUTH, channel: TELEGRAM_CHANNEL, context: [], responses: [{ optionId: "approve", requestId: parked.requests[0]!.requestId }], sessionId,
+      auth: OWNER_AUTH, context: [], responses: [{ optionId: "approve", requestId: parked.requests[0]!.requestId }], sessionId,
     });
     if (resumed.status !== "resumed") throw new Error(resumed.status);
     const final = await runTurn(testRuntime({ agent, callModel: model.callModel, observer: recordingObserver().observer }), resumed.continuation.id, RUN);
 
     expect(final).toEqual({ status: "completed", text: "Отправил." });
     expect(execute).toHaveBeenCalledTimes(1);
+    // The child continues as a child: with its own channel, not the parent's.
+    const childContinuations = await database().query<{ channel: unknown }>(
+      "SELECT channel FROM agent_turns WHERE resumes_turn_id IS NOT NULL AND session_id <> $1", [sessionId]);
+    expect(childContinuations.rows).toEqual([{ channel: { kind: "subagent" } }]);
     expect(model.requests.at(-1)!.messages.at(-1)).toMatchObject({ content: [{ output: { type: "text", value: "письмо ушло" }, toolCallId: "call-a" }] });
   });
 

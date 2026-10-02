@@ -16,22 +16,6 @@ import { createTelegramInputRequestHandler } from "./input-request.js";
 describe("createTelegramInputRequestHandler", () => {
   it.each([
     {
-      chatNotice: true,
-      code: "AGENT_EXTERNAL_SESSION_LIMIT_FORBIDDEN",
-      groupType: "external",
-      kind: "session-limit",
-      signal: "session budget by request kind",
-      toolName: "manage_agent_schedule",
-    },
-    {
-      chatNotice: true,
-      code: "AGENT_EXTERNAL_SESSION_LIMIT_FORBIDDEN",
-      groupType: "external",
-      kind: "tool-approval",
-      signal: "session budget by synthetic tool name",
-      toolName: "session_limit_continuation",
-    },
-    {
       code: "AGENT_EXTERNAL_APPROVAL_FORBIDDEN",
       groupType: "external",
       kind: "question",
@@ -46,14 +30,6 @@ describe("createTelegramInputRequestHandler", () => {
       toolName: "manage_reminder",
     },
     {
-      chatNotice: true,
-      code: "AGENT_EXTERNAL_SESSION_LIMIT_FORBIDDEN",
-      groupType: "family_private",
-      kind: "session-limit",
-      signal: "session budget in the family group",
-      toolName: "manage_agent_schedule",
-    },
-    {
       code: "AGENT_EXTERNAL_APPROVAL_FORBIDDEN",
       groupType: "family_private",
       kind: "tool-approval",
@@ -61,7 +37,6 @@ describe("createTelegramInputRequestHandler", () => {
       toolName: "execute_google_workspace",
     },
   ])("rejects a $groupType group prompt: $signal, before side effects", async ({
-    chatNotice,
     code,
     groupType,
     kind,
@@ -141,9 +116,8 @@ describe("createTelegramInputRequestHandler", () => {
     expect(parkSession).not.toHaveBeenCalled();
     expect(registerMessageRoutes).not.toHaveBeenCalled();
     expect(register).not.toHaveBeenCalled();
-    // Only the budget refusal speaks to the chat, and it binds nothing while doing so.
-    expect(request.mock.calls.map(([method]) => method))
-      .toEqual(chatNotice === true ? ["sendMessage"] : []);
+    // A refused prompt says nothing to the chat: the model explains the denied tool itself.
+    expect(request.mock.calls.map(([method]) => method)).toEqual([]);
   });
 
   it.each([
@@ -449,82 +423,6 @@ describe("createTelegramInputRequestHandler", () => {
       }],
     } as never, channel, ctx)).rejects.toThrow("AGENT_APPROVAL_CONTEXT_INVALID");
     expect(parkSession).not.toHaveBeenCalled();
-  });
-
-  it("explains a refused session budget in the shared chat before the turn ends", async () => {
-    const parkSession = vi.fn();
-    const register = vi.fn();
-    const request = vi.fn().mockResolvedValue({
-      body: { ok: true, result: { message_id: 93 } },
-      ok: true,
-      status: 200,
-    });
-    const handler = createTelegramInputRequestHandler({
-      approvals: { register },
-      parkSession,
-      present: vi.fn(),
-      registerMessageRoutes: vi.fn(),
-    });
-    const channel = {
-      state: {
-        botUsername: "osinara_bot",
-        chatId: "-1001",
-        chatType: "supergroup",
-        conversationId: "77",
-        hitlCallbacks: {},
-        messageThreadId: null,
-        nextHitlCallbackId: 0,
-        pendingFreeformReplies: {},
-        triggeringUserId: "101",
-      },
-      telegram: { request },
-    } as unknown as TelegramEventContext;
-    const ctx = {
-      session: {
-        auth: {
-          current: {
-            attributes: {
-              applicationSessionId: "app-session-1",
-              groupId: "group-1",
-              groupType: "family_private",
-              telegramChatId: "-1001",
-              telegramChatType: "supergroup",
-              telegramUserId: "101",
-            },
-            authenticator: "telegram",
-            principalId: "user-1",
-            principalType: "user",
-          },
-          initiator: null,
-        },
-        id: "wrun_hitl",
-        turn: { id: "turn-1", sequence: 1 },
-      },
-    } as unknown as SessionContext;
-
-    await expect(handler({
-      requests: [{
-        action: {
-          callId: "wrun_child:limit",
-          input: { kind: "input" },
-          kind: "tool-call",
-          toolName: "manage_agent_schedule",
-        },
-        display: "confirmation",
-        kind: "session-limit",
-        options: [],
-        prompt: "Approve a fresh token budget",
-        requestId: "wrun_child:limit",
-      }],
-    } as never, channel, ctx)).rejects.toThrow("AGENT_EXTERNAL_SESSION_LIMIT_FORBIDDEN");
-
-    expect(request).toHaveBeenCalledWith("sendMessage", expect.objectContaining({
-      chat_id: "-1001",
-      text: expect.stringContaining("Разбейте запрос на части"),
-    }));
-    // Explaining the stop is not the same as opening a prompt: nothing durable is bound.
-    expect(parkSession).not.toHaveBeenCalled();
-    expect(register).not.toHaveBeenCalled();
   });
 
   it("stays silent in the shared chat for a refused tool approval, which the model explains itself", async () => {

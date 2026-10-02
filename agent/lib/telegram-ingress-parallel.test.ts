@@ -1,9 +1,19 @@
 /** A slow group must not block private approval buttons; each chat still has one FIFO head. */
 import { describe, expect, it, vi } from "vitest";
+import type { TelegramUpdate } from "../runtime/telegram/inbound.js";
 import { createTelegramDurableIngress } from "./telegram-durable-ingress.js";
-import { correlatedDispatch } from "./telegram-ingress.test-fixtures.js";
 import type { TelegramIngressRepository } from "./telegram-ingress-contract.js";
 import { TELEGRAM_INGRESS_CALLBACK_CONCURRENCY, TELEGRAM_INGRESS_MESSAGE_CONCURRENCY } from "../config.js";
+
+function updateMessageId(update: TelegramUpdate): number {
+  return Number(update.kind === "message" ? update.message.messageId : update.callbackQuery.message!.messageId);
+}
+
+// The turn of an update is named after its message, so the runner knows which update it runs.
+function dispatchedTurn(update: TelegramUpdate) {
+  const id = updateMessageId(update);
+  return { sessionId: `wrun_${id}`, status: "dispatched" as const, turnId: `turn_${update.kind}_${id}` };
+}
 
 describe("independent Telegram queue progress", () => {
   it.each(["none", "turn", "lease"] as const)("bounds turns and reserves callback capacity (failure: %s)", async failure => {
@@ -23,29 +33,31 @@ describe("independent Telegram queue progress", () => {
     const repository = { claimNext: vi.fn(async () => items.shift() ?? null), beginDispatch: vi.fn(),
       renewLease: vi.fn(async (id: string) => { if (failure === "lease" && id === String(ordinary)) throw new Error("expected test lease loss"); }),
       privateBurstReadyIn: vi.fn(async () => null),
-      sessionEventStreamCursor: vi.fn(async () => 0), completeWithSession: vi.fn(async (id: string) => { completed.push(Number(id)); }), fail: vi.fn() };
+      complete: vi.fn(async (id: string) => { completed.push(Number(id)); }), fail: vi.fn() };
     const handler = createTelegramDurableIngress({ reportFailure: vi.fn(), repository: repository as unknown as TelegramIngressRepository,
       botUsername: "osinara_bot", leaseMilliseconds: 60_000, acceptMedia: vi.fn(), authorizeVoice: vi.fn(),
-      handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), transcribeVoice: vi.fn() });
-    try {
-      for (let index = 0; index < ordinary + callbacks; index++) await handler.drain({ attachSession: vi.fn(), waitUntil: task => { work.push(task); }, dispatch: correlatedDispatch(async update => {
-        const id = Number(update.kind === "message" ? update.message.messageId : update.callbackQuery.message!.messageId);
-        dispatched.push(id); active[update.kind]++; maximum[update.kind] = Math.max(maximum[update.kind], active[update.kind]);
-        return { id: String(id), getEventStream: async () => new ReadableStream({ async start(controller) {
-          await gates[update.kind]; active[update.kind]--;
-          if (failure === "turn" && id === 1) { controller.error(new Error("expected test turn failure")); return; }
-          controller.enqueue({ type: "session.waiting" }); controller.close();
-        } }) } as never;
+      handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), transcribeVoice: vi.fn(),
+      dispatch: vi.fn(async (update: TelegramUpdate) => { dispatched.push(updateMessageId(update)); return dispatchedTurn(update); }),
+      runTurn: vi.fn(async (turnId: string) => {
+        const kind = turnId.startsWith("turn_message") ? "message" : "callback_query";
+        active[kind]++; maximum[kind] = Math.max(maximum[kind], active[kind]);
+        await gates[kind]; active[kind]--;
+        if (failure === "turn" && turnId === "turn_message_1") throw new Error("expected test turn failure");
+        return { status: "completed" as const, text: null };
       }) });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      for (let index = 0; index < ordinary + callbacks; index++) await handler.drain({ waitUntil: task => { work.push(task); } });
       await vi.waitFor(() => expect(dispatched).toHaveLength(TELEGRAM_INGRESS_MESSAGE_CONCURRENCY + TELEGRAM_INGRESS_CALLBACK_CONCURRENCY));
       releaseCallbacks(); await vi.waitFor(() => expect(completed.filter(id => id > ordinary)).toHaveLength(callbacks));
       expect(dispatched.filter(id => id <= ordinary)).toHaveLength(TELEGRAM_INGRESS_MESSAGE_CONCURRENCY);
-    } finally { releaseMessages(); releaseCallbacks(); await Promise.all(work); }
+    } finally { releaseMessages(); releaseCallbacks(); await Promise.all(work); vi.restoreAllMocks(); }
     expect(maximum).toEqual({ message: TELEGRAM_INGRESS_MESSAGE_CONCURRENCY, callback_query: TELEGRAM_INGRESS_CALLBACK_CONCURRENCY });
     expect(repository.renewLease).toHaveBeenCalledTimes(2);
     expect(repository.fail).toHaveBeenCalledTimes(failure === "none" ? 0 : 1);
     expect(dispatched.includes(ordinary)).toBe(failure !== "lease");
   });
+
   it("keeps every message slot for messages while a wake-up turn runs", async () => {
     let releaseWakeup!: () => void, releaseMessages!: () => void;
     const wakeupGate = new Promise<void>(resolve => { releaseWakeup = resolve; });
@@ -54,11 +66,12 @@ describe("independent Telegram queue progress", () => {
     let wakeupRunning = false, wakeupDone = false;
     const dispatched: number[] = [], work: Promise<unknown>[] = [];
     const repository = { claimNext: vi.fn(async () => items.shift() ?? null), beginDispatch: vi.fn(), renewLease: vi.fn(),
-      privateBurstReadyIn: vi.fn(async () => null),
-      sessionEventStreamCursor: vi.fn(async () => 0), completeWithSession: vi.fn(), fail: vi.fn() };
+      privateBurstReadyIn: vi.fn(async () => null), complete: vi.fn(), fail: vi.fn() };
     const handler = createTelegramDurableIngress({ reportFailure: vi.fn(), repository: repository as unknown as TelegramIngressRepository,
       botUsername: "osinara_bot", leaseMilliseconds: 60_000, acceptMedia: vi.fn(), authorizeVoice: vi.fn(),
       handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), transcribeVoice: vi.fn(),
+      dispatch: vi.fn(async (update: TelegramUpdate) => { dispatched.push(updateMessageId(update)); return dispatchedTurn(update); }),
+      runTurn: vi.fn(async () => { await messageGate; return { status: "completed" as const, text: null }; }),
       processConversationWakeup: vi.fn(async ({ slots }) => {
         if (wakeupDone || slots.tryAcquire() === undefined) return false;
         wakeupRunning = true;
@@ -67,14 +80,7 @@ describe("independent Telegram queue progress", () => {
         wakeupDone = true;
         return true;
       }) });
-    const dispatch = correlatedDispatch(async update => {
-      const id = Number(update.kind === "message" ? update.message.messageId : 0);
-      dispatched.push(id);
-      return { id: String(id), getEventStream: async () => new ReadableStream({ async start(controller) {
-        await messageGate; controller.enqueue({ type: "session.waiting" }); controller.close();
-      } }) } as never;
-    });
-    const drain = () => handler.drain({ attachSession: vi.fn(), waitUntil: task => { work.push(task); }, dispatch });
+    const drain = () => handler.drain({ waitUntil: task => { work.push(task); } });
     try {
       await drain();
       await vi.waitFor(() => expect(wakeupRunning).toBe(true));
@@ -87,13 +93,13 @@ describe("independent Telegram queue progress", () => {
       await vi.waitFor(() => expect(dispatched).toHaveLength(TELEGRAM_INGRESS_MESSAGE_CONCURRENCY));
     } finally { releaseMessages(); releaseWakeup(); await Promise.all(work); }
   });
+
   it("processes four private buttons before a slow group finishes without overtaking either queue", async () => {
     const items = [
       { id: 1, chat: -100, status: "pending" }, { id: 2, chat: -100, status: "pending" },
       ...[3, 4, 5, 6].map(id => ({ id, chat: 101, status: "pending" })),
     ];
     const finish = async (id: string) => { items.find((item) => String(item.id) === id)!.status = "completed"; };
-    const cursors = new Map<string, number>();
     const repository = {
       claimNext: vi.fn(async () => {
         const item = items.find((candidate) => candidate.status === "pending" && !items.some((earlier) =>
@@ -114,12 +120,8 @@ describe("independent Telegram queue progress", () => {
         };
       }),
       beginDispatch: vi.fn(), complete: vi.fn(finish),
-      completeWithSession: vi.fn(async (id: string, _lease: string, sessionId: string, next: number) => {
-        cursors.set(sessionId, next);
-        await finish(id);
-      }),
       privateBurstReadyIn: vi.fn(async () => null),
-      sessionEventStreamCursor: vi.fn(async (id: string) => cursors.get(id) ?? 0), fail: vi.fn(), renewLease: vi.fn(),
+      fail: vi.fn(), renewLease: vi.fn(),
       acceptMedia: vi.fn(), beginVoiceTranscription: vi.fn(), enqueue: vi.fn(),
       rekeyQueue: vi.fn(), release: vi.fn(), saveVoiceTranscript: vi.fn(),
     } satisfies TelegramIngressRepository;
@@ -128,28 +130,18 @@ describe("independent Telegram queue progress", () => {
     const groupGate = new Promise<void>((resolve) => { releaseGroup = resolve; });
     const privateGate = new Promise<void>((resolve) => { releasePrivate = resolve; });
     const dispatched: number[] = [];
-    const streamStarts: number[][] = [];
     const handler = createTelegramDurableIngress({ reportFailure: vi.fn(), repository, botUsername: "osinara_bot",
       leaseMilliseconds: 60_000, acceptMedia: vi.fn(), authorizeVoice: vi.fn(),
       handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), transcribeVoice: vi.fn(),
+      dispatch: vi.fn(async (update: TelegramUpdate) => { dispatched.push(updateMessageId(update)); return dispatchedTurn(update); }),
+      runTurn: vi.fn(async (turnId: string) => {
+        if (turnId.endsWith("_1")) await groupGate;
+        if (turnId.endsWith("_3")) await privateGate;
+        return { status: "completed" as const, text: null };
+      }),
     });
     const work: Promise<unknown>[] = [];
-    async function drain() {
-      await handler.drain({ attachSession: vi.fn(), waitUntil: (task) => { work.push(task); }, dispatch: correlatedDispatch(async (update) => {
-        const id = Number(update.kind === "message" ? update.message.messageId : update.callbackQuery.message!.messageId);
-        dispatched.push(id);
-        return { id: id > 2 ? "private-session" : "group-session", getEventStream: async ({ startIndex }: { startIndex: number }) => {
-          streamStarts.push([id, startIndex]);
-          return new ReadableStream({
-            async start(controller) {
-              if (id === 1) await groupGate;
-              if (id === 3) await privateGate;
-              controller.enqueue({ type: "session.waiting" }); controller.close();
-            },
-          });
-        } } as never;
-      }) });
-    }
+    const drain = () => handler.drain({ waitUntil: (task) => { work.push(task); } });
     try {
       await drain();
       await vi.waitFor(() => expect(dispatched).toEqual([1]));
@@ -167,7 +159,6 @@ describe("independent Telegram queue progress", () => {
       await Promise.all(work);
     }
     expect(dispatched).toEqual([1, 3, 4, 5, 6, 2]);
-    expect(streamStarts).toEqual([[1, 0], [3, 0], [4, 1], [5, 2], [6, 3], [2, 1]]);
     expect(repository.fail).not.toHaveBeenCalled();
   });
 });
