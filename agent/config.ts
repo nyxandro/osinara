@@ -20,6 +20,7 @@ export const GOOGLE_WORKSPACE_COMMAND_TIMEOUT_MS = 60_000;
 export const SANDBOX_RUNNER_BASE_URL = "http://sandbox-runner:8080";
 export const SESSION_INACTIVITY_DAYS = 30;
 export const SESSION_GROUP_ROTATION_LOCK_HASH_SEED = 3;
+export const FAMILY_SKILLS_LOCK_HASH_SEED = 4;
 export const SESSION_RETENTION_LEASE_MS = 15 * 60 * 1_000;
 export const SESSION_RETENTION_DAYS = 1;
 // A cleanup that failed is tried again later instead of parking the session for good.

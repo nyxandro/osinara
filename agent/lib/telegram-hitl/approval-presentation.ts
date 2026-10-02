@@ -170,7 +170,7 @@ export const presentTelegramApproval = createTelegramApprovalPresenter({
     return await familySkillRepository.versions(requirePrivateTelegramOwner(ctx).familyId, name);
   },
   async findSkillGrantCatalog(ctx) {
-    return skillGrantCatalog(await familySkillRepository.workingSkills(requirePrivateTelegramOwner(ctx).familyId));
+    return skillGrantCatalog(await familySkillRepository.grantableSkills(requirePrivateTelegramOwner(ctx).familyId));
   },
   async findProfileProjectionGroup(groupRef, ctx) {
     requirePrivateTelegramOwner(ctx);

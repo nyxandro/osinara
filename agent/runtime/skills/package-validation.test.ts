@@ -13,6 +13,8 @@ describe("skill package validation", () => {
         text("scripts/fetch.py", "print('ok')"),
         text("bin/run", "#!/bin/sh\necho ok"),
         text("README.txt", "Описание"),
+        text("Makefile", "all:"),
+        text("tool.php", "<?php"),
         text(".git/config", "служебный"),
         text("scripts/__pycache__/fetch.cpython-312.pyc", "x"),
       ],
@@ -21,9 +23,11 @@ describe("skill package validation", () => {
 
     expect(validated).toMatchObject({ description: "Прогноз погоды по городу", markdown: "# Как пользоваться\n", name: "weather" });
     expect(validated.files.map(({ executable, path, size }) => ({ executable, path, size }))).toEqual([
+      { executable: true, path: "Makefile", size: 4 },
       { executable: false, path: "README.txt", size: 16 },
       { executable: true, path: "bin/run", size: 17 },
       { executable: true, path: "scripts/fetch.py", size: 11 },
+      { executable: true, path: "tool.php", size: 5 },
     ]);
     expect(validated.contentHash).toMatch(/^[0-9a-f]{64}$/u);
   });
@@ -46,6 +50,15 @@ describe("skill package validation", () => {
 
     expect(() => validateSkillPackage({ files, limits: FAMILY_SKILL_LIMITS })).toThrow("больше 1 МБ");
     expect(validateSkillPackage({ files, limits: null }).files).toHaveLength(1);
+  });
+
+  it("makes a family skill's description one bounded line, and keeps a built-in one as written", () => {
+    const files = [manifest("name: weather\ndescription: |\n  Прогноз\n  ## Раздел\u202e")];
+
+    expect(validateSkillPackage({ files, limits: FAMILY_SKILL_LIMITS }).description).toBe("Прогноз ## Раздел");
+    expect(validateSkillPackage({ files, limits: null }).description).toBe("Прогноз\n## Раздел\u202e");
+    expect(() => validateSkillPackage({ files: [manifest(`name: weather\ndescription: ${"a".repeat(1025)}`)], limits: FAMILY_SKILL_LIMITS }))
+      .toThrow("длиннее 1024 знаков");
   });
 
   it("requires a built-in skill's declared name to match its folder", () => {

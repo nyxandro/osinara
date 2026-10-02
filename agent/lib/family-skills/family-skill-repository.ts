@@ -5,21 +5,26 @@
  * - `familySkillRepository`: the working skills a turn receives; the owner's list and details;
  *   storing a checked package as a new version; and the changes the owner confirms — making a
  *   version the working one (create, update, rollback), enabling, disabling, deleting.
- * - `workingFamilySkills`: just the names of the working skills and whether each runs scripts,
- *   read inside the caller's transaction.
+ * - `grantableFamilySkills`: the skills the owner has confirmed at least once (a group's list may
+ *   name them), whether each is enabled and whether its working version runs scripts; read inside
+ *   the caller's transaction.
  * - `FamilySkillSummary`, `FamilySkillVersion`, `StoredSkillFile`.
  *
  * A new version is only stored: the skill keeps working with its current version until the owner
- * confirms the new one, and every earlier version stays for a rollback. Every change re-checks in
- * the same transaction that the person is still the family's owner: a button pressed after the
- * role was taken away changes nothing.
+ * confirms the new one; the newest versions stay for a rollback (`family-skill-limits.ts`). Every
+ * change re-checks in the same transaction that the person is still the family's owner — a button
+ * pressed after the role was taken away changes nothing — and takes the family's skill lock first,
+ * so changes of one family run one after another. Deleting a skill also takes it off the skill
+ * lists of the family's groups: a later skill under the same name is not granted by the old entry.
  */
 import type { Pool, PoolClient } from "pg";
 
+import { FAMILY_SKILLS_LOCK_HASH_SEED } from "../../config.js";
 import type { SkillDefinition } from "../../runtime/skills/definition.js";
 import type { ValidatedSkillPackage } from "../../runtime/skills/package-validation.js";
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
+import { pruneOldVersions, requireRoomForNewSkill, requireWorkingSizeWithin } from "./family-skill-limits.js";
 
 export interface StoredSkillFile {
   readonly executable: boolean;
@@ -32,6 +37,8 @@ export interface FamilySkillVersion {
   readonly createdAt: Date;
   readonly description: string;
   readonly files: readonly StoredSkillFile[];
+  /** Bytes of the `SKILL.md` instructions after the header. */
+  readonly markdownSize: number;
   readonly origin: { readonly kind: "authored" } | { readonly kind: "downloaded"; readonly url: string };
   readonly version: number;
 }
@@ -49,6 +56,7 @@ interface VersionRow {
   created_at: Date;
   description: string;
   files: Array<StoredSkillFile & { content: string }>;
+  markdown_size: number;
   origin_kind: "authored" | "downloaded";
   origin_url: string | null;
   version: number;
@@ -60,37 +68,10 @@ function toVersion(row: VersionRow): FamilySkillVersion {
     createdAt: row.created_at,
     description: row.description,
     files: row.files.map(({ executable, path, size }) => ({ executable, path, size })),
+    markdownSize: row.markdown_size,
     origin: row.origin_kind === "downloaded" ? { kind: "downloaded", url: row.origin_url! } : { kind: "authored" },
     version: row.version,
   };
-}
-
-// Every turn reads all working skills of the family and sends them to the sandbox in one request
-// (with the built-in ones, under the runner's 64 MB request limit).
-const FAMILY_WORKING_SKILLS_MAX_BYTES = 8 * 1024 * 1024;
-
-/**
- * Refuses a change that would make the family's working skills larger than a turn may carry:
- * `skillId` working with `version`, the others as they are. Locks the family's skills so two
- * changes cannot pass the check together.
- */
-async function requireWorkingSizeWithin(client: PoolClient, familyId: string, skillId: string, version: number): Promise<void> {
-  await client.query("SELECT 1 FROM family_skills WHERE family_id = $1 FOR UPDATE", [familyId]);
-  const total = Number((await client.query<{ total: string }>(
-    `SELECT coalesce(sum(octet_length(version.markdown)
-              + (SELECT coalesce(sum((file->>'size')::bigint), 0) FROM jsonb_array_elements(version.files) file)), 0) AS total
-       FROM family_skills skill
-       JOIN family_skill_versions version
-         ON version.skill_id = skill.id AND version.version = CASE WHEN skill.id = $2 THEN $3 ELSE skill.active_version END
-      WHERE skill.family_id = $1 AND (skill.enabled OR skill.id = $2)`,
-    [familyId, skillId, version],
-  )).rows[0]!.total);
-  if (total > FAMILY_WORKING_SKILLS_MAX_BYTES) {
-    throw new AppError("AGENT_SKILL_FAMILY_LIMIT_REACHED",
-      "Включённые скиллы семьи вместе займут больше 8 МБ. Выключите или удалите ненужные скиллы и повторите", {
-        details: { total },
-      });
-  }
 }
 
 function notFound(name: string): AppError {
@@ -106,6 +87,7 @@ async function asCurrentOwner<T>(familyId: string, userId: string, work: (client
       [familyId, userId],
     );
     if (owner.rowCount !== 1) throw new AppError("AGENT_OWNER_REQUIRED", "Это действие доступно только владельцу");
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, $2))", [familyId, FAMILY_SKILLS_LOCK_HASH_SEED]);
     const result = await work(client);
     await client.query("COMMIT");
     return result;
@@ -117,19 +99,19 @@ async function asCurrentOwner<T>(familyId: string, userId: string, work: (client
   }
 }
 
-export async function workingFamilySkills(
+export async function grantableFamilySkills(
   queryable: Pick<Pool | PoolClient, "query">,
   familyId: string,
-): Promise<Map<string, { readonly executable: boolean }>> {
-  const rows = (await queryable.query<{ executable: boolean; name: string }>(
-    `SELECT skill.name,
+): Promise<Map<string, { readonly enabled: boolean; readonly executable: boolean }>> {
+  const rows = (await queryable.query<{ enabled: boolean; executable: boolean; name: string }>(
+    `SELECT skill.name, skill.enabled,
             EXISTS (SELECT 1 FROM jsonb_array_elements(version.files) file WHERE (file->>'executable')::boolean) AS executable
        FROM family_skills skill
        JOIN family_skill_versions version ON version.skill_id = skill.id AND version.version = skill.active_version
-      WHERE skill.family_id = $1 AND skill.enabled`,
+      WHERE skill.family_id = $1`,
     [familyId],
   )).rows;
-  return new Map(rows.map((row) => [row.name, { executable: row.executable }]));
+  return new Map(rows.map((row) => [row.name, { enabled: row.enabled, executable: row.executable }]));
 }
 
 export const familySkillRepository = {
@@ -151,8 +133,8 @@ export const familySkillRepository = {
     }]));
   },
 
-  async workingSkills(familyId: string): Promise<Map<string, { readonly executable: boolean }>> {
-    return await workingFamilySkills(database(), familyId);
+  async grantableSkills(familyId: string): Promise<Map<string, { readonly enabled: boolean; readonly executable: boolean }>> {
+    return await grantableFamilySkills(database(), familyId);
   },
 
   async list(familyId: string): Promise<FamilySkillSummary[]> {
@@ -173,25 +155,13 @@ export const familySkillRepository = {
     const summary = (await this.list(familyId)).find((skill) => skill.name === name);
     if (summary === undefined) throw notFound(name);
     const rows = (await database().query<VersionRow>(
-      `SELECT version.version, version.description, version.files, version.content_hash, version.origin_kind, version.origin_url, version.created_at
+      `SELECT version.version, version.description, version.files, version.content_hash, version.origin_kind, version.origin_url,
+              version.created_at, octet_length(version.markdown) AS markdown_size
          FROM family_skill_versions version JOIN family_skills skill ON skill.id = version.skill_id
         WHERE skill.family_id = $1 AND skill.name = $2 ORDER BY version.version DESC`,
       [familyId, name],
     )).rows;
     return { summary, versions: rows.map(toVersion) };
-  },
-
-  async version(familyId: string, name: string, version: number): Promise<FamilySkillVersion> {
-    const row = (await database().query<VersionRow>(
-      `SELECT version.version, version.description, version.files, version.content_hash, version.origin_kind, version.origin_url, version.created_at
-         FROM family_skill_versions version JOIN family_skills skill ON skill.id = version.skill_id
-        WHERE skill.family_id = $1 AND skill.name = $2 AND version.version = $3`,
-      [familyId, name, version],
-    )).rows[0];
-    if (row === undefined) {
-      throw new AppError("AGENT_SKILL_VERSION_NOT_FOUND", `У скилла ${name} нет версии ${version}`, { details: { name, version } });
-    }
-    return toVersion(row);
   },
 
   /**
@@ -205,6 +175,7 @@ export const familySkillRepository = {
     readonly skill: ValidatedSkillPackage;
   }): Promise<{ readonly created: boolean; readonly version: number }> {
     return await asCurrentOwner(input.familyId, input.createdBy, async (client) => {
+      await requireRoomForNewSkill(client, input.familyId, input.skill.name);
       const skill = (await client.query<{ id: string }>(
         `INSERT INTO family_skills (family_id, name) VALUES ($1, $2)
          ON CONFLICT (family_id, name) DO UPDATE SET updated_at = now() RETURNING id`,
@@ -228,6 +199,7 @@ export const familySkillRepository = {
           input.skill.contentHash, input.origin.kind, input.origin.kind === "downloaded" ? input.origin.url : null, input.createdBy,
         ],
       );
+      await pruneOldVersions(client, skill.id);
       return { created: true, version };
     });
   },
@@ -275,6 +247,11 @@ export const familySkillRepository = {
     await asCurrentOwner(input.familyId, input.requestedBy, async (client) => {
       const deleted = await client.query("DELETE FROM family_skills WHERE family_id = $1 AND name = $2", [input.familyId, input.name]);
       if (deleted.rowCount !== 1) throw notFound(input.name);
+      await client.query(
+        `UPDATE telegram_groups SET skill_allowlist = array_remove(skill_allowlist, $2)
+          WHERE family_id = $1 AND $2 = ANY(skill_allowlist)`,
+        [input.familyId, input.name],
+      );
     });
   },
 };

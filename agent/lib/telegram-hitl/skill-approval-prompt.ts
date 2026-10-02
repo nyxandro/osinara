@@ -5,10 +5,10 @@
  * - `skillApprovalPrompt`: the text of the card for `manage_skill` activate, enable, disable and
  *   delete, built from the stored skill the button will act on.
  *
- * For a version to start working the card shows what that version is: its description, whether
- * the agent wrote it or it was downloaded (and from where), and every file with its size, scripts
- * marked. Everything in a skill package is untrusted text, so every line goes through the same
- * sanitizing as other approval facts.
+ * For a version to start working the card shows what that version is: its description, every file
+ * with its size, scripts marked, and where it came from. The source is the agent's own statement
+ * (the application cannot verify a download), so the card says so. Everything in a skill package
+ * is untrusted text, so every line goes through the same sanitizing as other approval facts.
  */
 import { AppError } from "../app-error.js";
 import type { FamilySkillSummary, FamilySkillVersion } from "../family-skills/family-skill-repository.js";
@@ -29,10 +29,10 @@ function versionFacts(version: FamilySkillVersion): { facts: string[]; files: st
   return {
     facts: [
       ...approvalFact("Описание", version.description),
-      ...approvalFact("Источник", version.origin.kind === "downloaded" ? `скачан с ${version.origin.url}` : "написан агентом"),
+      ...approvalFact("Источник по словам агента", version.origin.kind === "downloaded" ? `скачан с ${version.origin.url}` : "написан агентом"),
     ],
     files: [
-      "SKILL.md — инструкции скилла",
+      `SKILL.md — ${byteSize(version.markdownSize)}, инструкции скилла`,
       ...version.files.map((file) => sanitizeApprovalLine(`${file.path} — ${byteSize(file.size)}${file.executable ? ", скрипт" : ""}`)),
     ],
   };

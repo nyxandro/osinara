@@ -102,6 +102,13 @@ describe("trusted mode tool surfaces", () => {
     expect(scheduled).toContain("agent");
   });
 
+  it("manages family skills only in an interactive turn of the private chat", () => {
+    expect(names({ environment: "private" })).toContain("manage_skill");
+    expect(names({ environment: "private", scheduledRun: true })).not.toContain("manage_skill");
+    expect(Object.keys(buildSubagentToolSurface({ environment: "private" }))).not.toContain("manage_skill");
+    expect(names({ environment: "family" })).not.toContain("manage_skill");
+  });
+
   it("never exposes another zone's tools", () => {
     const privateNames = names({ environment: "private" });
     const familyNames = names({ environment: "family" });

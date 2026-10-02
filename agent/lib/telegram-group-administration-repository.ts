@@ -17,7 +17,7 @@ import {
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
 import { stopGroupSandboxes, updateGroupPermissions } from "./telegram-group-policy-repository.js";
-import { workingFamilySkills } from "./family-skills/family-skill-repository.js";
+import { grantableFamilySkills } from "./family-skills/family-skill-repository.js";
 import { skillGrantCatalog, skillNeedsBash } from "./family-skills/skill-grants.js";
 import type {
   RegisteredGroupType,
@@ -188,7 +188,7 @@ export const telegramGroupAdministrationRepository: TelegramGroupAdministrationR
       if (current && current.type !== input.type) {
         await client.query("DELETE FROM telegram_groups WHERE id = $1", [current.id]);
       }
-      const catalog = skillGrantCatalog(await workingFamilySkills(client, input.familyId));
+      const catalog = skillGrantCatalog(await grantableFamilySkills(client, input.familyId));
 
       // A conflicting chat owned by another family is never reassigned through an upsert.
       const result = await client.query<{ id: string }>(

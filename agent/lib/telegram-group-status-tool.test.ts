@@ -22,7 +22,7 @@ vi.mock("./telegram-group-administration-repository.js", () => ({
 }));
 
 vi.mock("./family-skills/family-skill-repository.js", () => ({
-  familySkillRepository: { workingSkills: vi.fn().mockResolvedValue(new Map()) },
+  familySkillRepository: { grantableSkills: vi.fn().mockResolvedValue(new Map()) },
 }));
 
 import manageTelegramGroup from "./tools/manage_telegram_group.js";

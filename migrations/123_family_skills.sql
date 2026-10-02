@@ -20,7 +20,8 @@ CREATE TABLE family_skills (
 CREATE TABLE family_skill_versions (
   skill_id uuid NOT NULL REFERENCES family_skills(id) ON DELETE CASCADE,
   version integer NOT NULL CHECK (version > 0),
-  description text NOT NULL CHECK (char_length(description) > 0),
+  -- Описание попадает в системный промпт каждого хода: одна строка, не длиннее 1024 знаков.
+  description text NOT NULL CHECK (char_length(description) BETWEEN 1 AND 1024 AND description !~ '[\n\r]'),
   license text,
   markdown text NOT NULL,
   -- [{ "path", "size", "executable", "content" (base64) }], пути без SKILL.md.

@@ -20,9 +20,16 @@ import { parseSkillFrontmatter } from "./frontmatter.js";
 
 export const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/u;
 
-export const FAMILY_SKILL_LIMITS = Object.freeze({ maxFileBytes: 1024 * 1024, maxFiles: 100, maxTotalBytes: 2 * 1024 * 1024 });
+// The description goes into the system prompt of every turn, so it is one bounded line.
+export const FAMILY_SKILL_LIMITS = Object.freeze({
+  maxDescriptionCharacters: 1024,
+  maxFileBytes: 1024 * 1024,
+  maxFiles: 100,
+  maxTotalBytes: 2 * 1024 * 1024,
+});
 
-const SCRIPT_EXTENSIONS = /\.(?:sh|bash|py|js|mjs|cjs|ts|rb|pl)$/u;
+const SCRIPT_EXTENSIONS = /\.(?:sh|bash|zsh|fish|py|js|mjs|cjs|ts|mts|cts|rb|pl|php|lua|ps1|r|tcl|jar|go)$/iu;
+const SCRIPT_NAMES = new Set(["Makefile", "makefile", "GNUmakefile", "Rakefile", "justfile"]);
 
 export interface SkillPackageFile {
   readonly content: Uint8Array;
@@ -50,7 +57,8 @@ export function isSkillServiceFile(path: string): boolean {
 
 function isExecutable(path: string, content: Uint8Array): boolean {
   const head = Buffer.from(content.subarray(0, 4));
-  return SCRIPT_EXTENSIONS.test(path) || head.subarray(0, 2).toString("latin1") === "#!" || head.toString("latin1") === "\u007fELF";
+  return SCRIPT_EXTENSIONS.test(path) || SCRIPT_NAMES.has(path.slice(path.lastIndexOf("/") + 1)) ||
+    head.subarray(0, 2).toString("latin1") === "#!" || head.toString("latin1") === "\u007fELF";
 }
 
 function requireSafePath(path: string): void {
@@ -95,8 +103,17 @@ export function validateSkillPackage(input: {
   if (input.expectedName !== undefined && name !== input.expectedName) {
     throw invalid(`Имя в SKILL.md (${name}) не совпадает с папкой скилла (${input.expectedName})`);
   }
-  const description = frontmatter.fields.description?.trim();
-  if (!description) throw invalid(`В SKILL.md скилла ${name} нет описания (description)`);
+  const declaredDescription = frontmatter.fields.description?.trim();
+  if (!declaredDescription) throw invalid(`В SKILL.md скилла ${name} нет описания (description)`);
+  // A family's package is untrusted: line breaks and control characters could forge prompt sections.
+  const description = input.limits === null
+    ? declaredDescription
+    : declaredDescription.replace(/[\p{Cc}\p{Cf}\u2028\u2029\s]+/gu, " ").trim();
+  if (input.limits !== null && description.length > input.limits.maxDescriptionCharacters) {
+    throw invalid(`Описание скилла в SKILL.md длиннее ${input.limits.maxDescriptionCharacters} знаков: сократите его`, {
+      characters: description.length,
+    });
+  }
 
   const others = files.filter((file) => file.path !== "SKILL.md")
     .map((file) => ({ ...file, executable: isExecutable(file.path, file.content), size: file.content.byteLength }))

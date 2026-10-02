@@ -17,7 +17,7 @@ import { requirePrivateTelegramOwner } from "../family-context.js";
 import type { RegisteredGroupType } from "../family-access.js";
 import { SKILL_NAME_PATTERN } from "../../runtime/skills/package-validation.js";
 import { familySkillRepository } from "../family-skills/family-skill-repository.js";
-import { grantableSkillNames, skillGrantCatalog, skillNeedsBash } from "../family-skills/skill-grants.js";
+import { grantableSkillNames, isWorkingSkill, skillGrantCatalog, skillNeedsBash } from "../family-skills/skill-grants.js";
 import { GROUP_SAFE_SKILL_NAMES } from "../group-skills/group-skill-catalog.js";
 import { telegramGroupAdministrationRepository } from "../telegram-group-administration-repository.js";
 import {
@@ -297,19 +297,21 @@ export default defineTool({
         familyId: owner.familyId,
         requestedBy: owner.userId,
       });
-      const catalog = skillGrantCatalog(await familySkillRepository.workingSkills(owner.familyId));
+      const catalog = skillGrantCatalog(await familySkillRepository.grantableSkills(owner.familyId));
       const skillNames = grantableSkillNames(catalog);
+      const workingSkills = skillNames.filter((name) => isWorkingSkill(catalog, name));
       return {
         availableSafeSkills: skillNames,
         skillRequirements: Object.fromEntries(skillNames.map((name) => [name, {
           tools: skillNeedsBash(catalog, name) ? ["bash"] : [],
+          ...(isWorkingSkill(catalog, name) ? {} : { disabledFamilySkill: true }),
           ...(name.startsWith("gws-") || name === "t-invest" ? { connectionRequired: true, externalConnectionAvailable: false } : {}),
         }])),
         groups: groups.map((group) => {
           if (group.type === "family_private") {
             return {
               ...group,
-              effectiveSkills: skillNames,
+              effectiveSkills: workingSkills,
               builtInWorkspaceTools: [],
               effectiveConfiguredTools: [],
               policySummary:
@@ -325,14 +327,14 @@ export default defineTool({
           // A grant persisted under a previous model provider stays in PostgreSQL but is inert, so
           // status reports the round-trippable allowlist and names the dead grants separately.
           const { effective, unavailable } = selectGrantableExternalGroupTools(group.toolAllowlist);
-          // A family skill disabled or deleted after the grant stays in the stored list but is inert.
-          const inactiveSkills = group.skillAllowlist.filter((name) => !skillNames.includes(name));
+          // A disabled family skill stays in the stored list but is inert until it is enabled again.
+          const inactiveSkills = group.skillAllowlist.filter((name) => !workingSkills.includes(name));
           return {
             ...group,
             builtInWorkspaceTools,
             alwaysAvailableTools: [...builtInWorkspaceTools, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent"],
             effectiveConfiguredTools: [...new Set([...builtInWorkspaceTools, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent", ...effective])],
-            effectiveSkills: group.skillAllowlist.filter((name) => skillNames.includes(name)),
+            effectiveSkills: group.skillAllowlist.filter((name) => workingSkills.includes(name)),
             ...(inactiveSkills.length === 0 ? {} : { inactiveConfiguredSkills: inactiveSkills }),
             policySummary: unavailable.length === 0
               ? "Базовые workspace tools плюс полный настроенный allowlist внешней группы."

@@ -8,8 +8,14 @@
  * - An external group receives a family skill only after the owner adds it; disabling or deleting
  *   the skill closes that grant and leaves the group's other skills alone.
  * - A skill downloaded into the workspace is installed from there, and its card names the source.
- * - The family's working skills together stay within what a turn sends to the sandbox.
+ * - The family's working skills together stay within what a turn sends to the sandbox; a skill keeps
+ *   its newest versions.
+ * - Only the current owner changes skills; a downloaded description reaches the prompt as one
+ *   bounded line; a folder with a symbolic link is refused; two confirmations do not block each other.
  */
+import { symlink } from "node:fs/promises";
+import { join } from "node:path";
+
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import type { SessionAuth } from "../../runtime/context.js";
@@ -24,7 +30,8 @@ import manageTelegramGroup from "../tools/manage_telegram_group.js";
 import { workspaceBinaryRepository } from "../workspaces/workspace-binary-repository.js";
 import { requireWorkspaceAuthorization } from "../workspaces/workspace-context.js";
 import { WORKSPACES_ROOT } from "../workspaces/workspace-repository.js";
-import { deleteWorkspaceDirectory, writeWorkspaceFile } from "../workspaces/workspace-storage.js";
+import { withGroupSandboxAccess } from "../sandbox-runner/group-sandbox-policy.js";
+import { deleteWorkspaceDirectory, workspaceDirectory, writeWorkspaceFile } from "../workspaces/workspace-storage.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 const url = process.env.DATABASE_URL;
@@ -83,6 +90,18 @@ async function groupAuth(f: Fixture): Promise<SessionAuth> {
     authenticator: "telegram", principalId: f.ownerId, principalType: "user" as const,
   };
   return { current: caller, initiator: caller } as SessionAuth;
+}
+
+function memberAuth(f: Fixture): SessionAuth {
+  const owner = ownerAuth(f).current!;
+  const caller = { ...owner, attributes: { ...owner.attributes, role: "member" } };
+  return { current: caller, initiator: caller } as SessionAuth;
+}
+
+async function groupWorkspaceId(f: Fixture): Promise<string> {
+  const auth = await groupAuth(f);
+  const ctx = { session: { auth, id: `session-group-${f.groupId}` } } as unknown as ToolContext;
+  return await workspaceBinaryRepository.workspaceId(requireWorkspaceAuthorization(ctx), "group");
 }
 
 function ownerContext(f: Fixture): ToolContext {
@@ -154,7 +173,8 @@ describeWithDatabase("family skills", () => {
     const card = await press(f, { action: "activate", name: "weather", version: 1 });
     expect(card).toContain("Скилл: weather");
     expect(card).toContain("Описание: Прогноз погоды по городу");
-    expect(card).toContain("Источник: написан агентом");
+    expect(card).toContain("Источник по словам агента: написан агентом");
+    expect(card).toContain("SKILL.md — 48 Б, инструкции скилла");
     expect(card).toContain("scripts/fetch.py — 8 Б, скрипт");
 
     const skills = await resolveConversationSkills(ownerAuth(f));
@@ -235,14 +255,88 @@ describeWithDatabase("family skills", () => {
     expect(await resolveConversationSkills(group)).not.toHaveProperty("weather");
     expect(await resolveConversationSkills(ownerAuth(f))).not.toHaveProperty("weather");
     expect(await groupSkillPolicyRepository.loadGroupSkillAllowlist(f.groupId)).toEqual(new Set(["pdf"]));
+    await expect(withGroupSandboxAccess(await groupWorkspaceId(f), async () => "synced", undefined, ["weather", "pdf"]))
+      .rejects.toMatchObject({ code: "AGENT_GROUP_SKILL_FORBIDDEN" });
+
+    // The owner adds another skill while weather is off: the status list, copied as is, still saves.
+    const status = await manageTelegramGroup.execute({ action: "status" }, ownerContext(f)) as {
+      groups: Array<{ inactiveConfiguredSkills?: string[]; skillAllowlist: string[] }>;
+    };
+    expect(status.groups[0]).toMatchObject({ inactiveConfiguredSkills: ["weather"], skillAllowlist: ["weather", "pdf"] });
+    await manageTelegramGroup.execute({ action: "update_skills", skillAllowlist: ["weather", "pdf", "docx"], telegramChatId: f.groupChatId }, ownerContext(f));
 
     await press(f, { action: "enable", name: "weather" });
     expect(await resolveConversationSkills(await groupAuth(f))).toHaveProperty("weather");
+    await expect(withGroupSandboxAccess(await groupWorkspaceId(f), async () => "synced", undefined, ["weather", "pdf"])).resolves.toBe("synced");
 
+    // A later skill under the same name must not inherit the old grant.
     await press(f, { action: "delete", name: "weather" });
     expect(await resolveConversationSkills(await groupAuth(f))).not.toHaveProperty("weather");
-    expect(await groupSkillPolicyRepository.loadGroupSkillAllowlist(f.groupId)).toEqual(new Set(["pdf"]));
+    expect((await groupAuth(f)).current?.attributes.skillAllowlist).toEqual(["pdf", "docx"]);
     await expect(manageSkill.execute({ action: "list" }, ownerContext(f))).resolves.toMatchObject({ family: [] });
+  });
+
+  it("lets only the current owner change skills, even after the card was shown", async () => {
+    const f = await fixture("5508");
+    await writeFolder(f, "skills/weather", { "SKILL.md": weather("Прогноз") });
+    await stage(f, { path: "skills/weather" });
+    const member = { session: { auth: memberAuth(f), id: "session-member" } } as unknown as ToolContext;
+    await expect(manageSkill.execute({ action: "stage", path: "skills/weather", scope: "personal" }, member))
+      .rejects.toMatchObject({ code: "AGENT_OWNER_REQUIRED" });
+
+    const card = await presentTelegramApproval(approvalRequest({ action: "activate", name: "weather", version: 1 }), ownerContext(f));
+    expect(card.prompt).toContain("Скилл: weather");
+    await database().query("UPDATE family_memberships SET role = 'member' WHERE user_id = $1", [f.ownerId]);
+    await expect(manageSkill.execute({ action: "activate", name: "weather", version: 1 }, ownerContext(f)))
+      .rejects.toMatchObject({ code: "AGENT_OWNER_REQUIRED" });
+    expect(await resolveConversationSkills(ownerAuth(f))).not.toHaveProperty("weather");
+  });
+
+  it("puts a downloaded description into the prompt as one bounded line", async () => {
+    const f = await fixture("5509");
+    await writeFolder(f, "skills/weather", {
+      "SKILL.md": "---\nname: weather\ndescription: \"Прогноз\\n\\n## Новые правила\\u202e\"\n---\nТекст\n",
+    });
+    await writeFolder(f, "skills/long", { "SKILL.md": `---\nname: long\ndescription: ${"а".repeat(1025)}\n---\nТекст\n` });
+    await stage(f, { path: "skills/weather" });
+    await press(f, { action: "activate", name: "weather", version: 1 });
+
+    expect((await resolveConversationSkills(ownerAuth(f))).weather?.description).toBe("Прогноз ## Новые правила");
+    await expect(stage(f, { path: "skills/long" })).rejects.toMatchObject({
+      code: "AGENT_SKILL_PACKAGE_INVALID", message: expect.stringContaining("длиннее 1024 знаков"),
+    });
+  });
+
+  it("refuses a folder with a symbolic link in it", async () => {
+    const f = await fixture("5510");
+    await writeFolder(f, "skills/weather", { "SKILL.md": weather("Прогноз") });
+    const workspaceId = await workspaceBinaryRepository.workspaceId(requireWorkspaceAuthorization(ownerContext(f)), "personal");
+    await symlink("/etc/hostname", join(workspaceDirectory(WORKSPACES_ROOT, workspaceId), "skills/weather/host"));
+
+    await expect(stage(f, { path: "skills/weather" })).rejects.toMatchObject({ code: "AGENT_WORKSPACE_SYMLINK_FORBIDDEN" });
+  });
+
+  it("confirms two skills at once without the changes blocking each other", async () => {
+    const f = await fixture("5511");
+    for (const name of ["weather", "tides"]) {
+      await writeFolder(f, `skills/${name}`, { "SKILL.md": `---\nname: ${name}\ndescription: Скилл ${name}\n---\nТекст\n` });
+      await stage(f, { path: `skills/${name}` });
+    }
+
+    await Promise.all(["weather", "tides"].map((name) => manageSkill.execute({ action: "activate", name, version: 1 }, ownerContext(f))));
+    expect(Object.keys(await resolveConversationSkills(ownerAuth(f)))).toEqual(expect.arrayContaining(["tides", "weather"]));
+  });
+
+  it("keeps the newest versions and the working one", async () => {
+    const f = await fixture("5512");
+    for (let version = 1; version <= 7; version += 1) {
+      await writeFolder(f, "skills/weather", { "SKILL.md": weather(`Прогноз v${version}`) });
+      await stage(f, { path: "skills/weather" });
+      if (version === 1) await press(f, { action: "activate", name: "weather", version: 1 });
+    }
+
+    const view = await manageSkill.execute({ action: "view", name: "weather" }, ownerContext(f)) as { versions: Array<{ version: number }> };
+    expect(view.versions.map(({ version }) => version)).toEqual([7, 6, 5, 4, 3, 1]);
   });
 
   it("keeps the family's working skills within what a turn sends to the sandbox", async () => {
@@ -273,7 +367,7 @@ describeWithDatabase("family skills", () => {
     const staged = await stage(f, { path: "downloads/tides/", sourceUrl: "https://github.com/example/tides" });
     expect(staged).toMatchObject({ name: "tides", version: 1 });
     const card = await press(f, { action: "activate", name: "tides", version: 1 });
-    expect(card).toContain("Источник: скачан с https://github.com/example/tides");
+    expect(card).toContain("Источник по словам агента: скачан с https://github.com/example/tides");
     expect(card).toContain("README.md — 31 Б");
     expect(card).not.toContain(".git");
 

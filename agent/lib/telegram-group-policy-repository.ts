@@ -3,7 +3,7 @@ import type { PoolClient } from "pg";
 import { SANDBOX_RUNNER_BASE_URL, TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED } from "../config.js";
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
-import { workingFamilySkills } from "./family-skills/family-skill-repository.js";
+import { grantableFamilySkills } from "./family-skills/family-skill-repository.js";
 import { requireGrantableSkills, skillGrantCatalog, skillNeedsBash } from "./family-skills/skill-grants.js";
 import { parseGroupSkillAllowlist } from "./group-skills/group-skill-catalog.js";
 import { SandboxRunnerClient } from "./sandbox-runner/runner-client.js";
@@ -45,7 +45,7 @@ export async function updateGroupPermissions(
     if (!group || group.family_id !== input.familyId) throw new AppError("AGENT_GROUP_NOT_FOUND", "Группа не найдена в вашей семье");
     if (group.type !== "external") throw new AppError("AGENT_GROUP_POLICY_UPDATE_UNSUPPORTED", "В семейном чате все установленные скиллы доступны автоматически");
     // The family's skills are read under the same transaction, so the check and the grant agree.
-    const catalog = skillGrantCatalog(await workingFamilySkills(client, input.familyId));
+    const catalog = skillGrantCatalog(await grantableFamilySkills(client, input.familyId));
     if (changingSkills) requireGrantableSkills(catalog, [...providedSkills!]);
     const needsBash = (name: string) => skillNeedsBash(catalog, name);
     let skills = changingSkills ? [...providedSkills!] : group.skill_allowlist;
