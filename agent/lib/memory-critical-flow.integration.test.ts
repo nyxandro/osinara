@@ -11,7 +11,7 @@
 import type { ToolContext } from "../runtime/tool.js";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
-import capabilities from "../tools/capabilities.js";
+import { resolveToolSurface } from "../tools/capabilities.js";
 import { closeDatabase, database } from "./database.js";
 import { createMainAgentMemoryFixture } from "./memory-agent-write.integration-fixtures.js";
 import { memoryReviewDispatchRepository } from "./memory-review/memory-review-dispatch-repository.js";
@@ -174,7 +174,7 @@ describeWithDatabase("critical main-agent memory paths", () => {
     });
 
     await bindMemoryTurnSources(context as never);
-    const surface = await capabilities.events["step.started"]?.({} as never, context as never);
+    const surface = await resolveToolSurface(context as never);
     expect(surface?.remember).toBeDefined();
     expect(surface?.load_skill).toBeDefined();
 
@@ -221,7 +221,7 @@ describeWithDatabase("critical main-agent memory paths", () => {
       timeline_entry_id: message.rows[0]!.id,
     }] });
 
-    const subagentSurface = await capabilities.events["step.started"]?.({} as never, {
+    const subagentSurface = await resolveToolSurface({
       ...context,
       channel: { kind: "subagent" },
     } as never);
@@ -293,7 +293,7 @@ describeWithDatabase("critical main-agent memory paths", () => {
     await bindMemoryTurnSources(context as never);
 
     // The review surface must execute the same source-backed writer used by ordinary main turns.
-    const surface = await capabilities.events["step.started"]?.({} as never, context as never);
+    const surface = await resolveToolSurface(context as never);
     expect(surface?.remember).toBeDefined();
     const result = await surface!.remember!.execute({
       basis: "agent_inferred",

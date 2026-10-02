@@ -2,8 +2,9 @@
  * PostgreSQL Workflow world deployment contracts.
  *
  * Tests:
- * - Pins Eve and the protocol-compatible official PostgreSQL world.
- * - Requires the world in the agent build and preserves FIFO Telegram turns.
+ * - Pins Eve and the protocol-compatible official PostgreSQL world: the history import reads Eve's
+ *   database until phase B removes it.
+ * - Preserves FIFO Telegram turns.
  * - Keeps Workflow credentials fail-fast and isolated to the agent and migration service.
  * - Removes the local-world mount while retaining its rollback snapshot during cutover.
  * - Runs official Workflow bootstrap before application migrations.
@@ -17,16 +18,13 @@ const root = process.cwd();
 const readProjectFile = (path: string): string => readFileSync(resolve(root, path), "utf8");
 
 describe("PostgreSQL Workflow world", () => {
-  it("pins the Eve-compatible official world and keeps it external at runtime", () => {
+  it("pins Eve and the Eve-compatible official world", () => {
     const packageJson = JSON.parse(readProjectFile("package.json")) as {
       dependencies?: Record<string, string>;
     };
-    const agent = readProjectFile("agent/agent.ts");
 
     expect(packageJson.dependencies?.eve).toBe("0.40.0");
     expect(packageJson.dependencies?.["@workflow/world-postgres"]).toBe("5.0.0-beta.35");
-    expect(agent).toContain('externalDependencies: ["@workflow/world-postgres"]');
-    expect(agent).toContain('world: "@workflow/world-postgres"');
   });
 
   it("keeps Telegram ingress FIFO after Eve changed its default turn policy", () => {

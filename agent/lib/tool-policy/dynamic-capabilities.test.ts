@@ -21,7 +21,7 @@ vi.mock("./external-group-live-policy.js", () => ({
   authorizeCurrentExternalGroupCapability,
 }));
 
-import capabilities from "../../tools/capabilities.js";
+import { resolveToolSurface } from "../../tools/capabilities.js";
 import {
   ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES,
   FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS,
@@ -42,7 +42,7 @@ function resolve(
   initiatorAttributes: Record<string, unknown> | null = null,
   authenticator = "telegram",
 ) {
-  return capabilities.events["step.started"]?.({} as never, {
+  return resolveToolSurface({
     channel: { kind: "telegram" },
     messages: [],
     session: {
@@ -79,11 +79,6 @@ describe("dynamic capability resolver", () => {
   beforeEach(() => {
     loadCurrentExternalGroupCapabilities.mockReset();
     loadCurrentExternalGroupCapabilities.mockResolvedValue(new Set());
-  });
-
-  it("resolves tools only at step scope so helper closures are rebuilt before every model call", () => {
-    expect(capabilities.events["step.started"]).toBeTypeOf("function");
-    expect(capabilities.events["turn.started"]).toBeUndefined();
   });
 
   it("emits the private surface for a verified private chat", async () => {

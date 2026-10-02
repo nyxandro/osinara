@@ -128,11 +128,4 @@ describe("agent capability surface", () => {
       }),
     );
   });
-
-  it("authors the whole dynamic tool surface at step scope", async () => {
-    const source = await readFile(`${AGENT_ROOT}/tools/capabilities.ts`, "utf8");
-
-    expect(source).toContain('"step.started": async');
-    expect(source).not.toContain('"turn.started"');
-  });
 });
