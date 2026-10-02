@@ -5,6 +5,7 @@
  * - `createSessionHistory`: registers a session with its initial history and carried-over state.
  * - `loadSessionHistory`: the current history generation with the session's state.
  * - `appendSessionHistory`: adds the messages a turn produced, after the current tail.
+ * - `saveCompactionCounters`: the provider-reported prompt size the next compaction check starts from.
  *
  * Writers take a client inside the caller's transaction, so a history change commits together
  * with the journal record that caused it. Appends lock the session row; two writers of one
@@ -135,4 +136,18 @@ export async function appendSessionHistory(
     generation: state.generation, firstPosition: tail.next_position, messages, sessionId: input.sessionId, turnId: input.turnId,
   });
   await client.query("UPDATE agent_session_state SET updated_at = now() WHERE session_id = $1", [input.sessionId]);
+}
+
+export async function saveCompactionCounters(
+  client: HistoryClient,
+  input: { counters: CompactionCounters; sessionId: string },
+): Promise<void> {
+  const updated = await client.query(
+    `UPDATE agent_session_state SET compaction_input_tokens = $2, compaction_prompt_message_count = $3, updated_at = now()
+      WHERE session_id = $1`,
+    [input.sessionId, input.counters.inputTokens, input.counters.promptMessageCount],
+  );
+  if (updated.rowCount !== 1) {
+    throw new AppError("AGENT_SESSION_HISTORY_MISSING", "История разговора не найдена", { details: { sessionId: input.sessionId } });
+  }
 }

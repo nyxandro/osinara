@@ -7,6 +7,7 @@
  * - `normalizeModelCallError`: maps an AI SDK failure onto them, keeping the original as cause.
  * - `classifyModelCallError`: `retry` (repeat this call now), `recoverable` (the turn fails, a
  *   person may retry) or `terminal` (the turn fails, repeating cannot help).
+ * - `modelCallFailure`: the coded error a turn fails with after its model call gave up.
  *
  * Derived from eve 0.40.0 `harness/model-call-error.ts`, `harness/turn-cancellation.ts` and
  * Osinara's `scripts/eve-runtime/model-inactivity.ts` (Apache-2.0, see NOTICE-eve). Changes:
@@ -99,4 +100,18 @@ export function classifyModelCallError(error: unknown): ModelCallFailureClass {
     if (status >= 400) return "terminal";
   }
   return "recoverable";
+}
+
+/** Cancellation passes through; every other failure becomes a coded error with its original as cause. */
+export function modelCallFailure(error: unknown): unknown {
+  if (error instanceof TurnCancelledError || error instanceof AppError) return error;
+  if (error instanceof EmptyModelResponseError) {
+    return new AppError("AGENT_MODEL_OUTPUT_INCOMPLETE", "Модель вернула пустой ответ. Попробуйте ещё раз", { cause: error });
+  }
+  if (classifyModelCallError(error) === "retry") {
+    return new AppError("AGENT_MODEL_TEMPORARILY_UNAVAILABLE", "Модель временно недоступна. Попробуйте позже", {
+      cause: error, isRetryable: true,
+    });
+  }
+  return new AppError("AGENT_MODEL_CALL_FAILED", "Модель не смогла обработать запрос. Попробуйте ещё раз", { cause: error });
 }

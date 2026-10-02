@@ -7,6 +7,7 @@
  * - `callStepModel`: calls the model for one step and returns the assistant message and its tool
  *   calls; tool calls are executed afterwards by the turn, never inside the call.
  * - `EMPTY_RESPONSE_NUDGE`: the wire-only notice of the one reissue after an empty answer.
+ * - `assistantStepText`: the visible text of a step's response.
  *
  * Recovery, in order:
  * - AI SDK's own transport retries cover a request that never got a response (its default, 2).
@@ -78,7 +79,8 @@ const REAL_TIMING: ModelCallTiming = {
   sleep: (milliseconds) => new Promise((done) => setTimeout(done, milliseconds)),
 };
 
-function assistantText(messages: readonly ModelMessage[]): string {
+/** The step's visible text: the last assistant message that has any, as Eve resolved it. */
+export function assistantStepText(messages: readonly ModelMessage[]): string {
   for (const message of [...messages].reverse()) {
     if (message.role !== "assistant") continue;
     const text = typeof message.content === "string"
@@ -124,7 +126,7 @@ async function callOnce(input: StepModelCall, trailingUserNote: string | undefin
     const [messages, toolCalls, finishReason, usage] = await Promise.all([
       result.responseMessages, result.toolCalls, result.finishReason, result.usage,
     ]);
-    const text = assistantText(messages);
+    const text = assistantStepText(messages);
     if (toolCalls.length === 0 && text.length === 0) throw new EmptyModelResponseError();
     return {
       finishReason,

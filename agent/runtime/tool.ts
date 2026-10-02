@@ -78,6 +78,12 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> {
    * for this tool's input still fits a mixed tool map: the runtime only calls it with that input.
    */
   approval?(ctx: ApprovalContext<ApprovalContextInput<TInput>>): ApprovalStatus | Promise<ApprovalStatus>;
+  /**
+   * Repeating the call after a crash cannot repeat a consequence: the tool only reads, or it keys
+   * its effect on `callId`. Any other call interrupted by a crash is reported to the model as an
+   * unknown outcome instead of being run again.
+   */
+  readonly replaySafe?: boolean;
   /** Projects the full result into what the model sees; channel handlers still get the full result. */
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }
@@ -100,6 +106,7 @@ export function defineTool<TSchema extends StandardSchemaV1 | StandardJSONSchema
   inputSchema: TSchema;
   execute(input: SchemaInput<TSchema>, ctx: ToolContext): TReturn;
   approval?: ToolDefinition<SchemaInput<TSchema>, unknown>["approval"];
+  replaySafe?: boolean;
   toModelOutput?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["toModelOutput"];
 }): ToolDefinitionWithExecuteReturn<SchemaInput<TSchema>, ToolOutputFromExecuteReturn<TReturn>, TReturn>;
 export function defineTool<TInput = unknown, TOutput = unknown>(
