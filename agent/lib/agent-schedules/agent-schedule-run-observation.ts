@@ -20,7 +20,7 @@ export type ScheduleListItem = AgentScheduleRecord & {
 };
 
 // The parent SELECT authorizes `schedule` in the same statement; no second read can widen its scope.
-// Memory failure keys are unique and tied to the exact Eve turn, avoiding scans of incident context.
+// Memory failure keys are unique and tied to the exact turn, avoiding scans of incident context.
 export const LAST_RUN_PROJECTION = `(SELECT jsonb_build_object(
   'id', run.id, 'executionStatus', run.status, 'scheduledFor', run.scheduled_for,
   'completedAt', run.completed_at, 'errorCode', run.error_code,

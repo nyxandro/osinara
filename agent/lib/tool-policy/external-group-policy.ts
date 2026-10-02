@@ -1,5 +1,5 @@
 /**
- * External Telegram group policy projection from verified Eve auth.
+ * External Telegram group policy projection from verified session auth.
  *
  * Exports:
  * - `resolveExternalGroupToolPolicy`: reads a fail-closed capability snapshot from session auth.

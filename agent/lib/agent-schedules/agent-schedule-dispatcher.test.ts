@@ -9,7 +9,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 
-import { EVE_EMPTY_DELIVERY_MARKER } from "../eve-empty-delivery.js";
+import { EMPTY_DELIVERY_MARKER } from "../../runtime/turn/step-history.js";
 import { createAgentScheduleDispatcher } from "./agent-schedule-dispatcher.js";
 import type { ClaimedAgentSchedule } from "./agent-schedule-dispatch-repository.js";
 
@@ -68,7 +68,7 @@ describe("agent schedule dispatcher", () => {
     expect(dispatched).toBe(1);
     expect(startInChat.mock.calls[0]![1]).toContain("scheduled_for_local: 2026-07-17 09:00:00 Europe/Moscow");
     // Silence is expressed only by this exact marker; any other wording is delivered as a message.
-    expect(startInChat.mock.calls[0]![1]).toContain(EVE_EMPTY_DELIVERY_MARKER);
+    expect(startInChat.mock.calls[0]![1]).toContain(EMPTY_DELIVERY_MARKER);
     expect(prepareSession).toHaveBeenCalledWith(job, "101::schedule:run-1", new Date("2026-07-17T06:00:00.000Z"));
     expect(startInChat).toHaveBeenCalledWith({
       chatId: "101",

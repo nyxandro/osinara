@@ -5,7 +5,7 @@
  * - `manage_reminder`: routes create, update, pause, resume, and delete actions.
  *
  * Key constructs:
- * - Object-shaped model schema avoids root JSON Schema unions in Eve descriptors.
+ * - Object-shaped model schema avoids root JSON Schema unions in tool descriptors.
  * - Action-specific validators return actionable Russian AppError messages.
  */
 import { defineTool } from "../../runtime/tool.js";

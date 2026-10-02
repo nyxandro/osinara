@@ -1,5 +1,5 @@
 /**
- * Eve history tool for delivered reminders and scheduled-agent results.
+ * History tool for delivered reminders and scheduled-agent results.
  *
  * Export:
  * - `list_proactive_deliveries`: searches successful deliveries in the current trust zone.

@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `createReminderDispatcher`: injectable deterministic lease-to-delivery processor.
- * - `dispatchDueReminders`: production dispatcher used by the Eve minute schedule.
+ * - `dispatchDueReminders`: production dispatcher used by the minute schedule.
  */
 import { isAppError } from "../app-error.js";
 import { recoverDatabaseBookkeeping } from "../database-recovery.js";

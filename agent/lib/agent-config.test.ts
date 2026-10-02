@@ -6,8 +6,12 @@
  * - The base prompt starts with the authored instructions under Eve's header.
  * - Turn blocks run in their explicit order; the model choice carries the session routing.
  * - Skills come from the conversation's scoped resolver.
+ * - Before each model step the messages shown to a running root turn are recorded as delivered.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+const markDelivered = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock("./turn-interjection/turn-interjection-repository.js", () => ({ turnInterjectionRepository: { markDelivered } }));
 
 import { createOsinaraAgent } from "../agent.js";
 import { AGENT_COMPACTION_THRESHOLD, AGENT_MAX_MODEL_STEPS_PER_TURN } from "../config.js";
@@ -46,6 +50,26 @@ describe("Osinara agent", () => {
     expect(selection.providerOptions).toEqual(modelProviderConfig.provider === "neuraldeep"
       ? { neuraldeep: { user: CONTEXT.session.id } }
       : undefined);
+  });
+
+  it("records the messages shown to a running root turn as delivered before each model step", async () => {
+    const auth = { current: {
+      attributes: {
+        applicationSessionId: "00000000-0000-4000-8000-0000000000a1", osinaraTelegramUpdateId: "500",
+        telegramActorKind: "telegram_user", telegramChatId: "101", telegramChatType: "private",
+        telegramTurnInterjectionMarker: "0123456789abcdef01234567", telegramUserId: "101",
+      },
+      authenticator: "telegram", principalId: "user-1", principalType: "user",
+    }, initiator: null };
+    const turn = { id: "turn_01M3YNFXVX5WCP17ZVB8ZTMQAS", sequence: 0 };
+
+    await agent.stepStarted({ channel: { kind: "telegram" }, session: { auth, id: CONTEXT.session.id, turn } });
+    await agent.stepStarted({ channel: { kind: "subagent" }, session: {
+      auth, id: "wrun_01M3YNFXVX5WCP17ZVB8ZTMQAT", turn,
+      parent: { callId: "call-1", rootSessionId: CONTEXT.session.id, sessionId: CONTEXT.session.id, turn },
+    } });
+
+    expect(markDelivered).toHaveBeenCalledExactlyOnceWith(CONTEXT.session.id, turn.id);
   });
 
   it("takes tools and skills from the verified conversation resolvers", () => {

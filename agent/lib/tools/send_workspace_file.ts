@@ -2,7 +2,7 @@
  * Workspace-to-Telegram file sender tool.
  *
  * Export:
- * - Eve `send_workspace_file` tool with current-scope authorization and durable delivery guard.
+ * - `send_workspace_file` tool with current-scope authorization and durable delivery guard.
  */
 import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";

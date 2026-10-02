@@ -281,7 +281,7 @@ export const telegramGroupAdministrationRepository: TelegramGroupAdministrationR
       );
 
       // Canonical rows represent main chat and forum topics. Parked task sessions retain the exact
-      // Eve state and requester binding needed to finish or deny their pending operation safely.
+      // session state and requester binding needed to finish or deny their pending operation safely.
       const rotated = await client.query<{ id: string }>(
         `UPDATE conversation_sessions
             SET rotation_requested_at = now()

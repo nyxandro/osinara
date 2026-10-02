@@ -2,7 +2,7 @@
  * Long-term memory creation tool.
  *
  * Export:
- * - Eve `remember` tool for one main-agent source-backed claim and optional atomic thread action.
+ * - `remember` tool for one main-agent source-backed claim and optional atomic thread action.
  */
 import { defineTool } from "../../runtime/tool.js";
 import { AppError, isAppError } from "../app-error.js";

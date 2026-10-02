@@ -19,7 +19,7 @@ import { scheduledGroupHistorySnapshotRepository } from "./scheduled-group-histo
 import { numericMessageThreadId } from "./agent-schedule-validation.js";
 import { sessionRepository, type PreparedSession } from "../sessions/session-repository.js";
 import { isDatabaseUnavailable, recoverDatabaseBookkeeping } from "../database-recovery.js";
-import { EVE_EMPTY_DELIVERY_MARKER } from "../eve-empty-delivery.js";
+import { EMPTY_DELIVERY_MARKER } from "../../runtime/turn/step-history.js";
 import { localScheduledTime } from "../scheduling/local-time.js";
 import { conversationWakeupRepository } from "../conversation-wakeups/conversation-wakeup-repository.js";
 
@@ -69,7 +69,7 @@ function scheduledRunPrompt(job: ClaimedAgentSchedule): string {
   return [
     "Выполни запланированный агентный сценарий для Telegram.",
     "Не пиши промежуточные статусы и не описывай процесс. Итоговый ответ должен быть готовым сообщением для пользователя.",
-    `Если сценарий велит ничего не присылать, когда сообщить нечего, и сейчас именно такой случай, заверши запуск ровно строкой ${EVE_EMPTY_DELIVERY_MARKER} без другого текста: это успешный запуск без сообщения, а не ошибка. Так можно, только если в этом запуске ты ничего не отправил, в том числе файлом. Любая фраза вроде «новостей нет» уйдёт в чат сообщением.`,
+    `Если сценарий велит ничего не присылать, когда сообщить нечего, и сейчас именно такой случай, заверши запуск ровно строкой ${EMPTY_DELIVERY_MARKER} без другого текста: это успешный запуск без сообщения, а не ошибка. Так можно, только если в этом запуске ты ничего не отправил, в том числе файлом. Любая фраза вроде «новостей нет» уйдёт в чат сообщением.`,
     "Если обязательной авторизации или данных не хватает, задай один понятный вопрос или сообщи конкретную ошибку.",
     "Сбой одной зависимости не отменяет независимые части задания. В результате явно отдели проверенные сведения от недоступных разделов; не объявляй неполную задачу полностью выполненной.",
     "<scheduled_agent_run>",

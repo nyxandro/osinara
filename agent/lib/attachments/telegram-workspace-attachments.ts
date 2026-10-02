@@ -121,7 +121,7 @@ export function createTelegramWorkspaceAttachmentImporter(
         const sourceId = sourceIds[index]!;
         const inboxDirectory = telegramInboxDirectory(input.auth, input.scope, sourceId);
         const bytes = await dependencies.download(attachment);
-        // Restricted groups persist only files that Eve's text-only read_file can consume.
+        // Restricted groups persist only files the text-only `read_file` can consume.
         const validator = input.scope === "group"
           ? validateReadableTextAttachmentContent
           : validateAttachmentContent;

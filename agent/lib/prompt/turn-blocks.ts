@@ -2,7 +2,7 @@
  * Turn-scoped prompt block resolution.
  *
  * Exports:
- * - `TurnBlockContext`: the minimal Eve resolve context a block resolver reads.
+ * - `TurnBlockContext`: the minimal resolve context a block resolver reads.
  * - `createModeBlockResolver` / `resolveModeBlock`: verified mode rulebook for the current turn.
  * - `createReactionSetBlockResolver` / `resolveReactionSetBlock`: reaction set announced in history.
  * - `createMemoryBlockResolver` / `resolveMemoryBlock`: authorized long-term memory records,
@@ -10,7 +10,7 @@
  * - `createPreferenceBlockResolver` / `resolvePreferenceBlock`: one editable chat prompt.
  *
  * Key constructs:
- * - Eve 0.40 clears turn-scoped system selections on each new turn. Explicit unavailable blocks
+ * - Turn blocks are resolved anew on each turn, so a selection never outlives its turn. Explicit unavailable blocks
  *   explain known failures to the model; `null` is used only when no context is needed.
  */
 import type { SessionAuth } from "../../runtime/context.js";
@@ -292,9 +292,9 @@ export function createMemoryBlockResolver(dependencies: {
       if (query === null) return null;
       phase = "retrieval";
       // The window exists only where there is a conversation to remember inside; a scheduled run
-      // has none, and then the selection behaves as it always did. A turn is identified by the Eve
-      // session together with its id: Eve numbers turns inside a session and replaces the session
-      // every fifty of them, so `turn_0` comes round again inside one long conversation.
+      // has none, and then the selection behaves as it always did. A turn is identified by its
+      // session together with its id: sessions carried over from Eve number turns inside the session,
+      // so `turn_0` comes round again inside one long conversation.
       //
       // A delegated child inherits the parent's verified auth, conversation included, but it is
       // not a turn of the conversation: it runs inside one. Giving it a window would let its work

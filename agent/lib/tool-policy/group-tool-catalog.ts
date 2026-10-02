@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `EXTERNAL_GROUP_CAPABILITY_CATALOG`: persisted capabilities with model usage metadata.
- * - `SANDBOX_FILE_CAPABILITY_CATALOG`: same-name guarded Eve capabilities for group workspaces.
+ * - `SANDBOX_FILE_CAPABILITY_CATALOG`: same-name guarded runtime capabilities for group workspaces.
  * - Derived capability-name tuples used by validation and execution policy.
  * - `ExternalGroupToolName`: validated persisted allowlist value.
  * - `isSubscriptionOnlyExternalGroupToolName`: marks capabilities tied to a specific provider.
@@ -113,7 +113,7 @@ export function isSubscriptionOnlyExternalGroupToolName(value: string): boolean 
   return SUBSCRIPTION_ONLY_TOOL_NAMES.has(value);
 }
 
-// Same-name wrappers preserve Eve's native contracts while adding live authorization and exact
+// Same-name wrappers preserve the native tools' contracts while adding live authorization and exact
 // group-root confinement. They remain baseline capabilities and need no persisted grant.
 export const SANDBOX_FILE_CAPABILITY_CATALOG = [
   { name: "glob", usage: "найти пути файлов в /workspace/group по glob-шаблону" },

@@ -1,4 +1,4 @@
-/** Compose a private album through Eve's public attachment-array contract, preserving raw sources. */
+/** Compose a private album through the channel's attachment-array contract, preserving raw sources. */
 import {
   parseTelegramUpdate,
   type TelegramMessage,

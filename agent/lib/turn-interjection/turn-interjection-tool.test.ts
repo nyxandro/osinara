@@ -89,15 +89,6 @@ describe("withTurnInterjection", () => {
     expect((await run(textProjection)).model).toEqual({ type: "text", value: `Страница 1\n\n${BLOCK}` });
   });
 
-  it("passes an Eve sign-in request through untouched", async () => {
-    const signal = { __eveAuthorization: true, challenges: [] };
-    const collect = vi.fn(async () => BLOCK);
-    const wrapped = withTurnInterjection(tool(() => signal), interjection(collect));
-
-    expect(await wrapped.execute({}, CONTEXT)).toBe(signal);
-    expect(collect).not.toHaveBeenCalled();
-  });
-
   it("does not consult the queue when the tool itself fails, and frees an earlier attempt's claims", async () => {
     const collect = vi.fn(async () => BLOCK);
     const release = vi.fn(async () => undefined);

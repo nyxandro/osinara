@@ -21,6 +21,7 @@ import type { ModelMessage, ToolResultPart } from "ai";
 
 import type { ToolResultOutput } from "./tool-calls.js";
 
+// Eve 0.40's literal, kept: transferred histories and the prompts already carry it.
 export const EMPTY_DELIVERY_MARKER = "<eve-empty-delivery/>";
 
 export interface StepTextEvent {

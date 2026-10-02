@@ -1,5 +1,5 @@
 /**
- * Agent schedule authorization derived from verified Eve Telegram session auth.
+ * Agent schedule authorization derived from verified Telegram session auth.
  *
  * Exports:
  * - `AgentScheduleAuthorization`: trusted identity and current Telegram destination.

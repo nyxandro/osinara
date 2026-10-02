@@ -166,7 +166,7 @@ export function createWorkspaceRepository(root: string) {
       }
 
       // Resolve against current PostgreSQL state on every file operation. Creating the directory
-      // here makes host-side path inspection available before Eve lazily starts the sandbox.
+      // here makes host-side path inspection available before the runtime lazily starts the sandbox.
       const client = await database().connect();
       try {
         await client.query("BEGIN");

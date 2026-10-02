@@ -220,7 +220,7 @@ function assertCompleteFinishReason(finishReason: LanguageModelV4FinishReason): 
     );
   }
   // An unfinished answer means the provider stream broke, not that the request was wrong. Marking
-  // it retryable is what lets Eve reissue this one call: truncation by length and a content filter
+  // it retryable is what lets the runtime reissue this one call: truncation by length and a content filter
   // stay terminal above, because repeating either produces the same result.
   throw new AppError(
     "AGENT_MODEL_OUTPUT_INCOMPLETE",

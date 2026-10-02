@@ -1,8 +1,8 @@
 /**
- * Monotonic Eve root event classification for application sessions.
+ * Monotonic session event classification for application sessions.
  *
  * Exports:
- * - `SessionEventResult`: whether an Eve lifecycle event was recorded or arrived stale.
+ * - `SessionEventResult`: whether a lifecycle event was recorded or arrived stale.
  * - `classifyMissedSessionEvent`: distinguishes stale roots from invalid session state.
  * - `isCurrentEveSession`: verifies that delivery belongs to the active application generation.
  */

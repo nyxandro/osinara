@@ -1,5 +1,5 @@
 /**
- * Memory authorization derived from Eve session auth.
+ * Memory authorization derived from verified session auth.
  *
  * Exports:
  * - `MemoryAuthorization`: verified identity and scopes available to memory operations.

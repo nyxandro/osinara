@@ -1,5 +1,5 @@
 /**
- * Reminder authorization derived from verified Eve Telegram session auth.
+ * Reminder authorization derived from verified Telegram session auth.
  *
  * Exports:
  * - `ReminderAuthorization`: trusted identity and current Telegram destination.

@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `MemoryReviewBatchSummary`: newly created background or interactive source range.
- * - `MemoryReviewClaim`: fully authorized leased batch ready for internal Eve handoff.
+ * - `MemoryReviewClaim`: fully authorized leased batch ready for its internal turn.
  * - `memoryReviewRepository`: lane initialization, batching, leasing, and terminal transitions.
  */
 import type { PoolClient } from "pg";

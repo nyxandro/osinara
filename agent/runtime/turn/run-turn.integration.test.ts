@@ -77,6 +77,25 @@ async function releaseRunner(turnId: string) {
     expect(await loadTurn(database(), turn.id)).toMatchObject({ finalText: "привет!", runnerId: null, status: "completed" });
   });
 
+  it("tells the application before every model call which turn is about to call the model", async () => {
+    const sessionId = await newTestSession();
+    const started: Array<{ session: string; turn: string }> = [];
+    const echo = defineTool({ description: "echo", inputSchema: z.object({}), async execute() { return "ok"; } });
+    let calls = 0;
+    const agent = testAgent({ echo }, {
+      stepStarted: async (ctx) => { started.push({ session: ctx.session.id, turn: ctx.session.turn.id }); },
+    });
+    const turn = await startMessageTurn(sessionId, "привет");
+
+    await runTurn(testRuntime({
+      agent,
+      callModel: async () => (calls += 1) === 1 ? toolCalls([{ id: "call-1", input: {}, name: "echo" }]) : reply("Готово."),
+      observer: recordingObserver().observer,
+    }), turn.id, RUN);
+
+    expect(started).toEqual([{ session: sessionId, turn: turn.id }, { session: sessionId, turn: turn.id }]);
+  });
+
   it("runs the step's tools once, concurrently, and continues with their results", async () => {
     const sessionId = await newTestSession();
     const executed: string[] = [];

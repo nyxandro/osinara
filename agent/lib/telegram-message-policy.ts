@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `TelegramInboundMediaKind`: strict none/photo/readable-text/unsupported-media decision.
- * - `classifyTelegramInboundMedia`: fail-closed classifier over raw and Eve-parsed media.
+ * - `classifyTelegramInboundMedia`: fail-closed classifier over raw and parsed media.
  * - `hasTelegramInboundMedia`: identifies file-bearing updates without downloading their bytes.
  * - `isMessageAddressedToBot`: preserves private, mention, and reply behavior.
  * - `telegramGroupTurnTrigger`: names the technical signal that woke the agent in a group.

@@ -49,6 +49,25 @@ async function runningReview(eveId = "eve-model-failure", eveTurnId = "turn_0") 
   return { fixture, batch: batch!, session };
 }
 
+/**
+ * A batch Eve ended as `ambiguous` (its session failed and the outcome stayed unknown). Releases
+ * before the runtime switch left such rows; only the operator recovery handles them now.
+ */
+async function recordEveAmbiguousEnding(batchId: string): Promise<void> {
+  const ended = await database().query(
+    `UPDATE memory_review_batches SET status = 'ambiguous', diagnostic_code = 'AGENT_MEMORY_REVIEW_SESSION_FAILED_AMBIGUOUS',
+            completed_at = now(), updated_at = now(), lease_token = NULL, lease_expires_at = NULL
+      WHERE id = $1 AND status = 'running' RETURNING application_session_id`,
+    [batchId],
+  );
+  await database().query(
+    `UPDATE conversation_sessions SET pending_operation = false, task_state = 'failed', retired_at = now(),
+            delete_after = now() + interval '1 day'
+      WHERE id = $1 AND kind = 'proactive'`,
+    [ended.rows[0]!.application_session_id],
+  );
+}
+
 (enabled ? describe : describe.skip)("memory review model recovery", () => {
   beforeEach(async () => { await database().query("TRUNCATE users, families, model_availability CASCADE"); });
   afterAll(closeDatabase);
@@ -108,8 +127,8 @@ async function runningReview(eveId = "eve-model-failure", eveTurnId = "turn_0") 
 
   it("waits after a confirmed model timeout without losing sources or retrying on every tick", async () => {
     const { batch } = await runningReview();
-    await memoryReviewDispatchRepository.markSessionAmbiguous({ batchId: batch.batchId,
-      eveSessionId: "eve-model-failure", diagnosticCode: "AGENT_MODEL_FIRST_CHUNK_TIMEOUT" });
+    await memoryReviewRepository.failRunning({ batchId: batch.batchId,
+      diagnosticCode: "AGENT_MODEL_FIRST_CHUNK_TIMEOUT", eveSessionId: "eve-model-failure", eveTurnId: "turn_0" });
     const current = await database().query("SELECT status, diagnostic_code FROM memory_review_batches WHERE id = $1", [batch.batchId]);
     expect(current.rows).toEqual([{ status: "waiting_model", diagnostic_code: "AGENT_MODEL_FIRST_CHUNK_TIMEOUT" }]);
     await closeDatabase();
@@ -120,7 +139,7 @@ async function runningReview(eveId = "eve-model-failure", eveTurnId = "turn_0") 
   });
 
   async function wait(batchId: string, eveSessionId = "eve-model-failure") {
-    await memoryReviewDispatchRepository.markSessionAmbiguous({ batchId, eveSessionId, diagnosticCode: "AGENT_MODEL_FIRST_CHUNK_TIMEOUT" });
+    await memoryReviewRepository.failRunning({ batchId, diagnosticCode: "AGENT_MODEL_FIRST_CHUNK_TIMEOUT", eveSessionId, eveTurnId: "turn_0" });
     return (await database().query<{ model_route_key: string; waiting_since: Date }>(
       "SELECT model_route_key, waiting_since FROM memory_review_batches WHERE id = $1", [batchId])).rows[0]!;
   }
@@ -218,8 +237,7 @@ async function runningReview(eveId = "eve-model-failure", eveTurnId = "turn_0") 
 
   it("recovers an explicitly inspected historical failure, but never an unconfirmed running session", async () => {
     const { batch } = await runningReview();
-    await memoryReviewDispatchRepository.markSessionAmbiguous({ batchId: batch.batchId,
-      eveSessionId: "eve-model-failure", diagnosticCode: "AGENT_MEMORY_REVIEW_SESSION_FAILED_AMBIGUOUS" });
+    await recordEveAmbiguousEnding(batch.batchId);
     const row = (await database().query("SELECT model_route_key FROM memory_review_batches WHERE id = $1", [batch.batchId])).rows[0];
     await database().query("UPDATE memory_review_batches SET model_route_key = NULL WHERE id = $1", [batch.batchId]);
     const input = { batchId: batch.batchId, expectedEveSessionId: "eve-model-failure",

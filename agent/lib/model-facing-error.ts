@@ -4,7 +4,8 @@
  * Exports:
  * - `ModelFacingErrorContract`: correction-loop fields serialized for the model.
  * - `ModelFacingError`: safe application error carrying that complete contract; `isExpectedRefusal`
- *   tells the patched Eve logger that the tool boundary's metrics line already recorded the code.
+ *   tells the runtime's tool-failure log (`runtime/turn/tool-calls.ts`) that the tool boundary's
+ *   metrics line already recorded the code.
  * - `normalizeModelFacingError`: converts legacy and unexpected failures without leaking internals.
  */
 import { AppError } from "./app-error.js";
@@ -89,7 +90,7 @@ export class ModelFacingError extends AppError {
   readonly contract: Readonly<ModelFacingErrorContract>;
 
   constructor(contract: ModelFacingErrorContract, options?: { readonly isExpectedRefusal?: boolean }) {
-    // JSON keeps the correction contract machine-readable inside Eve's tool-error text channel.
+    // JSON keeps the correction contract machine-readable inside the tool-error text the model reads.
     super(contract.code, JSON.stringify(contract), {
       isExpectedRefusal: EXPECTED_REFUSAL_CATEGORIES.has(contract.category) || options?.isExpectedRefusal === true,
     });

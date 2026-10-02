@@ -45,8 +45,8 @@ export async function bindMemoryTurnSources(ctx: TurnContext): Promise<void> {
   // Neither has a wake-up turn: it answers the agent's own schedule, not a person's message.
   if (conversationWakeupRunId(ctx.session.auth) !== null) return;
 
-  // Eve resumes an approved tool in the same durable turn but supplies freshly revalidated callback
-  // auth without replaying the original message metadata. Accept only the exact retained binding.
+  // A resumed turn brings freshly revalidated auth without the original message metadata (a button
+  // continuation already returned above). Accept only the exact retained binding.
   const sourceAttributesAbsent =
     conversationId === undefined && currentTimelineEntryId === undefined && visibleTimelineEntryIds === undefined && memoryReviewBatchId === undefined && memoryReviewSourceEntryIds === undefined;
   if (

@@ -1,5 +1,5 @@
 /**
- * Eve tool for the current verified Telegram group timeline.
+ * Tool for the current verified Telegram group timeline.
  *
  * Export:
  * - `list_group_history`: bounded pagination and search without a model-selectable group scope.

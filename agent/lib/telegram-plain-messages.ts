@@ -25,7 +25,7 @@ export async function postTelegramPlainMessageChunk(
   }
 
   // Proactive sessions have no inbound chat type. The raw provider receipt supplies the verified
-  // type without mutating Eve's continuation anchor before the durable receipt is committed.
+  // type without moving the conversation's anchor before the durable receipt is committed.
   return await postTelegramMessageWithReceiptWithoutContinuationChange(channel, {
     ...(replyParameters === undefined ? {} : { reply_parameters: replyParameters }),
     text,

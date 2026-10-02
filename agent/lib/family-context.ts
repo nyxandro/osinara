@@ -2,7 +2,7 @@
  * Family administration context.
  *
  * Exports:
- * - `requireFamilyCaller`: validates a family-authenticated Eve session.
+ * - `requireFamilyCaller`: validates a family-authenticated session.
  * - `requireOwner`: enforces owner-only administration.
  * - `requirePrivateTelegramOwner`: limits secret delivery to the verified owner chat.
  */

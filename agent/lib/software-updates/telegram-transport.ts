@@ -214,7 +214,7 @@ function productionTransport(): SoftwareUpdateTelegramTransport {
   });
 }
 
-// Configuration remains lazy so Eve discovery and build do not require runtime secrets.
+// Configuration remains lazy so builds do not require runtime secrets.
 export const softwareUpdateTelegramTransport: SoftwareUpdateTelegramTransport = {
   answerCallback: (input) => productionTransport().answerCallback(input),
   editProposal: (input) => productionTransport().editProposal(input),

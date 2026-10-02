@@ -50,7 +50,7 @@ export interface PreparedSession {
   continuationToken: string;
   generation: number;
   id: string;
-  /** True when rotation, task promotion, or trust-zone recreation requires a fresh Eve generation. */
+  /** True when rotation, task promotion, or trust-zone recreation requires a fresh session generation. */
   rotated: boolean;
   sandboxSessionId: string;
 }

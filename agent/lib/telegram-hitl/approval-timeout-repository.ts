@@ -5,10 +5,10 @@
  * - `approvalTimeoutRepository`: leased claim and terminal settlement of unanswered approvals.
  *
  * Key constructs:
- * - A lease separates "selected for cancellation" from "cancelled", so a failed Eve response retries.
- * - Eve replaces session auth with whatever the response delivers, so the claim rebuilds the same
+ * - A lease separates "selected for cancellation" from "cancelled", so a failed response retries.
+ * - a continuation runs with the auth its response delivers, so the claim rebuilds the same
  *   freshly revalidated auth the interactive callback path uses; an unprovable approver is skipped.
- * - Only a prompt whose session still owns the parked Eve run is eligible: settling a stale row would
+ * - Only a prompt whose session still owns the parked turn is eligible: settling a stale row would
  *   clear `pending_operation` for a different, genuinely pending approval.
  */
 import type { PoolClient } from "pg";

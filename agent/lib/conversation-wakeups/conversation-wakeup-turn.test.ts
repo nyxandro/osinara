@@ -11,7 +11,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { EVE_EMPTY_DELIVERY_MARKER } from "../eve-empty-delivery.js";
+import { EMPTY_DELIVERY_MARKER } from "../../runtime/turn/step-history.js";
 import { groupCanonicalContinuationToken } from "../sessions/group-canonical-token.js";
 import { formatPlannedWakeupsContext } from "./conversation-wakeup-context.js";
 import type { PreparedConversationWakeup } from "./conversation-wakeup-preparation.js";
@@ -129,7 +129,7 @@ describe("conversationWakeupMessage", () => {
     expect(message).toContain("scheduled_for_local: 2026-09-25 12:59:00 Europe/Moscow");
     expect(context.join("\n")).toContain("captured_at_utc: 2026-09-25T10:00:00.000Z");
     // Silence is offered in the wake-up itself, never in the rules every mode reads.
-    expect(message).toContain(EVE_EMPTY_DELIVERY_MARKER);
+    expect(message).toContain(EMPTY_DELIVERY_MARKER);
     expect(message).toContain("pause");
   });
 });

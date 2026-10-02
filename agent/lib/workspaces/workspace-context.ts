@@ -2,7 +2,7 @@
  * Trusted workspace authorization context.
  *
  * Export:
- * - `requireWorkspaceAuthorization`: derives scope identity only from verified Eve auth.
+ * - `requireWorkspaceAuthorization`: derives scope identity only from verified session auth.
  * - `requireTelegramDeliveryTarget`: resolves only the current verified chat and topic.
  */
 import type { SessionContext } from "../../runtime/context.js";

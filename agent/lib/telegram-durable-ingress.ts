@@ -152,7 +152,7 @@ function withCaptionlessAttachmentText(update: TelegramUpdate): TelegramUpdate {
     return update;
   }
 
-  // Eve no longer forwards persisted bytes to the text-only primary model. Keep its final user
+  // The runtime does not forward persisted bytes to the text-only primary model. Keep its final user
   // message non-empty while describing only the verified event, not inventing a file request.
   return {
     ...update,

@@ -82,7 +82,7 @@ function rejectTarget(
   return null;
 }
 
-/** Eve and raw Telegram identities must agree before nested untrusted content is admitted. */
+/** Parsed and raw Telegram identities must agree before nested untrusted content is admitted. */
 function verifiedRawTarget(message: TelegramReplyMessage): JsonRecord | null {
   const parsedTarget = message.replyToMessage;
   const rawTarget = record(message.raw.reply_to_message);

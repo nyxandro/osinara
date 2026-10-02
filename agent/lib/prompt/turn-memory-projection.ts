@@ -14,16 +14,16 @@
  * - Anything the markers do not delimit — the core rules, the mode block, a memory service notice —
  *   stays exactly where it was.
  *
- * Why not Eve's own `defineInstructions({ role: "user" })`, which lands in the same position: Eve
- * drains such a message into `session.history`, so every turn's selection would stay there and
- * accumulate. This payload has to be gone by the next turn, which leaves the transport boundary as
+ * Why not a user-role turn block (`userInstructions`), which lands in the same position: the
+ * runtime writes such a message into the session history, as Eve did, so every turn's selection
+ * would stay there and accumulate. This payload has to be gone by the next turn, which leaves the transport boundary as
  * the only place to express it.
  *
  * The anchor assumes the last user message is the one this turn is answering. Today that holds
  * because every path that lacks such a message also lacks a payload: an approval continuation
  * retrieves none (`memory-retrieval.ts`), a memory-review session resolves none
  * (`instructions/retrieved-memory.ts`), and a scheduled run delivers an ordinary user message. A
- * recovery note Eve appends after the turn message does move the anchor past it, which costs one
+ * recovery note appended after the turn message would move the anchor past it, which costs one
  * miss on a path that is already an exception.
  */
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
@@ -44,8 +44,8 @@ function findLineAnchored(content: string, marker: string, from: number): number
 }
 
 /**
- * Cuts the delimited payload out of one merged system message. Eve joins every system instruction
- * with a blank line, so the separator left behind is removed with it.
+ * Cuts the delimited payload out of one merged system message. The runtime joins every system
+ * instruction with a blank line (`runtime/prompt/system-prompt.ts`), so the separator left behind is removed with it.
  *
  * The core rules name both markers in prose to explain the block to the model, and records are
  * escaped before they are serialized. Only a marker on its own line is therefore a boundary:

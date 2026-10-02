@@ -67,7 +67,7 @@ export function telegramMessageSentAt(message: TelegramMessage): Date {
 }
 
 export function telegramMessageKind(message: TelegramMessage): string {
-  // Media keys survive Eve parsing in `raw`; only the compact kind is persisted.
+  // Media keys survive parsing in `raw`; only the compact kind is persisted.
   for (const kind of [
     "voice",
     "audio",

@@ -1,5 +1,5 @@
 /**
- * Trusted operator recovery for a stuck memory review; never replays Eve.
+ * Trusted operator recovery for a stuck memory review; never replays a turn.
  *
  * Exports:
  * - `inspectMemoryReviewLanes`: the head of every lane and how much is waiting behind it.

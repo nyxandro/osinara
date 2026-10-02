@@ -1,4 +1,8 @@
-/** Operator requests a fresh observation/cancellation, never blind replay or quarantine erasure. */
+/**
+ * Operator recovery of a queue item blocked by an unconfirmed cancellation — a state only Eve left
+ * behind. A bound item is taken again and closed without repeating it (its Eve turn is not the
+ * runtime's), which lets the chat's queue go on; an unbound one is closed here. Neither is replayed.
+ */
 import { database } from "./database.js";
 import { AppError } from "./app-error.js";
 import { requireUpdateId, requireUuid } from "./telegram-ingress-contract.js";
@@ -42,5 +46,5 @@ export async function requestTelegramIngressRecovery(updateId: string, action: "
     [updateId, action === "cancel", action, reason.trim()],
   );
   if (result.rowCount !== 1) throw new AppError("AGENT_TELEGRAM_RECOVERY_NOT_ADMISSIBLE",
-    "Запрос не заблокирован или не имеет сохранённой привязки к Eve. Для старой записи сначала требуется отдельная проверка исходного исполнения");
+    "Запрос не заблокирован или не имеет сохранённой привязки к ходу. Для старой записи сначала требуется отдельная проверка исходного исполнения");
 }

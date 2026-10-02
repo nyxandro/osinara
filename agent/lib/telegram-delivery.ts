@@ -41,7 +41,8 @@ export async function deliverFamilyInvitation(input: FamilyInvitationDelivery): 
       signal,
     });
 
-  // Eve owns Telegram request construction while this adapter owns cancellation and secret handling.
+  // The runtime's Telegram API builds the request while this adapter owns cancellation and secret
+  // handling.
   try {
     await sendTelegramMessage({
       body: {

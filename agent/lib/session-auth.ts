@@ -1,5 +1,5 @@
 /**
- * Durable Eve session caller resolution.
+ * Durable session caller resolution.
  *
  * Export:
  * - `resolveSessionCaller`: returns only the active verified caller for this turn.

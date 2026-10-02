@@ -2,7 +2,7 @@
  * Durable PostgreSQL boundary for one immutable turn-visible memory source set.
  *
  * Exports:
- * - `BindMemoryTurnSourcesInput`: verified Telegram and Eve turn coordinates.
+ * - `BindMemoryTurnSourcesInput`: verified Telegram and turn coordinates.
  * - `ResolvedMemoryTurnSource`: exact source and authorization partition projection.
  * - `memoryTurnSourceRepository`: replay-safe binding, HITL resume verification, and source resolution.
  */

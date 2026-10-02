@@ -2,7 +2,7 @@
  * Lazy registered-group Telegram attachment import tool.
  *
  * Export:
- * - Eve `import_telegram_attachment` materializes one authorized family or external journal reference.
+ * - `import_telegram_attachment` materializes one authorized family or external journal reference.
  * - External imports expose the canonical sandbox path accepted by guarded file tools.
  */
 import { defineTool } from "../../runtime/tool.js";

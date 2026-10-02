@@ -1,8 +1,8 @@
 /**
- * PostgreSQL persistence for Eve session lifecycle events.
+ * PostgreSQL persistence for session lifecycle events.
  *
  * Export:
- * - `sessionLifecycleEventRepository`: Eve binding, completion/failure, and rotation requests.
+ * - `sessionLifecycleEventRepository`: runtime session binding, completion/failure, and rotation requests.
  */
 import type { PoolClient } from "pg";
 
@@ -56,36 +56,6 @@ async function applyTerminalMutation(input: {
   }
 }
 
-async function resolveFailureSessionForUpdate(
-  client: PoolClient,
-  continuationToken: string,
-): Promise<string> {
-  // Eve's exact current continuation is authoritative over a stale alias with the same text.
-  const exact = await client.query<{ id: string }>(
-    `SELECT id FROM conversation_sessions
-      WHERE retired_at IS NULL AND continuation_token = $1
-      FOR UPDATE`,
-    [continuationToken],
-  );
-  if (exact.rowCount === 1) return exact.rows[0]!.id;
-
-  const route = await client.query<{ id: string }>(
-    `SELECT session.id
-       FROM conversation_session_routes route
-       JOIN conversation_sessions session ON session.id = route.session_id
-      WHERE route.base_continuation_token = $1 AND session.retired_at IS NULL
-      FOR UPDATE OF session`,
-    [continuationToken],
-  );
-  if (route.rowCount === 1) return route.rows[0]!.id;
-  throw new AppError(
-    "AGENT_SESSION_FAILURE_RECORD_FAILED",
-    route.rowCount === 0
-      ? "Не удалось завершить повреждённый контекст"
-      : "Маршрут повреждённого контекста связан с несколькими сессиями",
-  );
-}
-
 export const sessionLifecycleEventRepository = {
   async retireUnstartedScheduledSession(id: string): Promise<void> {
     const retired = await applyTerminalMutation({
@@ -131,7 +101,7 @@ export const sessionLifecycleEventRepository = {
       id,
       eveSessionId,
       "AGENT_SESSION_BIND_FAILED",
-      "Не удалось связать текущий контекст с Eve",
+      "Не удалось связать текущий контекст с ходом агента",
     );
   },
 
@@ -226,53 +196,6 @@ export const sessionLifecycleEventRepository = {
       eveSessionId,
       "AGENT_SESSION_FAILURE_RECORD_FAILED",
       "Не удалось сохранить состояние контекста",
-    );
-  },
-
-  async recordSessionFailedByContinuationToken(
-    continuationToken: string,
-    eveSessionId: string,
-  ): Promise<SessionEventResult> {
-    const client = await database().connect();
-    let id: string;
-    let recorded = false;
-    try {
-      await client.query("BEGIN");
-      id = await resolveFailureSessionForUpdate(client, continuationToken);
-      const result = await client.query(
-        `UPDATE conversation_sessions
-             SET pending_operation = false,
-                 rotation_requested_at = CASE WHEN kind = 'canonical' THEN now() ELSE rotation_requested_at END,
-                 eve_session_id = $2,
-                 task_state = CASE WHEN kind <> 'canonical' THEN 'failed'::conversation_task_state ELSE task_state END,
-                 retired_at = CASE WHEN kind <> 'canonical' THEN now() ELSE retired_at END,
-                 delete_after = CASE
-                   WHEN kind <> 'canonical' THEN now() + $3 * interval '1 day'
-                   ELSE delete_after
-                 END
-          WHERE id = $1 AND retired_at IS NULL
-            AND (eve_session_id IS NULL OR eve_session_id <= $2)`,
-        [id, eveSessionId, SESSION_RETENTION_DAYS],
-      );
-      if (result.rowCount === 1) {
-        await finalizeRetirement(client, id);
-        await client.query("COMMIT");
-        recorded = true;
-      } else {
-        await client.query("ROLLBACK");
-      }
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
-    if (recorded) return "recorded";
-    return await classifyMissedSessionEvent(
-      id!,
-      eveSessionId,
-      "AGENT_SESSION_FAILURE_RECORD_FAILED",
-      "Не удалось сохранить состояние повреждённого контекста",
     );
   },
 

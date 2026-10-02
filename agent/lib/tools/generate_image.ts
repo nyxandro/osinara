@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `createGenerateImageTool`: dependency-injected exact-once generation and delivery workflow.
- * - Default `generate_image`: production Eve tool using CLIProxyAPI, workspace, and Telegram.
+ * - Default `generate_image`: production tool using CLIProxyAPI, workspace, and Telegram.
  *
  * Key constructs:
  * - The verified workspace scope and call ID determine a stable non-overwriting output path.

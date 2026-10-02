@@ -144,7 +144,7 @@ export const agentScheduleDispatchRepository = {
       await recoverUnstartedAgentSchedules(client, options.now);
       await recoverOrphanedConversationRuns(client, options.now);
 
-      // Only an unfinished Eve handoff expires; a confirmed running workflow owns its lifecycle.
+      // Only an unfinished hand-off to the runtime expires; a confirmed running turn owns its lifecycle.
       const ambiguous = await client.query<{ family_id: string; id: string; lease_token: string }>(
         `WITH expired AS (
            SELECT schedule.id, schedule.family_id, schedule.lease_token::text AS lease_token
@@ -318,7 +318,7 @@ export const agentScheduleDispatchRepository = {
         );
         const leaseToken = updated.rows[0]?.lease_token;
         if (!leaseToken) continue;
-        // The same scheduled occurrence may be reclaimed only before Eve handoff starts.
+        // The same scheduled occurrence may be reclaimed only before the hand-off starts.
         const run = await client.query<{ id: string }>(
           `INSERT INTO agent_schedule_runs
              (schedule_id, family_id, scheduled_for, status, lease_token, updated_at)

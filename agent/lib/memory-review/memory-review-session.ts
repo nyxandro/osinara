@@ -1,5 +1,5 @@
 /**
- * Memory-review Eve session identification.
+ * Memory-review session identification.
  *
  * Exports:
  * - `memoryReviewBatchId`: validates the optional trusted batch marker.

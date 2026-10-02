@@ -1,5 +1,5 @@
 /**
- * Telegram actor recovery from verified Eve session auth.
+ * Telegram actor recovery from verified session auth.
  *
  * Exports:
  * - `TelegramSessionActor`: normalized durable user, bot, or channel actor identity.

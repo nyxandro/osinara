@@ -13,11 +13,11 @@
  * included. It is removed here, ahead of the decision, so no branch can deliver it and so a
  * reaction is still recognized as the whole message it has to be.
  *
- * Provider adapters route typed reasoning parts to dedicated Eve events that this delivery
+ * Provider adapters route typed reasoning parts to dedicated runtime events that this delivery
  * policy never receives.
  */
 import { AppError } from "./app-error.js";
-import { EVE_EMPTY_DELIVERY_MARKER } from "./eve-empty-delivery.js";
+import { EMPTY_DELIVERY_MARKER } from "../runtime/turn/step-history.js";
 import {
   readMemoryUsageDirective,
   type MemoryUsageDeclaration,
@@ -44,7 +44,7 @@ export function completedTelegramOutput(data: {
   finishReason: string;
   message?: string | null;
 }): CompletedTelegramOutput | null {
-  // Eve reports a final step the model marked as undelivered with `message: null`; that is the
+  // The runtime reports a final step the model marked as undelivered with `message: null`; that is the
   // model's deliberate silence, while a blank step is technical noise.
   if (data.message === null && data.finishReason !== TOOL_CALLS_FINISH_REASON) {
     return { kind: "silence" };
@@ -61,7 +61,7 @@ export function completedTelegramOutput(data: {
     if (
       !progress ||
       progress.includes(TELEGRAM_REACTION_DIRECTIVE_FRAGMENT) ||
-      progress.includes(EVE_EMPTY_DELIVERY_MARKER)
+      progress.includes(EMPTY_DELIVERY_MARKER)
     ) {
       return null;
     }

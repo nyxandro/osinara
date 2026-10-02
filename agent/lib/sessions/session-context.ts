@@ -65,7 +65,7 @@ export async function registerTelegramDeliveredMessageRoutes(
   }
 
   // Delivery anchors are application aliases only. Private HITL callbacks need their exact message
-  // route too; Eve's continuation token remains stable so no delivery can claim a competing hook.
+  // route too; the session's continuation token remains stable so no delivery can claim a competing hook.
   const messageThreadId = telegramMessageThreadId(state.messageThreadId, ctx);
   const sessionId = applicationSessionId(ctx);
   for (const conversationId of deliveredMessageIds) {

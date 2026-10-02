@@ -2,7 +2,7 @@
  * Telegram reply continuation routing.
  *
  * Exports:
- * - `telegramBaseContinuationToken`: selects a verified route or derives the native Eve base token.
+ * - `telegramBaseContinuationToken`: selects a verified route or derives the channel's base token.
  * - `telegramReplyContinuationTokens`: returns exact and reviewed historical reply-route candidates.
  */
 import type { TelegramMessage } from "../runtime/telegram/inbound.js";

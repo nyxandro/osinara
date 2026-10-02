@@ -79,7 +79,7 @@ function productionTransport(): MemoryReviewOwnerAlertTransport {
   });
 }
 
-// Runtime secrets stay lazy so Eve discovery and build remain deterministic.
+// Runtime secrets stay lazy so builds remain deterministic.
 export const memoryReviewOwnerAlertTransport: MemoryReviewOwnerAlertTransport = {
   async deliver(input) {
     const owner = await database().query<{ telegram_user_id: string }>(`SELECT u.telegram_user_id

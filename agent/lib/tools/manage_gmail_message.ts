@@ -1,4 +1,4 @@
-/** Structured Gmail message mutations over one bounded batch with semantic Eve HITL. */
+/** Structured Gmail message mutations over one bounded batch with semantic approval. */
 import type { ToolContext } from "../../runtime/tool.js";
 import { defineTool } from "../../runtime/tool.js";
 

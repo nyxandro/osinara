@@ -4,7 +4,7 @@
  * Exports:
  * - `formatRetrievedMemoryInstructions`: describes the active retrieval pipeline to the model.
  * - `recordOfferedMemories`: writes the show journal once the block budget picked what fits.
- * - `latestUserText`: extracts the newest user text from Eve model history.
+ * - `latestUserText`: extracts the newest user text from the model history.
  * - `memoryRetrievalQuery`: selects the addressed text to search by for the current turn.
  * - `MemoryRetrievalDiagnostics`: log-only numbers about the query and each search branch.
  * - `retrieveRelevantMemories`: embeds a query locally and runs scoped hybrid search.

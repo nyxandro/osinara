@@ -1,5 +1,5 @@
 /**
- * Shared execution-time boundary for Eve filesystem tools.
+ * Shared execution-time boundary for the runtime's filesystem tools.
  *
  * Exports:
  * - `ScopedFileToolName`, `ScopedWorkspaceRoot`: contracts for authorized mount roots.

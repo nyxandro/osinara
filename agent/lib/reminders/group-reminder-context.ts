@@ -1,5 +1,5 @@
 /**
- * External-group reminder authorization derived from verified Eve Telegram session auth.
+ * External-group reminder authorization derived from verified Telegram session auth.
  *
  * Exports:
  * - `GroupReminderAuthorization`: trusted Telegram author and current group destination.

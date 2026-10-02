@@ -1,5 +1,5 @@
 /**
- * Google Workspace profile actor derived from the active Eve caller.
+ * Google Workspace profile actor derived from the active session caller.
  *
  * Exports:
  * - `requireGoogleWorkspaceConnectionActor`: verified personal or family profile actor.

@@ -16,14 +16,12 @@
     "setup:google": "node --experimental-strip-types scripts/configure-google-workspace-cli.ts",
     "start": "eve start",
     "test": "vitest run",
-    "test:workflow-stress": "node --experimental-strip-types scripts/run-workflow-postgres-stress.ts",
     "test:watch": "vitest",
     "typecheck": "tsc",
     "migrate": "node --experimental-strip-types scripts/migrate-workflow.ts && node --experimental-strip-types scripts/migrate.ts",
     "migrate:runtime": "node .runtime/scripts/migrate-workflow.js && node .runtime/scripts/migrate.js",
     "memory:reindex": "node --import tsx scripts/reindex-memory.ts",
-    "postinstall": "node --experimental-strip-types scripts/apply-eve-patches.ts",
-    "reset:workflow-stress": "node --experimental-strip-types scripts/reset-workflow-stress-database.ts"
+    "postinstall": "node --experimental-strip-types scripts/apply-eve-patches.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.37",

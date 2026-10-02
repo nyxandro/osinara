@@ -2,7 +2,7 @@
  * Durable tool-execution approval guard for Telegram HITL.
  *
  * Export:
- * - `requireToolApprovalEvidence`: binds execution to the consumed exact Eve tool call.
+ * - `requireToolApprovalEvidence`: binds execution to the exact approved tool call.
  */
 import type { ToolContext } from "../runtime/tool.js";
 

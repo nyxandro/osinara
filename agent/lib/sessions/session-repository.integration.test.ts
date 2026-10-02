@@ -4,7 +4,6 @@
  * Constructs covered:
  * - Generation-zero session creation and stable route aliases.
  * - Monotonic Eve root rebinding after a terminal workflow replacement.
- * - Terminal failure resolution through any durable Telegram route after re-keying.
  * - Rotation after thresholds while pending operations remain pinned.
  * - Stable sandbox identity across generations and replacement at a trust-zone boundary.
  * - Retention leasing for retired Eve sessions.
@@ -238,10 +237,6 @@ describeWithDatabase("session repository", () => {
     await sessionRepository.markPendingOperation(current.id, true);
     await expect(sessionRepository.recordTurnCompleted(current.id, oldRoot, false, true)).resolves.toBe("stale");
     await expect(sessionRepository.recordTurnFailed(current.id, oldRoot)).resolves.toBe("stale");
-    await expect(sessionRepository.recordSessionFailedByContinuationToken(
-      current.continuationToken,
-      oldRoot,
-    )).resolves.toBe("stale");
 
     const stored = await database().query<{
       completed_turns: number;
@@ -259,68 +254,6 @@ describeWithDatabase("session repository", () => {
       pending_operation: true,
       rotation_requested_at: null,
     });
-  });
-
-  it("records a terminal failure from a newer root before turn.started binds it", async () => {
-    const f = await fixture();
-    const current = await sessionRepository.prepareTurn({
-      baseContinuationToken: "105::",
-      kind: "canonical",
-      telegramForumTopicId: null,
-      familyId: f.familyId,
-      groupId: null,
-      now: new Date("2026-07-12T12:00:00.000Z"),
-      scope: "personal",
-      userId: f.userId,
-    });
-    const previousRoot = "wrun_01KXB392VJ8YY13JMJ9YZAF5QR";
-    const failedRoot = "wrun_01KXBRD0AY4NP50QXR7C5D6YEK";
-    await sessionRepository.bindEveSession(current.id, previousRoot);
-    await sessionRepository.markPendingOperation(current.id, true);
-
-    await expect(sessionRepository.recordSessionFailedByContinuationToken(
-      current.continuationToken,
-      failedRoot,
-    )).resolves.toBe("recorded");
-
-    await expect(database().query(
-      `SELECT 1 FROM conversation_sessions
-        WHERE id = $1
-          AND eve_session_id = $2
-          AND pending_operation = false
-          AND rotation_requested_at IS NOT NULL`,
-      [current.id, failedRoot],
-    )).resolves.toMatchObject({ rowCount: 1 });
-  });
-
-  it("records a terminal failure through an earlier route after Telegram re-keying", async () => {
-    const f = await fixture();
-    const current = await sessionRepository.prepareTurn({
-      baseContinuationToken: "106::426",
-      kind: "canonical",
-      telegramForumTopicId: null,
-      familyId: f.familyId,
-      groupId: null,
-      now: new Date("2026-07-12T12:00:00.000Z"),
-      scope: "personal",
-      userId: f.userId,
-    });
-    const failedRoot = "wrun_01KXBRD0AY4NP50QXR7C5D6YEK";
-    await sessionRepository.bindEveSession(current.id, failedRoot);
-    await sessionRepository.registerRouteAlias(current.id, "106::437");
-
-    await expect(sessionRepository.recordSessionFailedByContinuationToken(
-      "106::426",
-      failedRoot,
-    )).resolves.toBe("recorded");
-
-    await expect(database().query(
-      `SELECT 1 FROM conversation_sessions
-        WHERE id = $1
-          AND pending_operation = false
-          AND rotation_requested_at IS NOT NULL`,
-      [current.id],
-    )).resolves.toMatchObject({ rowCount: 1 });
   });
 
   it("leases only retired sessions whose one-day retention has elapsed", async () => {

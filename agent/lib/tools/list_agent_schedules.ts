@@ -1,5 +1,5 @@
 /**
- * Eve list tool for scheduled agent scenarios.
+ * List tool for scheduled agent scenarios.
  *
  * Export:
  * - `list_agent_schedules` returns current-user personal and family schedules.

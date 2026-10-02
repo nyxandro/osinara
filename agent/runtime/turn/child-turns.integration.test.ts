@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { closeDatabase, database } from "../../lib/database.js";
 import { loadSessionHistory } from "../history/history-repository.js";
-import { defineTool } from "../tool.js";
+import { defineTool, type ToolDefinition } from "../tool.js";
 import { agentTool } from "../tools/delegate.js";
 import type { StepModelCall, StepModelResponse } from "./model-call.js";
 import { runTurn } from "./run-turn.js";
@@ -77,6 +77,36 @@ async function childTurns() {
     const [row] = await childTurns();
     expect(row).toMatchObject({ auth: OWNER_AUTH, channel: { kind: "subagent" }, status: "completed" });
     expect((await loadSessionHistory(database(), sessionId)).messages).toHaveLength(6);
+  });
+
+  it("shows a delegated task's tools and step hook who called it, and the root turn no caller", async () => {
+    const sessionId = await newTestSession();
+    const parents: Array<{ seenBy: string; parent: unknown }> = [];
+    const probe = defineTool({
+      description: "probe",
+      inputSchema: z.object({}),
+      async execute(_input, ctx) { parents.push({ parent: ctx.session.parent, seenBy: "tool" }); return "ok"; },
+    });
+    const model = routedModel((call, task) => {
+      if (task !== null) return hasResult(call) ? reply("проверено") : toolCalls([{ id: "call-probe", input: {}, name: "probe" }]);
+      return hasResult(call) ? reply("Готово.") : delegateTo({ id: "call-a", message: "проверь" });
+    });
+    const agent = testAgent({ agent: agentTool }, {
+      resolveTools: async (ctx): Promise<Record<string, ToolDefinition<any, any>>> => ctx.channel.kind === "subagent" ? { probe } : { agent: agentTool },
+      stepStarted: async (ctx) => { parents.push({ parent: ctx.session.parent, seenBy: `step:${ctx.channel.kind}` }); },
+    });
+    const turn = await startMessageTurn(sessionId, "делегируй");
+
+    await runTurn(testRuntime({ agent, callModel: model.callModel, observer: recordingObserver().observer }), turn.id, RUN);
+
+    const caller = { callId: "call-a", rootSessionId: sessionId, sessionId, turn: { id: turn.id, sequence: turn.sequence } };
+    expect(parents).toEqual([
+      { parent: undefined, seenBy: "step:telegram" },
+      { parent: caller, seenBy: "step:subagent" },
+      { parent: caller, seenBy: "tool" },
+      { parent: caller, seenBy: "step:subagent" },
+      { parent: undefined, seenBy: "step:telegram" },
+    ]);
   });
 
   it("runs several delegated tasks of one step at the same time", async () => {

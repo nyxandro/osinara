@@ -19,7 +19,7 @@ import {
   createPreferenceBlockResolver,
   createReactionSetBlockResolver,
 } from "./turn-blocks.js";
-import { EVE_EMPTY_DELIVERY_MARKER } from "../eve-empty-delivery.js";
+import { EMPTY_DELIVERY_MARKER } from "../../runtime/turn/step-history.js";
 import { VOICE_MESSAGE_RULES } from "./common-fragments.js";
 import { formatReactionSetAnnouncement } from "../telegram-reaction-announcement.js";
 import { TELEGRAM_DEFAULT_REACTIONS } from "../telegram-reaction-set.js";
@@ -111,14 +111,14 @@ describe("mode block resolution", () => {
     // A child answers its parent, a scheduled run has no message to stay silent on, and a private
     // chat is direct by definition: none of them may learn the silence marker. A private root
     // learns it only as the closing of a turn whose voice note already delivered the answer.
-    expect(root).toContain(EVE_EMPTY_DELIVERY_MARKER);
-    expect(child).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
-    expect(nested).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
-    expect(scheduled).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
+    expect(root).toContain(EMPTY_DELIVERY_MARKER);
+    expect(child).not.toContain(EMPTY_DELIVERY_MARKER);
+    expect(nested).not.toContain(EMPTY_DELIVERY_MARKER);
+    expect(scheduled).not.toContain(EMPTY_DELIVERY_MARKER);
     expect(personal).toContain(VOICE_MESSAGE_RULES);
-    expect(personal.replace(VOICE_MESSAGE_RULES, "")).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
-    expect(scheduledPersonal).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
-    expect(personalChild).not.toContain(EVE_EMPTY_DELIVERY_MARKER);
+    expect(personal.replace(VOICE_MESSAGE_RULES, "")).not.toContain(EMPTY_DELIVERY_MARKER);
+    expect(scheduledPersonal).not.toContain(EMPTY_DELIVERY_MARKER);
+    expect(personalChild).not.toContain(EMPTY_DELIVERY_MARKER);
   });
 
   it("teaches voice replies only where the voice tool is emitted", async () => {

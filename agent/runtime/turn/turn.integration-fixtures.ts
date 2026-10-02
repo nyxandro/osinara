@@ -109,6 +109,7 @@ export function testAgent(tools: Readonly<Record<string, ToolDefinition<any, any
       providerOptions: { neuraldeep: { user: sessionId } },
     }),
     staticToolNames: [],
+    stepStarted: async () => {},
     ...overrides,
   };
 }

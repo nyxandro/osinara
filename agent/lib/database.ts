@@ -11,7 +11,7 @@ import { createApplicationDatabasePool } from "./database-client.js";
 let pool: Pool | null = null;
 
 export function database(): Pool {
-  // Resolve at first use so Eve discovery and image builds do not require runtime secrets.
+  // Resolve at first use so builds and image builds do not require runtime secrets.
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
     throw new Error(

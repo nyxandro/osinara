@@ -6,8 +6,9 @@
  * - `TurnRuntime`, `TurnObserver`, `TurnOutcome`: what the loop needs and what it reports.
  *
  * One step:
- * 1. Without a recorded response for this step, the model is called and its response and tool
- *    calls are recorded in one transaction. A recorded response is never requested again.
+ * 1. Without a recorded response for this step, the agent's `stepStarted` runs, the model is
+ *    called and its response and tool calls are recorded in one transaction. A recorded response
+ *    is never requested again.
  * 2. The step's text goes to the channel once.
  * 3. Planned calls run concurrently; a call that waits for a person parks the turn.
  * 4. The turn input (on the first write), the step's messages and its tool results are appended
@@ -20,6 +21,7 @@
  * - A failing instruction resolver or turn-start handler fails the turn before any model call.
  * - The tool results of a continuation are written to history before its first model call, so a
  *   failing model call cannot hide that an approved tool already ran.
+ * - A delegated child's tools see their caller as `session.parent`, as Eve's subagent sessions did.
  */
 import type { ModelMessage } from "ai";
 import type { Pool } from "pg";
@@ -34,6 +36,7 @@ import type { InputRequest } from "../hitl/types.js";
 import { formatAvailableSkillsSection } from "../prompt/skills-section.js";
 import { composeSystemPrompt } from "../prompt/system-prompt.js";
 import { instructionTurnMessages, resolveTurnInstructions, turnInputMessages } from "../prompt/turn-instructions.js";
+import type { SessionParent } from "../context.js";
 import type { RuntimeSandboxSession } from "../sandbox/types.js";
 import { clearReadFileState, sessionToolState } from "../session/tool-state.js";
 import type { ToolContext, ToolDefinition } from "../tool.js";
@@ -115,9 +118,23 @@ function systemPrompt(agent: RuntimeAgent, prepared: PreparedTurn): string {
   });
 }
 
-function toolContexts(runtime: TurnRuntime, turn: TurnRecord, abortSignal: AbortSignal) {
+/** A delegated child's caller, as its tools and step hook see it; one level deep. */
+async function sessionParent(runtime: TurnRuntime, turn: TurnRecord): Promise<SessionParent | undefined> {
+  if (turn.parentTurnId === null || turn.parentCallId === null) return undefined;
+  const parent = await loadTurn(runtime.database, turn.parentTurnId);
+  return {
+    callId: turn.parentCallId, rootSessionId: parent.sessionId, sessionId: parent.sessionId,
+    turn: { id: parent.id, sequence: parent.sequence },
+  };
+}
+
+function sessionOf(turn: TurnRecord, parent: SessionParent | undefined) {
+  return { auth: turn.auth, id: turn.sessionId, ...(parent === undefined ? {} : { parent }), turn: { id: turn.id, sequence: turn.sequence } };
+}
+
+function toolContexts(runtime: TurnRuntime, turn: TurnRecord, parent: SessionParent | undefined, abortSignal: AbortSignal) {
   let sandbox: Promise<RuntimeSandboxSession> | undefined;
-  const session = { auth: turn.auth, id: turn.sessionId, turn: { id: turn.id, sequence: turn.sequence } };
+  const session = sessionOf(turn, parent);
   const state = sessionToolState(runtime.database, turn.sessionId);
   const skills = requirePrepared(turn).skills.map((skill) => skill.name);
   return (call: { readonly callId: string; readonly toolName: string }): ToolContext => ({
@@ -167,6 +184,7 @@ function withOutputs(calls: readonly ToolCallRecord[]) {
 async function runCalls(runtime: TurnRuntime, input: {
   readonly calls: readonly ToolCallRecord[];
   readonly journalTurnId: string;
+  readonly parent: SessionParent | undefined;
   readonly signal: AbortSignal;
   readonly stepIndex: number;
   readonly tools: AnyTools;
@@ -177,7 +195,7 @@ async function runCalls(runtime: TurnRuntime, input: {
   await runtime.observer.toolsStarted({ calls: runnable, stepIndex: input.stepIndex, turn: input.turn });
   return await executeStepCalls({
     calls: input.calls,
-    contextFor: toolContexts(runtime, input.turn, input.signal),
+    contextFor: toolContexts(runtime, input.turn, input.parent, input.signal),
     delegateCall: (call) => runChildTurn(runtime, {
       call, journalTurnId: input.journalTurnId, parent: input.turn, run: runTurn, signal: input.signal,
     }),
@@ -215,7 +233,9 @@ async function prepareTurn(runtime: TurnRuntime, turn: TurnRecord): Promise<Turn
 }
 
 /** A continuation runs the approved calls of the parked step and writes that step into history. */
-async function settleParkedStep(runtime: TurnRuntime, turn: TurnRecord, signal: AbortSignal): Promise<TurnRecord> {
+async function settleParkedStep(
+  runtime: TurnRuntime, turn: TurnRecord, parent: SessionParent | undefined, signal: AbortSignal,
+): Promise<TurnRecord> {
   const parked = await loadTurn(runtime.database, turn.resumesTurnId!);
   const recorded = await loadStep(runtime.database, parked.id, parked.nextStepIndex);
   if (recorded === null || recorded.calls.some((call) => call.state === "awaiting_input")) {
@@ -223,7 +243,7 @@ async function settleParkedStep(runtime: TurnRuntime, turn: TurnRecord, signal: 
   }
   const history = await loadSessionHistory(runtime.database, turn.sessionId);
   const tools = await stepTools(runtime, turn, history.messages);
-  const calls = await runCalls(runtime, { calls: recorded.calls, journalTurnId: parked.id, signal, stepIndex: 0, tools, turn });
+  const calls = await runCalls(runtime, { calls: recorded.calls, journalTurnId: parked.id, parent, signal, stepIndex: 0, tools, turn });
   if (calls.some((call) => call.state === "awaiting_input")) {
     throw new Error(`AGENT_TURN_CONTINUATION_INVALID: a call of turn ${parked.id} still waits after its answer`);
   }
@@ -309,7 +329,9 @@ function inputTokens(usage: unknown): number | undefined {
 }
 
 /** Runs one step; returns the outcome when the turn ends or parks, `null` to continue. */
-async function runStep(runtime: TurnRuntime, turn: TurnRecord, signal: AbortSignal): Promise<TurnOutcome | null> {
+async function runStep(
+  runtime: TurnRuntime, turn: TurnRecord, parent: SessionParent | undefined, signal: AbortSignal,
+): Promise<TurnOutcome | null> {
   const stepIndex = turn.nextStepIndex;
   const prepared = requirePrepared(turn);
   const history = await loadSessionHistory(runtime.database, turn.sessionId);
@@ -325,9 +347,10 @@ async function runStep(runtime: TurnRuntime, turn: TurnRecord, signal: AbortSign
       messages = compacted;
       turnInput = [];
     }
+    await runtime.agent.stepStarted({ channel: turn.channel, session: sessionOf(turn, parent) });
     const response = await callModel(runtime, { messages, selection, signal, tools, turn });
     const calls = await planStepCalls({
-      contextFor: toolContexts(runtime, turn, signal), response: response.messages, toolCalls: response.toolCalls, tools,
+      contextFor: toolContexts(runtime, turn, parent, signal), response: response.messages, toolCalls: response.toolCalls, tools,
     });
     await inJournalTransaction(runtime.database, async (client) => {
       await recordStep(client, {
@@ -379,7 +402,7 @@ async function runStep(runtime: TurnRuntime, turn: TurnRecord, signal: AbortSign
     return { status: "completed", text: finalText };
   }
 
-  const calls = await runCalls(runtime, { calls: recorded.calls, journalTurnId: turn.id, signal, stepIndex, tools, turn });
+  const calls = await runCalls(runtime, { calls: recorded.calls, journalTurnId: turn.id, parent, signal, stepIndex, tools, turn });
   const own = calls.flatMap((call) => call.state === "awaiting_input" && call.inputRequest !== null && call.inputRequest.kind !== "subagent"
     ? [call.inputRequest] : []);
   const proxied = calls.flatMap((call) => call.state === "awaiting_input" && call.inputRequest?.kind === "subagent"
@@ -405,10 +428,11 @@ async function runStep(runtime: TurnRuntime, turn: TurnRecord, signal: AbortSign
 }
 
 async function driveTurn(runtime: TurnRuntime, claimed: TurnRecord, signal: AbortSignal): Promise<TurnOutcome> {
+  const parent = await sessionParent(runtime, claimed);
   let turn = await prepareTurn(runtime, claimed);
-  if (turn.resumesTurnId !== null && !turn.historyStarted) turn = await settleParkedStep(runtime, turn, signal);
+  if (turn.resumesTurnId !== null && !turn.historyStarted) turn = await settleParkedStep(runtime, turn, parent, signal);
   for (;;) {
-    const outcome = await runStep(runtime, turn, signal);
+    const outcome = await runStep(runtime, turn, parent, signal);
     if (outcome !== null) return outcome;
     turn = await loadTurn(runtime.database, turn.id);
   }

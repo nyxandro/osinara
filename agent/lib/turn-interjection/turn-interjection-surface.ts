@@ -2,11 +2,11 @@
  * Interactive trusted tool surface that shows the running turn messages arriving meanwhile.
  *
  * Exports:
- * - `TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES`: Eve built-ins re-emitted so their results can carry
+ * - `TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES`: runtime built-ins re-emitted so their results can carry
  *   waiting messages too; long sandbox work is exactly where a correction arrives.
  * - `withTurnInterjectionSurface`: wraps a complete surface plus those built-ins.
  *
- * The built-ins are Eve's own public definitions, re-emitted unchanged under their framework names,
+ * The built-ins are the runtime's own definitions (ported from Eve), re-emitted unchanged under their framework names,
  * so descriptors, sandbox access, and read-before-write checks stay the framework's.
  */
 import type { ToolDefinition } from "../../runtime/tool.js";

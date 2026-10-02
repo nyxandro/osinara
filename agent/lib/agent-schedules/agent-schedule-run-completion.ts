@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `AgentScheduleRunOutcome`: delivered result, deliberate silence, or failure with its code.
- * - `finishActiveAgentScheduleRun`: marks a running Eve handoff completed or failed and advances recurrence.
+ * - `finishActiveAgentScheduleRun`: marks a running hand-off completed or failed and advances recurrence.
  * - `completeDeliveredAgentScheduleRun`: atomically records Telegram delivery and successful completion.
  *
  * Key construct:
@@ -39,7 +39,7 @@ const UNCONFIRMED_DELIVERY_CODES = new Set([
 
 export type AgentScheduleRunOutcome =
   | { kind: "delivered" }
-  // The model finished the run with Eve's empty-delivery marker, as its scenario allowed.
+  // The model finished the run with the empty-delivery marker, as its scenario allowed.
   | { kind: "silent" }
   | { errorCode: string; kind: "failed" };
 
@@ -206,7 +206,7 @@ export async function completeDeliveredAgentScheduleRun(
   });
   if (completed) return "completed";
 
-  // A concurrent Eve replay may finish after the initial state read; accept its exact receipt.
+  // A concurrent replay of the turn's end may finish after the initial state read; accept its exact receipt.
   const existing = await client.query(
     `SELECT 1
        FROM agent_schedule_runs run

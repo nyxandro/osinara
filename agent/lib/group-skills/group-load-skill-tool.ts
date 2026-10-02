@@ -1,9 +1,9 @@
 /**
- * Live-authorized Eve `load_skill` wrapper for external Telegram groups.
+ * Live-authorized `load_skill` wrapper for external Telegram groups.
  *
  * Exports:
- * - `createExternalGroupLoadSkillTool`: injectable Eve-branded wrapper for authorization tests.
- * - `externalGroupLoadSkillTool`: production `defineTool` wrapper over Eve's native skill loader.
+ * - `createExternalGroupLoadSkillTool`: injectable wrapper for authorization tests.
+ * - `externalGroupLoadSkillTool`: production `defineTool` wrapper over the runtime's native skill loader.
  */
 import { defineTool, type ToolContext, type ToolDefinition } from "../../runtime/tool.js";
 import { loadSkill } from "../../runtime/tools/defaults.js";

@@ -2,7 +2,7 @@
  * Current database authorization for resumed Telegram HITL turns.
  *
  * Exports:
- * - `ApprovalAuthRow`: approval/session fields required to rebuild trusted Eve auth.
+ * - `ApprovalAuthRow`: approval/session fields required to rebuild trusted session auth.
  * - `resolveCurrentApprovalAuth`: revalidates identity, membership, group, and scopes.
  */
 import type { SessionAuthContext } from "../../runtime/context.js";
@@ -93,7 +93,7 @@ export async function resolveCurrentApprovalAuth(client: PoolClient, row: Approv
     }
   }
 
-  // Only freshly read database policy enters the resumed Eve turn.
+  // Only freshly read database policy enters the continuation turn.
   return {
     attributes: {
       applicationSessionId: row.application_session_id,

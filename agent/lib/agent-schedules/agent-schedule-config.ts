@@ -20,8 +20,8 @@ export const AGENT_SCHEDULE_CONVERSATION_MAX_ACTIVE = 3;
 export const AGENT_SCHEDULE_CONVERSATION_MAX_RUNS = 50;
 // A conversation that waits for a person's approval answer is retried this long after it was found busy.
 export const AGENT_SCHEDULE_CONVERSATION_DEFER_MILLISECONDS = 60_000;
-// Eve must start a wake-up turn within this window or refuses it; the chat is idle when it is sent,
-// so a turn that did not start by then never reached Eve. It also bounds recovery after a crash.
+// A wake-up turn must start within this window (its admission deadline); the chat is idle when it
+// is created, so a turn that did not start by then is written off. It also bounds recovery after a crash.
 export const AGENT_SCHEDULE_CONVERSATION_ADMISSION_MILLISECONDS = 5 * 60_000;
 // Slack past the admission deadline before a turn that never started is written off.
 export const AGENT_SCHEDULE_CONVERSATION_ADMISSION_MARGIN_MILLISECONDS = 30_000;

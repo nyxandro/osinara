@@ -24,7 +24,7 @@
  * provider-reported value is interpolated into prompt text: the reaction set of the current chat
  * is announced as its own history message instead.
  */
-import { EVE_EMPTY_DELIVERY_MARKER } from "../eve-empty-delivery.js";
+import { EMPTY_DELIVERY_MARKER } from "../../runtime/turn/step-history.js";
 import { REACTION_SET_OPEN_TAG } from "../telegram-reaction-announcement.js";
 
 export type MemoryEditAction = "delete" | "edit" | "undo";
@@ -230,7 +230,7 @@ export const VOICE_MESSAGE_RULES = `
 
 ### После вызова
 
-Успешно отправленное голосовое и есть твой ответ: после него заверши ход ровно строкой \`${EVE_EMPTY_DELIVERY_MARKER}\` без другого текста и не пересказывай голосовое сообщением. Здесь эта строка означает не молчание, а то, что ответ уже доставлен.
+Успешно отправленное голосовое и есть твой ответ: после него заверши ход ровно строкой \`${EMPTY_DELIVERY_MARKER}\` без другого текста и не пересказывай голосовое сообщением. Здесь эта строка означает не молчание, а то, что ответ уже доставлен.
 
 Если \`send_voice_message\` вернул ошибку, не вызывай его повторно в этом ходе и ответь на ту же просьбу обычным текстом. При \`sideEffectStatus: "unknown"\` голосовое могло уже дойти: первой фразой коротко скажи, что не удалось подтвердить его отправку, поэтому дублируешь ответ текстом. В остальных случаях первой фразой коротко скажи, что голосовое сейчас не получилось, опираясь на \`reason\` ошибки, поэтому отвечаешь текстом.
 `.trim();

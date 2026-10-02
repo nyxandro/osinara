@@ -2,7 +2,7 @@
  * Trusted current-time tool.
  *
  * Export:
- * - Eve `get_current_time` tool for a fresh UTC and optional local civil-time snapshot.
+ * - `get_current_time` tool for a fresh UTC and optional local civil-time snapshot.
  */
 import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";

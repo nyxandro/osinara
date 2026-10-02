@@ -4,7 +4,7 @@
  * Exports:
  * - `TelegramVoiceFile`: trusted subset of Telegram voice metadata.
  * - `createTelegramVoiceTranscriber`: dependency-injected validation/download pipeline.
- * - `transcribeTelegramVoice`: production Eve Telegram and Groq implementation.
+ * - `transcribeTelegramVoice`: production Telegram and Groq implementation.
  */
 import { transcribe } from "ai";
 import { downloadTelegramFile, getTelegramFile } from "../runtime/telegram/api.js";

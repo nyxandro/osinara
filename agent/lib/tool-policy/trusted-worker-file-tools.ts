@@ -2,7 +2,7 @@
  * Execution-time filesystem boundary for the declared universal task worker.
  *
  * Exports:
- * - `createTrustedWorkerFileTools`: injectable same-name Eve wrappers for isolated tests.
+ * - `createTrustedWorkerFileTools`: injectable same-name wrappers for isolated tests.
  * - `TRUSTED_WORKER_FILE_TOOLS`: production wrappers with live personal/family authorization.
  */
 import type { ToolDefinition } from "../../runtime/tool.js";

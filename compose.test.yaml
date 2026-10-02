@@ -29,22 +29,6 @@ services:
       RUN_DATABASE_INTEGRATION_TESTS: "true"
       WORKFLOW_POSTGRES_URL: postgresql://osinara_workflow:osinara-workflow-test-only@postgres:5432/osinara_workflow
 
-  workflow-stress:
-    profiles: ["stress"]
-    build:
-      context: .
-      target: test
-    command: ["sh", "-c", "npm run reset:workflow-stress && npm run migrate && npm run test:workflow-stress"]
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: postgresql://osinara_test:osinara-test-only@postgres:5432/osinara_test
-      WORKFLOW_POSTGRES_MAX_POOL_SIZE: "12"
-      WORKFLOW_POSTGRES_URL: postgresql://osinara_workflow:osinara-workflow-test-only@postgres:5432/osinara_workflow
-      WORKFLOW_POSTGRES_WORKER_CONCURRENCY: "10"
-      WORKFLOW_STRESS_RESET_ALLOWED: "true"
-
   memory-embedding:
     profiles: ["workers"]
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07

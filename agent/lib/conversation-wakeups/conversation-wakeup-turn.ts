@@ -20,7 +20,7 @@ import type { SessionAuthContext } from "../../runtime/context.js";
 import { telegramContinuationToken } from "../../runtime/telegram/api.js";
 
 import { formatCurrentTimeContext } from "../current-time.js";
-import { EVE_EMPTY_DELIVERY_MARKER } from "../eve-empty-delivery.js";
+import { EMPTY_DELIVERY_MARKER } from "../../runtime/turn/step-history.js";
 import { groupCanonicalContinuationToken } from "../sessions/group-canonical-token.js";
 import { localScheduledTime } from "../scheduling/local-time.js";
 import type { PreparedConversationWakeup } from "./conversation-wakeup-preparation.js";
@@ -113,7 +113,7 @@ export function conversationWakeupMessage(wakeup: PreparedConversationWakeup, no
       "</conversation_wakeup>",
       "Выполни заметку с учётом всего разговора.",
       "- Если цель достигнута или проверять больше незачем, сообщи результат и поставь сценарий на паузу через manage_agent_schedule с action pause и этим schedule_id.",
-      `- Если сообщить нечего, а проверки ещё нужны, заверши ход ровно строкой ${EVE_EMPTY_DELIVERY_MARKER} без другого текста: любая фраза вроде «пока без изменений» уйдёт в чат.`,
+      `- Если сообщить нечего, а проверки ещё нужны, заверши ход ровно строкой ${EMPTY_DELIVERY_MARKER} без другого текста: любая фраза вроде «пока без изменений» уйдёт в чат.`,
       "- Если execution_number равен max_runs, это последний запуск: обязательно сообщи итог — что так и не произошло и стоит ли продолжать.",
       "- Не ставь реакции и не сохраняй факты через remember: у пробуждения нет сообщения человека.",
     ].join("\n"),

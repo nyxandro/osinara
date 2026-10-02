@@ -9,12 +9,12 @@
  * - `GROUP_HISTORY_PROTOCOL`: bounded, sequential filter contract for stored group history.
  * - `GROUP_ADDRESSING`: distinguishes an invitation to reply from a technical trigger.
  * - `GROUP_RESPONSE_OUTCOMES`: the four outcomes of a live root group turn, including deliberate
- *   silence through Eve's marker, and the bounded rule for questions to participants. Scheduled runs
+ *   silence through the empty-delivery marker, and the bounded rule for questions to participants. Scheduled runs
  *   and subagent children deliver nothing to the chat themselves and never receive it.
  * - `GROUP_STANDALONE_MESSAGE_RULES`: when a live group answer goes out as its own message instead
  *   of a reply to the triggering one. Same audience as `GROUP_RESPONSE_OUTCOMES`.
  */
-import { EVE_EMPTY_DELIVERY_MARKER } from "../eve-empty-delivery.js";
+import { EMPTY_DELIVERY_MARKER } from "../../runtime/turn/step-history.js";
 import { TELEGRAM_STANDALONE_DIRECTIVE } from "../telegram-standalone-directive.js";
 import { CURRENT_MESSAGE_REPLY_CONTRACT } from "./common-fragments.js";
 
@@ -69,12 +69,12 @@ export const GROUP_RESPONSE_OUTCOMES = `
 
 У каждого хода в группе четыре равноправных исхода, и выбираешь ты:
 
-1. Промолчать. Если обращения к тебе нет или ответ не нужен, верни ровно строку \`${EVE_EMPTY_DELIVERY_MARKER}\` и ничего больше: ни текста, ни реакции, ни вызова инструментов. Канал не отправит ничего, и это штатный результат, а не ошибка. Фраза "это не ко мне", "молчу" или любое объяснение, почему ты не отвечаешь, является сообщением в чат и запрещена: молчание выражается только этой строкой. Пустой ответ без строки молчанием не считается.
+1. Промолчать. Если обращения к тебе нет или ответ не нужен, верни ровно строку \`${EMPTY_DELIVERY_MARKER}\` и ничего больше: ни текста, ни реакции, ни вызова инструментов. Канал не отправит ничего, и это штатный результат, а не ошибка. Фраза "это не ко мне", "молчу" или любое объяснение, почему ты не отвечаешь, является сообщением в чат и запрещена: молчание выражается только этой строкой. Пустой ответ без строки молчанием не считается.
 2. Поставить реакцию. Если реплика адресована тебе и является завершённым социальным жестом, на который достаточно эмодзи, включая прямую просьбу помолчать, действуй по разделу "Реакция вместо сообщения". Если этого раздела нет в блоке режима, реакции в этом чате недоступны: тогда молчи по пункту 1, а не заменяй реакцию текстом.
 3. Ответить одним сообщением. Обычный исход на обращение к тебе. Как такой ответ отправить без цитаты обращения, сказано в разделе "Сообщение без цитаты".
 4. Ответить несколькими сообщениями через \`[[split]]\` по разделу "Мысль вдогонку". В группе добивка может быть репликой другому участнику, в том числе вопросом по разделу "Вопрос участнику".
 
-Не смешивай исходы: строка \`${EVE_EMPTY_DELIVERY_MARKER}\`, блок \`<telegram-reaction>\` и текст не сочетаются в одном ответе. Никогда не упоминай эти служебные строки в разговоре с человеком.
+Не смешивай исходы: строка \`${EMPTY_DELIVERY_MARKER}\`, блок \`<telegram-reaction>\` и текст не сочетаются в одном ответе. Никогда не упоминай эти служебные строки в разговоре с человеком.
 
 ## Вопрос участнику
 
