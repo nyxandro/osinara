@@ -91,7 +91,7 @@ describe("unavailable subscription image generation", () => {
 
     expect(buildModeToolSurface({ environment: "private" })).not.toHaveProperty("generate_image");
     expect(external).not.toHaveProperty("generate_image");
-    expect(external.load_skill?.description).toMatch(/недоступен/iu);
+    expect(external).not.toHaveProperty("load_skill");
     expect(instructions).not.toContain("generate_image");
     expect(instructions).not.toContain("skill=imagegen");
   });

@@ -78,9 +78,9 @@ describe("image generation tool surface", () => {
       capabilities: new Set(["generate_image"]),
       environment: "external",
       skills: { imagegen: {} as never },
-    }).load_skill?.description).toMatch(/недоступен/iu);
+    })).not.toHaveProperty("load_skill");
     expect(deniedExternal).not.toHaveProperty("generate_image");
-    expect(deniedExternal.load_skill?.description).toMatch(/недоступен/iu);
+    expect(deniedExternal).not.toHaveProperty("load_skill");
   });
 
   it("denies an external call after live capability revocation", async () => {
