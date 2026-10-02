@@ -163,13 +163,16 @@ async function releaseRunner(turnId: string) {
     await releaseRunner(turn.id);
 
     const second = scriptedModel(reply("готово"));
+    const stepStarted = vi.fn(async () => {});
     const outcome = await runTurn(testRuntime({
-      agent: testAgent({ note: noteTool(note) }), callModel: second.callModel, observer: recordingObserver().observer, runnerId: "runner-b",
+      agent: testAgent({ note: noteTool(note) }, { stepStarted }), callModel: second.callModel, observer: recordingObserver().observer, runnerId: "runner-b",
     }), turn.id, RUN);
 
     expect(outcome).toEqual({ status: "completed", text: "готово" });
     expect(note).toHaveBeenCalledTimes(1);
     expect(second.requests).toHaveLength(1);
+    // Only the new model call of the recovered turn starts a step; the recorded one is not redone.
+    expect(stepStarted).toHaveBeenCalledTimes(1);
     expect(second.requests[0]!.messages).toHaveLength(3);
   });
 

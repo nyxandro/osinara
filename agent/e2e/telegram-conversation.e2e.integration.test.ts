@@ -105,13 +105,21 @@ async function send(turn: Turn, text?: string): Promise<{ readonly marker: strin
          LEFT JOIN telegram_groups g ON g.id = s.group_id WHERE s.retired_at IS NULL AND s.kind = 'canonical' ORDER BY chat`,
     )).rows.map((row) => row.chat);
     expect(sessions).toEqual([String(CHATS.external), String(CHATS.family), "private"].sort());
-    const mounts = (await database().query<{ access: string; points: string }>(
-      `SELECT DISTINCT access, (SELECT string_agg(m->>'mountPoint', ',' ORDER BY m->>'mountPoint') FROM jsonb_array_elements(mounts) m) AS points
-         FROM ${E2E_TABLES.sandboxSessions} ORDER BY points`,
+    // Each chat's sandbox mounts exactly what that chat may reach; the external group runs its
+    // granted Bash in a group-only sandbox.
+    const mounts = (await database().query<{ access: string; chat: string; points: string }>(
+      `SELECT DISTINCT coalesce(g.telegram_chat_id, 'private') AS chat, e.access,
+              (SELECT string_agg(m->>'mountPoint', ',' ORDER BY m->>'mountPoint') FROM jsonb_array_elements(e.mounts) m) AS points
+         FROM ${E2E_TABLES.sandboxSessions} e
+         JOIN conversation_sessions s ON s.thread_id::text = e.sandbox_session_id
+         LEFT JOIN telegram_groups g ON g.id = s.group_id
+        ORDER BY chat`,
     )).rows;
-    expect(mounts).toEqual(expect.arrayContaining([
-      { access: "trusted", points: "family" }, { access: "trusted", points: "family,personal" }, expect.objectContaining({ points: "group" }),
-    ]));
+    expect(mounts).toEqual([
+      { access: "group-tools", chat: String(CHATS.external), points: "group" },
+      { access: "trusted", chat: String(CHATS.family), points: "family" },
+      { access: "trusted", chat: "private", points: "family,personal" },
+    ]);
   }, 240_000);
 
   it("runs a repeated webhook of the same update once", async () => {
@@ -172,6 +180,7 @@ async function send(turn: Turn, text?: string): Promise<{ readonly marker: strin
   it("stays silent in a group when its name was only mentioned, and keeps why it woke up", async () => {
     const silent = markerOf("x");
     const id = UPDATE_BASE + silent.ordinal;
+    const before = (await database().query<{ last: number }>(`SELECT coalesce(max(id), 0) AS last FROM ${E2E_TABLES.telegramCalls}`)).rows[0]!.last;
     await postUpdate(agent, { message: message({
       chatId: CHATS.family, messageId: silent.ordinal, text: `Осинара вчера уже разбирала ${silent.marker}, не трогаем`,
     }), update_id: id });
@@ -182,6 +191,10 @@ async function send(turn: Turn, text?: string): Promise<{ readonly marker: strin
       "SELECT status, final_text FROM agent_turns WHERE id = $1", [row.dispatch_turn_id],
     )).rows).toEqual([{ final_text: null, status: "completed" }]);
     expect(await modelCalls(silent.marker)).toHaveLength(1);
-    expect((await deliveredTexts()).filter((item) => item.text.includes(silent.marker))).toEqual([]);
+    // Nothing reached the chat: no message, no reaction (a typing status may precede the model).
+    expect((await database().query<{ method: string }>(
+      `SELECT method FROM ${E2E_TABLES.telegramCalls} WHERE id > $1 AND body->>'chat_id' = $2 AND method <> 'sendChatAction'`,
+      [before, String(CHATS.family)],
+    )).rows).toEqual([]);
   }, 60_000);
 });

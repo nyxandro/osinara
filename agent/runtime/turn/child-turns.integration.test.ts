@@ -164,7 +164,8 @@ async function childTurns() {
 
   it("shows a child's approval to the person and continues the child, then the parent", async () => {
     const sessionId = await newTestSession();
-    const execute = vi.fn(async () => "отправлено");
+    const callers: unknown[] = [];
+    const execute = vi.fn(async (_input: unknown, ctx: { session: { parent?: unknown } }) => { callers.push(ctx.session.parent); return "отправлено"; });
     const send = defineTool({ approval: () => "user-approval" as const, description: "Отправить", execute, inputSchema: z.object({ to: z.string() }) });
     const model = routedModel((call, task) => {
       if (task !== null) return hasResult(call) ? reply("письмо ушло") : toolCalls([{ id: "call-s", input: { to: "a@b" }, name: "send" }]);
@@ -189,6 +190,8 @@ async function childTurns() {
 
     expect(final).toEqual({ status: "completed", text: "Отправил." });
     expect(execute).toHaveBeenCalledTimes(1);
+    // The approved call runs in the child's continuation, which is still the caller's subagent.
+    expect(callers).toEqual([expect.objectContaining({ callId: "call-a", sessionId, turn: expect.objectContaining({ id: turn.id }) })]);
     // The child continues as a child: with its own channel, not the parent's.
     const childContinuations = await database().query<{ channel: unknown }>(
       "SELECT channel FROM agent_turns WHERE resumes_turn_id IS NOT NULL AND session_id <> $1", [sessionId]);

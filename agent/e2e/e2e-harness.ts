@@ -8,7 +8,7 @@
  *   call them.
  * - `waitForIngress`, `waitUntil`: polling the database until the application got there.
  * - `seedFamily`, `CHATS`: the family, its owner and the three kinds of chat the runs talk in.
- * - `deliveredTexts`, `modelCalls`: what Telegram and the model saw.
+ * - `deliveredTexts`, `modelCalls`: what Telegram and the model saw; `diagnose`: the recent journal.
  * - `E2E_APPLICATION_NAME`: the PostgreSQL `application_name` of the application's connections.
  *
  * Test-only.
@@ -135,6 +135,18 @@ export async function waitForIngress(updateId: number, status: "completed" | "fa
     }
     return row?.status === status ? row : null;
   }, `update ${updateId} ${status}`);
+}
+
+/** What the application did recently, for a failure message: turns, tool calls, Telegram, its log. */
+export async function diagnose(agent: RunningAgent): Promise<string> {
+  const turns = (await database().query(
+    "SELECT id, status, error_code, error_message, resumes_turn_id FROM agent_turns ORDER BY created_at DESC LIMIT 4",
+  )).rows;
+  const calls = (await database().query(
+    "SELECT turn_id, tool_name, state, left(output::text, 300) AS output FROM agent_tool_calls ORDER BY created_at DESC LIMIT 4",
+  )).rows;
+  const telegram = (await database().query(`SELECT method, left(body::text, 300) AS body FROM ${E2E_TABLES.telegramCalls} ORDER BY id DESC LIMIT 4`)).rows;
+  return [JSON.stringify(turns), JSON.stringify(calls), JSON.stringify(telegram), agent.output().slice(-4000)].join("\n");
 }
 
 export async function seedFamily(): Promise<{ readonly familyId: string; readonly externalGroupId: string; readonly ownerId: string }> {

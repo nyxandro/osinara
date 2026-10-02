@@ -10,6 +10,7 @@
  * - `recordStep`, `loadStep`, `markStepTextEmitted`, `completeStep`: one model step and its tool calls.
  * - `updateToolCall`, `recordInputResponse`: a tool call's state, result and a person's answer.
  * - `parkToolCall`, `findChildTurn`, `latestSessionTurn`: an `agent` call waiting on its child turn.
+ * - `findTurnCaller`: the `agent` call a child turn — or a continuation of one — works for.
  * - `findInputRequests`: requests the session's calls raised, by id.
  *
  * Writers take a client inside the caller's transaction: a step's model response, its tool calls
@@ -387,6 +388,33 @@ export async function parkToolCall(client: JournalClient, input: {
   if (updated.rowCount !== 1) {
     throw new AppError("AGENT_TOOL_CALL_NOT_FOUND", "Вызов инструмента не найден", { details: { callId: input.callId, turnId: input.turnId } });
   }
+}
+
+// A continuation chain grows by one turn per answered request; far beyond any real conversation.
+const MAX_CONTINUATION_DEPTH = 64;
+
+/**
+ * The call and the turn of the caller, for a child turn or any continuation of one: only the
+ * child's first turn records its parent (one child per call), its continuations resume it.
+ */
+export async function findTurnCaller(
+  client: JournalClient,
+  turnId: string,
+): Promise<{ readonly callId: string; readonly turn: TurnRecord } | null> {
+  const row = (await client.query<TurnRow & { caller_call_id: string }>(
+    `WITH RECURSIVE chain AS (
+       SELECT id, parent_turn_id, parent_call_id, resumes_turn_id, 0 AS depth FROM agent_turns WHERE id = $1
+       UNION ALL
+       SELECT turn.id, turn.parent_turn_id, turn.parent_call_id, turn.resumes_turn_id, chain.depth + 1
+         FROM agent_turns turn JOIN chain ON turn.id = chain.resumes_turn_id
+        WHERE chain.parent_turn_id IS NULL AND chain.depth < $2
+     )
+     SELECT ${TURN_COLUMNS.split(",").map((column) => `caller.${column.trim()}`).join(", ")}, chain.parent_call_id AS caller_call_id
+       FROM chain JOIN agent_turns caller ON caller.id = chain.parent_turn_id
+      LIMIT 1`,
+    [turnId, MAX_CONTINUATION_DEPTH],
+  )).rows[0];
+  return row ? { callId: row.caller_call_id, turn: toTurn(row) } : null;
 }
 
 /** The first turn of the child session an `agent` call started, if it did. */

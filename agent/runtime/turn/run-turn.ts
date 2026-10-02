@@ -43,7 +43,7 @@ import type { ToolContext, ToolDefinition } from "../tool.js";
 import { finalOutputTool, FINAL_OUTPUT_TOOL_NAME } from "../tools/delegate.js";
 import { runChildTurn } from "./child-turns.js";
 import {
-  claimTurn, completeStep, finishTurn, inJournalTransaction, loadStep, loadTurn, markHistoryStarted,
+  claimTurn, completeStep, findTurnCaller, finishTurn, inJournalTransaction, loadStep, loadTurn, markHistoryStarted,
   markStepTextEmitted, parkToolCall, parkTurn, recordStep, savePreparedTurn, sessionAwaitsApproval, updateToolCall,
   type JournalDatabase,
 } from "./journal-repository.js";
@@ -118,13 +118,14 @@ function systemPrompt(agent: RuntimeAgent, prepared: PreparedTurn): string {
   });
 }
 
-/** A delegated child's caller, as its tools and step hook see it; one level deep. */
+/** A delegated child's caller, as its tools and step hook see it, continuations included; one level deep. */
 async function sessionParent(runtime: TurnRuntime, turn: TurnRecord): Promise<SessionParent | undefined> {
-  if (turn.parentTurnId === null || turn.parentCallId === null) return undefined;
-  const parent = await loadTurn(runtime.database, turn.parentTurnId);
+  if (turn.parentTurnId === null && turn.resumesTurnId === null) return undefined;
+  const caller = await findTurnCaller(runtime.database, turn.id);
+  if (caller === null) return undefined;
   return {
-    callId: turn.parentCallId, rootSessionId: parent.sessionId, sessionId: parent.sessionId,
-    turn: { id: parent.id, sequence: parent.sequence },
+    callId: caller.callId, rootSessionId: caller.turn.sessionId, sessionId: caller.turn.sessionId,
+    turn: { id: caller.turn.id, sequence: caller.turn.sequence },
   };
 }
 

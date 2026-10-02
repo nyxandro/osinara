@@ -6,15 +6,16 @@
  *   journal; the recorded model step is not requested again, the interrupted command is not run
  *   again (the model is told its outcome is unknown), and the reply reaches Telegram once.
  * - An approval card survives a restart; the owner's button, pressed twice, executes the action once.
- * - The application's database connections are cut in the middle of a turn: the turn still ends
- *   with one reply and nothing runs twice.
+ * - The database drops all of the application's connections while a turn's command runs (they are
+ *   idle then; a cut inside a journal transaction is not reproduced here): the turn still ends with
+ *   one reply and nothing runs twice.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { database } from "../lib/database.js";
 import { createE2eTables, dropE2eTables, E2E_TABLES } from "./e2e-tables.js";
 import {
-  CHATS, deliveredTexts, drain, E2E_APPLICATION_NAME, killAgent, message, modelCalls, postUpdate, seedFamily, startAgent,
+  CHATS, deliveredTexts, diagnose, drain, E2E_APPLICATION_NAME, killAgent, message, modelCalls, postUpdate, seedFamily, startAgent,
   stopAgent, waitForIngress, waitUntil, type RunningAgent,
 } from "./e2e-harness.js";
 
@@ -71,6 +72,11 @@ async function replies(marker: string) {
 
     expect(await processes(marker)).toEqual([{ finished: false }]);
     expect((await modelCalls(marker)).map((call) => call.tool_results)).toEqual([0, 1]);
+    const bound = await waitForIngress(updateId);
+    // The interrupted command is recorded as of unknown outcome, and that is what the model read.
+    expect((await database().query<{ output: { value: string }; state: string }>(
+      "SELECT state, output FROM agent_tool_calls WHERE turn_id = $1 AND tool_name = 'bash'", [bound.dispatch_turn_id],
+    )).rows).toEqual([{ output: expect.objectContaining({ value: expect.stringContaining("AGENT_TOOL_OUTCOME_UNKNOWN") }), state: "unknown" }]);
     expect(await replies(marker)).toHaveLength(1);
   }, LEASE_EXPIRY_MILLISECONDS + 120_000);
 
@@ -108,7 +114,7 @@ async function replies(marker: string) {
     expect(await replies(marker)).toHaveLength(1);
   }, 120_000);
 
-  it("ends a turn with one reply when its database connections are cut in the middle", async () => {
+  it("ends a turn with one reply when the database drops its connections while a command runs", async () => {
     const marker = "e2e-3-h";
     const updateId = await send(3, CHATS.family, `@osinara_bot ${marker}`);
     await waitUntil(async () => (await processes(marker)).length === 1, "the command started");
@@ -120,7 +126,8 @@ async function replies(marker: string) {
     await database().query(`INSERT INTO ${E2E_TABLES.releases} (marker) VALUES ($1)`, [marker]);
 
     await waitForIngress(updateId);
-    await waitUntil(async () => (await replies(marker)).length > 0, "the turn answers");
+    await waitUntil(async () => (await replies(marker)).length > 0, "the turn answers")
+      .catch(async (error: unknown) => { throw new Error(`${String(error)}\n${await diagnose(agent)}`); });
     expect(await processes(marker)).toEqual([{ finished: true }]);
     expect(await replies(marker)).toHaveLength(1);
   }, 120_000);
