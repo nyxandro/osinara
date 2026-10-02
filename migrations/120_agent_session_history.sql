@@ -17,6 +17,8 @@
 --   Сжатие истории их сбрасывает: прочитанное ушло из контекста.
 -- - sandbox_state — с каким набором папок и доступом сессия впервые открыла sandbox. Набор папок
 --   сессии не меняется, повторное открытие сверяется с ним.
+-- - initiator_auth — права того, чья доставка открыла сессию; каждый ход видит их как
+--   `auth.initiator` (на них опираются сценарии по расписанию и политика внешних групп).
 -- - channel_state — состояние канала разговора: чат, тема, кто начал ход и кнопки подтверждений,
 --   которые ещё висят в чате. Счётчик номеров кнопок продолжается после переезда из Eve, иначе
 --   старая кнопка в чате совпала бы с новой.
@@ -36,6 +38,7 @@ CREATE TABLE agent_session_state (
   todo json,
   read_file_state jsonb NOT NULL DEFAULT '{}'::jsonb,
   sandbox_state json,
+  initiator_auth json,
   channel_state json,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),

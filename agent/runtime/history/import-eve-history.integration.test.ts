@@ -65,6 +65,7 @@ function snapshot(sessionId: string, history: unknown[]) {
     sandboxState: { initialized: true, session: { backendName: "osinara-scoped-runner-v3", metadata: SANDBOX_METADATA, sessionKey: "k" } },
   }, {
     "eve.channel": { kind: "telegram", state: { chatId: "912", chatType: "private", conversationId: null, messageThreadId: null, nextHitlCallbackId: 8 } },
+    "eve.initiatorAuth": { attributes: { role: "owner" }, authenticator: "telegram", principalId: "telegram:912", principalType: "user" },
     "eve.dynamicSkillManifest": { scoped: [{ name: "pohuy", description: "Режим мата" }] },
   }), "zstd");
 }
@@ -129,8 +130,9 @@ async function inTransaction<T>(work: (client: PoolClient) => Promise<T>) {
     });
     // The session keeps its sandbox (container identity and folders), its channel state with the
     // button counter, and its address: the next message of the chat reaches the same session.
-    const state = (await database().query("SELECT sandbox_state, channel_state FROM agent_session_state WHERE session_id = $1", [SESSION])).rows[0];
+    const state = (await database().query("SELECT sandbox_state, channel_state, initiator_auth FROM agent_session_state WHERE session_id = $1", [SESSION])).rows[0];
     expect(state.sandbox_state).toEqual(SANDBOX_METADATA);
+    expect(state.initiator_auth).toMatchObject({ principalId: "telegram:912" });
     expect(state.channel_state).toMatchObject({ chatId: "912", nextHitlCallbackId: 8 });
     const address = (await database().query(
       `SELECT c.channel_kind, c.session_id FROM agent_continuations c JOIN conversation_sessions s ON s.continuation_token = c.token

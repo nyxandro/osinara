@@ -23,6 +23,7 @@ import { TELEGRAM_CHANNEL_KIND } from "../telegram/channel-types.js";
 import { createSessionHistory, type HistoryClient, type NewSessionHistory } from "./history-repository.js";
 import { decodeEveTurnStepOutput, type EveSessionSnapshot } from "./eve-snapshot.js";
 import { AppError } from "../../lib/app-error.js";
+import type { SessionAuthContext } from "../context.js";
 
 const TURN_WORKFLOW_NAME = "workflow//eve//turnWorkflow";
 const TURN_STEP_NAME = "step//eve@0.40.0//turnStep";
@@ -87,7 +88,7 @@ function newImportedHistory(
   if (snapshot === null) {
     return {
       ...identity, announcedSkills: null, channelState: null, compaction: { inputTokens: null, promptMessageCount: null },
-      history: [], sandbox: null, todo: null,
+      history: [], initiatorAuth: null, sandbox: null, todo: null,
     };
   }
   return {
@@ -101,6 +102,7 @@ function newImportedHistory(
         promptMessageCount: counter(snapshot.compaction.lastKnownPromptMessageCount),
       },
     history: snapshot.history,
+    initiatorAuth: snapshot.initiatorAuth as unknown as SessionAuthContext | null,
     sandbox: snapshot.sandbox,
     todo: snapshot.todo,
   };

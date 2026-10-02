@@ -60,6 +60,7 @@ async function startChild(runtime: TurnRuntime, input: {
       channelState: null,
       compaction: { inputTokens: null, promptMessageCount: null },
       history: [],
+      initiatorAuth: input.parent.auth.initiator,
       parentSessionId: input.parent.sessionId,
       sandbox: null,
       sessionId,

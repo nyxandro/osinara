@@ -33,6 +33,8 @@ export interface EveSessionSnapshot {
   readonly history: ModelMessage[];
   /** The channel state Eve kept (chat, topic, pending buttons and their counter). */
   readonly channelState: Record<string, unknown> | null;
+  /** Who opened the session, as Eve kept it (`eve.initiatorAuth`). */
+  readonly initiatorAuth: Record<string, unknown> | null;
   /** The sandbox runner metadata Eve kept for the session; the runner backend validates it on use. */
   readonly sandbox: Record<string, unknown> | null;
   readonly sessionId: string;
@@ -121,6 +123,14 @@ function readAnnouncedSkills(manifest: unknown): readonly AnnouncedSkill[] | nul
   return skills.map((skill) => ({ name: skill.name as string, description: skill.description as string }));
 }
 
+function readInitiatorAuth(auth: unknown): Record<string, unknown> | null {
+  if (auth === undefined || auth === null) return null;
+  if (!isObject(auth) || typeof auth.principalId !== "string" || typeof auth.authenticator !== "string" || !isObject(auth.attributes)) {
+    throw importFailure("инициатор сессии имеет неверный вид");
+  }
+  return auth;
+}
+
 // Every conversation session Osinara ran on Eve was a Telegram one.
 function readChannelState(channel: unknown): Record<string, unknown> | null {
   if (channel === undefined) return null;
@@ -164,6 +174,7 @@ export function decodeEveTurnStepOutput(stored: Uint8Array): EveSessionSnapshot 
   return {
     announcedSkills: readAnnouncedSkills(context["eve.dynamicSkillManifest"]),
     channelState: readChannelState(context["eve.channel"]),
+    initiatorAuth: readInitiatorAuth(context["eve.initiatorAuth"]),
     compaction: readCompaction(session.compaction),
     history: requireHistory(session.history),
     sandbox: readSandbox(session.sandboxState),

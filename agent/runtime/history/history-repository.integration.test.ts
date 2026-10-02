@@ -10,7 +10,7 @@ import { modelHistoryArbitrary } from "./model-message-arbitraries.js";
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) throw new Error("AGENT_TEST_DATABASE_UNSAFE");
 
-const NO_STATE = { announcedSkills: null, channelState: null, compaction: { inputTokens: null, promptMessageCount: null }, sandbox: null, todo: null };
+const NO_STATE = { announcedSkills: null, channelState: null, initiatorAuth: null, compaction: { inputTokens: null, promptMessageCount: null }, sandbox: null, todo: null };
 
 async function newSession(sessionId: string, history: readonly ModelMessage[] = []) {
   const { applicationSessionId } = await createApplicationSession(sessionId);
@@ -46,6 +46,7 @@ async function newSession(sessionId: string, history: readonly ModelMessage[] = 
       applicationSessionId,
       channelState: null,
       compaction: { inputTokens: 153733, promptMessageCount: 424 },
+      initiatorAuth: null,
       history: [],
       parentSessionId: null,
       sandbox: null,

@@ -7,6 +7,9 @@
  * - `respondToInput`: records answers on the parked turn's calls. Once they release the step, the
  *   parked turn ends and a continuation turn is created; the caller runs it with `runTurn`. An
  *   answer to a request a child turn raised goes to the child's session first.
+ * - `startTurnWithClient`, `respondWithClient`: the same inside a caller's transaction, so the
+ *   caller's own records (channel state, ingress binding) commit with the turn.
+ * - `waitingRequests`: what the session's parked turn waits on.
  *
  * Derived from eve 0.40.0 `harness/input-requests.ts` (`resolvePendingInput`),
  * `harness/hitl/approval-input-requests.ts`, `harness/hitl/question-input-requests.ts` and
@@ -35,29 +38,42 @@ async function parkedCalls(client: JournalClient, turn: TurnRecord): Promise<Too
   return awaiting;
 }
 
-export async function startTurn(database: JournalDatabase, input: {
+interface StartInput {
   readonly auth: SessionAuth;
   readonly channel: TurnChannel;
   readonly input: TurnStartInput;
   readonly kind: TurnKind;
   readonly parent: { readonly callId: string; readonly turnId: string } | null;
   readonly sessionId: string;
-}): Promise<TurnRecord> {
-  return await inJournalTransaction(database, async (client) => {
-    const waiting = await findWaitingTurn(client, input.sessionId);
-    let resumesTurnId: string | null = null;
-    if (waiting !== null && input.input.message !== undefined) {
-      const awaiting = await parkedCalls(client, waiting);
-      if (awaiting.every((call) => call.inputRequest?.kind === "question")) {
-        for (const call of awaiting) {
-          await updateToolCall(client, { callId: call.callId, output: questionOutput(undefined), state: "completed", turnId: waiting.id });
-        }
-        await finishTurn(client, waiting.id, { finalText: null, status: "completed" });
-        resumesTurnId = waiting.id;
+}
+
+export async function startTurnWithClient(client: JournalClient, input: StartInput): Promise<TurnRecord> {
+  const waiting = await findWaitingTurn(client, input.sessionId);
+  let resumesTurnId: string | null = null;
+  if (waiting !== null && input.input.message !== undefined) {
+    const awaiting = await parkedCalls(client, waiting);
+    if (awaiting.every((call) => call.inputRequest?.kind === "question")) {
+      for (const call of awaiting) {
+        await updateToolCall(client, { callId: call.callId, output: questionOutput(undefined), state: "completed", turnId: waiting.id });
       }
+      await finishTurn(client, waiting.id, { finalText: null, status: "completed" });
+      resumesTurnId = waiting.id;
     }
-    return await createTurn(client, { ...input, id: newTurnId(), resumesTurnId });
-  });
+  }
+  return await createTurn(client, { ...input, id: newTurnId(), resumesTurnId });
+}
+
+export async function startTurn(database: JournalDatabase, input: StartInput): Promise<TurnRecord> {
+  return await inJournalTransaction(database, async (client) => await startTurnWithClient(client, input));
+}
+
+/** The requests a parked turn of the session waits on, its own and those its children raised. */
+export async function waitingRequests(client: JournalClient, sessionId: string): Promise<InputRequest[]> {
+  const waiting = await findWaitingTurn(client, sessionId);
+  if (waiting === null) return [];
+  return (await parkedCalls(client, waiting)).flatMap((call) => call.inputRequest?.kind === "subagent"
+    ? [...(call.inputRequest as SubagentInputRequest).requests]
+    : [call.inputRequest as InputRequest]);
 }
 
 export type InputResponseOutcome =
@@ -87,7 +103,7 @@ interface RespondInput {
 
 // The step of a parked turn is released once its own requests are answered (approvals all, a
 // question-only step on its first answer) and every child it waits on continued.
-async function respondWithClient(client: JournalClient, input: RespondInput): Promise<InputResponseOutcome> {
+export async function respondWithClient(client: JournalClient, input: RespondInput): Promise<InputResponseOutcome> {
   const waiting = await findWaitingTurn(client, input.sessionId);
   if (waiting === null) return { stale: input.responses, status: "stale" };
   const awaiting = await parkedCalls(client, waiting);

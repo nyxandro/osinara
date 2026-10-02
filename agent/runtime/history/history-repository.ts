@@ -9,6 +9,7 @@
  * - `replaceSessionHistory`: writes a compacted history as a new generation; old rows stay as they were.
  * - `saveAnnouncedSkills`: the skill list the session's sandbox now holds.
  * - `loadApplicationSessionId`: the application session a runtime session belongs to.
+ * - `loadInitiatorAuth`: who opened the session.
  *
  * Writers take a client inside the caller's transaction, so a history change commits together
  * with the journal record that caused it. Appends lock the session row; two writers of one
@@ -18,6 +19,7 @@ import type { ModelMessage } from "ai";
 import type { PoolClient } from "pg";
 
 import { AppError } from "../../lib/app-error.js";
+import type { SessionAuthContext } from "../context.js";
 import type { AnnouncedSkill } from "../skills/definition.js";
 import { describeHistoryProblem } from "./model-message-shape.js";
 
@@ -33,6 +35,8 @@ export interface NewSessionHistory {
   readonly applicationSessionId: string;
   /** The channel's JSON state; carried over from Eve, or set by the channel on a new session. */
   readonly channelState: Record<string, unknown> | null;
+  /** Who opened the session; every turn sees it as `auth.initiator`. */
+  readonly initiatorAuth: SessionAuthContext | null;
   readonly compaction: CompactionCounters;
   readonly history: readonly ModelMessage[];
   readonly parentSessionId: string | null;
@@ -78,8 +82,8 @@ export async function createSessionHistory(client: HistoryClient, input: NewSess
   const created = await client.query(
     `INSERT INTO agent_session_state
        (session_id, application_session_id, parent_session_id, source, compaction_input_tokens,
-        compaction_prompt_message_count, announced_skills, todo, sandbox_state, channel_state)
-     VALUES ($1, $2, $3, $4, $5, $6, $7::json, $8::json, $9::json, $10::json)
+        compaction_prompt_message_count, announced_skills, todo, sandbox_state, channel_state, initiator_auth)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::json, $8::json, $9::json, $10::json, $11::json)
      ON CONFLICT (session_id) DO NOTHING
      RETURNING session_id`,
     [
@@ -89,6 +93,7 @@ export async function createSessionHistory(client: HistoryClient, input: NewSess
       input.todo === null ? null : JSON.stringify(input.todo),
       input.sandbox === null ? null : JSON.stringify(input.sandbox),
       input.channelState === null ? null : JSON.stringify(input.channelState),
+      input.initiatorAuth === null ? null : JSON.stringify(input.initiatorAuth),
     ],
   );
   if (created.rowCount !== 1) return false;
@@ -200,4 +205,12 @@ export async function loadApplicationSessionId(client: HistoryClient, sessionId:
   )).rows[0];
   if (!row) throw new AppError("AGENT_SESSION_HISTORY_MISSING", "История разговора не найдена", { details: { sessionId } });
   return row.application_session_id;
+}
+
+export async function loadInitiatorAuth(client: HistoryClient, sessionId: string): Promise<SessionAuthContext | null> {
+  const row = (await client.query<{ initiator_auth: SessionAuthContext | null }>(
+    "SELECT initiator_auth FROM agent_session_state WHERE session_id = $1", [sessionId],
+  )).rows[0];
+  if (!row) throw new AppError("AGENT_SESSION_HISTORY_MISSING", "История разговора не найдена", { details: { sessionId } });
+  return row.initiator_auth;
 }

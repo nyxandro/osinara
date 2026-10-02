@@ -34,9 +34,15 @@ export async function bindContinuation(client: ContinuationClient, input: { chan
   return row.session_id;
 }
 
-export async function loadChannelState<TState>(client: ContinuationClient, sessionId: string): Promise<TState | null> {
+/** With `forUpdate`, the session row stays locked until the caller's transaction ends. */
+export async function loadChannelState<TState>(
+  client: ContinuationClient,
+  sessionId: string,
+  options: { readonly forUpdate?: boolean } = {},
+): Promise<TState | null> {
   const row = (await client.query<{ channel_state: TState | null }>(
-    "SELECT channel_state FROM agent_session_state WHERE session_id = $1", [sessionId],
+    `SELECT channel_state FROM agent_session_state WHERE session_id = $1${options.forUpdate === true ? " FOR UPDATE" : ""}`,
+    [sessionId],
   )).rows[0];
   if (!row) throw new AppError("AGENT_SESSION_HISTORY_MISSING", "История разговора не найдена", { details: { sessionId } });
   return row.channel_state;

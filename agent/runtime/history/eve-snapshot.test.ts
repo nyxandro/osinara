@@ -17,6 +17,7 @@ const SANDBOX_METADATA = {
   sandboxSessionId: "thread_0123456789abcdef",
   version: 3,
 };
+const INITIATOR = { attributes: { role: "owner" }, authenticator: "telegram", principalId: "telegram:912", principalType: "user" };
 const CHANNEL_STATE = {
   botUsername: "osinara_bot", chatId: "912", chatType: "private", conversationId: null,
   hitlCallbacks: { "eve:7": { optionId: "approve", requestId: "aitxt-x" } }, messageThreadId: null,
@@ -48,6 +49,7 @@ describe("Eve turn step snapshot decoding", () => {
       state: { "eve.todo": { items: [{ content: "проверить", status: "pending" }] } },
     }, {
       "eve.channel": { kind: "telegram", state: CHANNEL_STATE },
+      "eve.initiatorAuth": INITIATOR,
       "eve.dynamicSkillManifest": { scoped: [{ name: "pohuy", description: "Режим мата" }] },
     }), codec);
 
@@ -56,6 +58,7 @@ describe("Eve turn step snapshot decoding", () => {
       history: HISTORY,
       compaction: { lastKnownInputTokens: 153733, lastKnownPromptMessageCount: 424 },
       channelState: CHANNEL_STATE,
+      initiatorAuth: INITIATOR,
       sandbox: SANDBOX_METADATA,
       todo: { items: [{ content: "проверить", status: "pending" }] },
       announcedSkills: [{ name: "pohuy", description: "Режим мата" }],
@@ -71,7 +74,7 @@ describe("Eve turn step snapshot decoding", () => {
   it("reports absent optional state as null, not as invented values", () => {
     const decoded = decodeEveTurnStepOutput(storeLikeWorkflow(turnStepOutput({ sessionId: SESSION_ID, history: [] }), "zstd"));
 
-    expect(decoded).toEqual({ sessionId: SESSION_ID, history: [], channelState: null, compaction: null, sandbox: null, todo: null, announcedSkills: null });
+    expect(decoded).toEqual({ sessionId: SESSION_ID, history: [], channelState: null, compaction: null, initiatorAuth: null, sandbox: null, todo: null, announcedSkills: null });
     expect(decodeEveTurnStepOutput(storeLikeWorkflow(turnStepOutput({ sessionId: SESSION_ID, history: [], sandboxState: { initialized: false } }), "zstd")).sandbox)
       .toBeNull();
   });

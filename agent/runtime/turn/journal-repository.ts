@@ -4,11 +4,13 @@
  * Exports:
  * - `inJournalTransaction`: runs writers that must commit together.
  * - `createTurn`, `loadTurn`, `claimTurn`, `findWaitingTurn`: the turn row.
+ * - `releaseOtherRunners`, `listRunningRootTurns`: turns an earlier process left running.
  * - `savePreparedTurn`, `parkTurn`, `addPendingContext`, `markHistoryStarted`, `finishTurn`: its lifecycle.
  * - `sessionAwaitsApproval`: whether a tool approval of the session is still unanswered.
  * - `recordStep`, `loadStep`, `markStepTextEmitted`, `completeStep`: one model step and its tool calls.
  * - `updateToolCall`, `recordInputResponse`: a tool call's state, result and a person's answer.
  * - `parkToolCall`, `findChildTurn`, `latestSessionTurn`: an `agent` call waiting on its child turn.
+ * - `findInputRequests`: requests the session's calls raised, by id.
  *
  * Writers take a client inside the caller's transaction: a step's model response, its tool calls
  * and the history it appends commit together or not at all.
@@ -143,15 +145,41 @@ export async function markHistoryStarted(client: JournalClient, turnId: string):
   await updateTurn(client, turnId, "history_started = true", []);
 }
 
-/** Takes a running turn for this process; returns null when another process owns it or it is not running. */
+/**
+ * Takes a running turn for this process; returns null when another process owns it, it is not
+ * running, or an earlier turn of its session still runs: a session's turns run one at a time, in
+ * the order they were created (Eve's `queue` turn policy).
+ */
 export async function claimTurn(client: JournalClient, turnId: string, runnerId: string): Promise<TurnRecord | null> {
   const row = (await client.query<TurnRow>(
-    `UPDATE agent_turns SET runner_id = $2, updated_at = now()
-      WHERE id = $1 AND status = 'running' AND (runner_id IS NULL OR runner_id = $2)
+    `UPDATE agent_turns turn SET runner_id = $2, updated_at = now()
+      WHERE turn.id = $1 AND turn.status = 'running' AND (turn.runner_id IS NULL OR turn.runner_id = $2)
+        AND NOT EXISTS (
+          SELECT 1 FROM agent_turns earlier
+           WHERE earlier.session_id = turn.session_id AND earlier.status = 'running' AND earlier.sequence < turn.sequence)
       RETURNING ${TURN_COLUMNS}`,
     [turnId, runnerId],
   )).rows[0];
   return row ? toTurn(row) : null;
+}
+
+/**
+ * At startup, running turns of earlier processes become claimable again. One backend process runs
+ * turns, so any other runner is a process that is gone.
+ */
+export async function releaseOtherRunners(client: JournalClient, runnerId: string): Promise<void> {
+  await client.query(
+    "UPDATE agent_turns SET runner_id = NULL, updated_at = now() WHERE status = 'running' AND runner_id <> $1",
+    [runnerId],
+  );
+}
+
+/** Running turns that no parent drives, oldest first in each session. */
+export async function listRunningRootTurns(client: JournalClient): Promise<TurnRecord[]> {
+  const rows = (await client.query<TurnRow>(
+    `SELECT ${TURN_COLUMNS} FROM agent_turns WHERE status = 'running' AND parent_turn_id IS NULL ORDER BY session_id, sequence`,
+  )).rows;
+  return rows.map(toTurn);
 }
 
 /** The session's turn that waits for a person, locked for the caller's transaction. */
@@ -368,6 +396,17 @@ export async function findChildTurn(client: JournalClient, parentTurnId: string,
     [parentTurnId, callId],
   )).rows[0];
   return row ? toTurn(row) : null;
+}
+
+/** Requests of the session's calls by id, for answers that arrive after their request stopped waiting. */
+export async function findInputRequests(client: JournalClient, sessionId: string, requestIds: readonly string[]): Promise<Map<string, InputRequest>> {
+  const rows = (await client.query<{ input_request: InputRequest }>(
+    `SELECT c.input_request FROM agent_tool_calls c JOIN agent_turns t ON t.id = c.turn_id
+      WHERE t.session_id = $1 AND c.input_request->>'kind' IN ('question', 'tool-approval')
+        AND c.input_request->>'requestId' = ANY($2::text[])`,
+    [sessionId, requestIds],
+  )).rows;
+  return new Map(rows.map((row) => [row.input_request.requestId, row.input_request]));
 }
 
 /** The session's newest turn: a child that continued after an answer runs in a continuation turn. */

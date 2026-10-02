@@ -135,7 +135,7 @@ export async function newTestSession(history: readonly ModelMessage[] = []): Pro
   const sessionId = newSessionId();
   const { applicationSessionId } = await createApplicationSession(sessionId);
   await createSessionHistory(database(), {
-    announcedSkills: null, applicationSessionId, channelState: null, compaction: { inputTokens: null, promptMessageCount: null },
+    announcedSkills: null, applicationSessionId, channelState: null, compaction: { inputTokens: null, promptMessageCount: null }, initiatorAuth: null,
     history, parentSessionId: null, sandbox: null, sessionId, source: "runtime", todo: null,
   });
   return sessionId;
