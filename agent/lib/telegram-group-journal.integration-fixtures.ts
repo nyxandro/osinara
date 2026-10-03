@@ -4,7 +4,7 @@
  * Exports:
  * - `recordVerifiedHumanTelegramMessage`: records a fixture only after production actor validation.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import { telegramGroupJournalRepository } from "./telegram-group-journal-repository.js";
 import { telegramInboundActor } from "./telegram-inbound-actor.js";

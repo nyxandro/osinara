@@ -18,3 +18,7 @@ __pycache__/
 # Материалы курса из экспорта Telegram (не часть проекта)
 course/
 result-chat.json
+
+# Production inputs the Telegram conversation bench copies in for one run (bench-runner.ts).
+stress/telegram-conversation/config/
+stress/telegram-conversation/agent/instructions.md

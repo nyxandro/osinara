@@ -6,7 +6,7 @@
  * - A verified group turn searches memory by the addressed message, not the whole timeline.
  * - Retrieved records enter the prompt as escaped model-safe untrusted data.
  */
-import type { SessionAuth, SessionAuthContext } from "eve/context";
+import type { SessionAuth, SessionAuthContext } from "../runtime/context.js";
 import type { ModelMessage } from "ai";
 import { describe, expect, it, vi } from "vitest";
 

@@ -9,7 +9,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { defineSkill, type SkillDefinition } from "eve/skills";
+import { defineSkill, type SkillDefinition } from "../../runtime/skills/definition.js";
 
 export const IMAGE_GENERATION_SKILL_NAME = "imagegen" as const;
 

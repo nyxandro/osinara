@@ -5,7 +5,7 @@
  * - Exact conversation, timeline source, actor, and sequence extraction.
  * - Rejection of incomplete or non-Telegram runtime identity.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { describe, expect, it } from "vitest";
 
 import { requireBehaviorPreferenceAuthorization } from "./behavior-preference-context.js";

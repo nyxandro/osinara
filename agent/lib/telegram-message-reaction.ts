@@ -7,7 +7,7 @@
  * - `isTelegramMessageReactionEmoji`: strict single-emoji reaction directive guard.
  * - `setTelegramMessageReaction`: confirmed Bot API reaction on a verified inbound message.
  */
-import type { TelegramHandle } from "eve/channels/telegram";
+import type { TelegramHandle } from "../runtime/telegram/channel-types.js";
 
 import { AppError } from "./app-error.js";
 

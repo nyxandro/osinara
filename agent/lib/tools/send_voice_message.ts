@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `createSendVoiceMessageTool`: dependency-injected exact-once synthesis and delivery workflow.
- * - Default `send_voice_message`: production Eve tool using ElevenLabs, workspace, and Telegram.
+ * - Default `send_voice_message`: production tool using ElevenLabs, workspace, and Telegram.
  *
  * Key constructs:
  * - The verified workspace scope and call ID determine a stable non-overwriting output path.
@@ -14,13 +14,13 @@
  */
 import { createHash } from "node:crypto";
 
-import { defineTool, type ToolContext, type ToolDefinition } from "eve/tools";
+import { defineTool, type ToolContext, type ToolDefinition } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { AppError, isAppError } from "../app-error.js";
 import { telegramCaptionFits } from "../attachments/telegram-workspace-file-delivery.js";
 import { sendWorkspaceFileToCurrentChat } from "../attachments/workspace-file-chat-delivery.js";
-import { EVE_EMPTY_DELIVERY_MARKER } from "../eve-empty-delivery.js";
+import { EMPTY_DELIVERY_MARKER } from "../../runtime/turn/step-history.js";
 import {
   VOICE_MESSAGE_MEDIA_TYPE,
   VOICE_MESSAGE_TEXT_MAX_LENGTH,
@@ -279,13 +279,15 @@ async function sendVoiceMessage(
     ...delivery,
     characterCost,
     generated,
-    nextStep: `Голосовое уже доставлено и является твоим ответом: заверши ход ровно строкой ${EVE_EMPTY_DELIVERY_MARKER} без другого текста.`,
+    nextStep: `Голосовое уже доставлено и является твоим ответом: заверши ход ровно строкой ${EMPTY_DELIVERY_MARKER} без другого текста.`,
     path: file.path,
   };
 }
 
 export function createSendVoiceMessageTool(dependencies: SendVoiceMessageDependencies): AnyToolDefinition {
   return defineTool({
+    // Repeating it after a crash is safe: its effect is keyed on the call id.
+    replaySafe: true,
     description: [
       "Только по явной просьбе ответить голосом: озвучить text через ElevenLabs и отправить голосовым в текущий чат.",
       "text пиши как живую речь; ссылки и данные, которые неудобно слушать, передай в caption.",

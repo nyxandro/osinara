@@ -8,7 +8,7 @@
  * Key constructs:
  * - Exact chat and actor come only from the verified current Telegram timeline entry.
  * - One row lock and `expectedRevision` prevent silent lost updates.
- * - The last source/hash pair makes an exact Eve tool replay idempotent.
+ * - The last source/hash pair makes an exact replay of the tool call idempotent.
  */
 import { createHash } from "node:crypto";
 

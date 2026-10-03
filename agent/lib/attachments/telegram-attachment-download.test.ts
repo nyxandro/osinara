@@ -6,7 +6,7 @@
  * - Telegram getFile/download response validation.
  * - Transport and response-body failures return a bounded correction contract.
  */
-import type { TelegramAttachment } from "eve/channels/telegram";
+import type { TelegramAttachment } from "../../runtime/telegram/inbound.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { createTelegramAttachmentDownloader } from "./telegram-attachment-download.js";

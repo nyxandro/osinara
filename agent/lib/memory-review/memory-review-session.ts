@@ -1,5 +1,5 @@
 /**
- * Memory-review Eve session identification.
+ * Memory-review session identification.
  *
  * Exports:
  * - `memoryReviewBatchId`: validates the optional trusted batch marker.
@@ -7,7 +7,7 @@
  * - `isMemoryReviewSession`: identifies only internal background review turns.
  * - `memoryReviewScope`: the single verified memory scope a background review run may write into.
  */
-import type { SessionContext } from "eve/context";
+import type { SessionContext } from "../../runtime/context.js";
 
 import { AppError } from "../app-error.js";
 import type { MemoryScope } from "../memory-context.js";

@@ -6,7 +6,7 @@
  * - `executeGoogleWorkspace`: production exact-argv executor.
  * - `withAuthorizedGoogleWorkspaceExecution`: one live profile operation for trusted metadata reads.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../../runtime/tool.js";
 
 import { AppError } from "../app-error.js";
 import { withGoogleWorkspaceExecutionAccount } from "./google-execution-authorization.js";

@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `beginAgentScheduleDispatch`: binds the app session or terminalizes a revoked group run.
- * - `markAgentScheduleRunning`: binds Eve identity while tolerating an already-terminal event race.
+ * - `markAgentScheduleRunning`: binds the session identity while tolerating an already-terminal event race.
  */
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";

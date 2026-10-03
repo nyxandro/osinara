@@ -5,7 +5,7 @@
  * - `telegramForumTopicId`: distinguishes real forum topics from ordinary reply threads.
  * - Secret text keeps a logical event but never enters durable timeline content.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { describe, expect, it } from "vitest";
 
 import {

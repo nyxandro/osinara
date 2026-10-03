@@ -3,13 +3,10 @@
  *
  * Exports:
  * - `createTelegramAttachmentDownloader`: testable getFile/download coordinator with exact limits.
- * - `downloadTelegramAttachment`: production downloader using Eve's public Telegram API.
+ * - `downloadTelegramAttachment`: production downloader using the runtime's Telegram API.
  */
-import {
-  downloadTelegramFile,
-  getTelegramFile,
-  type TelegramAttachment,
-} from "eve/channels/telegram";
+import { downloadTelegramFile, getTelegramFile } from "../../runtime/telegram/api.js";
+import type { TelegramAttachment } from "../../runtime/telegram/inbound.js";
 
 import { TELEGRAM_MAX_INBOUND_ATTACHMENT_BYTES } from "../../config.js";
 import { AppError, isAppError } from "../app-error.js";

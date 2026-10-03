@@ -2,9 +2,9 @@
  * Trusted current-time tool.
  *
  * Export:
- * - Eve `get_current_time` tool for a fresh UTC and optional local civil-time snapshot.
+ * - `get_current_time` tool for a fresh UTC and optional local civil-time snapshot.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { resolveCurrentTime } from "../current-time.js";
@@ -21,6 +21,8 @@ const TOOL_DESCRIPTION = [
 ].join(" ");
 
 export default defineTool({
+  // Repeating it after a crash is safe: it only reads.
+  replaySafe: true,
   description: TOOL_DESCRIPTION,
   inputSchema: z.object({ timezone: z.string().min(1).max(100).optional() }).strict(),
   async execute(input, ctx) {

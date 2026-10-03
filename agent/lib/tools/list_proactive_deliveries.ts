@@ -1,10 +1,10 @@
 /**
- * Eve history tool for delivered reminders and scheduled-agent results.
+ * History tool for delivered reminders and scheduled-agent results.
  *
  * Export:
  * - `list_proactive_deliveries`: searches successful deliveries in the current trust zone.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import {
@@ -49,6 +49,8 @@ function requireDeliveryAuthorization(
 }
 
 export default defineTool({
+  // Repeating it after a crash is safe: it only reads.
+  replaySafe: true,
   description: [
     "Показать ранее доставленные в текущий чат напоминания и результаты агентных расписаний.",
     "Используй, когда пользователь ссылается на старый дайджест, отчёт, сводку или уведомление, которого уже нет в текущем контексте.",

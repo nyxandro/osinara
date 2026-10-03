@@ -10,7 +10,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { ToolDefinition } from "eve/tools";
+import type { ToolDefinition } from "../../runtime/tool.js";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 import type { WorkspaceAuthorization } from "../workspaces/workspace-repository.js";

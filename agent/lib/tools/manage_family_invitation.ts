@@ -9,7 +9,7 @@
  * - One semantic parser validates both approval and execution inputs.
  * - Input validators prevent malformed payloads from reaching invitation side effects.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { requirePrivateTelegramOwner } from "../family-context.js";
@@ -79,6 +79,8 @@ const TOOL_DESCRIPTION = [
 ].join(" ");
 
 export default defineTool({
+  // Repeating it after a crash is safe: its effect is keyed on the call id.
+  replaySafe: true,
   approval: ({ toolInput }) => {
     requireManageFamilyInvitationInput(toolInput);
     return "user-approval";

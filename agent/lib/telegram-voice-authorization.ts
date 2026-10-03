@@ -4,7 +4,7 @@
  * Exports:
  * - `createTelegramVoiceAuthorizer`: permits Groq usage only in personal and family spaces.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import { evaluateConversationAccess } from "./family-access.js";
 import type { TelegramRepository } from "./telegram-repository.js";

@@ -20,39 +20,11 @@ export const GOOGLE_WORKSPACE_COMMAND_TIMEOUT_MS = 60_000;
 export const SANDBOX_RUNNER_BASE_URL = "http://sandbox-runner:8080";
 export const SESSION_INACTIVITY_DAYS = 30;
 export const SESSION_GROUP_ROTATION_LOCK_HASH_SEED = 3;
-// The local Workflow world replays cumulative filesystem artifacts. Rotate with enough headroom
-// below the observed Eve 240-second replay failure at 118 completed production turns.
-export const SESSION_MAX_COMPLETED_TURNS = 50;
+export const FAMILY_SKILLS_LOCK_HASH_SEED = 4;
 export const SESSION_RETENTION_LEASE_MS = 15 * 60 * 1_000;
 export const SESSION_RETENTION_DAYS = 1;
-// A cleanup that failed is tried again later instead of parking the session for good: the usual
-// reason is a Workflow run that had not finished yet, and that changes on its own.
+// A cleanup that failed is tried again later instead of parking the session for good.
 export const SESSION_RETENTION_RETRY_MS = 60 * 60 * 1_000;
-/**
- * Cleanup lines that report normal operation, declared once so the error-burst alert can exclude
- * them by the same names the code writes. The first sweep after a release drains the whole backlog
- * of abandoned runs and writes one line per run, which is many times that alert's threshold.
- */
-export const EVE_RUN_ABANDONED_DELETED_CODE = "AGENT_EVE_SESSION_ABANDONED_RUN_DELETED";
-export const SESSION_RETENTION_STORAGE_ABSENT_CODE = "AGENT_SESSION_RETENTION_STORAGE_ABSENT";
-export const WORKFLOW_ORPHAN_RUNS_PURGED_CODE = "AGENT_WORKFLOW_ORPHAN_RUNS_PURGED";
-export const SESSION_RETENTION_ROUTINE_CODES = [
-  EVE_RUN_ABANDONED_DELETED_CODE,
-  SESSION_RETENTION_STORAGE_ABSENT_CODE,
-  WORKFLOW_ORPHAN_RUNS_PURGED_CODE,
-] as const;
-// Deleting a session removes only its root run; its turns, subagents and timer stay behind. On
-// production 2026-09-22 they were 2016 of 2300 runs and ~75% of the Workflow database the release
-// backup copies while the assistant is down. A finished run waits this long before it goes:
-// Workflow still delivers the wake-up it armed for the run, and a single wake-up is queued at most
-// `WAIT_CONTINUATION_MAX_DELAY_SECONDS` (23 h in the pinned Workflow core) ahead.
-export const WORKFLOW_ORPHAN_RUN_PURGE_AFTER_HOURS = 48;
-// One minute's share, so the first pass after a release drains the backlog over ~40 minutes
-// instead of deleting a gigabyte of history in one go.
-export const WORKFLOW_ORPHAN_RUN_PURGE_BATCH = 50;
-// Beyond this a non-terminal Workflow run is treated as abandoned rather than live. Measured on
-// production 2026-09-22 over 1710 completed runs: p99 lasted 16 minutes, the longest 4h 08m.
-export const EVE_RUN_ABANDONED_AFTER_HOURS = 24;
 export const SESSION_TASK_ABANDONED_DAYS = 7;
 export const SESSION_TASK_MAX_ACTIVE_PER_GROUP_TOPIC = 25;
 export const SESSION_TASK_SWEEP_BATCH_SIZE = 100;
@@ -71,17 +43,13 @@ export const MEMORY_SOFT_DELETE_PURGE_BATCH_SIZE = 200;
 export const TELEGRAM_API_REQUEST_TIMEOUT_MS = 15_000;
 // A chat action is presentation only, yet a voice note waits for one in flight before it is sent.
 export const TELEGRAM_CHAT_ACTION_TIMEOUT_MS = 3_000;
-// An unanswered approval parks the Eve turn indefinitely: Eve keeps `session.waiting` for as long
-// as it takes. The confirmation window bounds that wait so one ignored prompt cannot freeze a chat.
+// An unanswered approval parks its turn for as long as it takes. The confirmation window bounds
+// that wait so one ignored prompt cannot freeze a chat.
 export const TELEGRAM_HITL_APPROVAL_TIMEOUT_MS = 5 * 60 * 1_000;
-// One `respond` waits up to Eve's 30-second command-hook handover, so the lease must outlast a whole
-// batch; a lease that expires mid-flight would let the next minute answer the same request twice.
+// The lease outlasts a whole batch: a lease that expires mid-flight would let the next minute answer
+// the same request twice.
 export const TELEGRAM_HITL_TIMEOUT_LEASE_MS = 15 * 60 * 1_000;
 export const TELEGRAM_HITL_TIMEOUT_SWEEP_BATCH_SIZE = 5;
-export const TELEGRAM_HITL_TIMEOUT_SWEEP_TIMEOUT_MS = 180 * 1_000;
-// The timeout sweep needs a route-scoped `attachSession`, which exists only inside an HTTP handler,
-// so the minute schedule calls the agent's own private route. The port is fixed by `npm start`.
-export const AGENT_INTERNAL_SELF_BASE_URL = "http://127.0.0.1:3000";
 export const TELEGRAM_GROUP_JOURNAL_CONTEXT_CHARACTERS = 12_000;
 export const TELEGRAM_GROUP_JOURNAL_CONTEXT_MESSAGES = 100;
 export const TELEGRAM_GROUP_JOURNAL_RETENTION_MESSAGES = 10_000;
@@ -90,10 +58,6 @@ export const TELEGRAM_ATTACHMENT_REFERENCE_LIST_MAX_LIMIT = 50;
 export const TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED = 1;
 export const TELEGRAM_INGRESS_LEASE_MS = 60 * 1_000;
 export const TELEGRAM_INGRESS_ADMISSION_TIMEOUT_MS = 15 * 60 * 1_000;
-// Last-resort loss-of-observation window, longer than a runner's 30-minute command limit.
-// Actual model silence is bounded by the native AI SDK policy, not this transport guard.
-export const TELEGRAM_INGRESS_OBSERVER_IDLE_MS = 35 * 60 * 1_000;
-export const TELEGRAM_INGRESS_CANCELLATION_GRACE_MS = 30_000;
 export const TELEGRAM_INGRESS_RECOVERY_MAX_ATTEMPTS = 3;
 // Bound expensive turns on the single-process deployment without letting groups occupy button slots.
 export const TELEGRAM_INGRESS_MESSAGE_CONCURRENCY = 2;

@@ -4,7 +4,8 @@
  * Exports:
  * - `buildTelegramTurnResult`: composes internal auth attributes and bounded model context.
  */
-import type { TelegramInboundResult, TelegramMessage } from "eve/channels/telegram";
+import type { TelegramInboundResult } from "../runtime/telegram/channel-types.js";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import type { StoredTelegramAttachment } from "./attachments/telegram-workspace-attachments.js";
 import { formatCurrentTimeContext } from "./current-time.js";
@@ -61,7 +62,7 @@ export function buildTelegramTurnResult(input: {
   replyHandling: "message" | undefined;
   /** The fragment the person highlighted in the message they replied to, when they highlighted one. */
   replyQuotedText: string | null;
-  /** True when the reply answers a pending confirmation, which Eve resumes with the raw text alone. */
+  /** True when the reply answers a pending confirmation, which the runtime resumes with the raw text alone. */
   resumesPendingTask: boolean;
   responseSessionId?: string;
   /** What a running turn already saw of this message, when it was shown with a tool result. */
@@ -89,16 +90,16 @@ export function buildTelegramTurnResult(input: {
   if (input.turnInterjectionMarker) context.push(turnInterjectionMarkerContext(input.turnInterjectionMarker));
   const plannedWakeups = formatPlannedWakeupsContext(input.plannedWakeups);
   if (plannedWakeups) context.push(plannedWakeups);
-  // A reply that resumes a pending confirmation is delivered by Eve as an answer to its own
+  // A reply that resumes a pending confirmation is delivered by the runtime as an answer to its own
   // question, built from the raw message text: the prepared envelope never reaches the model, and
   // the highlighted fragment goes with it. Context is delivered on that path, so the fragment is
   // restored here — and only here, because on an ordinary turn the envelope already carries it and
   // a second copy would read as a different quote.
-  // Eve keeps the envelope in two cases: a reply with no text at all, such as an answer sent as a
+  // The runtime keeps the envelope in two cases: a reply with no text at all, such as an answer sent as a
   // sticker, and a reply whose target arrived without sender metadata, which Telegram does omit.
   // Then both copies reach the model. They hold the same field with the same value, so the fragment
-  // still reads as one; guarding those cases would mean restating Eve's own condition here and
-  // drifting from it at the next upgrade.
+  // still reads as one; guarding those cases would mean restating the runtime's own condition
+  // (`runtime/hitl/answer-matching.ts`) here and drifting from it.
   if (input.resumesPendingTask && input.replyQuotedText) {
     context.push(formatTelegramReplyQuote(input.replyQuotedText));
   }

@@ -9,7 +9,7 @@
  *   turns a doomed turn into an ordinary tool refusal the model can explain to the chat, so it acts
  *   on a positively known group and never guesses a chat it cannot see.
  */
-import type { SessionContext } from "eve/context";
+import type { SessionContext } from "../../runtime/context.js";
 
 const DENIAL_REASON =
   "AGENT_APPROVAL_SURFACE_UNAVAILABLE: Действие требует подтверждения, а в общем чате подтверждение запросить нельзя, поэтому здесь оно недоступно. Скажи это участнику обычной репликой, не обещай выполнить действие позже и не отправляй его в личный чат: там доступны другие данные, а не данные этой группы.";

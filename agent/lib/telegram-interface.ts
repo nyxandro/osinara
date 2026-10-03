@@ -78,7 +78,7 @@ const OPTION_LABELS: Readonly<Record<string, string>> = {
   stop: "Остановить",
 };
 
-// Eve reports an exhausted model call under this code; the message it produces carries no
+// The runtime reports an exhausted model call under this code; the message it produces carries no
 // internals, which is what makes it safe to show in a shared chat.
 export const MODEL_UNAVAILABLE_FAILURE_CODE = "MODEL_CALL_FAILED";
 
@@ -178,7 +178,7 @@ function publicFailureExplanation(data: FailureData): string | null {
 }
 
 export function localizeTelegramInputRequest<T extends TelegramInputRequest>(request: T): T {
-  // Option IDs remain unchanged because Eve resolves callbacks by ID, not visible text.
+  // Option IDs remain unchanged because the runtime resolves callbacks by ID, not visible text.
   const options = request.options?.map((option) => ({
     ...option,
     label: OPTION_LABELS[option.id] ?? option.label,
@@ -223,7 +223,7 @@ export function formatTelegramTurnFailure(
     ? [`Код: ${data.code}`, ...(errorId ? [`Номер ошибки: ${errorId}`] : [])]
     : [];
 
-  // Every retry Eve had is already spent by the time this runs, so the ask is to wait, not to
+  // Every retry the runtime had is already spent by the time this runs, so the ask is to wait, not to
   // repeat immediately, and the reason is named plainly instead of as a failed request.
   if (data.code === MODEL_UNAVAILABLE_FAILURE_CODE) {
     return [

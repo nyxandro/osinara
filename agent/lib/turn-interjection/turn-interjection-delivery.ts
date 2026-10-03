@@ -14,7 +14,7 @@
  * - A failed record never fails the person's turn: the message then reaches its ordinary turn as a
  *   new one, which can at most repeat a reply, never drop it.
  */
-import type { SessionAuth } from "eve/context";
+import type { SessionAuth } from "../../runtime/context.js";
 
 import { turnInterjectionRepository } from "./turn-interjection-repository.js";
 import { resolveTurnInterjectionScope } from "./turn-interjection-scope.js";

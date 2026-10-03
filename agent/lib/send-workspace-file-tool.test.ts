@@ -7,7 +7,7 @@
  * - Projection failures after confirmed delivery never invite a duplicate send.
  * - Delivery-journal failures after Telegram confirmation preserve completed side-effect semantics.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppError } from "./app-error.js";

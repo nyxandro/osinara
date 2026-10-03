@@ -5,7 +5,7 @@
  * - `FamilyRole`: authenticated family roles.
  * - `TelegramGroupMessageMode`: persisted group collection modes.
  * - `RegisteredGroup`: persisted Telegram group policy.
- * - `ConversationAccess`: scopes exposed to Eve runtime code.
+ * - `ConversationAccess`: scopes exposed to agent runtime code.
  * - `evaluateConversationAccess`: returns an explicit allow/deny decision.
  * - `resolveConversationAccess`: rejects unknown callers before model execution.
  */

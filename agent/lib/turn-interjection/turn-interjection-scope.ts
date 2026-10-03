@@ -10,7 +10,7 @@
  * background review, a button continuation, and an external group keep today's behavior: their
  * queue is not consulted at all.
  */
-import type { SessionAuth } from "eve/context";
+import type { SessionAuth } from "../../runtime/context.js";
 
 import { isScheduledSession } from "../agent-schedules/scheduled-session.js";
 

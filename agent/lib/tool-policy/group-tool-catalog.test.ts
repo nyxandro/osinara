@@ -2,7 +2,6 @@
  * External group tool catalog completeness tests.
  *
  * Constructs covered:
- * - `FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS`: covers the Eve built-ins that cannot be hidden.
  * - Capability metadata: provides generated model usage for every effective external capability.
  * - Memory capability usage: exposes only the model-safe `memoryRef` contract.
  */
@@ -13,38 +12,25 @@ import {
   EXTERNAL_GROUP_CAPABILITY_CATALOG,
   EXTERNAL_GROUP_TOOL_NAMES,
   EXTERNAL_GROUP_BASE_TOOLS,
-  FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS,
   SANDBOX_FILE_CAPABILITY_CATALOG,
 } from "./group-tool-catalog.js";
 
 describe("external group tool catalog", () => {
-  it("denies every framework built-in an external group must not reach", () => {
-    // Application tools are emitted per mode, so only framework descriptors need an override.
-    expect([...FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS].sort()).toEqual([
-      "ask_question",
-      "bash",
-    ]);
-  });
-
-  it("does not override native file tools in isolated external workspaces", () => {
+  it("keeps the file tools available in isolated external workspaces", () => {
     expect(ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES).toEqual([
       "glob",
       "grep",
       "read_file",
       "write_file",
     ]);
-    for (const toolName of ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES) {
-      expect(FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS).not.toContain(toolName);
-    }
   });
 
   it("does not expose the removed PDF parser capability", () => {
     expect(EXTERNAL_GROUP_TOOL_NAMES).not.toContain("inspect_workspace_pdf");
   });
 
-  it("offers explicit Telegram attachment import without granting Bash", () => {
+  it("offers explicit Telegram attachment import as its own grant", () => {
     expect(EXTERNAL_GROUP_TOOL_NAMES).toContain("import_telegram_attachment");
-    expect(FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS).toContain("bash");
   });
 
   it("offers owner-grantable subscription image generation with Telegram delivery", () => {
@@ -72,7 +58,6 @@ describe("external group tool catalog", () => {
     expect(EXTERNAL_GROUP_TOOL_NAMES).toContain("web_fetch");
     expect(EXTERNAL_GROUP_TOOL_NAMES).not.toContain("web_search");
     expect(EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name)).toEqual(expect.arrayContaining(["web_search", "web_fetch"]));
-    expect(FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS).not.toContain("agent");
   });
 
   it("describes external memory mutations through model-safe memoryRef values", () => {

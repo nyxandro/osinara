@@ -12,7 +12,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const telegram = vi.hoisted(() => ({ sendTelegramChatAction: vi.fn() }));
-vi.mock("eve/channels/telegram", () => telegram);
+vi.mock("../../runtime/telegram/api.js", () => telegram);
 
 import {
   VOICE_RECORDING_STATUS_CONFIRM_MS,

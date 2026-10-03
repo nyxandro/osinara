@@ -4,7 +4,7 @@
  * Exports:
  * - `CONVERSATION_CHANGED_CODE`: the chat started another conversation; the wake-up is parked.
  * - `WAKEUP_NOT_STARTED_CODE`: the turn never started; the wake-up is parked.
- * - `WAKEUP_HANDOFF_FAILED_CODE`: Eve refused the handoff; the wake-up is parked.
+ * - `WAKEUP_HANDOFF_FAILED_CODE`: the runtime refused the hand-off; the wake-up is parked.
  * - `WAKEUP_LEASE_LOST_CODE`: the queue item is no longer owned by this processor.
  * - `inTransaction`: runs one wake-up transition atomically.
  * - `closeWakeup`: makes the queue item terminal and frees its chat's lane.

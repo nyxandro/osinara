@@ -2,10 +2,9 @@
  * Least-privilege tool surface for silent memory review.
  *
  * Exports:
- * - `MEMORY_REVIEW_DENIED_TOOL_NAMES`: native Eve tools explicitly overridden for review turns.
  * - `buildMemoryReviewToolSurface`: memory reads and source-backed normal-sensitivity writes only.
  */
-import { defineTool, type ToolDefinition } from "eve/tools";
+import { defineTool, type ToolDefinition } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { AppError } from "../app-error.js";
@@ -24,22 +23,6 @@ import type { ExternalGroupToolName } from "../tool-policy/group-tool-catalog.js
 
 type AnyTool = ToolDefinition<any, any>;
 
-export const MEMORY_REVIEW_DENIED_TOOL_NAMES = [
-  "agent",
-  "ask_question",
-  "bash",
-  "glob",
-  "grep",
-  "load_skill",
-  "read_file",
-  "todo",
-  "web_fetch",
-  "web_search",
-  "write_file",
-] as const;
-
-const deniedInput = z.record(z.string(), z.unknown());
-
 /**
  * The run is authorized for exactly one scope, so the schema admits only that one: an external
  * group already gets its remember this way, and a model cannot name a scope it cannot express.
@@ -56,18 +39,6 @@ function reviewRememberSchema(scope: MemoryScope) {
   );
 }
 
-function deniedTool(name: string): AnyTool {
-  return defineTool({
-    description: `Инструмент ${name} недоступен во время тихой проверки памяти.`,
-    inputSchema: deniedInput,
-    async execute() {
-      throw new AppError(
-        "AGENT_MEMORY_REVIEW_TOOL_FORBIDDEN",
-        "Во время тихой проверки доступны только инструменты памяти",
-      );
-    },
-  }) as unknown as AnyTool;
-}
 
 function reviewRemember(scope: MemoryScope): AnyTool {
   const definition = remember as unknown as AnyTool;
@@ -147,6 +118,5 @@ export function buildMemoryReviewToolSurface(
       searchMemoryThreads as unknown as AnyTool,
     );
   }
-  for (const name of MEMORY_REVIEW_DENIED_TOOL_NAMES) surface[name] = deniedTool(name);
   return wrapModelFacingToolMap(surface);
 }

@@ -2,7 +2,7 @@
  * Silent memory-review dispatcher unit tests.
  *
  * Constructs covered:
- * - `createMemoryReviewDispatcher`: one claimed 50-message batch starts one internal Eve task turn.
+ * - `createMemoryReviewDispatcher`: one claimed 50-message batch starts one internal review turn.
  * - Failed pre-handoff work schedules repository-owned bounded recovery.
  * - A possibly-started handoff becomes ambiguous and is never retried automatically.
  * - One broken claim cannot block the remaining already-claimed reviews.
@@ -40,7 +40,7 @@ const batch: ClaimedMemoryReviewBatch = {
 };
 
 function dependencies(overrides: Record<string, unknown> = {}) {
-  const send = vi.fn().mockResolvedValue({ id: "eve-review-session-1" });
+  const startReview = vi.fn().mockResolvedValue({ sessionId: "eve-review-session-1" });
   return {
     dependencies: {
       claimPending: vi.fn().mockResolvedValue([batch]),
@@ -56,11 +56,11 @@ function dependencies(overrides: Record<string, unknown> = {}) {
         rotated: false,
         sandboxSessionId: "00000000-0000-4000-8000-000000000070",
       }),
+      startReview,
       syncParticipants: vi.fn(),
-      to: vi.fn().mockReturnValue({ send }),
       ...overrides,
     },
-    send,
+    startReview,
   };
 }
 
@@ -72,12 +72,9 @@ describe("memory review dispatcher", () => {
       new Date("2026-08-12T10:00:00.000Z"),
     )).resolves.toBe(1);
 
-    expect(fixture.dependencies.to).toHaveBeenCalledWith(expect.any(Object), {
-      batchId: batch.batchId,
-    });
     expect(fixture.dependencies.syncParticipants).toHaveBeenCalledWith(batch);
-    expect(fixture.send).toHaveBeenCalledTimes(1);
-    expect(fixture.send).toHaveBeenCalledWith(batch.prompt, {
+    expect(fixture.startReview).toHaveBeenCalledTimes(1);
+    expect(fixture.startReview).toHaveBeenCalledWith(batch.batchId, batch.prompt, {
       auth: expect.objectContaining({
         attributes: expect.objectContaining({
           applicationSessionId: "application-review-session-1",
@@ -105,9 +102,9 @@ describe("memory review dispatcher", () => {
     });
   });
 
-  it("marks a rejected handoff ambiguous because Eve may already have started", async () => {
+  it("marks a rejected handoff ambiguous because its turn may already exist", async () => {
     const fixture = dependencies({
-      to: vi.fn().mockReturnValue({ send: vi.fn().mockRejectedValue(new Error("connection lost")) }),
+      startReview: vi.fn().mockRejectedValue(new Error("connection lost")),
     });
 
     await createMemoryReviewDispatcher(fixture.dependencies as never)();
@@ -133,7 +130,7 @@ describe("memory review dispatcher", () => {
       "AGENT_MEMORY_REVIEW_DISPATCH_MARKER_AMBIGUOUS",
       "application-review-session-1",
     );
-    expect(fixture.send).not.toHaveBeenCalled();
+    expect(fixture.startReview).not.toHaveBeenCalled();
   });
 
   it("does not retire a reused session after another worker acquired the batch", async () => {
@@ -147,7 +144,7 @@ describe("memory review dispatcher", () => {
       batch,
       "application-review-session-1",
     );
-    expect(fixture.send).not.toHaveBeenCalled();
+    expect(fixture.startReview).not.toHaveBeenCalled();
   });
 
   it("schedules bounded recovery before handoff and continues with another claimed batch", async () => {
@@ -172,7 +169,7 @@ describe("memory review dispatcher", () => {
       batch,
       "AGENT_MEMORY_REVIEW_SESSION_PREPARATION_FAILED",
     );
-    expect(fixture.send).toHaveBeenCalledTimes(1);
+    expect(fixture.startReview).toHaveBeenCalledTimes(1);
     expect(fixture.dependencies.markRunning).toHaveBeenCalledWith(second, expect.any(Object));
     expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("AGENT_MEMORY_REVIEW_DISPATCH_FAILED"));
     consoleError.mockRestore();

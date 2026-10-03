@@ -4,7 +4,7 @@
  * Export:
  * - `list_memories` lists only records authorized for the current conversation.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { MEMORY_LIST_DEFAULT_LIMIT, MEMORY_LIST_MAX_LIMIT } from "../memory-config.js";
@@ -13,6 +13,8 @@ import { memoryRepository } from "../memory-repository.js";
 import { toModelMemory } from "../model-memory.js";
 
 export default defineTool({
+  // Repeating it after a crash is safe: it only reads.
+  replaySafe: true,
   description: [
     "Постранично показать записи долговременной памяти, доступные в текущем чате.",
     "Результат: {items,nextCursor}; items содержит текущую страницу, а nextCursor нужно без изменений",

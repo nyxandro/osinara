@@ -8,7 +8,7 @@
  * - The model edits free text; backend supplies identity and protects only storage integrity.
  * - `expectedRevision` prevents one concurrent turn from silently erasing another turn's edit.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { requireBehaviorPreferenceAuthorization } from "../behavior-preference-context.js";

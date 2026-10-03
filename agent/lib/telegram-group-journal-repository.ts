@@ -6,7 +6,7 @@
  * - `TelegramGroupHistorySearchInput`: bounded model-history query after trusted authorization.
  * - `telegramGroupJournalRepository`: monotonic timeline with chunk aliases and retention.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import { TELEGRAM_GROUP_JOURNAL_CONTEXT_MESSAGES } from "../config.js";
 import { database } from "./database.js";

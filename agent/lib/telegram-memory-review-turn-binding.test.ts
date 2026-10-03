@@ -2,7 +2,8 @@
  * Telegram `turn.completed` binding tests for interactive memory review.
  *
  * Constructs covered:
- * - A turn resumed after a human answer still closes its batch, though its authorization lost the marker.
+ * - A continuation after a human answer closes the batch of the turn it resumed, though its
+ *   authorization lost the marker, and releases that turn's sources.
  * - The marker keeps answering for a replayed terminal event whose batch row was already released.
  * - An ordinary chat turn is recorded as a turn of the conversation and touches no batch.
  * - A turn cancelled by the next message closes its batch instead of waiting for the bound.
@@ -10,8 +11,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const dependencies = vi.hoisted(() => ({
-  batchIdForTurn: vi.fn(),
-  channelConfig: null as Record<string, any> | null,
+  batchForTurn: vi.fn(),
   clearApprovals: vi.fn(),
   completeBatch: vi.fn(),
   failRunning: vi.fn(),
@@ -20,12 +20,6 @@ const dependencies = vi.hoisted(() => ({
   releaseMemoryTurnSources: vi.fn(),
 }));
 
-vi.mock("eve/channels/telegram", () => ({
-  telegramChannel: (config: Record<string, any>) => {
-    dependencies.channelConfig = config;
-    return config;
-  },
-}));
 vi.mock("./agent-schedules/scheduled-session.js", () => ({
   isScheduledSession: vi.fn(() => false),
   scheduledDeliveryMetadata: vi.fn(() => null),
@@ -49,13 +43,13 @@ vi.mock("./memory-turn-source.js", () => ({
 }));
 vi.mock("./memory-review/memory-review-repository.js", () => ({
   memoryReviewRepository: {
-    batchIdForTurn: dependencies.batchIdForTurn,
+    batchForTurn: dependencies.batchForTurn,
     completeBatch: dependencies.completeBatch,
     failRunning: dependencies.failRunning,
   },
 }));
 
-await import("../channels/telegram.js");
+const { telegramTurnEvents } = await import("../channels/telegram.js");
 
 function context(attributes: Record<string, string>) {
   return {
@@ -71,36 +65,39 @@ describe("telegram memory review turn binding", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dependencies.hasPendingOperation.mockResolvedValue(false);
-    dependencies.batchIdForTurn.mockResolvedValue(null);
+    dependencies.batchForTurn.mockResolvedValue(null);
   });
 
-  it("closes the batch of a turn resumed after a human answer", async () => {
-    const handler = dependencies.channelConfig?.events?.["turn.completed"];
-    // Возобновление приходит с авторизацией ответа человека: метки пакета в ней нет.
-    dependencies.batchIdForTurn.mockResolvedValue("batch-1");
+  it("closes the batch of the turn a continuation resumed after a human answer", async () => {
+    const handler = (telegramTurnEvents as Record<string, any>)["turn.completed"];
+    // Продолжение после ответа человека — новый ход с авторизацией ответа: метки пакета в ней нет,
+    // а пакет привязан к ходу, который ждал ответа.
+    dependencies.batchForTurn.mockResolvedValue({ batchId: "batch-1", eveTurnId: "turn-3" });
 
     await handler(undefined, {}, context({ telegramUserId: "101" }));
 
-    expect(dependencies.batchIdForTurn).toHaveBeenCalledWith({
+    expect(dependencies.batchForTurn).toHaveBeenCalledWith({
       eveSessionId: "eve-session-1",
       eveTurnId: "turn-4",
     });
     expect(dependencies.completeBatch).toHaveBeenCalledWith(expect.objectContaining({
       batchId: "batch-1",
       eveSessionId: "eve-session-1",
-      eveTurnId: "turn-4",
+      eveTurnId: "turn-3",
     }));
+    // The parked turn's sources are released with the batch it was reviewing.
+    expect(dependencies.releaseMemoryTurnSources.mock.calls.map(([ctx]) => ctx.session.turn.id).sort()).toEqual(["turn-3", "turn-4"]);
     // Ход проверки не является ходом разговора и не закрывает чат-сессию сам по себе.
     expect(dependencies.recordTurnCompleted).not.toHaveBeenCalled();
   });
 
   it("still recognizes a review turn from its marker after the batch row is gone", async () => {
-    const handler = dependencies.channelConfig?.events?.["turn.completed"];
+    const handler = (telegramTurnEvents as Record<string, any>)["turn.completed"];
 
     await handler(undefined, {}, context({ memoryReviewBatchId: "batch-2" }));
 
     // Пакет освобождён, строки нет, но повтор терминального события остаётся ходом проверки.
-    expect(dependencies.batchIdForTurn).toHaveBeenCalledWith({
+    expect(dependencies.batchForTurn).toHaveBeenCalledWith({
       eveSessionId: "eve-session-1", eveTurnId: "turn-4",
     });
     expect(dependencies.completeBatch).toHaveBeenCalledWith(expect.objectContaining({
@@ -110,7 +107,7 @@ describe("telegram memory review turn binding", () => {
   });
 
   it("records an ordinary chat turn without touching any batch", async () => {
-    const handler = dependencies.channelConfig?.events?.["turn.completed"];
+    const handler = (telegramTurnEvents as Record<string, any>)["turn.completed"];
 
     await handler(undefined, {}, context({ telegramUserId: "101" }));
 
@@ -124,8 +121,8 @@ describe("telegram memory review turn binding", () => {
   });
 
   it("closes the batch of a turn cancelled by the next chat message", async () => {
-    const handler = dependencies.channelConfig?.events?.["turn.cancelled"];
-    dependencies.batchIdForTurn.mockResolvedValue("batch-4");
+    const handler = (telegramTurnEvents as Record<string, any>)["turn.cancelled"];
+    dependencies.batchForTurn.mockResolvedValue({ batchId: "batch-4", eveTurnId: "turn-4" });
 
     await handler(undefined, {}, context({ telegramUserId: "101" }));
 
@@ -139,9 +136,9 @@ describe("telegram memory review turn binding", () => {
   });
 
   it("keeps the batch open while the turn is parked on a human answer", async () => {
-    const handler = dependencies.channelConfig?.events?.["turn.completed"];
+    const handler = (telegramTurnEvents as Record<string, any>)["turn.completed"];
     dependencies.hasPendingOperation.mockResolvedValue(true);
-    dependencies.batchIdForTurn.mockResolvedValue("batch-3");
+    dependencies.batchForTurn.mockResolvedValue({ batchId: "batch-3", eveTurnId: "turn-4" });
 
     await handler(undefined, {}, context({ memoryReviewBatchId: "batch-3" }));
 

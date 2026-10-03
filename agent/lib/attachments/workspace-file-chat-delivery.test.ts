@@ -7,7 +7,7 @@
  *   and receives a reply route like a channel-delivered answer.
  * - Ordinary private file deliveries keep their existing projection-free behavior.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({

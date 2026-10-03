@@ -7,7 +7,7 @@
  * - Application session scope and proactive-delivery authorization projections.
  * - `telegramProfileName`: display identity without exposing Telegram IDs.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import type { StoredTelegramAttachment } from "./attachments/telegram-workspace-attachments.js";
 import { evaluateConversationAccess } from "./family-access.js";

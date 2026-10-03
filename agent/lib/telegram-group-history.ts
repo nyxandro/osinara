@@ -5,7 +5,7 @@
  * - `requireTelegramGroupHistoryAuthorization`: derives group/topic only from current verified auth.
  * - `searchTelegramGroupHistory`: combines trusted scope with bounded model-selected filters.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 
 import { AppError } from "./app-error.js";
 import type {

@@ -4,7 +4,7 @@ import { database } from "../database.js";
 import { AppError } from "../app-error.js";
 import { parseExternalGroupToolAllowlist } from "../tool-policy/group-tool-catalog.js";
 import type { SandboxAccess } from "./sandbox-runner-contract.js";
-import { parseGroupSkillAllowlist } from "../group-skills/group-skill-catalog.js";
+import { isGroupSafeSkillName, parseGroupSkillAllowlist } from "../group-skills/group-skill-catalog.js";
 
 export async function withGroupSandboxAccess<T>(
   workspaceId: string, operation: (access: SandboxAccess) => Promise<T>, requiredCapability?: "bash",
@@ -13,8 +13,10 @@ export async function withGroupSandboxAccess<T>(
   const client: PoolClient = await database().connect();
   try {
     await client.query("BEGIN");
-    const result = await client.query<{ tool_allowlist: string[]; skill_allowlist: string[] }>(
-      `SELECT g.tool_allowlist, g.skill_allowlist FROM workspaces w JOIN telegram_groups g ON g.id=w.group_id
+    const result = await client.query<{ family_skills: string[]; tool_allowlist: string[]; skill_allowlist: string[] }>(
+      `SELECT g.tool_allowlist, g.skill_allowlist,
+              ARRAY(SELECT s.name FROM family_skills s WHERE s.family_id = g.family_id AND s.enabled) AS family_skills
+         FROM workspaces w JOIN telegram_groups g ON g.id=w.group_id
        WHERE w.id=$1 AND w.scope='group' AND g.type='external' AND w.family_id=g.family_id
        FOR SHARE OF g`, [workspaceId],
     );
@@ -25,7 +27,10 @@ export async function withGroupSandboxAccess<T>(
     }
     if (requiredSkills.length > 0) {
       const skills = parseGroupSkillAllowlist(result.rows[0]!.skill_allowlist);
-      if (!skills || requiredSkills.some((name) => name === "imagegen" ? !allowed.has("generate_image") : !skills.has(name))) {
+      // A family skill the owner disabled since the turn began is not synced either.
+      const family = new Set(result.rows[0]!.family_skills);
+      const granted = (name: string) => skills!.has(name) && (isGroupSafeSkillName(name) || family.has(name));
+      if (!skills || requiredSkills.some((name) => name === "imagegen" ? !allowed.has("generate_image") : !granted(name))) {
         throw new AppError("AGENT_GROUP_SKILL_FORBIDDEN", "Список скиллов группы изменился. Повторите запрос с актуальными правами");
       }
     }

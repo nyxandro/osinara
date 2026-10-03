@@ -1,5 +1,6 @@
 /** Owner-granted shell execution in the current group's isolated sandbox. */
-import { defineBashTool, defineTool } from "eve/tools";
+import { BASH_INPUT_SCHEMA, defineBashTool } from "../../runtime/tools/bash.js";
+import { defineTool } from "../../runtime/tool.js";
 import type { GroupSandboxCommandOptions } from "../sandbox-runner/sandbox-runner-contract.js";
 import { AppError } from "../app-error.js";
 import { requireWorkspaceAuthorization } from "../workspaces/workspace-context.js";
@@ -8,7 +9,7 @@ import { authorizeCurrentExternalGroupCapability } from "./external-group-live-p
 const bash = defineBashTool();
 
 export const externalGroupBash = defineTool({
-  ...bash,
+  inputSchema: BASH_INPUT_SCHEMA,
   description: "Выполнить команду в изолированном окружении текущей группы. Доступны только её файлы и публичная сеть через защищённый шлюз; личные и семейные данные не подключены.",
   async execute(input, ctx) {
     const auth = requireWorkspaceAuthorization(ctx);
@@ -21,7 +22,7 @@ export const externalGroupBash = defineTool({
         return {
           ...sandbox,
           run(options) {
-            // Eve forwards command options to our backend. The requirement is checked under the
+            // The runtime forwards command options to our backend. The requirement is checked under the
             // registration lock while selecting the exact container, not just before this tool.
             const command: GroupSandboxCommandOptions = { ...options, requiredGroupCapability: "bash" };
             return sandbox.run(command);

@@ -9,7 +9,8 @@
  * - A crashed wake-up is reclaimed even when messages already wait behind it.
  * - Preparation revalidates the conversation: a pause withdraws the run, a new or failed
  *   conversation parks it, a pending approval defers it, a schedule that no longer waits closes it.
- * - A dispatched wake-up that loses its lease is reclaimed with its dispatch coordinates, never resent.
+ * - A wake-up creates its turn in the conversation's runtime session, bound to the item; one that
+ *   loses its lease is reclaimed with that turn, never resent.
  * - A handoff that never started parks the schedule unless a turn was admitted meanwhile.
  * - The turn's completion counts the execution; a second wake-up of the same conversation runs too.
  * - A wake-up still waiting in the queue, or one that already ended, can be deleted with its schedule.
@@ -36,6 +37,10 @@ import { CONVERSATION_CHANGED_CODE } from "./conversation-wakeup-transitions.js"
 import { conversationWakeupRunRepository } from "./conversation-wakeup-run-repository.js";
 import { conversationCanonicalRouteToken } from "./conversation-wakeup-turn.js";
 import { NO_BURSTS } from "../telegram-ingress.test-fixtures.js";
+import { createSessionHistory } from "../../runtime/history/history-repository.js";
+import { bindContinuation } from "../../runtime/session/continuations.js";
+import { loadTurn } from "../../runtime/turn/journal-repository.js";
+import { createConversationWakeupTurn, WAKEUP_SESSION_INACTIVE_CODE } from "./conversation-wakeup-turn-start.js";
 
 const integrationTestsEnabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 const integrationDatabaseUrl = process.env.DATABASE_URL;
@@ -117,7 +122,7 @@ describeWithDatabase("conversation wake-ups", () => {
          telegram_turn_interjections, eve_session_event_cursors, telegram_ingress_ignored_updates,
          telegram_ingress_updates, telegram_ingress_continuation_aliases, telegram_ingress_queues,
          conversation_session_routes, conversation_sessions, conversation_route_generations,
-         application_conversations, family_memberships, users, families, operational_incidents CASCADE`,
+         application_conversations, family_memberships, users, families, operational_incidents, agent_session_state CASCADE`,
     );
     familyId = (await database().query<{ id: string }>("INSERT INTO families (name) VALUES ('Пробуждения') RETURNING id")).rows[0]!.id;
     const userId = (await database().query<{ id: string }>(
@@ -178,12 +183,9 @@ describeWithDatabase("conversation wake-ups", () => {
       kind: "ready",
       wakeup: { applicationSessionId: sessionId, eveSessionId: "ses_eve_1", maxRuns: 3, telegramUserId: "101" },
     });
-    expect(await conversationWakeupRepository.markDispatched(claim!, "ses_eve_1", handoff())).toBe(0);
-    await conversationWakeupRepository.complete(claim!, "ses_eve_1", 7);
+    await conversationWakeupRepository.bindDispatch(database(), claim!, { ...handoff(), sessionId: "ses_eve_1", turnId: "turn_wakeup" });
+    await conversationWakeupRepository.complete(claim!, "ses_eve_1");
     expect(await laneMark()).toBeNull();
-
-    const cursor = await database().query("SELECT next_event_index FROM eve_session_event_cursors WHERE eve_session_id = 'ses_eve_1'");
-    expect(Number(cursor.rows[0].next_event_index)).toBe(7);
     expect((await telegramIngressRepository.claimNext(LEASE, NO_BURSTS))?.updateId).toBe("1002");
   });
 
@@ -225,19 +227,67 @@ describeWithDatabase("conversation wake-ups", () => {
     expect(parked.rows[0]).toEqual({ last_error_code: CONVERSATION_CHANGED_CODE, status: "paused" });
   });
 
-  it("reclaims a dispatched wake-up with its start coordinate instead of sending it again", async () => {
+  it("reclaims a dispatched wake-up with the turn it created instead of sending it again", async () => {
     await createWakeup();
     await queueDue();
     const claim = await conversationWakeupRepository.claimNext(LEASE);
     await conversationWakeupRepository.prepare(claim!, conversationCanonicalRouteToken);
     const dispatched = handoff();
-    await conversationWakeupRepository.markDispatched(claim!, "ses_eve_1", dispatched);
+    await conversationWakeupRepository.bindDispatch(database(), claim!, { ...dispatched, sessionId: "ses_eve_1", turnId: "turn_bound" });
     await database().query("UPDATE telegram_ingress_wakeups SET lease_expires_at = now() - interval '1 second'");
 
     expect(await conversationWakeupRepository.claimNext(LEASE)).toMatchObject({
-      dispatch: { admissionDeadlineAt: dispatched.admissionDeadlineAt, eveSessionId: "ses_eve_1", id: dispatched.id, startIndex: 0 },
+      dispatch: { admissionDeadlineAt: dispatched.admissionDeadlineAt, eveSessionId: "ses_eve_1", id: dispatched.id, turnId: "turn_bound" },
       id: claim!.id,
     });
+  });
+
+  it("creates its turn in the conversation's runtime session, bound to the item, and a reclaim finds that turn", async () => {
+    await createSessionHistory(database(), {
+      announcedSkills: null, applicationSessionId: sessionId, channelState: null,
+      compaction: { inputTokens: null, promptMessageCount: null }, history: [], initiatorAuth: null, parentSessionId: null,
+      sandbox: null, sessionId: "ses_eve_1", source: "eve_import", todo: null,
+    });
+    await bindContinuation(database(), { channelKind: "telegram", sessionId: "ses_eve_1", token: "101::" });
+    await createWakeup();
+    const job = await queueDue();
+    const claim = await conversationWakeupRepository.claimNext(LEASE);
+    const prepared = await conversationWakeupRepository.prepare(claim!, conversationCanonicalRouteToken);
+    if (prepared.kind !== "ready") throw new Error(`TEST_EXPECTED_READY: ${prepared.kind}`);
+    const now = new Date();
+    const createTurn = createConversationWakeupTurn({
+      admissionMilliseconds: 5 * 60_000, database: database(), now: () => now, repository: conversationWakeupRepository,
+    });
+
+    const turnId = await createTurn(claim!, prepared.wakeup);
+
+    const turn = await loadTurn(database(), turnId);
+    expect(turn).toMatchObject({ channel: { continuationToken: "101::", kind: "telegram" }, kind: "wakeup", sessionId: "ses_eve_1", status: "running" });
+    expect(turn.input.message).toContain("<conversation_wakeup>");
+    expect(turn.auth.current?.attributes).toMatchObject({
+      conversationScheduleRunId: job.runId, osinaraTelegramDeadlineAt: new Date(now.getTime() + 5 * 60_000).toISOString(),
+    });
+    expect((await database().query("SELECT status, eve_session_id FROM agent_schedule_runs WHERE id = $1", [job.runId])).rows)
+      .toEqual([{ eve_session_id: "ses_eve_1", status: "running" }]);
+    await database().query("UPDATE telegram_ingress_wakeups SET lease_expires_at = now() - interval '1 second'");
+    expect(await conversationWakeupRepository.claimNext(LEASE)).toMatchObject({
+      dispatch: { eveSessionId: "ses_eve_1", turnId }, id: claim!.id,
+    });
+  });
+
+  it("parks its schedule when the conversation has no runtime session to continue", async () => {
+    await createWakeup();
+    await queueDue();
+    const claim = await conversationWakeupRepository.claimNext(LEASE);
+    const prepared = await conversationWakeupRepository.prepare(claim!, conversationCanonicalRouteToken);
+    if (prepared.kind !== "ready") throw new Error(`TEST_EXPECTED_READY: ${prepared.kind}`);
+    const createTurn = createConversationWakeupTurn({
+      admissionMilliseconds: 5 * 60_000, database: database(), now: () => new Date(), repository: conversationWakeupRepository,
+    });
+
+    await expect(createTurn(claim!, prepared.wakeup)).rejects.toMatchObject({ code: WAKEUP_SESSION_INACTIVE_CODE });
+    expect((await database().query("SELECT dispatch_started_at FROM telegram_ingress_wakeups WHERE id = $1", [claim!.id])).rows)
+      .toEqual([{ dispatch_started_at: null }]);
   });
 
   it("counts the execution when the turn completes and schedules the next one", async () => {
@@ -245,7 +295,7 @@ describeWithDatabase("conversation wake-ups", () => {
     const job = await queueDue();
     const claim = await conversationWakeupRepository.claimNext(LEASE);
     await conversationWakeupRepository.prepare(claim!, conversationCanonicalRouteToken);
-    await conversationWakeupRepository.markDispatched(claim!, "ses_eve_1", handoff());
+    await conversationWakeupRepository.bindDispatch(database(), claim!, { ...handoff(), sessionId: "ses_eve_1", turnId: "turn_wakeup" });
     const turn = { applicationSessionId: sessionId, eveSessionId: "ses_eve_1", eveTurnId: "turn_4", runId: job.runId };
     await conversationWakeupRunRepository.admitTurn(turn);
 
@@ -328,7 +378,7 @@ describeWithDatabase("conversation wake-ups", () => {
     const job = await queueDue();
     const claim = await conversationWakeupRepository.claimNext(LEASE);
     await conversationWakeupRepository.prepare(claim!, conversationCanonicalRouteToken);
-    await conversationWakeupRepository.markDispatched(claim!, "ses_eve_1", handoff());
+    await conversationWakeupRepository.bindDispatch(database(), claim!, { ...handoff(), sessionId: "ses_eve_1", turnId: "turn_wakeup" });
 
     expect(await conversationWakeupRepository.withdrawNotStarted(claim!, "AGENT_CONVERSATION_WAKEUP_NOT_STARTED")).toBe(true);
     const parked = await database().query("SELECT status, last_error_code FROM agent_schedules WHERE id = $1", [schedule.id]);
@@ -344,12 +394,11 @@ describeWithDatabase("conversation wake-ups", () => {
     const again = await queueDue();
     const next = await conversationWakeupRepository.claimNext(LEASE);
     await conversationWakeupRepository.prepare(next!, conversationCanonicalRouteToken);
-    await conversationWakeupRepository.markDispatched(next!, "ses_eve_1", handoff());
+    await conversationWakeupRepository.bindDispatch(database(), next!, { ...handoff(), sessionId: "ses_eve_1", turnId: "turn_wakeup" });
     await conversationWakeupRunRepository.admitTurn({
       applicationSessionId: sessionId, eveSessionId: "ses_eve_1", eveTurnId: "turn_6", runId: again.runId,
     });
     expect(await conversationWakeupRepository.withdrawNotStarted(next!, "AGENT_CONVERSATION_WAKEUP_NOT_STARTED")).toBe(false);
-    expect(await conversationWakeupRepository.admittedTurn(again.runId)).toEqual({ eveTurnId: "turn_6", open: true });
   });
 
   it("runs a second wake-up of the same conversation after the first one", async () => {
@@ -361,11 +410,11 @@ describeWithDatabase("conversation wake-ups", () => {
       const job = await queueDue();
       const claim = await conversationWakeupRepository.claimNext(LEASE);
       await conversationWakeupRepository.prepare(claim!, conversationCanonicalRouteToken);
-      await conversationWakeupRepository.markDispatched(claim!, "ses_eve_1", handoff());
+      await conversationWakeupRepository.bindDispatch(database(), claim!, { ...handoff(), sessionId: "ses_eve_1", turnId: "turn_wakeup" });
       const turn = { applicationSessionId: sessionId, eveSessionId: "ses_eve_1", eveTurnId, runId: job.runId };
       await conversationWakeupRunRepository.admitTurn(turn);
       expect(await conversationWakeupRunRepository.finishTurn({ ...turn, completedAt: new Date(), failureCode: null })).toBe(true);
-      await conversationWakeupRepository.complete(claim!, "ses_eve_1", 10 * (index + 1));
+      await conversationWakeupRepository.complete(claim!, "ses_eve_1");
     }
     const state = await database().query("SELECT completed_runs FROM agent_schedules WHERE id = $1", [schedule.id]);
     expect(state.rows[0].completed_runs).toBe(2);
@@ -376,7 +425,7 @@ describeWithDatabase("conversation wake-ups", () => {
     await queueDue();
     const claim = await conversationWakeupRepository.claimNext(LEASE);
     await conversationWakeupRepository.prepare(claim!, conversationCanonicalRouteToken);
-    await conversationWakeupRepository.markDispatched(claim!, "ses_eve_1", handoff());
+    await conversationWakeupRepository.bindDispatch(database(), claim!, { ...handoff(), sessionId: "ses_eve_1", turnId: "turn_wakeup" });
 
     await expect(agentScheduleRepository.delete(auth, schedule.id, "delete-running")).rejects.toThrow("AGENT_SCHEDULE_RUN_IN_PROGRESS");
     // The observer lost the turn: the item is terminal while the run still waits for a turn that may never end.
@@ -423,7 +472,7 @@ describeWithDatabase("conversation wake-ups", () => {
     const job = await queueDue();
     const claim = await conversationWakeupRepository.claimNext(LEASE);
     await conversationWakeupRepository.prepare(claim!, conversationCanonicalRouteToken);
-    await conversationWakeupRepository.markDispatched(claim!, "ses_eve_1", handoff());
+    await conversationWakeupRepository.bindDispatch(database(), claim!, { ...handoff(), sessionId: "ses_eve_1", turnId: "turn_wakeup" });
     const turn = { applicationSessionId: sessionId, eveSessionId: "ses_eve_1", eveTurnId: "turn_4", runId: job.runId };
 
     // Deliveries of other turns in the same conversation must not make this run look delivered.
@@ -438,7 +487,7 @@ describeWithDatabase("conversation wake-ups", () => {
     const again = await queueDue();
     const next = await conversationWakeupRepository.claimNext(LEASE);
     await conversationWakeupRepository.prepare(next!, conversationCanonicalRouteToken);
-    await conversationWakeupRepository.markDispatched(next!, "ses_eve_1", handoff());
+    await conversationWakeupRepository.bindDispatch(database(), next!, { ...handoff(), sessionId: "ses_eve_1", turnId: "turn_wakeup" });
     const own = { ...turn, eveTurnId: "turn_6", runId: again.runId };
     await conversationWakeupRunRepository.admitTurn(own);
     expect(await conversationWakeupRunRepository.finishTurn({ ...own, completedAt: new Date(), eveTurnId: "turn_8", failureCode: null }))
@@ -451,7 +500,7 @@ describeWithDatabase("conversation wake-ups", () => {
     await queueDue();
     const first = await conversationWakeupRepository.claimNext(LEASE);
     await conversationWakeupRepository.prepare(first!, conversationCanonicalRouteToken);
-    await conversationWakeupRepository.markDispatched(first!, "ses_eve_1", handoff(new Date(Date.now() - 60_000)));
+    await conversationWakeupRepository.bindDispatch(database(), first!, { ...handoff(new Date(Date.now() - 60_000)), sessionId: "ses_eve_1", turnId: "turn_wakeup" });
     await conversationWakeupRepository.fail(first!, { code: "AGENT_TELEGRAM_PROCESSING_TIMEOUT", message: "lost" });
 
     await agentScheduleDispatchRepository.claimDue({ leaseMilliseconds: LEASE, limit: 10, now: new Date() });
@@ -464,7 +513,7 @@ describeWithDatabase("conversation wake-ups", () => {
     const job = await queueDue();
     const second = await conversationWakeupRepository.claimNext(LEASE);
     await conversationWakeupRepository.prepare(second!, conversationCanonicalRouteToken);
-    await conversationWakeupRepository.markDispatched(second!, "ses_eve_1", handoff());
+    await conversationWakeupRepository.bindDispatch(database(), second!, { ...handoff(), sessionId: "ses_eve_1", turnId: "turn_wakeup" });
     await conversationWakeupRunRepository.admitTurn({
       applicationSessionId: sessionId, eveSessionId: "ses_eve_1", eveTurnId: "turn_6", runId: job.runId,
     });
@@ -529,8 +578,8 @@ describeWithDatabase("conversation wake-ups", () => {
     const claim = await conversationWakeupRepository.claimNext(LEASE);
     expect(await deployReadiness()).toBe("busy");
     await conversationWakeupRepository.prepare(claim!, conversationCanonicalRouteToken);
-    await conversationWakeupRepository.markDispatched(claim!, "ses_eve_1", handoff());
-    await conversationWakeupRepository.complete(claim!, "ses_eve_1", 3);
+    await conversationWakeupRepository.bindDispatch(database(), claim!, { ...handoff(), sessionId: "ses_eve_1", turnId: "turn_wakeup" });
+    await conversationWakeupRepository.complete(claim!, "ses_eve_1");
     expect(await deployReadiness()).toBe("idle");
   });
 

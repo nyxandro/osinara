@@ -2,7 +2,7 @@
  * PostgreSQL session-retention leasing operations.
  *
  * Exports:
- * - `SessionRetentionClaim`: exclusive Eve storage deletion lease.
+ * - `SessionRetentionClaim`: exclusive session storage deletion lease.
  * - `sessionRetentionRepository`: claim, completion, and failure persistence operations.
  */
 import { SESSION_RETENTION_LEASE_MS, SESSION_RETENTION_RETRY_MS } from "../../config.js";

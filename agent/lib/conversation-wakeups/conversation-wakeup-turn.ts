@@ -16,11 +16,11 @@
  * - The run attribute is distinct from an isolated scheduled run's, so every isolated-run branch
  *   keeps treating this turn as an ordinary conversation turn.
  */
-import type { SessionAuthContext } from "eve/context";
-import { telegramContinuationToken } from "eve/channels/telegram";
+import type { SessionAuthContext } from "../../runtime/context.js";
+import { telegramContinuationToken } from "../../runtime/telegram/api.js";
 
 import { formatCurrentTimeContext } from "../current-time.js";
-import { EVE_EMPTY_DELIVERY_MARKER } from "../eve-empty-delivery.js";
+import { EMPTY_DELIVERY_MARKER } from "../../runtime/turn/step-history.js";
 import { groupCanonicalContinuationToken } from "../sessions/group-canonical-token.js";
 import { localScheduledTime } from "../scheduling/local-time.js";
 import type { PreparedConversationWakeup } from "./conversation-wakeup-preparation.js";
@@ -57,8 +57,8 @@ export function conversationCanonicalRouteToken(route: {
 }
 
 /**
- * The dispatch coordinates are the ones a Telegram message's turn carries: every event of the turn
- * is marked with the dispatch id, and Eve refuses to start the turn after the deadline.
+ * The dispatch coordinates are the ones a Telegram message's turn carries: the dispatch id, and a
+ * deadline after which the turn fails at its start instead of running late.
  */
 export function conversationWakeupAuth(
   wakeup: PreparedConversationWakeup,
@@ -113,7 +113,7 @@ export function conversationWakeupMessage(wakeup: PreparedConversationWakeup, no
       "</conversation_wakeup>",
       "Выполни заметку с учётом всего разговора.",
       "- Если цель достигнута или проверять больше незачем, сообщи результат и поставь сценарий на паузу через manage_agent_schedule с action pause и этим schedule_id.",
-      `- Если сообщить нечего, а проверки ещё нужны, заверши ход ровно строкой ${EVE_EMPTY_DELIVERY_MARKER} без другого текста: любая фраза вроде «пока без изменений» уйдёт в чат.`,
+      `- Если сообщить нечего, а проверки ещё нужны, заверши ход ровно строкой ${EMPTY_DELIVERY_MARKER} без другого текста: любая фраза вроде «пока без изменений» уйдёт в чат.`,
       "- Если execution_number равен max_runs, это последний запуск: обязательно сообщи итог — что так и не произошло и стоит ли продолжать.",
       "- Не ставь реакции и не сохраняй факты через remember: у пробуждения нет сообщения человека.",
     ].join("\n"),

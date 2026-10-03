@@ -4,7 +4,7 @@
  * Export:
  * - `read_memory_thread`: deepens one authorized thread by at most 20 entries / 12k characters.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { THREAD_HISTORY_PAGE_MAX_ENTRIES } from "../memory-config.js";
@@ -16,6 +16,8 @@ import {
 } from "../memory-thread-query-repository.js";
 
 export default defineTool({
+  // Repeating it after a crash is safe: it only reads.
+  replaySafe: true,
   description:
     "Прочитать bounded страницу source-backed истории нити по opaque threadRef; используй cursor для углубления.",
   inputSchema: z.object({

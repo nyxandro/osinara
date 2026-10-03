@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `createGoogleOAuthCallbackHandler`: injectable one-time grant completion handler.
- * - `handleGoogleOAuthCallback`: production callback used by the custom Eve channel.
+ * - `handleGoogleOAuthCallback`: production callback behind the fixed callback route.
  */
 import type { GoogleAccountIdentity } from "./google-account-client.js";
 import { getGoogleAccountIdentity } from "./google-account-client.js";

@@ -6,7 +6,7 @@
  * - Unified timeline preparation retains exact forum and reply routing.
  * - Duplicate and unauthorized group updates stop before model dispatch.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { describe, expect, it } from "vitest";
 
 import {

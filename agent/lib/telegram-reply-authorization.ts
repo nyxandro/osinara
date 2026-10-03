@@ -5,7 +5,7 @@
  * - `TelegramReplyAuthorizationResult`: accepted routing state for the remaining inbound turn.
  * - `authorizeTelegramReply`: separates channel conversation replies from human HITL approvals.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import type { TelegramHitlApprovalRepository } from "./telegram-hitl/approval-repository.js";
 import type { TelegramInboundActor } from "./telegram-inbound-actor.js";
@@ -31,7 +31,7 @@ export async function authorizeTelegramReply(input: {
   sendMessage(text: string): Promise<unknown>;
   verifiedReplyRoute: string | undefined;
 }): Promise<TelegramReplyAuthorizationResult> {
-  // Eve synthesizes HITL responses for replies to any bot unless explicitly told otherwise.
+  // The channel takes a reply to the bot as an answer to a waiting request unless told otherwise.
   // Only a DB-authorized human reply may leave the ordinary-message path.
   let replyHandling: "message" | undefined = "message";
   let resumesPendingTask = false;

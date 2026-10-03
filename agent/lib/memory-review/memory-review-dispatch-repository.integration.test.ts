@@ -2,7 +2,7 @@
  * Memory-review dispatch crash-recovery PostgreSQL integration tests.
  *
  * Constructs covered:
- * - Bounded pre-handoff recovery, owner alerts, stale markers, and exact Eve-root ownership.
+ * - Bounded pre-handoff recovery, owner alerts and stale markers.
  */
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -258,30 +258,6 @@ describeWithDatabase("memory review dispatch repository", () => {
     }] });
   });
 
-  it("keeps a running background batch intact for a competing Eve root failure", async () => {
-    const { claim } = await claimBackgroundBatch();
-    const session = await memoryReviewSessionRepository.prepare(claim, new Date());
-    await memoryReviewDispatchRepository.markDispatchStarted(claim, session.id);
-    await memoryReviewDispatchRepository.markRunning(claim, {
-      applicationSessionId: session.id,
-      eveSessionId: "eve-authoritative-root",
-    });
-
-    await memoryReviewDispatchRepository.markSessionAmbiguous({
-      batchId: claim.batchId,
-      diagnosticCode: "AGENT_MEMORY_REVIEW_SESSION_FAILED_AMBIGUOUS",
-      eveSessionId: "eve-competing-root",
-    });
-
-    await expect(database().query(
-      `SELECT batch.status::text, count(source.timeline_entry_id)::integer AS source_count
-         FROM memory_review_batches AS batch
-         LEFT JOIN memory_review_batch_sources AS source ON source.batch_id = batch.id
-        WHERE batch.id = $1 GROUP BY batch.id`,
-      [claim.batchId],
-    )).resolves.toMatchObject({ rows: [{ source_count: 50, status: "running" }] });
-  });
-
   it("fails completion without a source binding and keeps the lane blocked", async () => {
     const { claim } = await claimBackgroundBatch();
     const session = await memoryReviewSessionRepository.prepare(claim, new Date());
@@ -326,65 +302,4 @@ describeWithDatabase("memory review dispatch repository", () => {
     }] });
   });
 
-  it("releases the review batch of a chat session that failed without writing memory", async () => {
-    const fixture = await createMainAgentMemoryFixture();
-    const session = await database().query<{ id: string }>(
-      `INSERT INTO conversation_sessions
-         (thread_id, generation, family_id, group_id, scope, kind, conversation_key,
-          continuation_token, started_at, last_activity_at)
-       VALUES (gen_random_uuid(), 0, $1, $2, 'family', 'canonical', 'review-session-failure',
-               'review-session-failure', now(), now()) RETURNING id`,
-      [fixture.familyId, fixture.groupId],
-    );
-    const source = await insertUserMessage({
-      conversationId: fixture.conversationId,
-      groupId: fixture.groupId,
-      sequence: 2,
-    });
-    const batch = await memoryReviewRepository.prepareInteractiveTurn({
-      applicationSessionId: session.rows[0]!.id,
-      groupId: fixture.groupId,
-      timelineEntryId: source.id,
-    });
-    await memoryReviewRepository.bindEveTurn({
-      applicationSessionId: session.rows[0]!.id,
-      batchId: batch!.batchId,
-      eveSessionId: "eve-interactive-session-failure",
-      eveTurnId: "turn-interactive-session-failure",
-    });
-    await database().query(
-      "UPDATE conversation_sessions SET eve_session_id = $2 WHERE id = $1",
-      [session.rows[0]!.id, "eve-interactive-session-failure"],
-    );
-
-    await expect(memoryReviewDispatchRepository.markInteractiveSessionAmbiguous({
-      continuationToken: "review-session-failure",
-      diagnosticCode: "AGENT_MEMORY_REVIEW_SESSION_FAILED_AMBIGUOUS",
-      eveSessionId: "eve-interactive-session-failure",
-    })).resolves.toBe("recorded");
-    // Ход этой сессии ничего не записал и наследника за собой не оставил, поэтому пакет
-    // освобождается целиком. Прежний терминал `ambiguous` сохранял источники «для ремонта», но
-    // ремонта не существовало: он занимал место на курсоре и глушил лейн навсегда.
-    await expect(database().query(
-      "SELECT count(*)::integer AS batches FROM memory_review_batches WHERE id = $1",
-      [batch!.batchId],
-    )).resolves.toMatchObject({ rows: [{ batches: 0 }] });
-    await expect(database().query(
-      `SELECT rotation_requested_at, pending_operation
-         FROM conversation_sessions WHERE id = $1`,
-      [session.rows[0]!.id],
-    )).resolves.toMatchObject({
-      rows: [{ pending_operation: false, rotation_requested_at: expect.any(Date) }],
-    });
-    await expect(database().query(
-      "SELECT count(*)::integer AS alerts FROM memory_review_owner_alerts",
-    )).resolves.toMatchObject({ rows: [{ alerts: 0 }] });
-    // Источники вернулись в непроверенный хвост и разберутся обычным ходом.
-    const repeated = await memoryReviewRepository.prepareInteractiveTurn({
-      applicationSessionId: session.rows[0]!.id,
-      groupId: fixture.groupId,
-      timelineEntryId: source.id,
-    });
-    expect(repeated?.sourceCount).toBe(2);
-  });
 });

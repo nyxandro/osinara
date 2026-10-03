@@ -9,7 +9,7 @@
  */
 import { createHash } from "node:crypto";
 
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("./image-generation/image-generation-availability.js", () => ({

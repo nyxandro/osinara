@@ -5,7 +5,7 @@
  * - Owner and memory guards accept the freshly authenticated callback caller.
  * - A non-owner callback caller cannot inherit the durable initiator's owner role.
  */
-import type { SessionContext } from "eve/context";
+import type { SessionContext } from "../runtime/context.js";
 import { describe, expect, it } from "vitest";
 
 import { requirePrivateTelegramOwner } from "./family-context.js";

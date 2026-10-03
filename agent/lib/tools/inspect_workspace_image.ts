@@ -2,13 +2,13 @@
  * Persistent workspace image inspection tool.
  *
  * Export:
- * - Eve `inspect_workspace_image` tool over a path, Telegram inbox, or opaque journal reference.
+ * - `inspect_workspace_image` tool over a path, Telegram inbox, or opaque journal reference.
  *
  * Key constructs:
- * - Object-shaped model schema avoids root anyOf in Eve descriptors.
+ * - Object-shaped model schema avoids root anyOf in tool descriptors.
  * - Input validation enforces exactly one image source before workspace authorization.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { requireWorkspaceAuthorization } from "../workspaces/workspace-context.js";
@@ -89,6 +89,8 @@ const TOOL_DESCRIPTION = [
 ].join(" ");
 
 export default defineTool({
+  // Repeating it after a crash is safe: it only reads.
+  replaySafe: true,
   description: TOOL_DESCRIPTION,
   inputSchema: inspectWorkspaceImageSchema,
   async execute(input, ctx) {

@@ -5,7 +5,7 @@
  * - Plain output uses `sendMessage` without parse mode or Rich Message payloads.
  * - Missing Telegram delivery identity is terminally ambiguous.
  */
-import type { TelegramEventContext } from "eve/channels/telegram";
+import type { TelegramEventContext } from "../runtime/telegram/channel-types.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { postTelegramPlainMessageChunk } from "./telegram-plain-messages.js";

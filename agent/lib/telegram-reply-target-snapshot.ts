@@ -6,7 +6,7 @@
  * - `TelegramReplyTargetProjection`: everything one inbound message may say about its reply target.
  * - `telegramReplyTargetProjection`: verifies the target once, then projects its untrusted content.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 export interface TelegramReplyTargetSnapshot {
   contentText: string;
@@ -82,7 +82,7 @@ function rejectTarget(
   return null;
 }
 
-/** Eve and raw Telegram identities must agree before nested untrusted content is admitted. */
+/** Parsed and raw Telegram identities must agree before nested untrusted content is admitted. */
 function verifiedRawTarget(message: TelegramReplyMessage): JsonRecord | null {
   const parsedTarget = message.replyToMessage;
   const rawTarget = record(message.raw.reply_to_message);

@@ -22,18 +22,14 @@ suite("runtime admission reconciliation", () => {
       child.on("error",reject); child.on("exit",code => code === 0 ? resolve() : reject(new Error(`Child identity failed: ${code}`)));
     });
     const dead = JSON.parse(output) as typeof current;
-    const ids = { alive: crypto.randomUUID(), dead: crypto.randomUUID(), legacy: crypto.randomUUID(), native: crypto.randomUUID() };
+    const ids = { alive: crypto.randomUUID(), dead: crypto.randomUUID(), legacy: crypto.randomUUID() };
     for (const [id,owner] of [[ids.alive,current],[ids.dead,dead]] as const) {
       await database().query(`INSERT INTO runtime_admission_holders(id,kind,owner_hostname,owner_pid,owner_start_ticks,created_at)
         VALUES($1,'ordinary',$2,$3,$4,now()-interval '2 days')`, [id,owner.hostname,owner.pid,owner.startTicks]);
     }
     await database().query("INSERT INTO runtime_admission_holders(id,kind) VALUES($1,'ordinary')", [ids.legacy]);
-    await database().query("INSERT INTO runtime_admission_holders(id,kind,eve_session_id) VALUES($1,'callback','native-session')", [ids.native]);
-    await reconcileRuntimeAdmissions(async () => "running");
+    await reconcileRuntimeAdmissions();
     const remaining = (await database().query("SELECT id FROM runtime_admission_holders")).rows.map(row => row.id).sort();
-    expect(remaining).toEqual([ids.alive,ids.legacy,ids.native].sort());
-    await reconcileRuntimeAdmissions(async () => "completed");
-    expect((await database().query("SELECT id FROM runtime_admission_holders")).rows.map(row => row.id).sort())
-      .toEqual([ids.alive,ids.legacy].sort());
+    expect(remaining).toEqual([ids.alive,ids.legacy].sort());
   });
 });

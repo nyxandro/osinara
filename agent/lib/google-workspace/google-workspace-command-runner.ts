@@ -8,7 +8,7 @@
  * The child receives one reviewed argv array, one workspace cwd, and one credential profile. There
  * are no retries; timeout, output bounds, and non-zero exits become stable Russian application errors.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../../runtime/tool.js";
 
 import {
   GOOGLE_WORKSPACE_COMMAND_TIMEOUT_MS,

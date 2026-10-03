@@ -8,7 +8,7 @@
  * - The header is bold through a Telegram `entities` span rather than a parse mode, so the reminder
  *   text written by a person is sent exactly as stored and never needs escaping.
  */
-import { callTelegramApi } from "eve/channels/telegram";
+import { callTelegramApi } from "../../runtime/telegram/api.js";
 
 import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../../config.js";
 import { AppError } from "../app-error.js";

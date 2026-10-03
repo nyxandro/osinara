@@ -2,13 +2,14 @@
  * Telegram owner bootstrap and invitation deep-link boundary.
  *
  * Exports:
- * - `handleTelegramEnrollmentBoundary`: consumes enrollment-only private messages before Eve.
+ * - `handleTelegramEnrollmentBoundary`: consumes enrollment-only private messages before the agent.
  *
  * Key constructs:
  * - Bootstrap claims accept only the exact one-time `/start <43-character-code>` command.
  * - Invitation claims and existing-member deep links never become ordinary model turns.
  */
-import type { TelegramContext, TelegramMessage } from "eve/channels/telegram";
+import type { TelegramContext } from "../runtime/telegram/channel-types.js";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import { telegramProfileName } from "./telegram-on-message-context.js";
 import type { TelegramMessageRepositories } from "./telegram-on-message-repositories.js";
@@ -43,7 +44,7 @@ export async function handleTelegramEnrollmentBoundary(input: {
   }
   const ownerConfigured = await input.repositories.telegram.hasOwner();
 
-  // Bootstrap plaintext is consumed entirely at the channel boundary and never reaches Eve.
+  // Bootstrap plaintext is consumed entirely at the channel boundary and never reaches the agent.
   if (!ownerConfigured) {
     const code = input.message.text.trim().match(OWNER_BOOTSTRAP_COMMAND_PATTERN)?.[1];
     if (!code) {

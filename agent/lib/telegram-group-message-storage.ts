@@ -7,7 +7,7 @@
  * - `telegramForumTopicId`: verified forum topic isolation separate from reply routing.
  * - `lockTelegramGroupJournal` and `pruneTelegramGroupJournal` transaction helpers.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import type { PoolClient } from "pg";
 
 import { TELEGRAM_GROUP_JOURNAL_RETENTION_MESSAGES } from "../config.js";
@@ -67,7 +67,7 @@ export function telegramMessageSentAt(message: TelegramMessage): Date {
 }
 
 export function telegramMessageKind(message: TelegramMessage): string {
-  // Media keys survive Eve parsing in `raw`; only the compact kind is persisted.
+  // Media keys survive parsing in `raw`; only the compact kind is persisted.
   for (const kind of [
     "voice",
     "audio",

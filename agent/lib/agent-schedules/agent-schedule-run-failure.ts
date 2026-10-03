@@ -4,7 +4,7 @@
  * Exports:
  * - `failAgentScheduleRun`: closes a run when no failure notification is needed.
  * - `failAgentScheduleRunForNotification`: closes a known turn and returns live delivery permission.
- * - `failAgentScheduleRunByIdentityForNotification`: closes a terminal Eve session by run identity.
+ * - `failAgentScheduleRunByIdentityForNotification`: closes a terminal session by run identity.
  */
 import type { PoolClient } from "pg";
 
@@ -137,7 +137,7 @@ export async function failAgentScheduleRunByIdentityForNotification(
       await client.query("COMMIT");
       return false;
     }
-    // A terminal Eve event may beat the dispatcher's post-receive running marker.
+    // A terminal turn event may beat the dispatcher's post-receive running marker.
     await client.query(
       `UPDATE agent_schedule_runs
           SET status = 'running', eve_session_id = $2, updated_at = $3

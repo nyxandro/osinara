@@ -7,7 +7,7 @@
  * - A custom model projection of the tool is preserved, including file parts.
  * - A failed tool never consults the queue, and a failed lookup never fails the tool.
  */
-import { defineTool, type ToolDefinition } from "eve/tools";
+import { defineTool, type ToolDefinition } from "../../runtime/tool.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
@@ -87,15 +87,6 @@ describe("withTurnInterjection", () => {
       interjection(async () => BLOCK),
     );
     expect((await run(textProjection)).model).toEqual({ type: "text", value: `Страница 1\n\n${BLOCK}` });
-  });
-
-  it("passes an Eve sign-in request through untouched", async () => {
-    const signal = { __eveAuthorization: true, challenges: [] };
-    const collect = vi.fn(async () => BLOCK);
-    const wrapped = withTurnInterjection(tool(() => signal), interjection(collect));
-
-    expect(await wrapped.execute({}, CONTEXT)).toBe(signal);
-    expect(collect).not.toHaveBeenCalled();
   });
 
   it("does not consult the queue when the tool itself fails, and frees an earlier attempt's claims", async () => {

@@ -11,7 +11,7 @@
  */
 import { createHash } from "node:crypto";
 
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../../runtime/tool.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { AppError } from "../app-error.js";

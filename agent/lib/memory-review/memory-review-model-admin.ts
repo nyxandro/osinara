@@ -1,4 +1,4 @@
-/** Explicit operator recovery for an inspected historical model failure; never sends to Eve. */
+/** Explicit operator recovery for an inspected historical model failure; never starts a turn. */
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
 import { isRecoverableModelCode } from "../model-failure.js";

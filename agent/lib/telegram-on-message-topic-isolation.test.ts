@@ -6,7 +6,7 @@
  * - Verified forum topics retain isolated journal reads.
  * - Eve delivery routing keeps the original Telegram thread in both cases.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { describe, expect, it } from "vitest";
 
 import {

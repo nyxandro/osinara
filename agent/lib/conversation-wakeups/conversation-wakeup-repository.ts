@@ -37,14 +37,15 @@ export interface ConversationWakeupDispatch {
   admissionDeadlineAt: Date;
   eveSessionId: string;
   id: string;
-  startIndex: number;
+  /** The turn the wake-up created; `null` only for a hand-off Eve took before the runtime. */
+  turnId: string | null;
 }
 
 export interface ConversationWakeupClaim {
   attemptCount: number;
-  /** Set once the turn was handed to Eve; such an item is observed, never sent again. */
+  /** Set once the wake-up created its turn; such an item lets that turn finish, never sends again. */
   dispatch: ConversationWakeupDispatch | null;
-  /** The turn Eve admitted for this run, when it reached admission. */
+  /** The turn admitted for this run, when it reached admission. */
   eveTurnId: string | null;
   id: string;
   leaseToken: string;
@@ -57,7 +58,6 @@ interface ClaimRow {
   admission_deadline_at: Date | null;
   attempt_count: number;
   dispatch_id: string | null;
-  dispatch_start_index: string | null;
   eve_session_id: string | null;
   eve_turn_id: string | null;
   id: string;
@@ -65,6 +65,7 @@ interface ClaimRow {
   queue_id: string;
   run_id: string;
   schedule_id: string;
+  turn_id: string | null;
 }
 
 /**
@@ -80,8 +81,7 @@ function laneHasUpdates(queueId: string): string {
 }
 
 function mapClaim(row: ClaimRow): ConversationWakeupClaim {
-  const dispatched = row.dispatch_id !== null && row.eve_session_id !== null &&
-    row.dispatch_start_index !== null && row.admission_deadline_at !== null;
+  const dispatched = row.dispatch_id !== null && row.eve_session_id !== null && row.admission_deadline_at !== null;
   return {
     attemptCount: row.attempt_count,
     dispatch: dispatched
@@ -89,7 +89,7 @@ function mapClaim(row: ClaimRow): ConversationWakeupClaim {
           admissionDeadlineAt: row.admission_deadline_at!,
           eveSessionId: row.eve_session_id!,
           id: row.dispatch_id!,
-          startIndex: Number(row.dispatch_start_index),
+          turnId: row.turn_id,
         }
       : null,
     eveTurnId: row.eve_turn_id,
@@ -194,7 +194,7 @@ export const conversationWakeupRepository = {
           WHERE wakeup.id = $1
           RETURNING wakeup.id::text, wakeup.lease_token::text, wakeup.queue_id::text, wakeup.run_id::text,
                     wakeup.schedule_id::text, wakeup.attempt_count, wakeup.eve_session_id,
-                    wakeup.dispatch_id::text, wakeup.admission_deadline_at, wakeup.dispatch_start_index::text,
+                    wakeup.dispatch_id::text, wakeup.admission_deadline_at, wakeup.turn_id,
                     (SELECT run.eve_turn_id FROM agent_schedule_runs run WHERE run.id = wakeup.run_id) AS eve_turn_id`,
         [found.id, leaseMilliseconds],
       );
@@ -216,71 +216,44 @@ export const conversationWakeupRepository = {
   prepare: prepareConversationWakeup,
 
   /**
-   * Fixes where the turn's events start, which dispatch marks them, and until when Eve may still
-   * admit the turn, all before Eve receives it. After this point a crash is recovered by observing
-   * the session, never by sending the wake-up again.
+   * Records, in the transaction that creates the wake-up's turn, which turn it is, which dispatch
+   * marks it, and until when it may still start. After this point a crash lets that turn finish;
+   * the wake-up is never sent again. The start index belonged to Eve's event stream; it stays
+   * filled only for the table's constraint.
    */
-  async markDispatched(
+  async bindDispatch(
+    client: Pick<PoolClient, "query">,
     claim: Pick<ConversationWakeupClaim, "id" | "leaseToken" | "runId">,
-    eveSessionId: string,
-    dispatch: { admissionDeadlineAt: Date; id: string },
-  ): Promise<number> {
-    return await inTransaction(async (client) => {
-      const cursor = await client.query<{ next_event_index: string }>(
-        "SELECT next_event_index::text FROM eve_session_event_cursors WHERE eve_session_id = $1",
-        [eveSessionId],
-      );
-      const startIndex = Number(cursor.rows[0]?.next_event_index ?? 0);
-      const marked = await client.query(
-        `UPDATE telegram_ingress_wakeups
-            SET dispatch_started_at = now(), eve_session_id = $3, dispatch_start_index = $4, dispatch_id = $5,
-                admission_deadline_at = $6, updated_at = now()
-          WHERE id = $1 AND status = 'processing' AND lease_token = $2 AND lease_expires_at > now()
-            AND dispatch_started_at IS NULL`,
-        [claim.id, claim.leaseToken, eveSessionId, startIndex, dispatch.id, dispatch.admissionDeadlineAt],
-      );
-      if (marked.rowCount !== 1) throw wakeupLeaseLost();
-      const run = await client.query(
-        `UPDATE agent_schedule_runs SET status = 'running', eve_session_id = $2, updated_at = now()
-          WHERE id = $1 AND status = 'dispatching'`,
-        [claim.runId, eveSessionId],
-      );
-      if (run.rowCount !== 1) throw new AppError("AGENT_SCHEDULE_ATTEMPT_STALE", "Попытка запуска расписания уже закрыта");
-      return startIndex;
-    });
-  },
-
-  /** The turn Eve admitted for the run, or null while none was admitted and the run is still open. */
-  async admittedTurn(runId: string): Promise<{ eveTurnId: string | null; open: boolean }> {
-    const run = await database().query<{ eve_turn_id: string | null; open: boolean }>(
-      "SELECT eve_turn_id, status IN ('dispatching', 'running') AS open FROM agent_schedule_runs WHERE id = $1",
-      [runId],
+    dispatch: { admissionDeadlineAt: Date; id: string; sessionId: string; turnId: string },
+  ): Promise<void> {
+    const marked = await client.query(
+      `UPDATE telegram_ingress_wakeups
+          SET dispatch_started_at = now(), eve_session_id = $3, dispatch_start_index = 0, dispatch_id = $4,
+              admission_deadline_at = $5, turn_id = $6, updated_at = now()
+        WHERE id = $1 AND status = 'processing' AND lease_token = $2 AND lease_expires_at > now()
+          AND dispatch_started_at IS NULL`,
+      [claim.id, claim.leaseToken, dispatch.sessionId, dispatch.id, dispatch.admissionDeadlineAt, dispatch.turnId],
     );
-    // A removed run was withdrawn: it is closed and no turn owns it.
-    const row = run.rows[0];
-    return { eveTurnId: row?.eve_turn_id ?? null, open: row?.open === true };
+    if (marked.rowCount !== 1) throw wakeupLeaseLost();
+    const run = await client.query(
+      `UPDATE agent_schedule_runs SET status = 'running', eve_session_id = $2, updated_at = now()
+        WHERE id = $1 AND status = 'dispatching'`,
+      [claim.runId, dispatch.sessionId],
+    );
+    if (run.rowCount !== 1) throw new AppError("AGENT_SCHEDULE_ATTEMPT_STALE", "Попытка запуска расписания уже закрыта");
   },
 
-  /** Closes the queue item and advances the session's event cursor in one step. */
-  async complete(claim: Pick<ConversationWakeupClaim, "id" | "leaseToken">, eveSessionId: string, nextEventIndex: number): Promise<void> {
-    if (!Number.isSafeInteger(nextEventIndex) || nextEventIndex < 0) {
-      throw new AppError("AGENT_TELEGRAM_SESSION_CURSOR_INVALID", "Eve вернул некорректную позицию потока событий сессии");
-    }
+  /** Closes the queue item once the wake-up's turn ended. */
+  async complete(claim: Pick<ConversationWakeupClaim, "id" | "leaseToken">, eveSessionId: string): Promise<void> {
     await inTransaction(async (client) => {
       const owned = await requireOwned(client, claim);
       if (owned.eve_session_id !== eveSessionId) throw wakeupLeaseLost();
       await closeWakeup(client, claim.id, { status: "completed" });
-      await client.query(
-        `INSERT INTO eve_session_event_cursors (eve_session_id, next_event_index) VALUES ($1, $2)
-         ON CONFLICT (eve_session_id) DO UPDATE SET next_event_index = EXCLUDED.next_event_index, updated_at = now()
-         WHERE eve_session_event_cursors.next_event_index <= EXCLUDED.next_event_index`,
-        [eveSessionId, nextEventIndex],
-      );
     });
   },
 
   /**
-   * Parks a wake-up whose turn provably never started: Eve refused the session, or the turn never
+   * Parks a wake-up whose turn provably never started: the conversation is gone, or the turn never
    * reached admission. Returns false when a turn was admitted meanwhile and now owns the run.
    */
   async withdrawNotStarted(

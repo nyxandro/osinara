@@ -1,5 +1,5 @@
 /**
- * External Telegram group policy projection from verified Eve auth.
+ * External Telegram group policy projection from verified session auth.
  *
  * Exports:
  * - `resolveExternalGroupToolPolicy`: reads a fail-closed capability snapshot from session auth.
@@ -8,7 +8,7 @@
  * This module holds no tool definitions, so prompt assembly can read the policy without importing
  * the whole executable tool surface.
  */
-import type { SessionAuth } from "eve/context";
+import type { SessionAuth } from "../../runtime/context.js";
 
 import {
   type GroupSafeSkillName,

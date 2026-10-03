@@ -7,7 +7,6 @@
  * - `workspaceBinaryRepository`: production repository rooted at `/app/workspaces`.
  */
 import { createHash } from "node:crypto";
-import { resolve } from "node:path";
 
 import type { PoolClient } from "pg";
 
@@ -24,7 +23,7 @@ import type {
   WorkspaceAuthorization,
   WorkspaceScope,
 } from "./workspace-repository.js";
-import { workspaceRepository } from "./workspace-repository.js";
+import { WORKSPACES_ROOT, workspaceRepository } from "./workspace-repository.js";
 import {
   getWorkspaceStoredFile,
   listWorkspaceStoredFilesUnder,
@@ -201,9 +200,7 @@ export function createWorkspaceBinaryRepository(root: string, resolver: Workspac
   };
 }
 
-const WORKSPACE_ROOT = resolve("workspaces");
-
 export const workspaceBinaryRepository = createWorkspaceBinaryRepository(
-  WORKSPACE_ROOT,
+  WORKSPACES_ROOT,
   workspaceRepository,
 );

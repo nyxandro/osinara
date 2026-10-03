@@ -6,7 +6,7 @@
  * - `wrapModelFacingToolMap`: applies the same boundary to a complete mode surface.
  * - The metrics line carries the failure code and log-only details of a failed call.
  */
-import { defineTool, type ToolDefinition } from "eve/tools";
+import { defineTool, type ToolDefinition } from "../runtime/tool.js";
 import { afterEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { z } from "zod";
 

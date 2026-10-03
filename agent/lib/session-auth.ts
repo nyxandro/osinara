@@ -1,10 +1,10 @@
 /**
- * Durable Eve session caller resolution.
+ * Durable session caller resolution.
  *
  * Export:
  * - `resolveSessionCaller`: returns only the active verified caller for this turn.
  */
-import type { SessionAuth, SessionAuthContext } from "eve/context";
+import type { SessionAuth, SessionAuthContext } from "../runtime/context.js";
 
 interface SessionAuthSource {
   session: {

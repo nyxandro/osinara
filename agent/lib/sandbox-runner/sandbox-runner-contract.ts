@@ -5,13 +5,13 @@
  * - Runner request/response types for sessions, atomic seed bundles, processes, files, and GWS.
  * - `sandboxSeedDigest`: canonical content identity used by both agent and runner policy checks.
  * - `parseCreateSandboxRequest`: enforces the trusted/restricted scope boundary.
- * - `parseWorkspaceSandboxUseOptions`: validates mounted or explicitly disabled Eve session state.
+ * - `parseWorkspaceSandboxUseOptions`: validates mounted or explicitly disabled session state.
  * - Other `parse*` helpers: validate every untrusted HTTP payload fail-closed.
  * - Runner endpoint, execution-limit, and transport-timeout constants.
  */
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
-import type { SandboxSpawnOptions } from "eve/sandbox";
+import type { SandboxSpawnOptions } from "../../runtime/sandbox/types.js";
 
 import { z } from "zod";
 

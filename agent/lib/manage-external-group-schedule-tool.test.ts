@@ -7,7 +7,7 @@
  * - Invalid schema and action semantics become model-readable denials before execution.
  * - Mutations use opaque schedule IDs and never accept model-selected family or group IDs.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const dependencies = vi.hoisted(() => ({

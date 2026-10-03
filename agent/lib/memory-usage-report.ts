@@ -12,7 +12,7 @@
  * The log line is not optional. Without it nobody can tell whether the rule is followed at all,
  * and a signal that quietly stopped arriving looks exactly like a memory where nothing is useful.
  */
-import type { SessionAuth } from "eve/context";
+import type { SessionAuth } from "../runtime/context.js";
 
 import { memoryFailureCode } from "./memory-context-failure.js";
 import type { MemoryUsageDeclaration } from "./memory-usage-directive.js";

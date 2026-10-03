@@ -22,9 +22,10 @@ the exact Compose bytes, and six exact `ghcr.io/nyxandro/...@sha256:...` referen
   Both release assets are independently attested and checked against pinned SHA-256 values before
   installation by their release-specific bridges.
 
-The app image contains the authored `agent/` tree because Eve `0.40.0` bundles those modules
-when `eve start` serves the built `.output`. The server receives no checkout: the source is confined
-to the immutable app image selected by digest.
+The app image runs the bundled agent `.runtime/agent/main.js`. It also contains the authored
+`agent/` tree: the agent reads `agent/instructions.md` from it, and the operator's manual `tsx`
+commands after a release run from it. The server receives no checkout: the source is confined to the
+immutable app image selected by digest.
 
 GitHub Actions uses only the repository `GITHUB_TOKEN`. The workflow grants package, release,
 OIDC, and attestation writes only to the release job. This follows GitHub's current guidance for
@@ -140,9 +141,15 @@ curl --fail https://HOSTNAME/eve/v1/health && rm /opt/osinara/tls/traefik-dynami
 The `osinara-tls-traefik-data` volume (ACME storage) is preserved by that restart; certificates are
 not reissued.
 
-Eve `0.40.0` uses the official `@workflow/world-postgres` backend in the separate
-`osinara_workflow` database inside the existing PostgreSQL service. The migration gate bootstraps
-that database before the agent starts, and the agent no longer mounts a local Workflow volume.
+Releases up to v0.34 ran on Eve `0.40.0` with the `@workflow/world-postgres` backend in the
+separate `osinara_workflow` database inside the existing PostgreSQL service. The agent's own runtime
+no longer uses that database: after the application migrations the `migrate` service reads it to
+carry each active conversation's history over (`import-eve-history`; a repeated run changes
+nothing), and the deploy controller still checks idleness against it. On a server that ran Eve the
+database is not changed and stays, backups included, until a later cleanup release removes it. A
+fresh installation has no such database: nothing creates it any more, and the import, having no
+history to carry over, does not connect to it.
+
 During the one-time cutover from the Eve `0.32.0` local world, the controller archives the current
 `osinara-production-eve-workflow-data-v032` volume and preserves it for explicit rollback after the
 PostgreSQL-backed candidate passes health checks.
@@ -340,7 +347,7 @@ but unpersisted, conflicting, or wrong-source state fails closed. The bridge exp
 value into the controller process so shell precedence cannot replace the root-owned credential. This
 one transition requires `openssl` on the existing v0.17.1 host; other update and initial paths do not.
 
-Long-term memory has no separate model route. The root Eve agent decides whether to call `remember`;
+Long-term memory has no separate model route. The root agent decides whether to call `remember`;
 PostgreSQL validates the current Telegram source and atomically writes optional thread state. Thread
 activation and context use local E5 embeddings plus deterministic source projections. Semantic
 extraction, relation/thread classifiers, and LLM-generated briefs are not part of the runtime.
@@ -463,6 +470,13 @@ an empty replacement for active data or silently reuses bytes of unknown provena
 embedding model and sandbox cache volumes are omitted.
 Candidate release files remain in a unique temporary directory and become `releases/vVERSION` only
 after health succeeds.
+
+One agent process works on the application database at a time: it holds a PostgreSQL advisory lock
+on a connection of its own for as long as it runs. A second agent started against the same database
+exits at once with `AGENT_RUNTIME_ALREADY_RUNNING`. PostgreSQL frees the lock when the holder's
+connection ends, so a killed or stopped agent never blocks the next one. An agent whose lock
+connection was cut takes the lock again at once; if another agent took it meanwhile, it exits with
+code 1 (`AGENT_RUNTIME_SECOND_PROCESS`) and leaves the turns to that agent.
 
 
 

@@ -1,98 +1,38 @@
 /**
- * Eve backend for the isolated Osinara sandbox runner.
+ * The session sandbox on the isolated Osinara sandbox runner.
  *
  * Exports:
- * - `scopedWorkspaceRunner`: real-Bash backend with trusted scoped tools persistence.
+ * - `openRunnerSandbox`: a lazy runner session for one agent session. The first operation creates
+ *   or reattaches its container; the folders a session mounted first stay its folders.
  * - `deleteRunnerToolEnvironment`: removes persistent tools when their workspace is deleted.
+ *
+ * Key constructs:
+ * - Access follows the mounts: a group workspace runs restricted, personal/family run trusted, a
+ *   session without mounts (silent memory review) has no compute at all.
+ * - Stored metadata (`agent_session_state.sandbox_state`, carried over from Eve) restores the same
+ *   container identity and mounts; compute itself is disposable, workspaces live on volumes.
+ * - Skills arrive as one verified batch per turn (`syncSkills`); there are no build-time seed
+ *   templates: the container starts empty and the turn syncs its skills before the first step.
  */
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { dirname, join, posix } from "node:path";
+import { posix } from "node:path";
 
-import type {
-  SandboxBackend,
-  SandboxBackendPrewarmInput,
-  SandboxProcess,
-  SandboxSeedFile,
-  SandboxSession,
-} from "eve/sandbox";
-import { SandboxTemplateNotProvisionedError } from "eve/sandbox";
+import type { Experimental_SandboxProcess } from "ai";
 
 import { SANDBOX_RUNNER_BASE_URL } from "../../config.js";
+import type { RuntimeSandboxSession, SandboxSkillPackage } from "../../runtime/sandbox/types.js";
 import type {
   GroupSandboxCommandOptions,
   SandboxAccess,
   SandboxRunnerCreateRequest,
-  SandboxRunnerSeedFile,
-  WorkspaceSandboxMount,
   WorkspaceSandboxUseOptions,
 } from "./sandbox-runner-contract.js";
-import {
-  parseCreateSandboxRequest,
-  parseSandboxEveSessionId,
-  parseWorkspaceSandboxUseOptions,
-  sandboxSeedDigest,
-} from "./sandbox-runner-contract.js";
+import { parseCreateSandboxRequest, parseWorkspaceSandboxUseOptions, sandboxSeedDigest } from "./sandbox-runner-contract.js";
 import { SandboxRunnerClient } from "./runner-client.js";
 import { withGroupSandboxAccess } from "./group-sandbox-policy.js";
-import {
-  accessForMounts,
-  type BackendProfile,
-  ROOT_RUNNER_PROFILE,
-  sandboxHome,
-} from "./runner-sandbox-profile.js";
-import { parseStoredSandboxMetadata } from "./runner-sandbox-state.js";
-import type { MaterializedSkillPackage } from "./skill-sync-contract.js";
+import { accessForMounts, ROOT_RUNNER_PROFILE } from "./runner-sandbox-profile.js";
+import { parseStoredSandboxMetadata, type StoredSandboxMetadata } from "./runner-sandbox-state.js";
 
-const TEMPLATE_SCHEMA_VERSION = 1;
-
-interface BackendOptions {
-  baseUrl?: string;
-}
-
-interface StoredTemplate {
-  files: Array<{ contentBase64: string; path: string }>;
-  version: number;
-}
-
-function templatePath(appRoot: string, cacheDirectory: string, templateKey: string): string {
-  return join(appRoot, ".eve", "sandbox-cache", cacheDirectory, "templates", `${templateKey}.json`);
-}
-
-async function exists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-}
-
-function encodeTemplate(seedFiles: ReadonlyArray<SandboxSeedFile>): StoredTemplate {
-  return {
-    files: seedFiles.map((file) => ({
-      contentBase64: Buffer.from(file.content).toString("base64"),
-      path: file.path,
-    })),
-    version: TEMPLATE_SCHEMA_VERSION,
-  };
-}
-
-async function loadTemplate(
-  appRoot: string,
-  templateKey: string,
-  profile: BackendProfile,
-): Promise<StoredTemplate> {
-  const path = templatePath(appRoot, profile.cacheDirectory, templateKey);
-  if (!await exists(path)) {
-    throw new SandboxTemplateNotProvisionedError({ backendName: profile.name, templateKey });
-  }
-  const template = JSON.parse(await readFile(path, "utf8")) as StoredTemplate;
-  if (template.version !== TEMPLATE_SCHEMA_VERSION || !Array.isArray(template.files)) {
-    throw new Error("AGENT_SANDBOX_RUNNER_TEMPLATE_INVALID: Template schema mismatch");
-  }
-  return template;
-}
+const NO_SEED = { seedDigest: sandboxSeedDigest([]), seedFiles: [] };
 
 function resolveSandboxPath(path: string): string {
   return path.startsWith("/") ? posix.normalize(path) : posix.resolve("/workspace", path);
@@ -124,39 +64,15 @@ function resultStream(
   });
 }
 
-function resolveSeedPath(
-  path: string,
-  access: SandboxAccess,
-  mounts: readonly WorkspaceSandboxMount[],
-): string {
-  const homePrefix = "$HOME/";
-  if (path.startsWith(homePrefix)) return `${sandboxHome(access, mounts)}/${path.slice(homePrefix.length)}`;
-  if (path.startsWith("$HOME")) {
-    throw new Error("AGENT_SANDBOX_RUNNER_SEED_PATH_INVALID: HOME seed path is malformed");
-  }
-  return resolveSandboxPath(path);
-}
-
-function seedManifest(
-  template: StoredTemplate | null,
-  access: SandboxAccess,
-  mounts: readonly WorkspaceSandboxMount[],
-): { seedDigest: string; seedFiles: SandboxRunnerSeedFile[] } {
-  const seedFiles = (template?.files ?? []).map((file) => ({
-    contentBase64: file.contentBase64,
-    path: resolveSeedPath(file.path, access, mounts),
-  }));
-  return { seedDigest: sandboxSeedDigest(seedFiles), seedFiles };
-}
-
 function buildSession(input: {
   access: () => SandboxAccess | null;
   client: SandboxRunnerClient;
   ensure: (requiredCapability?: "bash") => Promise<{ sessionId: string; instanceId: string }>;
   id: () => string;
-  syncSkills: (packages: readonly MaterializedSkillPackage[], removed: readonly string[]) => Promise<void>;
-}): SandboxSession & { syncSkillPackages: typeof input.syncSkills } {
-  async function spawn(options: GroupSandboxCommandOptions): Promise<SandboxProcess> {
+  stop: () => Promise<void>;
+  syncSkills: (packages: readonly SandboxSkillPackage[], removed: readonly string[]) => Promise<void>;
+}): RuntimeSandboxSession {
+  async function spawn(options: GroupSandboxCommandOptions): Promise<Experimental_SandboxProcess> {
     const { sessionId, instanceId } = await input.ensure(options.requiredGroupCapability);
     const controller = new AbortController();
     let killed = false;
@@ -194,7 +110,8 @@ function buildSession(input: {
   }
 
   return {
-    syncSkillPackages: input.syncSkills,
+    stop: input.stop,
+    syncSkills: input.syncSkills,
     get id() {
       return input.id();
     },
@@ -258,191 +175,103 @@ function buildSession(input: {
   };
 }
 
-function workspaceRunner(
-  profile: BackendProfile,
-  options: BackendOptions,
-): SandboxBackend<
-  Record<string, never>,
-  WorkspaceSandboxUseOptions
-> {
-  const client = new SandboxRunnerClient(options.baseUrl ?? SANDBOX_RUNNER_BASE_URL);
-  return {
-    name: profile.name,
-    async prewarm(input: SandboxBackendPrewarmInput<Record<string, never>>) {
-      if (input.bootstrap) {
-        throw new Error("AGENT_SANDBOX_RUNNER_BOOTSTRAP_UNSUPPORTED: Use Eve seed files");
-      }
-      const path = templatePath(
-        input.runtimeContext.appRoot,
-        profile.cacheDirectory,
-        input.templateKey,
-      );
-      if (await exists(path)) return { reused: true };
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, JSON.stringify(encodeTemplate(input.seedFiles)), { flag: "wx" });
-      return { reused: false };
-    },
-    async create(input) {
-      const template = input.templateKey === null
-        ? null
-        : await loadTemplate(input.runtimeContext.appRoot, input.templateKey, profile);
-      // A thread ID survives normal context rotation while a trust-zone replacement gets a new ID.
-      const eveSessionId = parseSandboxEveSessionId(input.tags?.sessionId);
-      const restored = parseStoredSandboxMetadata(
-        input.existingMetadata,
-        eveSessionId,
-        profile.stateSchemaVersion,
-      );
-      let request: SandboxRunnerCreateRequest | null = restored && !restored.disabled
-        ? parseCreateSandboxRequest({
-          access: restored.access,
-          eveSessionId,
-          mounts: restored.mounts,
-          sandboxSessionId: restored.sandboxSessionId,
-          ...seedManifest(template, restored.access, restored.mounts),
-        })
-        : null;
-      let disabledSandboxSessionId = restored?.disabled
-        ? restored.sandboxSessionId
-        : null;
-      const requireRequest = (): SandboxRunnerCreateRequest => {
-        if (disabledSandboxSessionId) {
-          throw new Error(
-            "AGENT_SANDBOX_RUNNER_SESSION_DISABLED: Sandbox access is disabled for this session",
-          );
-        }
-        if (!request) {
-          throw new Error(
-            "AGENT_SANDBOX_RUNNER_SESSION_MISSING: Sandbox session is not mounted",
-          );
-        }
-        return request;
-      };
-      const runnerSessionId = () => {
-        if (disabledSandboxSessionId) return disabledSandboxSessionId;
-        return requireRequest().sandboxSessionId;
-      };
-      const ensureWithAccess = async (access: SandboxAccess): Promise<{ sessionId: string; instanceId: string }> => {
-        let current = requireRequest();
-        if (current.access !== access) {
-          request = parseCreateSandboxRequest({ ...current, access, ...seedManifest(template, access, current.mounts) });
-          current = request;
-        }
-        let probe = await client.create({ ...current, seedFiles: undefined });
-        if (probe.seedRequired) {
-          probe = await client.create(current);
-          if (probe.seedRequired) {
-            throw new Error("AGENT_SANDBOX_RUNNER_SEED_REQUIRED: Runner rejected the seed bundle");
-          }
-        }
-        if (!probe.instanceId) throw new Error("AGENT_SANDBOX_RUNNER_INSTANCE_MISSING: Runner did not identify the active container");
-        return { sessionId: current.sandboxSessionId, instanceId: probe.instanceId };
-      };
-      const ensureRunner = async (requiredCapability?: "bash"): Promise<{ sessionId: string; instanceId: string }> => {
-        const current = requireRequest();
-        const group = current.mounts.find((mount) => mount.mountPoint === "group");
-        return group ? withGroupSandboxAccess(group.workspaceId, ensureWithAccess, requiredCapability) : ensureWithAccess("trusted");
-      };
-      const session = buildSession({
-        access: () => request?.access ?? null,
-        client,
-        ensure: ensureRunner,
-        id: runnerSessionId,
-        async syncSkills(packages, removed) {
-          if (packages.length === 0 && removed.length === 0) return;
-          const started = performance.now();
-          const sync = async (access: SandboxAccess) => {
-            const { sessionId, instanceId } = await ensureWithAccess(access);
-            return client.syncSkills(sessionId, { expectedInstanceId: instanceId,
-              packages: packages.map((pkg) => ({ name: pkg.name, files: pkg.files.map((file) => ({
-                path: file.relativePath, contentBase64: Buffer.from(file.content).toString("base64"),
-              })) })), removed: [...removed],
-            });
-          };
-          const group = requireRequest().mounts.find((mount) => mount.mountPoint === "group");
-          const result = group
-            ? await withGroupSandboxAccess(group.workspaceId, sync, undefined, packages.map((pkg) => pkg.name))
-            : await sync("trusted");
-          console.info(JSON.stringify({ code: "AGENT_SKILL_SYNC_METRICS", sessionId: eveSessionId,
-            durationMs: Math.round(performance.now() - started), ...result }));
-        },
-      });
-      const stopRunner = async (): Promise<void> => {
-        // Both lifecycle boundaries preserve metadata; the runner operation is intentionally idempotent.
-        if (request) await client.stop(request.sandboxSessionId);
-      };
-      return {
-        session,
-        async useSessionFn(useOptions) {
-          if (!useOptions) throw new Error("AGENT_SANDBOX_RUNNER_MOUNTS_MISSING: Mounts are required");
-          const parsedOptions = parseWorkspaceSandboxUseOptions(useOptions);
-          if (parsedOptions.mounts.length === 0) {
-            if (request || (disabledSandboxSessionId &&
-                disabledSandboxSessionId !== parsedOptions.sandboxSessionId)) {
-              throw new Error("AGENT_SANDBOX_RUNNER_REMOUNT_DENIED: Session mounts are immutable");
-            }
-            disabledSandboxSessionId = parsedOptions.sandboxSessionId;
-            return session;
-          }
-          if (disabledSandboxSessionId) {
-            throw new Error("AGENT_SANDBOX_RUNNER_REMOUNT_DENIED: Session mounts are immutable");
-          }
-          if (request) {
-            if (
-              request.sandboxSessionId !== parsedOptions.sandboxSessionId ||
-              JSON.stringify(request.mounts) !== JSON.stringify(parsedOptions.mounts)
-            ) {
-              throw new Error("AGENT_SANDBOX_RUNNER_REMOUNT_DENIED: Session mounts are immutable");
-            }
-            return session;
-          }
-          const access = accessForMounts(parsedOptions.mounts);
-          request = parseCreateSandboxRequest({
-            access,
-            eveSessionId,
-            mounts: parsedOptions.mounts,
-            sandboxSessionId: parsedOptions.sandboxSessionId,
-            ...seedManifest(template, access, parsedOptions.mounts),
-          });
-          return session;
-        },
-        async captureState() {
-          if (disabledSandboxSessionId) {
-            return {
-              backendName: profile.name,
-              metadata: {
-                disabled: true,
-                mounts: [],
-                sandboxSessionId: disabledSandboxSessionId,
-                version: profile.stateSchemaVersion,
-              },
-              sessionKey: input.sessionKey,
-            };
-          }
-          const current = requireRequest();
-          return {
-            backendName: profile.name,
-            metadata: {
-              access: current.access,
-              mounts: current.mounts,
-              sandboxSessionId: current.sandboxSessionId,
-              version: profile.stateSchemaVersion,
-            },
-            sessionKey: input.sessionKey,
-          };
-        },
-        shutdown: stopRunner,
-        stop: stopRunner,
-      };
-    },
-  };
+export interface RunnerSandbox {
+  readonly session: RuntimeSandboxSession;
+  /** What to store for the session: its container identity, mounts and access. */
+  captureState(): StoredSandboxMetadata;
 }
 
-export function scopedWorkspaceRunner(options: BackendOptions = {}): SandboxBackend<
-  Record<string, never>,
-  WorkspaceSandboxUseOptions
-> {
-  return workspaceRunner(ROOT_RUNNER_PROFILE, options);
+function remountDenied(): Error {
+  return new Error("AGENT_SANDBOX_RUNNER_REMOUNT_DENIED: Session mounts are immutable");
+}
+
+// A stored session keeps its folders: a different mount set or container identity is refused.
+function requireSameMounts(restored: StoredSandboxMetadata, use: WorkspaceSandboxUseOptions): void {
+  if (restored.sandboxSessionId !== use.sandboxSessionId) throw remountDenied();
+  if (restored.disabled ? use.mounts.length !== 0 : JSON.stringify(restored.mounts) !== JSON.stringify(use.mounts)) {
+    throw remountDenied();
+  }
+}
+
+export function openRunnerSandbox(input: {
+  readonly baseUrl?: string;
+  /** The agent session id; the runner records it with the container. */
+  readonly sessionId: string;
+  readonly stored: Record<string, unknown> | null;
+  /** What the session mounts now, from its verified authorization. */
+  readonly use: WorkspaceSandboxUseOptions;
+}): RunnerSandbox {
+  const profile = ROOT_RUNNER_PROFILE;
+  const client = new SandboxRunnerClient(input.baseUrl ?? SANDBOX_RUNNER_BASE_URL);
+  const use = parseWorkspaceSandboxUseOptions(input.use);
+  const restored = parseStoredSandboxMetadata(input.stored ?? undefined, input.sessionId, profile.stateSchemaVersion);
+  if (restored !== null) requireSameMounts(restored, use);
+  const disabled = use.mounts.length === 0;
+  let request: SandboxRunnerCreateRequest | null = disabled ? null : (() => {
+    const access = accessForMounts(use.mounts);
+    return parseCreateSandboxRequest({ access, eveSessionId: input.sessionId, mounts: use.mounts, sandboxSessionId: use.sandboxSessionId, ...NO_SEED });
+  })();
+  if (restored !== null && !restored.disabled && request !== null) {
+    request = parseCreateSandboxRequest({ ...request, access: restored.access });
+  }
+  const requireRequest = (): SandboxRunnerCreateRequest => {
+    if (request === null) throw new Error("AGENT_SANDBOX_RUNNER_SESSION_DISABLED: Sandbox access is disabled for this session");
+    return request;
+  };
+  const ensureWithAccess = async (access: SandboxAccess): Promise<{ sessionId: string; instanceId: string }> => {
+    let current = requireRequest();
+    if (current.access !== access) {
+      request = parseCreateSandboxRequest({ ...current, access, ...NO_SEED });
+      current = request;
+    }
+    let probe = await client.create({ ...current, seedFiles: undefined });
+    if (probe.seedRequired) {
+      probe = await client.create(current);
+      if (probe.seedRequired) throw new Error("AGENT_SANDBOX_RUNNER_SEED_REQUIRED: Runner rejected the seed bundle");
+    }
+    if (!probe.instanceId) throw new Error("AGENT_SANDBOX_RUNNER_INSTANCE_MISSING: Runner did not identify the active container");
+    return { sessionId: current.sandboxSessionId, instanceId: probe.instanceId };
+  };
+  const groupMount = () => requireRequest().mounts.find((mount) => mount.mountPoint === "group");
+  const ensureRunner = async (requiredCapability?: "bash") => {
+    const group = groupMount();
+    return group ? withGroupSandboxAccess(group.workspaceId, ensureWithAccess, requiredCapability) : ensureWithAccess("trusted");
+  };
+  const session = buildSession({
+    access: () => request?.access ?? null,
+    client,
+    ensure: ensureRunner,
+    id: () => use.sandboxSessionId,
+    // The runner operation is idempotent; a session without compute has nothing to stop.
+    stop: async () => { if (request !== null) await client.stop(request.sandboxSessionId); },
+    async syncSkills(packages, removed) {
+      if (packages.length === 0 && removed.length === 0) return;
+      const started = performance.now();
+      const sync = async (access: SandboxAccess) => {
+        const { sessionId, instanceId } = await ensureWithAccess(access);
+        return client.syncSkills(sessionId, { expectedInstanceId: instanceId,
+          packages: packages.map((pkg) => ({ name: pkg.name, files: pkg.files.map((file) => ({
+            path: file.relativePath, contentBase64: Buffer.from(file.content).toString("base64"),
+          })) })), removed: [...removed],
+        });
+      };
+      const group = groupMount();
+      const result = group
+        ? await withGroupSandboxAccess(group.workspaceId, sync, undefined, packages.map((pkg) => pkg.name))
+        : await sync("trusted");
+      console.info(JSON.stringify({ code: "AGENT_SKILL_SYNC_METRICS", sessionId: input.sessionId,
+        durationMs: Math.round(performance.now() - started), ...result }));
+    },
+  });
+  return {
+    session,
+    captureState() {
+      if (request === null) {
+        return { disabled: true, mounts: [], sandboxSessionId: use.sandboxSessionId, version: profile.stateSchemaVersion };
+      }
+      return { access: request.access, disabled: false, mounts: request.mounts, sandboxSessionId: request.sandboxSessionId, version: profile.stateSchemaVersion };
+    },
+  };
 }
 
 export async function deleteRunnerToolEnvironment(

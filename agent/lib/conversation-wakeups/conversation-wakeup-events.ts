@@ -3,13 +3,13 @@
  *
  * Exports:
  * - `isConversationWakeupTurn`: whether the current turn was started by a wake-up.
- * - `admitConversationWakeupTurn`: binds the starting Eve turn to its run.
+ * - `admitConversationWakeupTurn`: binds the starting turn to its run.
  * - `finishConversationWakeupTurn`: closes the run when the turn completes, fails, or is cancelled.
  *
  * A wake-up turn otherwise behaves as an ordinary turn of that conversation: its final answer is
  * delivered, recorded in the chat history, and routed like any other.
  */
-import type { SessionContext } from "eve/context";
+import type { SessionContext } from "../../runtime/context.js";
 
 import { applicationSessionId } from "../sessions/session-context.js";
 import { conversationWakeupRunRepository } from "./conversation-wakeup-run-repository.js";

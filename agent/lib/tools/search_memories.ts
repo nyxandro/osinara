@@ -4,7 +4,7 @@
  * Export:
  * - `search_memories` runs local embedding plus scoped PostgreSQL hybrid retrieval.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { requireMemoryAuthorization } from "../memory-context.js";
@@ -27,6 +27,8 @@ const EARLIEST_SEARCHABLE_DAY = "1900-01-01";
 const LATEST_SEARCHABLE_DAY = "2100-01-01";
 
 export default defineTool({
+  // Repeating it after a crash is safe: it only reads.
+  replaySafe: true,
   description: [
     "Найти по словам и смыслу сохранённые сведения об участниках, их опыте, прежних обсуждениях, решениях и рекомендациях в доступных областях памяти. Это не поиск в интернете; не используй для внешних сведений и готовых материалов без связи с историей пользователя или чата.",
     "Если для такого вопроса автоматической подборки недостаточно, вызови инструмент до трёх раз с разными смысловыми формулировками и остановись, когда контекста достаточно или новые релевантные факты больше не находятся.",

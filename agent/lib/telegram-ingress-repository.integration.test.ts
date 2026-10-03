@@ -10,7 +10,7 @@
  * - Continuation aliases: Telegram group re-keying keeps one logical FIFO.
  * - Voice transcript persistence: paid provider results survive delivery retries.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "./database.js";
@@ -284,52 +284,21 @@ describeWithDatabase("telegramIngressRepository", () => {
     expect(independent?.updateId).toBe("2003");
     expect(blocked).toBeNull();
 
-    await telegramIngressRepository.completeWithSession(
-      first!.updateId,
-      first!.leaseToken,
-      "eve-session-2001",
-      4,
-    );
+    await telegramIngressRepository.complete(first!.updateId, first!.leaseToken, "eve-session-2001");
 
     await expect(telegramIngressRepository.claimNext(LEASE_MILLISECONDS, NO_BURSTS)).resolves.toMatchObject({
       updateId: "2002",
     });
   });
 
-  it("persists a monotonic Eve event cursor atomically with ingress completion", async () => {
-    const continuationKey = "telegram:private:cursor";
-    const sessionId = "eve-session-cursor";
-    await telegramIngressRepository.enqueue(updateInput("2101", continuationKey, "первый turn"));
+  it("records the session an update ran in when it completes", async () => {
+    await telegramIngressRepository.enqueue(updateInput("2101", "telegram:private:session", "первый turn"));
     const first = await telegramIngressRepository.claimNext(LEASE_MILLISECONDS, NO_BURSTS);
-    await telegramIngressRepository.completeWithSession(
-      first!.updateId,
-      first!.leaseToken,
-      sessionId,
-      4,
-    );
-    await expect(telegramIngressRepository.sessionEventStreamCursor(sessionId)).resolves.toBe(4);
 
-    // A stale boundary cannot complete ingress unless its cursor update commits in the same transaction.
-    await telegramIngressRepository.enqueue(updateInput("2102", continuationKey, "второй turn"));
-    const second = await telegramIngressRepository.claimNext(LEASE_MILLISECONDS, NO_BURSTS);
-    await expect(telegramIngressRepository.completeWithSession(
-      second!.updateId,
-      second!.leaseToken,
-      sessionId,
-      3,
-    )).rejects.toThrowError(/AGENT_TELEGRAM_SESSION_CURSOR_REGRESSION/u);
-    await expect(database().query<{ status: string }>(
-      "SELECT status FROM telegram_ingress_updates WHERE update_id = 2102",
-    )).resolves.toMatchObject({ rows: [{ status: "processing" }] });
-    await expect(telegramIngressRepository.sessionEventStreamCursor(sessionId)).resolves.toBe(4);
+    await telegramIngressRepository.complete(first!.updateId, first!.leaseToken, "wrun_session");
 
-    await telegramIngressRepository.completeWithSession(
-      second!.updateId,
-      second!.leaseToken,
-      sessionId,
-      7,
-    );
-    await expect(telegramIngressRepository.sessionEventStreamCursor(sessionId)).resolves.toBe(7);
+    await expect(database().query("SELECT status, eve_session_id FROM telegram_ingress_updates WHERE update_id = 2101"))
+      .resolves.toMatchObject({ rows: [{ eve_session_id: "wrun_session", status: "completed" }] });
   });
 
   it("reclaims an expired lease and rejects the stale worker token", async () => {
@@ -346,12 +315,7 @@ describeWithDatabase("telegramIngressRepository", () => {
     expect(reclaimed?.updateId).toBe(first?.updateId);
     expect(reclaimed?.leaseToken).not.toBe(first?.leaseToken);
     await expect(
-      telegramIngressRepository.completeWithSession(
-        first!.updateId,
-        first!.leaseToken,
-        "stale-session",
-        1,
-      ),
+      telegramIngressRepository.complete(first!.updateId, first!.leaseToken, "stale-session"),
     ).rejects.toThrowError(/AGENT_TELEGRAM_LEASE_LOST/);
   });
 

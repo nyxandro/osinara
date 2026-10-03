@@ -7,20 +7,16 @@
  * - `SentTelegramMessage`: confirmed Telegram identity for each delivered rich chunk.
  *
  * Key constructs:
- * - One stable non-zero draft ID per private chat/topic and Eve turn.
+ * - One stable non-zero draft ID per private chat/topic and turn.
  * - Telegram Bot API 10.1 `sendRichMessageDraft` and `sendRichMessage` validation.
  * - Final-delivery ambiguity diagnostics without automatic retries.
  * - First-chunk group replies anchored to a verified inbound message.
  */
 import { createHash } from "node:crypto";
 
-import {
-  callTelegramApi,
-  type TelegramApiResponse,
-  type TelegramChannelState,
-  type TelegramChatType,
-  type TelegramHandle,
-} from "eve/channels/telegram";
+import { callTelegramApi, type TelegramApiResponse } from "../runtime/telegram/api.js";
+import type { TelegramChannelState, TelegramHandle } from "../runtime/telegram/channel-types.js";
+import type { TelegramChatType } from "../runtime/telegram/inbound.js";
 
 import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../config.js";
 import { AppError } from "./app-error.js";
@@ -296,7 +292,8 @@ export async function postTelegramRichMessageChunk(
   );
   const sent = requireSentMessage(response);
 
-  // Eve normally anchors groups inside `telegram.post`; raw rich delivery mirrors that contract.
+  // `telegram.post` anchors a group conversation (`runtime/telegram/handle.ts`); raw rich delivery
+  // mirrors that contract.
   if (state) {
     if (state.chatType === null) state.chatType = sent.chatType;
     if (sent.chatType === "group" || sent.chatType === "supergroup") {

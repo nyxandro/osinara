@@ -4,12 +4,12 @@ import { memoryReviewRepository } from "./memory-review-repository.js";
 import { resolveMemoryReviewBatch } from "./memory-review-turn-binding.js";
 
 vi.mock("./memory-review-repository.js", () => ({
-  memoryReviewRepository: { batchIdForTurn: vi.fn() },
+  memoryReviewRepository: { batchForTurn: vi.fn() },
 }));
 
 describe("resolveMemoryReviewBatch", () => {
   it("uses the persisted turn binding before a marker inherited from a later reply", async () => {
-    vi.mocked(memoryReviewRepository.batchIdForTurn).mockResolvedValue("old-batch");
+    vi.mocked(memoryReviewRepository.batchForTurn).mockResolvedValue({ batchId: "old-batch", eveTurnId: "old-turn" });
     await expect(resolveMemoryReviewBatch({
       session: {
         id: "session",
@@ -24,11 +24,11 @@ describe("resolveMemoryReviewBatch", () => {
           initiator: null,
         },
       },
-    })).resolves.toBe("old-batch");
+    })).resolves.toEqual({ batchId: "old-batch", eveTurnId: "old-turn" });
   });
 
   it("retains the marker for an identical terminal replay after the batch was released", async () => {
-    vi.mocked(memoryReviewRepository.batchIdForTurn).mockResolvedValue(null);
+    vi.mocked(memoryReviewRepository.batchForTurn).mockResolvedValue(null);
     await expect(resolveMemoryReviewBatch({
       session: {
         id: "session",
@@ -43,6 +43,6 @@ describe("resolveMemoryReviewBatch", () => {
           initiator: null,
         },
       },
-    })).resolves.toBe("released-batch");
+    })).resolves.toEqual({ batchId: "released-batch", eveTurnId: "old-turn" });
   });
 });
