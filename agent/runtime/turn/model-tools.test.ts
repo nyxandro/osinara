@@ -14,7 +14,7 @@ import { BUILT_IN_TOOL_ORDER, orderStepTools, toModelToolSet } from "./model-too
 type ProviderTool = { name: string };
 
 async function recordedTools(scenario: string): Promise<ProviderTool[]> {
-  const file = JSON.parse(await readFile(`agent/runtime/testing/eve-0.40-requests/${scenario}.json`, "utf8")) as ReferenceFile;
+  const file = JSON.parse(await readFile(`agent/runtime/testing/reference-requests/${scenario}.json`, "utf8")) as ReferenceFile;
   return (unpackReferenceFile(file)[0]!.request as { tools: ProviderTool[] }).tools;
 }
 

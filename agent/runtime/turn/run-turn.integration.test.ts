@@ -266,7 +266,7 @@ async function releaseRunner(turnId: string) {
     const { events, observer } = recordingObserver();
     const turn = await startMessageTurn(sessionId, "что нового?");
 
-    const outcome = await runTurn(testRuntime({ agent: testAgent({}), callModel: scriptedModel(reply("<eve-empty-delivery/>")).callModel, observer }), turn.id, RUN);
+    const outcome = await runTurn(testRuntime({ agent: testAgent({}), callModel: scriptedModel(reply("<empty-delivery/>")).callModel, observer }), turn.id, RUN);
 
     expect(outcome).toEqual({ status: "completed", text: null });
     expect(events.find((event) => event.kind === "stepText")).toMatchObject({ message: null });

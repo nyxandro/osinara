@@ -39,7 +39,7 @@ gws gmail +forward --message-id <ID> --to <EMAILS>
 ```bash
 gws gmail +forward --message-id 18f1a2b3c4d --to dave@example.com
 gws gmail +forward --message-id 18f1a2b3c4d --to dave@example.com --body 'FYI see below'
-gws gmail +forward --message-id 18f1a2b3c4d --to dave@example.com --cc eve@example.com
+gws gmail +forward --message-id 18f1a2b3c4d --to dave@example.com --cc carol@example.com
 gws gmail +forward --message-id 18f1a2b3c4d --to dave@example.com --body '<p>FYI</p>' --html
 gws gmail +forward --message-id 18f1a2b3c4d --to dave@example.com --no-original-attachments
 gws gmail +forward --message-id 18f1a2b3c4d --to dave@example.com --draft

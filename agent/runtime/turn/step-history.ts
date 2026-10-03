@@ -2,7 +2,9 @@
  * What one model step leaves behind: history messages and the text the channel delivers.
  *
  * Exports:
- * - `EMPTY_DELIVERY_MARKER`: the model's way to finish a turn without delivering anything.
+ * - `EMPTY_DELIVERY_MARKER`, `containsEmptyDeliveryMarker`: the model's way to finish a turn without
+ *   delivering anything. The previous marker `<eve-empty-delivery/>` still counts: earlier turns in
+ *   a conversation's history show it, and the model may repeat it.
  * - `isEmptyDelivery`: a final step that only carries the marker; it is not written into history.
  * - `stepHistoryMessages`: the assistant message(s) of a step and one tool message with every
  *   call's result in call order.
@@ -22,7 +24,12 @@ import type { ModelMessage, ToolResultPart } from "ai";
 import type { ToolResultOutput } from "./tool-calls.js";
 
 // Eve 0.40's literal, kept: transferred histories and the prompts already carry it.
-export const EMPTY_DELIVERY_MARKER = "<eve-empty-delivery/>";
+export const EMPTY_DELIVERY_MARKER = "<empty-delivery/>";
+const PREVIOUS_EMPTY_DELIVERY_MARKER = "<eve-empty-delivery/>";
+
+export function containsEmptyDeliveryMarker(text: string): boolean {
+  return text.includes(EMPTY_DELIVERY_MARKER) || text.includes(PREVIOUS_EMPTY_DELIVERY_MARKER);
+}
 
 export interface StepTextEvent {
   readonly finishReason: string;
@@ -31,7 +38,7 @@ export interface StepTextEvent {
 }
 
 export function isEmptyDelivery(input: { readonly finishReason: string; readonly text: string; readonly toolCallCount: number }): boolean {
-  return input.finishReason !== "tool-calls" && input.toolCallCount === 0 && input.text.includes(EMPTY_DELIVERY_MARKER);
+  return input.finishReason !== "tool-calls" && input.toolCallCount === 0 && containsEmptyDeliveryMarker(input.text);
 }
 
 export function stepHistoryMessages(input: {
@@ -68,7 +75,7 @@ export function stepTextEvents(response: readonly ModelMessage[], finishReason: 
       }
     }
   }
-  if (finishReason !== "tool-calls" && text.includes(EMPTY_DELIVERY_MARKER)) {
+  if (finishReason !== "tool-calls" && containsEmptyDeliveryMarker(text)) {
     events.push({ finishReason, message: null });
   } else if (text.trim().length > 0) {
     events.push({ finishReason, message: text });

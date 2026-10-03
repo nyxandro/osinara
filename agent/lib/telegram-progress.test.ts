@@ -30,7 +30,7 @@ describe("completedTelegramOutput", () => {
     expect(
       completedTelegramOutput({
         finishReason: "tool-calls",
-        message: "Молчу <eve-empty-delivery/>",
+        message: "Молчу <empty-delivery/>",
       }),
     ).toBeNull();
   });

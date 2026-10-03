@@ -38,7 +38,7 @@ gws docs +write --document DOC_ID --text 'Hello, world!'
 - For rich formatting, use the raw batchUpdate API instead.
 
 > [!CAUTION]
-> This is a **write** command. Execute it once; `execute_google_workspace` provides the only required Eve HITL confirmation.
+> This is a **write** command. Execute it once; `execute_google_workspace` provides the only required human approval.
 
 ## See Also
 

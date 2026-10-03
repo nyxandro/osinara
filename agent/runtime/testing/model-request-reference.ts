@@ -6,7 +6,7 @@
  * - `normalizeReferenceCalls`: replaces run-specific values with stable placeholders.
  * - `packReferenceFile` / `unpackReferenceFile`: store each repeated system prompt and tool set once.
  *
- * The golden requests in `eve-0.40-requests/` were recorded from native Eve 0.40.0 by the Eve
+ * The golden requests in `reference-requests/` were recorded from native Eve 0.40.0 by the Eve
  * bench `stress/telegram-conversation/evals/reference.eval.ts` (removed after the switch; see the
  * repository history up to `refactor/drop-eve` stage 10). Identifiers, random markers and clock
  * values differ on every run, so each distinct value becomes a numbered placeholder in order of

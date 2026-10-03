@@ -35,13 +35,13 @@ describe("provider installer configuration", () => {
     const generate = vi.fn((purpose: string) => `secret-${purpose}-abcdefghijklmnopqrstuvwxyz`);
     const secrets = generateInternalSecrets(generate);
 
-    expect(generate).toHaveBeenCalledTimes(4);
+    expect(generate).toHaveBeenCalledTimes(3);
     expect(Object.keys(secrets).sort()).toEqual([
       "invitationSigningSecret",
       "postgresPassword",
       "telegramWebhookSecretToken",
     ]);
-    expect(new Set(Object.values(secrets)).size).toBe(4);
+    expect(new Set(Object.values(secrets)).size).toBe(3);
   });
 
   it("rejects missing or whitespace-containing required credentials", () => {

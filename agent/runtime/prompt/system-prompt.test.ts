@@ -6,7 +6,7 @@ import { unpackReferenceFile, type ReferenceFile } from "../testing/model-reques
 import { composeBasePrompt, composeSystemPrompt } from "./system-prompt.js";
 import { formatAvailableSkillsSection } from "./skills-section.js";
 
-const REFERENCE_DIRECTORY = "agent/runtime/testing/eve-0.40-requests";
+const REFERENCE_DIRECTORY = "agent/runtime/testing/reference-requests";
 
 async function firstSystemPrompt(scenario: string): Promise<string> {
   const file = JSON.parse(await readFile(`${REFERENCE_DIRECTORY}/${scenario}.json`, "utf8")) as ReferenceFile;

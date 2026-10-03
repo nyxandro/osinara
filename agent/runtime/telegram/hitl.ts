@@ -21,7 +21,7 @@ import type { TelegramHitlState } from "./channel-types.js";
 export const TELEGRAM_HITL_CALLBACK_PREFIX = "hitl:";
 const PREVIOUS_HITL_CALLBACK_PREFIX = "eve:";
 
-export function isTelegramHitlCallback(data: string | undefined): boolean {
+export function isTelegramHitlCallback(data: string | undefined): data is string {
   return data !== undefined && (data.startsWith(TELEGRAM_HITL_CALLBACK_PREFIX) || data.startsWith(PREVIOUS_HITL_CALLBACK_PREFIX));
 }
 

@@ -29,7 +29,7 @@ type Prompt = LanguageModelV4CallOptions["prompt"];
 type PromptMessage = Prompt[number];
 
 async function rootPrompts(scenario: string): Promise<Prompt[]> {
-  const file = JSON.parse(await readFile(new URL(`../testing/eve-0.40-requests/${scenario}.json`, import.meta.url), "utf8")) as ReferenceFile;
+  const file = JSON.parse(await readFile(new URL(`../testing/reference-requests/${scenario}.json`, import.meta.url), "utf8")) as ReferenceFile;
   return unpackReferenceFile(file).filter((call) => call.agent === "root").map((call) => (call.request as { prompt: Prompt }).prompt);
 }
 
