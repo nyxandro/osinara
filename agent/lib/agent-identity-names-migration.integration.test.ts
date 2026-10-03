@@ -5,8 +5,8 @@
  * - The migrated schema has no table, column, constraint or index named after the previous runtime,
  *   and the turn identity columns are `agent_session_id` / `agent_turn_id`.
  * - Sessions carried over in v0.35 are labelled `imported`.
- * - Stored memory sources move to the `turn:` prefix; audit and incident keys to `agent…` names,
- *   while every other stored value stays as it was.
+ * - Stored memory sources move to the `turn:` prefix; session and turn id keys in audit and incident
+ *   records to `agent…` names, while every other stored value stays as it was.
  */
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -98,7 +98,8 @@ describeWithDatabase("127 agent identity data", () => {
           (2, '{"previousEveSessionId": "wrun_b", "previousEveTurnId": "turn_1", "previousSessionId": "s"}'),
           (3, '{"eveSessionId": "wrun_c", "level": "eve", "nested": {"eveTurnId": "kept"}}'),
           (4, NULL),
-          (5, '{"severity": "low"}');
+          (5, '{"severity": "low"}'),
+          (6, '{"fromEveVersion": "0.22.5", "toEveVersion": "0.32.0"}');
         INSERT INTO operational_incidents VALUES
           (1, '{"chatId": "-1", "eveSessionId": "wrun_d", "eveTurnId": "turn_2"}'),
           (2, '{"updateId": "7"}');
@@ -117,6 +118,8 @@ describeWithDatabase("127 agent identity data", () => {
         { agentSessionId: "wrun_c", level: "eve", nested: { eveTurnId: "kept" } },
         null,
         { severity: "low" },
+        // Versions of the previous runtime stay named after it: renaming them would misstate history.
+        { fromEveVersion: "0.22.5", toEveVersion: "0.32.0" },
       ]);
       const incidents = await client.query<{ context: unknown }>("SELECT context FROM operational_incidents ORDER BY id");
       expect(incidents.rows.map((row) => row.context)).toEqual([

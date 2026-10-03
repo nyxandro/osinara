@@ -103,7 +103,7 @@ interface ApprovalRow extends ApprovalAuthRow {
   pending_operation: boolean;
   prompt_text: string | null;
   retired_at: Date | null;
-  session_eve_session_id: string | null;
+  session_agent_session_id: string | null;
 }
 
 async function lockApproval(
@@ -127,7 +127,7 @@ async function lockApproval(
             a.telegram_message_id::text,
             a.telegram_message_thread_id::text,
             s.continuation_token,
-            s.agent_session_id AS session_eve_session_id,
+            s.agent_session_id AS session_agent_session_id,
             s.family_id,
             s.group_id,
             s.owner_user_id,
@@ -149,7 +149,7 @@ function isPendingApproval(row: ApprovalRow): boolean {
   return row.consumed_at === null &&
     row.pending_operation &&
     row.retired_at === null &&
-    row.session_eve_session_id === row.agent_session_id;
+    row.session_agent_session_id === row.agent_session_id;
 }
 
 function selectedCallbackOption(
@@ -294,7 +294,7 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
       const selectedOption = row ? selectedCallbackOption(row, input.callbackData) : null;
       const replayed = row !== null && input.ingress !== undefined &&
         row.consumed_callback_query_id === input.ingress.callbackQueryId && row.consumed_at !== null &&
-        row.retired_at === null && row.session_eve_session_id === row.agent_session_id;
+        row.retired_at === null && row.session_agent_session_id === row.agent_session_id;
       if (
         !row ||
         (!isPendingApproval(row) && !replayed) ||
@@ -402,7 +402,7 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
       );
       if (!isPendingApproval(row)) {
         if (input.ingress && row.consumed_reply_update_id === input.ingress.updateId && row.retired_at === null &&
-          row.session_eve_session_id === row.agent_session_id && routeMatches && row.expected_telegram_user_id === input.telegramUserId &&
+          row.session_agent_session_id === row.agent_session_id && routeMatches && row.expected_telegram_user_id === input.telegramUserId &&
           await resolveCurrentApprovalAuth(client,row)) {
           await bindTextReplyIngress(client,{ ...input.ingress,telegramUserId: input.telegramUserId,
             chatId: input.telegramChatId,promptMessageId: input.telegramMessageId }, { sessionId: row.agent_session_id,turnId: row.agent_turn_id });
