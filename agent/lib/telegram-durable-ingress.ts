@@ -119,7 +119,7 @@ function queueKey(update: TelegramUpdate): string {
   const message =
     update.kind === "message" ? update.message : update.callbackQuery.message!;
 
-  // One FIFO per chat/topic is stricter than Eve's reply branches and avoids cross-anchor races.
+  // One FIFO per chat/topic is stricter than per-reply branches and avoids cross-anchor races.
   return telegramContinuationToken({
     chatId: message.chat.id,
     messageThreadId: message.messageThreadId,
@@ -393,7 +393,7 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
         const origin = failedUpdate?.kind === "message" ? failedUpdate.message : failedUpdate?.callbackQuery.message;
         await dependencies.reportFailure({ key: `telegram:${claim.updateId}`, code: failure.code,
           summary: failure.message, context: { updateId: claim.updateId, queueId: claim.queueId,
-            chatId: origin?.chat.id ?? null, eveSessionId: dispatchedSessionId ?? null } });
+            chatId: origin?.chat.id ?? null, agentSessionId: dispatchedSessionId ?? null } });
       } finally {
         releaseSlot?.();
         heartbeatController.abort();

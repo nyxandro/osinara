@@ -24,7 +24,7 @@ vi.mock("./sessions/session-context.js", () => ({
   registerTelegramDeliveredMessageRoutes: vi.fn(),
 }));
 vi.mock("./sessions/session-repository.js", () => ({
-  sessionRepository: { isCurrentEveSession: vi.fn(async () => true) },
+  sessionRepository: { isCurrentAgentSession: vi.fn(async () => true) },
 }));
 vi.mock("./memory-usage-report.js", () => ({
   recordMemoryUsageDeclaration: vi.fn(),

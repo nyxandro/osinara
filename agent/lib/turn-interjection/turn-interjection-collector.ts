@@ -234,7 +234,7 @@ async function voiceEntry(
     console.warn(JSON.stringify({
       code: "AGENT_TURN_INTERJECTION_VOICE_UNAVAILABLE",
       error: error instanceof Error ? error.message : String(error),
-      eveTurnId: collection.coordinate.eveTurnId,
+      agentTurnId: collection.coordinate.agentTurnId,
       updateId: planned.updateId,
     }));
     return await unavailableVoice(planned, collection, "transcription_failed");
@@ -254,7 +254,7 @@ async function renderClaimed(plans: readonly Plan[], owned: ReadonlySet<string>,
 }
 
 function callCoordinate(ctx: ToolContext): TurnInterjectionShowCoordinate {
-  return { eveSessionId: ctx.session.id, eveTurnId: ctx.session.turn.id, toolCallId: ctx.callId };
+  return { agentSessionId: ctx.session.id, agentTurnId: ctx.session.turn.id, toolCallId: ctx.callId };
 }
 
 async function releaseClaims(
@@ -268,7 +268,7 @@ async function releaseClaims(
     console.error(JSON.stringify({
       code: "AGENT_TURN_INTERJECTION_RELEASE_FAILED",
       error: error instanceof Error ? error.message : String(error),
-      eveTurnId: coordinate.eveTurnId,
+      agentTurnId: coordinate.agentTurnId,
     }));
   }
 }

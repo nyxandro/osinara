@@ -262,18 +262,18 @@ describeWithDatabase("memory review dispatch repository", () => {
     const { claim } = await claimBackgroundBatch();
     const session = await memoryReviewSessionRepository.prepare(claim, new Date());
     await memoryReviewDispatchRepository.markDispatchStarted(claim, session.id);
-    await memoryReviewRepository.bindEveTurn({
+    await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: session.id,
       batchId: claim.batchId,
-      eveSessionId: "eve-unbound-review",
-      eveTurnId: "turn-unbound-review",
+      agentSessionId: "eve-unbound-review",
+      agentTurnId: "turn-unbound-review",
     });
 
     const completion = {
       batchId: claim.batchId,
       completedAt: new Date("2026-08-12T10:00:02.000Z"),
-      eveSessionId: "eve-unbound-review",
-      eveTurnId: "turn-unbound-review",
+      agentSessionId: "eve-unbound-review",
+      agentTurnId: "turn-unbound-review",
     };
     await expect(memoryReviewRepository.completeBatch(completion)).resolves.toBe("failed");
     await expect(memoryReviewRepository.completeBatch(completion)).resolves.toBe("failed");

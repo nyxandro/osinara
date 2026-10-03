@@ -5,7 +5,6 @@
  * - `claimExpired`: leases only prompts older than the confirmation window, once per lease.
  * - `completeTimeout`: terminalizes the row and releases the session's rotation veto.
  * - A concurrent user decision wins the row; a failed cancellation stays retryable.
- * - Framework `session-limit` prompts are out of the confirmation window's scope.
  * - Pre-migration rows without a request kind are fail-closed.
  * - A prompt whose session no longer owns the parked Eve run is never settled.
  * - A claim carries revalidated Telegram auth, and a timed-out row is not execution evidence.
@@ -28,7 +27,7 @@ const OWNER_TELEGRAM_ID = "timeout-owner";
 const NOW = new Date("2026-08-24T12:00:00.000Z");
 
 async function fixture(
-  kind: "question" | "session-limit" | "tool-approval" = "tool-approval",
+  kind: "question" | "tool-approval" = "tool-approval",
 ): Promise<{ sessionId: string }> {
   const family = await database().query<{ id: string }>(
     "INSERT INTO families (name) VALUES ('Timeout') RETURNING id",
@@ -52,7 +51,7 @@ async function fixture(
     telegramForumTopicId: null,
     userId: owner.rows[0]!.id,
   });
-  await sessionRepository.bindEveSession(session.id, "wrun_timeout");
+  await sessionRepository.bindAgentSession(session.id, "wrun_timeout");
   await sessionRepository.parkSession({
     applicationSessionId: session.id,
     pendingRequestId: "aitxt-timeout-1",
@@ -66,7 +65,7 @@ async function fixture(
 
 async function registerApproval(
   sessionId: string,
-  kind: "question" | "session-limit" | "tool-approval",
+  kind: "question" | "tool-approval",
 ): Promise<void> {
   await telegramHitlApprovalRepository.register({
     applicationSessionId: sessionId,
@@ -76,7 +75,7 @@ async function registerApproval(
       { callbackData: "hitl:0", label: "Да, подтвердить", optionId: "approve" },
       { callbackData: "hitl:1", label: "Cancel", optionId: "cancel" },
     ],
-    eveSessionId: "wrun_timeout",
+    agentSessionId: "wrun_timeout",
     promptText: "Подтвердите действие: исправить запись в памяти.",
     requestId: "aitxt-timeout-1",
     telegramChatId: "700",
@@ -112,15 +111,6 @@ describeWithDatabase("approval timeout repository", () => {
     );
   });
   afterAll(async () => closeDatabase());
-
-  it("never cancels a framework session-limit prompt", async () => {
-    await fixture("session-limit");
-    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
-
-    await expect(
-      approvalTimeoutRepository.claimExpired(NOW, TELEGRAM_HITL_APPROVAL_TIMEOUT_MS),
-    ).resolves.toEqual([]);
-  });
 
   it("bounds an unanswered agent question the same way as an approval", async () => {
     await fixture("question");
@@ -197,7 +187,7 @@ describeWithDatabase("approval timeout repository", () => {
     await expect(
       telegramHitlApprovalRepository.requireToolExecutionApproval({
         applicationSessionId: current.sessionId,
-        eveSessionId: "wrun_timeout",
+        agentSessionId: "wrun_timeout",
         telegramUserId: OWNER_TELEGRAM_ID,
         toolCallId: "call-timeout-1",
         toolInputHash: "b".repeat(64),
@@ -243,7 +233,7 @@ describeWithDatabase("approval timeout repository", () => {
     );
     expect(claimed).toHaveLength(1);
     expect(claimed[0]).toMatchObject({
-      eveSessionId: "wrun_timeout",
+      agentSessionId: "wrun_timeout",
       promptText: "Подтвердите действие: исправить запись в памяти.",
       requestId: "aitxt-timeout-1",
       telegramChatId: "700",

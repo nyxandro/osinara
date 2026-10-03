@@ -8,8 +8,8 @@
  *   the caller runs the turn.
  * - `sessionAddress`: the address a session was opened under, for turns that start inside it.
  *
- * Eve kept the same rule in its channel addresses (`createChannelAddress`): only a delivery with a
- * message may create a session, and the state passed with it applies only then.
+ * Only a delivery with a message may create a session, and the state passed with it applies only
+ * then.
  */
 import { AppError } from "../../lib/app-error.js";
 import type { SessionAuthContext } from "../context.js";

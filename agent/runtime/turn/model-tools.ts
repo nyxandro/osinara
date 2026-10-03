@@ -4,15 +4,11 @@
  * Exports:
  * - `BUILT_IN_TOOL_ORDER`: the fixed place of the runtime's built-in tools.
  * - `orderStepTools`: built-ins first, then static tools, then `agent`, then the application
- *   surface in its own order — the order Eve 0.40 sent, which keeps the provider's cached prompt
- *   prefix valid across the move.
+ *   surface in its own order. A fixed order keeps the provider's cached prompt prefix valid.
  * - `toModelToolSet`: model-facing AI SDK definitions without `execute`: the runtime executes tool
  *   calls itself after the model call returns.
  *
- * Derived from the tool assembly of eve 0.40.0 `harness/tool-loop.ts` (`runSingleModelCall`:
- * framework tools, authored tools, the implicit `agent` tool, then dynamic tools overriding a
- * same-named entry in place) (Apache-2.0, see NOTICE-eve). Changes: one application surface supplies
- * every tool, so the order is applied to it instead of emerging from four merged maps.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { asSchema, jsonSchema, tool, type ToolSet } from "ai";
 

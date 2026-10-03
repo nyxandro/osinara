@@ -6,18 +6,17 @@
  * - `normalizeReferenceCalls`: replaces run-specific values with stable placeholders.
  * - `packReferenceFile` / `unpackReferenceFile`: store each repeated system prompt and tool set once.
  *
- * The golden requests in `reference-requests/` were recorded from native Eve 0.40.0 by the Eve
- * bench `stress/telegram-conversation/evals/reference.eval.ts` (removed after the switch; see the
- * repository history up to `refactor/drop-eve` stage 10). Identifiers, random markers and clock
- * values differ on every run, so each distinct value becomes a numbered placeholder in order of
- * first appearance within one scenario: equal values stay equal, different values stay different,
- * and everything else is compared verbatim. The own runtime normalizes its requests the same way.
+ * The golden requests in `reference-requests/` are complete provider requests of fixed scenarios.
+ * Identifiers, random markers and clock values differ on every run, so each distinct value becomes
+ * a numbered placeholder in order of first appearance within one scenario: equal values stay equal,
+ * different values stay different, and everything else is compared verbatim. The runtime's own
+ * requests are normalized the same way.
  *
  * Comparison contract:
  * - Tool definitions are static text and are compared verbatim, including the UUID patterns and
  *   example dates in their schemas and descriptions.
- * - The bench registers one extra static tool, `probe_workspace`; the runtime's bench registers the
- *   same tool at the same place in the tool set instead of the recording being edited.
+ * - The scenarios register one extra static tool, `probe_workspace`, at a fixed place in the tool
+ *   set.
  * - Placeholders are typed by format, so the runtime must produce ids of the same shape: session
  *   ids `wrun_<ULID>`, approval request ids as AI SDK generates them (`aitxt-…`).
  * - Two independent values that happen to be equal (two timestamps of the same millisecond) share

@@ -83,12 +83,12 @@ for (const target of ["reminder", "agent"] as const) {
         familyId: auth.familyId, groupId: null, now: options.now, scope: "personal", userId: auth.userId,
       });
       await agentScheduleDispatchRepository.markDispatchStarted(job!, { applicationSessionId: session.id });
-      await agentScheduleDispatchRepository.markRunning(job!, { applicationSessionId: session.id, eveSessionId: job!.runId });
-      await admitScheduledAgentTurn({ runId: job!.runId, applicationSessionId: session.id, eveSessionId: job!.runId, eveTurnId: "turn_0" });
+      await agentScheduleDispatchRepository.markRunning(job!, { applicationSessionId: session.id, agentSessionId: job!.runId });
+      await admitScheduledAgentTurn({ runId: job!.runId, applicationSessionId: session.id, agentSessionId: job!.runId, agentTurnId: "turn_0" });
       // A later minute tick must not launch another copy of the same running scenario.
       expect(await agentScheduleDispatchRepository.claimDue({ ...options, now: new Date(after) })).toEqual([]);
       await agentScheduleDispatchRepository.completeDeliveredRun({
-        applicationSessionId: session.id, eveSessionId: job!.runId, runId: job!.runId,
+        applicationSessionId: session.id, agentSessionId: job!.runId, runId: job!.runId,
         content: "Готово", deliveredAt: new Date(after), familyId: auth.familyId, groupId: null,
         messageThreadId: null, ownerUserId: auth.userId, scheduledFor: new Date(job!.nextRunAt),
         scope: "personal", telegramChatId: auth.telegramChatId, telegramMessageId: `${Date.parse(now)}`, title: job!.title,

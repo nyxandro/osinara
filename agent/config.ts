@@ -23,8 +23,6 @@ export const SESSION_GROUP_ROTATION_LOCK_HASH_SEED = 3;
 export const FAMILY_SKILLS_LOCK_HASH_SEED = 4;
 export const SESSION_RETENTION_LEASE_MS = 15 * 60 * 1_000;
 export const SESSION_RETENTION_DAYS = 1;
-// A cleanup that failed is tried again later instead of parking the session for good.
-export const SESSION_RETENTION_RETRY_MS = 60 * 60 * 1_000;
 export const SESSION_TASK_ABANDONED_DAYS = 7;
 export const SESSION_TASK_MAX_ACTIVE_PER_GROUP_TOPIC = 25;
 export const SESSION_TASK_SWEEP_BATCH_SIZE = 100;

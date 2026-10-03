@@ -80,7 +80,7 @@ describeWithDatabase("memory usage counter", () => {
   it("counts a record the turn had shown and refuses one it had not", async () => {
     const window = {
       conversationId,
-      eveSessionId: SESSION,
+      agentSessionId: SESSION,
       turnId: "turn-1",
       turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
     };
@@ -95,14 +95,14 @@ describeWithDatabase("memory usage counter", () => {
   it("refuses a ref that belongs to an earlier turn of the same conversation", async () => {
     const first = {
       conversationId,
-      eveSessionId: SESSION,
+      agentSessionId: SESSION,
       turnId: "turn-1",
       turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
     };
     await memoryShowJournal.recordShown(first, [shownId]);
     const second = {
       conversationId,
-      eveSessionId: SESSION,
+      agentSessionId: SESSION,
       turnId: "turn-2",
       turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-2"),
     };
@@ -118,7 +118,7 @@ describeWithDatabase("memory usage counter", () => {
     // because it moves before that barrier is reached.
     const window = {
       conversationId,
-      eveSessionId: SESSION,
+      agentSessionId: SESSION,
       turnId: "turn-1",
       turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
     };
@@ -136,14 +136,14 @@ describeWithDatabase("memory usage counter", () => {
     // turn's evidence, and the barrier has to tell the two apart.
     const first = {
       conversationId,
-      eveSessionId: "wrun_first",
+      agentSessionId: "wrun_first",
       turnId: "turn_0",
       turnOrdinal: await memoryShowJournal.openTurn(conversationId, "wrun_first", "turn_0"),
     };
     await memoryShowJournal.recordShown(first, [shownId]);
     const rotated = {
       conversationId,
-      eveSessionId: "wrun_second",
+      agentSessionId: "wrun_second",
       turnId: "turn_0",
       turnOrdinal: await memoryShowJournal.openTurn(conversationId, "wrun_second", "turn_0"),
     };
@@ -157,7 +157,7 @@ describeWithDatabase("memory usage counter", () => {
   it("leaves reinforcement alone: observing a fact again is not the same as using it", async () => {
     const window = {
       conversationId,
-      eveSessionId: SESSION,
+      agentSessionId: SESSION,
       turnId: "turn-1",
       turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
     };
@@ -175,7 +175,7 @@ describeWithDatabase("memory usage counter", () => {
   it("does nothing at all when the model named no records", async () => {
     const window = {
       conversationId,
-      eveSessionId: SESSION,
+      agentSessionId: SESSION,
       turnId: "turn-1",
       turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
     };

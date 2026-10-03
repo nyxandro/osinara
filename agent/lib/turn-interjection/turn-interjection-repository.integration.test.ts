@@ -35,7 +35,7 @@ if (integrationTestsEnabled) {
 }
 
 const describeWithDatabase = integrationTestsEnabled ? describe : describe.skip;
-const COORDINATE = { eveSessionId: "ses_1", eveTurnId: "turn_2", toolCallId: "call-1" };
+const COORDINATE = { agentSessionId: "ses_1", agentTurnId: "turn_2", toolCallId: "call-1" };
 const OTHER_CALL = { ...COORDINATE, toolCallId: "call-2" };
 
 async function enqueue(updateId: string, input: { chatId?: string; fromId?: number; text?: string; voice?: boolean } = {}) {

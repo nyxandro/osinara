@@ -73,34 +73,6 @@ describe("Telegram interface localization", () => {
     ]);
   });
 
-  it("leaves a framework session-limit request unrewritten but localizes its buttons", () => {
-    const request = localizeTelegramInputRequest({
-      action: {
-        callId: "call-1",
-        input: { limit: 1_000_000, usedTokens: 1_000_123 },
-        kind: "tool-call" as const,
-        toolName: "session_limit_continuation",
-      },
-      display: "confirmation" as const,
-      kind: "session-limit" as const,
-      options: [
-        { id: "continue", label: "Approve" },
-        { id: "stop", label: "Stop" },
-      ],
-      prompt: "Session limit reached",
-      requestId: "request-limit",
-    });
-
-    // Nothing is executed by a budget prompt, so neither its text nor a consequence may be invented.
-    expect(request.prompt).toBe("Session limit reached");
-    expect(request.prompt).not.toContain("будет выполнено один раз");
-    expect(request.prompt).not.toContain("usedTokens");
-    expect(request.options).toEqual([
-      { id: "continue", label: "Продолжить" },
-      { id: "stop", label: "Остановить" },
-    ]);
-  });
-
   it("uses a generic Russian prompt for an unknown tool", () => {
     const request = localizeTelegramInputRequest({
       action: { callId: "call-1", input: {}, kind: "tool-call" as const, toolName: "future_tool" },

@@ -35,9 +35,9 @@ import {
 
 export interface ConversationWakeupDispatch {
   admissionDeadlineAt: Date;
-  eveSessionId: string;
+  agentSessionId: string;
   id: string;
-  /** The turn the wake-up created; `null` only for a hand-off Eve took before the runtime. */
+  /** The turn the wake-up created; `null` only for a hand-off recorded before turns were journaled. */
   turnId: string | null;
 }
 
@@ -46,7 +46,7 @@ export interface ConversationWakeupClaim {
   /** Set once the wake-up created its turn; such an item lets that turn finish, never sends again. */
   dispatch: ConversationWakeupDispatch | null;
   /** The turn admitted for this run, when it reached admission. */
-  eveTurnId: string | null;
+  agentTurnId: string | null;
   id: string;
   leaseToken: string;
   queueId: string;
@@ -87,12 +87,12 @@ function mapClaim(row: ClaimRow): ConversationWakeupClaim {
     dispatch: dispatched
       ? {
           admissionDeadlineAt: row.admission_deadline_at!,
-          eveSessionId: row.eve_session_id!,
+          agentSessionId: row.eve_session_id!,
           id: row.dispatch_id!,
           turnId: row.turn_id,
         }
       : null,
-    eveTurnId: row.eve_turn_id,
+    agentTurnId: row.eve_turn_id,
     id: row.id,
     leaseToken: row.lease_token,
     queueId: row.queue_id,
@@ -218,8 +218,8 @@ export const conversationWakeupRepository = {
   /**
    * Records, in the transaction that creates the wake-up's turn, which turn it is, which dispatch
    * marks it, and until when it may still start. After this point a crash lets that turn finish;
-   * the wake-up is never sent again. The start index belonged to Eve's event stream; it stays
-   * filled only for the table's constraint.
+   * the wake-up is never sent again. `dispatch_start_index` is no longer read; it stays filled only
+   * for the table's constraint.
    */
   async bindDispatch(
     client: Pick<PoolClient, "query">,
@@ -244,10 +244,10 @@ export const conversationWakeupRepository = {
   },
 
   /** Closes the queue item once the wake-up's turn ended. */
-  async complete(claim: Pick<ConversationWakeupClaim, "id" | "leaseToken">, eveSessionId: string): Promise<void> {
+  async complete(claim: Pick<ConversationWakeupClaim, "id" | "leaseToken">, agentSessionId: string): Promise<void> {
     await inTransaction(async (client) => {
       const owned = await requireOwned(client, claim);
-      if (owned.eve_session_id !== eveSessionId) throw wakeupLeaseLost();
+      if (owned.eve_session_id !== agentSessionId) throw wakeupLeaseLost();
       await closeWakeup(client, claim.id, { status: "completed" });
     });
   },

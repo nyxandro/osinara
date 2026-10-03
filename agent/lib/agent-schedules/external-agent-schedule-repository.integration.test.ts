@@ -335,7 +335,7 @@ describeWithDatabase("external agent schedule repository", () => {
     )).resolves.toBe(true);
     await expect(agentScheduleDispatchRepository.markRunning(job!, {
       applicationSessionId: session.id,
-      eveSessionId: "eve-terminal-race",
+      agentSessionId: "eve-terminal-race",
     })).resolves.toBeUndefined();
     await expect(database().query(
       "SELECT status::text, error_code FROM agent_schedule_runs WHERE id = $1",
@@ -382,11 +382,11 @@ describeWithDatabase("external agent schedule repository", () => {
     });
     await agentScheduleDispatchRepository.markRunning(job!, {
       applicationSessionId: session.id,
-      eveSessionId: "eve-external-schedule",
+      agentSessionId: "eve-external-schedule",
     });
     const authorization = {
       applicationSessionId: session.id,
-      eveSessionId: "eve-external-schedule",
+      agentSessionId: "eve-external-schedule",
       familyId: setup.familyId,
       groupId: setup.groupId,
       messageThreadId: null,

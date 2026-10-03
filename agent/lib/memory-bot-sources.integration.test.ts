@@ -112,8 +112,8 @@ describeWithDatabase("bot memory source end-to-end", () => {
     await expect(remember.execute({ ...input, ...(bot ? {} : { sourceSequence: "50" }) }, ctx))
       .resolves.toMatchObject({ item: { content: input.content, scope: "group" } });
     await expectBotAuthor();
-    await expect(memoryTurnSourceRepository.resolve({ eveSessionId: ctx.session.id,
-      eveTurnId: ctx.session.turn.id, sourceSequence: "51" })).resolves.toBeNull();
+    await expect(memoryTurnSourceRepository.resolve({ agentSessionId: ctx.session.id,
+      agentTurnId: ctx.session.turn.id, sourceSequence: "51" })).resolves.toBeNull();
     await expect(remember.execute({ ...input, scope: "personal" }, ctx)).rejects.toMatchObject({ code: "AGENT_MEMORY_SCOPE_DENIED" });
   });
 
@@ -155,9 +155,9 @@ describeWithDatabase("bot memory source end-to-end", () => {
     const session = await memoryReviewSessionRepository.prepare(batch!, new Date());
     await memoryReviewDispatchRepository.markDispatchStarted(batch!, session.id);
     const ctx = context(f, session.id, false, batch!);
-    await sessionRepository.bindEveSession(session.id, ctx.session.id);
-    await memoryReviewRepository.bindEveTurn({ applicationSessionId: session.id, batchId: batch!.batchId,
-      eveSessionId: ctx.session.id, eveTurnId: ctx.session.turn.id });
+    await sessionRepository.bindAgentSession(session.id, ctx.session.id);
+    await memoryReviewRepository.bindAgentTurn({ applicationSessionId: session.id, batchId: batch!.batchId,
+      agentSessionId: ctx.session.id, agentTurnId: ctx.session.turn.id });
     await bindMemoryTurnSources(ctx);
     expect(rendered.filter((entry) => entry.actor === "telegram_bot")).toHaveLength(1);
     await remember.execute({ ...input, sourceSequence: "50" }, ctx);
@@ -167,7 +167,7 @@ describeWithDatabase("bot memory source end-to-end", () => {
     await expect(database().query("SELECT count(*)::integer AS n FROM memory_items"))
       .resolves.toMatchObject({ rows: [{ n: 2 }] });
     await memoryReviewRepository.completeBatch({ batchId: batch!.batchId, completedAt: new Date(),
-      eveSessionId: ctx.session.id, eveTurnId: ctx.session.turn.id });
+      agentSessionId: ctx.session.id, agentTurnId: ctx.session.turn.id });
     expect(await memoryReviewRepository.getLaneCursor({ conversationId: f.conversationId, messageThreadId: null })).toBe("50");
   });
 });

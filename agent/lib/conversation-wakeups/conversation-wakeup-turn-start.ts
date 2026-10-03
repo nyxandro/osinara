@@ -34,20 +34,20 @@ export function createConversationWakeupTurn(input: {
     const { context, message } = conversationWakeupMessage(wakeup, now);
     const dispatch = { admissionDeadlineAt: new Date(now.getTime() + input.admissionMilliseconds), id: crypto.randomUUID() };
     return await inJournalTransaction(input.database, async (client) => {
-      const address = await sessionAddress(client, wakeup.eveSessionId);
+      const address = await sessionAddress(client, wakeup.agentSessionId);
       if (address === null || address.channelKind !== TELEGRAM_CHANNEL_KIND) {
         throw new AppError(WAKEUP_SESSION_INACTIVE_CODE, "Разговор пробуждения больше не ведётся");
       }
       const auth = conversationWakeupAuth(wakeup, now, { deadlineAt: dispatch.admissionDeadlineAt.toISOString(), id: dispatch.id });
       const turn = await startTurnWithClient(client, {
-        auth: { current: auth, initiator: await loadInitiatorAuth(client, wakeup.eveSessionId) },
+        auth: { current: auth, initiator: await loadInitiatorAuth(client, wakeup.agentSessionId) },
         channel: { continuationToken: address.token, kind: TELEGRAM_CHANNEL_KIND },
         input: { context, message },
         kind: "wakeup",
         parent: null,
-        sessionId: wakeup.eveSessionId,
+        sessionId: wakeup.agentSessionId,
       });
-      await input.repository.bindDispatch(client, claim, { ...dispatch, sessionId: wakeup.eveSessionId, turnId: turn.id });
+      await input.repository.bindDispatch(client, claim, { ...dispatch, sessionId: wakeup.agentSessionId, turnId: turn.id });
       return turn.id;
     });
   };

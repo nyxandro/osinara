@@ -8,10 +8,8 @@
  * - `requestedOutputSchema`: the call's `outputSchema`, only when it is a non-empty object.
  * - `finalOutputTool`, `FINAL_OUTPUT_TOOL_NAME`: the tool a child with an output schema answers through.
  *
- * Ported from eve 0.40.0 `runtime/framework-tools/agent.ts`, `runtime/subagents/registry.ts`
- * (input schema), `execution/subagent-invocation.ts` and `runtime/framework-tools/final-output.ts`
- * (Apache-2.0, see NOTICE-eve). The input schema is the JSON Eve sent, verbatim, so the provider
- * sees the same tool.
+ * The input schema is fixed JSON: the provider sees the same tool on every turn.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { JsonObject } from "../json.js";
 import { defineTool, type ToolDefinition } from "../tool.js";

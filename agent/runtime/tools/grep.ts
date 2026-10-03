@@ -5,9 +5,8 @@
  * - `grep`: the built-in definition the model sees as `grep`.
  * - `executeGrepOnSandbox`, `GrepInput`, `GrepResult`: ripgrep, or POSIX grep.
  *
- * Ported verbatim from eve 0.40.0 `runtime/framework-tools/grep.ts` and
- * `execution/sandbox/grep-tool.ts` (Apache-2.0, see NOTICE-eve). Changes: the sandbox comes from
- * the tool context.
+ * The sandbox comes from the tool context.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { z } from "zod";
 

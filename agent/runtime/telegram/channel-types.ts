@@ -10,10 +10,7 @@
  * - `TelegramInboundResult`, `TelegramHitlCallbackResult`: what the application's message and
  *   button handlers decide.
  *
- * Derived from eve 0.40.0 `public/channels/telegram/telegramChannel.ts`, `hitl.ts` and
- * `public/definitions/channel.ts` (Apache-2.0, see NOTICE-eve). Changes: the result types carry
- * the fields Osinara's patches added (`continuationToken`, `message`, `replyHandling`,
- * `acknowledgementText`).
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { SessionAuth, SessionAuthContext, SessionTurn } from "../context.js";
 import type { InputRequest, InputResponse } from "../hitl/types.js";
@@ -74,15 +71,15 @@ export interface TelegramChannelState extends TelegramHitlState {
 
 /**
  * Context of a handler that runs for a turn event. Changes to `state` are saved after the handler.
- * The address is read-only: the runtime never re-addresses a session after a bot message (Eve's
- * `rekey`), the application keeps its own routes.
+ * The address is read-only: the runtime never re-addresses a session after a bot message; the
+ * application keeps its own routes.
  */
 export interface TelegramEventContext extends TelegramContext {
   readonly continuation?: { readonly token: string };
   state: TelegramChannelState;
 }
 
-/** The turn a handler runs for, in the shape Eve handed to its channel events. */
+/** The turn a handler runs for. */
 export interface TelegramTurnContext {
   readonly session: {
     readonly auth: SessionAuth;

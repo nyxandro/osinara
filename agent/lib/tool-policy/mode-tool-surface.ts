@@ -9,8 +9,8 @@
  *
  * Key constructs:
  * - Every tool is emitted per mode, the runtime's built-ins included, so a tool that cannot work in
- *   the current trust zone has no descriptor at all. Trusted modes get the built-ins Eve always
- *   registered (agent, ask_question, bash, read_file, write_file, todo, load_skill); an external group
+ *   the current trust zone has no descriptor at all. Trusted modes get the runtime's built-ins
+ *   (agent, ask_question, bash, read_file, write_file, todo, load_skill); an external group
  *   gets only its own file tools, its granted capabilities and, without a verified registration,
  *   nothing beyond answering in text.
  * - External groups re-check every granted capability at execution time against the live policy.
@@ -219,7 +219,7 @@ async function withExternalGroupCapability<T>(
   if (capability === "send_workspace_file" && scheduledDelivery) {
     await authorizeAgentScheduleDelivery({
       applicationSessionId: scheduledDelivery.applicationSessionId,
-      eveSessionId: ctx.session.id,
+      agentSessionId: ctx.session.id,
       familyId: scheduledDelivery.familyId,
       groupId: scheduledDelivery.groupId,
       messageThreadId: scheduledDelivery.messageThreadId,
@@ -347,7 +347,7 @@ function buildExternalToolSurface(
   const effectiveSurface = scheduledRun
     ? Object.fromEntries(Object.entries(surface).map(([name, definition]) => [name, scheduledExternalTool(definition)]))
     : surface;
-  // A verified external group delegates like any root turn (Eve's built-in, never wrapped);
+  // A verified external group delegates like any root turn (the built-in, never wrapped);
   // a child never gets it, see `buildSubagentToolSurface`.
   const wrapped = wrapModelFacingToolMap(effectiveSurface);
   return includeApplicationCore ? { ...wrapped, agent: agentTool as AnyToolDefinition } : wrapped;
@@ -357,8 +357,8 @@ function allowlistKey(allowed: ReadonlySet<ExternalGroupToolName>): string {
   return [...allowed].sort().join("\0");
 }
 
-// What Eve registered in every trusted turn without the application asking. They stay outside the
-// model-facing error wrapper, as Eve's own tools did.
+// The runtime's built-ins of every trusted turn. They stay outside the model-facing error wrapper:
+// their errors are already written for the model.
 const TRUSTED_BUILT_IN_TOOLS: ToolMap = {
   agent: agentTool as AnyToolDefinition,
   ask_question: askQuestion as AnyToolDefinition,

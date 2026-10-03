@@ -98,7 +98,7 @@ describe("memory review dispatcher", () => {
     );
     expect(fixture.dependencies.markRunning).toHaveBeenCalledWith(batch, {
       applicationSessionId: "application-review-session-1",
-      eveSessionId: "eve-review-session-1",
+      agentSessionId: "eve-review-session-1",
     });
   });
 

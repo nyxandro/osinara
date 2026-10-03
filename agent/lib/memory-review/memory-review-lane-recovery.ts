@@ -1,4 +1,4 @@
-/** Repairs only the persisted pre-Eve incident class and measures lane progress without chat text. */
+/** Repairs only one persisted historical incident class and measures lane progress without chat text. */
 import type { PoolClient } from "pg";
 import { AppError } from "../app-error.js";
 

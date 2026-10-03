@@ -92,7 +92,7 @@ describeWithDatabase("canonical group session repository", () => {
   it("promotes a parked canonical and lets an unrelated turn create its replacement", async () => {
     const f = await fixture();
     const canonical = await sessionRepository.prepareTurn(canonicalInput(f, null));
-    await sessionRepository.bindEveSession(canonical.id, "wrun_task");
+    await sessionRepository.bindAgentSession(canonical.id, "wrun_task");
     await sessionRepository.registerRouteAlias(canonical.id, "-100-canonical::500");
 
     await sessionRepository.parkSession({
@@ -120,7 +120,7 @@ describeWithDatabase("canonical group session repository", () => {
   it("allocates above newer retired generations when an older running task remains", async () => {
     const f = await fixture();
     const staleTask = await sessionRepository.prepareTurn(canonicalInput(f, null));
-    await sessionRepository.bindEveSession(staleTask.id, "wrun_stale_task");
+    await sessionRepository.bindAgentSession(staleTask.id, "wrun_stale_task");
     await sessionRepository.parkSession({
       applicationSessionId: staleTask.id,
       pendingRequestId: "request-stale",
@@ -132,7 +132,7 @@ describeWithDatabase("canonical group session repository", () => {
     const firstReplacement = await sessionRepository.prepareTurn(canonicalInput(f, null));
     await sessionRepository.requestRotation(firstReplacement.id);
     const newer = await sessionRepository.prepareTurn(canonicalInput(f, null));
-    await sessionRepository.bindEveSession(newer.id, "wrun_newer_task");
+    await sessionRepository.bindAgentSession(newer.id, "wrun_newer_task");
     await sessionRepository.parkSession({
       applicationSessionId: newer.id,
       pendingRequestId: "request-newer",
@@ -215,7 +215,7 @@ describeWithDatabase("canonical group session repository", () => {
     async (terminalPath) => {
     const f = await fixture();
     const canonical = await sessionRepository.prepareTurn(canonicalInput(f, null));
-    await sessionRepository.bindEveSession(canonical.id, "wrun_atomic_terminal");
+    await sessionRepository.bindAgentSession(canonical.id, "wrun_atomic_terminal");
     await sessionRepository.parkSession({
       applicationSessionId: canonical.id,
       pendingRequestId: "request-atomic",
@@ -265,7 +265,7 @@ describeWithDatabase("canonical group session repository", () => {
   ] as const)("retires a non-pending task after it is %s", async (_outcome, failed) => {
     const f = await fixture();
     const canonical = await sessionRepository.prepareTurn(canonicalInput(f, null));
-    await sessionRepository.bindEveSession(canonical.id, "wrun_terminal_task");
+    await sessionRepository.bindAgentSession(canonical.id, "wrun_terminal_task");
     await sessionRepository.parkSession({
       applicationSessionId: canonical.id,
       pendingRequestId: "request-terminal",
@@ -291,7 +291,7 @@ describeWithDatabase("canonical group session repository", () => {
   it("retires abandoned running tasks in the bounded lifecycle sweep", async () => {
     const f = await fixture();
     const canonical = await sessionRepository.prepareTurn(canonicalInput(f, null));
-    await sessionRepository.bindEveSession(canonical.id, "wrun_abandoned_task");
+    await sessionRepository.bindAgentSession(canonical.id, "wrun_abandoned_task");
     await sessionRepository.parkSession({
       applicationSessionId: canonical.id,
       pendingRequestId: "request-abandoned",

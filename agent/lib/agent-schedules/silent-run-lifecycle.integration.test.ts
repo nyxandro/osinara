@@ -47,8 +47,8 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
       kind: "scheduled", telegramForumTopicId: null, familyId: auth.familyId, groupId: null,
       now: new Date(now), scope: "personal", userId: auth.userId });
     await dispatch.markDispatchStarted(job!, { applicationSessionId: session.id });
-    await admitScheduledAgentTurn({ runId: job!.runId, applicationSessionId: session.id, eveSessionId: job!.runId, eveTurnId: "turn_0" });
-    const receipt = { applicationSessionId: session.id, eveSessionId: job!.runId, runId: job!.runId,
+    await admitScheduledAgentTurn({ runId: job!.runId, applicationSessionId: session.id, agentSessionId: job!.runId, agentTurnId: "turn_0" });
+    const receipt = { applicationSessionId: session.id, agentSessionId: job!.runId, runId: job!.runId,
       content: "Чейнжлог", deliveredAt: new Date(Date.parse(now) + 10_000), familyId: auth.familyId, groupId: null,
       messageThreadId: null, ownerUserId: auth.userId, scheduledFor: new Date(job!.nextRunAt), scope: "personal" as const,
       telegramChatId: "123", telegramMessageId: String(Date.parse(now)), title: "Чейнжлог" };
@@ -71,10 +71,10 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
     const { auth, schedule } = await setup();
     const { job, receipt } = await start(auth, "2026-09-14T12:00:00Z");
 
-    expect(await dispatch.completeSilentRun(receipt.applicationSessionId, receipt.eveSessionId, receipt.deliveredAt))
+    expect(await dispatch.completeSilentRun(receipt.applicationSessionId, receipt.agentSessionId, receipt.deliveredAt))
       .toBe(true);
     // The channel still closes the turn afterwards; it must find nothing left to fail.
-    expect(await dispatch.failRun(receipt.applicationSessionId, receipt.eveSessionId,
+    expect(await dispatch.failRun(receipt.applicationSessionId, receipt.agentSessionId,
       "AGENT_SCHEDULE_DELIVERY_CONFIRMATION_MISSING", receipt.deliveredAt)).toBe(false);
 
     expect(await runRow(job.runId)).toEqual({ error_code: null, status: "completed" });
@@ -90,7 +90,7 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
     const { auth, schedule } = await setup(2);
     for (const now of ["2026-09-14T12:00:00Z", "2026-09-14T12:01:00Z"]) {
       const { receipt } = await start(auth, now);
-      await dispatch.completeSilentRun(receipt.applicationSessionId, receipt.eveSessionId, receipt.deliveredAt);
+      await dispatch.completeSilentRun(receipt.applicationSessionId, receipt.agentSessionId, receipt.deliveredAt);
     }
 
     expect(await schedules.findById(auth, schedule.id)).toMatchObject({ completedRuns: 2, status: "completed" });
@@ -103,7 +103,7 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
     await schedules.update(auth, schedule.id, { recurrence: { kind: "once" }, operationKey: "once" });
     const { job, receipt } = await start(auth, "2026-09-14T12:00:00Z");
 
-    await dispatch.completeSilentRun(receipt.applicationSessionId, receipt.eveSessionId, receipt.deliveredAt);
+    await dispatch.completeSilentRun(receipt.applicationSessionId, receipt.agentSessionId, receipt.deliveredAt);
 
     expect(await schedules.findById(auth, schedule.id)).toMatchObject({ completedRuns: 1, status: "completed" });
     expect(await incidents(job.runId)).toBe(0);
@@ -116,14 +116,14 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
     const confirm = vi.spyOn(telegramFinalDeliveryRepository, "confirmChunk").mockRejectedValueOnce(outage);
     try {
       await expect(deliverTelegramFinalOutput({ applicationSessionId: receipt.applicationSessionId,
-        deliveryIdentity: { chatId: "123" }, eveSessionId: receipt.eveSessionId, eveTurnId: "turn_0",
+        deliveryIdentity: { chatId: "123" }, agentSessionId: receipt.agentSessionId, agentTurnId: "turn_0",
         markdown: "Чейнжлог", sendChunk: vi.fn().mockResolvedValue({ chatType: "private", messageId: "1234" }) }))
         .rejects.toBe(outage);
     } finally {
       confirm.mockRestore();
     }
 
-    expect(await dispatch.completeSilentRun(receipt.applicationSessionId, receipt.eveSessionId, receipt.deliveredAt))
+    expect(await dispatch.completeSilentRun(receipt.applicationSessionId, receipt.agentSessionId, receipt.deliveredAt))
       .toBe(true);
 
     expect(await runRow(job.runId)).toEqual({

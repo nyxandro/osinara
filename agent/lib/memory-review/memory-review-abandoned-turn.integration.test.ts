@@ -41,36 +41,36 @@ describeWithDatabase("abandoned memory review turns", () => {
       groupId: fixture.groupId,
       timelineEntryId: source.id,
     });
-    await memoryReviewRepository.bindEveTurn({
+    await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: session,
       batchId: batch!.batchId,
-      eveSessionId: "eve-resumed",
-      eveTurnId: "turn-resumed",
+      agentSessionId: "eve-resumed",
+      agentTurnId: "turn-resumed",
     });
 
     // Ход, продолженный после ответа человека, приходит с авторизацией этого ответа, поэтому
     // метка пакета в ней отсутствует. Привязка хода к пакету живёт в базе и переживает паузу.
     await expect(memoryReviewRepository.batchForTurn({
-      eveSessionId: "eve-resumed",
-      eveTurnId: "turn-resumed",
-    })).resolves.toEqual({ batchId: batch!.batchId, eveTurnId: "turn-resumed" });
+      agentSessionId: "eve-resumed",
+      agentTurnId: "turn-resumed",
+    })).resolves.toEqual({ batchId: batch!.batchId, agentTurnId: "turn-resumed" });
 
     await memoryReviewRepository.completeBatch({
       batchId: batch!.batchId,
       completedAt: new Date(),
-      eveSessionId: "eve-resumed",
-      eveTurnId: "turn-resumed",
+      agentSessionId: "eve-resumed",
+      agentTurnId: "turn-resumed",
     });
 
     // Ход остаётся ходом проверки и после закрытия пакета, иначе повторное событие Eve засчиталось
     // бы как обычный ход разговора и закрыло бы сессию.
     await expect(memoryReviewRepository.batchForTurn({
-      eveSessionId: "eve-resumed",
-      eveTurnId: "turn-resumed",
-    })).resolves.toEqual({ batchId: batch!.batchId, eveTurnId: "turn-resumed" });
+      agentSessionId: "eve-resumed",
+      agentTurnId: "turn-resumed",
+    })).resolves.toEqual({ batchId: batch!.batchId, agentTurnId: "turn-resumed" });
     await expect(memoryReviewRepository.batchForTurn({
-      eveSessionId: "eve-resumed",
-      eveTurnId: "turn-other",
+      agentSessionId: "eve-resumed",
+      agentTurnId: "turn-other",
     })).resolves.toBeNull();
   });
 
@@ -87,11 +87,11 @@ describeWithDatabase("abandoned memory review turns", () => {
       groupId: fixture.groupId,
       timelineEntryId: source.id,
     });
-    await memoryReviewRepository.bindEveTurn({
+    await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: session,
       batchId: batch!.batchId,
-      eveSessionId: "eve-abandoned",
-      eveTurnId: "turn-abandoned",
+      agentSessionId: "eve-abandoned",
+      agentTurnId: "turn-abandoned",
     });
     await database().query(
       "UPDATE memory_review_batches SET started_at = '2026-08-12T09:00:00.000Z' WHERE id = $1",
@@ -131,11 +131,11 @@ describeWithDatabase("abandoned memory review turns", () => {
       groupId: fixture.groupId,
       timelineEntryId: source.id,
     });
-    await memoryReviewRepository.bindEveTurn({
+    await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: session,
       batchId: batch!.batchId,
-      eveSessionId: "eve-parked",
-      eveTurnId: "turn-parked",
+      agentSessionId: "eve-parked",
+      agentTurnId: "turn-parked",
     });
     await database().query(
       "UPDATE memory_review_batches SET started_at = '2026-08-12T09:00:00.000Z' WHERE id = $1",
@@ -175,11 +175,11 @@ describeWithDatabase("abandoned memory review turns", () => {
       groupId: fixture.groupId,
       timelineEntryId: source.id,
     });
-    await memoryReviewRepository.bindEveTurn({
+    await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: session,
       batchId: batch!.batchId,
-      eveSessionId: "eve-partial",
-      eveTurnId: "turn-partial",
+      agentSessionId: "eve-partial",
+      agentTurnId: "turn-partial",
     });
     await database().query(
       `INSERT INTO memory_items_all
@@ -267,11 +267,11 @@ describeWithDatabase("abandoned memory review turns", () => {
       groupId: fixture.groupId,
       timelineEntryId: head.id,
     });
-    await memoryReviewRepository.bindEveTurn({
+    await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: session,
       batchId: abandoned!.batchId,
-      eveSessionId: "eve-head",
-      eveTurnId: "turn-head",
+      agentSessionId: "eve-head",
+      agentTurnId: "turn-head",
     });
     // Пока голова висит, обычные ходы продолжают создавать пакеты за ней: они цепляются за её
     // конец, а не за курсор лейна. Именно так лейн и накапливает наследников.
@@ -344,11 +344,11 @@ describeWithDatabase("abandoned memory review turns", () => {
       groupId: fixture.groupId,
       timelineEntryId: source.id,
     });
-    await memoryReviewRepository.bindEveTurn({
+    await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: session,
       batchId: batch!.batchId,
-      eveSessionId: "eve-fresh",
-      eveTurnId: "turn-fresh",
+      agentSessionId: "eve-fresh",
+      agentTurnId: "turn-fresh",
     });
     await database().query(
       "UPDATE memory_review_batches SET started_at = '2026-08-12T10:50:00.000Z' WHERE id = $1",
@@ -435,25 +435,25 @@ describeWithDatabase("abandoned memory review turns", () => {
       groupId: fixture.groupId,
       timelineEntryId: source.id,
     });
-    await memoryReviewRepository.bindEveTurn({
+    await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: session,
       batchId: batch!.batchId,
-      eveSessionId: "eve-replay",
-      eveTurnId: "turn-replay",
+      agentSessionId: "eve-replay",
+      agentTurnId: "turn-replay",
     });
     await expect(memoryReviewRepository.failRunning({
       batchId: batch!.batchId,
       diagnosticCode: "AGENT_MEMORY_REVIEW_MODEL_FAILED",
-      eveSessionId: "eve-replay",
-      eveTurnId: "turn-replay",
+      agentSessionId: "eve-replay",
+      agentTurnId: "turn-replay",
     })).resolves.toBe("released");
 
     // Событие Eve может прийти повторно. Строки уже нет, и это тот же исход, а не конфликт.
     await expect(memoryReviewRepository.completeBatch({
       batchId: batch!.batchId,
       completedAt: new Date(),
-      eveSessionId: "eve-replay",
-      eveTurnId: "turn-replay",
+      agentSessionId: "eve-replay",
+      agentTurnId: "turn-replay",
     })).resolves.toBe("replayed");
   });
 
@@ -481,18 +481,18 @@ describeWithDatabase("abandoned memory review turns", () => {
       groupId: fixture.groupId,
       timelineEntryId: successorSource.id,
     });
-    await memoryReviewRepository.bindEveTurn({
+    await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: session,
       batchId: successor!.batchId,
-      eveSessionId: "eve-unstarted-successor",
-      eveTurnId: "turn-unstarted-successor",
+      agentSessionId: "eve-unstarted-successor",
+      agentTurnId: "turn-unstarted-successor",
     });
     await memoryTurnSourceRepository.bind({
       applicationSessionId: session,
       conversationId: fixture.conversationId,
       currentTimelineEntryId: successorSource.id,
-      eveSessionId: "eve-unstarted-successor",
-      eveTurnId: "turn-unstarted-successor",
+      agentSessionId: "eve-unstarted-successor",
+      agentTurnId: "turn-unstarted-successor",
       invokingActorId: "agent-memory-author",
       invokingActorKind: "telegram_user",
       memoryReviewBatchId: successor!.batchId,
@@ -502,8 +502,8 @@ describeWithDatabase("abandoned memory review turns", () => {
     await memoryReviewRepository.completeBatch({
       batchId: successor!.batchId,
       completedAt: new Date(),
-      eveSessionId: "eve-unstarted-successor",
-      eveTurnId: "turn-unstarted-successor",
+      agentSessionId: "eve-unstarted-successor",
+      agentTurnId: "turn-unstarted-successor",
     });
     await database().query(
       "UPDATE memory_review_batches SET started_at = '2026-08-12T09:00:00.000Z' WHERE id = $1",
@@ -559,8 +559,8 @@ describeWithDatabase("abandoned memory review turns", () => {
     await expect(memoryReviewRepository.failRunning({
       batchId: batch!.batchId,
       diagnosticCode: "AGENT_MEMORY_REVIEW_TURN_CANCELLED",
-      eveSessionId: "eve-cancelled",
-      eveTurnId: "turn-cancelled",
+      agentSessionId: "eve-cancelled",
+      agentTurnId: "turn-cancelled",
     })).resolves.toBe("released");
     await expect(database().query(
       "SELECT count(*)::integer AS batches FROM memory_review_batches WHERE id = $1",
@@ -595,8 +595,8 @@ describeWithDatabase("abandoned memory review turns", () => {
     await expect(memoryReviewRepository.failRunning({
       batchId: abandoned!.batchId,
       diagnosticCode: "AGENT_MEMORY_REVIEW_TURN_CANCELLED",
-      eveSessionId: "eve-steer",
-      eveTurnId: "turn-steer",
+      agentSessionId: "eve-steer",
+      agentTurnId: "turn-steer",
     })).resolves.toBe("skipped");
     // Пакет наследника создаётся ещё в обработчике сообщения, поэтому у отменённой головы он есть
     // почти всегда. Дописанное сообщение — обычное поведение чата, а не авария для владельца.

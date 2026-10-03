@@ -49,7 +49,7 @@ interface MemoryReviewDispatcherDependencies {
   ): Promise<boolean>;
   markRunning(
     batch: ClaimedMemoryReviewBatch,
-    input: { applicationSessionId: string; eveSessionId: string },
+    input: { applicationSessionId: string; agentSessionId: string },
   ): Promise<void>;
   prepareSession(batch: ClaimedMemoryReviewBatch, now: Date): Promise<PreparedSession>;
   startReview: MemoryReviewStart;
@@ -138,7 +138,7 @@ async function dispatchOne(
   }
   await recoverDatabaseBookkeeping(() => dependencies.markRunning(batch, {
     applicationSessionId: prepared.id,
-    eveSessionId: session.sessionId,
+    agentSessionId: session.sessionId,
   }));
 }
 

@@ -26,8 +26,8 @@ export async function admitConversationWakeupTurn(ctx: TurnContext): Promise<voi
   if (ctx.session.parent || runId === null) return;
   await conversationWakeupRunRepository.admitTurn({
     applicationSessionId: applicationSessionId(ctx),
-    eveSessionId: ctx.session.id,
-    eveTurnId: ctx.session.turn.id,
+    agentSessionId: ctx.session.id,
+    agentTurnId: ctx.session.turn.id,
     runId,
   });
 }
@@ -38,8 +38,8 @@ export async function finishConversationWakeupTurn(ctx: TurnContext, failureCode
   const finished = await conversationWakeupRunRepository.finishTurn({
     applicationSessionId: applicationSessionId(ctx),
     completedAt: new Date(),
-    eveSessionId: ctx.session.id,
-    eveTurnId: ctx.session.turn.id,
+    agentSessionId: ctx.session.id,
+    agentTurnId: ctx.session.turn.id,
     failureCode,
     runId,
   });

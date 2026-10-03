@@ -15,13 +15,12 @@
  *    to history together with the step's completion.
  * A continuation turn first settles the parked step it resumes (see `turn-start.ts`).
  *
- * Derived from eve 0.40.0 `harness/tool-loop.ts` (`executeStepBody`, `handleStepResult`,
- * `finishConversationTurn`) (Apache-2.0, see NOTICE-eve). Changes:
- * - The step limit is a direct check with Osinara's code instead of a blocking model.
+ * - The step limit is a direct check with Osinara's code.
  * - A failing instruction resolver or turn-start handler fails the turn before any model call.
  * - The tool results of a continuation are written to history before its first model call, so a
  *   failing model call cannot hide that an approved tool already ran.
- * - A delegated child's tools see their caller as `session.parent`, as Eve's subagent sessions did.
+ * - A delegated child's tools see their caller as `session.parent`.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { ModelMessage } from "ai";
 import type { Pool } from "pg";
@@ -173,7 +172,7 @@ async function stepTools(runtime: TurnRuntime, turn: TurnRecord, messages: reado
   return schema === undefined ? tools : { ...tools, [FINAL_OUTPUT_TOOL_NAME]: finalOutputTool(schema) };
 }
 
-// A `final_output` call ends a structured child turn, even beside other calls (Eve's rule).
+// A `final_output` call ends a structured child turn, even beside other calls.
 function structuredOutput(turn: TurnRecord, response: readonly ModelMessage[]): { readonly value: unknown } | null {
   if (turn.input.outputSchema === undefined) return null;
   for (const message of response) {
@@ -260,8 +259,8 @@ async function settleParkedStep(
   const prepared = requirePrepared(turn);
   const message = turnInputMessages({ context: [], message: turn.input.message, userInstructions: [] });
   const context = turn.input.context.map((entry): ModelMessage => ({ role: "user", content: entry }));
-  // Eve's order (with Osinara's hitl-context patch): a button press puts its context lines before
-  // the restored transcript; a new message that dismissed a question comes after it, as usual.
+  // A button press puts its context lines before the restored transcript; a new message that
+  // dismissed a question comes after it, as usual.
   const messages = [
     ...prepared.userInstructions,
     ...(message.length === 0 ? context : []),
@@ -297,7 +296,7 @@ async function compactIfNeeded(runtime: TurnRuntime, input: {
   const todo = todoCompactionMessage(input.history.todo);
   const messages = todo === undefined ? compacted : [...compacted, todo];
   // The turn input is part of the compacted history now, so it is not appended again. What the
-  // model read is summarized away, so a write must read the file again (Eve's compaction reset).
+  // model read is summarized away, so a write must read the file again.
   await inJournalTransaction(runtime.database, async (client) => {
     await replaceSessionHistory(client, { messages, sessionId: input.turn.sessionId, turnId: input.turn.id });
     await clearReadFileState(client, input.turn.sessionId);
@@ -315,7 +314,7 @@ async function callModel(runtime: TurnRuntime, input: {
 }): Promise<StepModelResponse> {
   const { agent } = runtime;
   const { selection } = input;
-  // While an approval waits, other turns of the session answer without tools, as Eve did.
+  // While an approval waits, other turns of the session answer without tools.
   const toolChoice = await sessionAwaitsApproval(runtime.database, input.turn.sessionId) ? "none" : undefined;
   try {
     return await runtime.callModel({

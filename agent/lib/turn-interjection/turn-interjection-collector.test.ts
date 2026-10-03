@@ -165,8 +165,8 @@ describe("createTurnInterjectionCollector", () => {
 
     expect(dependencies.repository.listCandidates).toHaveBeenCalledWith(expect.objectContaining({
       currentUpdateId: "500",
-      eveSessionId: "ses_1",
-      eveTurnId: "turn_2",
+      agentSessionId: "ses_1",
+      agentTurnId: "turn_2",
       telegramUserId: "101",
       toolCallId: "call-1",
     }));
@@ -233,7 +233,7 @@ describe("createTurnInterjectionCollector", () => {
     const interjection = createTurnInterjectionCollector(dependencies);
 
     await interjection.release(toolContext({}));
-    expect(dependencies.repository.releaseCall).toHaveBeenCalledWith({ eveSessionId: "ses_1", eveTurnId: "turn_2", toolCallId: "call-1" });
+    expect(dependencies.repository.releaseCall).toHaveBeenCalledWith({ agentSessionId: "ses_1", agentTurnId: "turn_2", toolCallId: "call-1" });
 
     dependencies.repository.releaseCall.mockClear();
     await interjection.release(toolContext({ telegramTurnInterjectionMarker: undefined }));

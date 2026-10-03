@@ -22,17 +22,17 @@ export const prepareTelegramTurn: TelegramTurnEvents["turn.started"] = async (_d
   const sessionId = applicationSessionId(ctx);
   const scheduledRunId = ctx.session.auth.current?.attributes.scheduledRunId;
   if (!ctx.session.parent && typeof scheduledRunId === "string") await admitScheduledAgentTurn({
-    runId: scheduledRunId, applicationSessionId: sessionId, eveSessionId: ctx.session.id, eveTurnId: ctx.session.turn.id,
+    runId: scheduledRunId, applicationSessionId: sessionId, agentSessionId: ctx.session.id, agentTurnId: ctx.session.turn.id,
   });
   await admitConversationWakeupTurn(ctx);
-  await sessionRepository.bindEveSession(sessionId, ctx.session.id);
+  await sessionRepository.bindAgentSession(sessionId, ctx.session.id);
   // Provider reaction policy is refreshed for later instruction resolution, never guessed.
   if (!isScheduledSession(ctx)) await refreshTelegramReactionPolicy(channel.telegram);
   const reviewBatchId = memoryReviewBatchId(ctx);
   if (reviewBatchId) {
-    await memoryReviewRepository.bindEveTurn({
+    await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: sessionId, batchId: reviewBatchId,
-      eveSessionId: ctx.session.id, eveTurnId: ctx.session.turn.id,
+      agentSessionId: ctx.session.id, agentTurnId: ctx.session.turn.id,
     });
   }
   await bindMemoryTurnSources(ctx);

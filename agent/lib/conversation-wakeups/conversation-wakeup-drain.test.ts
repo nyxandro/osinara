@@ -20,18 +20,18 @@ import type { ConversationWakeupClaim } from "./conversation-wakeup-repository.j
 import { WAKEUP_SESSION_INACTIVE_CODE } from "./conversation-wakeup-turn-start.js";
 
 const claim: ConversationWakeupClaim = {
-  attemptCount: 1, dispatch: null, eveTurnId: null, id: "wakeup-1", leaseToken: "lease-1",
+  attemptCount: 1, dispatch: null, agentTurnId: null, id: "wakeup-1", leaseToken: "lease-1",
   queueId: "queue-1", runId: "run-1", scheduleId: "schedule-1",
 };
 
 const handoff = {
-  admissionDeadlineAt: new Date(Date.now() + 60_000), eveSessionId: "wrun_session",
+  admissionDeadlineAt: new Date(Date.now() + 60_000), agentSessionId: "wrun_session",
   id: "00000000-0000-4000-8000-00000000d001", turnId: "turn_created",
 };
 
 const wakeup = {
   applicationConversationId: "conversation-1", applicationSessionId: "app-session-1", authorUserId: "user-1",
-  completedRuns: 0, eveSessionId: "wrun_session", familyId: "family-1", forumTopicId: null, groupId: null,
+  completedRuns: 0, agentSessionId: "wrun_session", familyId: "family-1", forumTopicId: null, groupId: null,
   maxRuns: 3, messageThreadId: null, role: "owner", runId: "run-1", sandboxSessionId: "thread-1",
   scenarioPrompt: "Проверь заказ", scheduledFor: new Date("2026-09-25T10:00:00Z"), scheduleId: "schedule-1",
   scope: "personal", skillAllowlist: [], telegramChatId: "101", telegramChatType: "private", telegramUserId: "101",

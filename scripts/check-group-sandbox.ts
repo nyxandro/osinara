@@ -90,7 +90,7 @@ async function main() {
     client = new SandboxRunnerClient(url);
     const group = {
       access: "restricted" as const,
-      eveSessionId: "wrun_01JZ8K4R0W6G73VTHX9NF2QABC",
+      agentSessionId: "wrun_01JZ8K4R0W6G73VTHX9NF2QABC",
       mounts: [{ mountPoint: "group" as const, workspaceId: workspace }],
       sandboxSessionId: sessionId, seedDigest: sandboxSeedDigest([]), seedFiles: [],
     };

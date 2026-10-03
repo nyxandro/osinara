@@ -8,11 +8,9 @@
  * - `resolveApprovalOutcome`, `deniedOutput`, `questionOutput`: the tool result the model reads.
  * - `stepInputResolved`: whether the answers given so far release the parked step.
  *
- * Derived from eve 0.40.0 `harness/input-extraction.ts`, `harness/hitl/approval-prompt.ts`,
- * `harness/input-request-resolution.ts`, `harness/hitl/approval-input-requests.ts` and
- * `harness/hitl/question-input-requests.ts` (Apache-2.0, see NOTICE-eve). Changes: one parked step
- * is one batch, so the batch rules apply to the step's calls; the texts are verbatim, and the
- * recorded Eve requests pin the note and the denial result.
+ * One parked step is one batch: the batch rules apply to the step's calls. The texts are fixed;
+ * the reference requests (`testing/reference-requests/`) pin the note and the denial result.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { createIdGenerator } from "ai";
 
@@ -87,7 +85,7 @@ export function deniedOutput(reason: string | undefined): ToolResultOutput {
 
 export function questionOutput(response: InputResponse | undefined): ToolResultOutput {
   if (response === undefined) return { type: "json", value: { status: "ignored" } };
-  // JSON drops an absent field, exactly as Eve's stored results did.
+  // JSON drops an absent field, as stored results always did.
   return {
     type: "json",
     value: {

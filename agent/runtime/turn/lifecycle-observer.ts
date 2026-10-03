@@ -4,9 +4,7 @@
  * Exports:
  * - `lifecycleTurnObserver`: the application hears that a turn started and how it ended; step
  *   texts are not delivered anywhere. A request for a person fails the turn: nobody can answer it.
- * - `LifecycleTurnContext`, `LifecycleTurnEvents`: what the handlers receive, in Eve's shape.
- *
- * Derived from Eve 0.40.0 channel events of a task-mode channel (Apache-2.0, see NOTICE-eve).
+ * - `LifecycleTurnContext`, `LifecycleTurnEvents`: what the handlers receive.
  */
 import { AppError } from "../../lib/app-error.js";
 import type { SessionAuth, SessionTurn } from "../context.js";

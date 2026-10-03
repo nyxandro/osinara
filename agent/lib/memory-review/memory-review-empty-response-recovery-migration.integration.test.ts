@@ -34,7 +34,7 @@ const MIGRATION_ORDINAL = 74;
 const TEST_SCHEMA = "test_memory_review_empty_response_recovery";
 const BATCH_ID = "287620e6-a391-40ff-bfc1-a0aeb628e819";
 const APPLICATION_SESSION_ID = "e49ef485-3521-4df3-bc18-85f7efc62e91";
-const EVE_SESSION_ID = "wrun_01M05TN1SQZJM2ZPKGVE50NHH3";
+const AGENT_SESSION_ID = "wrun_01M05TN1SQZJM2ZPKGVE50NHH3";
 const MIGRATION_NAME_PATTERN = /^(\d+)_.*\.sql$/u;
 
 function migrationOrdinal(name: string): number | null {
@@ -114,7 +114,7 @@ describeWithDatabase("074 empty model response recovery", () => {
             diagnostic_code, started_at, completed_at)
          VALUES ($1, $2, $3, 'background', 'failed', 7659, 7660, 7709, 50,
                  $4, 'turn_0', 'MODEL_CALL_FAILED', now(), now())`,
-        [BATCH_ID, lane.rows[0]!.id, conversation.rows[0]!.id, EVE_SESSION_ID],
+        [BATCH_ID, lane.rows[0]!.id, conversation.rows[0]!.id, AGENT_SESSION_ID],
       );
       await client.query(
         `INSERT INTO conversation_sessions
@@ -124,7 +124,7 @@ describeWithDatabase("074 empty model response recovery", () => {
          VALUES ($1, gen_random_uuid(), 0, $2, $3, 'group', 'proactive', 'failed',
                  $4, $4, $5, false, now(), now(), now(), now() + interval '1 day', $6)`,
         [APPLICATION_SESSION_ID, family.rows[0]!.id, group.rows[0]!.id,
-          `memory-review:${BATCH_ID}`, EVE_SESSION_ID, BATCH_ID],
+          `memory-review:${BATCH_ID}`, AGENT_SESSION_ID, BATCH_ID],
       );
       await client.query(
         "UPDATE memory_review_batches SET application_session_id = $2 WHERE id = $1",
@@ -153,7 +153,7 @@ describeWithDatabase("074 empty model response recovery", () => {
         `INSERT INTO memory_mutation_operations
            (family_id, operation_key, mutation_kind, input_hash, eve_session_id, eve_turn_id)
          VALUES ($1, 'empty-response-operation', 'create', $2, $3, 'turn_0')`,
-        [family.rows[0]!.id, "a".repeat(64), EVE_SESSION_ID],
+        [family.rows[0]!.id, "a".repeat(64), AGENT_SESSION_ID],
       );
       await expect(client.query(migration)).rejects.toThrow(
         "AGENT_MEMORY_REVIEW_EMPTY_RESPONSE_RECOVERY_SIDE_EFFECT_FOUND",

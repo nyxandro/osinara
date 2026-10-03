@@ -1,3 +1,75 @@
+# Third-party notices
+
+Osinara includes code adapted from **eve 0.40.0** (https://github.com/vercel/eve, tag `eve@0.40.0`,
+commit `6b4950c2d6c71d561ed6bfcac2efc128999d718b`, directory `packages/eve/src/`).
+
+```
+eve
+Copyright 2026 Vercel, Inc. and contributors
+
+This product includes software developed at Vercel, Inc.
+(https://vercel.com/).
+```
+
+The adapted code is licensed under the Apache License, Version 2.0, reproduced below. Osinara
+modified it. Each file that contains it carries a one-line notice pointing here:
+
+- `agent/runtime/agent-definition.ts`
+- `agent/runtime/context.ts`
+- `agent/runtime/hitl/answer-matching.ts`
+- `agent/runtime/hitl/input-requests.ts`
+- `agent/runtime/hitl/types.ts`
+- `agent/runtime/json.ts`
+- `agent/runtime/prompt/skills-section.ts`
+- `agent/runtime/prompt/system-prompt.ts`
+- `agent/runtime/prompt/turn-instructions.ts`
+- `agent/runtime/sandbox/paths.ts`
+- `agent/runtime/sandbox/types.ts`
+- `agent/runtime/skills/definition.ts`
+- `agent/runtime/skills/packages.ts`
+- `agent/runtime/telegram/api.ts`
+- `agent/runtime/telegram/channel-types.ts`
+- `agent/runtime/telegram/handle.ts`
+- `agent/runtime/telegram/hitl.ts`
+- `agent/runtime/telegram/inbound.ts`
+- `agent/runtime/telegram/telegram-channel.ts`
+- `agent/runtime/telegram/telegram-dispatch.ts`
+- `agent/runtime/telegram/telegram-events.ts`
+- `agent/runtime/telegram/verify.ts`
+- `agent/runtime/tool.ts`
+- `agent/runtime/tools/ask-question.ts`
+- `agent/runtime/tools/bash.ts`
+- `agent/runtime/tools/delegate.ts`
+- `agent/runtime/tools/file-state.ts`
+- `agent/runtime/tools/glob.ts`
+- `agent/runtime/tools/grep.ts`
+- `agent/runtime/tools/load-skill.ts`
+- `agent/runtime/tools/read-file.ts`
+- `agent/runtime/tools/ripgrep-probe.ts`
+- `agent/runtime/tools/shell-quote.ts`
+- `agent/runtime/tools/todo.ts`
+- `agent/runtime/tools/truncate-output.ts`
+- `agent/runtime/tools/write-file.ts`
+- `agent/runtime/turn/child-turns.ts`
+- `agent/runtime/turn/compaction-estimate.ts`
+- `agent/runtime/turn/compaction-prompt.ts`
+- `agent/runtime/turn/compaction.ts`
+- `agent/runtime/turn/lifecycle-observer.ts`
+- `agent/runtime/turn/model-call.ts`
+- `agent/runtime/turn/model-errors.ts`
+- `agent/runtime/turn/model-tools.ts`
+- `agent/runtime/turn/prompt-cache.ts`
+- `agent/runtime/turn/run-turn.ts`
+- `agent/runtime/turn/step-calls.ts`
+- `agent/runtime/turn/step-history.ts`
+- `agent/runtime/turn/tool-calls.ts`
+- `agent/runtime/turn/turn-failure.ts`
+- `agent/runtime/turn/turn-skills.ts`
+- `agent/runtime/turn/turn-start.ts`
+
+## Apache License, Version 2.0
+
+```
 
                                  Apache License
                            Version 2.0, January 2004
@@ -200,3 +272,4 @@
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```

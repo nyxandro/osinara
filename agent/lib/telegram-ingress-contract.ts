@@ -84,7 +84,7 @@ export interface TelegramIngressRepository {
   /** `sessionId`: the runtime session the update's turn ran in, when it created one. */
   complete(updateId: string, leaseToken: string, sessionId?: string): Promise<void>;
   enqueue(input: EnqueueTelegramUpdateInput): Promise<"duplicate" | "inserted">;
-  fail(updateId: string, leaseToken: string, failure: TelegramIngressFailure, eveSessionId?: string): Promise<void>;
+  fail(updateId: string, leaseToken: string, failure: TelegramIngressFailure, agentSessionId?: string): Promise<void>;
   rekeyQueue(input: {
     nextContinuationKey: string;
     previousContinuationKey: string;

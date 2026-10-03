@@ -10,20 +10,16 @@
  *   call's result in call order.
  * - `stepTextEvents`: the step's visible text as the channel receives it, split at tool calls.
  *
- * Derived from eve 0.40.0 `harness/tool-loop.ts` (`handleStepResult`, `appendMissingToolResultMessages`),
- * `harness/emission.ts` (`consumeStreamContent`) and `shared/empty-delivery.ts` (Apache-2.0, see
- * NOTICE-eve). Changes:
- * - The tool message is assembled from the journal, in call order. AI SDK wrote results in the
- *   order tools finished and put the results of a parked step's approved calls into a second tool
- *   message; the provider pairs results with calls by id, so the model reads the same thing.
+ * - The tool message is assembled from the journal, in call order; the provider pairs results with
+ *   calls by id.
  * - Text events are produced after the step is recorded, not while it streams: a retried model
  *   call cannot deliver the text of its failed attempt.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { ModelMessage, ToolResultPart } from "ai";
 
 import type { ToolResultOutput } from "./tool-calls.js";
 
-// Eve 0.40's literal, kept: transferred histories and the prompts already carry it.
 export const EMPTY_DELIVERY_MARKER = "<empty-delivery/>";
 const PREVIOUS_EMPTY_DELIVERY_MARKER = "<eve-empty-delivery/>";
 

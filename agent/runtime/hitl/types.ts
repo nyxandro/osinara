@@ -5,9 +5,8 @@
  * - `InputOption`, `InputRequest`: one pending question or tool approval as channels render it.
  * - `InputResponse`: the selected option or freeform text for one pending request.
  *
- * Derived from eve 0.40.0 `runtime/input/types.ts` (Apache-2.0, see NOTICE-eve).
- * Changes: plain types instead of zod schemas; the runtime validates answers where they enter.
- * There is no `session-limit` kind: Osinara sets no session token budget.
+ * Plain types: the runtime validates answers where they enter.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 export interface InputOption {
   readonly description?: string;

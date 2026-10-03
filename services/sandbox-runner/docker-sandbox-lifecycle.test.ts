@@ -18,14 +18,14 @@ import {
 } from "./docker-sandbox-lifecycle.js";
 
 const SANDBOX_SESSION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-const EVE_SESSION_ID = "wrun_01JZ8K4R0W6G73VTHX9NF2QABC";
-const NEXT_EVE_SESSION_ID = "wrun_01JZ8K4R0W6G73VTHX9NF2QABD";
+const AGENT_SESSION_ID = "wrun_01JZ8K4R0W6G73VTHX9NF2QABC";
+const NEXT_AGENT_SESSION_ID = "wrun_01JZ8K4R0W6G73VTHX9NF2QABD";
 const WORKSPACE_ID = "11111111-1111-4111-8111-111111111111";
 const OTHER_WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
 const EMPTY_SEED_DIGEST = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 const BASE_REQUEST: SandboxRunnerCreateRequest = {
   access: "trusted",
-  eveSessionId: EVE_SESSION_ID,
+  agentSessionId: AGENT_SESSION_ID,
   mounts: [{ mountPoint: "personal", workspaceId: WORKSPACE_ID }],
   sandboxSessionId: SANDBOX_SESSION_ID,
   seedDigest: EMPTY_SEED_DIGEST,
@@ -33,7 +33,7 @@ const BASE_REQUEST: SandboxRunnerCreateRequest = {
 
 describe("Docker sandbox lifecycle", () => {
   it("keeps one policy identity across Eve roots and changes it for another mount", () => {
-    expect(sandboxRequestHash({ ...BASE_REQUEST, eveSessionId: NEXT_EVE_SESSION_ID }))
+    expect(sandboxRequestHash({ ...BASE_REQUEST, agentSessionId: NEXT_AGENT_SESSION_ID }))
       .toBe(sandboxRequestHash(BASE_REQUEST));
     expect(sandboxRequestHash({
       ...BASE_REQUEST,

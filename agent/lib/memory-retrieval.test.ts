@@ -201,7 +201,7 @@ describe("formatRetrievedMemoryInstructions", () => {
 describe("recordOfferedMemories", () => {
   const window: MemorySelectionWindow = {
     conversationId: "conversation-1",
-    eveSessionId: "session-1",
+    agentSessionId: "session-1",
     turnId: "turn_1",
     turnOrdinal: 3,
   };

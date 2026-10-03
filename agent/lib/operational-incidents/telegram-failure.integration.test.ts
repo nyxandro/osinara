@@ -49,8 +49,8 @@ describe.skipIf(!enabled)("telegram failure correlation", () => {
       expect(stored.rows[0]?.context).toMatchObject({
         causeCode: "AGENT_TEST_FAILED",
         chatId: "-100111",
-        eveSessionId: sessionId,
-        eveTurnId: turnId,
+        agentSessionId: sessionId,
+        agentTurnId: turnId,
         updateId: null,
       });
     } finally {
@@ -74,7 +74,7 @@ describe.skipIf(!enabled)("telegram failure correlation", () => {
       );
 
       expect(stored.rows).toHaveLength(1);
-      expect(stored.rows[0]?.context).toMatchObject({ eveSessionId: sessionId, updateId: "987654321" });
+      expect(stored.rows[0]?.context).toMatchObject({ agentSessionId: sessionId, updateId: "987654321" });
     } finally {
       await database().query("DELETE FROM operational_incidents WHERE operation_key=$1", [operationKey]);
     }

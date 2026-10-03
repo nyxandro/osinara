@@ -93,7 +93,7 @@ describe("agent schedule dispatcher", () => {
     });
     expect(repository.markRunning).toHaveBeenCalledWith(job, {
       applicationSessionId: "app-session-1",
-      eveSessionId: "eve-session-1",
+      agentSessionId: "eve-session-1",
     });
   });
 
@@ -243,7 +243,7 @@ describe("agent schedule dispatcher", () => {
     expect(startInChat).toHaveBeenCalledTimes(1);
     expect(repository.markRunning).toHaveBeenCalledWith(secondJob, {
       applicationSessionId: "app-run-2",
-      eveSessionId: "eve-session-2",
+      agentSessionId: "eve-session-2",
     });
     expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("AGENT_SCHEDULE_DISPATCH_FAILED"));
     consoleError.mockRestore();
@@ -285,7 +285,7 @@ describe("agent schedule dispatcher", () => {
     expect(startInChat).toHaveBeenCalledTimes(1);
     expect(repository.markRunning).toHaveBeenCalledWith(secondJob, {
       applicationSessionId: "app-run-2",
-      eveSessionId: "eve-session-2",
+      agentSessionId: "eve-session-2",
     });
     expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("AGENT_SCHEDULE_DISPATCH_FAILED"));
     consoleError.mockRestore();

@@ -78,15 +78,15 @@ describeWithDatabase("unbound interactive memory-review recovery", () => {
 
     const prepared = await memoryReviewSessionRepository.prepare(recovered!, new Date());
     await memoryReviewDispatchRepository.markDispatchStarted(recovered!, prepared.id);
-    await memoryReviewRepository.bindEveTurn({ applicationSessionId: prepared.id,
-      batchId: head.batchId, eveSessionId: "eve-recovered", eveTurnId: "turn-recovered" });
+    await memoryReviewRepository.bindAgentTurn({ applicationSessionId: prepared.id,
+      batchId: head.batchId, agentSessionId: "eve-recovered", agentTurnId: "turn-recovered" });
     await memoryTurnSourceRepository.bindReview({ applicationSessionId: prepared.id,
       conversationId: fixture.conversationId,
-      eveSessionId: "eve-recovered", eveTurnId: "turn-recovered",
+      agentSessionId: "eve-recovered", agentTurnId: "turn-recovered",
       invokingActorId: "agent-memory-author", invokingActorKind: "telegram_user",
       memoryReviewBatchId: head.batchId, sourceEntryIds: head.sourceEntryIds });
     expect(await memoryReviewRepository.completeBatch({ batchId: head.batchId,
-      completedAt: new Date(), eveSessionId: "eve-recovered", eveTurnId: "turn-recovered" }))
+      completedAt: new Date(), agentSessionId: "eve-recovered", agentTurnId: "turn-recovered" }))
       .toBe("recorded");
     expect(await memoryReviewRepository.getLaneCursor({
       conversationId: fixture.conversationId, messageThreadId: null,

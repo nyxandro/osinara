@@ -5,8 +5,7 @@
  * - `runtimeTurnStatus`: the status of one turn of a session, or `null` when the journal has none.
  * - `isRuntimeSessionIdle`: nothing runs or waits in the session or its child sessions any more.
  *
- * Replaces the reads of Eve's Workflow database (`workflow-turn-outcome.ts`,
- * `workflow-postgres-session-storage.ts`): turns now live in `agent_turns`.
+ * Turns live in `agent_turns`.
  */
 import type { TurnStatus } from "../../runtime/turn/turn-types.js";
 import { database } from "../database.js";

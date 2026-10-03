@@ -14,7 +14,7 @@ import { finishActiveAgentScheduleRun } from "./agent-schedule-run-completion.js
 
 export async function completeSilentAgentScheduleRun(
   applicationSessionId: string,
-  eveSessionId: string,
+  agentSessionId: string,
   completedAt: Date,
 ): Promise<boolean> {
   const client = await database().connect();
@@ -23,7 +23,7 @@ export async function completeSilentAgentScheduleRun(
     const completed = await finishActiveAgentScheduleRun(client, {
       applicationSessionId,
       completedAt,
-      eveSessionId,
+      agentSessionId,
       outcome: { kind: "silent" },
     });
     await client.query("COMMIT");

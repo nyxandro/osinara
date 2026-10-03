@@ -13,20 +13,15 @@
  * - `continuationTokenFromState`, `turnChannel`: a conversation's address and a turn's channel.
  * - `replyInputResponse`: the answer a reply to a bot message carries, if it carries one.
  *
- * Ported from eve 0.40.0 `public/channels/telegram/telegramChannel.ts` (`dispatchMessage`,
- * `dispatchCallbackQuery`, `stateFromMessage`, `stateFromCallbackQuery`,
- * `conversationIdForMessage`, `continuationTokenFromState`, `attachTelegramDeliver`) with Osinara's
- * patches (`scripts/apply-eve-patches.ts`, `scripts/eve-patches/telegram-dispatch-control.ts`):
  * - bot senders reach the application hook, which decides; hook failures reach the caller;
  * - `message` replaces only the model-visible text, `continuationToken` the address;
  * - `replyHandling: "message"` makes a reply to a bot message an ordinary message;
  * - a button is acknowledged only after the application authorized it, with its text;
  * - `osinaraTelegramResponseSessionId` addresses an answer to an exact session;
- * - a dispatch without verified auth is refused.
- * Changes: Eve queued the delivery for its workflow; here the turn is created in a transaction and
- * the caller runs it. A text message answers the session's waiting requests when it matches them
- * (Eve's `resolveTextMessageInput`); answers to requests that no longer wait reach the model as a
- * user message (Eve's `convertStaleResponsesToUserMessage`).
+ * - a dispatch without verified auth is refused;
+ * - a text message answers the session's waiting requests when it matches them; answers to
+ *   requests that no longer wait reach the model as a user message.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { AppError } from "../../lib/app-error.js";
 import type { SessionAuth, SessionAuthContext } from "../context.js";
@@ -205,7 +200,7 @@ async function respond(client: JournalClient, input: {
 
 /**
  * A non-empty reply to a bot message answers the prompt that message carried, unless the
- * application marked it an ordinary message (Eve's rule with Osinara's `replyHandling` patch).
+ * application marked it an ordinary message (`replyHandling`).
  */
 export function replyInputResponse(message: TelegramMessage, result: NonNullable<TelegramInboundResult>): InputResponse | undefined {
   const text = message.text || message.caption;

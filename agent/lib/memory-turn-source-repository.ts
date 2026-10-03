@@ -23,8 +23,8 @@ export interface BindMemoryTurnSourcesInput {
   applicationSessionId: string;
   conversationId: string;
   currentTimelineEntryId: string;
-  eveSessionId: string;
-  eveTurnId: string;
+  agentSessionId: string;
+  agentTurnId: string;
   invokingActorId: string;
   invokingActorKind: TelegramActorKind;
   memoryReviewBatchId?: string;
@@ -78,8 +78,8 @@ function bindingHash(input: BindMemoryTurnSourcesInput, entryIds: readonly strin
         applicationSessionId: input.applicationSessionId,
         conversationId: input.conversationId,
         currentTimelineEntryId: input.currentTimelineEntryId,
-        eveSessionId: input.eveSessionId,
-        eveTurnId: input.eveTurnId,
+        agentSessionId: input.agentSessionId,
+        agentTurnId: input.agentTurnId,
         invokingActorId: input.invokingActorId,
         invokingActorKind: input.invokingActorKind,
         memoryReviewBatchId: input.memoryReviewBatchId ?? null,
@@ -90,7 +90,7 @@ function bindingHash(input: BindMemoryTurnSourcesInput, entryIds: readonly strin
 }
 
 export const memoryTurnSourceRepository = {
-  async verifyBoundResume(input: { applicationSessionId: string; eveSessionId: string; eveTurnId: string; invokingActorId: string; invokingActorKind: TelegramActorKind }): Promise<boolean> {
+  async verifyBoundResume(input: { applicationSessionId: string; agentSessionId: string; agentTurnId: string; invokingActorId: string; invokingActorKind: TelegramActorKind }): Promise<boolean> {
     // HITL resumes omit the original message attributes, so only the exact retained source-set may
     // authorize the same durable turn and actor to continue.
     const result = await database().query<{ matches: boolean }>(
@@ -100,7 +100,7 @@ export const memoryTurnSourceRepository = {
             AND application_session_id = $3
             AND invoking_actor_id = $4 AND invoking_actor_kind = $5
        ) AS matches`,
-      [input.eveSessionId, input.eveTurnId, input.applicationSessionId, input.invokingActorId, input.invokingActorKind],
+      [input.agentSessionId, input.agentTurnId, input.applicationSessionId, input.invokingActorId, input.invokingActorKind],
     );
     return result.rows[0]?.matches === true;
   },
@@ -114,7 +114,7 @@ export const memoryTurnSourceRepository = {
       const existing = await client.query<{ binding_hash: string }>(
         `SELECT binding_hash FROM memory_turn_source_sets
          WHERE eve_session_id = $1 AND eve_turn_id = $2 FOR UPDATE`,
-        [input.eveSessionId, input.eveTurnId],
+        [input.agentSessionId, input.agentTurnId],
       );
       if (existing.rows[0]) {
         if (existing.rows[0].binding_hash !== hash) {
@@ -196,7 +196,7 @@ export const memoryTurnSourceRepository = {
               current_timeline_entry_id, invoking_actor_kind, invoking_actor_id, binding_hash,
               memory_review_batch_id)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [input.eveSessionId, input.eveTurnId, input.applicationSessionId, input.conversationId, input.currentTimelineEntryId, input.invokingActorKind, input.invokingActorId, hash, input.memoryReviewBatchId ?? null],
+        [input.agentSessionId, input.agentTurnId, input.applicationSessionId, input.conversationId, input.currentTimelineEntryId, input.invokingActorKind, input.invokingActorId, hash, input.memoryReviewBatchId ?? null],
       );
       for (const entry of entries.rows) {
         await client.query(
@@ -204,7 +204,7 @@ export const memoryTurnSourceRepository = {
              (eve_session_id, eve_turn_id, conversation_id, timeline_entry_id,
               timeline_sequence, is_current)
            VALUES ($1, $2, $3, $4, $5, $6)`,
-          [input.eveSessionId, input.eveTurnId, input.conversationId, entry.id, entry.sequence_id, entry.id === input.currentTimelineEntryId],
+          [input.agentSessionId, input.agentTurnId, input.conversationId, entry.id, entry.sequence_id, entry.id === input.currentTimelineEntryId],
         );
       }
       await client.query("COMMIT");
@@ -219,8 +219,8 @@ export const memoryTurnSourceRepository = {
   async bindReview(input: {
     applicationSessionId: string;
     conversationId: string;
-    eveSessionId: string;
-    eveTurnId: string;
+    agentSessionId: string;
+    agentTurnId: string;
     invokingActorId: string;
     invokingActorKind: TelegramActorKind;
     memoryReviewBatchId: string;
@@ -244,7 +244,7 @@ export const memoryTurnSourceRepository = {
       const existing = await client.query<{ binding_hash: string }>(
         `SELECT binding_hash FROM memory_turn_source_sets
           WHERE eve_session_id = $1 AND eve_turn_id = $2 FOR UPDATE`,
-        [input.eveSessionId, input.eveTurnId],
+        [input.agentSessionId, input.agentTurnId],
       );
       if (existing.rows[0]) {
         if (existing.rows[0].binding_hash !== hash) throw new AppError("AGENT_MEMORY_TURN_SOURCE_REPLAY_MISMATCH", "Повторная привязка источников проверки не совпадает с исходной");
@@ -278,7 +278,7 @@ export const memoryTurnSourceRepository = {
              current_timeline_entry_id, invoking_actor_kind, invoking_actor_id, binding_hash,
              memory_review_batch_id)
           VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8)`,
-        [input.eveSessionId, input.eveTurnId, input.applicationSessionId, input.conversationId, input.invokingActorKind, input.invokingActorId, hash, input.memoryReviewBatchId],
+        [input.agentSessionId, input.agentTurnId, input.applicationSessionId, input.conversationId, input.invokingActorKind, input.invokingActorId, hash, input.memoryReviewBatchId],
       );
       for (const entry of entries.rows) {
         await client.query(
@@ -286,7 +286,7 @@ export const memoryTurnSourceRepository = {
              (eve_session_id, eve_turn_id, conversation_id, timeline_entry_id,
               timeline_sequence, is_current)
            VALUES ($1, $2, $3, $4, $5, false)`,
-          [input.eveSessionId, input.eveTurnId, input.conversationId, entry.id, entry.sequence_id],
+          [input.agentSessionId, input.agentTurnId, input.conversationId, entry.id, entry.sequence_id],
         );
       }
       await client.query("COMMIT");
@@ -298,7 +298,7 @@ export const memoryTurnSourceRepository = {
     }
   },
 
-  async resolve(input: { eveSessionId: string; eveTurnId: string; sourceSequence: string | null }): Promise<ResolvedMemoryTurnSource | null> {
+  async resolve(input: { agentSessionId: string; agentTurnId: string; sourceSequence: string | null }): Promise<ResolvedMemoryTurnSource | null> {
     const result = await database().query<SourceRow>(
       `SELECT source.conversation_id, source.timeline_entry_id, source.is_current,
               (review_batch.batch_kind = 'background') AS is_review,
@@ -318,7 +318,7 @@ export const memoryTurnSourceRepository = {
        WHERE source.eve_session_id = $1 AND source.eve_turn_id = $2
          AND message.actor_kind IN ('user', 'telegram_bot') AND message.content_text IS NOT NULL
          AND (($3::bigint IS NULL AND source.is_current) OR source.timeline_sequence = $3::bigint)`,
-      [input.eveSessionId, input.eveTurnId, input.sourceSequence],
+      [input.agentSessionId, input.agentTurnId, input.sourceSequence],
     );
     const row = result.rows[0];
     return row
@@ -337,11 +337,11 @@ export const memoryTurnSourceRepository = {
       : null;
   },
 
-  async release(eveSessionId: string, eveTurnId: string): Promise<void> {
+  async release(agentSessionId: string, agentTurnId: string): Promise<void> {
     await database().query(
       `DELETE FROM memory_turn_source_sets
        WHERE eve_session_id = $1 AND eve_turn_id = $2`,
-      [eveSessionId, eveTurnId],
+      [agentSessionId, agentTurnId],
     );
   },
 };

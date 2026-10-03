@@ -21,7 +21,7 @@ import { memoryUsageRepository } from "./memory-usage-repository.js";
 export async function recordMemoryUsageDeclaration(input: {
   auth: SessionAuth;
   declaration: MemoryUsageDeclaration;
-  eveSessionId: string;
+  agentSessionId: string;
   turnId: string;
 }): Promise<void> {
   const conversationId = input.auth.current?.attributes.telegramConversationId;
@@ -33,7 +33,7 @@ export async function recordMemoryUsageDeclaration(input: {
   let failed: string | null = null;
   try {
     const outcome = await memoryUsageRepository.recordUsed(
-      { conversationId, eveSessionId: input.eveSessionId, turnId: input.turnId },
+      { conversationId, agentSessionId: input.agentSessionId, turnId: input.turnId },
       input.declaration.memoryRefs,
     );
     counted = outcome.counted;
@@ -53,7 +53,7 @@ export async function recordMemoryUsageDeclaration(input: {
     failed,
     namedCount: input.declaration.memoryRefs.length,
     rejectedCount: rejected.length,
-    sessionId: input.eveSessionId,
+    sessionId: input.agentSessionId,
     turnId: input.turnId,
     usedCount: used.length,
   }));

@@ -764,7 +764,7 @@ describe("createTelegramInputRequestHandler", () => {
         { callbackData: "hitl:0", label: "Yes", optionId: "approve" },
         { callbackData: "hitl:1", label: "No", optionId: "deny" },
       ],
-      eveSessionId: "wrun_hitl",
+      agentSessionId: "wrun_hitl",
       requestId: "request-1",
       promptText: "Approve tool call",
       telegramChatId: "101",

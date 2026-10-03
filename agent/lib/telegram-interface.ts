@@ -63,19 +63,16 @@ export interface TelegramInputRequest {
   allowFreeform?: boolean;
   display?: "confirmation" | "select" | "text";
   /** Framework-owned source of the request. Only `tool-approval` is an application confirmation. */
-  kind?: "question" | "session-limit" | "tool-approval";
+  kind?: "question" | "tool-approval";
   options?: TelegramInputOption[];
   prompt: string;
   requestId: string;
 }
 
-// Eve 0.40.0 emits `approve`/`cancel` for a tool approval and `continue`/`stop` for a session
-// limit. No path emits `deny`, so no branch for it is kept.
+// A tool approval offers `approve` and `cancel`. No path emits `deny`, so no branch for it is kept.
 const OPTION_LABELS: Readonly<Record<string, string>> = {
   approve: "Да, подтвердить",
   cancel: "Нет, отменить",
-  continue: "Продолжить",
-  stop: "Остановить",
 };
 
 // The runtime reports an exhausted model call under this code; the message it produces carries no
@@ -184,8 +181,7 @@ export function localizeTelegramInputRequest<T extends TelegramInputRequest>(req
     label: OPTION_LABELS[option.id] ?? option.label,
   }));
 
-  // Only an application tool approval gets the composed confirmation. A framework request such as
-  // `session-limit` executes nothing, so its own prompt and consequence must not be rewritten.
+  // Only an application tool approval gets the composed confirmation; a question keeps its own prompt.
   if (request.display !== "confirmation" || request.kind !== "tool-approval") {
     return options ? { ...request, options } : request;
   }

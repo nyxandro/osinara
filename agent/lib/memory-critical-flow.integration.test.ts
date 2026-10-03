@@ -274,12 +274,12 @@ describeWithDatabase("critical main-agent memory paths", () => {
       new Date("2026-08-13T10:00:01.000Z"),
     );
     expect(await memoryReviewDispatchRepository.markDispatchStarted(batch!, appSession.id)).toBe(true);
-    await sessionRepository.bindEveSession(appSession.id, "eve-background-memory-session");
-    await memoryReviewRepository.bindEveTurn({
+    await sessionRepository.bindAgentSession(appSession.id, "eve-background-memory-session");
+    await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: appSession.id,
       batchId: batch!.batchId,
-      eveSessionId: "eve-background-memory-session",
-      eveTurnId: "eve-background-memory-turn",
+      agentSessionId: "eve-background-memory-session",
+      agentTurnId: "eve-background-memory-turn",
     });
     const context = reviewContext({
       applicationSessionId: appSession.id,
@@ -315,8 +315,8 @@ describeWithDatabase("critical main-agent memory paths", () => {
     await memoryReviewRepository.completeBatch({
       batchId: batch!.batchId,
       completedAt: new Date("2026-08-13T10:00:02.000Z"),
-      eveSessionId: "eve-background-memory-session",
-      eveTurnId: "eve-background-memory-turn",
+      agentSessionId: "eve-background-memory-session",
+      agentTurnId: "eve-background-memory-turn",
     });
     await releaseMemoryTurnSources(context as never);
     await expect(database().query(

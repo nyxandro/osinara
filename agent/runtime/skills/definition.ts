@@ -6,9 +6,8 @@
  * - `defineSkill`: types a skill definition; extra keys are a compile error.
  * - `AnnouncedSkill`: one entry of the skill list the model was last told about.
  *
- * Derived from eve 0.40.0 `public/definitions/skill.ts`, `shared/skill-definition.ts` and
- * `public/definitions/exact.ts` (Apache-2.0, see NOTICE-eve). Changes: plain objects without
- * Eve's brand stamp; the runtime identifies skills by catalog name, not by the stamp.
+ * Plain objects: the runtime identifies skills by catalog name.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 export type SkillFileContent = string | Uint8Array;
 

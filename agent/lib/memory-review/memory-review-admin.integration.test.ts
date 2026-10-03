@@ -31,11 +31,11 @@ async function incident() {
   const [head] = await claim();
   const prepared = await memoryReviewSessionRepository.prepare(head!, new Date());
   await memoryReviewDispatchRepository.markDispatchStarted(head!, prepared.id);
-  await memoryReviewRepository.bindEveTurn({ applicationSessionId: prepared.id,
-    batchId: head!.batchId, eveSessionId: "eve-broken", eveTurnId: "turn-broken" });
+  await memoryReviewRepository.bindAgentTurn({ applicationSessionId: prepared.id,
+    batchId: head!.batchId, agentSessionId: "eve-broken", agentTurnId: "turn-broken" });
   // Persisted incident: the old 49-human/1-bot source check failed before creating the source set.
   expect(await memoryReviewRepository.completeBatch({ batchId: head!.batchId,
-    completedAt: new Date(), eveSessionId: "eve-broken", eveTurnId: "turn-broken" })).toBe("failed");
+    completedAt: new Date(), agentSessionId: "eve-broken", agentTurnId: "turn-broken" })).toBe("failed");
   return { fixture, head: head!, prepared };
 }
 
@@ -65,13 +65,13 @@ describeWithDatabase("memory review operator recovery", () => {
     expect(next!.entries.filter((entry) => entry.actorKind === "telegram_bot")).toHaveLength(1);
     const prepared = await memoryReviewSessionRepository.prepare(next!, new Date());
     await memoryReviewDispatchRepository.markDispatchStarted(next!, prepared.id);
-    await memoryReviewRepository.bindEveTurn({ applicationSessionId: prepared.id,
-      batchId: next!.batchId, eveSessionId: "eve-fixed", eveTurnId: "turn-fixed" });
+    await memoryReviewRepository.bindAgentTurn({ applicationSessionId: prepared.id,
+      batchId: next!.batchId, agentSessionId: "eve-fixed", agentTurnId: "turn-fixed" });
     await memoryTurnSourceRepository.bindReview({ applicationSessionId: prepared.id,
       conversationId: fixture.conversationId, memoryReviewBatchId: next!.batchId,
-      sourceEntryIds: next!.sourceEntryIds, eveSessionId: "eve-fixed", eveTurnId: "turn-fixed",
+      sourceEntryIds: next!.sourceEntryIds, agentSessionId: "eve-fixed", agentTurnId: "turn-fixed",
       invokingActorId: "agent-memory-author", invokingActorKind: "telegram_user" });
-    expect(await memoryTurnSourceRepository.resolve({ eveSessionId: "eve-fixed", eveTurnId: "turn-fixed", sourceSequence: "56" }))
+    expect(await memoryTurnSourceRepository.resolve({ agentSessionId: "eve-fixed", agentTurnId: "turn-fixed", sourceSequence: "56" }))
       .toMatchObject({ isReview: true, sourceMessageId: "56" });
     await memoryRepository.create(fixture.auth, {
       content: "Анна продолжает готовиться к марафону", kind: "fact", scope: "family",
@@ -81,7 +81,7 @@ describeWithDatabase("memory review operator recovery", () => {
         timelineEntryId: next!.sourceEntryIds[0]!, subject: { kind: "current_author" } },
     });
     expect(await memoryReviewRepository.completeBatch({ batchId: next!.batchId,
-      completedAt: new Date(), eveSessionId: "eve-fixed", eveTurnId: "turn-fixed" })).toBe("recorded");
+      completedAt: new Date(), agentSessionId: "eve-fixed", agentTurnId: "turn-fixed" })).toBe("recorded");
     expect(await memoryReviewRepository.getLaneCursor({ conversationId: fixture.conversationId, messageThreadId: null })).toBe("100");
     expect((await database().query("SELECT count(*)::integer AS n FROM claim_evidence")).rows).toEqual([{ n: 1 }]);
     expect(await claim()).toEqual([]);
@@ -99,7 +99,7 @@ describeWithDatabase("memory review operator recovery", () => {
       WHERE event_type = 'memory_review.operator_skipped' AND subject_id = $1`, [head.batchId])).rows).toEqual([{ n: 1 }]);
     expect((await database().query("SELECT count(*)::integer AS n FROM memory_review_batch_sources WHERE batch_id = $1", [head.batchId])).rows).toEqual([{ n: 0 }]);
     expect(await memoryReviewRepository.completeBatch({ batchId: head.batchId, completedAt: new Date(),
-      eveSessionId: "eve-broken", eveTurnId: "turn-broken" })).toBe("replayed");
+      agentSessionId: "eve-broken", agentTurnId: "turn-broken" })).toBe("replayed");
   });
 
   it("also skips an isolated terminal batch instead of reissuing the approved-to-discard sources", async () => {

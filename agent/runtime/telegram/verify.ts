@@ -6,8 +6,8 @@
  *   or an error.
  * - `TelegramWebhookSecretToken`, `TelegramWebhookVerifier`: the two ways to configure it.
  *
- * Ported from eve 0.40.0 `public/channels/telegram/verify.ts` (Apache-2.0, see NOTICE-eve).
- * Changes: no fallback to `process.env`; a missing secret is a configuration error.
+ * A missing secret is a configuration error; there is no environment fallback.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { timingSafeEqual } from "node:crypto";
 /**
@@ -28,7 +28,7 @@ export type TelegramWebhookSecretToken = string | (() => string | Promise<string
 /**
  * Caller-supplied inbound webhook verifier. Use it instead of
  * Telegram's secret-token header when an integration authenticates
- * forwarded webhooks before they reach eve.
+ * forwarded webhooks before they reach the agent.
  *
  * The return value selects how the channel handles the request: return a
  * falsy value to reject the request, a string to accept it and use that

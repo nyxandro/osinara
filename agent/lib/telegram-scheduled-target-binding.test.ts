@@ -61,7 +61,7 @@ vi.mock("./operational-incidents/telegram-failure.js", () => ({
 }));
 vi.mock("./sessions/session-repository.js", () => ({
   sessionRepository: {
-    isCurrentEveSession: vi.fn(async () => true),
+    isCurrentAgentSession: vi.fn(async () => true),
     recordTurnFailed: dependencies.recordTurnFailed,
   },
 }));
@@ -69,7 +69,7 @@ vi.mock("./telegram-final-delivery.js", () => ({
   deliverTelegramFinalOutput: dependencies.deliverFinalOutput,
 }));
 vi.mock("./telegram-hitl/approval-repository.js", () => ({
-  telegramHitlApprovalRepository: { clearForEveSession: dependencies.clearApprovals },
+  telegramHitlApprovalRepository: { clearForAgentSession: dependencies.clearApprovals },
 }));
 vi.mock("./telegram-progress.js", () => ({
   telegramOutputWithoutMemoryDirective: vi.fn(() => dependencies.completedOutput),

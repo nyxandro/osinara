@@ -90,6 +90,6 @@ describeWithDatabase("session route and retention isolation", () => {
       new Date("2026-04-02T00:00:00.000Z"),
     );
 
-    expect(claim).toMatchObject({ eveSessionId: "wrun_eligible", id: inserted.rows[1]!.id });
+    expect(claim).toMatchObject({ agentSessionId: "wrun_eligible", id: inserted.rows[1]!.id });
   });
 });

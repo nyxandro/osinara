@@ -3,14 +3,14 @@
  *
  * Exports:
  * - `resolveSandboxModelPath`: expands a leading `$HOME` without evaluating any other shell syntax.
- * - `resolveAbsoluteFilePath`: the same, and rejects a relative result with Eve's wording.
+ * - `resolveAbsoluteFilePath`: the same, and rejects a relative result.
  * - `resolveSandboxSkillRoot`: `$HOME/.agents/skills`, or `/workspace/skills` when the sandbox has
  *   no usable home directory (the root the skill list in the prompt points at).
  *
- * Derived from eve 0.40.0 `shared/skill-paths.ts` and `execution/sandbox/require-sandbox.ts`
- * (Apache-2.0, see NOTICE-eve). Changes: a failing home probe (the command cannot run) is an
- * error instead of a silent fallback; only a sandbox that answers without a usable home gets the
- * documented `/workspace/skills` root. The probe result is cached per sandbox session.
+ * A failing home probe (the command cannot run) is an error, not a silent fallback; only a sandbox
+ * that answers without a usable home gets the documented `/workspace/skills` root. The probe
+ * result is cached per sandbox session.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { SandboxSession } from "./types.js";
 

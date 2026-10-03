@@ -65,12 +65,12 @@ export const memoryReviewTurnEvents: LifecycleTurnEvents = {
       "AGENT_MEMORY_REVIEW_CONTEXT_INVALID: Internal review turn has no batch",
     );
     const appSessionId = applicationSessionId(ctx);
-    await sessionRepository.bindEveSession(appSessionId, ctx.session.id);
-    await memoryReviewRepository.bindEveTurn({
+    await sessionRepository.bindAgentSession(appSessionId, ctx.session.id);
+    await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: appSessionId,
       batchId,
-      eveSessionId: ctx.session.id,
-      eveTurnId: ctx.session.turn.id,
+      agentSessionId: ctx.session.id,
+      agentTurnId: ctx.session.turn.id,
     });
     await bindMemoryTurnSources(ctx);
   },
@@ -82,8 +82,8 @@ export const memoryReviewTurnEvents: LifecycleTurnEvents = {
     await recoverDatabaseBookkeeping(() => memoryReviewRepository.completeBatch({
       batchId,
       completedAt: new Date(),
-      eveSessionId: ctx.session.id,
-      eveTurnId: ctx.session.turn.id,
+      agentSessionId: ctx.session.id,
+      agentTurnId: ctx.session.turn.id,
     }));
     await releaseMemoryTurnSources(ctx);
   },
@@ -95,8 +95,8 @@ export const memoryReviewTurnEvents: LifecycleTurnEvents = {
     await recoverDatabaseBookkeeping(() => memoryReviewRepository.failRunning({
       batchId,
       diagnosticCode: recoverableModelFailureCode(data) ?? data.code,
-      eveSessionId: ctx.session.id,
-      eveTurnId: ctx.session.turn.id,
+      agentSessionId: ctx.session.id,
+      agentTurnId: ctx.session.turn.id,
     }));
     await releaseMemoryTurnSources(ctx);
   },
@@ -106,8 +106,8 @@ export const memoryReviewTurnEvents: LifecycleTurnEvents = {
     await recoverDatabaseBookkeeping(() => memoryReviewRepository.failRunning({
       batchId,
       diagnosticCode: "AGENT_MEMORY_REVIEW_TURN_CANCELLED",
-      eveSessionId: ctx.session.id,
-      eveTurnId: ctx.session.turn.id,
+      agentSessionId: ctx.session.id,
+      agentTurnId: ctx.session.turn.id,
     }));
     await releaseMemoryTurnSources(ctx);
   },

@@ -83,8 +83,8 @@ describe("turn-bound memory source selection", () => {
     await expect(bindMemoryTurnSources(resumed)).resolves.toBeUndefined();
     expect(verifyBoundResume).toHaveBeenCalledWith({
       applicationSessionId: "application-session-1",
-      eveSessionId: "eve-session-1",
-      eveTurnId: "eve-turn-1",
+      agentSessionId: "eve-session-1",
+      agentTurnId: "eve-turn-1",
       invokingActorId: "caller-1",
       invokingActorKind: "telegram_user",
     });
@@ -137,8 +137,8 @@ describe("turn-bound memory source selection", () => {
       timelineEntryId: "entry-42",
     });
     expect(resolve).toHaveBeenCalledWith({
-      eveSessionId: "eve-session-1",
-      eveTurnId: "eve-turn-1",
+      agentSessionId: "eve-session-1",
+      agentTurnId: "eve-turn-1",
       sourceSequence: "42",
     });
   });

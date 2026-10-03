@@ -102,8 +102,8 @@ export async function resolveAbandonedReviewBatch(
     applicationSessionId: string | null;
     batchId: string;
     diagnosticCode: string;
-    eveSessionId: string | null;
-    eveTurnId: string | null;
+    agentSessionId: string | null;
+    agentTurnId: string | null;
     laneId: string;
     notifyOwner: boolean;
     now: Date;
@@ -116,11 +116,11 @@ export async function resolveAbandonedReviewBatch(
   }
   // A turn writes memory only after `turn.started` bound its id, so a batch without that binding
   // cannot have written anything and needs no provenance lookup at all.
-  const wrote = input.eveSessionId === null || input.eveTurnId === null
+  const wrote = input.agentSessionId === null || input.agentTurnId === null
     ? 0
     : (await client.query(
       "SELECT 1 FROM memory_items_all WHERE source = $1 LIMIT 1",
-      [`eve:${input.eveSessionId}:${input.eveTurnId}`],
+      [`eve:${input.agentSessionId}:${input.agentTurnId}`],
     )).rowCount;
   // The lane is locked before the successor is looked up. `prepareInteractiveTurn` commits a new
   // batch behind a live head under that same lock, so without it a successor could appear between
@@ -209,8 +209,8 @@ export async function terminalizeAbandonedReviewTurns(
       applicationSessionId: batch.application_session_id,
       batchId: batch.id,
       diagnosticCode: TURN_ABANDONED,
-      eveSessionId: batch.eve_session_id,
-      eveTurnId: batch.eve_turn_id,
+      agentSessionId: batch.eve_session_id,
+      agentTurnId: batch.eve_turn_id,
       laneId: batch.lane_id,
       notifyOwner: true,
       now,
@@ -219,8 +219,8 @@ export async function terminalizeAbandonedReviewTurns(
       batchId: batch.id,
       code: BATCH_RESOLVED,
       diagnosticCode: TURN_ABANDONED,
-      eveSessionId: batch.eve_session_id,
-      eveTurnId: batch.eve_turn_id,
+      agentSessionId: batch.eve_session_id,
+      agentTurnId: batch.eve_turn_id,
       fromSequence: batch.from_sequence,
       laneId: batch.lane_id,
       outcome,
@@ -233,8 +233,8 @@ export const memoryReviewTerminalRepository = {
   async completeBatch(input: {
     batchId: string;
     completedAt: Date;
-    eveSessionId: string;
-    eveTurnId: string;
+    agentSessionId: string;
+    agentTurnId: string;
   }): Promise<MemoryReviewCompletionResult> {
     const client = await database().connect();
     try {
@@ -255,8 +255,8 @@ export const memoryReviewTerminalRepository = {
         await client.query("COMMIT");
         return "replayed";
       }
-      const exactTurn = recorded.eve_session_id === input.eveSessionId &&
-        recorded.eve_turn_id === input.eveTurnId;
+      const exactTurn = recorded.eve_session_id === input.agentSessionId &&
+        recorded.eve_turn_id === input.agentTurnId;
       if (exactTurn && (recorded.status === "waiting_model" || recorded.diagnostic_code === "AGENT_MEMORY_REVIEW_PARTIAL_RESULT") ||
           !exactTurn && await isRetiredReviewAttempt(client, input)) {
         await client.query("COMMIT"); return "replayed";
@@ -287,7 +287,7 @@ export const memoryReviewTerminalRepository = {
       const sourceBinding = await client.query(
         `SELECT 1 FROM memory_turn_source_sets
           WHERE memory_review_batch_id = $1 AND eve_session_id = $2 AND eve_turn_id = $3`,
-        [input.batchId, input.eveSessionId, input.eveTurnId],
+        [input.batchId, input.agentSessionId, input.agentTurnId],
       );
       if (sourceBinding.rowCount !== 1) {
         await client.query(
@@ -300,7 +300,7 @@ export const memoryReviewTerminalRepository = {
         await terminalizeApplicationSession(client, {
           applicationSessionId: recorded.application_session_id,
           completedAt: input.completedAt,
-          eveSessionId: input.eveSessionId,
+          agentSessionId: input.agentSessionId,
           outcome: "failed",
         });
         await enqueueMemoryReviewOwnerAlert(client, input.batchId, SOURCE_BINDING_MISSING);
@@ -318,7 +318,7 @@ export const memoryReviewTerminalRepository = {
       await terminalizeApplicationSession(client, {
         applicationSessionId: recorded.application_session_id,
         completedAt: input.completedAt,
-        eveSessionId: input.eveSessionId,
+        agentSessionId: input.agentSessionId,
         outcome: "completed",
       });
       await advanceCompletedChain(client, recorded.lane_id);
@@ -346,8 +346,8 @@ export const memoryReviewTerminalRepository = {
   async failRunning(input: {
     batchId: string;
     diagnosticCode: string;
-    eveSessionId: string;
-    eveTurnId: string;
+    agentSessionId: string;
+    agentTurnId: string;
   }): Promise<MemoryReviewTerminalResult> {
     if (input.diagnosticCode !== TURN_CANCELLED) {
       const result = await failBackgroundReview(input);
@@ -370,11 +370,11 @@ export const memoryReviewTerminalRepository = {
         [input.batchId],
       );
       const batch = claimed.rows[0];
-      if (batch?.eve_session_id === input.eveSessionId && batch.eve_turn_id === input.eveTurnId &&
+      if (batch?.eve_session_id === input.agentSessionId && batch.eve_turn_id === input.agentTurnId &&
           (batch.status === "waiting_model" || batch.diagnostic_code === "AGENT_MEMORY_REVIEW_PARTIAL_RESULT")) {
         await client.query("COMMIT"); return "replayed";
       }
-      if (batch && batch.eve_session_id !== input.eveSessionId && await isRetiredReviewAttempt(client, input)) {
+      if (batch && batch.eve_session_id !== input.agentSessionId && await isRetiredReviewAttempt(client, input)) {
         await client.query("COMMIT"); return "replayed";
       }
       // Turn lifecycle events are at-least-once, and a released batch leaves no row at all: both
@@ -396,8 +396,8 @@ export const memoryReviewTerminalRepository = {
       // at all and provably wrote nothing. A binding that belongs to another turn is a real
       // disagreement about this batch and fails closed. Provenance is read from the row, never
       // from the channel context, so a mismatch cannot silently release written memory.
-      if (batch.eve_session_id !== null && (batch.eve_session_id !== input.eveSessionId ||
-        batch.eve_turn_id !== input.eveTurnId)) {
+      if (batch.eve_session_id !== null && (batch.eve_session_id !== input.agentSessionId ||
+        batch.eve_turn_id !== input.agentTurnId)) {
         throw new AppError(
           "AGENT_MEMORY_REVIEW_FAILURE_STATE_INVALID",
           "Проверка памяти завершена с другим результатом или недоступна",
@@ -408,8 +408,8 @@ export const memoryReviewTerminalRepository = {
         applicationSessionId: null,
         batchId: input.batchId,
         diagnosticCode: input.diagnosticCode,
-        eveSessionId: batch.eve_session_id,
-        eveTurnId: batch.eve_turn_id,
+        agentSessionId: batch.eve_session_id,
+        agentTurnId: batch.eve_turn_id,
         laneId: batch.lane_id,
         notifyOwner: input.diagnosticCode !== TURN_CANCELLED,
         now,
@@ -418,7 +418,7 @@ export const memoryReviewTerminalRepository = {
         await terminalizeApplicationSession(client, {
           applicationSessionId: batch.application_session_id,
           completedAt: now,
-          eveSessionId: input.eveSessionId,
+          agentSessionId: input.agentSessionId,
           outcome: "failed",
         });
       }
@@ -426,8 +426,8 @@ export const memoryReviewTerminalRepository = {
         batchId: input.batchId,
         code: BATCH_RESOLVED,
         diagnosticCode: input.diagnosticCode,
-        eveSessionId: batch.eve_session_id,
-        eveTurnId: batch.eve_turn_id,
+        agentSessionId: batch.eve_session_id,
+        agentTurnId: batch.eve_turn_id,
         outcome,
       }));
       await client.query("COMMIT");
@@ -460,8 +460,8 @@ export const memoryReviewTerminalRepository = {
           applicationSessionId: null,
           batchId,
           diagnosticCode,
-          eveSessionId: null,
-          eveTurnId: null,
+          agentSessionId: null,
+          agentTurnId: null,
           laneId: batch.lane_id,
           notifyOwner: true,
           now: new Date(),

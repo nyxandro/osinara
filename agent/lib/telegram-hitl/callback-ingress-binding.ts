@@ -1,6 +1,6 @@
 /**
  * Approval consumption and the answered session and turn of the update commit together.
- * The start index belonged to Eve's event stream; it stays filled only for the table's constraint.
+ * `dispatch_start_index` is no longer read; it stays filled only for the table's constraint.
  */
 import type { PoolClient } from "pg";
 import { AppError } from "../app-error.js";

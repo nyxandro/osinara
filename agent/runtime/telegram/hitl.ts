@@ -11,9 +11,9 @@
  *   data, and whether a pressed button is one of its cards — including a card shown under the
  *   previous prefix `eve:`, accepted until the next release.
  *
- * Ported verbatim from eve 0.40.0 `public/channels/telegram/hitl.ts` (Apache-2.0, see NOTICE-eve).
- * The callback ids continue the counter Eve kept per conversation (`nextHitlCallbackId`), so a
- * button still visible in a chat never maps to a new request.
+ * The callback ids continue the per-conversation counter (`nextHitlCallbackId`), so a button still
+ * visible in a chat never maps to a new request.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { InputRequest, InputResponse } from "../hitl/types.js";
 import type { TelegramHitlState } from "./channel-types.js";
@@ -125,7 +125,7 @@ export function isTelegramSyntheticResponse(response: InputResponse): boolean {
   );
 }
 
-/** Remaps compact Telegram callback/reply ids into real eve input responses. */
+/** Remaps compact Telegram callback/reply ids into the input responses they stand for. */
 export function resolveTelegramInputResponses(
   state: TelegramHitlState,
   responses: readonly InputResponse[],

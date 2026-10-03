@@ -34,7 +34,7 @@ vi.mock("../sessions/session-repository.js", () => ({
   },
 }));
 vi.mock("../telegram-hitl/approval-repository.js", () => ({
-  telegramHitlApprovalRepository: { clearForEveSession: dependencies.clearApprovals },
+  telegramHitlApprovalRepository: { clearForAgentSession: dependencies.clearApprovals },
 }));
 vi.mock("../memory-turn-source.js", () => ({
   bindMemoryTurnSources: vi.fn(),
@@ -81,8 +81,8 @@ describe("telegram wake-up turn lifecycle", () => {
 
     expect(dependencies.finishTurn).toHaveBeenCalledWith(expect.objectContaining({
       applicationSessionId: "application-session-1",
-      eveSessionId: "eve-session-1",
-      eveTurnId: "turn-4",
+      agentSessionId: "eve-session-1",
+      agentTurnId: "turn-4",
       failureCode: null,
       runId: "run-1",
     }));

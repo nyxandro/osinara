@@ -25,13 +25,13 @@ export async function resolveMemoryReviewBatch(ctx: {
     id: string;
     turn: { id: string };
   };
-}): Promise<{ batchId: string; eveTurnId: string } | null> {
+}): Promise<{ batchId: string; agentTurnId: string } | null> {
   const bound = await memoryReviewRepository.batchForTurn({
-    eveSessionId: ctx.session.id,
-    eveTurnId: ctx.session.turn.id,
+    agentSessionId: ctx.session.id,
+    agentTurnId: ctx.session.turn.id,
   });
   if (bound) return bound;
   // Released batches have no row; their original marker keeps a repeated terminal event a no-op.
   const marker = memoryReviewBatchId(ctx);
-  return marker === null ? null : { batchId: marker, eveTurnId: ctx.session.turn.id };
+  return marker === null ? null : { batchId: marker, agentTurnId: ctx.session.turn.id };
 }

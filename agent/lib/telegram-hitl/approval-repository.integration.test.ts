@@ -65,7 +65,7 @@ async function fixture(
     scope,
     userId: null,
   });
-  await sessionRepository.bindEveSession(session.id, "wrun_hitl");
+  await sessionRepository.bindAgentSession(session.id, "wrun_hitl");
   await sessionRepository.parkSession({
     applicationSessionId: session.id,
     pendingRequestId: "approval-request-1",
@@ -81,8 +81,8 @@ async function fixture(
       { callbackData: "hitl:0", label: "Да, подтвердить", optionId: "approve" },
       { callbackData: "hitl:1", label: "Нет, отклонить", optionId: "deny" },
     ],
-    eveSessionId: "wrun_hitl",
-    eveTurnId: "turn_0",
+    agentSessionId: "wrun_hitl",
+    agentTurnId: "turn_0",
     requestId: "approval-request-1",
     promptText: "Подтвердите тестовое действие",
     telegramChatId: "-1001",
@@ -210,7 +210,7 @@ describeWithDatabase("Telegram HITL approval repository", () => {
     await expect(
       telegramHitlApprovalRepository.requireToolExecutionApproval({
         applicationSessionId: current.sessionId,
-        eveSessionId: "wrun_hitl",
+        agentSessionId: "wrun_hitl",
         telegramUserId: OWNER_TELEGRAM_ID,
         toolCallId: "call-1",
         toolInputHash: "a".repeat(64),
@@ -231,7 +231,7 @@ describeWithDatabase("Telegram HITL approval repository", () => {
 
     const exact = {
       applicationSessionId: current.sessionId,
-      eveSessionId: "wrun_hitl",
+      agentSessionId: "wrun_hitl",
       telegramUserId: OWNER_TELEGRAM_ID,
       toolCallId: "call-1",
       toolInputHash: "a".repeat(64),
@@ -284,7 +284,7 @@ describeWithDatabase("Telegram HITL approval repository", () => {
         },
         { callbackData: "hitl:3", label: "Нет, отклонить", optionId: "deny" },
       ],
-      eveSessionId: "wrun_hitl",
+      agentSessionId: "wrun_hitl",
       requestId: "approval-request-2",
       promptText: "Подтвердите второе действие",
       telegramChatId: "-1001",
@@ -330,7 +330,7 @@ describeWithDatabase("Telegram HITL approval repository", () => {
           optionId: "approve",
         },
       ],
-      eveSessionId: "wrun_hitl_new",
+      agentSessionId: "wrun_hitl_new",
       requestId: "approval-request-new-root",
       promptText: "Подтвердите действие нового запуска",
       telegramChatId: "-1001",
@@ -343,7 +343,7 @@ describeWithDatabase("Telegram HITL approval repository", () => {
       toolName: "test_tool",
     });
 
-    await telegramHitlApprovalRepository.clearForEveSession(current.sessionId, "wrun_hitl");
+    await telegramHitlApprovalRepository.clearForAgentSession(current.sessionId, "wrun_hitl");
 
     await expect(database().query<{ eve_session_id: string }>("SELECT eve_session_id FROM telegram_hitl_approvals WHERE application_session_id = $1", [current.sessionId])).resolves.toMatchObject({
       rows: [{ eve_session_id: "wrun_hitl_new" }],

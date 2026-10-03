@@ -78,7 +78,7 @@ function correctionFor(category: ModelFacingErrorCategory, code: string, toolNam
 
 /**
  * Refusals caused by the call itself: bad arguments, a stale or unknown ref, no access, a conflict.
- * Eve's multi-line stack for them only fed the unstructured-problem alert (#289, #302). `operation`
+ * A multi-line stack for them only fed the unstructured-problem alert (#289, #302). `operation`
  * is the fallback category, so a broken integration lands there too: it stays loud unless the
  * thrower marks the refusal explicitly. Dependency failures and unknown exceptions always stay loud.
  */
