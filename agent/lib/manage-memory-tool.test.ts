@@ -7,7 +7,7 @@
  * - Raw database UUIDs and the historical `id` field are rejected at the model boundary.
  * - Approval and execution share one strict action parser without requiring persisted HITL evidence.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 

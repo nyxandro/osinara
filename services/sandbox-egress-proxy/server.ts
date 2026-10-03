@@ -10,14 +10,22 @@
  * - DNS is resolved at the proxy and the validated IP is pinned for the connection.
  * - Private/reserved destinations and ports other than HTTP(S) are rejected.
  * - Proxy credentials and hop-by-hop headers are never forwarded.
+ * - Logs name the destination host, never a full URL: it may carry credentials or tokens.
  */
 import { createServer, request as httpRequest, type IncomingHttpHeaders } from "node:http";
 import { connect, type Socket } from "node:net";
 
+import {
+  SANDBOX_EGRESS_CLIENT_CLOSED_CODE,
+  SANDBOX_EGRESS_UPSTREAM_CLOSED_CODE,
+  writeEgressLog,
+} from "./egress-log.js";
 import { resolvePublicInternetAddress } from "./public-dns-resolver.js";
 
 const ALLOWED_PORTS = new Set([80, 443]);
 const CONNECT_TIMEOUT_MS = 15_000;
+// How a client closing its side of the connection surfaces on the proxy socket.
+const CLIENT_CLOSED_ERROR_CODES = new Set(["ECONNRESET", "EPIPE"]);
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
   "keep-alive",
@@ -92,6 +100,19 @@ function filteredHeaders(headers: IncomingHttpHeaders): IncomingHttpHeaders {
   );
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function urlHost(url: string | undefined): string | null {
+  return url !== undefined && URL.canParse(url) ? new URL(url).host : null;
+}
+
+// A CONNECT target is `host:port`; anything a client put before an `@` would be credentials.
+function connectTargetForLog(target: string | undefined): string | null {
+  return target === undefined ? null : target.slice(target.lastIndexOf("@") + 1);
+}
+
 function rejectSocket(socket: Socket, status: number, message: string): void {
   socket.end(`HTTP/1.1 ${status} ${message}\r\nConnection: close\r\n\r\n`);
 }
@@ -102,8 +123,10 @@ function guardClientSocket(socket: Socket, phase: () => ConnectPhase): () => boo
   // The socket is request-scoped, so closing it must never terminate the shared proxy process.
   socket.on("error", (error: NodeJS.ErrnoException) => {
     unavailable = true;
-    console.error("Sandbox CONNECT client socket failed", {
-      code: error.code ?? "AGENT_SANDBOX_EGRESS_CLIENT_SOCKET_FAILED",
+    const closed = error.code !== undefined && CLIENT_CLOSED_ERROR_CODES.has(error.code);
+    writeEgressLog({
+      code: closed ? SANDBOX_EGRESS_CLIENT_CLOSED_CODE : "AGENT_SANDBOX_EGRESS_CLIENT_SOCKET_FAILED",
+      errorCode: error.code ?? null,
       errorName: error.name,
       phase: phase(),
     });
@@ -141,14 +164,24 @@ export function createSandboxEgressProxy() {
       upstream.on("timeout", () => upstream.destroy(
         new Error("AGENT_SANDBOX_EGRESS_TIMEOUT: Upstream connection timed out"),
       ));
-      upstream.on("error", (error) => {
-        console.error("Sandbox HTTP egress failed", { error, hostname: target.hostname, port });
+      upstream.on("error", (error: NodeJS.ErrnoException) => {
+        writeEgressLog({
+          code: "AGENT_SANDBOX_EGRESS_HTTP_FAILED",
+          errorCode: error.code ?? null,
+          errorMessage: error.message,
+          hostname: target.hostname,
+          port,
+        });
         if (!outgoing.headersSent) outgoing.writeHead(502);
         outgoing.end("AGENT_SANDBOX_EGRESS_FAILED: Public destination request failed\n");
       });
       incoming.pipe(upstream);
     })().catch((error: unknown) => {
-      console.error("Sandbox HTTP egress rejected", { error, url: incoming.url });
+      writeEgressLog({
+        code: "AGENT_SANDBOX_EGRESS_HTTP_REJECTED",
+        errorMessage: errorMessage(error),
+        host: urlHost(incoming.url),
+      });
       if (!outgoing.headersSent) outgoing.writeHead(403);
       outgoing.end("AGENT_SANDBOX_EGRESS_FORBIDDEN: Destination is not allowed\n");
     });
@@ -182,9 +215,11 @@ export function createSandboxEgressProxy() {
         upstream.pipe(clientSocket);
         clientSocket.pipe(upstream);
       });
-      upstream.once("error", (error) => {
-        console.error("Sandbox CONNECT failed", {
-          error,
+      upstream.once("error", (error: NodeJS.ErrnoException) => {
+        writeEgressLog({
+          code: phase === "tunnel" ? SANDBOX_EGRESS_UPSTREAM_CLOSED_CODE : "AGENT_SANDBOX_EGRESS_UPSTREAM_FAILED",
+          errorCode: error.code ?? null,
+          errorMessage: error.message,
           hostname: target.hostname,
           phase,
           port,
@@ -192,7 +227,12 @@ export function createSandboxEgressProxy() {
         rejectSocket(clientSocket, 502, "Bad Gateway");
       });
     })().catch((error: unknown) => {
-      console.error("Sandbox CONNECT rejected", { error, phase, target: request.url });
+      writeEgressLog({
+        code: "AGENT_SANDBOX_EGRESS_CONNECT_REJECTED",
+        errorMessage: errorMessage(error),
+        phase,
+        target: connectTargetForLog(request.url),
+      });
       rejectSocket(clientSocket, 403, "Forbidden");
     });
   });

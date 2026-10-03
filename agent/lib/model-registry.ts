@@ -2,7 +2,7 @@
  * Explicit AI SDK model registry.
  *
  * Exports:
- * - `primaryModel`: configured protocol-native text model for the Eve agent loop.
+ * - `primaryModel`: configured protocol-native text model for the agent loop.
  * - `visionModel`: independently selected model, or `null` when image input is unsupported.
  * - `voiceTranscriptionModel`: isolated Groq Whisper route for Telegram voice notes.
  */

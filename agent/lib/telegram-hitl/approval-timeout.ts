@@ -7,21 +7,22 @@
  * - `approvalTimeoutContext`: model-facing explanation attached to the synthetic cancellation.
  *
  * Key constructs:
- * - Eve settles an approval by option id only, so the timeout reason travels as session context.
- * - The response carries the same freshly revalidated auth the interactive callback path delivers,
- *   because Eve replaces session auth with whatever a response supplies.
- * - A dead session is settled rather than retried: its parked turn can never resume.
+ * - An approval is settled by option id only, so the timeout reason travels as context of the
+ *   continuation, written before the restored approval transcript.
+ * - The response carries the same freshly revalidated auth the interactive callback path delivers:
+ *   the continuation acts as whoever answered.
+ * - A request that no longer waits is settled rather than retried: nothing can resume it.
  */
-import type { SessionAuthContext } from "eve/context";
-import type { Session } from "eve/channels";
+import type { SessionAuthContext } from "../../runtime/context.js";
+import type { InputResponse } from "../../runtime/hitl/types.js";
 
 import { TELEGRAM_HITL_APPROVAL_TIMEOUT_MS } from "../../config.js";
 
 export interface TimedOutApprovalClaim {
   applicationSessionId: string;
-  /** Revalidated Telegram auth for the resumed turn; Eve overwrites session auth with it. */
+  /** Revalidated Telegram auth for the resumed turn, which acts as the one who answered. */
   auth: SessionAuthContext;
-  eveSessionId: string;
+  agentSessionId: string;
   id: string;
   kind: "question" | "tool-approval";
   leaseToken: string;
@@ -39,9 +40,15 @@ export interface ApprovalTimeoutRepository {
 }
 
 export interface ApprovalTimeoutDependencies {
-  attachSession(eveSessionId: string): Pick<Session, "respond">;
   finalizePrompt(claim: TimedOutApprovalClaim): Promise<void>;
   repository: ApprovalTimeoutRepository;
+  /** Records the answer in the parked session; `stale` when that request no longer waits. */
+  respond(input: {
+    auth: SessionAuthContext;
+    context: readonly string[];
+    responses: readonly InputResponse[];
+    sessionId: string;
+  }): Promise<"continued" | "recorded" | "stale">;
 }
 
 const TIMEOUT_RESPONSE_FAILED = "AGENT_APPROVAL_TIMEOUT_RESPONSE_FAILED";
@@ -65,8 +72,8 @@ export function approvalTimeoutContext(claim: TimedOutApprovalClaim): string {
   ].join(" ");
 }
 
-/** Eve resolves an approval only by option id; a question has no option the user ever saw. */
-function timeoutInputResponse(claim: TimedOutApprovalClaim) {
+/** An approval resolves only by option id; a question has no option the user ever saw. */
+function timeoutInputResponse(claim: TimedOutApprovalClaim): InputResponse {
   return claim.kind === "question"
     ? { requestId: claim.requestId, text: NO_ANSWER_TEXT }
     : { optionId: "cancel", requestId: claim.requestId };
@@ -93,19 +100,21 @@ async function resolveOne(
 ): Promise<boolean> {
   let active: boolean;
   try {
-    // Eve settles the original tool call exactly once. Cancel keeps the side effect unexecuted while
+    // The original tool call is settled exactly once. Cancel keeps the side effect unexecuted while
     // the persisted context carries the reason, which the hardcoded approval outcome cannot express.
-    const result = await dependencies.attachSession(claim.eveSessionId).respond(
-      [timeoutInputResponse(claim)],
-      { auth: claim.auth, context: [approvalTimeoutContext(claim)] },
-    );
-    active = result.status === "accepted";
+    const result = await dependencies.respond({
+      auth: claim.auth,
+      context: [approvalTimeoutContext(claim)],
+      responses: [timeoutInputResponse(claim)],
+      sessionId: claim.agentSessionId,
+    });
+    active = result !== "stale";
     if (!active) {
       // The parked turn is gone; settling the row is the only way to release the rotation veto.
       console.error(JSON.stringify({
         approvalId: claim.id,
         code: TIMEOUT_SESSION_INACTIVE,
-        eveSessionId: claim.eveSessionId,
+        agentSessionId: claim.agentSessionId,
       }));
     }
   } catch (error) {
@@ -114,7 +123,7 @@ async function resolveOne(
       approvalId: claim.id,
       code: TIMEOUT_RESPONSE_FAILED,
       error: error instanceof Error ? error.message : String(error),
-      eveSessionId: claim.eveSessionId,
+      agentSessionId: claim.agentSessionId,
     }));
     try {
       await dependencies.repository.failTimeout(claim, TIMEOUT_RESPONSE_FAILED);

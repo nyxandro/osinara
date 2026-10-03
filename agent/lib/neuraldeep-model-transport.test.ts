@@ -13,7 +13,7 @@ import { createConfiguredLanguageModel } from "./model-transport.js";
 import { formatTurnMemoryContext } from "./prompt/turn-memory-context.js";
 
 describe("NeuralDeep model transport", () => {
-  it("keeps turn memory in system context and the real task last, with streamed cache usage", async () => {
+  it("projects turn memory into the tail so the system prefix repeats byte for byte", async () => {
     const requests: { messages: { role: string; content: string }[]; user: string; stream_options: unknown }[] = [];
     const model = createConfiguredLanguageModel({
       apiKey: "synthetic-secret", maxOutputTokens: 128, modelId: "qwen3.8-27b",
@@ -42,15 +42,22 @@ describe("NeuralDeep model transport", () => {
       expect(finish?.usage).toMatchObject({ inputTokens: { total: 1200, cacheRead: 1024 }, outputTokens: { total: 20, reasoning: 18 } });
       expect(prompt).toEqual(original);
     }
-    expect(requests[0]!.messages.slice(1, 3)).toEqual(requests[1]!.messages.slice(1, 3));
+    // The whole point of the projection: everything before the turn tail repeats unchanged, so the
+    // provider can reuse the prefix it already computed for the previous turn.
+    expect(requests[0]!.messages.slice(0, 3)).toEqual(requests[1]!.messages.slice(0, 3));
     for (const [index, request] of requests.entries()) {
+      const question = index === 0 ? "first question" : "second question";
       expect(request.user).toBe("synthetic-session");
       expect(request.stream_options).toEqual({ include_usage: true });
       expect(request.messages[0]!.role).toBe("system");
-      expect(request.messages[0]!.content).toContain("<osinara_turn_memory");
-      expect(request.messages).toHaveLength(4);
-      expect(request.messages.at(-1)?.content).toBe(index === 0 ? "first question" : "second question");
-      expect(request.messages[3]!.content).toBe(index === 0 ? "first question" : "second question");
+      expect(request.messages[0]!.content).toBe("Stable rules");
+      expect(request.messages).toHaveLength(5);
+      expect(request.messages[3]).toEqual({
+        role: "user",
+        content: expect.stringContaining(`Facts for ${question}`),
+      });
+      expect(request.messages[3]!.content).toContain("<osinara_turn_memory>");
+      expect(request.messages.at(-1)).toEqual({ role: "user", content: question });
     }
   });
 
@@ -67,7 +74,9 @@ describe("NeuralDeep model transport", () => {
       },
     });
     const prompt: LanguageModelV4CallOptions["prompt"] = [
-      { role: "system", content: formatTurnMemoryContext("AGENT_MEMORY_UNAVAILABLE: Память недоступна") },
+      // A service notice is a rule about behaviour, not retrieved data: it is never wrapped as a
+      // memory payload and must stay in the system prefix instead of arriving as a new request.
+      { role: "system", content: "AGENT_MEMORY_UNAVAILABLE: Память недоступна" },
       { role: "user", content: [{ type: "text", text: "Собери дайджест" }] },
       { role: "assistant", content: [{ type: "tool-call", toolCallId: "search-1", toolName: "web_search", input: { query: "AI" } }] },
       { role: "tool", content: [{ type: "tool-result", toolCallId: "search-1", toolName: "web_search", output: { type: "text", value: "Новости" } }] },

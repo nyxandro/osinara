@@ -63,22 +63,19 @@ export interface TelegramInputRequest {
   allowFreeform?: boolean;
   display?: "confirmation" | "select" | "text";
   /** Framework-owned source of the request. Only `tool-approval` is an application confirmation. */
-  kind?: "question" | "session-limit" | "tool-approval";
+  kind?: "question" | "tool-approval";
   options?: TelegramInputOption[];
   prompt: string;
   requestId: string;
 }
 
-// Eve 0.40.0 emits `approve`/`cancel` for a tool approval and `continue`/`stop` for a session
-// limit. No path emits `deny`, so no branch for it is kept.
+// A tool approval offers `approve` and `cancel`. No path emits `deny`, so no branch for it is kept.
 const OPTION_LABELS: Readonly<Record<string, string>> = {
   approve: "Да, подтвердить",
   cancel: "Нет, отменить",
-  continue: "Продолжить",
-  stop: "Остановить",
 };
 
-// Eve reports an exhausted model call under this code; the message it produces carries no
+// The runtime reports an exhausted model call under this code; the message it produces carries no
 // internals, which is what makes it safe to show in a shared chat.
 export const MODEL_UNAVAILABLE_FAILURE_CODE = "MODEL_CALL_FAILED";
 
@@ -178,14 +175,13 @@ function publicFailureExplanation(data: FailureData): string | null {
 }
 
 export function localizeTelegramInputRequest<T extends TelegramInputRequest>(request: T): T {
-  // Option IDs remain unchanged because Eve resolves callbacks by ID, not visible text.
+  // Option IDs remain unchanged because the runtime resolves callbacks by ID, not visible text.
   const options = request.options?.map((option) => ({
     ...option,
     label: OPTION_LABELS[option.id] ?? option.label,
   }));
 
-  // Only an application tool approval gets the composed confirmation. A framework request such as
-  // `session-limit` executes nothing, so its own prompt and consequence must not be rewritten.
+  // Only an application tool approval gets the composed confirmation; a question keeps its own prompt.
   if (request.display !== "confirmation" || request.kind !== "tool-approval") {
     return options ? { ...request, options } : request;
   }
@@ -223,7 +219,7 @@ export function formatTelegramTurnFailure(
     ? [`Код: ${data.code}`, ...(errorId ? [`Номер ошибки: ${errorId}`] : [])]
     : [];
 
-  // Every retry Eve had is already spent by the time this runs, so the ask is to wait, not to
+  // Every retry the runtime had is already spent by the time this runs, so the ask is to wait, not to
   // repeat immediately, and the reason is named plainly instead of as a failed request.
   if (data.code === MODEL_UNAVAILABLE_FAILURE_CODE) {
     return [

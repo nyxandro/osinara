@@ -4,7 +4,7 @@
  * Export:
  * - `EXTERNAL_IMAGE_GENERATION_TOOL_PRESENTATION`: group-only description and input schema.
  */
-import type { ToolDefinition } from "eve/tools";
+import type { ToolDefinition } from "../../runtime/tool.js";
 import { z } from "zod";
 
 type AnyToolDefinition = ToolDefinition<any, any>;

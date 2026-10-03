@@ -2,16 +2,16 @@
  * Critical main-agent memory path integration tests.
  *
  * Constructs covered:
- * - Step-scoped capability resolution returns Eve-branded `remember` and `load_skill` definitions.
- * - `bindMemoryTurnSources` freezes the current verified Telegram source for the Eve turn.
+ * - Step-scoped capability resolution returns the runtime's `remember` and `load_skill` definitions.
+ * - `bindMemoryTurnSources` freezes the current verified Telegram source for the agent turn.
  * - The emitted `remember` tool persists one group claim, evidence, operation, audit, and index job.
  * - Turn completion releases the source binding, and subagents never receive `remember`.
  * - A durable background review writes from its exact batch source and retires cleanly.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
-import capabilities from "../tools/capabilities.js";
+import { resolveToolSurface } from "../tools/capabilities.js";
 import { closeDatabase, database } from "./database.js";
 import { createMainAgentMemoryFixture } from "./memory-agent-write.integration-fixtures.js";
 import { memoryReviewDispatchRepository } from "./memory-review/memory-review-dispatch-repository.js";
@@ -27,7 +27,6 @@ import {
 const describeWithDatabase = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true"
   ? describe
   : describe.skip;
-const EVE_TOOL_BRAND = Symbol.for("eve:tool-brand");
 
 function sessionContext(input: {
   applicationSessionId: string;
@@ -67,8 +66,8 @@ function sessionContext(input: {
     messages: [],
     session: {
       auth,
-      id: "eve-critical-memory-session",
-      turn: { id: "eve-critical-memory-turn" },
+      id: "agent-critical-memory-session",
+      turn: { id: "agent-critical-memory-turn" },
     },
   };
 }
@@ -110,8 +109,8 @@ function reviewContext(input: {
         },
         initiator: null,
       },
-      id: "eve-background-memory-session",
-      turn: { id: "eve-background-memory-turn" },
+      id: "agent-background-memory-session",
+      turn: { id: "agent-background-memory-turn" },
     },
   };
 }
@@ -175,11 +174,9 @@ describeWithDatabase("critical main-agent memory paths", () => {
     });
 
     await bindMemoryTurnSources(context as never);
-    const surface = await capabilities.events["step.started"]?.({} as never, context as never);
+    const surface = await resolveToolSurface(context as never);
     expect(surface?.remember).toBeDefined();
     expect(surface?.load_skill).toBeDefined();
-    expect((surface?.remember as unknown as Record<symbol, unknown>)[EVE_TOOL_BRAND]).toBe(true);
-    expect((surface?.load_skill as unknown as Record<symbol, unknown>)[EVE_TOOL_BRAND]).toBe(true);
 
     const result = await surface!.remember!.execute({
       basis: "user_requested",
@@ -216,15 +213,15 @@ describeWithDatabase("critical main-agent memory paths", () => {
     )).resolves.toMatchObject({ rows: [{
       content: "Проект использует синий корпус",
       embedding_job: true,
-      eve_session_id: "eve-critical-memory-session",
-      eve_turn_id: "eve-critical-memory-turn",
+      eve_session_id: "agent-critical-memory-session",
+      eve_turn_id: "agent-critical-memory-turn",
       event_type: "memory.created",
       group_id: group.rows[0]!.id,
       subject_participant_id: participant.rows[0]!.id,
       timeline_entry_id: message.rows[0]!.id,
     }] });
 
-    const subagentSurface = await capabilities.events["step.started"]?.({} as never, {
+    const subagentSurface = await resolveToolSurface({
       ...context,
       channel: { kind: "subagent" },
     } as never);
@@ -277,12 +274,12 @@ describeWithDatabase("critical main-agent memory paths", () => {
       new Date("2026-08-13T10:00:01.000Z"),
     );
     expect(await memoryReviewDispatchRepository.markDispatchStarted(batch!, appSession.id)).toBe(true);
-    await sessionRepository.bindEveSession(appSession.id, "eve-background-memory-session");
-    await memoryReviewRepository.bindEveTurn({
+    await sessionRepository.bindAgentSession(appSession.id, "agent-background-memory-session");
+    await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: appSession.id,
       batchId: batch!.batchId,
-      eveSessionId: "eve-background-memory-session",
-      eveTurnId: "eve-background-memory-turn",
+      agentSessionId: "agent-background-memory-session",
+      agentTurnId: "agent-background-memory-turn",
     });
     const context = reviewContext({
       applicationSessionId: appSession.id,
@@ -296,8 +293,8 @@ describeWithDatabase("critical main-agent memory paths", () => {
     await bindMemoryTurnSources(context as never);
 
     // The review surface must execute the same source-backed writer used by ordinary main turns.
-    const surface = await capabilities.events["step.started"]?.({} as never, context as never);
-    expect((surface?.remember as unknown as Record<symbol, unknown>)[EVE_TOOL_BRAND]).toBe(true);
+    const surface = await resolveToolSurface(context as never);
+    expect(surface?.remember).toBeDefined();
     const result = await surface!.remember!.execute({
       basis: "agent_inferred",
       content: "Анна предпочитает утренние тренировки",
@@ -318,8 +315,8 @@ describeWithDatabase("critical main-agent memory paths", () => {
     await memoryReviewRepository.completeBatch({
       batchId: batch!.batchId,
       completedAt: new Date("2026-08-13T10:00:02.000Z"),
-      eveSessionId: "eve-background-memory-session",
-      eveTurnId: "eve-background-memory-turn",
+      agentSessionId: "agent-background-memory-session",
+      agentTurnId: "agent-background-memory-turn",
     });
     await releaseMemoryTurnSources(context as never);
     await expect(database().query(

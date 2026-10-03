@@ -1,16 +1,18 @@
 /**
- * Common model-facing execution boundary for Eve tools.
+ * Common model-facing execution boundary for application tools.
  *
  * Exports:
- * - `wrapModelFacingTool`: preserves a descriptor while normalizing every thrown error.
+ * - `wrapModelFacingTool`: preserves a descriptor while normalizing every thrown error and records
+ *   each call, with the failure code and log-only details, in one `AGENT_TOOL_CALL_METRICS` line.
  *
  * Key construct:
  * - The generic call contract is stated once in `agent/instructions.md`, so a descriptor carries
  *   only what is specific to its own tool.
  * - `wrapModelFacingToolMap`: applies the boundary once to a complete mode-scoped surface.
  */
-import { defineTool, type ToolDefinition } from "eve/tools";
+import { defineTool, type ToolDefinition } from "../runtime/tool.js";
 
+import { AppError } from "./app-error.js";
 import { normalizeModelFacingError } from "./model-facing-error.js";
 
 type AnyToolDefinition = ToolDefinition<any, any>;
@@ -36,15 +38,21 @@ export function wrapModelFacingTool(
     async execute(input, ctx) {
       const started = performance.now();
       let outcome = "succeeded";
+      let failure: { errorCode: string; errorDetails?: AppError["details"] } | undefined;
       try {
         return await definition.execute(input, ctx);
       } catch (error) {
         outcome = "failed";
-        throw normalizeModelFacingError(error, { toolName });
+        const normalized = normalizeModelFacingError(error, { toolName });
+        // The single structured record of a failed call: the runtime does not log expected refusals
+        // again (`runtime/turn/tool-calls.ts`).
+        failure = { errorCode: normalized.contract.code };
+        if (error instanceof AppError && error.details !== undefined) failure.errorDetails = error.details;
+        throw normalized;
       } finally {
         console.info(JSON.stringify({ code: "AGENT_TOOL_CALL_METRICS", toolName, outcome,
           sessionId: ctx?.session?.id ?? null, turnId: ctx?.session?.turn?.id ?? null,
-          callId: ctx?.callId ?? null, durationMs: Math.round(performance.now() - started) }));
+          callId: ctx?.callId ?? null, durationMs: Math.round(performance.now() - started), ...failure }));
       }
     },
   });

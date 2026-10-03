@@ -19,8 +19,12 @@ export async function recordSuccessfulModelCall(input: SuccessfulModelCall): Pro
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new AppError("AGENT_DATABASE_CONFIG_MISSING", "Не задано подключение к базе данных");
   // An optional health observation must not wait indefinitely for the application's busy pool.
+  // Nor for the disk: the host sometimes takes over two seconds to confirm a synchronous write, and
+  // statement_timeout does not cover that wait (#311). A crash loses at most the last marks, and a
+  // later ordinary commit that acts on one flushes it as well, because the journal is sequential.
   const client = new Client({ connectionString, connectionTimeoutMillis: OBSERVATION_DATABASE_TIMEOUT_MS,
-    query_timeout: OBSERVATION_DATABASE_TIMEOUT_MS, statement_timeout: OBSERVATION_DATABASE_TIMEOUT_MS });
+    query_timeout: OBSERVATION_DATABASE_TIMEOUT_MS, statement_timeout: OBSERVATION_DATABASE_TIMEOUT_MS,
+    options: "-c synchronous_commit=off" });
   try {
     await client.connect();
     await client.query(

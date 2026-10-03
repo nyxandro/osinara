@@ -2,9 +2,9 @@
  * Reminder listing tool.
  *
  * Export:
- * - Eve `list_reminders` tool for current-user personal and family reminders.
+ * - `list_reminders` tool for current-user personal and family reminders.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import {
@@ -15,6 +15,8 @@ import { requireReminderAuthorization } from "../reminders/reminder-context.js";
 import { reminderRepository } from "../reminders/reminder-repository.js";
 
 export default defineTool({
+  // Repeating it after a crash is safe: it only reads.
+  replaySafe: true,
   description: [
     "Постранично показать доступные текущему участнику личные и семейные напоминания.",
     "Результат: {items,nextCursor}; если nextCursor не null, передай его без изменений для следующей страницы.",

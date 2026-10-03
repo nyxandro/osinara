@@ -8,7 +8,7 @@
  * - Complete payload and bounded-correction guidance in the tool description.
  * - Durable fail-closed delivery when Telegram succeeds but completion persistence fails.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
@@ -90,7 +90,7 @@ describe("manage_family_invitation model input", () => {
     expect(approveInvitation).not.toHaveBeenCalled();
   });
 
-  it("does not send again when delivery completion fails and Eve replays the call", async () => {
+  it("does not send again when delivery completion fails and the runtime replays the call", async () => {
     const invitation = {
       code: "invite-code",
       deliveryRequired: true,

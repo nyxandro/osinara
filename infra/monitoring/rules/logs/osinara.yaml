@@ -20,7 +20,8 @@ groups:
         expr: 'project:"osinara-production" code:"AGENT_MEMORY_RETRIEVAL_METRICS" outcome:"failed" | stats by (failurePhase) count() as value'
 
       # Two halves of the same ratio: how many turns searched memory successfully, and how many of
-      # them came back with nothing. Every measured production turn returned the full twelve
+      # them came back with nothing. `memories` counts what the search found; what survived the
+      # turn block ceiling is `offeredMemories`, and the difference is `droppedMemories`. Every measured production turn returned the full twelve
       # records, so a high empty share means either the embedding service broke or a retrieval
       # change started cutting too much. The ratio itself lives in the alert.
       # Both are grouped by `outcome`, like every other rule here: it is the one label the filter

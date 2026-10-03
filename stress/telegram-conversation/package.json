@@ -1,8 +1,0 @@
-{
-  "name": "osinara-telegram-conversation-test",
-  "private": true,
-  "type": "module",
-  "devDependencies": {
-    "just-bash": "^3.4.2"
-  }
-}

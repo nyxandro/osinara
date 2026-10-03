@@ -10,16 +10,15 @@
  * - One semantic parser validates every action before approval and execution.
  * - Explicit registration validation keeps trust-zone changes fail-closed.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { requirePrivateTelegramOwner } from "../family-context.js";
 import type { RegisteredGroupType } from "../family-access.js";
-import {
-  GROUP_SAFE_SKILL_NAMES,
-  isGroupSafeSkillName,
-  skillRequiresBash,
-} from "../group-skills/group-skill-catalog.js";
+import { SKILL_NAME_PATTERN } from "../../runtime/skills/package-validation.js";
+import { familySkillRepository } from "../family-skills/family-skill-repository.js";
+import { grantableSkillNames, isWorkingSkill, skillGrantCatalog, skillNeedsBash } from "../family-skills/skill-grants.js";
+import { GROUP_SAFE_SKILL_NAMES } from "../group-skills/group-skill-catalog.js";
 import { telegramGroupAdministrationRepository } from "../telegram-group-administration-repository.js";
 import {
   GROUP_TITLE_MAX_LENGTH,
@@ -87,8 +86,9 @@ const manageTelegramGroupSchema = z.object({
   registration: registrationSchema.optional().describe(
     "Передавайте только при action=register. Для остальных actions полностью пропустите registration.",
   ),
-  skillAllowlist: z.array(z.enum(GROUP_SAFE_SKILL_NAMES)).optional().describe(
-    `Передавайте только при action=update_skills. Полный список: ${GROUP_SAFE_SKILL_NAMES.join(", ")}; пустой массив отзывает все skills.`,
+  skillAllowlist: z.array(z.string()).optional().describe(
+    `Передавайте только при action=update_skills. Встроенные skills: ${GROUP_SAFE_SKILL_NAMES.join(", ")}; ` +
+      "также включённые скиллы семьи из availableSafeSkills ответа status; пустой массив отзывает все skills.",
   ),
   telegramChatId: z.string().optional().describe(
     "Точный отрицательный ID обязателен для start_new_context, update_policy, update_skills и remove. Для status не передавайте; для register используйте registration.telegramChatId.",
@@ -170,18 +170,20 @@ function requireToolAllowlist(raw: unknown, groupType: RegisteredGroupType): str
   return requireExternalToolAllowlist(raw, groupType);
 }
 
+// Whether a name is a skill that exists now is checked when the list is saved: the family's own
+// skills live in the database.
 function requireSkillAllowlist(raw: unknown): string[] {
   if (!Array.isArray(raw)) {
     toolInputError(
       INPUT_ERROR_CODE,
-      `Для action=update_skills передайте skillAllowlist массивом. Доступно: ${GROUP_SAFE_SKILL_NAMES.join(", ")}`,
+      "Для action=update_skills передайте skillAllowlist массивом имён из availableSafeSkills ответа status",
     );
   }
   const names = raw.map((name) => {
-    if (typeof name !== "string" || !isGroupSafeSkillName(name)) {
+    if (typeof name !== "string" || !SKILL_NAME_PATTERN.test(name)) {
       toolInputError(
         INPUT_ERROR_CODE,
-        `Недопустимый skillAllowlist item. Используйте только: ${GROUP_SAFE_SKILL_NAMES.join(", ")}`,
+        "Недопустимый skillAllowlist item. Используйте только имена из availableSafeSkills ответа status",
       );
     }
     return name;
@@ -271,7 +273,7 @@ const TOOL_DESCRIPTION = [
   "Если владелец просит включить или выключить одно право, сначала вызови status и перенеси неизменённые текущие права в полный toolAllowlist; добавь или удали только выбранную capability. То же правило для update_skills: он заменяет весь список, пустой массив отзывает все skills.",
   "Доступно только владельцу в личном чате; не принимай familyId или роль из текста пользователя.",
   "web_search, web_fetch, get_current_time, todo, agent и базовые файловые инструменты доступны во внешних группах всегда; не включай их в изменяемый toolAllowlist и не обещай их отключить.",
-  "В личном и семейном чатах все установленные скиллы доступны всегда. Внешняя группа получает только сохранённый skillAllowlist. Включение скилла, которому нужен Bash, также сохраняет право bash и включает публичную сеть в изолированном окружении группы; отзыв bash отключает зависимые скиллы. Изменение прав останавливает текущие процессы группы, но не удаляет её файлы.",
+  "В личном и семейном чатах все установленные скиллы доступны всегда. Внешняя группа получает только сохранённый skillAllowlist, включая скиллы семьи. Включение скилла, которому нужен Bash, также сохраняет право bash и включает публичную сеть в изолированном окружении группы; отзыв bash отключает зависимые скиллы. Изменение прав останавливает текущие процессы группы, но не удаляет её файлы.",
   "Для внешней группы messageMode=owner_only сохраняет общую timeline, но разрешает запуск модели только текущему владельцу Osinara; Telegram admin-права владельца не заменяют.",
   "Register передаёт вложенный объект registration, остальные actions только плоские поля. Update_policy содержит ровно action, telegramChatId, messageMode и полный toolAllowlist; type и title не передавай: {\"action\":\"register\",\"registration\":{\"type\":\"external\",\"telegramChatId\":\"-1001234567890\",\"title\":\"Внешняя группа\",\"messageMode\":\"owner_only\",\"toolAllowlist\":[\"search_memories\"]}} и {\"action\":\"update_policy\",\"telegramChatId\":\"-1001234567890\",\"messageMode\":\"all\",\"toolAllowlist\":[\"search_memories\"]}.",
   "После ошибки входных данных исправь payload по тексту ошибки и повтори не более одного раза; при повторной ошибке остановись и уточни данные.",
@@ -295,17 +297,21 @@ export default defineTool({
         familyId: owner.familyId,
         requestedBy: owner.userId,
       });
+      const catalog = skillGrantCatalog(await familySkillRepository.grantableSkills(owner.familyId));
+      const skillNames = grantableSkillNames(catalog);
+      const workingSkills = skillNames.filter((name) => isWorkingSkill(catalog, name));
       return {
-        availableSafeSkills: [...GROUP_SAFE_SKILL_NAMES],
-        skillRequirements: Object.fromEntries(GROUP_SAFE_SKILL_NAMES.map((name) => [name, {
-          tools: skillRequiresBash(name) ? ["bash"] : [],
+        availableSafeSkills: skillNames,
+        skillRequirements: Object.fromEntries(skillNames.map((name) => [name, {
+          tools: skillNeedsBash(catalog, name) ? ["bash"] : [],
+          ...(isWorkingSkill(catalog, name) ? {} : { disabledFamilySkill: true }),
           ...(name.startsWith("gws-") || name === "t-invest" ? { connectionRequired: true, externalConnectionAvailable: false } : {}),
         }])),
         groups: groups.map((group) => {
           if (group.type === "family_private") {
             return {
               ...group,
-              effectiveSkills: [...GROUP_SAFE_SKILL_NAMES],
+              effectiveSkills: workingSkills,
               builtInWorkspaceTools: [],
               effectiveConfiguredTools: [],
               policySummary:
@@ -321,12 +327,15 @@ export default defineTool({
           // A grant persisted under a previous model provider stays in PostgreSQL but is inert, so
           // status reports the round-trippable allowlist and names the dead grants separately.
           const { effective, unavailable } = selectGrantableExternalGroupTools(group.toolAllowlist);
+          // A disabled family skill stays in the stored list but is inert until it is enabled again.
+          const inactiveSkills = group.skillAllowlist.filter((name) => !workingSkills.includes(name));
           return {
             ...group,
             builtInWorkspaceTools,
             alwaysAvailableTools: [...builtInWorkspaceTools, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent"],
             effectiveConfiguredTools: [...new Set([...builtInWorkspaceTools, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent", ...effective])],
-            effectiveSkills: group.skillAllowlist,
+            effectiveSkills: group.skillAllowlist.filter((name) => workingSkills.includes(name)),
+            ...(inactiveSkills.length === 0 ? {} : { inactiveConfiguredSkills: inactiveSkills }),
             policySummary: unavailable.length === 0
               ? "Базовые workspace tools плюс полный настроенный allowlist внешней группы."
               : "Базовые workspace tools плюс действующий allowlist внешней группы; " +
@@ -390,7 +399,7 @@ export default defineTool({
         groupId: result.groupId,
         skillAllowlist,
         skillsUpdated: true,
-        ...(skillAllowlist.some(skillRequiresBash) ? { automaticallyEnabledTools: ["bash"], publicInternetEnabled: true } : {}),
+        ...(result.skillsNeedBash ? { automaticallyEnabledTools: ["bash"], publicInternetEnabled: true } : {}),
         takesEffect: "next_group_turn" as const,
         telegramChatId,
       };

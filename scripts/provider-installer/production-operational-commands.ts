@@ -27,7 +27,7 @@ const COMPOSE_PATH = `${BASE_DIR}/compose.installation.json`;
 const MANIFEST_PATH = `${BASE_DIR}/osinara-deployment.json`;
 const TLS_ENV_PATH = `${BASE_DIR}/tls/.env`;
 const TLS_COMPOSE_PATH = `${BASE_DIR}/tls/compose.yaml`;
-const LOCAL_HEALTH_URL = "http://127.0.0.1:8082/eve/v1/health";
+const LOCAL_HEALTH_URL = "http://127.0.0.1:8082/v1/health";
 const HEALTH_TIMEOUT_MS = 10_000;
 
 export interface OperationalHostIdentity {
@@ -185,7 +185,7 @@ export function createProductionOperationalCommands(): OperationalCommandOperati
         await compose(TLS_COMPOSE_PATH, [TLS_ENV_PATH], ["config", "--quiet"]);
       }
       await requireExactHealthyResponse(LOCAL_HEALTH_URL, globalThis.fetch);
-      await requireExactHealthyResponse(`${metadata.address}/eve/v1/health`, globalThis.fetch);
+      await requireExactHealthyResponse(`${metadata.address}/v1/health`, globalThis.fetch);
       return { code: "OSINARA_DOCTOR_OK", ...metadata };
     },
     logs: async (lines) => {
@@ -214,13 +214,13 @@ export function createProductionOperationalCommands(): OperationalCommandOperati
         ]);
       }
       await requireExactHealthyResponse(LOCAL_HEALTH_URL, globalThis.fetch);
-      await requireExactHealthyResponse(`${metadata.address}/eve/v1/health`, globalThis.fetch);
+      await requireExactHealthyResponse(`${metadata.address}/v1/health`, globalThis.fetch);
       return { code: "OSINARA_RESTART_OK", ...metadata };
     },
     status: async () => {
       const metadata = await installationMetadata();
       await requireExactHealthyResponse(LOCAL_HEALTH_URL, globalThis.fetch);
-      await requireExactHealthyResponse(`${metadata.address}/eve/v1/health`, globalThis.fetch);
+      await requireExactHealthyResponse(`${metadata.address}/v1/health`, globalThis.fetch);
       return { code: "OSINARA_STATUS_OK", healthy: true, ...metadata };
     },
   };

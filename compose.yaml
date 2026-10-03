@@ -50,6 +50,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://osinara:${POSTGRES_PASSWORD}@postgres:5432/osinara
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY-}
       GROQ_API_KEY: ${GROQ_API_KEY-}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID-}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET-}
@@ -61,13 +62,8 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN is required}
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:?TELEGRAM_BOT_USERNAME is required}
       TELEGRAM_WEBHOOK_SECRET_TOKEN: ${TELEGRAM_WEBHOOK_SECRET_TOKEN:?TELEGRAM_WEBHOOK_SECRET_TOKEN is required}
-      WORKFLOW_POSTGRES_JOB_PREFIX: osinara
-      WORKFLOW_POSTGRES_MAX_POOL_SIZE: "12"
-      WORKFLOW_POSTGRES_URL: ${WORKFLOW_POSTGRES_URL:?WORKFLOW_POSTGRES_URL is required}
-      WORKFLOW_POSTGRES_WORKER_CONCURRENCY: "10"
-      WORKFLOW_QUEUE_NAMESPACE: eve6f73696e6172612d66616d696c792d6167656e74
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/eve/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 5s
       timeout: 3s
       retries: 72
@@ -78,7 +74,6 @@ services:
     volumes:
       - ./config/agent-model-providers.json:/app/config/agent-model-providers.json:ro
       - google-workspace-credentials:/app/google-workspace-credentials
-      - sandbox-data:/app/.eve/sandbox-cache
       - workspace-data:/app/workspaces
 
   migrate:
@@ -91,7 +86,6 @@ services:
     entrypoint: ["npm", "run", "migrate:runtime"]
     environment:
       DATABASE_URL: postgresql://osinara:${POSTGRES_PASSWORD}@postgres:5432/osinara
-      WORKFLOW_POSTGRES_URL: ${WORKFLOW_POSTGRES_URL:?WORKFLOW_POSTGRES_URL is required}
     restart: "no"
 
   sandbox-runtime-image:
@@ -156,8 +150,14 @@ services:
 
   memory-embedding:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07
-    cpus: 1.5
-    mem_limit: 1536m
+    # Sized by measurement on a six-core host, not by guess. Memory is set by the math threads
+    # alone: three cores cost eleven megabytes more than two, while a third math thread costs four
+    # hundred and does not fit a gigabyte at all — the container is killed while loading the model.
+    # Two threads peak at 870 MB under a saturating load. The CPU budget is separate and cheap:
+    # tokenization and request handling use the third core without touching that peak, and it buys
+    # 45% more indexing throughput and a third off the wait when a search queues behind a batch.
+    cpus: 3.0
+    mem_limit: 1024m
     command:
       - --model-id
       - intfloat/multilingual-e5-small
@@ -167,8 +167,12 @@ services:
       - "2"
       - --max-client-batch-size
       - "8"
+      # One queue slot per input, so a client batch of eight fills a limit of eight and the search
+      # arriving beside it is refused rather than queued — the turn silently loses its semantic
+      # branch. Measured against a saturating indexer: at eight, 15 searches out of 60 were refused;
+      # at sixteen, none, at no cost in memory.
       - --max-concurrent-requests
-      - "8"
+      - "16"
       - --max-batch-requests
       - "8"
       - --max-batch-tokens
@@ -240,7 +244,6 @@ volumes:
   google-workspace-credentials:
   postgres-data:
   memory-embedding-model-e5:
-  sandbox-data:
   tool-environments:
   workspace-data:
 

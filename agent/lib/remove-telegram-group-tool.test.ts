@@ -5,7 +5,7 @@
  * - `manage_telegram_group.remove`: requires private owner approval context.
  * - Group removal is scoped by the verified family and Telegram chat identifier.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { removeRegistration } = vi.hoisted(() => ({ removeRegistration: vi.fn() }));

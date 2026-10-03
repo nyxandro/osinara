@@ -14,7 +14,7 @@ suite("owner-only operational incidents", () => {
     const incident = { key: "telegram:42", code: "AGENT_TELEGRAM_INGRESS_FAILED",
       summary: "Не удалось обработать сообщение", context: { updateId: "42", chatId: "-1001" } };
     await recordOperationalIncident(incident);
-    await recordOperationalIncident({ ...incident, code: "AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED" });
+    await recordOperationalIncident({ ...incident, code: "AGENT_TELEGRAM_PROCESSING_INTERRUPTED" });
     const deliver = vi.fn().mockResolvedValue(undefined);
     await dispatchOperationalIncidents({ deliver });
     await dispatchOperationalIncidents({ deliver });

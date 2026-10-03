@@ -6,7 +6,7 @@
  * - A target is admitted only from the chat the current turn belongs to.
  * - A refused target leaves one structured record and never reaches the turn.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { telegramReplyTargetProjection } from "./telegram-reply-target-snapshot.js";

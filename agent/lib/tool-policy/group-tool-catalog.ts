@@ -3,9 +3,8 @@
  *
  * Exports:
  * - `EXTERNAL_GROUP_CAPABILITY_CATALOG`: persisted capabilities with model usage metadata.
- * - `SANDBOX_FILE_CAPABILITY_CATALOG`: same-name guarded Eve capabilities for group workspaces.
+ * - `SANDBOX_FILE_CAPABILITY_CATALOG`: same-name guarded runtime capabilities for group workspaces.
  * - Derived capability-name tuples used by validation and execution policy.
- * - `FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS`: Eve built-ins overridden fail-closed externally.
  * - `ExternalGroupToolName`: validated persisted allowlist value.
  * - `isSubscriptionOnlyExternalGroupToolName`: marks capabilities tied to a specific provider.
  * - `parseExternalGroupToolAllowlist`: validates the complete persisted policy atomically.
@@ -84,6 +83,10 @@ export const EXTERNAL_GROUP_CAPABILITY_CATALOG = [
   },
   { name: "search_memory_threads", usage: "искать нити памяти текущей группы по смыслу" },
   {
+    name: "send_voice_message",
+    usage: "по явной просьбе участника озвучить ответ через ElevenLabs и отправить его голосовым сообщением в текущий чат",
+  },
+  {
     name: "send_workspace_file",
     usage: "отправить файл из workspace в текущий Telegram-чат или тему",
   },
@@ -110,7 +113,7 @@ export function isSubscriptionOnlyExternalGroupToolName(value: string): boolean 
   return SUBSCRIPTION_ONLY_TOOL_NAMES.has(value);
 }
 
-// Same-name wrappers preserve Eve's native contracts while adding live authorization and exact
+// Same-name wrappers preserve the native tools' contracts while adding live authorization and exact
 // group-root confinement. They remain baseline capabilities and need no persisted grant.
 export const SANDBOX_FILE_CAPABILITY_CATALOG = [
   { name: "glob", usage: "найти пути файлов в /workspace/group по glob-шаблону" },
@@ -130,17 +133,9 @@ export const EXTERNAL_GROUP_BASE_TOOLS = [
   { name: "todo", usage: "вести план шагов текущей задачи" },
 ] as const;
 
-// Application tools are emitted per mode, so an external group never sees a descriptor it cannot
-// use. Eve 0.40.0 allows same-name overrides but not per-mode removal, so forbidden built-ins still
-// receive explicit denial definitions while file built-ins receive guarded same-name wrappers.
-// Search and page reading use application-controlled baseline wrappers, never provider-native search.
-export const FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS = [
-  "ask_question",
-  "bash",
-] as const;
-
-export const UNVERIFIED_CONTEXT_DENIALS = ["agent", "todo", "web_fetch", "web_search"] as const;
-
+// Every tool is emitted per mode, so an external group never sees a descriptor it cannot use:
+// file built-ins come as guarded same-name wrappers, search and page reading as application-
+// controlled baseline wrappers, never provider-native search.
 export function isExternalGroupToolName(value: string): value is ExternalGroupToolName {
   return (EXTERNAL_GROUP_TOOL_NAMES as readonly string[]).includes(value);
 }

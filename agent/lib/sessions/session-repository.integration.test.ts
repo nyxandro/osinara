@@ -3,11 +3,10 @@
  *
  * Constructs covered:
  * - Generation-zero session creation and stable route aliases.
- * - Monotonic Eve root rebinding after a terminal workflow replacement.
- * - Terminal failure resolution through any durable Telegram route after re-keying.
+ * - Monotonic agent session rebinding after a terminal replacement.
  * - Rotation after thresholds while pending operations remain pinned.
  * - Stable sandbox identity across generations and replacement at a trust-zone boundary.
- * - Retention leasing for retired Eve sessions.
+ * - Retention leasing for retired agent sessions.
  * - Monotonic per-session Telegram group timeline cursors.
  * - Group trust-zone scenarios are implemented in the colocated scenario module.
  */
@@ -65,7 +64,7 @@ describeWithDatabase("session repository", () => {
     });
 
     expect(current).toMatchObject({ continuationToken: "101::", generation: 0, rotated: false });
-    await sessionRepository.bindEveSession(current.id, "wrun_generation_zero");
+    await sessionRepository.bindAgentSession(current.id, "wrun_generation_zero");
     await sessionRepository.registerRouteAlias(current.id, "101:42:900");
     await expect(database().query<{ continuation_token: string }>(
       `SELECT s.continuation_token
@@ -92,11 +91,11 @@ describeWithDatabase("session repository", () => {
     });
 
     await expect(sessionRepository.hasRoute("101:42:900")).resolves.toBe(false);
-    await sessionRepository.bindEveSession(current.id, "wrun_bound_after_start");
+    await sessionRepository.bindAgentSession(current.id, "wrun_bound_after_start");
     await expect(sessionRepository.hasRoute("101:42:900")).resolves.toBe(true);
   });
 
-  it("resumes the current Eve continuation through a tool-delivery route alias", async () => {
+  it("resumes the current continuation through a tool-delivery route alias", async () => {
     const f = await fixture();
     const current = await sessionRepository.prepareTurn({
       baseContinuationToken: "101::400",
@@ -108,7 +107,7 @@ describeWithDatabase("session repository", () => {
       scope: "personal",
       userId: f.userId,
     });
-    await sessionRepository.bindEveSession(current.id, "wrun_tool_route");
+    await sessionRepository.bindAgentSession(current.id, "wrun_tool_route");
     await sessionRepository.registerRouteAlias(current.id, "101::401");
 
     const resumed = await sessionRepository.prepareTurn({
@@ -153,7 +152,7 @@ describeWithDatabase("session repository", () => {
     });
     expect(pinned.id).toBe(current.id);
 
-    await sessionRepository.recordTurnCompleted(current.id, "wrun_old", false);
+    await sessionRepository.recordTurnCompleted(current.id, "wrun_old", false, true);
     const rotated = await sessionRepository.prepareTurn({
       baseContinuationToken: "102::",
       kind: "canonical",
@@ -166,9 +165,9 @@ describeWithDatabase("session repository", () => {
     });
     expect(rotated).toMatchObject({ continuationToken: "102:::osinara:1", generation: 1, rotated: true });
     expect(rotated.sandboxSessionId).toBe(current.sandboxSessionId);
-    await expect(sessionRepository.isCurrentEveSession(current.id, "wrun_old")).resolves.toBe(false);
-    await sessionRepository.bindEveSession(rotated.id, "wrun_new");
-    await expect(sessionRepository.isCurrentEveSession(rotated.id, "wrun_new")).resolves.toBe(true);
+    await expect(sessionRepository.isCurrentAgentSession(current.id, "wrun_old")).resolves.toBe(false);
+    await sessionRepository.bindAgentSession(rotated.id, "wrun_new");
+    await expect(sessionRepository.isCurrentAgentSession(rotated.id, "wrun_new")).resolves.toBe(true);
   });
 
   it("moves every delivered Telegram alias to the new generation during rotation", async () => {
@@ -183,7 +182,7 @@ describeWithDatabase("session repository", () => {
       scope: "personal",
       userId: f.userId,
     });
-    await sessionRepository.bindEveSession(current.id, "wrun_before_alias_rotation");
+    await sessionRepository.bindAgentSession(current.id, "wrun_before_alias_rotation");
     await sessionRepository.registerRouteAlias(current.id, "103::900");
     await sessionRepository.registerRouteAlias(current.id, "103::901");
     await sessionRepository.requestRotation(current.id);
@@ -218,7 +217,7 @@ describeWithDatabase("session repository", () => {
     });
   });
 
-  it("accepts a newer Eve root and ignores delayed events from the replaced root", async () => {
+  it("accepts a newer agent session and ignores delayed events from the replaced one", async () => {
     const f = await fixture();
     const current = await sessionRepository.prepareTurn({
       baseContinuationToken: "104::",
@@ -233,15 +232,11 @@ describeWithDatabase("session repository", () => {
     const oldRoot = "wrun_01KXB392VJ8YY13JMJ9YZAF5QR";
     const newRoot = "wrun_01KXBRD0AY4NP50QXR7C5D6YEK";
 
-    await expect(sessionRepository.bindEveSession(current.id, oldRoot)).resolves.toBe("recorded");
-    await expect(sessionRepository.bindEveSession(current.id, newRoot)).resolves.toBe("recorded");
+    await expect(sessionRepository.bindAgentSession(current.id, oldRoot)).resolves.toBe("recorded");
+    await expect(sessionRepository.bindAgentSession(current.id, newRoot)).resolves.toBe("recorded");
     await sessionRepository.markPendingOperation(current.id, true);
-    await expect(sessionRepository.recordTurnCompleted(current.id, oldRoot, false)).resolves.toBe("stale");
+    await expect(sessionRepository.recordTurnCompleted(current.id, oldRoot, false, true)).resolves.toBe("stale");
     await expect(sessionRepository.recordTurnFailed(current.id, oldRoot)).resolves.toBe("stale");
-    await expect(sessionRepository.recordSessionFailedByContinuationToken(
-      current.continuationToken,
-      oldRoot,
-    )).resolves.toBe("stale");
 
     const stored = await database().query<{
       completed_turns: number;
@@ -261,68 +256,6 @@ describeWithDatabase("session repository", () => {
     });
   });
 
-  it("records a terminal failure from a newer root before turn.started binds it", async () => {
-    const f = await fixture();
-    const current = await sessionRepository.prepareTurn({
-      baseContinuationToken: "105::",
-      kind: "canonical",
-      telegramForumTopicId: null,
-      familyId: f.familyId,
-      groupId: null,
-      now: new Date("2026-07-12T12:00:00.000Z"),
-      scope: "personal",
-      userId: f.userId,
-    });
-    const previousRoot = "wrun_01KXB392VJ8YY13JMJ9YZAF5QR";
-    const failedRoot = "wrun_01KXBRD0AY4NP50QXR7C5D6YEK";
-    await sessionRepository.bindEveSession(current.id, previousRoot);
-    await sessionRepository.markPendingOperation(current.id, true);
-
-    await expect(sessionRepository.recordSessionFailedByContinuationToken(
-      current.continuationToken,
-      failedRoot,
-    )).resolves.toBe("recorded");
-
-    await expect(database().query(
-      `SELECT 1 FROM conversation_sessions
-        WHERE id = $1
-          AND eve_session_id = $2
-          AND pending_operation = false
-          AND rotation_requested_at IS NOT NULL`,
-      [current.id, failedRoot],
-    )).resolves.toMatchObject({ rowCount: 1 });
-  });
-
-  it("records a terminal failure through an earlier route after Telegram re-keying", async () => {
-    const f = await fixture();
-    const current = await sessionRepository.prepareTurn({
-      baseContinuationToken: "106::426",
-      kind: "canonical",
-      telegramForumTopicId: null,
-      familyId: f.familyId,
-      groupId: null,
-      now: new Date("2026-07-12T12:00:00.000Z"),
-      scope: "personal",
-      userId: f.userId,
-    });
-    const failedRoot = "wrun_01KXBRD0AY4NP50QXR7C5D6YEK";
-    await sessionRepository.bindEveSession(current.id, failedRoot);
-    await sessionRepository.registerRouteAlias(current.id, "106::437");
-
-    await expect(sessionRepository.recordSessionFailedByContinuationToken(
-      "106::426",
-      failedRoot,
-    )).resolves.toBe("recorded");
-
-    await expect(database().query(
-      `SELECT 1 FROM conversation_sessions
-        WHERE id = $1
-          AND pending_operation = false
-          AND rotation_requested_at IS NOT NULL`,
-      [current.id],
-    )).resolves.toMatchObject({ rowCount: 1 });
-  });
-
   it("leases only retired sessions whose one-day retention has elapsed", async () => {
     const f = await fixture();
     const current = await sessionRepository.prepareTurn({
@@ -335,7 +268,7 @@ describeWithDatabase("session repository", () => {
       scope: "personal",
       userId: f.userId,
     });
-    await sessionRepository.bindEveSession(current.id, "wrun_expired");
+    await sessionRepository.bindAgentSession(current.id, "wrun_expired");
     await sessionRepository.requestRotation(current.id);
     await sessionRepository.prepareTurn({
       baseContinuationToken: "103::",
@@ -360,7 +293,7 @@ describeWithDatabase("session repository", () => {
     const claim = await sessionRepository.claimExpiredForDeletion(
       new Date("2026-01-03T00:00:01.000Z"),
     );
-    expect(claim).toMatchObject({ eveSessionId: "wrun_expired", id: current.id });
+    expect(claim).toMatchObject({ agentSessionId: "wrun_expired", id: current.id });
     await sessionRepository.completeDeletion(claim!.id, claim!.leaseToken);
     await expect(database().query(
       "SELECT id FROM conversation_sessions WHERE id = $1",
@@ -368,11 +301,51 @@ describeWithDatabase("session repository", () => {
     )).resolves.toMatchObject({ rowCount: 0 });
   });
 
+  it("keeps a session whose deletion failed for an operator instead of retrying it", async () => {
+    const f = await fixture();
+    const current = await sessionRepository.prepareTurn({
+      baseContinuationToken: "104::",
+      kind: "canonical",
+      telegramForumTopicId: null,
+      familyId: f.familyId,
+      groupId: null,
+      now: new Date("2026-01-01T00:00:00.000Z"),
+      scope: "personal",
+      userId: f.userId,
+    });
+    await sessionRepository.bindAgentSession(current.id, "wrun_retry");
+    await sessionRepository.requestRotation(current.id);
+    await sessionRepository.prepareTurn({
+      baseContinuationToken: "104::",
+      kind: "canonical",
+      telegramForumTopicId: null,
+      familyId: f.familyId,
+      groupId: null,
+      now: new Date("2026-01-02T00:00:00.000Z"),
+      scope: "personal",
+      userId: f.userId,
+    });
+
+    const first = await sessionRepository.claimExpiredForDeletion(
+      new Date("2026-01-03T00:00:01.000Z"),
+    );
+    expect(first).toMatchObject({ agentSessionId: "wrun_retry", id: current.id });
+    await sessionRepository.failDeletion(first!.id, first!.leaseToken, "AGENT_DATABASE_CONSTRAINT");
+
+    // The failure is kept for an operator; the sweep does not take the session again.
+    await expect(sessionRepository.claimExpiredForDeletion(
+      new Date("2026-01-05T00:00:00.000Z"),
+    )).resolves.toBeNull();
+    expect((await database().query(
+      "SELECT cleanup_error_code, retention_lease_token FROM conversation_sessions WHERE id = $1", [current.id],
+    )).rows).toEqual([{ cleanup_error_code: "AGENT_DATABASE_CONSTRAINT", retention_lease_token: null }]);
+  });
+
   it("clears active and retired group cursors when a Telegram trust zone is recreated", async () => {
     await verifyGroupTrustZoneRecreation(await fixture());
   });
 
-  it("advances a group timeline cursor monotonically for the current Eve root", async () => {
+  it("advances a group timeline cursor monotonically for the current agent session", async () => {
     await verifyMonotonicGroupTimelineCursor(await fixture());
   });
 });

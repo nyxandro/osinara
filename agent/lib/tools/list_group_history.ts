@@ -1,10 +1,10 @@
 /**
- * Eve tool for the current verified Telegram group timeline.
+ * Tool for the current verified Telegram group timeline.
  *
  * Export:
  * - `list_group_history`: bounded pagination and search without a model-selectable group scope.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { searchTelegramGroupHistory } from "../telegram-group-history.js";
@@ -14,6 +14,8 @@ import { loadCurrentExternalGroupCapabilities } from "../tool-policy/external-gr
 const POSITIVE_BIGINT = z.string().regex(/^[1-9]\d*$/u);
 
 export default defineTool({
+  // Repeating it after a crash is safe: it only reads.
+  replaySafe: true,
   description: [
     "Читает сохранённую историю всей текущей verified Telegram-группы, включая другие форумные темы; group ID и scope определяются авторизацией и не передаются.",
     "Результат содержит записи в хронологическом порядке и nextBeforeSequence для следующей страницы; без фильтров возвращаются последние сообщения.",

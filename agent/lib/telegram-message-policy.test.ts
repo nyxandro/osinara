@@ -6,19 +6,13 @@
  * - `telegramGroupTurnTrigger`: names the technical signal that woke the agent in a group.
  * - `classifyTelegramInboundMedia`: recognizes one native photo or allowlisted document candidate.
  * - `hasTelegramInboundMedia`: detects every file-bearing Telegram message kind without download.
- * - `TELEGRAM_EVE_UPLOAD_POLICY`: keeps persisted files out of the text-only primary model.
  */
-import {
-  buildTelegramTurnMessage,
-  collectTelegramFileParts,
-} from "eve/channels/telegram";
 import { describe, expect, it } from "vitest";
 
 import {
   classifyTelegramInboundMedia,
   hasTelegramInboundMedia,
   isMessageAddressedToBot,
-  TELEGRAM_EVE_UPLOAD_POLICY,
   telegramGroupTurnTrigger,
 } from "./telegram-message-policy.js";
 
@@ -248,7 +242,7 @@ describe("hasTelegramInboundMedia", () => {
     })).toBe(true);
   });
 
-  it("also detects Eve-parsed attachments and permits text-only messages", () => {
+  it("also detects runtime-parsed attachments and permits text-only messages", () => {
     expect(hasTelegramInboundMedia({
       attachments: [{ fileId: "telegram-file-1", kind: "photo" }],
       raw: {},
@@ -399,22 +393,5 @@ describe("classifyTelegramInboundMedia", () => {
     },
   ])("fails closed for mixed or malformed native-photo metadata", (message) => {
     expect(classifyTelegramInboundMedia(message)).toBe("unsupported_media");
-  });
-});
-
-describe("TELEGRAM_EVE_UPLOAD_POLICY", () => {
-  it("keeps a Telegram photo out of the primary model while preserving its caption", () => {
-    const fileParts = collectTelegramFileParts([{
-      fileId: "telegram-photo-1",
-      fileName: "photo.jpg",
-      kind: "photo",
-      mediaType: "image/jpeg",
-      size: 1_024,
-    }], TELEGRAM_EVE_UPLOAD_POLICY);
-
-    expect(fileParts).toEqual([]);
-    expect(buildTelegramTurnMessage({ caption: "Что изображено?", text: "" }, fileParts)).toBe(
-      "Что изображено?",
-    );
   });
 });

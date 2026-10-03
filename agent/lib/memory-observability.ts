@@ -21,7 +21,12 @@ export function memorySelectionMetrics(memories: readonly ModelMemoryContextItem
 }
 
 export interface MemoryWriteEvent {
-  code: "AGENT_MEMORY_WRITE_FAILED" | "AGENT_MEMORY_WRITE_SUCCEEDED";
+  /**
+   * `DEFERRED` is a write the product stopped on purpose so the model would look at what is
+   * already stored. It is counted apart from `FAILED` because it is not a fault: an alert that
+   * mixed the two would fire on the assistant working exactly as designed.
+   */
+  code: "AGENT_MEMORY_WRITE_DEFERRED" | "AGENT_MEMORY_WRITE_FAILED" | "AGENT_MEMORY_WRITE_SUCCEEDED";
   errorCode?: string;
   scope: "family" | "group" | "personal";
   sourceKind: "current" | "delta";

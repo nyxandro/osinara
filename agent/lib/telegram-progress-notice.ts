@@ -8,7 +8,8 @@
  * - The notice is cosmetic and its turn is still working, so a failed send is logged and the turn
  *   continues; the durable claim happens first, so a replay never repeats a delivered notice.
  */
-import { splitTelegramMessageText, type TelegramEventContext } from "eve/channels/telegram";
+import { splitTelegramMessageText } from "../runtime/telegram/api.js";
+import type { TelegramEventContext } from "../runtime/telegram/channel-types.js";
 
 import { isAppError } from "./app-error.js";
 import { postTelegramPlainMessageChunk } from "./telegram-plain-messages.js";
@@ -17,15 +18,15 @@ import { telegramProgressNoticeRepository } from "./telegram-progress-notice-rep
 export async function deliverTelegramProgressNotice(input: {
   applicationSessionId: string;
   channel: TelegramEventContext;
-  eveSessionId: string;
-  eveTurnId: string;
+  agentSessionId: string;
+  agentTurnId: string;
   message: string;
   stepIndex: number;
 }): Promise<void> {
   const claim = await telegramProgressNoticeRepository.claim({
     applicationSessionId: input.applicationSessionId,
-    eveSessionId: input.eveSessionId,
-    eveTurnId: input.eveTurnId,
+    agentSessionId: input.agentSessionId,
+    agentTurnId: input.agentTurnId,
     stepIndex: input.stepIndex,
   });
   if (!claim) return;

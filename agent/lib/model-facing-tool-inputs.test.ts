@@ -6,7 +6,7 @@
  * - Invalid input stops before authorization, repository writes, or external model calls.
  * - `executeInvalidToolInput`: invokes heterogeneous tool signatures through a safe `never` input.
  */
-import type { ToolContext, ToolDefinition } from "eve/tools";
+import type { ToolContext, ToolDefinition } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 

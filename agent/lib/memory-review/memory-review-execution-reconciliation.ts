@@ -1,7 +1,7 @@
-/** Reconcile an exact terminal native task whose application completion was lost with the DB connection. */
+/** Reconcile an exact finished review turn whose application completion was lost with the DB connection. */
 import { database } from "../database.js";
 import { SESSION_RETENTION_DAYS } from "../../config.js";
-import { readConfiguredEveTurnOutcome } from "../sessions/workflow-turn-outcome.js";
+import { runtimeTurnStatus } from "../sessions/runtime-session-status.js";
 import { memoryReviewRepository } from "./memory-review-repository.js";
 import { hasPendingReviewWrite, lockReviewAttempt, requireReviewSources, reviewAttemptHasWrites } from "./memory-review-attempt.js";
 import { blockPartialReviewAttempt } from "./memory-review-model-recovery.js";
@@ -9,7 +9,7 @@ import { recordOperationalIncident } from "../operational-incidents/owner-alerts
 import { isDatabaseUnavailable } from "../database-errors.js";
 import { terminalizeApplicationSession } from "./memory-review-session-terminal.js";
 
-export async function reconcileMemoryReviewExecutions(readStatus: (sessionId: string,turnId: string) => Promise<string | null> = readConfiguredEveTurnOutcome): Promise<void> {
+export async function reconcileMemoryReviewExecutions(readStatus: (sessionId: string,turnId: string) => Promise<string | null> = runtimeTurnStatus): Promise<void> {
   const candidates = await database().query<{ id: string; eve_session_id: string; eve_turn_id: string; infrastructure_recovery_attempts: number; model_recovery_generation: number }>(
     `SELECT id,eve_session_id,eve_turn_id,infrastructure_recovery_attempts,model_recovery_generation FROM memory_review_batches
      WHERE recovery_protocol=1 AND batch_kind='background' AND status='running' AND eve_turn_id IS NOT NULL
@@ -18,15 +18,15 @@ export async function reconcileMemoryReviewExecutions(readStatus: (sessionId: st
     try {
     const status = await readStatus(candidate.eve_session_id,candidate.eve_turn_id);
     if (status === "completed") {
-      await memoryReviewRepository.completeBatch({ batchId: candidate.id, eveSessionId: candidate.eve_session_id,
-        eveTurnId: candidate.eve_turn_id, completedAt: new Date() });
+      await memoryReviewRepository.completeBatch({ batchId: candidate.id, agentSessionId: candidate.eve_session_id,
+        agentTurnId: candidate.eve_turn_id, completedAt: new Date() });
       continue;
     }
     if (status !== "failed" && status !== "cancelled") {
       await database().query("UPDATE memory_review_batches SET updated_at=now() WHERE id=$1 AND eve_session_id=$2 AND status='running'", [candidate.id,candidate.eve_session_id]);
       if (status !== "running") await recordOperationalIncident({ key: `memory-review:${candidate.id}:outcome:${candidate.model_recovery_generation}`,
         code: "AGENT_MEMORY_REVIEW_OUTCOME_UNCONFIRMED",summary: "Не удалось прочитать подтверждение результата проверки памяти. Сообщения сохранены; проверка состояния продолжится автоматически.",
-        context: { batchId: candidate.id,eveSessionId: candidate.eve_session_id } });
+        context: { batchId: candidate.id,agentSessionId: candidate.eve_session_id } });
       continue;
     }
     const client = await database().connect();
@@ -41,7 +41,7 @@ export async function reconcileMemoryReviewExecutions(readStatus: (sessionId: st
       if (await reviewAttemptHasWrites(client, batch)) {
         await blockPartialReviewAttempt(client, batch, "AGENT_MEMORY_REVIEW_TERMINAL_RECONCILED", new Date());
       } else if (status === "failed" && candidate.infrastructure_recovery_attempts === 0) {
-        // The native task is terminal; its restricted tool surface could only write the checked memory stores.
+        // The review turn is terminal; its restricted tool surface could only write the checked memory stores.
         await client.query(`UPDATE conversation_sessions SET retired_at=now(),delete_after=now()+$2*interval '1 day',
           task_state='failed',pending_operation=false,memory_review_batch_id=NULL WHERE id=$1`, [batch.application_session_id, SESSION_RETENTION_DAYS]);
         await client.query("DELETE FROM memory_turn_source_sets WHERE memory_review_batch_id=$1", [batch.id]);
@@ -54,7 +54,7 @@ export async function reconcileMemoryReviewExecutions(readStatus: (sessionId: st
         [batch.conversation_id,batch.id,batch.eve_session_id,batch.eve_turn_id]);
       } else {
         if (batch.application_session_id && batch.eve_session_id) await terminalizeApplicationSession(client,{
-          applicationSessionId: batch.application_session_id,eveSessionId: batch.eve_session_id,completedAt: new Date(),outcome: "failed",
+          applicationSessionId: batch.application_session_id,agentSessionId: batch.eve_session_id,completedAt: new Date(),outcome: "failed",
         });
         await client.query("DELETE FROM memory_turn_source_sets WHERE memory_review_batch_id=$1", [batch.id]);
         await client.query(`UPDATE memory_review_batches SET status='failed',diagnostic_code='AGENT_MEMORY_REVIEW_EXECUTION_STOPPED',
@@ -72,7 +72,7 @@ export async function reconcileMemoryReviewExecutions(readStatus: (sessionId: st
       await database().query("UPDATE memory_review_batches SET updated_at=now() WHERE id=$1 AND eve_session_id=$2 AND status='running'", [candidate.id,candidate.eve_session_id]);
       await recordOperationalIncident({ key: `memory-review:${candidate.id}:reconciliation:${candidate.model_recovery_generation}`,
         code: "AGENT_MEMORY_REVIEW_RECONCILIATION_FAILED",summary: "Не удалось проверить результат одного пакета памяти. Его сообщения сохранены; остальные пакеты продолжают обработку.",
-        context: { batchId: candidate.id,eveSessionId: candidate.eve_session_id } });
+        context: { batchId: candidate.id,agentSessionId: candidate.eve_session_id } });
     }
   }
 }

@@ -1,16 +1,13 @@
 /**
- * Real Eve Telegram dispatch with the application reply-authorization boundary.
- * Ordinary conversation must use send, never a synthetic response to another bot.
+ * The application's reply-authorization boundary with the runtime's reply rule.
+ * Ordinary conversation must start a turn, never a synthetic response to another bot.
  */
-import { telegramChannel } from "eve/channels/telegram";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
+import { parseTelegramUpdate } from "../runtime/telegram/inbound.js";
+import { replyInputResponse } from "../runtime/telegram/telegram-dispatch.js";
 import { createTelegramMessageHandler } from "./telegram-on-message.js";
-import { BOT_USERNAME, repositories } from "./telegram-on-message.test-fixtures.js";
-
-interface HttpRoute {
-  handler(request: Request, context: Record<string, unknown>): Promise<Response>;
-}
+import { BOT_USERNAME, repositories, telegramContext } from "./telegram-on-message.test-fixtures.js";
 
 describe("Telegram reply dispatch", () => {
   it.each([
@@ -53,82 +50,55 @@ describe("Telegram reply dispatch", () => {
         visibleEntryIds: ["00000000-0000-4000-8000-000000000010"],
         visibleTimelineEntries: [],
       });
-      const send = vi.fn().mockResolvedValue({ id: "eve-session-1" });
-      const respond = vi.fn().mockResolvedValue({ id: "eve-session-1" });
-      const from = vi.fn(() => ({ send, respond }));
-      const channel = telegramChannel({
-        botUsername: BOT_USERNAME,
-        credentials: { webhookSecretToken: "webhook-secret" },
-        onMessage: (context,message) => createTelegramMessageHandler(repository)({ ...context,
-          ingressRecovery: { updateId: "1001",dispatchId: "123e4567-e89b-42d3-a456-426614174000" } },message),
-      });
-      const route = channel.routes[0] as unknown as HttpRoute;
-      let backgroundTask: Promise<unknown> | undefined;
-
-      const response = await route.handler(new Request("https://agent.example/eve/v1/telegram", {
-        body: JSON.stringify({
-          message: {
-            chat: { id: -100, type: "supergroup" },
-            date: 1_700_000_000,
-            from: {
-              first_name: "Sender",
-              id: actor === "channel" ? 136_817_688 : 101,
-              is_bot: actor !== "human",
-            },
-            ...(actor === "channel" ? {
-              sender_chat: { id: -200, title: "Channel", type: "channel" },
-            } : {}),
-            message_id: 3496,
-            reply_to_message: {
-              chat: { id: -100, type: "supergroup" },
-              date: 1_699_999_999,
-              from: {
-                first_name: "Bot",
-                id: 999,
-                is_bot: true,
-                username: target === "osinara" ? BOT_USERNAME : "mimimia_ai_bot",
-              },
-              message_id: 3493,
-              text: "Previous message",
-            },
-            text,
+      const update = parseTelegramUpdate({
+        message: {
+          chat: { id: -100, type: "supergroup" },
+          date: 1_700_000_000,
+          from: {
+            first_name: "Sender",
+            id: actor === "channel" ? 136_817_688 : 101,
+            is_bot: actor !== "human",
           },
-          update_id: 1001,
-        }),
-        headers: { "x-telegram-bot-api-secret-token": "webhook-secret" },
-        method: "POST",
-      }), {
-        params: {},
-        requestIp: null,
-        from,
-        waitUntil(task: Promise<unknown>) {
-          backgroundTask = task;
+          ...(actor === "channel" ? {
+            sender_chat: { id: -200, title: "Channel", type: "channel" },
+          } : {}),
+          message_id: 3496,
+          reply_to_message: {
+            chat: { id: -100, type: "supergroup" },
+            date: 1_699_999_999,
+            from: {
+              first_name: "Bot",
+              id: 999,
+              is_bot: true,
+              username: target === "osinara" ? BOT_USERNAME : "mimimia_ai_bot",
+            },
+            message_id: 3493,
+            text: "Previous message",
+          },
+          text,
         },
+        update_id: 1001,
       });
-      await backgroundTask;
+      if (update?.kind !== "message") throw new Error("TEST_MESSAGE_INVALID");
 
-      expect(response.status).toBe(200);
-      expect(send).toHaveBeenCalledTimes(dispatch === "send" ? 1 : 0);
-      expect(respond).toHaveBeenCalledTimes(dispatch === "respond" ? 1 : 0);
+      const result = await createTelegramMessageHandler(repository)({ ...telegramContext().context,
+        ingressRecovery: { updateId: "1001", dispatchId: "123e4567-e89b-42d3-a456-426614174000" } }, update.message);
+
+      const decision = result === null ? "none" : replyInputResponse(update.message, result) === undefined ? "send" : "respond";
+      expect(decision).toBe(dispatch);
       if (dispatch === "send") {
-        expect(send).toHaveBeenCalledWith(durableMessage, expect.objectContaining({
-          auth: expect.objectContaining({
-            attributes: expect.objectContaining({ memoryScopes: ["group"] }),
-          }),
-        }));
+        expect(result?.message).toBe(durableMessage);
+        expect(result?.auth?.attributes).toMatchObject({ memoryScopes: ["group"] });
         expect(repository.session.prepareTurn).toHaveBeenCalledWith(expect.objectContaining({
           baseContinuationToken: "osinara:group:group-1:main",
           kind: "canonical",
         }));
       } else if (dispatch === "respond") {
-        expect(respond).toHaveBeenCalledWith([
-          { requestId: "telegram_reply:3493", text },
-        ], expect.anything());
+        expect(replyInputResponse(update.message, result!)).toEqual({ requestId: "telegram_reply:3493", text });
         expect(repository.session.prepareAuthorizedResponse).toHaveBeenCalledWith(expect.objectContaining({
           ingress: expect.objectContaining({ updateId: "1001" }),
         }));
       } else {
-        expect(from).not.toHaveBeenCalled();
         expect(repository.session.prepareTurn).not.toHaveBeenCalled();
       }
       if (actor !== "human" || !addressed) {

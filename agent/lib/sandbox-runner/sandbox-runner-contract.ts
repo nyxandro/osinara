@@ -5,13 +5,13 @@
  * - Runner request/response types for sessions, atomic seed bundles, processes, files, and GWS.
  * - `sandboxSeedDigest`: canonical content identity used by both agent and runner policy checks.
  * - `parseCreateSandboxRequest`: enforces the trusted/restricted scope boundary.
- * - `parseWorkspaceSandboxUseOptions`: validates mounted or explicitly disabled Eve session state.
+ * - `parseWorkspaceSandboxUseOptions`: validates mounted or explicitly disabled session state.
  * - Other `parse*` helpers: validate every untrusted HTTP payload fail-closed.
  * - Runner endpoint, execution-limit, and transport-timeout constants.
  */
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
-import type { SandboxSpawnOptions } from "eve/sandbox";
+import type { SandboxSpawnOptions } from "../../runtime/sandbox/types.js";
 
 import { z } from "zod";
 
@@ -31,8 +31,8 @@ export const SANDBOX_RUNNER_HTTP_TIMEOUT_MS = SANDBOX_RUNNER_TIMEOUT_MAX_MS + 30
 export const SANDBOX_RUNNER_SEED_FILES_MAX = 512;
 export const SANDBOX_RUNNER_SEED_FILE_MAX_BYTES = 50 * 1024 * 1024;
 
-const eveSessionIdSchema = z.string().regex(/^wrun_[A-Z0-9]{26}$/u);
-// Eve sanitizes custom-backend keys to this alphabet and truncates them to 120 characters.
+const agentSessionIdSchema = z.string().regex(/^wrun_[A-Z0-9]{26}$/u);
+// Session keys use this alphabet and at most 120 characters.
 const sessionIdSchema = z.string().min(1).max(120).regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/u);
 const workspaceIdSchema = z.uuid();
 const mountPointSchema = z.enum(["family", "group", "personal"]);
@@ -66,7 +66,7 @@ export function sandboxSeedDigest(
 
 const createSandboxRequestSchema = z.strictObject({
   access: z.enum(["restricted", "group-tools", "trusted"]),
-  eveSessionId: eveSessionIdSchema,
+  agentSessionId: agentSessionIdSchema,
   mounts: z.array(workspaceMountSchema).min(1).max(2),
   sandboxSessionId: sessionIdSchema,
   seedDigest: z.string().regex(/^[0-9a-f]{64}$/u),
@@ -220,8 +220,8 @@ export function parseSandboxSessionId(value: unknown): string {
   return parseOrThrow(sessionIdSchema, value, "AGENT_SANDBOX_RUNNER_SESSION_ID_INVALID");
 }
 
-export function parseSandboxEveSessionId(value: unknown): string {
-  return parseOrThrow(eveSessionIdSchema, value, "AGENT_SANDBOX_RUNNER_EVE_SESSION_ID_INVALID");
+export function parseSandboxAgentSessionId(value: unknown): string {
+  return parseOrThrow(agentSessionIdSchema, value, "AGENT_SANDBOX_RUNNER_AGENT_SESSION_ID_INVALID");
 }
 
 export function parseSandboxWorkspaceId(value: unknown): string {

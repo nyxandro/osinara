@@ -23,8 +23,8 @@ const TEST_SCHEMA = "test_memory_review_sandbox_recovery";
 const BATCH_ID = "18329b3e-9563-4762-bc77-11641e8cbac1";
 const ORIGINAL_APPLICATION_SESSION_ID = "61b08325-2147-4047-9cb1-01d8210b89b4";
 const RECOVERY_APPLICATION_SESSION_ID = "26942f0e-76a7-4240-b241-ff866fc084b4";
-const ORIGINAL_EVE_SESSION_ID = "wrun_01KZWTTV5XAJY71V8DW3E7EM4X";
-const RECOVERY_EVE_SESSION_ID = "wrun_01KZZN63ATNDJSP336AVRKE1XW";
+const ORIGINAL_AGENT_SESSION_ID = "wrun_01KZWTTV5XAJY71V8DW3E7EM4X";
+const RECOVERY_AGENT_SESSION_ID = "wrun_01KZZN63ATNDJSP336AVRKE1XW";
 const MIGRATION_NAME_PATTERN = /^(\d+)_.*\.sql$/u;
 
 function migrationOrdinal(name: string): number | null {
@@ -106,7 +106,7 @@ describeWithDatabase("069 memory review sandbox recovery migration", () => {
          VALUES ($1, $2, $3, 'background', 'ambiguous', 5539, 5540, 5589, 50,
                  $4, 'turn_0', 'AGENT_MEMORY_REVIEW_SESSION_FAILED_AMBIGUOUS', 1,
                  'AGENT_MEMORY_REVIEW_SESSION_FAILED_AMBIGUOUS', now(), now(), now())`,
-        [BATCH_ID, lane.rows[0]!.id, conversation.rows[0]!.id, RECOVERY_EVE_SESSION_ID],
+        [BATCH_ID, lane.rows[0]!.id, conversation.rows[0]!.id, RECOVERY_AGENT_SESSION_ID],
       );
 
       // Preserve both failed roots exactly as observed; neither root has a memory mutation row.
@@ -119,7 +119,7 @@ describeWithDatabase("069 memory review sandbox recovery migration", () => {
                  $4, $5, $6, now(), now(), now(), now() + interval '90 days', NULL)`,
         [ORIGINAL_APPLICATION_SESSION_ID, family.rows[0]!.id, group.rows[0]!.id,
           BATCH_ID, `retired-memory-review:${ORIGINAL_APPLICATION_SESSION_ID}`,
-          ORIGINAL_EVE_SESSION_ID],
+          ORIGINAL_AGENT_SESSION_ID],
       );
       await client.query(
         `INSERT INTO conversation_sessions
@@ -129,7 +129,7 @@ describeWithDatabase("069 memory review sandbox recovery migration", () => {
          VALUES ($1::uuid, gen_random_uuid(), 1, $2, $3, 'family', 'proactive', 'failed',
                  $4, $5, $6, now(), now(), now(), now() + interval '90 days', $7::uuid)`,
         [RECOVERY_APPLICATION_SESSION_ID, family.rows[0]!.id, group.rows[0]!.id,
-          BATCH_ID, `memory-review:${BATCH_ID}`, RECOVERY_EVE_SESSION_ID, BATCH_ID],
+          BATCH_ID, `memory-review:${BATCH_ID}`, RECOVERY_AGENT_SESSION_ID, BATCH_ID],
       );
       await client.query(
         "UPDATE memory_review_batches SET application_session_id = $2 WHERE id = $1",

@@ -5,7 +5,7 @@
  * - Read-only policy listing does not require HITL evidence.
  * - Policy mutation consumes exact tool-call approval before repository access.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { listPolicies, requireApprovalEvidence, updatePolicy } = vi.hoisted(() => ({

@@ -286,7 +286,7 @@ describeWithDatabase("live memory read authorization", () => {
     const fixture = await createTrustedFixture();
     await expectReadable(fixture);
 
-    // The Eve turn still carries old scopes, but the database membership is authoritative.
+    // The turn still carries old scopes, but the database membership is authoritative.
     await database().query(
       "DELETE FROM family_memberships WHERE family_id = $1 AND user_id = $2",
       [fixture.familyId, fixture.userId],

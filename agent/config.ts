@@ -20,9 +20,7 @@ export const GOOGLE_WORKSPACE_COMMAND_TIMEOUT_MS = 60_000;
 export const SANDBOX_RUNNER_BASE_URL = "http://sandbox-runner:8080";
 export const SESSION_INACTIVITY_DAYS = 30;
 export const SESSION_GROUP_ROTATION_LOCK_HASH_SEED = 3;
-// The local Workflow world replays cumulative filesystem artifacts. Rotate with enough headroom
-// below the observed Eve 240-second replay failure at 118 completed production turns.
-export const SESSION_MAX_COMPLETED_TURNS = 50;
+export const FAMILY_SKILLS_LOCK_HASH_SEED = 4;
 export const SESSION_RETENTION_LEASE_MS = 15 * 60 * 1_000;
 export const SESSION_RETENTION_DAYS = 1;
 export const SESSION_TASK_ABANDONED_DAYS = 7;
@@ -41,17 +39,15 @@ export const SOFTWARE_UPDATE_MANIFEST_MAX_BYTES = 64 * 1024;
 export const MEMORY_SOFT_DELETE_RETENTION_DAYS = 30;
 export const MEMORY_SOFT_DELETE_PURGE_BATCH_SIZE = 200;
 export const TELEGRAM_API_REQUEST_TIMEOUT_MS = 15_000;
-// An unanswered approval parks the Eve turn indefinitely: Eve keeps `session.waiting` for as long
-// as it takes. The confirmation window bounds that wait so one ignored prompt cannot freeze a chat.
+// A chat action is presentation only, yet a voice note waits for one in flight before it is sent.
+export const TELEGRAM_CHAT_ACTION_TIMEOUT_MS = 3_000;
+// An unanswered approval parks its turn for as long as it takes. The confirmation window bounds
+// that wait so one ignored prompt cannot freeze a chat.
 export const TELEGRAM_HITL_APPROVAL_TIMEOUT_MS = 5 * 60 * 1_000;
-// One `respond` waits up to Eve's 30-second command-hook handover, so the lease must outlast a whole
-// batch; a lease that expires mid-flight would let the next minute answer the same request twice.
+// The lease outlasts a whole batch: a lease that expires mid-flight would let the next minute answer
+// the same request twice.
 export const TELEGRAM_HITL_TIMEOUT_LEASE_MS = 15 * 60 * 1_000;
 export const TELEGRAM_HITL_TIMEOUT_SWEEP_BATCH_SIZE = 5;
-export const TELEGRAM_HITL_TIMEOUT_SWEEP_TIMEOUT_MS = 180 * 1_000;
-// The timeout sweep needs a route-scoped `attachSession`, which exists only inside an HTTP handler,
-// so the minute schedule calls the agent's own private route. The port is fixed by `npm start`.
-export const AGENT_INTERNAL_SELF_BASE_URL = "http://127.0.0.1:3000";
 export const TELEGRAM_GROUP_JOURNAL_CONTEXT_CHARACTERS = 12_000;
 export const TELEGRAM_GROUP_JOURNAL_CONTEXT_MESSAGES = 100;
 export const TELEGRAM_GROUP_JOURNAL_RETENTION_MESSAGES = 10_000;
@@ -60,14 +56,19 @@ export const TELEGRAM_ATTACHMENT_REFERENCE_LIST_MAX_LIMIT = 50;
 export const TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED = 1;
 export const TELEGRAM_INGRESS_LEASE_MS = 60 * 1_000;
 export const TELEGRAM_INGRESS_ADMISSION_TIMEOUT_MS = 15 * 60 * 1_000;
-// Last-resort loss-of-observation window, longer than a runner's 30-minute command limit.
-// Actual model silence is bounded by the native AI SDK policy, not this transport guard.
-export const TELEGRAM_INGRESS_OBSERVER_IDLE_MS = 35 * 60 * 1_000;
-export const TELEGRAM_INGRESS_CANCELLATION_GRACE_MS = 30_000;
-export const TELEGRAM_INGRESS_RECOVERY_MAX_ATTEMPTS = 3;
 // Bound expensive turns on the single-process deployment without letting groups occupy button slots.
 export const TELEGRAM_INGRESS_MESSAGE_CONCURRENCY = 2;
 export const TELEGRAM_INGRESS_CALLBACK_CONCURRENCY = 2;
+// Wake-up turns run on their own slot, so a long wake-up never takes a message's place; at most
+// this many wake-up turns run at once across all chats.
+export const TELEGRAM_INGRESS_WAKEUP_CONCURRENCY = 1;
+// A person often sends several messages in a row. A private chat's turn starts only after the chat
+// has been quiet this long, so the whole burst is answered at once; a steady stream waits at most the cap.
+export const TELEGRAM_PRIVATE_BURST_QUIET_MS = 2_000;
+export const TELEGRAM_PRIVATE_BURST_MAX_WAIT_MS = 20_000;
+// One burst is one model message: it stays well inside the turn's 12 000-character message budget.
+export const TELEGRAM_PRIVATE_BURST_MAX_MESSAGES = 10;
+export const TELEGRAM_PRIVATE_BURST_MAX_CHARACTERS = 6_000;
 export const TELEGRAM_MAX_INBOUND_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 // A logical private message can be a Telegram media group (up to ten files).
 export const TELEGRAM_MAX_ATTACHMENTS_PER_MESSAGE = 10;

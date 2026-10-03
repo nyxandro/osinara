@@ -8,6 +8,10 @@
  * - Pending reservations serialize concurrent calls before E5.
  * - Expired calls are reclaimed while revoked callers cannot finalize outcomes.
  * - Candidate replay survives ordinary timeline retention.
+ *
+ * The counts include the neighbour probe: since #208 every semantic write embeds one passage, and
+ * a thread creation sends its title in the same request. What this file measures is unchanged —
+ * that a retry spends no embedding beyond its own attempt.
  */
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -131,7 +135,7 @@ describeWithDatabase("memory thread candidate retry", () => {
     await expect(attach("retry-candidate-late-repeat", candidate.rows[0]!.thread_ref))
       .rejects.toThrowError(/AGENT_MEMORY_THREAD_RESOLUTION_COMPLETED/u);
 
-    expect(embedMemoryPassages).toHaveBeenCalledTimes(3);
+    expect(embedMemoryPassages).toHaveBeenCalledTimes(5);
     await expect(database().query(
       `SELECT count(*)::integer AS attempts,
               count(DISTINCT operation_key)::integer AS operation_keys
@@ -166,7 +170,7 @@ describeWithDatabase("memory thread candidate retry", () => {
     await expect(create("retry-success-third", "Сон и режим"))
       .rejects.toThrowError(/AGENT_MEMORY_THREAD_RETRY_EXHAUSTED/u);
 
-    expect(embedMemoryPassages).toHaveBeenCalledTimes(3);
+    expect(embedMemoryPassages).toHaveBeenCalledTimes(4);
     await expect(database().query(
       "SELECT status FROM memory_thread_creation_attempts ORDER BY attempt_number",
     )).resolves.toMatchObject({ rows: [{ status: "candidate" }, { status: "completed" }] });
@@ -194,7 +198,7 @@ describeWithDatabase("memory thread candidate retry", () => {
     await expect(create("retry-attach-third", "Физическая форма"))
       .rejects.toThrowError(/AGENT_MEMORY_THREAD_RETRY_EXHAUSTED/u);
 
-    expect(embedMemoryPassages).toHaveBeenCalledTimes(2);
+    expect(embedMemoryPassages).toHaveBeenCalledTimes(5);
     await expect(database().query(
       "SELECT status FROM memory_thread_creation_attempts WHERE operation_key = 'retry-attach-first'",
     )).resolves.toMatchObject({ rows: [{ status: "resolved" }] });

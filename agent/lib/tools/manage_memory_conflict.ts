@@ -4,7 +4,7 @@
  * Export:
  * - `manage_memory_conflict`: chooses one version, keeps both, or records an unresolved decision.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { memoryConflictRepository } from "../memory-conflict-repository.js";
@@ -27,6 +27,8 @@ function invalidInput(): AppError {
 }
 
 export default defineTool({
+  // Repeating it after a crash is safe: its effect is keyed on the call id.
+  replaySafe: true,
   description: [
     "Разрешить показанный конфликт памяти только по явному решению пользователя.",
     "choose требует conflictRef и memoryRef выбранной версии; keep_both сохраняет обе версии;",

@@ -37,7 +37,7 @@ const TEST_SCHEMA = "test_memory_review_local_queue_recovery";
 const INCIDENT_BATCH_ID = "c0cdfedb-2631-44b8-be4f-f1eb0b03b46a";
 const SUCCESSOR_BATCH_ID = "6e5cf73b-6375-41d9-8bf8-e627c28784c3";
 const APPLICATION_SESSION_ID = "bafe368d-04ec-4ec8-ab99-4a6803379f42";
-const SUCCESSOR_EVE_SESSION_ID = "wrun_01M04ST8SKEVWWK14WRSH1FPYG";
+const SUCCESSOR_AGENT_SESSION_ID = "wrun_01M04ST8SKEVWWK14WRSH1FPYG";
 const MIGRATION_NAME_PATTERN = /^(\d+)_.*\.sql$/u;
 
 function migrationOrdinal(name: string): number | null {
@@ -137,7 +137,7 @@ describeWithDatabase("072 local Workflow queue recovery", () => {
       await client.query(
         `UPDATE memory_review_batches SET eve_session_id = $2, eve_turn_id = 'turn_0'
           WHERE id = $1`,
-        [SUCCESSOR_BATCH_ID, SUCCESSOR_EVE_SESSION_ID],
+        [SUCCESSOR_BATCH_ID, SUCCESSOR_AGENT_SESSION_ID],
       );
       await client.query(
         `INSERT INTO memory_review_batch_sources
@@ -198,13 +198,13 @@ describeWithDatabase("072 local Workflow queue recovery", () => {
            (family_id, operation_key, mutation_kind, input_hash, eve_session_id, eve_turn_id)
          VALUES ($1, 'successor-turn-operation', 'create', $2, $3, 'turn_0'),
                 ($1, 'later-session-operation', 'create', $2, $3, 'turn_15')`,
-        [family.rows[0]!.id, "a".repeat(64), SUCCESSOR_EVE_SESSION_ID],
+        [family.rows[0]!.id, "a".repeat(64), SUCCESSOR_AGENT_SESSION_ID],
       );
       await client.query(
         `INSERT INTO memory_mutation_operations
            (family_id, operation_key, mutation_kind, input_hash, eve_session_id, eve_turn_id)
          VALUES ($1, 'cross-family-turn-operation', 'create', $2, $3, 'turn_0')`,
-        [otherFamily.rows[0]!.id, "b".repeat(64), SUCCESSOR_EVE_SESSION_ID],
+        [otherFamily.rows[0]!.id, "b".repeat(64), SUCCESSOR_AGENT_SESSION_ID],
       );
       await expect(client.query(migration)).rejects.toThrow(
         "AGENT_MEMORY_REVIEW_LOCAL_QUEUE_RECOVERY_SIDE_EFFECT_FOUND",

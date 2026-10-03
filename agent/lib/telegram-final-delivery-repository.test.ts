@@ -44,8 +44,8 @@ describe("Telegram final-delivery intent compatibility", () => {
     await expect(telegramFinalDeliveryRepository.start({
       applicationSessionId: "00000000-0000-4000-8000-000000000001",
       chunkCount: 2,
-      eveSessionId: "session-1",
-      eveTurnId: "turn-1",
+      agentSessionId: "session-1",
+      agentTurnId: "turn-1",
       legacyChunkCount: 1,
       legacyOutputHash: legacyHash,
       outputHash,

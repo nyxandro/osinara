@@ -5,7 +5,7 @@
  * - `StoredTelegramAttachment`: trusted persistent path advertised to the model.
  * - `createTelegramWorkspaceAttachmentImporter`: download, validate, and persist pipeline.
  */
-import type { TelegramAttachment } from "eve/channels/telegram";
+import type { TelegramAttachment } from "../../runtime/telegram/inbound.js";
 
 import { TELEGRAM_MAX_ATTACHMENTS_PER_MESSAGE } from "../../config.js";
 import { AppError } from "../app-error.js";
@@ -121,7 +121,7 @@ export function createTelegramWorkspaceAttachmentImporter(
         const sourceId = sourceIds[index]!;
         const inboxDirectory = telegramInboxDirectory(input.auth, input.scope, sourceId);
         const bytes = await dependencies.download(attachment);
-        // Restricted groups persist only files that Eve's text-only read_file can consume.
+        // Restricted groups persist only files the text-only `read_file` can consume.
         const validator = input.scope === "group"
           ? validateReadableTextAttachmentContent
           : validateAttachmentContent;

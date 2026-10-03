@@ -94,7 +94,6 @@ export interface InternalSecrets {
   invitationSigningSecret: string;
   postgresPassword: string;
   telegramWebhookSecretToken: string;
-  workflowPostgresPassword: string;
 }
 
 export interface InstallationExecutionInput {

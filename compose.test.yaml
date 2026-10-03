@@ -27,23 +27,6 @@ services:
       DATABASE_URL: postgresql://osinara_test:osinara-test-only@postgres:5432/osinara_test
       INVITATION_SIGNING_SECRET: integration-test-signing-secret-32-chars
       RUN_DATABASE_INTEGRATION_TESTS: "true"
-      WORKFLOW_POSTGRES_URL: postgresql://osinara_workflow:osinara-workflow-test-only@postgres:5432/osinara_workflow
-
-  workflow-stress:
-    profiles: ["stress"]
-    build:
-      context: .
-      target: test
-    command: ["sh", "-c", "npm run reset:workflow-stress && npm run migrate && npm run test:workflow-stress"]
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: postgresql://osinara_test:osinara-test-only@postgres:5432/osinara_test
-      WORKFLOW_POSTGRES_MAX_POOL_SIZE: "12"
-      WORKFLOW_POSTGRES_URL: postgresql://osinara_workflow:osinara-workflow-test-only@postgres:5432/osinara_workflow
-      WORKFLOW_POSTGRES_WORKER_CONCURRENCY: "10"
-      WORKFLOW_STRESS_RESET_ALLOWED: "true"
 
   memory-embedding:
     profiles: ["workers"]

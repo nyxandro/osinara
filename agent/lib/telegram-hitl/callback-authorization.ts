@@ -5,12 +5,12 @@
  * - `createTelegramHitlCallbackAuthorizer`: builds an independently testable callback guard.
  * - `authorizeTelegramHitlCallback`: production guard backed by durable PostgreSQL claims.
  */
-import {
-  telegramContinuationToken,
-  type TelegramCallbackQuery,
-  type TelegramContext,
-  type TelegramHitlCallbackResult,
-} from "eve/channels/telegram";
+import { telegramContinuationToken } from "../../runtime/telegram/api.js";
+import type { TelegramCallbackQuery } from "../../runtime/telegram/inbound.js";
+import type {
+  TelegramContext,
+  TelegramHitlCallbackResult,
+} from "../../runtime/telegram/channel-types.js";
 
 import { AppError } from "../app-error.js";
 import {
@@ -34,7 +34,7 @@ function resolvedApprovalText(result: {
   selectedOptionId: string;
   selectedOptionLabel: string;
 }): string {
-  // Eve присылает `cancel`; прежняя проверка на `deny` не срабатывала и оставляла английский ярлык.
+  // Отказ приходит как `cancel`: варианта `deny` у карточки нет.
   const resolution = result.selectedOptionId === "approve"
     ? "Решение: Подтверждено.\nДействие передано на выполнение."
     : result.selectedOptionId === "cancel"
@@ -72,7 +72,7 @@ export function createTelegramHitlCallbackAuthorizer(
       conversationId: message.messageId,
       ...(message.messageThreadId === undefined ? {} : { messageThreadId: message.messageThreadId }),
     });
-    // The repository atomically binds the exact button, active Eve request, and current DB role.
+    // The repository atomically binds the exact button, active request, and current DB role.
     const result = await repository.claimCallback({
       ...(ctx.ingressRecovery ? { ingress: { updateId: ctx.ingressRecovery.updateId,
         dispatchId: ctx.ingressRecovery.dispatchId,callbackQueryId: query.id } } : {}),
@@ -84,7 +84,7 @@ export function createTelegramHitlCallbackAuthorizer(
     });
     if (result.status === "authorized") {
       if (result.replayed) return { acknowledgementText: "Решение сохранено", auth: result.auth, continuationToken: result.continuationToken };
-      // Replace the exact claimed prompt before Eve resumes; an empty keyboard removes stale buttons.
+      // Replace the exact claimed prompt before the turn continues; an empty keyboard removes stale buttons.
       try {
         const edited = await ctx.telegram.request("editMessageText", {
           chat_id: message.chat.id,

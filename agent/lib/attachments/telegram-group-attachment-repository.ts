@@ -5,7 +5,7 @@
  * - `TelegramGroupAttachmentRepository`: authorized record, list, and materialization lookup contract.
  * - `telegramGroupAttachmentRepository`: PostgreSQL implementation over the bounded group journal.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../../runtime/telegram/inbound.js";
 
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";

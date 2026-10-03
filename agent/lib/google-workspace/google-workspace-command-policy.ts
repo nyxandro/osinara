@@ -5,6 +5,7 @@
  * - `GoogleWorkspaceCommandKind`: read-only or externally mutating operation.
  * - `classifyGoogleWorkspaceCommand`: validates an exact gws argv and fails closed when unknown.
  * - `classifyModelFacingGoogleWorkspaceCommand`: reserves structured application-owned actions.
+ * - `fitsApprovableGoogleWorkspaceArguments`: whether a mutation argv can be shown before approval.
  *
  * The allowlist is pinned to the installed gws 0.22.5 command tree. Command meaning is never
  * inferred from model prose, JSON bodies, flag names, or substrings in user-controlled values.
@@ -257,17 +258,19 @@ const REVIEWED_ROUTES = [...READ_ROUTES, ...MUTATION_ROUTES]
   .map((route) => ({ route, segments: route.split(" ") }))
   .sort((left, right) => right.segments.length - left.segments.length);
 const SERVICE_NAMES = new Set(["calendar", "docs", "drive", "gmail", "people", "sheets"]);
+const GMAIL_MESSAGE_BATCH_ROUTE = "manage_gmail_message: все messageId одной пачкой до 30 за вызов";
+const GMAIL_THREAD_BATCH_ROUTE = "manage_gmail_message: messageId писем цепочки одной пачкой до 30 за вызов";
 const STRUCTURED_APPLICATION_ROUTES: Readonly<Record<string, string>> = {
-  "gmail users messages batchDelete": "manage_gmail_message по одному вызову на каждый messageId",
-  "gmail users messages batchModify": "manage_gmail_message по одному вызову на каждый messageId",
-  "gmail users messages delete": "manage_gmail_message",
-  "gmail users messages modify": "manage_gmail_message",
-  "gmail users messages trash": "manage_gmail_message",
-  "gmail users messages untrash": "manage_gmail_message",
-  "gmail users threads delete": "manage_gmail_message по одному вызову на каждый messageId цепочки",
-  "gmail users threads modify": "manage_gmail_message по одному вызову на каждый messageId цепочки",
-  "gmail users threads trash": "manage_gmail_message по одному вызову на каждый messageId цепочки",
-  "gmail users threads untrash": "manage_gmail_message по одному вызову на каждый messageId цепочки",
+  "gmail users messages batchDelete": GMAIL_MESSAGE_BATCH_ROUTE,
+  "gmail users messages batchModify": GMAIL_MESSAGE_BATCH_ROUTE,
+  "gmail users messages delete": GMAIL_MESSAGE_BATCH_ROUTE,
+  "gmail users messages modify": GMAIL_MESSAGE_BATCH_ROUTE,
+  "gmail users messages trash": GMAIL_MESSAGE_BATCH_ROUTE,
+  "gmail users messages untrash": GMAIL_MESSAGE_BATCH_ROUTE,
+  "gmail users threads delete": GMAIL_THREAD_BATCH_ROUTE,
+  "gmail users threads modify": GMAIL_THREAD_BATCH_ROUTE,
+  "gmail users threads trash": GMAIL_THREAD_BATCH_ROUTE,
+  "gmail users threads untrash": GMAIL_THREAD_BATCH_ROUTE,
 };
 const FILE_PATH_FLAGS = new Set([
   "-a",
@@ -335,6 +338,10 @@ const HELPER_FLAGS: Readonly<Record<string, Readonly<Record<string, FlagArity>>>
   },
   "sheets +read": { "--range": "value", "--spreadsheet": "value" },
 };
+
+export function fitsApprovableGoogleWorkspaceArguments(argv: readonly string[]): boolean {
+  return JSON.stringify(argv).length <= MAX_APPROVABLE_ARGUMENTS_LENGTH;
+}
 
 function classifyRoute(route: string): GoogleWorkspaceCommandKind {
   if (READ_ROUTE_SET.has(route)) return "read";
@@ -467,10 +474,7 @@ export function classifyGoogleWorkspaceCommand(
     );
   }
   // Telegram must be able to show every material mutation argument before approval.
-  if (
-    reviewed.kind === "mutation" &&
-    JSON.stringify(argv).length > MAX_APPROVABLE_ARGUMENTS_LENGTH
-  ) {
+  if (reviewed.kind === "mutation" && !fitsApprovableGoogleWorkspaceArguments(argv)) {
     throw googleWorkspaceArgumentsTooLarge();
   }
   return reviewed.kind;

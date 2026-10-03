@@ -4,12 +4,12 @@
  * Exports:
  * - `applicationSessionId`: reads the application-owned ID from persisted verified auth.
  * - `registerTelegramDeliveredMessageRoutes`: stores channel-delivered message IDs as aliases.
- * - `registerTelegramMessageRoutes`: binds every delivered group message to one app session.
+ * - `registerTelegramMessageRoutes`: binds every tool-delivered message to one app session.
  * - `sandboxSessionId`: reads the stable conversation-thread ID for disposable compute.
  */
-import type { TelegramEventContext } from "eve/channels/telegram";
-import { telegramContinuationToken } from "eve/channels/telegram";
-import type { SessionContext } from "eve/context";
+import type { TelegramEventContext } from "../../runtime/telegram/channel-types.js";
+import { telegramContinuationToken } from "../../runtime/telegram/api.js";
+import type { SessionContext } from "../../runtime/context.js";
 
 import { AppError } from "../app-error.js";
 import { sessionRepository } from "./session-repository.js";
@@ -26,7 +26,7 @@ export function applicationSessionId(ctx: Pick<SessionContext, "session">): stri
   return id;
 }
 
-export function sandboxSessionId(ctx: Pick<SessionContext, "session">): string {
+export function sandboxSessionId(ctx: { readonly session: Pick<SessionContext["session"], "auth"> }): string {
   const id = ctx.session.auth.current?.attributes.sandboxSessionId;
   if (typeof id !== "string") {
     throw new AppError(
@@ -65,7 +65,7 @@ export async function registerTelegramDeliveredMessageRoutes(
   }
 
   // Delivery anchors are application aliases only. Private HITL callbacks need their exact message
-  // route too; Eve's continuation token remains stable so no delivery can claim a competing hook.
+  // route too; the session's continuation token remains stable so no delivery can claim a competing hook.
   const messageThreadId = telegramMessageThreadId(state.messageThreadId, ctx);
   const sessionId = applicationSessionId(ctx);
   for (const conversationId of deliveredMessageIds) {

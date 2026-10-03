@@ -13,7 +13,7 @@
  *   the prompt then offers no reaction surface at all. A record older than the refresh window means
  *   the refresh keeps failing, so it stops counting as verified instead of describing a stale set.
  */
-import type { TelegramHandle } from "eve/channels/telegram";
+import type { TelegramHandle } from "../runtime/telegram/channel-types.js";
 
 import { isAppError } from "./app-error.js";
 import { telegramReactionPolicyRepository } from "./telegram-reaction-policy-repository.js";

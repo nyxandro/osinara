@@ -3,12 +3,11 @@
  *
  * Exports:
  * - `ClaimedMemoryReviewBatch`: exact leased source range and verified authorization sponsor.
- * - `createMemoryReviewDispatcher`: deterministic lease-to-internal-Eve handoff processor.
+ * - `createMemoryReviewDispatcher`: deterministic lease-to-internal-turn handoff processor.
  * - `dispatchPendingMemoryReviews`: production minute dispatcher.
+ * - `MemoryReviewStart`: starts the batch's turn in the internal review channel.
  */
-import type { ScheduleToFn } from "eve/schedules";
-
-import memoryReviewChannel from "../../channels/memory-review.js";
+import type { SessionAuthContext } from "../../runtime/context.js";
 import type { PreparedSession } from "../sessions/session-repository.js";
 import { conversationRepository } from "../conversation-repository.js";
 import {
@@ -50,12 +49,19 @@ interface MemoryReviewDispatcherDependencies {
   ): Promise<boolean>;
   markRunning(
     batch: ClaimedMemoryReviewBatch,
-    input: { applicationSessionId: string; eveSessionId: string },
+    input: { applicationSessionId: string; agentSessionId: string },
   ): Promise<void>;
   prepareSession(batch: ClaimedMemoryReviewBatch, now: Date): Promise<PreparedSession>;
+  startReview: MemoryReviewStart;
   syncParticipants(batch: ClaimedMemoryReviewBatch): Promise<unknown>;
-  to: ScheduleToFn;
 }
+
+/** Starts the batch's review turn; the turn then runs in the background. */
+export type MemoryReviewStart = (
+  batchId: string,
+  message: string,
+  options: { readonly auth: SessionAuthContext },
+) => Promise<{ readonly sessionId: string }>;
 
 function reviewAuth(batch: ClaimedMemoryReviewBatch, prepared: PreparedSession) {
   return {
@@ -121,11 +127,10 @@ async function dispatchOne(
     return;
   }
 
-  let session: { id: string };
+  let session: { sessionId: string };
   try {
-    // The authored internal channel selects task mode and has no Telegram delivery adapter.
-    session = await dependencies.to(memoryReviewChannel, { batchId: batch.batchId })
-      .send(batch.prompt, { auth: reviewAuth(batch, prepared) });
+    // The internal channel delivers nothing; the review writes only through its memory tools.
+    session = await dependencies.startReview(batch.batchId, batch.prompt, { auth: reviewAuth(batch, prepared) });
   } catch (error) {
     if (isDatabaseUnavailable(error)) throw error;
     await dependencies.markAmbiguous(batch, "AGENT_MEMORY_REVIEW_HANDOFF_AMBIGUOUS", prepared.id);
@@ -133,7 +138,7 @@ async function dispatchOne(
   }
   await recoverDatabaseBookkeeping(() => dependencies.markRunning(batch, {
     applicationSessionId: prepared.id,
-    eveSessionId: session.id,
+    agentSessionId: session.sessionId,
   }));
 }
 
@@ -160,7 +165,7 @@ export function createMemoryReviewDispatcher(dependencies: MemoryReviewDispatche
 }
 
 export function dispatchPendingMemoryReviews(
-  to: ScheduleToFn,
+  startReview: MemoryReviewStart,
   now = new Date(),
 ): Promise<number> {
   return reconcileMemoryReviewExecutions().then(() => createMemoryReviewDispatcher({
@@ -175,10 +180,10 @@ export function dispatchPendingMemoryReviews(
     markRunning: (batch, input) => memoryReviewDispatchRepository.markRunning(batch, input),
     prepareSession: (batch, currentTime) =>
       memoryReviewSessionRepository.prepare(batch, currentTime),
+    startReview,
     syncParticipants: (batch) => conversationRepository.syncTimelineParticipants(
       batch.conversationId,
       batch.sourceEntryIds,
     ),
-    to,
   })());
 }

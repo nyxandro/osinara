@@ -92,10 +92,6 @@ function buildEnvironment(input: InstallationExecutionInput): Buffer {
     ["TELEGRAM_BOT_TOKEN", input.telegramBotToken],
     ["TELEGRAM_BOT_USERNAME", input.telegramBotUsername],
     ["TELEGRAM_WEBHOOK_SECRET_TOKEN", input.internalSecrets.telegramWebhookSecretToken],
-    [
-      "WORKFLOW_POSTGRES_URL",
-      `postgresql://osinara_workflow:${input.internalSecrets.workflowPostgresPassword}@postgres:5432/osinara_workflow`,
-    ],
   ];
   if (input.groqApiKey !== null) values.push(["GROQ_API_KEY", input.groqApiKey]);
   return Buffer.from(

@@ -7,7 +7,7 @@
  * - Explicit safe handling of MiniMax sibling-field materialization.
  * - Complete payload and bounded-correction guidance in the tool description.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 

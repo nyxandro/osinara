@@ -1,5 +1,5 @@
 /**
- * Persisted Eve sandbox backend state validation.
+ * Persisted sandbox backend state validation.
  *
  * Exports:
  * - `StoredSandboxMetadata`: mounted legacy/current state or disabled internal-session state.
@@ -36,7 +36,7 @@ export type StoredSandboxMetadata =
 
 export function parseStoredSandboxMetadata(
   value: Record<string, unknown> | undefined,
-  eveSessionId: string,
+  agentSessionId: string,
   stateSchemaVersion: number,
 ): StoredSandboxMetadata | null {
   if (!value) return null;
@@ -67,7 +67,7 @@ export function parseStoredSandboxMetadata(
   // Existing mounted state remains compatible and reuses the runner's strict trust-zone parser.
   const request = parseCreateSandboxRequest({
     access: value.access,
-    eveSessionId,
+    agentSessionId,
     mounts: useOptions.mounts,
     sandboxSessionId: useOptions.sandboxSessionId,
     seedDigest: sandboxSeedDigest([]),

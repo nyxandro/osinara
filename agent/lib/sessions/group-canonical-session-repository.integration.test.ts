@@ -92,7 +92,7 @@ describeWithDatabase("canonical group session repository", () => {
   it("promotes a parked canonical and lets an unrelated turn create its replacement", async () => {
     const f = await fixture();
     const canonical = await sessionRepository.prepareTurn(canonicalInput(f, null));
-    await sessionRepository.bindEveSession(canonical.id, "wrun_task");
+    await sessionRepository.bindAgentSession(canonical.id, "wrun_task");
     await sessionRepository.registerRouteAlias(canonical.id, "-100-canonical::500");
 
     await sessionRepository.parkSession({
@@ -120,7 +120,7 @@ describeWithDatabase("canonical group session repository", () => {
   it("allocates above newer retired generations when an older running task remains", async () => {
     const f = await fixture();
     const staleTask = await sessionRepository.prepareTurn(canonicalInput(f, null));
-    await sessionRepository.bindEveSession(staleTask.id, "wrun_stale_task");
+    await sessionRepository.bindAgentSession(staleTask.id, "wrun_stale_task");
     await sessionRepository.parkSession({
       applicationSessionId: staleTask.id,
       pendingRequestId: "request-stale",
@@ -132,14 +132,14 @@ describeWithDatabase("canonical group session repository", () => {
     const firstReplacement = await sessionRepository.prepareTurn(canonicalInput(f, null));
     await sessionRepository.requestRotation(firstReplacement.id);
     const newer = await sessionRepository.prepareTurn(canonicalInput(f, null));
-    await sessionRepository.bindEveSession(newer.id, "wrun_newer_task");
+    await sessionRepository.bindAgentSession(newer.id, "wrun_newer_task");
     await sessionRepository.parkSession({
       applicationSessionId: newer.id,
       pendingRequestId: "request-newer",
       requesterTelegramUserId: "canonical-owner",
       requesterUserId: f.userId,
     });
-    await sessionRepository.recordTurnCompleted(newer.id, "wrun_newer_task", false);
+    await sessionRepository.recordTurnCompleted(newer.id, "wrun_newer_task", false, true);
 
     const [recovered, concurrent] = await Promise.all([
       sessionRepository.prepareTurn(canonicalInput(f, null)),
@@ -194,7 +194,7 @@ describeWithDatabase("canonical group session repository", () => {
       requesterUserId: f.userId,
     });
 
-    // OAuth authorization.required has no Eve request id and may lack a mapped application user.
+    // OAuth authorization.required has no runtime request id and may lack a mapped application user.
     await sessionRepository.parkSession({
       applicationSessionId: canonical.id,
       pendingRequestId: null,
@@ -210,12 +210,12 @@ describeWithDatabase("canonical group session repository", () => {
     )).resolves.toMatchObject({ rowCount: 1 });
   });
 
-  it.each(["completed", "failed", "continuation"] as const)(
+  it.each(["completed", "failed"] as const)(
     "rolls back %s terminal state and route deletion when retirement audit fails",
     async (terminalPath) => {
     const f = await fixture();
     const canonical = await sessionRepository.prepareTurn(canonicalInput(f, null));
-    await sessionRepository.bindEveSession(canonical.id, "wrun_atomic_terminal");
+    await sessionRepository.bindAgentSession(canonical.id, "wrun_atomic_terminal");
     await sessionRepository.parkSession({
       applicationSessionId: canonical.id,
       pendingRequestId: "request-atomic",
@@ -240,13 +240,8 @@ describeWithDatabase("canonical group session repository", () => {
 
     try {
       const terminal = terminalPath === "completed"
-        ? sessionRepository.recordTurnCompleted(canonical.id, "wrun_atomic_terminal", false)
-        : terminalPath === "failed"
-        ? sessionRepository.recordTurnFailed(canonical.id, "wrun_atomic_terminal")
-        : sessionRepository.recordSessionFailedByContinuationToken(
-          canonical.continuationToken,
-          "wrun_atomic_terminal",
-        );
+        ? sessionRepository.recordTurnCompleted(canonical.id, "wrun_atomic_terminal", false, true)
+        : sessionRepository.recordTurnFailed(canonical.id, "wrun_atomic_terminal");
       await expect(terminal).rejects.toThrow("forced retirement audit failure");
       await expect(database().query(
         `SELECT 1 FROM conversation_sessions
@@ -270,7 +265,7 @@ describeWithDatabase("canonical group session repository", () => {
   ] as const)("retires a non-pending task after it is %s", async (_outcome, failed) => {
     const f = await fixture();
     const canonical = await sessionRepository.prepareTurn(canonicalInput(f, null));
-    await sessionRepository.bindEveSession(canonical.id, "wrun_terminal_task");
+    await sessionRepository.bindAgentSession(canonical.id, "wrun_terminal_task");
     await sessionRepository.parkSession({
       applicationSessionId: canonical.id,
       pendingRequestId: "request-terminal",
@@ -281,7 +276,7 @@ describeWithDatabase("canonical group session repository", () => {
     if (failed) {
       await sessionRepository.recordTurnFailed(canonical.id, "wrun_terminal_task");
     } else {
-      await sessionRepository.recordTurnCompleted(canonical.id, "wrun_terminal_task", false);
+      await sessionRepository.recordTurnCompleted(canonical.id, "wrun_terminal_task", false, true);
     }
 
     await expect(database().query(
@@ -296,7 +291,7 @@ describeWithDatabase("canonical group session repository", () => {
   it("retires abandoned running tasks in the bounded lifecycle sweep", async () => {
     const f = await fixture();
     const canonical = await sessionRepository.prepareTurn(canonicalInput(f, null));
-    await sessionRepository.bindEveSession(canonical.id, "wrun_abandoned_task");
+    await sessionRepository.bindAgentSession(canonical.id, "wrun_abandoned_task");
     await sessionRepository.parkSession({
       applicationSessionId: canonical.id,
       pendingRequestId: "request-abandoned",

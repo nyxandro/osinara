@@ -4,6 +4,8 @@
  * Exports:
  * - `memorySubjectSchema`: explicit current-author, verified-ref, label, or subjectless intent.
  * - `memoryThreadSchema`: atomic thread create/attach contract.
+ * - `createRememberInputSchema`: the contract narrowed to the scopes one surface may write into and,
+ *   for a surface without profile views, to subjects that need no verified reference.
  * - `rememberInputSchema`: trusted personal/family/group tool input.
  * - `externalRememberInputSchema`: exact external-group presentation contract.
  * - `RememberInput`: parsed trusted tool input type.
@@ -13,6 +15,9 @@
  */
 import { z } from "zod";
 
+import { MEMORY_ATTRIBUTE_MAX_CHARACTERS } from "./memory-attribute-slot.js";
+import { MEMORY_NEIGHBOUR_CANDIDATE_LIMIT } from "./memory-neighbour-gate.js";
+import { MEMORY_REF_PATTERN } from "./model-memory.js";
 import {
   THREAD_PURPOSE_MAX_CHARACTERS,
   THREAD_TITLE_MAX_CHARACTERS,
@@ -32,41 +37,77 @@ export const MEMORY_SUBJECT_REF_PATTERN = /^subj_[0-9a-f]{32}$/u;
  */
 const JSON_WHITESPACE_PATTERN = String.raw`[ \t\r\n]*`;
 const JSON_STRING_PATTERN = String.raw`"(?:[^"\\\u0000-\u001f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"`;
-const SERIALIZED_MEMORY_SUBJECT_VARIANTS = [
+const SERIALIZED_UNVERIFIED_SUBJECT_VARIANTS = [
   String.raw`"kind"${JSON_WHITESPACE_PATTERN}:${JSON_WHITESPACE_PATTERN}"current_author"`,
   String.raw`"kind"${JSON_WHITESPACE_PATTERN}:${JSON_WHITESPACE_PATTERN}"none"`,
-  String.raw`"kind"${JSON_WHITESPACE_PATTERN}:${JSON_WHITESPACE_PATTERN}"verified_ref"${JSON_WHITESPACE_PATTERN},${JSON_WHITESPACE_PATTERN}"subjectRef"${JSON_WHITESPACE_PATTERN}:${JSON_WHITESPACE_PATTERN}${JSON_STRING_PATTERN}`,
-  String.raw`"subjectRef"${JSON_WHITESPACE_PATTERN}:${JSON_WHITESPACE_PATTERN}${JSON_STRING_PATTERN}${JSON_WHITESPACE_PATTERN},${JSON_WHITESPACE_PATTERN}"kind"${JSON_WHITESPACE_PATTERN}:${JSON_WHITESPACE_PATTERN}"verified_ref"`,
   String.raw`"kind"${JSON_WHITESPACE_PATTERN}:${JSON_WHITESPACE_PATTERN}"label"${JSON_WHITESPACE_PATTERN},${JSON_WHITESPACE_PATTERN}"label"${JSON_WHITESPACE_PATTERN}:${JSON_WHITESPACE_PATTERN}${JSON_STRING_PATTERN}`,
   String.raw`"label"${JSON_WHITESPACE_PATTERN}:${JSON_WHITESPACE_PATTERN}${JSON_STRING_PATTERN}${JSON_WHITESPACE_PATTERN},${JSON_WHITESPACE_PATTERN}"kind"${JSON_WHITESPACE_PATTERN}:${JSON_WHITESPACE_PATTERN}"label"`,
 ];
-const SERIALIZED_MEMORY_SUBJECT_PATTERN = new RegExp(
-  String.raw`^${JSON_WHITESPACE_PATTERN}\{${JSON_WHITESPACE_PATTERN}(?:${SERIALIZED_MEMORY_SUBJECT_VARIANTS.join("|")})${JSON_WHITESPACE_PATTERN}\}${JSON_WHITESPACE_PATTERN}$`,
-  "u",
-);
+const SERIALIZED_VERIFIED_REF_SUBJECT_VARIANTS = [
+  String.raw`"kind"${JSON_WHITESPACE_PATTERN}:${JSON_WHITESPACE_PATTERN}"verified_ref"${JSON_WHITESPACE_PATTERN},${JSON_WHITESPACE_PATTERN}"subjectRef"${JSON_WHITESPACE_PATTERN}:${JSON_WHITESPACE_PATTERN}${JSON_STRING_PATTERN}`,
+  String.raw`"subjectRef"${JSON_WHITESPACE_PATTERN}:${JSON_WHITESPACE_PATTERN}${JSON_STRING_PATTERN}${JSON_WHITESPACE_PATTERN},${JSON_WHITESPACE_PATTERN}"kind"${JSON_WHITESPACE_PATTERN}:${JSON_WHITESPACE_PATTERN}"verified_ref"`,
+];
+
+function serializedSubjectPattern(variants: readonly string[]): RegExp {
+  return new RegExp(
+    String.raw`^${JSON_WHITESPACE_PATTERN}\{${JSON_WHITESPACE_PATTERN}(?:${variants.join("|")})${JSON_WHITESPACE_PATTERN}\}${JSON_WHITESPACE_PATTERN}$`,
+    "u",
+  );
+}
+
+const currentAuthorSubjectSchema = z.object({
+  kind: z.literal("current_author").describe("Сведение относится к автору текущего сообщения"),
+}).strict();
+const labelSubjectSchema = z.object({
+  kind: z.literal("label").describe("Текстовая тема без проверенной identity"),
+  label: z.string().trim().min(1).max(SUBJECT_LABEL_MAX_CHARACTERS).describe("Краткая нейтральная метка темы"),
+}).strict();
+const noneSubjectSchema = z.object({ kind: z.literal("none").describe("Запись не относится к человеку") }).strict();
 
 export const memorySubjectSchema = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("current_author").describe("Сведение относится к автору текущего сообщения"),
-  }).strict(),
+  currentAuthorSubjectSchema,
   z.object({
     kind: z.literal("verified_ref").describe("Сведение относится к проверенному subjectRef из контекста"),
     subjectRef: z.string().regex(MEMORY_SUBJECT_REF_PATTERN).describe("Opaque subjectRef только из текущего profile context"),
   }).strict(),
-  z.object({
-    kind: z.literal("label").describe("Текстовая тема без проверенной identity"),
-    label: z.string().trim().min(1).max(SUBJECT_LABEL_MAX_CHARACTERS).describe("Краткая нейтральная метка темы"),
-  }).strict(),
-  z.object({ kind: z.literal("none").describe("Запись не относится к человеку") }).strict(),
+  labelSubjectSchema,
+  noneSubjectSchema,
 ]);
 
-const modelFacingMemorySubjectSchema = z.union([
-  memorySubjectSchema,
-  z.string()
-    .regex(SERIALIZED_MEMORY_SUBJECT_PATTERN)
-    .transform((value) => JSON.parse(value) as unknown)
-    .pipe(memorySubjectSchema),
+/** A surface without profile views could never resolve a verified reference, so it is not offered. */
+const unverifiedMemorySubjectSchema = z.discriminatedUnion("kind", [
+  currentAuthorSubjectSchema,
+  labelSubjectSchema,
+  noneSubjectSchema,
 ]);
+
+function modelFacingSubject<T extends typeof memorySubjectSchema | typeof unverifiedMemorySubjectSchema>(
+  schema: T,
+  serializedPattern: RegExp,
+) {
+  return z.union([
+    schema,
+    z.string()
+      .regex(serializedPattern)
+      .transform((value) => JSON.parse(value) as unknown)
+      .pipe(schema),
+  ]);
+}
+
+const modelFacingMemorySubjectSchema = modelFacingSubject(
+  memorySubjectSchema,
+  // Keeps the conversation contract's pattern text byte-identical to what the model already reads.
+  serializedSubjectPattern([
+    ...SERIALIZED_UNVERIFIED_SUBJECT_VARIANTS.slice(0, 2),
+    ...SERIALIZED_VERIFIED_REF_SUBJECT_VARIANTS,
+    ...SERIALIZED_UNVERIFIED_SUBJECT_VARIANTS.slice(2),
+  ]),
+);
+// The serialized pattern is part of the JSON schema the model reads, so it must not name verified_ref either.
+const modelFacingUnverifiedMemorySubjectSchema = modelFacingSubject(
+  unverifiedMemorySubjectSchema,
+  serializedSubjectPattern(SERIALIZED_UNVERIFIED_SUBJECT_VARIANTS),
+);
 
 const threadRoleSchema = z.enum([
   "goal", "constraint", "method", "decision", "episode", "outcome", "lesson", "open_loop",
@@ -91,11 +132,25 @@ export const memoryThreadSchema = z.discriminatedUnion("action", [
   ),
 ]);
 
-function createRememberInputSchema(scope: z.ZodType<"family" | "group" | "personal">) {
+export function createRememberInputSchema(
+  scope: z.ZodType<"family" | "group" | "personal">,
+  options: { readonly verifiedRefs: boolean } = { verifiedRefs: true },
+) {
+  const subject = options.verifiedRefs ? modelFacingMemorySubjectSchema : modelFacingUnverifiedMemorySubjectSchema;
   return z.object({
+    attribute: z.string().trim().min(1).max(MEMORY_ATTRIBUTE_MAX_CHARACTERS).optional().describe(
+      "Короткое имя свойства субъекта, о котором запись: «кофе», «место работы», «размер обуви». Не значение свойства и не пересказ содержания. Ставь его, когда свойство со временем меняется и новая запись отменяет прежнюю; новая запись того же субъекта с тем же именем переводит прежнюю в историю. Не ставь общее имя вроде «еда» — оно уберёт из активной памяти независимые сведения. У записи без субъекта (subject.kind=none) имя свойства действует на всю область памяти, поэтому там оно должно быть особенно точным. Для kind=episode поле недопустимо",
+    ),
     basis: z.enum(["agent_inferred", "user_requested"]).describe("agent_inferred: сама отобрала сведение из сообщения, не догадка; user_requested: автор прямо попросил сохранить"),
+    distinctFrom: z.array(z.string().regex(MEMORY_REF_PATTERN)).max(MEMORY_NEIGHBOUR_CANDIDATE_LIMIT)
+      .optional().describe(
+        "Только в ответ на отказ AGENT_MEMORY_SIMILAR_RECORD_EXISTS: memoryRef показанных близких записей, которые ты прочитала и считаешь другими сведениями. Не заполняй заранее",
+      ),
     content: z.string().min(1).max(MEMORY_CONTENT_MAX_CHARACTERS).describe("Одно самостоятельное конкретное сведение без догадок; сохраняй известные даты, контекст и точный URL для полезной ссылки"),
     kind: z.enum(["profile", "preference", "fact", "episode", "family_shared"]).describe("profile: устойчивые сведения о человеке; preference: предпочтения; episode: отдельное событие или опыт; fact: прочие факты, планы, ресурсы; family_shared: общесемейные сведения"),
+    occurredOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional().describe(
+      "День, когда событие произошло, в формате ГГГГ-ММ-ДД, если он известен из разговора. Не вычисляй его из расплывчатых слов вроде «давно» или «тем летом» и не подставляй сегодняшнюю дату: не уверена — не указывай вовсе",
+    ),
     scope: scope.describe("Разрешённая область памяти текущего trust zone"),
     sensitivity: z.enum(["normal", "sensitive"]).describe("Чувствительность сохраняемого сведения"),
     sourceSequence: z.string().regex(TIMELINE_SEQUENCE_PATTERN).refine(
@@ -104,7 +159,7 @@ function createRememberInputSchema(scope: z.ZodType<"family" | "group" | "person
     ).optional().describe(
       "Только для группы: номер #sequence одного сообщения из видимой дельты текущего хода; без поля источником является текущее сообщение",
     ),
-    subject: modelFacingMemorySubjectSchema.describe("Кому или чему принадлежит утверждение"),
+    subject: subject.describe("Кому или чему принадлежит утверждение"),
     thread: memoryThreadSchema.optional().describe("Необязательное атомарное создание нити или attach"),
   }).strict().superRefine((input, context) => {
     const create = input.thread?.action === "create" ? input.thread : null;
@@ -127,6 +182,14 @@ function createRememberInputSchema(scope: z.ZodType<"family" | "group" | "person
         code: "custom",
         message: "AGENT_MEMORY_THREAD_INPUT_INVALID: Project identity недоступна в личной записи",
         path: ["thread", "identity"],
+      });
+    }
+    if (input.attribute !== undefined && input.kind === "episode") {
+      context.addIssue({
+        code: "custom",
+        message:
+          "AGENT_MEMORY_ATTRIBUTE_INVALID: Событие не имеет свойства, которое меняется со временем",
+        path: ["attribute"],
       });
     }
     if (input.sourceSequence !== undefined && input.sensitivity === "sensitive") {

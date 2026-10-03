@@ -2,11 +2,11 @@
  * NeuralDeep session-sticky model routing.
  *
  * Exports:
- * - `resolveSessionModelSelection`: binds NeuralDeep requests to one upstream by Eve session ID.
+ * - `resolveSessionModelSelection`: binds NeuralDeep requests to one upstream by the session ID.
  */
-import type { AgentModelOptionsDefinition } from "eve";
 import type { LanguageModel } from "ai";
 
+import type { StepModelSelection } from "../runtime/agent-definition.js";
 import type { ModelProviderId } from "./model-provider-config.js";
 
 interface SessionModelSelectionInput {
@@ -16,28 +16,16 @@ interface SessionModelSelectionInput {
   readonly sessionId: string;
 }
 
-interface SessionModelSelection {
-  readonly model: LanguageModel;
-  readonly modelContextWindowTokens: number;
-  readonly modelOptions?: AgentModelOptionsDefinition;
-}
-
 export function resolveSessionModelSelection({
   model,
   modelContextWindowTokens,
   providerId,
   sessionId,
-}: SessionModelSelectionInput): SessionModelSelection {
+}: SessionModelSelectionInput): StepModelSelection {
   // NeuralDeep uses this OpenAI-compatible field for sticky upstream routing and KV-cache reuse.
-  if (providerId !== "neuraldeep") return { model, modelContextWindowTokens };
-
   return {
+    contextWindowTokens: modelContextWindowTokens,
     model,
-    modelContextWindowTokens,
-    modelOptions: {
-      providerOptions: {
-        neuraldeep: { user: sessionId },
-      },
-    },
+    providerOptions: providerId === "neuraldeep" ? { neuraldeep: { user: sessionId } } : undefined,
   };
 }

@@ -2,7 +2,7 @@
 import { recordBoundedOperationalIncident } from "./operational-incidents/owner-alerts.js";
 import { MEMORY_INCIDENT_QUERY_TIMEOUT_MS, MEMORY_INCIDENT_STATEMENT_TIMEOUT_MS } from "./memory-config.js";
 
-export type MemoryContextPhase = "authorization" | "query" | "retrieval" | "embedding" | "search" | "threads" | "profile" | "format";
+export type MemoryContextPhase = "authorization" | "query" | "retrieval" | "embedding" | "search" | "threads" | "profile" | "journal" | "format";
 
 export class MemoryContextFailure extends Error {
   constructor(readonly phase: MemoryContextPhase, cause: unknown) {

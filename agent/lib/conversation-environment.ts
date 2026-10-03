@@ -8,7 +8,7 @@
  * Prompt text for each trust zone is composed separately in `prompt/mode-instructions.ts`, so this
  * module stays a pure authorization projection with no model-facing wording.
  */
-import type { SessionAuth } from "eve/context";
+import type { SessionAuth } from "../runtime/context.js";
 
 import { AppError } from "./app-error.js";
 import { resolveTelegramSessionActor } from "./telegram-session-actor.js";

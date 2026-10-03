@@ -19,7 +19,7 @@ const CLAIM: TimedOutApprovalClaim = {
   applicationSessionId: "app-session-1",
   auth: { attributes: {}, authenticator: "telegram", principalId: "user-1", principalType: "user" } as never,
   kind: "tool-approval",
-  eveSessionId: "wrun_parked",
+  agentSessionId: "wrun_parked",
   id: "approval-1",
   leaseToken: "lease-1",
   promptText: "Подтвердите действие: исправить запись в памяти.",

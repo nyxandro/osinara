@@ -6,7 +6,7 @@
  * - Telegram getFile/download response validation.
  * - Transport and response-body failures return a bounded correction contract.
  */
-import type { TelegramAttachment } from "eve/channels/telegram";
+import type { TelegramAttachment } from "../../runtime/telegram/inbound.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { createTelegramAttachmentDownloader } from "./telegram-attachment-download.js";
@@ -20,7 +20,7 @@ const attachment = (size: number): TelegramAttachment => ({
 });
 
 describe("createTelegramAttachmentDownloader", () => {
-  it("downloads an accepted file through Eve's public Telegram API", async () => {
+  it("downloads an accepted file through the runtime's Telegram API", async () => {
     const getFile = vi.fn().mockResolvedValue({ filePath: "documents/file.txt" });
     const downloadFile = vi.fn().mockResolvedValue(new Response("content", { status: 200 }));
     const download = createTelegramAttachmentDownloader({ downloadFile, getFile });

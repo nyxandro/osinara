@@ -1,122 +1,114 @@
 /**
  * Internal silent channel for root-agent memory review.
  *
- * Export:
- * - Authored receive channel that creates task sessions without external delivery.
+ * Exports:
+ * - `MEMORY_REVIEW_CHANNEL_KIND`: the channel kind of review turns, as resolvers see it.
+ * - `memoryReviewTurnEvents`: lifecycle handlers that bind exact batch sources and terminalize the
+ *   durable application batch.
+ * - `createMemoryReviewStart`: starts a batch's review turn in the background, in the session of the
+ *   batch's attempt.
  *
  * Key constructs:
- * - Lifecycle handlers bind exact batch sources and terminalize the durable application batch.
+ * - The review turn delivers nothing; it writes only through its memory tools.
+ * - The batch in the target must be the one the verified auth names, and each recovery attempt gets
+ *   its own session (`reviewContinuationToken`).
  */
-import { defineChannel, POST } from "eve/channels";
-
+import type { TurnDispatcher } from "../runtime/dispatch.js";
+import { startChannelTurn } from "../runtime/session/channel-session.js";
+import type { LifecycleTurnEvents } from "../runtime/turn/lifecycle-observer.js";
+import type { JournalDatabase } from "../runtime/turn/journal-repository.js";
 import {
   bindMemoryTurnSources,
   releaseMemoryTurnSources,
 } from "../lib/memory-turn-source.js";
+import type { MemoryReviewStart } from "../lib/memory-review/memory-review-dispatcher.js";
 import { memoryReviewRepository } from "../lib/memory-review/memory-review-repository.js";
-import {
-  memoryReviewBatchId,
-  memoryReviewBatchIdFromContinuationToken,
-  reviewContinuationToken,
-} from "../lib/memory-review/memory-review-session.js";
-import { memoryReviewDispatchRepository } from "../lib/memory-review/memory-review-dispatch-repository.js";
+import { memoryReviewBatchId, reviewContinuationToken } from "../lib/memory-review/memory-review-session.js";
 import { applicationSessionId } from "../lib/sessions/session-context.js";
 import { sessionRepository } from "../lib/sessions/session-repository.js";
-import { isHookConflictFailure } from "../lib/telegram-session-failure.js";
 import { recoverableModelFailureCode } from "../lib/model-failure.js";
 import { recoverDatabaseBookkeeping } from "../lib/database-recovery.js";
 
-export default defineChannel<undefined, void, { batchId: string }>({
-  // Eve 0.32 discovers authored receive targets only when the channel owns a route. This route is
-  // never a dispatch seam: it is absent from the edge allowlist and rejects every direct request.
-  routes: [POST("/internal/memory-review", async () => new Response(null, { status: 404 }))],
-  receive(input, { from }) {
-    const batchId = input.target.batchId;
-    if (!batchId || input.auth?.attributes.memoryReviewBatchId !== batchId) {
+export const MEMORY_REVIEW_CHANNEL_KIND = "memory-review";
+
+export function createMemoryReviewStart(runtime: {
+  readonly database: JournalDatabase & Parameters<typeof startChannelTurn>[0];
+  readonly dispatcher: Pick<TurnDispatcher, "start">;
+}): MemoryReviewStart {
+  return async (batchId, message, { auth }) => {
+    if (!batchId || auth.attributes.memoryReviewBatchId !== batchId) {
       throw new Error(
         "AGENT_MEMORY_REVIEW_HANDOFF_INVALID: Internal review target does not match verified auth",
       );
     }
-    const generation = input.auth.attributes.memoryReviewGeneration;
+    const generation = auth.attributes.memoryReviewGeneration;
     if (typeof generation !== "string" || !/^(?:0|[1-9]\d*)$/u.test(generation)) throw new Error(
       "AGENT_MEMORY_REVIEW_GENERATION_INVALID: Internal review has no verified attempt number",
     );
-    return from(reviewContinuationToken(batchId, Number(generation))).send(input.message, {
-      auth: input.auth,
-      mode: "task",
+    const started = await startChannelTurn(runtime.database, {
+      auth,
+      channel: { kind: MEMORY_REVIEW_CHANNEL_KIND },
+      channelState: null,
+      input: { context: [], message },
+      kind: "memory_review",
+      token: reviewContinuationToken(batchId, Number(generation)),
     });
+    runtime.dispatcher.start(started.turnId);
+    return { sessionId: started.sessionId };
+  };
+}
+
+export const memoryReviewTurnEvents: LifecycleTurnEvents = {
+  async "turn.started"(ctx) {
+    const batchId = memoryReviewBatchId(ctx);
+    if (!batchId) throw new Error(
+      "AGENT_MEMORY_REVIEW_CONTEXT_INVALID: Internal review turn has no batch",
+    );
+    const appSessionId = applicationSessionId(ctx);
+    await sessionRepository.bindAgentSession(appSessionId, ctx.session.id);
+    await memoryReviewRepository.bindAgentTurn({
+      applicationSessionId: appSessionId,
+      batchId,
+      agentSessionId: ctx.session.id,
+      agentTurnId: ctx.session.turn.id,
+    });
+    await bindMemoryTurnSources(ctx);
   },
-  events: {
-    async "turn.started"(_data, _channel, ctx) {
-      const batchId = memoryReviewBatchId(ctx);
-      if (!batchId) throw new Error(
-        "AGENT_MEMORY_REVIEW_CONTEXT_INVALID: Internal review turn has no batch",
-      );
-      const appSessionId = applicationSessionId(ctx);
-      await sessionRepository.bindEveSession(appSessionId, ctx.session.id);
-      await memoryReviewRepository.bindEveTurn({
-        applicationSessionId: appSessionId,
-        batchId,
-        eveSessionId: ctx.session.id,
-        eveTurnId: ctx.session.turn.id,
-      });
-      await bindMemoryTurnSources(ctx);
-    },
-    async "turn.completed"(_data, _channel, ctx) {
-      const batchId = memoryReviewBatchId(ctx);
-      if (!batchId) throw new Error(
-        "AGENT_MEMORY_REVIEW_CONTEXT_INVALID: Completed review turn has no batch",
-      );
-      const terminal = await recoverDatabaseBookkeeping(() => memoryReviewRepository.completeBatch({
-        batchId,
-        completedAt: new Date(),
-        eveSessionId: ctx.session.id,
-        eveTurnId: ctx.session.turn.id,
-      }));
-      await releaseMemoryTurnSources(ctx);
-      if (terminal === "replayed") return;
-    },
-    async "turn.failed"(data, _channel, ctx) {
-      const batchId = memoryReviewBatchId(ctx);
-      if (!batchId) throw new Error(
-        "AGENT_MEMORY_REVIEW_CONTEXT_INVALID: Failed review turn has no batch",
-      );
-      const terminal = await recoverDatabaseBookkeeping(() => memoryReviewRepository.failRunning({
-        batchId,
-        diagnosticCode: recoverableModelFailureCode(data) ?? data.code,
-        eveSessionId: ctx.session.id,
-        eveTurnId: ctx.session.turn.id,
-      }));
-      await releaseMemoryTurnSources(ctx);
-      if (terminal === "replayed") return;
-    },
-    async "turn.cancelled"(_data, _channel, ctx) {
-      const batchId = memoryReviewBatchId(ctx);
-      if (!batchId) return;
-      const terminal = await recoverDatabaseBookkeeping(() => memoryReviewRepository.failRunning({
-        batchId,
-        diagnosticCode: "AGENT_MEMORY_REVIEW_TURN_CANCELLED",
-        eveSessionId: ctx.session.id,
-        eveTurnId: ctx.session.turn.id,
-      }));
-      await releaseMemoryTurnSources(ctx);
-      if (terminal === "replayed") return;
-    },
-    async "session.failed"(data, channel) {
-      // A competing root lost channel ownership; the existing review root remains authoritative.
-      if (isHookConflictFailure(data)) return;
-      const batchId = memoryReviewBatchIdFromContinuationToken(
-        channel.continuation?.token ?? "",
-      );
-      if (!batchId) throw new Error(
-        "AGENT_MEMORY_REVIEW_CONTINUATION_INVALID: Failed review session has no batch route",
-      );
-      await memoryReviewDispatchRepository.markSessionAmbiguous({
-        batchId,
-        continuationToken: channel.continuation!.token,
-        diagnosticCode: recoverableModelFailureCode(data) ?? "AGENT_MEMORY_REVIEW_SESSION_FAILED_AMBIGUOUS",
-        eveSessionId: data.sessionId,
-      });
-    },
+  async "turn.completed"(ctx) {
+    const batchId = memoryReviewBatchId(ctx);
+    if (!batchId) throw new Error(
+      "AGENT_MEMORY_REVIEW_CONTEXT_INVALID: Completed review turn has no batch",
+    );
+    await recoverDatabaseBookkeeping(() => memoryReviewRepository.completeBatch({
+      batchId,
+      completedAt: new Date(),
+      agentSessionId: ctx.session.id,
+      agentTurnId: ctx.session.turn.id,
+    }));
+    await releaseMemoryTurnSources(ctx);
   },
-});
+  async "turn.failed"(data, ctx) {
+    const batchId = memoryReviewBatchId(ctx);
+    if (!batchId) throw new Error(
+      "AGENT_MEMORY_REVIEW_CONTEXT_INVALID: Failed review turn has no batch",
+    );
+    await recoverDatabaseBookkeeping(() => memoryReviewRepository.failRunning({
+      batchId,
+      diagnosticCode: recoverableModelFailureCode(data) ?? data.code,
+      agentSessionId: ctx.session.id,
+      agentTurnId: ctx.session.turn.id,
+    }));
+    await releaseMemoryTurnSources(ctx);
+  },
+  async "turn.cancelled"(ctx) {
+    const batchId = memoryReviewBatchId(ctx);
+    if (!batchId) return;
+    await recoverDatabaseBookkeeping(() => memoryReviewRepository.failRunning({
+      batchId,
+      diagnosticCode: "AGENT_MEMORY_REVIEW_TURN_CANCELLED",
+      agentSessionId: ctx.session.id,
+      agentTurnId: ctx.session.turn.id,
+    }));
+    await releaseMemoryTurnSources(ctx);
+  },
+};

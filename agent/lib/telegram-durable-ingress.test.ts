@@ -2,25 +2,27 @@
  * Durable Telegram ingress coordinator tests.
  *
  * Constructs covered:
- * - Webhook ACK waits only for persistence, never voice transcription or Eve execution.
- * - External media is acknowledged without entering the durable queue or native dispatch.
- * - Voice results persist once before native Eve dispatch.
+ * - Webhook ACK waits only for persistence, never voice transcription or turn execution.
+ * - External media is acknowledged without entering the durable queue or dispatch.
+ * - Voice results persist once before dispatch.
  * - Captionless attachments receive a non-empty factual model message after durable storage.
- * - FIFO releases at a waiting boundary even though the durable session stream remains open.
- * - Reused Eve sessions start at the persisted stream cursor and ignore an old waiting boundary.
- * - An unknown non-HITL callback never reaches Eve when no application handler claims it.
+ * - An update completes only after its turn ran to the end, with the session it ran in.
+ * - A restarted update that already created its turn lets that turn finish; one interrupted before
+ *   its turn existed is prepared again under its own attempt, never dispatched twice.
+ * - A preparation that outlives the admission window creates no turn.
+ * - An unknown non-HITL callback is never dispatched when no application handler claims it.
  * - One failed item releases its own record and the drain keeps going.
- * - A session that never reaches a boundary releases the queue within one lease.
+ * - A private chat still receiving a burst is claimed the moment its quiet window ends, not at the
+ *   next poll, with the configured window.
+ * - A claimed burst is dispatched as one message carrying every part in chat order.
  */
-import type { TelegramVerifiedUpdateContext } from "eve/channels/telegram";
-import { parseTelegramUpdate } from "eve/channels/telegram";
+import { parseTelegramUpdate } from "../runtime/telegram/inbound.js";
+import type { RouteContext } from "../runtime/server.js";
+import type { JsonObject } from "../runtime/json.js";
 import { describe, expect, it, vi } from "vitest";
 
-import type { TelegramIngressRepository } from "./telegram-ingress-contract.js";
-import { createTelegramDurableIngress } from "./telegram-durable-ingress.js";
-import { correlatedDispatch } from "./telegram-ingress.test-fixtures.js";
-
-const BOUNDARY_SETTLEMENT_TIMEOUT_MILLISECONDS = 100;
+import type { TelegramIngressClaim, TelegramIngressRepository } from "./telegram-ingress-contract.js";
+import { createTelegramDurableIngress, type DurableIngressDependencies } from "./telegram-durable-ingress.js";
 
 function voicePayload(): Record<string, unknown> {
   return {
@@ -57,59 +59,48 @@ function callbackPayload(): Record<string, unknown> {
   };
 }
 
+const DISPATCHED = { sessionId: "wrun_session", status: "dispatched", turnId: "turn_one" } as const;
+
 function ingress(
   storage: ReturnType<typeof repository>,
-  overrides: {
-    dispatch: ReturnType<typeof vi.fn>;
-    handleSoftwareUpdateCallback?: () => Promise<boolean>;
-    leaseMilliseconds?: number;
-  },
+  overrides: Partial<DurableIngressDependencies> = {},
 ) {
-  return createTelegramDurableIngress({
+  const dependencies = {
     reportFailure: vi.fn(),
     acceptMedia: vi.fn().mockResolvedValue(true),
     authorizeVoice: vi.fn().mockResolvedValue(true),
     botUsername: "osinara_bot",
-    handleSoftwareUpdateCallback:
-      overrides.handleSoftwareUpdateCallback ?? vi.fn().mockResolvedValue(false),
-    leaseMilliseconds: overrides.leaseMilliseconds ?? 60_000,
-    admissionMilliseconds: overrides.leaseMilliseconds ?? 60_000,
-    observerIdleMilliseconds: overrides.leaseMilliseconds ?? 60_000,
-    cancellationMilliseconds: 20,
+    dispatch: vi.fn().mockResolvedValue(DISPATCHED),
+    handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false),
+    leaseMilliseconds: 60_000,
+    admissionMilliseconds: 60_000,
     repository: storage.value,
+    runTurn: vi.fn().mockResolvedValue({ status: "completed", text: "готово" }),
     transcribeVoice: vi.fn().mockResolvedValue("Купи молоко"),
-  });
+    ...overrides,
+  };
+  return { dependencies, handle: createTelegramDurableIngress(dependencies) };
 }
 
-async function runDrain(
-  handle: ReturnType<typeof createTelegramDurableIngress>,
-  raw: Record<string, unknown>,
-  dispatch: ReturnType<typeof vi.fn>,
-): Promise<void> {
+async function deliver(handle: ReturnType<typeof createTelegramDurableIngress>, raw: Record<string, unknown>) {
   const update = parseTelegramUpdate(raw);
   if (!update) throw new Error("AGENT_TEST_TELEGRAM_UPDATE_INVALID: Не создано тестовое обновление");
   let backgroundTask: Promise<unknown> | undefined;
-  await handle({
-    attachSession: vi.fn(),
-    dispatch: correlatedDispatch(dispatch as TelegramVerifiedUpdateContext["dispatch"]),
-    notifyTimeout: vi.fn(),
-    raw,
-    update,
-    waitUntil(task) {
-      backgroundTask = task;
-    },
-  } as TelegramVerifiedUpdateContext);
-  if (!backgroundTask) {
-    throw new Error("AGENT_TEST_BACKGROUND_TASK_MISSING: Durable ingress did not schedule a drain");
-  }
-  await backgroundTask;
+  const context: RouteContext = { waitUntil(task) { backgroundTask = task; } };
+  const response = await handle({ ...context, raw: raw as JsonObject, update });
+  return { background: backgroundTask, response, update };
+}
+
+async function runDrain(handle: ReturnType<typeof createTelegramDurableIngress>, raw: Record<string, unknown>): Promise<void> {
+  const { background } = await deliver(handle, raw);
+  if (!background) throw new Error("AGENT_TEST_BACKGROUND_TASK_MISSING: Durable ingress did not schedule a drain");
+  await background;
 }
 
 function repository() {
-  const claim = {
+  const claim: TelegramIngressClaim = {
     dispatchStarted: false,
     dispatchBinding: null,
-    recoveryCancelRequested: false,
     attemptCount: 1,
     deliveryContinuationKey: "101::",
     ingressContinuationKey: "101::",
@@ -129,180 +120,154 @@ function repository() {
       beginVoiceTranscription: vi.fn().mockResolvedValue("started"),
       claimNext: vi.fn().mockResolvedValueOnce(claim).mockResolvedValueOnce(null),
       complete: vi.fn(),
-      completeWithSession: vi.fn(),
       enqueue: vi.fn().mockResolvedValue("inserted"),
       fail: vi.fn(),
       rekeyQueue: vi.fn(),
       release: vi.fn(),
       renewLease: vi.fn(),
-      sessionEventStreamCursor: vi.fn().mockResolvedValue(0),
       saveVoiceTranscript: vi.fn(),
+      privateBurstReadyIn: vi.fn().mockResolvedValue(null),
     } satisfies TelegramIngressRepository,
   };
 }
 
 describe("createTelegramDurableIngress", () => {
-  it("acknowledges after enqueue and processes voice in the background", async () => {
+  it("acknowledges after enqueue, then transcribes the voice once and runs its turn to the end", async () => {
     const storage = repository();
-    const transcribeVoice = vi.fn().mockResolvedValue("Купи молоко");
-    let sessionStreamController: ReadableStreamDefaultController<{ type: string }> | undefined;
-    const dispatch = vi.fn().mockResolvedValue({
-      getEventStream: async () =>
-        new ReadableStream({
-          start(controller) {
-            sessionStreamController = controller;
-            controller.enqueue({ type: "session.waiting" });
-          },
-        }),
-      id: "session-1",
+    const order: string[] = [];
+    const { dependencies, handle } = ingress(storage, {
+      dispatch: vi.fn(async () => { order.push("dispatch"); return DISPATCHED; }),
+      runTurn: vi.fn(async () => { order.push("turn"); return { status: "completed" as const, text: "готово" }; }),
     });
-    let backgroundTask: Promise<unknown> | undefined;
-    const raw = voicePayload();
-    const update = parseTelegramUpdate(raw);
-    if (!update) throw new Error("AGENT_TEST_TELEGRAM_UPDATE_INVALID: Не создано тестовое обновление");
-    const handle = createTelegramDurableIngress({
-      reportFailure: vi.fn(),
-      acceptMedia: vi.fn().mockResolvedValue(true),
-      authorizeVoice: vi.fn().mockResolvedValue(true),
-      botUsername: "osinara_bot",
-      handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false),
-      leaseMilliseconds: 60_000,
-      repository: storage.value,
-      transcribeVoice,
-    });
+    storage.value.complete.mockImplementation(async () => { order.push("complete"); });
 
-    const response = await handle({
-      attachSession: vi.fn(),
-      dispatch: correlatedDispatch(dispatch),
-      notifyTimeout: vi.fn(),
-      raw,
-      update,
-      waitUntil(task) {
-        backgroundTask = task;
-      },
-    } as TelegramVerifiedUpdateContext);
+    const { background, response } = await deliver(handle, voicePayload());
 
     expect(response.status).toBe(200);
     expect(storage.value.enqueue).toHaveBeenCalledTimes(1);
-    expect(transcribeVoice).not.toHaveBeenCalled();
-    if (!backgroundTask) {
-      throw new Error("AGENT_TEST_BACKGROUND_TASK_MISSING: Durable ingress did not schedule a drain");
-    }
-
-    // Eve keeps the durable stream open for future turns, so waiting must itself settle the drain.
-    const settledAtBoundary = await Promise.race([
-      backgroundTask.then(() => true),
-      new Promise<false>((resolve) => {
-        setTimeout(() => resolve(false), BOUNDARY_SETTLEMENT_TIMEOUT_MILLISECONDS);
-      }),
-    ]);
-    if (!settledAtBoundary) {
-      sessionStreamController?.close();
-      await backgroundTask;
-    }
-
-    expect(settledAtBoundary).toBe(true);
-    expect(transcribeVoice).toHaveBeenCalledTimes(1);
-    expect(storage.value.beginVoiceTranscription).toHaveBeenCalledWith(
-      "1001",
-      storage.claim.leaseToken,
-    );
-    expect(storage.value.saveVoiceTranscript).toHaveBeenCalledWith(
-      "1001",
-      storage.claim.leaseToken,
-      "Купи молоко",
-    );
-    expect(dispatch.mock.calls[0]?.[0].message.text).toBe("Купи молоко");
-    expect(storage.value.beginDispatch).toHaveBeenCalledWith(
-      "1001",
-      storage.claim.leaseToken,
-      expect.any(String),
-    );
-    expect(storage.value.completeWithSession).toHaveBeenCalledWith(
-      "1001",
-      storage.claim.leaseToken,
-      "session-1",
-      1,
-    );
+    expect(dependencies.transcribeVoice).not.toHaveBeenCalled();
+    await background;
+    expect(dependencies.transcribeVoice).toHaveBeenCalledTimes(1);
+    expect(storage.value.beginVoiceTranscription).toHaveBeenCalledWith("1001", storage.claim.leaseToken);
+    expect(storage.value.saveVoiceTranscript).toHaveBeenCalledWith("1001", storage.claim.leaseToken, "Купи молоко");
+    const [update, control] = vi.mocked(dependencies.dispatch).mock.calls[0]!;
+    expect(update).toMatchObject({ message: { text: "Купи молоко" } });
+    expect(control.attributes).toEqual({
+      osinaraTelegramDeadlineAt: expect.any(String),
+      osinaraTelegramIngressId: vi.mocked(storage.value.beginDispatch).mock.calls[0]![2],
+      osinaraTelegramUpdateId: "1001",
+    });
+    expect(dependencies.runTurn).toHaveBeenCalledWith("turn_one");
+    expect(order).toEqual(["dispatch", "turn", "complete"]);
+    expect(storage.value.complete).toHaveBeenCalledWith("1001", storage.claim.leaseToken, "wrun_session");
   });
 
-  it("does not let an old session.waiting complete a newly dispatched turn", async () => {
-    const storage = repository();
-    storage.value.sessionEventStreamCursor.mockResolvedValue(2);
-    const requestedStartIndexes: number[] = [];
-    const dispatch = vi.fn().mockResolvedValue({
-      getEventStream: async (options?: { startIndex?: number }) => {
-        requestedStartIndexes.push(options?.startIndex ?? 0);
-        return new ReadableStream({
-          start(controller) {
-            // The old waiting event is at index 1 and must be excluded by startIndex=2.
-            controller.enqueue({ type: "turn.started" });
-            controller.enqueue({ type: "turn.completed" });
-            controller.enqueue({ type: "session.waiting" });
-          },
-        });
-      },
-      id: "session-reused",
-    });
-    const raw = voicePayload();
-    const update = parseTelegramUpdate(raw);
-    if (!update) throw new Error("AGENT_TEST_TELEGRAM_UPDATE_INVALID: Не создано тестовое обновление");
-    const handle = createTelegramDurableIngress({
-      reportFailure: vi.fn(),
-      acceptMedia: vi.fn().mockResolvedValue(true),
-      authorizeVoice: vi.fn().mockResolvedValue(false),
-      botUsername: "osinara_bot",
-      handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false),
-      leaseMilliseconds: 60_000,
-      repository: storage.value,
-      transcribeVoice: vi.fn(),
-    });
-    let backgroundTask: Promise<unknown> | undefined;
-
-    await handle({
-      attachSession: vi.fn(),
-      dispatch: correlatedDispatch(dispatch),
-      notifyTimeout: vi.fn(),
-      raw,
-      update,
-      waitUntil(task) {
-        backgroundTask = task;
-      },
-    } as TelegramVerifiedUpdateContext);
-    await backgroundTask;
-
-    expect(requestedStartIndexes).toEqual([2]);
-    expect(storage.value.completeWithSession).toHaveBeenCalledWith(
-      "1001",
-      storage.claim.leaseToken,
-      "session-reused",
-      5,
-    );
-  });
-
-  it("never sends an unknown non-HITL callback to Eve when no handler claims it", async () => {
+  it("lets the turn of a restarted update finish without dispatching the update again", async () => {
     const storage = repository();
     storage.value.claimNext = vi.fn()
       .mockResolvedValueOnce({
-        ...storage.claim,
-        payload: callbackPayload(),
-        updateId: "1002",
-        voice: null,
+        ...storage.claim, dispatchAttemptId: "attempt-1", dispatchBinding: { id: "attempt-1", sessionId: "wrun_session", turnId: "turn_bound" },
+        dispatchStarted: true, recoveryProtocol: 1, transcript: "Купи молоко",
       })
       .mockResolvedValueOnce(null);
-    const dispatch = vi.fn();
-    const handleSoftwareUpdateCallback = vi.fn().mockResolvedValue(false);
+    const { dependencies, handle } = ingress(storage);
 
-    await runDrain(
-      ingress(storage, { dispatch, handleSoftwareUpdateCallback }),
-      callbackPayload(),
-      dispatch,
-    );
+    await runDrain(handle, voicePayload());
+
+    expect(dependencies.runTurn).toHaveBeenCalledWith("turn_bound");
+    expect(dependencies.dispatch).not.toHaveBeenCalled();
+    expect(dependencies.transcribeVoice).not.toHaveBeenCalled();
+    expect(storage.value.beginDispatch).not.toHaveBeenCalled();
+    expect(storage.value.complete).toHaveBeenCalledWith("1001", storage.claim.leaseToken, "wrun_session");
+  });
+
+  it("prepares again, under its own attempt, an update interrupted before its turn existed", async () => {
+    const storage = repository();
+    storage.value.claimNext = vi.fn()
+      .mockResolvedValueOnce({ ...storage.claim, dispatchAttemptId: "attempt-1", dispatchStarted: true, recoveryProtocol: 1, transcript: "Купи молоко" })
+      .mockResolvedValueOnce(null);
+    const { dependencies, handle } = ingress(storage);
+
+    await runDrain(handle, voicePayload());
+
+    expect(storage.value.beginDispatch).not.toHaveBeenCalled();
+    expect(dependencies.transcribeVoice).not.toHaveBeenCalled();
+    const [, control] = vi.mocked(dependencies.dispatch).mock.calls[0]!;
+    expect(control.attributes?.osinaraTelegramIngressId).toBe("attempt-1");
+    expect(dependencies.runTurn).toHaveBeenCalledWith("turn_one");
+  });
+
+  it("creates no turn when the preparation outlives the admission window", async () => {
+    const storage = repository();
+    const { dependencies, handle } = ingress(storage, {
+      admissionMilliseconds: 20,
+      dispatch: vi.fn(async (_update, control) => {
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        control.signal?.throwIfAborted();
+        return DISPATCHED;
+      }),
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await runDrain(handle, voicePayload());
+
+    expect(dependencies.runTurn).not.toHaveBeenCalled();
+    expect(storage.value.fail.mock.calls[0]?.[2]).toMatchObject({ code: "AGENT_TELEGRAM_PROCESSING_TIMEOUT" });
+    vi.restoreAllMocks();
+  });
+
+  it("never dispatches an unknown non-HITL callback when no handler claims it", async () => {
+    const storage = repository();
+    storage.value.claimNext = vi.fn()
+      .mockResolvedValueOnce({ ...storage.claim, payload: callbackPayload(), updateId: "1002", voice: null })
+      .mockResolvedValueOnce(null);
+    const handleSoftwareUpdateCallback = vi.fn().mockResolvedValue(false);
+    const { dependencies, handle } = ingress(storage, { handleSoftwareUpdateCallback });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await runDrain(handle, callbackPayload());
 
     expect(handleSoftwareUpdateCallback).toHaveBeenCalledTimes(1);
-    expect(dispatch).not.toHaveBeenCalled();
+    expect(dependencies.dispatch).not.toHaveBeenCalled();
     expect(storage.value.beginDispatch).not.toHaveBeenCalled();
-    expect(storage.value.complete).toHaveBeenCalledWith("1002", storage.claim.leaseToken);
+    expect(storage.value.complete).toHaveBeenCalledWith("1002", storage.claim.leaseToken, undefined);
+    vi.restoreAllMocks();
+  });
+
+  it("claims a private chat the moment its burst window ends", async () => {
+    const storage = repository();
+    storage.value.claimNext = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(storage.claim)
+      .mockResolvedValueOnce(null);
+    storage.value.privateBurstReadyIn = vi.fn().mockResolvedValueOnce(30).mockResolvedValue(null);
+    const { dependencies, handle } = ingress(storage);
+
+    await runDrain(handle, voicePayload());
+
+    expect(dependencies.dispatch).toHaveBeenCalledTimes(1);
+    expect(storage.value.claimNext).toHaveBeenCalledWith(60_000, { maxCharacters: 6_000, maxMessages: 10, maxWaitMilliseconds: 20_000, quietMilliseconds: 2_000 });
+    expect(storage.value.privateBurstReadyIn).toHaveBeenCalledWith({ maxCharacters: 6_000, maxMessages: 10, maxWaitMilliseconds: 20_000, quietMilliseconds: 2_000 });
+  });
+
+  it("dispatches a claimed burst as one message with every part in order", async () => {
+    const storage = repository();
+    const part = (id: number, text: string) => ({
+      message: { chat: { id: 101, type: "private" }, date: 1_700_000_000, from: { first_name: "Анна", id: 101, is_bot: false }, message_id: id, text },
+      update_id: id,
+    });
+    const burst = [part(1101, "напомни завтра в 9 позвонить маме"), part(1102, "и добавь молоко в список"), part(1103, "спасибо")];
+    storage.value.claimNext = vi.fn()
+      .mockResolvedValueOnce({ ...storage.claim, burstPayloads: burst, payload: burst[0], updateId: "1101", voice: null })
+      .mockResolvedValueOnce(null);
+    const { dependencies, handle } = ingress(storage);
+
+    await runDrain(handle, voicePayload());
+
+    const [update] = vi.mocked(dependencies.dispatch).mock.calls[0]!;
+    if (update.kind !== "message") throw new Error("TEST_EXPECTED_MESSAGE");
+    expect(update.message.messageId).toBe("1101");
+    expect(update.message.text).toBe("напомни завтра в 9 позвонить маме\n\nи добавь молоко в список\n\nспасибо");
   });
 
   it("keeps draining the queue after one item fails", async () => {
@@ -312,117 +277,37 @@ describe("createTelegramDurableIngress", () => {
       .mockResolvedValueOnce(storage.claim)
       .mockResolvedValueOnce(second)
       .mockResolvedValueOnce(null);
-    const dispatch = vi.fn()
-      .mockRejectedValueOnce(new Error("Eve dispatch exploded"))
-      .mockResolvedValueOnce({
-        getEventStream: async () =>
-          new ReadableStream({
-            start(controller) {
-              controller.enqueue({ type: "session.waiting" });
-            },
-          }),
-        id: "session-2",
-      });
+    const { dependencies, handle } = ingress(storage, {
+      dispatch: vi.fn().mockRejectedValueOnce(new Error("dispatch exploded")).mockResolvedValueOnce({ ...DISPATCHED, sessionId: "wrun_second" }),
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await runDrain(ingress(storage, { dispatch }), voicePayload(), dispatch);
+    await runDrain(handle, voicePayload());
 
     expect(storage.value.fail).toHaveBeenCalledTimes(1);
     expect(storage.value.fail.mock.calls[0]?.[0]).toBe("1001");
-    expect(dispatch).toHaveBeenCalledTimes(2);
-    expect(storage.value.completeWithSession).toHaveBeenCalledWith(
-      "1003",
-      second.leaseToken,
-      "session-2",
-      1,
-    );
-  });
-
-  it("quarantines the affected queue when a session cannot confirm stopping", async () => {
-    const storage = repository();
-    const dispatch = vi.fn().mockResolvedValue({
-      getEventStream: async () => new ReadableStream({ start() {} }),
-      id: "session-3",
-    });
-
-    await runDrain(ingress(storage, { dispatch, leaseMilliseconds: 60 }), voicePayload(), dispatch);
-
-    expect(storage.value.completeWithSession).not.toHaveBeenCalled();
-    expect(storage.value.fail).toHaveBeenCalledTimes(1);
-    expect(storage.value.fail.mock.calls[0]?.[2]).toMatchObject({
-      code: "AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED",
-    });
-  });
-
-  it.each(["open", "cancel"] as const)("does not block later messages when stream %s hangs", async (phase) => {
-    const storage = repository();
-    storage.value.claimNext = vi.fn()
-      .mockResolvedValueOnce(storage.claim)
-      .mockResolvedValueOnce({ ...storage.claim, updateId: "1003" })
-      .mockResolvedValueOnce(null);
-    let unblock!: () => void;
-    const blocked = new Promise<void>((resolve) => { unblock = resolve; });
-    const cancel = vi.fn(async () => { if (phase === "cancel") await blocked; });
-    const dispatch = vi.fn().mockResolvedValueOnce({
-      id: "session-stuck",
-      async getEventStream() {
-        if (phase === "open") await blocked;
-        return new ReadableStream({
-          start(controller) { controller.enqueue({ type: "session.waiting" }); },
-          cancel,
-        });
-      },
-    }).mockResolvedValueOnce(null);
-    const running = runDrain(ingress(storage, { dispatch, leaseMilliseconds: 60 }), voicePayload(), dispatch);
-    const settled = await Promise.race([
-      running.then(() => true),
-      new Promise<false>((resolve) => { setTimeout(() => resolve(false), 180); }),
-    ]);
-    unblock();
-    await running;
-    expect(settled).toBe(true);
-    if (phase === "open") {
-      expect(storage.value.fail.mock.calls[0]?.[2]).toMatchObject({ code: "AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED" });
-    } else {
-      expect(storage.value.fail).not.toHaveBeenCalled();
-      expect(storage.value.completeWithSession).toHaveBeenCalledWith("1001", storage.claim.leaseToken, "session-stuck", 1);
-    }
-    expect(storage.value.complete).toHaveBeenCalledWith("1003", storage.claim.leaseToken);
-    await vi.waitFor(() => expect(cancel).toHaveBeenCalledTimes(phase === "open" ? 2 : 1));
+    expect(dependencies.dispatch).toHaveBeenCalledTimes(2);
+    expect(storage.value.complete).toHaveBeenCalledWith("1003", second.leaseToken, "wrun_second");
+    vi.restoreAllMocks();
   });
 
   it("acknowledges rejected external media without enqueue, download, or dispatch", async () => {
     const storage = repository();
     storage.value.claimNext.mockReset().mockResolvedValue(null);
     const acceptMedia = vi.fn().mockResolvedValue(false);
-    const transcribeVoice = vi.fn();
-    const dispatch = vi.fn();
-    const waitUntil = vi.fn();
+    const { dependencies, handle } = ingress(storage, { acceptMedia });
     const raw = voicePayload();
-    const rawMessage = raw.message as Record<string, unknown>;
-    rawMessage.chat = { id: -1001, type: "supergroup" };
-    const update = parseTelegramUpdate(raw);
-    if (!update || update.kind !== "message") {
-      throw new Error("AGENT_TEST_TELEGRAM_UPDATE_INVALID: Не создано тестовое сообщение");
-    }
-    const handle = createTelegramDurableIngress({
-      reportFailure: vi.fn(),
-      acceptMedia,
-      authorizeVoice: vi.fn(),
-      botUsername: "osinara_bot",
-      handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false),
-      leaseMilliseconds: 60_000,
-      repository: storage.value,
-      transcribeVoice,
-    });
+    (raw.message as Record<string, unknown>).chat = { id: -1001, type: "supergroup" };
 
-    const response = await handle({ attachSession: vi.fn(), dispatch, notifyTimeout: vi.fn(), raw, update, waitUntil } as TelegramVerifiedUpdateContext);
+    const { background, response, update } = await deliver(handle, raw);
 
     expect(response.status).toBe(200);
+    if (update.kind !== "message") throw new Error("TEST_EXPECTED_MESSAGE");
     expect(acceptMedia).toHaveBeenCalledWith(update.message, "1001", "unsupported_media");
     expect(storage.value.enqueue).not.toHaveBeenCalled();
-    expect(transcribeVoice).not.toHaveBeenCalled();
-    expect(dispatch).not.toHaveBeenCalled();
-    expect(waitUntil).not.toHaveBeenCalled();
+    expect(dependencies.transcribeVoice).not.toHaveBeenCalled();
+    expect(dependencies.dispatch).not.toHaveBeenCalled();
+    expect(background).toBeUndefined();
   });
 
   it("dispatches a captionless photo with a non-empty factual model message", async () => {
@@ -433,50 +318,16 @@ describe("createTelegramDurableIngress", () => {
         date: 1_700_000_000,
         from: { first_name: "Анна", id: 101, is_bot: false },
         message_id: 78,
-        photo: [{
-          file_id: "photo-file-1",
-          file_size: 1_024,
-          file_unique_id: "photo-unique-1",
-          height: 640,
-          width: 640,
-        }],
+        photo: [{ file_id: "photo-file-1", file_size: 1_024, file_unique_id: "photo-unique-1", height: 640, width: 640 }],
       },
       update_id: 1002,
     };
     Object.assign(storage.claim, { payload: raw, updateId: "1002", voice: null });
-    const update = parseTelegramUpdate(raw);
-    if (!update || update.kind !== "message") {
-      throw new Error("AGENT_TEST_TELEGRAM_UPDATE_INVALID: Не создано тестовое сообщение");
-    }
-    const dispatch = vi.fn().mockResolvedValue(null);
-    let backgroundTask: Promise<unknown> | undefined;
-    const handle = createTelegramDurableIngress({
-      reportFailure: vi.fn(),
-      acceptMedia: vi.fn().mockResolvedValue(true),
-      authorizeVoice: vi.fn(),
-      botUsername: "osinara_bot",
-      handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false),
-      leaseMilliseconds: 60_000,
-      repository: storage.value,
-      transcribeVoice: vi.fn(),
-    });
+    const { dependencies, handle } = ingress(storage, { dispatch: vi.fn().mockResolvedValue({ status: "dropped" }) });
 
-    await handle({
-      attachSession: vi.fn(),
-      dispatch: correlatedDispatch(dispatch),
-      notifyTimeout: vi.fn(),
-      raw,
-      update,
-      waitUntil(task) {
-        backgroundTask = task;
-      },
-    } as TelegramVerifiedUpdateContext);
-    if (!backgroundTask) {
-      throw new Error("AGENT_TEST_BACKGROUND_TASK_MISSING: Durable ingress did not schedule a drain");
-    }
-    await backgroundTask;
+    await runDrain(handle, raw);
 
-    expect(dispatch.mock.calls[0]?.[0]).toMatchObject({
+    expect(vi.mocked(dependencies.dispatch).mock.calls[0]?.[0]).toMatchObject({
       kind: "message",
       message: {
         attachments: [expect.objectContaining({ fileId: "photo-file-1", kind: "photo" })],
@@ -484,5 +335,6 @@ describe("createTelegramDurableIngress", () => {
       },
     });
     expect((raw.message as Record<string, unknown>).text).toBeUndefined();
+    expect(dependencies.runTurn).not.toHaveBeenCalled();
   });
 });

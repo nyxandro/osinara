@@ -15,6 +15,8 @@
  *   any other occurrence is removed. The retired tag-shaped spelling counts as well, so an old
  *   habit of the model cannot leak either. Fenced and indented code keeps its literal content.
  */
+import { isIndentedCodeLine, nextFenceState, type FenceState } from "./markdown-code-fence.js";
+
 const TELEGRAM_AUTHORED_MESSAGE_MAX_COUNT = 5;
 
 export const TELEGRAM_ASIDE_DIRECTIVE = "[[split]]";
@@ -25,8 +27,6 @@ const DIRECTIVE_SOURCE = "\\[\\[split\\]\\]|</?telegram-split\\s*/?>";
 // Column zero only: an indented directive belongs to a Markdown code block, not to the transport.
 const DIRECTIVE_LINE_PATTERN = new RegExp(`^(?:${DIRECTIVE_SOURCE})[ \\t\\r]*$`, "u");
 const INLINE_DIRECTIVE_PATTERN = new RegExp(DIRECTIVE_SOURCE, "gu");
-const FENCE_LINE_PATTERN = /^ {0,3}(?<fence>`{3,}|~{3,})(?<info>.*)$/u;
-const INDENTED_CODE_PATTERN = /^(?: {4}|\t)/u;
 const DIRECTIVE_PRESENCE_PATTERN = new RegExp(DIRECTIVE_SOURCE, "u");
 
 export interface TelegramAuthoredParts {
@@ -34,30 +34,8 @@ export interface TelegramAuthoredParts {
   readonly main: string;
 }
 
-interface FenceState {
-  character: string;
-  length: number;
-}
-
-function nextFenceState(line: string, open: FenceState | null): FenceState | null {
-  const match = FENCE_LINE_PATTERN.exec(line);
-  if (!match) return open;
-  const fence = match.groups?.fence ?? "";
-  const info = match.groups?.info ?? "";
-  const character = fence[0] ?? "";
-  // A closing fence repeats the opening character, is at least as long, and carries no info string.
-  if (open) {
-    const closes = character === open.character && fence.length >= open.length &&
-      info.trim().length === 0;
-    return closes ? null : open;
-  }
-  // Markdown forbids a backtick inside the info string of a backtick fence.
-  if (character === "`" && info.includes("`")) return null;
-  return { character, length: fence.length };
-}
-
 function withoutInlineDirective(line: string): string {
-  if (!DIRECTIVE_PRESENCE_PATTERN.test(line) || INDENTED_CODE_PATTERN.test(line)) return line;
+  if (!DIRECTIVE_PRESENCE_PATTERN.test(line) || isIndentedCodeLine(line)) return line;
   return line.replace(INLINE_DIRECTIVE_PATTERN, "").replace(/[ \t]{2,}/gu, " ").trimEnd();
 }
 

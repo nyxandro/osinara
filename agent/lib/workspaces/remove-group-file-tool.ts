@@ -4,7 +4,7 @@
  * Export:
  * - `removeGroupFileTool`: approval-gated deletion confined to the verified group mount.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { groupApprovalDenial } from "../telegram-hitl/approval-surface.js";

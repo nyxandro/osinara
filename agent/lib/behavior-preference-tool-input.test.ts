@@ -6,7 +6,7 @@
  * - Mutations use the visible prompt revision to prevent lost concurrent edits.
  * - Prompt text is bounded but receives no semantic classification in backend code.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 

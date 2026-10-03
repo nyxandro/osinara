@@ -5,9 +5,8 @@
  * - `claimExpired`: leases only prompts older than the confirmation window, once per lease.
  * - `completeTimeout`: terminalizes the row and releases the session's rotation veto.
  * - A concurrent user decision wins the row; a failed cancellation stays retryable.
- * - Framework `session-limit` prompts are out of the confirmation window's scope.
  * - Pre-migration rows without a request kind are fail-closed.
- * - A prompt whose session no longer owns the parked Eve run is never settled.
+ * - A prompt whose session no longer owns the parked turn is never settled.
  * - A claim carries revalidated Telegram auth, and a timed-out row is not execution evidence.
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -28,7 +27,7 @@ const OWNER_TELEGRAM_ID = "timeout-owner";
 const NOW = new Date("2026-08-24T12:00:00.000Z");
 
 async function fixture(
-  kind: "question" | "session-limit" | "tool-approval" = "tool-approval",
+  kind: "question" | "tool-approval" = "tool-approval",
 ): Promise<{ sessionId: string }> {
   const family = await database().query<{ id: string }>(
     "INSERT INTO families (name) VALUES ('Timeout') RETURNING id",
@@ -52,7 +51,7 @@ async function fixture(
     telegramForumTopicId: null,
     userId: owner.rows[0]!.id,
   });
-  await sessionRepository.bindEveSession(session.id, "wrun_timeout");
+  await sessionRepository.bindAgentSession(session.id, "wrun_timeout");
   await sessionRepository.parkSession({
     applicationSessionId: session.id,
     pendingRequestId: "aitxt-timeout-1",
@@ -66,17 +65,17 @@ async function fixture(
 
 async function registerApproval(
   sessionId: string,
-  kind: "question" | "session-limit" | "tool-approval",
+  kind: "question" | "tool-approval",
 ): Promise<void> {
   await telegramHitlApprovalRepository.register({
     applicationSessionId: sessionId,
     kind,
-    callbackData: ["eve:0", "eve:1"],
+    callbackData: ["hitl:0", "hitl:1"],
     callbackOptions: [
-      { callbackData: "eve:0", label: "Да, подтвердить", optionId: "approve" },
-      { callbackData: "eve:1", label: "Cancel", optionId: "cancel" },
+      { callbackData: "hitl:0", label: "Да, подтвердить", optionId: "approve" },
+      { callbackData: "hitl:1", label: "Cancel", optionId: "cancel" },
     ],
-    eveSessionId: "wrun_timeout",
+    agentSessionId: "wrun_timeout",
     promptText: "Подтвердите действие: исправить запись в памяти.",
     requestId: "aitxt-timeout-1",
     telegramChatId: "700",
@@ -113,15 +112,6 @@ describeWithDatabase("approval timeout repository", () => {
   });
   afterAll(async () => closeDatabase());
 
-  it("never cancels a framework session-limit prompt", async () => {
-    await fixture("session-limit");
-    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
-
-    await expect(
-      approvalTimeoutRepository.claimExpired(NOW, TELEGRAM_HITL_APPROVAL_TIMEOUT_MS),
-    ).resolves.toEqual([]);
-  });
-
   it("bounds an unanswered agent question the same way as an approval", async () => {
     await fixture("question");
     await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
@@ -141,7 +131,7 @@ describeWithDatabase("approval timeout repository", () => {
     ).resolves.toEqual([]);
   });
 
-  it("never settles a prompt whose session moved to another Eve run", async () => {
+  it("never settles a prompt whose session moved to another agent session", async () => {
     await fixture();
     await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
     // A crashed run leaves the old prompt behind; settling it would clear the veto of the live one.
@@ -171,11 +161,16 @@ describeWithDatabase("approval timeout repository", () => {
       TELEGRAM_HITL_APPROVAL_TIMEOUT_MS,
     );
 
-    // Eve overwrites session auth with what the response delivers, so it must be the real context.
+    // The runtime overwrites session auth with what the response delivers, so it must be the real context.
     expect(claim!.auth.authenticator).toBe("telegram");
+    const thread = (await database().query<{ thread_id: string }>(
+      "SELECT thread_id FROM conversation_sessions WHERE id = $1", [current.sessionId],
+    )).rows[0]!;
     expect(claim!.auth.attributes).toMatchObject({
       applicationSessionId: current.sessionId,
       memoryScopes: ["personal", "family"],
+      // The continuation turn opens the session's sandbox (to sync its skills) by this id.
+      sandboxSessionId: thread.thread_id,
       telegramActorId: OWNER_TELEGRAM_ID,
     });
   });
@@ -192,7 +187,7 @@ describeWithDatabase("approval timeout repository", () => {
     await expect(
       telegramHitlApprovalRepository.requireToolExecutionApproval({
         applicationSessionId: current.sessionId,
-        eveSessionId: "wrun_timeout",
+        agentSessionId: "wrun_timeout",
         telegramUserId: OWNER_TELEGRAM_ID,
         toolCallId: "call-timeout-1",
         toolInputHash: "b".repeat(64),
@@ -210,7 +205,7 @@ describeWithDatabase("approval timeout repository", () => {
     );
     await approvalTimeoutRepository.completeTimeout(claim!, NOW);
 
-    // Eve may replay `input.requested`; the ON CONFLICT branch must clear the timeout state.
+    // The runtime may replay `input.requested`; the ON CONFLICT branch must clear the timeout state.
     await expect(registerApproval(current.sessionId, "tool-approval")).resolves.toBeUndefined();
     const row = await database().query<{ consumed_at: Date | null; timed_out_at: Date | null }>(
       "SELECT consumed_at, timed_out_at FROM telegram_hitl_approvals",
@@ -238,7 +233,7 @@ describeWithDatabase("approval timeout repository", () => {
     );
     expect(claimed).toHaveLength(1);
     expect(claimed[0]).toMatchObject({
-      eveSessionId: "wrun_timeout",
+      agentSessionId: "wrun_timeout",
       promptText: "Подтвердите действие: исправить запись в памяти.",
       requestId: "aitxt-timeout-1",
       telegramChatId: "700",
@@ -282,7 +277,7 @@ describeWithDatabase("approval timeout repository", () => {
     await expect(
       telegramHitlApprovalRepository.claimCallback({
         baseContinuationToken: "700::2801",
-        callbackData: "eve:0",
+        callbackData: "hitl:0",
         telegramChatId: "700",
         telegramMessageId: "2801",
         telegramUserId: OWNER_TELEGRAM_ID,

@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `SCHEDULED_TELEGRAM_TARGET_MISMATCH_CODE`: stable terminal failure code for target drift.
- * - `scheduledTelegramTargetMatches`: compares the active Eve target with trusted schedule metadata.
+ * - `scheduledTelegramTargetMatches`: compares the active channel target with trusted schedule metadata.
  * - `requireScheduledTelegramTarget`: rejects a mismatched final delivery before side effects.
  */
 import { AppError } from "../app-error.js";
@@ -26,7 +26,7 @@ export function scheduledTelegramTargetMatches(
   active: ActiveTelegramTarget,
   scheduled: ScheduledTelegramTarget,
 ): boolean {
-  // Eve exposes an active topic as a number, while PostgreSQL-backed auth carries its exact string.
+  // The channel state holds an active topic as a number, while PostgreSQL-backed auth carries its exact string.
   const activeMessageThreadId = active.messageThreadId === undefined
     ? null
     : String(active.messageThreadId);

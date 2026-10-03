@@ -62,7 +62,7 @@ describe("external group network isolation", () => {
       info.Containers = { "old-proxy": {} };
       docker.listContainers.mockResolvedValue([{ Id: "new-proxy" }]);
       const request = {
-        access: "group-tools" as const, eveSessionId: "wrun_01JZ8K4R0W6G73VTHX9NF2QABC",
+        access: "group-tools" as const, agentSessionId: "wrun_01JZ8K4R0W6G73VTHX9NF2QABC",
         mounts: [{ mountPoint: "group" as const, workspaceId: "workspace" }],
         sandboxSessionId: "session", seedDigest: "a".repeat(64),
       };

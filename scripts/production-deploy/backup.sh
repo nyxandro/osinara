@@ -3,27 +3,20 @@
 # Drains application work, stops writers, then snapshots PostgreSQL and irreconstructible volumes.
 
 readonly BACKUP_RESERVE_BYTES=$((512 * 1024 * 1024))
-readonly RETAINED_DEPLOY_BACKUP_COUNT=1
+# Three deploy snapshots, not one. A single copy means damage noticed a day late has no state to
+# go back to: the only copy already contains it. Measured on the production host 2026-09-22, one
+# set is about 3.7 GB of 93 GB free, so two extra sets cost roughly eight percent of the free disk.
+readonly RETAINED_DEPLOY_BACKUP_COUNT=3
 readonly LEGACY_INITIAL_MIGRATION_BACKUP_NAME="initial-migration-v0.1.1"
 readonly DEPLOY_BACKUP_NAME_PATTERN='^[0-9]{8}T[0-9]{6}Z-to-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
-readonly LEGACY_EVE_VOLUME="osinara-production-workflow-data"
-readonly LEGACY_EVE_LOGICAL_VOLUME="workflow-data"
-readonly CURRENT_EVE_LOGICAL_VOLUME="eve-workflow-data"
-readonly POSTGRES_WORLD_CUTOVER_VOLUME="osinara-production-eve-workflow-data-v032"
 readonly DURABLE_VOLUME_BINDINGS=(
   "osinara-production-cli-proxy-auth|cli-proxy-auth"
   "osinara-production-google-workspace-credentials|google-workspace-credentials"
   "osinara-production-tool-environments|tool-environments"
-  "osinara-production-workflow-data|workflow-data"
-  "osinara-production-eve-workflow-data-v032|eve-workflow-data"
   "osinara-production-workspace-data|workspace-data"
 )
 BACKUP_DURABLE_VOLUMES=()
 CREATED_CANDIDATE_VOLUMES=()
-RETIRED_CUTOVER_VOLUME=""
-RETIRED_CUTOVER_ARCHIVED=0
-PRESERVED_WORKFLOW_CUTOVER_VOLUME=""
-CANDIDATE_HEALTH_VALIDATED=0
 COMPLETED_BACKUP_DIR=""
 MAINTENANCE_TOKEN=""
 MAINTENANCE_ACTIVE=0
@@ -37,7 +30,7 @@ require_runtime_admission() {
   supported="$(compose_current exec -T agent node --input-type=module -e '
     const secret=process.env.TELEGRAM_WEBHOOK_SECRET_TOKEN;
     if(!secret) throw new Error("DEPLOY_WEBHOOK_SECRET_MISSING");
-    const r=await fetch("http://127.0.0.1:3000/eve/v1/telegram-drain", {
+    const r=await fetch("http://127.0.0.1:3000/v1/telegram-drain", {
       method:"POST",body:"{}",headers:{"x-telegram-bot-api-secret-token":secret},
       signal:AbortSignal.timeout(10000)
     });
@@ -65,14 +58,19 @@ SQL
 }
 
 runtime_is_idle() {
-  local app_idle workflow_idle
+  local app_idle
+  # A wake-up turn runs in the chat's lane like a message. The running release may predate the
+  # wake-up table, so that query is built at execution time and runs only where the table exists.
   app_idle="$(psql_current <<'SQL'
 SELECT CASE
  WHEN EXISTS (SELECT 1 FROM conversation_sessions WHERE retired_at IS NULL AND pending_operation)
    THEN 'approval'
  WHEN EXISTS (SELECT 1 FROM runtime_admission_holders)
-   OR EXISTS (SELECT 1 FROM telegram_ingress_updates WHERE status = 'processing'
-     OR last_error_code = 'AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED')
+   OR EXISTS (SELECT 1 FROM telegram_ingress_updates WHERE status = 'processing')
+   OR CASE WHEN to_regclass('public.telegram_ingress_wakeups') IS NULL THEN false
+     ELSE (xpath('/row/busy/text()', query_to_xml(
+       'SELECT EXISTS (SELECT 1 FROM telegram_ingress_wakeups WHERE status = ''processing'') AS busy',
+       false, true, '')))[1]::text = 'true' END
    OR EXISTS (SELECT 1 FROM conversation_sessions WHERE retired_at IS NULL
      AND kind IN ('scheduled', 'proactive') AND task_state IN ('pending', 'running'))
    THEN 'busy'
@@ -82,15 +80,6 @@ SQL
   [[ "$app_idle" == "approval" ]] && return 3
   [[ "$app_idle" == "busy" ]] && return 1
   [[ "$app_idle" == "idle" ]] || return 2
-  workflow_idle="$(compose_current exec -T postgres psql -X --no-psqlrc --set ON_ERROR_STOP=1 \
-    --username osinara --dbname osinara_workflow --no-align --tuples-only --quiet <<'SQL'
-SELECT NOT EXISTS (SELECT 1 FROM workflow.workflow_runs
- WHERE status NOT IN ('completed', 'failed', 'cancelled')
-   AND name NOT IN ('workflow//eve//workflowEntry', 'workflow//eve//sessionTimeoutWorkflow'));
-SQL
-)" || return 2
-  [[ "$workflow_idle" =~ ^[tf]$ ]] || return 2
-  [[ "$workflow_idle" == "t" ]]
 }
 
 resume_runtime_admission() {
@@ -237,9 +226,6 @@ cleanup_created_candidate_volumes() {
 select_durable_volumes() {
   local binding volume logical_volume current_owns candidate_owns
   BACKUP_DURABLE_VOLUMES=()
-  RETIRED_CUTOVER_VOLUME=""
-  RETIRED_CUTOVER_ARCHIVED=0
-  PRESERVED_WORKFLOW_CUTOVER_VOLUME=""
   for binding in "${DURABLE_VOLUME_BINDINGS[@]}"; do
     IFS='|' read -r volume logical_volume <<<"$binding"
     current_owns=0
@@ -248,21 +234,10 @@ select_durable_volumes() {
     compose_declares_volume "$CANDIDATE_COMPOSE" "$logical_volume" && candidate_owns=1
     [[ "$current_owns" -eq 1 || "$candidate_owns" -eq 1 ]] || continue
 
-    # Each documented world cutover must preserve a restorable snapshot before changing ownership.
     if [[ "$current_owns" -eq 1 && "$candidate_owns" -eq 0 ]]; then
-      if [[ "$volume" == "$LEGACY_EVE_VOLUME" &&
-            "$logical_volume" == "$LEGACY_EVE_LOGICAL_VOLUME" ]] &&
-        compose_declares_volume "$CANDIDATE_COMPOSE" "$CURRENT_EVE_LOGICAL_VOLUME"; then
-        RETIRED_CUTOVER_VOLUME="$volume"
-      elif [[ "$volume" == "$POSTGRES_WORLD_CUTOVER_VOLUME" &&
-              "$logical_volume" == "$CURRENT_EVE_LOGICAL_VOLUME" ]]; then
-        # PostgreSQL cutover keeps the physical v0.32 volume for immediate rollback.
-        PRESERVED_WORKFLOW_CUTOVER_VOLUME="$volume"
-      else
-        fail "DEPLOY_CANDIDATE_DURABLE_VOLUME_REMOVED" \
-          "Candidate release removes a current-owned durable volume: ${volume}"
-        return 1
-      fi
+      fail "DEPLOY_CANDIDATE_DURABLE_VOLUME_REMOVED" \
+        "Candidate release removes a current-owned durable volume: ${volume}"
+      return 1
     fi
 
     # Current ownership selects backup input; candidate-only ownership permits one clean bootstrap.
@@ -296,16 +271,7 @@ preflight_backup() {
   database_bytes="$(psql_current --command="SELECT pg_database_size('osinara');")"
   [[ "$database_bytes" =~ ^[0-9]+$ ]] ||
     fail "DEPLOY_BACKUP_SIZE_INVALID" "Could not determine PostgreSQL size"
-  local workflow_database_exists workflow_database_bytes=0
-  workflow_database_exists="$(psql_current --command="SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'osinara_workflow');")"
-  [[ "$workflow_database_exists" == "t" || "$workflow_database_exists" == "f" ]] ||
-    fail "DEPLOY_BACKUP_DATABASE_STATE_INVALID" "Could not determine Workflow database state"
-  if [[ "$workflow_database_exists" == "t" ]]; then
-    workflow_database_bytes="$(psql_current --command="SELECT pg_database_size('osinara_workflow');")"
-    [[ "$workflow_database_bytes" =~ ^[0-9]+$ ]] ||
-      fail "DEPLOY_BACKUP_SIZE_INVALID" "Could not determine Workflow PostgreSQL size"
-  fi
-  required_bytes=$(((required_bytes + database_bytes + workflow_database_bytes) * 2 + BACKUP_RESERVE_BYTES))
+  required_bytes=$(((required_bytes + database_bytes) * 2 + BACKUP_RESERVE_BYTES))
 
   local -a disk_lines
   mapfile -t disk_lines < <(df --output=avail -B1 "$BACKUPS_DIR")
@@ -322,16 +288,6 @@ create_postgres_backup() {
     --format=custom --no-owner --no-privileges > "${BACKUP_TEMP_DIR}/postgres.dump"
   compose_current exec -T postgres pg_restore --list < "${BACKUP_TEMP_DIR}/postgres.dump" \
     > /dev/null
-  local workflow_database_exists
-  workflow_database_exists="$(psql_current --command="SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'osinara_workflow');")"
-  if [[ "$workflow_database_exists" == "t" ]]; then
-    compose_current exec -T postgres pg_dump --username osinara --dbname osinara_workflow \
-      --format=custom --no-owner --no-privileges > "${BACKUP_TEMP_DIR}/workflow-postgres.dump"
-    compose_current exec -T postgres pg_restore --list < "${BACKUP_TEMP_DIR}/workflow-postgres.dump" \
-      > /dev/null
-  elif [[ "$workflow_database_exists" != "f" ]]; then
-    fail "DEPLOY_BACKUP_DATABASE_STATE_INVALID" "Could not determine Workflow database state"
-  fi
 }
 
 stop_current_services() {
@@ -355,9 +311,6 @@ snapshot_durable_volumes() {
     fail "DEPLOY_BACKUP_VOLUME_SET_EMPTY" "Preflight did not select durable backup volumes"
   for volume in "${BACKUP_DURABLE_VOLUMES[@]}"; do
     backup_volume "$volume"
-    if [[ -n "$RETIRED_CUTOVER_VOLUME" && "$volume" == "$RETIRED_CUTOVER_VOLUME" ]]; then
-      RETIRED_CUTOVER_ARCHIVED=1
-    fi
   done
   # Relative paths remain verifiable after the temporary directory is atomically renamed.
   (cd -- "$BACKUP_TEMP_DIR" && sha256sum -- ./* > SHA256SUMS && sha256sum --check --status SHA256SUMS)
@@ -369,26 +322,6 @@ snapshot_durable_volumes() {
   mv "$BACKUP_TEMP_DIR" "$final_dir"
   BACKUP_TEMP_DIR=""
   COMPLETED_BACKUP_DIR="$final_dir"
-}
-
-remove_retired_cutover_volume() {
-  [[ -n "$RETIRED_CUTOVER_VOLUME" ]] || return 0
-  if [[ "$RETIRED_CUTOVER_VOLUME" != "$LEGACY_EVE_VOLUME" ||
-        "$RETIRED_CUTOVER_ARCHIVED" -ne 1 || "$CANDIDATE_HEALTH_VALIDATED" -ne 1 ]]; then
-    fail "DEPLOY_RETIRED_VOLUME_BOUNDARY_INVALID" \
-      "Legacy Eve volume retirement requires its validated archive and a healthy candidate"
-    return 1
-  fi
-
-  # This exact one-time cutover volume is retired only at the post-health success boundary.
-  if ! docker volume rm "$RETIRED_CUTOVER_VOLUME" >/dev/null; then
-    fail "DEPLOY_RETIRED_VOLUME_REMOVAL_FAILED" \
-      "Could not remove the archived legacy Eve volume: ${RETIRED_CUTOVER_VOLUME}"
-    return 1
-  fi
-  log_event "DEPLOY_RETIRED_VOLUME_REMOVED" \
-    "Removed archived legacy Eve volume: ${RETIRED_CUTOVER_VOLUME}"
-  RETIRED_CUTOVER_VOLUME=""
 }
 
 cleanup_incomplete_backup() {

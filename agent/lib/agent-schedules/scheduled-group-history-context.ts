@@ -5,7 +5,7 @@
  * - `ScheduledGroupHistoryAccess`: exact run and group identity carried by scheduled auth.
  * - `scheduledGroupHistoryAccess`: fail-closed current/initiator projection for root and child turns.
  */
-import type { SessionAuth } from "eve/context";
+import type { SessionAuth } from "../../runtime/context.js";
 
 export interface ScheduledGroupHistoryAccess {
   groupId: string;

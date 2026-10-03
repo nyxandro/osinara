@@ -18,7 +18,7 @@ export async function recoverReviewDispatches(client: PoolClient, now: Date): Pr
       await client.query(`UPDATE conversation_sessions SET retired_at=$2,delete_after=$2::timestamptz+$3*interval '1 day',
         task_state='failed',pending_operation=false,memory_review_batch_id=NULL WHERE id=$1`, [batch.application_session_id, now, SESSION_RETENTION_DAYS]);
     }
-    // bindEveTurn uses the same batch row and exact application_session_id before any model/tool work.
+    // bindAgentTurn uses the same batch row and exact application_session_id before any model/tool work.
     await client.query(`UPDATE memory_review_batches SET status='pending',application_session_id=NULL,eve_session_id=NULL,
       eve_turn_id=NULL,lease_token=NULL,lease_expires_at=NULL,started_at=NULL,completed_at=NULL,diagnostic_code=NULL,
       model_recovery_generation=model_recovery_generation+1,updated_at=$2 WHERE id=$1`, [batch.id, now]);

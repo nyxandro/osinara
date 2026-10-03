@@ -14,8 +14,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "../database.js";
 import { embedMemoryPassages, embedMemoryQueryChunks } from "../memory-embedding-client.js";
-import { chunkMemoryContent } from "../memory-embedding-chunks.js";
+import { chunkMemoryContent, chunkMemoryQuery } from "../memory-embedding-chunks.js";
 import {
+  MEMORY_EMBEDDING_CHUNK_MAX_CHARACTERS,
   MEMORY_EMBEDDING_MODEL_VERSION,
   MEMORY_EMBEDDING_PROVIDER_BATCH_SIZE,
   MEMORY_RETRIEVAL_LIMIT,
@@ -211,6 +212,24 @@ describeEval("memory retrieval eval v3", () => {
   }, EVAL_SETUP_TIMEOUT_MILLISECONDS);
 
   afterAll(async () => closeDatabase());
+
+  it("keeps the long fixtures longer than one chunk, whatever the chunk limit becomes", () => {
+    // This is the check that was missing. The long queries were written against a 400-character
+    // chunk limit; when it rose to 900 they quietly became single-chunk, and the category went on
+    // reporting numbers under a name it no longer earned. Length is not the invariant — the number
+    // of chunks is, so this fails the moment the constant moves past the fixtures again.
+    const longQueries = MEMORY_RETRIEVAL_EVAL_QUERIES_V3
+      .filter((query) => query.category === "long_query")
+      .map((query) => ({ chunks: chunkMemoryQuery(query.text).length, key: query.key }));
+    const longRecords = MEMORY_RETRIEVAL_EVAL_RECORDS_V3
+      .filter((record) => record.content.length > MEMORY_EMBEDDING_CHUNK_MAX_CHARACTERS)
+      .map((record) => ({ chunks: chunkMemoryContent(record.content).length, key: record.key }));
+
+    expect(longQueries.filter((one) => one.chunks < 2)).toEqual([]);
+    expect(longQueries).toHaveLength(6);
+    expect(longRecords.filter((one) => one.chunks < 2)).toEqual([]);
+    expect(longRecords).toHaveLength(3);
+  });
 
   it("measures recall per live query shape and pins the result", async () => {
     const evaluated: EvaluatedQueryV3[] = [];

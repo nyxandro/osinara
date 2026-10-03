@@ -45,7 +45,7 @@ function decodeCursor(
 export const memoryListRepository = {
   async list(
     auth: MemoryAuthorization,
-    options: { cursor?: string; limit: number; scope?: MemoryScope },
+    options: { cursor?: string; history?: boolean; limit: number; scope?: MemoryScope },
   ): Promise<{ items: ReferencedMemoryItem[]; nextCursor: string | null }> {
     if (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > MEMORY_LIST_MAX_LIMIT) {
       throw new AppError("AGENT_MEMORY_LIMIT_INVALID", "Некорректный размер страницы памяти");
@@ -61,10 +61,11 @@ export const memoryListRepository = {
       auth.groupId,
       [...auth.scopes].sort().join(","),
       options.scope ?? null,
+      options.history === true ? "history" : "current",
     ]);
     const cursor = decodeCursor(options.cursor, cursorBinding);
     const result = await database().query<MemoryListRow>(
-      `SELECT item.id, item.author_user_id, item.author_telegram_user_id, item.scope, item.kind,
+      `SELECT item.id, item.attribute, item.occurred_on, item.claim_status, item.author_user_id, item.author_telegram_user_id, item.scope, item.kind,
                item.content, item.source, item.confirmation, item.sensitivity,
                item.message_thread_id, item.embedding_status, item.created_at, item.updated_at,
                ref.memory_ref,
@@ -79,7 +80,9 @@ export const memoryListRepository = {
          FROM claim_evidence WHERE claim_id = item.id AND evidence_role = 'primary'
          ORDER BY observed_at, id LIMIT 1
        ) AS source_evidence ON true
-        WHERE item.family_id = $1 AND item.claim_status = 'active'
+        WHERE item.family_id = $1
+          AND (item.claim_status = 'active'
+               OR ($9::boolean AND item.claim_status = 'superseded'))
           AND ($5::memory_scope IS NULL OR item.scope = $5)
            AND ${liveMemoryReadPredicate({
              alias: "item",
@@ -97,6 +100,7 @@ export const memoryListRepository = {
         cursor?.updatedAt ?? null,
         cursor?.memoryRef ?? null,
         options.limit + 1,
+        options.history === true,
       ],
     );
     const hasNext = result.rows.length > options.limit;

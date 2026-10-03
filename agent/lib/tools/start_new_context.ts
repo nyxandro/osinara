@@ -2,9 +2,9 @@
  * Manual durable session rotation tool.
  *
  * Export:
- * - Eve `start_new_context` tool that rotates before the next ordinary user turn.
+ * - `start_new_context` tool that rotates before the next ordinary user turn.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { applicationSessionId } from "../sessions/session-context.js";

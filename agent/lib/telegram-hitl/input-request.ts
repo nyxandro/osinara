@@ -1,22 +1,19 @@
 /**
- * Secure Telegram rendering for Eve HITL input requests.
+ * Secure Telegram rendering for HITL input requests.
  *
  * Exports:
  * - `createTelegramInputRequestHandler`: dependency-injected renderer and durable approval binder.
- * - `handleTelegramInputRequested`: production Eve `input.requested` event handler.
+ * - `handleTelegramInputRequested`: production `input.requested` event handler.
  *
  * Key constructs:
- * - A prompt exists only in a private chat: every shared-chat request, including a session-budget
- *   continuation, fails before parking or Telegram delivery.
+ * - An approval exists only in a private chat; a family group may get a plain question, an external
+ *   group no prompt at all. A refused request fails before parking or Telegram delivery.
  */
-import {
-  registerTelegramFreeformPrompt,
-  renderTelegramInputRequest,
-  type TelegramChatType,
-  type TelegramEventContext,
-} from "eve/channels/telegram";
-import type { InputRequestKind } from "eve/client";
-import type { SessionContext } from "eve/context";
+import { registerTelegramFreeformPrompt, renderTelegramInputRequest } from "../../runtime/telegram/hitl.js";
+import type { TelegramChatType } from "../../runtime/telegram/inbound.js";
+import type { TelegramEventContext } from "../../runtime/telegram/channel-types.js";
+import type { InputRequest } from "../../runtime/hitl/types.js";
+import type { SessionContext } from "../../runtime/context.js";
 
 import {
   localizeTelegramReplyMarkup,
@@ -35,13 +32,14 @@ import {
   telegramHitlApprovalRepository,
   type TelegramHitlApprovalRepository,
 } from "./approval-repository.js";
+import { HITL_PROMPT_CHUNK_CHARACTERS } from "./approval-message.js";
 import {
   presentTelegramApproval,
   type TelegramApprovalPresenter,
 } from "./approval-presentation.js";
 
 interface InputRequestedData {
-  requests: ReadonlyArray<TelegramInputRequest & { kind: InputRequestKind }>;
+  requests: readonly InputRequest[];
 }
 
 interface InputRequestDependencies {
@@ -61,8 +59,6 @@ interface InputRequestDependencies {
 }
 
 const HITL_PREPARING_MESSAGE = "Подготавливаю безопасный запрос подтверждения.";
-const HITL_PROMPT_CHUNK_CHARACTERS = 3_000;
-const SESSION_LIMIT_CONTINUATION_TOOL_NAME = "session_limit_continuation";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 type TelegramJsonValue =
@@ -90,6 +86,19 @@ function toTelegramJson(value: unknown): TelegramJsonValue {
   return Object.fromEntries(
     Object.entries(value).map(([key, item]) => [key, toTelegramJson(item)]),
   );
+}
+
+/** The request as stored JSON; a value that is not JSON cannot be shown and fails here. */
+function telegramInputRequest(request: InputRequest): TelegramInputRequest {
+  const input = toTelegramJson(request.action.input);
+  if (input === null || typeof input !== "object" || Array.isArray(input)) {
+    throw new AppError("AGENT_APPROVAL_MARKUP_INVALID", "Не удалось подготовить безопасные кнопки подтверждения");
+  }
+  return {
+    ...request,
+    action: { ...request.action, input: input as Record<string, TelegramJsonValue> },
+    options: request.options?.map((option) => ({ ...option })),
+  };
 }
 
 function callbackData(replyMarkup: Readonly<Record<string, unknown>> | undefined): string[] {
@@ -140,51 +149,30 @@ function numberedPromptChunk(chunk: string, index: number, total: number): strin
   return total === 1 ? chunk : `Часть ${index + 1} из ${total}\n\n${chunk}`;
 }
 
-const SESSION_LIMIT_CHAT_NOTICE =
-  "Задача оказалась слишком длинной для одного хода, и продолжить её в общем чате нельзя. Разбейте запрос на части и отправьте заново.";
-
 /**
  * Returns the refusal for a prompt this chat cannot carry, or null when it may be shown.
- *
- * A refused tool approval reaches the model as a tool denial, which it explains itself. A session
- * budget is authored by Eve outside the tool surface, so nothing would reach the chat at all: that
- * one refusal carries a plain notice the caller delivers before ending the turn.
+ * A refused tool approval reaches the model as a tool denial, which it explains itself.
  */
 function sharedChatInputRefusal(
   data: InputRequestedData,
   chatType: TelegramChatType,
   ctx: Pick<SessionContext, "session">,
-): { chatNotice?: string; error: AppError } | null {
-  // Authorizing an action belongs to one accountable person, so an approval and a session budget
-  // exist only in a private chat. A plain question authorizes nothing and stays available to the
-  // family group, where the participants are the verified family; an external group is public and
-  // receives no prompt at all. Eve authors some requests outside the tool surface, so descriptor
-  // denials cannot stop them and this boundary is the only one that can.
+): AppError | null {
+  // Authorizing an action belongs to one accountable person, so an approval exists only in a
+  // private chat. A plain question authorizes nothing and stays available to the family group,
+  // where the participants are the verified family; an external group is public and receives no
+  // prompt at all. The built-in `ask_question` is not an application tool, so descriptor denials
+  // cannot stop it and this boundary is the only one that can.
   const groupType = ctx.session.auth.current?.attributes.groupType;
   if (chatType === "private" && groupType === undefined) return null;
   if (groupType === "family_private" && data.requests.every((request) => request.kind === "question")) {
     return null;
   }
 
-  const requestsSessionBudget = data.requests.some((request) =>
-    request.kind === "session-limit" ||
-    request.action.toolName === SESSION_LIMIT_CONTINUATION_TOOL_NAME
+  return new AppError(
+    "AGENT_EXTERNAL_APPROVAL_FORBIDDEN",
+    "В общем чате нельзя запрашивать подтверждение. Напишите агенту в личные сообщения",
   );
-  if (requestsSessionBudget) {
-    return {
-      chatNotice: SESSION_LIMIT_CHAT_NOTICE,
-      error: new AppError(
-        "AGENT_EXTERNAL_SESSION_LIMIT_FORBIDDEN",
-        "Агент остановил слишком длинную задачу в общем чате. Разбейте запрос на части и отправьте его заново",
-      ),
-    };
-  }
-  return {
-    error: new AppError(
-      "AGENT_EXTERNAL_APPROVAL_FORBIDDEN",
-      "В общем чате нельзя запрашивать подтверждение. Напишите агенту в личные сообщения",
-    ),
-  };
 }
 
 export function createTelegramInputRequestHandler(dependencies: InputRequestDependencies) {
@@ -221,29 +209,23 @@ export function createTelegramInputRequestHandler(dependencies: InputRequestDepe
     if (!firstRequest) {
       throw new AppError(
         "AGENT_APPROVAL_REQUEST_MISSING",
-        "Eve не передал запрос, который нужно показать пользователю",
+        "Не найден запрос, который нужно показать пользователю",
       );
     }
 
-    // Policy is evaluated before semantic presentation, session parking, persistence, or approval
-    // I/O. Only a plain notice may precede the refusal, and it binds nothing.
+    // Policy is evaluated before semantic presentation, session parking, persistence, or approval I/O.
     const refusal = sharedChatInputRefusal(data, chatType, ctx);
-    if (refusal) {
-      if (refusal.chatNotice !== undefined) {
-        await postTelegramMessageWithoutContinuationChange(channel, refusal.chatNotice);
-      }
-      throw refusal.error;
-    }
+    if (refusal) throw refusal;
 
     // Resolve trusted semantic subjects before parking so presentation failures remain recoverable.
     const localizedRequests: Array<{
-      kind: InputRequestKind;
+      kind: InputRequest["kind"];
       request: TelegramInputRequest;
     }> = [];
     for (const request of data.requests) {
       localizedRequests.push({
         kind: request.kind,
-        request: await dependencies.present(request, ctx),
+        request: await dependencies.present(telegramInputRequest(request), ctx),
       });
     }
     await dependencies.parkSession({
@@ -296,8 +278,8 @@ export function createTelegramInputRequestHandler(dependencies: InputRequestDepe
         applicationSessionId: appSessionId,
         callbackData: callbacks,
         callbackOptions: options,
-        eveSessionId: ctx.session.id,
-        eveTurnId: ctx.session.turn.id,
+        agentSessionId: ctx.session.id,
+        agentTurnId: ctx.session.turn.id,
         requestId: localizedRequest.requestId,
         promptText: localizedRequest.prompt,
         telegramChatId: chatId,

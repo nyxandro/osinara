@@ -9,7 +9,7 @@
  * - A semantic parser validates execution inputs.
  * - Input validation explains the exact quiet-hours contract before repository calls.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { AppError } from "../app-error.js";

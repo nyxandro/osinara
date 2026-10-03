@@ -29,8 +29,8 @@ function terminalDeliveryError(code: string): AppError {
 export async function deliverTelegramFinalOutput(input: {
   applicationSessionId: string;
   deliveryIdentity: unknown;
-  eveSessionId: string;
-  eveTurnId: string;
+  agentSessionId: string;
+  agentTurnId: string;
   markdown: string;
   sendChunk(chunk: TelegramFinalPresentationChunk, ordinal: number): Promise<SentTelegramMessage>;
 }): Promise<SentTelegramMessage[]> {
@@ -43,8 +43,8 @@ export async function deliverTelegramFinalOutput(input: {
   const start = await telegramFinalDeliveryRepository.start({
     applicationSessionId: input.applicationSessionId,
     chunkCount: chunks.length,
-    eveSessionId: input.eveSessionId,
-    eveTurnId: input.eveTurnId,
+    agentSessionId: input.agentSessionId,
+    agentTurnId: input.agentTurnId,
     legacyChunkCount: legacyChunks.length,
     legacyOutputHash: hash({
       chunks: legacyChunks.map((chunk) => hash(chunk)),

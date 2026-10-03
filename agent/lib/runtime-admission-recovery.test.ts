@@ -12,7 +12,8 @@ it("releases completed background work after a transient cleanup disconnect with
   const work = vi.fn().mockResolvedValue("done");
   await expect(withRuntimeAdmission("ordinary", work)).resolves.toBe("done");
   expect(work).toHaveBeenCalledOnce();
-  expect(state.query.mock.calls[2]?.[0]).toBe("SELECT 1");
+  // The recovery probe carries its own read timeout now, so it is a query config, not bare text.
+  expect(state.query.mock.calls[2]?.[0]).toMatchObject({ text: "SELECT 1" });
   expect(state.query.mock.calls[3]?.[0]).toContain("DELETE FROM runtime_admission_holders");
 });
 

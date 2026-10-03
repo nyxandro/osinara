@@ -5,10 +5,10 @@
  * - `approvalTimeoutRepository`: leased claim and terminal settlement of unanswered approvals.
  *
  * Key constructs:
- * - A lease separates "selected for cancellation" from "cancelled", so a failed Eve response retries.
- * - Eve replaces session auth with whatever the response delivers, so the claim rebuilds the same
+ * - A lease separates "selected for cancellation" from "cancelled", so a failed response retries.
+ * - a continuation runs with the auth its response delivers, so the claim rebuilds the same
  *   freshly revalidated auth the interactive callback path uses; an unprovable approver is skipped.
- * - Only a prompt whose session still owns the parked Eve run is eligible: settling a stale row would
+ * - Only a prompt whose session still owns the parked turn is eligible: settling a stale row would
  *   clear `pending_operation` for a different, genuinely pending approval.
  */
 import type { PoolClient } from "pg";
@@ -73,7 +73,7 @@ export const approvalTimeoutRepository: ApprovalTimeoutRepository = {
                    approval.telegram_message_id::text AS telegram_message_id,
                    approval.telegram_message_thread_id::text AS telegram_message_thread_id,
                    approval.timeout_lease_token::text AS timeout_lease_token, approval.tool_name,
-                   session.family_id, session.group_id, session.owner_user_id, session.scope`,
+                   session.family_id, session.group_id, session.owner_user_id, session.scope, session.thread_id`,
         [
           now,
           timeoutMilliseconds,
@@ -148,7 +148,7 @@ export const approvalTimeoutRepository: ApprovalTimeoutRepository = {
                 END
           WHERE session.id = $1 AND session.retired_at IS NULL
             AND session.eve_session_id = $2`,
-        [claim.applicationSessionId, claim.eveSessionId],
+        [claim.applicationSessionId, claim.agentSessionId],
       );
       await client.query("COMMIT");
       return true;
@@ -197,7 +197,7 @@ function toClaim(row: ClaimRow, auth: TimedOutApprovalClaim["auth"]): TimedOutAp
   return {
     applicationSessionId: row.application_session_id,
     auth,
-    eveSessionId: row.eve_session_id,
+    agentSessionId: row.eve_session_id,
     id: row.id,
     kind: row.request_kind,
     leaseToken: row.timeout_lease_token,

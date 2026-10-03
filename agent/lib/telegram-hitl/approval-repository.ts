@@ -6,7 +6,7 @@
  * - `telegramHitlApprovalRepository`: PostgreSQL implementation with atomic callback claims.
  * - Approval input/result types used by Telegram channel boundaries.
  */
-import type { SessionAuthContext } from "eve/context";
+import type { SessionAuthContext } from "../../runtime/context.js";
 import type { PoolClient } from "pg";
 
 import { AppError } from "../app-error.js";
@@ -20,17 +20,17 @@ import {
 type TelegramChatType = "group" | "private" | "supergroup";
 
 export interface RegisterTelegramHitlApprovalInput {
-  eveTurnId?: string;
+  agentTurnId?: string;
   applicationSessionId: string;
   /** Framework-owned request source; the confirmation window applies only to human-answerable kinds. */
-  kind: "question" | "session-limit" | "tool-approval";
+  kind: "question" | "tool-approval";
   callbackData: readonly string[];
   callbackOptions: readonly {
     callbackData: string;
     label: string;
     optionId: string;
   }[];
-  eveSessionId: string;
+  agentSessionId: string;
   requestId: string;
   promptText: string;
   telegramChatId: string;
@@ -77,11 +77,11 @@ export type TelegramHitlReplyAuthorization =
 export interface TelegramHitlApprovalRepository {
   authorizeReply(input: AuthorizeTelegramHitlReplyInput): Promise<TelegramHitlReplyAuthorization>;
   claimCallback(input: ClaimTelegramHitlCallbackInput): Promise<TelegramHitlCallbackClaim>;
-  clearForEveSession(applicationSessionId: string, eveSessionId: string): Promise<void>;
-  hasPendingForSession(applicationSessionId: string, eveSessionId: string): Promise<boolean>;
+  clearForAgentSession(applicationSessionId: string, agentSessionId: string): Promise<void>;
+  hasPendingForSession(applicationSessionId: string, agentSessionId: string): Promise<boolean>;
   requireToolExecutionApproval(input: {
     applicationSessionId: string;
-    eveSessionId: string;
+    agentSessionId: string;
     telegramUserId: string;
     toolCallId: string;
     toolInputHash: string;
@@ -91,7 +91,7 @@ export interface TelegramHitlApprovalRepository {
 }
 
 interface ApprovalRow extends ApprovalAuthRow {
-  request_kind: "question" | "tool-approval" | "session-limit";
+  request_kind: "question" | "tool-approval";
   eve_turn_id: string | null;
   consumed_callback_query_id: string | null;
   consumed_reply_update_id: string | null;
@@ -133,7 +133,8 @@ async function lockApproval(
             s.owner_user_id,
             s.pending_operation,
             s.retired_at,
-            s.scope
+            s.scope,
+            s.thread_id
        FROM telegram_hitl_approvals a
        JOIN conversation_sessions s ON s.id = a.application_session_id
       WHERE a.telegram_chat_id = $1
@@ -237,7 +238,7 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
               consumed_at = NULL`,
       [
         input.applicationSessionId,
-        input.eveSessionId,
+        input.agentSessionId,
         input.requestId,
         input.telegramChatId,
         input.telegramChatType,
@@ -251,7 +252,7 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
         input.toolName,
         input.toolInputHash,
         input.kind,
-        input.eveTurnId ?? null,
+        input.agentTurnId ?? null,
       ],
     );
   },
@@ -274,7 +275,7 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
            AND session.eve_session_id = approval.eve_session_id
            AND session.retired_at IS NULL
        ) AS authorized`,
-      [input.applicationSessionId, input.eveSessionId, input.telegramUserId,
+      [input.applicationSessionId, input.agentSessionId, input.telegramUserId,
         input.toolCallId, input.toolName, input.toolInputHash],
     );
     if (result.rows[0]?.authorized !== true) {
@@ -484,15 +485,15 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
     }
   },
 
-  async clearForEveSession(applicationSessionId, eveSessionId) {
+  async clearForAgentSession(applicationSessionId, agentSessionId) {
     await database().query(
       `DELETE FROM telegram_hitl_approvals
         WHERE application_session_id = $1 AND eve_session_id = $2`,
-      [applicationSessionId, eveSessionId],
+      [applicationSessionId, agentSessionId],
     );
   },
 
-  async hasPendingForSession(applicationSessionId, eveSessionId) {
+  async hasPendingForSession(applicationSessionId, agentSessionId) {
     const result = await database().query<{ pending: boolean }>(
       `SELECT EXISTS (
          SELECT 1
@@ -505,7 +506,7 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
             AND s.retired_at IS NULL
             AND s.eve_session_id = a.eve_session_id
        ) AS pending`,
-      [applicationSessionId, eveSessionId],
+      [applicationSessionId, agentSessionId],
     );
     return result.rows[0]?.pending === true;
   },

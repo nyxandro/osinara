@@ -4,7 +4,7 @@
  * Exports:
  * - `GWS_VERSION`: exact npm package and release version.
  * - `resolveGoogleWorkspaceCliArtifact`: Linux architecture to official artifact/checksum mapping.
- * - `resolveGoogleWorkspaceCliDownloadUrl`: official GitHub release URL for a pinned artifact.
+ * - `resolveGoogleWorkspaceCliDownloadUrl`: official GitHub release download URL for an artifact.
  * - `installGoogleWorkspaceCli`: verified official download and package-local extraction.
  */
 import { execFile } from "node:child_process";
@@ -19,25 +19,25 @@ export const GWS_VERSION = "0.22.5";
 
 const DOWNLOAD_TIMEOUT_MILLISECONDS = 120_000;
 const GWS_PACKAGE_DIRECTORY = resolve("node_modules/@googleworkspace/cli");
-const GWS_RELEASE_ASSET_API_BASE_URL =
-  "https://api.github.com/repos/googleworkspace/cli/releases/assets";
+// The release download URL, not the REST API: unauthenticated the API allows 60 requests an hour
+// per address, and CI runners share addresses, so a release build failed on HTTP 403 (23.09).
+// A tag can in principle be moved; the pinned SHA-256 below is what makes the artifact immutable.
+const GWS_RELEASE_DOWNLOAD_BASE_URL =
+  `https://github.com/googleworkspace/cli/releases/download/v${GWS_VERSION}`;
 const execFileAsync = promisify(execFile);
 
 interface GoogleWorkspaceCliArtifact {
   archiveName: string;
-  releaseAssetId: number;
   sha256: string;
 }
 
 const LINUX_ARTIFACTS: Readonly<Record<string, GoogleWorkspaceCliArtifact>> = {
   arm64: {
     archiveName: "google-workspace-cli-aarch64-unknown-linux-musl.tar.gz",
-    releaseAssetId: 385726968,
     sha256: "e700fe63524932b10ec2130b47ece90aa850e66005fe52ccfc4cf8767bf9919a",
   },
   x64: {
     archiveName: "google-workspace-cli-x86_64-unknown-linux-musl.tar.gz",
-    releaseAssetId: 385726987,
     sha256: "4db473dde4b1ab872e4ff35d769b0d4af1f1a6441a605e79d5cf8ada9c87e920",
   },
 };
@@ -58,15 +58,12 @@ export function resolveGoogleWorkspaceCliArtifact(
 export function resolveGoogleWorkspaceCliDownloadUrl(
   artifact: GoogleWorkspaceCliArtifact,
 ): string {
-  return `${GWS_RELEASE_ASSET_API_BASE_URL}/${artifact.releaseAssetId}`;
+  return `${GWS_RELEASE_DOWNLOAD_BASE_URL}/${artifact.archiveName}`;
 }
 
 async function downloadVerifiedArchive(artifact: GoogleWorkspaceCliArtifact): Promise<Buffer> {
+  // GitHub answers with a redirect to its release asset storage; fetch follows it.
   const response = await fetch(resolveGoogleWorkspaceCliDownloadUrl(artifact), {
-    headers: {
-      Accept: "application/octet-stream",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
     signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MILLISECONDS),
   });
   if (!response.ok) {

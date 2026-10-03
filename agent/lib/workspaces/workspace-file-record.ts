@@ -25,7 +25,7 @@ export function createWorkspaceFileRecord(input: {
   scope: WorkspaceScope;
   updatedAt: Date;
 }): WorkspaceFileRecord {
-  // Eve accepts only plain JSON values, so filesystem timestamps cross as ISO strings.
+  // Tool results are plain JSON values, so filesystem timestamps cross as ISO strings.
   return {
     byteSize: input.byteSize,
     contentSha256: input.contentSha256,

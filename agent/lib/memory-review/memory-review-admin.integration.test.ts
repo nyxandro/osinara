@@ -31,11 +31,11 @@ async function incident() {
   const [head] = await claim();
   const prepared = await memoryReviewSessionRepository.prepare(head!, new Date());
   await memoryReviewDispatchRepository.markDispatchStarted(head!, prepared.id);
-  await memoryReviewRepository.bindEveTurn({ applicationSessionId: prepared.id,
-    batchId: head!.batchId, eveSessionId: "eve-broken", eveTurnId: "turn-broken" });
+  await memoryReviewRepository.bindAgentTurn({ applicationSessionId: prepared.id,
+    batchId: head!.batchId, agentSessionId: "agent-broken", agentTurnId: "turn-broken" });
   // Persisted incident: the old 49-human/1-bot source check failed before creating the source set.
   expect(await memoryReviewRepository.completeBatch({ batchId: head!.batchId,
-    completedAt: new Date(), eveSessionId: "eve-broken", eveTurnId: "turn-broken" })).toBe("failed");
+    completedAt: new Date(), agentSessionId: "agent-broken", agentTurnId: "turn-broken" })).toBe("failed");
   return { fixture, head: head!, prepared };
 }
 
@@ -65,23 +65,23 @@ describeWithDatabase("memory review operator recovery", () => {
     expect(next!.entries.filter((entry) => entry.actorKind === "telegram_bot")).toHaveLength(1);
     const prepared = await memoryReviewSessionRepository.prepare(next!, new Date());
     await memoryReviewDispatchRepository.markDispatchStarted(next!, prepared.id);
-    await memoryReviewRepository.bindEveTurn({ applicationSessionId: prepared.id,
-      batchId: next!.batchId, eveSessionId: "eve-fixed", eveTurnId: "turn-fixed" });
+    await memoryReviewRepository.bindAgentTurn({ applicationSessionId: prepared.id,
+      batchId: next!.batchId, agentSessionId: "agent-fixed", agentTurnId: "turn-fixed" });
     await memoryTurnSourceRepository.bindReview({ applicationSessionId: prepared.id,
       conversationId: fixture.conversationId, memoryReviewBatchId: next!.batchId,
-      sourceEntryIds: next!.sourceEntryIds, eveSessionId: "eve-fixed", eveTurnId: "turn-fixed",
+      sourceEntryIds: next!.sourceEntryIds, agentSessionId: "agent-fixed", agentTurnId: "turn-fixed",
       invokingActorId: "agent-memory-author", invokingActorKind: "telegram_user" });
-    expect(await memoryTurnSourceRepository.resolve({ eveSessionId: "eve-fixed", eveTurnId: "turn-fixed", sourceSequence: "56" }))
+    expect(await memoryTurnSourceRepository.resolve({ agentSessionId: "agent-fixed", agentTurnId: "turn-fixed", sourceSequence: "56" }))
       .toMatchObject({ isReview: true, sourceMessageId: "56" });
     await memoryRepository.create(fixture.auth, {
       content: "Анна продолжает готовиться к марафону", kind: "fact", scope: "family",
-      confirmation: "model_high", sensitivity: "normal", source: "eve:eve-fixed:turn-fixed",
-      operationKey: "recovery-next-fact", provenance: { sessionId: "eve-fixed", turnId: "turn-fixed" },
+      confirmation: "model_high", sensitivity: "normal", source: "eve:agent-fixed:turn-fixed",
+      operationKey: "recovery-next-fact", provenance: { sessionId: "agent-fixed", turnId: "turn-fixed" },
       explicitSource: { conversationId: fixture.conversationId,
         timelineEntryId: next!.sourceEntryIds[0]!, subject: { kind: "current_author" } },
     });
     expect(await memoryReviewRepository.completeBatch({ batchId: next!.batchId,
-      completedAt: new Date(), eveSessionId: "eve-fixed", eveTurnId: "turn-fixed" })).toBe("recorded");
+      completedAt: new Date(), agentSessionId: "agent-fixed", agentTurnId: "turn-fixed" })).toBe("recorded");
     expect(await memoryReviewRepository.getLaneCursor({ conversationId: fixture.conversationId, messageThreadId: null })).toBe("100");
     expect((await database().query("SELECT count(*)::integer AS n FROM claim_evidence")).rows).toEqual([{ n: 1 }]);
     expect(await claim()).toEqual([]);
@@ -99,7 +99,7 @@ describeWithDatabase("memory review operator recovery", () => {
       WHERE event_type = 'memory_review.operator_skipped' AND subject_id = $1`, [head.batchId])).rows).toEqual([{ n: 1 }]);
     expect((await database().query("SELECT count(*)::integer AS n FROM memory_review_batch_sources WHERE batch_id = $1", [head.batchId])).rows).toEqual([{ n: 0 }]);
     expect(await memoryReviewRepository.completeBatch({ batchId: head.batchId, completedAt: new Date(),
-      eveSessionId: "eve-broken", eveTurnId: "turn-broken" })).toBe("replayed");
+      agentSessionId: "agent-broken", agentTurnId: "turn-broken" })).toBe("replayed");
   });
 
   it("also skips an isolated terminal batch instead of reissuing the approved-to-discard sources", async () => {
@@ -120,7 +120,7 @@ describeWithDatabase("memory review operator recovery", () => {
       if (condition === "source_binding") await database().query(`INSERT INTO memory_turn_source_sets
         (eve_session_id,eve_turn_id,application_session_id,conversation_id,current_timeline_entry_id,
           invoking_actor_kind,invoking_actor_id,binding_hash,memory_review_batch_id)
-        VALUES ('eve-broken','turn-broken',$1,$2,NULL,'telegram_user','agent-memory-author',$3,$4)`,
+        VALUES ('agent-broken','turn-broken',$1,$2,NULL,'telegram_user','agent-memory-author',$3,$4)`,
       [prepared.id,fixture.conversationId,"a".repeat(64),head.batchId]);
       if (condition === "missing_source") await database().query(
         "DELETE FROM memory_review_batch_sources WHERE batch_id=$1 AND timeline_sequence=6", [head.batchId]);
@@ -129,8 +129,8 @@ describeWithDatabase("memory review operator recovery", () => {
       if (["written_memory", "retained_operation", "evidence_only"].includes(condition)) await memoryRepository.create(fixture.auth, {
         content: "Анна готовится к марафону", kind: "fact", scope: "family",
         confirmation: "model_high", sensitivity: "normal",
-        source: condition === "evidence_only" ? "eve:another:turn" : "eve:eve-broken:turn-broken",
-        operationKey: "unexpected-write", provenance: { sessionId: condition === "evidence_only" ? "another" : "eve-broken", turnId: "turn-broken" },
+        source: condition === "evidence_only" ? "eve:another:turn" : "eve:agent-broken:turn-broken",
+        operationKey: "unexpected-write", provenance: { sessionId: condition === "evidence_only" ? "another" : "agent-broken", turnId: "turn-broken" },
         explicitSource: { conversationId: fixture.conversationId, timelineEntryId: fixture.timelineEntryId, subject: { kind: "current_author" } },
       });
       if (condition === "retained_operation") await database().query("DELETE FROM memory_items_all");
@@ -147,7 +147,7 @@ describeWithDatabase("memory review operator recovery", () => {
     const { head } = await incident();
     const later = (await database().query<{ id: string }>(
       `UPDATE memory_review_batches SET status='failed', diagnostic_code=$1, completed_at=now(),
-        eve_session_id='eve-later', eve_turn_id='turn-later'
+        eve_session_id='agent-later', eve_turn_id='turn-later'
         WHERE predecessor_sequence=50 RETURNING id`, [SOURCE_MISSING],
     )).rows[0]!.id;
     await expect(skipUnboundMemoryReviewBatch({ batchId: later, reason: "Не тот пакет" }))

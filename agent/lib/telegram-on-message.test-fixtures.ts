@@ -3,11 +3,12 @@
  *
  * Exports:
  * - `BOT_USERNAME`: stable bot identity used by dispatch tests.
- * - `privateMessage`, `groupMessage`, and `botGroupMessage`: minimal parsed Eve Telegram messages.
+ * - `privateMessage`, `groupMessage`, and `botGroupMessage`: minimal parsed Telegram messages.
  * - `telegramContext`: Telegram channel context with an observable sender.
  * - `repositories`: isolated application repository doubles for message-handler tests.
  */
-import type { TelegramContext, TelegramMessage } from "eve/channels/telegram";
+import type { TelegramContext } from "../runtime/telegram/channel-types.js";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { vi } from "vitest";
 
 export const BOT_USERNAME = "osinara_bot";
@@ -146,7 +147,7 @@ export function repositories() {
     },
     session: {
       prepareAuthorizedResponse: vi.fn().mockResolvedValue({ continuationToken: "telegram-101::",generation: 0,id: "session-1",
-        rotated: false,sandboxSessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",nativeSessionId: "eve-response-session" }),
+        rotated: false,sandboxSessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",nativeSessionId: "agent-response-session" }),
       hasRoute: vi.fn().mockResolvedValue(false),
       prepareTurn: vi.fn().mockResolvedValue({
         continuationToken: "telegram-101::",
@@ -161,6 +162,12 @@ export function repositories() {
       findGroup: vi.fn().mockResolvedValue(null),
       findIdentity: vi.fn().mockResolvedValue(null),
       hasOwner: vi.fn(),
+    },
+    turnInterjections: {
+      findDeliveredContentKind: vi.fn().mockResolvedValue(null),
+    },
+    conversationWakeups: {
+      listPlanned: vi.fn().mockResolvedValue([]),
     },
     timeline: {
       recordInbound: vi.fn().mockResolvedValue({

@@ -1,5 +1,5 @@
 /**
- * Migration 073 terminal Eve stream retention policy tests.
+ * Migration 073: retention policy of terminal session streams.
  *
  * Constructs covered:
  * - Existing retired application sessions are capped at one day without releasing retention holds.
@@ -54,7 +54,7 @@ async function applyEarlierMigrations(client: import("pg").PoolClient): Promise<
   }
 }
 
-describeWithDatabase("073 terminal Eve stream retention", () => {
+describeWithDatabase("073 terminal session stream retention", () => {
   afterAll(closeDatabase);
 
   it("shortens retired deadlines and preserves active or held session guards", async () => {

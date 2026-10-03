@@ -5,7 +5,7 @@
  * - `telegramGroupAttachmentRepository.find` and `list`: revalidate family membership at read time.
  * - Registered external group removal and trust-zone replacement invalidate stale references.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../../runtime/telegram/inbound.js";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { database, closeDatabase } from "../database.js";

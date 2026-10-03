@@ -6,7 +6,7 @@
  * - Sessions without the deployed actor contract are intentionally invalidated.
  * - Channel identity cannot be projected through a user principal or Telegram user attribute.
  */
-import type { SessionAuth } from "eve/context";
+import type { SessionAuth } from "../runtime/context.js";
 import { describe, expect, it } from "vitest";
 
 import { resolveTelegramSessionActor } from "./telegram-session-actor.js";

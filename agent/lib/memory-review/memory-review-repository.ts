@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `MemoryReviewBatchSummary`: newly created background or interactive source range.
- * - `MemoryReviewClaim`: fully authorized leased batch ready for internal Eve handoff.
+ * - `MemoryReviewClaim`: fully authorized leased batch ready for its internal turn.
  * - `memoryReviewRepository`: lane initialization, batching, leasing, and terminal transitions.
  */
 import type { PoolClient } from "pg";
@@ -60,6 +60,9 @@ interface SourceRow {
   sent_at: Date;
   sequence_id: string;
 }
+
+// A turn parks for each human answer it waits on; a review turn waits on a handful at most.
+const MAX_CONTINUATION_DEPTH = 64;
 
 const SOURCE_COLUMNS = `message.id, message.sequence_id::text, message.actor_kind,
   message.actor_id, message.message_thread_id::text, message.sender_username,
@@ -400,11 +403,11 @@ export const memoryReviewRepository = {
     return result.rows[0]?.processed_through_sequence ?? null;
   },
 
-  async bindEveTurn(input: {
+  async bindAgentTurn(input: {
     applicationSessionId: string;
     batchId: string;
-    eveSessionId: string;
-    eveTurnId: string;
+    agentSessionId: string;
+    agentTurnId: string;
   }): Promise<void> {
     const result = await database().query(
       `UPDATE memory_review_batches
@@ -415,7 +418,7 @@ export const memoryReviewRepository = {
           AND application_session_id = $4
           AND (eve_session_id IS NULL OR eve_session_id = $2)
           AND (eve_turn_id IS NULL OR eve_turn_id = $3)`,
-      [input.batchId, input.eveSessionId, input.eveTurnId, input.applicationSessionId],
+      [input.batchId, input.agentSessionId, input.agentTurnId, input.applicationSessionId],
     );
     if (result.rowCount !== 1) throw new AppError(
       "AGENT_MEMORY_REVIEW_TURN_BINDING_INVALID",
@@ -424,21 +427,32 @@ export const memoryReviewRepository = {
   },
 
   /**
-   * A turn parked for a human answer resumes under the authorization of that answer, so the batch
-   * marker of the message that started the turn is no longer in context. The binding written at
-   * turn start is durable, which makes it the only source terminal handling can trust. The status
-   * is deliberately not filtered: a replayed terminal event must still recognize a review turn.
+   * The batch a turn reviews, with the turn it is bound to. A turn parked for a human answer is
+   * continued by a new turn under the authorization of that answer, so the batch marker of the
+   * message that started the review is no longer in context: the batch is found through the turns
+   * the continuation resumes (`agent_turns.resumes_turn_id`), nearest first. The binding written
+   * at turn start is durable, which makes it the only source terminal handling can trust. The
+   * status is deliberately not filtered: a replayed terminal event must still recognize a review.
    */
-  async batchIdForTurn(input: {
-    eveSessionId: string;
-    eveTurnId: string;
-  }): Promise<string | null> {
-    const result = await database().query<{ id: string }>(
-      `SELECT id FROM memory_review_batches
-        WHERE eve_session_id = $1 AND eve_turn_id = $2`,
-      [input.eveSessionId, input.eveTurnId],
+  async batchForTurn(input: {
+    agentSessionId: string;
+    agentTurnId: string;
+  }): Promise<{ batchId: string; agentTurnId: string } | null> {
+    const result = await database().query<{ id: string; eve_turn_id: string }>(
+      `WITH RECURSIVE chain (turn_id, depth) AS (
+         SELECT $2::text, 0
+         UNION ALL
+         SELECT turn.resumes_turn_id, chain.depth + 1
+           FROM chain JOIN agent_turns turn ON turn.id = chain.turn_id
+          WHERE turn.session_id = $1 AND turn.resumes_turn_id IS NOT NULL AND chain.depth < $3
+       )
+       SELECT batch.id, batch.eve_turn_id FROM chain
+         JOIN memory_review_batches batch ON batch.eve_session_id = $1 AND batch.eve_turn_id = chain.turn_id
+        ORDER BY chain.depth LIMIT 1`,
+      [input.agentSessionId, input.agentTurnId, MAX_CONTINUATION_DEPTH],
     );
-    return result.rows[0]?.id ?? null;
+    const row = result.rows[0];
+    return row === undefined ? null : { batchId: row.id, agentTurnId: row.eve_turn_id };
   },
 
 };

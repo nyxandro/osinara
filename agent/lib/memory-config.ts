@@ -21,6 +21,22 @@ export const MEMORY_LIST_DEFAULT_LIMIT = 20;
 export const MEMORY_LIST_MAX_LIMIT = 50;
 export const MEMORY_RETRIEVAL_LIMIT = 12;
 export const MEMORY_RETRIEVAL_CANDIDATE_LIMIT = 40;
+/**
+ * Total size of the assembled turn memory block: retrieved records, profile and threads together
+ * with the instructions, tags and escaping around them. The three payload parts are bounded
+ * separately, and their sum was bounded by nothing — worst case 76 000 characters of payload.
+ * Since the block left the cached prefix it is the only piece the model recomputes on every
+ * message, so this number is turn latency and input cost.
+ *
+ * Payload measured on 17 production turns 2026-09-21: median 21 601, second largest 29 608,
+ * largest 41 012. The wrapper measured on the same code is 2 505 characters, so 40 000 sits above
+ * the second largest turn with its wrapper and below the largest — it trims the top turn of that
+ * sample, the one carrying 37 910 characters of records alone, and leaves the rest untouched.
+ * One day of traffic is a thin sample, so `droppedMemories` and `offeredMemories` in
+ * `AGENT_MEMORY_RETRIEVAL_METRICS` are the evidence to retune it: cutting more than the occasional
+ * outlier means this is too low.
+ */
+export const MEMORY_TURN_BLOCK_MAX_CHARACTERS = 40_000;
 export const MEMORY_INCIDENT_STATEMENT_TIMEOUT_MS = 1_000;
 export const MEMORY_INCIDENT_QUERY_TIMEOUT_MS = 1_500;
 
@@ -29,6 +45,31 @@ export const CONVERSATION_TIMELINE_SELECTION_MAX_ENTRIES = 50;
 // The retired service remains until the installed production controller removes its process contract.
 export const MEMORY_EXTRACTION_WORKER_IDLE_MILLISECONDS = 1_000;
 export const MEMORY_EXTRACTION_WORKER_READY_PATH = "/tmp/osinara-memory-extraction-worker-ready";
+/**
+ * The embedding worker touches this file on every pass of its loop, and its healthcheck requires
+ * it to be fresh. Without it a hung worker was indistinguishable from a healthy one: the process
+ * stays alive, memories keep being written, and they quietly stop being findable by meaning.
+ */
+export const MEMORY_EMBEDDING_WORKER_READY_PATH = "/tmp/osinara-memory-embedding-worker-ready";
+/**
+ * How stale the readiness mark may be before the container is called unhealthy. The mark is
+ * touched after every job, and one job may spend a tokenizer call and a batch of embeddings, each
+ * bounded by the client's own thirty-second timeout. Ninety seconds therefore sits above an
+ * honest slow job and still catches a hung loop inside two minutes.
+ */
+export const MEMORY_EMBEDDING_WORKER_STALE_MILLISECONDS = 90_000;
+/**
+ * The codes this subsystem writes that are not failures. `OsinaraEmbeddingFailed` watches the
+ * whole `AGENT_MEMORY_EMBEDDING_` family, because fifteen of its sixteen codes are failures; the
+ * sixteenth says the indexer is alive. Anything normal has to be named here and excluded in the
+ * rule, or a healthy start reads to the duty reader as a broken index.
+ */
+export const MEMORY_EMBEDDING_WORKER_STARTED_CODE = "AGENT_MEMORY_EMBEDDING_WORKER_STARTED";
+export const MEMORY_EMBEDDING_WORKER_WAITING_CODE = "AGENT_MEMORY_EMBEDDING_WORKER_WAITING";
+export const MEMORY_EMBEDDING_LIFECYCLE_CODES = [
+  MEMORY_EMBEDDING_WORKER_STARTED_CODE,
+  MEMORY_EMBEDDING_WORKER_WAITING_CODE,
+] as const;
 export const MEMORY_EXTRACTION_WORKER_STABILITY_MILLISECONDS = 30_000;
 export const MEMORY_EVIDENCE_SNIPPET_MAX_CHARACTERS = 1_000;
 
@@ -84,13 +125,25 @@ export const MEMORY_RETRIEVAL_MIN_RUSSIAN_MORPHOLOGY_TERM_MATCHES = 2;
 // number both admits a paraphrase and refuses a question that is not about memory at all. That is
 // the answer to #196: abstention has to come from a signal other than this similarity.
 export const MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY = 0.78;
-// A floating cutoff relative to the best semantic match was tried here and removed: on both
-// fixtures it changed no measured number. It can only trim one query's own tail, and an off-topic
-// question has a low best score, so its tail is measured against that same low score.
+// A floating cutoff relative to that threshold was tried here and removed: on both fixtures it
+// changed no measured number. It can only trim one query's own tail, and an off-topic question has
+// a low best score, so its tail is measured against that same low score.
 export const MEMORY_RETRIEVAL_RRF_RANK_OFFSET = 60;
 export const MEMORY_RETRIEVAL_CONFIRMATION_BOOST = 0.001;
-export const MEMORY_RETRIEVAL_RECENCY_BOOST = 0.0005;
-export const MEMORY_RETRIEVAL_RECENCY_DECAY_SECONDS = 31_557_600;
+// How many turns back the automatic selection remembers what it already showed. Three is short
+// enough that a record the conversation keeps needing comes back within a couple of exchanges, and
+// long enough to stop the immediate repeat that measured as half of all shows. The explicit search
+// is not bounded by it at all: a deliberate lookup must see everything.
+export const MEMORY_RETRIEVAL_RECENT_SHOW_WINDOW_TURNS = 3;
+// How much of the show journal is kept behind the window. Nothing reads further back than the
+// window itself, apart from a retried turn looking for its own rows, so the rest is dead weight:
+// production takes about 360 turns a day across all chats, and at twelve records a turn the
+// journal would outgrow the memory it serves within months. Fifty turns is one session's worth of
+// conversation — far longer than any retry lives, and a fixed ceiling per chat.
+export const MEMORY_RETRIEVAL_SHOW_JOURNAL_RETAINED_TURNS = 50;
+// Freshness used to be a term added to the fused score, and at 0.0005 against a rank step of
+// 0.0164 it was a tie-breaker wearing the name of a ranking factor. It is now a multiplier over
+// the whole score, and the curve lives in `memory-forgetting.ts`.
 
 export const MEMORY_EMBEDDING_DIMENSIONS = 384;
 export const MEMORY_EMBEDDING_MODEL = "intfloat/multilingual-e5-small";

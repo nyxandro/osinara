@@ -9,7 +9,7 @@
   <a href="https://github.com/nyxandro/osinara/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/nyxandro/osinara?style=flat-square&label=release"></a>
   <img alt="Node.js" src="https://img.shields.io/badge/Node.js-24.x-339933?style=flat-square&logo=node.js&logoColor=white">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-7.0-3178C6?style=flat-square&logo=typescript&logoColor=white">
-  <img alt="Eve" src="https://img.shields.io/badge/Eve-0.40.0-111827?style=flat-square">
+  <img alt="AI SDK" src="https://img.shields.io/badge/AI%20SDK-7.0.60-111827?style=flat-square">
   <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-pgvector%2017-4169E1?style=flat-square&logo=postgresql&logoColor=white">
 </p>
 
@@ -35,12 +35,12 @@ Osinara — self-hosted агент, который живёт в Telegram и р�
 | Семья и группы | Bootstrap владельца, приглашения, подтверждение участников, owner-only операции, семейные и внешние группы. |
 | Память | Root-agent source-backed writes, semantic integrity для изменений, versioned mutations, soft delete, atomic memory threads, локальный hybrid retrieval, экспорт и отдельные scopes. |
 | Расписания | Напоминания и автономные agent schedules: личные и семейные сценарии, а также owner-approved отчёты во внешние группы с отдельной fresh session, минимальным capability allowlist и bounded snapshot истории. |
-| Голос | Groq Whisper transcription перед основным agent turn с повторной проверкой authorization. |
+| Голос | Groq Whisper transcription перед основным agent turn с повторной проверкой authorization; по явной просьбе root-agent озвучивает ответ через ElevenLabs `eleven_v3` и отправляет голосовым без скрытых повторов, а при сбое озвучки отвечает текстом. |
 | Workspaces | Изолированные personal, family и group файловые области, attachment persistence, безопасная отправка файлов. |
 | Изображения | Root-agent создаёт одно WebP через `gpt-image-2`, сохраняет его в authorized workspace и доставляет в Telegram без скрытых повторов; внешней группе capability выдаёт владелец из личного чата. |
 | Google Workspace | Native `gws` skills для Gmail, Calendar, Drive, Docs, Sheets и People через workspace-bound OAuth credentials. |
 | Sandbox | Долгоживущие Docker sandbox sessions с scoped mounts, isolated tools volume, egress proxy и fail-closed policy. |
-| Оркестрация | В trusted private/family режимах root-agent делегирует большие задачи нативному Eve `agent` со свежим контекстом и теми же разрешёнными tools, skills, connections, sandbox и workspace; во внешних группах child delegation запрещена. |
+| Оркестрация | В trusted private/family режимах root-agent делегирует большие задачи подагенту `agent` со свежим контекстом и теми же разрешёнными tools, skills, connections, sandbox и workspace; во внешних группах child delegation запрещена. |
 | Production | Immutable GitHub releases, GHCR digest images, Telegram approval перед deploy, systemd timer на сервере. |
 
 ---
@@ -66,6 +66,7 @@ Osinara — self-hosted агент, который живёт в Telegram и р�
 ### 🎙 Голос, файлы и вложения
 
 - Голосовые сообщения расшифровываются через Groq Whisper до основного хода агента.
+- По просьбе «ответь голосом» агент присылает голосовое сообщение, озвученное через ElevenLabs.
 - Присланные файлы и фото сохраняются в рабочую область чата и доступны инструментам.
 - Агент может прислать файл из рабочей области обратно в Telegram и посмотреть картинку.
 - Изолированные области: `personal`, `family`, `group` — файлы одной области не видны в другой.
@@ -126,10 +127,10 @@ Osinara — self-hosted агент, который живёт в Telegram и р�
 
 | Где | Память | Файлы | Инструменты |
 | --- | --- | --- | --- |
-| Личный чат | `personal` и `family` | `/workspace/personal`, `/workspace/family` | Полный trusted sandbox и personal tools environment; при активной Codex-подписке root-agent может создавать изображения. |
-| Семейная группа | Только `family` | `/workspace/family` | Trusted sandbox и family tools environment; при активной Codex-подписке root-agent может создавать изображения. |
-| Внешняя группа | Только `group` | `/workspace/group` | Без Bash, произвольного сетевого доступа и persistent credentials; `web_fetch` и `generate_image` доступны только через отдельные owner grants, причём `generate_image` предлагается владельцу лишь при активном provider `codex-subscription`; безопасные file tools и настраиваемый импорт UTF-8 TXT/MD/JSON/CSV/TSV/HTML/XML/YAML/YML из Telegram. |
-| Native child | Та же проверенная identity и scopes, что у parent turn | Тот же разрешённый workspace и sandbox | Тот же trust-zone surface, кроме root-owned `remember` и `generate_image`; отдельные history и state. |
+| Личный чат | `personal` и `family` | `/workspace/personal`, `/workspace/family` | Полный trusted sandbox и personal tools environment; при активной Codex-подписке root-agent может создавать изображения; по явной просьбе root-agent отвечает голосовым через ElevenLabs. |
+| Семейная группа | Только `family` | `/workspace/family` | Trusted sandbox и family tools environment; при активной Codex-подписке root-agent может создавать изображения; по явной просьбе root-agent отвечает голосовым через ElevenLabs. |
+| Внешняя группа | Только `group` | `/workspace/group` | Без Bash, произвольного сетевого доступа и persistent credentials; `web_fetch`, `generate_image` и `send_voice_message` доступны только через отдельные owner grants, причём `generate_image` предлагается владельцу лишь при активном provider `codex-subscription`; безопасные file tools и настраиваемый импорт UTF-8 TXT/MD/JSON/CSV/TSV/HTML/XML/YAML/YML из Telegram. |
+| Native child | Та же проверенная identity и scopes, что у parent turn | Тот же разрешённый workspace и sandbox | Тот же trust-zone surface, кроме root-owned `remember`, `generate_image` и `send_voice_message`; отдельные history и state. |
 
 ---
 
@@ -176,7 +177,7 @@ osinara config     # конфигурация модели и провайдер
 ## Локальная разработка
 
 ```bash
-npm ci                      # postinstall применяет локальные Eve-патчи
+npm ci
 cp .env.example .env        # заполнить обязательные секреты
 docker compose up --build   # edge: http://localhost:8080
 ```
@@ -201,7 +202,7 @@ docker compose -f compose.test.yaml up --build --abort-on-container-exit --exit-
 
 ## Стек
 
-TypeScript на Node 24 · [Eve](https://eve.dev/docs) `0.40.0` · PostgreSQL 17 + pgvector ·
+TypeScript на Node 24 · собственное ядро агента на [AI SDK](https://ai-sdk.dev) `7.0.60` · PostgreSQL 17 + pgvector ·
 Docker Compose · Groq Whisper · локальные эмбеддинги E5 · Telegram как единственный канал.
 
 Архитектурные заметки и рантбуки — в [`docs/`](docs/), правила разработки — в [`AGENTS.md`](AGENTS.md),

@@ -11,7 +11,7 @@ import { runHostCommand } from "./process-runner.js";
 const BASE_DIR = "/opt/osinara";
 const COMPOSE_PATH = `${BASE_DIR}/compose.installation.json`;
 const RELEASE_ENV_PATH = `${BASE_DIR}/release.env`;
-const LOCAL_HEALTH_URL = "http://127.0.0.1:8082/eve/v1/health";
+const LOCAL_HEALTH_URL = "http://127.0.0.1:8082/v1/health";
 
 async function compose(
   envPath: string,

@@ -1,42 +1,50 @@
 /**
- * Eve dynamic capability resolver tests.
+ * Dynamic capability resolver tests.
  *
  * Constructs covered:
  * - `capabilities`: one step-scoped map per verified mode instead of replayed helper closures.
  * - An unresolvable mode or failed policy lookup retains only fail-closed baseline wrappers.
  * - Scheduled history is visible only with a successfully resolved application-core policy.
  * - Live policy changes affect visibility on the next turn and execution checks enforce revocation.
- * - Every returned entry carries Eve's `defineTool` brand required by the runtime lifecycle.
+ * - Every returned entry is a complete tool: description, input schema and executor.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const loadCurrentExternalGroupCapabilities = vi.hoisted(() => vi.fn());
 const authorizeCurrentExternalGroupCapability = vi.hoisted(() => vi.fn());
+const loadGroupSkillAllowlist = vi.hoisted(() => vi.fn());
 
 vi.mock("../image-generation/image-generation-availability.js", () => ({
   IMAGE_GENERATION_AVAILABLE: true,
+}));
+vi.mock("../group-skills/group-skill-repository.js", () => ({
+  groupSkillPolicyRepository: { loadGroupSkillAllowlist },
 }));
 vi.mock("./external-group-live-policy.js", () => ({
   loadCurrentExternalGroupCapabilities,
   authorizeCurrentExternalGroupCapability,
 }));
 
-import capabilities from "../../tools/capabilities.js";
+import { resolveToolSurface } from "../../tools/capabilities.js";
 import {
   ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES,
-  FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS,
   EXTERNAL_GROUP_BASE_TOOLS,
-  UNVERIFIED_CONTEXT_DENIALS,
 } from "./group-tool-catalog.js";
 
-const EVE_TOOL_BRAND = Symbol.for("eve:tool-brand");
+// The runtime hands every surface entry to the model loop, so each must be a complete tool.
+function expectRuntimeTool(toolName: string, definition: unknown) {
+  const tool = definition as { description?: unknown; execute?: unknown; inputSchema?: unknown };
+  expect(typeof tool.description === "string" && tool.description.length > 0, `${toolName} has no description`).toBe(true);
+  expect(tool.inputSchema, `${toolName} has no input schema`).toBeTypeOf("object");
+  expect(tool.execute, `${toolName} has no executor`).toBeTypeOf("function");
+}
 
 function resolve(
   attributes: Record<string, unknown> | null,
   initiatorAttributes: Record<string, unknown> | null = null,
   authenticator = "telegram",
 ) {
-  return capabilities.events["step.started"]?.({} as never, {
+  return resolveToolSurface({
     channel: { kind: "telegram" },
     messages: [],
     session: {
@@ -73,11 +81,8 @@ describe("dynamic capability resolver", () => {
   beforeEach(() => {
     loadCurrentExternalGroupCapabilities.mockReset();
     loadCurrentExternalGroupCapabilities.mockResolvedValue(new Set());
-  });
-
-  it("resolves tools only at step scope so helper closures are rebuilt before every model call", () => {
-    expect(capabilities.events["step.started"]).toBeTypeOf("function");
-    expect(capabilities.events["turn.started"]).toBeUndefined();
+    loadGroupSkillAllowlist.mockReset();
+    loadGroupSkillAllowlist.mockResolvedValue(new Set());
   });
 
   it("emits the private surface for a verified private chat", async () => {
@@ -102,7 +107,7 @@ describe("dynamic capability resolver", () => {
     expect(Object.keys(surface ?? {})).not.toContain("export_memory");
   });
 
-  it("emits only granted capabilities and framework denials for an external group", async () => {
+  it("emits only granted capabilities for an external group, without questions or Bash", async () => {
     loadCurrentExternalGroupCapabilities.mockResolvedValue(new Set(["remember"]));
 
     const surface = await resolve({
@@ -117,14 +122,13 @@ describe("dynamic capability resolver", () => {
     expect(Object.keys(surface ?? {}).sort()).toEqual(
       [
         ...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES,
+        "agent",
         "list_reminders",
-        "load_skill",
         "manage_behavior_preference",
         "manage_reminder",
         "read_profile_view",
         "remember",
         ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name),
-        ...FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS,
       ].sort(),
     );
     expect(loadCurrentExternalGroupCapabilities).toHaveBeenCalledWith({
@@ -149,21 +153,16 @@ describe("dynamic capability resolver", () => {
 
     expect(Object.keys(surface ?? {})).toContain("remember");
     expect(Object.keys(surface ?? {})).not.toContain("search_memories");
-    expect(Object.keys(surface ?? {})).toContain("bash");
+    expect(Object.keys(surface ?? {})).not.toContain("bash");
     expect(loadCurrentExternalGroupCapabilities).toHaveBeenCalledWith({
       familyId: "family-1",
       groupId: "group-1",
     });
-    for (const [toolName, definition] of Object.entries(surface ?? {})) {
-      expect(
-        (definition as unknown as Record<symbol, unknown>)[EVE_TOOL_BRAND],
-        `${toolName} review tool must be created through defineTool()`,
-      ).toBe(true);
-    }
+    for (const [toolName, definition] of Object.entries(surface ?? {})) expectRuntimeTool(toolName, definition);
   });
 
   it("emits load_skill only when the external group has a current skill grant", async () => {
-    const surface = await resolve({
+    const attributes = {
       familyId: "family-1",
       groupId: "group-1",
       groupType: "external",
@@ -171,9 +170,20 @@ describe("dynamic capability resolver", () => {
       skillAllowlist: ["pohuy"],
       telegramChatType: "supergroup",
       toolAllowlist: [],
-    });
+    };
+    loadGroupSkillAllowlist.mockResolvedValue(new Set(["pohuy"]));
+    expect(await resolve(attributes)).toHaveProperty("load_skill");
+    expect(loadGroupSkillAllowlist).toHaveBeenCalledWith("group-1");
 
-    expect(surface).toHaveProperty("load_skill");
+    // A grant revoked since the turn began, or a family skill the owner disabled, is gone.
+    loadGroupSkillAllowlist.mockResolvedValue(new Set());
+    expect(await resolve(attributes)).not.toHaveProperty("load_skill");
+
+    // A failed skill lookup closes only skills; the group's other tools stay.
+    loadGroupSkillAllowlist.mockRejectedValue(new Error("database unavailable"));
+    const failed = await resolve(attributes);
+    expect(failed).not.toHaveProperty("load_skill");
+    expect(failed).toHaveProperty("web_search");
   });
 
   it("emits imagegen loading only for an interactive live generate_image grant", async () => {
@@ -192,7 +202,7 @@ describe("dynamic capability resolver", () => {
 
     expect(interactive?.load_skill?.description).toMatch(/available skill/iu);
     expect(interactive).toHaveProperty("generate_image");
-    expect(scheduled?.load_skill?.description).toMatch(/недоступен/iu);
+    expect(scheduled).not.toHaveProperty("load_skill");
     expect(scheduled).not.toHaveProperty("generate_image");
   });
 
@@ -223,18 +233,13 @@ describe("dynamic capability resolver", () => {
       telegramChatType: "supergroup",
       toolAllowlist: ["remember"],
     }],
-  ] as const)("returns only Eve-branded tools for %s mode", async (_name, attributes) => {
+  ] as const)("returns only complete runtime tools for %s mode", async (_name, attributes) => {
     loadCurrentExternalGroupCapabilities.mockResolvedValue(new Set(["remember"]));
 
     const surface = await resolve(attributes as unknown as Record<string, unknown>);
 
     expect(Object.keys(surface ?? {}).length).toBeGreaterThan(0);
-    for (const [toolName, definition] of Object.entries(surface ?? {})) {
-      expect(
-        (definition as unknown as Record<symbol, unknown>)[EVE_TOOL_BRAND],
-        `${toolName} must be created through defineTool()`,
-      ).toBe(true);
-    }
+    for (const [toolName, definition] of Object.entries(surface ?? {})) expectRuntimeTool(toolName, definition);
   });
 
   it("revokes a capability that is absent from the current database policy", async () => {
@@ -266,9 +271,6 @@ describe("dynamic capability resolver", () => {
     expect(Object.keys(surface ?? {}).sort()).toEqual(
       [
         ...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES,
-        "load_skill",
-        ...FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS,
-        ...UNVERIFIED_CONTEXT_DENIALS,
       ].sort(),
     );
     expect(consoleError).toHaveBeenCalledWith(
@@ -321,9 +323,6 @@ describe("dynamic capability resolver", () => {
     expect(Object.keys(surface ?? {}).sort()).toEqual(
       [
         ...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES,
-        "load_skill",
-        ...FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS,
-        ...UNVERIFIED_CONTEXT_DENIALS,
       ].sort(),
     );
     expect(consoleError).toHaveBeenCalledWith(

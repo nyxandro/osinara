@@ -2,7 +2,7 @@
  * External group file removal contract tests.
  *
  * Constructs covered:
- * - Invalid relative paths fail before Eve requests destructive approval.
+ * - Invalid relative paths fail before the runtime requests destructive approval.
  * - A valid scope-relative path remains confirmation-gated.
  * - A group turn is refused outright, because its confirmation could never be shown.
  */

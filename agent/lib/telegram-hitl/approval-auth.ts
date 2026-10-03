@@ -2,10 +2,10 @@
  * Current database authorization for resumed Telegram HITL turns.
  *
  * Exports:
- * - `ApprovalAuthRow`: approval/session fields required to rebuild trusted Eve auth.
+ * - `ApprovalAuthRow`: approval/session fields required to rebuild trusted session auth.
  * - `resolveCurrentApprovalAuth`: revalidates identity, membership, group, and scopes.
  */
-import type { SessionAuthContext } from "eve/context";
+import type { SessionAuthContext } from "../../runtime/context.js";
 import type { PoolClient } from "pg";
 
 type TelegramChatType = "group" | "private" | "supergroup";
@@ -25,6 +25,8 @@ export interface ApprovalAuthRow {
   telegram_chat_type: TelegramChatType;
   telegram_message_id: string;
   telegram_message_thread_id: string | null;
+  /** The conversation session's sandbox id (`conversation_sessions.thread_id`). */
+  thread_id: string;
 }
 
 interface IdentityRow {
@@ -93,10 +95,12 @@ export async function resolveCurrentApprovalAuth(client: PoolClient, row: Approv
     }
   }
 
-  // Only freshly read database policy enters the resumed Eve turn.
+  // Only freshly read database policy enters the continuation turn.
   return {
     attributes: {
       applicationSessionId: row.application_session_id,
+      // The continuation turn opens the session's sandbox (its skills are synced there) by this id.
+      sandboxSessionId: row.thread_id,
       telegramApprovalContinuation: "true",
       osinaraTelegramResponseSessionId: row.eve_session_id,
       telegramApprovalScope: row.scope,

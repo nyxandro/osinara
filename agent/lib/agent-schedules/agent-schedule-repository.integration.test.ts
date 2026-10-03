@@ -96,7 +96,7 @@ describeWithDatabase("agent schedule repositories", () => {
   it("recovers a pre-model handoff of the same occurrence and fences the late old run", async () => {
     const fixture = await createFixture();
     const now = new Date();
-    const schedule = await agentScheduleRepository.create(privateAuth(fixture, "owner"), {
+    const schedule = await agentScheduleRepository.create(privateAuth(fixture, "owner"), { executionContext: "isolated",
       firstRunAt: new Date(now.getTime()-1000), operationKey: "recover-handoff", recurrence: { kind: "once" },
       scenarioPrompt: "Проверь новости", scope: "personal", timezone: "Europe/Moscow", title: "Проверка", userRequest: "Проверь новости",
     });
@@ -108,7 +108,7 @@ describeWithDatabase("agent schedule repositories", () => {
     const client = await database().connect();
     try { await client.query("BEGIN"); await recoverUnstartedAgentSchedules(client, now); await client.query("COMMIT"); }
     finally { client.release(); }
-    await expect(admitScheduledAgentTurn({ runId: job.runId, applicationSessionId: session.id, eveSessionId: "late", eveTurnId: "turn_0" }))
+    await expect(admitScheduledAgentTurn({ runId: job.runId, applicationSessionId: session.id, agentSessionId: "late", agentTurnId: "turn_0" }))
       .rejects.toThrow("AGENT_SCHEDULE_ATTEMPT_STALE");
     const next = (await agentScheduleDispatchRepository.claimDue({ now: new Date(), limit: 10, leaseMilliseconds: 60000 }))[0]!;
     expect(next.id).toBe(schedule.id);
@@ -120,7 +120,7 @@ describeWithDatabase("agent schedule repositories", () => {
     const fixture = await createFixture();
     const auth = privateAuth(fixture, "member");
 
-    const schedule = await agentScheduleRepository.create(auth, {
+    const schedule = await agentScheduleRepository.create(auth, { executionContext: "isolated",
       firstRunAt: new Date("2026-07-17T06:00:00.000Z"),
       operationKey: "create-personal-news",
       recurrence: { daysOfWeek: [1, 2, 3, 4, 5], interval: 1, kind: "weekly" },
@@ -151,7 +151,7 @@ describeWithDatabase("agent schedule repositories", () => {
     const fixture = await createFixture();
     const auth = privateAuth(fixture, "member");
     const now = new Date("2026-09-13T07:00:00Z");
-    const schedule = await agentScheduleRepository.create(auth, {
+    const schedule = await agentScheduleRepository.create(auth, { executionContext: "isolated",
       firstRunAt: now, operationKey: "diagnostic-schedule", recurrence: { kind: "once" },
       scenarioPrompt: "Собери дайджест", scope: "personal", timezone: "Europe/Moscow", title: "Дайджест", userRequest: "Новости",
     });
@@ -174,7 +174,7 @@ describeWithDatabase("agent schedule repositories", () => {
   it("requires a verified family group destination for family schedules", async () => {
     const fixture = await createFixture();
 
-    await expect(agentScheduleRepository.create(privateAuth(fixture, "owner"), {
+    await expect(agentScheduleRepository.create(privateAuth(fixture, "owner"), { executionContext: "isolated",
       firstRunAt: new Date("2026-07-17T06:00:00.000Z"),
       operationKey: "bad-family-destination",
       recurrence: { interval: 1, kind: "daily" },
@@ -185,7 +185,7 @@ describeWithDatabase("agent schedule repositories", () => {
       userRequest: "Присылай семье сводку",
     })).rejects.toThrowError(/AGENT_SCHEDULE_DESTINATION_INVALID/);
 
-    await expect(agentScheduleRepository.create(familyAuth(fixture, "owner"), {
+    await expect(agentScheduleRepository.create(familyAuth(fixture, "owner"), { executionContext: "isolated",
       firstRunAt: new Date("2026-07-17T06:00:00.000Z"),
       operationKey: "good-family-destination",
       recurrence: { interval: 1, kind: "daily" },
@@ -200,7 +200,7 @@ describeWithDatabase("agent schedule repositories", () => {
   it("rejects history configuration for a non-group schedule before SQL mutation", async () => {
     const fixture = await createFixture();
     const auth = privateAuth(fixture, "member");
-    const schedule = await agentScheduleRepository.create(auth, {
+    const schedule = await agentScheduleRepository.create(auth, { executionContext: "isolated",
       firstRunAt: new Date("2026-07-17T06:00:00.000Z"),
       operationKey: "create-personal-without-history",
       recurrence: { interval: 1, kind: "daily" },
@@ -224,10 +224,10 @@ describeWithDatabase("agent schedule repositories", () => {
     expect(persisted.rows[0]?.history_window_days).toBeNull();
   });
 
-  it("claims a weekday schedule once and advances it after Eve completion", async () => {
+  it("claims a weekday schedule once and advances it after the turn completes", async () => {
     const fixture = await createFixture();
     const auth = privateAuth(fixture, "member");
-    await agentScheduleRepository.create(auth, {
+    await agentScheduleRepository.create(auth, { executionContext: "isolated",
       firstRunAt: new Date("2026-07-17T09:00:00.000Z"),
       operationKey: "weekday-created",
       recurrence: { daysOfWeek: [1, 2, 3, 4, 5], interval: 1, kind: "weekly" },
@@ -265,13 +265,13 @@ describeWithDatabase("agent schedule repositories", () => {
     });
     await agentScheduleDispatchRepository.markRunning(claimed!, {
       applicationSessionId: prepared.id,
-      eveSessionId: "eve-schedule-1",
+      agentSessionId: "agent-schedule-1",
     });
     const delivery = {
       applicationSessionId: prepared.id,
       content: "Будничная сводка готова",
       deliveredAt: new Date("2026-07-17T09:01:00.000Z"),
-      eveSessionId: "eve-schedule-1",
+      agentSessionId: "agent-schedule-1",
       familyId: fixture.familyId,
       groupId: null,
       messageThreadId: null,
@@ -296,7 +296,7 @@ describeWithDatabase("agent schedule repositories", () => {
     // Once Telegram delivery belongs to a durable run, retain the receipt despite identity conflict.
     await expect(agentScheduleDispatchRepository.completeDeliveredRun({
       ...delivery,
-      eveSessionId: "eve-schedule-conflict",
+      agentSessionId: "agent-schedule-conflict",
     })).rejects.toMatchObject({ code: "AGENT_SCHEDULE_DELIVERY_STATE_INVALID" });
     await expect(database().query("SELECT 1 FROM proactive_deliveries")).resolves.toMatchObject({
       rowCount: 1,
@@ -319,7 +319,7 @@ describeWithDatabase("agent schedule repositories", () => {
   it("reclaims an expired pre-handoff lease without duplicating the scheduled occurrence", async () => {
     const fixture = await createFixture();
     const auth = privateAuth(fixture, "member");
-    await agentScheduleRepository.create(auth, {
+    await agentScheduleRepository.create(auth, { executionContext: "isolated",
       firstRunAt: new Date("2026-07-17T09:00:00.000Z"),
       operationKey: "recoverable-created",
       recurrence: { kind: "once" },
@@ -359,13 +359,13 @@ describeWithDatabase("agent schedule repositories", () => {
     });
     await agentScheduleDispatchRepository.markRunning(reclaimed!, {
       applicationSessionId: prepared.id,
-      eveSessionId: "eve-schedule-recovered",
+      agentSessionId: "agent-schedule-recovered",
     });
     await agentScheduleDispatchRepository.completeDeliveredRun({
       applicationSessionId: prepared.id,
       content: "Одноразовый результат",
       deliveredAt: new Date("2026-07-17T09:01:00.000Z"),
-      eveSessionId: "eve-schedule-recovered",
+      agentSessionId: "agent-schedule-recovered",
       familyId: fixture.familyId,
       groupId: null,
       messageThreadId: null,
@@ -386,7 +386,7 @@ describeWithDatabase("agent schedule repositories", () => {
 
   it("does not expire a running scenario with its short handoff lease", async () => {
     const fixture = await createFixture();
-    await agentScheduleRepository.create(privateAuth(fixture, "member"), {
+    await agentScheduleRepository.create(privateAuth(fixture, "member"), { executionContext: "isolated",
       firstRunAt: new Date("2026-07-17T09:00:00.000Z"),
       operationKey: "long-running-created",
       recurrence: { kind: "once" },
@@ -417,10 +417,10 @@ describeWithDatabase("agent schedule repositories", () => {
 
     await agentScheduleDispatchRepository.markRunning(claimed!, {
       applicationSessionId: prepared.id,
-      eveSessionId: "eve-schedule-long-running",
+      agentSessionId: "agent-schedule-long-running",
     });
     await admitScheduledAgentTurn({ runId: claimed!.runId, applicationSessionId: prepared.id,
-      eveSessionId: "eve-schedule-long-running", eveTurnId: "turn_0" });
+      agentSessionId: "agent-schedule-long-running", agentTurnId: "turn_0" });
 
     await expect(agentScheduleDispatchRepository.claimDue({
       leaseMilliseconds: 1_000,
@@ -436,10 +436,10 @@ describeWithDatabase("agent schedule repositories", () => {
     });
   });
 
-  it("does not retry a legacy expired lease after Eve handoff may have started", async () => {
+  it("does not retry a legacy expired lease after the turn handoff may have started", async () => {
     const fixture = await createFixture();
     const auth = privateAuth(fixture, "member");
-    await agentScheduleRepository.create(auth, {
+    await agentScheduleRepository.create(auth, { executionContext: "isolated",
       firstRunAt: new Date("2026-07-17T09:00:00.000Z"),
       operationKey: "ambiguous-created",
       recurrence: { kind: "once" },

@@ -6,12 +6,13 @@
  * - `resolveMemoryTurnSource`: resolves current, visible-delta, or review-batch source for `remember`.
  * - `releaseMemoryTurnSources`: releases timeline retention at the terminal turn boundary.
  */
-import type { SessionContext } from "eve/context";
+import type { SessionContext } from "../runtime/context.js";
 
 import { AppError } from "./app-error.js";
 import type { MemoryAuthorization } from "./memory-context.js";
 import { memoryTurnSourceRepository } from "./memory-turn-source-repository.js";
 import { resolveTelegramSessionActor } from "./telegram-session-actor.js";
+import { conversationWakeupRunId } from "./conversation-wakeups/conversation-wakeup-turn.js";
 
 const POSITIVE_SEQUENCE_PATTERN = /^[1-9]\d*$/u;
 const POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807n;
@@ -41,9 +42,11 @@ export async function bindMemoryTurnSources(ctx: TurnContext): Promise<void> {
   const visibleTimelineEntryIds = attributes?.telegramTimelineVisibleEntryIds;
   // Scheduled prompts have no verified Telegram message that could serve as memory evidence.
   if (typeof attributes?.scheduledRunId === "string" && attributes.scheduledRunId) return;
+  // Neither has a wake-up turn: it answers the agent's own schedule, not a person's message.
+  if (conversationWakeupRunId(ctx.session.auth) !== null) return;
 
-  // Eve resumes an approved tool in the same durable turn but supplies freshly revalidated callback
-  // auth without replaying the original message metadata. Accept only the exact retained binding.
+  // A resumed turn brings freshly revalidated auth without the original message metadata (a button
+  // continuation already returned above). Accept only the exact retained binding.
   const sourceAttributesAbsent =
     conversationId === undefined && currentTimelineEntryId === undefined && visibleTimelineEntryIds === undefined && memoryReviewBatchId === undefined && memoryReviewSourceEntryIds === undefined;
   if (
@@ -52,8 +55,8 @@ export async function bindMemoryTurnSources(ctx: TurnContext): Promise<void> {
     sourceAttributesAbsent &&
     (await memoryTurnSourceRepository.verifyBoundResume({
       applicationSessionId,
-      eveSessionId: ctx.session.id,
-      eveTurnId: ctx.session.turn.id,
+      agentSessionId: ctx.session.id,
+      agentTurnId: ctx.session.turn.id,
       invokingActorId: invokingActor.id,
       invokingActorKind: invokingActor.kind,
     }))
@@ -78,8 +81,8 @@ export async function bindMemoryTurnSources(ctx: TurnContext): Promise<void> {
     await memoryTurnSourceRepository.bindReview({
       applicationSessionId,
       conversationId,
-      eveSessionId: ctx.session.id,
-      eveTurnId: ctx.session.turn.id,
+      agentSessionId: ctx.session.id,
+      agentTurnId: ctx.session.turn.id,
       invokingActorId: invokingActor.id,
       invokingActorKind: invokingActor.kind,
       memoryReviewBatchId,
@@ -103,8 +106,8 @@ export async function bindMemoryTurnSources(ctx: TurnContext): Promise<void> {
     applicationSessionId,
     conversationId,
     currentTimelineEntryId,
-    eveSessionId: ctx.session.id,
-    eveTurnId: ctx.session.turn.id,
+    agentSessionId: ctx.session.id,
+    agentTurnId: ctx.session.turn.id,
     invokingActorId: invokingActor.id,
     invokingActorKind: invokingActor.kind,
     ...(typeof memoryReviewBatchId === "string" ? { memoryReviewBatchId } : {}),
@@ -136,8 +139,8 @@ export async function resolveMemoryTurnSource(
     throw sourceError("personal_delta_source_forbidden");
   }
   const source = await memoryTurnSourceRepository.resolve({
-    eveSessionId: ctx.session.id,
-    eveTurnId: ctx.session.turn.id,
+    agentSessionId: ctx.session.id,
+    agentTurnId: ctx.session.turn.id,
     sourceSequence: sourceSequence ?? null,
   });
   if (!source) throw sourceError("source_not_bound_to_turn");

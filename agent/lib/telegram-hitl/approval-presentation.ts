@@ -6,7 +6,7 @@
  * - `createTelegramApprovalPresenter`: injectable presenter with verified subject resolution.
  * - `presentTelegramApproval`: production presenter backed by PostgreSQL repositories.
  */
-import type { SessionContext } from "eve/context";
+import type { SessionContext } from "../../runtime/context.js";
 
 import { AppError } from "../app-error.js";
 import { requirePrivateTelegramOwner } from "../family-context.js";
@@ -15,8 +15,10 @@ import { profileProjectionPolicyRepository } from "../profile-projection-policy-
 import { requireProfileProjectionUpdate } from "../profile-projection-input.js";
 import { telegramGroupAdministrationRepository } from "../telegram-group-administration-repository.js";
 import { requireManageTelegramGroupInput } from "../tools/manage_telegram_group.js";
-import { skillRequiresBash } from "../group-skills/group-skill-catalog.js";
-import type { GmailMessageApprovalSubject } from "../google-workspace/gmail-message-approval.js";
+import { requireManageSkillInput } from "../tools/manage_skill.js";
+import { familySkillRepository, type FamilySkillSummary, type FamilySkillVersion } from "../family-skills/family-skill-repository.js";
+import { requireGrantableSkills, skillGrantCatalog, skillNeedsBash, type SkillGrantCatalog } from "../family-skills/skill-grants.js";
+import type { GmailMessagesApprovalSubject } from "../google-workspace/gmail-message-approval.js";
 import { loadGmailMessageApproval } from "../google-workspace/gmail-message-approval.js";
 import { requireGmailMessageInput } from "../google-workspace/gmail-message-contract.js";
 import {
@@ -33,95 +35,28 @@ import {
   buildApprovalMessage,
   googleWorkspaceFacts,
 } from "./approval-message.js";
+import { gmailApprovalOptions, gmailApprovalPrompt } from "./gmail-approval-prompt.js";
+import { skillApprovalPrompt } from "./skill-approval-prompt.js";
 
 interface ApprovalPresentationDependencies {
+  findFamilySkill(
+    name: string,
+    ctx: Pick<SessionContext, "session">,
+  ): Promise<{ summary: FamilySkillSummary; versions: FamilySkillVersion[] }>;
+  findSkillGrantCatalog(ctx: Pick<SessionContext, "session">): Promise<SkillGrantCatalog>;
   findProfileProjectionGroup(groupRef: string, ctx: Pick<SessionContext, "session">): Promise<string | null>;
   findGroupTitle(telegramChatId: string, ctx: Pick<SessionContext, "session">): Promise<string | null>;
-  findGmailMessage(
-    messageId: string,
+  findGmailMessages(
+    messageIds: readonly string[],
     profileRef: string,
     ctx: Pick<SessionContext, "session">,
-  ): Promise<GmailMessageApprovalSubject>;
+  ): Promise<GmailMessagesApprovalSubject>;
 }
 
 export type TelegramApprovalPresenter = (
   request: TelegramInputRequest,
   ctx: Pick<SessionContext, "session">,
 ) => Promise<TelegramInputRequest>;
-
-const GMAIL_MESSAGE_ACTIONS = {
-  delete: {
-    action: "Безвозвратно удалить письмо Gmail",
-    consequence: "Письмо будет удалено навсегда. Его нельзя будет восстановить.",
-  },
-  mark_read: {
-    action: "Отметить письмо Gmail прочитанным",
-    consequence: "Письмо больше не будет отмечено как непрочитанное.",
-  },
-  mark_unread: {
-    action: "Отметить письмо Gmail непрочитанным",
-    consequence: "Письмо будет отмечено как непрочитанное.",
-  },
-  restore: {
-    action: "Восстановить письмо Gmail из корзины",
-    consequence: "Письмо будет возвращено из корзины.",
-  },
-  trash: {
-    action: "Переместить письмо в корзину Gmail",
-    consequence: "Письмо будет перемещено в корзину. Его можно будет восстановить.",
-  },
-} as const;
-
-function approvalValue(value: string | null, missing: string, maxCharacters = 500): string {
-  if (value === null) return missing;
-  const normalized = value.replace(/[\p{Cc}\p{Cf}]+/gu, " ").replace(/\s+/gu, " ").trim();
-  if (!normalized) return missing;
-  return normalized.length <= maxCharacters
-    ? normalized
-    : `${normalized.slice(0, maxCharacters - 1).trimEnd()}…`;
-}
-
-function gmailMessagePrompt(
-  actionName: keyof typeof GMAIL_MESSAGE_ACTIONS,
-  message: GmailMessageApprovalSubject,
-): string {
-  const action = GMAIL_MESSAGE_ACTIONS[actionName];
-  return [
-    "Подтверждение действия",
-    "",
-    `Действие: ${action.action}`,
-    `Профиль: ${message.scope === "personal" ? "личный" : "семейный"}`,
-    `Почтовый ящик: ${approvalValue(message.profileDisplayName, "не определён")}`,
-    `Отправитель: ${approvalValue(message.from, "не указан")}`,
-    `Тема: ${approvalValue(message.subject, "без темы")}`,
-    `Дата: ${approvalValue(message.date, "не указана")}`,
-    `Фрагмент письма: ${approvalValue(message.snippet, "не предоставлен Gmail", 240)}`,
-    `Gmail ID: ${message.id}`,
-    "",
-    `Что произойдёт: ${action.consequence}`,
-  ].join("\n");
-}
-
-function gmailMessageOptions(
-  request: TelegramInputRequest,
-  actionName: keyof typeof GMAIL_MESSAGE_ACTIONS,
-): TelegramInputRequest["options"] {
-  const approveLabels: Readonly<Record<keyof typeof GMAIL_MESSAGE_ACTIONS, string>> = {
-    delete: "Удалить навсегда",
-    mark_read: "Отметить прочитанным",
-    mark_unread: "Отметить непрочитанным",
-    restore: "Восстановить письмо",
-    trash: "Переместить в корзину",
-  };
-  return request.options?.map((option) => ({
-    ...option,
-    label: option.id === "approve"
-      ? approveLabels[actionName]
-      : option.id === "deny" || option.id === "cancel"
-        ? "Отменить"
-        : option.label,
-  }));
-}
 
 const GROUP_MESSAGE_MODES = {
   owner_only: "Запуск только по обращению владельца; контекст всех сообщений (owner_only)",
@@ -166,14 +101,21 @@ export function createTelegramApprovalPresenter(
           throw new AppError("AGENT_APPROVAL_GROUP_NOT_FOUND", "Группа не найдена в вашей семье. Обновите список групп и повторите запрос");
         }
         const group = `${title} (${chatId})`;
-        if (parsed.action === "update_skills") return {
-          ...localized,
-          prompt: buildApprovalMessage({
-            actionLabel: "изменение скиллов группы",
-            facts: [...approvalFact("Группа", group), ...approvalFact("Скиллы", parsed.skillAllowlist.join(", ") || "нет")],
-            consequence: parsed.skillAllowlist.some(skillRequiresBash) ? GROUP_SKILLS_BASH_CONSEQUENCE : GROUP_SKILLS_CONSEQUENCE,
-          }),
-        };
+        if (parsed.action === "update_skills") {
+          // A list naming a skill that does not exist now is refused before the owner sees a button.
+          const catalog = await dependencies.findSkillGrantCatalog(ctx);
+          requireGrantableSkills(catalog, parsed.skillAllowlist);
+          return {
+            ...localized,
+            prompt: buildApprovalMessage({
+              actionLabel: "изменение скиллов группы",
+              facts: [...approvalFact("Группа", group), ...approvalFact("Скиллы", parsed.skillAllowlist.join(", ") || "нет")],
+              consequence: parsed.skillAllowlist.some((name) => skillNeedsBash(catalog, name))
+                ? GROUP_SKILLS_BASH_CONSEQUENCE
+                : GROUP_SKILLS_CONSEQUENCE,
+            }),
+          };
+        }
         return {
           ...localized,
           prompt: buildApprovalMessage({
@@ -188,16 +130,22 @@ export function createTelegramApprovalPresenter(
         };
       }
     }
+    if (request.display === "confirmation" && request.action.toolName === "manage_skill") {
+      const parsed = requireManageSkillInput(request.action.input);
+      if (parsed.action !== "list" && parsed.action !== "stage" && parsed.action !== "view") {
+        return { ...localized, prompt: skillApprovalPrompt(parsed, await dependencies.findFamilySkill(parsed.name, ctx)) };
+      }
+    }
     if (
       request.display === "confirmation" &&
       request.action.toolName === "manage_gmail_message"
     ) {
       const input = requireGmailMessageInput(request.action.input);
-      const message = await dependencies.findGmailMessage(input.messageId, input.profileRef, ctx);
+      const subject = await dependencies.findGmailMessages(input.messageIds, input.profileRef, ctx);
       return {
         ...localized,
-        options: gmailMessageOptions(localized, input.action),
-        prompt: gmailMessagePrompt(input.action, message),
+        options: gmailApprovalOptions(localized, input.action, input.messageIds.length),
+        prompt: gmailApprovalPrompt(input.action, input.messageIds, subject),
       };
     }
     if (
@@ -218,6 +166,12 @@ export function createTelegramApprovalPresenter(
 }
 
 export const presentTelegramApproval = createTelegramApprovalPresenter({
+  async findFamilySkill(name, ctx) {
+    return await familySkillRepository.versions(requirePrivateTelegramOwner(ctx).familyId, name);
+  },
+  async findSkillGrantCatalog(ctx) {
+    return skillGrantCatalog(await familySkillRepository.grantableSkills(requirePrivateTelegramOwner(ctx).familyId));
+  },
   async findProfileProjectionGroup(groupRef, ctx) {
     requirePrivateTelegramOwner(ctx);
     const policies = await profileProjectionPolicyRepository.list(requireMemoryAuthorization(ctx));
@@ -231,5 +185,5 @@ export const presentTelegramApproval = createTelegramApprovalPresenter({
     });
     return groups.find((group) => group.telegramChatId === telegramChatId)?.title ?? null;
   },
-  findGmailMessage: loadGmailMessageApproval,
+  findGmailMessages: loadGmailMessageApproval,
 });

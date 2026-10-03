@@ -5,7 +5,7 @@
  * - `agent/tools` holds only the dynamic resolver; native `agent` supplies fresh-context delegation.
  * - Exact application tool-module allowlist after CRUD consolidation.
  * - Exact static package directories plus the single dynamic policy resolver.
- * - The opt-in tone skill lives outside static Eve discovery.
+ * - The opt-in tone skill is not part of any static skill list.
  * - The compiled dynamic resolver stays step-scoped and avoids durable helper-closure replay.
  */
 import { readFile, readdir } from "node:fs/promises";
@@ -43,6 +43,7 @@ const EXPECTED_TOOL_MODULES = [
   "manage_memory_thread.ts",
   "manage_profile_projection.ts",
   "manage_reminder.ts",
+  "manage_skill.ts",
   "manage_telegram_group.ts",
   "notification_settings.ts",
   "read_memory_thread.ts",
@@ -51,6 +52,7 @@ const EXPECTED_TOOL_MODULES = [
   "remember.ts",
   "search_memories.ts",
   "search_memory_threads.ts",
+  "send_voice_message.ts",
   "send_workspace_file.ts",
   "start_new_context.ts",
 ] as const;
@@ -68,7 +70,7 @@ const EXPECTED_SKILL_DIRECTORIES = [
 ] as const;
 
 describe("agent capability surface", () => {
-  it("discovers only the dynamic resolver so Eve provides native delegation", async () => {
+  it("keeps only the dynamic resolver in the tools folder", async () => {
     const entries = await readdir(`${AGENT_ROOT}/tools`, { withFileTypes: true });
     const toolFiles = entries
       .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
@@ -78,7 +80,7 @@ describe("agent capability surface", () => {
     expect(toolFiles).toEqual([...EXPECTED_DISCOVERED_TOOL_FILES]);
   });
 
-  it("keeps every application tool implementation outside Eve discovery", async () => {
+  it("keeps every application tool implementation in lib/tools", async () => {
     const entries = await readdir(`${AGENT_ROOT}/lib/tools`, { withFileTypes: true });
     const toolModules = entries
       .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
@@ -126,12 +128,5 @@ describe("agent capability surface", () => {
         expect(files).toContain("SKILL.md");
       }),
     );
-  });
-
-  it("authors the whole dynamic tool surface at step scope", async () => {
-    const source = await readFile(`${AGENT_ROOT}/tools/capabilities.ts`, "utf8");
-
-    expect(source).toContain('"step.started": async');
-    expect(source).not.toContain('"turn.started"');
   });
 });

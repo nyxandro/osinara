@@ -6,6 +6,7 @@
  * - Anthropic Messages requests enable adaptive thinking and use configured authentication.
  * - Streaming thinking signatures survive the assistant/tool-result round trip unchanged.
  * - Codex subscription requests carry the selected reasoning effort through Chat Completions.
+ * - Turn memory projection is confined to Chat Completions; Anthropic keeps its system field.
  */
 import { generateText, stepCountIs, streamText, tool } from "ai";
 import type { LanguageModelV4CallOptions } from "@ai-sdk/provider";
@@ -13,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { createConfiguredLanguageModel } from "./model-transport.js";
+import { formatTurnMemoryContext } from "./prompt/turn-memory-context.js";
 
 const SIGNATURE = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
@@ -242,6 +244,46 @@ describe("createConfiguredLanguageModel", () => {
     expect(headers?.get("authorization")).toBeNull();
   });
 
+  it("leaves turn memory in the Anthropic system prefix", async () => {
+    // Anthropic carries system context in its own request field and marks its own cache
+    // breakpoints, so the projection is deliberately confined to Chat Completions.
+    let body: { system?: { text?: string }[]; messages?: unknown[] } | undefined;
+    const model = createConfiguredLanguageModel({
+      apiKey: "model-secret",
+      fetch: async (_input, init) => {
+        body = JSON.parse(String(init?.body));
+        return jsonResponse({
+          content: [{ text: "Готово", type: "text" }],
+          id: "msg_projection_001",
+          model: "compatible-model",
+          role: "assistant",
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          type: "message",
+          usage: { input_tokens: 1, output_tokens: 1 },
+        });
+      },
+      maxOutputTokens: 8_000,
+      modelId: "compatible-model",
+      transport: {
+        authentication: "api-key",
+        baseUrl: "https://example-provider.test/v1",
+        protocol: "anthropic-messages",
+        reasoning: null,
+      },
+    });
+
+    await model.doGenerate({
+      prompt: [
+        { content: `Правила\n\n${formatTurnMemoryContext("Записи памяти")}`, role: "system" },
+        { content: [{ text: "Проверка", type: "text" }], role: "user" },
+      ],
+    } as LanguageModelV4CallOptions);
+
+    expect(body?.system?.map((part) => part.text).join("")).toContain("<osinara_turn_memory>");
+    expect(body?.messages).toHaveLength(1);
+  });
+
   it.each([
     ["max_tokens", "AGENT_MODEL_OUTPUT_TRUNCATED"],
     ["refusal", "AGENT_MODEL_OUTPUT_FILTERED"],
@@ -274,7 +316,7 @@ describe("createConfiguredLanguageModel", () => {
     } as LanguageModelV4CallOptions)).rejects.toThrow(code);
   });
 
-  it("rejects a truncated streaming response before its finish event reaches Eve", async () => {
+  it("rejects a truncated streaming response before its finish event reaches the turn", async () => {
     const model = createConfiguredLanguageModel({
       apiKey: "model-secret",
       fetch: async () => new Response([

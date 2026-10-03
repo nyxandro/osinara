@@ -50,6 +50,11 @@ class ApplicationDatabaseClient extends Client {
   }
 }
 
+/** A connection of its own, outside any pool, with the same error handling as pooled ones. */
+export function createApplicationDatabaseClient(config: ClientConfig): Client {
+  return new ApplicationDatabaseClient(config);
+}
+
 export function createApplicationDatabasePool(config: PoolConfig): Pool {
   const pool = new Pool({ ...config,Client: ApplicationDatabaseClient });
   pool.on("error",(error,client) => {

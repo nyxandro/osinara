@@ -80,20 +80,30 @@ describe("production container contract", () => {
       "FROM eceasy/cli-proxy-api@sha256:591a09c19de769be09a2e56277365cd568b83fc7d98c94d2e7e7bef7069f7422 AS cli-proxy",
     );
 
-    // Eve 0.40.0 serves built output but still bundles authored modules during `eve start`.
+    // The agent runs bundled; its authored tree stays for `instructions.md` and operator `tsx` commands.
     const runtime = dockerfile.slice(dockerfile.indexOf(" AS runtime"));
     expect(runtime).toContain("COPY --from=build /app/.runtime ./.runtime");
     expect(runtime).toContain("COPY --from=build /app/agent ./agent");
+    expect(entrypoint).toContain("exec node .runtime/agent/main.js");
+    expect(entrypoint).not.toContain("npm run start");
     expect(runtime).not.toMatch(/COPY --from=build \/app\/(scripts|services)\b/);
     expect(entrypoint).toContain("node .runtime/scripts/migrate.js");
     expect(entrypoint).toContain("node .runtime/scripts/validate-model-provider-config.js");
     expect(entrypoint).not.toContain("npm run migrate");
   });
 
-  it("installs the version-pinned Eve patch in build and production stages", () => {
+  it("installs dependencies without install-time scripts", () => {
     const dockerfile = readProjectFile("Dockerfile");
+    const packageJson = JSON.parse(readProjectFile("package.json")) as {
+      dependencies: Record<string, string>;
+      scripts: Record<string, string>;
+    };
 
-    expect(dockerfile.match(/COPY scripts\/apply-eve-patches\.ts/g)).toHaveLength(2);
+    expect(dockerfile).not.toContain("npm run postinstall");
+    expect(dockerfile).toContain("RUN npm ci --ignore-scripts \\\n    && npm run install:gws");
+    expect(dockerfile).toContain("RUN npm ci --omit=dev --ignore-scripts \\\n    && npm run install:gws");
+    expect(packageJson.scripts).not.toHaveProperty("postinstall");
+    expect(packageJson.scripts["migrate:runtime"]).toBe("node .runtime/scripts/migrate.js");
   });
 
   it("pins the official Russian root CA inside the sandbox runtime", () => {
@@ -175,7 +185,6 @@ describe("production container contract", () => {
       "postgres-data",
       "memory-embedding-model-e5",
       "google-workspace-credentials",
-      "sandbox-data",
       "tool-environments",
       "workspace-data",
       "cli-proxy-auth",
@@ -199,7 +208,7 @@ describe("production container contract", () => {
     expect(compose.match(/logging: \*bounded-json-logs/g)).toHaveLength(12);
   });
 
-  it("limits Docker control to the runner and tunes pinned TEI for one CPU", () => {
+  it("limits Docker control to the runner and pins every production image", () => {
     const compose = readProjectFile("compose.production.yaml");
     const agent = service(compose, "agent", "migrate");
     const runner = service(compose, "sandbox-runner", "sandbox-egress-proxy");
@@ -207,8 +216,6 @@ describe("production container contract", () => {
     expect(compose.match(/\/var\/run\/docker\.sock/g)).toHaveLength(2);
     expect(agent).not.toContain("/var/run/docker.sock");
     expect(agent).toContain("google-workspace-credentials:/app/google-workspace-credentials");
-    expect(agent).not.toContain("/app/.eve/.workflow-data");
-    expect(agent).not.toContain("workflow-data:/app/.workflow-data");
     expect(runner).toContain("/var/run/docker.sock:/var/run/docker.sock");
     expect(runner).not.toContain("google-workspace-credentials");
     expect(runner).toContain("      - sandbox-control");
@@ -219,11 +226,11 @@ describe("production container contract", () => {
     expect(compose).toContain(
       "ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07",
     );
-    expect(compose).toContain("    cpus: 1.0\n");
-    expect(compose).toContain('      OMP_NUM_THREADS: "1"\n');
-    expect(compose).toContain('      - "1"\n      - --max-client-batch-size');
     expect(compose).toContain("      - intfloat/multilingual-e5-small\n");
     expect(compose).toContain("      - 614241f622f53c4eeff9890bdc4f31cfecc418b3\n");
+    // The embedding service's CPU, memory and queue settings are not frozen here as literals:
+    // `compose-runtime.test.ts` holds them to the measurement they came from, so a future change
+    // has to move them together instead of matching a number nobody can explain.
   });
 });
 
@@ -346,7 +353,7 @@ describe("server deployment contract", () => {
     expect(script).toContain("pg_restore --list");
     expect(script).toContain("tar -tzf");
     expect(script).toContain("restart_current_release");
-    expect(script).toContain("127.0.0.1:8082/eve/v1/health");
+    expect(script).toContain("127.0.0.1:8082/v1/health");
     expect(script).not.toMatch(/git\s+(pull|fetch|checkout)/);
     expect(script).not.toMatch(/docker\s+(compose\s+)?build/);
     const main = readProjectFile("scripts/production-deploy.sh");
@@ -462,7 +469,6 @@ describe("server deployment contract", () => {
     expect(script).toContain("HAVING count(*) = 1");
     expect(script).toContain("MIGRATION_STARTED");
     expect(script).not.toContain("osinara-production-memory-embedding-model-e5 \\");
-    expect(script).not.toContain("osinara-production-sandbox-data \\");
   });
 
   it("installs a persistent root timer without embedding secrets", () => {

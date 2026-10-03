@@ -15,6 +15,8 @@ import {
   createMainAgentPrivateMemoryFixture,
 } from "../memory-agent-write.integration-fixtures.js";
 import { memoryTurnSourceRepository } from "../memory-turn-source-repository.js";
+import { createSessionHistory } from "../../runtime/history/history-repository.js";
+import { newSessionId, newTurnId } from "../../runtime/ids.js";
 import { memoryReviewRepository } from "./memory-review-repository.js";
 import { memoryReviewDispatchRepository } from "./memory-review-dispatch-repository.js";
 
@@ -174,6 +176,48 @@ describeWithDatabase("memory review repository", () => {
     )).resolves.toMatchObject({ rows: [{ count: 0 }] });
   });
 
+  it("finds the batch of a parked turn from a continuation two answers later", async () => {
+    const fixture = await createMainAgentMemoryFixture();
+    await memoryReviewRepository.initializeLane({
+      conversationId: fixture.conversationId,
+      messageThreadId: null,
+      processedThroughSequence: "1",
+    });
+    const session = await database().query<{ id: string }>(
+      `INSERT INTO conversation_sessions
+         (thread_id, generation, family_id, group_id, scope, kind, conversation_key,
+          continuation_token, started_at, last_activity_at)
+       VALUES (gen_random_uuid(), 0, $1, $2, 'family', 'canonical', 'review-continued',
+               'review-continued', now(), now()) RETURNING id`,
+      [fixture.familyId, fixture.groupId],
+    );
+    const source = await insertUserMessage({ conversationId: fixture.conversationId, groupId: fixture.groupId, sequence: 2 });
+    const batch = await memoryReviewRepository.prepareInteractiveTurn({
+      applicationSessionId: session.rows[0]!.id, groupId: fixture.groupId, timelineEntryId: source.id,
+    });
+    const runtimeSession = newSessionId();
+    await createSessionHistory(database(), {
+      announcedSkills: null, applicationSessionId: session.rows[0]!.id, channelState: null,
+      compaction: { inputTokens: null, promptMessageCount: null }, history: [], initiatorAuth: null, parentSessionId: null,
+      sandbox: null, sessionId: runtimeSession, source: "runtime", todo: null,
+    });
+    const [parked, answered, answeredAgain] = [newTurnId(), newTurnId(), newTurnId()];
+    for (const [sequence, id, resumes] of [[0, parked, null], [1, answered, parked], [2, answeredAgain, answered]] as const) {
+      await database().query(
+        `INSERT INTO agent_turns (id, session_id, sequence, kind, status, resumes_turn_id, auth, channel, input, completed_at)
+         VALUES ($1, $2, $3, 'conversation', 'completed', $4, '{}', '{"kind":"telegram"}', '{"context":[]}', now())`,
+        [id, runtimeSession, sequence, resumes],
+      );
+    }
+    await memoryReviewRepository.bindAgentTurn({
+      applicationSessionId: session.rows[0]!.id, batchId: batch!.batchId, agentSessionId: runtimeSession, agentTurnId: parked,
+    });
+
+    await expect(memoryReviewRepository.batchForTurn({ agentSessionId: runtimeSession, agentTurnId: answeredAgain }))
+      .resolves.toEqual({ batchId: batch!.batchId, agentTurnId: parked });
+    await expect(memoryReviewRepository.batchForTurn({ agentSessionId: "wrun_other", agentTurnId: answeredAgain })).resolves.toBeNull();
+  });
+
   it("retains active sources and advances only after successful completion", async () => {
     const fixture = await createMainAgentMemoryFixture();
     await memoryReviewRepository.initializeLane({
@@ -206,18 +250,18 @@ describeWithDatabase("memory review repository", () => {
       [firstSource.id],
     )).rejects.toThrow();
 
-    await memoryReviewRepository.bindEveTurn({
+    await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: session.rows[0]!.id,
       batchId: first!.batchId,
-      eveSessionId: "eve-retention-complete",
-      eveTurnId: "turn-retention-complete",
+      agentSessionId: "agent-retention-complete",
+      agentTurnId: "turn-retention-complete",
     });
     await memoryTurnSourceRepository.bind({
       applicationSessionId: session.rows[0]!.id,
       conversationId: fixture.conversationId,
       currentTimelineEntryId: firstSource.id,
-      eveSessionId: "eve-retention-complete",
-      eveTurnId: "turn-retention-complete",
+      agentSessionId: "agent-retention-complete",
+      agentTurnId: "turn-retention-complete",
       invokingActorId: "agent-memory-author",
       invokingActorKind: "telegram_user",
       memoryReviewBatchId: first!.batchId,
@@ -227,10 +271,10 @@ describeWithDatabase("memory review repository", () => {
     await memoryReviewRepository.completeBatch({
       batchId: first!.batchId,
       completedAt: new Date(),
-      eveSessionId: "eve-retention-complete",
-      eveTurnId: "turn-retention-complete",
+      agentSessionId: "agent-retention-complete",
+      agentTurnId: "turn-retention-complete",
     });
-    await memoryTurnSourceRepository.release("eve-retention-complete", "turn-retention-complete");
+    await memoryTurnSourceRepository.release("agent-retention-complete", "turn-retention-complete");
     await expect(memoryReviewRepository.getLaneCursor({
       conversationId: fixture.conversationId,
       messageThreadId: null,
@@ -262,18 +306,18 @@ describeWithDatabase("memory review repository", () => {
       timelineEntryId: source.id,
     });
 
-    await memoryReviewRepository.bindEveTurn({
+    await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: session.rows[0]!.id,
       batchId: batch!.batchId,
-      eveSessionId: "eve-review-replay",
-      eveTurnId: "turn-review-replay",
+      agentSessionId: "agent-review-replay",
+      agentTurnId: "turn-review-replay",
     });
     await memoryTurnSourceRepository.bind({
       applicationSessionId: session.rows[0]!.id,
       conversationId: fixture.conversationId,
       currentTimelineEntryId: source.id,
-      eveSessionId: "eve-review-replay",
-      eveTurnId: "turn-review-replay",
+      agentSessionId: "agent-review-replay",
+      agentTurnId: "turn-review-replay",
       invokingActorId: "agent-memory-author",
       invokingActorKind: "telegram_user",
       memoryReviewBatchId: batch!.batchId,
@@ -283,8 +327,8 @@ describeWithDatabase("memory review repository", () => {
     const completion = {
       batchId: batch!.batchId,
       completedAt: new Date(),
-      eveSessionId: "eve-review-replay",
-      eveTurnId: "turn-review-replay",
+      agentSessionId: "agent-review-replay",
+      agentTurnId: "turn-review-replay",
     };
     await expect(memoryReviewRepository.completeBatch(completion))
       .resolves.toBe("recorded");
@@ -297,8 +341,8 @@ describeWithDatabase("memory review repository", () => {
     await expect(memoryReviewRepository.failRunning({
       batchId: batch!.batchId,
       diagnosticCode: "AGENT_MEMORY_REVIEW_REPLAYED_FAILURE",
-      eveSessionId: "eve-review-replay",
-      eveTurnId: "turn_0",
+      agentSessionId: "agent-review-replay",
+      agentTurnId: "turn_0",
     })).rejects.toThrowError(/AGENT_MEMORY_REVIEW_FAILURE_STATE_INVALID/u);
   });
 
@@ -322,17 +366,17 @@ describeWithDatabase("memory review repository", () => {
       groupId: fixture.groupId,
       timelineEntryId: source.id,
     });
-    await memoryReviewRepository.bindEveTurn({
+    await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: session.rows[0]!.id,
       batchId: batch!.batchId,
-      eveSessionId: "eve-review-failure-replay",
-      eveTurnId: "turn-review-failure-replay",
+      agentSessionId: "agent-review-failure-replay",
+      agentTurnId: "turn-review-failure-replay",
     });
     const failure = {
       batchId: batch!.batchId,
       diagnosticCode: "AGENT_MEMORY_REVIEW_MODEL_FAILED",
-      eveSessionId: "eve-review-failure-replay",
-      eveTurnId: "turn-review-failure-replay",
+      agentSessionId: "agent-review-failure-replay",
+      agentTurnId: "turn-review-failure-replay",
     };
 
     // Ход ничего не записал, поэтому батч освобождается, а повтор события идемпотентен.
@@ -364,17 +408,17 @@ describeWithDatabase("memory review repository", () => {
       groupId: fixture.groupId,
       timelineEntryId: source.id,
     });
-    await memoryReviewRepository.bindEveTurn({
+    await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: session.rows[0]!.id,
       batchId: batch!.batchId,
-      eveSessionId: "eve-review-wrote",
-      eveTurnId: "turn-review-wrote",
+      agentSessionId: "agent-review-wrote",
+      agentTurnId: "turn-review-wrote",
     });
     await database().query(
       `INSERT INTO memory_items_all
          (family_id, scope, kind, confirmation, sensitivity, content, source, operation_key)
        VALUES ($1, 'family', 'fact', 'model_high', 'normal', 'Записано до сбоя', $2, $3)`,
-      [fixture.familyId, "eve:eve-review-wrote:turn-review-wrote", "op-review-wrote"],
+      [fixture.familyId, "eve:agent-review-wrote:turn-review-wrote", "op-review-wrote"],
     );
 
     // Повтор такого хода создал бы дубликат, поэтому проход засчитывается. Прежний терминал
@@ -382,8 +426,8 @@ describeWithDatabase("memory review repository", () => {
     await expect(memoryReviewRepository.failRunning({
       batchId: batch!.batchId,
       diagnosticCode: "AGENT_MEMORY_REVIEW_MODEL_FAILED",
-      eveSessionId: "eve-review-wrote",
-      eveTurnId: "turn-review-wrote",
+      agentSessionId: "agent-review-wrote",
+      agentTurnId: "turn-review-wrote",
     })).resolves.toBe("recorded");
     await expect(database().query(
       `SELECT batch.status::text, batch.diagnostic_code,
@@ -401,7 +445,7 @@ describeWithDatabase("memory review repository", () => {
     });
   });
 
-  it("releases an interactive batch that never reached an Eve turn", async () => {
+  it("releases an interactive batch that never reached an agent turn", async () => {
     const fixture = await createMainAgentMemoryFixture();
     const session = await database().query<{ id: string }>(
       `INSERT INTO conversation_sessions

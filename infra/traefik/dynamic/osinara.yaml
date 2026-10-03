@@ -15,6 +15,6 @@ http:
         servers:
           - url: http://edge:80
         healthCheck:
-          path: /eve/v1/health
+          path: /v1/health
           interval: 10s
           timeout: 3s

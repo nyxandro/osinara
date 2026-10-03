@@ -6,13 +6,17 @@ import { spawnSync } from "node:child_process";
 import { afterEach, expect, it } from "vitest";
 
 const temporary: string[] = [];
+const OLDEST = "20260904T120000Z-to-v0.21.4";
+const OLDER = "20260905T120000Z-to-v0.21.5";
 const OLD = "20260906T120000Z-to-v0.21.6";
 const NEW = "20260907T120000Z-to-v0.21.7";
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "osinara-backup-safety-"));
   temporary.push(directory);
-  mkdirSync(join(directory, OLD));
-  writeFileSync(join(directory, OLD, "postgres.dump"), "previous backup");
+  for (const name of [OLDEST, OLDER, OLD]) {
+    mkdirSync(join(directory, name));
+    writeFileSync(join(directory, name, "postgres.dump"), "previous backup");
+  }
   return directory;
 }
 function shell(source: string) {
@@ -44,7 +48,7 @@ prune_old_deploy_backups`);
   expect(readFileSync(join(directory, OLD, "postgres.dump"), "utf8")).toBe("previous backup");
 });
 
-it("writes a portable checksum manifest and keeps only the newly verified rolling backup", () => {
+it("writes a portable checksum manifest and keeps a step back beyond the newest backup", () => {
   const directory = fixture();
   mkdirSync(join(directory, "manual-operator-copy"));
   const result = shell(`
@@ -59,7 +63,8 @@ snapshot_durable_volumes
 (cd "$BACKUPS_DIR/${NEW}" && sha256sum --check SHA256SUMS)
 prune_old_deploy_backups`);
   expect(result.status, result.stderr).toBe(0);
-  expect(readdirSync(directory).sort()).toEqual([NEW, "manual-operator-copy"].sort());
+  // Damage noticed a day or two late needs a copy from before it, not only the newest one.
+  expect(readdirSync(directory).sort()).toEqual([OLDER, OLD, NEW, "manual-operator-copy"].sort());
   expect(readFileSync(join(directory, NEW, "SHA256SUMS"), "utf8")).not.toContain(directory);
 });
 

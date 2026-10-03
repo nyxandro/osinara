@@ -40,7 +40,7 @@ suite("memory handoff recovery fence", () => {
     finally { client.release(); }
     const row = (await database().query("SELECT status,model_recovery_generation FROM memory_review_batches WHERE id=$1", [batch.id])).rows[0];
     expect(row).toEqual({ status: "pending", model_recovery_generation: 1 });
-    await expect(memoryReviewRepository.bindEveTurn({ batchId: batch.id, applicationSessionId: session.id,
-      eveSessionId: "late", eveTurnId: "turn_0" })).rejects.toThrow("AGENT_MEMORY_REVIEW_TURN_BINDING_INVALID");
+    await expect(memoryReviewRepository.bindAgentTurn({ batchId: batch.id, applicationSessionId: session.id,
+      agentSessionId: "late", agentTurnId: "turn_0" })).rejects.toThrow("AGENT_MEMORY_REVIEW_TURN_BINDING_INVALID");
   });
 });

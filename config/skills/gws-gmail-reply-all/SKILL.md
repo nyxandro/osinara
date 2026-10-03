@@ -39,7 +39,7 @@ gws gmail +reply-all --message-id <ID> --body <TEXT>
 ```bash
 gws gmail +reply-all --message-id 18f1a2b3c4d --body 'Sounds good to me!'
 gws gmail +reply-all --message-id 18f1a2b3c4d --body 'Updated' --remove bob@example.com
-gws gmail +reply-all --message-id 18f1a2b3c4d --body 'Adding Eve' --cc eve@example.com
+gws gmail +reply-all --message-id 18f1a2b3c4d --body 'Adding Carol' --cc carol@example.com
 gws gmail +reply-all --message-id 18f1a2b3c4d --body '<i>Noted</i>' --html
 gws gmail +reply-all --message-id 18f1a2b3c4d --body 'Draft reply' --draft
 ```

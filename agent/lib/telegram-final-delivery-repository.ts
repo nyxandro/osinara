@@ -7,7 +7,7 @@
  */
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
-import type { TelegramChatType } from "eve/channels/telegram";
+import type { TelegramChatType } from "../runtime/telegram/inbound.js";
 
 export type TelegramFinalDeliveryStart =
   | { deliveryId: string; deliveryToken: string; status: "started" }
@@ -18,8 +18,8 @@ export const telegramFinalDeliveryRepository = {
   async start(input: {
     applicationSessionId: string;
     chunkCount: number;
-    eveSessionId: string;
-    eveTurnId: string;
+    agentSessionId: string;
+    agentTurnId: string;
     legacyChunkCount: number;
     legacyOutputHash: string;
     outputHash: string;
@@ -31,7 +31,7 @@ export const telegramFinalDeliveryRepository = {
         `INSERT INTO telegram_final_deliveries
            (eve_session_id, eve_turn_id, application_session_id, output_hash, expected_chunk_count)
          VALUES ($1, $2, $3, $4, $5) ON CONFLICT (eve_session_id, eve_turn_id) DO NOTHING`,
-        [input.eveSessionId, input.eveTurnId, input.applicationSessionId,
+        [input.agentSessionId, input.agentTurnId, input.applicationSessionId,
           input.outputHash, input.chunkCount],
       );
       const current = await client.query<{
@@ -44,7 +44,7 @@ export const telegramFinalDeliveryRepository = {
         `SELECT id, output_hash, expected_chunk_count, status, diagnostic_code
          FROM telegram_final_deliveries
          WHERE eve_session_id = $1 AND eve_turn_id = $2 FOR UPDATE`,
-        [input.eveSessionId, input.eveTurnId],
+        [input.agentSessionId, input.agentTurnId],
       );
       const delivery = current.rows[0]!;
       const exactContract = delivery.output_hash === input.outputHash &&

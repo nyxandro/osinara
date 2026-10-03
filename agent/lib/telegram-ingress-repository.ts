@@ -20,8 +20,8 @@ import {
   validateEnqueueInput,
 } from "./telegram-ingress-contract.js";
 import { telegramIngressProcessingRepository } from "./telegram-ingress-processing-repository.js";
-import { telegramIngressSessionCursorRepository } from "./telegram-ingress-session-cursor-repository.js";
 import { claimNextTelegramIngress } from "./telegram-ingress-claim-repository.js";
+import { telegramPrivateBurstRepository } from "./telegram-private-burst.js";
 import { registerTelegramMediaGroupMember, settleTelegramMediaGroupMembersSql } from "./telegram-media-group-repository.js";
 
 const IGNORED_MEDIA_REASON = "external_media";
@@ -66,7 +66,6 @@ async function requireActiveLease(
 
 export const telegramIngressRepository: TelegramIngressRepository = {
   ...telegramIngressProcessingRepository,
-  ...telegramIngressSessionCursorRepository,
 
   async acceptMedia(input) {
     requireUpdateId(input.updateId);
@@ -247,6 +246,8 @@ export const telegramIngressRepository: TelegramIngressRepository = {
 
   claimNext: claimNextTelegramIngress,
 
+  privateBurstReadyIn: (burst) => telegramPrivateBurstRepository.readyInMilliseconds(burst),
+
   async renewLease(updateId, leaseToken, leaseMilliseconds) {
     requireLeaseMilliseconds(leaseMilliseconds);
     let expiresAt: Date | undefined;
@@ -265,18 +266,21 @@ export const telegramIngressRepository: TelegramIngressRepository = {
     return expiresAt!;
   },
 
-  async complete(updateId, leaseToken) {
+  async complete(updateId, leaseToken, sessionId) {
+    if (sessionId !== undefined) {
+      requireNonEmpty(sessionId, "AGENT_TELEGRAM_SESSION_INVALID", "Не задан идентификатор сессии сообщения");
+    }
     await requireActiveLease(updateId, leaseToken, async () => {
       const result = await database().query(
         `WITH finished AS (
            UPDATE telegram_ingress_updates
-           SET status = 'completed', completed_at = now(),
+           SET status = 'completed', eve_session_id = $3, completed_at = now(),
                lease_token = NULL, lease_expires_at = NULL, updated_at = now()
            WHERE update_id = $1 AND status = 'processing' AND lease_token = $2
              AND lease_expires_at > now()
            RETURNING *
          ), ${settleTelegramMediaGroupMembersSql} SELECT update_id FROM finished`,
-        [updateId, leaseToken],
+        [updateId, leaseToken, sessionId ?? null],
       );
       return result.rowCount ?? 0;
     });
@@ -299,10 +303,10 @@ export const telegramIngressRepository: TelegramIngressRepository = {
     });
   },
 
-  async fail(updateId, leaseToken, failure, eveSessionId) {
+  async fail(updateId, leaseToken, failure, agentSessionId) {
     requireFailure(failure);
-    if (eveSessionId !== undefined) {
-      requireNonEmpty(eveSessionId, "AGENT_TELEGRAM_SESSION_INVALID", "Eve не вернул идентификатор сессии");
+    if (agentSessionId !== undefined) {
+      requireNonEmpty(agentSessionId, "AGENT_TELEGRAM_SESSION_INVALID", "Не задан идентификатор сессии сообщения");
     }
     await requireActiveLease(updateId, leaseToken, async () => {
       const result = await database().query(
@@ -325,7 +329,7 @@ export const telegramIngressRepository: TelegramIngressRepository = {
              AND session.kind = 'canonical' AND session.retired_at IS NULL
            RETURNING session.id
          ) SELECT update_id FROM finished`,
-        [updateId, leaseToken, failure.code, failure.message, eveSessionId ?? null],
+        [updateId, leaseToken, failure.code, failure.message, agentSessionId ?? null],
       );
       return result.rowCount ?? 0;
     });

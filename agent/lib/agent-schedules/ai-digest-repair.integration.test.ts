@@ -23,7 +23,7 @@ async function fixture() {
     familyId: base.familyId, userId: base.userId, role: "owner", groupId: null, groupType: null,
     telegramChatId: "thread-owner", telegramChatType: "private", telegramUserId: "thread-owner",
     messageThreadId: null, forumTopicId: null,
-  }, { firstRunAt: new Date("2027-09-13T07:00:00Z"), operationKey: "digest-fixture",
+  }, { executionContext: "isolated", firstRunAt: new Date("2027-09-13T07:00:00Z"), operationKey: "digest-fixture",
     recurrence: { kind: "daily", interval: 1 }, scenarioPrompt: oldPrompt, scope: "personal",
     timezone: "Europe/Moscow", title: "AI-дайджест", userRequest: "Новости",
   });

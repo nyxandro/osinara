@@ -4,13 +4,13 @@
  * Constructs covered:
  * - Every file operation repeats live trusted-workspace authorization.
  * - Paths stay inside currently authorized personal/family roots.
- * - Revoked access and symlink escapes fail before Eve's default executor.
+ * - Revoked access and symlink escapes fail before the built-in executor.
  */
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { ToolDefinition } from "eve/tools";
+import type { ToolDefinition } from "../../runtime/tool.js";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 import type { WorkspaceAuthorization } from "../workspaces/workspace-repository.js";
@@ -26,7 +26,7 @@ const AUTHORIZATION = {
 };
 
 function tool(execute: ReturnType<typeof vi.fn>): ToolDefinition<any, any> {
-  return { description: "Eve default", execute, inputSchema: {} } as ToolDefinition<any, any>;
+  return { description: "built-in default", execute, inputSchema: {} } as ToolDefinition<any, any>;
 }
 
 function context() {
@@ -131,7 +131,7 @@ describe("trusted worker file tools", () => {
     }
   });
 
-  it("passes an authorized canonical path to Eve's executor", async () => {
+  it("passes an authorized canonical path to the built-in executor", async () => {
     const ctx = context();
     await tools().read_file!.execute(
       { filePath: "/workspace/personal/docs/allowed.txt" },

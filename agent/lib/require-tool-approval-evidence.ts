@@ -2,9 +2,9 @@
  * Durable tool-execution approval guard for Telegram HITL.
  *
  * Export:
- * - `requireToolApprovalEvidence`: binds execution to the consumed exact Eve tool call.
+ * - `requireToolApprovalEvidence`: binds execution to the exact approved tool call.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 
 import { AppError } from "./app-error.js";
 import { memoryOperationHash } from "./memory-record.js";
@@ -25,7 +25,7 @@ export async function requireToolApprovalEvidence(
   }
   await telegramHitlApprovalRepository.requireToolExecutionApproval({
     applicationSessionId: applicationSessionId(ctx),
-    eveSessionId: ctx.session.id,
+    agentSessionId: ctx.session.id,
     telegramUserId,
     toolCallId: ctx.callId,
     toolInputHash: memoryOperationHash(toolInput),

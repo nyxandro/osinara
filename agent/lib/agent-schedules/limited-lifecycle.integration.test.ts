@@ -24,7 +24,7 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
     await database().query("INSERT INTO family_memberships(family_id,user_id,role) VALUES ($1,$2,'owner')", [familyId,userId]);
     const auth = { familyId, userId, role: "owner" as const, forumTopicId: null, groupId: null, groupType: null,
       messageThreadId: null, telegramChatId: "123", telegramChatType: "private" as const, telegramUserId: "123" };
-    const schedule = await schedules.create(auth, { firstRunAt: new Date("2026-09-14T12:00:00Z"),
+    const schedule = await schedules.create(auth, { executionContext: "isolated", firstRunAt: new Date("2026-09-14T12:00:00Z"),
       operationKey: "create", recurrence: { kind: "minutely", interval: 1 }, maxRuns,
       scenarioPrompt: "Пришли погоду", scope: "personal", timezone: "UTC", title: "Погода", userRequest: "Два раза" });
     return { auth, schedule };
@@ -37,8 +37,8 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
       kind: "scheduled", telegramForumTopicId: null, familyId: auth.familyId, groupId: null,
       now: new Date(now), scope: "personal", userId: auth.userId });
     await dispatch.markDispatchStarted(job!, { applicationSessionId: session.id });
-    await admitScheduledAgentTurn({ runId: job!.runId, applicationSessionId: session.id, eveSessionId: job!.runId, eveTurnId: "turn_0" });
-    const receipt = { applicationSessionId: session.id, eveSessionId: job!.runId, runId: job!.runId,
+    await admitScheduledAgentTurn({ runId: job!.runId, applicationSessionId: session.id, agentSessionId: job!.runId, agentTurnId: "turn_0" });
+    const receipt = { applicationSessionId: session.id, agentSessionId: job!.runId, runId: job!.runId,
       content: "Погода", deliveredAt: new Date(Date.parse(now) + 10_000), familyId: auth.familyId, groupId: null,
       messageThreadId: null, ownerUserId: auth.userId, scheduledFor: new Date(job!.nextRunAt), scope: "personal" as const,
       telegramChatId: "123", telegramMessageId: String(Date.parse(now)), title: "Погода" };
@@ -69,7 +69,7 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
     expect(await schedules.update(auth, schedule.id, input)).toMatchObject({ status: "leased", pauseRequested: true });
     expect(await schedules.update(auth, schedule.id, input)).toMatchObject({ pauseRequested: true });
     await dispatch.authorizeDelivery(receipt);
-    if (failure) await dispatch.failRun(receipt.applicationSessionId, receipt.eveSessionId, "AGENT_TEST_FAILURE", receipt.deliveredAt);
+    if (failure) await dispatch.failRun(receipt.applicationSessionId, receipt.agentSessionId, "AGENT_TEST_FAILURE", receipt.deliveredAt);
     else await dispatch.completeDeliveredRun(receipt);
     expect(await schedules.findById(auth, schedule.id)).toMatchObject({ status: "paused", pauseRequested: false, completedRuns: failure ? 0 : 1 });
     expect(await dispatch.claimDue({ now: new Date("2026-09-14T13:00:00Z"), limit: 10, leaseMilliseconds: 60_000 })).toEqual([]);
@@ -78,7 +78,7 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
   it("does not consume the delivery limit on a failed run", async () => {
     const { auth, schedule } = await setup(1);
     const { receipt } = await start(auth, "2026-09-14T12:00:00Z");
-    await dispatch.failRun(receipt.applicationSessionId, receipt.eveSessionId, "AGENT_TEST_FAILURE", receipt.deliveredAt);
+    await dispatch.failRun(receipt.applicationSessionId, receipt.agentSessionId, "AGENT_TEST_FAILURE", receipt.deliveredAt);
     expect(await schedules.findById(auth, schedule.id)).toMatchObject({ status: "active", completedRuns: 0 });
     const next = await start(auth, "2026-09-14T12:01:00Z");
     await dispatch.completeDeliveredRun(next.receipt);
@@ -106,7 +106,7 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
     "stops instead of scheduling another attempt after %s", async (code) => {
       const { auth, schedule } = await setup();
       const { receipt } = await start(auth, "2026-09-14T12:00:00Z");
-      await dispatch.failRun(receipt.applicationSessionId, receipt.eveSessionId, code, receipt.deliveredAt);
+      await dispatch.failRun(receipt.applicationSessionId, receipt.agentSessionId, code, receipt.deliveredAt);
       expect(await schedules.findById(auth, schedule.id)).toMatchObject({ status: "failed", completedRuns: 0, lastErrorCode: code });
       expect(await dispatch.claimDue({ now: new Date("2026-09-14T13:00:00Z"), limit: 1, leaseMilliseconds: 60_000 })).toEqual([]);
     });
@@ -179,14 +179,14 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
     const sendChunk = vi.fn().mockResolvedValue({ chatType: "private", messageId: "1234" });
     try {
       await expect(deliverTelegramFinalOutput({ applicationSessionId: receipt.applicationSessionId,
-        deliveryIdentity: { chatId: "123" }, eveSessionId: receipt.eveSessionId, eveTurnId: "turn_0",
+        deliveryIdentity: { chatId: "123" }, agentSessionId: receipt.agentSessionId, agentTurnId: "turn_0",
         markdown: "Погода", sendChunk })).rejects.toBe(outage);
     } finally {
       confirm.mockRestore();
     }
     expect(sendChunk).toHaveBeenCalledOnce();
     // The Telegram channel passes the original storage error to the schedule boundary.
-    await dispatch.failRun(receipt.applicationSessionId, receipt.eveSessionId, outage.code, receipt.deliveredAt);
+    await dispatch.failRun(receipt.applicationSessionId, receipt.agentSessionId, outage.code, receipt.deliveredAt);
     expect(await schedules.findById(auth, schedule.id)).toMatchObject({ status: "failed", completedRuns: 0 });
     expect(await dispatch.claimDue({ now: new Date("2026-09-14T13:00:00Z"), limit: 1, leaseMilliseconds: 60_000 })).toEqual([]);
   });
@@ -236,7 +236,7 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
         await dispatch.completeDeliveredRun(receipt);
         deliveries++;
       } else {
-        await dispatch.failRun(receipt.applicationSessionId, receipt.eveSessionId, "AGENT_TEST_FAILURE", receipt.deliveredAt);
+        await dispatch.failRun(receipt.applicationSessionId, receipt.agentSessionId, "AGENT_TEST_FAILURE", receipt.deliveredAt);
       }
       expect(await schedules.findById(auth, schedule.id)).toMatchObject({
         completedRuns: deliveries, status: deliveries === 2 ? "completed" : "active",

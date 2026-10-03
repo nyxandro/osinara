@@ -1,4 +1,4 @@
-/** Repairs only the persisted pre-Eve incident class and measures lane progress without chat text. */
+/** Repairs only one persisted historical incident class and measures lane progress without chat text. */
 import type { PoolClient } from "pg";
 import { AppError } from "../app-error.js";
 
@@ -9,7 +9,7 @@ const LEGACY_UNSTARTED_CODE = "AGENT_MEMORY_REVIEW_INTERACTIVE_START_AMBIGUOUS";
 
 export async function recoverUnstartedReviewBatches(client: PoolClient, now: Date): Promise<void> {
   // This code was emitted before unstarted turns were released/skipped. A retired or absent
-  // application root, no Eve binding, no source-set and no evidence exclude replaying memory writes.
+  // application root, no session binding, no source-set and no evidence exclude replaying memory writes.
   // Keys never change: NO KEY UPDATE keeps competing recovery exclusive but lets an owner-alert
   // FK take KEY SHARE while another dispatcher holds the lane we are about to acquire.
   const candidates = await client.query<{ id: string; lane_id: string }>(

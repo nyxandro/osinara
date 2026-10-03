@@ -5,7 +5,7 @@
  * - Every wrapped execution revalidates the exact active run and destination.
  * - Authorization runs before the underlying workspace/network/tool operation.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
@@ -39,7 +39,7 @@ function context() {
           principalType: "user",
         },
       },
-      id: "eve-session-1",
+      id: "agent-session-1",
     },
   } as never;
 }

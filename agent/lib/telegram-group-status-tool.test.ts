@@ -7,7 +7,7 @@
  * - External status distinguishes configured grants from always-available workspace tools.
  * - Private-mode guidance requires reading status before an uncertain policy replacement.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { listStatuses } = vi.hoisted(() => ({ listStatuses: vi.fn() }));
@@ -19,6 +19,10 @@ vi.mock("./telegram-group-administration-repository.js", () => ({
     removeRegistration: vi.fn(),
     updatePolicy: vi.fn(),
   },
+}));
+
+vi.mock("./family-skills/family-skill-repository.js", () => ({
+  familySkillRepository: { grantableSkills: vi.fn().mockResolvedValue(new Map()) },
 }));
 
 import manageTelegramGroup from "./tools/manage_telegram_group.js";

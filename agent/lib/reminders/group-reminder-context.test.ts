@@ -6,7 +6,7 @@
  * - Channel-authored turns fail with the author-unidentified contract.
  * - Trusted private and family contexts never resolve as a group reminder author.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../../runtime/tool.js";
 import { describe, expect, it } from "vitest";
 
 import { AppError } from "../app-error.js";

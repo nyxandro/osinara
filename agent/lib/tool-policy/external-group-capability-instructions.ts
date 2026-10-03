@@ -46,7 +46,7 @@ export function externalGroupCapabilityInstructions(
     ...EXTERNAL_GROUP_CAPABILITY_CATALOG.filter(({ name }) =>
       name !== "web_fetch" && allowed.has(name) && !(name === "generate_image" && (
         options.scheduledRun || !IMAGE_GENERATION_AVAILABLE
-      ))
+      )) && !(name === "send_voice_message" && options.scheduledRun)
     ),
   ];
   const applicationCore = options.includeApplicationCore

@@ -5,14 +5,16 @@
  * - `message.completed` rejects a channel target that differs from scheduled auth before delivery.
  * - Scheduled final-delivery failures persist their primary stable code before terminal fallback.
  * - `turn.failed` terminalizes a mismatched run without notifying the unrelated active target.
+ * - A scheduled run the model deliberately left silent closes as a successful run without delivery.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const dependencies = vi.hoisted(() => ({
   authorizeDelivery: vi.fn(),
-  channelConfig: null as Record<string, any> | null,
   clearApprovals: vi.fn(),
   completeDeliveredRun: vi.fn(),
+  completeSilentRun: vi.fn(),
+  completedOutput: null as Record<string, unknown> | null,
   deliverFinalOutput: vi.fn(),
   failRun: vi.fn(),
   failRunForNotification: vi.fn(),
@@ -35,16 +37,11 @@ const dependencies = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("eve/channels/telegram", () => ({
-  telegramChannel: (config: Record<string, any>) => {
-    dependencies.channelConfig = config;
-    return config;
-  },
-}));
 vi.mock("./agent-schedules/agent-schedule-dispatch-repository.js", () => ({
   agentScheduleDispatchRepository: {
     authorizeDelivery: dependencies.authorizeDelivery,
     completeDeliveredRun: dependencies.completeDeliveredRun,
+    completeSilentRun: dependencies.completeSilentRun,
     failRun: dependencies.failRun,
     failRunForNotification: dependencies.failRunForNotification,
   },
@@ -64,7 +61,7 @@ vi.mock("./operational-incidents/telegram-failure.js", () => ({
 }));
 vi.mock("./sessions/session-repository.js", () => ({
   sessionRepository: {
-    isCurrentEveSession: vi.fn(async () => true),
+    isCurrentAgentSession: vi.fn(async () => true),
     recordTurnFailed: dependencies.recordTurnFailed,
   },
 }));
@@ -72,10 +69,10 @@ vi.mock("./telegram-final-delivery.js", () => ({
   deliverTelegramFinalOutput: dependencies.deliverFinalOutput,
 }));
 vi.mock("./telegram-hitl/approval-repository.js", () => ({
-  telegramHitlApprovalRepository: { clearForEveSession: dependencies.clearApprovals },
+  telegramHitlApprovalRepository: { clearForAgentSession: dependencies.clearApprovals },
 }));
 vi.mock("./telegram-progress.js", () => ({
-  completedTelegramOutput: vi.fn(() => ({ kind: "message", message: "Секретная сводка" })),
+  telegramOutputWithoutMemoryDirective: vi.fn(() => dependencies.completedOutput),
 }));
 vi.mock("./telegram-stable-delivery.js", () => ({
   postTelegramMessageWithoutContinuationChange: dependencies.postStableMessage,
@@ -93,16 +90,17 @@ vi.mock("./memory-turn-source.js", () => ({
 // A scheduled run never carries a memory-review batch, but the channel now resolves that binding
 // from the database instead of the message authorization, so the lookup has to be answered.
 vi.mock("./memory-review/memory-review-repository.js", () => ({
-  memoryReviewRepository: { batchIdForTurn: vi.fn(async () => null) },
+  memoryReviewRepository: { batchForTurn: vi.fn(async () => null) },
 }));
 
-await import("../channels/telegram.js");
+const { telegramTurnEvents } = await import("../channels/telegram.js");
 const { AppError } = await import("./app-error.js");
+const { isScheduledSession } = await import("./agent-schedules/scheduled-session.js");
 
 const context = {
   session: {
     auth: { current: { attributes: {} }, initiator: null },
-    id: "eve-session-1",
+    id: "agent-session-1",
     turn: { id: "turn-1", sequence: 1 },
   },
 };
@@ -130,6 +128,10 @@ function matchingChannel() {
 describe("scheduled Telegram target binding", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    dependencies.completedOutput = {
+      declaration: { answer: "Секретная сводка", declared: false, memoryRefs: [] },
+      output: { kind: "message", message: "Секретная сводка" },
+    };
     dependencies.deliverFinalOutput.mockResolvedValue([{ messageId: "telegram-message-1" }]);
     dependencies.failRun.mockResolvedValue(true);
     dependencies.failRunForNotification.mockResolvedValue(true);
@@ -137,7 +139,7 @@ describe("scheduled Telegram target binding", () => {
   });
 
   it("rejects a completed result before authorization or Telegram delivery when chat differs", async () => {
-    const handler = dependencies.channelConfig?.events?.["message.completed"];
+    const handler = (telegramTurnEvents as Record<string, any>)["message.completed"];
 
     await expect(handler(
       { finishReason: "stop", message: "Секретная сводка" },
@@ -152,8 +154,44 @@ describe("scheduled Telegram target binding", () => {
     expect(dependencies.deliverFinalOutput).not.toHaveBeenCalled();
   });
 
+  it("closes a run the model deliberately left silent as a successful run without delivery", async () => {
+    // A scenario may say to skip an empty report; the run is done, not a delivery that went missing.
+    dependencies.completedOutput = {
+      declaration: { answer: "", declared: false, memoryRefs: [] },
+      output: { kind: "silence" },
+    };
+    dependencies.completeSilentRun.mockResolvedValue(true);
+    const handler = (telegramTurnEvents as Record<string, any>)["message.completed"];
+
+    await handler({ finishReason: "stop", message: null }, matchingChannel(), context);
+
+    expect(dependencies.completeSilentRun).toHaveBeenCalledWith(
+      "application-session-1",
+      "agent-session-1",
+      expect.any(Date),
+    );
+    expect(dependencies.authorizeDelivery).not.toHaveBeenCalled();
+    expect(dependencies.deliverFinalOutput).not.toHaveBeenCalled();
+  });
+
+  it("leaves schedules alone when an ordinary conversation turn stays silent", async () => {
+    vi.mocked(isScheduledSession).mockReturnValue(false);
+    dependencies.completedOutput = {
+      declaration: { answer: "", declared: false, memoryRefs: [] },
+      output: { kind: "silence" },
+    };
+    const handler = (telegramTurnEvents as Record<string, any>)["message.completed"];
+    try {
+      await handler({ finishReason: "stop", message: null }, matchingChannel(), context);
+    } finally {
+      vi.mocked(isScheduledSession).mockReturnValue(true);
+    }
+
+    expect(dependencies.completeSilentRun).not.toHaveBeenCalled();
+  });
+
   it("rejects a completed result when only the Telegram topic differs", async () => {
-    const handler = dependencies.channelConfig?.events?.["message.completed"];
+    const handler = (telegramTurnEvents as Record<string, any>)["message.completed"];
     const channel = matchingChannel();
     channel.telegram.messageThreadId = 78;
 
@@ -168,7 +206,7 @@ describe("scheduled Telegram target binding", () => {
   });
 
   it("normalizes and accepts the exact persisted chat and topic before delivery", async () => {
-    const handler = dependencies.channelConfig?.events?.["message.completed"];
+    const handler = (telegramTurnEvents as Record<string, any>)["message.completed"];
 
     await expect(handler(
       { finishReason: "stop", message: "Секретная сводка" },
@@ -181,7 +219,7 @@ describe("scheduled Telegram target binding", () => {
   });
 
   it("persists the primary scheduled delivery error before the terminal fallback runs", async () => {
-    const handler = dependencies.channelConfig?.events?.["message.completed"];
+    const handler = (telegramTurnEvents as Record<string, any>)["message.completed"];
     dependencies.deliverFinalOutput.mockRejectedValueOnce(new AppError(
       "AGENT_TELEGRAM_MESSAGE_DELIVERY_AMBIGUOUS",
       "Telegram не подтвердил доставку",
@@ -195,14 +233,14 @@ describe("scheduled Telegram target binding", () => {
 
     expect(dependencies.failRun).toHaveBeenCalledWith(
       "application-session-1",
-      "eve-session-1",
+      "agent-session-1",
       "AGENT_TELEGRAM_MESSAGE_DELIVERY_AMBIGUOUS",
       expect.any(Date),
     );
   });
 
   it("preserves the primary delivery error when terminal persistence also fails", async () => {
-    const handler = dependencies.channelConfig?.events?.["message.completed"];
+    const handler = (telegramTurnEvents as Record<string, any>)["message.completed"];
     const deliveryError = new AppError(
       "AGENT_TELEGRAM_MESSAGE_DELIVERY_AMBIGUOUS",
       "Telegram не подтвердил доставку",
@@ -224,7 +262,7 @@ describe("scheduled Telegram target binding", () => {
   });
 
   it("fails a mismatched run without sending its failure notification to another chat", async () => {
-    const handler = dependencies.channelConfig?.events?.["turn.failed"];
+    const handler = (telegramTurnEvents as Record<string, any>)["turn.failed"];
 
     await handler(
       { code: "AGENT_MODEL_FAILED" },
@@ -234,7 +272,7 @@ describe("scheduled Telegram target binding", () => {
 
     expect(dependencies.failRun).toHaveBeenCalledWith(
       "application-session-1",
-      "eve-session-1",
+      "agent-session-1",
       "AGENT_SCHEDULE_DELIVERY_TARGET_MISMATCH",
       expect.any(Date),
     );
@@ -245,17 +283,17 @@ describe("scheduled Telegram target binding", () => {
     expect(dependencies.recordTelegramFailure).not.toHaveBeenCalled();
     expect(dependencies.recordTurnFailed).toHaveBeenCalledWith(
       "application-session-1",
-      "eve-session-1",
+      "agent-session-1",
     );
     expect(dependencies.clearApprovals).toHaveBeenCalledWith(
       "application-session-1",
-      "eve-session-1",
+      "agent-session-1",
     );
     expect(dependencies.releaseMemoryTurnSources).toHaveBeenCalledWith(context);
   });
 
   it("terminalizes a matching group run without publishing a failure message", async () => {
-    const handler = dependencies.channelConfig?.events?.["turn.failed"];
+    const handler = (telegramTurnEvents as Record<string, any>)["turn.failed"];
 
     await handler(
       { code: "AGENT_MODEL_FAILED" },
@@ -273,16 +311,16 @@ describe("scheduled Telegram target binding", () => {
     expect(dependencies.recordTelegramFailure).toHaveBeenCalledWith({
       chatId: "-100111",
       code: "AGENT_MODEL_FAILED",
-      sessionId: "eve-session-1",
+      sessionId: "agent-session-1",
       turnId: "turn-1",
     });
     expect(dependencies.recordTurnFailed).toHaveBeenCalledWith(
       "application-session-1",
-      "eve-session-1",
+      "agent-session-1",
     );
     expect(dependencies.clearApprovals).toHaveBeenCalledWith(
       "application-session-1",
-      "eve-session-1",
+      "agent-session-1",
     );
   });
 });

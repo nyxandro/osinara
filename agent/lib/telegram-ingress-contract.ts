@@ -2,7 +2,7 @@
  * Durable Telegram ingress contracts and boundary validation.
  *
  * Exports:
- * - `TelegramIngressRepository`: persistence operations required by a future Eve ingress bridge.
+ * - `TelegramIngressRepository`: persistence operations of the durable ingress.
  * - `TelegramIngressClaim`: one lease-protected FIFO item.
  * - `ClaimRow` and `mapTelegramIngressClaim`: PostgreSQL row normalization.
  * - Validation helpers: fail-fast checks for update ids, leases, failures, and enqueue payloads.
@@ -31,21 +31,18 @@ export interface TelegramIngressFailure {
   message: string;
 }
 
+/** The runtime turn an update created, written in the transaction that created it. */
 export interface TelegramIngressDispatchBinding {
   id: string;
   sessionId: string;
   turnId: string;
-  cursor: number;
 }
 
 export interface TelegramIngressClaim {
   recoveryProtocol?: 1;
   dispatchAttemptId?: string;
-  responseAdmission?: true;
-  executionBound?: true;
   dispatchStarted: boolean;
   dispatchBinding: TelegramIngressDispatchBinding | null;
-  recoveryCancelRequested: boolean;
   attemptCount: number;
   deliveryContinuationKey: string;
   ingressContinuationKey: string;
@@ -54,10 +51,23 @@ export interface TelegramIngressClaim {
   payload: Record<string, unknown>;
   queueId: string;
   mediaGroupPayloads?: Record<string, unknown>[];
+  /** A private burst in chat order, head first; handled as one message like an album. */
+  burstPayloads?: Record<string, unknown>[];
   mediaGroupLate?: boolean;
   transcript: string | null;
   updateId: string;
   voice: TelegramIngressVoice | null;
+}
+
+/**
+ * Private-chat bursts: how long a chat must be quiet before its head is claimed, the most it may
+ * wait, and how large the burst that the head then takes along may grow.
+ */
+export interface TelegramPrivateBurstPolicy {
+  maxCharacters: number;
+  maxMessages: number;
+  maxWaitMilliseconds: number;
+  quietMilliseconds: number;
 }
 
 export interface TelegramIngressRepository {
@@ -69,16 +79,11 @@ export interface TelegramIngressRepository {
   }): Promise<boolean>;
   beginVoiceTranscription(updateId: string, leaseToken: string): Promise<"completed" | "started">;
   beginDispatch(updateId: string, leaseToken: string, dispatchId: string): Promise<void>;
-  claimNext(leaseMilliseconds: number): Promise<TelegramIngressClaim | null>;
-  complete(updateId: string, leaseToken: string): Promise<void>;
-  completeWithSession(
-    updateId: string,
-    leaseToken: string,
-    sessionId: string,
-    nextEventIndex: number,
-  ): Promise<void>;
+  claimNext(leaseMilliseconds: number, burst: TelegramPrivateBurstPolicy): Promise<TelegramIngressClaim | null>;
+  /** `sessionId`: the runtime session the update's turn ran in, when it created one. */
+  complete(updateId: string, leaseToken: string, sessionId?: string): Promise<void>;
   enqueue(input: EnqueueTelegramUpdateInput): Promise<"duplicate" | "inserted">;
-  fail(updateId: string, leaseToken: string, failure: TelegramIngressFailure, eveSessionId?: string): Promise<void>;
+  fail(updateId: string, leaseToken: string, failure: TelegramIngressFailure, agentSessionId?: string): Promise<void>;
   rekeyQueue(input: {
     nextContinuationKey: string;
     previousContinuationKey: string;
@@ -86,8 +91,9 @@ export interface TelegramIngressRepository {
   }): Promise<void>;
   release(updateId: string, leaseToken: string, failure: TelegramIngressFailure): Promise<void>;
   renewLease(updateId: string, leaseToken: string, leaseMilliseconds: number): Promise<Date>;
-  sessionEventStreamCursor(sessionId: string): Promise<number>;
   saveVoiceTranscript(updateId: string, leaseToken: string, transcript: string): Promise<void>;
+  /** Milliseconds until the next private chat held by the burst window is ready; null when none is. */
+  privateBurstReadyIn(burst: TelegramPrivateBurstPolicy): Promise<number | null>;
 }
 
 export interface ClaimRow {
@@ -96,11 +102,6 @@ export interface ClaimRow {
   dispatch_id: string | null;
   dispatch_session_id: string | null;
   dispatch_turn_id: string | null;
-  dispatch_start_index: string | null;
-  response_session_id: string | null;
-  response_turn_id: string | null;
-  response_start_index: string | null;
-  recovery_cancel_requested: boolean;
   attempt_count: number;
   current_continuation_key: string;
   ingress_continuation_key: string;
@@ -205,15 +206,9 @@ export function mapTelegramIngressClaim(row: ClaimRow): TelegramIngressClaim {
   return {
     ...(row.recovery_protocol === 1 ? { recoveryProtocol: 1 as const } : {}),
     ...(row.dispatch_id === null ? {} : { dispatchAttemptId: row.dispatch_id }),
-    ...(row.response_session_id ? { responseAdmission: true as const } : {}),
-    ...(row.dispatch_session_id ? { executionBound: true as const } : {}),
     dispatchStarted: row.dispatch_started_at !== null,
-    recoveryCancelRequested: row.recovery_cancel_requested,
-    dispatchBinding: row.dispatch_session_id === null ? row.response_session_id == null ? null : {
-      id: row.dispatch_id!,sessionId: row.response_session_id,turnId: row.response_turn_id!,cursor: Number(row.response_start_index),
-    } : {
-      id: row.dispatch_id!, sessionId: row.dispatch_session_id,
-      turnId: row.dispatch_turn_id!, cursor: Number(row.dispatch_start_index),
+    dispatchBinding: row.dispatch_session_id === null ? null : {
+      id: row.dispatch_id!, sessionId: row.dispatch_session_id, turnId: row.dispatch_turn_id!,
     },
     attemptCount: row.attempt_count,
     deliveryContinuationKey: row.current_continuation_key,

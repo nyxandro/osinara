@@ -2,7 +2,7 @@
  * Credentialed Google Workspace execution boundary tests.
  *
  * Constructs covered:
- * - Mutations require Eve HITL while reads do not.
+ * - Mutations require human approval while reads do not.
  * - Execution rechecks current access/profile after approval and preserves scope isolation.
  * - Exact argv transport treats shell metacharacters as ordinary data.
  */

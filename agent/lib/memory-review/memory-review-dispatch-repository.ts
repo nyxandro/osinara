@@ -2,7 +2,7 @@
  * PostgreSQL dispatch state for silent memory-review batches.
  *
  * Export:
- * - `memoryReviewDispatchRepository`: leasing and exact pre/post Eve handoff transitions.
+ * - `memoryReviewDispatchRepository`: leasing and exact pre/post hand-off transitions.
  */
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
@@ -16,7 +16,11 @@ import {
   memoryReviewDispatchTerminalRepository,
   terminalizeStaleMemoryReviewBatches,
 } from "./memory-review-dispatch-terminal-repository.js";
-import { formatMemoryReviewBatchPrompt } from "./memory-review-prompt.js";
+import {
+  formatMemoryReviewBatchPrompt,
+  formatMemoryReviewContext,
+} from "./memory-review-prompt.js";
+import { selectMemoryReviewContext } from "./memory-review-known-memory.js";
 import type { MemoryReviewClaim } from "./memory-review-repository.js";
 import { readMemoryReviewLaneHealth, recoverUnstartedReviewBatches } from "./memory-review-lane-recovery.js";
 import { recoverModelWaitingReviews } from "./memory-review-model-recovery.js";
@@ -138,6 +142,7 @@ export const memoryReviewDispatchRepository = {
         conversation_id: string; family_id: string; group_id: string;
         group_type: "external" | "family_private"; id: string; lease_token: string;
         message_thread_id: string | null; owner_telegram_user_id: string; owner_user_id: string;
+        predecessor_sequence: string;
         scope: "family" | "group"; telegram_chat_id: string;
         source_count: number;
         telegram_chat_type: "group" | "supergroup"; through_sequence: string;
@@ -162,7 +167,8 @@ export const memoryReviewDispatchRepository = {
             AND telegram_group.id = conversation.telegram_group_id
             AND membership.family_id = conversation.family_id AND membership.role = 'owner'
             AND owner.id = membership.user_id
-          RETURNING batch.id, batch.conversation_id, batch.through_sequence::text, batch.source_count,
+          RETURNING batch.id, batch.conversation_id, batch.through_sequence::text,
+                   batch.predecessor_sequence::text, batch.source_count,
                    batch.lease_token::text, lane.message_thread_id::text,
                    conversation.family_id, conversation.scope::text,
                    telegram_group.id AS group_id, telegram_group.type::text AS group_type,
@@ -190,12 +196,25 @@ export const memoryReviewDispatchRepository = {
           "Пакет проверки памяти не содержит ожидаемые сообщения",
         );
         const entries = sources.rows.map(project);
+        // What this conversation already stores and already read, so the review has a third
+        // option besides saving and not saving.
+        const context = await selectMemoryReviewContext(client, {
+          conversationId: row.conversation_id,
+          familyId: row.family_id,
+          predecessorSequence: row.predecessor_sequence,
+          scope: row.scope,
+          scopePartitionKey: row.scope === "group" ? row.group_id : row.family_id,
+        });
+        const contextBlocks = formatMemoryReviewContext(context);
         claims.push({
           batchId: row.id, conversationId: row.conversation_id, entries,
           familyId: row.family_id, groupId: row.group_id, groupType: row.group_type,
           leaseToken: row.lease_token, messageThreadId: row.message_thread_id,
           ownerTelegramUserId: row.owner_telegram_user_id, ownerUserId: row.owner_user_id,
-          prompt: formatMemoryReviewBatchPrompt(entries), scope: row.scope,
+          prompt: contextBlocks
+            ? `${contextBlocks}\n${formatMemoryReviewBatchPrompt(entries)}`
+            : formatMemoryReviewBatchPrompt(entries),
+          scope: row.scope,
           sourceCount: entries.length, sourceEntryIds: sources.rows.map((source) => source.id),
           status: "pending", telegramChatId: row.telegram_chat_id,
           telegramChatType: row.telegram_chat_type,
@@ -237,7 +256,7 @@ export const memoryReviewDispatchRepository = {
 
   async markRunning(
     batch: MemoryReviewClaim,
-    input: { applicationSessionId: string; eveSessionId: string },
+    input: { applicationSessionId: string; agentSessionId: string },
   ): Promise<void> {
     const result = await database().query(
       `UPDATE memory_review_batches
@@ -247,11 +266,11 @@ export const memoryReviewDispatchRepository = {
         WHERE id = $1 AND application_session_id = $3
           AND ((status = 'dispatching' AND lease_token = $2) OR
                (status = 'running' AND eve_session_id = $4))`,
-      [batch.batchId, batch.leaseToken, input.applicationSessionId, input.eveSessionId],
+      [batch.batchId, batch.leaseToken, input.applicationSessionId, input.agentSessionId],
     );
     if (result.rowCount !== 1) {
       const settled = await database().query(`SELECT 1 FROM memory_review_batches WHERE id=$1 AND application_session_id=$2
-        AND eve_session_id=$3 AND status IN ('completed','failed','waiting_model','ambiguous')`, [batch.batchId,input.applicationSessionId,input.eveSessionId]);
+        AND eve_session_id=$3 AND status IN ('completed','failed','waiting_model','ambiguous')`, [batch.batchId,input.applicationSessionId,input.agentSessionId]);
       if (settled.rowCount !== 1) throw new AppError("AGENT_MEMORY_REVIEW_RUNNING_STATE_INVALID", "Не удалось подтвердить запуск проверки памяти");
     }
   },

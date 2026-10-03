@@ -2,8 +2,13 @@
  * SQL-backed completion helpers for scheduled agent runs.
  *
  * Exports:
- * - `finishActiveAgentScheduleRun`: marks a running Eve handoff completed or failed and advances recurrence.
+ * - `AgentScheduleRunOutcome`: delivered result, deliberate silence, or failure with its code.
+ * - `finishActiveAgentScheduleRun`: marks a running hand-off completed or failed and advances recurrence.
  * - `completeDeliveredAgentScheduleRun`: atomically records Telegram delivery and successful completion.
+ *
+ * Key construct:
+ * - A deliberately silent run advances `completed_runs` like a delivered one: `max_runs` limits
+ *   executions, and a limited scenario that keeps finding nothing to report must still end.
  */
 import type { PoolClient } from "pg";
 
@@ -32,11 +37,20 @@ const UNCONFIRMED_DELIVERY_CODES = new Set([
   "AGENT_TELEGRAM_FINAL_DELIVERY_AMBIGUOUS",
 ]);
 
+export type AgentScheduleRunOutcome =
+  | { kind: "delivered" }
+  // The model finished the run with the empty-delivery marker, as its scenario allowed.
+  | { kind: "silent" }
+  | { errorCode: string; kind: "failed" };
+
+// Silence claimed after a delivery may already have started cannot be told apart from a lost receipt.
+const SILENCE_AFTER_DELIVERY_CODE = "AGENT_SCHEDULE_DELIVERY_CONFIRMATION_MISSING";
+
 export interface CompleteDeliveredAgentScheduleRunInput {
   applicationSessionId: string;
   content: string;
   deliveredAt: Date;
-  eveSessionId: string;
+  agentSessionId: string;
   familyId: string;
   groupId: string | null;
   messageThreadId: string | null;
@@ -51,7 +65,14 @@ export interface CompleteDeliveredAgentScheduleRunInput {
 
 export async function finishActiveAgentScheduleRun(
   client: PoolClient,
-  input: { applicationSessionId: string; completedAt: Date; errorCode: string | null; eveSessionId: string },
+  input: {
+    applicationSessionId: string;
+    completedAt: Date;
+    agentSessionId: string;
+    outcome: AgentScheduleRunOutcome;
+    /** A conversation run shares its session with ordinary turns, so it is also selected by id. */
+    runId?: string;
+  },
 ): Promise<boolean> {
   const active = await client.query<ActiveRunRow>(
     `SELECT run.id AS run_id, schedule.id AS schedule_id, schedule.family_id,
@@ -60,7 +81,8 @@ export async function finishActiveAgentScheduleRun(
               SELECT 1 FROM telegram_final_deliveries delivery
               WHERE delivery.application_session_id = run.application_session_id
                 AND delivery.eve_session_id = run.eve_session_id
-                AND (run.eve_turn_id IS NULL OR delivery.eve_turn_id = run.eve_turn_id)
+                -- A conversation run shares its session with every ordinary turn: only its own turn counts.
+                AND (delivery.eve_turn_id = run.eve_turn_id OR (run.eve_turn_id IS NULL AND run.recovery_protocol <> 2))
                 AND (delivery.status IN ('started','ambiguous','delivered') OR EXISTS (
                   SELECT 1 FROM telegram_final_delivery_chunks chunk WHERE chunk.delivery_id = delivery.id
                 ))
@@ -71,30 +93,35 @@ export async function finishActiveAgentScheduleRun(
         AND run.eve_session_id = $2
         AND run.status = 'running'
         AND schedule.status = 'leased'
+        AND ($3::uuid IS NULL OR run.id = $3::uuid)
       FOR UPDATE OF run, schedule`,
-    [input.applicationSessionId, input.eveSessionId],
+    [input.applicationSessionId, input.agentSessionId, input.runId ?? null],
   );
   const row = active.rows[0];
   if (!row) return false;
-  if (input.errorCode !== null) await recordOperationalIncident({ key: `schedule-run:${row.run_id}`,
+  const outcome: AgentScheduleRunOutcome = input.outcome.kind === "silent" && row.delivery_may_have_happened
+    ? { errorCode: SILENCE_AFTER_DELIVERY_CODE, kind: "failed" }
+    : input.outcome;
+  const errorCode = outcome.kind === "failed" ? outcome.errorCode : null;
+  if (errorCode !== null) await recordOperationalIncident({ key: `schedule-run:${row.run_id}`,
     code: "AGENT_SCHEDULE_EXECUTION_FAILED", summary: "Агентный сценарий завершился с ошибкой. Проверьте результат перед повтором.",
-    context: { runId: row.run_id, scheduleId: row.schedule_id, causeCode: input.errorCode } }, client);
+    context: { runId: row.run_id, scheduleId: row.schedule_id, causeCode: errorCode } }, client);
 
   // The run row is terminal before the schedule is re-opened, avoiding overlap windows.
   await client.query(
     `UPDATE agent_schedule_runs
         SET status = $2, completed_at = $3, error_code = $4, updated_at = $3
       WHERE id = $1`,
-    [row.run_id, input.errorCode === null ? "completed" : "failed", input.completedAt, input.errorCode],
+    [row.run_id, errorCode === null ? "completed" : "failed", input.completedAt, errorCode],
   );
   // History chunks exist only to serve the active model run and must not become retained copies.
   await client.query("DELETE FROM agent_schedule_history_snapshots WHERE run_id = $1", [row.run_id]);
 
-  const completedRuns = row.completed_runs + (input.errorCode === null ? 1 : 0);
+  const completedRuns = row.completed_runs + (errorCode === null ? 1 : 0);
   const limitReached = row.max_runs !== null && completedRuns >= row.max_runs;
   // A storage error can hide the transport's ambiguity code. The durable outbox is authoritative.
-  const deliveryUnconfirmed = input.errorCode !== null &&
-    (row.delivery_may_have_happened || UNCONFIRMED_DELIVERY_CODES.has(input.errorCode));
+  const deliveryUnconfirmed = errorCode !== null &&
+    (row.delivery_may_have_happened || UNCONFIRMED_DELIVERY_CODES.has(errorCode));
   const next = limitReached || deliveryUnconfirmed
     ? null : await nextAgentScheduleOccurrence(client, row.schedule_id, row.recurrence_kind, input.completedAt);
   if (!next) {
@@ -106,8 +133,8 @@ export async function finishActiveAgentScheduleRun(
         WHERE id = $1`,
       [
         row.schedule_id,
-        input.errorCode === null ? "completed" : "failed",
-        input.errorCode,
+        errorCode === null ? "completed" : "failed",
+        errorCode,
         input.completedAt,
         completedRuns,
       ],
@@ -122,7 +149,7 @@ export async function finishActiveAgentScheduleRun(
             dispatch_started_at = NULL, last_error_code = $4, updated_at = $5,
             completed_runs = $7, pause_requested = false
       WHERE id = $1`,
-    [row.schedule_id, next.next_index, next.next_run_at, input.errorCode, input.completedAt,
+    [row.schedule_id, next.next_index, next.next_run_at, errorCode, input.completedAt,
       row.pause_requested ? "paused" : "active", completedRuns],
   );
   return true;
@@ -138,7 +165,7 @@ export async function completeDeliveredAgentScheduleRun(
             application_session_id = $2::uuid AND eve_session_id = $3 AS identity_matches
        FROM agent_schedule_runs
       WHERE id = $1`,
-    [input.runId, input.applicationSessionId, input.eveSessionId],
+    [input.runId, input.applicationSessionId, input.agentSessionId],
   );
   const durableRun = run.rows[0];
   if (!durableRun) {
@@ -174,12 +201,12 @@ export async function completeDeliveredAgentScheduleRun(
   const completed = await finishActiveAgentScheduleRun(client, {
     applicationSessionId: input.applicationSessionId,
     completedAt: input.deliveredAt,
-    errorCode: null,
-    eveSessionId: input.eveSessionId,
+    agentSessionId: input.agentSessionId,
+    outcome: { kind: "delivered" },
   });
   if (completed) return "completed";
 
-  // A concurrent Eve replay may finish after the initial state read; accept its exact receipt.
+  // A concurrent replay of the turn's end may finish after the initial state read; accept its exact receipt.
   const existing = await client.query(
     `SELECT 1
        FROM agent_schedule_runs run
@@ -187,7 +214,7 @@ export async function completeDeliveredAgentScheduleRun(
          ON delivery.source_kind = 'agent_schedule' AND delivery.source_id = run.id
       WHERE run.id = $1 AND run.application_session_id = $2 AND run.eve_session_id = $3
         AND run.status = 'completed' AND delivery.telegram_message_id = $4::bigint`,
-    [input.runId, input.applicationSessionId, input.eveSessionId, input.telegramMessageId],
+    [input.runId, input.applicationSessionId, input.agentSessionId, input.telegramMessageId],
   );
   return existing.rowCount === 1 ? "duplicate" : "state_conflict";
 }

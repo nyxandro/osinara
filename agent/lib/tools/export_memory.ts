@@ -4,7 +4,7 @@
  * Export:
  * - `export_memory` generates JSON and Markdown outside the model and delivers both to Telegram.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { AppError, isAppError } from "../app-error.js";

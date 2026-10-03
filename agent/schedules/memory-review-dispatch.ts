@@ -1,27 +1,28 @@
 /**
- * Eve minute dispatcher for durable silent memory-review batches.
+ * Minute dispatcher for durable silent memory-review batches.
  *
  * Export:
- * - Default schedule that delivers severe alerts and starts ready task sessions: a full
- *   50-message batch, or a shorter one whose oldest message has waited out its age limit.
+ * - `memoryReviewDispatchSchedule`: delivers severe alerts and starts ready review turns: a full
+ *   50-message batch, or a shorter one whose oldest message has waited out its age limit. It also
+ *   releases deploy admissions of processes that are gone.
  * - Records a completed cycle for external monitoring; a failed cycle records nothing.
  */
-import { defineSchedule } from "eve/schedules";
+import type { RuntimeSchedule } from "../runtime/scheduler.js";
 import { withRuntimeAdmission } from "../lib/runtime-maintenance.js";
 import { withScheduleHeartbeat } from "../lib/schedule-heartbeat.js";
 import { dispatchOperationalIncidents } from "../lib/operational-incidents/owner-alerts.js";
 import { reconcileRuntimeAdmissions } from "../lib/runtime-admission-reconciliation.js";
 
-import { dispatchPendingMemoryReviews } from "../lib/memory-review/memory-review-dispatcher.js";
+import { dispatchPendingMemoryReviews, type MemoryReviewStart } from "../lib/memory-review/memory-review-dispatcher.js";
 import { dispatchMemoryReviewOwnerAlerts } from
   "../lib/memory-review/memory-review-owner-alert-dispatcher.js";
 
-async function dispatchMemoryReviewCycle(to: Parameters<typeof dispatchPendingMemoryReviews>[0]) {
+async function dispatchMemoryReviewCycle(startReview: MemoryReviewStart) {
   // Alert delivery cannot prevent an independent review claim; a second pass flushes new failures.
   const initial = await Promise.allSettled([
     dispatchOperationalIncidents(),
     dispatchMemoryReviewOwnerAlerts(),
-    dispatchPendingMemoryReviews(to),
+    dispatchPendingMemoryReviews(startReview),
   ]);
   const final = await Promise.allSettled([dispatchMemoryReviewOwnerAlerts(), dispatchOperationalIncidents()]);
   const failures = [...initial, ...final].filter(
@@ -40,13 +41,16 @@ async function dispatchMemoryReviewCycle(to: Parameters<typeof dispatchPendingMe
   throw failures[0]!.reason;
 }
 
-export default defineSchedule({
-  cron: "* * * * *",
-  run({ to, waitUntil }) {
-    waitUntil(reconcileRuntimeAdmissions());
-    waitUntil(withRuntimeAdmission(
-      "ordinary",
-      () => withScheduleHeartbeat("memory-review-dispatch", () => dispatchMemoryReviewCycle(to)),
-    ));
-  },
-});
+export function memoryReviewDispatchSchedule(startReview: MemoryReviewStart): RuntimeSchedule {
+  return {
+    cron: "* * * * *",
+    name: "memory-review-dispatch",
+    run({ waitUntil }) {
+      waitUntil(reconcileRuntimeAdmissions());
+      waitUntil(withRuntimeAdmission(
+        "ordinary",
+        () => withScheduleHeartbeat("memory-review-dispatch", () => dispatchMemoryReviewCycle(startReview)),
+      ));
+    },
+  };
+}

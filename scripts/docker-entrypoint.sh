@@ -17,12 +17,12 @@ if [ "${#INVITATION_SIGNING_SECRET}" -lt "$INVITATION_SIGNING_SECRET_MIN_LENGTH"
   exit 1
 fi
 
-# Validate model IDs and context metadata before Eve opens a listener or accepts durable work.
+# Validate model IDs and context metadata before the agent opens a listener or accepts durable work.
 node .runtime/scripts/validate-model-provider-config.js
 
 # A compose run command is an explicit operator action and must terminate normally.
 if [ "$#" -eq 1 ] && [ "$1" = "start-after-migration" ]; then
-  exec npm run start -- --host 0.0.0.0 --port 3000
+  exec node .runtime/agent/main.js
 fi
 if [ "$#" -gt 0 ]; then
   exec "$@"
@@ -30,4 +30,4 @@ fi
 
 # Production images contain the emitted migration runner, not TypeScript source files.
 node .runtime/scripts/migrate.js
-exec npm run start -- --host 0.0.0.0 --port 3000
+exec node .runtime/agent/main.js

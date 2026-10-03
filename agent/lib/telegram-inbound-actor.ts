@@ -6,7 +6,7 @@
  * - `TelegramTimelineActorKind`: persisted timeline actor discriminator.
  * - `telegramInboundActor`: fail-closed classifier for human, bot, and channel-authored messages.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 export type TelegramTimelineActorKind = "agent_self" | "telegram_bot" | "telegram_channel" | "user";
 export type TelegramActorKind = "telegram_bot" | "telegram_channel" | "telegram_user";

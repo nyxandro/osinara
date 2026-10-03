@@ -2,11 +2,11 @@
  * Execution-time external-group skill authorization tests.
  *
  * Constructs covered:
- * - The Eve loader runs only for a safe skill present in the current live group policy.
+ * - The runtime's skill loader runs only for a safe skill present in the current live group policy.
  * - Revoked, unknown and malformed requests fail before native skill loading.
  * - The capability-coupled `imagegen` skill additionally requires its active model provider.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../../runtime/tool.js";
 import { describe, expect, it, vi } from "vitest";
 
 // The imagegen cases below describe the Codex-subscription runtime; the direct-provider denial has

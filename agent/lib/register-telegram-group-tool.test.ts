@@ -6,7 +6,7 @@
  * - A freshly authenticated group callback remains invalid for private-only administration.
  * - Owner-only dispatch can be assigned only to an external trust zone.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { registerGroup } = vi.hoisted(() => ({ registerGroup: vi.fn() }));

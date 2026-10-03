@@ -6,7 +6,7 @@
  * - Enrollment command suffixes must target the current bot.
  * - Voice transcripts cannot masquerade as Telegram commands.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { describe, expect, it } from "vitest";
 
 import {

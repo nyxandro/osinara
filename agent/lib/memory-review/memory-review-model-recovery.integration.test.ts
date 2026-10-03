@@ -1,6 +1,6 @@
 /** A provider outage suspends one review, keeping its sources and conversation usable. */
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { Client, type PoolClient } from "pg";
+import type { PoolClient } from "pg";
 import { closeDatabase, database } from "../database.js";
 import { createMainAgentMemoryFixture } from "../memory-agent-write.integration-fixtures.js";
 import { memoryTurnSourceRepository } from "../memory-turn-source-repository.js";
@@ -17,6 +17,8 @@ import { createConfiguredLanguageModel } from "../model-transport.js";
 import { modelRouteKey } from "../model-route.js";
 import { recoverableModelFailureCode } from "../model-failure.js";
 import { reconcileMemoryReviewExecutions } from "./memory-review-execution-reconciliation.js";
+import { createSessionHistory } from "../../runtime/history/history-repository.js";
+import { newSessionId, newTurnId } from "../../runtime/ids.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) throw new Error("AGENT_TEST_DATABASE_UNSAFE");
@@ -28,7 +30,7 @@ function latch() {
   return { promise, resolve };
 }
 
-async function runningReview(eveId = "eve-model-failure") {
+async function runningReview(agentSessionId = "agent-model-failure", agentTurnId = "turn_0") {
   const fixture = await createMainAgentMemoryFixture();
   for (let sequence = 2; sequence <= 50; sequence++) {
     const message = await insertReviewUserMessage({ ...fixture, sequence });
@@ -37,14 +39,33 @@ async function runningReview(eveId = "eve-model-failure") {
   const [batch] = await claim();
   const session = await memoryReviewSessionRepository.prepare(batch!, new Date());
   await memoryReviewDispatchRepository.markDispatchStarted(batch!, session.id);
-  await sessionRepository.bindEveSession(session.id, eveId);
-  await memoryReviewRepository.bindEveTurn({ batchId: batch!.batchId, applicationSessionId: session.id,
-    eveSessionId: eveId, eveTurnId: "turn_0" });
+  await sessionRepository.bindAgentSession(session.id, agentSessionId);
+  await memoryReviewRepository.bindAgentTurn({ batchId: batch!.batchId, applicationSessionId: session.id,
+    agentSessionId: agentSessionId, agentTurnId });
   await memoryTurnSourceRepository.bindReview({ applicationSessionId: session.id,
     conversationId: fixture.conversationId, memoryReviewBatchId: batch!.batchId,
-    sourceEntryIds: batch!.sourceEntryIds, eveSessionId: eveId, eveTurnId: "turn_0",
+    sourceEntryIds: batch!.sourceEntryIds, agentSessionId: agentSessionId, agentTurnId,
     invokingActorId: fixture.auth.telegramActorId!, invokingActorKind: "telegram_user" });
   return { fixture, batch: batch!, session };
+}
+
+/**
+ * A batch that ended as `ambiguous` (its session failed and the outcome stayed unknown). Releases
+ * before the runtime switch left such rows; only the operator recovery handles them now.
+ */
+async function recordAmbiguousEnding(batchId: string): Promise<void> {
+  const ended = await database().query(
+    `UPDATE memory_review_batches SET status = 'ambiguous', diagnostic_code = 'AGENT_MEMORY_REVIEW_SESSION_FAILED_AMBIGUOUS',
+            completed_at = now(), updated_at = now(), lease_token = NULL, lease_expires_at = NULL
+      WHERE id = $1 AND status = 'running' RETURNING application_session_id`,
+    [batchId],
+  );
+  await database().query(
+    `UPDATE conversation_sessions SET pending_operation = false, task_state = 'failed', retired_at = now(),
+            delete_after = now() + interval '1 day'
+      WHERE id = $1 AND kind = 'proactive'`,
+    [ended.rows[0]!.application_session_id],
+  );
 }
 
 (enabled ? describe : describe.skip)("memory review model recovery", () => {
@@ -59,33 +80,29 @@ async function runningReview(eveId = "eve-model-failure") {
     expect((await database().query("SELECT count(*)::int AS n FROM memory_turn_source_sets WHERE memory_review_batch_id=$1", [batch.batchId])).rows[0].n).toBe(0);
     expect((await database().query("SELECT count(*)::int AS n FROM memory_review_batch_sources WHERE batch_id=$1", [batch.batchId])).rows[0].n).toBe(50);
   });
-  it("does not count partial memory as reviewed when Workflow completed with an agent failure", async () => {
-    const tag=crypto.randomUUID().replaceAll("-","").slice(0,26).toUpperCase();
-    const eveId=`wrun_${tag}`;
-    const { fixture,batch } = await runningReview(eveId);
+  it("does not count partial memory as reviewed when its review turn failed", async () => {
+    const agentSessionId = newSessionId();
+    const turnId = newTurnId();
+    const { fixture,batch,session } = await runningReview(agentSessionId, turnId);
+    await createSessionHistory(database(), { announcedSkills: null, applicationSessionId: session.id, channelState: null,
+      compaction: { inputTokens: null, promptMessageCount: null }, history: [], initiatorAuth: null, parentSessionId: null,
+      sandbox: null, sessionId: agentSessionId, source: "runtime", todo: null });
+    await database().query(`INSERT INTO agent_turns (id, session_id, sequence, kind, status, auth, channel, input, error_code, completed_at)
+      VALUES ($1, $2, 0, 'memory_review', 'failed', '{}', '{"kind":"memory-review"}', '{"context":[]}', 'AGENT_MODEL_CALL_FAILED', now())`, [turnId, agentSessionId]);
     await memoryRepository.create(fixture.auth, {
       memoryReviewBatchId: batch.batchId,confirmation: "model_high",content: "Анна готовится к марафону",kind: "fact",scope: "family",
-      sensitivity: "normal",operationKey: "partial-native-result",source: `eve:${eveId}:turn_0`,
-      provenance: { sessionId: eveId,turnId: "turn_0" },systemActor: true,
+      sensitivity: "normal",operationKey: "partial-native-result",source: `eve:${agentSessionId}:${turnId}`,
+      provenance: { sessionId: agentSessionId,turnId },systemActor: true,
       explicitSource: { conversationId: fixture.conversationId,timelineEntryId: batch.sourceEntryIds[0]!,subject: { kind: "current_author" } },
     });
     await database().query("UPDATE memory_review_batches SET updated_at=now()-interval '2 minutes' WHERE id=$1", [batch.batchId]);
-    const native = new Client({ connectionString: process.env.WORKFLOW_POSTGRES_URL });
-    await native.connect();
-    try {
-      await native.query("INSERT INTO workflow.workflow_runs(id,name,status,deployment_id) VALUES($1,'failed-agent-test','completed','test')", [eveId]);
-      await native.query("INSERT INTO workflow.workflow_stream_chunks(id,stream_id,run_id,data,eof) VALUES($1,$2,$3,$4,false)",
-        [`chnk_${tag}`,`strm_${tag}_user`,eveId,Buffer.from(JSON.stringify({ type: "turn.failed",data: { turnId: "turn_0",code: "MODEL_CALL_FAILED" } })+"\n")]);
-      await reconcileMemoryReviewExecutions();
-      expect((await database().query("SELECT status,diagnostic_code FROM memory_review_batches WHERE id=$1", [batch.batchId])).rows)
-        .toEqual([{ status: "failed",diagnostic_code: "AGENT_MEMORY_REVIEW_PARTIAL_RESULT" }]);
-      expect(await memoryReviewRepository.getLaneCursor({ conversationId: fixture.conversationId,messageThreadId: null })).toBe("0");
-      expect((await database().query("SELECT count(*)::int AS n FROM memory_review_batch_sources WHERE batch_id=$1", [batch.batchId])).rows[0].n).toBe(50);
-    } finally {
-      await native.query("DELETE FROM workflow.workflow_stream_chunks WHERE run_id=$1", [eveId]);
-      await native.query("DELETE FROM workflow.workflow_runs WHERE id=$1", [eveId]);
-      await native.end();
-    }
+
+    await reconcileMemoryReviewExecutions();
+
+    expect((await database().query("SELECT status,diagnostic_code FROM memory_review_batches WHERE id=$1", [batch.batchId])).rows)
+      .toEqual([{ status: "failed",diagnostic_code: "AGENT_MEMORY_REVIEW_PARTIAL_RESULT" }]);
+    expect(await memoryReviewRepository.getLaneCursor({ conversationId: fixture.conversationId,messageThreadId: null })).toBe("0");
+    expect((await database().query("SELECT count(*)::int AS n FROM memory_review_batch_sources WHERE batch_id=$1", [batch.batchId])).rows[0].n).toBe(50);
   });
 
   it("reconciles a terminal empty native task once when its application failure event was lost", async () => {
@@ -110,8 +127,8 @@ async function runningReview(eveId = "eve-model-failure") {
 
   it("waits after a confirmed model timeout without losing sources or retrying on every tick", async () => {
     const { batch } = await runningReview();
-    await memoryReviewDispatchRepository.markSessionAmbiguous({ batchId: batch.batchId,
-      eveSessionId: "eve-model-failure", diagnosticCode: "AGENT_MODEL_FIRST_CHUNK_TIMEOUT" });
+    await memoryReviewRepository.failRunning({ batchId: batch.batchId,
+      diagnosticCode: "AGENT_MODEL_FIRST_CHUNK_TIMEOUT", agentSessionId: "agent-model-failure", agentTurnId: "turn_0" });
     const current = await database().query("SELECT status, diagnostic_code FROM memory_review_batches WHERE id = $1", [batch.batchId]);
     expect(current.rows).toEqual([{ status: "waiting_model", diagnostic_code: "AGENT_MODEL_FIRST_CHUNK_TIMEOUT" }]);
     await closeDatabase();
@@ -121,8 +138,8 @@ async function runningReview(eveId = "eve-model-failure") {
       .toEqual([{ count: 50 }]);
   });
 
-  async function wait(batchId: string, eveSessionId = "eve-model-failure") {
-    await memoryReviewDispatchRepository.markSessionAmbiguous({ batchId, eveSessionId, diagnosticCode: "AGENT_MODEL_FIRST_CHUNK_TIMEOUT" });
+  async function wait(batchId: string, agentSessionId = "agent-model-failure") {
+    await memoryReviewRepository.failRunning({ batchId, diagnosticCode: "AGENT_MODEL_FIRST_CHUNK_TIMEOUT", agentSessionId, agentTurnId: "turn_0" });
     return (await database().query<{ model_route_key: string; waiting_since: Date }>(
       "SELECT model_route_key, waiting_since FROM memory_review_batches WHERE id = $1", [batchId])).rows[0]!;
   }
@@ -144,14 +161,14 @@ async function runningReview(eveId = "eve-model-failure") {
     expect(next.id).not.toBe(session.id);
     expect(next.continuationToken).not.toBe(session.continuationToken);
     await memoryReviewDispatchRepository.markDispatchStarted(resumed[0]!, next.id);
-    await sessionRepository.bindEveSession(next.id, "eve-recovered");
-    await memoryReviewRepository.bindEveTurn({ batchId: batch.batchId, applicationSessionId: next.id, eveSessionId: "eve-recovered", eveTurnId: "turn_0" });
+    await sessionRepository.bindAgentSession(next.id, "agent-recovered");
+    await memoryReviewRepository.bindAgentTurn({ batchId: batch.batchId, applicationSessionId: next.id, agentSessionId: "agent-recovered", agentTurnId: "turn_0" });
     await memoryTurnSourceRepository.bindReview({ applicationSessionId: next.id,
       conversationId: fixture.conversationId, memoryReviewBatchId: batch.batchId, sourceEntryIds: batch.sourceEntryIds,
-      eveSessionId: "eve-recovered", eveTurnId: "turn_0", invokingActorId: fixture.auth.telegramActorId!, invokingActorKind: "telegram_user" });
+      agentSessionId: "agent-recovered", agentTurnId: "turn_0", invokingActorId: fixture.auth.telegramActorId!, invokingActorKind: "telegram_user" });
     await expect(memoryReviewRepository.completeBatch({ batchId: batch.batchId, completedAt: new Date(),
-      eveSessionId: "eve-model-failure", eveTurnId: "turn_0" })).resolves.toBe("replayed");
-    await memoryReviewRepository.completeBatch({ batchId: batch.batchId, completedAt: new Date(), eveSessionId: "eve-recovered", eveTurnId: "turn_0" });
+      agentSessionId: "agent-model-failure", agentTurnId: "turn_0" })).resolves.toBe("replayed");
+    await memoryReviewRepository.completeBatch({ batchId: batch.batchId, completedAt: new Date(), agentSessionId: "agent-recovered", agentTurnId: "turn_0" });
     expect(await memoryReviewRepository.getLaneCursor({ conversationId: fixture.conversationId, messageThreadId: null })).toBe("50");
     expect((await database().query("SELECT count(*)::int AS count FROM audit_events WHERE event_type = 'memory_review.model_recovered' AND subject_id = $1", [batch.batchId])).rows)
       .toEqual([{ count: 1 }]);
@@ -165,9 +182,9 @@ async function runningReview(eveId = "eve-model-failure") {
     const [resumed] = await claim();
     const next = await memoryReviewSessionRepository.prepare(resumed!, new Date());
     await memoryReviewDispatchRepository.markDispatchStarted(resumed!, next.id);
-    await sessionRepository.bindEveSession(next.id, "eve-recovered");
-    await memoryReviewRepository.bindEveTurn({ batchId: batch.batchId, applicationSessionId: next.id, eveSessionId: "eve-recovered", eveTurnId: "turn_0" });
-    const secondWait = await wait(batch.batchId, "eve-recovered");
+    await sessionRepository.bindAgentSession(next.id, "agent-recovered");
+    await memoryReviewRepository.bindAgentTurn({ batchId: batch.batchId, applicationSessionId: next.id, agentSessionId: "agent-recovered", agentTurnId: "turn_0" });
+    const secondWait = await wait(batch.batchId, "agent-recovered");
     await recordSuccessfulModelCall(signal);
     expect(await claim()).toEqual([]);
     // An old observation arriving late is not a new proof of availability.
@@ -181,11 +198,11 @@ async function runningReview(eveId = "eve-model-failure") {
     const { fixture, batch } = await runningReview();
     await memoryRepository.create(fixture.auth, {
       memoryReviewBatchId: batch.batchId, confirmation: "model_high", content: "Анна готовится к марафону", kind: "fact",
-      scope: "family", sensitivity: "normal", operationKey: "partial-write", source: "eve:eve-model-failure:turn_0",
-      provenance: { sessionId: "eve-model-failure", turnId: "turn_0" }, systemActor: true,
+      scope: "family", sensitivity: "normal", operationKey: "partial-write", source: "eve:agent-model-failure:turn_0",
+      provenance: { sessionId: "agent-model-failure", turnId: "turn_0" }, systemActor: true,
       explicitSource: { conversationId: fixture.conversationId, timelineEntryId: batch.sourceEntryIds[0]!, subject: { kind: "current_author" } },
     });
-    await memoryReviewRepository.failRunning({ batchId: batch.batchId, diagnosticCode: "AGENT_MODEL_STREAM_TIMEOUT", eveSessionId: "eve-model-failure", eveTurnId: "turn_0" });
+    await memoryReviewRepository.failRunning({ batchId: batch.batchId, diagnosticCode: "AGENT_MODEL_STREAM_TIMEOUT", agentSessionId: "agent-model-failure", agentTurnId: "turn_0" });
     expect((await database().query("SELECT status, diagnostic_code FROM memory_review_batches WHERE id = $1", [batch.batchId])).rows)
       .toEqual([{ status: "failed", diagnostic_code: "AGENT_MEMORY_REVIEW_PARTIAL_RESULT" }]);
     expect(await memoryReviewRepository.getLaneCursor({ conversationId: fixture.conversationId, messageThreadId: null })).toBe("0");
@@ -197,8 +214,8 @@ async function runningReview(eveId = "eve-model-failure") {
     await wait(batch.batchId);
     await expect(memoryRepository.create(fixture.auth, {
       memoryReviewBatchId: batch.batchId, confirmation: "model_high", content: "Запоздавшая запись", kind: "fact",
-      scope: "family", sensitivity: "normal", operationKey: "late-write", source: "eve:eve-model-failure:turn_0",
-      provenance: { sessionId: "eve-model-failure", turnId: "turn_0" }, systemActor: true,
+      scope: "family", sensitivity: "normal", operationKey: "late-write", source: "eve:agent-model-failure:turn_0",
+      provenance: { sessionId: "agent-model-failure", turnId: "turn_0" }, systemActor: true,
       explicitSource: { conversationId: fixture.conversationId, timelineEntryId: batch.sourceEntryIds[0]!, subject: { kind: "current_author" } },
     })).rejects.toMatchObject({ code: "AGENT_MEMORY_REVIEW_ATTEMPT_STALE" });
     expect((await database().query("SELECT count(*)::int AS count FROM memory_mutation_operations")).rows).toEqual([{ count: 0 }]);
@@ -220,16 +237,15 @@ async function runningReview(eveId = "eve-model-failure") {
 
   it("recovers an explicitly inspected historical failure, but never an unconfirmed running session", async () => {
     const { batch } = await runningReview();
-    await memoryReviewDispatchRepository.markSessionAmbiguous({ batchId: batch.batchId,
-      eveSessionId: "eve-model-failure", diagnosticCode: "AGENT_MEMORY_REVIEW_SESSION_FAILED_AMBIGUOUS" });
+    await recordAmbiguousEnding(batch.batchId);
     const row = (await database().query("SELECT model_route_key FROM memory_review_batches WHERE id = $1", [batch.batchId])).rows[0];
     await database().query("UPDATE memory_review_batches SET model_route_key = NULL WHERE id = $1", [batch.batchId]);
-    const input = { batchId: batch.batchId, expectedEveSessionId: "eve-model-failure",
+    const input = { batchId: batch.batchId, expectedAgentSessionId: "agent-model-failure",
       causeCode: "AGENT_MODEL_FIRST_CHUNK_TIMEOUT", modelRouteKey: row.model_route_key, reason: "Проверен таймаут без записей" };
-    await expect(recoverEmptyReviewModelFailure(input, { isEveSessionTerminal: async () => false }))
+    await expect(recoverEmptyReviewModelFailure(input, { isAgentSessionTerminal: async () => false }))
       .rejects.toMatchObject({ code: "AGENT_MEMORY_REVIEW_RECOVERY_SESSION_UNCONFIRMED" });
-    expect(await recoverEmptyReviewModelFailure(input, { isEveSessionTerminal: async () => true })).toBe("waiting");
-    expect(await recoverEmptyReviewModelFailure(input, { isEveSessionTerminal: async () => true })).toBe("replayed");
+    expect(await recoverEmptyReviewModelFailure(input, { isAgentSessionTerminal: async () => true })).toBe("waiting");
+    expect(await recoverEmptyReviewModelFailure(input, { isAgentSessionTerminal: async () => true })).toBe("replayed");
     expect((await database().query("SELECT count(*)::int AS count FROM audit_events WHERE event_type = 'memory_review.operator_model_recovery' AND subject_id = $1", [batch.batchId])).rows)
       .toEqual([{ count: 1 }]);
     expect(await claim()).toEqual([]);
@@ -276,8 +292,8 @@ async function runningReview(eveId = "eve-model-failure") {
     pool.on("acquire",acquired);
     const write = memoryRepository.create(fixture.auth, {
       memoryReviewBatchId: batch.batchId, confirmation: "model_high", content: "Запись началась до таймаута", kind: "fact",
-      scope: "family", sensitivity: "normal", operationKey: "in-flight-write", source: "eve:eve-model-failure:turn_0",
-      provenance: { sessionId: "eve-model-failure", turnId: "turn_0" }, systemActor: true,
+      scope: "family", sensitivity: "normal", operationKey: "in-flight-write", source: "eve:agent-model-failure:turn_0",
+      provenance: { sessionId: "agent-model-failure", turnId: "turn_0" }, systemActor: true,
       explicitSource: { conversationId: fixture.conversationId, timelineEntryId: batch.sourceEntryIds[0]!, subject: { kind: "current_author" } },
     });
     let terminal: Promise<unknown> | undefined;
@@ -309,7 +325,7 @@ async function runningReview(eveId = "eve-model-failure") {
     const failure = { code: "MODEL_CALL_FAILED", details: { semanticErrorId: "network-request-failed" } };
     await memoryReviewRepository.failRunning({ batchId: batch.batchId,
       diagnosticCode: recoverableModelFailureCode(failure) ?? failure.code,
-      eveSessionId: "eve-model-failure", eveTurnId: "turn_0" });
+      agentSessionId: "agent-model-failure", agentTurnId: "turn_0" });
     expect((await database().query("SELECT status FROM memory_review_batches WHERE id = $1", [batch.batchId])).rows)
       .toEqual([{ status: "waiting_model" }]);
     expect(await claim()).toEqual([]);
@@ -320,7 +336,7 @@ async function runningReview(eveId = "eve-model-failure") {
   it("preserves sources for an unclassified background failure instead of silently replaying them", async () => {
     const { batch } = await runningReview();
     await memoryReviewRepository.failRunning({ batchId: batch.batchId, diagnosticCode: "UNCLASSIFIED_REVIEW_ERROR",
-      eveSessionId: "eve-model-failure", eveTurnId: "turn_0" });
+      agentSessionId: "agent-model-failure", agentTurnId: "turn_0" });
     expect((await database().query("SELECT status, diagnostic_code FROM memory_review_batches WHERE id = $1", [batch.batchId])).rows)
       .toEqual([{ status: "failed", diagnostic_code: "UNCLASSIFIED_REVIEW_ERROR" }]);
     expect(await claim()).toEqual([]);

@@ -2,14 +2,16 @@
  * Controlled external-group web fetch tests.
  *
  * Constructs covered:
- * - `createControlledWebFetch`: injectable proxied HTTP executor with strict URL and resource limits.
- * - `controlledWebFetchTool`: Eve-compatible custom `web_fetch` definition.
+ * - `createControlledWebFetch`: injectable proxied HTTP executor with strict URL and resource limits;
+ *   a refusing site's status reaches the model, its origin only the diagnostics.
+ * - `controlledWebFetchTool`: custom `web_fetch` definition with the built-in input contract.
  */
 import { Buffer } from "node:buffer";
 
 import { ProxyAgent, type RequestInit, type Response } from "undici";
 import { describe, expect, it, vi } from "vitest";
 
+import { AppError } from "../app-error.js";
 import {
   CONTROLLED_WEB_FETCH_MAX_BODY_BYTES,
   CONTROLLED_WEB_FETCH_MAX_MODEL_BYTES,
@@ -27,7 +29,7 @@ function response(body: BodyInit | null, init?: ResponseInit): Response {
 }
 
 describe("controlled external-group web fetch", () => {
-  it("preserves the Eve input contract and always dispatches through the fixed proxy", async () => {
+  it("preserves the built-in input contract and always dispatches through the fixed proxy", async () => {
     const fetch = vi.fn(async () => response("<h1>Hello</h1>", {
       headers: { "content-type": "text/html; charset=utf-8" },
     }));
@@ -210,6 +212,26 @@ describe("controlled external-group web fetch", () => {
 
     await expect(execute({ timeout: 121, url: "https://example.com" })).rejects.toThrow();
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("tells the model the refusing status and keeps the site only for diagnostics", async () => {
+    const fetch = vi.fn(async () => response("denied", { status: 403 }));
+    const execute = createControlledWebFetch({ dispatcher: {} as never, fetch });
+
+    const failure = await execute({ url: "https://news.example.com/2026/09/post?token=secret" })
+      .catch((error: unknown) => error);
+
+    // Without the status a blocked site, an invented address and an outage look the same (#302).
+    expect(failure).toBeInstanceOf(AppError);
+    expect(failure).toMatchObject({
+      code: "AGENT_WEB_FETCH_RESPONSE_FAILED",
+      details: { origin: "https://news.example.com", status: 403 },
+      isExpectedRefusal: true,
+    });
+    expect((failure as AppError).message).toContain("HTTP 403");
+    expect((failure as AppError).message).not.toContain("example.com");
+    expect(JSON.stringify((failure as AppError).details)).not.toContain("secret");
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("does not retry failed requests and returns a safe Russian error", async () => {

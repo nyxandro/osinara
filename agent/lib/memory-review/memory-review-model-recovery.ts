@@ -21,14 +21,14 @@ async function audit(client: PoolClient, batch: ReviewAttempt, event: string, me
 
 export async function blockPartialReviewAttempt(client: PoolClient, batch: ReviewAttempt, causeCode: string, now: Date): Promise<void> {
   if (batch.application_session_id && batch.eve_session_id) await terminalizeApplicationSession(client, {
-    applicationSessionId: batch.application_session_id, eveSessionId: batch.eve_session_id, completedAt: now, outcome: "failed",
+    applicationSessionId: batch.application_session_id, agentSessionId: batch.eve_session_id, completedAt: now, outcome: "failed",
   });
   await client.query(`UPDATE memory_review_batches SET status = 'failed', diagnostic_code = $2,
     completed_at = $3, updated_at = $3, lease_token = NULL, lease_expires_at = NULL,
     waiting_since = NULL, waiting_success_version = NULL WHERE id = $1`, [batch.id, REVIEW_PARTIAL_RESULT, now]);
   await enqueueMemoryReviewOwnerAlert(client, batch.id, REVIEW_PARTIAL_RESULT);
   await audit(client, batch, "memory_review.partial_result", { causeCode, generation: batch.model_recovery_generation,
-    eveSessionId: batch.eve_session_id, eveTurnId: batch.eve_turn_id });
+    agentSessionId: batch.eve_session_id, agentTurnId: batch.eve_turn_id });
 }
 
 export async function recordReviewModelWait(
@@ -44,7 +44,7 @@ export async function recordReviewModelWait(
     return "blocked";
   }
   await terminalizeApplicationSession(client, { applicationSessionId: batch.application_session_id,
-    eveSessionId: batch.eve_session_id, completedAt: now, outcome: "failed" });
+    agentSessionId: batch.eve_session_id, completedAt: now, outcome: "failed" });
   // Zero explicitly means no successful call has yet been observed for this connection.
   await client.query(`UPDATE memory_review_batches SET status = 'waiting_model', diagnostic_code = $2,
     completed_at = NULL, updated_at = $3, waiting_since = $3,
@@ -53,13 +53,13 @@ export async function recordReviewModelWait(
   await enqueueMemoryReviewOwnerAlert(client, batch.id, REVIEW_WAITING_MODEL);
   await audit(client, batch, "memory_review.waiting_model", {
     causeCode: code, modelRouteKey: batch.model_route_key, generation: batch.model_recovery_generation,
-    eveSessionId: batch.eve_session_id, eveTurnId: batch.eve_turn_id,
+    agentSessionId: batch.eve_session_id, agentTurnId: batch.eve_turn_id,
   });
   return "waiting";
 }
 
 export async function failBackgroundReview(input: {
-  batchId: string; diagnosticCode: string; eveSessionId: string; eveTurnId?: string;
+  batchId: string; diagnosticCode: string; agentSessionId: string; agentTurnId?: string;
 }): Promise<"waiting" | "blocked" | "replayed" | null> {
   if (!input.diagnosticCode) throw new AppError("AGENT_MEMORY_REVIEW_DIAGNOSTIC_MISSING", "Не сохранена причина ошибки проверки памяти");
   const client = await database().connect();
@@ -67,7 +67,7 @@ export async function failBackgroundReview(input: {
     await client.query("BEGIN");
     const batch = await lockReviewAttempt(client, input.batchId);
     if (!batch || batch.batch_kind !== "background") { await client.query("COMMIT"); return null; }
-    if (batch.eve_session_id !== input.eveSessionId || input.eveTurnId !== undefined && batch.eve_turn_id !== input.eveTurnId ||
+    if (batch.eve_session_id !== input.agentSessionId || input.agentTurnId !== undefined && batch.eve_turn_id !== input.agentTurnId ||
         !["running", "dispatching"].includes(batch.status)) {
       await client.query("COMMIT"); return "replayed";
     }
@@ -81,14 +81,14 @@ export async function failBackgroundReview(input: {
     } else {
       // An unknown background error must not silently release/replay or skip its sources.
       if (batch.application_session_id && batch.eve_session_id) await terminalizeApplicationSession(client, {
-        applicationSessionId: batch.application_session_id, eveSessionId: batch.eve_session_id, completedAt: now, outcome: "failed",
+        applicationSessionId: batch.application_session_id, agentSessionId: batch.eve_session_id, completedAt: now, outcome: "failed",
       });
       await client.query(`UPDATE memory_review_batches SET status = 'failed', diagnostic_code = $2,
         completed_at = $3, updated_at = $3, lease_token = NULL, lease_expires_at = NULL WHERE id = $1`,
       [batch.id, input.diagnosticCode, now]);
       await enqueueMemoryReviewOwnerAlert(client, batch.id, input.diagnosticCode);
       await audit(client, batch, "memory_review.failed", { causeCode: input.diagnosticCode,
-        eveSessionId: batch.eve_session_id, eveTurnId: batch.eve_turn_id });
+        agentSessionId: batch.eve_session_id, agentTurnId: batch.eve_turn_id });
       result = "blocked";
     }
     await client.query("COMMIT");

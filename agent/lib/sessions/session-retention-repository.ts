@@ -2,7 +2,7 @@
  * PostgreSQL session-retention leasing operations.
  *
  * Exports:
- * - `SessionRetentionClaim`: exclusive Eve storage deletion lease.
+ * - `SessionRetentionClaim`: exclusive session storage deletion lease.
  * - `sessionRetentionRepository`: claim, completion, and failure persistence operations.
  */
 import { SESSION_RETENTION_LEASE_MS } from "../../config.js";
@@ -10,7 +10,7 @@ import { AppError } from "../app-error.js";
 import { database } from "../database.js";
 
 export interface SessionRetentionClaim {
-  eveSessionId: string;
+  agentSessionId: string;
   id: string;
   leaseToken: string;
 }
@@ -30,6 +30,8 @@ export const sessionRetentionRepository = {
           SELECT id FROM conversation_sessions
             WHERE retired_at IS NOT NULL AND delete_after <= $1
               AND retention_hold = false AND eve_session_id IS NOT NULL
+              -- A session whose deletion failed waits for an operator: retrying it in a loop
+              -- would hide the cause.
               AND cleanup_error_code IS NULL
               AND (retention_lease_expires_at IS NULL OR retention_lease_expires_at <= $1)
            ORDER BY delete_after, id
@@ -40,7 +42,7 @@ export const sessionRetentionRepository = {
     );
     const row = result.rows[0];
     return row
-      ? { eveSessionId: row.eve_session_id, id: row.id, leaseToken: row.retention_lease_token }
+      ? { agentSessionId: row.eve_session_id, id: row.id, leaseToken: row.retention_lease_token }
       : null;
   },
 
@@ -57,12 +59,14 @@ export const sessionRetentionRepository = {
     }
   },
 
+  /**
+   * The failure is kept for diagnosis and the lease is released: `cleanup_error_code` alone keeps the
+   * session out of later claims until an operator clears it.
+   */
   async failDeletion(id: string, leaseToken: string, errorCode: string): Promise<void> {
     const result = await database().query(
       `UPDATE conversation_sessions
-          SET cleanup_error_code = $3,
-              retention_lease_token = NULL,
-              retention_lease_expires_at = NULL
+          SET cleanup_error_code = $3, retention_lease_token = NULL, retention_lease_expires_at = NULL
         WHERE id = $1 AND retention_lease_token = $2`,
       [id, leaseToken, errorCode],
     );

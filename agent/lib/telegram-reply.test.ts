@@ -6,8 +6,8 @@
  * - Private and non-message turns remain unthreaded.
  * - Mismatched channel/auth state fails closed.
  */
-import type { TelegramChannelState } from "eve/channels/telegram";
-import type { SessionContext } from "eve/context";
+import type { TelegramChannelState } from "../runtime/telegram/channel-types.js";
+import type { SessionContext } from "../runtime/context.js";
 import { describe, expect, it } from "vitest";
 
 import { telegramTurnReplyParameters } from "./telegram-reply.js";

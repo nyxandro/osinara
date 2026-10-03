@@ -4,7 +4,7 @@
  * Export:
  * - `manage_memory_thread`: completes or reactivates an authorized thread with replay protection.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { AppError } from "../app-error.js";
@@ -38,6 +38,8 @@ function verifiedTurn(ctx: Parameters<typeof requireMemoryAuthorization>[0]) {
 }
 
 export default defineTool({
+  // Repeating it after a crash is safe: its effect is keyed on the call id.
+  replaySafe: true,
   description: [
     "Явно завершить или реактивировать нить памяти.",
     "complete разрешён только после проверенного текущего заявления пользователя, confirmed outcome или formal goal condition и требует sourceEntryRefs из read_memory_thread.",

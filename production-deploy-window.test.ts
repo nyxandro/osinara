@@ -9,9 +9,11 @@
  * - Closing the window is immediate, which is how a failed release becomes visible at once.
  * - Absent collector storage and every way the write can fail never abort an approved release.
  * - The entrypoint opens the window only once a deployment is certain and closes it on every exit.
+ * - Closing writes only when a window exists: a tick that deployed nothing leaves the mark be,
+ *   which is what keeps the alert that allows a grace period on top of it from being silenced.
  * - The systemd unit grants the write access that `ProtectSystem=strict` would otherwise deny.
  */
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -162,6 +164,168 @@ describe("deployment noise window", () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stderr).toBe("");
     expect(existsSync(metricPath)).toBe(false);
+  });
+
+  it("leaves a closed window alone on a tick that deployed nothing", () => {
+    const directory = makeDirectory("osinara-window-tick-");
+    const metricPath = join(directory, "osinara-deploy-window.prom");
+
+    const release = runShell(`
+      source scripts/production-deploy/common.sh
+      open_deploy_window ${JSON.stringify(metricPath)}
+      close_deploy_window ${JSON.stringify(metricPath)}
+    `);
+    expect(release.status, release.stderr).toBe(0);
+    const closed = readDeadline(metricPath).deadline;
+
+    // The next timer tick is a separate process that finds no approved proposal and still reaches
+    // the exit trap. Re-stamping the mark here is what silenced the ingress alert around the
+    // clock: that rule allows a grace period on top of the mark, and a mark refreshed every
+    // minute never falls far enough behind for the grace to expire. `date` is stubbed far into
+    // the future so a rewrite is unmistakable.
+    const tick = runShell(`
+      source scripts/production-deploy/common.sh
+      date() { printf '%s\\n' 9999999999; }
+      close_deploy_window ${JSON.stringify(metricPath)}
+    `);
+
+    expect(tick.status, tick.stderr).toBe(0);
+    expect(readDeadline(metricPath).deadline).toBe(closed);
+  });
+
+  it("does not abort the run when the tick finds the window already closed", () => {
+    const directory = makeDirectory("osinara-window-guard-");
+    const metricPath = join(directory, "osinara-deploy-window.prom");
+    const setup = runShell(`
+      source scripts/production-deploy/common.sh
+      open_deploy_window ${JSON.stringify(metricPath)}
+      close_deploy_window ${JSON.stringify(metricPath)}
+    `);
+    // Without a written sample the tick below meets no file at all, returns early and proves
+    // nothing about the guard it is meant to exercise.
+    expect(setup.status, setup.stderr).toBe(0);
+    expect(existsSync(metricPath)).toBe(true);
+
+    // The guard answers "there is no window" by failing, which is the exact shape `set -e` and the
+    // release's ERR trap abort on. Deciding not to write must never end a run.
+    const result = runShell(`
+      set -E
+      source scripts/production-deploy/common.sh
+      trap 'printf "RUN-ABORTED\\n"; exit 9' ERR
+      close_deploy_window ${JSON.stringify(metricPath)}
+      printf 'tick-continues\\n'
+    `);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).not.toContain("RUN-ABORTED");
+    expect(result.stdout).toContain("tick-continues");
+  });
+
+  it("closes a window this run opened even after its deadline has passed", () => {
+    const directory = makeDirectory("osinara-window-overrun-");
+    const metricPath = join(directory, "osinara-deploy-window.prom");
+
+    // systemd allows a release forty-five minutes and the window it announces lasts thirty, so a
+    // slow release can outlive its own deadline. It still has to hand the queue its grace period
+    // on the way out: without that the alert fires the moment a healthy release finishes.
+    const before = Math.floor(Date.now() / 1000);
+    const result = runShell(`
+      source scripts/production-deploy/common.sh
+      date() { printf '%s\\n' 1000000000; }
+      open_deploy_window ${JSON.stringify(metricPath)}
+      unset -f date
+      close_deploy_window ${JSON.stringify(metricPath)}
+    `);
+    const after = Math.floor(Date.now() / 1000);
+
+    expect(result.status, result.stderr).toBe(0);
+    const { deadline } = readDeadline(metricPath);
+    expect(deadline).toBeGreaterThanOrEqual(before);
+    expect(deadline).toBeLessThanOrEqual(after);
+  });
+
+  it("repairs a sample nothing can parse instead of leaving it for good", () => {
+    const directory = makeDirectory("osinara-window-corrupt-");
+    const metricPath = join(directory, "osinara-deploy-window.prom");
+    writeFileSync(metricPath, "half a line nobody can read\n");
+
+    // The collector cannot read this either, so the hub reports broken textfile metrics until
+    // someone intervenes. Refusing to touch it would make that permanent; one valid write ends it.
+    const result = runShell(`
+      source scripts/production-deploy/common.sh
+      close_deploy_window ${JSON.stringify(metricPath)}
+    `);
+    const after = Math.floor(Date.now() / 1000);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(readDeadline(metricPath).deadline).toBeLessThanOrEqual(after);
+  });
+
+  it("repairs a file whose last sample is fine but which carries anything else", () => {
+    const directory = makeDirectory("osinara-window-mixed-");
+    const metricPath = join(directory, "osinara-deploy-window.prom");
+    const past = Math.floor(Date.now() / 1000) - 3_600;
+    // The collector parses the file whole, so one stray line or a duplicate sample costs the valid
+    // sample next to it as well. Looking at the last sample alone would leave that for good.
+    writeFileSync(metricPath, [
+      "half a line nobody can read",
+      `deploy_window_end_timestamp_seconds{project="osinara-production"} ${past}`,
+      `deploy_window_end_timestamp_seconds{project="osinara-production"} ${past}`,
+      "",
+    ].join("\n"));
+
+    const result = runShell(`
+      source scripts/production-deploy/common.sh
+      close_deploy_window ${JSON.stringify(metricPath)}
+    `);
+
+    expect(result.status, result.stderr).toBe(0);
+    const content = readFileSync(metricPath, "utf8");
+    expect(content).not.toContain("half a line");
+    expect(content.match(/^deploy_window_end_timestamp_seconds\{/gmu)).toHaveLength(1);
+  });
+
+  it("leaves an exact closed sample untouched", () => {
+    const directory = makeDirectory("osinara-window-rest-");
+    const metricPath = join(directory, "osinara-deploy-window.prom");
+    const setup = runShell(`
+      source scripts/production-deploy/common.sh
+      publish_deploy_window ${JSON.stringify(metricPath)} 1000
+    `);
+    expect(setup.status, setup.stderr).toBe(0);
+    const before = readFileSync(metricPath, "utf8");
+
+    const result = runShell(`
+      source scripts/production-deploy/common.sh
+      close_deploy_window ${JSON.stringify(metricPath)}
+    `);
+
+    // The ordinary resting state: an old deadline the tick has no business rewriting.
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(metricPath, "utf8")).toBe(before);
+  });
+
+  it("clears a window a killed release left in the future", () => {
+    const directory = makeDirectory("osinara-window-stale-");
+    const metricPath = join(directory, "osinara-deploy-window.prom");
+
+    // A release killed between opening the window and running its trap leaves a deadline ahead of
+    // now. Nothing else will ever close it, so the next tick has to.
+    const killed = runShell(`
+      source scripts/production-deploy/common.sh
+      open_deploy_window ${JSON.stringify(metricPath)}
+    `);
+    expect(killed.status, killed.stderr).toBe(0);
+    expect(readDeadline(metricPath).deadline).toBeGreaterThan(Math.floor(Date.now() / 1000));
+
+    const tick = runShell(`
+      source scripts/production-deploy/common.sh
+      close_deploy_window ${JSON.stringify(metricPath)}
+    `);
+    const after = Math.floor(Date.now() / 1000);
+
+    expect(tick.status, tick.stderr).toBe(0);
+    expect(readDeadline(metricPath).deadline).toBeLessThanOrEqual(after);
   });
 
   it("publishes exactly the metric and project the alert rules stand down on", () => {

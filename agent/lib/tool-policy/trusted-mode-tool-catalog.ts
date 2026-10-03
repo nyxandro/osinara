@@ -6,7 +6,7 @@
  * - `PRIVATE_ONLY_TOOLS`, `FAMILY_ONLY_TOOLS`: trust-zone-specific definitions.
  * - Sorted tool-name arrays used by policy contracts.
  */
-import type { ToolDefinition } from "eve/tools";
+import type { ToolDefinition } from "../../runtime/tool.js";
 
 import executeGoogleWorkspace from "../tools/execute_google_workspace.js";
 import exportMemory from "../tools/export_memory.js";
@@ -34,6 +34,7 @@ import manageMemoryConflict from "../tools/manage_memory_conflict.js";
 import manageMemoryThread from "../tools/manage_memory_thread.js";
 import manageProfileProjection from "../tools/manage_profile_projection.js";
 import manageReminder from "../tools/manage_reminder.js";
+import manageSkill from "../tools/manage_skill.js";
 import manageTelegramGroup from "../tools/manage_telegram_group.js";
 import notificationSettings from "../tools/notification_settings.js";
 import readMemoryThread from "../tools/read_memory_thread.js";
@@ -41,6 +42,7 @@ import readProfileView from "../tools/read_profile_view.js";
 import remember from "../tools/remember.js";
 import searchMemories from "../tools/search_memories.js";
 import searchMemoryThreads from "../tools/search_memory_threads.js";
+import sendVoiceMessage from "../tools/send_voice_message.js";
 import sendWorkspaceFile from "../tools/send_workspace_file.js";
 import startNewContext from "../tools/start_new_context.js";
 import { IMAGE_GENERATION_AVAILABLE } from "../image-generation/image-generation-availability.js";
@@ -77,6 +79,7 @@ export const TRUSTED_MODE_TOOLS: ToolMap = {
   remember: remember as unknown as AnyToolDefinition,
   search_memories: searchMemories as unknown as AnyToolDefinition,
   search_memory_threads: searchMemoryThreads as unknown as AnyToolDefinition,
+  send_voice_message: sendVoiceMessage as unknown as AnyToolDefinition,
   send_workspace_file: sendWorkspaceFile as unknown as AnyToolDefinition,
   start_new_context: startNewContext as unknown as AnyToolDefinition,
 };
@@ -89,6 +92,7 @@ export const PRIVATE_ONLY_TOOLS: ToolMap = {
   manage_external_group_schedule: manageExternalGroupSchedule as unknown as AnyToolDefinition,
   manage_family_invitation: manageFamilyInvitation as unknown as AnyToolDefinition,
   manage_profile_projection: manageProfileProjection as unknown as AnyToolDefinition,
+  manage_skill: manageSkill as unknown as AnyToolDefinition,
   manage_telegram_group: manageTelegramGroup as unknown as AnyToolDefinition,
   notification_settings: notificationSettings as unknown as AnyToolDefinition,
 };

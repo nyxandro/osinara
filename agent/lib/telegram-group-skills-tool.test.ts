@@ -5,7 +5,7 @@
  * - `manage_telegram_group.update_skills` replaces one exact group's safe allowlist after HITL.
  * - Status exposes persisted and globally available safe skills.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { listStatuses, updateSkills } = vi.hoisted(() => ({
@@ -48,7 +48,7 @@ describe("manage_telegram_group.update_skills", () => {
   beforeEach(() => {
     listStatuses.mockReset();
     updateSkills.mockReset();
-    updateSkills.mockResolvedValue({ groupId: "group-1" });
+    updateSkills.mockResolvedValue({ groupId: "group-1", skillsNeedBash: false });
   });
 
   it("replaces the exact group allowlist with reviewed skills", async () => {
@@ -95,12 +95,14 @@ describe("manage_telegram_group.update_skills", () => {
     }));
   });
 
-  it("rejects unreviewed and duplicate skills before persistence", async () => {
+  // Whether a well-formed name is an existing skill is decided by the repository, which also knows
+  // the family's own skills (`family-skills.integration.test.ts`).
+  it("rejects malformed and duplicate skill names before persistence", async () => {
     await expect(manageTelegramGroup.execute({
       action: "update_skills",
-      skillAllowlist: ["unknown"],
+      skillAllowlist: ["../escape"],
       telegramChatId: "-1001234567890",
-    } as never, context())).rejects.toThrowError(/AGENT_TELEGRAM_GROUP_INPUT_INVALID.*pohuy/u);
+    } as never, context())).rejects.toThrowError(/AGENT_TELEGRAM_GROUP_INPUT_INVALID.*availableSafeSkills/u);
     await expect(manageTelegramGroup.execute({
       action: "update_skills",
       skillAllowlist: ["pohuy", "pohuy"],

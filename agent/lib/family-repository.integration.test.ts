@@ -160,7 +160,7 @@ describeWithDatabase("familyRepository invitations", () => {
     await expect(telegramRepository.findIdentity("candidate-cross-family")).resolves.toBeNull();
   });
 
-  it("reuses one invitation for an Eve replay and rejects a stale owner", async () => {
+  it("reuses one invitation for a replayed call and rejects a stale owner", async () => {
     const owner = await createOwner("replay");
     const first = await familyRepository.createInvitation(
       owner.familyId,
@@ -332,7 +332,7 @@ describeWithDatabase("familyRepository invitations", () => {
     expect(state.rows[0]?.status).toBe("expired");
   });
 
-  it("does not deliver an expired invitation when Eve replays its create operation", async () => {
+  it("does not deliver an expired invitation when the runtime replays its create operation", async () => {
     const owner = await createOwner("expired-replay");
     const invitation = await familyRepository.createInvitation(
       owner.familyId,

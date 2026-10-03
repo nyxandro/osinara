@@ -10,7 +10,7 @@
  *   trusted descriptor keeps its own scope field and stays untouched by this module.
  * - Every execute re-derives the verified Telegram participant and acts only in that chat.
  */
-import { defineTool, type ToolDefinition } from "eve/tools";
+import { defineTool, type ToolDefinition } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { groupReminderRepository } from "../reminders/group-reminder-repository.js";
