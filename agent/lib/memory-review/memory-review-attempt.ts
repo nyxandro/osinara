@@ -10,8 +10,8 @@ export interface ReviewAttempt {
   batch_kind: "background" | "interactive";
   status: string;
   application_session_id: string | null;
-  eve_session_id: string | null;
-  eve_turn_id: string | null;
+  agent_session_id: string | null;
+  agent_turn_id: string | null;
   model_route_key: string | null;
   model_recovery_generation: number;
   diagnostic_code: string | null;
@@ -31,7 +31,7 @@ export async function isRetiredReviewAttempt(client: PoolClient, input: {
 }): Promise<boolean> {
   return (await client.query(
     `SELECT 1 FROM audit_events WHERE subject_id = $1 AND event_type = 'memory_review.model_recovered'
-      AND metadata->>'previousEveSessionId' = $2 AND metadata->>'previousEveTurnId' = $3 LIMIT 1`,
+      AND metadata->>'previousAgentSessionId' = $2 AND metadata->>'previousAgentTurnId' = $3 LIMIT 1`,
     [input.batchId, input.agentSessionId, input.agentTurnId],
   )).rowCount === 1;
 }
@@ -39,8 +39,8 @@ export async function isRetiredReviewAttempt(client: PoolClient, input: {
 export async function reviewAttemptHasWrites(client: PoolClient, batch: ReviewAttempt): Promise<boolean> {
   const result = await client.query<{ wrote: boolean }>(
     `SELECT EXISTS (SELECT 1 FROM memory_items_all WHERE source = $1)
-       OR EXISTS (SELECT 1 FROM memory_mutation_operations WHERE eve_session_id = $2) AS wrote`,
-    [`eve:${batch.eve_session_id}:${batch.eve_turn_id}`, batch.eve_session_id],
+       OR EXISTS (SELECT 1 FROM memory_mutation_operations WHERE agent_session_id = $2) AS wrote`,
+    [`turn:${batch.agent_session_id}:${batch.agent_turn_id}`, batch.agent_session_id],
   );
   return result.rows[0]!.wrote;
 }
@@ -82,8 +82,8 @@ export async function fenceReviewMemoryWrite(client: PoolClient, input: CreateMe
     `SELECT 1 FROM memory_review_batches batch
        JOIN conversation_sessions session ON session.id = batch.application_session_id
      WHERE batch.id = $1 AND batch.batch_kind = 'background' AND batch.status = 'running'
-       AND batch.eve_session_id = $2 AND batch.eve_turn_id = $3 AND session.retired_at IS NULL
-       AND session.eve_session_id = $2 FOR SHARE OF batch`,
+       AND batch.agent_session_id = $2 AND batch.agent_turn_id = $3 AND session.retired_at IS NULL
+       AND session.agent_session_id = $2 FOR SHARE OF batch`,
     [input.memoryReviewBatchId, input.provenance?.sessionId, input.provenance?.turnId],
   );
   if (batch.rowCount !== 1) throw new AppError(

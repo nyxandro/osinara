@@ -20,21 +20,21 @@ async function audit(client: PoolClient, batch: ReviewAttempt, event: string, me
 }
 
 export async function blockPartialReviewAttempt(client: PoolClient, batch: ReviewAttempt, causeCode: string, now: Date): Promise<void> {
-  if (batch.application_session_id && batch.eve_session_id) await terminalizeApplicationSession(client, {
-    applicationSessionId: batch.application_session_id, agentSessionId: batch.eve_session_id, completedAt: now, outcome: "failed",
+  if (batch.application_session_id && batch.agent_session_id) await terminalizeApplicationSession(client, {
+    applicationSessionId: batch.application_session_id, agentSessionId: batch.agent_session_id, completedAt: now, outcome: "failed",
   });
   await client.query(`UPDATE memory_review_batches SET status = 'failed', diagnostic_code = $2,
     completed_at = $3, updated_at = $3, lease_token = NULL, lease_expires_at = NULL,
     waiting_since = NULL, waiting_success_version = NULL WHERE id = $1`, [batch.id, REVIEW_PARTIAL_RESULT, now]);
   await enqueueMemoryReviewOwnerAlert(client, batch.id, REVIEW_PARTIAL_RESULT);
   await audit(client, batch, "memory_review.partial_result", { causeCode, generation: batch.model_recovery_generation,
-    agentSessionId: batch.eve_session_id, agentTurnId: batch.eve_turn_id });
+    agentSessionId: batch.agent_session_id, agentTurnId: batch.agent_turn_id });
 }
 
 export async function recordReviewModelWait(
   client: PoolClient, batch: ReviewAttempt, code: RecoverableModelCode, now: Date,
 ): Promise<"waiting" | "blocked"> {
-  if (!batch.model_route_key || !batch.eve_session_id || !batch.eve_turn_id || !batch.application_session_id) {
+  if (!batch.model_route_key || !batch.agent_session_id || !batch.agent_turn_id || !batch.application_session_id) {
     throw new AppError("AGENT_MEMORY_REVIEW_RECOVERY_CONTEXT_MISSING", "Не удалось подтвердить исполнение проверки памяти");
   }
   await requireReviewSources(client, batch);
@@ -44,7 +44,7 @@ export async function recordReviewModelWait(
     return "blocked";
   }
   await terminalizeApplicationSession(client, { applicationSessionId: batch.application_session_id,
-    agentSessionId: batch.eve_session_id, completedAt: now, outcome: "failed" });
+    agentSessionId: batch.agent_session_id, completedAt: now, outcome: "failed" });
   // Zero explicitly means no successful call has yet been observed for this connection.
   await client.query(`UPDATE memory_review_batches SET status = 'waiting_model', diagnostic_code = $2,
     completed_at = NULL, updated_at = $3, waiting_since = $3,
@@ -53,7 +53,7 @@ export async function recordReviewModelWait(
   await enqueueMemoryReviewOwnerAlert(client, batch.id, REVIEW_WAITING_MODEL);
   await audit(client, batch, "memory_review.waiting_model", {
     causeCode: code, modelRouteKey: batch.model_route_key, generation: batch.model_recovery_generation,
-    agentSessionId: batch.eve_session_id, agentTurnId: batch.eve_turn_id,
+    agentSessionId: batch.agent_session_id, agentTurnId: batch.agent_turn_id,
   });
   return "waiting";
 }
@@ -67,7 +67,7 @@ export async function failBackgroundReview(input: {
     await client.query("BEGIN");
     const batch = await lockReviewAttempt(client, input.batchId);
     if (!batch || batch.batch_kind !== "background") { await client.query("COMMIT"); return null; }
-    if (batch.eve_session_id !== input.agentSessionId || input.agentTurnId !== undefined && batch.eve_turn_id !== input.agentTurnId ||
+    if (batch.agent_session_id !== input.agentSessionId || input.agentTurnId !== undefined && batch.agent_turn_id !== input.agentTurnId ||
         !["running", "dispatching"].includes(batch.status)) {
       await client.query("COMMIT"); return "replayed";
     }
@@ -80,15 +80,15 @@ export async function failBackgroundReview(input: {
       result = "blocked";
     } else {
       // An unknown background error must not silently release/replay or skip its sources.
-      if (batch.application_session_id && batch.eve_session_id) await terminalizeApplicationSession(client, {
-        applicationSessionId: batch.application_session_id, agentSessionId: batch.eve_session_id, completedAt: now, outcome: "failed",
+      if (batch.application_session_id && batch.agent_session_id) await terminalizeApplicationSession(client, {
+        applicationSessionId: batch.application_session_id, agentSessionId: batch.agent_session_id, completedAt: now, outcome: "failed",
       });
       await client.query(`UPDATE memory_review_batches SET status = 'failed', diagnostic_code = $2,
         completed_at = $3, updated_at = $3, lease_token = NULL, lease_expires_at = NULL WHERE id = $1`,
       [batch.id, input.diagnosticCode, now]);
       await enqueueMemoryReviewOwnerAlert(client, batch.id, input.diagnosticCode);
       await audit(client, batch, "memory_review.failed", { causeCode: input.diagnosticCode,
-        agentSessionId: batch.eve_session_id, agentTurnId: batch.eve_turn_id });
+        agentSessionId: batch.agent_session_id, agentTurnId: batch.agent_turn_id });
       result = "blocked";
     }
     await client.query("COMMIT");
@@ -113,9 +113,9 @@ export async function recoverModelWaitingReviews(client: PoolClient, now: Date):
     if (batch.application_session_id !== null) {
       // Retention locks the session before its FK clears the batch reference. Never wait in the
       // opposite order: let deletion finish, then recover on the next tick with the same signal.
-      const session = await client.query<{ retired_at: Date | null; eve_session_id: string | null }>(
-        "SELECT retired_at, eve_session_id FROM conversation_sessions WHERE id = $1 FOR UPDATE SKIP LOCKED", [batch.application_session_id]);
-      if (!session.rows[0]?.retired_at || session.rows[0].eve_session_id !== batch.eve_session_id) continue;
+      const session = await client.query<{ retired_at: Date | null; agent_session_id: string | null }>(
+        "SELECT retired_at, agent_session_id FROM conversation_sessions WHERE id = $1 FOR UPDATE SKIP LOCKED", [batch.application_session_id]);
+      if (!session.rows[0]?.retired_at || session.rows[0].agent_session_id !== batch.agent_session_id) continue;
     }
     if (!batch.diagnostic_code || !isRecoverableModelCode(batch.diagnostic_code)) throw new AppError(
       "AGENT_MEMORY_REVIEW_RECOVERY_REASON_INVALID", "Не подтверждена причина ожидания модели",
@@ -140,14 +140,14 @@ export async function recoverModelWaitingReviews(client: PoolClient, now: Date):
     }
     await client.query("DELETE FROM memory_turn_source_sets WHERE memory_review_batch_id = $1", [batch.id]);
     await client.query(`UPDATE memory_review_batches SET status = 'pending', model_recovery_generation = model_recovery_generation + 1,
-      application_session_id = NULL, eve_session_id = NULL, eve_turn_id = NULL, started_at = NULL,
+      application_session_id = NULL, agent_session_id = NULL, agent_turn_id = NULL, started_at = NULL,
       diagnostic_code = NULL, completed_at = NULL, waiting_since = NULL, waiting_success_version = NULL, updated_at = $2
       WHERE id = $1`, [batch.id, now]);
     await audit(client, batch, "memory_review.model_recovered", {
       causeCode: batch.diagnostic_code, generation: batch.model_recovery_generation + 1,
       successVersion: batch.success_version, modelRouteKey: batch.model_route_key,
-      previousSessionId: batch.application_session_id, previousEveSessionId: batch.eve_session_id,
-      previousEveTurnId: batch.eve_turn_id,
+      previousSessionId: batch.application_session_id, previousAgentSessionId: batch.agent_session_id,
+      previousAgentTurnId: batch.agent_turn_id,
     });
   }
 }

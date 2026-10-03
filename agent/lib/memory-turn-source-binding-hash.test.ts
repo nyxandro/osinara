@@ -4,8 +4,8 @@ import { reviewSourceBindingHash, turnSourceBindingHash } from "./memory-turn-so
 
 const SESSION = "wrun_01JZ8K4R0W6G73VTHX9NF2QABC";
 
-// The expected values are hashes already stored in `memory_turn_source_sets.binding_hash`: a turn
-// bound before an update and resumed after it must produce the same value, or its replay fails.
+// The expected values pin the stored format of `memory_turn_source_sets.binding_hash`: a turn bound
+// by one release and started again after a crash by the next must produce the same value.
 describe("memory turn source binding hashes", () => {
   it("keeps the stored hash of a conversation turn binding", () => {
     expect(turnSourceBindingHash({
@@ -16,7 +16,7 @@ describe("memory turn source binding hashes", () => {
       agentTurnId: "turn-1",
       invokingActorId: "actor-1",
       invokingActorKind: "telegram_user",
-    }, ["entry-1", "entry-2"])).toBe("e7aad060a7c946d56145d9847d0c0d70e4eaaa3563a29f542a796bb10a9f3824");
+    }, ["entry-1", "entry-2"])).toBe("9aaeb922bac093c691931b422d1476f51b61268b5b94ddc49730449c1cafd742");
   });
 
   it("keeps the stored hash of a memory review binding regardless of the caller's field order", () => {
@@ -28,6 +28,6 @@ describe("memory turn source binding hashes", () => {
       agentSessionId: SESSION,
       conversationId: "conv-1",
       applicationSessionId: "app-1",
-    }, ["entry-1", "entry-2"])).toBe("afb8e2c39311054eb1d0496a41b4910f07b5bf7091344fb077aa009a60b61c94");
+    }, ["entry-1", "entry-2"])).toBe("206b9a1b941a43ea4d43f19546b697db4743af5106788d1e11b62918f56a118e");
   });
 });

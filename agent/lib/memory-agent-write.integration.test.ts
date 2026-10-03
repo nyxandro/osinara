@@ -63,7 +63,7 @@ describeWithDatabase("main-agent memory write", () => {
       provenance: { sessionId: "agent-session-main", turnId: "agent-turn-main" },
       scope: "family",
       sensitivity: "normal",
-      source: "eve:agent-session-main:agent-turn-main",
+      source: "turn:agent-session-main:agent-turn-main",
       thread: {
         action: "create",
         identity: "subject",
@@ -79,7 +79,7 @@ describeWithDatabase("main-agent memory write", () => {
     });
     await expect(database().query(
       `SELECT item.subject_user_id, operation.actor_user_id, operation.actor_telegram_user_id,
-              operation.eve_session_id, operation.eve_turn_id, entry.role::text,
+              operation.agent_session_id, operation.agent_turn_id, entry.role::text,
               thread.subject_user_id AS thread_subject_user_id
        FROM memory_items AS item
        JOIN memory_mutation_operations AS operation ON operation.memory_item_id = item.id
@@ -90,8 +90,8 @@ describeWithDatabase("main-agent memory write", () => {
     )).resolves.toMatchObject({ rows: [{
       actor_telegram_user_id: "agent-memory-author",
       actor_user_id: fixture.userId,
-      eve_session_id: "agent-session-main",
-      eve_turn_id: "agent-turn-main",
+      agent_session_id: "agent-session-main",
+      agent_turn_id: "agent-turn-main",
       role: "goal",
       subject_user_id: fixture.userId,
       thread_subject_user_id: fixture.userId,
@@ -128,7 +128,7 @@ describeWithDatabase("main-agent memory write", () => {
       provenance: { sessionId: "agent-review-session", turnId: "agent-review-turn" },
       scope: "family",
       sensitivity: "normal",
-      source: "eve:agent-review-session:agent-review-turn",
+      source: "turn:agent-review-session:agent-review-turn",
       systemActor: true,
       thread: {
         action: "create",
@@ -141,7 +141,7 @@ describeWithDatabase("main-agent memory write", () => {
 
     await expect(database().query(
       `SELECT audit.actor_user_id, operation.actor_user_id AS operation_actor_user_id,
-              operation.actor_telegram_user_id, operation.eve_session_id, operation.eve_turn_id
+              operation.actor_telegram_user_id, operation.agent_session_id, operation.agent_turn_id
          FROM audit_events AS audit
          JOIN memory_mutation_operations AS operation ON operation.memory_item_id = audit.subject_id
         WHERE audit.subject_id = $1 AND audit.event_type = 'memory.thread_created'`,
@@ -149,8 +149,8 @@ describeWithDatabase("main-agent memory write", () => {
     )).resolves.toMatchObject({ rows: [{
       actor_telegram_user_id: null,
       actor_user_id: null,
-      eve_session_id: "agent-review-session",
-      eve_turn_id: "agent-review-turn",
+      agent_session_id: "agent-review-session",
+      agent_turn_id: "agent-review-turn",
       operation_actor_user_id: null,
     }] });
   });
@@ -172,7 +172,7 @@ describeWithDatabase("main-agent memory write", () => {
       operationKey,
       scope: "family" as const,
       sensitivity: "normal" as const,
-      source: `eve:${operationKey}`,
+      source: `turn:${operationKey}`,
       thread: {
         action: "create" as const,
         identity: "project" as const,
@@ -210,7 +210,7 @@ describeWithDatabase("main-agent memory write", () => {
       operationKey: "thread-candidate-semantic-first",
       scope: "family",
       sensitivity: "normal",
-      source: "eve:thread-candidate-semantic-first",
+      source: "turn:thread-candidate-semantic-first",
       thread: {
         action: "create",
         purpose: "Сохранять план подготовки и результаты забегов",
@@ -231,7 +231,7 @@ describeWithDatabase("main-agent memory write", () => {
       operationKey: "thread-candidate-semantic-second",
       scope: "family",
       sensitivity: "normal",
-      source: "eve:thread-candidate-semantic-second",
+      source: "turn:thread-candidate-semantic-second",
       thread: {
         action: "create",
         purpose: "Контролировать тренировочную нагрузку",
@@ -269,7 +269,7 @@ describeWithDatabase("main-agent memory write", () => {
       operationKey,
       scope: "family" as const,
       sensitivity: "normal" as const,
-      source: `eve:${operationKey}`,
+      source: `turn:${operationKey}`,
       thread: {
         action: "create" as const,
         purpose,
@@ -314,7 +314,7 @@ describeWithDatabase("main-agent memory write", () => {
       operationKey: "thread-candidate-purpose-first",
       scope: "family",
       sensitivity: "normal",
-      source: "eve:thread-candidate-purpose-first",
+      source: "turn:thread-candidate-purpose-first",
       thread: {
         action: "create",
         identity: "project",
@@ -336,7 +336,7 @@ describeWithDatabase("main-agent memory write", () => {
       operationKey: "thread-candidate-purpose-second",
       scope: "family",
       sensitivity: "normal",
-      source: "eve:thread-candidate-purpose-second",
+      source: "turn:thread-candidate-purpose-second",
       thread: {
         action: "create",
         identity: "project",
@@ -369,7 +369,7 @@ describeWithDatabase("main-agent memory write", () => {
       operationKey,
       scope: "family" as const,
       sensitivity: "normal" as const,
-      source: `eve:${operationKey}`,
+      source: `turn:${operationKey}`,
       thread: {
         action: "create" as const,
         purpose: "Сохранять подготовку и результаты",
@@ -402,7 +402,7 @@ describeWithDatabase("main-agent memory write", () => {
       operationKey: "agent-memory-replay-thread",
       scope: "family" as const,
       sensitivity: "normal" as const,
-      source: "eve:replay",
+      source: "turn:replay",
       thread: {
         action: "create" as const,
         purpose: "Сохранять подготовку",
@@ -431,7 +431,7 @@ describeWithDatabase("main-agent memory write", () => {
       operationKey: "agent-memory-revoked-replay",
       scope: "family" as const,
       sensitivity: "normal" as const,
-      source: "eve:revoked-replay",
+      source: "turn:revoked-replay",
     };
     await memoryRepository.create(fixture.auth, input);
     await database().query(
@@ -459,7 +459,7 @@ describeWithDatabase("main-agent memory write", () => {
       provenance: { sessionId: "agent-session-main", turnId: "agent-turn-invalid" },
       scope: "family",
       sensitivity: "normal",
-      source: "eve:agent-session-main:agent-turn-invalid",
+      source: "turn:agent-session-main:agent-turn-invalid",
       thread: {
         action: "attach",
         role: "constraint",

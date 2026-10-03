@@ -75,7 +75,7 @@ describeWithDatabase("memory review operator recovery", () => {
       .toMatchObject({ isReview: true, sourceMessageId: "56" });
     await memoryRepository.create(fixture.auth, {
       content: "Анна продолжает готовиться к марафону", kind: "fact", scope: "family",
-      confirmation: "model_high", sensitivity: "normal", source: "eve:agent-fixed:turn-fixed",
+      confirmation: "model_high", sensitivity: "normal", source: "turn:agent-fixed:turn-fixed",
       operationKey: "recovery-next-fact", provenance: { sessionId: "agent-fixed", turnId: "turn-fixed" },
       explicitSource: { conversationId: fixture.conversationId,
         timelineEntryId: next!.sourceEntryIds[0]!, subject: { kind: "current_author" } },
@@ -118,7 +118,7 @@ describeWithDatabase("memory review operator recovery", () => {
       if (condition === "other_failure") await database().query("UPDATE memory_review_batches SET diagnostic_code = 'MODEL_CALL_FAILED' WHERE id = $1", [head.batchId]);
       if (condition === "live_session") await database().query("UPDATE conversation_sessions SET retired_at = NULL, delete_after = NULL WHERE id = $1", [prepared.id]);
       if (condition === "source_binding") await database().query(`INSERT INTO memory_turn_source_sets
-        (eve_session_id,eve_turn_id,application_session_id,conversation_id,current_timeline_entry_id,
+        (agent_session_id,agent_turn_id,application_session_id,conversation_id,current_timeline_entry_id,
           invoking_actor_kind,invoking_actor_id,binding_hash,memory_review_batch_id)
         VALUES ('agent-broken','turn-broken',$1,$2,NULL,'telegram_user','agent-memory-author',$3,$4)`,
       [prepared.id,fixture.conversationId,"a".repeat(64),head.batchId]);
@@ -129,7 +129,7 @@ describeWithDatabase("memory review operator recovery", () => {
       if (["written_memory", "retained_operation", "evidence_only"].includes(condition)) await memoryRepository.create(fixture.auth, {
         content: "Анна готовится к марафону", kind: "fact", scope: "family",
         confirmation: "model_high", sensitivity: "normal",
-        source: condition === "evidence_only" ? "eve:another:turn" : "eve:agent-broken:turn-broken",
+        source: condition === "evidence_only" ? "turn:another:turn" : "turn:agent-broken:turn-broken",
         operationKey: "unexpected-write", provenance: { sessionId: condition === "evidence_only" ? "another" : "agent-broken", turnId: "turn-broken" },
         explicitSource: { conversationId: fixture.conversationId, timelineEntryId: fixture.timelineEntryId, subject: { kind: "current_author" } },
       });
@@ -147,7 +147,7 @@ describeWithDatabase("memory review operator recovery", () => {
     const { head } = await incident();
     const later = (await database().query<{ id: string }>(
       `UPDATE memory_review_batches SET status='failed', diagnostic_code=$1, completed_at=now(),
-        eve_session_id='agent-later', eve_turn_id='turn-later'
+        agent_session_id='agent-later', agent_turn_id='turn-later'
         WHERE predecessor_sequence=50 RETURNING id`, [SOURCE_MISSING],
     )).rows[0]!.id;
     await expect(skipUnboundMemoryReviewBatch({ batchId: later, reason: "Не тот пакет" }))

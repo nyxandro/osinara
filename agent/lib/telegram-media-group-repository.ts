@@ -37,7 +37,7 @@ export async function registerTelegramMediaGroupMember(
 /** Embed after a CTE named `finished` returning the leader row. The leader's lease guards all members. */
 export const settleTelegramMediaGroupMembersSql = `settled_members AS (
   UPDATE telegram_ingress_updates member
-  SET status = finished.status, eve_session_id = finished.eve_session_id,
+  SET status = finished.status, agent_session_id = finished.agent_session_id,
       last_error_code = finished.last_error_code, last_error_message = finished.last_error_message,
       completed_at = finished.completed_at, updated_at = now()
   FROM finished

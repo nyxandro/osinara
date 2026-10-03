@@ -94,7 +94,7 @@ describeWithDatabase("memory neighbour gate", () => {
       provenance: { sessionId: "gate-session", turnId: input.key },
       scope,
       sensitivity: "normal",
-      source: `eve:gate:${input.key}`,
+      source: `turn:gate:${input.key}`,
     });
   }
 

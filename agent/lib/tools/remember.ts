@@ -91,7 +91,7 @@ export default defineTool({
         systemActor: reviewWrite,
         scope,
         sensitivity: input.sensitivity,
-        source: `eve:${ctx.session.id}:${ctx.session.turn.id}`,
+        source: `turn:${ctx.session.id}:${ctx.session.turn.id}`,
         sourceEventId: source.sourceMessageId,
         ...(source.messageThreadId === null ? {} : { messageThreadId: source.messageThreadId }),
         ...(input.thread === undefined ? {} : { thread: input.thread }),

@@ -35,7 +35,7 @@ describeDatabase("deploy application readiness", () => {
     if (kind === "proactive") await database().query("UPDATE conversation_sessions SET kind='proactive' WHERE id=$1", [prepared.id]);
     expect(await readiness()).toBe("busy");
     // No native workflow exists yet: the application handoff itself must keep the deploy waiting.
-    expect((await database().query("SELECT eve_session_id FROM conversation_sessions WHERE id=$1", [prepared.id])).rows[0].eve_session_id).toBeNull();
+    expect((await database().query("SELECT agent_session_id FROM conversation_sessions WHERE id=$1", [prepared.id])).rows[0].agent_session_id).toBeNull();
   });
 
   it("defers for human input so normal FIFO can deliver both text and button responses", async () => {

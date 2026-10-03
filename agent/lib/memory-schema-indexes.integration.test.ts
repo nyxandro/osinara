@@ -24,7 +24,6 @@ const memoryMigrationTables = [
   "confirmed_outcome_source_claims",
   "conversation_extraction_cursors",
   "conversation_participants",
-  "eve_session_event_cursors",
   "external_profile_projection_notices",
   "external_profile_projection_policies",
   "external_profile_projection_policy_operations",

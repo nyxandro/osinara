@@ -38,8 +38,8 @@ async function loadAuthorization(
        FROM agent_schedule_runs AS run
        JOIN agent_schedules AS schedule ON schedule.id = run.schedule_id
       WHERE run.id = $1
-        AND (run.eve_session_id = $2 OR
-          (run.status = 'dispatching' AND run.eve_session_id IS NULL))
+        AND (run.agent_session_id = $2 OR
+          (run.status = 'dispatching' AND run.agent_session_id IS NULL))
         AND run.application_session_id IS NOT NULL
         AND run.status IN ('dispatching', 'running') AND schedule.status = 'leased'
       FOR UPDATE OF run, schedule`,
@@ -140,8 +140,8 @@ export async function failAgentScheduleRunByIdentityForNotification(
     // A terminal turn event may beat the dispatcher's post-receive running marker.
     await client.query(
       `UPDATE agent_schedule_runs
-          SET status = 'running', eve_session_id = $2, updated_at = $3
-        WHERE id = $1 AND status = 'dispatching' AND eve_session_id IS NULL`,
+          SET status = 'running', agent_session_id = $2, updated_at = $3
+        WHERE id = $1 AND status = 'dispatching' AND agent_session_id IS NULL`,
       [runId, agentSessionId, failedAt],
     );
     const result = await failWithinTransaction(client, authorization, errorCode, failedAt, true);

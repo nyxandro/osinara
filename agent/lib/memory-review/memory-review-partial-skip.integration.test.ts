@@ -58,7 +58,7 @@ describeWithDatabase("operator skip of a partially written review", () => {
       `INSERT INTO memory_review_batches
          (lane_id, conversation_id, predecessor_sequence, from_sequence,
           through_sequence, source_count, status, diagnostic_code, completed_at,
-          eve_session_id, eve_turn_id, batch_kind, recovery_protocol)
+          agent_session_id, agent_turn_id, batch_kind, recovery_protocol)
        VALUES ($1, $2, 0, 1, 50, 50, 'failed', $3, now(), 'wrun_stuck', 'turn_0',
                'background', 1)
        RETURNING id`,
@@ -71,7 +71,7 @@ describeWithDatabase("operator skip of a partially written review", () => {
          (family_id, group_id, author_telegram_user_id, scope, kind, content, source,
           confirmation, sensitivity, operation_key)
        VALUES ($1, $2, 'stuck-author', 'group', 'fact', 'Успели записать до падения',
-               'eve:wrun_stuck:turn_0', 'model_high', 'normal', 'stuck-write')
+               'turn:wrun_stuck:turn_0', 'model_high', 'normal', 'stuck-write')
        RETURNING id`,
       [familyId, groupId],
     );

@@ -201,7 +201,7 @@ describeWithDatabase("critical main-agent memory paths", () => {
 
     await expect(database().query(
       `SELECT item.content, item.group_id, item.subject_participant_id,
-              evidence.timeline_entry_id, operation.eve_session_id, operation.eve_turn_id,
+              evidence.timeline_entry_id, operation.agent_session_id, operation.agent_turn_id,
               audit.event_type,
               EXISTS (SELECT 1 FROM memory_embedding_jobs AS job
                       WHERE job.memory_item_id = item.id) AS embedding_job
@@ -213,8 +213,8 @@ describeWithDatabase("critical main-agent memory paths", () => {
     )).resolves.toMatchObject({ rows: [{
       content: "Проект использует синий корпус",
       embedding_job: true,
-      eve_session_id: "agent-critical-memory-session",
-      eve_turn_id: "agent-critical-memory-turn",
+      agent_session_id: "agent-critical-memory-session",
+      agent_turn_id: "agent-critical-memory-turn",
       event_type: "memory.created",
       group_id: group.rows[0]!.id,
       subject_participant_id: participant.rows[0]!.id,
@@ -333,8 +333,8 @@ describeWithDatabase("critical main-agent memory paths", () => {
          JOIN conversation_sessions AS app_session ON app_session.id = batch.application_session_id
          LEFT JOIN memory_review_batch_sources AS batch_source ON batch_source.batch_id = batch.id
          LEFT JOIN memory_turn_sources AS turn_source
-           ON turn_source.eve_session_id = operation.eve_session_id
-          AND turn_source.eve_turn_id = operation.eve_turn_id
+           ON turn_source.agent_session_id = operation.agent_session_id
+          AND turn_source.agent_turn_id = operation.agent_turn_id
         WHERE operation.operation_key = 'background-memory-call'
         GROUP BY item.id, item.content, evidence.timeline_entry_id, batch.status,
                  app_session.task_state, app_session.retired_at, lane.processed_through_sequence`,

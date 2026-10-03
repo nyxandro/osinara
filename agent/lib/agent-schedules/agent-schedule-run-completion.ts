@@ -80,9 +80,9 @@ export async function finishActiveAgentScheduleRun(
             EXISTS (
               SELECT 1 FROM telegram_final_deliveries delivery
               WHERE delivery.application_session_id = run.application_session_id
-                AND delivery.eve_session_id = run.eve_session_id
+                AND delivery.agent_session_id = run.agent_session_id
                 -- A conversation run shares its session with every ordinary turn: only its own turn counts.
-                AND (delivery.eve_turn_id = run.eve_turn_id OR (run.eve_turn_id IS NULL AND run.recovery_protocol <> 2))
+                AND (delivery.agent_turn_id = run.agent_turn_id OR (run.agent_turn_id IS NULL AND run.recovery_protocol <> 2))
                 AND (delivery.status IN ('started','ambiguous','delivered') OR EXISTS (
                   SELECT 1 FROM telegram_final_delivery_chunks chunk WHERE chunk.delivery_id = delivery.id
                 ))
@@ -90,7 +90,7 @@ export async function finishActiveAgentScheduleRun(
        FROM agent_schedule_runs AS run
        JOIN agent_schedules AS schedule ON schedule.id = run.schedule_id
       WHERE run.application_session_id = $1
-        AND run.eve_session_id = $2
+        AND run.agent_session_id = $2
         AND run.status = 'running'
         AND schedule.status = 'leased'
         AND ($3::uuid IS NULL OR run.id = $3::uuid)
@@ -162,7 +162,7 @@ export async function completeDeliveredAgentScheduleRun(
   // The trusted run id anchors the receipt even if later lifecycle validation finds corruption.
   const run = await client.query<{ identity_matches: boolean; status: string }>(
     `SELECT status::text,
-            application_session_id = $2::uuid AND eve_session_id = $3 AS identity_matches
+            application_session_id = $2::uuid AND agent_session_id = $3 AS identity_matches
        FROM agent_schedule_runs
       WHERE id = $1`,
     [input.runId, input.applicationSessionId, input.agentSessionId],
@@ -212,7 +212,7 @@ export async function completeDeliveredAgentScheduleRun(
        FROM agent_schedule_runs run
        JOIN proactive_deliveries delivery
          ON delivery.source_kind = 'agent_schedule' AND delivery.source_id = run.id
-      WHERE run.id = $1 AND run.application_session_id = $2 AND run.eve_session_id = $3
+      WHERE run.id = $1 AND run.application_session_id = $2 AND run.agent_session_id = $3
         AND run.status = 'completed' AND delivery.telegram_message_id = $4::bigint`,
     [input.runId, input.applicationSessionId, input.agentSessionId, input.telegramMessageId],
   );

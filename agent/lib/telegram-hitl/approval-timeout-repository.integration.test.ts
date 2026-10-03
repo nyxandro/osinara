@@ -135,7 +135,7 @@ describeWithDatabase("approval timeout repository", () => {
     await fixture();
     await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
     // A crashed run leaves the old prompt behind; settling it would clear the veto of the live one.
-    await database().query("UPDATE conversation_sessions SET eve_session_id = 'wrun_newer'");
+    await database().query("UPDATE conversation_sessions SET agent_session_id = 'wrun_newer'");
 
     await expect(
       approvalTimeoutRepository.claimExpired(NOW, TELEGRAM_HITL_APPROVAL_TIMEOUT_MS),

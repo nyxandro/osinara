@@ -74,7 +74,7 @@ describeWithDatabase("telegramIngressRepository", () => {
   });
   beforeEach(async () => {
     await database().query(
-      `TRUNCATE eve_session_event_cursors, telegram_ingress_ignored_updates,
+      `TRUNCATE telegram_ingress_ignored_updates,
          telegram_ingress_updates, telegram_ingress_continuation_aliases,
          telegram_ingress_queues CASCADE`,
     );
@@ -297,8 +297,8 @@ describeWithDatabase("telegramIngressRepository", () => {
 
     await telegramIngressRepository.complete(first!.updateId, first!.leaseToken, "wrun_session");
 
-    await expect(database().query("SELECT status, eve_session_id FROM telegram_ingress_updates WHERE update_id = 2101"))
-      .resolves.toMatchObject({ rows: [{ eve_session_id: "wrun_session", status: "completed" }] });
+    await expect(database().query("SELECT status, agent_session_id FROM telegram_ingress_updates WHERE update_id = 2101"))
+      .resolves.toMatchObject({ rows: [{ agent_session_id: "wrun_session", status: "completed" }] });
   });
 
   it("reclaims an expired lease and rejects the stale worker token", async () => {

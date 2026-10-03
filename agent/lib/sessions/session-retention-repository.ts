@@ -20,7 +20,7 @@ export const sessionRetentionRepository = {
     const leaseToken = crypto.randomUUID();
     const leaseExpiresAt = new Date(now.getTime() + SESSION_RETENTION_LEASE_MS);
     const result = await database().query<{
-      eve_session_id: string;
+      agent_session_id: string;
       id: string;
       retention_lease_token: string;
     }>(
@@ -29,7 +29,7 @@ export const sessionRetentionRepository = {
         WHERE id = (
           SELECT id FROM conversation_sessions
             WHERE retired_at IS NOT NULL AND delete_after <= $1
-              AND retention_hold = false AND eve_session_id IS NOT NULL
+              AND retention_hold = false AND agent_session_id IS NOT NULL
               -- A session whose deletion failed waits for an operator: retrying it in a loop
               -- would hide the cause.
               AND cleanup_error_code IS NULL
@@ -37,12 +37,12 @@ export const sessionRetentionRepository = {
            ORDER BY delete_after, id
            LIMIT 1 FOR UPDATE SKIP LOCKED
         )
-      RETURNING id, eve_session_id, retention_lease_token`,
+      RETURNING id, agent_session_id, retention_lease_token`,
       [now, leaseToken, leaseExpiresAt],
     );
     const row = result.rows[0];
     return row
-      ? { agentSessionId: row.eve_session_id, id: row.id, leaseToken: row.retention_lease_token }
+      ? { agentSessionId: row.agent_session_id, id: row.id, leaseToken: row.retention_lease_token }
       : null;
   },
 

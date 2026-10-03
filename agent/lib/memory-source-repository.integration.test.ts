@@ -86,7 +86,7 @@ describeWithDatabase("R3 memory source lookup", () => {
       provenance: { sessionId: "source-session", turnId: "source-turn" },
       scope: "group",
       sensitivity: "normal",
-      source: "eve:source-session:source-turn",
+      source: "turn:source-session:source-turn",
     });
     const memoryRef = claim.memoryRef;
     const personalAuth: MemoryAuthorization = {

@@ -52,7 +52,7 @@ export async function claimNextTelegramIngress(leaseMilliseconds: number, burst:
          LIMIT 1
        )
        UPDATE telegram_ingress_updates item
-        SET status = 'processing', eve_session_id = NULL,
+        SET status = 'processing', agent_session_id = NULL,
             attempt_count = attempt_count + 1,
             completed_at = NULL, lease_token = gen_random_uuid(),
             lease_expires_at = now() + ($1 * interval '1 millisecond'),

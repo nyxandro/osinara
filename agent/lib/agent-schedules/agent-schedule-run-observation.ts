@@ -29,7 +29,7 @@ export const LAST_RUN_PROJECTION = `(SELECT jsonb_build_object(
   'diagnostics', COALESCE((SELECT jsonb_agg(jsonb_build_object(
     'code', incident.code, 'causeCode', incident.context->>'causeCode', 'phase', incident.context->>'phase'))
     FROM operational_incidents incident
-    WHERE incident.operation_key='memory-context:' || run.eve_session_id || ':' || run.eve_turn_id
+    WHERE incident.operation_key='memory-context:' || run.agent_session_id || ':' || run.agent_turn_id
       AND incident.context->>'runId'=run.id::text AND incident.code='AGENT_MEMORY_UNAVAILABLE'), '[]'::jsonb)
   ) FROM agent_schedule_runs run WHERE run.schedule_id=schedule.id
     ORDER BY run.scheduled_for DESC, run.created_at DESC LIMIT 1) AS last_run`;

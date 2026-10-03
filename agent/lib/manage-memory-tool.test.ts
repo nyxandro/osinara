@@ -155,7 +155,7 @@ describe("manage_memory", () => {
       messageThreadId: null,
       scope: "personal",
       sensitivity: "normal",
-      source: "eve:private-session:turn-1",
+      source: "turn:private-session:turn-1",
       updatedAt: "2026-08-01T11:00:00.000Z",
     });
 

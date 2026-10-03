@@ -30,7 +30,7 @@ const wakeup: PreparedConversationWakeup = {
   applicationSessionId: "00000000-0000-4000-8000-0000000000a1",
   authorUserId: "00000000-0000-4000-8000-0000000000u1",
   completedRuns: 2,
-  agentSessionId: "ses_eve_1",
+  agentSessionId: "ses_agent_1",
   familyId: "family-1",
   forumTopicId: null,
   groupId: null,

@@ -326,7 +326,7 @@ export const memoryReviewRepository = {
       const prepared = await client.query<{ id: string; through_sequence: string; source_count: number }>(
         `SELECT id,through_sequence::text,source_count FROM memory_review_batches WHERE lane_id=$1
           AND application_session_id=$2 AND preparation_entry_id=$3 AND batch_kind='interactive'
-          AND status='running' AND eve_turn_id IS NULL FOR UPDATE`, [lane.id,input.applicationSessionId,input.timelineEntryId]);
+          AND status='running' AND agent_turn_id IS NULL FOR UPDATE`, [lane.id,input.applicationSessionId,input.timelineEntryId]);
       if (prepared.rows[0]) {
         const batch = prepared.rows[0];
         const sources = await client.query<SourceRow>(`SELECT ${SOURCE_COLUMNS} FROM memory_review_batch_sources source
@@ -411,13 +411,13 @@ export const memoryReviewRepository = {
   }): Promise<void> {
     const result = await database().query(
       `UPDATE memory_review_batches
-          SET status = 'running', eve_session_id = $2, eve_turn_id = $3,
+          SET status = 'running', agent_session_id = $2, agent_turn_id = $3,
               started_at = coalesce(started_at, now()), updated_at = now(),
               lease_token = NULL, lease_expires_at = NULL
         WHERE id = $1 AND status IN ('dispatching', 'running')
           AND application_session_id = $4
-          AND (eve_session_id IS NULL OR eve_session_id = $2)
-          AND (eve_turn_id IS NULL OR eve_turn_id = $3)`,
+          AND (agent_session_id IS NULL OR agent_session_id = $2)
+          AND (agent_turn_id IS NULL OR agent_turn_id = $3)`,
       [input.batchId, input.agentSessionId, input.agentTurnId, input.applicationSessionId],
     );
     if (result.rowCount !== 1) throw new AppError(
@@ -438,7 +438,7 @@ export const memoryReviewRepository = {
     agentSessionId: string;
     agentTurnId: string;
   }): Promise<{ batchId: string; agentTurnId: string } | null> {
-    const result = await database().query<{ id: string; eve_turn_id: string }>(
+    const result = await database().query<{ id: string; agent_turn_id: string }>(
       `WITH RECURSIVE chain (turn_id, depth) AS (
          SELECT $2::text, 0
          UNION ALL
@@ -446,13 +446,13 @@ export const memoryReviewRepository = {
            FROM chain JOIN agent_turns turn ON turn.id = chain.turn_id
           WHERE turn.session_id = $1 AND turn.resumes_turn_id IS NOT NULL AND chain.depth < $3
        )
-       SELECT batch.id, batch.eve_turn_id FROM chain
-         JOIN memory_review_batches batch ON batch.eve_session_id = $1 AND batch.eve_turn_id = chain.turn_id
+       SELECT batch.id, batch.agent_turn_id FROM chain
+         JOIN memory_review_batches batch ON batch.agent_session_id = $1 AND batch.agent_turn_id = chain.turn_id
         ORDER BY chain.depth LIMIT 1`,
       [input.agentSessionId, input.agentTurnId, MAX_CONTINUATION_DEPTH],
     );
     const row = result.rows[0];
-    return row === undefined ? null : { batchId: row.id, agentTurnId: row.eve_turn_id };
+    return row === undefined ? null : { batchId: row.id, agentTurnId: row.agent_turn_id };
   },
 
 };

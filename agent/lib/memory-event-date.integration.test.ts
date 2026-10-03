@@ -51,7 +51,7 @@ describeWithDatabase("memory event date", () => {
       provenance: { sessionId: "event-session", turnId: input.key },
       scope: "personal",
       sensitivity: "normal",
-      source: `eve:event:${input.key}`,
+      source: `turn:event:${input.key}`,
     });
   }
 

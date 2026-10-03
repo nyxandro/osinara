@@ -65,7 +65,7 @@ export const sessionLifecycleEventRepository = {
           SET pending_operation = false, task_state = 'failed', retired_at = now(),
               delete_after = now() + $2 * interval '1 day'
         WHERE id = $1 AND retired_at IS NULL AND kind = 'scheduled'
-          AND eve_session_id IS NULL`,
+          AND agent_session_id IS NULL`,
       parameters: [id, SESSION_RETENTION_DAYS],
     });
     if (!retired) {
@@ -80,7 +80,7 @@ export const sessionLifecycleEventRepository = {
     const result = await database().query<{ pending: boolean }>(
       `SELECT EXISTS (
          SELECT 1 FROM conversation_sessions
-          WHERE id = $1 AND eve_session_id = $2
+          WHERE id = $1 AND agent_session_id = $2
             AND pending_operation = true AND retired_at IS NULL
        ) AS pending`,
       [id, agentSessionId],
@@ -91,9 +91,9 @@ export const sessionLifecycleEventRepository = {
   async bindAgentSession(id: string, agentSessionId: string): Promise<SessionEventResult> {
     const result = await database().query(
       `UPDATE conversation_sessions
-           SET eve_session_id = $2
+           SET agent_session_id = $2
          WHERE id = $1 AND retired_at IS NULL
-           AND (eve_session_id IS NULL OR eve_session_id <= $2)`,
+           AND (agent_session_id IS NULL OR agent_session_id <= $2)`,
       [id, agentSessionId],
     );
     if (result.rowCount === 1) return "recorded";
@@ -123,7 +123,7 @@ export const sessionLifecycleEventRepository = {
                 WHEN kind <> 'canonical' THEN 'running'::conversation_task_state
                 ELSE task_state
               END
-        WHERE id = $1 AND eve_session_id = $2 AND retired_at IS NULL`,
+        WHERE id = $1 AND agent_session_id = $2 AND retired_at IS NULL`,
       [id, agentSessionId],
     );
     if (result.rowCount !== 1) {
@@ -147,7 +147,7 @@ export const sessionLifecycleEventRepository = {
       `UPDATE conversation_sessions
           SET completed_turns = completed_turns + CASE WHEN $5 THEN 1 ELSE 0 END,
               last_activity_at = now(), pending_operation = $3,
-              eve_session_id = $2,
+              agent_session_id = $2,
               task_state = CASE
                 WHEN kind <> 'canonical' AND $3 THEN 'pending'::conversation_task_state
                 WHEN kind <> 'canonical' THEN 'completed'::conversation_task_state
@@ -159,7 +159,7 @@ export const sessionLifecycleEventRepository = {
                 ELSE delete_after
               END
         WHERE id = $1 AND retired_at IS NULL
-           AND (eve_session_id IS NULL OR eve_session_id <= $2)`,
+           AND (agent_session_id IS NULL OR agent_session_id <= $2)`,
       parameters: [id, agentSessionId, pendingOperation, SESSION_RETENTION_DAYS, countsTowardRotation],
     });
     if (recorded) return "recorded";
@@ -176,7 +176,7 @@ export const sessionLifecycleEventRepository = {
       id,
       sql:
       `UPDATE conversation_sessions
-          SET pending_operation = false, eve_session_id = $2,
+          SET pending_operation = false, agent_session_id = $2,
               task_state = CASE
                 WHEN kind <> 'canonical' THEN 'failed'::conversation_task_state
                 ELSE task_state
@@ -187,7 +187,7 @@ export const sessionLifecycleEventRepository = {
                 ELSE delete_after
               END
         WHERE id = $1 AND retired_at IS NULL
-           AND (eve_session_id IS NULL OR eve_session_id <= $2)`,
+           AND (agent_session_id IS NULL OR agent_session_id <= $2)`,
       parameters: [id, agentSessionId, SESSION_RETENTION_DAYS],
     });
     if (recorded) return "recorded";

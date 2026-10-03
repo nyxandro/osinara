@@ -58,8 +58,8 @@ interface ClaimRow {
   admission_deadline_at: Date | null;
   attempt_count: number;
   dispatch_id: string | null;
-  eve_session_id: string | null;
-  eve_turn_id: string | null;
+  agent_session_id: string | null;
+  agent_turn_id: string | null;
   id: string;
   lease_token: string;
   queue_id: string;
@@ -80,18 +80,18 @@ function laneHasUpdates(queueId: string): string {
 }
 
 function mapClaim(row: ClaimRow): ConversationWakeupClaim {
-  const dispatched = row.dispatch_id !== null && row.eve_session_id !== null && row.admission_deadline_at !== null;
+  const dispatched = row.dispatch_id !== null && row.agent_session_id !== null && row.admission_deadline_at !== null;
   return {
     attemptCount: row.attempt_count,
     dispatch: dispatched
       ? {
           admissionDeadlineAt: row.admission_deadline_at!,
-          agentSessionId: row.eve_session_id!,
+          agentSessionId: row.agent_session_id!,
           id: row.dispatch_id!,
           turnId: row.turn_id,
         }
       : null,
-    agentTurnId: row.eve_turn_id,
+    agentTurnId: row.agent_turn_id,
     id: row.id,
     leaseToken: row.lease_token,
     queueId: row.queue_id,
@@ -103,9 +103,9 @@ function mapClaim(row: ClaimRow): ConversationWakeupClaim {
 async function requireOwned(
   client: PoolClient,
   claim: Pick<ConversationWakeupClaim, "id" | "leaseToken">,
-): Promise<{ dispatch_started_at: Date | null; eve_session_id: string | null }> {
-  const owned = await client.query<{ dispatch_started_at: Date | null; eve_session_id: string | null; owned: boolean }>(
-    `SELECT dispatch_started_at, eve_session_id, status = 'processing' AND lease_token = $2 AS owned
+): Promise<{ dispatch_started_at: Date | null; agent_session_id: string | null }> {
+  const owned = await client.query<{ dispatch_started_at: Date | null; agent_session_id: string | null; owned: boolean }>(
+    `SELECT dispatch_started_at, agent_session_id, status = 'processing' AND lease_token = $2 AS owned
        FROM telegram_ingress_wakeups WHERE id = $1
       FOR UPDATE`,
     [claim.id, claim.leaseToken],
@@ -192,9 +192,9 @@ export const conversationWakeupRepository = {
                 lease_expires_at = now() + ($2 * interval '1 millisecond'), updated_at = now()
           WHERE wakeup.id = $1
           RETURNING wakeup.id::text, wakeup.lease_token::text, wakeup.queue_id::text, wakeup.run_id::text,
-                    wakeup.schedule_id::text, wakeup.attempt_count, wakeup.eve_session_id,
+                    wakeup.schedule_id::text, wakeup.attempt_count, wakeup.agent_session_id,
                     wakeup.dispatch_id::text, wakeup.admission_deadline_at, wakeup.turn_id,
-                    (SELECT run.eve_turn_id FROM agent_schedule_runs run WHERE run.id = wakeup.run_id) AS eve_turn_id`,
+                    (SELECT run.agent_turn_id FROM agent_schedule_runs run WHERE run.id = wakeup.run_id) AS agent_turn_id`,
         [found.id, leaseMilliseconds],
       );
       await client.query("UPDATE telegram_ingress_queues SET active_wakeup_id = $2 WHERE id = $1", [found.queue_id, found.id]);
@@ -227,7 +227,7 @@ export const conversationWakeupRepository = {
   ): Promise<void> {
     const marked = await client.query(
       `UPDATE telegram_ingress_wakeups
-          SET dispatch_started_at = now(), eve_session_id = $3, dispatch_start_index = 0, dispatch_id = $4,
+          SET dispatch_started_at = now(), agent_session_id = $3, dispatch_start_index = 0, dispatch_id = $4,
               admission_deadline_at = $5, turn_id = $6, updated_at = now()
         WHERE id = $1 AND status = 'processing' AND lease_token = $2 AND lease_expires_at > now()
           AND dispatch_started_at IS NULL`,
@@ -235,7 +235,7 @@ export const conversationWakeupRepository = {
     );
     if (marked.rowCount !== 1) throw wakeupLeaseLost();
     const run = await client.query(
-      `UPDATE agent_schedule_runs SET status = 'running', eve_session_id = $2, updated_at = now()
+      `UPDATE agent_schedule_runs SET status = 'running', agent_session_id = $2, updated_at = now()
         WHERE id = $1 AND status = 'dispatching'`,
       [claim.runId, dispatch.sessionId],
     );
@@ -246,7 +246,7 @@ export const conversationWakeupRepository = {
   async complete(claim: Pick<ConversationWakeupClaim, "id" | "leaseToken">, agentSessionId: string): Promise<void> {
     await inTransaction(async (client) => {
       const owned = await requireOwned(client, claim);
-      if (owned.eve_session_id !== agentSessionId) throw wakeupLeaseLost();
+      if (owned.agent_session_id !== agentSessionId) throw wakeupLeaseLost();
       await closeWakeup(client, claim.id, { status: "completed" });
     });
   },
@@ -284,8 +284,8 @@ export const conversationWakeupRepository = {
       }
       await client.query(
         `UPDATE conversation_sessions SET rotation_requested_at = now()
-          WHERE eve_session_id = $1 AND kind = 'canonical' AND retired_at IS NULL`,
-        [owned.eve_session_id],
+          WHERE agent_session_id = $1 AND kind = 'canonical' AND retired_at IS NULL`,
+        [owned.agent_session_id],
       );
     });
   },

@@ -33,7 +33,7 @@ export const groupTimelineCursorRepository = {
       `UPDATE conversation_sessions
           SET group_timeline_cursor = greatest(coalesce(group_timeline_cursor, 0), $3::bigint)
         WHERE id = $1
-          AND eve_session_id = $2
+          AND agent_session_id = $2
            AND retired_at IS NULL`,
       [applicationSessionId, agentSessionId, sequence],
     );

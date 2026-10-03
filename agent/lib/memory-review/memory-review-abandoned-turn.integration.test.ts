@@ -185,7 +185,7 @@ describeWithDatabase("abandoned memory review turns", () => {
       `INSERT INTO memory_items_all
          (family_id, scope, kind, confirmation, sensitivity, content, source, operation_key)
        VALUES ($1, 'family', 'fact', 'model_high', 'normal', 'Записано до обрыва', $2, $3)`,
-      [fixture.familyId, "eve:agent-partial:turn-partial", "op-review-partial"],
+      [fixture.familyId, "turn:agent-partial:turn-partial", "op-review-partial"],
     );
     await database().query(
       "UPDATE memory_review_batches SET started_at = '2026-08-12T09:00:00.000Z' WHERE id = $1",
@@ -235,7 +235,7 @@ describeWithDatabase("abandoned memory review turns", () => {
     // outlive it: the interactive check constraint forbids that combination outright.
     await database().query(
       `UPDATE memory_review_batches
-          SET status = 'running', eve_session_id = 'agent-orphan', eve_turn_id = 'turn-orphan',
+          SET status = 'running', agent_session_id = 'agent-orphan', agent_turn_id = 'turn-orphan',
               application_session_id = NULL, started_at = '2026-08-12T09:00:00.000Z'
         WHERE id = $1`,
       [created!.batchId],
@@ -399,7 +399,7 @@ describeWithDatabase("abandoned memory review turns", () => {
     // этими шагами память записать невозможно, поэтому такой пакет освобождается без сомнений.
     await database().query(
       `UPDATE memory_review_batches
-          SET status = 'running', eve_session_id = 'agent-unbound', eve_turn_id = NULL,
+          SET status = 'running', agent_session_id = 'agent-unbound', agent_turn_id = NULL,
               application_session_id = $2, started_at = '2026-08-12T09:00:00.000Z'
         WHERE id = $1`,
       [created!.batchId, proactive],

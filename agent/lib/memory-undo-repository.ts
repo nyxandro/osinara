@@ -28,8 +28,8 @@ export interface MemoryUndoInput extends MemoryOperationProvenance {
 interface MutationOperationRow {
   actor_telegram_user_id: string | null;
   actor_user_id: string | null;
-  eve_session_id: string | null;
-  eve_turn_id: string | null;
+  agent_session_id: string | null;
+  agent_turn_id: string | null;
   input_hash: string;
   mutation_kind: "create" | "delete" | "update";
 }
@@ -53,7 +53,7 @@ async function existingUndo(
 ): Promise<boolean> {
   const result = await client.query<MutationOperationRow>(
     `SELECT mutation_kind, input_hash, actor_user_id, actor_telegram_user_id,
-            eve_session_id, eve_turn_id
+            agent_session_id, agent_turn_id
      FROM memory_mutation_operations
      WHERE family_id = $1 AND operation_key = $2`,
     [auth.familyId, input.operationKey],
@@ -63,8 +63,8 @@ async function existingUndo(
   const sameProvenance =
     operation.actor_user_id === auth.userId &&
     operation.actor_telegram_user_id === auth.telegramUserId &&
-    operation.eve_session_id === input.sessionId &&
-    operation.eve_turn_id === input.turnId;
+    operation.agent_session_id === input.sessionId &&
+    operation.agent_turn_id === input.turnId;
   if (
     operation.mutation_kind !== "delete" ||
     operation.input_hash !== inputHash ||
@@ -97,8 +97,8 @@ async function selectImmediateUndoCandidate(
        AND item.scope = ANY($3::memory_scope[])
        AND creation.actor_user_id IS NOT DISTINCT FROM $4::uuid
        AND creation.actor_telegram_user_id = $5
-       AND creation.eve_session_id = $6
-       AND creation.eve_turn_id = $7
+       AND creation.agent_session_id = $6
+       AND creation.agent_turn_id = $7
        AND (
          (item.scope IN ('personal', 'family')
            AND item.author_user_id = $4
@@ -187,7 +187,7 @@ export const memoryUndoRepository = {
       await client.query(
         `INSERT INTO memory_mutation_operations
            (family_id, operation_key, mutation_kind, input_hash, memory_item_id,
-            actor_user_id, actor_telegram_user_id, eve_session_id, eve_turn_id)
+            actor_user_id, actor_telegram_user_id, agent_session_id, agent_turn_id)
          VALUES ($1, $2, 'delete', $3, $4, $5, $6, $7, $8)`,
         [
           auth.familyId,

@@ -16,7 +16,7 @@ export async function terminalizeApplicationSession(
   const result = await client.query(
     `UPDATE conversation_sessions
         SET completed_turns = completed_turns + CASE WHEN $4 = 'completed' THEN 1 ELSE 0 END,
-            last_activity_at = $3, pending_operation = false, eve_session_id = $2,
+            last_activity_at = $3, pending_operation = false, agent_session_id = $2,
             task_state = CASE
               WHEN kind <> 'canonical' THEN $4::conversation_task_state
               ELSE task_state
@@ -27,7 +27,7 @@ export async function terminalizeApplicationSession(
               ELSE delete_after
             END
       WHERE id = $1 AND retired_at IS NULL
-        AND (eve_session_id IS NULL OR eve_session_id = $2)`,
+        AND (agent_session_id IS NULL OR agent_session_id = $2)`,
     [input.applicationSessionId, input.agentSessionId, input.completedAt, input.outcome,
       SESSION_RETENTION_DAYS],
   );
@@ -36,7 +36,7 @@ export async function terminalizeApplicationSession(
     // exact batch without reopening or mutating either generation of the conversation.
     const retired = await client.query(
       `SELECT 1 FROM conversation_sessions
-        WHERE id = $1 AND eve_session_id = $2 AND retired_at IS NOT NULL`,
+        WHERE id = $1 AND agent_session_id = $2 AND retired_at IS NOT NULL`,
       [input.applicationSessionId, input.agentSessionId],
     );
     if (retired.rowCount === 1) return;
