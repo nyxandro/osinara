@@ -42,7 +42,7 @@ function dependencies() {
       clientId: "client-id",
       clientSecret: "client-secret",
       encryptionKey: Buffer.alloc(32, 1).toString("base64"),
-      redirectUri: "https://agent.example/eve/v1/google-oauth/callback",
+      redirectUri: "https://agent.example/v1/google-oauth/callback",
     }),
     now: () => new Date("2026-07-12T12:00:00.000Z"),
     writeProfile: vi.fn(),
@@ -54,7 +54,7 @@ describe("Google Workspace OAuth callback", () => {
     const deps = dependencies();
     const handler = createGoogleOAuthCallbackHandler(deps);
     const response = await handler(new Request(
-      "https://agent.example/eve/v1/google-oauth/callback?state=state-with-at-least-32-random-bytes&code=auth-code",
+      "https://agent.example/v1/google-oauth/callback?state=state-with-at-least-32-random-bytes&code=auth-code",
     ));
 
     expect(response.status).toBe(200);
@@ -81,7 +81,7 @@ describe("Google Workspace OAuth callback", () => {
     const handler = createGoogleOAuthCallbackHandler(deps);
 
     await expect(handler(new Request(
-      "https://agent.example/eve/v1/google-oauth/callback?state=state-with-at-least-32-random-bytes&code=auth-code",
+      "https://agent.example/v1/google-oauth/callback?state=state-with-at-least-32-random-bytes&code=auth-code",
     ))).rejects.toThrowError(/AGENT_OWNER_REQUIRED/);
     expect(deps.completeAuthorization).toHaveBeenCalled();
     expect(deps.writeProfile).not.toHaveBeenCalled();
@@ -102,7 +102,7 @@ describe("Google Workspace OAuth callback", () => {
     const handler = createGoogleOAuthCallbackHandler(deps);
 
     await expect(handler(new Request(
-      "https://agent.example/eve/v1/google-oauth/callback?state=state-with-at-least-32-random-bytes&code=auth-code",
+      "https://agent.example/v1/google-oauth/callback?state=state-with-at-least-32-random-bytes&code=auth-code",
     ))).rejects.toThrowError(/AGENT_GOOGLE_SCOPE_INCOMPLETE/);
     expect(deps.completeAuthorization).not.toHaveBeenCalled();
     expect(deps.writeProfile).not.toHaveBeenCalled();
@@ -112,7 +112,7 @@ describe("Google Workspace OAuth callback", () => {
     const deps = dependencies();
     const handler = createGoogleOAuthCallbackHandler(deps);
     const response = await handler(new Request(
-      "https://agent.example/eve/v1/google-oauth/callback?state=state-with-at-least-32-random-bytes&error=access_denied",
+      "https://agent.example/v1/google-oauth/callback?state=state-with-at-least-32-random-bytes&error=access_denied",
     ));
 
     expect(response.status).toBe(400);
@@ -126,7 +126,7 @@ describe("Google Workspace OAuth callback", () => {
     const handler = createGoogleOAuthCallbackHandler(deps);
 
     await expect(handler(new Request(
-      "https://agent.example/eve/v1/google-oauth/callback?state=state-with-at-least-32-random-bytes&code=auth-code",
+      "https://agent.example/v1/google-oauth/callback?state=state-with-at-least-32-random-bytes&code=auth-code",
     ))).rejects.toThrowError("provider unavailable");
     expect(deps.failAuthorization).toHaveBeenCalledWith(
       claim,

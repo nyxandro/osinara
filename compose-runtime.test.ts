@@ -2,7 +2,6 @@
  * Docker Compose runtime wiring regression tests.
  *
  * Constructs covered:
- * - Eve Workflow queue namespace is available before the local world starts.
  * - Local E5 runtime is immutable and resource bounded.
  * - Removed antivirus infrastructure cannot return to the runtime.
  * - PDF processing stays inside the normal sandbox instead of a parallel service.
@@ -134,18 +133,6 @@ describe("Docker Compose runtime wiring", () => {
       "- /opt/osinara/agent-model-providers.json:/app/config/agent-model-providers.json:ro",
     );
     expect(productionCompose).not.toContain("/opt/osinara/model-providers.json");
-  });
-
-  it("provides Eve's derived queue namespace before workflow recovery starts", () => {
-    // Eve derives the queue namespace from the package name after loading the agent bundle.
-    // Compose must provide the same value earlier so local-world recovery targets registered queues.
-    const packageManifest = JSON.parse(
-      readFileSync(new URL("package.json", projectRoot), "utf8"),
-    ) as PackageManifest;
-    const expectedNamespace = `eve${Buffer.from(packageManifest.name, "utf8").toString("hex")}`;
-    const compose = readFileSync(new URL("compose.yaml", projectRoot), "utf8");
-
-    expect(compose).toContain(`      WORKFLOW_QUEUE_NAMESPACE: ${expectedNamespace}\n`);
   });
 
   it.each(["compose.yaml", "compose.production.yaml"])(
@@ -386,7 +373,7 @@ describe("Docker Compose runtime wiring", () => {
     // Docker's embedded DNS must be queried after startup; a shared upstream zone lets Nginx
     // replace stale addresses without restarting the public webhook edge.
     expect(nginx).toContain("  resolver 127.0.0.11 valid=10s ipv6=off;\n");
-    expect(nginx).toContain("    zone eve_agent 64k;\n");
+    expect(nginx).toContain("    zone osinara_agent 64k;\n");
     expect(nginx).toContain("    server agent:3000 resolve;\n");
   });
 });

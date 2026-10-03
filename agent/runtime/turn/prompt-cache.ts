@@ -6,9 +6,8 @@
  * - `markPromptCache`: marks the system prompt, the last tool and the conversation tail, so the
  *   provider reuses the cached prefix across steps instead of reading the whole prompt again.
  *
- * Derived from eve 0.40.0 `harness/prompt-cache.ts` and its use in `harness/tool-loop.ts` and
- * `harness/step-hooks.ts` (Apache-2.0, see NOTICE-eve). Changes: no AI Gateway branch (Osinara
- * calls providers directly); the three marks are applied in one place, on the request as sent.
+ * The three marks are applied in one place, on the request as sent.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { LanguageModel, ModelMessage, SystemModelMessage, ToolSet } from "ai";
 

@@ -403,11 +403,11 @@ export const memoryReviewRepository = {
     return result.rows[0]?.processed_through_sequence ?? null;
   },
 
-  async bindEveTurn(input: {
+  async bindAgentTurn(input: {
     applicationSessionId: string;
     batchId: string;
-    eveSessionId: string;
-    eveTurnId: string;
+    agentSessionId: string;
+    agentTurnId: string;
   }): Promise<void> {
     const result = await database().query(
       `UPDATE memory_review_batches
@@ -418,7 +418,7 @@ export const memoryReviewRepository = {
           AND application_session_id = $4
           AND (eve_session_id IS NULL OR eve_session_id = $2)
           AND (eve_turn_id IS NULL OR eve_turn_id = $3)`,
-      [input.batchId, input.eveSessionId, input.eveTurnId, input.applicationSessionId],
+      [input.batchId, input.agentSessionId, input.agentTurnId, input.applicationSessionId],
     );
     if (result.rowCount !== 1) throw new AppError(
       "AGENT_MEMORY_REVIEW_TURN_BINDING_INVALID",
@@ -435,9 +435,9 @@ export const memoryReviewRepository = {
    * status is deliberately not filtered: a replayed terminal event must still recognize a review.
    */
   async batchForTurn(input: {
-    eveSessionId: string;
-    eveTurnId: string;
-  }): Promise<{ batchId: string; eveTurnId: string } | null> {
+    agentSessionId: string;
+    agentTurnId: string;
+  }): Promise<{ batchId: string; agentTurnId: string } | null> {
     const result = await database().query<{ id: string; eve_turn_id: string }>(
       `WITH RECURSIVE chain (turn_id, depth) AS (
          SELECT $2::text, 0
@@ -449,10 +449,10 @@ export const memoryReviewRepository = {
        SELECT batch.id, batch.eve_turn_id FROM chain
          JOIN memory_review_batches batch ON batch.eve_session_id = $1 AND batch.eve_turn_id = chain.turn_id
         ORDER BY chain.depth LIMIT 1`,
-      [input.eveSessionId, input.eveTurnId, MAX_CONTINUATION_DEPTH],
+      [input.agentSessionId, input.agentTurnId, MAX_CONTINUATION_DEPTH],
     );
     const row = result.rows[0];
-    return row === undefined ? null : { batchId: row.id, eveTurnId: row.eve_turn_id };
+    return row === undefined ? null : { batchId: row.id, agentTurnId: row.eve_turn_id };
   },
 
 };

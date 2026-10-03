@@ -32,7 +32,7 @@ const REQUIRED_CORE_RULES = [
 // Raised from 25 000 for `manage_skill` (family skills), whose procedure lives in the owner's
 // private-chat instructions so that its own description stays short.
 const TOTAL_DESCRIPTION_MAX_CHARACTERS = 25_300;
-// The runtime's built-ins were in every Eve prompt anyway; the budget is the application's own.
+// The runtime's built-ins are in every prompt anyway; the budget is the application's own.
 const NATIVE_DESCRIPTIONS = new Set([agentTool, askQuestion, bash, glob, grep, loadSkill, readFile, todo, writeFile].map((definition) => definition.description));
 
 function surfaces() {

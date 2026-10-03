@@ -3,9 +3,10 @@
  *
  * Exports:
  * - `newTurnId`: `turn_<ULID>`, unique across sessions. Exactly-once barrier tables are unique on
- *   session plus turn, so a per-session counter (Eve's `turn_0`, `turn_1`) would collide with the
- *   turns of an imported session.
- * - `newSessionId`: `wrun_<ULID>`, the shape Eve gave sessions; the sandbox runner validates it.
+ *   session plus turn, so a per-session counter would collide with the turns of older sessions
+ *   that number them `turn_0`, `turn_1`, ….
+ * - `newSessionId`: `wrun_<ULID>`, the format of every session id; the sandbox runner validates it.
+ *   Session ids are compared as strings to tell the newer one, which holds within one prefix.
  *
  * A ULID is 48 bits of millisecond time and 80 random bits in Crockford base32, so ids sort by
  * creation time.

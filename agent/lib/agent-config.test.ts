@@ -3,7 +3,7 @@
  *
  * Constructs covered:
  * - The step limit and the compaction threshold come from `agent/config.ts`.
- * - The base prompt starts with the authored instructions under Eve's header.
+ * - The base prompt starts with the authored instructions under the `Instructions (instructions)` header.
  * - Turn blocks run in their explicit order; the model choice carries the session routing.
  * - Skills come from the conversation's scoped resolver.
  * - Before each model step the messages shown to a running root turn are recorded as delivered.

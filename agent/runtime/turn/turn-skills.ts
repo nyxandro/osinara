@@ -5,9 +5,9 @@
  * - `prepareTurnSkills`: writes the turn's packages in one batch, removes the ones the session had
  *   but this turn no longer grants, and records the new list for the next turn's comparison.
  *
- * Derived from eve 0.40.0 `context/dynamic-skill-lifecycle.ts` with Osinara's `skill-sync` patch
- * (one verified batch per turn instead of per-file writes) (Apache-2.0, see NOTICE-eve). A turn
- * without skills, whose session never had any, does not touch the sandbox.
+ * One verified batch per turn. A turn without skills, whose session never had any, does not touch
+ * the sandbox.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { Pool } from "pg";
 

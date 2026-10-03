@@ -5,9 +5,8 @@
  * - `glob`: the built-in definition the model sees as `glob`.
  * - `executeGlobOnSandbox`, `GlobInput`, `GlobResult`: ripgrep's file listing, or POSIX find.
  *
- * Ported verbatim from eve 0.40.0 `runtime/framework-tools/glob.ts` and
- * `execution/sandbox/glob-tool.ts` (Apache-2.0, see NOTICE-eve). Changes: the sandbox comes from
- * the tool context.
+ * The sandbox comes from the tool context.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { z } from "zod";
 

@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import { parseStoredSandboxMetadata } from "./runner-sandbox-state.js";
 
-const EVE_SESSION_ID = "wrun_01JZ8K4R0W6G73VTHX9NF2QABC";
+const AGENT_SESSION_ID = "wrun_01JZ8K4R0W6G73VTHX9NF2QABC";
 const SANDBOX_SESSION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const WORKSPACE_ID = "11111111-1111-4111-8111-111111111111";
 const STATE_SCHEMA_VERSION = 3;
@@ -21,7 +21,7 @@ describe("persisted sandbox state", () => {
       mounts: [{ mountPoint: "personal", workspaceId: WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,
       version: STATE_SCHEMA_VERSION,
-    }, EVE_SESSION_ID, STATE_SCHEMA_VERSION)).toEqual({
+    }, AGENT_SESSION_ID, STATE_SCHEMA_VERSION)).toEqual({
       access: "trusted",
       disabled: false,
       mounts: [{ mountPoint: "personal", workspaceId: WORKSPACE_ID }],
@@ -36,7 +36,7 @@ describe("persisted sandbox state", () => {
       mounts: [],
       sandboxSessionId: SANDBOX_SESSION_ID,
       version: STATE_SCHEMA_VERSION,
-    }, EVE_SESSION_ID, STATE_SCHEMA_VERSION)).toEqual({
+    }, AGENT_SESSION_ID, STATE_SCHEMA_VERSION)).toEqual({
       disabled: true,
       mounts: [],
       sandboxSessionId: SANDBOX_SESSION_ID,
@@ -50,7 +50,7 @@ describe("persisted sandbox state", () => {
       mounts: [{ mountPoint: "personal", workspaceId: WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,
       version: STATE_SCHEMA_VERSION,
-    }, EVE_SESSION_ID, STATE_SCHEMA_VERSION)).toThrowError(
+    }, AGENT_SESSION_ID, STATE_SCHEMA_VERSION)).toThrowError(
       /AGENT_SANDBOX_RUNNER_STATE_INVALID/,
     );
   });
@@ -61,7 +61,7 @@ describe("persisted sandbox state", () => {
       mounts: [],
       sandboxSessionId: SANDBOX_SESSION_ID,
       version: STATE_SCHEMA_VERSION - 1,
-    }, EVE_SESSION_ID, STATE_SCHEMA_VERSION)).toThrowError(
+    }, AGENT_SESSION_ID, STATE_SCHEMA_VERSION)).toThrowError(
       /AGENT_SANDBOX_RUNNER_STATE_INVALID: Reconnect schema mismatch/,
     );
   });
@@ -73,7 +73,7 @@ describe("persisted sandbox state", () => {
       mounts: [{ mountPoint: "personal", workspaceId: WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,
       version: STATE_SCHEMA_VERSION,
-    }, EVE_SESSION_ID, STATE_SCHEMA_VERSION)).toThrowError(
+    }, AGENT_SESSION_ID, STATE_SCHEMA_VERSION)).toThrowError(
       /AGENT_SANDBOX_RUNNER_STATE_INVALID: Sandbox state discriminator is malformed/,
     );
   });

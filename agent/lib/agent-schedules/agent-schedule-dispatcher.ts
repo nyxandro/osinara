@@ -27,7 +27,7 @@ interface AgentScheduleDispatcherRepository {
   claimDue(options: { leaseMilliseconds: number; limit: number; now: Date }): Promise<ClaimedAgentSchedule[]>;
   failClaim(job: ClaimedAgentSchedule, errorCode: string): Promise<void>;
   markDispatchStarted(job: ClaimedAgentSchedule, input: { applicationSessionId: string }): Promise<boolean>;
-  markRunning(job: ClaimedAgentSchedule, input: { applicationSessionId: string; eveSessionId: string }): Promise<void>;
+  markRunning(job: ClaimedAgentSchedule, input: { applicationSessionId: string; agentSessionId: string }): Promise<void>;
 }
 
 interface AgentScheduleDispatcherDependencies {
@@ -185,7 +185,7 @@ async function dispatchOne(dependencies: AgentScheduleDispatcherDependencies, jo
     }, scheduledRunPrompt(job), { auth: scheduledAuth(job, prepared) });
     await recoverDatabaseBookkeeping(() => dependencies.repository.markRunning(job, {
       applicationSessionId: prepared.id,
-      eveSessionId: started.sessionId,
+      agentSessionId: started.sessionId,
     }));
   } catch (error) {
     if (isDatabaseUnavailable(error)) throw error;

@@ -5,7 +5,7 @@
  * - `agent/tools` holds only the dynamic resolver; native `agent` supplies fresh-context delegation.
  * - Exact application tool-module allowlist after CRUD consolidation.
  * - Exact static package directories plus the single dynamic policy resolver.
- * - The opt-in tone skill lives outside static Eve discovery.
+ * - The opt-in tone skill is not part of any static skill list.
  * - The compiled dynamic resolver stays step-scoped and avoids durable helper-closure replay.
  */
 import { readFile, readdir } from "node:fs/promises";
@@ -70,7 +70,7 @@ const EXPECTED_SKILL_DIRECTORIES = [
 ] as const;
 
 describe("agent capability surface", () => {
-  it("discovers only the dynamic resolver so Eve provides native delegation", async () => {
+  it("keeps only the dynamic resolver in the tools folder", async () => {
     const entries = await readdir(`${AGENT_ROOT}/tools`, { withFileTypes: true });
     const toolFiles = entries
       .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
@@ -80,7 +80,7 @@ describe("agent capability surface", () => {
     expect(toolFiles).toEqual([...EXPECTED_DISCOVERED_TOOL_FILES]);
   });
 
-  it("keeps every application tool implementation outside Eve discovery", async () => {
+  it("keeps every application tool implementation in lib/tools", async () => {
     const entries = await readdir(`${AGENT_ROOT}/lib/tools`, { withFileTypes: true });
     const toolModules = entries
       .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))

@@ -38,7 +38,7 @@ function claim(overrides: Partial<TimedOutApprovalClaim> = {}): TimedOutApproval
   return {
     applicationSessionId: "app-session-1",
     auth: VERIFIED_AUTH,
-    eveSessionId: "wrun_parked",
+    agentSessionId: "wrun_parked",
     id: "approval-1",
     kind: "tool-approval",
     leaseToken: "lease-1",

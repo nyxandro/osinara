@@ -7,9 +7,8 @@
  * - `executeBashOnSandbox`, `BashInput`, `BashResult`: the execution, with stdout and stderr
  *   bounded from their tails.
  *
- * Derived from eve 0.40.0 `runtime/framework-tools/bash.ts`, `execution/sandbox/bash-tool.ts`
- * and `public/tools/define-bash-tool.ts` (Apache-2.0, see NOTICE-eve). Changes: the sandbox comes
- * from the tool context; Eve's development-mode progress logging is gone.
+ * The sandbox comes from the tool context.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { z } from "zod";
 

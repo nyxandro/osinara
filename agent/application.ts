@@ -14,8 +14,8 @@
  *    channel (Telegram delivers, the memory review only records how its turn ended).
  * 3. Recovery: turns an earlier process left running continue from the journal, and what it left
  *    unreported (a card not shown, an end not reported) is reported.
- * 4. The HTTP server on the addresses Eve had: the Telegram webhook, the internal drain the
- *    ingress worker calls, the Google OAuth callback and the health check.
+ * 4. The HTTP server: the Telegram webhook, the internal drain the ingress worker calls, the Google
+ *    OAuth callback and the health check.
  * 5. The minute scheduler: reminders and approval timeouts, scheduled runs, memory review, the
  *    software update check, and recovery again for turns whose start a deploy held back.
  */
@@ -50,8 +50,8 @@ import { memoryReviewDispatchSchedule } from "./schedules/memory-review-dispatch
 import { reminderDispatchSchedule } from "./schedules/reminder-dispatch.js";
 import { softwareUpdateCheckSchedule } from "./schedules/software-update-check.js";
 
-export const TELEGRAM_WEBHOOK_ROUTE = "/eve/v1/telegram";
-export const TELEGRAM_DRAIN_ROUTE = "/eve/v1/telegram-drain";
+export const TELEGRAM_WEBHOOK_ROUTE = "/v1/telegram";
+export const TELEGRAM_DRAIN_ROUTE = "/v1/telegram-drain";
 // A waiting turn checks again this often when no turn of this process signals that its session moved on.
 const TURN_WAIT_MILLISECONDS = 1_000;
 // How long the start waits for reports of turns an earlier process left unreported.

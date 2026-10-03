@@ -7,11 +7,9 @@
  * - `executeToolCall`: runs the tool and returns the result as the model will see it; a failure
  *   becomes `error-text`, a cancelled turn throws.
  *
- * Derived from eve 0.40.0 `harness/tools.ts` (`buildApprovalFn`, `wrapToolExecute`),
- * `harness/tool-model-output.ts`, `harness/tool-call-input-errors.ts`, `harness/runtime-actions.ts`
- * (`resolveToolCallInputObject`), AI SDK 7.0.60 `createToolModelOutput` and Osinara's
- * `tool-refusal-logging` patch (Apache-2.0, see NOTICE-eve). Changes: the runtime executes the
- * call itself after the model call; outputs and error texts are the same values AI SDK produced.
+ * The runtime executes the call itself after the model call; outputs and error texts are the
+ * values AI SDK 7.0.60 produces (`createToolModelOutput`).
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { JSONValue } from "@ai-sdk/provider";
 import type { ToolResultPart } from "ai";

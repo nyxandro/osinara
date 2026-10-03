@@ -145,24 +145,6 @@ describeWithDatabase("ingress queue monitoring view", () => {
     expect(view.running).toBe(0);
   });
 
-  it("counts messages behind a queue blocked by an unconfirmed cancellation as unserved", async () => {
-    await enqueue(-1005, 40, 1_000);
-    await enqueue(-1005, 41, 800);
-    // The claim refuses every later message of the chat until this row is recovered.
-    await database().query(
-      `UPDATE telegram_ingress_updates
-          SET status = 'failed', completed_at = now(),
-              last_error_code = 'AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED',
-              last_error_message = 'cancellation was not confirmed'
-        WHERE update_id = 40`,
-    );
-
-    const view = await readView();
-
-    expectAge(view.stalled, 800);
-    expect(view.running).toBe(0);
-  });
-
   it("reports the longest of several turns running at once", async () => {
     await enqueue(-1001, 1, 400);
     await markRunning(1, 380);

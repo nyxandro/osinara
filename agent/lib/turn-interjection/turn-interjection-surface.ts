@@ -6,8 +6,8 @@
  *   waiting messages too; long sandbox work is exactly where a correction arrives.
  * - `withTurnInterjectionSurface`: wraps a complete surface plus those built-ins.
  *
- * The built-ins are the runtime's own definitions (ported from Eve), re-emitted unchanged under their framework names,
- * so descriptors, sandbox access, and read-before-write checks stay the framework's.
+ * The built-ins are the runtime's own definitions, re-emitted unchanged under their names, so
+ * descriptors, sandbox access, and read-before-write checks stay the runtime's.
  */
 import type { ToolDefinition } from "../../runtime/tool.js";
 import { bash, glob, grep, readFile, writeFile } from "../../runtime/tools/defaults.js";

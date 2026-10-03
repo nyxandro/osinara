@@ -5,9 +5,7 @@
  * - `findContinuation`: the session of an address, or `null` when the address is new.
  * - `bindContinuation`: gives an address to a session; the first binding of an address wins.
  * - `loadChannelState`, `saveChannelState`: the channel's JSON state of a session.
- *
- * Eve kept the same mapping in its continuation hooks and the state in its channel context;
- * imported sessions carry both over (`history/import-eve-history.ts`).
+
  */
 import type { Pool } from "pg";
 

@@ -24,7 +24,7 @@ export async function inspectMemoryReviewLanes() {
     fromSequence: string | null; throughSequence: string | null; sourceCount: number | null;
     modelRouteKey: string | null; modelRecoveryGeneration: number | null;
     waitingSince: Date | null; lastModelSuccessAt: Date | null; agedReleaseAt: Date | null;
-    eveSessionId: string | null; eveTurnId: string | null;
+    agentSessionId: string | null; agentTurnId: string | null;
   }>(
     `SELECT lane.id AS "laneId", telegram_group.title AS "groupTitle",
             batch.id AS "batchId", batch.status::text AS status,
@@ -35,7 +35,7 @@ export async function inspectMemoryReviewLanes() {
              batch.model_route_key AS "modelRouteKey", batch.model_recovery_generation AS "modelRecoveryGeneration",
              batch.waiting_since AS "waitingSince", health.observed_at AS "lastModelSuccessAt",
              batch.aged_release_at AS "agedReleaseAt",
-             batch.eve_session_id AS "eveSessionId", batch.eve_turn_id AS "eveTurnId",
+             batch.eve_session_id AS "agentSessionId", batch.eve_turn_id AS "agentTurnId",
             (SELECT count(*)::integer FROM telegram_group_messages AS message
               WHERE message.conversation_id = lane.conversation_id
                 AND message.message_thread_id IS NOT DISTINCT FROM lane.message_thread_id
@@ -144,7 +144,7 @@ export async function skipUnboundMemoryReviewBatch(input: { batchId: string; rea
       `INSERT INTO audit_events (family_id, event_type, subject_id, metadata)
        SELECT family_id, 'memory_review.operator_skipped', $2,
          jsonb_build_object('reason', $3::text, 'operator', 'root-cli', 'originalDiagnosticCode', $4::text,
-           'eveSessionId', $5::text, 'eveTurnId', $6::text, 'fromSequence', $7::text,
+           'agentSessionId', $5::text, 'agentTurnId', $6::text, 'fromSequence', $7::text,
            'throughSequence', $8::text, 'sourceCount', $9::integer, 'processedThroughSequence', $10::text)
        FROM application_conversations WHERE id = $1`,
       [batch.conversation_id, batch.id, input.reason.trim(), SOURCE_MISSING, batch.eve_session_id,
@@ -271,7 +271,7 @@ export async function skipPartialMemoryReviewBatch(input: { batchId: string; rea
        SELECT family_id, 'memory_review.operator_skipped_partial', $2,
          jsonb_build_object('reason', $3::text, 'operator', 'root-cli',
            'originalDiagnosticCode', $4::text, 'keptMemories', $5::integer,
-           'eveSessionId', $6::text, 'eveTurnId', $7::text, 'fromSequence', $8::text,
+           'agentSessionId', $6::text, 'agentTurnId', $7::text, 'fromSequence', $8::text,
            'throughSequence', $9::text, 'sourceCount', $10::integer,
            'processedThroughSequence', $11::text)
        FROM application_conversations WHERE id = $1`,

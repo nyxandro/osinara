@@ -96,7 +96,7 @@ describeWithDatabase("memory show journal", () => {
   });
 
   it("keeps counting up when a new session starts the turn names over", async () => {
-    // Eve numbers turns inside a session: `turn_0` of the next session is a different turn of the
+    // The runtime numbers turns inside a session: `turn_0` of the next session is a different turn of the
     // same conversation, and treating the two as one would freeze the window for good.
     await memoryShowJournal.openTurn(conversationId, "wrun_first", "turn_0");
     await memoryShowJournal.openTurn(conversationId, "wrun_first", "turn_1");
@@ -109,7 +109,7 @@ describeWithDatabase("memory show journal", () => {
   it("keeps a record it just showed out of the next automatic selection", async () => {
     const first = {
       conversationId,
-      eveSessionId: SESSION,
+      agentSessionId: SESSION,
       turnId: "turn-1",
       turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
     };
@@ -121,7 +121,7 @@ describeWithDatabase("memory show journal", () => {
 
     const second = {
       conversationId,
-      eveSessionId: SESSION,
+      agentSessionId: SESSION,
       turnId: "turn-2",
       turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-2"),
     };
@@ -136,7 +136,7 @@ describeWithDatabase("memory show journal", () => {
   it("offers it again once the window has moved past it", async () => {
     const first = {
       conversationId,
-      eveSessionId: SESSION,
+      agentSessionId: SESSION,
       turnId: "turn-1",
       turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
     };
@@ -146,7 +146,7 @@ describeWithDatabase("memory show journal", () => {
     }
     const later = {
       conversationId,
-      eveSessionId: SESSION,
+      agentSessionId: SESSION,
       turnId: `turn-${MEMORY_RETRIEVAL_RECENT_SHOW_WINDOW_TURNS + 2}`,
       turnOrdinal: await memoryShowJournal.openTurn(
         conversationId,
@@ -167,7 +167,7 @@ describeWithDatabase("memory show journal", () => {
     // would give the second pass a different memory to answer from than the first one had.
     const window = {
       conversationId,
-      eveSessionId: SESSION,
+      agentSessionId: SESSION,
       turnId: "turn-1",
       turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
     };
@@ -177,7 +177,7 @@ describeWithDatabase("memory show journal", () => {
       auth, "домофон", [vector(1, 0)], undefined,
       {
         conversationId,
-        eveSessionId: SESSION,
+        agentSessionId: SESSION,
         turnId: "turn-1",
         turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
       },
@@ -189,7 +189,7 @@ describeWithDatabase("memory show journal", () => {
   it("drops what is older than the kept depth instead of growing without end", async () => {
     const first = {
       conversationId,
-      eveSessionId: SESSION,
+      agentSessionId: SESSION,
       turnId: "turn-1",
       turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
     };
@@ -212,7 +212,7 @@ describeWithDatabase("memory show journal", () => {
   it("never hides anything from a deliberate search", async () => {
     const first = {
       conversationId,
-      eveSessionId: SESSION,
+      agentSessionId: SESSION,
       turnId: "turn-1",
       turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
     };

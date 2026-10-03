@@ -39,7 +39,7 @@ function context() {
           principalType: "user",
         },
       },
-      id: "eve-session-1",
+      id: "agent-session-1",
     },
   } as never;
 }

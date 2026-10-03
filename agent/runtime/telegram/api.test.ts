@@ -1,4 +1,4 @@
-/** Ported from eve 0.40.0 `public/channels/telegram/api.test.ts` (Apache-2.0, see NOTICE-eve). */
+/** Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md. */
 import { describe, expect, it, vi } from "vitest";
 
 import {

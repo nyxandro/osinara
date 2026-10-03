@@ -9,8 +9,8 @@
  *   would send a failure notice and clear the next turn's approvals.
  * - `ParkedTurnTakenOver`: what the loop throws in that case; the run ends without a report.
  *
- * Moved out of `run-turn.ts` (derived from eve 0.40.0 `harness/tool-loop.ts`, Apache-2.0, see
- * NOTICE-eve), so recovery fails a turn exactly as the loop does.
+ * Shared by the loop and recovery, so recovery fails a turn exactly as the loop does.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { AppError } from "../../lib/app-error.js";
 import { failWaitingTurn, finishTurn, type JournalClient } from "./journal-repository.js";

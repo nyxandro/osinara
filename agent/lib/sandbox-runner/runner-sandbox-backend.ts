@@ -9,7 +9,7 @@
  * Key constructs:
  * - Access follows the mounts: a group workspace runs restricted, personal/family run trusted, a
  *   session without mounts (silent memory review) has no compute at all.
- * - Stored metadata (`agent_session_state.sandbox_state`, carried over from Eve) restores the same
+ * - Stored metadata (`agent_session_state.sandbox_state`) restores the same
  *   container identity and mounts; compute itself is disposable, workspaces live on volumes.
  * - Skills arrive as one verified batch per turn (`syncSkills`); there are no build-time seed
  *   templates: the container starts empty and the turn syncs its skills before the first step.
@@ -209,7 +209,7 @@ export function openRunnerSandbox(input: {
   const disabled = use.mounts.length === 0;
   let request: SandboxRunnerCreateRequest | null = disabled ? null : (() => {
     const access = accessForMounts(use.mounts);
-    return parseCreateSandboxRequest({ access, eveSessionId: input.sessionId, mounts: use.mounts, sandboxSessionId: use.sandboxSessionId, ...NO_SEED });
+    return parseCreateSandboxRequest({ access, agentSessionId: input.sessionId, mounts: use.mounts, sandboxSessionId: use.sandboxSessionId, ...NO_SEED });
   })();
   if (restored !== null && !restored.disabled && request !== null) {
     request = parseCreateSandboxRequest({ ...request, access: restored.access });

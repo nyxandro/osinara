@@ -12,7 +12,7 @@ import {
   requireExactHealthyResponse,
 } from "./production-operational-commands.js";
 
-const HEALTH_URL = "https://bot.example.com/eve/v1/health";
+const HEALTH_URL = "https://bot.example.com/v1/health";
 
 describe("production operational boundary", () => {
   it.each([

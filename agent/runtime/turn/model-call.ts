@@ -16,12 +16,10 @@
  * - An empty answer is reissued once with `EMPTY_RESPONSE_NUDGE` appended to that request only.
  * On the Anthropic protocol every attempt carries prompt-cache breakpoints (`prompt-cache.ts`).
  *
- * Derived from eve 0.40.0 `harness/tool-loop.ts` (`runModelCallWithRetries`,
- * `attemptEmptyResponseRecovery`, `isEmptyModelResponse`), `harness/messages.ts`
- * (`resolveAssistantStepText`) and Osinara's `scripts/eve-runtime/model-inactivity.ts`
- * (Apache-2.0, see NOTICE-eve). Changes: the runtime owns both inactivity windows over the parts it
- * reads, so the first window also covers the wait for response headers (AI SDK 7.0.60 started it
- * after them) and no window runs while tools execute.
+ * The runtime owns both inactivity windows over the parts it reads, so the first window also covers
+ * the wait for response headers (AI SDK 7.0.60 starts its own after them) and no window runs while
+ * tools execute.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { NoOutputGeneratedError, streamText, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
 import type { SharedV4ProviderOptions } from "@ai-sdk/provider";
@@ -81,7 +79,7 @@ const REAL_TIMING: ModelCallTiming = {
   sleep: (milliseconds) => new Promise((done) => setTimeout(done, milliseconds)),
 };
 
-/** The step's visible text: the last assistant message that has any, as Eve resolved it. */
+/** The step's visible text: the last assistant message that has any. */
 export function assistantStepText(messages: readonly ModelMessage[]): string {
   for (const message of [...messages].reverse()) {
     if (message.role !== "assistant") continue;

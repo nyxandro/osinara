@@ -1,5 +1,5 @@
 /**
- * Durable Eve session authentication tests.
+ * Durable agent session authentication tests.
  *
  * Constructs covered:
  * - `resolveSessionCaller`: trusts only the current turn identity.

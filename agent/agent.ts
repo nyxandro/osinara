@@ -7,7 +7,7 @@
  *   NeuralDeep session routing, the step limit, the compaction threshold, and the record made
  *   before each model step (delivery of the messages shown to a running turn).
  *
- * The block order is explicit here (Eve derived it from file names): the trust zone rules first,
+ * The block order is explicit here: the trust zone rules first,
  * then delegation and chat preferences, the reaction set (a user-role history entry), and the
  * volatile memory payload last.
  */

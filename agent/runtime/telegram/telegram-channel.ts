@@ -4,14 +4,12 @@
  * Exports:
  * - `createTelegramChannel`: binds the application's hooks and handlers to the database and the
  *   Bot API; `dispatch` turns one verified update into a turn, `receive` starts a turn in a chat
- *   without one (Eve's `receive`), `observer` delivers a turn's events to the application's handlers.
+ *   without one, `observer` delivers a turn's events to the application's handlers.
  * - `telegramWebhookRoutes`: the public webhook and the internal drain route. Both verify the
  *   webhook secret; the webhook hands a parsed update to the application's ingress, which stores it
  *   before Telegram is acknowledged.
  *
- * Derived from eve 0.40.0 `public/channels/telegram/telegramChannel.ts` (`telegramChannel`,
- * `verifyInbound`) with Osinara's ingress patches (`onVerifiedUpdate`, `onDrain`, `drainRoute`)
- * (Apache-2.0, see NOTICE-eve).
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { JsonObject } from "../json.js";
 import { parseJsonObject } from "../json.js";

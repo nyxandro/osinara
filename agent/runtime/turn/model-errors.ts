@@ -9,13 +9,11 @@
  *   person may retry) or `terminal` (the turn fails, repeating cannot help).
  * - `modelCallFailure`: the coded error a turn fails with after its model call gave up.
  *
- * Derived from eve 0.40.0 `harness/model-call-error.ts`, `harness/turn-cancellation.ts` and
- * Osinara's `scripts/eve-runtime/model-inactivity.ts` (Apache-2.0, see NOTICE-eve). Changes:
- * - The AI Gateway and error-catalog branches are gone: Osinara calls providers directly.
  * - An inactivity timeout is always retryable: tools never run inside a model call here, so a
  *   repeated call cannot repeat a side effect.
  * - AI SDK's exhausted transport retries end the call instead of being multiplied by the outer
- *   loop (the Osinara patch rule).
+ *   loop.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { AppError } from "../../lib/app-error.js";
 

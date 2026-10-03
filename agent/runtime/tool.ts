@@ -7,14 +7,9 @@
  * - `ToolModelOutput`: what the model sees instead of the full result, when a tool projects it.
  * - `ApprovalContext`, `ApprovalStatus`: what an approval policy sees and decides per call.
  *
- * Derived from eve 0.40.0 `public/definitions/tool.ts`, `public/definitions/approval.ts` and
- * `shared/tool-definition.ts` (Apache-2.0, see NOTICE-eve). Changes:
- * - The same names and shapes, so every application tool keeps its code; definitions are plain
- *   objects without Eve's brand stamp.
- * - Left out what the application never uses: token accessors, approval response policies,
- *   output-schema overloads, workflow and disabled-tool sentinels.
- * - `ApprovalStatus` keeps AI SDK 7's values (`"user-approval"`, `"not-applicable"`, `"approved"`,
- *   `"denied"`), which the runtime passes to AI SDK unchanged.
+ * Definitions are plain objects. `ApprovalStatus` keeps AI SDK 7's values (`"user-approval"`,
+ * `"not-applicable"`, `"approved"`, `"denied"`), which the runtime passes to AI SDK unchanged.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { JsonObject } from "./json.js";
 import type { SessionContext } from "./context.js";

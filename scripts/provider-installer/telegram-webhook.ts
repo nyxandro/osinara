@@ -8,7 +8,7 @@
 import { InstallerError } from "./errors.js";
 
 const TELEGRAM_API_ORIGIN = "https://api.telegram.org";
-const TELEGRAM_WEBHOOK_PATH = "/eve/v1/telegram";
+const TELEGRAM_WEBHOOK_PATH = "/v1/telegram";
 const MAX_TIMEOUT_MS = 120_000;
 const BOT_TOKEN_PATTERN = /^[0-9]+:[A-Za-z0-9_-]+$/u;
 const HOSTNAME_PATTERN = /^(?=.{1,253}$)(?!-)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;

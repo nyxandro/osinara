@@ -108,7 +108,7 @@ describeWithDatabase("agent schedule repositories", () => {
     const client = await database().connect();
     try { await client.query("BEGIN"); await recoverUnstartedAgentSchedules(client, now); await client.query("COMMIT"); }
     finally { client.release(); }
-    await expect(admitScheduledAgentTurn({ runId: job.runId, applicationSessionId: session.id, eveSessionId: "late", eveTurnId: "turn_0" }))
+    await expect(admitScheduledAgentTurn({ runId: job.runId, applicationSessionId: session.id, agentSessionId: "late", agentTurnId: "turn_0" }))
       .rejects.toThrow("AGENT_SCHEDULE_ATTEMPT_STALE");
     const next = (await agentScheduleDispatchRepository.claimDue({ now: new Date(), limit: 10, leaseMilliseconds: 60000 }))[0]!;
     expect(next.id).toBe(schedule.id);
@@ -224,7 +224,7 @@ describeWithDatabase("agent schedule repositories", () => {
     expect(persisted.rows[0]?.history_window_days).toBeNull();
   });
 
-  it("claims a weekday schedule once and advances it after Eve completion", async () => {
+  it("claims a weekday schedule once and advances it after the turn completes", async () => {
     const fixture = await createFixture();
     const auth = privateAuth(fixture, "member");
     await agentScheduleRepository.create(auth, { executionContext: "isolated",
@@ -265,13 +265,13 @@ describeWithDatabase("agent schedule repositories", () => {
     });
     await agentScheduleDispatchRepository.markRunning(claimed!, {
       applicationSessionId: prepared.id,
-      eveSessionId: "eve-schedule-1",
+      agentSessionId: "agent-schedule-1",
     });
     const delivery = {
       applicationSessionId: prepared.id,
       content: "Будничная сводка готова",
       deliveredAt: new Date("2026-07-17T09:01:00.000Z"),
-      eveSessionId: "eve-schedule-1",
+      agentSessionId: "agent-schedule-1",
       familyId: fixture.familyId,
       groupId: null,
       messageThreadId: null,
@@ -296,7 +296,7 @@ describeWithDatabase("agent schedule repositories", () => {
     // Once Telegram delivery belongs to a durable run, retain the receipt despite identity conflict.
     await expect(agentScheduleDispatchRepository.completeDeliveredRun({
       ...delivery,
-      eveSessionId: "eve-schedule-conflict",
+      agentSessionId: "agent-schedule-conflict",
     })).rejects.toMatchObject({ code: "AGENT_SCHEDULE_DELIVERY_STATE_INVALID" });
     await expect(database().query("SELECT 1 FROM proactive_deliveries")).resolves.toMatchObject({
       rowCount: 1,
@@ -359,13 +359,13 @@ describeWithDatabase("agent schedule repositories", () => {
     });
     await agentScheduleDispatchRepository.markRunning(reclaimed!, {
       applicationSessionId: prepared.id,
-      eveSessionId: "eve-schedule-recovered",
+      agentSessionId: "agent-schedule-recovered",
     });
     await agentScheduleDispatchRepository.completeDeliveredRun({
       applicationSessionId: prepared.id,
       content: "Одноразовый результат",
       deliveredAt: new Date("2026-07-17T09:01:00.000Z"),
-      eveSessionId: "eve-schedule-recovered",
+      agentSessionId: "agent-schedule-recovered",
       familyId: fixture.familyId,
       groupId: null,
       messageThreadId: null,
@@ -417,10 +417,10 @@ describeWithDatabase("agent schedule repositories", () => {
 
     await agentScheduleDispatchRepository.markRunning(claimed!, {
       applicationSessionId: prepared.id,
-      eveSessionId: "eve-schedule-long-running",
+      agentSessionId: "agent-schedule-long-running",
     });
     await admitScheduledAgentTurn({ runId: claimed!.runId, applicationSessionId: prepared.id,
-      eveSessionId: "eve-schedule-long-running", eveTurnId: "turn_0" });
+      agentSessionId: "agent-schedule-long-running", agentTurnId: "turn_0" });
 
     await expect(agentScheduleDispatchRepository.claimDue({
       leaseMilliseconds: 1_000,
@@ -436,7 +436,7 @@ describeWithDatabase("agent schedule repositories", () => {
     });
   });
 
-  it("does not retry a legacy expired lease after Eve handoff may have started", async () => {
+  it("does not retry a legacy expired lease after the turn handoff may have started", async () => {
     const fixture = await createFixture();
     const auth = privateAuth(fixture, "member");
     await agentScheduleRepository.create(auth, { executionContext: "isolated",

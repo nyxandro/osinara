@@ -175,7 +175,8 @@ async function drain(dispatch: DurableIngressDependencies["dispatch"], notifyTim
     const dispatchId = randomUUID();
     await repository.beginDispatch(claim.updateId, claim.leaseToken, dispatchId);
     await database().query("UPDATE telegram_ingress_updates SET dispatch_session_id = 'session-1', dispatch_turn_id = 'turn_1', dispatch_start_index = 0 WHERE update_id = 1001");
-    await repository.fail(claim.updateId, claim.leaseToken, { code: "AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED", message: "Остановка не подтверждена" });
+    // The worker died after the turn was bound: its lease runs out with the album still processing.
+    await database().query("UPDATE telegram_ingress_updates SET lease_expires_at = now() - interval '1 second' WHERE update_id = 1001");
     const recovered = (await repository.claimNext(lease, NO_BURSTS))!;
     expect(recovered.dispatchBinding).toMatchObject({ id: dispatchId, sessionId: "session-1" });
     expect(recovered.mediaGroupPayloads).toHaveLength(2);

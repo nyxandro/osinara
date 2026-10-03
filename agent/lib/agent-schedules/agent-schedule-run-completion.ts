@@ -50,7 +50,7 @@ export interface CompleteDeliveredAgentScheduleRunInput {
   applicationSessionId: string;
   content: string;
   deliveredAt: Date;
-  eveSessionId: string;
+  agentSessionId: string;
   familyId: string;
   groupId: string | null;
   messageThreadId: string | null;
@@ -68,7 +68,7 @@ export async function finishActiveAgentScheduleRun(
   input: {
     applicationSessionId: string;
     completedAt: Date;
-    eveSessionId: string;
+    agentSessionId: string;
     outcome: AgentScheduleRunOutcome;
     /** A conversation run shares its session with ordinary turns, so it is also selected by id. */
     runId?: string;
@@ -95,7 +95,7 @@ export async function finishActiveAgentScheduleRun(
         AND schedule.status = 'leased'
         AND ($3::uuid IS NULL OR run.id = $3::uuid)
       FOR UPDATE OF run, schedule`,
-    [input.applicationSessionId, input.eveSessionId, input.runId ?? null],
+    [input.applicationSessionId, input.agentSessionId, input.runId ?? null],
   );
   const row = active.rows[0];
   if (!row) return false;
@@ -165,7 +165,7 @@ export async function completeDeliveredAgentScheduleRun(
             application_session_id = $2::uuid AND eve_session_id = $3 AS identity_matches
        FROM agent_schedule_runs
       WHERE id = $1`,
-    [input.runId, input.applicationSessionId, input.eveSessionId],
+    [input.runId, input.applicationSessionId, input.agentSessionId],
   );
   const durableRun = run.rows[0];
   if (!durableRun) {
@@ -201,7 +201,7 @@ export async function completeDeliveredAgentScheduleRun(
   const completed = await finishActiveAgentScheduleRun(client, {
     applicationSessionId: input.applicationSessionId,
     completedAt: input.deliveredAt,
-    eveSessionId: input.eveSessionId,
+    agentSessionId: input.agentSessionId,
     outcome: { kind: "delivered" },
   });
   if (completed) return "completed";
@@ -214,7 +214,7 @@ export async function completeDeliveredAgentScheduleRun(
          ON delivery.source_kind = 'agent_schedule' AND delivery.source_id = run.id
       WHERE run.id = $1 AND run.application_session_id = $2 AND run.eve_session_id = $3
         AND run.status = 'completed' AND delivery.telegram_message_id = $4::bigint`,
-    [input.runId, input.applicationSessionId, input.eveSessionId, input.telegramMessageId],
+    [input.runId, input.applicationSessionId, input.agentSessionId, input.telegramMessageId],
   );
   return existing.rowCount === 1 ? "duplicate" : "state_conflict";
 }

@@ -43,7 +43,7 @@ gws sheets +append --spreadsheet ID --range "Sheet2!A1" --values 'Alice,100'
 - Use --range to append to a specific sheet tab (default: A1, i.e. first sheet).
 
 > [!CAUTION]
-> This is a **write** command. Execute it once; `execute_google_workspace` provides the only required Eve HITL confirmation.
+> This is a **write** command. Execute it once; `execute_google_workspace` provides the only required human approval.
 
 ## See Also
 

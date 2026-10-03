@@ -40,7 +40,7 @@ const batch: ClaimedMemoryReviewBatch = {
 };
 
 function dependencies(overrides: Record<string, unknown> = {}) {
-  const startReview = vi.fn().mockResolvedValue({ sessionId: "eve-review-session-1" });
+  const startReview = vi.fn().mockResolvedValue({ sessionId: "agent-review-session-1" });
   return {
     dependencies: {
       claimPending: vi.fn().mockResolvedValue([batch]),
@@ -98,7 +98,7 @@ describe("memory review dispatcher", () => {
     );
     expect(fixture.dependencies.markRunning).toHaveBeenCalledWith(batch, {
       applicationSessionId: "application-review-session-1",
-      eveSessionId: "eve-review-session-1",
+      agentSessionId: "agent-review-session-1",
     });
   });
 

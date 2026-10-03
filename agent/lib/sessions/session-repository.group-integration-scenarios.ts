@@ -35,7 +35,7 @@ export async function verifyGroupTrustZoneRecreation(f: SessionOwnerFixture): Pr
     scope: "group",
     userId: null,
   });
-  await sessionRepository.bindEveSession(old.id, "wrun_old_group_cursor");
+  await sessionRepository.bindAgentSession(old.id, "wrun_old_group_cursor");
   await groupTimelineCursorRepository.advance(old.id, "wrun_old_group_cursor", "10");
 
   // Keep both lifecycle states attached to the old trust zone with durable cursors.
@@ -50,7 +50,7 @@ export async function verifyGroupTrustZoneRecreation(f: SessionOwnerFixture): Pr
     scope: "group",
     userId: null,
   });
-  await sessionRepository.bindEveSession(active.id, "wrun_active_group_cursor");
+  await sessionRepository.bindAgentSession(active.id, "wrun_active_group_cursor");
   await groupTimelineCursorRepository.advance(active.id, "wrun_active_group_cursor", "20");
   await sessionRepository.registerRouteAlias(active.id, "-100-session-zone::900");
   const scheduled = await database().query<{ id: string }>(
@@ -151,7 +151,7 @@ export async function verifyMonotonicGroupTimelineCursor(f: SessionOwnerFixture)
     scope: "family",
     userId: null,
   });
-  await sessionRepository.bindEveSession(session.id, "wrun_cursor");
+  await sessionRepository.bindAgentSession(session.id, "wrun_cursor");
 
   // A stale lower sequence cannot move the durable cursor backwards.
   await expect(

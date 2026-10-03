@@ -4,7 +4,7 @@
  * Constructs covered:
  * - Only the two exact side-effect-free production batches are requeued.
  * - The lane is rewound to the first predecessor so the batches run in order.
- * - A mutation from either original Eve turn aborts recovery atomically.
+ * - A mutation from either original turn aborts recovery atomically.
  * - All 100 source messages become retained batch evidence again.
  */
 import { readFile, readdir } from "node:fs/promises";
@@ -36,8 +36,8 @@ const FIRST_BATCH_ID = "90619ff3-137e-423e-9615-4e436e3a52b1";
 const SECOND_BATCH_ID = "e19dc521-5a31-4d2f-b6ea-2baa6639ee10";
 const PREDECESSOR_BATCH_ID = "f69985eb-eafd-472b-84f6-df87ae44ea3e";
 const LANE_ID = "31da105f-108e-445f-b20d-be5154ecd11a";
-const FIRST_EVE_SESSION_ID = "wrun_01M15ZW7PGDEHMF3VD5RRTW1W7";
-const SECOND_EVE_SESSION_ID = "wrun_01M16T2VN126WQNZWJB2C0VRK2";
+const FIRST_AGENT_SESSION_ID = "wrun_01M15ZW7PGDEHMF3VD5RRTW1W7";
+const SECOND_AGENT_SESSION_ID = "wrun_01M16T2VN126WQNZWJB2C0VRK2";
 const MIGRATION_NAME_PATTERN = /^(\d+)_.*\.sql$/u;
 
 function migrationOrdinal(name: string): number | null {
@@ -116,13 +116,13 @@ describeWithDatabase("077 missing source-binding recovery", () => {
             started_at, completed_at)
          VALUES
            ($1, $2, $3, 'background', 'completed', 408, 409, 458, 50,
-            'eve-predecessor', 'turn_0', now(), now()),
+            'agent-predecessor', 'turn_0', now(), now()),
            ($4, $2, $3, 'background', 'completed', 458, 459, 508, 50,
             $5, 'turn_0', now(), now()),
            ($6, $2, $3, 'background', 'completed', 508, 509, 558, 50,
             $7, 'turn_0', now(), now())`,
         [PREDECESSOR_BATCH_ID, LANE_ID, conversationId, FIRST_BATCH_ID,
-          FIRST_EVE_SESSION_ID, SECOND_BATCH_ID, SECOND_EVE_SESSION_ID],
+          FIRST_AGENT_SESSION_ID, SECOND_BATCH_ID, SECOND_AGENT_SESSION_ID],
       );
       const migration = await readFile(resolve("migrations", MIGRATION_NAME), "utf8");
 
@@ -130,7 +130,7 @@ describeWithDatabase("077 missing source-binding recovery", () => {
         `INSERT INTO memory_mutation_operations
            (family_id, operation_key, mutation_kind, input_hash, eve_session_id, eve_turn_id)
          VALUES ($1, 'source-binding-operation', 'create', $2, $3, 'turn_0')`,
-        [family.rows[0]!.id, "a".repeat(64), SECOND_EVE_SESSION_ID],
+        [family.rows[0]!.id, "a".repeat(64), SECOND_AGENT_SESSION_ID],
       );
       await expect(client.query(migration)).rejects.toThrow(
         "AGENT_MEMORY_REVIEW_SOURCE_BINDING_RECOVERY_SIDE_EFFECT_FOUND",

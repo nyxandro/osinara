@@ -30,8 +30,8 @@ export async function recordTurnInterjectionDelivery(
     console.error(JSON.stringify({
       code: "AGENT_TURN_INTERJECTION_DELIVERY_RECORD_FAILED",
       error: error instanceof Error ? error.message : String(error),
-      eveSessionId: ctx.session.id,
-      eveTurnId: ctx.session.turn.id,
+      agentSessionId: ctx.session.id,
+      agentTurnId: ctx.session.turn.id,
     }));
   }
 }

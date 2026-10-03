@@ -43,7 +43,6 @@ export interface TelegramIngressClaim {
   dispatchAttemptId?: string;
   dispatchStarted: boolean;
   dispatchBinding: TelegramIngressDispatchBinding | null;
-  recoveryCancelRequested: boolean;
   attemptCount: number;
   deliveryContinuationKey: string;
   ingressContinuationKey: string;
@@ -84,7 +83,7 @@ export interface TelegramIngressRepository {
   /** `sessionId`: the runtime session the update's turn ran in, when it created one. */
   complete(updateId: string, leaseToken: string, sessionId?: string): Promise<void>;
   enqueue(input: EnqueueTelegramUpdateInput): Promise<"duplicate" | "inserted">;
-  fail(updateId: string, leaseToken: string, failure: TelegramIngressFailure, eveSessionId?: string): Promise<void>;
+  fail(updateId: string, leaseToken: string, failure: TelegramIngressFailure, agentSessionId?: string): Promise<void>;
   rekeyQueue(input: {
     nextContinuationKey: string;
     previousContinuationKey: string;
@@ -103,7 +102,6 @@ export interface ClaimRow {
   dispatch_id: string | null;
   dispatch_session_id: string | null;
   dispatch_turn_id: string | null;
-  recovery_cancel_requested: boolean;
   attempt_count: number;
   current_continuation_key: string;
   ingress_continuation_key: string;
@@ -209,7 +207,6 @@ export function mapTelegramIngressClaim(row: ClaimRow): TelegramIngressClaim {
     ...(row.recovery_protocol === 1 ? { recoveryProtocol: 1 as const } : {}),
     ...(row.dispatch_id === null ? {} : { dispatchAttemptId: row.dispatch_id }),
     dispatchStarted: row.dispatch_started_at !== null,
-    recoveryCancelRequested: row.recovery_cancel_requested,
     dispatchBinding: row.dispatch_session_id === null ? null : {
       id: row.dispatch_id!, sessionId: row.dispatch_session_id, turnId: row.dispatch_turn_id!,
     },

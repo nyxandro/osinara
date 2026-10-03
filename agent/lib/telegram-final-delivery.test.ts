@@ -25,8 +25,8 @@ import { deliverTelegramFinalOutput } from "./telegram-final-delivery.js";
 const base = {
   applicationSessionId: "00000000-0000-4000-8000-000000000001",
   deliveryIdentity: { chatId: "101" },
-  eveSessionId: "wrun_session_1",
-  eveTurnId: "turn-1",
+  agentSessionId: "wrun_session_1",
+  agentTurnId: "turn-1",
   markdown: "Готово",
 };
 
@@ -50,8 +50,8 @@ describe("Telegram final delivery", () => {
     expect(repository.start).toHaveBeenCalledWith({
       applicationSessionId: base.applicationSessionId,
       chunkCount: 1,
-      eveSessionId: base.eveSessionId,
-      eveTurnId: base.eveTurnId,
+      agentSessionId: base.agentSessionId,
+      agentTurnId: base.agentTurnId,
       legacyChunkCount: 1,
       legacyOutputHash: hash({
         chunks: [hash(base.markdown)],

@@ -20,7 +20,7 @@ describe("configureTelegramWebhook", () => {
         result: {
           has_custom_certificate: false,
           pending_update_count: 0,
-          url: "https://bot.example.com/eve/v1/telegram",
+          url: "https://bot.example.com/v1/telegram",
         },
       }), { headers: { "content-type": "application/json" } }));
 
@@ -39,7 +39,7 @@ describe("configureTelegramWebhook", () => {
     expect(body).toEqual({
       allowed_updates: ["message", "callback_query"],
       secret_token: "webhook_secret-123",
-      url: "https://bot.example.com/eve/v1/telegram",
+      url: "https://bot.example.com/v1/telegram",
     });
     expect(body).not.toHaveProperty("drop_pending_updates");
     expect(String(fetch.mock.calls[1]?.[0])).toContain("/getWebhookInfo");

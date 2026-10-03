@@ -9,7 +9,7 @@ export async function terminalizeApplicationSession(
   input: {
     applicationSessionId: string;
     completedAt: Date;
-    eveSessionId: string;
+    agentSessionId: string;
     outcome: "completed" | "failed";
   },
 ): Promise<void> {
@@ -28,7 +28,7 @@ export async function terminalizeApplicationSession(
             END
       WHERE id = $1 AND retired_at IS NULL
         AND (eve_session_id IS NULL OR eve_session_id = $2)`,
-    [input.applicationSessionId, input.eveSessionId, input.completedAt, input.outcome,
+    [input.applicationSessionId, input.agentSessionId, input.completedAt, input.outcome,
       SESSION_RETENTION_DAYS],
   );
   if (result.rowCount !== 1) {
@@ -37,7 +37,7 @@ export async function terminalizeApplicationSession(
     const retired = await client.query(
       `SELECT 1 FROM conversation_sessions
         WHERE id = $1 AND eve_session_id = $2 AND retired_at IS NOT NULL`,
-      [input.applicationSessionId, input.eveSessionId],
+      [input.applicationSessionId, input.agentSessionId],
     );
     if (retired.rowCount === 1) return;
     throw new AppError(

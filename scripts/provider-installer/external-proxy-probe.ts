@@ -17,7 +17,7 @@ import { createServer } from "node:http";
 import { InstallerError } from "./errors.js";
 
 const PROBE_TIMEOUT_MS = 10_000;
-const HEALTH_PATH = "/eve/v1/health";
+const HEALTH_PATH = "/v1/health";
 /** Gateway errors are the only acceptable non-token answers: the upstream is simply not up yet. */
 const UPSTREAM_MISSING_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
 

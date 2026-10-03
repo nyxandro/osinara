@@ -3,12 +3,11 @@
  *
  * Export:
  * - `telegramTurnObserver`: a `TurnObserver` for turns of the Telegram channel. Each handler gets
- *   the conversation's Telegram handle and state, and the turn in Eve's handler shape; what a
- *   handler changes in the state is saved right after it.
+ *   the conversation's Telegram handle and state, and the turn; what a handler changes in the
+ *   state is saved right after it.
  *
- * Derived from eve 0.40.0 `public/channels/telegram/telegramChannel.ts` (`rebuildTelegramContext`)
- * and `defaults.ts` (`actions.requested` shows "typing") (Apache-2.0, see NOTICE-eve). Eve's other
- * default handlers are not used: the application replaces every one of them.
+ * Without an application handler for `actions.requested`, the chat shows "typing".
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { TurnObserver, TurnOutcome } from "../turn/run-turn.js";
 import type { TurnRecord } from "../turn/turn-types.js";

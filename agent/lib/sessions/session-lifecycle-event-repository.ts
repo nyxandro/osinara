@@ -9,7 +9,7 @@ import type { PoolClient } from "pg";
 import { SESSION_RETENTION_DAYS } from "../../config.js";
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
-import { classifyMissedSessionEvent, type SessionEventResult } from "./session-eve-event.js";
+import { classifyMissedSessionEvent, type SessionEventResult } from "./session-event-order.js";
 
 async function finalizeRetirement(client: PoolClient, id: string): Promise<void> {
   // Route removal and the audit record are part of the same commit as the terminal state change.
@@ -76,30 +76,30 @@ export const sessionLifecycleEventRepository = {
     }
   },
 
-  async hasPendingOperation(id: string, eveSessionId: string): Promise<boolean> {
+  async hasPendingOperation(id: string, agentSessionId: string): Promise<boolean> {
     const result = await database().query<{ pending: boolean }>(
       `SELECT EXISTS (
          SELECT 1 FROM conversation_sessions
           WHERE id = $1 AND eve_session_id = $2
             AND pending_operation = true AND retired_at IS NULL
        ) AS pending`,
-      [id, eveSessionId],
+      [id, agentSessionId],
     );
     return result.rows[0]?.pending === true;
   },
 
-  async bindEveSession(id: string, eveSessionId: string): Promise<SessionEventResult> {
+  async bindAgentSession(id: string, agentSessionId: string): Promise<SessionEventResult> {
     const result = await database().query(
       `UPDATE conversation_sessions
            SET eve_session_id = $2
          WHERE id = $1 AND retired_at IS NULL
            AND (eve_session_id IS NULL OR eve_session_id <= $2)`,
-      [id, eveSessionId],
+      [id, agentSessionId],
     );
     if (result.rowCount === 1) return "recorded";
     return await classifyMissedSessionEvent(
       id,
-      eveSessionId,
+      agentSessionId,
       "AGENT_SESSION_BIND_FAILED",
       "Не удалось связать текущий контекст с ходом агента",
     );
@@ -114,7 +114,7 @@ export const sessionLifecycleEventRepository = {
     throw new AppError("AGENT_SESSION_NOT_ACTIVE", "Текущий контекст уже завершён");
   },
 
-  async resumePendingSession(id: string, eveSessionId: string): Promise<void> {
+  async resumePendingSession(id: string, agentSessionId: string): Promise<void> {
     const result = await database().query(
       `UPDATE conversation_sessions
           SET pending_operation = false,
@@ -124,7 +124,7 @@ export const sessionLifecycleEventRepository = {
                 ELSE task_state
               END
         WHERE id = $1 AND eve_session_id = $2 AND retired_at IS NULL`,
-      [id, eveSessionId],
+      [id, agentSessionId],
     );
     if (result.rowCount !== 1) {
       throw new AppError(
@@ -136,7 +136,7 @@ export const sessionLifecycleEventRepository = {
 
   async recordTurnCompleted(
     id: string,
-    eveSessionId: string,
+    agentSessionId: string,
     pendingOperation: boolean,
     /** A wake-up turn answers no person, so it does not spend the conversation's turn budget. */
     countsTowardRotation: boolean,
@@ -160,18 +160,18 @@ export const sessionLifecycleEventRepository = {
               END
         WHERE id = $1 AND retired_at IS NULL
            AND (eve_session_id IS NULL OR eve_session_id <= $2)`,
-      parameters: [id, eveSessionId, pendingOperation, SESSION_RETENTION_DAYS, countsTowardRotation],
+      parameters: [id, agentSessionId, pendingOperation, SESSION_RETENTION_DAYS, countsTowardRotation],
     });
     if (recorded) return "recorded";
     return await classifyMissedSessionEvent(
       id,
-      eveSessionId,
+      agentSessionId,
       "AGENT_SESSION_TURN_RECORD_FAILED",
       "Не удалось сохранить завершённый ход",
     );
   },
 
-  async recordTurnFailed(id: string, eveSessionId: string): Promise<SessionEventResult> {
+  async recordTurnFailed(id: string, agentSessionId: string): Promise<SessionEventResult> {
     const recorded = await applyTerminalMutation({
       id,
       sql:
@@ -188,12 +188,12 @@ export const sessionLifecycleEventRepository = {
               END
         WHERE id = $1 AND retired_at IS NULL
            AND (eve_session_id IS NULL OR eve_session_id <= $2)`,
-      parameters: [id, eveSessionId, SESSION_RETENTION_DAYS],
+      parameters: [id, agentSessionId, SESSION_RETENTION_DAYS],
     });
     if (recorded) return "recorded";
     return await classifyMissedSessionEvent(
       id,
-      eveSessionId,
+      agentSessionId,
       "AGENT_SESSION_FAILURE_RECORD_FAILED",
       "Не удалось сохранить состояние контекста",
     );

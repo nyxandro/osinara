@@ -45,7 +45,7 @@ describe("probeExternalProxy", () => {
     const proxy = vi.fn(async () => new Response("bad gateway", { status }));
     await expect(probeExternalProxy({ fetch: proxy as unknown as typeof fetch, hostname: "bot.example.com", listenPort: port }))
       .resolves.toBeUndefined();
-    expect(proxy).toHaveBeenCalledWith("https://bot.example.com/eve/v1/health", expect.objectContaining({ redirect: "manual" }));
+    expect(proxy).toHaveBeenCalledWith("https://bot.example.com/v1/health", expect.objectContaining({ redirect: "manual" }));
   });
 
   it.each([

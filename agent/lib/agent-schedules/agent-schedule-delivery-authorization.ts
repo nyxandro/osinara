@@ -27,13 +27,13 @@ export interface AgentScheduleExecutionAuthorizationInput {
 
 export interface AgentScheduleDeliveryAuthorizationInput
   extends AgentScheduleExecutionAuthorizationInput {
-  eveSessionId: string;
+  agentSessionId: string;
 }
 
 async function isAuthorized(
   client: Pick<PoolClient, "query">,
   input: AgentScheduleExecutionAuthorizationInput,
-  eveSessionId: string | null,
+  agentSessionId: string | null,
 ): Promise<boolean> {
   const result = await client.query(
     `SELECT 1
@@ -65,7 +65,7 @@ async function isAuthorized(
     [
       input.runId,
       input.applicationSessionId,
-      eveSessionId,
+      agentSessionId,
       input.familyId,
       input.scope,
       input.groupId,
@@ -81,7 +81,7 @@ export async function isAgentScheduleDeliveryAuthorized(
   client: Pick<PoolClient, "query">,
   input: AgentScheduleDeliveryAuthorizationInput,
 ): Promise<boolean> {
-  return await isAuthorized(client, input, input.eveSessionId);
+  return await isAuthorized(client, input, input.agentSessionId);
 }
 
 export async function authorizeAgentScheduleExecution(

@@ -3,7 +3,7 @@
  *
  * Constructs covered:
  * - Exact private chat, message, token, query user, and action reach the atomic repository claim.
- * - Foreign and repeated callbacks bypass Eve while returning stable Russian errors.
+ * - Foreign and repeated callbacks bypass the turn while returning stable Russian errors.
  * - UI cleanup failures after commit never roll back an approved decision.
  */
 import type { TelegramCallbackQuery } from "../../runtime/telegram/inbound.js";
@@ -59,7 +59,7 @@ describe("software update callback handler", () => {
     }));
   });
 
-  it("rejects a foreign owner callback without exposing it to Eve", async () => {
+  it("rejects a foreign owner callback without exposing it to the agent", async () => {
     const repository = {
       claimDecision: vi.fn().mockResolvedValue({ status: "forbidden" }),
       recordDecisionUiFailure: vi.fn(),
@@ -107,12 +107,12 @@ describe("software update callback handler", () => {
     expect(transport.answerCallback).toHaveBeenCalledTimes(1);
   });
 
-  it("leaves unrelated callback prefixes for native Eve handling", async () => {
+  it("leaves unrelated callback prefixes for the runtime's handling", async () => {
     const repository = { claimDecision: vi.fn(), recordDecisionUiFailure: vi.fn() };
     const transport = { answerCallback: vi.fn(), removeKeyboard: vi.fn() };
     const handle = createSoftwareUpdateCallbackHandler({ repository, transport });
 
-    await expect(handle(callbackQuery({ data: "eve:0" }))).resolves.toBe(false);
+    await expect(handle(callbackQuery({ data: "hitl:0" }))).resolves.toBe(false);
 
     expect(repository.claimDecision).not.toHaveBeenCalled();
     expect(transport.answerCallback).not.toHaveBeenCalled();

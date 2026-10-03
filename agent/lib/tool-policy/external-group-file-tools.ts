@@ -13,10 +13,10 @@
  */
 import { type ToolContext, type ToolDefinition, defineTool } from "../../runtime/tool.js";
 import {
-  glob as eveGlob,
-  grep as eveGrep,
-  readFile as eveReadFile,
-  writeFile as eveWriteFile,
+  glob as runtimeGlob,
+  grep as runtimeGrep,
+  readFile as runtimeReadFile,
+  writeFile as runtimeWriteFile,
 } from "../../runtime/tools/defaults.js";
 
 import { SKILL_NAME_PATTERN } from "../../runtime/skills/package-validation.js";
@@ -178,10 +178,10 @@ export function createExternalGroupFileTools(
 export const EXTERNAL_GROUP_FILE_TOOLS = createExternalGroupFileTools({
   authorize: async (auth) => await workspaceRepository.externalGroupRoot(auth),
   defaults: {
-    glob: eveGlob,
-    grep: eveGrep,
-    read_file: eveReadFile,
-    write_file: eveWriteFile,
+    glob: runtimeGlob,
+    grep: runtimeGrep,
+    read_file: runtimeReadFile,
+    write_file: runtimeWriteFile,
   },
   loadGroupSkillAllowlist: (groupId) =>
     groupSkillPolicyRepository.loadGroupSkillAllowlist(groupId),

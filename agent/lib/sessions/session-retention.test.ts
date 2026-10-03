@@ -31,8 +31,8 @@ describe("deleteExpiredSessions", () => {
 
   it("deletes each expired session after retiring abandoned tasks", async () => {
     values.claimExpiredForDeletion
-      .mockResolvedValueOnce({ eveSessionId: "wrun_01KXB392VJ8YY13JMJ9YZAF5QR", id: "application-session-1", leaseToken: "lease-1" })
-      .mockResolvedValueOnce({ eveSessionId: null, id: "application-session-2", leaseToken: "lease-2" })
+      .mockResolvedValueOnce({ agentSessionId: "wrun_01KXB392VJ8YY13JMJ9YZAF5QR", id: "application-session-1", leaseToken: "lease-1" })
+      .mockResolvedValueOnce({ agentSessionId: null, id: "application-session-2", leaseToken: "lease-2" })
       .mockResolvedValue(null);
 
     await expect(deleteExpiredSessions()).resolves.toBe(2);
@@ -43,8 +43,8 @@ describe("deleteExpiredSessions", () => {
 
   it("keeps sweeping when a lease is lost under a session", async () => {
     values.claimExpiredForDeletion
-      .mockResolvedValueOnce({ eveSessionId: "wrun_01KXB392VJ8YY13JMJ9YZAF5QR", id: "lost", leaseToken: "lease-1" })
-      .mockResolvedValueOnce({ eveSessionId: "wrun_01KXB392VJ8YY13JMJ9YZAF5QS", id: "healthy", leaseToken: "lease-2" })
+      .mockResolvedValueOnce({ agentSessionId: "wrun_01KXB392VJ8YY13JMJ9YZAF5QR", id: "lost", leaseToken: "lease-1" })
+      .mockResolvedValueOnce({ agentSessionId: "wrun_01KXB392VJ8YY13JMJ9YZAF5QS", id: "healthy", leaseToken: "lease-2" })
       .mockResolvedValue(null);
     values.completeDeletion
       .mockRejectedValueOnce(new AppError("AGENT_SESSION_RETENTION_LEASE_LOST", "аренда потеряна"))
@@ -57,8 +57,8 @@ describe("deleteExpiredSessions", () => {
 
   it("parks a session that refuses deletion and keeps sweeping the others", async () => {
     values.claimExpiredForDeletion
-      .mockResolvedValueOnce({ eveSessionId: "wrun_01KXB392VJ8YY13JMJ9YZAF5QR", id: "stuck", leaseToken: "lease-1" })
-      .mockResolvedValueOnce({ eveSessionId: "wrun_01KXB392VJ8YY13JMJ9YZAF5QS", id: "healthy", leaseToken: "lease-2" })
+      .mockResolvedValueOnce({ agentSessionId: "wrun_01KXB392VJ8YY13JMJ9YZAF5QR", id: "stuck", leaseToken: "lease-1" })
+      .mockResolvedValueOnce({ agentSessionId: "wrun_01KXB392VJ8YY13JMJ9YZAF5QS", id: "healthy", leaseToken: "lease-2" })
       .mockResolvedValue(null);
     values.completeDeletion
       .mockRejectedValueOnce(new AppError("AGENT_DATABASE_CONSTRAINT", "связанные данные"))
@@ -66,7 +66,7 @@ describe("deleteExpiredSessions", () => {
 
     await expect(deleteExpiredSessions()).resolves.toBe(1);
 
-    expect(values.failDeletion).toHaveBeenCalledWith("stuck", "lease-1", "AGENT_DATABASE_CONSTRAINT", expect.any(Date));
+    expect(values.failDeletion).toHaveBeenCalledWith("stuck", "lease-1", "AGENT_DATABASE_CONSTRAINT");
     expect(values.completeDeletion).toHaveBeenCalledWith("healthy", "lease-2");
   });
 });

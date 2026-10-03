@@ -31,7 +31,7 @@ export interface MemoryUsageOutcome {
 
 export const memoryUsageRepository = {
   async recordUsed(
-    window: Pick<MemorySelectionWindow, "conversationId" | "eveSessionId" | "turnId">,
+    window: Pick<MemorySelectionWindow, "conversationId" | "agentSessionId" | "turnId">,
     memoryRefs: readonly string[],
   ): Promise<MemoryUsageOutcome> {
     if (memoryRefs.length === 0) return { counted: [], rejected: [], used: [] };
@@ -66,7 +66,7 @@ export const memoryUsageRepository = {
        -- A data-modifying CTE always runs to completion, so the counters move whether or not the
        -- final select reads them; it reports what was shown and which of it the counter just took.
        SELECT shown.memory_ref, (shown.used_at IS NULL) AS counted FROM shown`,
-      [window.conversationId, window.eveSessionId, window.turnId, [...memoryRefs]],
+      [window.conversationId, window.agentSessionId, window.turnId, [...memoryRefs]],
     );
     const used = outcome.rows.map((row) => row.memory_ref);
     return {

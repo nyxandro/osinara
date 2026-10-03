@@ -7,7 +7,6 @@
  *   reaches Telegram exactly once, each chat keeps one session, sandboxes mount what the chat may.
  * - A failing model call ends its turn without a reply and records an incident.
  * - A repeated webhook of the same update runs nothing twice.
- * - An ingress item whose completion was lost is finished from its binding, not run again.
  * - A failing turn preparation stops the turn before the model.
  * - A silent turn in a group delivers nothing and keeps why the agent woke up.
  */
@@ -135,26 +134,6 @@ async function send(turn: Turn, text?: string): Promise<{ readonly marker: strin
     await waitUntil(async () => (await deliveredTexts()).some((item) => item.text === `reply-${marker}`), "reply");
     expect((await deliveredTexts()).filter((item) => item.text === `reply-${marker}`)).toHaveLength(1);
     expect(await modelCalls(marker)).toHaveLength(2);
-  }, 60_000);
-
-  it("finishes an item whose completion was lost from its binding, without running it again", async () => {
-    const { marker, updateId } = await send({ chatId: CHATS.family, flags: "" });
-    const bound = await waitForIngress(updateId);
-    expect(bound.dispatch_turn_id).not.toBeNull();
-    const calls = (await modelCalls(marker)).length;
-    // The state a crash between the reply and the queue's own completion left behind under Eve.
-    await database().query(
-      `UPDATE telegram_ingress_updates SET status = 'failed', last_error_code = 'AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED',
-              last_error_message = 'TEST_LOST_COMPLETION' WHERE update_id = $1`,
-      [updateId],
-    );
-    await drain(agent);
-
-    await waitUntil(async () => (await database().query(
-      "SELECT 1 FROM telegram_ingress_updates WHERE update_id = $1 AND status = 'completed'", [updateId],
-    )).rowCount === 1, "the recovered item completes");
-    expect(await modelCalls(marker)).toHaveLength(calls);
-    expect((await deliveredTexts()).filter((item) => item.text === `reply-${marker}`)).toHaveLength(1);
   }, 60_000);
 
   it("stops a turn whose preparation fails before the model is called", async () => {

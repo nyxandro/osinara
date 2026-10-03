@@ -60,10 +60,10 @@ describeWithDatabase("main-agent memory write", () => {
       },
       kind: "episode",
       operationKey: "agent-memory-create-thread",
-      provenance: { sessionId: "eve-session-main", turnId: "eve-turn-main" },
+      provenance: { sessionId: "agent-session-main", turnId: "agent-turn-main" },
       scope: "family",
       sensitivity: "normal",
-      source: "eve:eve-session-main:eve-turn-main",
+      source: "eve:agent-session-main:agent-turn-main",
       thread: {
         action: "create",
         identity: "subject",
@@ -90,8 +90,8 @@ describeWithDatabase("main-agent memory write", () => {
     )).resolves.toMatchObject({ rows: [{
       actor_telegram_user_id: "agent-memory-author",
       actor_user_id: fixture.userId,
-      eve_session_id: "eve-session-main",
-      eve_turn_id: "eve-turn-main",
+      eve_session_id: "agent-session-main",
+      eve_turn_id: "agent-turn-main",
       role: "goal",
       subject_user_id: fixture.userId,
       thread_subject_user_id: fixture.userId,
@@ -113,7 +113,7 @@ describeWithDatabase("main-agent memory write", () => {
     }] });
   });
 
-  it("records review thread writes as system actions while preserving Eve provenance", async () => {
+  it("records review thread writes as system actions while preserving turn provenance", async () => {
     const fixture = await createMainAgentMemoryFixture();
     const memory = await memoryRepository.create(fixture.auth, {
       confirmation: "model_high",
@@ -125,10 +125,10 @@ describeWithDatabase("main-agent memory write", () => {
       },
       kind: "episode",
       operationKey: "agent-memory-system-thread",
-      provenance: { sessionId: "eve-review-session", turnId: "eve-review-turn" },
+      provenance: { sessionId: "agent-review-session", turnId: "agent-review-turn" },
       scope: "family",
       sensitivity: "normal",
-      source: "eve:eve-review-session:eve-review-turn",
+      source: "eve:agent-review-session:agent-review-turn",
       systemActor: true,
       thread: {
         action: "create",
@@ -149,8 +149,8 @@ describeWithDatabase("main-agent memory write", () => {
     )).resolves.toMatchObject({ rows: [{
       actor_telegram_user_id: null,
       actor_user_id: null,
-      eve_session_id: "eve-review-session",
-      eve_turn_id: "eve-review-turn",
+      eve_session_id: "agent-review-session",
+      eve_turn_id: "agent-review-turn",
       operation_actor_user_id: null,
     }] });
   });
@@ -456,10 +456,10 @@ describeWithDatabase("main-agent memory write", () => {
       },
       kind: "fact",
       operationKey: "agent-memory-invalid-thread",
-      provenance: { sessionId: "eve-session-main", turnId: "eve-turn-invalid" },
+      provenance: { sessionId: "agent-session-main", turnId: "agent-turn-invalid" },
       scope: "family",
       sensitivity: "normal",
-      source: "eve:eve-session-main:eve-turn-invalid",
+      source: "eve:agent-session-main:agent-turn-invalid",
       thread: {
         action: "attach",
         role: "constraint",

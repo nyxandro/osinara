@@ -8,10 +8,7 @@
  * - `SessionContext`: session identity plus sandbox access.
  * - `DynamicResolveContext`: what an instructions, tools or skills resolver sees before a step.
  *
- * Derived from eve 0.40.0 `channel/types.ts`, `context/keys.ts`,
- * `public/definitions/callback-context.ts` and `shared/dynamic-tool-definition.ts`
- * (Apache-2.0, see NOTICE-eve). Changes: the same names and shapes, so application code keeps its
- * contract; members the application never uses (skill handles, token accessors) are left out.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { ModelMessage } from "ai";
 

@@ -8,11 +8,8 @@
  *   numbers, ranges, steps and lists; day-of-month and day-of-week match either when both are set.
  * - `RuntimeSchedule`: one schedule.
  *
- * Replaces Eve's Nitro cron tasks: the same expressions (`* * * * *`, `0 *\/6 * * *`), the same
- * clock, and a missed minute is skipped rather than caught up, as Nitro did. A schedule runs one
- * cycle at a time: while the work its last cycle started is unfinished, its minute is skipped —
- * Nitro's `runTask` returned the running task instead of starting it again, and Eve's schedule
- * task awaited all of its `waitUntil` work.
+ * A missed minute is skipped rather than caught up. A schedule runs one cycle at a time: while the
+ * work its last cycle started is unfinished, its minute is skipped.
  */
 
 export interface RuntimeSchedule {

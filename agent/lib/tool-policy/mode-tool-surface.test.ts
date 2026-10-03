@@ -30,7 +30,7 @@ function names(input: Parameters<typeof buildModeToolSurface>[0]): string[] {
   return Object.keys(buildModeToolSurface(input)).sort();
 }
 
-// Built-ins every trusted turn had in Eve that the interjection surface does not wrap.
+// Built-ins every trusted turn has that the interjection surface does not wrap.
 const UNWRAPPED_BUILT_IN_NAMES = ["agent", "ask_question", "load_skill", "todo"];
 
 function externalAuth(toolAllowlist: readonly string[]): SessionAuth {
@@ -98,7 +98,7 @@ describe("trusted mode tool surfaces", () => {
 
     expect(ordinary).not.toContain("read_scheduled_group_history");
     expect(scheduled).toContain("read_scheduled_group_history");
-    // A scheduled root turn may delegate, as Eve's implicit agent allowed.
+    // A scheduled root turn may delegate, as the built-in `agent` tool allows.
     expect(scheduled).toContain("agent");
   });
 
@@ -121,7 +121,7 @@ describe("trusted mode tool surfaces", () => {
     }
   });
 
-  it("gives trusted zones the built-ins Eve always registered, and external groups no questions or Bash", () => {
+  it("gives trusted zones the always-registered built-ins, and external groups no questions or Bash", () => {
     for (const environment of ["private", "family"] as const) {
       for (const scheduledRun of [false, true]) {
         expect(names({ environment, scheduledRun }), `${environment} scheduled=${scheduledRun}`).toEqual(expect.arrayContaining([
@@ -142,7 +142,7 @@ describe("trusted mode tool surfaces", () => {
         expect(surface[name]?.description, `${environment}.${name}`).toBe(definition.description);
         expect(surface[name]?.inputSchema, `${environment}.${name}`).toBe(definition.inputSchema);
       }
-      // A scheduled turn keeps the plain built-ins, as Eve registered them, and no opt-in search tools.
+      // A scheduled turn keeps the plain built-ins, as the runtime registers them, and no opt-in search tools.
       const scheduled = buildModeToolSurface({ environment, scheduledRun: true });
       for (const name of ["bash", "read_file", "write_file"] as const) expect(scheduled[name], `${environment}.${name}`).toBe(native[name]);
       for (const name of ["glob", "grep"]) expect(scheduled).not.toHaveProperty(name);

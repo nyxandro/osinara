@@ -16,8 +16,8 @@ export const TELEGRAM_PROGRESS_NOTICE_MAX_PER_TURN = 5;
 export const telegramProgressNoticeRepository = {
   async claim(input: {
     applicationSessionId: string;
-    eveSessionId: string;
-    eveTurnId: string;
+    agentSessionId: string;
+    agentTurnId: string;
     stepIndex: number;
   }): Promise<{ noticeId: string } | null> {
     const claimed = await database().query<{ id: string }>(
@@ -31,8 +31,8 @@ export const telegramProgressNoticeRepository = {
        ON CONFLICT (eve_session_id, eve_turn_id, step_index) DO NOTHING
        RETURNING id`,
       [
-        input.eveSessionId,
-        input.eveTurnId,
+        input.agentSessionId,
+        input.agentTurnId,
         input.stepIndex,
         input.applicationSessionId,
         TELEGRAM_PROGRESS_NOTICE_MAX_PER_TURN,

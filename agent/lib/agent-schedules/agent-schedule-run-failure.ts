@@ -29,7 +29,7 @@ interface AuthorizationRow {
 async function loadAuthorization(
   client: PoolClient,
   runId: string,
-  eveSessionId: string,
+  agentSessionId: string,
 ): Promise<AgentScheduleDeliveryAuthorizationInput | null> {
   const result = await client.query<AuthorizationRow>(
     `SELECT run.application_session_id::text, schedule.family_id,
@@ -43,13 +43,13 @@ async function loadAuthorization(
         AND run.application_session_id IS NOT NULL
         AND run.status IN ('dispatching', 'running') AND schedule.status = 'leased'
       FOR UPDATE OF run, schedule`,
-    [runId, eveSessionId],
+    [runId, agentSessionId],
   );
   const row = result.rows[0];
   return row
     ? {
         applicationSessionId: row.application_session_id,
-        eveSessionId,
+        agentSessionId,
         familyId: row.family_id,
         groupId: row.group_id,
         messageThreadId: row.message_thread_id,
@@ -73,7 +73,7 @@ async function failWithinTransaction(
   const failed = await finishActiveAgentScheduleRun(client, {
     applicationSessionId: authorization.applicationSessionId,
     completedAt: failedAt,
-    eveSessionId: authorization.eveSessionId,
+    agentSessionId: authorization.agentSessionId,
     outcome: { errorCode, kind: "failed" },
   });
   return { failed, notify: failed && notify };
@@ -81,7 +81,7 @@ async function failWithinTransaction(
 
 export async function failAgentScheduleRun(
   applicationSessionId: string,
-  eveSessionId: string,
+  agentSessionId: string,
   errorCode: string,
   failedAt: Date,
 ): Promise<boolean> {
@@ -91,7 +91,7 @@ export async function failAgentScheduleRun(
     const failed = await finishActiveAgentScheduleRun(client, {
       applicationSessionId,
       completedAt: failedAt,
-      eveSessionId,
+      agentSessionId,
       outcome: { errorCode, kind: "failed" },
     });
     await client.query("COMMIT");
@@ -125,14 +125,14 @@ export async function failAgentScheduleRunForNotification(
 
 export async function failAgentScheduleRunByIdentityForNotification(
   runId: string,
-  eveSessionId: string,
+  agentSessionId: string,
   errorCode: string,
   failedAt: Date,
 ): Promise<boolean> {
   const client = await database().connect();
   try {
     await client.query("BEGIN");
-    const authorization = await loadAuthorization(client, runId, eveSessionId);
+    const authorization = await loadAuthorization(client, runId, agentSessionId);
     if (!authorization) {
       await client.query("COMMIT");
       return false;
@@ -142,7 +142,7 @@ export async function failAgentScheduleRunByIdentityForNotification(
       `UPDATE agent_schedule_runs
           SET status = 'running', eve_session_id = $2, updated_at = $3
         WHERE id = $1 AND status = 'dispatching' AND eve_session_id IS NULL`,
-      [runId, eveSessionId, failedAt],
+      [runId, agentSessionId, failedAt],
     );
     const result = await failWithinTransaction(client, authorization, errorCode, failedAt, true);
     await client.query("COMMIT");

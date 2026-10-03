@@ -5,15 +5,23 @@
  * - `startRuntimeServer`: listens on the given port; `close` stops taking requests and waits a
  *   bounded time for answered requests' background work.
  * - `RuntimeRoute`, `RouteContext`: a route and what its handler may do after answering.
- * - `HEALTH_ROUTE`: `/eve/v1/health`, the address Docker, Nginx and the deploy controller probe.
+ * - `HEALTH_ROUTE`: `/v1/health`, the address Docker, Nginx and the deploy controller probe.
  *
- * Replaces Eve's Nitro host. The addresses stay Eve's: `/eve/v1/telegram`, the internal
- * `/eve/v1/telegram-drain`, `/eve/v1/google-oauth/callback` and the health check.
+ * The addresses: `/v1/telegram`, the internal `/v1/telegram-drain`, `/v1/google-oauth/callback`
+ * and the health check. A request to a previous address (`/eve/v1/…`) is served as the current
+ * one while Telegram's webhook, the Google sign-in return, the deploy controller and the TLS proxy
+ * still use it; the next release removes `PREVIOUS_PREFIX`.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 
-export const HEALTH_ROUTE = "/eve/v1/health";
+export const HEALTH_ROUTE = "/v1/health";
+const CURRENT_PREFIX = "/v1/";
+const PREVIOUS_PREFIX = "/eve/v1/";
+
+function currentUrl(url: string): string {
+  return url.startsWith(PREVIOUS_PREFIX) ? `${CURRENT_PREFIX}${url.slice(PREVIOUS_PREFIX.length)}` : url;
+}
 
 export interface RouteContext {
   /** Work that continues after the response; a stopping server waits for it. */
@@ -31,7 +39,7 @@ export interface RuntimeServer {
   close(graceMilliseconds: number): Promise<void>;
 }
 
-function toRequest(incoming: IncomingMessage, port: number): Request {
+function toRequest(incoming: IncomingMessage, url: string, port: number): Request {
   const headers = new Headers();
   for (const [name, value] of Object.entries(incoming.headers)) {
     if (value === undefined) continue;
@@ -39,7 +47,7 @@ function toRequest(incoming: IncomingMessage, port: number): Request {
   }
   const method = incoming.method ?? "GET";
   const hasBody = method !== "GET" && method !== "HEAD";
-  return new Request(new URL(incoming.url ?? "/", `http://127.0.0.1:${port}`), {
+  return new Request(new URL(url, `http://127.0.0.1:${port}`), {
     ...(hasBody ? { body: Readable.toWeb(incoming) as ReadableStream, duplex: "half" } : {}),
     headers,
     method,
@@ -84,7 +92,8 @@ export async function startRuntimeServer(input: {
   const server = createServer((incoming, outgoing) => {
     void (async () => {
       const method = incoming.method ?? "GET";
-      const path = new URL(incoming.url ?? "/", "http://127.0.0.1").pathname;
+      const url = currentUrl(incoming.url ?? "/");
+      const path = new URL(url, "http://127.0.0.1").pathname;
       try {
         if (path === HEALTH_ROUTE && (method === "GET" || method === "HEAD")) {
           await writeResponse(outgoing, healthResponse(), method === "HEAD");
@@ -95,7 +104,7 @@ export async function startRuntimeServer(input: {
           await writeResponse(outgoing, new Response(null, { status: 404 }), false);
           return;
         }
-        await writeResponse(outgoing, await route.handle(toRequest(incoming, port), context), false);
+        await writeResponse(outgoing, await route.handle(toRequest(incoming, url, port), context), false);
       } catch (error) {
         console.error(JSON.stringify({
           code: "AGENT_HTTP_ROUTE_FAILED", error: error instanceof Error ? error.message : String(error), method, path,

@@ -101,20 +101,20 @@ export const telegramTurnEvents: TelegramTurnEvents = {
     const { declaration, output } = telegramOutputWithoutMemoryDirective(data);
     if (!output) return;
     const sessionId = applicationSessionId(ctx);
-    if (!await sessionRepository.isCurrentEveSession(sessionId, ctx.session.id)) return;
+    if (!await sessionRepository.isCurrentAgentSession(sessionId, ctx.session.id)) return;
     // Behind the barrier: a superseded session must not move counters either.
     await recordMemoryUsageDeclaration({
       auth: ctx.session.auth,
       declaration,
-      eveSessionId: ctx.session.id,
+      agentSessionId: ctx.session.id,
       turnId: ctx.session.turn.id,
     });
     if (output.kind === "silence") {
       // The model chose to deliver nothing; the trigger it stayed quiet on is the useful signal.
       logTelegramSilentTurn({
         auth: ctx.session.auth.current,
-        eveSessionId: ctx.session.id,
-        eveTurnId: ctx.session.turn.id,
+        agentSessionId: ctx.session.id,
+        agentTurnId: ctx.session.turn.id,
       });
       // A scenario may skip an empty report: the run is done, so turn completion finds nothing to fail.
       if (isScheduledSession(ctx)) {
@@ -126,8 +126,8 @@ export const telegramTurnEvents: TelegramTurnEvents = {
       await deliverTelegramProgressNotice({
         applicationSessionId: sessionId,
         channel,
-        eveSessionId: ctx.session.id,
-        eveTurnId: ctx.session.turn.id,
+        agentSessionId: ctx.session.id,
+        agentTurnId: ctx.session.turn.id,
         message: output.message,
         stepIndex: data.stepIndex,
       });
@@ -137,7 +137,7 @@ export const telegramTurnEvents: TelegramTurnEvents = {
     const scheduledDelivery = scheduledDeliveryMetadata(ctx);
     if (output.kind === "reaction" && isConversationWakeupTurn(ctx)) {
       // A wake-up answers no message, so a reaction has nothing to attach to and is not sent.
-      logTelegramSilentTurn({ auth: ctx.session.auth.current, eveSessionId: ctx.session.id, eveTurnId: ctx.session.turn.id });
+      logTelegramSilentTurn({ auth: ctx.session.auth.current, agentSessionId: ctx.session.id, agentTurnId: ctx.session.turn.id });
       return;
     }
     if (output.kind === "reaction") {
@@ -157,7 +157,7 @@ export const telegramTurnEvents: TelegramTurnEvents = {
       requireScheduledTelegramTarget(channel.telegram, scheduledDelivery);
       await agentScheduleDispatchRepository.authorizeDelivery({
         applicationSessionId: sessionId,
-        eveSessionId: ctx.session.id,
+        agentSessionId: ctx.session.id,
         familyId: scheduledDelivery.familyId,
         groupId: scheduledDelivery.groupId,
         messageThreadId: scheduledDelivery.messageThreadId,
@@ -183,8 +183,8 @@ export const telegramTurnEvents: TelegramTurnEvents = {
           messageThreadId: channel.telegram.messageThreadId ?? null,
           replyParameters: replyParameters ?? null,
         },
-        eveSessionId: ctx.session.id,
-        eveTurnId: ctx.session.turn.id,
+        agentSessionId: ctx.session.id,
+        agentTurnId: ctx.session.turn.id,
         markdown: isScheduledSession(ctx) ? durableText : message,
         sendChunk: async (chunk, ordinal) => {
           // An authored aside is a second thought, so it arrives after a visible typing pause.
@@ -250,7 +250,7 @@ export const telegramTurnEvents: TelegramTurnEvents = {
         applicationSessionId: sessionId,
         content: durableText,
         deliveredAt,
-        eveSessionId: ctx.session.id,
+        agentSessionId: ctx.session.id,
         familyId: scheduledDelivery.familyId,
         groupId: scheduledDelivery.groupId,
         messageThreadId: scheduledDelivery.messageThreadId,
@@ -317,11 +317,11 @@ export const telegramTurnEvents: TelegramTurnEvents = {
       const terminal = await recoverDatabaseBookkeeping(() => memoryReviewRepository.failRunning({
         batchId: review.batchId,
         diagnosticCode: data.code,
-        eveSessionId: ctx.session.id,
-        eveTurnId: review.eveTurnId,
+        agentSessionId: ctx.session.id,
+        agentTurnId: review.agentTurnId,
       }));
       reviewFailureReplayed = terminal === "replayed";
-      await releaseResumedTurnSources(ctx, review.eveTurnId);
+      await releaseResumedTurnSources(ctx, review.agentTurnId);
     }
     const sessionId = applicationSessionId(ctx);
     const scheduledDelivery = scheduledDeliveryMetadata(ctx);
@@ -351,7 +351,7 @@ export const telegramTurnEvents: TelegramTurnEvents = {
         notifyFailure = await agentScheduleDispatchRepository.failRunForNotification(
           {
             applicationSessionId: sessionId,
-            eveSessionId: ctx.session.id,
+            agentSessionId: ctx.session.id,
             familyId: scheduledDelivery.familyId,
             groupId: scheduledDelivery.groupId,
             messageThreadId: scheduledDelivery.messageThreadId,
@@ -371,7 +371,7 @@ export const telegramTurnEvents: TelegramTurnEvents = {
         ...(typeof updateId === "string" ? { updateId } : {}), code: data.code, chatId: channel.telegram.chatId });
     }
     if (!reviewBatchId) await sessionRepository.recordTurnFailed(sessionId, ctx.session.id);
-    await telegramHitlApprovalRepository.clearForEveSession(sessionId, ctx.session.id);
+    await telegramHitlApprovalRepository.clearForAgentSession(sessionId, ctx.session.id);
   },
   async "turn.cancelled"(_data, _channel, ctx) {
     // A cancelled turn closes its review like a failed one: a batch waiting for the time bound let
@@ -382,15 +382,15 @@ export const telegramTurnEvents: TelegramTurnEvents = {
       await memoryReviewRepository.failRunning({
         batchId: review.batchId,
         diagnosticCode: "AGENT_MEMORY_REVIEW_TURN_CANCELLED",
-        eveSessionId: ctx.session.id,
-        eveTurnId: review.eveTurnId,
+        agentSessionId: ctx.session.id,
+        agentTurnId: review.agentTurnId,
       });
-      await releaseResumedTurnSources(ctx, review.eveTurnId);
+      await releaseResumedTurnSources(ctx, review.agentTurnId);
     }
     await finishConversationWakeupTurn(ctx, "AGENT_CONVERSATION_WAKEUP_CANCELLED");
     // A cancelled turn is not a failure and its session keeps serving the replacement turn, so
     // only its own approval rows are released here.
-    await telegramHitlApprovalRepository.clearForEveSession(
+    await telegramHitlApprovalRepository.clearForAgentSession(
       applicationSessionId(ctx),
       ctx.session.id,
     );
@@ -407,10 +407,10 @@ export const telegramTurnEvents: TelegramTurnEvents = {
         await recoverDatabaseBookkeeping(() => memoryReviewRepository.completeBatch({
           batchId: review.batchId,
           completedAt: new Date(),
-          eveSessionId: ctx.session.id,
-          eveTurnId: review.eveTurnId,
+          agentSessionId: ctx.session.id,
+          agentTurnId: review.agentTurnId,
         }));
-        await releaseResumedTurnSources(ctx, review.eveTurnId);
+        await releaseResumedTurnSources(ctx, review.agentTurnId);
       }
       await releaseMemoryTurnSources(ctx);
     }
@@ -429,7 +429,7 @@ export const telegramTurnEvents: TelegramTurnEvents = {
       await sessionRepository.recordTurnCompleted(sessionId, ctx.session.id, awaitingApproval, !isConversationWakeupTurn(ctx));
     }
     if (!awaitingApproval) {
-      await telegramHitlApprovalRepository.clearForEveSession(sessionId, ctx.session.id);
+      await telegramHitlApprovalRepository.clearForAgentSession(sessionId, ctx.session.id);
     }
   },
 };

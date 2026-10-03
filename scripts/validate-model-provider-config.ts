@@ -2,7 +2,7 @@
  * Runtime model configuration preflight.
  *
  * Construct:
- * - Loads and validates the canonical config and its dependent credentials before Eve starts.
+ * - Loads and validates the canonical config and its dependent credentials before the agent starts.
  */
 import { modelProviderConfig } from "../agent/lib/model-provider-config.js";
 import { validateModelProviderRuntimeEnvironment } from "../agent/lib/model-provider-config-schema.js";

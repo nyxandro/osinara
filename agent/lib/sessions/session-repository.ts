@@ -23,8 +23,8 @@ import {
   upsertSessionRoute,
 } from "./session-route-repository.js";
 import {
-  isCurrentEveSession,
-} from "./session-eve-event.js";
+  isCurrentAgentSession,
+} from "./session-event-order.js";
 import { sessionLifecycleEventRepository } from "./session-lifecycle-event-repository.js";
 import { sessionRetentionRepository } from "./session-retention-repository.js";
 import { sessionTaskCleanupRepository } from "./session-task-cleanup-repository.js";
@@ -269,7 +269,7 @@ export const sessionRepository = {
   ...sessionLifecycleEventRepository,
   ...sessionRetentionRepository,
   ...sessionTaskCleanupRepository,
-  isCurrentEveSession,
+  isCurrentAgentSession,
 
   async prepareTurn(input: PrepareSessionInput): Promise<PreparedSession> {
     const client = await database().connect();

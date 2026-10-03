@@ -15,7 +15,7 @@
  *   stays exactly where it was.
  *
  * Why not a user-role turn block (`userInstructions`), which lands in the same position: the
- * runtime writes such a message into the session history, as Eve did, so every turn's selection
+ * runtime writes such a message into the session history, so every turn's selection
  * would stay there and accumulate. This payload has to be gone by the next turn, which leaves the transport boundary as
  * the only place to express it.
  *

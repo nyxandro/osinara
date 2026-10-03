@@ -21,9 +21,9 @@ import {
 } from "./configure-google-workspace.js";
 
 const localCallback =
-  "https://desktop-ukevcbh.tail245bf9.ts.net/eve/v1/google-oauth/callback";
+  "https://desktop-ukevcbh.tail245bf9.ts.net/v1/google-oauth/callback";
 const productionCallback =
-  "https://sbe720bcf.fastvps-server.com/eve/v1/google-oauth/callback";
+  "https://sbe720bcf.fastvps-server.com/v1/google-oauth/callback";
 
 function clientJson(redirectUris = [localCallback, productionCallback]) {
   return JSON.stringify({

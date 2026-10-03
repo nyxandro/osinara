@@ -7,9 +7,8 @@
  * - `SandboxSkillPackage`: one skill's files, relative to its directory under the skill root.
  * - `SandboxSpawnOptions`: options of one spawned command.
  *
- * Derived from eve 0.40.0 `shared/sandbox-session.ts` (Apache-2.0, see NOTICE-eve).
- * Changes: the network policy is the two values the Osinara runner supports, not Vercel's
- * rule-based policy.
+ * The network policy is one of the two values the runner supports.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { Experimental_SandboxSession as AiSdkSandbox } from "ai";
 

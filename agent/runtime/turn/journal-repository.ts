@@ -152,7 +152,7 @@ export async function markHistoryStarted(client: JournalClient, turnId: string):
 /**
  * Takes a running turn for this process; returns null when another process owns it, it is not
  * running, or an earlier turn of its session still runs: a session's turns run one at a time, in
- * the order they were created (Eve's `queue` turn policy).
+ * the order they were created.
  */
 export async function claimTurn(client: JournalClient, turnId: string, runnerId: string): Promise<TurnRecord | null> {
   const row = (await client.query<TurnRow>(

@@ -8,7 +8,7 @@
  *
  * Constructs covered:
  * - Both correlation statements execute against the live schema.
- * - With neither correlation available the incident is keyed by the Eve session and turn.
+ * - With neither correlation available the incident is keyed by the agent session and turn.
  */
 import { randomUUID } from "node:crypto";
 
@@ -25,10 +25,10 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
 describe.skipIf(!enabled)("telegram failure correlation", () => {
   afterAll(closeDatabase);
 
-  it("runs both correlation lookups and falls back to the Eve session key", async () => {
+  it("runs both correlation lookups and falls back to the session and turn key", async () => {
     const sessionId = `test-${randomUUID()}`;
     const turnId = "turn_0";
-    const operationKey = `eve:${sessionId}:${turnId}`;
+    const operationKey = `turn:${sessionId}:${turnId}`;
     try {
       await recordTelegramFailure({
         chatId: "-100111",
@@ -49,8 +49,8 @@ describe.skipIf(!enabled)("telegram failure correlation", () => {
       expect(stored.rows[0]?.context).toMatchObject({
         causeCode: "AGENT_TEST_FAILED",
         chatId: "-100111",
-        eveSessionId: sessionId,
-        eveTurnId: turnId,
+        agentSessionId: sessionId,
+        agentTurnId: turnId,
         updateId: null,
       });
     } finally {
@@ -74,7 +74,7 @@ describe.skipIf(!enabled)("telegram failure correlation", () => {
       );
 
       expect(stored.rows).toHaveLength(1);
-      expect(stored.rows[0]?.context).toMatchObject({ eveSessionId: sessionId, updateId: "987654321" });
+      expect(stored.rows[0]?.context).toMatchObject({ agentSessionId: sessionId, updateId: "987654321" });
     } finally {
       await database().query("DELETE FROM operational_incidents WHERE operation_key=$1", [operationKey]);
     }

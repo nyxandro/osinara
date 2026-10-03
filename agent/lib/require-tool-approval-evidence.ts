@@ -25,7 +25,7 @@ export async function requireToolApprovalEvidence(
   }
   await telegramHitlApprovalRepository.requireToolExecutionApproval({
     applicationSessionId: applicationSessionId(ctx),
-    eveSessionId: ctx.session.id,
+    agentSessionId: ctx.session.id,
     telegramUserId,
     toolCallId: ctx.callId,
     toolInputHash: memoryOperationHash(toolInput),

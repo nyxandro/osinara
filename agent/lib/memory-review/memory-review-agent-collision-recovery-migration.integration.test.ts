@@ -24,9 +24,9 @@ const BATCH_ID = "18329b3e-9563-4762-bc77-11641e8cbac1";
 const ORIGINAL_APPLICATION_SESSION_ID = "61b08325-2147-4047-9cb1-01d8210b89b4";
 const SANDBOX_APPLICATION_SESSION_ID = "26942f0e-76a7-4240-b241-ff866fc084b4";
 const COLLISION_APPLICATION_SESSION_ID = "ced56a9b-e788-41e5-82fb-ac46e8b20168";
-const ORIGINAL_EVE_SESSION_ID = "wrun_01KZWTTV5XAJY71V8DW3E7EM4X";
-const SANDBOX_EVE_SESSION_ID = "wrun_01KZZN63ATNDJSP336AVRKE1XW";
-const COLLISION_EVE_SESSION_ID = "wrun_01KZZW3MVCRG9D57A0TWQ06M8D";
+const ORIGINAL_AGENT_SESSION_ID = "wrun_01KZWTTV5XAJY71V8DW3E7EM4X";
+const SANDBOX_AGENT_SESSION_ID = "wrun_01KZZN63ATNDJSP336AVRKE1XW";
+const COLLISION_AGENT_SESSION_ID = "wrun_01KZZW3MVCRG9D57A0TWQ06M8D";
 const MIGRATION_NAME_PATTERN = /^(\d+)_.*\.sql$/u;
 
 function migrationOrdinal(name: string): number | null {
@@ -107,16 +107,16 @@ describeWithDatabase("070 memory review agent collision recovery migration", () 
          VALUES ($1, $2, $3, 'background', 'ambiguous', 5539, 5540, 5589, 50,
                  $4, 'turn_0', 'AGENT_MEMORY_REVIEW_SESSION_FAILED_AMBIGUOUS', 2,
                  'AGENT_MEMORY_REVIEW_SANDBOX_CONTEXT_INVALID', now(), now(), now())`,
-        [BATCH_ID, lane.rows[0]!.id, conversation.rows[0]!.id, COLLISION_EVE_SESSION_ID],
+        [BATCH_ID, lane.rows[0]!.id, conversation.rows[0]!.id, COLLISION_AGENT_SESSION_ID],
       );
 
       // All earlier roots remain immutable retired history; only the current root owns the batch.
       const sessionValues = [
-        [ORIGINAL_APPLICATION_SESSION_ID, ORIGINAL_EVE_SESSION_ID, null],
-        [SANDBOX_APPLICATION_SESSION_ID, SANDBOX_EVE_SESSION_ID, null],
-        [COLLISION_APPLICATION_SESSION_ID, COLLISION_EVE_SESSION_ID, BATCH_ID],
+        [ORIGINAL_APPLICATION_SESSION_ID, ORIGINAL_AGENT_SESSION_ID, null],
+        [SANDBOX_APPLICATION_SESSION_ID, SANDBOX_AGENT_SESSION_ID, null],
+        [COLLISION_APPLICATION_SESSION_ID, COLLISION_AGENT_SESSION_ID, BATCH_ID],
       ] as const;
-      for (const [id, eveSessionId, memoryReviewBatchId] of sessionValues) {
+      for (const [id, agentSessionId, memoryReviewBatchId] of sessionValues) {
         await client.query(
           `INSERT INTO conversation_sessions
              (id, thread_id, generation, family_id, group_id, scope, kind, task_state,
@@ -126,7 +126,7 @@ describeWithDatabase("070 memory review agent collision recovery migration", () 
                    $4, $5, $6, now(), now(), now(), now() + interval '90 days', $7::uuid)`,
           [id, family.rows[0]!.id, group.rows[0]!.id, `memory-review:${BATCH_ID}`,
             memoryReviewBatchId === null ? `retired-memory-review:${id}` : `memory-review:${BATCH_ID}`,
-            eveSessionId, memoryReviewBatchId],
+            agentSessionId, memoryReviewBatchId],
         );
       }
       await client.query(
@@ -147,7 +147,7 @@ describeWithDatabase("070 memory review agent collision recovery migration", () 
              current_timeline_entry_id, invoking_telegram_user_id, binding_hash,
              memory_review_batch_id)
           VALUES ($1, 'turn_0', $2, $3, NULL, 'agent-collision-owner', $4, $5)`,
-        [COLLISION_EVE_SESSION_ID, COLLISION_APPLICATION_SESSION_ID,
+        [COLLISION_AGENT_SESSION_ID, COLLISION_APPLICATION_SESSION_ID,
           conversation.rows[0]!.id, "a".repeat(64), BATCH_ID],
       );
       await client.query(
@@ -157,7 +157,7 @@ describeWithDatabase("070 memory review agent collision recovery migration", () 
          SELECT $1, 'turn_0', source.conversation_id, source.timeline_entry_id,
                 source.timeline_sequence, false
            FROM memory_review_batch_sources AS source WHERE source.batch_id = $2`,
-        [COLLISION_EVE_SESSION_ID, BATCH_ID],
+        [COLLISION_AGENT_SESSION_ID, BATCH_ID],
       );
       await client.query(
         `INSERT INTO memory_review_owner_alerts
@@ -236,7 +236,7 @@ describeWithDatabase("070 memory review agent collision recovery migration", () 
           ORDER BY created_at DESC LIMIT 1`,
         [BATCH_ID],
       )).resolves.toMatchObject({ rows: [{ metadata: {
-        collisionEveSessionId: COLLISION_EVE_SESSION_ID,
+        collisionEveSessionId: COLLISION_AGENT_SESSION_ID,
         recoveryAttempt: 3,
       } }] });
       await expect(client.query(

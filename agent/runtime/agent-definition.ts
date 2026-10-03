@@ -7,8 +7,8 @@
  * - `StepStartContext`: what that call sees.
  * - `StepModelSelection`: the model of one step with its provider options and context window.
  *
- * Replaces eve 0.40.0 `defineAgent`/`defineDynamic` for the parts Osinara configures. Every member
- * is explicit: the runtime has no fallback model, no default resolver order and no default limits.
+ * Every member is explicit: the runtime has no fallback model, no default resolver order and no
+ * default limits.
  */
 import type { LanguageModel } from "ai";
 import type { SharedV4ProviderOptions } from "@ai-sdk/provider";
@@ -52,7 +52,7 @@ export interface RuntimeAgent {
   resolveTools(context: DynamicResolveContext): Promise<Readonly<Record<string, ToolDefinition<any, any>>>>;
   selectModel(input: { readonly sessionId: string; readonly stepIndex: number }): StepModelSelection;
   /**
-   * Runs right before each model call of a turn (Eve's `step.started` hook): every tool result of
+   * Runs right before each model call of a turn: every tool result of
    * the previous step is in that call's prompt. Not run again for a step recorded before a crash.
    */
   stepStarted(context: StepStartContext): Promise<void>;

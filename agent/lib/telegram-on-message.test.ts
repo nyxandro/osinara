@@ -3,7 +3,7 @@
  *
  * Constructs covered:
  * - `createTelegramMessageHandler`: dependency-injected inbound authorization handler.
- * - Secret enrollment messages terminate before Eve creates a model turn.
+ * - Secret enrollment messages terminate before the runtime creates a model turn.
  * - Unknown callers can submit invitations only through `/start <token>`.
  * - Group voice captions preserve invocation after transcript insertion.
  * - Configured groups either ignore or journal passive messages by message mode.
@@ -12,7 +12,7 @@
  * - Captionless photos retain a model-visible trusted workspace reference.
  * - External groups drop all inbound media before persistence, journaling, or model dispatch.
  * - Group name mentions start a turn and project the verified dynamic skill allowlist.
- * - Foreign replies to pending HITL prompts stop before Eve dispatch.
+ * - Foreign replies to pending HITL prompts stop before turn dispatch.
  * - Forum replies inherit routing from the referenced bot message, not a newly assigned thread.
  * - Each accepted turn receives one trusted UTC clock snapshot shared by repository reads.
  */

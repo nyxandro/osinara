@@ -86,7 +86,7 @@ then ask whether to continue with the next batch. When the user asks to see mess
 their subjects grouped by sender, with the number of messages from each sender.
 
 Do not pass message or thread `trash`, `delete`, `untrash`, `modify`, `batchDelete`, or `batchModify`
-through `execute_google_workspace`. Before Eve asks for approval, Osinara loads every message of the
+through `execute_google_workspace`. Before the approval is requested, Osinara loads every message of the
 batch from the current verified Google profile and shows one card: the mailbox, then senders and
 subjects grouped by sender address. A single message also shows its date, short snippet and
 immutable Gmail ID. Do not repeat that list in chat before the call unless the user asked to see it

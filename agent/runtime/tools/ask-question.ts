@@ -5,8 +5,7 @@
  * - `askQuestion`: the definition the model sees as `ask_question`. The runtime parks the turn on
  *   its call (`hitl/input-requests.ts`) and the answer becomes its result; it never executes.
  *
- * Ported from eve 0.40.0 `runtime/framework-tools/ask-question.ts` and the option and request
- * schemas of `runtime/input/types.ts` (Apache-2.0, see NOTICE-eve). Texts are verbatim.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { z } from "zod";
 

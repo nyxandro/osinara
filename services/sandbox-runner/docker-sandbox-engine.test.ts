@@ -28,7 +28,7 @@ import { sandboxRequestHash } from "./docker-sandbox-lifecycle.js";
 const PERSONAL_WORKSPACE_ID = "11111111-1111-4111-8111-111111111111";
 const FAMILY_WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
 const GROUP_WORKSPACE_ID = "33333333-3333-4333-8333-333333333333";
-const EVE_SESSION_ID = "wrun_01JZ8K4R0W6G73VTHX9NF2QABC";
+const AGENT_SESSION_ID = "wrun_01JZ8K4R0W6G73VTHX9NF2QABC";
 const SANDBOX_SESSION_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const EMPTY_SEED_DIGEST = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 const temporaryRoots: string[] = [];
@@ -51,7 +51,7 @@ describe("buildSandboxContainerOptions", () => {
   it("keeps family files visible in private chat without exposing Google credentials", () => {
     const options = buildSandboxContainerOptions(runtime, {
       access: "trusted",
-      eveSessionId: EVE_SESSION_ID,
+      agentSessionId: AGENT_SESSION_ID,
       mounts: [
         { mountPoint: "personal", workspaceId: PERSONAL_WORKSPACE_ID },
         { mountPoint: "family", workspaceId: FAMILY_WORKSPACE_ID },
@@ -133,7 +133,7 @@ describe("buildSandboxContainerOptions", () => {
   it("mounts only the family tool environment without Google credentials", () => {
     const options = buildSandboxContainerOptions(runtime, {
       access: "trusted",
-      eveSessionId: EVE_SESSION_ID,
+      agentSessionId: AGENT_SESSION_ID,
       mounts: [{ mountPoint: "family", workspaceId: FAMILY_WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,
       seedDigest: EMPTY_SEED_DIGEST,
@@ -163,7 +163,7 @@ describe("buildSandboxContainerOptions", () => {
   it("gives an external group no tools volume and no network", () => {
     const options = buildSandboxContainerOptions(runtime, {
       access: "restricted",
-      eveSessionId: EVE_SESSION_ID,
+      agentSessionId: AGENT_SESSION_ID,
       mounts: [{ mountPoint: "group", workspaceId: GROUP_WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,
       seedDigest: EMPTY_SEED_DIGEST,
@@ -194,7 +194,7 @@ describe("buildSandboxContainerOptions", () => {
   it("gives an enabled group its own tools and dedicated proxy-only network, not the trusted network", () => {
     const request = {
       access: "group-tools" as const,
-      eveSessionId: EVE_SESSION_ID,
+      agentSessionId: AGENT_SESSION_ID,
       mounts: [{ mountPoint: "group" as const, workspaceId: GROUP_WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,
       seedDigest: EMPTY_SEED_DIGEST,
@@ -248,7 +248,7 @@ describe("buildSandboxContainerOptions", () => {
 
     await expect(engine.createSession({
       access: "restricted",
-      eveSessionId: EVE_SESSION_ID,
+      agentSessionId: AGENT_SESSION_ID,
       mounts: [{ mountPoint: "group", workspaceId: GROUP_WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,
       seedDigest: "a".repeat(64),
@@ -265,7 +265,7 @@ describe("buildSandboxContainerOptions", () => {
     temporaryRoots.push(root);
     const request = {
       access: "restricted" as const,
-      eveSessionId: EVE_SESSION_ID,
+      agentSessionId: AGENT_SESSION_ID,
       mounts: [{ mountPoint: "group" as const, workspaceId: GROUP_WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,
       seedDigest: EMPTY_SEED_DIGEST,

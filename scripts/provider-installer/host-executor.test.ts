@@ -44,7 +44,6 @@ function input(overrides: Partial<InstallationExecutionInput> = {}): Installatio
       invitationSigningSecret: "invitation_secret_abcdefghijklmnopqrstuvwxyz",
       postgresPassword: "postgres_secret_abcdefghijklmnopqrstuvwxyz",
       telegramWebhookSecretToken: "webhook_secret_abcdefghijklmnopqrstuvwxyz",
-      workflowPostgresPassword: "workflow_postgres_secret_abcdefghijklmnopqrstuvwxyz",
     },
     model,
     modelApiKey: "model-secret",
@@ -112,9 +111,7 @@ describe("createHostInstallationExecutor", () => {
     const environment = staged?.environmentBytes.toString("utf8");
     expect(environment).toContain("MODEL_API_KEY='model-secret'\n");
     expect(environment).toContain("PUBLIC_BASE_URL='https://8-8-8-8.sslip.io'\n");
-    expect(environment).toContain(
-      "WORKFLOW_POSTGRES_URL='postgresql://osinara_workflow:workflow_postgres_secret_abcdefghijklmnopqrstuvwxyz@postgres:5432/osinara_workflow'\n",
-    );
+    expect(environment).not.toContain("WORKFLOW_");
     expect(environment).not.toContain("CLI_PROXY_API_KEY");
     expect(environment).not.toContain("MODEL_UPSTREAM_API_KEY");
     expect(JSON.parse(staged!.modelConfigBytes.toString("utf8"))).toMatchObject({

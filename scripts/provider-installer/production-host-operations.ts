@@ -55,7 +55,6 @@ const PRODUCTION_DOCKER_RESOURCES = [
   "osinara-production-google-workspace-credentials",
   "osinara-production-sandbox-data",
   "osinara-production-tool-environments",
-  "osinara-production-eve-workflow-data-v032",
   "osinara-production-workspace-data",
   "osinara-production-app-network",
   "osinara-production-edge-frontend",
@@ -331,7 +330,7 @@ export function createProductionHostOperations(): HostInstallationOperations {
     },
     validateBundle: validateInstallationBundle,
     waitForPublicHttps: async (input: HostTlsInput) => {
-      const url = `https://${input.hostname}/eve/v1/health`;
+      const url = `https://${input.hostname}/v1/health`;
       const attempts = input.tlsMode === "external" ? EXTERNAL_HTTPS_ATTEMPTS : HTTPS_ATTEMPTS;
       for (let attempt = 1; attempt <= attempts; attempt += 1) {
         try {

@@ -6,9 +6,8 @@
  * - `executeReadFileOnSandbox`, `ReadFileInput`, `ReadFileResult`: the execution; a successful read
  *   records the file's stamp so `write_file` may overwrite it.
  *
- * Ported from eve 0.40.0 `runtime/framework-tools/read-file.ts` and
- * `execution/sandbox/read-file-tool.ts` (Apache-2.0, see NOTICE-eve). Changes: the sandbox and the
- * stamp store come from the tool context; texts and limits are verbatim.
+ * The sandbox and the stamp store come from the tool context.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { z } from "zod";
 

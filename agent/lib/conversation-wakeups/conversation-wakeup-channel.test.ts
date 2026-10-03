@@ -34,7 +34,7 @@ vi.mock("../sessions/session-repository.js", () => ({
   },
 }));
 vi.mock("../telegram-hitl/approval-repository.js", () => ({
-  telegramHitlApprovalRepository: { clearForEveSession: dependencies.clearApprovals },
+  telegramHitlApprovalRepository: { clearForAgentSession: dependencies.clearApprovals },
 }));
 vi.mock("../memory-turn-source.js", () => ({
   bindMemoryTurnSources: vi.fn(),
@@ -56,7 +56,7 @@ function context(attributes: Record<string, string>) {
   return {
     session: {
       auth: { current: { attributes, principalId: "user-1" } },
-      id: "eve-session-1",
+      id: "agent-session-1",
       turn: { id: "turn-4" },
     },
   };
@@ -81,12 +81,12 @@ describe("telegram wake-up turn lifecycle", () => {
 
     expect(dependencies.finishTurn).toHaveBeenCalledWith(expect.objectContaining({
       applicationSessionId: "application-session-1",
-      eveSessionId: "eve-session-1",
-      eveTurnId: "turn-4",
+      agentSessionId: "agent-session-1",
+      agentTurnId: "turn-4",
       failureCode: null,
       runId: "run-1",
     }));
-    expect(dependencies.recordTurnCompleted).toHaveBeenCalledWith("application-session-1", "eve-session-1", false, false);
+    expect(dependencies.recordTurnCompleted).toHaveBeenCalledWith("application-session-1", "agent-session-1", false, false);
   });
 
   it("closes the run of a failed wake-up before its failure notice", async () => {
@@ -110,6 +110,6 @@ describe("telegram wake-up turn lifecycle", () => {
     await handler("turn.completed")({}, channel, context({ telegramChatId: "101" }));
 
     expect(dependencies.finishTurn).not.toHaveBeenCalled();
-    expect(dependencies.recordTurnCompleted).toHaveBeenCalledWith("application-session-1", "eve-session-1", false, true);
+    expect(dependencies.recordTurnCompleted).toHaveBeenCalledWith("application-session-1", "agent-session-1", false, true);
   });
 });

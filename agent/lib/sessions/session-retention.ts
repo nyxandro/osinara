@@ -4,9 +4,6 @@
  * Export:
  * - `deleteExpiredSessions`: deletes retired application sessions whose retention has elapsed;
  *   their runtime history, journal and channel addresses go with them (foreign-key cascade).
- *
- * Phase A of the Eve removal leaves the Eve run data of old sessions in `osinara_workflow`
- * untouched; that database is removed as a whole later.
  */
 import { isAppError } from "../app-error.js";
 import { sessionRepository } from "./session-repository.js";
@@ -37,19 +34,19 @@ export async function deleteExpiredSessions(): Promise<number> {
       if (errorCode === "AGENT_SESSION_RETENTION_LEASE_LOST") {
         console.warn(JSON.stringify({
           code: "AGENT_SESSION_RETENTION_LEASE_LOST",
-          applicationSessionId: claim.id, eveSessionId: claim.eveSessionId,
+          applicationSessionId: claim.id, agentSessionId: claim.agentSessionId,
         }));
         continue;
       }
       // This schedule is the boundary: persist the context and keep sweeping. Stopping here left
       // every later expired session untouched and dropped the dispatcher's heartbeat for a minute.
       parkedThisSweep += 1;
-      await sessionRepository.failDeletion(claim.id, claim.leaseToken, errorCode, new Date());
+      await sessionRepository.failDeletion(claim.id, claim.leaseToken, errorCode);
       console.error(JSON.stringify({
         code: "AGENT_SESSION_RETENTION_DELETE_FAILED",
         applicationSessionId: claim.id,
         errorCode,
-        eveSessionId: claim.eveSessionId,
+        agentSessionId: claim.agentSessionId,
         error: error instanceof Error ? error.message : String(error),
       }));
     }

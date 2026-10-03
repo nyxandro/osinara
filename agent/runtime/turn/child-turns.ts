@@ -9,14 +9,11 @@
  *
  * Key constructs:
  * - The child acts as the parent turn's caller: a turn's auth never changes while it runs, so a
- *   person who answered something meanwhile does not become the child's caller (Osinara's
- *   `task-origin-auth` patch).
+ *   person who answered something meanwhile does not become the child's caller.
  * - The child is found by the parent call it serves, so a restart waits for the same child
  *   instead of starting another one; after an answer the child runs in its continuation turn.
  *
- * Derived from eve 0.40.0 subagent delegation (`runtime/framework-tools/agent.ts`,
- * `execution/subagent-invocation.ts`, `harness/runtime-actions.ts` `toToolResultOutput`,
- * `harness/proxy-input-requests.ts`) (Apache-2.0, see NOTICE-eve).
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { AppError } from "../../lib/app-error.js";
 import { createSessionHistory, loadApplicationSessionId } from "../history/history-repository.js";

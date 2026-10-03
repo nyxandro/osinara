@@ -19,16 +19,15 @@
  * holds each conversation to a fixed number of rows instead of twelve more every turn forever.
  *
  * A turn is identified by its session together with the turn id, never by the turn id alone.
- * Sessions carried over from Eve number turns inside the session — `turn_0`, `turn_1`, … — and Eve
- * replaced the session every fifty completed turns, so inside one long-lived conversation those
- * names come round again.
+ * Older sessions number turns inside the session — `turn_0`, `turn_1`, … — and were replaced every
+ * fifty completed turns, so inside one long-lived conversation those names come round again.
  */
 import { database } from "./database.js";
 import { MEMORY_RETRIEVAL_SHOW_JOURNAL_RETAINED_TURNS } from "./memory-config.js";
 
 export interface MemorySelectionWindow {
   conversationId: string;
-  eveSessionId: string;
+  agentSessionId: string;
   turnId: string;
   /** Position of this turn inside its conversation, from `openTurn`. */
   turnOrdinal: number;
@@ -39,7 +38,7 @@ export const memoryShowJournal = {
    * The number is handed out once per turn: re-processing the same turn must not move the window,
    * or a retried turn would suppress what the first attempt had shown and answer differently.
    */
-  async openTurn(conversationId: string, eveSessionId: string, turnId: string): Promise<number> {
+  async openTurn(conversationId: string, agentSessionId: string, turnId: string): Promise<number> {
     const opened = await database().query<{ turn_ordinal: string }>(
       `WITH opened AS (
          INSERT INTO memory_retrieval_turns
@@ -64,7 +63,7 @@ export const memoryShowJournal = {
            AND turn_ordinal <= (SELECT turn_ordinal FROM opened) - $4::bigint
        )
        SELECT turn_ordinal FROM opened`,
-      [conversationId, eveSessionId, turnId, MEMORY_RETRIEVAL_SHOW_JOURNAL_RETAINED_TURNS],
+      [conversationId, agentSessionId, turnId, MEMORY_RETRIEVAL_SHOW_JOURNAL_RETAINED_TURNS],
     );
     return Number(opened.rows[0]!.turn_ordinal);
   },
@@ -78,7 +77,7 @@ export const memoryShowJournal = {
        ON CONFLICT (conversation_id, eve_session_id, turn_id, claim_id) DO NOTHING`,
       [
         window.conversationId,
-        window.eveSessionId,
+        window.agentSessionId,
         window.turnId,
         window.turnOrdinal,
         [...claimIds],

@@ -6,7 +6,7 @@ import { AppError } from "../app-error.js";
 import { AGENT_SCHEDULE_DISPATCH_MAX_SAFE_ATTEMPTS } from "./agent-schedule-config.js";
 import { recordOperationalIncident } from "../operational-incidents/owner-alerts.js";
 
-export async function admitScheduledAgentTurn(input: { runId: string; applicationSessionId: string; eveSessionId: string; eveTurnId: string }): Promise<void> {
+export async function admitScheduledAgentTurn(input: { runId: string; applicationSessionId: string; agentSessionId: string; agentTurnId: string }): Promise<void> {
   const result = await database().query(`UPDATE agent_schedule_runs run SET status='running',eve_session_id=$3,eve_turn_id=$4,updated_at=now()
     FROM agent_schedules schedule,conversation_sessions session
     WHERE run.id=$1 AND run.application_session_id=$2 AND run.status IN ('dispatching','running')
@@ -14,7 +14,7 @@ export async function admitScheduledAgentTurn(input: { runId: string; applicatio
       AND session.id=$2 AND session.retired_at IS NULL
       AND (run.eve_session_id IS NULL OR run.eve_session_id=$3)
       AND (run.eve_turn_id IS NULL OR run.eve_turn_id=$4) RETURNING run.id`,
-  [input.runId, input.applicationSessionId, input.eveSessionId, input.eveTurnId]);
+  [input.runId, input.applicationSessionId, input.agentSessionId, input.agentTurnId]);
   if (result.rowCount !== 1) throw new AppError("AGENT_SCHEDULE_ATTEMPT_STALE", "Попытка запуска расписания уже закрыта");
 }
 

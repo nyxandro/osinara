@@ -30,7 +30,7 @@ export interface PreparedConversationWakeup {
   applicationSessionId: string;
   authorUserId: string;
   completedRuns: number;
-  eveSessionId: string;
+  agentSessionId: string;
   familyId: string;
   forumTopicId: string | null;
   groupId: string | null;
@@ -215,7 +215,7 @@ export async function prepareConversationWakeup(
         applicationSessionId: live.id,
         authorUserId: row.author_user_id,
         completedRuns: row.completed_runs,
-        eveSessionId: live.eve_session_id,
+        agentSessionId: live.eve_session_id,
         familyId: row.family_id,
         forumTopicId: row.forum_topic_id,
         groupId: row.group_id,

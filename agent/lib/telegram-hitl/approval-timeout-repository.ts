@@ -148,7 +148,7 @@ export const approvalTimeoutRepository: ApprovalTimeoutRepository = {
                 END
           WHERE session.id = $1 AND session.retired_at IS NULL
             AND session.eve_session_id = $2`,
-        [claim.applicationSessionId, claim.eveSessionId],
+        [claim.applicationSessionId, claim.agentSessionId],
       );
       await client.query("COMMIT");
       return true;
@@ -197,7 +197,7 @@ function toClaim(row: ClaimRow, auth: TimedOutApprovalClaim["auth"]): TimedOutAp
   return {
     applicationSessionId: row.application_session_id,
     auth,
-    eveSessionId: row.eve_session_id,
+    agentSessionId: row.eve_session_id,
     id: row.id,
     kind: row.request_kind,
     leaseToken: row.timeout_lease_token,
