@@ -11,7 +11,7 @@ readonly BACKUPS_DIR="${BASE_DIR}/backups"
 readonly GLOBAL_RELEASE_ENV="${BASE_DIR}/release.env"
 readonly CURRENT_LINK="${BASE_DIR}/current"
 readonly LOCK_FILE="/run/lock/osinara-production-deploy.lock"
-readonly HEALTH_URL="http://127.0.0.1:8082/eve/v1/health"
+readonly HEALTH_URL="http://127.0.0.1:8082/v1/health"
 readonly HEALTH_ATTEMPTS=60
 readonly HEALTH_INTERVAL_SECONDS=5
 # A release stops and restarts every production container, which the observability hub reads as

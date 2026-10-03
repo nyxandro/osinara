@@ -24,7 +24,7 @@ describe("independent Telegram queue progress", () => {
       const message = { message_id: id, date: 1700000000, text: "request", from,
         chat: { id: callback ? 100 + id : -id, type: callback ? "private" : "group" } };
       return { updateId: String(id), queueId: String(id), leaseToken: String(id), voice: null, transcript: null,
-        payload: { update_id: id, ...(callback ? { callback_query: { id: String(id), chat_instance: "chat", data: `eve:${id}`, from, message } } : { message }) } };
+        payload: { update_id: id, ...(callback ? { callback_query: { id: String(id), chat_instance: "chat", data: `hitl:${id}`, from, message } } : { message }) } };
     });
     let releaseMessages!: () => void, releaseCallbacks!: () => void;
     const gates = { message: new Promise<void>(resolve => { releaseMessages = resolve; }), callback_query: new Promise<void>(resolve => { releaseCallbacks = resolve; }) };
@@ -114,7 +114,7 @@ describe("independent Telegram queue progress", () => {
           deliveryContinuationKey: `${item.chat}::`, ingressContinuationKey: `${item.chat}::`,
           voice: null, transcript: null, payload: { update_id: item.id,
             ...(item.chat > 0 ? { callback_query: {
-              id: `callback-${item.id}`, chat_instance: "chat", data: `eve:${item.id}`,
+              id: `callback-${item.id}`, chat_instance: "chat", data: `hitl:${item.id}`,
               from: message.from, message,
             } } : { message }) },
         };

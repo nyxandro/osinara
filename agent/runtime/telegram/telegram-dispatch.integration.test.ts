@@ -255,27 +255,6 @@ async function channelState(sessionId: string) {
     expect(continuation.auth.current?.attributes).toMatchObject({ osinaraTelegramUpdateId: "2" });
   });
 
-  it("still continues a card shown before the button prefix changed", async () => {
-    const auth = await ownerAuth();
-    const api = telegramApi();
-    const channel = hooks({ callback: () => ({ auth, continuationToken: "7::" }), message: () => ({ auth, continuationToken: "7::" }), transport: api.transport });
-    const asked = await dispatchTelegramMessage(database(), channel, message("измени"));
-    if (asked.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
-    const parked = await runWith(asked.turnId, { change }, toolCalls([{ id: "call-c", input: {}, name: "change" }]));
-    if (parked.outcome.status !== "waiting_input") throw new Error("TEST_EXPECTED_PARK");
-    const state = await channelState(asked.sessionId);
-    renderTelegramInputRequest(parked.outcome.requests[0]!, state);
-    // The card as an earlier release stored and showed it: the same buttons under the previous prefix.
-    state.hitlCallbacks = Object.fromEntries(Object.entries(state.hitlCallbacks ?? {}).map(([key, value]) => [key.replace(/^hitl:/u, "eve:"), value]));
-    await database().query("UPDATE agent_session_state SET channel_state = $2::json WHERE session_id = $1", [asked.sessionId, JSON.stringify(state)]);
-    const previous = Object.keys(state.hitlCallbacks)[0]!;
-
-    const pressed = await dispatchTelegramCallback(database(), channel, press(previous));
-
-    expect(previous).toMatch(/^eve:/u);
-    expect(pressed.status).toBe("dispatched");
-  });
-
   it("neither acknowledges nor continues a press the application rejected", async () => {
     const auth = await ownerAuth();
     const api = telegramApi();
