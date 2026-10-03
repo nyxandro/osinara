@@ -2,7 +2,7 @@
  * Dedicated application-session storage for one-shot memory-review turns.
  *
  * Export:
- * - `memoryReviewSessionRepository`: creates and retires explicitly batch-linked Eve sessions.
+ * - `memoryReviewSessionRepository`: creates and retires explicitly batch-linked sessions.
  */
 import { SESSION_RETENTION_DAYS } from "../../config.js";
 import { AppError } from "../app-error.js";

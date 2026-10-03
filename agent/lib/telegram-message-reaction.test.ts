@@ -5,7 +5,7 @@
  * - `setTelegramMessageReaction`: exact current-message Bot API request.
  * - Provider rejection and malformed acknowledgements fail with stable application errors.
  */
-import type { TelegramHandle } from "eve/channels/telegram";
+import type { TelegramHandle } from "../runtime/telegram/channel-types.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { setTelegramMessageReaction } from "./telegram-message-reaction.js";

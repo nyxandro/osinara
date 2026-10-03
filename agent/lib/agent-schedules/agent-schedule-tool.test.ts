@@ -9,7 +9,7 @@
  * - ID-only actions reject every sibling field.
  * - Tool guidance publishes exact action payloads and forbids delete/recreate workarounds.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 

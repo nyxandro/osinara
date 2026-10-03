@@ -7,7 +7,7 @@
  */
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
-import type { TelegramChatType } from "eve/channels/telegram";
+import type { TelegramChatType } from "../runtime/telegram/inbound.js";
 
 export type TelegramFinalDeliveryStart =
   | { deliveryId: string; deliveryToken: string; status: "started" }

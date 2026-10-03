@@ -2,7 +2,7 @@
  * Durable immediate-undo boundary for long-term memory creates.
  *
  * Exports:
- * - `MemoryUndoInput`: verified Eve call/session/turn identity for one undo attempt.
+ * - `MemoryUndoInput`: verified call/session/turn identity for one undo attempt.
  * - `MEMORY_UNDO_DENIED_MESSAGE`: stable user-facing denial with a safe next step.
  * - `memoryUndoRepository`: provenance eligibility and atomic replay-safe undo operations.
  *

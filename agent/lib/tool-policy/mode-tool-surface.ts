@@ -8,17 +8,20 @@
  * - `buildSubagentToolSurface`: the same trust zone without root-owned durable writes.
  *
  * Key constructs:
- * - Application tools are emitted per mode instead of authored statically, so a tool that cannot
- *   work in the current trust zone has no descriptor at all rather than a denial stub.
- * - External groups additionally deny the framework built-ins Eve always registers, and re-check
- *   every granted capability at execution time against the live database policy.
- * - Interactive private and family surfaces re-emit the sandbox built-ins, so that every tool result
- *   there can carry the messages the turn's author sent meanwhile. Scheduled surfaces do not.
+ * - Every tool is emitted per mode, the runtime's built-ins included, so a tool that cannot work in
+ *   the current trust zone has no descriptor at all. Trusted modes get the built-ins Eve always
+ *   registered (agent, ask_question, bash, read_file, write_file, todo, load_skill); an external group
+ *   gets only its own file tools, its granted capabilities and, without a verified registration,
+ *   nothing beyond answering in text.
+ * - External groups re-check every granted capability at execution time against the live policy.
+ * - Interactive private and family surfaces wrap the sandbox built-ins (plus glob and grep), so
+ *   that every tool result there can carry the messages the turn's author sent meanwhile.
+ *   Scheduled surfaces do not.
  */
-import type { SkillDefinition } from "eve/skills";
-import { defineTool, type ToolContext, type ToolDefinition } from "eve/tools";
+import { defineTool, type ToolContext, type ToolDefinition } from "../../runtime/tool.js";
+import { askQuestion, bash, loadSkill, readFile, todo, writeFile } from "../../runtime/tools/defaults.js";
+import { agentTool } from "../../runtime/tools/delegate.js";
 import { z } from "zod";
-import { todo } from "eve/tools/defaults";
 
 import { AppError } from "../app-error.js";
 import { IMAGE_GENERATION_AVAILABLE } from "../image-generation/image-generation-availability.js";
@@ -28,7 +31,7 @@ import { wrapModelFacingToolMap } from "../model-facing-tool.js";
 import { authorizeAgentScheduleDelivery } from "../agent-schedules/agent-schedule-delivery-authorization.js";
 import { scheduledDeliveryMetadata } from "../agent-schedules/scheduled-session.js";
 import { externalGroupLoadSkillTool } from "../group-skills/group-load-skill-tool.js";
-import { isGroupSafeSkillName } from "../group-skills/group-skill-catalog.js";
+import { SKILL_NAME_PATTERN } from "../../runtime/skills/package-validation.js";
 import { MEMORY_LIST_DEFAULT_LIMIT, MEMORY_LIST_MAX_LIMIT, THREAD_HISTORY_PAGE_MAX_ENTRIES } from "../memory-config.js";
 import { THREAD_REF_PATTERN } from "../memory-thread-query-repository.js";
 import { externalRememberInputSchema } from "../remember-contract.js";
@@ -65,12 +68,7 @@ import { resolveExternalGroupPolicyIdentity } from "./external-group-policy.js";
 import { EXTERNAL_GROUP_REMINDER_TOOLS } from "./external-group-reminder-tools.js";
 import { scheduledExternalTool } from "./scheduled-external-tool.js";
 import { withTurnInterjectionSurface } from "../turn-interjection/turn-interjection-surface.js";
-import {
-  FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS,
-  UNVERIFIED_CONTEXT_DENIALS,
-  isExternalGroupToolName,
-  type ExternalGroupToolName,
-} from "./group-tool-catalog.js";
+import { isExternalGroupToolName, type ExternalGroupToolName } from "./group-tool-catalog.js";
 import {
   FAMILY_ONLY_TOOLS,
   PRIVATE_ONLY_TOOLS,
@@ -94,10 +92,9 @@ export type ModeToolSurfaceInput =
       includeApplicationCore?: boolean;
       scheduledHistory?: boolean;
       scheduledRun?: boolean;
-      skills: Readonly<Record<string, SkillDefinition>>;
+      /** Names of the turn's granted skills; the surface needs only whether there are any. */
+      skills: ReadonlySet<string>;
     };
-
-const DENIED_TOOL_INPUT = z.record(z.string(), z.unknown());
 
 type DirectExternalToolName = Exclude<
   ExternalGroupToolName,
@@ -240,16 +237,6 @@ async function withExternalGroupCapability<T>(
   return await operation();
 }
 
-function deniedTool(toolName: string): AnyToolDefinition {
-  return defineTool({
-    description: `Инструмент ${toolName} недоступен в текущей внешней группе.`,
-    inputSchema: DENIED_TOOL_INPUT,
-    async execute() {
-      throw groupToolForbidden();
-    },
-  }) as unknown as AnyToolDefinition;
-}
-
 function allowedDirectTool(capability: DirectExternalToolName, definition: AnyToolDefinition): AnyToolDefinition {
   return defineTool({
     ...definition,
@@ -308,21 +295,19 @@ function buildExternalToolSurface(
   includeApplicationCore: boolean,
   scheduledHistory: boolean,
   scheduledRun: boolean,
-  skills: Readonly<Record<string, SkillDefinition>>,
+  skills: ReadonlySet<string>,
 ): ToolMap {
   const imageGenerationAllowed = IMAGE_GENERATION_AVAILABLE &&
     !scheduledRun && allowed.has("generate_image");
   const surface: Record<string, AnyToolDefinition> = {
     ...EXTERNAL_GROUP_FILE_TOOLS,
-    load_skill: Object.keys(skills).length > 0 || imageGenerationAllowed
-      ? externalGroupLoadSkillTool
-      : deniedTool("load_skill"),
+    ...(skills.size > 0 || imageGenerationAllowed ? { load_skill: externalGroupLoadSkillTool } : {}),
   };
   if (includeApplicationCore) {
     surface.web_search = conversationWebSearch as AnyToolDefinition;
     surface.web_fetch = conversationWebFetch as AnyToolDefinition;
     surface.get_current_time = getCurrentTime as AnyToolDefinition;
-    surface.todo = todo;
+    surface.todo = todo as AnyToolDefinition;
     surface.read_profile_view = readProfileView as unknown as AnyToolDefinition;
     if (!scheduledRun) {
       surface.manage_behavior_preference = manageBehaviorPreference as unknown as AnyToolDefinition;
@@ -359,24 +344,30 @@ function buildExternalToolSurface(
     surface.manage_memory_thread = allowedMemoryThreadTool();
   }
 
-  // Eve always registers its own built-ins, and 0.40.0 cannot hide a framework descriptor, so the
-  // ones an external group must never reach stay overridden with an explicit denial.
-  for (const toolName of FRAMEWORK_TOOLS_DENIED_IN_EXTERNAL_GROUPS) {
-    if (toolName === "bash" && includeApplicationCore && allowed.has("bash")) continue;
-    surface[toolName] = deniedTool(toolName);
-  }
-  if (!includeApplicationCore) {
-    for (const name of UNVERIFIED_CONTEXT_DENIALS) surface[name] = deniedTool(name);
-  }
   const effectiveSurface = scheduledRun
     ? Object.fromEntries(Object.entries(surface).map(([name, definition]) => [name, scheduledExternalTool(definition)]))
     : surface;
-  return wrapModelFacingToolMap(effectiveSurface);
+  // A verified external group delegates like any root turn (Eve's built-in, never wrapped);
+  // a child never gets it, see `buildSubagentToolSurface`.
+  const wrapped = wrapModelFacingToolMap(effectiveSurface);
+  return includeApplicationCore ? { ...wrapped, agent: agentTool as AnyToolDefinition } : wrapped;
 }
 
 function allowlistKey(allowed: ReadonlySet<ExternalGroupToolName>): string {
   return [...allowed].sort().join("\0");
 }
+
+// What Eve registered in every trusted turn without the application asking. They stay outside the
+// model-facing error wrapper, as Eve's own tools did.
+const TRUSTED_BUILT_IN_TOOLS: ToolMap = {
+  agent: agentTool as AnyToolDefinition,
+  ask_question: askQuestion as AnyToolDefinition,
+  bash: bash as AnyToolDefinition,
+  load_skill: loadSkill as AnyToolDefinition,
+  read_file: readFile as AnyToolDefinition,
+  todo: todo as AnyToolDefinition,
+  write_file: writeFile as AnyToolDefinition,
+};
 
 const TRUSTED_APPLICATION_SURFACES: Readonly<Record<"family" | "private", ToolMap>> = {
   family: wrapModelFacingToolMap({
@@ -390,22 +381,32 @@ const TRUSTED_APPLICATION_SURFACES: Readonly<Record<"family" | "private", ToolMa
 };
 
 // An interactive turn also receives, with each tool result, the messages its author sent meanwhile.
+// The interjection surface brings its own sandbox built-ins; delegation, questions, todo and skills
+// stay as is.
+const UNWRAPPED_BUILT_INS: ToolMap = {
+  agent: TRUSTED_BUILT_IN_TOOLS.agent!,
+  ask_question: TRUSTED_BUILT_IN_TOOLS.ask_question!,
+  load_skill: TRUSTED_BUILT_IN_TOOLS.load_skill!,
+  todo: TRUSTED_BUILT_IN_TOOLS.todo!,
+};
 const TRUSTED_SURFACES: Readonly<Record<"family" | "private", ToolMap>> = {
-  family: withTurnInterjectionSurface(TRUSTED_APPLICATION_SURFACES.family),
-  private: withTurnInterjectionSurface(TRUSTED_APPLICATION_SURFACES.private),
+  family: { ...UNWRAPPED_BUILT_INS, ...withTurnInterjectionSurface(TRUSTED_APPLICATION_SURFACES.family) },
+  private: { ...UNWRAPPED_BUILT_INS, ...withTurnInterjectionSurface(TRUSTED_APPLICATION_SURFACES.private) },
 };
 
 const TRUSTED_SCHEDULED_SURFACES: Readonly<Record<"family" | "private", ToolMap>> = Object.fromEntries(
   Object.entries(TRUSTED_APPLICATION_SURFACES).map(([environment, surface]) => {
     // A scheduled turn can read chat instructions but has no user source for prompt or memory writes.
+    // Family skills are managed only in a conversation with the owner.
     const {
       generate_image: _generateImage,
       manage_behavior_preference: _manageBehaviorPreference,
+      manage_skill: _manageSkill,
       remember: _remember,
       send_voice_message: _sendVoiceMessage,
       ...readOnlyPromptSurface
     } = surface;
-    return [environment, readOnlyPromptSurface];
+    return [environment, { ...TRUSTED_BUILT_IN_TOOLS, ...readOnlyPromptSurface }];
   }),
 ) as Record<"family" | "private", ToolMap>;
 
@@ -425,21 +426,19 @@ export function buildModeToolSurface(input: ModeToolSurfaceInput): ToolMap {
   const includeApplicationCore = input.includeApplicationCore !== false;
   const scheduledHistory = input.scheduledHistory === true;
   const scheduledRun = input.scheduledRun === true || scheduledHistory;
-  const validatedSkills = Object.keys(input.skills).some((name) =>
-    !isGroupSafeSkillName(name) && !isImageGenerationSkillName(name)
-  ) ? {} : input.skills;
+  const validatedSkills: ReadonlySet<string> = [...input.skills].some((name) =>
+    !SKILL_NAME_PATTERN.test(name) && !isImageGenerationSkillName(name)
+  ) ? new Set() : input.skills;
   const skills = IMAGE_GENERATION_AVAILABLE &&
     !scheduledRun && allowed.has("generate_image")
     ? validatedSkills
-    : Object.fromEntries(Object.entries(validatedSkills).filter(([name]) =>
-      !isImageGenerationSkillName(name)
-    ));
+    : new Set([...validatedSkills].filter((name) => !isImageGenerationSkillName(name)));
   const key = [
     includeApplicationCore ? "core" : "failed",
     scheduledHistory ? "history" : "ordinary",
     scheduledRun ? "scheduled" : "interactive",
     allowlistKey(allowed),
-    Object.keys(skills).sort().join(","),
+    [...skills].sort().join(","),
   ].join("|");
   const cached = EXTERNAL_SURFACES.get(key);
   if (cached) return cached;
@@ -455,16 +454,18 @@ export function buildSubagentToolSurface(input: ModeToolSurfaceInput): ToolMap {
       capabilities: new Set([...input.capabilities].filter((name) =>
         name !== "generate_image" && name !== "send_voice_message"
       )),
-      skills: Object.fromEntries(Object.entries(input.skills).filter(([name]) =>
-        !isImageGenerationSkillName(name)
-      )),
+      skills: new Set([...input.skills].filter((name) => !isImageGenerationSkillName(name))),
     }
     : input;
+  // Delegation is one level deep: a child has no `agent` of its own. A delegated task (often reading
+  // untrusted pages) does not manage the family's skills.
   const {
+    agent: _agent,
     generate_image: _generateImage,
     list_reminders: _listReminders,
     manage_behavior_preference: _manageBehaviorPreference,
     manage_reminder: _manageReminder,
+    manage_skill: _manageSkill,
     remember: _remember,
     send_voice_message: _sendVoiceMessage,
     ...surface

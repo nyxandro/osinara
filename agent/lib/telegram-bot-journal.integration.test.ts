@@ -7,7 +7,7 @@
  * - A bot becomes a conversation participant like a person, without an application account link.
  * - The schema rejects a bot row that claims a human-shaped identity.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "./database.js";

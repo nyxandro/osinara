@@ -1,8 +1,12 @@
 /** A privacy policy approval must explain direction, audience and persistence before consent. */
 import { describe, expect, it, vi } from "vitest";
 import { createTelegramApprovalPresenter } from "./approval-presentation.js";
+import { skillGrantCatalog } from "../family-skills/skill-grants.js";
 import type { TelegramInputRequest } from "../telegram-interface.js";
 import { settledPromptText } from "./settled-prompt.js";
+
+// Family skills are not part of these cards: none exist, so the built-in catalog decides.
+const SKILL_DEPENDENCIES = { findFamilySkill: vi.fn(), findSkillGrantCatalog: vi.fn().mockResolvedValue(skillGrantCatalog(new Map())) };
 
 const groupRef = "grp_0123456789abcdef0123456789abcdef";
 const context = { session: { auth: {} } } as never;
@@ -23,7 +27,7 @@ function request(enabled: boolean): TelegramInputRequest {
 }
 function presenter(label: string | null = "Остриков пилит агентов") {
   const findProfileProjectionGroup = vi.fn().mockResolvedValue(label);
-  return { findProfileProjectionGroup, present: createTelegramApprovalPresenter({
+  return { findProfileProjectionGroup, present: createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES,
     findProfileProjectionGroup, findGroupTitle: vi.fn(), findGmailMessages: vi.fn(),
   }) };
 }

@@ -18,7 +18,7 @@ try {
   } else if ((action === "observe" || action === "cancel") && updateId && reason && extra.length === 0) {
     await requestTelegramIngressRecovery(updateId, action, reason);
     console.log(JSON.stringify({ code: "AGENT_TELEGRAM_RECOVERY_REQUESTED", updateId,
-      message: "Проверка запрошена. Очередь откроется только после подтверждения состояния Eve" }));
+      message: "Проверка запрошена. Запрос будет закрыт без повторного исполнения, затем очередь продолжит работу" }));
   } else if (action === "close-unbound" && updateId && reason && extra.length === 1) {
     await closeExpiredUnboundTelegramIngress(updateId, reason, extra[0]!);
     console.log(JSON.stringify({ code: "AGENT_TELEGRAM_INTERRUPTED_CLOSED", updateId,

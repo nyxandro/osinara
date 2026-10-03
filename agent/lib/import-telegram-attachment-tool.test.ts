@@ -5,7 +5,7 @@
  * - External imports return the canonical sandbox path accepted by guarded `read_file`.
  * - Family imports preserve the trusted relative workspace path contract.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const dependencies = vi.hoisted(() => ({

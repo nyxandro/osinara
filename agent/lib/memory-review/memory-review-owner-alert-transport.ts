@@ -6,7 +6,7 @@
  * - `createMemoryReviewOwnerAlertTransport`: injectable no-retry transport.
  * - `memoryReviewOwnerAlertTransport`: lazy production transport using the required bot token.
  */
-import { callTelegramApi } from "eve/channels/telegram";
+import { callTelegramApi } from "../../runtime/telegram/api.js";
 
 import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../../config.js";
 import { AppError } from "../app-error.js";
@@ -79,7 +79,7 @@ function productionTransport(): MemoryReviewOwnerAlertTransport {
   });
 }
 
-// Runtime secrets stay lazy so Eve discovery and build remain deterministic.
+// Runtime secrets stay lazy so builds remain deterministic.
 export const memoryReviewOwnerAlertTransport: MemoryReviewOwnerAlertTransport = {
   async deliver(input) {
     const owner = await database().query<{ telegram_user_id: string }>(`SELECT u.telegram_user_id

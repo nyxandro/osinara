@@ -81,7 +81,7 @@ export async function validateReadableTextAttachmentContent(input: {
 
   try {
     const text = new TextDecoder("utf-8", { fatal: true }).decode(input.bytes);
-    // Eve's read_file rejects NUL-bearing files as binary, so persistence must prove the same contract.
+    // `read_file` rejects NUL-bearing files as binary, so persistence must prove the same contract.
     if (text.includes("\0")) throw textRequired();
   } catch (error) {
     if (error instanceof AppError) throw error;

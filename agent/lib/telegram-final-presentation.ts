@@ -11,7 +11,7 @@
  * - An authored aside is a separate paced message; a length-driven split never is.
  * - Every authored message passes the length policy on its own.
  */
-import { splitTelegramMessageText } from "eve/channels/telegram";
+import { splitTelegramMessageText } from "../runtime/telegram/api.js";
 
 import {
   formatTelegramRichMessages,

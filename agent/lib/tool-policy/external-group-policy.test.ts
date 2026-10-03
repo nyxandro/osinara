@@ -5,7 +5,7 @@
  * - `resolveExternalGroupToolPolicy`: derives policy only from verified Eve auth attributes.
  * - A resumed external session keeps its initiator policy and fails closed on any conflict.
  */
-import type { SessionAuth } from "eve/context";
+import type { SessionAuth } from "../../runtime/context.js";
 import { describe, expect, it } from "vitest";
 
 import { resolveExternalGroupToolPolicy } from "./external-group-policy.js";

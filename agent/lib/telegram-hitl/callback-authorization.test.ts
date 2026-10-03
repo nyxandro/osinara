@@ -6,7 +6,8 @@
  * - Callback ownership uses the exact verified prompt message route, including private chats.
  * - Foreign and expired callbacks receive a Russian alert and never resume Eve.
  */
-import type { TelegramContext, TelegramCallbackQuery } from "eve/channels/telegram";
+import type { TelegramContext } from "../../runtime/telegram/channel-types.js";
+import type { TelegramCallbackQuery } from "../../runtime/telegram/inbound.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { buildApprovalMessage } from "./approval-message.js";

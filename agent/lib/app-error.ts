@@ -6,11 +6,12 @@
  * - `isAppError`: narrows errors at channel and HTTP boundaries.
  *
  * Key construct:
- * - `isRetryable` is the flag Eve's model-call classifier looks for while walking the cause chain.
+ * - `isRetryable` is the flag the runtime's model-call classifier looks for while walking the cause
+ *   chain.
  *   Only a failure whose repetition can plausibly succeed may set it.
  * - `details` is log-only diagnostic context; it never reaches the model or the user.
  * - `isExpectedRefusal` marks an answer from the outside world, such as a site that refused a page,
- *   which the tool boundary records without Eve's stack even though its category is `operation`.
+ *   which the tool boundary records without a stack even though its category is `operation`.
  */
 export class AppError extends Error {
   readonly code: string;
@@ -22,11 +23,12 @@ export class AppError extends Error {
   readonly details?: Readonly<Record<string, string | number>>;
 
   constructor(code: string, message: string, options?: {
+    readonly cause?: unknown;
     readonly details?: Readonly<Record<string, string | number>>;
     readonly isExpectedRefusal?: boolean;
     readonly isRetryable?: boolean;
   }) {
-    super(`${code}: ${message}`);
+    super(`${code}: ${message}`, options?.cause === undefined ? undefined : { cause: options.cause });
     this.name = "AppError";
     this.code = code;
     this.isRetryable = options?.isRetryable === true;

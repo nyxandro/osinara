@@ -43,6 +43,7 @@ const EXPECTED_TOOL_MODULES = [
   "manage_memory_thread.ts",
   "manage_profile_projection.ts",
   "manage_reminder.ts",
+  "manage_skill.ts",
   "manage_telegram_group.ts",
   "notification_settings.ts",
   "read_memory_thread.ts",
@@ -127,12 +128,5 @@ describe("agent capability surface", () => {
         expect(files).toContain("SKILL.md");
       }),
     );
-  });
-
-  it("authors the whole dynamic tool surface at step scope", async () => {
-    const source = await readFile(`${AGENT_ROOT}/tools/capabilities.ts`, "utf8");
-
-    expect(source).toContain('"step.started": async');
-    expect(source).not.toContain('"turn.started"');
   });
 });

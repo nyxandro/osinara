@@ -2,9 +2,9 @@
  * Typed model-facing Google Workspace execution boundary.
  *
  * Exports:
- * - `execute_google_workspace`: reviewed argv execution with input-aware Eve HITL.
+ * - `execute_google_workspace`: reviewed argv execution with input-aware approval.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { AppError } from "../app-error.js";

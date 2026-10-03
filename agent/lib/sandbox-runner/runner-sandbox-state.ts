@@ -1,5 +1,5 @@
 /**
- * Persisted Eve sandbox backend state validation.
+ * Persisted sandbox backend state validation (the format Eve stored, carried over).
  *
  * Exports:
  * - `StoredSandboxMetadata`: mounted legacy/current state or disabled internal-session state.

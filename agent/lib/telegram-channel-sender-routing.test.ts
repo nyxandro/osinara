@@ -7,7 +7,7 @@
  * - Family-private and owner-only policies reject channel actors before persistence.
  * - Channel replies to Osinara remain ordinary messages and never enter HITL authorization.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { describe, expect, it } from "vitest";
 
 import { createTelegramMessageHandler } from "./telegram-on-message.js";

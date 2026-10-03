@@ -1,29 +1,27 @@
 /**
- * Execution-time boundary for Eve's external-group filesystem built-ins.
+ * Execution-time boundary for the runtime's filesystem built-ins in external groups.
  *
  * Exports:
- * - `createExternalGroupFileTools`: testable same-name wrappers around Eve default tools.
+ * - `createExternalGroupFileTools`: testable same-name wrappers around the runtime's default tools.
  * - `EXTERNAL_GROUP_FILE_TOOLS`: production wrappers backed by live workspace authorization.
  *
  * Key constructs:
  * - Every execution resolves the current external registration before touching the sandbox.
  * - Model paths are canonical absolute paths under the exact `/workspace/group` root.
  * - `read_file` alone may read a currently granted dynamic skill package through canonical `$HOME`.
- * - Host-side component inspection rejects symlinks before Eve's native executor runs.
+ * - Host-side component inspection rejects symlinks before the native executor runs.
  */
-import { type ToolContext, type ToolDefinition, defineTool } from "eve/tools";
+import { type ToolContext, type ToolDefinition, defineTool } from "../../runtime/tool.js";
 import {
   glob as eveGlob,
   grep as eveGrep,
   readFile as eveReadFile,
   writeFile as eveWriteFile,
-} from "eve/tools/defaults";
+} from "../../runtime/tools/defaults.js";
 
+import { SKILL_NAME_PATTERN } from "../../runtime/skills/package-validation.js";
 import { AppError } from "../app-error.js";
-import {
-  isGroupSafeSkillName,
-  type GroupSafeSkillName,
-} from "../group-skills/group-skill-catalog.js";
+import type { GroupSafeSkillName } from "../group-skills/group-skill-catalog.js";
 import { groupSkillPolicyRepository } from "../group-skills/group-skill-repository.js";
 import { requireWorkspaceAuthorization } from "../workspaces/workspace-context.js";
 import {
@@ -74,7 +72,7 @@ function skillPathSuffix(value: string): string | null {
   }
   if (!value.startsWith("/")) return null;
 
-  // The announced absolute HOME is untrusted and discarded rather than delegated to Eve.
+  // The announced absolute HOME is untrusted and discarded rather than delegated to the native tool.
   const markerIndex = value.indexOf(ABSOLUTE_SKILL_ROOT_MARKER);
   if (markerIndex < 0) return null;
   const suffixStart = markerIndex + ABSOLUTE_SKILL_ROOT_MARKER.length;
@@ -97,7 +95,7 @@ function parseSkillFilePath(value: unknown): SkillFilePath | null {
 
   // Every segment must remain a literal package-relative component after prefix removal.
   const [skillName, ...relativeComponents] = suffix.split("/");
-  if (skillName === undefined || !isGroupSafeSkillName(skillName)) throw forbiddenSkill();
+  if (skillName === undefined || !SKILL_NAME_PATTERN.test(skillName)) throw forbiddenSkill();
   if (
     relativeComponents.length === 0 ||
     relativeComponents.some((component) =>
@@ -129,7 +127,7 @@ async function readAuthorizedSkillFile(
   const allowed = await dependencies.loadGroupSkillAllowlist(authorization.groupId);
   if (!allowed.has(skillPath.skillName)) throw forbiddenSkill();
 
-  // Eve resolves canonical `$HOME` and retains native pagination, output, and read stamps.
+  // The native tool resolves canonical `$HOME` and retains native pagination, output, and read stamps.
   try {
     return await dependencies.defaults.read_file.execute(
       { ...input as object, filePath: skillPath.canonicalPath },

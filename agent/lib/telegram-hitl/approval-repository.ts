@@ -6,7 +6,7 @@
  * - `telegramHitlApprovalRepository`: PostgreSQL implementation with atomic callback claims.
  * - Approval input/result types used by Telegram channel boundaries.
  */
-import type { SessionAuthContext } from "eve/context";
+import type { SessionAuthContext } from "../../runtime/context.js";
 import type { PoolClient } from "pg";
 
 import { AppError } from "../app-error.js";
@@ -133,7 +133,8 @@ async function lockApproval(
             s.owner_user_id,
             s.pending_operation,
             s.retired_at,
-            s.scope
+            s.scope,
+            s.thread_id
        FROM telegram_hitl_approvals a
        JOIN conversation_sessions s ON s.id = a.application_session_id
       WHERE a.telegram_chat_id = $1

@@ -8,7 +8,7 @@
  * - `search_memories`: returns the already-safe retrieval DTO unchanged.
  * - `executeNonStreamingTool`: rejects an unexpected Eve streaming result before object assertions.
  */
-import type { ToolContext, ToolDefinition } from "eve/tools";
+import type { ToolContext, ToolDefinition } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 

@@ -6,12 +6,17 @@
  * - `withTurnInterjection`: wraps one tool without changing its descriptor or failure behavior.
  *
  * Key constructs:
- * - Eve hands `toModelOutput` only the stored output, so the block travels inside the output of
- *   this one call. Every other call keeps its exact output and projection.
+ * - The runtime hands `toModelOutput` only the stored output, so the block travels inside the
+ *   output of this one call. Every other call keeps its exact output and projection.
  * - The lookup is an addition to the result. When it fails, the tool result is returned unchanged
  *   and the waiting message still gets its own ordinary turn, so nothing is lost.
  */
-import { defineTool, type ToolContext, type ToolDefinition, type ToolModelOutput } from "eve/tools";
+import {
+  defineTool,
+  type ToolContext,
+  type ToolDefinition,
+  type ToolModelOutput,
+} from "../../runtime/tool.js";
 
 type AnyToolDefinition = ToolDefinition<any, any>;
 
@@ -39,13 +44,8 @@ function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
   return typeof value === "object" && value !== null && Symbol.asyncIterator in value;
 }
 
-// Eve 0.40 recognizes its control values by `__eve*` brand keys, e.g. `__eveAuthorization`.
-function isEveControlValue(value: unknown): boolean {
-  return typeof value === "object" && value !== null &&
-    Object.keys(value).some((key) => key.startsWith("__eve"));
-}
-
-// Mirrors Eve 0.40 for a tool without its own projection: text stays text, everything else is JSON.
+// Mirrors the runtime (`runtime/turn/tool-calls.ts`) for a tool without its own projection: text
+// stays text, everything else is JSON.
 function defaultModelOutput(output: unknown): ToolModelOutput {
   return typeof output === "string"
     ? { type: "text", value: output }
@@ -79,8 +79,7 @@ export function withTurnInterjection(
         throw error;
       }
       // A streaming tool settles through its own iterator; its final snapshot cannot carry a block.
-      // An Eve control value, such as a sign-in request, must reach the runtime exactly as returned.
-      if (isAsyncIterable(result) || isEveControlValue(result)) return result;
+      if (isAsyncIterable(result)) return result;
       let block: string | null;
       try {
         block = await interjection.collect(ctx);

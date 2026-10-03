@@ -240,7 +240,7 @@ export async function createMemoryClaim(
     (!input.provenance?.sessionId || !input.provenance.turnId)) {
     throw new AppError(
       "AGENT_MEMORY_SYSTEM_PROVENANCE_REQUIRED",
-      "Системная запись памяти требует проверенный контекст выполнения Eve",
+      "Системная запись памяти требует проверенный контекст выполнения хода",
     );
   }
   requireScope(auth, input.scope);

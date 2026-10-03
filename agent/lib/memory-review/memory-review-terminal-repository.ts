@@ -2,7 +2,7 @@
  * Terminal state for interactive and background memory-review batches.
  *
  * Exports:
- * - `memoryReviewTerminalRepository`: replay-safe completion/failure and pre-Eve source release.
+ * - `memoryReviewTerminalRepository`: replay-safe completion/failure and release of sources whose turn never started.
  * - `resolveAbandonedReviewBatch`: the one terminal decision for a turn that never reports.
  * - `terminalizeAbandonedReviewTurns`: last-resort time bound for a turn that went silent.
  * - `advanceCompletedChain`: shared cursor advancement for terminal and operator decisions.
@@ -85,7 +85,7 @@ export type AbandonedReviewOutcome = "counted" | "released" | "skipped" | "block
 
 /**
  * The single terminal decision for a batch whose own turn will never report an outcome: it was
- * cancelled, it never reached Eve, or it went silent. Every such path used to end differently, and
+ * cancelled, it never reached the runtime, or it went silent. Every such path used to end differently, and
  * two of those endings — `failed` and `ambiguous` — hold the lane cursor forever, because
  * `(lane_id, predecessor_sequence)` is unique and `laneBlocked` refuses to reuse that place.
  *
@@ -168,7 +168,7 @@ export async function resolveAbandonedReviewBatch(
 }
 
 /**
- * A running batch holds no lease: once its turn reaches Eve, the batch waits for that turn's own
+ * A running batch holds no lease: once its turn starts, the batch waits for that turn's own
  * terminal event and for nothing else. A turn that never reports back — a lost event, a killed
  * process, a restart in the middle of a pass — would hold its lane forever.
  *
@@ -268,7 +268,7 @@ export const memoryReviewTerminalRepository = {
         return "replayed";
       }
       if (recorded.status === "completed" && exactTurn) {
-        // Eve lifecycle events are at-least-once; an identical terminal replay is a no-op.
+        // Turn lifecycle events are at-least-once; an identical terminal replay is a no-op.
         await client.query("COMMIT");
         return "replayed";
       }
@@ -377,7 +377,7 @@ export const memoryReviewTerminalRepository = {
       if (batch && batch.eve_session_id !== input.eveSessionId && await isRetiredReviewAttempt(client, input)) {
         await client.query("COMMIT"); return "replayed";
       }
-      // Eve lifecycle events are at-least-once, and a released batch leaves no row at all: both
+      // Turn lifecycle events are at-least-once, and a released batch leaves no row at all: both
       // describe the same outcome. A different recorded outcome is a real disagreement about what
       // happened to this turn and fails closed instead of being overwritten.
       if (!batch) {

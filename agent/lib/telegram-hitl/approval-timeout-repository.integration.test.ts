@@ -173,9 +173,14 @@ describeWithDatabase("approval timeout repository", () => {
 
     // Eve overwrites session auth with what the response delivers, so it must be the real context.
     expect(claim!.auth.authenticator).toBe("telegram");
+    const thread = (await database().query<{ thread_id: string }>(
+      "SELECT thread_id FROM conversation_sessions WHERE id = $1", [current.sessionId],
+    )).rows[0]!;
     expect(claim!.auth.attributes).toMatchObject({
       applicationSessionId: current.sessionId,
       memoryScopes: ["personal", "family"],
+      // The continuation turn opens the session's sandbox (to sync its skills) by this id.
+      sandboxSessionId: thread.thread_id,
       telegramActorId: OWNER_TELEGRAM_ID,
     });
   });

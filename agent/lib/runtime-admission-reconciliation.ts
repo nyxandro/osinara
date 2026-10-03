@@ -1,9 +1,12 @@
-/** The single backend reconciles only processes in its own container and exact terminal native sessions. */
+/**
+ * The single backend reconciles admissions of processes in its own container that are gone.
+ * Every admission is held by the process doing the work, for as long as the work runs, so a dead
+ * holder is the only one that never releases itself.
+ */
 import { readFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { database } from "./database.js";
 import { AppError } from "./app-error.js";
-import { readConfiguredEveRunStatus } from "./sessions/workflow-postgres-session-storage.js";
 
 const START_TIME_FIELD_AFTER_COMM = 19;
 async function processStartTicks(pid: number): Promise<string | null> {
@@ -24,7 +27,7 @@ export async function runtimeProcessIdentity() {
   return { hostname: hostname(), pid: process.pid, startTicks };
 }
 
-export async function reconcileRuntimeAdmissions(readStatus = readConfiguredEveRunStatus): Promise<void> {
+export async function reconcileRuntimeAdmissions(): Promise<void> {
   const holders = await database().query<{ id: string; owner_pid: number; owner_start_ticks: string }>(
     `SELECT id,owner_pid,owner_start_ticks FROM runtime_admission_holders
       WHERE eve_session_id IS NULL AND owner_hostname=$1 AND owner_pid IS NOT NULL ORDER BY created_at LIMIT 100`, [hostname()]);
@@ -35,12 +38,5 @@ export async function reconcileRuntimeAdmissions(readStatus = readConfiguredEveR
       AND EXISTS(SELECT 1 FROM runtime_maintenance WHERE singleton AND phase<>'frozen')
       AND owner_hostname=$2 AND owner_pid=$3 AND owner_start_ticks=$4`, [holder.id,hostname(),holder.owner_pid,holder.owner_start_ticks]);
     if (deleted.rowCount) console.info(JSON.stringify({ code: "AGENT_RUNTIME_DEAD_PROCESS_RECONCILED", holderId: holder.id }));
-  }
-  const sessions = await database().query<{ eve_session_id: string }>(`SELECT DISTINCT eve_session_id FROM runtime_admission_holders
-    WHERE eve_session_id IS NOT NULL ORDER BY eve_session_id LIMIT 100`);
-  for (const row of sessions.rows) {
-    const status = await readStatus(row.eve_session_id);
-    if (status !== "completed" && status !== "failed" && status !== "cancelled") continue;
-    await database().query("DELETE FROM runtime_admission_holders WHERE eve_session_id=$1 AND EXISTS(SELECT 1 FROM runtime_maintenance WHERE singleton AND phase<>'frozen')", [row.eve_session_id]);
   }
 }

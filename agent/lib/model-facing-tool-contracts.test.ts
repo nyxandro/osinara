@@ -11,7 +11,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
-import { bash, glob, grep, readFile, writeFile } from "eve/tools/defaults";
+import { askQuestion, bash, glob, grep, loadSkill, readFile, todo, writeFile } from "../runtime/tools/defaults.js";
+import { agentTool } from "../runtime/tools/delegate.js";
 
 import { buildMemoryReviewToolSurface } from "./memory-review/memory-review-tool-surface.js";
 import { EXTERNAL_GROUP_TOOL_NAMES } from "./tool-policy/group-tool-catalog.js";
@@ -28,8 +29,11 @@ const REQUIRED_CORE_RULES = [
   "только по успешному результату инструмента",
   "sideEffectStatus",
 ] as const;
-const TOTAL_DESCRIPTION_MAX_CHARACTERS = 25_000;
-const NATIVE_DESCRIPTIONS = new Set([bash, glob, grep, readFile, writeFile].map((definition) => definition.description));
+// Raised from 25 000 for `manage_skill` (family skills), whose procedure lives in the owner's
+// private-chat instructions so that its own description stays short.
+const TOTAL_DESCRIPTION_MAX_CHARACTERS = 25_300;
+// The runtime's built-ins were in every Eve prompt anyway; the budget is the application's own.
+const NATIVE_DESCRIPTIONS = new Set([agentTool, askQuestion, bash, glob, grep, loadSkill, readFile, todo, writeFile].map((definition) => definition.description));
 
 function surfaces() {
   const externalInput = {
@@ -37,7 +41,7 @@ function surfaces() {
     environment: "external" as const,
     includeApplicationCore: true,
     scheduledHistory: false,
-    skills: {},
+    skills: new Set<string>(),
   };
   return {
     external: buildModeToolSurface(externalInput),

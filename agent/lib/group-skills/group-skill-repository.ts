@@ -3,11 +3,14 @@
  *
  * Exports:
  * - `GroupSkillPolicyRepository`: injectable exact-group allowlist contract.
- * - `groupSkillPolicyRepository`: fail-closed production implementation.
+ * - `groupSkillPolicyRepository`: fail-closed production implementation. It returns the skills the
+ *   group's list grants that still exist now: built-in ones and the family's enabled ones. A family
+ *   skill the owner disabled or deleted drops out of the result while the stored list stays as is.
  */
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
 import {
+  isGroupSafeSkillName,
   parseGroupSkillAllowlist,
   type GroupSafeSkillName,
 } from "./group-skill-catalog.js";
@@ -18,8 +21,11 @@ export interface GroupSkillPolicyRepository {
 
 export const groupSkillPolicyRepository: GroupSkillPolicyRepository = {
   async loadGroupSkillAllowlist(groupId) {
-    const result = await database().query<{ skill_allowlist: string[] }>(
-      "SELECT skill_allowlist FROM telegram_groups WHERE id = $1",
+    const result = await database().query<{ family_skills: string[]; skill_allowlist: string[] }>(
+      `SELECT g.skill_allowlist,
+              ARRAY(SELECT s.name FROM family_skills s WHERE s.family_id = g.family_id AND s.enabled) AS family_skills
+         FROM telegram_groups g
+        WHERE g.id = $1`,
       [groupId],
     );
     const row = result.rows[0];
@@ -36,6 +42,7 @@ export const groupSkillPolicyRepository: GroupSkillPolicyRepository = {
         "Политика skills группы повреждена. Обратитесь к владельцу агента",
       );
     }
-    return allowed;
+    const family = new Set(row.family_skills);
+    return new Set([...allowed].filter((name) => isGroupSafeSkillName(name) || family.has(name)));
   },
 };

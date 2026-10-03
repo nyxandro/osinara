@@ -16,7 +16,7 @@
  * - Forum replies inherit routing from the referenced bot message, not a newly assigned thread.
  * - Each accepted turn receives one trusted UTC clock snapshot shared by repository reads.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { describe, expect, it, vi } from "vitest";
 
 import {

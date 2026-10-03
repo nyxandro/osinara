@@ -10,7 +10,7 @@ import {
   answerTelegramCallbackQuery,
   callTelegramApi,
   editTelegramMessageReplyMarkup,
-} from "eve/channels/telegram";
+} from "../../runtime/telegram/api.js";
 import { z } from "zod";
 
 import { SOFTWARE_UPDATE_HTTP_TIMEOUT_MS } from "../../config.js";
@@ -214,7 +214,7 @@ function productionTransport(): SoftwareUpdateTelegramTransport {
   });
 }
 
-// Configuration remains lazy so Eve discovery and build do not require runtime secrets.
+// Configuration remains lazy so builds do not require runtime secrets.
 export const softwareUpdateTelegramTransport: SoftwareUpdateTelegramTransport = {
   answerCallback: (input) => productionTransport().answerCallback(input),
   editProposal: (input) => productionTransport().editProposal(input),

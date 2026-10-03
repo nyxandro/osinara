@@ -1,5 +1,5 @@
 /**
- * Common model-facing execution boundary for Eve tools.
+ * Common model-facing execution boundary for application tools.
  *
  * Exports:
  * - `wrapModelFacingTool`: preserves a descriptor while normalizing every thrown error and records
@@ -10,7 +10,7 @@
  *   only what is specific to its own tool.
  * - `wrapModelFacingToolMap`: applies the boundary once to a complete mode-scoped surface.
  */
-import { defineTool, type ToolDefinition } from "eve/tools";
+import { defineTool, type ToolDefinition } from "../runtime/tool.js";
 
 import { AppError } from "./app-error.js";
 import { normalizeModelFacingError } from "./model-facing-error.js";
@@ -44,7 +44,8 @@ export function wrapModelFacingTool(
       } catch (error) {
         outcome = "failed";
         const normalized = normalizeModelFacingError(error, { toolName });
-        // The single structured record of a failed call: Eve skips its stack for expected refusals.
+        // The single structured record of a failed call: the runtime does not log expected refusals
+        // again (`runtime/turn/tool-calls.ts`).
         failure = { errorCode: normalized.contract.code };
         if (error instanceof AppError && error.details !== undefined) failure.errorDetails = error.details;
         throw normalized;

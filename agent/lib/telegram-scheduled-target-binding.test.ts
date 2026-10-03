@@ -11,7 +11,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const dependencies = vi.hoisted(() => ({
   authorizeDelivery: vi.fn(),
-  channelConfig: null as Record<string, any> | null,
   clearApprovals: vi.fn(),
   completeDeliveredRun: vi.fn(),
   completeSilentRun: vi.fn(),
@@ -38,12 +37,6 @@ const dependencies = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("eve/channels/telegram", () => ({
-  telegramChannel: (config: Record<string, any>) => {
-    dependencies.channelConfig = config;
-    return config;
-  },
-}));
 vi.mock("./agent-schedules/agent-schedule-dispatch-repository.js", () => ({
   agentScheduleDispatchRepository: {
     authorizeDelivery: dependencies.authorizeDelivery,
@@ -97,10 +90,10 @@ vi.mock("./memory-turn-source.js", () => ({
 // A scheduled run never carries a memory-review batch, but the channel now resolves that binding
 // from the database instead of the message authorization, so the lookup has to be answered.
 vi.mock("./memory-review/memory-review-repository.js", () => ({
-  memoryReviewRepository: { batchIdForTurn: vi.fn(async () => null) },
+  memoryReviewRepository: { batchForTurn: vi.fn(async () => null) },
 }));
 
-await import("../channels/telegram.js");
+const { telegramTurnEvents } = await import("../channels/telegram.js");
 const { AppError } = await import("./app-error.js");
 const { isScheduledSession } = await import("./agent-schedules/scheduled-session.js");
 
@@ -146,7 +139,7 @@ describe("scheduled Telegram target binding", () => {
   });
 
   it("rejects a completed result before authorization or Telegram delivery when chat differs", async () => {
-    const handler = dependencies.channelConfig?.events?.["message.completed"];
+    const handler = (telegramTurnEvents as Record<string, any>)["message.completed"];
 
     await expect(handler(
       { finishReason: "stop", message: "Секретная сводка" },
@@ -168,7 +161,7 @@ describe("scheduled Telegram target binding", () => {
       output: { kind: "silence" },
     };
     dependencies.completeSilentRun.mockResolvedValue(true);
-    const handler = dependencies.channelConfig?.events?.["message.completed"];
+    const handler = (telegramTurnEvents as Record<string, any>)["message.completed"];
 
     await handler({ finishReason: "stop", message: null }, matchingChannel(), context);
 
@@ -187,7 +180,7 @@ describe("scheduled Telegram target binding", () => {
       declaration: { answer: "", declared: false, memoryRefs: [] },
       output: { kind: "silence" },
     };
-    const handler = dependencies.channelConfig?.events?.["message.completed"];
+    const handler = (telegramTurnEvents as Record<string, any>)["message.completed"];
     try {
       await handler({ finishReason: "stop", message: null }, matchingChannel(), context);
     } finally {
@@ -198,7 +191,7 @@ describe("scheduled Telegram target binding", () => {
   });
 
   it("rejects a completed result when only the Telegram topic differs", async () => {
-    const handler = dependencies.channelConfig?.events?.["message.completed"];
+    const handler = (telegramTurnEvents as Record<string, any>)["message.completed"];
     const channel = matchingChannel();
     channel.telegram.messageThreadId = 78;
 
@@ -213,7 +206,7 @@ describe("scheduled Telegram target binding", () => {
   });
 
   it("normalizes and accepts the exact persisted chat and topic before delivery", async () => {
-    const handler = dependencies.channelConfig?.events?.["message.completed"];
+    const handler = (telegramTurnEvents as Record<string, any>)["message.completed"];
 
     await expect(handler(
       { finishReason: "stop", message: "Секретная сводка" },
@@ -226,7 +219,7 @@ describe("scheduled Telegram target binding", () => {
   });
 
   it("persists the primary scheduled delivery error before the terminal fallback runs", async () => {
-    const handler = dependencies.channelConfig?.events?.["message.completed"];
+    const handler = (telegramTurnEvents as Record<string, any>)["message.completed"];
     dependencies.deliverFinalOutput.mockRejectedValueOnce(new AppError(
       "AGENT_TELEGRAM_MESSAGE_DELIVERY_AMBIGUOUS",
       "Telegram не подтвердил доставку",
@@ -247,7 +240,7 @@ describe("scheduled Telegram target binding", () => {
   });
 
   it("preserves the primary delivery error when terminal persistence also fails", async () => {
-    const handler = dependencies.channelConfig?.events?.["message.completed"];
+    const handler = (telegramTurnEvents as Record<string, any>)["message.completed"];
     const deliveryError = new AppError(
       "AGENT_TELEGRAM_MESSAGE_DELIVERY_AMBIGUOUS",
       "Telegram не подтвердил доставку",
@@ -269,7 +262,7 @@ describe("scheduled Telegram target binding", () => {
   });
 
   it("fails a mismatched run without sending its failure notification to another chat", async () => {
-    const handler = dependencies.channelConfig?.events?.["turn.failed"];
+    const handler = (telegramTurnEvents as Record<string, any>)["turn.failed"];
 
     await handler(
       { code: "AGENT_MODEL_FAILED" },
@@ -300,7 +293,7 @@ describe("scheduled Telegram target binding", () => {
   });
 
   it("terminalizes a matching group run without publishing a failure message", async () => {
-    const handler = dependencies.channelConfig?.events?.["turn.failed"];
+    const handler = (telegramTurnEvents as Record<string, any>)["turn.failed"];
 
     await handler(
       { code: "AGENT_MODEL_FAILED" },

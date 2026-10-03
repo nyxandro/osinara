@@ -5,7 +5,7 @@
  * - `createTelegramAttachmentMaterializer`: resolves one opaque reference and persists its bytes.
  * - `materializeTelegramAttachment`: production registered-group journal to workspace pipeline.
  */
-import type { TelegramAttachment } from "eve/channels/telegram";
+import type { TelegramAttachment } from "../../runtime/telegram/inbound.js";
 
 import { telegramGroupAttachmentRepository } from "./telegram-group-attachment-repository.js";
 import { workspaceBinaryRepository } from "../workspaces/workspace-binary-repository.js";

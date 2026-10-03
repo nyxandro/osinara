@@ -2,23 +2,24 @@
  * Agent schedule dispatch orchestration.
  *
  * Exports:
- * - `createAgentScheduleDispatcher`: injectable deterministic lease-to-Eve handoff processor.
- * - `dispatchDueAgentSchedules`: production dispatcher used by the Eve minute schedule.
+ * - `createAgentScheduleDispatcher`: injectable deterministic lease-to-turn handoff processor.
+ * - `dispatchDueAgentSchedules`: production dispatcher used by the minute schedule.
+ * - `ScheduledChatStart`: starts the run's turn in its own session of the target chat.
  *
  * A conversation occurrence is not started here: it waits in its chat's queue and runs as a turn of
  * that chat's own conversation once the queue is free.
  */
-import { telegramContinuationToken } from "eve/channels/telegram";
-import type { ScheduleToFn } from "eve/schedules";
+import type { SessionAuthContext } from "../../runtime/context.js";
+import { telegramContinuationToken } from "../../runtime/telegram/api.js";
+import type { TelegramReceiveTarget } from "../../runtime/telegram/telegram-channel.js";
 
-import telegram from "../../channels/telegram.js";
 import { AGENT_SCHEDULE_DISPATCH_BATCH_SIZE, AGENT_SCHEDULE_DISPATCH_LEASE_MILLISECONDS } from "./agent-schedule-config.js";
 import { type ClaimedAgentSchedule, agentScheduleDispatchRepository } from "./agent-schedule-dispatch-repository.js";
 import { scheduledGroupHistorySnapshotRepository } from "./scheduled-group-history-snapshot-repository.js";
 import { numericMessageThreadId } from "./agent-schedule-validation.js";
 import { sessionRepository, type PreparedSession } from "../sessions/session-repository.js";
 import { isDatabaseUnavailable, recoverDatabaseBookkeeping } from "../database-recovery.js";
-import { EVE_EMPTY_DELIVERY_MARKER } from "../eve-empty-delivery.js";
+import { EMPTY_DELIVERY_MARKER } from "../../runtime/turn/step-history.js";
 import { localScheduledTime } from "../scheduling/local-time.js";
 import { conversationWakeupRepository } from "../conversation-wakeups/conversation-wakeup-repository.js";
 
@@ -36,8 +37,15 @@ interface AgentScheduleDispatcherDependencies {
   prepareHistory(job: ClaimedAgentSchedule): Promise<unknown>;
   prepareSession(job: ClaimedAgentSchedule, baseContinuationToken: string, now: Date): Promise<PreparedSession>;
   repository: AgentScheduleDispatcherRepository;
-  to: ScheduleToFn;
+  startInChat: ScheduledChatStart;
 }
+
+/** Starts the run's turn in its chat; the turn then runs in the background. */
+export type ScheduledChatStart = (
+  target: TelegramReceiveTarget,
+  message: string,
+  options: { readonly auth: SessionAuthContext },
+) => Promise<{ readonly sessionId: string }>;
 
 function memoryScopes(job: ClaimedAgentSchedule): Array<"family" | "group" | "personal"> {
   if (job.scope === "personal") return ["personal", "family"];
@@ -61,7 +69,7 @@ function scheduledRunPrompt(job: ClaimedAgentSchedule): string {
   return [
     "Выполни запланированный агентный сценарий для Telegram.",
     "Не пиши промежуточные статусы и не описывай процесс. Итоговый ответ должен быть готовым сообщением для пользователя.",
-    `Если сценарий велит ничего не присылать, когда сообщить нечего, и сейчас именно такой случай, заверши запуск ровно строкой ${EVE_EMPTY_DELIVERY_MARKER} без другого текста: это успешный запуск без сообщения, а не ошибка. Так можно, только если в этом запуске ты ничего не отправил, в том числе файлом. Любая фраза вроде «новостей нет» уйдёт в чат сообщением.`,
+    `Если сценарий велит ничего не присылать, когда сообщить нечего, и сейчас именно такой случай, заверши запуск ровно строкой ${EMPTY_DELIVERY_MARKER} без другого текста: это успешный запуск без сообщения, а не ошибка. Так можно, только если в этом запуске ты ничего не отправил, в том числе файлом. Любая фраза вроде «новостей нет» уйдёт в чат сообщением.`,
     "Если обязательной авторизации или данных не хватает, задай один понятный вопрос или сообщи конкретную ошибку.",
     "Сбой одной зависимости не отменяет независимые части задания. В результате явно отдели проверенные сведения от недоступных разделов; не объявляй неполную задачу полностью выполненной.",
     "<scheduled_agent_run>",
@@ -169,17 +177,15 @@ async function dispatchOne(dependencies: AgentScheduleDispatcherDependencies, jo
     return;
   }
   try {
-    // `to(...).send(...)` keeps channel selection and receive execution inside Eve's native source.
-    const session = await dependencies
-      .to(telegram, {
-        chatId: job.telegramChatId,
-        conversationId: scheduledConversationId(job),
-        ...(job.messageThreadId === null ? {} : { messageThreadId: numericMessageThreadId(job.messageThreadId) }),
-      })
-      .send(scheduledRunPrompt(job), { auth: scheduledAuth(job, prepared) });
+    // The run gets its own session at its own address in the chat, as a separate conversation.
+    const started = await dependencies.startInChat({
+      chatId: job.telegramChatId,
+      conversationId: scheduledConversationId(job),
+      ...(job.messageThreadId === null ? {} : { messageThreadId: numericMessageThreadId(job.messageThreadId) }),
+    }, scheduledRunPrompt(job), { auth: scheduledAuth(job, prepared) });
     await recoverDatabaseBookkeeping(() => dependencies.repository.markRunning(job, {
       applicationSessionId: prepared.id,
-      eveSessionId: session.id,
+      eveSessionId: started.sessionId,
     }));
   } catch (error) {
     if (isDatabaseUnavailable(error)) throw error;
@@ -225,7 +231,7 @@ export function createAgentScheduleDispatcher(dependencies: AgentScheduleDispatc
   };
 }
 
-export function dispatchDueAgentSchedules(to: ScheduleToFn, now = new Date()): Promise<number> {
+export function dispatchDueAgentSchedules(startInChat: ScheduledChatStart, now = new Date()): Promise<number> {
   return createAgentScheduleDispatcher({
     discardSession: (applicationSessionId) => sessionRepository.retireUnstartedScheduledSession(applicationSessionId),
     enqueueConversation: (job) => conversationWakeupRepository.enqueue(job),
@@ -247,6 +253,6 @@ export function dispatchDueAgentSchedules(to: ScheduleToFn, now = new Date()): P
         userId: job.scope === "personal" ? job.authorUserId : null,
       }),
     repository: agentScheduleDispatchRepository,
-    to,
+    startInChat,
   })();
 }

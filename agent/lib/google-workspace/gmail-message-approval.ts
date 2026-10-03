@@ -3,7 +3,7 @@
  *
  * Every provider read is bound to the same verified profile and immutable message IDs as execution.
  */
-import type { SessionContext } from "eve/context";
+import type { SessionContext } from "../../runtime/context.js";
 import { z } from "zod";
 
 import { AppError, isAppError } from "../app-error.js";

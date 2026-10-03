@@ -159,7 +159,7 @@ export const familyRepository: FamilyRepository = {
     try {
       await client.query("BEGIN");
 
-      // Lock current membership so a stale Eve approval cannot race an owner-role revocation.
+      // Lock current membership so a stale approval cannot race an owner-role revocation.
       const owner = await client.query(
         `SELECT 1
          FROM family_memberships
@@ -171,7 +171,7 @@ export const familyRepository: FamilyRepository = {
         throw new AppError("AGENT_OWNER_REQUIRED", "Это действие доступно только владельцу");
       }
 
-      // A code derived from callId is reproducible after Eve replays an interrupted tool step.
+      // A code derived from callId is reproducible if the same tool call is executed again.
       const generated = createInvitationCodeForOperation(
         `${familyId}:${createdBy}:${operationKey}`,
         requireInvitationSigningSecret(),

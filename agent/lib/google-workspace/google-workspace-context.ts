@@ -1,11 +1,11 @@
 /**
- * Google Workspace profile actor derived from the active Eve caller.
+ * Google Workspace profile actor derived from the active session caller.
  *
  * Exports:
  * - `requireGoogleWorkspaceConnectionActor`: verified personal or family profile actor.
  * - `resolveGoogleWorkspaceAuthorization`: resolves the exact current workspace ID.
  */
-import type { SessionContext } from "eve/context";
+import type { SessionContext } from "../../runtime/context.js";
 
 import { AppError } from "../app-error.js";
 import { resolveSessionCaller } from "../session-auth.js";

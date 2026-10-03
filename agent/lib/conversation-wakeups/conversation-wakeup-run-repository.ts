@@ -2,7 +2,7 @@
  * Run lifecycle of a wake-up turn inside its chat's own conversation.
  *
  * Export:
- * - `conversationWakeupRunRepository`: binds the Eve turn to its run and closes the run when that
+ * - `conversationWakeupRunRepository`: binds the turn to its run and closes the run when that
  *   turn completes, fails, or is cancelled.
  *
  * The run is closed by the same completion logic as every scheduled run: it counts the execution,

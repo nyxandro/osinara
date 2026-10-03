@@ -4,7 +4,7 @@
  * Export:
  * - `telegramReplyAttachmentTarget`: parses one exact-chat/topic reply target without model input.
  */
-import { parseTelegramUpdate, type TelegramMessage } from "eve/channels/telegram";
+import { parseTelegramUpdate, type TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import type { RegisteredGroup } from "./family-access.js";
 import { classifyTelegramInboundMedia } from "./telegram-message-policy.js";
@@ -16,7 +16,7 @@ export function telegramReplyAttachmentTarget(
   const rawReply = message.raw.reply_to_message;
   if (!rawReply || typeof rawReply !== "object" || Array.isArray(rawReply)) return null;
 
-  // Reuse Eve's installed parser, then bind every identity field back to the verified current
+  // Reuse the channel's parser (`runtime/telegram/inbound.ts`), then bind every identity field back to the verified current
   // reply reference. Nested webhook data can never select another chat or topic.
   const parsed = parseTelegramUpdate({ message: rawReply, update_id: 0 });
   if (parsed?.kind !== "message" || !message.replyToMessage) return null;

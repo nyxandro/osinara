@@ -1,4 +1,4 @@
-/** Translate trusted Eve failure envelopes into a small, explicit recovery contract. */
+/** Translate trusted runtime failure envelopes into a small, explicit recovery contract. */
 export const RECOVERABLE_MODEL_CODES = [
   "AGENT_MODEL_FIRST_CHUNK_TIMEOUT", "AGENT_MODEL_STREAM_TIMEOUT",
   "AGENT_MODEL_OUTPUT_INCOMPLETE", "AGENT_MODEL_TEMPORARILY_UNAVAILABLE",
@@ -14,7 +14,7 @@ export function recoverableModelFailureCode(data: {
 }): RecoverableModelCode | null {
   if (isRecoverableModelCode(data.code)) return data.code;
   if (data.code !== "MODEL_CALL_FAILED") return null;
-  // Eve's catalog classifies socket/DNS/connection failures even when no HTTP status exists.
+  // The runtime's catalog classifies socket/DNS/connection failures even when no HTTP status exists.
   if (data.details?.semanticErrorId === "network-request-failed") return "AGENT_MODEL_TEMPORARILY_UNAVAILABLE";
   if (data.details?.semanticErrorId === "empty-model-response") return "AGENT_MODEL_OUTPUT_INCOMPLETE";
   for (const code of RECOVERABLE_MODEL_CODES) {

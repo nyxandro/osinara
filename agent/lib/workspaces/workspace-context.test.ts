@@ -1,5 +1,5 @@
 /** Group workspace authorization must not depend on whether a participant is a human or a bot. */
-import type { SessionAuthContext, SessionContext } from "eve/context";
+import type { SessionAuthContext, SessionContext } from "../../runtime/context.js";
 import { describe, expect, it } from "vitest";
 
 import { requireWorkspaceAuthorization } from "./workspace-context.js";

@@ -1,5 +1,5 @@
 /**
- * External-group reminder authorization derived from verified Eve Telegram session auth.
+ * External-group reminder authorization derived from verified Telegram session auth.
  *
  * Exports:
  * - `GroupReminderAuthorization`: trusted Telegram author and current group destination.
@@ -11,7 +11,7 @@
  *   stored against it at all.
  * - Group-scoped proactive delivery is chat-level by contract, so no forum topic is carried here.
  */
-import type { SessionContext } from "eve/context";
+import type { SessionContext } from "../../runtime/context.js";
 
 import { AppError } from "../app-error.js";
 import { resolveConversationEnvironment } from "../conversation-environment.js";

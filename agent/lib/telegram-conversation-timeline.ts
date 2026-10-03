@@ -4,7 +4,7 @@
  * Exports:
  * - `bindTelegramConversationTimeline`: resolves trust boundary and stores authorized private input.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import { AppError } from "./app-error.js";
 import type { conversationRepository } from "./conversation-repository.js";

@@ -9,7 +9,7 @@
  * - Each schedule persists an explicit safe capability subset and optional retained-history window.
  * - Approval and execution share one non-throwing parser; only execution rethrows invalid input.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import {
@@ -299,6 +299,8 @@ const TOOL_DESCRIPTION = [
 ].join(" ");
 
 export default defineTool({
+  // Repeating it after a crash is safe: its effect is keyed on the call id.
+  replaySafe: true,
   approval: ({ toolInput }) => {
     const result = parseInput(toolInput);
     if (!result.success) return { reason: result.error.message, type: "denied" };

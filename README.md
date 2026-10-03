@@ -9,7 +9,7 @@
   <a href="https://github.com/nyxandro/osinara/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/nyxandro/osinara?style=flat-square&label=release"></a>
   <img alt="Node.js" src="https://img.shields.io/badge/Node.js-24.x-339933?style=flat-square&logo=node.js&logoColor=white">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-7.0-3178C6?style=flat-square&logo=typescript&logoColor=white">
-  <img alt="Eve" src="https://img.shields.io/badge/Eve-0.40.0-111827?style=flat-square">
+  <img alt="AI SDK" src="https://img.shields.io/badge/AI%20SDK-7.0.60-111827?style=flat-square">
   <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-pgvector%2017-4169E1?style=flat-square&logo=postgresql&logoColor=white">
 </p>
 
@@ -40,7 +40,7 @@ Osinara — self-hosted агент, который живёт в Telegram и р�
 | Изображения | Root-agent создаёт одно WebP через `gpt-image-2`, сохраняет его в authorized workspace и доставляет в Telegram без скрытых повторов; внешней группе capability выдаёт владелец из личного чата. |
 | Google Workspace | Native `gws` skills для Gmail, Calendar, Drive, Docs, Sheets и People через workspace-bound OAuth credentials. |
 | Sandbox | Долгоживущие Docker sandbox sessions с scoped mounts, isolated tools volume, egress proxy и fail-closed policy. |
-| Оркестрация | В trusted private/family режимах root-agent делегирует большие задачи нативному Eve `agent` со свежим контекстом и теми же разрешёнными tools, skills, connections, sandbox и workspace; во внешних группах child delegation запрещена. |
+| Оркестрация | В trusted private/family режимах root-agent делегирует большие задачи подагенту `agent` со свежим контекстом и теми же разрешёнными tools, skills, connections, sandbox и workspace; во внешних группах child delegation запрещена. |
 | Production | Immutable GitHub releases, GHCR digest images, Telegram approval перед deploy, systemd timer на сервере. |
 
 ---
@@ -177,7 +177,7 @@ osinara config     # конфигурация модели и провайдер
 ## Локальная разработка
 
 ```bash
-npm ci                      # postinstall применяет локальные Eve-патчи
+npm ci
 cp .env.example .env        # заполнить обязательные секреты
 docker compose up --build   # edge: http://localhost:8080
 ```
@@ -202,7 +202,7 @@ docker compose -f compose.test.yaml up --build --abort-on-container-exit --exit-
 
 ## Стек
 
-TypeScript на Node 24 · [Eve](https://eve.dev/docs) `0.40.0` · PostgreSQL 17 + pgvector ·
+TypeScript на Node 24 · собственное ядро агента на [AI SDK](https://ai-sdk.dev) `7.0.60` · PostgreSQL 17 + pgvector ·
 Docker Compose · Groq Whisper · локальные эмбеддинги E5 · Telegram как единственный канал.
 
 Архитектурные заметки и рантбуки — в [`docs/`](docs/), правила разработки — в [`AGENTS.md`](AGENTS.md),

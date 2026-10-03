@@ -6,7 +6,7 @@
  * - Execution uses only verified private-owner identity and returns the persisted policy contract.
  * - Subscription-coupled capabilities are grantable only while their model provider is active.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { updatePolicy } = vi.hoisted(() => ({ updatePolicy: vi.fn() }));

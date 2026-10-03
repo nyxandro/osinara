@@ -6,7 +6,7 @@
  * - `PRIVATE_ONLY_TOOLS`, `FAMILY_ONLY_TOOLS`: trust-zone-specific definitions.
  * - Sorted tool-name arrays used by policy contracts.
  */
-import type { ToolDefinition } from "eve/tools";
+import type { ToolDefinition } from "../../runtime/tool.js";
 
 import executeGoogleWorkspace from "../tools/execute_google_workspace.js";
 import exportMemory from "../tools/export_memory.js";
@@ -34,6 +34,7 @@ import manageMemoryConflict from "../tools/manage_memory_conflict.js";
 import manageMemoryThread from "../tools/manage_memory_thread.js";
 import manageProfileProjection from "../tools/manage_profile_projection.js";
 import manageReminder from "../tools/manage_reminder.js";
+import manageSkill from "../tools/manage_skill.js";
 import manageTelegramGroup from "../tools/manage_telegram_group.js";
 import notificationSettings from "../tools/notification_settings.js";
 import readMemoryThread from "../tools/read_memory_thread.js";
@@ -91,6 +92,7 @@ export const PRIVATE_ONLY_TOOLS: ToolMap = {
   manage_external_group_schedule: manageExternalGroupSchedule as unknown as AnyToolDefinition,
   manage_family_invitation: manageFamilyInvitation as unknown as AnyToolDefinition,
   manage_profile_projection: manageProfileProjection as unknown as AnyToolDefinition,
+  manage_skill: manageSkill as unknown as AnyToolDefinition,
   manage_telegram_group: manageTelegramGroup as unknown as AnyToolDefinition,
   notification_settings: notificationSettings as unknown as AnyToolDefinition,
 };

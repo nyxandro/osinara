@@ -8,7 +8,7 @@
  * - Object-shaped model schema avoids fragile root action unions.
  * - Action validators keep memory mutations fail-closed on malformed model payloads.
  */
-import { defineTool, type ToolContext } from "eve/tools";
+import { defineTool, type ToolContext } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { MEMORY_CONTENT_MAX_LENGTH } from "../memory-config.js";
@@ -149,6 +149,8 @@ function currentProvenance(session: { id: string; turn: { id: string } }) {
 const TOOL_PRESENTATION = manageMemoryPresentation(MANAGE_MEMORY_ACTIONS);
 
 export default defineTool({
+  // Repeating it after a crash is safe: its effect is keyed on the call id.
+  replaySafe: true,
   approval: async ({ session, toolInput }) => {
     const parsed = requireManageMemoryInput(toolInput);
     const authorization = requireMemoryAuthorization({ session });

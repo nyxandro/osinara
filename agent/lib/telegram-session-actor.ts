@@ -1,5 +1,5 @@
 /**
- * Telegram actor recovery from verified Eve session auth.
+ * Telegram actor recovery from verified session auth.
  *
  * Exports:
  * - `TelegramSessionActor`: normalized durable user, bot, or channel actor identity.
@@ -7,7 +7,7 @@
  * - `isTelegramChannelSession`: exact channel-service predicate for authorization boundaries.
  * - `accountlessActorApprovalError`: refusal for an actor that no human can answer for.
  */
-import type { SessionAuth } from "eve/context";
+import type { SessionAuth } from "../runtime/context.js";
 
 import { AppError } from "./app-error.js";
 import type { TelegramActorKind } from "./telegram-inbound-actor.js";

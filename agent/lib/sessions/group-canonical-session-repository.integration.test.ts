@@ -210,7 +210,7 @@ describeWithDatabase("canonical group session repository", () => {
     )).resolves.toMatchObject({ rowCount: 1 });
   });
 
-  it.each(["completed", "failed", "continuation"] as const)(
+  it.each(["completed", "failed"] as const)(
     "rolls back %s terminal state and route deletion when retirement audit fails",
     async (terminalPath) => {
     const f = await fixture();
@@ -241,12 +241,7 @@ describeWithDatabase("canonical group session repository", () => {
     try {
       const terminal = terminalPath === "completed"
         ? sessionRepository.recordTurnCompleted(canonical.id, "wrun_atomic_terminal", false, true)
-        : terminalPath === "failed"
-        ? sessionRepository.recordTurnFailed(canonical.id, "wrun_atomic_terminal")
-        : sessionRepository.recordSessionFailedByContinuationToken(
-          canonical.continuationToken,
-          "wrun_atomic_terminal",
-        );
+        : sessionRepository.recordTurnFailed(canonical.id, "wrun_atomic_terminal");
       await expect(terminal).rejects.toThrow("forced retirement audit failure");
       await expect(database().query(
         `SELECT 1 FROM conversation_sessions

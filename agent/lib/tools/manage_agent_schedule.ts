@@ -9,7 +9,7 @@
  * - Exact nested recurrence variants describe one-time and minute-to-year schedules.
  * - A semantic parser validates execution input before trusted boundaries run.
  */
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import {
@@ -374,6 +374,8 @@ const TOOL_DESCRIPTION = [
 ].join(" ");
 
 export default defineTool({
+  // Repeating it after a crash is safe: its effect is keyed on the call id.
+  replaySafe: true,
   description: TOOL_DESCRIPTION,
   inputSchema: manageAgentScheduleSchema,
   async execute(input, ctx) {

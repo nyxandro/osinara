@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { TelegramDrainContext } from "eve/channels/telegram";
+import type { DurableIngressDependencies } from "./telegram-durable-ingress.js";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDatabase, database } from "./database.js";
 import { telegramIngressRepository as repository } from "./telegram-ingress-repository.js";
@@ -7,7 +7,6 @@ import { createTelegramDurableIngress } from "./telegram-durable-ingress.js";
 import { createTelegramMessageHandler } from "./telegram-on-message.js";
 import { repositories, telegramContext } from "./telegram-on-message.test-fixtures.js";
 import { createTelegramWorkspaceAttachmentImporter } from "./attachments/telegram-workspace-attachments.js";
-import { correlatedDispatch } from "./telegram-ingress.test-fixtures.js";
 import { NO_BURSTS } from "./telegram-ingress.test-fixtures.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
@@ -27,19 +26,19 @@ async function ready() {
 }
 const lease = 60_000;
 
-async function drain(dispatch: TelegramDrainContext["dispatch"], notifyTimeout = vi.fn()) {
+async function drain(dispatch: DurableIngressDependencies["dispatch"], notifyTimeout = vi.fn()) {
   const ingress = createTelegramDurableIngress({ reportFailure: notifyTimeout, repository, botUsername: "osinara_bot", leaseMilliseconds: lease,
-    acceptMedia: vi.fn(), authorizeVoice: vi.fn(), handleSoftwareUpdateCallback: vi.fn(), transcribeVoice: vi.fn(),
+    acceptMedia: vi.fn(), authorizeVoice: vi.fn(), dispatch, handleSoftwareUpdateCallback: vi.fn(),
+    runTurn: vi.fn().mockResolvedValue({ status: "completed", text: "готово" }), transcribeVoice: vi.fn(),
   });
   const tasks: Promise<unknown>[] = [];
-  await ingress.drain({ attachSession: vi.fn(), dispatch: correlatedDispatch(dispatch),
-    waitUntil(task) { tasks.push(task); } });
+  await ingress.drain({ waitUntil(task) { tasks.push(task); } });
   await Promise.all(tasks);
 }
 
 (enabled ? describe : describe.skip)("durable private Telegram albums", () => {
   beforeEach(async () => {
-    await database().query("TRUNCATE telegram_ingress_queues, telegram_ingress_ignored_updates, eve_session_event_cursors CASCADE");
+    await database().query("TRUNCATE telegram_ingress_queues, telegram_ingress_ignored_updates CASCADE");
   });
   afterAll(closeDatabase);
 
@@ -54,13 +53,11 @@ async function drain(dispatch: TelegramDrainContext["dispatch"], notifyTimeout =
     });
     const handleMessage = createTelegramMessageHandler({ ...dependencies, attachments });
     const context = telegramContext();
-    const dispatch = vi.fn<TelegramDrainContext["dispatch"]>(async update => {
+    const dispatch = vi.fn<DurableIngressDependencies["dispatch"]>(async update => {
       if (update.kind !== "message") throw new Error("Expected album");
       const result = await handleMessage(context.context, update.message);
       expect(result).not.toBeNull();
-      return { id: "album-session", getEventStream: async () => new ReadableStream({ start(controller) {
-        controller.enqueue({ type: "session.waiting" }); controller.close();
-      } }) } as unknown as Awaited<ReturnType<TelegramDrainContext["dispatch"]>>;
+      return { sessionId: "album-session", status: "dispatched", turnId: "turn_album" };
     });
     for (const id of [1001, 1002, 1003, 1004]) await repository.enqueue(input(id, id === 1004 ? "Проверь оба сервера" : ""));
     await ready();
@@ -138,7 +135,7 @@ async function drain(dispatch: TelegramDrainContext["dispatch"], notifyTimeout =
     expect(claims).toHaveLength(1);
     const claim = claims[0]!;
     expect(claim.mediaGroupPayloads).toHaveLength(4);
-    await repository.completeWithSession(claim.updateId, claim.leaseToken, "album-session", 8);
+    await repository.complete(claim.updateId, claim.leaseToken, "album-session");
     const rows = await database().query("SELECT status, eve_session_id FROM telegram_ingress_updates WHERE update_id <= 1004 ORDER BY update_id");
     expect(rows.rows).toEqual(Array.from({ length: 4 }, () => ({ status: "completed", eve_session_id: "album-session" })));
     expect((await repository.claimNext(lease, NO_BURSTS))?.updateId).toBe("1005");
@@ -182,7 +179,7 @@ async function drain(dispatch: TelegramDrainContext["dispatch"], notifyTimeout =
     const recovered = (await repository.claimNext(lease, NO_BURSTS))!;
     expect(recovered.dispatchBinding).toMatchObject({ id: dispatchId, sessionId: "session-1" });
     expect(recovered.mediaGroupPayloads).toHaveLength(2);
-    await repository.completeWithSession(recovered.updateId, recovered.leaseToken, "session-1", 9);
+    await repository.complete(recovered.updateId, recovered.leaseToken, "session-1");
     await expect(repository.claimNext(lease, NO_BURSTS)).resolves.toBeNull();
   });
 

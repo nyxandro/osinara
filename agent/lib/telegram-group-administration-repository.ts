@@ -17,7 +17,8 @@ import {
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
 import { stopGroupSandboxes, updateGroupPermissions } from "./telegram-group-policy-repository.js";
-import { skillRequiresBash } from "./group-skills/group-skill-catalog.js";
+import { grantableFamilySkills } from "./family-skills/family-skill-repository.js";
+import { skillGrantCatalog, skillNeedsBash } from "./family-skills/skill-grants.js";
 import type {
   RegisteredGroupType,
   StandardTelegramGroupMessageMode,
@@ -89,7 +90,7 @@ export interface TelegramGroupAdministrationRepository {
     requestedCanonicalSessions: number;
   }>;
   updatePolicy(input: TelegramGroupPolicyUpdate): Promise<{ groupId: string }>;
-  updateSkills(input: TelegramGroupSkillUpdate): Promise<{ groupId: string }>;
+  updateSkills(input: TelegramGroupSkillUpdate): Promise<{ groupId: string; skillsNeedBash: boolean }>;
 }
 
 export const telegramGroupAdministrationRepository: TelegramGroupAdministrationRepository = {
@@ -187,6 +188,7 @@ export const telegramGroupAdministrationRepository: TelegramGroupAdministrationR
       if (current && current.type !== input.type) {
         await client.query("DELETE FROM telegram_groups WHERE id = $1", [current.id]);
       }
+      const catalog = skillGrantCatalog(await grantableFamilySkills(client, input.familyId));
 
       // A conflicting chat owned by another family is never reassigned through an upsert.
       const result = await client.query<{ id: string }>(
@@ -209,7 +211,7 @@ export const telegramGroupAdministrationRepository: TelegramGroupAdministrationR
           input.toolAllowlist,
           input.messageMode,
           current?.type === input.type
-            ? current.skill_allowlist.filter((name) => input.toolAllowlist.includes("bash") || !skillRequiresBash(name))
+            ? current.skill_allowlist.filter((name) => input.toolAllowlist.includes("bash") || !skillNeedsBash(catalog, name))
             : [],
         ],
       );
@@ -279,7 +281,7 @@ export const telegramGroupAdministrationRepository: TelegramGroupAdministrationR
       );
 
       // Canonical rows represent main chat and forum topics. Parked task sessions retain the exact
-      // Eve state and requester binding needed to finish or deny their pending operation safely.
+      // session state and requester binding needed to finish or deny their pending operation safely.
       const rotated = await client.query<{ id: string }>(
         `UPDATE conversation_sessions
             SET rotation_requested_at = now()

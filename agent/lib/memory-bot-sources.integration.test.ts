@@ -1,5 +1,5 @@
 /** Human and bot sources share the full memory path, without manufacturing a human account. */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { conversationRepository } from "./conversation-repository.js";

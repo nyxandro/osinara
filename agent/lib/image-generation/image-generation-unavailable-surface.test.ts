@@ -7,7 +7,7 @@
  * - The owner-facing grant contract drops the capability, so it cannot be enabled at all.
  * - Skill loading and tool execution fail closed before any durable or billable side effect.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../../runtime/tool.js";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("./image-generation-availability.js", () => ({
@@ -17,6 +17,7 @@ vi.mock("../telegram-group-administration-repository.js", () => ({
   telegramGroupAdministrationRepository: {
     listStatuses: vi.fn().mockResolvedValue([{
       messageMode: "owner_only",
+      skillAllowlist: [],
       telegramChatId: "-1001234567890",
       title: "Внешняя группа",
       toolAllowlist: ["remember", "generate_image"],
@@ -28,6 +29,10 @@ vi.mock("../telegram-group-administration-repository.js", () => ({
     updatePolicy: vi.fn(),
     updateSkills: vi.fn(),
   },
+}));
+
+vi.mock("../family-skills/family-skill-repository.js", () => ({
+  familySkillRepository: { grantableSkills: vi.fn().mockResolvedValue(new Map()) },
 }));
 
 import { createExternalGroupLoadSkillTool } from "../group-skills/group-load-skill-tool.js";
@@ -82,7 +87,7 @@ describe("unavailable subscription image generation", () => {
     const external = buildModeToolSurface({
       capabilities: new Set(["generate_image"]),
       environment: "external",
-      skills: { imagegen: {} as never },
+      skills: new Set(["imagegen"]),
     });
     const instructions = externalGroupCapabilityInstructions(
       new Set(["generate_image"]),
@@ -91,7 +96,7 @@ describe("unavailable subscription image generation", () => {
 
     expect(buildModeToolSurface({ environment: "private" })).not.toHaveProperty("generate_image");
     expect(external).not.toHaveProperty("generate_image");
-    expect(external.load_skill?.description).toMatch(/недоступен/iu);
+    expect(external).not.toHaveProperty("load_skill");
     expect(instructions).not.toContain("generate_image");
     expect(instructions).not.toContain("skill=imagegen");
   });

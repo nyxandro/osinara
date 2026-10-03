@@ -1,6 +1,7 @@
 /** Checkpoint inbound preparation and fence every pre-model Telegram effect by the original update. */
 import { createHash } from "node:crypto";
-import type { TelegramContext, TelegramInboundResult, TelegramMessage } from "eve/channels/telegram";
+import type { TelegramContext, TelegramInboundResult } from "../runtime/telegram/channel-types.js";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
 import { telegramRepository } from "./telegram-repository.js";
@@ -85,10 +86,4 @@ async function preparationEffect(updateId: string, dispatchId: string, ordinal: 
   await database().query(`UPDATE telegram_preparation_effects SET status='completed',result=$3::jsonb WHERE update_id=$1 AND ordinal=$2`,
     [updateId, ordinal, JSON.stringify(value === undefined ? {} : { value })]);
   return value;
-}
-
-export async function recordTelegramDispatchTarget(updateId: string, dispatchId: string, continuationToken: string, kind: "send" | "respond"): Promise<void> {
-  const result = await database().query(`UPDATE telegram_ingress_updates SET dispatch_continuation_key=$3,dispatch_kind=$4
-    WHERE update_id=$1 AND dispatch_id=$2 AND status='processing' AND lease_expires_at>now()`, [updateId, dispatchId, continuationToken, kind]);
-  if (result.rowCount !== 1) throw new AppError("AGENT_TELEGRAM_LEASE_LOST", "Попытка передачи сообщения уже закрыта");
 }

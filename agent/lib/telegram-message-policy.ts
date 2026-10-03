@@ -3,16 +3,15 @@
  *
  * Exports:
  * - `TelegramInboundMediaKind`: strict none/photo/readable-text/unsupported-media decision.
- * - `classifyTelegramInboundMedia`: fail-closed classifier over raw and Eve-parsed media.
+ * - `classifyTelegramInboundMedia`: fail-closed classifier over raw and parsed media.
  * - `hasTelegramInboundMedia`: identifies file-bearing updates without downloading their bytes.
  * - `isMessageAddressedToBot`: preserves private, mention, and reply behavior.
  * - `telegramGroupTurnTrigger`: names the technical signal that woke the agent in a group.
  * - `replyToAgentTrigger`: folds a journal-proven reply to the agent into that signal.
  * - `isTelegramSlashCommand`: identifies command-shaped text reserved for application handlers.
  * - `isReplyToBot`: verifies that a Telegram reply targets this exact bot identity.
- * - `TELEGRAM_EVE_UPLOAD_POLICY`: prevents direct file delivery to the text-only primary model.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import { isAgentNameMentioned } from "./agent-name.js";
 import { isTelegramImageDocumentCandidate } from "./attachments/telegram-vision-attachment.js";
@@ -43,10 +42,6 @@ export type TelegramGroupTurnTrigger = "mention" | "name_in_text" | "reply_to_ag
 const TELEGRAM_COMMAND_PATTERN =
   /^\/[A-Za-z0-9_]{1,32}(?:@[A-Za-z0-9_]{5,32})?(?:\s|$)/u;
 const TELEGRAM_MENTION_PATTERN = /(?:^|[^A-Za-z0-9_])@(?<target>[A-Za-z0-9_]+)/gu;
-// The application persists authorized files and exposes trusted workspace paths. Eve must not
-// forward a second copy to the text-only primary model; vision runs through the dedicated tool.
-export const TELEGRAM_EVE_UPLOAD_POLICY = "disabled" as const;
-
 const TELEGRAM_INBOUND_MEDIA_FIELDS = [
   "animation",
   "audio",

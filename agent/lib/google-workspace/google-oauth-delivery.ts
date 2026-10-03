@@ -4,7 +4,7 @@
  * Export:
  * - `deliverGoogleAuthorizationLink`: sends a state-bearing URL outside model context.
  */
-import { sendTelegramMessage } from "eve/channels/telegram";
+import { sendTelegramMessage } from "../../runtime/telegram/api.js";
 
 import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../../config.js";
 

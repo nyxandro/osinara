@@ -10,13 +10,13 @@
  * - Telegram keeps a chat action for at most five seconds, so the status is repeated inside that
  *   window for as long as the operation runs, and never after it: a status landing after the voice
  *   note would show "recording" under a voice that has already arrived.
- * - Eve shows its own typing status when the model requests the tool, and it may arrive just after
+ * - The runtime shows a typing status when the model requests the tool, and it may arrive just after
  *   the first recording status; the early repeat puts "recording" back within a second.
  * - The status is presentation only. A failed status call never fails the voice note; it is
  *   reported once per operation, because every repeat fails for the same reason. Each call has a
  *   short timeout of its own, since the voice note waits for every call still in flight.
  */
-import { sendTelegramChatAction } from "eve/channels/telegram";
+import { sendTelegramChatAction } from "../../runtime/telegram/api.js";
 
 import { AppError, isAppError } from "../app-error.js";
 import { TELEGRAM_CHAT_ACTION_TIMEOUT_MS } from "../../config.js";

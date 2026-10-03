@@ -4,10 +4,8 @@
  * Export:
  * - `postTelegramPlainMessageChunk`: sends one provider-sized text chunk without parse mode.
  */
-import {
-  TELEGRAM_MESSAGE_TEXT_MAX_LENGTH,
-  type TelegramEventContext,
-} from "eve/channels/telegram";
+import { TELEGRAM_MESSAGE_TEXT_MAX_LENGTH } from "../runtime/telegram/api.js";
+import type { TelegramEventContext } from "../runtime/telegram/channel-types.js";
 
 import { AppError } from "./app-error.js";
 import type { TelegramReplyParameters } from "./telegram-reply.js";
@@ -27,7 +25,7 @@ export async function postTelegramPlainMessageChunk(
   }
 
   // Proactive sessions have no inbound chat type. The raw provider receipt supplies the verified
-  // type without mutating Eve's continuation anchor before the durable receipt is committed.
+  // type without moving the conversation's anchor before the durable receipt is committed.
   return await postTelegramMessageWithReceiptWithoutContinuationChange(channel, {
     ...(replyParameters === undefined ? {} : { reply_parameters: replyParameters }),
     text,

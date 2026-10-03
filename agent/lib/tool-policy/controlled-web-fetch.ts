@@ -3,9 +3,9 @@
  *
  * Exports:
  * - Resource-limit and proxy constants used by policy tests and runtime wiring.
- * - `CONTROLLED_WEB_FETCH_INPUT_SCHEMA`: Eve-compatible validated input contract.
+ * - `CONTROLLED_WEB_FETCH_INPUT_SCHEMA`: validated input contract, the same as the native `web_fetch`.
  * - `createControlledWebFetch`: injectable secure HTTP executor for isolated tests.
- * - `controlledWebFetchTool`: Eve-compatible custom `web_fetch` definition.
+ * - `controlledWebFetchTool`: custom `web_fetch` definition, compatible with the native one.
  */
 import { Buffer } from "node:buffer";
 
@@ -16,7 +16,7 @@ import {
   type RequestInit,
   type Response,
 } from "undici";
-import { defineTool } from "eve/tools";
+import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { AppError, isAppError } from "../app-error.js";
@@ -245,7 +245,7 @@ export function createControlledWebFetch(dependencies: ControlledWebFetchDepende
           await response.body?.cancel();
           // The status tells a blocked site from an invented address or an outage; the path and
           // query may carry tokens, so only the origin reaches the log. A site's answer is not an
-          // application failure, so the tool boundary records it without Eve's stack.
+          // application failure, so the tool boundary records it without a stack.
           throw new AppError(
             "AGENT_WEB_FETCH_RESPONSE_FAILED",
             `Сайт не отдал доступную страницу: HTTP ${response.status}. Проверьте адрес или попробуйте позже`,

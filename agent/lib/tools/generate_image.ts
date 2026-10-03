@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `createGenerateImageTool`: dependency-injected exact-once generation and delivery workflow.
- * - Default `generate_image`: production Eve tool using CLIProxyAPI, workspace, and Telegram.
+ * - Default `generate_image`: production tool using CLIProxyAPI, workspace, and Telegram.
  *
  * Key constructs:
  * - The verified workspace scope and call ID determine a stable non-overwriting output path.
@@ -12,7 +12,7 @@
  */
 import { createHash } from "node:crypto";
 
-import { defineTool, type ToolContext, type ToolDefinition } from "eve/tools";
+import { defineTool, type ToolContext, type ToolDefinition } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { AppError, isAppError } from "../app-error.js";
@@ -210,6 +210,8 @@ async function recoverStartedOperation(
 
 export function createGenerateImageTool(dependencies: GenerateImageDependencies): AnyToolDefinition {
   return defineTool({
+    // Repeating it after a crash is safe: its effect is keyed on the call id.
+    replaySafe: true,
     description: [
       "Когда использовать: создать одно новое raster-изображение через GPT-Image-2 и сразу отправить его в текущий Telegram-чат.",
       "Не использовать: для SVG, диаграмм из кода, редактирования существующего файла или незапрошенной фоновой генерации.",

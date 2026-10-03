@@ -8,7 +8,7 @@
  * own expiry never frees it. Normally the run is closed by its turn's terminal event. When the
  * queue item ended without that — the observer gave up — the sweep closes the run instead:
  * - no turn was admitted and the admission deadline has passed: the turn can never start, so the
- *   wake-up is parked exactly like one that never reached Eve;
+ *   wake-up is parked exactly like one that never reached the runtime;
  * - a turn was admitted but has not reported long after its cancellation was requested: the run
  *   fails as lost, and the usual completion decides whether the schedule may run again, which it
  *   does not when a message of that turn may already have gone out.

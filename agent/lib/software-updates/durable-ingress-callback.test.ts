@@ -2,17 +2,16 @@
  * Software update durable-ingress routing tests.
  *
  * Constructs covered:
- * - Application update callbacks are consumed before the Eve dispatch start marker.
- * - Consumed callbacks complete their ingress item without creating an Eve session.
+ * - Application update callbacks are consumed before the dispatch start marker.
+ * - Consumed callbacks complete their ingress item without creating a turn.
  */
-import type { TelegramDrainContext } from "eve/channels/telegram";
 import { describe, expect, it, vi } from "vitest";
 
 import type { TelegramIngressRepository } from "../telegram-ingress-contract.js";
 import { createTelegramDurableIngress } from "../telegram-durable-ingress.js";
 
 describe("software update callback durable ingress", () => {
-  it("completes a handled callback without beginDispatch or native Eve dispatch", async () => {
+  it("completes a handled callback without beginDispatch or dispatch", async () => {
     const claim = {
       attemptCount: 1,
       deliveryContinuationKey: "101::",
@@ -44,14 +43,12 @@ describe("software update callback durable ingress", () => {
       beginVoiceTranscription: vi.fn(),
       claimNext: vi.fn().mockResolvedValueOnce(claim).mockResolvedValueOnce(null),
       complete: vi.fn(),
-      completeWithSession: vi.fn(),
       enqueue: vi.fn(),
       fail: vi.fn(),
       rekeyQueue: vi.fn(),
       release: vi.fn(),
       renewLease: vi.fn(),
       privateBurstReadyIn: vi.fn(async () => null),
-      sessionEventStreamCursor: vi.fn().mockResolvedValue(0),
       saveVoiceTranscript: vi.fn(),
     } satisfies TelegramIngressRepository;
     const handleSoftwareUpdateCallback = vi.fn().mockResolvedValue(true);
@@ -62,26 +59,25 @@ describe("software update callback durable ingress", () => {
       acceptMedia: vi.fn(),
       authorizeVoice: vi.fn(),
       botUsername: "osinara_bot",
+      dispatch,
       handleSoftwareUpdateCallback,
       leaseMilliseconds: 60_000,
       repository,
+      runTurn: vi.fn(),
       transcribeVoice: vi.fn(),
     });
 
     await ingress.drain({
-      attachSession: vi.fn(),
-      dispatch,
-      notifyTimeout: vi.fn(),
       waitUntil(task) {
         backgroundTask = task;
       },
-    } as TelegramDrainContext);
+    });
     await backgroundTask;
 
     expect(handleSoftwareUpdateCallback).toHaveBeenCalledWith(
       expect.objectContaining({ data: "su:a:callback-secret", id: "query-1" }),
     );
-    expect(repository.complete).toHaveBeenCalledWith("7001", claim.leaseToken);
+    expect(repository.complete).toHaveBeenCalledWith("7001", claim.leaseToken, undefined);
     expect(repository.beginDispatch).not.toHaveBeenCalled();
     expect(dispatch).not.toHaveBeenCalled();
   });

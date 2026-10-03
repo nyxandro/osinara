@@ -14,7 +14,7 @@
  */
 import { basename } from "node:path";
 
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../../runtime/tool.js";
 
 import { AppError, isAppError } from "../app-error.js";
 import { conversationTimelineRepository } from "../conversation-timeline-repository.js";

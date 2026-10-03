@@ -6,7 +6,7 @@
  * - `telegramCaptionFits`: whether a caption stays within Telegram's limit after rendering.
  * - `deliverWorkspaceFile`: sends exact bytes as an explicit photo, document, or voice note.
  */
-import { resolveTelegramBotToken } from "eve/channels/telegram";
+import { resolveTelegramBotToken } from "../../runtime/telegram/api.js";
 
 import {
   TELEGRAM_API_REQUEST_TIMEOUT_MS,
@@ -102,7 +102,7 @@ export async function deliverWorkspaceFile(
     );
   }
 
-  const token = await resolveTelegramBotToken();
+  const token = await resolveTelegramBotToken(process.env.TELEGRAM_BOT_TOKEN);
   const { field, method } = TELEGRAM_METHODS[input.presentation];
   const form = new FormData();
   form.set("chat_id", input.chatId);

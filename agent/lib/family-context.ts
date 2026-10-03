@@ -2,11 +2,11 @@
  * Family administration context.
  *
  * Exports:
- * - `requireFamilyCaller`: validates a family-authenticated Eve session.
+ * - `requireFamilyCaller`: validates a family-authenticated session.
  * - `requireOwner`: enforces owner-only administration.
  * - `requirePrivateTelegramOwner`: limits secret delivery to the verified owner chat.
  */
-import type { SessionContext } from "eve/context";
+import type { SessionContext } from "../runtime/context.js";
 
 import { AppError } from "./app-error.js";
 import type { FamilyRole } from "./family-access.js";

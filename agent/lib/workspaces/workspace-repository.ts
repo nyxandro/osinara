@@ -4,7 +4,7 @@
  * Exports:
  * - `WorkspaceAuthorization`, file metadata, and scope types: public contracts.
  * - `createWorkspaceRepository`: direct filesystem operations behind current access checks.
- * - `workspaceRepository`: production repository rooted at `/app/workspaces`.
+ * - `workspaceRepository`, `WORKSPACES_ROOT`: production repository rooted at `/app/workspaces`.
  * - `externalGroupRoot`: resolves a group root at the final live authorization boundary.
  * - `trustedRoots`: resolves current personal/family host roots for delegated file wrappers.
  */
@@ -166,7 +166,7 @@ export function createWorkspaceRepository(root: string) {
       }
 
       // Resolve against current PostgreSQL state on every file operation. Creating the directory
-      // here makes host-side path inspection available before Eve lazily starts the sandbox.
+      // here makes host-side path inspection available before the runtime lazily starts the sandbox.
       const client = await database().connect();
       try {
         await client.query("BEGIN");
@@ -259,4 +259,7 @@ export function createWorkspaceRepository(root: string) {
   };
 }
 
-export const workspaceRepository = createWorkspaceRepository(resolve("workspaces"));
+/** Where the persistent workspaces live in the agent container (`workspace-data` volume). */
+export const WORKSPACES_ROOT = resolve("workspaces");
+
+export const workspaceRepository = createWorkspaceRepository(WORKSPACES_ROOT);

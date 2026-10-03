@@ -6,7 +6,7 @@
  * - Foreign and repeated callbacks bypass Eve while returning stable Russian errors.
  * - UI cleanup failures after commit never roll back an approved decision.
  */
-import type { TelegramCallbackQuery } from "eve/channels/telegram";
+import type { TelegramCallbackQuery } from "../../runtime/telegram/inbound.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { createSoftwareUpdateCallbackHandler } from "./callback.js";

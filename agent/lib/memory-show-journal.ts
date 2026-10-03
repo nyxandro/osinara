@@ -18,9 +18,10 @@
  * The journal is not an archive: opening a turn drops everything older than the kept depth, which
  * holds each conversation to a fixed number of rows instead of twelve more every turn forever.
  *
- * A turn is identified by the Eve session together with the turn id, never by the turn id alone.
- * Eve numbers turns inside a session — `turn_0`, `turn_1`, … — and the session is replaced every
- * fifty completed turns, so inside one long-lived conversation those names come round again.
+ * A turn is identified by its session together with the turn id, never by the turn id alone.
+ * Sessions carried over from Eve number turns inside the session — `turn_0`, `turn_1`, … — and Eve
+ * replaced the session every fifty completed turns, so inside one long-lived conversation those
+ * names come round again.
  */
 import { database } from "./database.js";
 import { MEMORY_RETRIEVAL_SHOW_JOURNAL_RETAINED_TURNS } from "./memory-config.js";

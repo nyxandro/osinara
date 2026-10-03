@@ -8,7 +8,8 @@
  * - The notice is cosmetic and its turn is still working, so a failed send is logged and the turn
  *   continues; the durable claim happens first, so a replay never repeats a delivered notice.
  */
-import { splitTelegramMessageText, type TelegramEventContext } from "eve/channels/telegram";
+import { splitTelegramMessageText } from "../runtime/telegram/api.js";
+import type { TelegramEventContext } from "../runtime/telegram/channel-types.js";
 
 import { isAppError } from "./app-error.js";
 import { postTelegramPlainMessageChunk } from "./telegram-plain-messages.js";

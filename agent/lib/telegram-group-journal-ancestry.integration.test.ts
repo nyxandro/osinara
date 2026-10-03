@@ -6,7 +6,7 @@
  * - `telegramGroupAttachmentRepository`: lazy capture for observed and raw reply targets.
  * - `telegramGroupAdministrationRepository`: family-scoped cascading group removal.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { TELEGRAM_GROUP_JOURNAL_RETENTION_MESSAGES } from "../config.js";

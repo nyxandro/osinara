@@ -4,7 +4,7 @@
  * Export:
  * - `verifiedTelegramProfileSignals`: exact reply/text_mention IDs, never names or usernames.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)

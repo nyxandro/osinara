@@ -2,7 +2,7 @@
  * PostgreSQL dispatch state for silent memory-review batches.
  *
  * Export:
- * - `memoryReviewDispatchRepository`: leasing and exact pre/post Eve handoff transitions.
+ * - `memoryReviewDispatchRepository`: leasing and exact pre/post hand-off transitions.
  */
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";

@@ -5,7 +5,7 @@
  * - `manage_telegram_group.start_new_context`: requests all-topic canonical rotation without HITL.
  * - Private prompt guidance: resolves the exact registered chat before mutation.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { requestGroupSessionRotation } = vi.hoisted(() => ({

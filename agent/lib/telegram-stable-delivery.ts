@@ -1,5 +1,5 @@
 /**
- * Telegram delivery that preserves Eve's stable continuation hook.
+ * Telegram delivery that leaves the conversation's anchor where it is.
  *
  * Exports:
  * - `StableTelegramMessageReceipt`: provider-confirmed Telegram message identity.
@@ -8,7 +8,8 @@
  * - `postTelegramMessageWithoutContinuationChange`: sends one short service message via the raw
  *   Bot API handle and returns its verified message ID without mutating channel anchor state.
  */
-import type { TelegramChatType, TelegramEventContext } from "eve/channels/telegram";
+import type { TelegramChatType } from "../runtime/telegram/inbound.js";
+import type { TelegramEventContext } from "../runtime/telegram/channel-types.js";
 
 import { AppError } from "./app-error.js";
 
@@ -72,8 +73,9 @@ async function requestStableTelegramMessage(
     );
   }
 
-  // `telegram.post` re-keys Eve as a side effect. Raw `sendMessage` deliberately bypasses that
-  // adapter mutation while retaining Eve's authenticated Telegram API transport.
+  // In a group `telegram.post` makes the sent message the conversation's anchor, from which later
+  // turns are addressed (`runtime/telegram/handle.ts`). A service message must not move it, so the
+  // raw `sendMessage` goes through the same authenticated transport without that side effect.
   const payload = typeof message === "string"
     ? { text: message }
     : {

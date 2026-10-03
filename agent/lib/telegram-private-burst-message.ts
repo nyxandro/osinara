@@ -14,7 +14,11 @@
  *   message a running turn already saw carries its own notice. Each of them stays a turn of its own.
  * - The followers stop at the first message that cannot join, so the chat's order is kept.
  */
-import { parseTelegramUpdate, type TelegramMessage, type TelegramUpdate } from "eve/channels/telegram";
+import {
+  parseTelegramUpdate,
+  type TelegramMessage,
+  type TelegramUpdate,
+} from "../runtime/telegram/inbound.js";
 
 import { TELEGRAM_MAX_ATTACHMENTS_PER_MESSAGE } from "../config.js";
 import { AppError } from "./app-error.js";

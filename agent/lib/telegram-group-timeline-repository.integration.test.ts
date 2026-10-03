@@ -7,7 +7,7 @@
  * - Tool-delivered agent attachments persist without an inbound Telegram file identifier.
  * - Retention never resets or reuses the durable group counter.
  */
-import type { TelegramMessage } from "eve/channels/telegram";
+import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "./database.js";

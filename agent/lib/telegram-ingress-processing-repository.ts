@@ -2,7 +2,7 @@
  * PostgreSQL Telegram ingress processing markers.
  *
  * Exports:
- * - `telegramIngressProcessingRepository`: exactly-once barriers for provider and Eve dispatch.
+ * - `telegramIngressProcessingRepository`: exactly-once barriers for provider and runtime dispatch.
  */
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
@@ -76,11 +76,11 @@ export const telegramIngressProcessingRepository: ProcessingOperations = {
       [updateId, leaseToken],
     );
     if (!existing.rows[0]?.active) {
-      throw new AppError("AGENT_TELEGRAM_LEASE_LOST", "Срок передачи сообщения в Eve истёк. Операция остановлена");
+      throw new AppError("AGENT_TELEGRAM_LEASE_LOST", "Срок обработки сообщения истёк. Операция остановлена");
     }
     throw new AppError(
       "AGENT_TELEGRAM_DISPATCH_RECOVERY_REQUIRED",
-      "Передача сообщения в Eve была прервана. Автоматический повтор отключён для защиты от двойного действия",
+      "Передача сообщения была прервана. Автоматический повтор отключён для защиты от двойного действия",
     );
   },
 

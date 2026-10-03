@@ -1,57 +1,61 @@
 /**
- * Root Eve agent configuration.
+ * Osinara's agent as the runtime runs it.
  *
- * Constructs:
- * - Explicit primary model from the multi-provider registry.
- * - Fail-closed per-turn model step limit and NeuralDeep routing for upstream KV-cache reuse.
- * - Context compaction; Eve exposes its native fresh-context child only to root sessions.
- * - Official PostgreSQL Workflow world retained as an external runtime dependency.
+ * Export:
+ * - `createOsinaraAgent`: the base prompt from `instructions.md`, the turn blocks in their fixed
+ *   order, the tool surface and skills of the verified conversation, the primary model with
+ *   NeuralDeep session routing, the step limit, the compaction threshold, and the record made
+ *   before each model step (delivery of the messages shown to a running turn).
+ *
+ * The block order is explicit here (Eve derived it from file names): the trust zone rules first,
+ * then delegation and chat preferences, the reaction set (a user-role history entry), and the
+ * volatile memory payload last.
  */
-import { defineAgent, defineDynamic } from "eve";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
-import {
-  AGENT_COMPACTION_THRESHOLD,
-  AGENT_MAX_MODEL_STEPS_PER_TURN,
-} from "./config.js";
-import { primaryModel } from "./lib/model-registry.js";
+import { AGENT_COMPACTION_THRESHOLD, AGENT_MAX_MODEL_STEPS_PER_TURN } from "./config.js";
+import { conversationModeInstructions } from "./instructions/conversation-mode.js";
+import { delegationInstructions } from "./instructions/delegation.js";
+import { presentationPreferenceInstructions } from "./instructions/presentation-preferences.js";
+import { reactionSetInstructions } from "./instructions/reaction-set.js";
+import { retrievedMemoryInstructions } from "./instructions/retrieved-memory.js";
 import { modelProviderConfig } from "./lib/model-provider-config.js";
+import { primaryModel } from "./lib/model-registry.js";
 import { resolveSessionModelSelection } from "./lib/neuraldeep-session-routing.js";
-import { resolveTurnModelStepLimitSelection } from "./lib/turn-model-step-limit.js";
+import type { RuntimeAgent } from "./runtime/agent-definition.js";
+import { composeBasePrompt } from "./runtime/prompt/system-prompt.js";
+import { resolveScopedSkills } from "./skills/scoped.js";
+import { recordTurnInterjectionDelivery } from "./lib/turn-interjection/turn-interjection-delivery.js";
+import { resolveToolSurface } from "./tools/capabilities.js";
 
-const primaryModelContextWindowTokens =
-  modelProviderConfig.agent.models.primary.contextWindowTokens;
+// Read from the project tree (the image keeps `agent/`): the bundled `.runtime/agent/main.js` has no
+// `instructions.md` next to it.
+const AUTHORED_INSTRUCTIONS = { content: readFileSync(resolve("agent/instructions.md"), "utf8"), name: "instructions" };
 
-export default defineAgent({
-  build: {
-    externalDependencies: ["@workflow/world-postgres"],
-  },
-  compaction: {
-    modelContextWindowTokens: primaryModelContextWindowTokens,
-    thresholdPercent: AGENT_COMPACTION_THRESHOLD,
-  },
-  experimental: {
-    workflow: {
-      world: "@workflow/world-postgres",
-    },
-  },
-  model: defineDynamic({
-    events: {
-      "step.started": (event, ctx) => {
-        // Resolve the guard first: resolver exceptions would let Eve silently use its fallback.
-        const blockedSelection = resolveTurnModelStepLimitSelection({
-          event,
-          maxModelSteps: AGENT_MAX_MODEL_STEPS_PER_TURN,
-          model: primaryModel,
-        });
-        if (blockedSelection !== null) return blockedSelection;
-
-        return resolveSessionModelSelection({
-          model: primaryModel,
-          modelContextWindowTokens: primaryModelContextWindowTokens,
-          providerId: modelProviderConfig.provider,
-          sessionId: ctx.session.id,
-        });
-      },
-    },
-  }),
-});
+export function createOsinaraAgent(): RuntimeAgent {
+  const contextWindowTokens = modelProviderConfig.agent.models.primary.contextWindowTokens;
+  return {
+    basePrompt: composeBasePrompt({ instructions: AUTHORED_INSTRUCTIONS, toolsAvailable: true }),
+    compactionThresholdPercent: AGENT_COMPACTION_THRESHOLD,
+    instructionResolvers: [
+      conversationModeInstructions,
+      delegationInstructions,
+      presentationPreferenceInstructions,
+      reactionSetInstructions,
+      retrievedMemoryInstructions,
+    ],
+    maxModelSteps: AGENT_MAX_MODEL_STEPS_PER_TURN,
+    resolveSkills: resolveScopedSkills,
+    resolveTools: resolveToolSurface,
+    selectModel: ({ sessionId }) => resolveSessionModelSelection({
+      model: primaryModel,
+      modelContextWindowTokens: contextWindowTokens,
+      providerId: modelProviderConfig.provider,
+      sessionId,
+    }),
+    staticToolNames: [],
+    // Messages shown to a running turn count as delivered once a model step had them in its prompt.
+    stepStarted: (ctx) => recordTurnInterjectionDelivery(ctx),
+  };
+}

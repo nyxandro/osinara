@@ -6,7 +6,7 @@
  * - `createTelegramApprovalPresenter`: injectable presenter with verified subject resolution.
  * - `presentTelegramApproval`: production presenter backed by PostgreSQL repositories.
  */
-import type { SessionContext } from "eve/context";
+import type { SessionContext } from "../../runtime/context.js";
 
 import { AppError } from "../app-error.js";
 import { requirePrivateTelegramOwner } from "../family-context.js";
@@ -15,7 +15,9 @@ import { profileProjectionPolicyRepository } from "../profile-projection-policy-
 import { requireProfileProjectionUpdate } from "../profile-projection-input.js";
 import { telegramGroupAdministrationRepository } from "../telegram-group-administration-repository.js";
 import { requireManageTelegramGroupInput } from "../tools/manage_telegram_group.js";
-import { skillRequiresBash } from "../group-skills/group-skill-catalog.js";
+import { requireManageSkillInput } from "../tools/manage_skill.js";
+import { familySkillRepository, type FamilySkillSummary, type FamilySkillVersion } from "../family-skills/family-skill-repository.js";
+import { requireGrantableSkills, skillGrantCatalog, skillNeedsBash, type SkillGrantCatalog } from "../family-skills/skill-grants.js";
 import type { GmailMessagesApprovalSubject } from "../google-workspace/gmail-message-approval.js";
 import { loadGmailMessageApproval } from "../google-workspace/gmail-message-approval.js";
 import { requireGmailMessageInput } from "../google-workspace/gmail-message-contract.js";
@@ -34,8 +36,14 @@ import {
   googleWorkspaceFacts,
 } from "./approval-message.js";
 import { gmailApprovalOptions, gmailApprovalPrompt } from "./gmail-approval-prompt.js";
+import { skillApprovalPrompt } from "./skill-approval-prompt.js";
 
 interface ApprovalPresentationDependencies {
+  findFamilySkill(
+    name: string,
+    ctx: Pick<SessionContext, "session">,
+  ): Promise<{ summary: FamilySkillSummary; versions: FamilySkillVersion[] }>;
+  findSkillGrantCatalog(ctx: Pick<SessionContext, "session">): Promise<SkillGrantCatalog>;
   findProfileProjectionGroup(groupRef: string, ctx: Pick<SessionContext, "session">): Promise<string | null>;
   findGroupTitle(telegramChatId: string, ctx: Pick<SessionContext, "session">): Promise<string | null>;
   findGmailMessages(
@@ -93,14 +101,21 @@ export function createTelegramApprovalPresenter(
           throw new AppError("AGENT_APPROVAL_GROUP_NOT_FOUND", "Группа не найдена в вашей семье. Обновите список групп и повторите запрос");
         }
         const group = `${title} (${chatId})`;
-        if (parsed.action === "update_skills") return {
-          ...localized,
-          prompt: buildApprovalMessage({
-            actionLabel: "изменение скиллов группы",
-            facts: [...approvalFact("Группа", group), ...approvalFact("Скиллы", parsed.skillAllowlist.join(", ") || "нет")],
-            consequence: parsed.skillAllowlist.some(skillRequiresBash) ? GROUP_SKILLS_BASH_CONSEQUENCE : GROUP_SKILLS_CONSEQUENCE,
-          }),
-        };
+        if (parsed.action === "update_skills") {
+          // A list naming a skill that does not exist now is refused before the owner sees a button.
+          const catalog = await dependencies.findSkillGrantCatalog(ctx);
+          requireGrantableSkills(catalog, parsed.skillAllowlist);
+          return {
+            ...localized,
+            prompt: buildApprovalMessage({
+              actionLabel: "изменение скиллов группы",
+              facts: [...approvalFact("Группа", group), ...approvalFact("Скиллы", parsed.skillAllowlist.join(", ") || "нет")],
+              consequence: parsed.skillAllowlist.some((name) => skillNeedsBash(catalog, name))
+                ? GROUP_SKILLS_BASH_CONSEQUENCE
+                : GROUP_SKILLS_CONSEQUENCE,
+            }),
+          };
+        }
         return {
           ...localized,
           prompt: buildApprovalMessage({
@@ -113,6 +128,12 @@ export function createTelegramApprovalPresenter(
             consequence: parsed.policy.toolAllowlist.includes("bash") ? GROUP_TOOLS_BASH_CONSEQUENCE : GROUP_TOOLS_NO_BASH_CONSEQUENCE,
           }),
         };
+      }
+    }
+    if (request.display === "confirmation" && request.action.toolName === "manage_skill") {
+      const parsed = requireManageSkillInput(request.action.input);
+      if (parsed.action !== "list" && parsed.action !== "stage" && parsed.action !== "view") {
+        return { ...localized, prompt: skillApprovalPrompt(parsed, await dependencies.findFamilySkill(parsed.name, ctx)) };
       }
     }
     if (
@@ -145,6 +166,12 @@ export function createTelegramApprovalPresenter(
 }
 
 export const presentTelegramApproval = createTelegramApprovalPresenter({
+  async findFamilySkill(name, ctx) {
+    return await familySkillRepository.versions(requirePrivateTelegramOwner(ctx).familyId, name);
+  },
+  async findSkillGrantCatalog(ctx) {
+    return skillGrantCatalog(await familySkillRepository.grantableSkills(requirePrivateTelegramOwner(ctx).familyId));
+  },
   async findProfileProjectionGroup(groupRef, ctx) {
     requirePrivateTelegramOwner(ctx);
     const policies = await profileProjectionPolicyRepository.list(requireMemoryAuthorization(ctx));

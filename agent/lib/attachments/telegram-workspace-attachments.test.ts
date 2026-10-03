@@ -5,7 +5,7 @@
  * - `createTelegramWorkspaceAttachmentImporter`: validated persistence before model dispatch.
  * - Deterministic personal/family/group inbox references, binary persistence, and count limits.
  */
-import type { TelegramAttachment } from "eve/channels/telegram";
+import type { TelegramAttachment } from "../../runtime/telegram/inbound.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { createTelegramWorkspaceAttachmentImporter } from "./telegram-workspace-attachments.js";

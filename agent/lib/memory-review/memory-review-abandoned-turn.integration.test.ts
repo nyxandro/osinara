@@ -50,10 +50,10 @@ describeWithDatabase("abandoned memory review turns", () => {
 
     // Ход, продолженный после ответа человека, приходит с авторизацией этого ответа, поэтому
     // метка пакета в ней отсутствует. Привязка хода к пакету живёт в базе и переживает паузу.
-    await expect(memoryReviewRepository.batchIdForTurn({
+    await expect(memoryReviewRepository.batchForTurn({
       eveSessionId: "eve-resumed",
       eveTurnId: "turn-resumed",
-    })).resolves.toBe(batch!.batchId);
+    })).resolves.toEqual({ batchId: batch!.batchId, eveTurnId: "turn-resumed" });
 
     await memoryReviewRepository.completeBatch({
       batchId: batch!.batchId,
@@ -64,11 +64,11 @@ describeWithDatabase("abandoned memory review turns", () => {
 
     // Ход остаётся ходом проверки и после закрытия пакета, иначе повторное событие Eve засчиталось
     // бы как обычный ход разговора и закрыло бы сессию.
-    await expect(memoryReviewRepository.batchIdForTurn({
+    await expect(memoryReviewRepository.batchForTurn({
       eveSessionId: "eve-resumed",
       eveTurnId: "turn-resumed",
-    })).resolves.toBe(batch!.batchId);
-    await expect(memoryReviewRepository.batchIdForTurn({
+    })).resolves.toEqual({ batchId: batch!.batchId, eveTurnId: "turn-resumed" });
+    await expect(memoryReviewRepository.batchForTurn({
       eveSessionId: "eve-resumed",
       eveTurnId: "turn-other",
     })).resolves.toBeNull();

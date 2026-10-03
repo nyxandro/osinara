@@ -5,7 +5,7 @@
  * - The tool derives run identity only from verified scheduled auth.
  * - Opaque cursors are forwarded without model-selected group, dates, path, or limit.
  */
-import type { ToolContext } from "eve/tools";
+import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const readChunk = vi.hoisted(() => vi.fn());
