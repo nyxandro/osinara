@@ -71,10 +71,10 @@ async function registerApproval(
   await telegramHitlApprovalRepository.register({
     applicationSessionId: sessionId,
     kind,
-    callbackData: ["eve:0", "eve:1"],
+    callbackData: ["hitl:0", "hitl:1"],
     callbackOptions: [
-      { callbackData: "eve:0", label: "Да, подтвердить", optionId: "approve" },
-      { callbackData: "eve:1", label: "Cancel", optionId: "cancel" },
+      { callbackData: "hitl:0", label: "Да, подтвердить", optionId: "approve" },
+      { callbackData: "hitl:1", label: "Cancel", optionId: "cancel" },
     ],
     eveSessionId: "wrun_timeout",
     promptText: "Подтвердите действие: исправить запись в памяти.",
@@ -287,7 +287,7 @@ describeWithDatabase("approval timeout repository", () => {
     await expect(
       telegramHitlApprovalRepository.claimCallback({
         baseContinuationToken: "700::2801",
-        callbackData: "eve:0",
+        callbackData: "hitl:0",
         telegramChatId: "700",
         telegramMessageId: "2801",
         telegramUserId: OWNER_TELEGRAM_ID,

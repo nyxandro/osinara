@@ -242,6 +242,7 @@ async function channelState(sessionId: string) {
     const rendered = renderTelegramInputRequest(parked.outcome.requests[0]!, state);
     await database().query("UPDATE agent_session_state SET channel_state = $2::json WHERE session_id = $1", [asked.sessionId, JSON.stringify(state)]);
     const approve = (rendered.replyMarkup!.inline_keyboard as Array<Array<{ callback_data: string }>>)[0]![0]!.callback_data;
+    expect(approve).toMatch(/^hitl:/u);
 
     const pressed = await dispatchTelegramCallback(database(), channel, press(approve), { attributes: { osinaraTelegramUpdateId: "2" } });
     const again = await dispatchTelegramCallback(database(), channel, press(approve));
@@ -254,13 +255,34 @@ async function channelState(sessionId: string) {
     expect(continuation.auth.current?.attributes).toMatchObject({ osinaraTelegramUpdateId: "2" });
   });
 
+  it("still continues a card shown before the button prefix changed", async () => {
+    const auth = await ownerAuth();
+    const api = telegramApi();
+    const channel = hooks({ callback: () => ({ auth, continuationToken: "7::" }), message: () => ({ auth, continuationToken: "7::" }), transport: api.transport });
+    const asked = await dispatchTelegramMessage(database(), channel, message("измени"));
+    if (asked.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
+    const parked = await runWith(asked.turnId, { change }, toolCalls([{ id: "call-c", input: {}, name: "change" }]));
+    if (parked.outcome.status !== "waiting_input") throw new Error("TEST_EXPECTED_PARK");
+    const state = await channelState(asked.sessionId);
+    renderTelegramInputRequest(parked.outcome.requests[0]!, state);
+    // The card as an earlier release stored and showed it: the same buttons under the previous prefix.
+    state.hitlCallbacks = Object.fromEntries(Object.entries(state.hitlCallbacks ?? {}).map(([key, value]) => [key.replace(/^hitl:/u, "eve:"), value]));
+    await database().query("UPDATE agent_session_state SET channel_state = $2::json WHERE session_id = $1", [asked.sessionId, JSON.stringify(state)]);
+    const previous = Object.keys(state.hitlCallbacks)[0]!;
+
+    const pressed = await dispatchTelegramCallback(database(), channel, press(previous));
+
+    expect(previous).toMatch(/^eve:/u);
+    expect(pressed.status).toBe("dispatched");
+  });
+
   it("neither acknowledges nor continues a press the application rejected", async () => {
     const auth = await ownerAuth();
     const api = telegramApi();
     const channel = hooks({ callback: () => null, message: () => ({ auth, continuationToken: "7::" }), transport: api.transport });
     await dispatchTelegramMessage(database(), channel, message("привет"));
 
-    expect(await dispatchTelegramCallback(database(), channel, press("eve:0"))).toEqual({ status: "dropped" });
+    expect(await dispatchTelegramCallback(database(), channel, press("hitl:0"))).toEqual({ status: "dropped" });
     expect(api.calls.filter((call) => call.method === "answerCallbackQuery")).toEqual([]);
   });
 

@@ -17,7 +17,7 @@ vi.mock("../operational-incidents/owner-alerts.js", () => ({ recordOperationalIn
 
 function callbackQuery(): TelegramCallbackQuery {
   return {
-    data: "eve:0",
+    data: "hitl:0",
     from: { firstName: "Анна", id: "101", isBot: false },
     id: "callback-1",
     message: {
@@ -78,7 +78,7 @@ describe("createTelegramHitlCallbackAuthorizer", () => {
       });
     expect(repository.claimCallback).toHaveBeenCalledWith({
       baseContinuationToken: "-1001:55:88",
-      callbackData: "eve:0",
+      callbackData: "hitl:0",
       telegramChatId: "-1001",
       telegramMessageId: "88",
       telegramUserId: "101",

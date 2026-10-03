@@ -112,7 +112,7 @@ describe("software update callback handler", () => {
     const transport = { answerCallback: vi.fn(), removeKeyboard: vi.fn() };
     const handle = createSoftwareUpdateCallbackHandler({ repository, transport });
 
-    await expect(handle(callbackQuery({ data: "eve:0" }))).resolves.toBe(false);
+    await expect(handle(callbackQuery({ data: "hitl:0" }))).resolves.toBe(false);
 
     expect(repository.claimDecision).not.toHaveBeenCalled();
     expect(transport.answerCallback).not.toHaveBeenCalled();

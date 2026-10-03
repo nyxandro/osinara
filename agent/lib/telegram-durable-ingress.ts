@@ -15,7 +15,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { TelegramMessage, TelegramUpdate } from "../runtime/telegram/inbound.js";
-import { TELEGRAM_HITL_CALLBACK_PREFIX } from "../runtime/telegram/hitl.js";
+import { isTelegramHitlCallback } from "../runtime/telegram/hitl.js";
 import { parseTelegramUpdate } from "../runtime/telegram/inbound.js";
 import { telegramContinuationToken } from "../runtime/telegram/api.js";
 import type { JsonObject } from "../runtime/json.js";
@@ -284,7 +284,7 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
       if (update.kind === "callback_query") {
         const claimed = await dependencies.handleSoftwareUpdateCallback(update.callbackQuery);
         stop.throwIfAborted();
-        const runtimeButton = update.callbackQuery.data?.startsWith(TELEGRAM_HITL_CALLBACK_PREFIX) === true;
+        const runtimeButton = isTelegramHitlCallback(update.callbackQuery.data);
         if (claimed || !runtimeButton) {
           if (!claimed) console.error(JSON.stringify({ code: "AGENT_TELEGRAM_CALLBACK_UNCLAIMED", updateId: claim.updateId }));
           return null;

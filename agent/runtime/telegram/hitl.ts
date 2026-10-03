@@ -7,7 +7,9 @@
  * - `registerTelegramFreeformPrompt`: remembers which posted message a freeform answer replies to.
  * - `telegramCallbackInputResponse`, `telegramReplyInputResponse`, `isTelegramSyntheticResponse`,
  *   `resolveTelegramInputResponses`: a pressed button or a reply, mapped back to the request it answers.
- * - `TELEGRAM_HITL_CALLBACK_PREFIX`: the prefix of the runtime's callback data.
+ * - `TELEGRAM_HITL_CALLBACK_PREFIX`, `isTelegramHitlCallback`: the prefix of the runtime's callback
+ *   data, and whether a pressed button is one of its cards — including a card shown under the
+ *   previous prefix `eve:`, accepted until the next release.
  *
  * Ported verbatim from eve 0.40.0 `public/channels/telegram/hitl.ts` (Apache-2.0, see NOTICE-eve).
  * The callback ids continue the counter Eve kept per conversation (`nextHitlCallbackId`), so a
@@ -16,7 +18,12 @@
 import type { InputRequest, InputResponse } from "../hitl/types.js";
 import type { TelegramHitlState } from "./channel-types.js";
 
-export const TELEGRAM_HITL_CALLBACK_PREFIX = "eve:";
+export const TELEGRAM_HITL_CALLBACK_PREFIX = "hitl:";
+const PREVIOUS_HITL_CALLBACK_PREFIX = "eve:";
+
+export function isTelegramHitlCallback(data: string | undefined): boolean {
+  return data !== undefined && (data.startsWith(TELEGRAM_HITL_CALLBACK_PREFIX) || data.startsWith(PREVIOUS_HITL_CALLBACK_PREFIX));
+}
 
 /** Synthetic request id prefix sent through `send()` for callback queries. */
 export const TELEGRAM_CALLBACK_RESPONSE_PREFIX = "telegram_callback:";

@@ -78,7 +78,7 @@ describe("parseTelegramUpdate", () => {
       callback_query: {
         id: "cb1",
         from: { id: 42, is_bot: false, username: "ada" },
-        data: "eve:0",
+        data: "hitl:0",
         message: {
           message_id: 12,
           chat: { id: 42, type: "private" },
@@ -88,7 +88,7 @@ describe("parseTelegramUpdate", () => {
     expect(callback).toMatchObject({
       kind: "callback_query",
       callbackQuery: {
-        data: "eve:0",
+        data: "hitl:0",
         from: { id: "42", username: "ada" },
         id: "cb1",
         message: { messageId: "12", chat: { id: "42" } },

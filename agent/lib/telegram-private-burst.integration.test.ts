@@ -47,7 +47,7 @@ async function privateButton(updateId: string) {
     continuationKey: PRIVATE,
     payload: {
       callback_query: {
-        chat_instance: "101", data: "eve:1", from: { first_name: "Анна", id: 101, is_bot: false }, id: `callback-${updateId}`,
+        chat_instance: "101", data: "hitl:1", from: { first_name: "Анна", id: 101, is_bot: false }, id: `callback-${updateId}`,
         message: { chat: { id: 101, type: "private" }, date: 1_700_000_000, from: { first_name: "Osinara", id: 900, is_bot: true }, message_id: 1 },
       },
       update_id: Number(updateId),

@@ -44,7 +44,7 @@ import {
 } from "./channel-types.js";
 import { buildTelegramHandle, type TelegramTransport } from "./handle.js";
 import {
-  isTelegramSyntheticResponse, resolveTelegramInputResponses, TELEGRAM_HITL_CALLBACK_PREFIX, telegramCallbackInputResponse,
+  isTelegramHitlCallback, isTelegramSyntheticResponse, resolveTelegramInputResponses, telegramCallbackInputResponse,
   telegramReplyInputResponse,
 } from "./hitl.js";
 import { formatTelegramContextBlock, type TelegramCallbackQuery, type TelegramMessage } from "./inbound.js";
@@ -287,7 +287,7 @@ export async function dispatchTelegramCallback(
   const state = stateFromCallbackQuery(query, hooks.botUsername);
   const ctx: TelegramContext = { telegram: buildTelegramHandle({ state, transport: hooks.transport }) };
   const data = query.data;
-  if (data?.startsWith(TELEGRAM_HITL_CALLBACK_PREFIX) !== true) {
+  if (!isTelegramHitlCallback(data)) {
     await acknowledge(ctx, query.id, UNSUPPORTED_CALLBACK_ACKNOWLEDGEMENT);
     return DROPPED;
   }
