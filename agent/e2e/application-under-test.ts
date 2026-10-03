@@ -15,7 +15,7 @@
  *
  * Test-only.
  */
-import { database } from "../lib/database.js";
+import { createApplicationDatabasePool } from "../lib/database-client.js";
 import { installNetworkDouble } from "./telegram-double.js";
 
 function required(name: string): string {
@@ -25,7 +25,9 @@ function required(name: string): string {
 }
 
 if (!new URL(required("DATABASE_URL")).pathname.endsWith("_test")) throw new Error("AGENT_TEST_DATABASE_UNSAFE");
-const db = database();
+// The doubles journal what Telegram, the model and the sandbox saw on connections of their own: a
+// test that cuts the application's connections (`PGAPPNAME`) must not cut the world outside it.
+const db = createApplicationDatabasePool({ application_name: "osinara-e2e-doubles", connectionString: required("DATABASE_URL"), max: 4 });
 installNetworkDouble(db);
 
 // Imported after the network double, so no module captures the real `fetch` first.
