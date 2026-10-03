@@ -69,15 +69,14 @@ interface ClaimRow {
 }
 
 /**
- * Any Telegram update of the queue that is waiting, running, or blocking it after a lost cancel. A
- * row bound to an album or burst head follows that head, exactly as the update claim treats it.
+ * Any Telegram update of the queue that is waiting or running. A row bound to an album or burst head
+ * follows that head, exactly as the update claim treats it.
  */
 function laneHasUpdates(queueId: string): string {
   return `EXISTS (
     SELECT 1 FROM telegram_ingress_updates item
      WHERE item.queue_id = ${queueId} AND (item.media_group_leader_id IS NULL OR item.media_group_late)
-       AND (item.status IN ('pending', 'processing') OR (
-         item.status = 'failed' AND item.last_error_code = 'AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED')))`;
+       AND item.status IN ('pending', 'processing'))`;
 }
 
 function mapClaim(row: ClaimRow): ConversationWakeupClaim {

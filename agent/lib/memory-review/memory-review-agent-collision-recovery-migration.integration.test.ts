@@ -236,7 +236,7 @@ describeWithDatabase("070 memory review agent collision recovery migration", () 
           ORDER BY created_at DESC LIMIT 1`,
         [BATCH_ID],
       )).resolves.toMatchObject({ rows: [{ metadata: {
-        collisionAgentSessionId: COLLISION_AGENT_SESSION_ID,
+        collisionEveSessionId: COLLISION_AGENT_SESSION_ID,
         recoveryAttempt: 3,
       } }] });
       await expect(client.query(

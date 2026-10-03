@@ -50,7 +50,7 @@ export async function reconcileMemoryReviewExecutions(readStatus: (sessionId: st
           started_at=NULL,completed_at=NULL,diagnostic_code=NULL,updated_at=now() WHERE id=$1`, [batch.id]);
         await client.query(`INSERT INTO audit_events(family_id,event_type,subject_id,metadata)
           SELECT family_id,'memory_review.model_recovered',$2,jsonb_build_object('causeCode','AGENT_MEMORY_REVIEW_TERMINAL_RECONCILED',
-          'previousAgentSessionId',$3::text,'previousAgentTurnId',$4::text) FROM application_conversations WHERE id=$1`,
+          'previousEveSessionId',$3::text,'previousEveTurnId',$4::text) FROM application_conversations WHERE id=$1`,
         [batch.conversation_id,batch.id,batch.eve_session_id,batch.eve_turn_id]);
       } else {
         if (batch.application_session_id && batch.eve_session_id) await terminalizeApplicationSession(client,{

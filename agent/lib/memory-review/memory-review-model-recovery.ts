@@ -146,8 +146,8 @@ export async function recoverModelWaitingReviews(client: PoolClient, now: Date):
     await audit(client, batch, "memory_review.model_recovered", {
       causeCode: batch.diagnostic_code, generation: batch.model_recovery_generation + 1,
       successVersion: batch.success_version, modelRouteKey: batch.model_route_key,
-      previousSessionId: batch.application_session_id, previousAgentSessionId: batch.eve_session_id,
-      previousAgentTurnId: batch.eve_turn_id,
+      previousSessionId: batch.application_session_id, previousEveSessionId: batch.eve_session_id,
+      previousEveTurnId: batch.eve_turn_id,
     });
   }
 }

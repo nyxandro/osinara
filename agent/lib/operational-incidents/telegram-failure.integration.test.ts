@@ -25,10 +25,10 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
 describe.skipIf(!enabled)("telegram failure correlation", () => {
   afterAll(closeDatabase);
 
-  it("runs both correlation lookups and falls back to the Eve session key", async () => {
+  it("runs both correlation lookups and falls back to the session and turn key", async () => {
     const sessionId = `test-${randomUUID()}`;
     const turnId = "turn_0";
-    const operationKey = `eve:${sessionId}:${turnId}`;
+    const operationKey = `turn:${sessionId}:${turnId}`;
     try {
       await recordTelegramFailure({
         chatId: "-100111",

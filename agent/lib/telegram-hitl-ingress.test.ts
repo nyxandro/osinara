@@ -7,7 +7,6 @@ import type { TelegramIngressRepository } from "./telegram-ingress-contract.js";
 function fixture(count: number) {
   const claims = Array.from({ length: count }, (_, index) => ({
     dispatchStarted: false, dispatchBinding: null,
-    recoveryCancelRequested: false,
     attemptCount: 1, deliveryContinuationKey: "101::", ingressContinuationKey: "101::",
     leaseExpiresAt: new Date(Date.now() + 60_000), leaseToken: `lease-${index}`, queueId: "queue",
     updateId: String(1001 + index), transcript: null, voice: null,

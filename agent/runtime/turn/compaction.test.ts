@@ -39,7 +39,7 @@ describe("history compaction", () => {
     const compacted = await compactMessages(messages, { recentWindowSize: 10, threshold: 2_400 }, summarize);
 
     expect(summarize).not.toHaveBeenCalled();
-    expect(compacted[3]).toMatchObject({ role: "tool", content: [{ output: { type: "text", value: expect.stringMatching(/^\[Truncated by eve: /) } }] });
+    expect(compacted[3]).toMatchObject({ role: "tool", content: [{ output: { type: "text", value: expect.stringMatching(/^\[Truncated: /) } }] });
     expect(compacted.slice(-10)).toEqual(messages.slice(-10));
     expect(compacted).toHaveLength(messages.length);
   });

@@ -24,7 +24,7 @@ export async function recoverReviewDispatches(client: PoolClient, now: Date): Pr
       model_recovery_generation=model_recovery_generation+1,updated_at=$2 WHERE id=$1`, [batch.id, now]);
     await client.query(`INSERT INTO audit_events(family_id,event_type,subject_id,metadata)
       SELECT family_id,'memory_review.model_recovered',$2,jsonb_build_object('causeCode','AGENT_MEMORY_REVIEW_HANDOFF_RECOVERED',
-        'previousSessionId',$3::text,'previousAgentSessionId',$4::text,'previousAgentTurnId',$5::text)
+        'previousSessionId',$3::text,'previousEveSessionId',$4::text,'previousEveTurnId',$5::text)
       FROM application_conversations WHERE id=$1`, [batch.conversation_id, batch.id, batch.application_session_id, batch.eve_session_id, batch.eve_turn_id]);
   }
 }

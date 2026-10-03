@@ -429,7 +429,7 @@ describeWithDatabase("conversation wake-ups", () => {
 
     await expect(agentScheduleRepository.delete(auth, schedule.id, "delete-running")).rejects.toThrow("AGENT_SCHEDULE_RUN_IN_PROGRESS");
     // The observer lost the turn: the item is terminal while the run still waits for a turn that may never end.
-    await conversationWakeupRepository.fail(claim!, { code: "AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED", message: "lost" });
+    await conversationWakeupRepository.fail(claim!, { code: "AGENT_TELEGRAM_PROCESSING_INTERRUPTED", message: "lost" });
     expect(await laneMark()).toBeNull();
     expect(await agentScheduleRepository.delete(auth, schedule.id, "delete-ended")).toBe(true);
   });
@@ -517,7 +517,7 @@ describeWithDatabase("conversation wake-ups", () => {
     await conversationWakeupRunRepository.admitTurn({
       applicationSessionId: sessionId, agentSessionId: "ses_eve_1", agentTurnId: "turn_6", runId: job.runId,
     });
-    await conversationWakeupRepository.fail(second!, { code: "AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED", message: "lost" });
+    await conversationWakeupRepository.fail(second!, { code: "AGENT_TELEGRAM_PROCESSING_INTERRUPTED", message: "lost" });
     await agentScheduleDispatchRepository.claimDue({ leaseMilliseconds: LEASE, limit: 10, now: new Date() });
     expect((await database().query("SELECT status FROM agent_schedule_runs WHERE id = $1", [job.runId])).rows[0].status)
       .toBe("running");
@@ -553,22 +553,6 @@ describeWithDatabase("conversation wake-ups", () => {
     await agentScheduleRepository.update(auth, selfPaused.id, { enabled: false, operationKey: "pause-self" });
     const after = await conversationWakeupContextRepository.listPlanned("1000", familyId, auth.userId);
     expect(after.map((wakeup) => wakeup.scheduleId)).toEqual([open.id]);
-  });
-
-  it("is not blocked by a burst member once its stuck head was closed", async () => {
-    await createWakeup();
-    await enqueueMessage("1001", "первое");
-    await enqueueMessage("1002", "второе");
-    const head = await telegramIngressRepository.claimNext(LEASE, { ...NO_BURSTS, maxCharacters: 6_000, maxMessages: 2 });
-    expect(head?.burstPayloads).toHaveLength(2);
-    await telegramIngressRepository.fail(head!.updateId, head!.leaseToken, {
-      code: "AGENT_TELEGRAM_CANCELLATION_UNCONFIRMED", message: "Не удалось подтвердить остановку запроса",
-    });
-    // The owner closes the stuck head; its member keeps the copied code.
-    await database().query("UPDATE telegram_ingress_updates SET last_error_code = 'AGENT_TELEGRAM_RECOVERY_CLOSED' WHERE update_id = 1001");
-    await queueDue();
-
-    expect(await conversationWakeupRepository.claimNext(LEASE)).not.toBeNull();
   });
 
   it("keeps a deploy waiting while a wake-up turn runs", async () => {

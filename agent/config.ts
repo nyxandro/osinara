@@ -56,7 +56,6 @@ export const TELEGRAM_ATTACHMENT_REFERENCE_LIST_MAX_LIMIT = 50;
 export const TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED = 1;
 export const TELEGRAM_INGRESS_LEASE_MS = 60 * 1_000;
 export const TELEGRAM_INGRESS_ADMISSION_TIMEOUT_MS = 15 * 60 * 1_000;
-export const TELEGRAM_INGRESS_RECOVERY_MAX_ATTEMPTS = 3;
 // Bound expensive turns on the single-process deployment without letting groups occupy button slots.
 export const TELEGRAM_INGRESS_MESSAGE_CONCURRENCY = 2;
 export const TELEGRAM_INGRESS_CALLBACK_CONCURRENCY = 2;

@@ -31,7 +31,7 @@ export async function isRetiredReviewAttempt(client: PoolClient, input: {
 }): Promise<boolean> {
   return (await client.query(
     `SELECT 1 FROM audit_events WHERE subject_id = $1 AND event_type = 'memory_review.model_recovered'
-      AND metadata->>'previousAgentSessionId' = $2 AND metadata->>'previousAgentTurnId' = $3 LIMIT 1`,
+      AND metadata->>'previousEveSessionId' = $2 AND metadata->>'previousEveTurnId' = $3 LIMIT 1`,
     [input.batchId, input.agentSessionId, input.agentTurnId],
   )).rowCount === 1;
 }

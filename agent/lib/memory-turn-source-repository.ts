@@ -6,10 +6,9 @@
  * - `ResolvedMemoryTurnSource`: exact source and authorization partition projection.
  * - `memoryTurnSourceRepository`: replay-safe binding, HITL resume verification, and source resolution.
  */
-import { createHash } from "node:crypto";
-
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
+import { reviewSourceBindingHash, turnSourceBindingHash } from "./memory-turn-source-binding-hash.js";
 import type { TelegramActorKind, TelegramTimelineActorKind } from "./telegram-inbound-actor.js";
 
 // The timeline discriminator each invoking actor kind must carry on its own current message.
@@ -71,24 +70,6 @@ function canonicalEntryIds(input: BindMemoryTurnSourcesInput): string[] {
   return unique.sort();
 }
 
-function bindingHash(input: BindMemoryTurnSourcesInput, entryIds: readonly string[]): string {
-  return createHash("sha256")
-    .update(
-      JSON.stringify({
-        applicationSessionId: input.applicationSessionId,
-        conversationId: input.conversationId,
-        currentTimelineEntryId: input.currentTimelineEntryId,
-        agentSessionId: input.agentSessionId,
-        agentTurnId: input.agentTurnId,
-        invokingActorId: input.invokingActorId,
-        invokingActorKind: input.invokingActorKind,
-        memoryReviewBatchId: input.memoryReviewBatchId ?? null,
-        visibleTimelineEntryIds: entryIds,
-      }),
-    )
-    .digest("hex");
-}
-
 export const memoryTurnSourceRepository = {
   async verifyBoundResume(input: { applicationSessionId: string; agentSessionId: string; agentTurnId: string; invokingActorId: string; invokingActorKind: TelegramActorKind }): Promise<boolean> {
     // HITL resumes omit the original message attributes, so only the exact retained source-set may
@@ -107,7 +88,7 @@ export const memoryTurnSourceRepository = {
 
   async bind(input: BindMemoryTurnSourcesInput): Promise<void> {
     const entryIds = canonicalEntryIds(input);
-    const hash = bindingHash(input, entryIds);
+    const hash = turnSourceBindingHash(input, entryIds);
     const client = await database().connect();
     try {
       await client.query("BEGIN");
@@ -230,14 +211,7 @@ export const memoryTurnSourceRepository = {
     if (entryIds.length !== input.sourceEntryIds.length || entryIds.length === 0) {
       throw new AppError("AGENT_MEMORY_TURN_SOURCE_SET_INVALID", "Не удалось подтвердить набор сообщений проверки памяти");
     }
-    const hash = createHash("sha256")
-      .update(
-        JSON.stringify({
-          ...input,
-          sourceEntryIds: entryIds,
-        }),
-      )
-      .digest("hex");
+    const hash = reviewSourceBindingHash(input, entryIds);
     const client = await database().connect();
     try {
       await client.query("BEGIN");
