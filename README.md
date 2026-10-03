@@ -35,7 +35,7 @@ Osinara — self-hosted агент, который живёт в Telegram и р�
 | Семья и группы | Bootstrap владельца, приглашения, подтверждение участников, owner-only операции, семейные и внешние группы. |
 | Память | Root-agent source-backed writes, semantic integrity для изменений, versioned mutations, soft delete, atomic memory threads, локальный hybrid retrieval, экспорт и отдельные scopes. |
 | Расписания | Напоминания и автономные agent schedules: личные и семейные сценарии, а также owner-approved отчёты во внешние группы с отдельной fresh session, минимальным capability allowlist и bounded snapshot истории. |
-| Голос | Groq Whisper transcription перед основным agent turn с повторной проверкой authorization; по явной просьбе root-agent озвучивает ответ через ElevenLabs `eleven_v3` и отправляет голосовым без скрытых повторов, а при сбое озвучки отвечает текстом. |
+| Голос | Groq Whisper transcription перед основным agent turn с повторной проверкой authorization; по явной просьбе root-agent озвучивает ответ через ElevenLabs `eleven_v4` и отправляет голосовым без скрытых повторов, а при сбое озвучки отвечает текстом. |
 | Workspaces | Изолированные personal, family и group файловые области, attachment persistence, безопасная отправка файлов. |
 | Изображения | Root-agent создаёт одно WebP через `gpt-image-2`, сохраняет его в authorized workspace и доставляет в Telegram без скрытых повторов; внешней группе capability выдаёт владелец из личного чата. |
 | Google Workspace | Native `gws` skills для Gmail, Calendar, Drive, Docs, Sheets и People через workspace-bound OAuth credentials. |
