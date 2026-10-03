@@ -299,7 +299,8 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
         stop.throwIfAborted();
       }
       const result = await dependencies.dispatch(withCaptionlessAttachmentText(update), telegramIngressControl({
-        deadlineAt: deadlineAt.toISOString(), dispatchId, replaying: claim.dispatchStarted, signal: stop, updateId: claim.updateId,
+        deadlineAt: deadlineAt.toISOString(), dispatchId, leaseToken: claim.leaseToken, replaying: claim.dispatchStarted, signal: stop,
+        updateId: claim.updateId,
       }));
       clearTimeout(timer);
       if (result.status === "dropped") return null;

@@ -16,7 +16,7 @@ import type { TelegramChannelHooks } from "../runtime/telegram/telegram-dispatch
 import { createTurnDispatcher } from "../runtime/dispatch.js";
 import type { ToolDefinition } from "../runtime/tool.js";
 import { routeTurnObservers } from "../runtime/turn/observer-routing.js";
-import { scriptedModel, testAgent, testRuntime, type ScriptStep } from "../runtime/turn/turn.integration-fixtures.js";
+import { HELD_RUNNER_LOCK, scriptedModel, testAgent, testRuntime, type ScriptStep } from "../runtime/turn/turn.integration-fixtures.js";
 import { database } from "./database.js";
 
 export function runtimeTelegram(input: {
@@ -50,6 +50,7 @@ export function runtimeTelegram(input: {
   const model = scriptedModel(...input.steps);
   const dispatcher = createTurnDispatcher({
     admit: async (work) => await work(),
+    runnerLock: HELD_RUNNER_LOCK,
     runtime: testRuntime({
       agent: testAgent(input.tools ?? {}),
       callModel: model.callModel,

@@ -37,15 +37,17 @@ export function requireTelegramAdmissionDeadline(auth: SessionAuth, now = Date.n
 
 async function bindIngressTurn(
   client: JournalClient,
-  ingress: { readonly dispatchId: string; readonly updateId: string },
+  ingress: { readonly dispatchId: string; readonly leaseToken: string; readonly updateId: string },
   target: TelegramDispatchTarget,
 ): Promise<void> {
   // The start index belonged to Eve's event stream; it stays filled only for the table's constraint.
+  // The lease token: a worker whose lease expired and went to another worker binds nothing, even
+  // though an interrupted dispatch keeps its attempt id for the next worker.
   const result = await client.query(
     `UPDATE telegram_ingress_updates SET dispatch_session_id = $3, dispatch_turn_id = $4, dispatch_start_index = 0, updated_at = now()
-      WHERE update_id = $1 AND dispatch_id = $2 AND status = 'processing' AND lease_expires_at > now()
+      WHERE update_id = $1 AND dispatch_id = $2 AND lease_token = $5::uuid AND status = 'processing' AND lease_expires_at > now()
         AND dispatch_started_at IS NOT NULL AND dispatch_session_id IS NULL`,
-    [ingress.updateId, ingress.dispatchId, target.sessionId, target.turnId],
+    [ingress.updateId, ingress.dispatchId, target.sessionId, target.turnId, ingress.leaseToken],
   );
   if (result.rowCount !== 1) {
     throw new AppError("AGENT_TELEGRAM_DISPATCH_BINDING_REJECTED",
@@ -56,19 +58,22 @@ async function bindIngressTurn(
 export function telegramIngressControl(input: {
   readonly deadlineAt: string;
   readonly dispatchId: string;
+  /** The queue lease this worker holds the update under. */
+  readonly leaseToken: string;
   /** A replay of an interrupted dispatch: a rejected button is not announced a second time. */
   readonly replaying: boolean;
   readonly signal: AbortSignal;
   readonly updateId: string;
 }): TelegramDispatchControl {
   const ingress = { dispatchId: input.dispatchId, updateId: input.updateId };
+  const binding = { ...ingress, leaseToken: input.leaseToken };
   return {
     attributes: {
       osinaraTelegramDeadlineAt: input.deadlineAt,
       osinaraTelegramIngressId: input.dispatchId,
       osinaraTelegramUpdateId: input.updateId,
     },
-    bind: (client, target) => bindIngressTurn(client, ingress, target),
+    bind: (client, target) => bindIngressTurn(client, binding, target),
     prepareCallback: (context, query, token, prepare) => {
       const verified: TelegramPreparationContext = { ...context, ingressRecovery: { ...ingress, ...(input.replaying ? { replaying: true } : {}) } };
       return prepare(verified, query, token);

@@ -7,7 +7,7 @@ import { sessionRepository } from "./sessions/session-repository.js";
 import { withRuntimeAdmission } from "./runtime-maintenance.js";
 import { createTurnDispatcher } from "../runtime/dispatch.js";
 import {
-  newTestSession, recordingObserver, reply, scriptedModel, startMessageTurn, testAgent, testRuntime,
+  HELD_RUNNER_LOCK, newTestSession, recordingObserver, reply, scriptedModel, startMessageTurn, testAgent, testRuntime,
 } from "../runtime/turn/turn.integration-fixtures.js";
 
 const describeDatabase = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true" ? describe : describe.skip;
@@ -61,6 +61,7 @@ describeDatabase("deploy application readiness", () => {
     const modelCalled = new Promise<void>((resolve) => { started = resolve; });
     const dispatcher = createTurnDispatcher({
       admit: async (work) => await withRuntimeAdmission("callback", work),
+      runnerLock: HELD_RUNNER_LOCK,
       runtime: testRuntime({
         agent: testAgent({}),
         callModel: scriptedModel(async () => { started(); await released; return reply("готово"); }).callModel,

@@ -21,10 +21,12 @@ describe("cron matching", () => {
     expect(cronMatches("0 0 * * 7", at("2026-10-04T00:00:00"))).toBe(true);
   });
 
-  it("refuses an expression it cannot read", () => {
+  it("refuses an expression it cannot read, and two schedules under one name", () => {
     expect(() => cronMatches("61 * * * *", new Date())).toThrow("AGENT_SCHEDULE_CRON_INVALID");
     expect(() => cronMatches("* * * *", new Date())).toThrow("AGENT_SCHEDULE_CRON_INVALID");
     expect(() => startScheduler({ schedules: [{ cron: "x * * * *", name: "broken", run: () => {} }] })).toThrow("AGENT_SCHEDULE_CRON_INVALID");
+    expect(() => startScheduler({ schedules: [{ cron: "* * * * *", name: "twice", run: () => {} }, { cron: "0 * * * *", name: "twice", run: () => {} }] }))
+      .toThrow("AGENT_SCHEDULE_NAME_DUPLICATE");
   });
 });
 
@@ -38,7 +40,10 @@ describe("minute scheduler", () => {
     const pending = new Promise<void>((resolve) => { finish = resolve; });
     const scheduler = startScheduler({
       schedules: [
-        { cron: "* * * * *", name: "every-minute", run: ({ waitUntil }) => { minutes.push(new Date().toISOString()); waitUntil(pending); } },
+        { cron: "* * * * *", name: "every-minute", run: ({ waitUntil }) => {
+          minutes.push(new Date().toISOString());
+          if (minutes.length === 2) waitUntil(pending);
+        } },
         { cron: "0 */6 * * *", name: "six-hourly", run: () => { throw new Error("must not run at 13:48"); } },
       ],
     });
@@ -57,6 +62,31 @@ describe("minute scheduler", () => {
     await stopping;
     await vi.advanceTimersByTimeAsync(120_000);
     expect(minutes).toHaveLength(2);
+  });
+
+  it("skips a schedule's minute while its previous cycle still runs, as Eve's Nitro tasks did", async () => {
+    vi.useFakeTimers({ now: at("2026-10-02T13:47:59") });
+    const infos = vi.spyOn(console, "info").mockImplementation(() => {});
+    let finish!: () => void;
+    const slow = new Promise<void>((resolve) => { finish = resolve; });
+    const runs: string[] = [];
+    const scheduler = startScheduler({
+      schedules: [
+        { cron: "* * * * *", name: "slow", run: ({ waitUntil }) => { runs.push("slow"); waitUntil(slow); } },
+        { cron: "* * * * *", name: "quick", run: () => { runs.push("quick"); } },
+      ],
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(60_000);
+    finish();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await scheduler.stop(10);
+
+    expect(runs).toEqual(["slow", "quick", "quick", "slow", "quick"]);
+    expect(infos.mock.calls.map(([line]) => JSON.parse(String(line)))).toEqual([
+      { code: "AGENT_SCHEDULE_CYCLE_SKIPPED", schedule: "slow" },
+    ]);
   });
 
   it("logs a schedule that throws and keeps running the others", async () => {

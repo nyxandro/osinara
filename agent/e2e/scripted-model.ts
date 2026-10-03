@@ -14,11 +14,13 @@
  * - `s`: `load_skill` of `pohuy`; `d`: delegate to a subagent, which answers `child-<marker>`;
  * - every other turn runs one `bash` command; `k` makes it never finish (the process is killed
  *   under it), `h` makes it wait until the test releases the marker;
- * - then the answer `reply-<marker>`.
+ * - then the answer `reply-<marker>`; `w` makes it wait until the test releases the marker.
  * Every call is journaled in `e2e_model_calls`.
  *
  * Test-only.
  */
+import { setTimeout as sleep } from "node:timers/promises";
+
 import type { LanguageModelV4CallOptions, LanguageModelV4Prompt, LanguageModelV4StreamPart } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
 import type { Pool } from "pg";
@@ -27,6 +29,7 @@ import { EMPTY_DELIVERY_MARKER } from "../runtime/turn/step-history.js";
 import { E2E_TABLES } from "./e2e-tables.js";
 
 const MARKER_PATTERN = /e2e-\d+-[a-z]*/gu;
+const RELEASE_POLL_MILLISECONDS = 100;
 const SUBAGENT_OPENING = 'You are the subagent "agent".';
 export const E2E_EXTERNAL_CHAT_ID = -900_000_101;
 
@@ -101,6 +104,11 @@ async function rootStep(db: Pick<Pool, "query">, marker: string, user: string, r
   if (!flags.includes("p") && !has("bash")) {
     const hold = flags.includes("k") ? " # e2e-block" : flags.includes("h") ? ` # e2e-hold:${marker}` : "";
     return { toolCall: { input: { command: `printf 'BASH:${marker}\\n'${hold}` }, name: "bash" } };
+  }
+  if (flags.includes("w")) {
+    while ((await db.query(`SELECT 1 FROM ${E2E_TABLES.releases} WHERE marker = $1`, [marker])).rowCount !== 1) {
+      await sleep(RELEASE_POLL_MILLISECONDS);
+    }
   }
   return { text: `reply-${marker}` };
 }

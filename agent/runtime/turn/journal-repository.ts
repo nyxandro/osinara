@@ -5,6 +5,8 @@
  * - `inJournalTransaction`: runs writers that must commit together.
  * - `createTurn`, `loadTurn`, `claimTurn`, `findWaitingTurn`: the turn row.
  * - `releaseOtherRunners`, `listRunningRootTurns`: turns an earlier process left running.
+ * - `listUnobservedRootTurns`, `loadUnobservedTurn`, `markInputPresented`, `markFinishObserved`:
+ *   whether the application was told that a turn waits for a person and how its run ended.
  * - `savePreparedTurn`, `parkTurn`, `addPendingContext`, `markHistoryStarted`, `finishTurn`: its lifecycle.
  * - `sessionAwaitsApproval`: whether a tool approval of the session is still unanswered.
  * - `recordStep`, `loadStep`, `markStepTextEmitted`, `completeStep`: one model step and its tool calls.
@@ -165,8 +167,8 @@ export async function claimTurn(client: JournalClient, turnId: string, runnerId:
 }
 
 /**
- * At startup, running turns of earlier processes become claimable again. One backend process runs
- * turns, so any other runner is a process that is gone.
+ * At startup, running turns of earlier processes become claimable again. Only while this process
+ * holds the runner lock (`runtime/runner-lock.ts`): then any other runner is a process that is gone.
  */
 export async function releaseOtherRunners(client: JournalClient, runnerId: string): Promise<void> {
   await client.query(
@@ -175,12 +177,43 @@ export async function releaseOtherRunners(client: JournalClient, runnerId: strin
   );
 }
 
+// A child session's turns, its continuations included (they record no parent), are driven by the
+// parent's `agent` call and report through it.
+const ROOT_SESSION = `NOT EXISTS (SELECT 1 FROM agent_session_state child
+  WHERE child.session_id = agent_turns.session_id AND child.parent_session_id IS NOT NULL)`;
+
 /** Running turns that no parent drives, oldest first in each session. */
 export async function listRunningRootTurns(client: JournalClient): Promise<TurnRecord[]> {
   const rows = (await client.query<TurnRow>(
-    `SELECT ${TURN_COLUMNS} FROM agent_turns WHERE status = 'running' AND parent_turn_id IS NULL ORDER BY session_id, sequence`,
+    `SELECT ${TURN_COLUMNS} FROM agent_turns WHERE status = 'running' AND ${ROOT_SESSION} ORDER BY session_id, sequence`,
   )).rows;
   return rows.map(toTurn);
+}
+
+// A root turn whose run ended, or that waits for a person, without the application having heard of it.
+const UNOBSERVED_ROOT_TURN = `finish_observed_at IS NULL AND status <> 'running' AND ${ROOT_SESSION}`;
+
+export async function listUnobservedRootTurns(client: JournalClient): Promise<string[]> {
+  return (await client.query<{ id: string }>(
+    `SELECT id FROM agent_turns WHERE ${UNOBSERVED_ROOT_TURN} ORDER BY session_id, sequence`,
+  )).rows.map((row) => row.id);
+}
+
+/** The turn, if it is still unobserved, and whether its request was shown already. */
+export async function loadUnobservedTurn(client: JournalClient, turnId: string): Promise<{ readonly inputPresented: boolean; readonly turn: TurnRecord } | null> {
+  const row = (await client.query<TurnRow & { input_presented: boolean }>(
+    `SELECT ${TURN_COLUMNS}, input_presented_at IS NOT NULL AS input_presented FROM agent_turns WHERE id = $1 AND ${UNOBSERVED_ROOT_TURN}`,
+    [turnId],
+  )).rows[0];
+  return row ? { inputPresented: row.input_presented, turn: toTurn(row) } : null;
+}
+
+export async function markInputPresented(client: JournalClient, turnId: string): Promise<void> {
+  await updateTurn(client, turnId, "input_presented_at = now()", []);
+}
+
+export async function markFinishObserved(client: JournalClient, turnId: string): Promise<void> {
+  await updateTurn(client, turnId, "finish_observed_at = now()", []);
 }
 
 /** The session's turn that waits for a person, locked for the caller's transaction. */

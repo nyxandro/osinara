@@ -117,9 +117,12 @@ describeWithDatabase("Telegram HITL approval repository", () => {
     expect((await telegramHitlApprovalRepository.claimCallback(input)).status).toBe("authorized");
     expect((await database().query("SELECT response_session_id,response_turn_id,dispatch_turn_id FROM telegram_ingress_updates WHERE update_id=900")).rows)
       .toEqual([{ response_session_id: "wrun_hitl",response_turn_id: "turn_0",dispatch_turn_id: null }]);
-    const control = telegramIngressControl({ deadlineAt: new Date(Date.now() + 60_000).toISOString(), dispatchId, replaying: false,
-      signal: new AbortController().signal, updateId: "900" });
-    await control.bind!(database(), { sessionId: "wrun_hitl", turnId: "turn_1" });
+    const controlUnder = (leaseToken: string) => telegramIngressControl({ deadlineAt: new Date(Date.now() + 60_000).toISOString(), dispatchId,
+      leaseToken, replaying: false, signal: new AbortController().signal, updateId: "900" });
+    // A worker whose lease the queue gave to another one cannot bind its turn to the update.
+    await expect(controlUnder(crypto.randomUUID()).bind!(database(), { sessionId: "wrun_hitl", turnId: "turn_stale" }))
+      .rejects.toThrow("AGENT_TELEGRAM_DISPATCH_BINDING_REJECTED");
+    await controlUnder(claim.leaseToken).bind!(database(), { sessionId: "wrun_hitl", turnId: "turn_1" });
     expect((await database().query("SELECT response_turn_id,dispatch_turn_id FROM telegram_ingress_updates WHERE update_id=900")).rows)
       .toEqual([{ response_turn_id: "turn_0",dispatch_turn_id: "turn_1" }]);
     expect(await telegramHitlApprovalRepository.claimCallback(input)).toMatchObject({ status: "authorized",replayed: true });

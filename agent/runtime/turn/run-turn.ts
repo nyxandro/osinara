@@ -43,9 +43,9 @@ import type { ToolContext, ToolDefinition } from "../tool.js";
 import { finalOutputTool, FINAL_OUTPUT_TOOL_NAME } from "../tools/delegate.js";
 import { runChildTurn } from "./child-turns.js";
 import {
-  claimTurn, completeStep, findTurnCaller, finishTurn, inJournalTransaction, loadStep, loadTurn, markHistoryStarted,
-  markStepTextEmitted, parkToolCall, parkTurn, recordStep, savePreparedTurn, sessionAwaitsApproval, updateToolCall,
-  type JournalDatabase,
+  claimTurn, completeStep, findTurnCaller, finishTurn, inJournalTransaction, loadStep, loadTurn, markFinishObserved,
+  markHistoryStarted, markInputPresented, markStepTextEmitted, parkToolCall, parkTurn, recordStep, savePreparedTurn,
+  sessionAwaitsApproval, updateToolCall, type JournalDatabase,
 } from "./journal-repository.js";
 import { compactionSettings, compactMessages, shouldCompact, todoCompactionMessage, type CompactionSummaryRequest } from "./compaction.js";
 import { assistantStepText, MODEL_INACTIVITY_TIMEOUT, type StepModelCall, type StepModelResponse } from "./model-call.js";
@@ -69,9 +69,15 @@ export interface TurnObserver {
   turnStarted(turn: TurnRecord): Promise<void>;
   stepText(event: { readonly finishReason: string; readonly message: string | null; readonly stepIndex: number; readonly turn: TurnRecord }): Promise<void>;
   toolsStarted(event: { readonly calls: readonly ToolCallRecord[]; readonly stepIndex: number; readonly turn: TurnRecord }): Promise<void>;
-  /** The turn is already parked; a failure here fails it, so no request stays without its buttons. */
+  /**
+   * The turn is already parked; a failure here fails it, so no request stays without its buttons.
+   * A process that died before this returned leaves it to recovery, which presents it again.
+   */
   inputRequested(event: { readonly requests: readonly InputRequest[]; readonly stepIndex: number; readonly turn: TurnRecord }): Promise<void>;
-  /** After the outcome is stored; a failure here reaches the caller, the outcome stays. */
+  /**
+   * After the outcome is stored; a failure here reaches the caller, the outcome stays. A process
+   * that died before this returned leaves it to recovery, which runs it once more.
+   */
   turnFinished(event: { readonly outcome: TurnOutcome; readonly turn: TurnRecord }): Promise<void>;
 }
 
@@ -418,6 +424,7 @@ async function runStep(
       await parkTurn(client, turn.id);
     });
     await runtime.observer.inputRequested({ requests, stepIndex, turn });
+    await markInputPresented(runtime.database, turn.id);
     return { requests, status: "waiting_input" };
   }
   await inJournalTransaction(runtime.database, async (client) => {
@@ -443,7 +450,8 @@ function isCancellation(error: unknown, signal: AbortSignal): boolean {
   return error instanceof TurnCancelledError || signal.aborted;
 }
 
-async function failTurn(runtime: TurnRuntime, turn: TurnRecord, error: unknown, signal: AbortSignal): Promise<TurnOutcome> {
+/** Stores the failure as the turn's outcome; a cancellation as cancelled. Logged here, once. */
+export async function failTurn(runtime: TurnRuntime, turn: TurnRecord, error: unknown, signal: AbortSignal): Promise<TurnOutcome> {
   if (isCancellation(error, signal)) {
     await finishTurn(runtime.database, turn.id, { status: "cancelled" });
     return { status: "cancelled" };
@@ -477,6 +485,11 @@ export async function runTurn(
   } catch (error) {
     outcome = await failTurn(runtime, claimed, error, options.abortSignal);
   }
-  await runtime.observer.turnFinished({ outcome, turn: claimed });
+  try {
+    await runtime.observer.turnFinished({ outcome, turn: claimed });
+  } finally {
+    // A failing handler reaches the caller; only a process that died here leaves it for recovery.
+    await markFinishObserved(runtime.database, claimed.id);
+  }
   return outcome;
 }

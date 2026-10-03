@@ -30,12 +30,10 @@ describe("Google Workspace runtime wiring", () => {
 
     expect(dockerfile).toContain([
       "RUN npm ci --ignore-scripts \\",
-      "    && npm run postinstall \\",
       "    && npm run install:gws",
     ].join("\n"));
     expect(dockerfile).toContain([
       "RUN npm ci --omit=dev --ignore-scripts \\",
-      "    && npm run postinstall \\",
       "    && npm run install:gws",
     ].join("\n"));
     expect(dockerfile).toContain(

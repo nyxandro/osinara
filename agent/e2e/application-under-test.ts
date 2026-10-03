@@ -57,6 +57,8 @@ const application = await startApplication({
   webhookSecretToken: required("TELEGRAM_WEBHOOK_SECRET_TOKEN"),
 });
 
+// As in production (`agent/main.ts`): running work gets a bounded time, then the process exits.
+const SHUTDOWN_GRACE_MILLISECONDS = 5_000;
 process.once("SIGTERM", () => {
-  void application.stop(2_000).then(() => runner.close()).then(() => process.exit(0));
+  void application.stop(SHUTDOWN_GRACE_MILLISECONDS).then(() => runner.close()).then(() => process.exit(0));
 });

@@ -1,7 +1,9 @@
 /**
  * Operator recovery of a queue item blocked by an unconfirmed cancellation — a state only Eve left
- * behind. A bound item is taken again and closed without repeating it (its Eve turn is not the
- * runtime's), which lets the chat's queue go on; an unbound one is closed here. Neither is replayed.
+ * behind. An unbound item is closed here. A bound item is taken again by the queue, which finishes
+ * its turn rather than starting a new one; its turn is Eve's, which the runtime does not have, so
+ * the item fails with `AGENT_TURN_NOT_FOUND` and the owner is alerted. Either way the chat's queue
+ * goes on and nothing is replayed. `cancel` and `observe` end the same way since Eve is gone.
  */
 import { database } from "./database.js";
 import { AppError } from "./app-error.js";

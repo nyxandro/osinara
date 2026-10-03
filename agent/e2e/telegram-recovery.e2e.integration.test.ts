@@ -9,6 +9,8 @@
  * - The database drops all of the application's connections while a turn's command runs (they are
  *   idle then; a cut inside a journal transaction is not reproduced here): the turn still ends with
  *   one reply and nothing runs twice.
+ * - A second agent process on the same database refuses to start, also after such a cut.
+ * - A process told to stop lets a turn it runs in the background finish within its grace.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -130,5 +132,33 @@ async function replies(marker: string) {
       .catch(async (error: unknown) => { throw new Error(`${String(error)}\n${await diagnose(agent)}`); });
     expect(await processes(marker)).toEqual([{ finished: true }]);
     expect(await replies(marker)).toHaveLength(1);
+  }, 120_000);
+
+  it("refuses to start a second agent process on the same database", async () => {
+    // A second process that did start is stopped at once, so it cannot take over the next tests.
+    const outcome = await startAgent().then(async (second) => { await stopAgent(second); return "started"; }, (error: unknown) => String(error));
+
+    expect(outcome).toContain("AGENT_RUNTIME_ALREADY_RUNNING");
+  }, 90_000);
+
+  it("lets a turn running in the background finish within the stop grace, with one reply", async () => {
+    const marker = "e2e-4-kw";
+    const updateId = await send(4, CHATS.owner, marker);
+    await waitUntil(async () => (await processes(marker)).length === 1, "the command started");
+    await killAgent(agent);
+    agent = await startAgent();
+    // The new process resumes the turn in the background; its answer waits for the test.
+    await waitUntil(async () => (await modelCalls(marker)).length === 2, "the recovered turn asks the model");
+
+    const stopped = stopAgent(agent);
+    await database().query(`INSERT INTO ${E2E_TABLES.releases} (marker) VALUES ($1)`, [marker]);
+    await stopped;
+
+    expect(await replies(marker)).toHaveLength(1);
+    expect((await database().query<{ status: string }>(
+      "SELECT t.status FROM telegram_ingress_updates u JOIN agent_turns t ON t.id = u.dispatch_turn_id WHERE u.update_id = $1",
+      [updateId],
+    )).rows).toEqual([{ status: "completed" }]);
+    agent = await startAgent();
   }, 120_000);
 });

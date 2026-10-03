@@ -8,12 +8,15 @@
  *   and the sandbox runner.
  *
  * Start, in order:
- * 1. The runtime: Osinara's agent, the model call, sandboxes, compaction, and an observer per
+ * 1. The runner lock: one agent process per database; a second one stops here with
+ *    `AGENT_RUNTIME_ALREADY_RUNNING`.
+ * 2. The runtime: Osinara's agent, the model call, sandboxes, compaction, and an observer per
  *    channel (Telegram delivers, the memory review only records how its turn ended).
- * 2. Recovery: turns an earlier process left running continue from the journal.
- * 3. The HTTP server on the addresses Eve had: the Telegram webhook, the internal drain the
+ * 3. Recovery: turns an earlier process left running continue from the journal, and what it left
+ *    unreported (a card not shown, an end not reported) is reported.
+ * 4. The HTTP server on the addresses Eve had: the Telegram webhook, the internal drain the
  *    ingress worker calls, the Google OAuth callback and the health check.
- * 4. The minute scheduler: reminders and approval timeouts, scheduled runs, memory review, the
+ * 5. The minute scheduler: reminders and approval timeouts, scheduled runs, memory review, the
  *    software update check, and recovery again for turns whose start a deploy held back.
  */
 import { createTelegramIngress, telegramChannelHooks, telegramTurnEvents } from "./channels/telegram.js";
@@ -25,7 +28,7 @@ import type { ScheduledChatStart } from "./lib/agent-schedules/agent-schedule-di
 import { createConversationWakeupProcessor } from "./lib/conversation-wakeups/conversation-wakeup-drain.js";
 import { conversationWakeupRepository } from "./lib/conversation-wakeups/conversation-wakeup-repository.js";
 import { createConversationWakeupTurn } from "./lib/conversation-wakeups/conversation-wakeup-turn-start.js";
-import { database } from "./lib/database.js";
+import { database, openDedicatedConnection } from "./lib/database.js";
 import { withRuntimeAdmission } from "./lib/runtime-maintenance.js";
 import { createApprovalTimeoutResolver } from "./lib/telegram-hitl/approval-timeout.js";
 import { finalizeTimedOutPrompt } from "./lib/telegram-hitl/approval-timeout-prompt.js";
@@ -33,6 +36,7 @@ import { approvalTimeoutRepository } from "./lib/telegram-hitl/approval-timeout-
 import type { RuntimeAgent } from "./runtime/agent-definition.js";
 import { createTurnDispatcher } from "./runtime/dispatch.js";
 import { respondInSession } from "./runtime/respond.js";
+import { acquireRunnerLock } from "./runtime/runner-lock.js";
 import { startScheduler } from "./runtime/scheduler.js";
 import { startRuntimeServer } from "./runtime/server.js";
 import { createTelegramChannel, telegramWebhookRoutes } from "./runtime/telegram/telegram-channel.js";
@@ -58,8 +62,8 @@ export interface ApplicationOptions {
   readonly host: string;
   readonly port: number;
   /**
-   * This process's identity in the turn journal. One agent process runs at a time: turns claimed
-   * under any other runner id are taken over at start and every minute.
+   * This process's identity in the turn journal. One agent process runs at a time (the runner
+   * lock): turns claimed under any other runner id are taken over at start and every minute.
    */
   readonly runnerId: string;
   readonly sandboxRunnerBaseUrl: string;
@@ -68,12 +72,17 @@ export interface ApplicationOptions {
 
 export interface RunningApplication {
   readonly port: number;
-  /** No new requests or schedule cycles; running work gets `graceMilliseconds` and is never cancelled. */
+  /**
+   * No new requests or schedule cycles; running work, background turns included, gets
+   * `graceMilliseconds` and is never cancelled. The runner lock goes with the process: a turn still
+   * running here after the grace is not taken over by a next process while this one runs it.
+   */
   stop(graceMilliseconds: number): Promise<void>;
 }
 
 export async function startApplication(options: ApplicationOptions): Promise<RunningApplication> {
   const db = database();
+  const runnerLock = await acquireRunnerLock(openDedicatedConnection);
   const telegram = createTelegramChannel({
     botToken: options.botToken,
     botUsername: options.botUsername,
@@ -84,6 +93,7 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
   const dispatcher = createTurnDispatcher({
     // A turn that already exists may finish while a deploy drains, never once it is frozen.
     admit: (work) => withRuntimeAdmission("callback", work),
+    runnerLock,
     runtime: {
       agent: options.agent,
       callModel: callStepModel,
@@ -156,7 +166,15 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
   return {
     port: server.port,
     async stop(graceMilliseconds) {
-      await Promise.all([scheduler.stop(graceMilliseconds), server.close(graceMilliseconds)]);
+      let graceTimer: ReturnType<typeof setTimeout> | undefined;
+      const grace = new Promise<void>((resolve) => { graceTimer = setTimeout(resolve, graceMilliseconds); });
+      await Promise.all([
+        scheduler.stop(graceMilliseconds),
+        server.close(graceMilliseconds),
+        // Scheduled, recovered and reported turns run in the background, outside any request.
+        Promise.race([dispatcher.idle(), grace]),
+      ]);
+      clearTimeout(graceTimer);
     },
   };
 }

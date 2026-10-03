@@ -65,7 +65,11 @@ export async function startAgent(): Promise<RunningAgent> {
   for (;;) {
     const port = /"code":"AGENT_RUNTIME_STARTED","port":(\d+)/u.exec(output)?.[1];
     if (port !== undefined) return { output: () => output, port: Number(port), process: child, sandboxRoot };
-    if (child.exitCode !== null || Date.now() > deadline) throw new Error(`TEST_AGENT_START_FAILED:\n${output}`);
+    if (child.exitCode !== null || Date.now() > deadline) {
+      child.kill("SIGKILL");
+      await rm(sandboxRoot, { force: true, recursive: true });
+      throw new Error(`TEST_AGENT_START_FAILED:\n${output}`);
+    }
     await sleep(POLL_MILLISECONDS);
   }
 }
@@ -75,6 +79,7 @@ async function exited(agent: RunningAgent): Promise<void> {
   await new Promise((resolve) => agent.process.once("exit", resolve));
 }
 
+/** As the deploy stops it: SIGTERM, and the process gets its shutdown grace. */
 export async function stopAgent(agent: RunningAgent): Promise<void> {
   agent.process.kill("SIGTERM");
   await exited(agent);

@@ -26,10 +26,20 @@ import { questionOutput, resolveApprovalOutcome, deniedOutput, stepInputResolved
 import type { InputRequest, InputResponse } from "../hitl/types.js";
 import { newTurnId } from "../ids.js";
 import {
-  addPendingContext, createTurn, findWaitingTurn, finishTurn, inJournalTransaction, loadStep, recordInputResponse,
-  updateToolCall, type JournalClient, type JournalDatabase,
+  addPendingContext, createTurn, findWaitingTurn, finishTurn, inJournalTransaction, loadStep, markFinishObserved,
+  recordInputResponse, updateToolCall, type JournalClient, type JournalDatabase,
 } from "./journal-repository.js";
 import type { SubagentInputRequest, ToolCallRecord, TurnChannel, TurnKind, TurnRecord, TurnStartInput } from "./turn-types.js";
+
+/**
+ * The parked turn ends because the next turn takes over its session. Its run already told the
+ * application that it waits; from here the next turn reports, so recovery must not report the
+ * parked one as finished on top of it.
+ */
+async function closeParkedTurn(client: JournalClient, turnId: string): Promise<void> {
+  await finishTurn(client, turnId, { finalText: null, status: "completed" });
+  await markFinishObserved(client, turnId);
+}
 
 async function parkedCalls(client: JournalClient, turn: TurnRecord): Promise<ToolCallRecord[]> {
   const recorded = await loadStep(client, turn.id, turn.nextStepIndex);
@@ -56,7 +66,7 @@ export async function startTurnWithClient(client: JournalClient, input: StartInp
       for (const call of awaiting) {
         await updateToolCall(client, { callId: call.callId, output: questionOutput(undefined), state: "completed", turnId: waiting.id });
       }
-      await finishTurn(client, waiting.id, { finalText: null, status: "completed" });
+      await closeParkedTurn(client, waiting.id);
       resumesTurnId = waiting.id;
     }
   }
@@ -142,7 +152,7 @@ export async function respondWithClient(client: JournalClient, input: RespondInp
     return { stale, status: "waiting", turnId: waiting.id };
   }
   for (const call of own) await settleCall(client, waiting.id, call, answers.get((call.inputRequest as InputRequest).requestId));
-  await finishTurn(client, waiting.id, { finalText: null, status: "completed" });
+  await closeParkedTurn(client, waiting.id);
   const continuation = await createTurn(client, {
     auth: input.auth,
     // The continuation answers where the parked turn would have: a child stays a child.

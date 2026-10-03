@@ -145,8 +145,10 @@ Releases up to v0.34 ran on Eve `0.40.0` with the `@workflow/world-postgres` bac
 separate `osinara_workflow` database inside the existing PostgreSQL service. The agent's own runtime
 no longer uses that database: after the application migrations the `migrate` service reads it to
 carry each active conversation's history over (`import-eve-history`; a repeated run changes
-nothing), and the deploy controller still checks idleness against it. The database is not changed
-and stays in backups until a later cleanup release removes it.
+nothing), and the deploy controller still checks idleness against it. On a server that ran Eve the
+database is not changed and stays, backups included, until a later cleanup release removes it. A
+fresh installation has no such database: nothing creates it any more, and the import, having no
+history to carry over, does not connect to it.
 
 During the one-time cutover from the Eve `0.32.0` local world, the controller archives the current
 `osinara-production-eve-workflow-data-v032` volume and preserves it for explicit rollback after the
@@ -468,6 +470,11 @@ an empty replacement for active data or silently reuses bytes of unknown provena
 embedding model and sandbox cache volumes are omitted.
 Candidate release files remain in a unique temporary directory and become `releases/vVERSION` only
 after health succeeds.
+
+One agent process works on the application database at a time: it holds a PostgreSQL advisory lock
+on a connection of its own for as long as it runs. A second agent started against the same database
+exits at once with `AGENT_RUNTIME_ALREADY_RUNNING`. PostgreSQL frees the lock when the holder's
+connection ends, so a killed or stopped agent never blocks the next one.
 
 
 

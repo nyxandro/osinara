@@ -6,6 +6,7 @@
  * - `scriptedModel`: answers model calls in order and keeps every request it received.
  * - `recordingObserver`: keeps every turn event in order.
  * - `testAgent`, `testRuntime`, `newTestSession`: a runtime over the test database.
+ * - `HELD_RUNNER_LOCK`: the runner lock of the only process on the test database.
  *
  * Test-only: imported by `*.integration.test.ts` files, never by runtime code.
  */
@@ -27,6 +28,8 @@ export const OWNER_AUTH: SessionAuth = {
   initiator: { attributes: { role: "owner" }, authenticator: "telegram", principalId: "telegram:912", principalType: "user" },
 };
 export const TELEGRAM_CHANNEL = { kind: "telegram" };
+/** The runner lock of a test process that is the only one on the test database. */
+export const HELD_RUNNER_LOCK = { ensureHeld: async () => true };
 
 export function reply(text: string, inputTokens = 100): StepModelResponse {
   return {
@@ -132,12 +135,15 @@ export function testRuntime(input: {
   };
 }
 
-export async function newTestSession(history: readonly ModelMessage[] = []): Promise<string> {
+export async function newTestSession(
+  history: readonly ModelMessage[] = [],
+  options: { readonly parentSessionId?: string } = {},
+): Promise<string> {
   const sessionId = newSessionId();
   const { applicationSessionId } = await createApplicationSession(sessionId);
   await createSessionHistory(database(), {
     announcedSkills: null, applicationSessionId, channelState: null, compaction: { inputTokens: null, promptMessageCount: null }, initiatorAuth: null,
-    history, parentSessionId: null, sandbox: null, sessionId, source: "runtime", todo: null,
+    history, parentSessionId: options.parentSessionId ?? null, sandbox: null, sessionId, source: "runtime", todo: null,
   });
   return sessionId;
 }

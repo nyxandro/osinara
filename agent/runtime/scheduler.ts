@@ -9,7 +9,10 @@
  * - `RuntimeSchedule`: one schedule.
  *
  * Replaces Eve's Nitro cron tasks: the same expressions (`* * * * *`, `0 *\/6 * * *`), the same
- * clock, and a missed minute is skipped rather than caught up, as Nitro did.
+ * clock, and a missed minute is skipped rather than caught up, as Nitro did. A schedule runs one
+ * cycle at a time: while the work its last cycle started is unfinished, its minute is skipped —
+ * Nitro's `runTask` returned the running task instead of starting it again, and Eve's schedule
+ * task awaited all of its `waitUntil` work.
  */
 
 export interface RuntimeSchedule {
@@ -86,7 +89,13 @@ export function startScheduler(input: {
   const now = input.now ?? (() => new Date());
   // An invalid expression stops the start, not a minute months later.
   for (const schedule of input.schedules) parseCron(schedule.cron);
+  // A schedule's cycles are told apart by its name.
+  const names = input.schedules.map((schedule) => schedule.name);
+  const repeated = names.find((name, index) => names.indexOf(name) !== index);
+  if (repeated !== undefined) throw new Error(`AGENT_SCHEDULE_NAME_DUPLICATE: "${repeated}"`);
   const work = new Set<Promise<unknown>>();
+  // Unfinished work of each schedule's last cycle.
+  const running = new Map<string, number>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
 
@@ -99,13 +108,23 @@ export function startScheduler(input: {
         }));
       });
       work.add(tracked);
-      void tracked.finally(() => work.delete(tracked));
+      running.set(schedule.name, (running.get(schedule.name) ?? 0) + 1);
+      void tracked.finally(() => {
+        work.delete(tracked);
+        const left = running.get(schedule.name)! - 1;
+        if (left === 0) running.delete(schedule.name);
+        else running.set(schedule.name, left);
+      });
     };
   }
 
   function tick(minute: Date): void {
     for (const schedule of input.schedules) {
       if (!cronMatches(schedule.cron, minute)) continue;
+      if (running.has(schedule.name)) {
+        console.info(JSON.stringify({ code: "AGENT_SCHEDULE_CYCLE_SKIPPED", schedule: schedule.name }));
+        continue;
+      }
       try {
         schedule.run({ waitUntil: waitUntilFor(schedule) });
       } catch (error) {
