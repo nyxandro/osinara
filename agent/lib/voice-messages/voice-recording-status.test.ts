@@ -140,7 +140,9 @@ describe("voice recording status", () => {
   });
 
   describe("production status", () => {
-    it("sends Telegram's record_voice action to the same chat and topic", async () => {
+    it("sends Telegram's record_voice action to the same chat and topic with the bot token", async () => {
+      // The runtime's Telegram API has no environment fallback: the token must be passed.
+      vi.stubEnv("TELEGRAM_BOT_TOKEN", "123:test-token");
       telegram.sendTelegramChatAction.mockResolvedValue({ body: { ok: true }, ok: true, status: 200 });
 
       await withVoiceRecordingStatus(TARGET, async () => "voice");
@@ -148,9 +150,11 @@ describe("voice recording status", () => {
       expect(telegram.sendTelegramChatAction).toHaveBeenCalledWith({
         action: "record_voice",
         chatId: "-1001",
+        credentials: { botToken: "123:test-token" },
         fetch: expect.any(Function),
         messageThreadId: 7,
       });
+      vi.unstubAllEnvs();
     });
 
     it("reports a refused status with the provider status so causes stay distinguishable", async () => {

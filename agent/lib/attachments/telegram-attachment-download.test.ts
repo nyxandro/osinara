@@ -7,9 +7,9 @@
  * - Transport and response-body failures return a bounded correction contract.
  */
 import type { TelegramAttachment } from "../../runtime/telegram/inbound.js";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createTelegramAttachmentDownloader } from "./telegram-attachment-download.js";
+import { createTelegramAttachmentDownloader, downloadTelegramAttachment } from "./telegram-attachment-download.js";
 
 const attachment = (size: number): TelegramAttachment => ({
   fileId: "file-id",
@@ -73,5 +73,28 @@ describe("createTelegramAttachmentDownloader", () => {
         sideEffectStatus: "not_started",
       },
     });
+  });
+});
+
+describe("downloadTelegramAttachment", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  // The production binding must pass the bot token: the runtime's Telegram API has no environment fallback.
+  it("downloads the file from Telegram with the configured bot token", async () => {
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "123:test-token");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('{"ok":true,"result":{"file_path":"documents/file.txt"}}', { status: 200 }))
+      .mockResolvedValueOnce(new Response("content", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(downloadTelegramAttachment(attachment(7))).resolves.toEqual(Buffer.from("content"));
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      "https://api.telegram.org/bot123:test-token/getFile",
+      "https://api.telegram.org/file/bot123:test-token/documents/file.txt",
+    ]);
   });
 });

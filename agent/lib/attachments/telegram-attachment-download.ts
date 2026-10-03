@@ -84,7 +84,10 @@ export function createTelegramAttachmentDownloader(adapter: TelegramAttachmentDo
   };
 }
 
+// The runtime's Telegram API takes the bot token explicitly; a missing token fails the call.
+const credentials = () => ({ botToken: process.env.TELEGRAM_BOT_TOKEN });
+
 export const downloadTelegramAttachment = createTelegramAttachmentDownloader({
-  downloadFile: (filePath) => downloadTelegramFile({ filePath }),
-  getFile: (fileId) => getTelegramFile({ fileId }),
+  downloadFile: (filePath) => downloadTelegramFile({ credentials: credentials(), filePath }),
+  getFile: (fileId) => getTelegramFile({ credentials: credentials(), fileId }),
 });
