@@ -60,6 +60,11 @@ export interface ApplicationOptions {
   readonly botToken: string;
   readonly botUsername: string;
   readonly host: string;
+  /**
+   * Another process took the runner lock while this one had lost its connection: this process
+   * must stop at once, or both would run the same turns.
+   */
+  readonly onRunnerLockTaken: () => void;
   readonly port: number;
   /**
    * This process's identity in the turn journal. One agent process runs at a time (the runner
@@ -82,7 +87,7 @@ export interface RunningApplication {
 
 export async function startApplication(options: ApplicationOptions): Promise<RunningApplication> {
   const db = database();
-  const runnerLock = await acquireRunnerLock(openDedicatedConnection);
+  const runnerLock = await acquireRunnerLock(openDedicatedConnection, options.onRunnerLockTaken);
   const telegram = createTelegramChannel({
     botToken: options.botToken,
     botUsername: options.botUsername,
@@ -133,6 +138,8 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
   };
 
   await dispatcher.recover();
+  // A person's answer arrives through the server: it must not close a parked turn before its report.
+  await dispatcher.reportsIdle();
   const server = await startRuntimeServer({
     host: options.host,
     port: options.port,

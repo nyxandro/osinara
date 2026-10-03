@@ -51,6 +51,7 @@ const application = await startApplication({
   botToken: required("TELEGRAM_BOT_TOKEN"),
   botUsername: required("TELEGRAM_BOT_USERNAME"),
   host: "127.0.0.1",
+  onRunnerLockTaken: () => process.exit(1),
   port: 0,
   runnerId: required("E2E_RUNNER_ID"),
   sandboxRunnerBaseUrl: `http://127.0.0.1:${runnerPort}/`,

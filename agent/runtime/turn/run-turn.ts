@@ -49,9 +49,10 @@ import {
 } from "./journal-repository.js";
 import { compactionSettings, compactMessages, shouldCompact, todoCompactionMessage, type CompactionSummaryRequest } from "./compaction.js";
 import { assistantStepText, MODEL_INACTIVITY_TIMEOUT, type StepModelCall, type StepModelResponse } from "./model-call.js";
-import { modelCallFailure, TurnCancelledError } from "./model-errors.js";
+import { modelCallFailure } from "./model-errors.js";
 import { orderStepTools, toModelToolSet } from "./model-tools.js";
 import { executeStepCalls, planStepCalls, type CallJournal } from "./step-calls.js";
+import { failTurn } from "./turn-failure.js";
 import { prepareTurnSkills } from "./turn-skills.js";
 import { isEmptyDelivery, stepHistoryMessages, stepTextEvents } from "./step-history.js";
 import type { ToolResultOutput } from "./tool-calls.js";
@@ -94,8 +95,6 @@ export interface TurnRuntime {
 
 type AnyTools = Readonly<Record<string, ToolDefinition<any, any>>>;
 
-const TURN_FAILED_MESSAGE = "Не удалось выполнить ход агента. Попробуйте ещё раз";
-
 // Model-facing: a delegating parent reads it as the result of its `agent` call.
 function outputSchemaNotFulfilled(): AppError {
   return new AppError("AGENT_SUBAGENT_OUTPUT_SCHEMA_NOT_FULFILLED", "The agent could not produce a result matching the requested schema.");
@@ -126,9 +125,12 @@ function systemPrompt(agent: RuntimeAgent, prepared: PreparedTurn): string {
 
 /** A delegated child's caller, as its tools and step hook see it, continuations included; one level deep. */
 async function sessionParent(runtime: TurnRuntime, turn: TurnRecord): Promise<SessionParent | undefined> {
-  if (turn.parentTurnId === null && turn.resumesTurnId === null) return undefined;
+  if (turn.kind !== "subagent") return undefined;
   const caller = await findTurnCaller(runtime.database, turn.id);
-  if (caller === null) return undefined;
+  // Without its caller a child would run with the main agent's view of the session.
+  if (caller === null) {
+    throw new AppError("AGENT_SUBAGENT_CALLER_MISSING", "Не найден ход, который поручил эту подзадачу", { details: { turnId: turn.id } });
+  }
   return {
     callId: caller.callId, rootSessionId: caller.turn.sessionId, sessionId: caller.turn.sessionId,
     turn: { id: caller.turn.id, sequence: caller.turn.sequence },
@@ -424,7 +426,10 @@ async function runStep(
       await parkTurn(client, turn.id);
     });
     await runtime.observer.inputRequested({ requests, stepIndex, turn });
-    await markInputPresented(runtime.database, turn.id);
+    // The card is out: an unwritten mark only lets a crash recovery show it again (its buttons go to
+    // the newest card), so the turn stays parked instead of failing under a shown card.
+    await markInputPresented(runtime.database, turn.id).catch((error: unknown) => console.error(JSON.stringify({
+      code: "AGENT_TURN_INPUT_MARK_FAILED", error: error instanceof Error ? error.message : String(error), turnId: turn.id })));
     return { requests, status: "waiting_input" };
   }
   await inJournalTransaction(runtime.database, async (client) => {
@@ -446,31 +451,6 @@ async function driveTurn(runtime: TurnRuntime, claimed: TurnRecord, signal: Abor
   }
 }
 
-function isCancellation(error: unknown, signal: AbortSignal): boolean {
-  return error instanceof TurnCancelledError || signal.aborted;
-}
-
-/** Stores the failure as the turn's outcome; a cancellation as cancelled. Logged here, once. */
-export async function failTurn(runtime: TurnRuntime, turn: TurnRecord, error: unknown, signal: AbortSignal): Promise<TurnOutcome> {
-  if (isCancellation(error, signal)) {
-    await finishTurn(runtime.database, turn.id, { status: "cancelled" });
-    return { status: "cancelled" };
-  }
-  const code = error instanceof AppError ? error.code : "AGENT_TURN_FAILED";
-  const message = error instanceof AppError ? error.message.slice(code.length + 2) : TURN_FAILED_MESSAGE;
-  console.error(JSON.stringify({
-    code: "AGENT_TURN_FAILED",
-    error: error instanceof Error ? error.message : String(error),
-    errorCode: code,
-    ...(error instanceof AppError && error.details !== undefined ? { details: error.details } : {}),
-    ...(error instanceof Error && error.cause instanceof Error ? { cause: error.cause.message } : {}),
-    sessionId: turn.sessionId,
-    turnId: turn.id,
-  }));
-  await finishTurn(runtime.database, turn.id, { errorCode: code, errorMessage: message, status: "failed" });
-  return { code, message, status: "failed" };
-}
-
 /** Returns `busy` when another live process owns the turn or it is no longer running. */
 export async function runTurn(
   runtime: TurnRuntime,
@@ -483,7 +463,7 @@ export async function runTurn(
   try {
     outcome = await driveTurn(runtime, claimed, options.abortSignal);
   } catch (error) {
-    outcome = await failTurn(runtime, claimed, error, options.abortSignal);
+    outcome = await failTurn(runtime.database, claimed, error, options.abortSignal);
   }
   try {
     await runtime.observer.turnFinished({ outcome, turn: claimed });

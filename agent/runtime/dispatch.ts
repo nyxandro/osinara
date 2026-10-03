@@ -5,7 +5,8 @@
  * - `createTurnDispatcher`: `run` runs a created turn to its end and returns its outcome; `start`
  *   does the same in the background under the deploy admission; `recover` resumes the turns an
  *   earlier process left running, and any whose start the deploy admission refused, and reports
- *   the turns it left unreported (it is repeated every minute); `idle` waits for background work.
+ *   the turns it left unreported (it is repeated every minute); `reportsIdle` waits for those
+ *   reports, `idle` for all background work.
  *
  * A session's turns run one at a time, in creation order (`claimTurn`), so a turn created while an
  * earlier one runs waits for it, as Eve's `queue` turn policy did. A turn this process already
@@ -23,6 +24,8 @@ export interface TurnDispatcher {
   run(turnId: string): Promise<TurnOutcome>;
   start(turnId: string): void;
   recover(): Promise<number>;
+  /** At start, before the application takes requests: a person's answer cannot overtake a report. */
+  reportsIdle(): Promise<void>;
   idle(): Promise<void>;
 }
 
@@ -42,7 +45,7 @@ export function createTurnDispatcher(input: {
 }): TurnDispatcher {
   const { runtime } = input;
   const active = new Map<string, Promise<TurnOutcome>>();
-  const reporting = new Set<string>();
+  const reporting = new Map<string, Promise<void>>();
   const sessionWaiters = new Map<string, Set<() => void>>();
   const background = new Set<Promise<void>>();
 
@@ -92,7 +95,7 @@ export function createTurnDispatcher(input: {
     return running;
   }
 
-  function inBackground(turnId: string, failureCode: string, work: () => Promise<unknown>): void {
+  function inBackground(turnId: string, failureCode: string, work: () => Promise<unknown>): Promise<void> {
     const running = (async () => {
       try {
         const ran = await input.admit(work);
@@ -104,31 +107,29 @@ export function createTurnDispatcher(input: {
     })();
     background.add(running);
     void running.finally(() => background.delete(running));
+    return running;
   }
 
   function start(turnId: string): void {
-    inBackground(turnId, "AGENT_TURN_BACKGROUND_RUN_FAILED", () => run(turnId));
+    void inBackground(turnId, "AGENT_TURN_BACKGROUND_RUN_FAILED", () => run(turnId));
   }
 
   function report(turnId: string): void {
-    reporting.add(turnId);
-    inBackground(turnId, "AGENT_TURN_REPORT_FAILED", async () => {
-      try {
-        const entry = await loadUnobservedTurn(runtime.database, turnId);
-        // A run of this process reports its own turn: it marks the report before it lets the turn go.
-        if (entry === null || active.has(turnId)) return false;
-        await reportUnobservedTurn(runtime, entry);
-        return true;
-      } finally {
-        reporting.delete(turnId);
-      }
+    const reported = inBackground(turnId, "AGENT_TURN_REPORT_FAILED", async () => {
+      const entry = await loadUnobservedTurn(runtime.database, turnId);
+      // A run of this process reports its own turn: it marks the report before it lets the turn go.
+      if (entry === null || active.has(turnId)) return false;
+      await reportUnobservedTurn(runtime, entry);
+      return true;
     });
+    // Also when maintenance held the report back: the next recovery tries it again.
+    reporting.set(turnId, reported.finally(() => reporting.delete(turnId)));
   }
 
   async function recover(): Promise<number> {
     if (!await input.runnerLock.ensureHeld()) {
-      // Another process took the database over while this one had lost its connection.
-      console.error(JSON.stringify({ code: "AGENT_RUNTIME_SECOND_PROCESS", runnerId: runtime.runnerId }));
+      // Another process took the database over while this one had lost its connection; this one stops.
+      console.error(JSON.stringify({ code: "AGENT_TURN_RECOVERY_WITHOUT_LOCK", runnerId: runtime.runnerId }));
       return 0;
     }
     await releaseOtherRunners(runtime.database, runtime.runnerId);
@@ -143,9 +144,13 @@ export function createTurnDispatcher(input: {
     return turns.length + unreported.length;
   }
 
+  async function reportsIdle(): Promise<void> {
+    while (reporting.size > 0) await Promise.allSettled([...reporting.values()]);
+  }
+
   async function idle(): Promise<void> {
     while (background.size > 0) await Promise.allSettled([...background]);
   }
 
-  return { idle, recover, run, start };
+  return { idle, recover, reportsIdle, run, start };
 }

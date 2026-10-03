@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { closeDatabase, database } from "../../lib/database.js";
 import { loadSessionHistory } from "../history/history-repository.js";
+import { newTurnId } from "../ids.js";
 import { defineTool, type ToolDefinition } from "../tool.js";
 import { agentTool } from "../tools/delegate.js";
 import type { StepModelCall, StepModelResponse } from "./model-call.js";
@@ -197,6 +198,22 @@ async function childTurns() {
       "SELECT channel FROM agent_turns WHERE resumes_turn_id IS NOT NULL AND session_id <> $1", [sessionId]);
     expect(childContinuations.rows).toEqual([{ channel: { kind: "subagent" } }]);
     expect(model.requests.at(-1)!.messages.at(-1)).toMatchObject({ content: [{ output: { type: "text", value: "письмо ушло" }, toolCallId: "call-a" }] });
+  });
+
+  it("fails a subagent turn whose caller cannot be found instead of running it as the main agent", async () => {
+    const parentSession = await newTestSession();
+    const childSession = await newTestSession([], { parentSessionId: parentSession });
+    const orphan = (await database().query<{ id: string }>(
+      `INSERT INTO agent_turns (id, session_id, sequence, kind, status, auth, channel, input)
+       VALUES ($2, $1, 0, 'subagent', 'running', $3::json, '{"kind":"subagent"}', '{"context":[],"message":"задача"}') RETURNING id`,
+      [childSession, newTurnId(), JSON.stringify(OWNER_AUTH)],
+    )).rows[0]!;
+    const model = routedModel(() => reply("сделал"));
+
+    const outcome = await runTurn(testRuntime({ agent: testAgent({}), callModel: model.callModel, observer: recordingObserver().observer }), orphan.id, RUN);
+
+    expect(outcome).toMatchObject({ code: "AGENT_SUBAGENT_CALLER_MISSING", status: "failed" });
+    expect(model.requests).toHaveLength(0);
   });
 
   it("waits for the same child after a restart instead of starting another one", async () => {

@@ -7,6 +7,9 @@
  * Stop (SIGTERM, SIGINT): no new requests or schedule cycles; running work gets a bounded time.
  * What is still running then continues at the next start from the journal: a turn is never marked
  * cancelled by a stopping process.
+ *
+ * Exit with code 1 at once when another agent process took the database over while this one had
+ * lost its connection (`AGENT_RUNTIME_SECOND_PROCESS`): the other one continues the turns.
  */
 import { createOsinaraAgent } from "./agent.js";
 import { startApplication } from "./application.js";
@@ -33,6 +36,7 @@ async function main(): Promise<void> {
     botToken: requiredEnv("TELEGRAM_BOT_TOKEN"),
     botUsername: requiredEnv("TELEGRAM_BOT_USERNAME"),
     host: HTTP_HOST,
+    onRunnerLockTaken: () => process.exit(1),
     port: HTTP_PORT,
     runnerId: `${identity.hostname}:${identity.pid}:${identity.startTicks}`,
     sandboxRunnerBaseUrl: SANDBOX_RUNNER_BASE_URL,

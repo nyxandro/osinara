@@ -474,7 +474,9 @@ after health succeeds.
 One agent process works on the application database at a time: it holds a PostgreSQL advisory lock
 on a connection of its own for as long as it runs. A second agent started against the same database
 exits at once with `AGENT_RUNTIME_ALREADY_RUNNING`. PostgreSQL frees the lock when the holder's
-connection ends, so a killed or stopped agent never blocks the next one.
+connection ends, so a killed or stopped agent never blocks the next one. An agent whose lock
+connection was cut takes the lock again at once; if another agent took it meanwhile, it exits with
+code 1 (`AGENT_RUNTIME_SECOND_PROCESS`) and leaves the turns to that agent.
 
 
 

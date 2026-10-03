@@ -4,7 +4,7 @@
  * Exports:
  * - `database`: lazily initialized connection pool.
  * - `openDedicatedConnection`: a fresh connection outside the pool, for a hold that lasts as long
- *   as its session, such as the runner lock; the caller ends it.
+ *   as its session, such as the runner lock; its queries are short checks; the caller ends it.
  * - `closeDatabase`: graceful shutdown helper for scripts and tests.
  */
 import type { Client, Pool } from "pg";
@@ -12,6 +12,7 @@ import { createApplicationDatabaseClient, createApplicationDatabasePool } from "
 import { normalizePostgresError } from "./database-errors.js";
 
 const CONNECTION_TIMEOUT_MILLISECONDS = 5_000;
+const DEDICATED_QUERY_TIMEOUT_MILLISECONDS = 5_000;
 
 let pool: Pool | null = null;
 
@@ -30,6 +31,10 @@ export async function openDedicatedConnection(): Promise<Client> {
   const client = createApplicationDatabaseClient({
     connectionString: connectionString(),
     connectionTimeoutMillis: CONNECTION_TIMEOUT_MILLISECONDS,
+    // Held for hours: a peer that vanished without closing is noticed, and a short check on a
+    // half-dead connection fails instead of hanging the minute recovery that waits on it.
+    keepAlive: true,
+    query_timeout: DEDICATED_QUERY_TIMEOUT_MILLISECONDS,
   });
   try {
     await client.connect();

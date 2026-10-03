@@ -5,7 +5,7 @@
  * - A second process cannot take the lock while the first holds it, and gets a clear error.
  * - A holder whose connection is cut takes the lock again at once, so a second process still
  *   cannot start; if the database refused it meanwhile and another process got the lock, the
- *   first one learns that it is no longer the holder.
+ *   first one learns that it is no longer the holder and is told once, so it can stop.
  * - A released lock is free for the next process at once.
  */
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -19,8 +19,10 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) t
 // The lock is a database session's, so two "processes" are just two acquisitions.
 const held: RunnerLock[] = [];
 
-async function acquire(connect: LockConnection = openDedicatedConnection): Promise<RunnerLock> {
-  const lock = await acquireRunnerLock(connect);
+const NOT_TAKEN = () => { throw new Error("TEST_LOCK_TAKEN_UNEXPECTEDLY"); };
+
+async function acquire(connect: LockConnection = openDedicatedConnection, onTaken: () => void = NOT_TAKEN): Promise<RunnerLock> {
+  const lock = await acquireRunnerLock(connect, onTaken);
   held.push(lock);
   return lock;
 }
@@ -55,7 +57,7 @@ async function cutHolder(): Promise<void> {
   it("refuses a second process while the first one holds the lock", async () => {
     const first = await acquire();
 
-    await expect(acquireRunnerLock(openDedicatedConnection)).rejects.toThrow("AGENT_RUNTIME_ALREADY_RUNNING");
+    await expect(acquireRunnerLock(openDedicatedConnection, NOT_TAKEN)).rejects.toThrow("AGENT_RUNTIME_ALREADY_RUNNING");
     expect(await first.ensureHeld()).toBe(true);
   });
 
@@ -65,27 +67,30 @@ async function cutHolder(): Promise<void> {
     await cutHolder();
     await until(async () => (await lockHolders()).length === 1);
 
-    await expect(acquireRunnerLock(openDedicatedConnection)).rejects.toThrow("AGENT_RUNTIME_ALREADY_RUNNING");
+    await expect(acquireRunnerLock(openDedicatedConnection, NOT_TAKEN)).rejects.toThrow("AGENT_RUNTIME_ALREADY_RUNNING");
     expect(await first.ensureHeld()).toBe(true);
   });
 
-  it("learns that another process holds the lock after the database refused it a new connection", async () => {
+  it("learns that another process holds the lock after the database refused it a new connection, and says so once", async () => {
     let databaseDown = false;
+    let taken = 0;
     const first = await acquire(async () => {
       if (databaseDown) throw new Error("TEST_DATABASE_DOWN");
       return await openDedicatedConnection();
-    });
+    }, () => { taken += 1; });
     databaseDown = true;
     await cutHolder();
 
     const second = await acquire();
     databaseDown = false;
     expect(await first.ensureHeld()).toBe(false);
+    expect(await first.ensureHeld()).toBe(false);
+    expect(taken).toBe(1);
     expect(await second.ensureHeld()).toBe(true);
 
     await second.release();
     expect(await first.ensureHeld()).toBe(true);
-    await expect(acquireRunnerLock(openDedicatedConnection)).rejects.toThrow("AGENT_RUNTIME_ALREADY_RUNNING");
+    await expect(acquireRunnerLock(openDedicatedConnection, NOT_TAKEN)).rejects.toThrow("AGENT_RUNTIME_ALREADY_RUNNING");
   });
 
   it("frees the lock for the next process as soon as it is released", async () => {

@@ -6,7 +6,8 @@
  *   it waits on — its own and those its child raised.
  * - `reportUnobservedTurn`: for a turn whose process died before the application heard of it,
  *   shows its request if it was never shown, then reports how its run ended. A request that cannot
- *   be shown fails the turn, as it would have in the run itself.
+ *   be shown fails the turn, as it would have in the run itself — unless a person answered an
+ *   earlier card meanwhile: then the next turn has the session and reports, and nothing is changed.
  *
  * The turn loop marks both steps in the journal (`markInputPresented`, `markFinishObserved`), so
  * recovery reports only what a dead process left unreported. A request shown just before the crash,
@@ -14,11 +15,9 @@
  */
 import type { InputRequest } from "../hitl/types.js";
 import { loadStep, markFinishObserved, markInputPresented, type JournalClient } from "./journal-repository.js";
-import { failTurn, type TurnOutcome, type TurnRuntime } from "./run-turn.js";
+import type { TurnOutcome, TurnRuntime } from "./run-turn.js";
+import { failParkedTurn } from "./turn-failure.js";
 import type { SubagentInputRequest, TurnRecord } from "./turn-types.js";
-
-// Recovery is never cancelled: a stopping process leaves what it did not finish to the next one.
-const NEVER_ABORTED = new AbortController().signal;
 
 export async function storedTurnOutcome(client: JournalClient, turn: TurnRecord): Promise<TurnOutcome> {
   switch (turn.status) {
@@ -40,24 +39,27 @@ export async function storedTurnOutcome(client: JournalClient, turn: TurnRecord)
   }
 }
 
+async function presentAgain(runtime: TurnRuntime, turn: TurnRecord, outcome: TurnOutcome & { readonly status: "waiting_input" }): Promise<TurnOutcome | null> {
+  try {
+    await runtime.observer.inputRequested({ requests: outcome.requests, stepIndex: turn.nextStepIndex, turn });
+  } catch (error) {
+    return await failParkedTurn(runtime.database, turn, error);
+  }
+  await markInputPresented(runtime.database, turn.id);
+  return outcome;
+}
+
 export async function reportUnobservedTurn(runtime: TurnRuntime, input: {
   readonly inputPresented: boolean;
   readonly turn: TurnRecord;
-}): Promise<TurnOutcome> {
+}): Promise<void> {
   const { turn } = input;
-  let outcome = await storedTurnOutcome(runtime.database, turn);
-  if (outcome.status === "waiting_input" && !input.inputPresented) {
-    try {
-      await runtime.observer.inputRequested({ requests: outcome.requests, stepIndex: turn.nextStepIndex, turn });
-      await markInputPresented(runtime.database, turn.id);
-    } catch (error) {
-      outcome = await failTurn(runtime, turn, error, NEVER_ABORTED);
-    }
-  }
+  let outcome: TurnOutcome | null = await storedTurnOutcome(runtime.database, turn);
+  if (outcome.status === "waiting_input" && !input.inputPresented) outcome = await presentAgain(runtime, turn, outcome);
+  if (outcome === null) return;
   try {
     await runtime.observer.turnFinished({ outcome, turn });
   } finally {
     await markFinishObserved(runtime.database, turn.id);
   }
-  return outcome;
 }

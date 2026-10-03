@@ -6,7 +6,8 @@
  * - `createTurn`, `loadTurn`, `claimTurn`, `findWaitingTurn`: the turn row.
  * - `releaseOtherRunners`, `listRunningRootTurns`: turns an earlier process left running.
  * - `listUnobservedRootTurns`, `loadUnobservedTurn`, `markInputPresented`, `markFinishObserved`:
- *   whether the application was told that a turn waits for a person and how its run ended.
+ *   whether the application was told that a turn waits for a person and how its run ended;
+ *   `failWaitingTurn`: a parked turn whose request cannot be shown.
  * - `savePreparedTurn`, `parkTurn`, `addPendingContext`, `markHistoryStarted`, `finishTurn`: its lifecycle.
  * - `sessionAwaitsApproval`: whether a tool approval of the session is still unanswered.
  * - `recordStep`, `loadStep`, `markStepTextEmitted`, `completeStep`: one model step and its tool calls.
@@ -206,6 +207,20 @@ export async function loadUnobservedTurn(client: JournalClient, turnId: string):
     [turnId],
   )).rows[0];
   return row ? { inputPresented: row.input_presented, turn: toTurn(row) } : null;
+}
+
+/** Fails a parked turn; false when it no longer waits because the next turn took its session over. */
+export async function failWaitingTurn(client: JournalClient, turnId: string, failure: {
+  readonly errorCode: string;
+  readonly errorMessage: string;
+}): Promise<boolean> {
+  const updated = await client.query(
+    `UPDATE agent_turns SET status = 'failed', error_code = $2, error_message = $3, runner_id = NULL, completed_at = now(),
+            updated_at = now()
+      WHERE id = $1 AND status = 'waiting_input'`,
+    [turnId, failure.errorCode, failure.errorMessage],
+  );
+  return updated.rowCount === 1;
 }
 
 export async function markInputPresented(client: JournalClient, turnId: string): Promise<void> {

@@ -7,8 +7,9 @@ import { newTurnId } from "./ids.js";
 import { defineTool } from "./tool.js";
 import { createTurnDispatcher } from "./dispatch.js";
 import { claimTurn, loadTurn } from "./turn/journal-repository.js";
+import { respondToInput } from "./turn/turn-start.js";
 import {
-  HELD_RUNNER_LOCK, newTestSession, recordingObserver, reply, scriptedModel, startMessageTurn, testAgent, testRuntime, toolCalls,
+  HELD_RUNNER_LOCK, newTestSession, OWNER_AUTH, recordingObserver, reply, scriptedModel, startMessageTurn, testAgent, testRuntime, toolCalls,
 } from "./turn/turn.integration-fixtures.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
@@ -289,6 +290,115 @@ function gate() {
     await next.idle();
 
     expect(events).toEqual([{ kind: "turnFinished", outcome: "completed", turnId: turn.id }]);
+  });
+
+  it("shows the card at a later recovery when maintenance held the first one back", async () => {
+    const sessionId = await newTestSession();
+    const model = scriptedModel(toolCalls([{ id: "call-1", input: {}, name: "change" }]));
+    const dead = createTurnDispatcher({
+      admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
+      runtime: testRuntime({
+        agent: testAgent(approvalTools()), callModel: model.callModel, observer: recordingObserver({ inputRequested: DIES_HERE }).observer, runnerId: "runner-dead",
+      }),
+    });
+    const turn = await startMessageTurn(sessionId, "измени");
+    void dead.run(turn.id);
+    await untilStatus(turn.id, "waiting_input");
+    let frozen = true;
+    const { events, observer } = recordingObserver();
+    const next = createTurnDispatcher({
+      admit: async (work) => frozen ? null : await work(), runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
+      runtime: testRuntime({ agent: testAgent(approvalTools()), callModel: model.callModel, observer, runnerId: "runner-new" }),
+    });
+
+    await next.recover();
+    await next.idle();
+    expect(events).toEqual([]);
+    frozen = false;
+    expect(await next.recover()).toBe(1);
+    await next.idle();
+
+    expect(events.map((event) => event.kind)).toEqual(["inputRequested", "turnFinished"]);
+  });
+
+  it("does not report a turn again while this process is still reporting it", async () => {
+    const sessionId = await newTestSession();
+    const model = scriptedModel(reply("готово"));
+    const release = gate();
+    const reached = gate();
+    const { events, observer } = recordingObserver({ turnFinished: async () => { reached.open(); await release.opened; } });
+    const dispatcher = createTurnDispatcher({
+      admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
+      runtime: testRuntime({ agent: testAgent({}), callModel: model.callModel, observer }),
+    });
+    const turn = await startMessageTurn(sessionId, "привет");
+    const running = dispatcher.run(turn.id);
+    await reached.opened;
+
+    expect(await dispatcher.recover()).toBe(0);
+    await dispatcher.idle();
+    release.open();
+    await running;
+
+    expect(events.filter((event) => event.kind === "turnFinished")).toHaveLength(1);
+  });
+
+  it("keeps a turn parked when its card was shown but the mark of it could not be written", async () => {
+    const sessionId = await newTestSession();
+    const model = scriptedModel(toolCalls([{ id: "call-1", input: {}, name: "change" }]));
+    const { events, observer } = recordingObserver();
+    const dispatcher = createTurnDispatcher({
+      admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
+      runtime: testRuntime({ agent: testAgent(approvalTools()), callModel: model.callModel, observer }),
+    });
+    await database().query(`CREATE FUNCTION test_refuse_presented_mark() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'TEST_MARK_REFUSED'; END $$`);
+    await database().query(`CREATE TRIGGER test_refuse_presented_mark BEFORE UPDATE OF input_presented_at ON agent_turns
+      FOR EACH ROW EXECUTE FUNCTION test_refuse_presented_mark()`);
+    const turn = await startMessageTurn(sessionId, "измени");
+    let outcome: Awaited<ReturnType<typeof dispatcher.run>>;
+    try {
+      outcome = await dispatcher.run(turn.id);
+    } finally {
+      await database().query("DROP TRIGGER test_refuse_presented_mark ON agent_turns");
+      await database().query("DROP FUNCTION test_refuse_presented_mark()");
+    }
+
+    expect(outcome).toMatchObject({ status: "waiting_input" });
+    expect(await loadTurn(database(), turn.id)).toMatchObject({ status: "waiting_input" });
+    expect(events.flatMap((event) => event.kind === "turnFinished" ? [`turnFinished:${event.outcome}`] : event.kind === "inputRequested" ? [event.kind] : []))
+      .toEqual(["inputRequested", "turnFinished:waiting_input"]);
+  });
+
+  it("leaves a parked turn to the next turn when its card fails to show while someone answered it", async () => {
+    const sessionId = await newTestSession();
+    const model = scriptedModel(toolCalls([{ id: "call-1", input: {}, name: "change" }]));
+    const dead = createTurnDispatcher({
+      admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
+      runtime: testRuntime({
+        agent: testAgent(approvalTools()), callModel: model.callModel, observer: recordingObserver({ inputRequested: DIES_HERE }).observer, runnerId: "runner-dead",
+      }),
+    });
+    const turn = await startMessageTurn(sessionId, "измени");
+    void dead.run(turn.id);
+    await untilStatus(turn.id, "waiting_input");
+    // The person answers the earlier card while recovery shows it again, and that showing fails.
+    const { events, observer } = recordingObserver({
+      inputRequested: async (event) => {
+        await respondToInput(database(), { auth: OWNER_AUTH, context: [], responses: [{ optionId: "cancel", requestId: event.requests[0]!.requestId }], sessionId });
+        throw new Error("TEST_CARD_REFUSED");
+      },
+    });
+    const next = createTurnDispatcher({
+      admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
+      runtime: testRuntime({ agent: testAgent(approvalTools()), callModel: model.callModel, observer, runnerId: "runner-new" }),
+    });
+
+    await next.recover();
+    await next.idle();
+
+    expect(await loadTurn(database(), turn.id)).toMatchObject({ status: "completed" });
+    expect(events.map((event) => event.kind)).toEqual(["inputRequested"]);
   });
 
   it("reports nothing again that a live run reported, even when its report failed", async () => {
