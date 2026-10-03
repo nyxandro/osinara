@@ -1,6 +1,6 @@
 /**
- * Ported from eve 0.40.0 `public/channels/telegram/inbound.test.ts` (Apache-2.0, see NOTICE-eve).
- * Changes: topic messages carry `is_topic_message`; a case pins the ordinary-reply rule.
+ * Topic messages carry `is_topic_message`; a case pins the ordinary-reply rule.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { describe, expect, it } from "vitest";
 

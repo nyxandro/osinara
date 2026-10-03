@@ -2,7 +2,7 @@
  * Telegram turn result context tests.
  *
  * A reply that resumes a pending confirmation never reaches the model as the prepared envelope:
- * Eve answers its own question with the raw message text, so everything the envelope carried is
+ * The runtime answers its own question with the raw message text, so everything the envelope carried is
  * dropped. The highlighted fragment is the part of that loss which changes the answer.
  *
  * Constructs covered:

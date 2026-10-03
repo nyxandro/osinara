@@ -57,7 +57,7 @@ const context = {
       },
       initiator: null,
     },
-    id: "eve-session-1",
+    id: "agent-session-1",
     turn: { id: "turn-1", sequence: 1 },
   },
 };

@@ -1,9 +1,9 @@
 /**
- * The turn loop replays recorded Eve 0.40 conversations and sends the model the same messages.
+ * The turn loop replays the recorded reference conversations and sends the model the same messages.
  *
- * Each scenario seeds the session with the history Eve had sent before the turn, scripts the model
- * with the answers Eve received, and stubs every tool with the result Eve recorded. The provider
- * request the runtime builds is compared with Eve's after both are normalized the same way. The
+ * Each scenario seeds the session with the history the reference had sent before the turn, scripts the model
+ * with the answers the reference received, and stubs every tool with the recorded result. The provider
+ * request the runtime builds is compared with the reference request after both are normalized the same way. The
  * system prompt is out of scope here (its parts are pinned in `prompt/*.test.ts`), so is the tool
  * JSON (`model-tools.test.ts`).
  */
@@ -38,7 +38,7 @@ function textOf(message: PromptMessage): string {
   return message.content.map((part) => part.type === "text" ? part.text : "").join("");
 }
 
-// Before the turn: the history Eve sent; the turn input: the user messages after its last answer.
+// Before the turn: the history the reference sent; the turn input: the user messages after its last answer.
 function splitFirstPrompt(prompt: Prompt) {
   const messages = prompt.slice(1);
   let start = messages.length;
@@ -46,7 +46,7 @@ function splitFirstPrompt(prompt: Prompt) {
   return { history: messages.slice(0, start) as unknown as ModelMessage[], input: messages.slice(start).map(textOf) };
 }
 
-// The model's answer at step i is what Eve's next request carries after the previous one.
+// The model's answer at step i is what the next reference request carries after the previous one.
 function answers(prompts: readonly Prompt[]) {
   return prompts.slice(1).map((next, index) => {
     const added = next.slice(prompts[index]!.length).filter((message) => message.role === "assistant");
@@ -93,7 +93,7 @@ function stubTools(prompts: readonly Prompt[], guarded: ReadonlySet<string>) {
   return tools;
 }
 
-// Eve's placeholders and the one raw value the runtime adds (a new approval id) are renumbered by
+// The reference placeholders and the one raw value the runtime adds (a new approval id) are renumbered by
 // first appearance, so an id seeded from history and a fresh one stay distinct on both sides.
 function renumber(value: unknown): unknown {
   const seen = new Map<string, string>();
@@ -162,11 +162,11 @@ async function replay(scenario: string, input: {
   return { prompts, sent };
 }
 
-(enabled ? describe : describe.skip)("replay of Eve 0.40 conversations", () => {
+(enabled ? describe : describe.skip)("replay of reference conversations", () => {
   beforeEach(async () => { await database().query("TRUNCATE users, families CASCADE"); });
   afterAll(closeDatabase);
 
-  it("builds every step of a multi-tool turn as Eve did", async () => {
+  it("builds every step of a multi-tool turn as the reference did", async () => {
     const { prompts, sent } = await replay("private-first", {});
 
     expect(sent.map(comparable)).toEqual(prompts.map(comparable));
@@ -176,13 +176,13 @@ async function replay(scenario: string, input: {
     ["approval", { guarded: ["manage_profile_projection"], respond: { optionId: "approve" } }],
     ["approval-denied", { guarded: ["manage_profile_projection"], respond: { optionId: "cancel" } }],
     ["question", { respond: { optionId: "continue" } }],
-  ] as const)("continues %s exactly as Eve did", async (scenario, input) => {
+  ] as const)("continues %s exactly as the reference did", async (scenario, input) => {
     const { prompts, sent } = await replay(scenario, input);
 
     expect(sent.map(comparable)).toEqual(prompts.map(comparable));
   });
 
-  it("puts the approval timeout notice where Eve did", async () => {
+  it("puts the approval timeout notice where the reference did", async () => {
     const prompts = await rootPrompts("approval-timeout");
     const notice = textOf(prompts[1]!.at(-3)!);
     const { sent } = await replay("approval-timeout", { guarded: ["manage_profile_projection"], respond: { context: [notice], optionId: "cancel" } });
@@ -190,7 +190,7 @@ async function replay(scenario: string, input: {
     expect(sent.map(comparable)).toEqual(prompts.map(comparable));
   });
 
-  it("reissues an empty answer once with Eve's notice", async () => {
+  it("reissues an empty answer once with the reference notice", async () => {
     const { prompts, sent } = await replay("empty-reply", { empty: true });
 
     expect(sent.map(comparable)).toEqual(prompts.map(comparable));

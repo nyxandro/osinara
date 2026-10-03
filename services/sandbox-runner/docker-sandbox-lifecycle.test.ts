@@ -2,7 +2,7 @@
  * Docker sandbox lifecycle policy tests.
  *
  * Constructs covered:
- * - Policy identity ignores transient Eve roots but includes scope and mount changes.
+ * - Policy identity ignores the agent session but includes scope and mount changes.
  * - Existing compute is replaced when its owner or policy identity is stale.
  * - Idle detection never stops an operation that is still active.
  * - Idle stop/removal transitions cannot race newly arriving work on the same container.
@@ -32,7 +32,7 @@ const BASE_REQUEST: SandboxRunnerCreateRequest = {
 };
 
 describe("Docker sandbox lifecycle", () => {
-  it("keeps one policy identity across Eve roots and changes it for another mount", () => {
+  it("keeps one policy identity across agent sessions and changes it for another mount", () => {
     expect(sandboxRequestHash({ ...BASE_REQUEST, agentSessionId: NEXT_AGENT_SESSION_ID }))
       .toBe(sandboxRequestHash(BASE_REQUEST));
     expect(sandboxRequestHash({

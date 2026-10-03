@@ -4,7 +4,7 @@
  * Constructs covered:
  * - New sessions receive a bounded bootstrap timeline with reply ancestry.
  * - Existing sessions receive only unseen entries that are not already owned by that session.
- * - Timeline context is embedded in the durable user message rather than ephemeral Eve context.
+ * - Timeline context is embedded in the durable user message rather than ephemeral turn context.
  * - The addressed message text is recoverable from the durable envelope the preparer produced.
  * - The envelope names the technical trigger of a group turn and never invents one for a private chat.
  */

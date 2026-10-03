@@ -147,7 +147,7 @@ export function repositories() {
     },
     session: {
       prepareAuthorizedResponse: vi.fn().mockResolvedValue({ continuationToken: "telegram-101::",generation: 0,id: "session-1",
-        rotated: false,sandboxSessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",nativeSessionId: "eve-response-session" }),
+        rotated: false,sandboxSessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",nativeSessionId: "agent-response-session" }),
       hasRoute: vi.fn().mockResolvedValue(false),
       prepareTurn: vi.fn().mockResolvedValue({
         continuationToken: "telegram-101::",

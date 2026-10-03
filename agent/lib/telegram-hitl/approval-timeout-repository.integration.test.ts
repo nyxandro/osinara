@@ -6,7 +6,7 @@
  * - `completeTimeout`: terminalizes the row and releases the session's rotation veto.
  * - A concurrent user decision wins the row; a failed cancellation stays retryable.
  * - Pre-migration rows without a request kind are fail-closed.
- * - A prompt whose session no longer owns the parked Eve run is never settled.
+ * - A prompt whose session no longer owns the parked turn is never settled.
  * - A claim carries revalidated Telegram auth, and a timed-out row is not execution evidence.
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -131,7 +131,7 @@ describeWithDatabase("approval timeout repository", () => {
     ).resolves.toEqual([]);
   });
 
-  it("never settles a prompt whose session moved to another Eve run", async () => {
+  it("never settles a prompt whose session moved to another agent session", async () => {
     await fixture();
     await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
     // A crashed run leaves the old prompt behind; settling it would clear the veto of the live one.
@@ -161,7 +161,7 @@ describeWithDatabase("approval timeout repository", () => {
       TELEGRAM_HITL_APPROVAL_TIMEOUT_MS,
     );
 
-    // Eve overwrites session auth with what the response delivers, so it must be the real context.
+    // The runtime overwrites session auth with what the response delivers, so it must be the real context.
     expect(claim!.auth.authenticator).toBe("telegram");
     const thread = (await database().query<{ thread_id: string }>(
       "SELECT thread_id FROM conversation_sessions WHERE id = $1", [current.sessionId],
@@ -205,7 +205,7 @@ describeWithDatabase("approval timeout repository", () => {
     );
     await approvalTimeoutRepository.completeTimeout(claim!, NOW);
 
-    // Eve may replay `input.requested`; the ON CONFLICT branch must clear the timeout state.
+    // The runtime may replay `input.requested`; the ON CONFLICT branch must clear the timeout state.
     await expect(registerApproval(current.sessionId, "tool-approval")).resolves.toBeUndefined();
     const row = await database().query<{ consumed_at: Date | null; timed_out_at: Date | null }>(
       "SELECT consumed_at, timed_out_at FROM telegram_hitl_approvals",

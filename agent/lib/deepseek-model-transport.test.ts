@@ -207,7 +207,7 @@ describe("DeepSeek model transport", () => {
       }, "stop");
     });
 
-    // Eve can resume with an approved call that has no execution result yet. DeepSeek only accepts
+    // A turn can resume with an approved call that has no execution result yet. DeepSeek only accepts
     // assistant tool calls that have a corresponding tool message in the serialized history.
     await model.doGenerate({
       prompt: [

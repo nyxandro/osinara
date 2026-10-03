@@ -5,7 +5,7 @@
  * - `registerTelegramDeliveredMessageRoutes` restores a verified topic from trusted auth.
  * - Private delivery IDs receive aliases for exact HITL callback authorization.
  * - Every chunk of a split group response receives a continuation route alias.
- * - Application aliases never rotate the stable Eve continuation hook.
+ * - Application aliases never rotate the stable continuation hook.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 

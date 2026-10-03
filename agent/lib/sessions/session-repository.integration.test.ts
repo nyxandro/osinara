@@ -3,10 +3,10 @@
  *
  * Constructs covered:
  * - Generation-zero session creation and stable route aliases.
- * - Monotonic Eve root rebinding after a terminal workflow replacement.
+ * - Monotonic agent session rebinding after a terminal replacement.
  * - Rotation after thresholds while pending operations remain pinned.
  * - Stable sandbox identity across generations and replacement at a trust-zone boundary.
- * - Retention leasing for retired Eve sessions.
+ * - Retention leasing for retired agent sessions.
  * - Monotonic per-session Telegram group timeline cursors.
  * - Group trust-zone scenarios are implemented in the colocated scenario module.
  */
@@ -95,7 +95,7 @@ describeWithDatabase("session repository", () => {
     await expect(sessionRepository.hasRoute("101:42:900")).resolves.toBe(true);
   });
 
-  it("resumes the current Eve continuation through a tool-delivery route alias", async () => {
+  it("resumes the current continuation through a tool-delivery route alias", async () => {
     const f = await fixture();
     const current = await sessionRepository.prepareTurn({
       baseContinuationToken: "101::400",
@@ -217,7 +217,7 @@ describeWithDatabase("session repository", () => {
     });
   });
 
-  it("accepts a newer Eve root and ignores delayed events from the replaced root", async () => {
+  it("accepts a newer agent session and ignores delayed events from the replaced one", async () => {
     const f = await fixture();
     const current = await sessionRepository.prepareTurn({
       baseContinuationToken: "104::",
@@ -345,7 +345,7 @@ describeWithDatabase("session repository", () => {
     await verifyGroupTrustZoneRecreation(await fixture());
   });
 
-  it("advances a group timeline cursor monotonically for the current Eve root", async () => {
+  it("advances a group timeline cursor monotonically for the current agent session", async () => {
     await verifyMonotonicGroupTimelineCursor(await fixture());
   });
 });

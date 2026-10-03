@@ -2,7 +2,7 @@
  * LLM provider registry tests.
  *
  * Constructs covered:
- * - `primaryModel`: server-configured protocol-native text route for the Eve agent loop.
+ * - `primaryModel`: server-configured protocol-native text route for the agent loop.
  * - `visionModel`: absent when the active provider explicitly lacks image input.
  * - `voiceTranscriptionModel`: explicit Groq Whisper transcription route.
  */

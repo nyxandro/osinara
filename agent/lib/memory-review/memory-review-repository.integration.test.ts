@@ -253,14 +253,14 @@ describeWithDatabase("memory review repository", () => {
     await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: session.rows[0]!.id,
       batchId: first!.batchId,
-      agentSessionId: "eve-retention-complete",
+      agentSessionId: "agent-retention-complete",
       agentTurnId: "turn-retention-complete",
     });
     await memoryTurnSourceRepository.bind({
       applicationSessionId: session.rows[0]!.id,
       conversationId: fixture.conversationId,
       currentTimelineEntryId: firstSource.id,
-      agentSessionId: "eve-retention-complete",
+      agentSessionId: "agent-retention-complete",
       agentTurnId: "turn-retention-complete",
       invokingActorId: "agent-memory-author",
       invokingActorKind: "telegram_user",
@@ -271,10 +271,10 @@ describeWithDatabase("memory review repository", () => {
     await memoryReviewRepository.completeBatch({
       batchId: first!.batchId,
       completedAt: new Date(),
-      agentSessionId: "eve-retention-complete",
+      agentSessionId: "agent-retention-complete",
       agentTurnId: "turn-retention-complete",
     });
-    await memoryTurnSourceRepository.release("eve-retention-complete", "turn-retention-complete");
+    await memoryTurnSourceRepository.release("agent-retention-complete", "turn-retention-complete");
     await expect(memoryReviewRepository.getLaneCursor({
       conversationId: fixture.conversationId,
       messageThreadId: null,
@@ -309,14 +309,14 @@ describeWithDatabase("memory review repository", () => {
     await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: session.rows[0]!.id,
       batchId: batch!.batchId,
-      agentSessionId: "eve-review-replay",
+      agentSessionId: "agent-review-replay",
       agentTurnId: "turn-review-replay",
     });
     await memoryTurnSourceRepository.bind({
       applicationSessionId: session.rows[0]!.id,
       conversationId: fixture.conversationId,
       currentTimelineEntryId: source.id,
-      agentSessionId: "eve-review-replay",
+      agentSessionId: "agent-review-replay",
       agentTurnId: "turn-review-replay",
       invokingActorId: "agent-memory-author",
       invokingActorKind: "telegram_user",
@@ -327,7 +327,7 @@ describeWithDatabase("memory review repository", () => {
     const completion = {
       batchId: batch!.batchId,
       completedAt: new Date(),
-      agentSessionId: "eve-review-replay",
+      agentSessionId: "agent-review-replay",
       agentTurnId: "turn-review-replay",
     };
     await expect(memoryReviewRepository.completeBatch(completion))
@@ -341,7 +341,7 @@ describeWithDatabase("memory review repository", () => {
     await expect(memoryReviewRepository.failRunning({
       batchId: batch!.batchId,
       diagnosticCode: "AGENT_MEMORY_REVIEW_REPLAYED_FAILURE",
-      agentSessionId: "eve-review-replay",
+      agentSessionId: "agent-review-replay",
       agentTurnId: "turn_0",
     })).rejects.toThrowError(/AGENT_MEMORY_REVIEW_FAILURE_STATE_INVALID/u);
   });
@@ -369,13 +369,13 @@ describeWithDatabase("memory review repository", () => {
     await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: session.rows[0]!.id,
       batchId: batch!.batchId,
-      agentSessionId: "eve-review-failure-replay",
+      agentSessionId: "agent-review-failure-replay",
       agentTurnId: "turn-review-failure-replay",
     });
     const failure = {
       batchId: batch!.batchId,
       diagnosticCode: "AGENT_MEMORY_REVIEW_MODEL_FAILED",
-      agentSessionId: "eve-review-failure-replay",
+      agentSessionId: "agent-review-failure-replay",
       agentTurnId: "turn-review-failure-replay",
     };
 
@@ -411,14 +411,14 @@ describeWithDatabase("memory review repository", () => {
     await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: session.rows[0]!.id,
       batchId: batch!.batchId,
-      agentSessionId: "eve-review-wrote",
+      agentSessionId: "agent-review-wrote",
       agentTurnId: "turn-review-wrote",
     });
     await database().query(
       `INSERT INTO memory_items_all
          (family_id, scope, kind, confirmation, sensitivity, content, source, operation_key)
        VALUES ($1, 'family', 'fact', 'model_high', 'normal', 'Записано до сбоя', $2, $3)`,
-      [fixture.familyId, "eve:eve-review-wrote:turn-review-wrote", "op-review-wrote"],
+      [fixture.familyId, "eve:agent-review-wrote:turn-review-wrote", "op-review-wrote"],
     );
 
     // Повтор такого хода создал бы дубликат, поэтому проход засчитывается. Прежний терминал
@@ -426,7 +426,7 @@ describeWithDatabase("memory review repository", () => {
     await expect(memoryReviewRepository.failRunning({
       batchId: batch!.batchId,
       diagnosticCode: "AGENT_MEMORY_REVIEW_MODEL_FAILED",
-      agentSessionId: "eve-review-wrote",
+      agentSessionId: "agent-review-wrote",
       agentTurnId: "turn-review-wrote",
     })).resolves.toBe("recorded");
     await expect(database().query(
@@ -445,7 +445,7 @@ describeWithDatabase("memory review repository", () => {
     });
   });
 
-  it("releases an interactive batch that never reached an Eve turn", async () => {
+  it("releases an interactive batch that never reached an agent turn", async () => {
     const fixture = await createMainAgentMemoryFixture();
     const session = await database().query<{ id: string }>(
       `INSERT INTO conversation_sessions

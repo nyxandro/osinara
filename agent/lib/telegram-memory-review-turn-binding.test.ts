@@ -55,7 +55,7 @@ function context(attributes: Record<string, string>) {
   return {
     session: {
       auth: { current: { attributes, principalId: "user-1" } },
-      id: "eve-session-1",
+      id: "agent-session-1",
       turn: { id: "turn-4" },
     },
   };
@@ -77,12 +77,12 @@ describe("telegram memory review turn binding", () => {
     await handler(undefined, {}, context({ telegramUserId: "101" }));
 
     expect(dependencies.batchForTurn).toHaveBeenCalledWith({
-      agentSessionId: "eve-session-1",
+      agentSessionId: "agent-session-1",
       agentTurnId: "turn-4",
     });
     expect(dependencies.completeBatch).toHaveBeenCalledWith(expect.objectContaining({
       batchId: "batch-1",
-      agentSessionId: "eve-session-1",
+      agentSessionId: "agent-session-1",
       agentTurnId: "turn-3",
     }));
     // The parked turn's sources are released with the batch it was reviewing.
@@ -98,7 +98,7 @@ describe("telegram memory review turn binding", () => {
 
     // Пакет освобождён, строки нет, но повтор терминального события остаётся ходом проверки.
     expect(dependencies.batchForTurn).toHaveBeenCalledWith({
-      agentSessionId: "eve-session-1", agentTurnId: "turn-4",
+      agentSessionId: "agent-session-1", agentTurnId: "turn-4",
     });
     expect(dependencies.completeBatch).toHaveBeenCalledWith(expect.objectContaining({
       batchId: "batch-2",
@@ -114,7 +114,7 @@ describe("telegram memory review turn binding", () => {
     expect(dependencies.completeBatch).not.toHaveBeenCalled();
     expect(dependencies.recordTurnCompleted).toHaveBeenCalledWith(
       "application-session-1",
-      "eve-session-1",
+      "agent-session-1",
       false,
       true,
     );
@@ -130,7 +130,7 @@ describe("telegram memory review turn binding", () => {
     // границы, а следующие ходы успевали выстроиться за мёртвой головой.
     expect(dependencies.failRunning).toHaveBeenCalledWith(expect.objectContaining({
       batchId: "batch-4",
-      agentSessionId: "eve-session-1",
+      agentSessionId: "agent-session-1",
       agentTurnId: "turn-4",
     }));
   });

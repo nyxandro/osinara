@@ -316,7 +316,7 @@ describe("createConfiguredLanguageModel", () => {
     } as LanguageModelV4CallOptions)).rejects.toThrow(code);
   });
 
-  it("rejects a truncated streaming response before its finish event reaches Eve", async () => {
+  it("rejects a truncated streaming response before its finish event reaches the turn", async () => {
     const model = createConfiguredLanguageModel({
       apiKey: "model-secret",
       fetch: async () => new Response([

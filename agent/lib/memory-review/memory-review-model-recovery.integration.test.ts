@@ -30,7 +30,7 @@ function latch() {
   return { promise, resolve };
 }
 
-async function runningReview(agentSessionId = "eve-model-failure", agentTurnId = "turn_0") {
+async function runningReview(agentSessionId = "agent-model-failure", agentTurnId = "turn_0") {
   const fixture = await createMainAgentMemoryFixture();
   for (let sequence = 2; sequence <= 50; sequence++) {
     const message = await insertReviewUserMessage({ ...fixture, sequence });
@@ -50,7 +50,7 @@ async function runningReview(agentSessionId = "eve-model-failure", agentTurnId =
 }
 
 /**
- * A batch Eve ended as `ambiguous` (its session failed and the outcome stayed unknown). Releases
+ * A batch that ended as `ambiguous` (its session failed and the outcome stayed unknown). Releases
  * before the runtime switch left such rows; only the operator recovery handles them now.
  */
 async function recordAmbiguousEnding(batchId: string): Promise<void> {
@@ -128,7 +128,7 @@ async function recordAmbiguousEnding(batchId: string): Promise<void> {
   it("waits after a confirmed model timeout without losing sources or retrying on every tick", async () => {
     const { batch } = await runningReview();
     await memoryReviewRepository.failRunning({ batchId: batch.batchId,
-      diagnosticCode: "AGENT_MODEL_FIRST_CHUNK_TIMEOUT", agentSessionId: "eve-model-failure", agentTurnId: "turn_0" });
+      diagnosticCode: "AGENT_MODEL_FIRST_CHUNK_TIMEOUT", agentSessionId: "agent-model-failure", agentTurnId: "turn_0" });
     const current = await database().query("SELECT status, diagnostic_code FROM memory_review_batches WHERE id = $1", [batch.batchId]);
     expect(current.rows).toEqual([{ status: "waiting_model", diagnostic_code: "AGENT_MODEL_FIRST_CHUNK_TIMEOUT" }]);
     await closeDatabase();
@@ -138,7 +138,7 @@ async function recordAmbiguousEnding(batchId: string): Promise<void> {
       .toEqual([{ count: 50 }]);
   });
 
-  async function wait(batchId: string, agentSessionId = "eve-model-failure") {
+  async function wait(batchId: string, agentSessionId = "agent-model-failure") {
     await memoryReviewRepository.failRunning({ batchId, diagnosticCode: "AGENT_MODEL_FIRST_CHUNK_TIMEOUT", agentSessionId, agentTurnId: "turn_0" });
     return (await database().query<{ model_route_key: string; waiting_since: Date }>(
       "SELECT model_route_key, waiting_since FROM memory_review_batches WHERE id = $1", [batchId])).rows[0]!;
@@ -161,14 +161,14 @@ async function recordAmbiguousEnding(batchId: string): Promise<void> {
     expect(next.id).not.toBe(session.id);
     expect(next.continuationToken).not.toBe(session.continuationToken);
     await memoryReviewDispatchRepository.markDispatchStarted(resumed[0]!, next.id);
-    await sessionRepository.bindAgentSession(next.id, "eve-recovered");
-    await memoryReviewRepository.bindAgentTurn({ batchId: batch.batchId, applicationSessionId: next.id, agentSessionId: "eve-recovered", agentTurnId: "turn_0" });
+    await sessionRepository.bindAgentSession(next.id, "agent-recovered");
+    await memoryReviewRepository.bindAgentTurn({ batchId: batch.batchId, applicationSessionId: next.id, agentSessionId: "agent-recovered", agentTurnId: "turn_0" });
     await memoryTurnSourceRepository.bindReview({ applicationSessionId: next.id,
       conversationId: fixture.conversationId, memoryReviewBatchId: batch.batchId, sourceEntryIds: batch.sourceEntryIds,
-      agentSessionId: "eve-recovered", agentTurnId: "turn_0", invokingActorId: fixture.auth.telegramActorId!, invokingActorKind: "telegram_user" });
+      agentSessionId: "agent-recovered", agentTurnId: "turn_0", invokingActorId: fixture.auth.telegramActorId!, invokingActorKind: "telegram_user" });
     await expect(memoryReviewRepository.completeBatch({ batchId: batch.batchId, completedAt: new Date(),
-      agentSessionId: "eve-model-failure", agentTurnId: "turn_0" })).resolves.toBe("replayed");
-    await memoryReviewRepository.completeBatch({ batchId: batch.batchId, completedAt: new Date(), agentSessionId: "eve-recovered", agentTurnId: "turn_0" });
+      agentSessionId: "agent-model-failure", agentTurnId: "turn_0" })).resolves.toBe("replayed");
+    await memoryReviewRepository.completeBatch({ batchId: batch.batchId, completedAt: new Date(), agentSessionId: "agent-recovered", agentTurnId: "turn_0" });
     expect(await memoryReviewRepository.getLaneCursor({ conversationId: fixture.conversationId, messageThreadId: null })).toBe("50");
     expect((await database().query("SELECT count(*)::int AS count FROM audit_events WHERE event_type = 'memory_review.model_recovered' AND subject_id = $1", [batch.batchId])).rows)
       .toEqual([{ count: 1 }]);
@@ -182,9 +182,9 @@ async function recordAmbiguousEnding(batchId: string): Promise<void> {
     const [resumed] = await claim();
     const next = await memoryReviewSessionRepository.prepare(resumed!, new Date());
     await memoryReviewDispatchRepository.markDispatchStarted(resumed!, next.id);
-    await sessionRepository.bindAgentSession(next.id, "eve-recovered");
-    await memoryReviewRepository.bindAgentTurn({ batchId: batch.batchId, applicationSessionId: next.id, agentSessionId: "eve-recovered", agentTurnId: "turn_0" });
-    const secondWait = await wait(batch.batchId, "eve-recovered");
+    await sessionRepository.bindAgentSession(next.id, "agent-recovered");
+    await memoryReviewRepository.bindAgentTurn({ batchId: batch.batchId, applicationSessionId: next.id, agentSessionId: "agent-recovered", agentTurnId: "turn_0" });
+    const secondWait = await wait(batch.batchId, "agent-recovered");
     await recordSuccessfulModelCall(signal);
     expect(await claim()).toEqual([]);
     // An old observation arriving late is not a new proof of availability.
@@ -198,11 +198,11 @@ async function recordAmbiguousEnding(batchId: string): Promise<void> {
     const { fixture, batch } = await runningReview();
     await memoryRepository.create(fixture.auth, {
       memoryReviewBatchId: batch.batchId, confirmation: "model_high", content: "Анна готовится к марафону", kind: "fact",
-      scope: "family", sensitivity: "normal", operationKey: "partial-write", source: "eve:eve-model-failure:turn_0",
-      provenance: { sessionId: "eve-model-failure", turnId: "turn_0" }, systemActor: true,
+      scope: "family", sensitivity: "normal", operationKey: "partial-write", source: "eve:agent-model-failure:turn_0",
+      provenance: { sessionId: "agent-model-failure", turnId: "turn_0" }, systemActor: true,
       explicitSource: { conversationId: fixture.conversationId, timelineEntryId: batch.sourceEntryIds[0]!, subject: { kind: "current_author" } },
     });
-    await memoryReviewRepository.failRunning({ batchId: batch.batchId, diagnosticCode: "AGENT_MODEL_STREAM_TIMEOUT", agentSessionId: "eve-model-failure", agentTurnId: "turn_0" });
+    await memoryReviewRepository.failRunning({ batchId: batch.batchId, diagnosticCode: "AGENT_MODEL_STREAM_TIMEOUT", agentSessionId: "agent-model-failure", agentTurnId: "turn_0" });
     expect((await database().query("SELECT status, diagnostic_code FROM memory_review_batches WHERE id = $1", [batch.batchId])).rows)
       .toEqual([{ status: "failed", diagnostic_code: "AGENT_MEMORY_REVIEW_PARTIAL_RESULT" }]);
     expect(await memoryReviewRepository.getLaneCursor({ conversationId: fixture.conversationId, messageThreadId: null })).toBe("0");
@@ -214,8 +214,8 @@ async function recordAmbiguousEnding(batchId: string): Promise<void> {
     await wait(batch.batchId);
     await expect(memoryRepository.create(fixture.auth, {
       memoryReviewBatchId: batch.batchId, confirmation: "model_high", content: "Запоздавшая запись", kind: "fact",
-      scope: "family", sensitivity: "normal", operationKey: "late-write", source: "eve:eve-model-failure:turn_0",
-      provenance: { sessionId: "eve-model-failure", turnId: "turn_0" }, systemActor: true,
+      scope: "family", sensitivity: "normal", operationKey: "late-write", source: "eve:agent-model-failure:turn_0",
+      provenance: { sessionId: "agent-model-failure", turnId: "turn_0" }, systemActor: true,
       explicitSource: { conversationId: fixture.conversationId, timelineEntryId: batch.sourceEntryIds[0]!, subject: { kind: "current_author" } },
     })).rejects.toMatchObject({ code: "AGENT_MEMORY_REVIEW_ATTEMPT_STALE" });
     expect((await database().query("SELECT count(*)::int AS count FROM memory_mutation_operations")).rows).toEqual([{ count: 0 }]);
@@ -240,7 +240,7 @@ async function recordAmbiguousEnding(batchId: string): Promise<void> {
     await recordAmbiguousEnding(batch.batchId);
     const row = (await database().query("SELECT model_route_key FROM memory_review_batches WHERE id = $1", [batch.batchId])).rows[0];
     await database().query("UPDATE memory_review_batches SET model_route_key = NULL WHERE id = $1", [batch.batchId]);
-    const input = { batchId: batch.batchId, expectedAgentSessionId: "eve-model-failure",
+    const input = { batchId: batch.batchId, expectedAgentSessionId: "agent-model-failure",
       causeCode: "AGENT_MODEL_FIRST_CHUNK_TIMEOUT", modelRouteKey: row.model_route_key, reason: "Проверен таймаут без записей" };
     await expect(recoverEmptyReviewModelFailure(input, { isAgentSessionTerminal: async () => false }))
       .rejects.toMatchObject({ code: "AGENT_MEMORY_REVIEW_RECOVERY_SESSION_UNCONFIRMED" });
@@ -292,8 +292,8 @@ async function recordAmbiguousEnding(batchId: string): Promise<void> {
     pool.on("acquire",acquired);
     const write = memoryRepository.create(fixture.auth, {
       memoryReviewBatchId: batch.batchId, confirmation: "model_high", content: "Запись началась до таймаута", kind: "fact",
-      scope: "family", sensitivity: "normal", operationKey: "in-flight-write", source: "eve:eve-model-failure:turn_0",
-      provenance: { sessionId: "eve-model-failure", turnId: "turn_0" }, systemActor: true,
+      scope: "family", sensitivity: "normal", operationKey: "in-flight-write", source: "eve:agent-model-failure:turn_0",
+      provenance: { sessionId: "agent-model-failure", turnId: "turn_0" }, systemActor: true,
       explicitSource: { conversationId: fixture.conversationId, timelineEntryId: batch.sourceEntryIds[0]!, subject: { kind: "current_author" } },
     });
     let terminal: Promise<unknown> | undefined;
@@ -325,7 +325,7 @@ async function recordAmbiguousEnding(batchId: string): Promise<void> {
     const failure = { code: "MODEL_CALL_FAILED", details: { semanticErrorId: "network-request-failed" } };
     await memoryReviewRepository.failRunning({ batchId: batch.batchId,
       diagnosticCode: recoverableModelFailureCode(failure) ?? failure.code,
-      agentSessionId: "eve-model-failure", agentTurnId: "turn_0" });
+      agentSessionId: "agent-model-failure", agentTurnId: "turn_0" });
     expect((await database().query("SELECT status FROM memory_review_batches WHERE id = $1", [batch.batchId])).rows)
       .toEqual([{ status: "waiting_model" }]);
     expect(await claim()).toEqual([]);
@@ -336,7 +336,7 @@ async function recordAmbiguousEnding(batchId: string): Promise<void> {
   it("preserves sources for an unclassified background failure instead of silently replaying them", async () => {
     const { batch } = await runningReview();
     await memoryReviewRepository.failRunning({ batchId: batch.batchId, diagnosticCode: "UNCLASSIFIED_REVIEW_ERROR",
-      agentSessionId: "eve-model-failure", agentTurnId: "turn_0" });
+      agentSessionId: "agent-model-failure", agentTurnId: "turn_0" });
     expect((await database().query("SELECT status, diagnostic_code FROM memory_review_batches WHERE id = $1", [batch.batchId])).rows)
       .toEqual([{ status: "failed", diagnostic_code: "UNCLASSIFIED_REVIEW_ERROR" }]);
     expect(await claim()).toEqual([]);

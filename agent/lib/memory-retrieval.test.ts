@@ -2,7 +2,7 @@
  * Turn-level memory retrieval tests.
  *
  * Constructs covered:
- * - The newest user text is extracted from plain and multipart Eve model messages.
+ * - The newest user text is extracted from plain and multipart model messages.
  * - A verified group turn searches memory by the addressed message, not the whole timeline.
  * - Retrieved records enter the prompt as escaped model-safe untrusted data.
  */

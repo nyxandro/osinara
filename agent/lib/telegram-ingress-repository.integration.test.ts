@@ -284,7 +284,7 @@ describeWithDatabase("telegramIngressRepository", () => {
     expect(independent?.updateId).toBe("2003");
     expect(blocked).toBeNull();
 
-    await telegramIngressRepository.complete(first!.updateId, first!.leaseToken, "eve-session-2001");
+    await telegramIngressRepository.complete(first!.updateId, first!.leaseToken, "agent-session-2001");
 
     await expect(telegramIngressRepository.claimNext(LEASE_MILLISECONDS, NO_BURSTS)).resolves.toMatchObject({
       updateId: "2002",
@@ -332,7 +332,7 @@ describeWithDatabase("telegramIngressRepository", () => {
     await telegramIngressRepository.enqueue(updateInput("4002", "telegram:group:new", "следующее"));
     await telegramIngressRepository.release(first!.updateId, first!.leaseToken, {
       code: "AGENT_TELEGRAM_DELIVERY_INTERRUPTED",
-      message: "Передача сообщения в Eve была прервана. Обработка будет запущена повторно",
+      message: "Передача сообщения агенту была прервана. Обработка будет запущена повторно",
     });
 
     const reclaimed = await telegramIngressRepository.claimNext(LEASE_MILLISECONDS, NO_BURSTS);
@@ -362,7 +362,7 @@ describeWithDatabase("telegramIngressRepository", () => {
     );
     await telegramIngressRepository.release(first!.updateId, first!.leaseToken, {
       code: "AGENT_TELEGRAM_DELIVERY_INTERRUPTED",
-      message: "Передача сообщения в Eve была прервана. Обработка будет запущена повторно",
+      message: "Передача сообщения агенту была прервана. Обработка будет запущена повторно",
     });
     const reclaimed = await telegramIngressRepository.claimNext(LEASE_MILLISECONDS, NO_BURSTS);
 
@@ -411,7 +411,7 @@ describeWithDatabase("telegramIngressRepository", () => {
     ).rejects.toThrowError(/AGENT_VOICE_TRANSCRIPTION_RECOVERY_REQUIRED/);
   });
 
-  it("does not repeat an Eve dispatch after its durable start marker", async () => {
+  it("does not repeat a turn dispatch after its durable start marker", async () => {
     await telegramIngressRepository.enqueue(updateInput("6001", "telegram:private:101", "действие"));
     const first = await telegramIngressRepository.claimNext(LEASE_MILLISECONDS, NO_BURSTS);
     await telegramIngressRepository.beginDispatch(first!.updateId, first!.leaseToken, crypto.randomUUID());

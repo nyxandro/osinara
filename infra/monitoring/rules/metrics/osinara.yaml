@@ -93,7 +93,7 @@ groups:
       - alert: OsinaraErrorBurst
         expr: >-
           sum by (host) (sum_over_time(log_code_lines_1m{project="osinara-production",
-          code!~"AGENT_(SCHEDULE_TICK|TELEGRAM_SILENT_TURN|MEMORY_PURGE_COMPLETED|DATABASE_BOOKKEEPING_RECOVERY|RUNTIME_DEAD_PROCESS_RECONCILED|TELEGRAM_INGRESS_RECOVERED|TELEGRAM_OBSERVER_TRANSFERRED|TELEGRAM_BINDING_RECOVERED|TELEGRAM_DATABASE_RECOVERY|MEMORY_WRITE_SUCCEEDED|MEMORY_WRITE_DEFERRED|MEMORY_INDEX_RETRY_CLAIMED|MEMORY_INDEX_CHUNK_RESPLIT|MEMORY_USAGE_DIRECTIVE|MEMORY_EMBEDDING_WORKER_STARTED|MEMORY_EMBEDDING_WORKER_WAITING|MODEL_CALL_METRICS|TOOL_CALL_METRICS|SKILL_SYNC_METRICS|MEMORY_SEARCH_METRICS|MEMORY_RETRIEVAL_METRICS|MEMORY_REVIEW_LANE_METRICS|EVE_SESSION_ABANDONED_RUN_DELETED|SESSION_RETENTION_STORAGE_ABSENT|WORKFLOW_ORPHAN_RUNS_PURGED|SANDBOX_EGRESS_CLIENT_CLOSED|SANDBOX_EGRESS_UPSTREAM_CLOSED)"}[5m])) > 10
+          code!~"AGENT_(SCHEDULE_TICK|TELEGRAM_SILENT_TURN|MEMORY_PURGE_COMPLETED|DATABASE_BOOKKEEPING_RECOVERY|RUNTIME_DEAD_PROCESS_RECONCILED|TELEGRAM_INGRESS_RECOVERED|TELEGRAM_OBSERVER_TRANSFERRED|TELEGRAM_DATABASE_RECOVERY|MEMORY_WRITE_SUCCEEDED|MEMORY_WRITE_DEFERRED|MEMORY_INDEX_RETRY_CLAIMED|MEMORY_INDEX_CHUNK_RESPLIT|MEMORY_USAGE_DIRECTIVE|MEMORY_EMBEDDING_WORKER_STARTED|MEMORY_EMBEDDING_WORKER_WAITING|MODEL_CALL_METRICS|TOOL_CALL_METRICS|SKILL_SYNC_METRICS|MEMORY_SEARCH_METRICS|MEMORY_RETRIEVAL_METRICS|MEMORY_REVIEW_LANE_METRICS|SANDBOX_EGRESS_CLIENT_CLOSED|SANDBOX_EGRESS_UPSTREAM_CLOSED)"}[5m])) > 10
         labels:
           severity: warning
           project: osinara-production
@@ -215,7 +215,7 @@ groups:
         annotations:
           summary: 'Отклонена цель ответа в Telegram'
           description: 'Приложение отказалось принять сообщение, на которое отвечал человек: оно из другого чата либо идентификаторы в апдейте разошлись. Для пользователя ответ теряет контекст цитаты. В штатной работе этого не бывает.'
-          runbook: 'В строке есть reason: foreign_chat — цель из другого чата, identity_mismatch — расхождение внутри апдейта. Разовый случай разбирать по telegramChatId и telegramReplyTargetMessageId; массовые identity_mismatch означают смену формата Bot API или разбора в Eve.'
+          runbook: 'В строке есть reason: foreign_chat — цель из другого чата, identity_mismatch — расхождение внутри апдейта. Разовый случай разбирать по telegramChatId и telegramReplyTargetMessageId; массовые identity_mismatch означают смену формата Bot API или разбора апдейта в агенте.'
 
       - alert: OsinaraIncidentDeliveryUnconfirmed
         expr: sum(sum_over_time(log_code_lines_1m{project="osinara-production", code="AGENT_INCIDENT_DELIVERY_UNCONFIRMED"}[15m])) > 0

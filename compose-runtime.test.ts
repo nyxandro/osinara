@@ -2,7 +2,6 @@
  * Docker Compose runtime wiring regression tests.
  *
  * Constructs covered:
- * - Eve Workflow queue namespace is available before the local world starts.
  * - Local E5 runtime is immutable and resource bounded.
  * - Removed antivirus infrastructure cannot return to the runtime.
  * - PDF processing stays inside the normal sandbox instead of a parallel service.

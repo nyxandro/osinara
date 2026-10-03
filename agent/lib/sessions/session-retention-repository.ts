@@ -60,9 +60,8 @@ export const sessionRetentionRepository = {
   },
 
   /**
-   * The failure is kept for diagnosis, and the lease is held until the retry moment instead of
-   * being released: the table requires the token and the expiry to be set or cleared together,
-   * and a held lease is exactly what "do not offer this session again yet" means here.
+   * The failure is kept for diagnosis and the lease is released: `cleanup_error_code` alone keeps the
+   * session out of later claims until an operator clears it.
    */
   async failDeletion(id: string, leaseToken: string, errorCode: string): Promise<void> {
     const result = await database().query(

@@ -55,7 +55,6 @@ const PRODUCTION_DOCKER_RESOURCES = [
   "osinara-production-google-workspace-credentials",
   "osinara-production-sandbox-data",
   "osinara-production-tool-environments",
-  "osinara-production-eve-workflow-data-v032",
   "osinara-production-workspace-data",
   "osinara-production-app-network",
   "osinara-production-edge-frontend",

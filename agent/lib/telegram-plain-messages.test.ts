@@ -68,7 +68,7 @@ describe("plain Telegram messages", () => {
     )).rejects.toThrowError(/AGENT_TELEGRAM_MESSAGE_DELIVERY_AMBIGUOUS/u);
   });
 
-  it("rejects a chunk that Eve would split behind the durable outbox", async () => {
+  it("rejects a chunk that the runtime would split behind the durable outbox", async () => {
     const request = vi.fn();
     const channel = {
       state: { chatId: "101", chatType: "private", messageThreadId: null },

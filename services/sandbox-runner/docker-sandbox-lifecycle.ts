@@ -7,7 +7,7 @@
  * - `createSandboxActivityRegistry`: tracks active work and serializes session creation.
  * - `sandboxContainerName`: deterministic physical name for a stable conversation thread.
  * - `sandboxContainerNeedsReplacement`: detects stale owner or policy identity.
- * - `sandboxRequestHash`: stable policy identity independent of transient Eve roots.
+ * - `sandboxRequestHash`: stable policy identity of the container, without the agent session id.
  * - Activity gates prevent idle stop/removal from racing with newly arriving work.
  */
 import { createHash } from "node:crypto";

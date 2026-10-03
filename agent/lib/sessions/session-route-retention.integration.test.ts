@@ -55,7 +55,7 @@ describeWithDatabase("session route and retention isolation", () => {
     });
     await sessionRepository.registerRouteAlias(current.id, "101::911");
 
-    // The alias is not resumable before Eve binds, but prepareTurn must not fork the app session.
+    // The alias is not resumable before the agent session binds, but prepareTurn must not fork the app session.
     await expect(sessionRepository.hasRoute("101::911")).resolves.toBe(false);
     const reply = await sessionRepository.prepareTurn({
       baseContinuationToken: "101::911",

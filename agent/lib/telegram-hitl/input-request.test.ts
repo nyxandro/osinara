@@ -4,7 +4,7 @@
  * Constructs covered:
  * - Any group chat rejects every confirmation prompt before any Telegram or durable side effect.
  * - `createTelegramInputRequestHandler`: persists approver identity before exposing buttons.
- * - Interactive and scheduled requests receive aliases without changing Eve's continuation hook.
+ * - Interactive and scheduled requests receive aliases without changing the continuation hook.
  * - Long approval prompts are delivered completely before the actionable final message.
  */
 import type { SessionContext } from "../../runtime/context.js";

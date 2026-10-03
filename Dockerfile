@@ -153,6 +153,8 @@ COPY --from=build /app/agent ./agent
 COPY --from=build /app/config ./config
 COPY --from=build /app/migrations ./migrations
 COPY --from=build /app/package.json ./package.json
+# The license and attribution of the adapted third-party code under `agent/runtime/`.
+COPY --from=build /app/THIRD_PARTY_NOTICES.md ./THIRD_PARTY_NOTICES.md
 COPY scripts/docker-entrypoint.sh /usr/local/bin/osinara-entrypoint
 RUN chmod +x /usr/local/bin/osinara-entrypoint
 EXPOSE 3000

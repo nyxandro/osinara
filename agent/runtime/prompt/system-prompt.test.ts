@@ -22,7 +22,7 @@ async function productionInstructions() {
 
 describe("system prompt composition", () => {
   it.each(["private-first", "family-group", "external-human", "external-bot", "memory-review", "scheduled-isolated"])(
-    "starts with the same base prompt Eve 0.40 sent (%s)",
+    "starts with the reference base prompt (%s)",
     async (scenario) => {
       const base = composeBasePrompt({ instructions: await productionInstructions(), toolsAvailable: true });
 

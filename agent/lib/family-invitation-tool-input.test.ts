@@ -90,7 +90,7 @@ describe("manage_family_invitation model input", () => {
     expect(approveInvitation).not.toHaveBeenCalled();
   });
 
-  it("does not send again when delivery completion fails and Eve replays the call", async () => {
+  it("does not send again when delivery completion fails and the runtime replays the call", async () => {
     const invitation = {
       code: "invite-code",
       deliveryRequired: true,

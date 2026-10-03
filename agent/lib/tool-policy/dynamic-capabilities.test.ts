@@ -1,12 +1,12 @@
 /**
- * Eve dynamic capability resolver tests.
+ * Dynamic capability resolver tests.
  *
  * Constructs covered:
  * - `capabilities`: one step-scoped map per verified mode instead of replayed helper closures.
  * - An unresolvable mode or failed policy lookup retains only fail-closed baseline wrappers.
  * - Scheduled history is visible only with a successfully resolved application-core policy.
  * - Live policy changes affect visibility on the next turn and execution checks enforce revocation.
- * - Every returned entry carries Eve's `defineTool` brand required by the runtime lifecycle.
+ * - Every returned entry is a complete tool: description, input schema and executor.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 

@@ -242,7 +242,7 @@ describe("hasTelegramInboundMedia", () => {
     })).toBe(true);
   });
 
-  it("also detects Eve-parsed attachments and permits text-only messages", () => {
+  it("also detects runtime-parsed attachments and permits text-only messages", () => {
     expect(hasTelegramInboundMedia({
       attachments: [{ fileId: "telegram-file-1", kind: "photo" }],
       raw: {},

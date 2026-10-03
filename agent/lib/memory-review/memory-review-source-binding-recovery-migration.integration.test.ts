@@ -4,7 +4,7 @@
  * Constructs covered:
  * - Only the two exact side-effect-free production batches are requeued.
  * - The lane is rewound to the first predecessor so the batches run in order.
- * - A mutation from either original Eve turn aborts recovery atomically.
+ * - A mutation from either original turn aborts recovery atomically.
  * - All 100 source messages become retained batch evidence again.
  */
 import { readFile, readdir } from "node:fs/promises";
@@ -116,7 +116,7 @@ describeWithDatabase("077 missing source-binding recovery", () => {
             started_at, completed_at)
          VALUES
            ($1, $2, $3, 'background', 'completed', 408, 409, 458, 50,
-            'eve-predecessor', 'turn_0', now(), now()),
+            'agent-predecessor', 'turn_0', now(), now()),
            ($4, $2, $3, 'background', 'completed', 458, 459, 508, 50,
             $5, 'turn_0', now(), now()),
            ($6, $2, $3, 'background', 'completed', 508, 509, 558, 50,

@@ -4,10 +4,10 @@
  * Constructs covered:
  * - `telegramHitlApprovalRepository.register`: binds a rendered request to one Telegram user.
  * - `claimCallback`: atomically rejects foreign, stale, and repeated callback attempts.
- * - Pending approvals survive the Eve turn that pauses for user input.
+ * - Pending approvals survive the turn that pauses for user input.
  * - `authorizeReply`: atomically protects and consumes accepted text replies.
  * - Consumed prompts become ordinary ancestry for any later author without weakening pending binds.
- * - Owner-only external approvals recheck the current owner role before resuming Eve.
+ * - Owner-only external approvals recheck the current owner role before resuming the turn.
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -252,7 +252,7 @@ describeWithDatabase("Telegram HITL approval repository", () => {
     ).rejects.toThrowError(/AGENT_TOOL_APPROVAL_EVIDENCE_INVALID/u);
   });
 
-  it("keeps a callback claimable after the Eve turn pauses for approval", async () => {
+  it("keeps a callback claimable after the turn pauses for approval", async () => {
     const current = await fixture();
 
     await expect(telegramHitlApprovalRepository.hasPendingForSession(current.sessionId, "wrun_hitl")).resolves.toBe(true);
@@ -317,7 +317,7 @@ describeWithDatabase("Telegram HITL approval repository", () => {
     ).resolves.toMatchObject({ status: "authorized" });
   });
 
-  it("clears only approvals owned by the completed Eve root", async () => {
+  it("clears only approvals owned by the completed agent session", async () => {
     const current = await fixture();
     await telegramHitlApprovalRepository.register({
       applicationSessionId: current.sessionId,
@@ -350,7 +350,7 @@ describeWithDatabase("Telegram HITL approval repository", () => {
     });
   });
 
-  it("rechecks active family membership before resuming Eve", async () => {
+  it("rechecks active family membership before resuming the turn", async () => {
     const current = await fixture();
     await database().query("DELETE FROM family_memberships WHERE user_id = $1", [current.ownerId]);
 

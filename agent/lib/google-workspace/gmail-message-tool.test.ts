@@ -2,7 +2,7 @@
  * Structured Gmail message mutation tool tests.
  *
  * Constructs covered:
- * - Every supported message-state action requires Eve HITL in a private chat.
+ * - Every supported message-state action requires human approval in a private chat.
  * - A group turn is refused as an ordinary tool denial, because no confirmation can be shown there.
  * - The backend, not the model, compiles one exact batch gws argv after approval.
  * - Only the published action/messageIds/profileRef contract reaches execution, bounded to one

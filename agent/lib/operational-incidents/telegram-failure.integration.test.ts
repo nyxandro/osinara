@@ -8,7 +8,7 @@
  *
  * Constructs covered:
  * - Both correlation statements execute against the live schema.
- * - With neither correlation available the incident is keyed by the Eve session and turn.
+ * - With neither correlation available the incident is keyed by the agent session and turn.
  */
 import { randomUUID } from "node:crypto";
 

@@ -166,7 +166,7 @@ export function buildSandboxContainerOptions(
     Image: runtime.image,
     Labels: {
       "dev.osinara.sandbox.access": request.access,
-      "dev.osinara.sandbox.eve-session-id": request.agentSessionId,
+      "dev.osinara.sandbox.agent-session-id": request.agentSessionId,
       "dev.osinara.sandbox.policy-version": SANDBOX_CONTAINER_POLICY_VERSION,
       "dev.osinara.sandbox.project": runtime.project,
       "dev.osinara.sandbox.session-id": request.sandboxSessionId,

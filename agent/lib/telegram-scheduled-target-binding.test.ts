@@ -100,7 +100,7 @@ const { isScheduledSession } = await import("./agent-schedules/scheduled-session
 const context = {
   session: {
     auth: { current: { attributes: {} }, initiator: null },
-    id: "eve-session-1",
+    id: "agent-session-1",
     turn: { id: "turn-1", sequence: 1 },
   },
 };
@@ -167,7 +167,7 @@ describe("scheduled Telegram target binding", () => {
 
     expect(dependencies.completeSilentRun).toHaveBeenCalledWith(
       "application-session-1",
-      "eve-session-1",
+      "agent-session-1",
       expect.any(Date),
     );
     expect(dependencies.authorizeDelivery).not.toHaveBeenCalled();
@@ -233,7 +233,7 @@ describe("scheduled Telegram target binding", () => {
 
     expect(dependencies.failRun).toHaveBeenCalledWith(
       "application-session-1",
-      "eve-session-1",
+      "agent-session-1",
       "AGENT_TELEGRAM_MESSAGE_DELIVERY_AMBIGUOUS",
       expect.any(Date),
     );
@@ -272,7 +272,7 @@ describe("scheduled Telegram target binding", () => {
 
     expect(dependencies.failRun).toHaveBeenCalledWith(
       "application-session-1",
-      "eve-session-1",
+      "agent-session-1",
       "AGENT_SCHEDULE_DELIVERY_TARGET_MISMATCH",
       expect.any(Date),
     );
@@ -283,11 +283,11 @@ describe("scheduled Telegram target binding", () => {
     expect(dependencies.recordTelegramFailure).not.toHaveBeenCalled();
     expect(dependencies.recordTurnFailed).toHaveBeenCalledWith(
       "application-session-1",
-      "eve-session-1",
+      "agent-session-1",
     );
     expect(dependencies.clearApprovals).toHaveBeenCalledWith(
       "application-session-1",
-      "eve-session-1",
+      "agent-session-1",
     );
     expect(dependencies.releaseMemoryTurnSources).toHaveBeenCalledWith(context);
   });
@@ -311,16 +311,16 @@ describe("scheduled Telegram target binding", () => {
     expect(dependencies.recordTelegramFailure).toHaveBeenCalledWith({
       chatId: "-100111",
       code: "AGENT_MODEL_FAILED",
-      sessionId: "eve-session-1",
+      sessionId: "agent-session-1",
       turnId: "turn-1",
     });
     expect(dependencies.recordTurnFailed).toHaveBeenCalledWith(
       "application-session-1",
-      "eve-session-1",
+      "agent-session-1",
     );
     expect(dependencies.clearApprovals).toHaveBeenCalledWith(
       "application-session-1",
-      "eve-session-1",
+      "agent-session-1",
     );
   });
 });

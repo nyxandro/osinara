@@ -79,14 +79,14 @@ describeWithDatabase("unbound interactive memory-review recovery", () => {
     const prepared = await memoryReviewSessionRepository.prepare(recovered!, new Date());
     await memoryReviewDispatchRepository.markDispatchStarted(recovered!, prepared.id);
     await memoryReviewRepository.bindAgentTurn({ applicationSessionId: prepared.id,
-      batchId: head.batchId, agentSessionId: "eve-recovered", agentTurnId: "turn-recovered" });
+      batchId: head.batchId, agentSessionId: "agent-recovered", agentTurnId: "turn-recovered" });
     await memoryTurnSourceRepository.bindReview({ applicationSessionId: prepared.id,
       conversationId: fixture.conversationId,
-      agentSessionId: "eve-recovered", agentTurnId: "turn-recovered",
+      agentSessionId: "agent-recovered", agentTurnId: "turn-recovered",
       invokingActorId: "agent-memory-author", invokingActorKind: "telegram_user",
       memoryReviewBatchId: head.batchId, sourceEntryIds: head.sourceEntryIds });
     expect(await memoryReviewRepository.completeBatch({ batchId: head.batchId,
-      completedAt: new Date(), agentSessionId: "eve-recovered", agentTurnId: "turn-recovered" }))
+      completedAt: new Date(), agentSessionId: "agent-recovered", agentTurnId: "turn-recovered" }))
       .toBe("recorded");
     expect(await memoryReviewRepository.getLaneCursor({
       conversationId: fixture.conversationId, messageThreadId: null,
@@ -102,12 +102,12 @@ describeWithDatabase("unbound interactive memory-review recovery", () => {
     "does not replay an unsafe or unrelated batch: %s", async (reason) => {
       const { fixture, head, session } = await incident();
       if (reason === "bound") await database().query(
-        "UPDATE memory_review_batches SET eve_session_id = 'old-eve', eve_turn_id = 'old-turn' WHERE id = $1", [head.batchId]);
+        "UPDATE memory_review_batches SET eve_session_id = 'old-agent', eve_turn_id = 'old-turn' WHERE id = $1", [head.batchId]);
       if (reason === "source_set") await database().query(
         `INSERT INTO memory_turn_source_sets
           (eve_session_id, eve_turn_id, application_session_id, conversation_id,
            current_timeline_entry_id, invoking_actor_kind, invoking_actor_id, binding_hash, memory_review_batch_id)
-         VALUES ('old-eve', 'old-turn', $1, $2, $3, 'telegram_user', 'agent-memory-author', $4, $5)`,
+         VALUES ('old-agent', 'old-turn', $1, $2, $3, 'telegram_user', 'agent-memory-author', $4, $5)`,
         [session, fixture.conversationId, fixture.timelineEntryId, "a".repeat(64), head.batchId]);
       if (reason === "live_session") await database().query(
         "UPDATE conversation_sessions SET retired_at = NULL WHERE id = $1", [session]);

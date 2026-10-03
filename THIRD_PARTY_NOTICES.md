@@ -14,7 +14,6 @@ This product includes software developed at Vercel, Inc.
 The adapted code is licensed under the Apache License, Version 2.0, reproduced below. Osinara
 modified it. Each file that contains it carries a one-line notice pointing here:
 
-- `agent/runtime/agent-definition.ts`
 - `agent/runtime/context.ts`
 - `agent/runtime/hitl/answer-matching.ts`
 - `agent/runtime/hitl/input-requests.ts`
@@ -27,10 +26,12 @@ modified it. Each file that contains it carries a one-line notice pointing here:
 - `agent/runtime/sandbox/types.ts`
 - `agent/runtime/skills/definition.ts`
 - `agent/runtime/skills/packages.ts`
+- `agent/runtime/telegram/api.test.ts`
 - `agent/runtime/telegram/api.ts`
 - `agent/runtime/telegram/channel-types.ts`
 - `agent/runtime/telegram/handle.ts`
 - `agent/runtime/telegram/hitl.ts`
+- `agent/runtime/telegram/inbound.test.ts`
 - `agent/runtime/telegram/inbound.ts`
 - `agent/runtime/telegram/telegram-channel.ts`
 - `agent/runtime/telegram/telegram-dispatch.ts`

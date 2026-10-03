@@ -79,8 +79,8 @@ describeWithDatabase("051 R2a provenance/extraction migration", () => {
         `INSERT INTO conversation_sessions
            (thread_id, generation, family_id, group_id, scope, kind, conversation_key,
             continuation_token, started_at, last_activity_at)
-         VALUES (gen_random_uuid(), 0, $1, $2, 'group', 'canonical', 'eve-history-only',
-                 'r2a-eve-history-token', now(), now())`,
+         VALUES (gen_random_uuid(), 0, $1, $2, 'group', 'canonical', 'agent-history-only',
+                 'r2a-agent-history-token', now(), now())`,
         [family.rows[0]!.id, firstGroup.id],
       );
       const memory = await client.query<{ id: string }>(

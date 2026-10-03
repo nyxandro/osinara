@@ -2,12 +2,12 @@
  * Turn memory projection tests.
  *
  * Constructs covered:
- * - `projectTurnMemory`: lifts the memory payload out of Eve's merged system prefix into the tail.
+ * - `projectTurnMemory`: lifts the memory payload out of the merged system prefix into the tail.
  * - The anchor holds across the steps of one turn, so the within-turn prefix stays reusable.
  * - Service notices, the remaining prefix, and a prompt without a payload are left untouched.
  * - Neither the core rules naming the marker nor a record forging it can move the boundary.
  *
- * Eve joins every system instruction into one message with `\n\n`, so the payload is a segment of
+ * The runtime joins every system instruction into one message with `\n\n`, so the payload is a segment of
  * that text rather than a message of its own.
  */
 import { readFileSync } from "node:fs";
@@ -166,7 +166,7 @@ describe("turn memory projection", () => {
     expect(projectTurnMemory(once)).toEqual(once);
   });
 
-  it("anchors before a recovery note Eve appends after the turn message", () => {
+  it("anchors before a recovery note the runtime appends after the turn message", () => {
     const projected = projectTurnMemory([...turnPrompt(), user("Ответ был пустым, повтори шаг")]);
 
     expect(projected.at(-1)).toEqual(user("Ответ был пустым, повтори шаг"));

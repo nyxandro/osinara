@@ -2,11 +2,11 @@
  * External-group native file-tool override tests.
  *
  * Constructs covered:
- * - Same-name Eve overrides authorize every execution against current group state.
+ * - Same-name overrides of built-in tools authorize every execution against current group state.
  * - Canonical sandbox paths remain inside the exact `/workspace/group` root.
  * - Read-only dynamic skill files require a current code-reviewed group grant.
  * - Symlink components cannot redirect an operation outside the group workspace.
- * - Allowed paths retain Eve's native executor contracts.
+ * - Allowed paths retain the built-in executor contracts.
  * - Native filesystem failures become safe model-facing correction contracts.
  */
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
@@ -33,7 +33,7 @@ const AUTHORIZATION = {
 
 function tool(execute: ReturnType<typeof vi.fn>): ToolDefinition<any, any> {
   return {
-    description: "Eve default",
+    description: "built-in default",
     execute,
     inputSchema: {},
   } as ToolDefinition<any, any>;
@@ -130,7 +130,7 @@ describe("external-group file tools", () => {
 
   it.each([
     SKILL_REFERENCE,
-    "/home/eve/.agents/skills/pohuy/references/slovar.md",
+    "/home/agent/.agents/skills/pohuy/references/slovar.md",
     "$HOME/.agents/skills/pohuy/SKILL.md",
   ])("canonicalizes and executes an allowed skill file read from %s", async (filePath) => {
     const expectedFilePath = filePath.endsWith("/SKILL.md")
@@ -193,7 +193,7 @@ describe("external-group file tools", () => {
   it.each([
     "$HOME/.agents/skills/unknown/references/file.md",
     "$HOME/.agents/skills/pohuy/references/../secret.md",
-    "/home/eve/.agents/skills/pohuy//secret.md",
+    "/home/agent/.agents/skills/pohuy//secret.md",
   ])("denies an unknown or malformed skill file path: %s", async (filePath) => {
     await expect(tools().read_file!.execute({ filePath }, context())).rejects.toThrowError(
       /AGENT_GROUP_(?:FILE_PATH|SKILL)_FORBIDDEN/u,
@@ -203,7 +203,7 @@ describe("external-group file tools", () => {
 
   it.each([
     ["glob", { path: "$HOME/.agents/skills/pohuy", pattern: "**/*" }],
-    ["grep", { path: "/home/eve/.agents/skills/pohuy", pattern: "secret" }],
+    ["grep", { path: "/home/agent/.agents/skills/pohuy", pattern: "secret" }],
     ["write_file", { content: "replace", filePath: SKILL_REFERENCE }],
   ] as const)("keeps %s forbidden under the skill package root", async (name, input) => {
     await expect(tools()[name]!.execute(input, context())).rejects.toThrowError(

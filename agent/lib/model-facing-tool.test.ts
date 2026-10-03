@@ -69,7 +69,7 @@ describe("model-facing tool boundary", () => {
 
       const failure = await wrapped.execute({}, {} as never).catch((error: unknown) => error);
 
-      // Eve no longer prints a stack for a coded refusal, so this line is its only record (#302).
+      // The runtime prints no stack for a coded refusal, so this line is its only record (#302).
       expect(metricsLines(info)).toEqual([expect.objectContaining({
         code: "AGENT_TOOL_CALL_METRICS",
         errorCode: "AGENT_WEB_FETCH_RESPONSE_FAILED",

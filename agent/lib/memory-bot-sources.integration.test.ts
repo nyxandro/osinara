@@ -58,7 +58,7 @@ function context(f: Awaited<ReturnType<typeof fixture>>, applicationSessionId: s
   const actor = bot ? BOT_ID : HUMAN_ID;
   return {
     callId: "remember-bot-source", session: {
-      id: "eve-bot-memory", turn: { id: "turn_0" }, auth: { initiator: null, current: {
+      id: "agent-bot-memory", turn: { id: "turn_0" }, auth: { initiator: null, current: {
         authenticator: review ? "memory-review" : "telegram",
         principalId: bot ? `telegram-bot:${BOT_ID}` : f.ownerId,
         principalType: bot ? "service" : "user",

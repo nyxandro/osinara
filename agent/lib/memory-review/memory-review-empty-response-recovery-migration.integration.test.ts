@@ -3,7 +3,7 @@
  *
  * Constructs covered:
  * - Only the exact side-effect-free production batch is requeued after an empty model response.
- * - A mutation from the failed Eve turn aborts recovery atomically.
+ * - A mutation from the failed turn aborts recovery atomically.
  * - The failed session and delivered owner alert remain immutable audit history.
  * - All 50 retained source messages survive for a fresh background review root.
  */

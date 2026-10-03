@@ -96,7 +96,7 @@ describeWithDatabase("memory show journal", () => {
   });
 
   it("keeps counting up when a new session starts the turn names over", async () => {
-    // Eve numbers turns inside a session: `turn_0` of the next session is a different turn of the
+    // The runtime numbers turns inside a session: `turn_0` of the next session is a different turn of the
     // same conversation, and treating the two as one would freeze the window for good.
     await memoryShowJournal.openTurn(conversationId, "wrun_first", "turn_0");
     await memoryShowJournal.openTurn(conversationId, "wrun_first", "turn_1");

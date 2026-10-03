@@ -4,7 +4,7 @@
  * Constructs covered:
  * - A retained, side-effect-free ambiguous background turn is rebuilt and requeued once.
  * - Any matching durable memory operation prevents automatic recovery.
- * - The discarded Eve application root remains retired and auditable but cannot be resumed.
+ * - The discarded application root remains retired and auditable but cannot be resumed.
  */
 import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -67,7 +67,7 @@ async function insertAmbiguousBatch(
              $6, $7, 'AGENT_MEMORY_REVIEW_SESSION_FAILED_AMBIGUOUS', now(), now())
      RETURNING id`,
     [lane.rows[0]!.id, input.conversationId, input.sequenceStart - 1,
-      input.sequenceStart, sequenceEnd, `eve-recovery-${input.sequenceStart}`,
+      input.sequenceStart, sequenceEnd, `agent-recovery-${input.sequenceStart}`,
       `turn-recovery-${input.sequenceStart}`],
   );
   const session = await client.query<{ id: string }>(
@@ -79,14 +79,14 @@ async function insertAmbiguousBatch(
              $3, $3, $4, now(), now(), now(), now() + interval '90 days', $5)
      RETURNING id`,
     [input.familyId, input.groupId, `memory-review:${batch.rows[0]!.id}`,
-      `eve-recovery-${input.sequenceStart}`, batch.rows[0]!.id],
+      `agent-recovery-${input.sequenceStart}`, batch.rows[0]!.id],
   );
   await client.query(
     "UPDATE memory_review_batches SET application_session_id = $2 WHERE id = $1",
     [batch.rows[0]!.id, session.rows[0]!.id],
   );
 
-  // A system-owned operation proves that the old Eve turn crossed the side-effect boundary.
+  // A system-owned operation proves that the old turn crossed the side-effect boundary.
   if (input.operationTurnId) {
     await client.query(
       `INSERT INTO memory_mutation_operations
@@ -94,7 +94,7 @@ async function insertAmbiguousBatch(
           actor_telegram_user_id, eve_session_id, eve_turn_id)
        VALUES ($1, $2, 'create', $3, NULL, NULL, $4, $5)`,
       [input.familyId, `recovery-operation-${input.sequenceStart}`, "a".repeat(64),
-        `eve-recovery-${input.sequenceStart}`, input.operationTurnId],
+        `agent-recovery-${input.sequenceStart}`, input.operationTurnId],
     );
   }
   return { batchId: batch.rows[0]!.id, sessionId: session.rows[0]!.id };

@@ -3,7 +3,7 @@
  *
  * Constructs covered:
  * - PDF supporting-file links match Linux case-sensitive package paths.
- * - DOCX and XLSX scripts are invoked from their Eve materialized skill roots.
+ * - DOCX and XLSX scripts are invoked from their materialized skill roots.
  * - The DOCX quick start imports every Node.js module it uses.
  */
 import { readFile } from "node:fs/promises";
@@ -26,7 +26,7 @@ describe("document skill packages", () => {
     expect(forms).not.toMatch(/python scripts\//u);
   });
 
-  it.each(["docx", "xlsx"])("anchors %s scripts at the Eve skill root", async (skillName) => {
+  it.each(["docx", "xlsx"])("anchors %s scripts at the sandbox skill root", async (skillName) => {
     const skill = await skillFile(skillName);
 
     expect(skill).not.toMatch(/python scripts\//u);

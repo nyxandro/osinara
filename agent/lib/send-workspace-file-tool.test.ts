@@ -63,7 +63,7 @@ function context(): ToolContext {
     callId: "call-1",
     session: {
       auth: { current: caller, initiator: caller },
-      id: "eve-session-1",
+      id: "agent-session-1",
       turn: { id: "turn-1", sequence: 1 },
     },
   } as unknown as ToolContext;

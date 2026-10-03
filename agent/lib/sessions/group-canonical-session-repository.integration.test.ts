@@ -194,7 +194,7 @@ describeWithDatabase("canonical group session repository", () => {
       requesterUserId: f.userId,
     });
 
-    // OAuth authorization.required has no Eve request id and may lack a mapped application user.
+    // OAuth authorization.required has no runtime request id and may lack a mapped application user.
     await sessionRepository.parkSession({
       applicationSessionId: canonical.id,
       pendingRequestId: null,

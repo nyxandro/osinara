@@ -2,9 +2,9 @@
  * Durable turn-bound memory source PostgreSQL tests.
  *
  * Constructs covered:
- * - One immutable Eve turn snapshot binds the current message and visible group delta.
+ * - One immutable turn snapshot binds the current message and visible group delta.
  * - HITL resume verification accepts only the same application session, turn, and Telegram actor.
- * - Sequence resolution returns only a source captured for that exact Eve session and turn.
+ * - Sequence resolution returns only a source captured for that exact agent session and turn.
  * - Rebinding the same turn with a different visible set fails instead of widening access.
  * - A bot-invoked turn binds against its own actor kind and Telegram id.
  */
@@ -64,8 +64,8 @@ describeWithDatabase("turn-bound memory source repository", () => {
       applicationSessionId: appSession.rows[0]!.id,
       conversationId: fixture.conversationId,
       currentTimelineEntryId: fixture.timelineEntryId,
-      agentSessionId: "eve-source-session",
-      agentTurnId: "eve-source-turn",
+      agentSessionId: "agent-source-session",
+      agentTurnId: "agent-source-turn",
       invokingActorId: "agent-memory-author",
       invokingActorKind: "telegram_user" as const,
       visibleTimelineEntryIds: [delta.rows[0]!.id, fixture.timelineEntryId],
@@ -179,8 +179,8 @@ describeWithDatabase("turn-bound memory source repository", () => {
       applicationSessionId: appSession.rows[0]!.id,
       conversationId: fixture.conversationId,
       currentTimelineEntryId: botEntry.rows[0]!.id,
-      agentSessionId: "eve-bot-session",
-      agentTurnId: "eve-bot-turn",
+      agentSessionId: "agent-bot-session",
+      agentTurnId: "agent-bot-turn",
       invokingActorId: "8123456789",
       invokingActorKind: "telegram_bot" as const,
       visibleTimelineEntryIds: [botEntry.rows[0]!.id],
@@ -199,7 +199,7 @@ describeWithDatabase("turn-bound memory source repository", () => {
     // A bot must not be able to bind a turn against a channel-shaped or human identity.
     await expect(memoryTurnSourceRepository.bind({
       ...binding,
-      agentTurnId: "eve-bot-turn-forged",
+      agentTurnId: "agent-bot-turn-forged",
       invokingActorKind: "telegram_channel" as const,
     })).rejects.toMatchObject({ code: "AGENT_MEMORY_TURN_SOURCE_SET_INVALID" });
   });

@@ -3,7 +3,7 @@
  *
  * Constructs covered:
  * - Mutations need no approval; malformed model payloads stop before any write.
- * - Action routing: pause and resume become one enabled flag, delete carries the Eve call id.
+ * - Action routing: pause and resume become one enabled flag, delete carries the tool call id.
  * - The group descriptor knows no scope or timezone field, so neither can reach the repository.
  * - A Moscow offset is required, so a UTC timestamp cannot move the reminder by three hours.
  */
@@ -84,7 +84,7 @@ describe("external group reminder tools", () => {
     expect(repository.create).not.toHaveBeenCalled();
   });
 
-  it("creates a reminder under the verified author with the Eve call id as replay key", async () => {
+  it("creates a reminder under the verified author with the tool call id as replay key", async () => {
     repository.create.mockResolvedValue({ id: REMINDER_ID, scope: "group" });
 
     await expect(manageReminder.execute({
