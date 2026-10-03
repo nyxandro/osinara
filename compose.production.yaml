@@ -139,11 +139,6 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN is required}
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:?TELEGRAM_BOT_USERNAME is required}
       TELEGRAM_WEBHOOK_SECRET_TOKEN: ${TELEGRAM_WEBHOOK_SECRET_TOKEN:?TELEGRAM_WEBHOOK_SECRET_TOKEN is required}
-      WORKFLOW_POSTGRES_JOB_PREFIX: osinara
-      WORKFLOW_POSTGRES_MAX_POOL_SIZE: "12"
-      WORKFLOW_POSTGRES_URL: ${WORKFLOW_POSTGRES_URL:?WORKFLOW_POSTGRES_URL is required}
-      WORKFLOW_POSTGRES_WORKER_CONCURRENCY: "10"
-      WORKFLOW_QUEUE_NAMESPACE: eve6f73696e6172612d66616d696c792d6167656e74
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/eve/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 5s
@@ -169,7 +164,6 @@ services:
     entrypoint: ["npm", "run", "migrate:runtime"]
     environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
-      WORKFLOW_POSTGRES_URL: ${WORKFLOW_POSTGRES_URL:?WORKFLOW_POSTGRES_URL is required}
     networks:
       - app-network
     restart: "no"

@@ -136,18 +136,6 @@ describe("Docker Compose runtime wiring", () => {
     expect(productionCompose).not.toContain("/opt/osinara/model-providers.json");
   });
 
-  it("provides Eve's derived queue namespace before workflow recovery starts", () => {
-    // Eve derives the queue namespace from the package name after loading the agent bundle.
-    // Compose must provide the same value earlier so local-world recovery targets registered queues.
-    const packageManifest = JSON.parse(
-      readFileSync(new URL("package.json", projectRoot), "utf8"),
-    ) as PackageManifest;
-    const expectedNamespace = `eve${Buffer.from(packageManifest.name, "utf8").toString("hex")}`;
-    const compose = readFileSync(new URL("compose.yaml", projectRoot), "utf8");
-
-    expect(compose).toContain(`      WORKFLOW_QUEUE_NAMESPACE: ${expectedNamespace}\n`);
-  });
-
   it.each(["compose.yaml", "compose.production.yaml"])(
     "pins the multilingual E5 model in %s",
     (file) => {

@@ -40,7 +40,6 @@ describe("provider installer configuration", () => {
       "invitationSigningSecret",
       "postgresPassword",
       "telegramWebhookSecretToken",
-      "workflowPostgresPassword",
     ]);
     expect(new Set(Object.values(secrets)).size).toBe(4);
   });
