@@ -26,10 +26,8 @@ describe("step text events", () => {
     expect(isEmptyDelivery({ finishReason: "stop", text: "<empty-delivery/>", toolCallCount: 1 })).toBe(false);
   });
 
-  it("still understands the previous marker, which the model may repeat after earlier turns in its history", () => {
-    expect(stepTextEvents([{ role: "assistant", content: "<eve-empty-delivery/>" }], "stop")).toEqual([{ finishReason: "stop", message: null }]);
-    expect(isEmptyDelivery({ finishReason: "stop", text: "<eve-empty-delivery/>", toolCallCount: 0 })).toBe(true);
-    expect(containsEmptyDeliveryMarker("Молчу <eve-empty-delivery/>")).toBe(true);
+  it("finds the marker anywhere in a text and nothing in an ordinary answer", () => {
+    expect(containsEmptyDeliveryMarker("Молчу <empty-delivery/>")).toBe(true);
     expect(containsEmptyDeliveryMarker("обычный ответ")).toBe(false);
   });
 });

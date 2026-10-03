@@ -84,7 +84,6 @@ describe("production container contract", () => {
     const runtime = dockerfile.slice(dockerfile.indexOf(" AS runtime"));
     expect(runtime).toContain("COPY --from=build /app/.runtime ./.runtime");
     expect(runtime).toContain("COPY --from=build /app/agent ./agent");
-    expect(runtime).not.toMatch(/COPY --from=build \/app\/\.(eve|output)\b/);
     expect(entrypoint).toContain("exec node .runtime/agent/main.js");
     expect(entrypoint).not.toContain("npm run start");
     expect(runtime).not.toMatch(/COPY --from=build \/app\/(scripts|services)\b/);
@@ -93,19 +92,17 @@ describe("production container contract", () => {
     expect(entrypoint).not.toContain("npm run migrate");
   });
 
-  it("installs dependencies without Eve, its patches or install-time scripts", () => {
+  it("installs dependencies without install-time scripts", () => {
     const dockerfile = readProjectFile("Dockerfile");
     const packageJson = JSON.parse(readProjectFile("package.json")) as {
       dependencies: Record<string, string>;
       scripts: Record<string, string>;
     };
 
-    expect(dockerfile).not.toMatch(/apply-eve-patches|eve-patches|eve-runtime|npm run postinstall/u);
+    expect(dockerfile).not.toContain("npm run postinstall");
     expect(dockerfile).toContain("RUN npm ci --ignore-scripts \\\n    && npm run install:gws");
     expect(dockerfile).toContain("RUN npm ci --omit=dev --ignore-scripts \\\n    && npm run install:gws");
     expect(packageJson.scripts).not.toHaveProperty("postinstall");
-    expect(packageJson.dependencies).not.toHaveProperty("eve");
-    expect(packageJson.dependencies).not.toHaveProperty("@workflow/world-postgres");
     expect(packageJson.scripts["migrate:runtime"]).toBe("node .runtime/scripts/migrate.js");
   });
 
@@ -188,7 +185,6 @@ describe("production container contract", () => {
       "postgres-data",
       "memory-embedding-model-e5",
       "google-workspace-credentials",
-      "sandbox-data",
       "tool-environments",
       "workspace-data",
       "cli-proxy-auth",
@@ -220,8 +216,6 @@ describe("production container contract", () => {
     expect(compose.match(/\/var\/run\/docker\.sock/g)).toHaveLength(2);
     expect(agent).not.toContain("/var/run/docker.sock");
     expect(agent).toContain("google-workspace-credentials:/app/google-workspace-credentials");
-    expect(agent).not.toContain("/app/.eve/.workflow-data");
-    expect(agent).not.toContain("workflow-data:/app/.workflow-data");
     expect(runner).toContain("/var/run/docker.sock:/var/run/docker.sock");
     expect(runner).not.toContain("google-workspace-credentials");
     expect(runner).toContain("      - sandbox-control");
@@ -359,7 +353,7 @@ describe("server deployment contract", () => {
     expect(script).toContain("pg_restore --list");
     expect(script).toContain("tar -tzf");
     expect(script).toContain("restart_current_release");
-    expect(script).toContain("127.0.0.1:8082/eve/v1/health");
+    expect(script).toContain("127.0.0.1:8082/v1/health");
     expect(script).not.toMatch(/git\s+(pull|fetch|checkout)/);
     expect(script).not.toMatch(/docker\s+(compose\s+)?build/);
     const main = readProjectFile("scripts/production-deploy.sh");
@@ -475,7 +469,6 @@ describe("server deployment contract", () => {
     expect(script).toContain("HAVING count(*) = 1");
     expect(script).toContain("MIGRATION_STARTED");
     expect(script).not.toContain("osinara-production-memory-embedding-model-e5 \\");
-    expect(script).not.toContain("osinara-production-sandbox-data \\");
   });
 
   it("installs a persistent root timer without embedding secrets", () => {

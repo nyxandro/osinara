@@ -8,20 +8,12 @@
  * - `HEALTH_ROUTE`: `/v1/health`, the address Docker, Nginx and the deploy controller probe.
  *
  * The addresses: `/v1/telegram`, the internal `/v1/telegram-drain`, `/v1/google-oauth/callback`
- * and the health check. A request to a previous address (`/eve/v1/…`) is served as the current
- * one while Telegram's webhook, the Google sign-in return, the deploy controller and the TLS proxy
- * still use it; the next release removes `PREVIOUS_PREFIX`.
+ * and the health check.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 
 export const HEALTH_ROUTE = "/v1/health";
-const CURRENT_PREFIX = "/v1/";
-const PREVIOUS_PREFIX = "/eve/v1/";
-
-function currentUrl(url: string): string {
-  return url.startsWith(PREVIOUS_PREFIX) ? `${CURRENT_PREFIX}${url.slice(PREVIOUS_PREFIX.length)}` : url;
-}
 
 export interface RouteContext {
   /** Work that continues after the response; a stopping server waits for it. */
@@ -92,7 +84,7 @@ export async function startRuntimeServer(input: {
   const server = createServer((incoming, outgoing) => {
     void (async () => {
       const method = incoming.method ?? "GET";
-      const url = currentUrl(incoming.url ?? "/");
+      const url = incoming.url ?? "/";
       const path = new URL(url, "http://127.0.0.1").pathname;
       try {
         if (path === HEALTH_ROUTE && (method === "GET" || method === "HEAD")) {

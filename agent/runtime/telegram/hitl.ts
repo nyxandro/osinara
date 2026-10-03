@@ -8,8 +8,7 @@
  * - `telegramCallbackInputResponse`, `telegramReplyInputResponse`, `isTelegramSyntheticResponse`,
  *   `resolveTelegramInputResponses`: a pressed button or a reply, mapped back to the request it answers.
  * - `TELEGRAM_HITL_CALLBACK_PREFIX`, `isTelegramHitlCallback`: the prefix of the runtime's callback
- *   data, and whether a pressed button is one of its cards — including a card shown under the
- *   previous prefix `eve:`, accepted until the next release.
+ *   data, and whether a pressed button is one of its cards.
  *
  * The callback ids continue the per-conversation counter (`nextHitlCallbackId`), so a button still
  * visible in a chat never maps to a new request.
@@ -19,10 +18,9 @@ import type { InputRequest, InputResponse } from "../hitl/types.js";
 import type { TelegramHitlState } from "./channel-types.js";
 
 export const TELEGRAM_HITL_CALLBACK_PREFIX = "hitl:";
-const PREVIOUS_HITL_CALLBACK_PREFIX = "eve:";
 
 export function isTelegramHitlCallback(data: string | undefined): data is string {
-  return data !== undefined && (data.startsWith(TELEGRAM_HITL_CALLBACK_PREFIX) || data.startsWith(PREVIOUS_HITL_CALLBACK_PREFIX));
+  return data !== undefined && data.startsWith(TELEGRAM_HITL_CALLBACK_PREFIX);
 }
 
 /** Synthetic request id prefix sent through `send()` for callback queries. */

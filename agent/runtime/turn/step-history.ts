@@ -3,8 +3,7 @@
  *
  * Exports:
  * - `EMPTY_DELIVERY_MARKER`, `containsEmptyDeliveryMarker`: the model's way to finish a turn without
- *   delivering anything. The previous marker `<eve-empty-delivery/>` still counts: earlier turns in
- *   a conversation's history show it, and the model may repeat it.
+ *   delivering anything.
  * - `isEmptyDelivery`: a final step that only carries the marker; it is not written into history.
  * - `stepHistoryMessages`: the assistant message(s) of a step and one tool message with every
  *   call's result in call order.
@@ -21,10 +20,9 @@ import type { ModelMessage, ToolResultPart } from "ai";
 import type { ToolResultOutput } from "./tool-calls.js";
 
 export const EMPTY_DELIVERY_MARKER = "<empty-delivery/>";
-const PREVIOUS_EMPTY_DELIVERY_MARKER = "<eve-empty-delivery/>";
 
 export function containsEmptyDeliveryMarker(text: string): boolean {
-  return text.includes(EMPTY_DELIVERY_MARKER) || text.includes(PREVIOUS_EMPTY_DELIVERY_MARKER);
+  return text.includes(EMPTY_DELIVERY_MARKER);
 }
 
 export interface StepTextEvent {
