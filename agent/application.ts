@@ -34,7 +34,7 @@ import { createApprovalTimeoutResolver } from "./lib/telegram-hitl/approval-time
 import { finalizeTimedOutPrompt } from "./lib/telegram-hitl/approval-timeout-prompt.js";
 import { approvalTimeoutRepository } from "./lib/telegram-hitl/approval-timeout-repository.js";
 import type { RuntimeAgent } from "./runtime/agent-definition.js";
-import { createTurnDispatcher } from "./runtime/dispatch.js";
+import { createTurnDispatcher, type TurnDispatcher } from "./runtime/dispatch.js";
 import { respondInSession } from "./runtime/respond.js";
 import { acquireRunnerLock } from "./runtime/runner-lock.js";
 import { startScheduler } from "./runtime/scheduler.js";
@@ -54,6 +54,8 @@ export const TELEGRAM_WEBHOOK_ROUTE = "/eve/v1/telegram";
 export const TELEGRAM_DRAIN_ROUTE = "/eve/v1/telegram-drain";
 // A waiting turn checks again this often when no turn of this process signals that its session moved on.
 const TURN_WAIT_MILLISECONDS = 1_000;
+// How long the start waits for reports of turns an earlier process left unreported.
+const STARTUP_REPORTS_WAIT_MILLISECONDS = 30_000;
 
 export interface ApplicationOptions {
   readonly agent: RuntimeAgent;
@@ -83,6 +85,19 @@ export interface RunningApplication {
    * running here after the grace is not taken over by a next process while this one runs it.
    */
   stop(graceMilliseconds: number): Promise<void>;
+}
+
+/**
+ * A person's answer arrives through the server, so it must not close a parked turn before that
+ * turn's report. A report stuck on Telegram does not keep the bot closed: past the bound it goes
+ * on in the background, as reports of later minutes do.
+ */
+async function reportsBeforeRequests(dispatcher: TurnDispatcher): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bound = new Promise<"late">((resolve) => { timer = setTimeout(() => resolve("late"), STARTUP_REPORTS_WAIT_MILLISECONDS); });
+  const settled = await Promise.race([dispatcher.reportsIdle().then(() => "done" as const), bound]);
+  clearTimeout(timer);
+  if (settled === "late") console.warn(JSON.stringify({ code: "AGENT_RUNTIME_START_REPORTS_PENDING" }));
 }
 
 export async function startApplication(options: ApplicationOptions): Promise<RunningApplication> {
@@ -138,8 +153,7 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
   };
 
   await dispatcher.recover();
-  // A person's answer arrives through the server: it must not close a parked turn before its report.
-  await dispatcher.reportsIdle();
+  await reportsBeforeRequests(dispatcher);
   const server = await startRuntimeServer({
     host: options.host,
     port: options.port,

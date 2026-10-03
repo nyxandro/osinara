@@ -16,8 +16,10 @@
  * never blocks the next one. A holder whose connection is cut (a database restart) takes the lock
  * again at once on a fresh connection — not from the pool, which may still hold connections cut
  * at the same moment; while the database is down that fails, and recovery tries every minute.
- * The cut session itself may still hold the lock for a moment while it ends: that is told apart
- * from another process by the session's id, and waited out briefly.
+ * A session of this process may still hold the lock for a moment while it ends — the cut one, or
+ * one whose lock was taken while the answer to that was lost: every lock session of the process is
+ * remembered by its id from the moment it connects, so such a session is waited out briefly
+ * instead of being taken for another process.
  */
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -38,9 +40,14 @@ export interface RunnerLock {
 /** Opens a new connection, outside any pool (`openDedicatedConnection`). */
 export type LockConnection = () => Promise<Client>;
 
-type Attempt =
-  | { readonly client: Client; readonly sessionPid: number }
-  | { readonly holderPid: number | null };
+type Attempt = { readonly client: Client } | { readonly holderPid: number | null };
+
+/** The database session behind a connection, known from the moment it connected. */
+export function sessionPidOf(client: Client): number {
+  const pid = (client as Client & { readonly processID?: unknown }).processID;
+  if (typeof pid !== "number") throw new Error("AGENT_RUNNER_LOCK_SESSION_UNKNOWN: the connection has no database session id");
+  return pid;
+}
 
 // Ending the connection drops the lock. A connection that is already broken holds nothing, so a
 // failure to end it is only noted.
@@ -52,17 +59,19 @@ async function drop(client: Client): Promise<void> {
   }
 }
 
-async function tryLock(connect: LockConnection): Promise<Attempt> {
+async function tryLock(connect: LockConnection, ownSessions: Set<number>): Promise<Attempt> {
   const client = await connect();
   try {
-    const row = (await client.query<{ locked: boolean; pid: number }>(
-      "SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked, pg_backend_pid() AS pid", [RUNNER_LOCK_NAME],
+    ownSessions.add(sessionPidOf(client));
+    const row = (await client.query<{ locked: boolean }>(
+      "SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked", [RUNNER_LOCK_NAME],
     )).rows[0]!;
-    if (row.locked) return { client, sessionPid: row.pid };
-    // A bigint advisory key shows its high half as classid and its low half as objid.
+    if (row.locked) return { client };
+    // Advisory locks belong to a database; a bigint key shows its high half as classid, its low half as objid.
     const holder = (await client.query<{ pid: number }>(
       `SELECT l.pid FROM pg_locks l
         WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
+          AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
           AND l.classid::bigint = ((hashtextextended($1, 0) >> 32) & 4294967295)
           AND l.objid::bigint = (hashtextextended($1, 0) & 4294967295)`,
       [RUNNER_LOCK_NAME],
@@ -77,40 +86,42 @@ async function tryLock(connect: LockConnection): Promise<Attempt> {
 
 export async function acquireRunnerLock(connect: LockConnection, onTaken: () => void): Promise<RunnerLock> {
   let holder: Client | null = null;
-  // The database session that held the lock for this process last.
-  let sessionPid: number | null = null;
+  // Every database session this process opened for the lock that may still be ending.
+  const ownSessions = new Set<number>();
   let released = false;
   let taken = false;
   // One attempt at a time: two attempts of this process would see each other as another holder.
   let retaking: Promise<boolean> | null = null;
 
-  function hold(attempt: { readonly client: Client; readonly sessionPid: number }): void {
-    holder = attempt.client;
-    sessionPid = attempt.sessionPid;
-    attempt.client.on("error", (error) => lost(attempt.client, error));
-    attempt.client.on("end", () => lost(attempt.client, undefined));
+  function hold(client: Client): void {
+    holder = client;
+    // Holding the lock, this process has no other session left that could hold it.
+    ownSessions.clear();
+    ownSessions.add(sessionPidOf(client));
+    client.on("error", (error) => lost(client, error));
+    client.on("end", () => lost(client, undefined));
   }
 
   async function takeAgain(): Promise<boolean> {
     for (let check = 1; ; check += 1) {
-      const attempt = await tryLock(connect);
+      const attempt = await tryLock(connect, ownSessions);
       if ("client" in attempt) {
         if (released) {
           await drop(attempt.client);
           return false;
         }
-        hold(attempt);
+        hold(attempt.client);
         console.info(JSON.stringify({ code: "AGENT_RUNNER_LOCK_RETAKEN" }));
         return true;
       }
       // Free again by the time it was looked up, or still held by this process's ending session.
-      const ending = attempt.holderPid === null || attempt.holderPid === sessionPid;
+      const ending = attempt.holderPid === null || ownSessions.has(attempt.holderPid);
       if (ending && check < ENDING_SESSION_CHECKS) {
         await sleep(ENDING_SESSION_PAUSE_MILLISECONDS);
         continue;
       }
       if (ending) {
-        console.error(JSON.stringify({ code: "AGENT_RUNNER_LOCK_RELEASE_PENDING", sessionPid }));
+        console.error(JSON.stringify({ code: "AGENT_RUNNER_LOCK_RELEASE_PENDING", holderPid: attempt.holderPid }));
         return false;
       }
       if (!taken && !released) {
@@ -142,11 +153,11 @@ export async function acquireRunnerLock(connect: LockConnection, onTaken: () => 
     });
   }
 
-  const first = await tryLock(connect);
+  const first = await tryLock(connect, ownSessions);
   if (!("client" in first)) {
     throw new AppError("AGENT_RUNTIME_ALREADY_RUNNING", "С этой базой уже работает другой процесс агента. Остановите его и запустите снова");
   }
-  hold(first);
+  hold(first.client);
 
   return {
     async ensureHeld() {

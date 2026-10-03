@@ -128,7 +128,8 @@ export function createTurnDispatcher(input: {
 
   async function recover(): Promise<number> {
     if (!await input.runnerLock.ensureHeld()) {
-      // Another process took the database over while this one had lost its connection; this one stops.
+      // Another process took the lock over (this process is told to stop), or this process's own
+      // ended session still holds it: either way nobody else's turns are taken over now.
       console.error(JSON.stringify({ code: "AGENT_TURN_RECOVERY_WITHOUT_LOCK", runnerId: runtime.runnerId }));
       return 0;
     }

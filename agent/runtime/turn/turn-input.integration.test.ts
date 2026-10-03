@@ -175,6 +175,27 @@ async function continueWith(sessionId: string, continuationId: string, guarded: 
     }] });
   });
 
+  it("leaves a question to the next message when showing it fails after that message dismissed it", async () => {
+    const sessionId = await newTestSession();
+    const { events, observer } = recordingObserver({
+      inputRequested: async () => {
+        await startMessageTurn(sessionId, "другое");
+        throw new Error("TEST_CARD_REFUSED");
+      },
+    });
+    const turn = await startMessageTurn(sessionId, "спроси");
+
+    const outcome = await runTurn(testRuntime({
+      agent: testAgent({ ask_question: askQuestion }),
+      callModel: scriptedModel(toolCalls([{ id: "call-q", input: { prompt: "Дальше?" }, name: "ask_question" }])).callModel,
+      observer,
+    }), turn.id, RUN);
+
+    expect(outcome).toEqual({ status: "completed", text: null });
+    expect(await loadTurn(database(), turn.id)).toMatchObject({ status: "completed" });
+    expect(events.filter((event) => event.kind === "turnFinished")).toEqual([]);
+  });
+
   it("dismisses a waiting question when a new message arrives, before that message", async () => {
     const sessionId = await newTestSession();
     const turn = await startMessageTurn(sessionId, "спроси");

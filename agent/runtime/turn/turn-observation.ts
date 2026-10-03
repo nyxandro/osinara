@@ -45,7 +45,9 @@ async function presentAgain(runtime: TurnRuntime, turn: TurnRecord, outcome: Tur
   } catch (error) {
     return await failParkedTurn(runtime.database, turn, error);
   }
-  await markInputPresented(runtime.database, turn.id);
+  // As in the loop: the card is out, an unwritten mark does not undo it; the end is still reported.
+  await markInputPresented(runtime.database, turn.id).catch((error: unknown) => console.error(JSON.stringify({
+    code: "AGENT_TURN_INPUT_MARK_FAILED", error: error instanceof Error ? error.message : String(error), turnId: turn.id })));
   return outcome;
 }
 

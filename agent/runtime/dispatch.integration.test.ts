@@ -401,6 +401,38 @@ function gate() {
     expect(events.map((event) => event.kind)).toEqual(["inputRequested"]);
   });
 
+  it("does not start a second report of a turn while the first runs, and lets the start wait for it", async () => {
+    const sessionId = await newTestSession();
+    const model = scriptedModel(reply("готово"));
+    const dead = createTurnDispatcher({
+      admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
+      runtime: testRuntime({
+        agent: testAgent({}), callModel: model.callModel, observer: recordingObserver({ turnFinished: DIES_HERE }).observer, runnerId: "runner-dead",
+      }),
+    });
+    const turn = await startMessageTurn(sessionId, "привет");
+    void dead.run(turn.id);
+    await untilStatus(turn.id, "completed");
+    const release = gate();
+    const { events, observer } = recordingObserver({ turnFinished: async () => { await release.opened; } });
+    const next = createTurnDispatcher({
+      admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
+      runtime: testRuntime({ agent: testAgent({}), callModel: model.callModel, observer, runnerId: "runner-new" }),
+    });
+
+    expect(await next.recover()).toBe(1);
+    expect(await next.recover()).toBe(0);
+    let reported = false;
+    const waiting = next.reportsIdle().then(() => { reported = true; });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(reported).toBe(false);
+    release.open();
+    await waiting;
+    await next.idle();
+
+    expect(events.filter((event) => event.kind === "turnFinished")).toHaveLength(1);
+  });
+
   it("reports nothing again that a live run reported, even when its report failed", async () => {
     const parkedSession = await newTestSession();
     const failingSession = await newTestSession();

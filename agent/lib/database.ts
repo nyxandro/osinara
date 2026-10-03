@@ -13,6 +13,7 @@ import { normalizePostgresError } from "./database-errors.js";
 
 const CONNECTION_TIMEOUT_MILLISECONDS = 5_000;
 const DEDICATED_QUERY_TIMEOUT_MILLISECONDS = 5_000;
+const DEDICATED_KEEPALIVE_DELAY_MILLISECONDS = 60_000;
 
 let pool: Pool | null = null;
 
@@ -31,9 +32,11 @@ export async function openDedicatedConnection(): Promise<Client> {
   const client = createApplicationDatabaseClient({
     connectionString: connectionString(),
     connectionTimeoutMillis: CONNECTION_TIMEOUT_MILLISECONDS,
-    // Held for hours: a peer that vanished without closing is noticed, and a short check on a
-    // half-dead connection fails instead of hanging the minute recovery that waits on it.
+    // Held for hours: TCP probes start after a minute of silence, so a vanished peer is noticed in
+    // minutes, and a short check on a half-dead connection fails instead of hanging the minute
+    // recovery that waits on it.
     keepAlive: true,
+    keepAliveInitialDelayMillis: DEDICATED_KEEPALIVE_DELAY_MILLISECONDS,
     query_timeout: DEDICATED_QUERY_TIMEOUT_MILLISECONDS,
   });
   try {

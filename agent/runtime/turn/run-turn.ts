@@ -52,7 +52,8 @@ import { assistantStepText, MODEL_INACTIVITY_TIMEOUT, type StepModelCall, type S
 import { modelCallFailure } from "./model-errors.js";
 import { orderStepTools, toModelToolSet } from "./model-tools.js";
 import { executeStepCalls, planStepCalls, type CallJournal } from "./step-calls.js";
-import { failTurn } from "./turn-failure.js";
+import { failParkedTurn, failTurn, ParkedTurnTakenOver } from "./turn-failure.js";
+import { storedTurnOutcome } from "./turn-observation.js";
 import { prepareTurnSkills } from "./turn-skills.js";
 import { isEmptyDelivery, stepHistoryMessages, stepTextEvents } from "./step-history.js";
 import type { ToolResultOutput } from "./tool-calls.js";
@@ -425,7 +426,15 @@ async function runStep(
       await appendSessionHistory(client, { messages: [...turnInput, ...parkedMessages], sessionId: turn.sessionId, turnId: turn.id });
       await parkTurn(client, turn.id);
     });
-    await runtime.observer.inputRequested({ requests, stepIndex, turn });
+    try {
+      await runtime.observer.inputRequested({ requests, stepIndex, turn });
+    } catch (error) {
+      if (signal.aborted) throw error;
+      // A new message may have closed the parked turn meanwhile: then the next turn reports.
+      const failed = await failParkedTurn(runtime.database, turn, error);
+      if (failed === null) throw new ParkedTurnTakenOver(turn.id);
+      return failed;
+    }
     // The card is out: an unwritten mark only lets a crash recovery show it again (its buttons go to
     // the newest card), so the turn stays parked instead of failing under a shown card.
     await markInputPresented(runtime.database, turn.id).catch((error: unknown) => console.error(JSON.stringify({
@@ -463,6 +472,8 @@ export async function runTurn(
   try {
     outcome = await driveTurn(runtime, claimed, options.abortSignal);
   } catch (error) {
+    // The next turn has the session and reports; this one ends as that turn closed it.
+    if (error instanceof ParkedTurnTakenOver) return await storedTurnOutcome(runtime.database, await loadTurn(runtime.database, claimed.id));
     outcome = await failTurn(runtime.database, claimed, error, options.abortSignal);
   }
   try {
