@@ -141,11 +141,6 @@ curl --fail https://HOSTNAME/v1/health && rm /opt/osinara/tls/traefik-dynamic.ya
 The `osinara-tls-traefik-data` volume (ACME storage) is preserved by that restart; certificates are
 not reissued.
 
-Releases up to v0.34 kept agent state in a separate `osinara_workflow` database inside the
-existing PostgreSQL service; v0.35 carried each active conversation's history over from it into the
-application database. Neither the application nor the deploy controller reads it any more, and a
-later cleanup release removes it. A fresh installation has no such database.
-
 ## External monitoring
 
 Since v0.25.0 the application publishes two signals for an external observer, and neither is part

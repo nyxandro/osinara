@@ -14,7 +14,7 @@ export type SessionEventResult = "recorded" | "stale";
 export async function isCurrentAgentSession(id: string, agentSessionId: string): Promise<boolean> {
   const result = await database().query(
     `SELECT 1 FROM conversation_sessions
-      WHERE id = $1 AND retired_at IS NULL AND eve_session_id = $2`,
+      WHERE id = $1 AND retired_at IS NULL AND agent_session_id = $2`,
     [id, agentSessionId],
   );
   return result.rowCount === 1;
@@ -26,11 +26,11 @@ export async function classifyMissedSessionEvent(
   code: string,
   message: string,
 ): Promise<SessionEventResult> {
-  const active = await database().query<{ eve_session_id: string | null }>(
-    "SELECT eve_session_id FROM conversation_sessions WHERE id = $1 AND retired_at IS NULL",
+  const active = await database().query<{ agent_session_id: string | null }>(
+    "SELECT agent_session_id FROM conversation_sessions WHERE id = $1 AND retired_at IS NULL",
     [id],
   );
   const current = active.rows[0];
-  if (current?.eve_session_id && current.eve_session_id > agentSessionId) return "stale";
+  if (current?.agent_session_id && current.agent_session_id > agentSessionId) return "stale";
   throw new AppError(code, message);
 }

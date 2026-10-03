@@ -112,7 +112,7 @@ describeWithDatabase("turn-bound memory source repository", () => {
       provenance: { sessionId: binding.agentSessionId, turnId: binding.agentTurnId },
       scope: "family",
       sensitivity: "normal",
-      source: "eve:delta-source-memory",
+      source: "turn:delta-source-memory",
     });
     await expect(database().query(
       `SELECT item.subject_user_id, evidence.author_user_id, evidence.timeline_entry_id,

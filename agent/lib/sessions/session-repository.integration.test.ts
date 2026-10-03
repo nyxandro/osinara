@@ -240,17 +240,17 @@ describeWithDatabase("session repository", () => {
 
     const stored = await database().query<{
       completed_turns: number;
-      eve_session_id: string;
+      agent_session_id: string;
       pending_operation: boolean;
       rotation_requested_at: Date | null;
     }>(
-      `SELECT completed_turns, eve_session_id, pending_operation, rotation_requested_at
+      `SELECT completed_turns, agent_session_id, pending_operation, rotation_requested_at
          FROM conversation_sessions WHERE id = $1`,
       [current.id],
     );
     expect(stored.rows[0]).toEqual({
       completed_turns: 0,
-      eve_session_id: newRoot,
+      agent_session_id: newRoot,
       pending_operation: true,
       rotation_requested_at: null,
     });

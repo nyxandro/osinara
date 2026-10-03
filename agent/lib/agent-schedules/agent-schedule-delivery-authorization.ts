@@ -46,7 +46,7 @@ async function isAuthorized(
          ON telegram_group.id = schedule.group_id
         AND telegram_group.family_id = schedule.family_id
       WHERE run.id = $1 AND run.application_session_id = $2
-        AND ($3::text IS NULL OR run.eve_session_id = $3)
+        AND ($3::text IS NULL OR run.agent_session_id = $3)
         AND run.status = 'running' AND schedule.status = 'leased'
         AND schedule.family_id = $4 AND schedule.scope = $5
         AND schedule.group_id IS NOT DISTINCT FROM $6::uuid

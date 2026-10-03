@@ -150,7 +150,7 @@ async function insertCreateOperation(
   await client.query(
     `INSERT INTO memory_mutation_operations
        (family_id, operation_key, mutation_kind, input_hash, memory_item_id,
-        actor_user_id, actor_telegram_user_id, eve_session_id, eve_turn_id,
+        actor_user_id, actor_telegram_user_id, agent_session_id, agent_turn_id,
         thread_id, thread_action)
      VALUES ($1, $2, 'create', $3, $4, $5, $6, $7, $8, $9, $10)`,
     [auth.familyId, input.operationKey, inputHash, memoryItemId,

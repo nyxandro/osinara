@@ -59,8 +59,8 @@ async function renderButtons(sessionId: string, request: Parameters<typeof rende
 }
 
 async function updates() {
-  return (await database().query<{ dispatch_turn_id: string | null; eve_session_id: string | null; status: string }>(
-    "SELECT status, eve_session_id, dispatch_turn_id FROM telegram_ingress_updates ORDER BY update_id",
+  return (await database().query<{ dispatch_turn_id: string | null; agent_session_id: string | null; status: string }>(
+    "SELECT status, agent_session_id, dispatch_turn_id FROM telegram_ingress_updates ORDER BY update_id",
   )).rows;
 }
 
@@ -93,8 +93,8 @@ async function updates() {
       .toEqual(["Готово"]);
     const rows = await updates();
     expect(rows).toMatchObject([
-      { eve_session_id: sessionId, status: "completed" },
-      { eve_session_id: sessionId, status: "completed" },
+      { agent_session_id: sessionId, status: "completed" },
+      { agent_session_id: sessionId, status: "completed" },
     ]);
     expect(rows[1]!.dispatch_turn_id).not.toBe(rows[0]!.dispatch_turn_id);
     expect(telegram.fetch.mock.calls.map((call) => String((call as unknown[])[0]).split("/").at(-1))).toContain("answerCallbackQuery");

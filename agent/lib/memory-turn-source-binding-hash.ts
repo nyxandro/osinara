@@ -6,8 +6,7 @@
  * - `reviewSourceBindingHash`: a memory review turn's binding.
  *
  * A replayed bind compares its fingerprint with the stored one, so the serialized field names and
- * their order are a stored format: `eveSessionId` and `eveTurnId` stay until a data migration
- * recomputes the stored values.
+ * their order are a stored format.
  */
 import { createHash } from "node:crypto";
 
@@ -34,8 +33,8 @@ export function turnSourceBindingHash(
     applicationSessionId: input.applicationSessionId,
     conversationId: input.conversationId,
     currentTimelineEntryId: input.currentTimelineEntryId,
-    eveSessionId: input.agentSessionId,
-    eveTurnId: input.agentTurnId,
+    agentSessionId: input.agentSessionId,
+    agentTurnId: input.agentTurnId,
     invokingActorId: input.invokingActorId,
     invokingActorKind: input.invokingActorKind,
     memoryReviewBatchId: input.memoryReviewBatchId ?? null,
@@ -50,8 +49,8 @@ export function reviewSourceBindingHash(
   return sha256({
     applicationSessionId: input.applicationSessionId,
     conversationId: input.conversationId,
-    eveSessionId: input.agentSessionId,
-    eveTurnId: input.agentTurnId,
+    agentSessionId: input.agentSessionId,
+    agentTurnId: input.agentTurnId,
     invokingActorId: input.invokingActorId,
     invokingActorKind: input.invokingActorKind,
     memoryReviewBatchId: input.memoryReviewBatchId,

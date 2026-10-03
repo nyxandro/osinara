@@ -26,9 +26,9 @@ interface WakeupTurn {
 export const conversationWakeupRunRepository = {
   async admitTurn(turn: WakeupTurn): Promise<void> {
     const result = await database().query(
-      `UPDATE agent_schedule_runs SET eve_turn_id = $4, updated_at = now()
-        WHERE id = $1 AND application_session_id = $2 AND eve_session_id = $3 AND status = 'running'
-          AND recovery_protocol = 2 AND (eve_turn_id IS NULL OR eve_turn_id = $4)`,
+      `UPDATE agent_schedule_runs SET agent_turn_id = $4, updated_at = now()
+        WHERE id = $1 AND application_session_id = $2 AND agent_session_id = $3 AND status = 'running'
+          AND recovery_protocol = 2 AND (agent_turn_id IS NULL OR agent_turn_id = $4)`,
       [turn.runId, turn.applicationSessionId, turn.agentSessionId, turn.agentTurnId],
     );
     if (result.rowCount !== 1) {
@@ -39,23 +39,23 @@ export const conversationWakeupRunRepository = {
   /** Returns false when the run was already closed, which a replayed terminal event may observe. */
   async finishTurn(turn: WakeupTurn & { completedAt: Date; failureCode: string | null }): Promise<boolean> {
     return await inTransaction(async (client) => {
-      const run = await client.query<{ eve_turn_id: string | null; schedule_id: string }>(
-        `SELECT eve_turn_id, schedule_id::text FROM agent_schedule_runs
-          WHERE id = $1 AND application_session_id = $2 AND eve_session_id = $3 AND recovery_protocol = 2
+      const run = await client.query<{ agent_turn_id: string | null; schedule_id: string }>(
+        `SELECT agent_turn_id, schedule_id::text FROM agent_schedule_runs
+          WHERE id = $1 AND application_session_id = $2 AND agent_session_id = $3 AND recovery_protocol = 2
             AND status = 'running'
           FOR UPDATE`,
         [turn.runId, turn.applicationSessionId, turn.agentSessionId],
       );
       const row = run.rows[0];
       if (!row) return false;
-      if (row.eve_turn_id === null) {
+      if (row.agent_turn_id === null) {
         return await withdrawUnstartedRun(client, row.schedule_id, turn.runId, WAKEUP_NOT_STARTED_CODE);
       }
-      if (row.eve_turn_id !== turn.agentTurnId) return false;
+      if (row.agent_turn_id !== turn.agentTurnId) return false;
       const delivered = await client.query<{ delivered: boolean }>(
         `SELECT EXISTS (
            SELECT 1 FROM telegram_final_deliveries
-            WHERE application_session_id = $1 AND eve_session_id = $2 AND eve_turn_id = $3
+            WHERE application_session_id = $1 AND agent_session_id = $2 AND agent_turn_id = $3
               AND status = 'delivered') AS delivered`,
         [turn.applicationSessionId, turn.agentSessionId, turn.agentTurnId],
       );

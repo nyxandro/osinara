@@ -117,6 +117,6 @@ export function createMemoryInput(
     provenance,
     scope,
     sensitivity: "normal" as const,
-    source: `eve:session:${operationKey}`,
+    source: `turn:session:${operationKey}`,
   };
 }

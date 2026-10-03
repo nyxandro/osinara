@@ -74,7 +74,7 @@ export async function withdrawUnstartedRun(
 ): Promise<boolean> {
   const removed = await client.query(
     `DELETE FROM agent_schedule_runs
-      WHERE id = $1 AND recovery_protocol = 2 AND status IN ('dispatching', 'running') AND eve_turn_id IS NULL`,
+      WHERE id = $1 AND recovery_protocol = 2 AND status IN ('dispatching', 'running') AND agent_turn_id IS NULL`,
     [runId],
   );
   if (removed.rowCount !== 1) return false;

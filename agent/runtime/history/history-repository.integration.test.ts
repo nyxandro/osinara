@@ -51,7 +51,7 @@ async function newSession(sessionId: string, history: readonly ModelMessage[] = 
       parentSessionId: null,
       sandbox: null,
       sessionId: "wrun_HISTORY0000000000000000002",
-      source: "eve_import",
+      source: "imported",
       todo: { items: [{ content: "проверить", status: "pending" }] },
     });
 

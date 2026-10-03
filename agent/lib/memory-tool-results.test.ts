@@ -92,7 +92,7 @@ const internalMemory = {
   messageThreadId: "42",
   scope: "personal",
   sensitivity: "normal",
-  source: "eve:session-internal:turn-internal",
+  source: "turn:session-internal:turn-internal",
   // Запись менялась после создания, поэтому updatedAt обязан доехать до модели.
   updatedAt: "2026-08-02T11:30:00.000Z",
   sourceEvidence: {

@@ -100,7 +100,7 @@ export async function markAgentScheduleRunning(
 ): Promise<void> {
   const result = await database().query(
     `UPDATE agent_schedule_runs
-        SET status = 'running', eve_session_id = $5, updated_at = now()
+        SET status = 'running', agent_session_id = $5, updated_at = now()
       WHERE id = $1 AND schedule_id = $2 AND lease_token = $3 AND status = 'dispatching'
         AND application_session_id = $4`,
     [job.runId, job.id, job.leaseToken, input.applicationSessionId, input.agentSessionId],
@@ -109,7 +109,7 @@ export async function markAgentScheduleRunning(
   const terminal = await database().query(
     `SELECT 1 FROM agent_schedule_runs
       WHERE id = $1 AND schedule_id = $2 AND lease_token = $3
-        AND application_session_id = $4 AND (status IN ('completed', 'failed', 'ambiguous') OR (status='running' AND eve_session_id=$5))`,
+        AND application_session_id = $4 AND (status IN ('completed', 'failed', 'ambiguous') OR (status='running' AND agent_session_id=$5))`,
     [job.runId, job.id, job.leaseToken, input.applicationSessionId, input.agentSessionId],
   );
   if (terminal.rowCount !== 1) {

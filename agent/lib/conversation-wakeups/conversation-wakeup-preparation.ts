@@ -185,13 +185,13 @@ export async function prepareConversationWakeup(
       telegramForumTopicId: row.forum_topic_id,
     });
     const session = await client.query<{
-      eve_session_id: string | null;
+      agent_session_id: string | null;
       id: string;
       pending_operation: boolean;
       rotation_requested: boolean;
       thread_id: string;
     }>(
-      `SELECT session.id::text, session.thread_id::text, session.eve_session_id, session.pending_operation,
+      `SELECT session.id::text, session.thread_id::text, session.agent_session_id, session.pending_operation,
               session.rotation_requested_at IS NOT NULL AS rotation_requested
          FROM conversation_session_routes route
          JOIN conversation_sessions session ON session.id = route.session_id
@@ -200,7 +200,7 @@ export async function prepareConversationWakeup(
       [route, row.conversation_session_id],
     );
     const live = session.rows[0];
-    if (!live || live.eve_session_id === null || live.rotation_requested) {
+    if (!live || live.agent_session_id === null || live.rotation_requested) {
       await withdraw(client, row, claim.id, CONVERSATION_CHANGED_CODE);
       return { kind: "withdrawn" };
     }
@@ -215,7 +215,7 @@ export async function prepareConversationWakeup(
         applicationSessionId: live.id,
         authorUserId: row.author_user_id,
         completedRuns: row.completed_runs,
-        agentSessionId: live.eve_session_id,
+        agentSessionId: live.agent_session_id,
         familyId: row.family_id,
         forumTopicId: row.forum_topic_id,
         groupId: row.group_id,

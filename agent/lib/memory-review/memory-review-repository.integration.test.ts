@@ -418,7 +418,7 @@ describeWithDatabase("memory review repository", () => {
       `INSERT INTO memory_items_all
          (family_id, scope, kind, confirmation, sensitivity, content, source, operation_key)
        VALUES ($1, 'family', 'fact', 'model_high', 'normal', 'Записано до сбоя', $2, $3)`,
-      [fixture.familyId, "eve:agent-review-wrote:turn-review-wrote", "op-review-wrote"],
+      [fixture.familyId, "turn:agent-review-wrote:turn-review-wrote", "op-review-wrote"],
     );
 
     // Повтор такого хода создал бы дубликат, поэтому проход засчитывается. Прежний терминал

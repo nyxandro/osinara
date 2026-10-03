@@ -44,7 +44,7 @@ export const memoryUsageRepository = {
          FROM named
          JOIN memory_item_refs AS ref ON ref.memory_ref = named.memory_ref
          JOIN memory_retrieval_shows AS show ON show.claim_id = ref.memory_item_id
-          AND show.conversation_id = $1 AND show.eve_session_id = $2 AND show.turn_id = $3
+          AND show.conversation_id = $1 AND show.agent_session_id = $2 AND show.turn_id = $3
          JOIN memory_items AS item ON item.id = ref.memory_item_id
           AND item.claim_status = 'active'
        ),
@@ -52,7 +52,7 @@ export const memoryUsageRepository = {
          UPDATE memory_retrieval_shows AS show
          SET used_at = now()
          FROM shown
-         WHERE show.conversation_id = $1 AND show.eve_session_id = $2 AND show.turn_id = $3
+         WHERE show.conversation_id = $1 AND show.agent_session_id = $2 AND show.turn_id = $3
            AND show.claim_id = shown.claim_id AND show.used_at IS NULL
          RETURNING show.claim_id
        ),

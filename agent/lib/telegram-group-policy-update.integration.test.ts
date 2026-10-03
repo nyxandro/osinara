@@ -61,7 +61,7 @@ describeWithDatabase("Telegram group policy update repository", () => {
     const session = await database().query<{ id: string; thread_id: string }>(
       `INSERT INTO conversation_sessions
          (thread_id, generation, family_id, group_id, scope, kind, conversation_key,
-           continuation_token, eve_session_id, started_at, last_activity_at, group_timeline_cursor)
+           continuation_token, agent_session_id, started_at, last_activity_at, group_timeline_cursor)
        VALUES (gen_random_uuid(), 0, $1, $2, 'group', 'canonical', '-100-policy::', '-100-policy::',
                'wrun_policy', now(), now(), 1)
         RETURNING id, thread_id`,

@@ -29,8 +29,8 @@ export const telegramFinalDeliveryRepository = {
       await client.query("BEGIN");
       await client.query(
         `INSERT INTO telegram_final_deliveries
-           (eve_session_id, eve_turn_id, application_session_id, output_hash, expected_chunk_count)
-         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (eve_session_id, eve_turn_id) DO NOTHING`,
+           (agent_session_id, agent_turn_id, application_session_id, output_hash, expected_chunk_count)
+         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (agent_session_id, agent_turn_id) DO NOTHING`,
         [input.agentSessionId, input.agentTurnId, input.applicationSessionId,
           input.outputHash, input.chunkCount],
       );
@@ -43,7 +43,7 @@ export const telegramFinalDeliveryRepository = {
       }>(
         `SELECT id, output_hash, expected_chunk_count, status, diagnostic_code
          FROM telegram_final_deliveries
-         WHERE eve_session_id = $1 AND eve_turn_id = $2 FOR UPDATE`,
+         WHERE agent_session_id = $1 AND agent_turn_id = $2 FOR UPDATE`,
         [input.agentSessionId, input.agentTurnId],
       );
       const delivery = current.rows[0]!;

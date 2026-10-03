@@ -156,7 +156,7 @@ describeWithDatabase("agent schedule repositories", () => {
       scenarioPrompt: "Собери дайджест", scope: "personal", timezone: "Europe/Moscow", title: "Дайджест", userRequest: "Новости",
     });
     const job = (await agentScheduleDispatchRepository.claimDue({ now, limit: 10, leaseMilliseconds: 60000 }))[0]!;
-    await database().query("UPDATE agent_schedule_runs SET status='completed', completed_at=$2, eve_session_id='diagnostic-session', eve_turn_id='turn_0' WHERE id=$1", [job.runId, now]);
+    await database().query("UPDATE agent_schedule_runs SET status='completed', completed_at=$2, agent_session_id='diagnostic-session', agent_turn_id='turn_0' WHERE id=$1", [job.runId, now]);
     await database().query(`INSERT INTO operational_incidents(operation_key,code,summary,context) VALUES($1,'AGENT_MEMORY_UNAVAILABLE','Память недоступна',$2)`,
       ["memory-context:diagnostic-session:turn_0", JSON.stringify({ runId: job.runId, phase: "embedding", causeCode: "AGENT_MEMORY_EMBEDDING_PROVIDER_FAILED", privateText: "must-not-leak" })]);
     const result = await agentScheduleRepository.list(auth, { limit: 10 });

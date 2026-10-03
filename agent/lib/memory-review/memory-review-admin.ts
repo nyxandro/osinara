@@ -35,7 +35,7 @@ export async function inspectMemoryReviewLanes() {
              batch.model_route_key AS "modelRouteKey", batch.model_recovery_generation AS "modelRecoveryGeneration",
              batch.waiting_since AS "waitingSince", health.observed_at AS "lastModelSuccessAt",
              batch.aged_release_at AS "agedReleaseAt",
-             batch.eve_session_id AS "agentSessionId", batch.eve_turn_id AS "agentTurnId",
+             batch.agent_session_id AS "agentSessionId", batch.agent_turn_id AS "agentTurnId",
             (SELECT count(*)::integer FROM telegram_group_messages AS message
               WHERE message.conversation_id = lane.conversation_id
                 AND message.message_thread_id IS NOT DISTINCT FROM lane.message_thread_id
@@ -65,11 +65,11 @@ export async function skipUnboundMemoryReviewBatch(input: { batchId: string; rea
     const locked = await client.query<{
       id: string; lane_id: string; conversation_id: string; application_session_id: string | null;
       status: string; diagnostic_code: string | null; completed_at: Date | null;
-      eve_session_id: string | null; eve_turn_id: string | null;
+      agent_session_id: string | null; agent_turn_id: string | null;
       predecessor_sequence: string; from_sequence: string; through_sequence: string; source_count: number;
     }>(
       `SELECT id, lane_id, conversation_id, application_session_id, status::text, diagnostic_code,
-              completed_at, eve_session_id, eve_turn_id, predecessor_sequence::text,
+              completed_at, agent_session_id, agent_turn_id, predecessor_sequence::text,
               from_sequence::text, through_sequence::text, source_count
          FROM memory_review_batches WHERE id = $1 FOR UPDATE`, [input.batchId],
     );
@@ -86,7 +86,7 @@ export async function skipUnboundMemoryReviewBatch(input: { batchId: string; rea
       return { outcome: "replayed", processedThroughSequence: lane.rows[0]!.processed_through_sequence };
     }
     if (batch.status !== "failed" || batch.diagnostic_code !== SOURCE_MISSING || !batch.completed_at ||
-        !batch.eve_session_id || !batch.eve_turn_id ||
+        !batch.agent_session_id || !batch.agent_turn_id ||
         lane.rows[0]!.processed_through_sequence !== batch.predecessor_sequence) throw new AppError(
       "AGENT_MEMORY_REVIEW_SKIP_STATE_INVALID",
       "Пропуск доступен только для первого завершённого с ошибкой пакета без привязки источников. Повторите inspect",
@@ -102,11 +102,11 @@ export async function skipUnboundMemoryReviewBatch(input: { batchId: string; rea
     const unsafe = await client.query(
       `SELECT 1 WHERE EXISTS (SELECT 1 FROM memory_turn_source_sets WHERE memory_review_batch_id = $1)
         OR EXISTS (SELECT 1 FROM memory_items_all WHERE source = $2)
-        OR EXISTS (SELECT 1 FROM memory_mutation_operations WHERE eve_session_id = $3 AND eve_turn_id = $4)
+        OR EXISTS (SELECT 1 FROM memory_mutation_operations WHERE agent_session_id = $3 AND agent_turn_id = $4)
         OR EXISTS (SELECT 1 FROM claim_evidence AS evidence
           WHERE evidence.origin_conversation_id = $5
             AND evidence.timeline_sequence BETWEEN $6::bigint AND $7::bigint)`,
-      [batch.id, `eve:${batch.eve_session_id}:${batch.eve_turn_id}`, batch.eve_session_id, batch.eve_turn_id,
+      [batch.id, `turn:${batch.agent_session_id}:${batch.agent_turn_id}`, batch.agent_session_id, batch.agent_turn_id,
         batch.conversation_id, batch.from_sequence, batch.through_sequence],
     );
     if (unsafe.rowCount) throw new AppError(
@@ -147,8 +147,8 @@ export async function skipUnboundMemoryReviewBatch(input: { batchId: string; rea
            'agentSessionId', $5::text, 'agentTurnId', $6::text, 'fromSequence', $7::text,
            'throughSequence', $8::text, 'sourceCount', $9::integer, 'processedThroughSequence', $10::text)
        FROM application_conversations WHERE id = $1`,
-      [batch.conversation_id, batch.id, input.reason.trim(), SOURCE_MISSING, batch.eve_session_id,
-        batch.eve_turn_id, batch.from_sequence, batch.through_sequence, batch.source_count, cursor],
+      [batch.conversation_id, batch.id, input.reason.trim(), SOURCE_MISSING, batch.agent_session_id,
+        batch.agent_turn_id, batch.from_sequence, batch.through_sequence, batch.source_count, cursor],
     );
     await client.query("COMMIT");
     return { outcome: "skipped", processedThroughSequence: cursor };
@@ -192,12 +192,12 @@ export async function skipPartialMemoryReviewBatch(input: { batchId: string; rea
     await client.query("BEGIN");
     const locked = await client.query<{
       id: string; lane_id: string; conversation_id: string; application_session_id: string | null;
-      status: string; diagnostic_code: string | null; eve_session_id: string | null;
-      eve_turn_id: string | null; predecessor_sequence: string; from_sequence: string;
+      status: string; diagnostic_code: string | null; agent_session_id: string | null;
+      agent_turn_id: string | null; predecessor_sequence: string; from_sequence: string;
       through_sequence: string; source_count: number;
     }>(
       `SELECT id, lane_id, conversation_id, application_session_id, status::text, diagnostic_code,
-              eve_session_id, eve_turn_id, predecessor_sequence::text, from_sequence::text,
+              agent_session_id, agent_turn_id, predecessor_sequence::text, from_sequence::text,
               through_sequence::text, source_count
          FROM memory_review_batches WHERE id = $1 FOR UPDATE`, [input.batchId],
     );
@@ -212,7 +212,7 @@ export async function skipPartialMemoryReviewBatch(input: { batchId: string; rea
     // Only what a reader of memory would still see: a soft-deleted record is not «kept».
     const countKept = async () => (await client.query<{ kept: number }>(
       "SELECT count(*)::integer AS kept FROM memory_items WHERE source = $1",
-      [`eve:${batch.eve_session_id}:${batch.eve_turn_id}`],
+      [`turn:${batch.agent_session_id}:${batch.agent_turn_id}`],
     )).rows[0]!.kept;
     // A repeat of the same command is the same answer, and it must not move the cursor twice.
     if (batch.status === "skipped" && batch.diagnostic_code === PARTIAL_SKIPPED) {
@@ -224,8 +224,8 @@ export async function skipPartialMemoryReviewBatch(input: { batchId: string; rea
         processedThroughSequence: lane.rows[0]!.processed_through_sequence,
       };
     }
-    if (!["ambiguous", "failed"].includes(batch.status) || !batch.eve_session_id ||
-        !batch.eve_turn_id ||
+    if (!["ambiguous", "failed"].includes(batch.status) || !batch.agent_session_id ||
+        !batch.agent_turn_id ||
         lane.rows[0]!.processed_through_sequence !== batch.predecessor_sequence) throw new AppError(
       "AGENT_MEMORY_REVIEW_PARTIAL_SKIP_STATE_INVALID",
       "Пропуск доступен только для первого завершённого с ошибкой пакета очереди. Повторите inspect",
@@ -276,7 +276,7 @@ export async function skipPartialMemoryReviewBatch(input: { batchId: string; rea
            'processedThroughSequence', $11::text)
        FROM application_conversations WHERE id = $1`,
       [batch.conversation_id, batch.id, input.reason.trim(), batch.diagnostic_code, keptMemories,
-        batch.eve_session_id, batch.eve_turn_id, batch.from_sequence, batch.through_sequence,
+        batch.agent_session_id, batch.agent_turn_id, batch.from_sequence, batch.through_sequence,
         batch.source_count, cursor],
     );
     await client.query("COMMIT");

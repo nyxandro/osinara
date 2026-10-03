@@ -157,6 +157,8 @@ const POST_V0101_MIGRATIONS = [
   "123_family_skills.sql",
   "124_agent_turn_observation.sql",
   "125_empty_delivery_marker.sql",
+  "126_agent_identity_names.sql",
+  "127_agent_identity_data.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [

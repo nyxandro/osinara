@@ -69,7 +69,7 @@ describeWithDatabase("memory attribute slot", () => {
       provenance: { sessionId: "slot-session", turnId: input.key },
       scope,
       sensitivity: "normal",
-      source: `eve:slot:${input.key}`,
+      source: `turn:slot:${input.key}`,
     });
   }
 
@@ -162,7 +162,7 @@ describeWithDatabase("memory attribute slot", () => {
       provenance: { sessionId: "slot-session", turnId: "slot-11" },
       scope: "personal",
       sensitivity: "normal",
-      source: "eve:slot:11",
+      source: "turn:slot:11",
     })).rejects.toMatchObject({ code: "AGENT_MEMORY_ATTRIBUTE_INVALID" });
   });
 

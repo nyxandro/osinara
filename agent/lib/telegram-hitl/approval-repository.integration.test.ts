@@ -345,8 +345,8 @@ describeWithDatabase("Telegram HITL approval repository", () => {
 
     await telegramHitlApprovalRepository.clearForAgentSession(current.sessionId, "wrun_hitl");
 
-    await expect(database().query<{ eve_session_id: string }>("SELECT eve_session_id FROM telegram_hitl_approvals WHERE application_session_id = $1", [current.sessionId])).resolves.toMatchObject({
-      rows: [{ eve_session_id: "wrun_hitl_new" }],
+    await expect(database().query<{ agent_session_id: string }>("SELECT agent_session_id FROM telegram_hitl_approvals WHERE application_session_id = $1", [current.sessionId])).resolves.toMatchObject({
+      rows: [{ agent_session_id: "wrun_hitl_new" }],
     });
   });
 

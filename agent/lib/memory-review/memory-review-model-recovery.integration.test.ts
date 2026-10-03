@@ -91,7 +91,7 @@ async function recordAmbiguousEnding(batchId: string): Promise<void> {
       VALUES ($1, $2, 0, 'memory_review', 'failed', '{}', '{"kind":"memory-review"}', '{"context":[]}', 'AGENT_MODEL_CALL_FAILED', now())`, [turnId, agentSessionId]);
     await memoryRepository.create(fixture.auth, {
       memoryReviewBatchId: batch.batchId,confirmation: "model_high",content: "Анна готовится к марафону",kind: "fact",scope: "family",
-      sensitivity: "normal",operationKey: "partial-native-result",source: `eve:${agentSessionId}:${turnId}`,
+      sensitivity: "normal",operationKey: "partial-native-result",source: `turn:${agentSessionId}:${turnId}`,
       provenance: { sessionId: agentSessionId,turnId },systemActor: true,
       explicitSource: { conversationId: fixture.conversationId,timelineEntryId: batch.sourceEntryIds[0]!,subject: { kind: "current_author" } },
     });
@@ -198,7 +198,7 @@ async function recordAmbiguousEnding(batchId: string): Promise<void> {
     const { fixture, batch } = await runningReview();
     await memoryRepository.create(fixture.auth, {
       memoryReviewBatchId: batch.batchId, confirmation: "model_high", content: "Анна готовится к марафону", kind: "fact",
-      scope: "family", sensitivity: "normal", operationKey: "partial-write", source: "eve:agent-model-failure:turn_0",
+      scope: "family", sensitivity: "normal", operationKey: "partial-write", source: "turn:agent-model-failure:turn_0",
       provenance: { sessionId: "agent-model-failure", turnId: "turn_0" }, systemActor: true,
       explicitSource: { conversationId: fixture.conversationId, timelineEntryId: batch.sourceEntryIds[0]!, subject: { kind: "current_author" } },
     });
@@ -214,7 +214,7 @@ async function recordAmbiguousEnding(batchId: string): Promise<void> {
     await wait(batch.batchId);
     await expect(memoryRepository.create(fixture.auth, {
       memoryReviewBatchId: batch.batchId, confirmation: "model_high", content: "Запоздавшая запись", kind: "fact",
-      scope: "family", sensitivity: "normal", operationKey: "late-write", source: "eve:agent-model-failure:turn_0",
+      scope: "family", sensitivity: "normal", operationKey: "late-write", source: "turn:agent-model-failure:turn_0",
       provenance: { sessionId: "agent-model-failure", turnId: "turn_0" }, systemActor: true,
       explicitSource: { conversationId: fixture.conversationId, timelineEntryId: batch.sourceEntryIds[0]!, subject: { kind: "current_author" } },
     })).rejects.toMatchObject({ code: "AGENT_MEMORY_REVIEW_ATTEMPT_STALE" });
@@ -292,7 +292,7 @@ async function recordAmbiguousEnding(batchId: string): Promise<void> {
     pool.on("acquire",acquired);
     const write = memoryRepository.create(fixture.auth, {
       memoryReviewBatchId: batch.batchId, confirmation: "model_high", content: "Запись началась до таймаута", kind: "fact",
-      scope: "family", sensitivity: "normal", operationKey: "in-flight-write", source: "eve:agent-model-failure:turn_0",
+      scope: "family", sensitivity: "normal", operationKey: "in-flight-write", source: "turn:agent-model-failure:turn_0",
       provenance: { sessionId: "agent-model-failure", turnId: "turn_0" }, systemActor: true,
       explicitSource: { conversationId: fixture.conversationId, timelineEntryId: batch.sourceEntryIds[0]!, subject: { kind: "current_author" } },
     });

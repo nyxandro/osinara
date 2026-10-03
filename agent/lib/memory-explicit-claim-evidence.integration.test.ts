@@ -64,7 +64,7 @@ describeWithDatabase("explicit claim evidence", () => {
     const view = await database().query<{ id: string }>(
       `INSERT INTO profile_views
          (family_id, viewer_conversation_id, viewer_user_id, subject_count,
-          claim_count, total_characters, eve_session_id, eve_turn_id)
+          claim_count, total_characters, agent_session_id, agent_turn_id)
        VALUES ($1, $2, $3, 1, 0, 0, 'explicit-session', 'explicit-turn') RETURNING id`,
       [family.rows[0]!.id, conversation.rows[0]!.id, author.id],
     );
@@ -110,7 +110,7 @@ describeWithDatabase("explicit claim evidence", () => {
       provenance: { sessionId: "explicit-session", turnId: "explicit-turn" },
       scope: "family",
       sensitivity: "normal",
-      source: "eve:test-explicit",
+      source: "turn:test-explicit",
     });
 
     await expect(database().query(
@@ -149,13 +149,13 @@ describeWithDatabase("explicit claim evidence", () => {
       provenance: { sessionId: "explicit-session", turnId: "another-turn" },
       scope: "family",
       sensitivity: "normal",
-      source: "eve:test-explicit-stale",
+      source: "turn:test-explicit-stale",
     })).rejects.toMatchObject({ code: "AGENT_MEMORY_SUBJECT_REF_INVALID" });
 
     const otherViewer = await database().query<{ id: string }>(
       `INSERT INTO profile_views
          (family_id, viewer_conversation_id, viewer_user_id, subject_count,
-          claim_count, total_characters, eve_session_id, eve_turn_id)
+          claim_count, total_characters, agent_session_id, agent_turn_id)
        VALUES ($1, $2, $3, 1, 0, 0, 'other-viewer-session', 'other-viewer-turn') RETURNING id`,
       [family.rows[0]!.id, conversation.rows[0]!.id, subject.id],
     );
@@ -182,7 +182,7 @@ describeWithDatabase("explicit claim evidence", () => {
       provenance: { sessionId: "other-viewer-session", turnId: "other-viewer-turn" },
       scope: "family",
       sensitivity: "normal",
-      source: "eve:test-explicit-other-viewer",
+      source: "turn:test-explicit-other-viewer",
     })).rejects.toMatchObject({ code: "AGENT_MEMORY_SUBJECT_REF_INVALID" });
 
     const firstPersonSource = await database().query<{ id: string }>(
@@ -206,7 +206,7 @@ describeWithDatabase("explicit claim evidence", () => {
       provenance: { sessionId: "explicit-session", turnId: "explicit-turn" },
       scope: "family",
       sensitivity: "normal",
-      source: "eve:test-current-author",
+      source: "turn:test-current-author",
     });
     await expect(database().query(
       "SELECT subject_user_id, profile_eligible FROM memory_items WHERE id = $1",

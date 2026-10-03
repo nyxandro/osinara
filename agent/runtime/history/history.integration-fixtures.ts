@@ -23,7 +23,7 @@ export async function createApplicationSession(sessionId: string, options: { ret
   const session = (await database().query<{ id: string }>(
     `INSERT INTO conversation_sessions
        (thread_id, generation, family_id, owner_user_id, scope, kind, conversation_key, continuation_token,
-        eve_session_id, started_at, last_activity_at, retired_at, delete_after)
+        agent_session_id, started_at, last_activity_at, retired_at, delete_after)
      VALUES (gen_random_uuid(), 0, $1, $2, 'personal', 'canonical', $3, $3, $4, now(), now(),
              CASE WHEN $5 THEN now() END, CASE WHEN $5 THEN now() + interval '30 days' END)
      RETURNING id`,

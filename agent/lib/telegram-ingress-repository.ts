@@ -274,7 +274,7 @@ export const telegramIngressRepository: TelegramIngressRepository = {
       const result = await database().query(
         `WITH finished AS (
            UPDATE telegram_ingress_updates
-           SET status = 'completed', eve_session_id = $3, completed_at = now(),
+           SET status = 'completed', agent_session_id = $3, completed_at = now(),
                lease_token = NULL, lease_expires_at = NULL, updated_at = now()
            WHERE update_id = $1 AND status = 'processing' AND lease_token = $2
              AND lease_expires_at > now()
@@ -313,7 +313,7 @@ export const telegramIngressRepository: TelegramIngressRepository = {
         `WITH finished AS (
            UPDATE telegram_ingress_updates
            SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
-               last_error_code = $3, last_error_message = $4, eve_session_id = $5,
+               last_error_code = $3, last_error_message = $4, agent_session_id = $5,
                completed_at = now(), updated_at = now()
            WHERE update_id = $1 AND status = 'processing' AND lease_token = $2
              AND lease_expires_at > now()
@@ -325,7 +325,7 @@ export const telegramIngressRepository: TelegramIngressRepository = {
             FROM finished ON CONFLICT(operation_key) DO NOTHING RETURNING id
           ), rotated AS (
            UPDATE conversation_sessions AS session SET rotation_requested_at = now()
-           FROM finished WHERE session.eve_session_id = finished.eve_session_id
+           FROM finished WHERE session.agent_session_id = finished.agent_session_id
              AND session.kind = 'canonical' AND session.retired_at IS NULL
            RETURNING session.id
          ) SELECT update_id FROM finished`,

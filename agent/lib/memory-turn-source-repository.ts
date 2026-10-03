@@ -77,7 +77,7 @@ export const memoryTurnSourceRepository = {
     const result = await database().query<{ matches: boolean }>(
       `SELECT EXISTS (
          SELECT 1 FROM memory_turn_source_sets
-          WHERE eve_session_id = $1 AND eve_turn_id = $2
+          WHERE agent_session_id = $1 AND agent_turn_id = $2
             AND application_session_id = $3
             AND invoking_actor_id = $4 AND invoking_actor_kind = $5
        ) AS matches`,
@@ -94,7 +94,7 @@ export const memoryTurnSourceRepository = {
       await client.query("BEGIN");
       const existing = await client.query<{ binding_hash: string }>(
         `SELECT binding_hash FROM memory_turn_source_sets
-         WHERE eve_session_id = $1 AND eve_turn_id = $2 FOR UPDATE`,
+         WHERE agent_session_id = $1 AND agent_turn_id = $2 FOR UPDATE`,
         [input.agentSessionId, input.agentTurnId],
       );
       if (existing.rows[0]) {
@@ -173,7 +173,7 @@ export const memoryTurnSourceRepository = {
       }
       await client.query(
         `INSERT INTO memory_turn_source_sets
-           (eve_session_id, eve_turn_id, application_session_id, conversation_id,
+           (agent_session_id, agent_turn_id, application_session_id, conversation_id,
               current_timeline_entry_id, invoking_actor_kind, invoking_actor_id, binding_hash,
               memory_review_batch_id)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
@@ -182,7 +182,7 @@ export const memoryTurnSourceRepository = {
       for (const entry of entries.rows) {
         await client.query(
           `INSERT INTO memory_turn_sources
-             (eve_session_id, eve_turn_id, conversation_id, timeline_entry_id,
+             (agent_session_id, agent_turn_id, conversation_id, timeline_entry_id,
               timeline_sequence, is_current)
            VALUES ($1, $2, $3, $4, $5, $6)`,
           [input.agentSessionId, input.agentTurnId, input.conversationId, entry.id, entry.sequence_id, entry.id === input.currentTimelineEntryId],
@@ -217,7 +217,7 @@ export const memoryTurnSourceRepository = {
       await client.query("BEGIN");
       const existing = await client.query<{ binding_hash: string }>(
         `SELECT binding_hash FROM memory_turn_source_sets
-          WHERE eve_session_id = $1 AND eve_turn_id = $2 FOR UPDATE`,
+          WHERE agent_session_id = $1 AND agent_turn_id = $2 FOR UPDATE`,
         [input.agentSessionId, input.agentTurnId],
       );
       if (existing.rows[0]) {
@@ -248,7 +248,7 @@ export const memoryTurnSourceRepository = {
       if (entries.rows.length !== entryIds.length) throw new AppError("AGENT_MEMORY_TURN_SOURCE_SET_INVALID", "Источники проверки памяти не совпадают с пакетным снимком");
       await client.query(
         `INSERT INTO memory_turn_source_sets
-           (eve_session_id, eve_turn_id, application_session_id, conversation_id,
+           (agent_session_id, agent_turn_id, application_session_id, conversation_id,
              current_timeline_entry_id, invoking_actor_kind, invoking_actor_id, binding_hash,
              memory_review_batch_id)
           VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8)`,
@@ -257,7 +257,7 @@ export const memoryTurnSourceRepository = {
       for (const entry of entries.rows) {
         await client.query(
           `INSERT INTO memory_turn_sources
-             (eve_session_id, eve_turn_id, conversation_id, timeline_entry_id,
+             (agent_session_id, agent_turn_id, conversation_id, timeline_entry_id,
               timeline_sequence, is_current)
            VALUES ($1, $2, $3, $4, $5, false)`,
           [input.agentSessionId, input.agentTurnId, input.conversationId, entry.id, entry.sequence_id],
@@ -283,13 +283,13 @@ export const memoryTurnSourceRepository = {
               message.message_thread_id::text
        FROM memory_turn_sources AS source
        JOIN memory_turn_source_sets AS source_set
-         ON source_set.eve_session_id = source.eve_session_id
-        AND source_set.eve_turn_id = source.eve_turn_id
+         ON source_set.agent_session_id = source.agent_session_id
+        AND source_set.agent_turn_id = source.agent_turn_id
         JOIN application_conversations AS conversation ON conversation.id = source.conversation_id
         LEFT JOIN memory_review_batches AS review_batch
           ON review_batch.id = source_set.memory_review_batch_id
        JOIN telegram_group_messages AS message ON message.id = source.timeline_entry_id
-       WHERE source.eve_session_id = $1 AND source.eve_turn_id = $2
+       WHERE source.agent_session_id = $1 AND source.agent_turn_id = $2
          AND message.actor_kind IN ('user', 'telegram_bot') AND message.content_text IS NOT NULL
          AND (($3::bigint IS NULL AND source.is_current) OR source.timeline_sequence = $3::bigint)`,
       [input.agentSessionId, input.agentTurnId, input.sourceSequence],
@@ -314,7 +314,7 @@ export const memoryTurnSourceRepository = {
   async release(agentSessionId: string, agentTurnId: string): Promise<void> {
     await database().query(
       `DELETE FROM memory_turn_source_sets
-       WHERE eve_session_id = $1 AND eve_turn_id = $2`,
+       WHERE agent_session_id = $1 AND agent_turn_id = $2`,
       [agentSessionId, agentTurnId],
     );
   },

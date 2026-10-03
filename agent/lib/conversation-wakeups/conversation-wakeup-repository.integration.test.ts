@@ -119,7 +119,7 @@ describeWithDatabase("conversation wake-ups", () => {
   beforeEach(async () => {
     await database().query(
       `TRUNCATE telegram_ingress_wakeups, agent_schedule_runs, agent_schedule_operations, agent_schedules,
-         telegram_turn_interjections, eve_session_event_cursors, telegram_ingress_ignored_updates,
+         telegram_turn_interjections, telegram_ingress_ignored_updates,
          telegram_ingress_updates, telegram_ingress_continuation_aliases, telegram_ingress_queues,
          conversation_session_routes, conversation_sessions, conversation_route_generations,
          application_conversations, family_memberships, users, families, operational_incidents, agent_session_state CASCADE`,
@@ -246,7 +246,7 @@ describeWithDatabase("conversation wake-ups", () => {
     await createSessionHistory(database(), {
       announcedSkills: null, applicationSessionId: sessionId, channelState: null,
       compaction: { inputTokens: null, promptMessageCount: null }, history: [], initiatorAuth: null, parentSessionId: null,
-      sandbox: null, sessionId: "ses_eve_1", source: "eve_import", todo: null,
+      sandbox: null, sessionId: "ses_eve_1", source: "imported", todo: null,
     });
     await bindContinuation(database(), { channelKind: "telegram", sessionId: "ses_eve_1", token: "101::" });
     await createWakeup();
@@ -267,8 +267,8 @@ describeWithDatabase("conversation wake-ups", () => {
     expect(turn.auth.current?.attributes).toMatchObject({
       conversationScheduleRunId: job.runId, osinaraTelegramDeadlineAt: new Date(now.getTime() + 5 * 60_000).toISOString(),
     });
-    expect((await database().query("SELECT status, eve_session_id FROM agent_schedule_runs WHERE id = $1", [job.runId])).rows)
-      .toEqual([{ eve_session_id: "ses_eve_1", status: "running" }]);
+    expect((await database().query("SELECT status, agent_session_id FROM agent_schedule_runs WHERE id = $1", [job.runId])).rows)
+      .toEqual([{ agent_session_id: "ses_eve_1", status: "running" }]);
     await database().query("UPDATE telegram_ingress_wakeups SET lease_expires_at = now() - interval '1 second'");
     expect(await conversationWakeupRepository.claimNext(LEASE)).toMatchObject({
       dispatch: { agentSessionId: "ses_eve_1", turnId }, id: claim!.id,

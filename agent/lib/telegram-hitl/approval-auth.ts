@@ -15,7 +15,7 @@ type GroupType = "external" | "family_private";
 
 export interface ApprovalAuthRow {
   application_session_id: string;
-  eve_session_id: string;
+  agent_session_id: string;
   expected_telegram_user_id: string;
   family_id: string;
   group_id: string | null;
@@ -102,7 +102,7 @@ export async function resolveCurrentApprovalAuth(client: PoolClient, row: Approv
       // The continuation turn opens the session's sandbox (its skills are synced there) by this id.
       sandboxSessionId: row.thread_id,
       telegramApprovalContinuation: "true",
-      osinaraTelegramResponseSessionId: row.eve_session_id,
+      osinaraTelegramResponseSessionId: row.agent_session_id,
       telegramApprovalScope: row.scope,
       familyId: row.family_id,
       memoryScopes,

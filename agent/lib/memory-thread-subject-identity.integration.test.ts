@@ -45,7 +45,7 @@ describeWithDatabase("memory thread subject identity", () => {
       provenance: { sessionId: "subject-session", turnId: "subject-create-turn" },
       scope: "family",
       sensitivity: "normal",
-      source: "eve:subject-session:subject-create-turn",
+      source: "turn:subject-session:subject-create-turn",
       thread: {
         action: "create",
         purpose: "Сохранять тренировки и результаты Анны",
@@ -100,7 +100,7 @@ describeWithDatabase("memory thread subject identity", () => {
       provenance: { sessionId: "report-session", turnId: "report-turn" },
       scope: "family",
       sensitivity: "normal",
-      source: "eve:report-session:report-turn",
+      source: "turn:report-session:report-turn",
       thread: { action: "attach", role: "outcome", threadRef: subjectThread.thread!.threadRef },
     })).rejects.toMatchObject({ code: "AGENT_MEMORY_THREAD_INPUT_INVALID" });
 
@@ -112,7 +112,7 @@ describeWithDatabase("memory thread subject identity", () => {
     const view = await database().query<{ id: string }>(
       `INSERT INTO profile_views
          (family_id, viewer_conversation_id, viewer_user_id, subject_count,
-          claim_count, total_characters, eve_session_id, eve_turn_id)
+          claim_count, total_characters, agent_session_id, agent_turn_id)
        VALUES ($1, $2, $3, 1, 0, 0, 'report-session', 'report-turn') RETURNING id`,
       [fixture.familyId, fixture.conversationId, reporter.rows[0]!.id],
     );
@@ -136,7 +136,7 @@ describeWithDatabase("memory thread subject identity", () => {
       provenance: { sessionId: "report-session", turnId: "report-turn" },
       scope: "family",
       sensitivity: "normal",
-      source: "eve:report-session:report-turn",
+      source: "turn:report-session:report-turn",
       thread: { action: "attach", role: "outcome", threadRef: subjectThread.thread!.threadRef },
     });
     await expect(database().query(
@@ -170,7 +170,7 @@ describeWithDatabase("memory thread subject identity", () => {
       provenance: { sessionId: "report-session", turnId: "project-turn" },
       scope: "family",
       sensitivity: "normal",
-      source: "eve:report-session:project-turn",
+      source: "turn:report-session:project-turn",
       thread: {
         action: "create",
         identity: "project",
@@ -201,7 +201,7 @@ describeWithDatabase("memory thread subject identity", () => {
       provenance: { sessionId: "subject-session", turnId: "project-author-turn" },
       scope: "family",
       sensitivity: "normal",
-      source: "eve:subject-session:project-author-turn",
+      source: "turn:subject-session:project-author-turn",
       thread: { action: "attach", role: "episode", threadRef: project.thread!.threadRef },
     });
     await expect(database().query(

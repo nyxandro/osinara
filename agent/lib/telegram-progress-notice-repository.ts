@@ -22,13 +22,13 @@ export const telegramProgressNoticeRepository = {
   }): Promise<{ noticeId: string } | null> {
     const claimed = await database().query<{ id: string }>(
       `INSERT INTO telegram_progress_notices
-         (eve_session_id, eve_turn_id, step_index, application_session_id)
+         (agent_session_id, agent_turn_id, step_index, application_session_id)
        SELECT $1, $2, $3, $4
        WHERE (
          SELECT count(*) FROM telegram_progress_notices
-         WHERE eve_session_id = $1 AND eve_turn_id = $2
+         WHERE agent_session_id = $1 AND agent_turn_id = $2
        ) < $5
-       ON CONFLICT (eve_session_id, eve_turn_id, step_index) DO NOTHING
+       ON CONFLICT (agent_session_id, agent_turn_id, step_index) DO NOTHING
        RETURNING id`,
       [
         input.agentSessionId,

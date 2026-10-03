@@ -92,7 +92,7 @@ export interface TelegramHitlApprovalRepository {
 
 interface ApprovalRow extends ApprovalAuthRow {
   request_kind: "question" | "tool-approval";
-  eve_turn_id: string | null;
+  agent_turn_id: string | null;
   consumed_callback_query_id: string | null;
   consumed_reply_update_id: string | null;
   id: string;
@@ -117,8 +117,8 @@ async function lockApproval(
              a.callback_options,
              a.request_kind,
             a.consumed_at,
-             a.eve_session_id,
-             a.eve_turn_id,a.consumed_callback_query_id,a.consumed_reply_update_id::text,
+             a.agent_session_id,
+             a.agent_turn_id,a.consumed_callback_query_id,a.consumed_reply_update_id::text,
             a.expected_telegram_user_id,
             a.id,
             a.prompt_text,
@@ -127,7 +127,7 @@ async function lockApproval(
             a.telegram_message_id::text,
             a.telegram_message_thread_id::text,
             s.continuation_token,
-            s.eve_session_id AS session_eve_session_id,
+            s.agent_session_id AS session_eve_session_id,
             s.family_id,
             s.group_id,
             s.owner_user_id,
@@ -149,7 +149,7 @@ function isPendingApproval(row: ApprovalRow): boolean {
   return row.consumed_at === null &&
     row.pending_operation &&
     row.retired_at === null &&
-    row.session_eve_session_id === row.eve_session_id;
+    row.session_eve_session_id === row.agent_session_id;
 }
 
 function selectedCallbackOption(
@@ -208,13 +208,13 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
   async register(input) {
     await database().query(
       `INSERT INTO telegram_hitl_approvals
-         (application_session_id, eve_session_id, request_id,
+         (application_session_id, agent_session_id, request_id,
            telegram_chat_id, telegram_chat_type, telegram_message_id,
            telegram_message_thread_id, expected_telegram_user_id, callback_data,
             prompt_text, callback_options, tool_call_id, tool_name, tool_input_hash,
-             request_kind,eve_turn_id)
+             request_kind,agent_turn_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,$16)
-       ON CONFLICT (application_session_id, eve_session_id, request_id) DO UPDATE
+       ON CONFLICT (application_session_id, agent_session_id, request_id) DO UPDATE
          SET telegram_chat_id = EXCLUDED.telegram_chat_id,
              telegram_chat_type = EXCLUDED.telegram_chat_type,
              telegram_message_id = EXCLUDED.telegram_message_id,
@@ -227,7 +227,7 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
                tool_name = EXCLUDED.tool_name,
                tool_input_hash = EXCLUDED.tool_input_hash,
                 request_kind = EXCLUDED.request_kind,
-                eve_turn_id = EXCLUDED.eve_turn_id,consumed_callback_query_id=NULL,consumed_reply_update_id=NULL,
+                agent_turn_id = EXCLUDED.agent_turn_id,consumed_callback_query_id=NULL,consumed_reply_update_id=NULL,
               -- A replayed request re-opens the prompt, so no timeout state may survive it.
               timed_out_at = NULL,
               timeout_lease_token = NULL,
@@ -264,7 +264,7 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
          FROM telegram_hitl_approvals AS approval
          JOIN conversation_sessions AS session ON session.id = approval.application_session_id
          WHERE approval.application_session_id = $1
-           AND approval.eve_session_id = $2
+           AND approval.agent_session_id = $2
            AND approval.expected_telegram_user_id = $3
            AND approval.tool_call_id = $4
            AND approval.tool_name = $5
@@ -272,7 +272,7 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
            AND approval.consumed_at IS NOT NULL
            AND approval.timed_out_at IS NULL
            AND (approval.selected_option_id IS NULL OR approval.selected_option_id = 'approve')
-           AND session.eve_session_id = approval.eve_session_id
+           AND session.agent_session_id = approval.agent_session_id
            AND session.retired_at IS NULL
        ) AS authorized`,
       [input.applicationSessionId, input.agentSessionId, input.telegramUserId,
@@ -294,7 +294,7 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
       const selectedOption = row ? selectedCallbackOption(row, input.callbackData) : null;
       const replayed = row !== null && input.ingress !== undefined &&
         row.consumed_callback_query_id === input.ingress.callbackQueryId && row.consumed_at !== null &&
-        row.retired_at === null && row.session_eve_session_id === row.eve_session_id;
+        row.retired_at === null && row.session_eve_session_id === row.agent_session_id;
       if (
         !row ||
         (!isPendingApproval(row) && !replayed) ||
@@ -323,7 +323,7 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
         return { status: "forbidden" };
       }
       if (input.ingress) await bindCallbackIngress(client, { ...input.ingress, callbackData: input.callbackData, telegramUserId: input.telegramUserId },
-        { sessionId: row.eve_session_id, turnId: row.eve_turn_id });
+        { sessionId: row.agent_session_id, turnId: row.agent_turn_id });
       if (replayed) {
         await client.query("COMMIT");
         return { auth, continuationToken: row.continuation_token, promptText: row.prompt_text,
@@ -344,14 +344,14 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
             SET pending_operation = EXISTS (
                   SELECT 1 FROM telegram_hitl_approvals pending
                    WHERE pending.application_session_id = session.id
-                     AND pending.eve_session_id = $2
+                     AND pending.agent_session_id = $2
                      AND pending.consumed_at IS NULL
                 ),
                 pending_request_id = CASE
                   WHEN EXISTS (
                     SELECT 1 FROM telegram_hitl_approvals pending
                      WHERE pending.application_session_id = session.id
-                       AND pending.eve_session_id = $2
+                       AND pending.agent_session_id = $2
                        AND pending.consumed_at IS NULL
                   ) THEN pending_request_id
                   ELSE NULL
@@ -360,13 +360,13 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
                   WHEN kind = 'task' AND NOT EXISTS (
                     SELECT 1 FROM telegram_hitl_approvals pending
                      WHERE pending.application_session_id = session.id
-                       AND pending.eve_session_id = $2
+                       AND pending.agent_session_id = $2
                        AND pending.consumed_at IS NULL
                   ) THEN 'running'::conversation_task_state
                   ELSE task_state
                 END
           WHERE session.id = $1`,
-        [row.application_session_id, row.eve_session_id],
+        [row.application_session_id, row.agent_session_id],
       );
       await client.query("COMMIT");
       return {
@@ -402,10 +402,10 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
       );
       if (!isPendingApproval(row)) {
         if (input.ingress && row.consumed_reply_update_id === input.ingress.updateId && row.retired_at === null &&
-          row.session_eve_session_id === row.eve_session_id && routeMatches && row.expected_telegram_user_id === input.telegramUserId &&
+          row.session_eve_session_id === row.agent_session_id && routeMatches && row.expected_telegram_user_id === input.telegramUserId &&
           await resolveCurrentApprovalAuth(client,row)) {
           await bindTextReplyIngress(client,{ ...input.ingress,telegramUserId: input.telegramUserId,
-            chatId: input.telegramChatId,promptMessageId: input.telegramMessageId }, { sessionId: row.eve_session_id,turnId: row.eve_turn_id });
+            chatId: input.telegramChatId,promptMessageId: input.telegramMessageId }, { sessionId: row.agent_session_id,turnId: row.agent_turn_id });
           await client.query("COMMIT");
           return "authorized";
         }
@@ -434,7 +434,7 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
       if (input.ingress) {
         if (!await resolveCurrentApprovalAuth(client,row)) { await client.query("ROLLBACK"); return "forbidden"; }
         await bindTextReplyIngress(client,{ ...input.ingress,telegramUserId: input.telegramUserId,
-          chatId: input.telegramChatId,promptMessageId: input.telegramMessageId }, { sessionId: row.eve_session_id,turnId: row.eve_turn_id });
+          chatId: input.telegramChatId,promptMessageId: input.telegramMessageId }, { sessionId: row.agent_session_id,turnId: row.agent_turn_id });
       }
       const consumed = await client.query(
         `UPDATE telegram_hitl_approvals
@@ -451,14 +451,14 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
             SET pending_operation = EXISTS (
                   SELECT 1 FROM telegram_hitl_approvals pending
                    WHERE pending.application_session_id = session.id
-                     AND pending.eve_session_id = $2
+                     AND pending.agent_session_id = $2
                      AND pending.consumed_at IS NULL
                 ),
                 pending_request_id = CASE
                   WHEN EXISTS (
                     SELECT 1 FROM telegram_hitl_approvals pending
                      WHERE pending.application_session_id = session.id
-                       AND pending.eve_session_id = $2
+                       AND pending.agent_session_id = $2
                        AND pending.consumed_at IS NULL
                   ) THEN pending_request_id
                   ELSE NULL
@@ -467,13 +467,13 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
                   WHEN kind = 'task' AND NOT EXISTS (
                     SELECT 1 FROM telegram_hitl_approvals pending
                      WHERE pending.application_session_id = session.id
-                       AND pending.eve_session_id = $2
+                       AND pending.agent_session_id = $2
                        AND pending.consumed_at IS NULL
                   ) THEN 'running'::conversation_task_state
                   ELSE task_state
                 END
           WHERE session.id = $1`,
-        [row.application_session_id, row.eve_session_id],
+        [row.application_session_id, row.agent_session_id],
       );
       await client.query("COMMIT");
       return "authorized";
@@ -488,7 +488,7 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
   async clearForAgentSession(applicationSessionId, agentSessionId) {
     await database().query(
       `DELETE FROM telegram_hitl_approvals
-        WHERE application_session_id = $1 AND eve_session_id = $2`,
+        WHERE application_session_id = $1 AND agent_session_id = $2`,
       [applicationSessionId, agentSessionId],
     );
   },
@@ -500,11 +500,11 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
            FROM telegram_hitl_approvals a
            JOIN conversation_sessions s ON s.id = a.application_session_id
           WHERE a.application_session_id = $1
-            AND a.eve_session_id = $2
+            AND a.agent_session_id = $2
             AND a.consumed_at IS NULL
             AND s.pending_operation = true
             AND s.retired_at IS NULL
-            AND s.eve_session_id = a.eve_session_id
+            AND s.agent_session_id = a.agent_session_id
        ) AS pending`,
       [applicationSessionId, agentSessionId],
     );

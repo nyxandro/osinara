@@ -53,7 +53,7 @@ export const approvalTimeoutRepository: ApprovalTimeoutRepository = {
                     <= $1::timestamptz - ($2::bigint * interval '1 millisecond')
               AND (approval.timeout_lease_expires_at IS NULL
                    OR approval.timeout_lease_expires_at <= $1::timestamptz)
-              AND session.eve_session_id = approval.eve_session_id
+              AND session.agent_session_id = approval.agent_session_id
               AND session.retired_at IS NULL
               AND session.pending_operation
             ORDER BY approval.timeout_attempts, approval.created_at, approval.id
@@ -67,7 +67,7 @@ export const approvalTimeoutRepository: ApprovalTimeoutRepository = {
            FROM candidate, conversation_sessions session
           WHERE approval.id = candidate.id
             AND session.id = approval.application_session_id
-         RETURNING approval.application_session_id, approval.eve_session_id, approval.id,
+         RETURNING approval.application_session_id, approval.agent_session_id, approval.id,
                    approval.expected_telegram_user_id, approval.prompt_text, approval.request_id,
                    approval.request_kind, approval.telegram_chat_id, approval.telegram_chat_type,
                    approval.telegram_message_id::text AS telegram_message_id,
@@ -125,14 +125,14 @@ export const approvalTimeoutRepository: ApprovalTimeoutRepository = {
             SET pending_operation = EXISTS (
                   SELECT 1 FROM telegram_hitl_approvals pending
                    WHERE pending.application_session_id = session.id
-                     AND pending.eve_session_id = $2
+                     AND pending.agent_session_id = $2
                      AND pending.consumed_at IS NULL
                 ),
                 pending_request_id = CASE
                   WHEN EXISTS (
                     SELECT 1 FROM telegram_hitl_approvals pending
                      WHERE pending.application_session_id = session.id
-                       AND pending.eve_session_id = $2
+                       AND pending.agent_session_id = $2
                        AND pending.consumed_at IS NULL
                   ) THEN pending_request_id
                   ELSE NULL
@@ -141,13 +141,13 @@ export const approvalTimeoutRepository: ApprovalTimeoutRepository = {
                   WHEN kind = 'task' AND NOT EXISTS (
                     SELECT 1 FROM telegram_hitl_approvals pending
                      WHERE pending.application_session_id = session.id
-                       AND pending.eve_session_id = $2
+                       AND pending.agent_session_id = $2
                        AND pending.consumed_at IS NULL
                   ) THEN 'running'::conversation_task_state
                   ELSE task_state
                 END
           WHERE session.id = $1 AND session.retired_at IS NULL
-            AND session.eve_session_id = $2`,
+            AND session.agent_session_id = $2`,
         [claim.applicationSessionId, claim.agentSessionId],
       );
       await client.query("COMMIT");
@@ -197,7 +197,7 @@ function toClaim(row: ClaimRow, auth: TimedOutApprovalClaim["auth"]): TimedOutAp
   return {
     applicationSessionId: row.application_session_id,
     auth,
-    agentSessionId: row.eve_session_id,
+    agentSessionId: row.agent_session_id,
     id: row.id,
     kind: row.request_kind,
     leaseToken: row.timeout_lease_token,

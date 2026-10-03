@@ -42,10 +42,10 @@ export const memoryShowJournal = {
     const opened = await database().query<{ turn_ordinal: string }>(
       `WITH opened AS (
          INSERT INTO memory_retrieval_turns
-           (conversation_id, eve_session_id, turn_id, turn_ordinal)
+           (conversation_id, agent_session_id, turn_id, turn_ordinal)
          SELECT $1, $2, $3, coalesce(max(turn_ordinal), 0) + 1
          FROM memory_retrieval_turns WHERE conversation_id = $1
-         ON CONFLICT (conversation_id, eve_session_id, turn_id)
+         ON CONFLICT (conversation_id, agent_session_id, turn_id)
            DO UPDATE SET turn_id = EXCLUDED.turn_id
          RETURNING turn_ordinal
        ),
@@ -72,9 +72,9 @@ export const memoryShowJournal = {
     if (claimIds.length === 0) return;
     await database().query(
       `INSERT INTO memory_retrieval_shows
-         (conversation_id, eve_session_id, turn_id, turn_ordinal, claim_id)
+         (conversation_id, agent_session_id, turn_id, turn_ordinal, claim_id)
        SELECT $1, $2, $3, $4, claim FROM unnest($5::uuid[]) AS claim
-       ON CONFLICT (conversation_id, eve_session_id, turn_id, claim_id) DO NOTHING`,
+       ON CONFLICT (conversation_id, agent_session_id, turn_id, claim_id) DO NOTHING`,
       [
         window.conversationId,
         window.agentSessionId,
