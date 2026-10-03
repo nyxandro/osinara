@@ -45,7 +45,7 @@ function managerDependencies() {
       clientId: "client-id",
       clientSecret: "client-secret",
       encryptionKey: "encryption-key",
-      redirectUri: "https://agent.example/eve/v1/google-oauth/callback",
+      redirectUri: "https://agent.example/v1/google-oauth/callback",
     }),
     profileExists: vi.fn().mockResolvedValue(true),
     removeProfile: vi.fn(),

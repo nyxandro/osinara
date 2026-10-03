@@ -31,25 +31,34 @@ describe("runtime HTTP server", () => {
     const seen: Array<{ body: string; secret: string | null; url: string }> = [];
     const base = await serve([{
       method: "POST",
-      path: "/eve/v1/telegram",
+      path: "/v1/telegram",
       async handle(request) {
         seen.push({ body: await request.text(), secret: request.headers.get("x-telegram-bot-api-secret-token"), url: new URL(request.url).pathname });
         return new Response("ok", { headers: { "x-osinara-runtime-admission": "1" } });
       },
     }]);
 
-    const response = await fetch(`${base}/eve/v1/telegram`, { body: '{"update_id":1}', headers: { "x-telegram-bot-api-secret-token": "s" }, method: "POST" });
+    const response = await fetch(`${base}/v1/telegram`, { body: '{"update_id":1}', headers: { "x-telegram-bot-api-secret-token": "s" }, method: "POST" });
 
     expect(await response.text()).toBe("ok");
     expect(response.headers.get("x-osinara-runtime-admission")).toBe("1");
-    expect(seen).toEqual([{ body: '{"update_id":1}', secret: "s", url: "/eve/v1/telegram" }]);
+    expect(seen).toEqual([{ body: '{"update_id":1}', secret: "s", url: "/v1/telegram" }]);
+  });
+
+  it("serves the previous addresses as the current ones until Telegram, Google and the deploy tools move over", async () => {
+    const seen: string[] = [];
+    const base = await serve([{ method: "POST", path: "/v1/telegram", async handle(request) { seen.push(new URL(request.url).pathname); return new Response("ok"); } }]);
+
+    expect((await fetch(`${base}/eve/v1/telegram`, { method: "POST" })).status).toBe(200);
+    expect((await fetch(`${base}/eve/v1/health`)).status).toBe(200);
+    expect(seen).toEqual(["/v1/telegram"]);
   });
 
   it("answers 404 for an unknown address or method, and 500 with one log line when a route fails", async () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const base = await serve([{ method: "POST", path: "/broken", handle: async () => { throw new Error("boom"); } }]);
 
-    expect((await fetch(`${base}/eve/v1/sessions`)).status).toBe(404);
+    expect((await fetch(`${base}/v1/sessions`)).status).toBe(404);
     expect((await fetch(`${base}/broken`)).status).toBe(404);
     expect((await fetch(`${base}/broken`, { method: "POST" })).status).toBe(500);
     expect(errors.mock.calls.map(([line]) => JSON.parse(String(line)))).toEqual([

@@ -12,7 +12,7 @@ import { AppError } from "../app-error.js";
 import { requireGoogleTokenEncryptionKey } from "./google-token-crypto.js";
 
 export const GOOGLE_OAUTH_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
-export const GOOGLE_OAUTH_CALLBACK_PATH = "/eve/v1/google-oauth/callback";
+export const GOOGLE_OAUTH_CALLBACK_PATH = "/v1/google-oauth/callback";
 export const GOOGLE_OAUTH_STATE_TTL_MILLISECONDS = 10 * 60_000;
 export const GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
 export const GOOGLE_PROVIDER_REQUEST_TIMEOUT_MILLISECONDS = 15_000;

@@ -374,7 +374,7 @@ describe("Docker Compose runtime wiring", () => {
     // Docker's embedded DNS must be queried after startup; a shared upstream zone lets Nginx
     // replace stale addresses without restarting the public webhook edge.
     expect(nginx).toContain("  resolver 127.0.0.11 valid=10s ipv6=off;\n");
-    expect(nginx).toContain("    zone eve_agent 64k;\n");
+    expect(nginx).toContain("    zone osinara_agent 64k;\n");
     expect(nginx).toContain("    server agent:3000 resolve;\n");
   });
 });

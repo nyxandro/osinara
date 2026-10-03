@@ -18,7 +18,7 @@ import {
 const config = {
   clientId: "google-client-id",
   clientSecret: "google-client-secret",
-  redirectUri: "https://agent.example/eve/v1/google-oauth/callback",
+  redirectUri: "https://agent.example/v1/google-oauth/callback",
 };
 
 describe("Google Workspace OAuth client", () => {
