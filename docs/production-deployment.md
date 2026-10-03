@@ -302,7 +302,7 @@ instead of persisting an inert grant, and a grant made while Codex was active is
 client, while CLIProxy cannot inject its own hidden image tool into ordinary model calls.
 
 Interactive root turns may call the application-owned `send_voice_message` boundary when the current
-message explicitly asks for a voice reply. It synthesizes one ElevenLabs `eleven_v3` Ogg Opus note
+message explicitly asks for a voice reply. It synthesizes one ElevenLabs `eleven_v4` Ogg Opus note
 with the pinned voice, reserves the call in `voice_message_operations` before the billable request,
 never retries an ambiguous result, stores the audio in the authorized workspace, and sends it through
 the exact-once workspace file delivery as a Telegram voice note. The optional `ELEVENLABS_API_KEY`

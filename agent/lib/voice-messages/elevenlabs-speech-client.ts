@@ -31,8 +31,8 @@ const ELEVENLABS_API_BASE_URL = "https://api.elevenlabs.io";
 // Ogg Opus is the container Telegram renders as a voice note without transcoding.
 const ELEVENLABS_OUTPUT_FORMAT = "opus_48000_64";
 // Eleven v4 stability runs from 0 to 1: lower values vary the delivery more, higher ones keep it
-// close to the voice's baseline. 0.5 is ElevenLabs' default; v4 follows audio tags without the
-// low stability v3 needed for them.
+// close to the voice's baseline. The move to v4 starts from 0.5, the API default; a livelier
+// delivery after listening means lowering it.
 const ELEVENLABS_V4_STABILITY = 0.5;
 // A full 5,000-character request is a few minutes of speech and needs well under a minute.
 const ELEVENLABS_TTS_TIMEOUT_MS = 120_000;
