@@ -30,11 +30,11 @@ export async function runtimeProcessIdentity() {
 export async function reconcileRuntimeAdmissions(): Promise<void> {
   const holders = await database().query<{ id: string; owner_pid: number; owner_start_ticks: string }>(
     `SELECT id,owner_pid,owner_start_ticks FROM runtime_admission_holders
-      WHERE eve_session_id IS NULL AND owner_hostname=$1 AND owner_pid IS NOT NULL ORDER BY created_at LIMIT 100`, [hostname()]);
+      WHERE agent_session_id IS NULL AND owner_hostname=$1 AND owner_pid IS NOT NULL ORDER BY created_at LIMIT 100`, [hostname()]);
   for (const holder of holders.rows) {
     // PID reuse is not evidence of a live old process; compare the kernel's immutable start time.
     if (await processStartTicks(holder.owner_pid) === holder.owner_start_ticks) continue;
-    const deleted = await database().query(`DELETE FROM runtime_admission_holders WHERE id=$1 AND eve_session_id IS NULL
+    const deleted = await database().query(`DELETE FROM runtime_admission_holders WHERE id=$1 AND agent_session_id IS NULL
       AND EXISTS(SELECT 1 FROM runtime_maintenance WHERE singleton AND phase<>'frozen')
       AND owner_hostname=$2 AND owner_pid=$3 AND owner_start_ticks=$4`, [holder.id,hostname(),holder.owner_pid,holder.owner_start_ticks]);
     if (deleted.rowCount) console.info(JSON.stringify({ code: "AGENT_RUNTIME_DEAD_PROCESS_RECONCILED", holderId: holder.id }));

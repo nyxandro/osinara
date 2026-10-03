@@ -227,7 +227,7 @@ describeWithDatabase("memoryRepository", () => {
 
     await expect(database().query(
       `SELECT audit.actor_user_id, operation.actor_user_id AS operation_actor_user_id,
-              operation.actor_telegram_user_id, operation.eve_session_id, operation.eve_turn_id
+              operation.actor_telegram_user_id, operation.agent_session_id, operation.agent_turn_id
          FROM audit_events AS audit
          JOIN memory_mutation_operations AS operation ON operation.memory_item_id = audit.subject_id
           AND operation.operation_key = 'system-exact-second'
@@ -236,8 +236,8 @@ describeWithDatabase("memoryRepository", () => {
     )).resolves.toMatchObject({ rows: [{
       actor_telegram_user_id: null,
       actor_user_id: null,
-      eve_session_id: "session-current",
-      eve_turn_id: "turn-current",
+      agent_session_id: "session-current",
+      agent_turn_id: "turn-current",
       operation_actor_user_id: null,
     }] });
   });
@@ -381,7 +381,7 @@ describeWithDatabase("memoryRepository", () => {
       `INSERT INTO memory_items
          (family_id, owner_user_id, author_user_id, author_telegram_user_id, scope, kind,
           content, source, confirmation, sensitivity, operation_key)
-       VALUES ($1, $2, $2, $3, 'personal', 'fact', 'Историческая запись', 'eve:legacy',
+       VALUES ($1, $2, $2, $3, 'personal', 'fact', 'Историческая запись', 'turn:legacy',
                'user_confirmed', 'normal', 'historical-create')
        RETURNING id`,
       [family.familyId, family.owner.userId, family.owner.telegramUserId],

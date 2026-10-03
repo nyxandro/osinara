@@ -75,7 +75,7 @@ async function statusOf(updateId: string): Promise<string> {
 describeWithDatabase("private-chat bursts", () => {
   beforeEach(async () => {
     await database().query(
-      `TRUNCATE eve_session_event_cursors, telegram_ingress_ignored_updates, telegram_ingress_updates,
+      `TRUNCATE telegram_ingress_ignored_updates, telegram_ingress_updates,
          telegram_ingress_continuation_aliases, telegram_ingress_queues CASCADE`,
     );
   });

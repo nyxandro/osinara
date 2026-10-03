@@ -17,7 +17,7 @@ export async function recoverUnstartedReviewBatches(client: PoolClient, now: Dat
       LEFT JOIN conversation_sessions AS session ON session.id = batch.application_session_id
       WHERE batch.batch_kind = 'interactive' AND batch.status = 'ambiguous'
         AND batch.diagnostic_code = $1 AND batch.recovery_attempts = 0
-        AND batch.eve_session_id IS NULL AND batch.eve_turn_id IS NULL
+        AND batch.agent_session_id IS NULL AND batch.agent_turn_id IS NULL
         AND (session.id IS NULL OR session.retired_at IS NOT NULL)
       ORDER BY batch.created_at, batch.id FOR NO KEY UPDATE OF batch SKIP LOCKED LIMIT $2`,
     [LEGACY_UNSTARTED_CODE, MEMORY_REVIEW_ABANDONED_TURN_BATCH_SIZE],

@@ -37,7 +37,7 @@ export const memoryReviewSessionRepository = {
           DO UPDATE SET last_activity_at = EXCLUDED.last_activity_at
             WHERE conversation_sessions.retired_at IS NULL
               AND conversation_sessions.kind = 'proactive'
-              AND conversation_sessions.eve_session_id IS NULL
+              AND conversation_sessions.agent_session_id IS NULL
           RETURNING id, thread_id`,
         [batch.familyId, batch.groupId, batch.scope, batch.messageThreadId,
           continuationToken, now, batch.batchId, generation, `memory-review:${batch.batchId}`],
@@ -70,7 +70,7 @@ export const memoryReviewSessionRepository = {
                memory_review_batch_id = NULL, continuation_token = 'retired-memory-review:' || id,
               delete_after = now() + $2 * interval '1 day'
         WHERE id = $1 AND retired_at IS NULL AND kind = 'proactive'
-          AND memory_review_batch_id = $3 AND eve_session_id IS NULL
+          AND memory_review_batch_id = $3 AND agent_session_id IS NULL
           AND EXISTS (
             SELECT 1 FROM memory_review_batches AS batch
              WHERE batch.id = $3 AND batch.status = 'leased' AND batch.lease_token = $4

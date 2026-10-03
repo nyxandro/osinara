@@ -65,7 +65,7 @@ export interface ParkSessionInput {
 interface SessionRow {
   completed_turns: number;
   continuation_token: string;
-  eve_session_id: string | null;
+  agent_session_id: string | null;
   family_id: string;
   generation: number;
   group_id: string | null;

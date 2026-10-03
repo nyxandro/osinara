@@ -88,24 +88,24 @@ export async function prepareExplicitClaimEvidence(
             SELECT 1
             FROM memory_turn_sources AS turn_source
             JOIN memory_turn_source_sets AS source_set
-              ON source_set.eve_session_id = turn_source.eve_session_id
-             AND source_set.eve_turn_id = turn_source.eve_turn_id
+              ON source_set.agent_session_id = turn_source.agent_session_id
+             AND source_set.agent_turn_id = turn_source.agent_turn_id
             WHERE turn_source.timeline_entry_id = message.id
               AND turn_source.conversation_id = message.conversation_id
-              AND source_set.eve_session_id = $4
-              AND source_set.eve_turn_id = $5
+              AND source_set.agent_session_id = $4
+              AND source_set.agent_turn_id = $5
                AND source_set.invoking_actor_kind IN ('telegram_user', 'telegram_bot')
                AND source_set.invoking_actor_id = $3
            ) OR EXISTS (
              SELECT 1
              FROM memory_turn_sources AS turn_source
              JOIN memory_turn_source_sets AS source_set
-               ON source_set.eve_session_id = turn_source.eve_session_id
-              AND source_set.eve_turn_id = turn_source.eve_turn_id
+               ON source_set.agent_session_id = turn_source.agent_session_id
+              AND source_set.agent_turn_id = turn_source.agent_turn_id
              WHERE turn_source.timeline_entry_id = message.id
                AND turn_source.conversation_id = message.conversation_id
-               AND source_set.eve_session_id = $4
-               AND source_set.eve_turn_id = $5
+               AND source_set.agent_session_id = $4
+               AND source_set.agent_turn_id = $5
                AND source_set.memory_review_batch_id IS NOT NULL
            )
         )`,
@@ -164,7 +164,7 @@ export async function prepareExplicitClaimEvidence(
          JOIN profile_subjects AS subject ON subject.id = selected.profile_subject_id
         WHERE selected.subject_ref_snapshot = $1 AND subject.subject_ref = $1
            AND view.viewer_conversation_id = $2 AND view.family_id = $3
-          AND view.eve_session_id = $4 AND view.eve_turn_id = $5
+          AND view.agent_session_id = $4 AND view.agent_turn_id = $5
           AND view.viewer_user_id IS NOT DISTINCT FROM $6`,
       [source.subject.subjectRef, source.conversationId, auth.familyId,
         input.provenance.sessionId, input.provenance.turnId, auth.userId],

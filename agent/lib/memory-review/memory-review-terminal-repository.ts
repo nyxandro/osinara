@@ -120,7 +120,7 @@ export async function resolveAbandonedReviewBatch(
     ? 0
     : (await client.query(
       "SELECT 1 FROM memory_items_all WHERE source = $1 LIMIT 1",
-      [`eve:${input.agentSessionId}:${input.agentTurnId}`],
+      [`turn:${input.agentSessionId}:${input.agentTurnId}`],
     )).rowCount;
   // The lane is locked before the successor is looked up. `prepareInteractiveTurn` commits a new
   // batch behind a live head under that same lock, so without it a successor could appear between
@@ -182,18 +182,18 @@ export async function terminalizeAbandonedReviewTurns(
 ): Promise<void> {
   const abandoned = await client.query<{
     application_session_id: string | null;
-    eve_session_id: string;
-    eve_turn_id: string | null;
+    agent_session_id: string;
+    agent_turn_id: string | null;
     from_sequence: string;
     id: string;
     lane_id: string;
     through_sequence: string;
   }>(
-    `SELECT batch.id, batch.lane_id, batch.application_session_id, batch.eve_session_id,
-            batch.eve_turn_id, batch.from_sequence::text, batch.through_sequence::text
+    `SELECT batch.id, batch.lane_id, batch.application_session_id, batch.agent_session_id,
+            batch.agent_turn_id, batch.from_sequence::text, batch.through_sequence::text
        FROM memory_review_batches AS batch
        LEFT JOIN conversation_sessions AS session ON session.id = batch.application_session_id
-       WHERE batch.status = 'running' AND batch.eve_session_id IS NOT NULL
+       WHERE batch.status = 'running' AND batch.agent_session_id IS NOT NULL
          AND NOT (batch.batch_kind='background' AND batch.recovery_protocol=1)
         AND batch.started_at <= $1::timestamptz - $2::double precision * interval '1 millisecond'
         AND (session.id IS NULL OR session.retired_at IS NOT NULL
@@ -209,8 +209,8 @@ export async function terminalizeAbandonedReviewTurns(
       applicationSessionId: batch.application_session_id,
       batchId: batch.id,
       diagnosticCode: TURN_ABANDONED,
-      agentSessionId: batch.eve_session_id,
-      agentTurnId: batch.eve_turn_id,
+      agentSessionId: batch.agent_session_id,
+      agentTurnId: batch.agent_turn_id,
       laneId: batch.lane_id,
       notifyOwner: true,
       now,
@@ -219,8 +219,8 @@ export async function terminalizeAbandonedReviewTurns(
       batchId: batch.id,
       code: BATCH_RESOLVED,
       diagnosticCode: TURN_ABANDONED,
-      agentSessionId: batch.eve_session_id,
-      agentTurnId: batch.eve_turn_id,
+      agentSessionId: batch.agent_session_id,
+      agentTurnId: batch.agent_turn_id,
       fromSequence: batch.from_sequence,
       laneId: batch.lane_id,
       outcome,
@@ -241,10 +241,10 @@ export const memoryReviewTerminalRepository = {
       await client.query("BEGIN");
       const batch = await client.query<{
         application_session_id: string; diagnostic_code: string | null;
-        eve_session_id: string | null; eve_turn_id: string | null; lane_id: string;
+        agent_session_id: string | null; agent_turn_id: string | null; lane_id: string;
         status: string;
       }>(
-        `SELECT lane_id, application_session_id, eve_session_id, eve_turn_id,
+        `SELECT lane_id, application_session_id, agent_session_id, agent_turn_id,
                 status::text, diagnostic_code
            FROM memory_review_batches WHERE id = $1 FOR UPDATE`,
         [input.batchId],
@@ -255,8 +255,8 @@ export const memoryReviewTerminalRepository = {
         await client.query("COMMIT");
         return "replayed";
       }
-      const exactTurn = recorded.eve_session_id === input.agentSessionId &&
-        recorded.eve_turn_id === input.agentTurnId;
+      const exactTurn = recorded.agent_session_id === input.agentSessionId &&
+        recorded.agent_turn_id === input.agentTurnId;
       if (exactTurn && (recorded.status === "waiting_model" || recorded.diagnostic_code === "AGENT_MEMORY_REVIEW_PARTIAL_RESULT") ||
           !exactTurn && await isRetiredReviewAttempt(client, input)) {
         await client.query("COMMIT"); return "replayed";
@@ -286,7 +286,7 @@ export const memoryReviewTerminalRepository = {
 
       const sourceBinding = await client.query(
         `SELECT 1 FROM memory_turn_source_sets
-          WHERE memory_review_batch_id = $1 AND eve_session_id = $2 AND eve_turn_id = $3`,
+          WHERE memory_review_batch_id = $1 AND agent_session_id = $2 AND agent_turn_id = $3`,
         [input.batchId, input.agentSessionId, input.agentTurnId],
       );
       if (sourceBinding.rowCount !== 1) {
@@ -359,22 +359,22 @@ export const memoryReviewTerminalRepository = {
       const claimed = await client.query<{
         application_session_id: string | null;
         diagnostic_code: string | null;
-        eve_session_id: string | null;
-        eve_turn_id: string | null;
+        agent_session_id: string | null;
+        agent_turn_id: string | null;
         lane_id: string;
         status: string;
       }>(
         `SELECT lane_id, application_session_id, status::text, diagnostic_code,
-                eve_session_id, eve_turn_id
+                agent_session_id, agent_turn_id
            FROM memory_review_batches WHERE id = $1 FOR UPDATE`,
         [input.batchId],
       );
       const batch = claimed.rows[0];
-      if (batch?.eve_session_id === input.agentSessionId && batch.eve_turn_id === input.agentTurnId &&
+      if (batch?.agent_session_id === input.agentSessionId && batch.agent_turn_id === input.agentTurnId &&
           (batch.status === "waiting_model" || batch.diagnostic_code === "AGENT_MEMORY_REVIEW_PARTIAL_RESULT")) {
         await client.query("COMMIT"); return "replayed";
       }
-      if (batch && batch.eve_session_id !== input.agentSessionId && await isRetiredReviewAttempt(client, input)) {
+      if (batch && batch.agent_session_id !== input.agentSessionId && await isRetiredReviewAttempt(client, input)) {
         await client.query("COMMIT"); return "replayed";
       }
       // Turn lifecycle events are at-least-once, and a released batch leaves no row at all: both
@@ -396,8 +396,8 @@ export const memoryReviewTerminalRepository = {
       // at all and provably wrote nothing. A binding that belongs to another turn is a real
       // disagreement about this batch and fails closed. Provenance is read from the row, never
       // from the channel context, so a mismatch cannot silently release written memory.
-      if (batch.eve_session_id !== null && (batch.eve_session_id !== input.agentSessionId ||
-        batch.eve_turn_id !== input.agentTurnId)) {
+      if (batch.agent_session_id !== null && (batch.agent_session_id !== input.agentSessionId ||
+        batch.agent_turn_id !== input.agentTurnId)) {
         throw new AppError(
           "AGENT_MEMORY_REVIEW_FAILURE_STATE_INVALID",
           "Проверка памяти завершена с другим результатом или недоступна",
@@ -408,8 +408,8 @@ export const memoryReviewTerminalRepository = {
         applicationSessionId: null,
         batchId: input.batchId,
         diagnosticCode: input.diagnosticCode,
-        agentSessionId: batch.eve_session_id,
-        agentTurnId: batch.eve_turn_id,
+        agentSessionId: batch.agent_session_id,
+        agentTurnId: batch.agent_turn_id,
         laneId: batch.lane_id,
         notifyOwner: input.diagnosticCode !== TURN_CANCELLED,
         now,
@@ -426,8 +426,8 @@ export const memoryReviewTerminalRepository = {
         batchId: input.batchId,
         code: BATCH_RESOLVED,
         diagnosticCode: input.diagnosticCode,
-        agentSessionId: batch.eve_session_id,
-        agentTurnId: batch.eve_turn_id,
+        agentSessionId: batch.agent_session_id,
+        agentTurnId: batch.agent_turn_id,
         outcome,
       }));
       await client.query("COMMIT");
@@ -451,7 +451,7 @@ export const memoryReviewTerminalRepository = {
       const claimed = await client.query<{ lane_id: string }>(
         `SELECT lane_id FROM memory_review_batches
           WHERE id = $1 AND batch_kind = 'interactive' AND status = 'running'
-            AND eve_session_id IS NULL FOR UPDATE`,
+            AND agent_session_id IS NULL FOR UPDATE`,
         [batchId],
       );
       const batch = claimed.rows[0];

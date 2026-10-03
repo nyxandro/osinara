@@ -21,8 +21,8 @@ export async function recoverEmptyReviewModelFailure(input: {
   try {
     await client.query("BEGIN");
     const batch = await lockReviewAttempt(client, input.batchId);
-    if (!batch || batch.batch_kind !== "background" || batch.eve_session_id !== input.expectedAgentSessionId ||
-        !batch.eve_turn_id || !batch.application_session_id) throw new AppError(
+    if (!batch || batch.batch_kind !== "background" || batch.agent_session_id !== input.expectedAgentSessionId ||
+        !batch.agent_turn_id || !batch.application_session_id) throw new AppError(
       "AGENT_MEMORY_REVIEW_RECOVERY_STATE_CHANGED", "Состояние пакета изменилось или его контекст отсутствует. Повторите inspect",
     );
     if (batch.status === "waiting_model") { await client.query("COMMIT"); return "replayed"; }
@@ -31,7 +31,7 @@ export async function recoverEmptyReviewModelFailure(input: {
     );
     const session = await client.query(
       `SELECT 1 FROM conversation_sessions WHERE id = $1 AND retired_at IS NOT NULL
-        AND eve_session_id = $2 AND memory_review_batch_id = $3 FOR UPDATE SKIP LOCKED`,
+        AND agent_session_id = $2 AND memory_review_batch_id = $3 FOR UPDATE SKIP LOCKED`,
       [batch.application_session_id, input.expectedAgentSessionId, batch.id],
     );
     if (session.rowCount !== 1) throw new AppError(

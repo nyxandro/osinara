@@ -32,7 +32,7 @@ export const sessionRouteRepository = {
          JOIN conversation_sessions session ON session.id = route.session_id
         WHERE route.base_continuation_token = $1
            AND session.retired_at IS NULL
-           AND session.eve_session_id IS NOT NULL
+           AND session.agent_session_id IS NOT NULL
            AND (session.kind <> 'task' OR session.task_state = 'pending')
         LIMIT 1`,
       [baseContinuationToken],

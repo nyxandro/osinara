@@ -29,7 +29,7 @@ describe("toModelMemory", () => {
       messageThreadId: "42",
       scope: "personal",
       sensitivity: "normal",
-      source: "eve:session-internal:turn-internal",
+      source: "turn:session-internal:turn-internal",
       updatedAt: "2026-08-01T11:00:00.000Z",
     });
 

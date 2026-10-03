@@ -93,7 +93,7 @@ describeWithDatabase("turnInterjectionRepository", () => {
 
   beforeEach(async () => {
     await database().query(
-      `TRUNCATE telegram_turn_interjections, eve_session_event_cursors, telegram_ingress_ignored_updates,
+      `TRUNCATE telegram_turn_interjections, telegram_ingress_ignored_updates,
          telegram_ingress_updates, telegram_ingress_continuation_aliases, telegram_ingress_queues,
          conversation_session_routes, conversation_sessions, conversation_route_generations,
          family_memberships, users, families CASCADE`,

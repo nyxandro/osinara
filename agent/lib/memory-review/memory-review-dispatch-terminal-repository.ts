@@ -35,7 +35,7 @@ async function terminalizeStaleInteractiveBatches(client: PoolClient, now: Date)
     lane_id: string;
   }>(
     `SELECT id, lane_id, application_session_id FROM memory_review_batches
-      WHERE batch_kind = 'interactive' AND status = 'running' AND eve_session_id IS NULL
+      WHERE batch_kind = 'interactive' AND status = 'running' AND agent_session_id IS NULL
         AND started_at <= $1::timestamptz - $2::double precision * interval '1 millisecond'
       ORDER BY started_at, id
       FOR UPDATE SKIP LOCKED

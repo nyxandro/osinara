@@ -55,7 +55,7 @@ async function createRetryScenario() {
     provenance: { sessionId: "retry-session", turnId: "retry-turn" },
     scope: "family",
     sensitivity: "normal",
-    source: "eve:retry-session:retry-turn",
+    source: "turn:retry-session:retry-turn",
     thread: {
       action: "create",
       purpose: "Следить за здоровьем, сном и режимом дня",
@@ -76,7 +76,7 @@ async function createRetryScenario() {
     provenance: { sessionId: "retry-session", turnId: "retry-turn" },
     scope: "family",
     sensitivity: "normal",
-    source: "eve:retry-session:retry-turn",
+    source: "turn:retry-session:retry-turn",
     thread: { action: "attach", role: "goal", threadRef },
   });
 
@@ -92,7 +92,7 @@ async function createRetryScenario() {
     operationKey: "retry-existing-thread",
     scope: "family",
     sensitivity: "normal",
-    source: "eve:retry-existing-thread",
+    source: "turn:retry-existing-thread",
     thread: {
       action: "create",
       purpose: "Планировать инвестиционные взносы",
@@ -146,7 +146,7 @@ describeWithDatabase("memory thread candidate retry", () => {
     )).resolves.toMatchObject({ rows: [{ status: "resolved" }, { status: "resolved" }] });
     await expect(database().query(
       "SELECT operation_key FROM memory_items WHERE source = $1 ORDER BY operation_key",
-      ["eve:retry-session:retry-turn"],
+      ["turn:retry-session:retry-turn"],
     )).resolves.toMatchObject({ rows: [{ operation_key: "retry-candidate-late-attach" }] });
   });
 

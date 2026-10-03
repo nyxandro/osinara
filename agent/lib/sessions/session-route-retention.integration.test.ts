@@ -75,7 +75,7 @@ describeWithDatabase("session route and retention isolation", () => {
     const inserted = await database().query<{ id: string }>(
       `INSERT INTO conversation_sessions
          (thread_id, generation, family_id, owner_user_id, scope, kind, conversation_key,
-          continuation_token, eve_session_id, started_at, last_activity_at, retired_at,
+          continuation_token, agent_session_id, started_at, last_activity_at, retired_at,
           delete_after, cleanup_error_code)
        VALUES
          (gen_random_uuid(), 0, $1, $2, 'personal', 'canonical', 'poisoned', 'poisoned',

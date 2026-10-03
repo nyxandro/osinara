@@ -296,7 +296,7 @@ export const profileViewRepository = {
       const insertedView = await client.query<{ created_at: Date; id: string; profile_view_ref: string }>(
          `INSERT INTO profile_views
             (family_id, viewer_conversation_id, viewer_user_id, subject_count,
-             claim_count, total_characters, eve_session_id, eve_turn_id)
+             claim_count, total_characters, agent_session_id, agent_turn_id)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING id, profile_view_ref, created_at`,
         [auth.familyId, input.conversationId, auth.userId, selection.subjects.length,

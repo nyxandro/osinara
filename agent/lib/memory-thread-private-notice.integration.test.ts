@@ -44,7 +44,7 @@ describeWithDatabase("private memory thread notice", () => {
       operationKey: "private-personal-thread-notice",
       scope: "personal",
       sensitivity: "normal",
-      source: "eve:private-thread-notice",
+      source: "turn:private-thread-notice",
       thread: {
         action: "create",
         purpose: "Сохранять цели, решения и результаты подготовки",

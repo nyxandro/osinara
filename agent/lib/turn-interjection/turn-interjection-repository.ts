@@ -84,7 +84,7 @@ export const turnInterjectionRepository = {
           AND pending.payload ? 'message'
           AND pending.payload->'message'->'from'->>'id' = $2
           AND (shown.update_id IS NULL OR (
-            shown.eve_session_id = $3 AND shown.eve_turn_id = $4 AND shown.tool_call_id = $5
+            shown.agent_session_id = $3 AND shown.agent_turn_id = $4 AND shown.tool_call_id = $5
             AND shown.delivered_at IS NULL))
         ORDER BY pending.update_id
         LIMIT $6`,
@@ -121,14 +121,14 @@ export const turnInterjectionRepository = {
     if (messages.length === 0) return new Set();
     const result = await database().query<{ update_id: string }>(
       `INSERT INTO telegram_turn_interjections
-         (update_id, application_session_id, eve_session_id, eve_turn_id, tool_call_id, content_kind)
+         (update_id, application_session_id, agent_session_id, agent_turn_id, tool_call_id, content_kind)
        SELECT pending.update_id, $2, $3, $4, $5, claimed.content_kind
          FROM unnest($1::bigint[], $6::text[]) AS claimed(update_id, content_kind)
          JOIN telegram_ingress_updates pending
            ON pending.update_id = claimed.update_id AND pending.status = 'pending'
        ON CONFLICT (update_id) DO UPDATE SET content_kind = EXCLUDED.content_kind, returned_at = NULL
-         WHERE telegram_turn_interjections.eve_session_id = EXCLUDED.eve_session_id
-           AND telegram_turn_interjections.eve_turn_id = EXCLUDED.eve_turn_id
+         WHERE telegram_turn_interjections.agent_session_id = EXCLUDED.agent_session_id
+           AND telegram_turn_interjections.agent_turn_id = EXCLUDED.agent_turn_id
            AND telegram_turn_interjections.tool_call_id = EXCLUDED.tool_call_id
            AND telegram_turn_interjections.delivered_at IS NULL
        RETURNING update_id::text`,
@@ -149,7 +149,7 @@ export const turnInterjectionRepository = {
     requireCoordinate(coordinate);
     await database().query(
       `UPDATE telegram_turn_interjections SET returned_at = COALESCE(returned_at, now())
-        WHERE update_id = ANY($1::bigint[]) AND eve_session_id = $2 AND eve_turn_id = $3 AND tool_call_id = $4`,
+        WHERE update_id = ANY($1::bigint[]) AND agent_session_id = $2 AND agent_turn_id = $3 AND tool_call_id = $4`,
       [updateIds.map(requireUpdateId), coordinate.agentSessionId, coordinate.agentTurnId, coordinate.toolCallId],
     );
   },
@@ -159,7 +159,7 @@ export const turnInterjectionRepository = {
     requireCoordinate(coordinate);
     await database().query(
       `DELETE FROM telegram_turn_interjections
-        WHERE eve_session_id = $1 AND eve_turn_id = $2 AND tool_call_id = $3 AND delivered_at IS NULL`,
+        WHERE agent_session_id = $1 AND agent_turn_id = $2 AND tool_call_id = $3 AND delivered_at IS NULL`,
       [coordinate.agentSessionId, coordinate.agentTurnId, coordinate.toolCallId],
     );
   },
@@ -168,7 +168,7 @@ export const turnInterjectionRepository = {
   async markDelivered(agentSessionId: string, agentTurnId: string): Promise<number> {
     const result = await database().query(
       `UPDATE telegram_turn_interjections SET delivered_at = now()
-        WHERE eve_session_id = $1 AND eve_turn_id = $2 AND returned_at IS NOT NULL AND delivered_at IS NULL`,
+        WHERE agent_session_id = $1 AND agent_turn_id = $2 AND returned_at IS NOT NULL AND delivered_at IS NULL`,
       [agentSessionId, agentTurnId],
     );
     return result.rowCount ?? 0;

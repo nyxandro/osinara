@@ -139,7 +139,7 @@ async function send(turn: Turn, text?: string): Promise<{ readonly marker: strin
   it("stops a turn whose preparation fails before the model is called", async () => {
     await database().query(`CREATE FUNCTION e2e_reject_binding() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN RAISE EXCEPTION 'TEST_REQUIRED_PREPARATION_FAILED'; END $$`);
-    await database().query(`CREATE TRIGGER e2e_reject_binding BEFORE UPDATE OF eve_session_id ON conversation_sessions
+    await database().query(`CREATE TRIGGER e2e_reject_binding BEFORE UPDATE OF agent_session_id ON conversation_sessions
       FOR EACH ROW EXECUTE FUNCTION e2e_reject_binding()`);
     try {
       const { marker, updateId } = await send({ chatId: CHATS.family, flags: "" });

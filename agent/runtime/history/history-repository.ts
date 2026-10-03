@@ -43,7 +43,7 @@ export interface NewSessionHistory {
   /** Sandbox runner metadata; a new session opens its sandbox on first use. */
   readonly sandbox: Record<string, unknown> | null;
   readonly sessionId: string;
-  readonly source: "eve_import" | "runtime";
+  readonly source: "imported" | "runtime";
   readonly todo: Record<string, unknown> | null;
 }
 

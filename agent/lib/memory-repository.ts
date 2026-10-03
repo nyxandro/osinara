@@ -38,8 +38,8 @@ export type {
 interface MutationOperationRow {
   actor_telegram_user_id: string | null;
   actor_user_id: string | null;
-  eve_session_id: string | null;
-  eve_turn_id: string | null;
+  agent_session_id: string | null;
+  agent_turn_id: string | null;
   input_hash: string;
   memory_item_id: string | null;
   mutation_kind: "create" | "delete" | "update";
@@ -78,7 +78,7 @@ async function existingOperation(
 ): Promise<MutationOperationRow | null> {
   const result = await client.query<MutationOperationRow>(
     `SELECT mutation_kind, input_hash, memory_item_id, actor_user_id, actor_telegram_user_id,
-            eve_session_id, eve_turn_id
+            agent_session_id, agent_turn_id
      FROM memory_mutation_operations
      WHERE family_id = $1 AND operation_key = $2`,
     [auth.familyId, operationKey],
@@ -189,7 +189,7 @@ async function hasImmediateUndoProvenance(
      WHERE item.family_id = $1 AND item.id = $2 AND item.claim_status = 'active'
        AND creation.actor_user_id IS NOT DISTINCT FROM $3::uuid
        AND creation.actor_telegram_user_id = $4
-       AND creation.eve_session_id = $5 AND creation.eve_turn_id = $6
+       AND creation.agent_session_id = $5 AND creation.agent_turn_id = $6
        AND ((item.scope IN ('personal', 'family') AND EXISTS (
          SELECT 1 FROM family_memberships WHERE family_id = $1 AND user_id = $3
        )) OR (item.scope = 'group' AND item.group_id = $7 AND EXISTS (
@@ -303,7 +303,7 @@ export const memoryRepository = {
       if (replay) {
         const sameProvenance = replay.actor_user_id === auth.userId &&
           replay.actor_telegram_user_id === auth.telegramUserId &&
-          replay.eve_session_id === input.sessionId && replay.eve_turn_id === input.turnId;
+          replay.agent_session_id === input.sessionId && replay.agent_turn_id === input.turnId;
         if (!sameProvenance) {
           throw new AppError(
             "AGENT_MEMORY_REPLAY_MISMATCH",
@@ -327,7 +327,7 @@ export const memoryRepository = {
       await client.query(
         `INSERT INTO memory_mutation_operations
            (family_id, operation_key, mutation_kind, input_hash, memory_item_id,
-            actor_user_id, actor_telegram_user_id, eve_session_id, eve_turn_id)
+            actor_user_id, actor_telegram_user_id, agent_session_id, agent_turn_id)
          VALUES ($1, $2, 'delete', $3, $4, $5, $6, $7, $8)`,
         [auth.familyId, input.operationKey, inputHash, memory.id, auth.userId,
           auth.telegramUserId, input.sessionId, input.turnId],

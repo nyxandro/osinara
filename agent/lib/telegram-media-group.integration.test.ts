@@ -136,8 +136,8 @@ async function drain(dispatch: DurableIngressDependencies["dispatch"], notifyTim
     const claim = claims[0]!;
     expect(claim.mediaGroupPayloads).toHaveLength(4);
     await repository.complete(claim.updateId, claim.leaseToken, "album-session");
-    const rows = await database().query("SELECT status, eve_session_id FROM telegram_ingress_updates WHERE update_id <= 1004 ORDER BY update_id");
-    expect(rows.rows).toEqual(Array.from({ length: 4 }, () => ({ status: "completed", eve_session_id: "album-session" })));
+    const rows = await database().query("SELECT status, agent_session_id FROM telegram_ingress_updates WHERE update_id <= 1004 ORDER BY update_id");
+    expect(rows.rows).toEqual(Array.from({ length: 4 }, () => ({ status: "completed", agent_session_id: "album-session" })));
     expect((await repository.claimNext(lease, NO_BURSTS))?.updateId).toBe("1005");
   });
 
