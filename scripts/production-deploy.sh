@@ -168,7 +168,6 @@ main() {
   fi
   provision_v0152_model_bridge
   validate_v0160_codex_bridge
-  provision_v0180_workflow_postgres_bridge
   prepare_candidate_release
   pull_release_images
   prepare_v0160_codex_volume
@@ -195,10 +194,8 @@ main() {
   start_candidate_release
   wait_for_health
   validate_v0160_codex_model
-  CANDIDATE_HEALTH_VALIDATED=1
   promote_candidate_release
   complete_v0160_codex_bridge
-  remove_retired_cutover_volume
   if [[ "$INITIAL_MODE" -eq 1 ]]; then
     resolve_initial_owner_chat
   fi

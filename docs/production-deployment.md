@@ -47,7 +47,7 @@ runs `/opt/osinara/bin/production-deploy.sh` once per minute. The script takes a
 claims one approved PostgreSQL proposal after rechecking the current owner, verifies the public
 release, Compose hash, fixed service/image/mount policy, and digest names. It pulls before stopping,
 backs up existing durable state, starts the released Compose graph without build, and checks
-`http://127.0.0.1:8082/eve/v1/health`.
+`http://127.0.0.1:8082/v1/health`.
 
 If GitHub loses the canonical `main` push event during an Actions outage, an operator may dispatch
 the same `CI and release` workflow manually with `gh workflow run "CI and release" --ref main`.
@@ -143,14 +143,8 @@ not reissued.
 
 Releases up to v0.34 kept agent state in a separate `osinara_workflow` database inside the
 existing PostgreSQL service; v0.35 carried each active conversation's history over from it into the
-application database. The application no longer reads it. The deploy controller still checks
-idleness against it and includes it in backups until a later cleanup release removes the database.
-A fresh installation has no such database. `WORKFLOW_POSTGRES_URL` in the environment of such a
-server is no longer read either.
-
-During the one-time cutover from the v0.32 local workflow volume, the controller archives the current
-`osinara-production-eve-workflow-data-v032` volume and preserves it for explicit rollback after the
-PostgreSQL-backed candidate passes health checks.
+application database. Neither the application nor the deploy controller reads it any more, and a
+later cleanup release removes it. A fresh installation has no such database.
 
 ## External monitoring
 
@@ -336,15 +330,6 @@ sets its root to `10001:10001 0700`, then follows the same irreversible provisio
 The standalone fresh installer still removes CLIProxy from its generated Compose and stays on the
 selected direct provider, so it does not require this production-only OAuth seed.
 
-The one-time v0.18.0 bridge accepts only exact v0.17.1 source state. After immutable release and
-owner validation but before candidate Compose interpolation, it appends a dedicated
-`WORKFLOW_POSTGRES_URL` to the root-owned environment with an OpenSSL-generated 256-bit password.
-Initial installs must already contain the installer-generated connection. A pre-migration retry
-accepts only the exact single assignment written by the first attempt; duplicate, malformed, exported
-but unpersisted, conflicting, or wrong-source state fails closed. The bridge exports the validated
-value into the controller process so shell precedence cannot replace the root-owned credential. This
-one transition requires `openssl` on the existing v0.17.1 host; other update and initial paths do not.
-
 Long-term memory has no separate model route. The root agent decides whether to call `remember`;
 PostgreSQL validates the current Telegram source and atomically writes optional thread state. Thread
 activation and context use local E5 embeddings plus deterministic source projections. Semantic
@@ -456,16 +441,13 @@ only those exact recorded volumes; a failed removal makes the result `ambiguous`
 is removed after migration starts, and pre-existing candidate-only bytes remain a fail-closed error.
 
 Before every non-initial update the script derives the backup set from the current immutable Compose,
-verifies those durable volumes and free space, writes and validates a logical dump of the application
-database and, when present, the separate `osinara_workflow` database. It then stops application
-writers, archives `google-workspace-credentials`, `tool-environments`, `workspace-data`, and any
-current release-owned local Workflow volume, and validates every artifact. During the one-time
-PostgreSQL Workflow cutover the old v0.32 workflow volume is archived and deliberately preserved for
-explicit rollback; later backups use `workflow-postgres.dump` instead of a local Workflow volume.
-Any other current-owned durable volume missing from the candidate is forbidden. A missing
+verifies those durable volumes and free space, and writes and validates a logical dump of the
+application database. It then stops application writers, archives `cli-proxy-auth`,
+`google-workspace-credentials`, `tool-environments` and `workspace-data`, and validates every
+artifact. A current-owned durable volume missing from the candidate is forbidden. A missing
 current-owned volume or a pre-existing candidate-only volume fails closed, so deploy never creates
-an empty replacement for active data or silently reuses bytes of unknown provenance. Reconstructible
-embedding model and sandbox cache volumes are omitted.
+an empty replacement for active data or silently reuses bytes of unknown provenance. The
+reconstructible embedding model volume is omitted.
 Candidate release files remain in a unique temporary directory and become `releases/vVERSION` only
 after health succeeds.
 

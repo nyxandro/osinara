@@ -74,7 +74,6 @@ services:
     volumes:
       - ./config/agent-model-providers.json:/app/config/agent-model-providers.json:ro
       - google-workspace-credentials:/app/google-workspace-credentials
-      - sandbox-data:/app/.eve/sandbox-cache
       - workspace-data:/app/workspaces
 
   migrate:
@@ -245,7 +244,6 @@ volumes:
   google-workspace-credentials:
   postgres-data:
   memory-embedding-model-e5:
-  sandbox-data:
   tool-environments:
   workspace-data:
 

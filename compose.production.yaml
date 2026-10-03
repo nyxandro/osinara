@@ -152,7 +152,6 @@ services:
     volumes:
       - /opt/osinara/agent-model-providers.json:/app/config/agent-model-providers.json:ro
       - google-workspace-credentials:/app/google-workspace-credentials
-      - sandbox-data:/app/.eve/sandbox-cache
       - workspace-data:/app/workspaces
 
   migrate:
@@ -312,8 +311,6 @@ volumes:
     name: osinara-production-memory-embedding-model-e5
   google-workspace-credentials:
     name: osinara-production-google-workspace-credentials
-  sandbox-data:
-    name: osinara-production-sandbox-data
   tool-environments:
     name: osinara-production-tool-environments
   workspace-data:

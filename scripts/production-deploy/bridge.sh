@@ -7,8 +7,6 @@ readonly V0152_BRIDGE_TARGET_VERSION="0.15.2"
 readonly V0152_MODEL_CONFIG_SHA256="4125a909ad3a2cfab08df5158538d210e2bcb753b3faa3a79f7be8a81bcf55c8"
 readonly V0160_BRIDGE_SOURCE_VERSION="0.15.14"
 readonly V0160_BRIDGE_TARGET_VERSION="0.16.0"
-readonly V0180_BRIDGE_SOURCE_VERSION="0.17.1"
-readonly V0180_BRIDGE_TARGET_VERSION="0.18.0"
 readonly V0160_UPDATE_SOURCE_MODEL_CONFIG_SHA256="3ebc69be3aec08cae7a08ce4024b6b8d8a00a797819a787aed391b8ee30937dd"
 readonly V0160_INITIAL_SOURCE_MODEL_CONFIG_SHA256="4125a909ad3a2cfab08df5158538d210e2bcb753b3faa3a79f7be8a81bcf55c8"
 readonly V0160_CODEX_MODEL_CONFIG_SHA256="68b349485a474c4426adb7f98b541d812fb6edaa7617010a0e8e942d94fa16b7"
@@ -204,83 +202,6 @@ dotenv_credential_runtime_value() {
     value="${value%\'}"
   fi
   printf '%s' "$value"
-}
-
-read_v0180_workflow_postgres_url() {
-  local line name value
-  local workflow_url_count=0
-  V0180_WORKFLOW_POSTGRES_VALUE=""
-
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    name="${line%%=*}"
-    value="${line#*=}"
-    if [[ "$name" == "WORKFLOW_POSTGRES_URL" ]]; then
-      workflow_url_count=$((workflow_url_count + 1))
-      V0180_WORKFLOW_POSTGRES_VALUE="$value"
-    fi
-  done < "$SERVER_ENV"
-
-  [[ "$workflow_url_count" -le 1 ]] ||
-    fail "DEPLOY_V0180_WORKFLOW_URL_INVALID" \
-      "Environment must contain at most one WORKFLOW_POSTGRES_URL assignment"
-  if [[ "$workflow_url_count" -eq 1 ]] &&
-     [[ ! "$V0180_WORKFLOW_POSTGRES_VALUE" =~ ^\'postgresql://osinara_workflow:[A-Za-z0-9_-]{32,}@postgres:5432/osinara_workflow\'$ ]]; then
-    fail "DEPLOY_V0180_WORKFLOW_URL_INVALID" \
-      "Existing Workflow PostgreSQL connection does not match the v0.18.0 boundary"
-  fi
-  V0180_WORKFLOW_POSTGRES_PRESENT="$workflow_url_count"
-}
-
-provision_v0180_workflow_postgres_bridge() {
-  [[ "$REQUESTED_VERSION" == "$V0180_BRIDGE_TARGET_VERSION" ]] || return 0
-  read_v0180_workflow_postgres_url
-
-  if [[ "$INITIAL_MODE" -eq 1 ]]; then
-    [[ "$V0180_WORKFLOW_POSTGRES_PRESENT" -eq 1 ]] ||
-      fail "DEPLOY_V0180_WORKFLOW_URL_INVALID" \
-        "Initial v0.18.0 deployment must contain one installer-generated Workflow connection"
-  else
-    local source_version
-    source_version="$(jq -er '.version' "${CURRENT_LINK}/osinara-deployment.json")"
-    [[ "$source_version" == "$V0180_BRIDGE_SOURCE_VERSION" ]] ||
-      fail "DEPLOY_V0180_BRIDGE_SOURCE_INVALID" \
-        "Workflow PostgreSQL bridge can run only from exact v0.17.1 production state"
-
-    if [[ "$V0180_WORKFLOW_POSTGRES_PRESENT" -eq 0 ]]; then
-      [[ ! -v WORKFLOW_POSTGRES_URL ]] ||
-        fail "DEPLOY_V0180_WORKFLOW_URL_CONFLICT" \
-          "Exported WORKFLOW_POSTGRES_URL is not backed by the root-owned environment file"
-      command -v openssl >/dev/null ||
-        fail "DEPLOY_COMMAND_MISSING" "Required v0.18.0 bridge command is unavailable: openssl"
-
-      local password workflow_url environment_temp
-      if ! password="$(openssl rand -hex 32)" ||
-         [[ ! "$password" =~ ^[0-9a-f]{64}$ ]]; then
-        fail "DEPLOY_V0180_SECRET_GENERATION_FAILED" \
-          "Could not generate the required Workflow PostgreSQL credential"
-      fi
-      workflow_url="postgresql://osinara_workflow:${password}@postgres:5432/osinara_workflow"
-      environment_temp="$(mktemp "${WORK_DIR}/server-env.XXXXXX")"
-      install -o root -g root -m 0600 "$SERVER_ENV" "$environment_temp"
-      if [[ -n "$(tail -c 1 "$environment_temp")" ]]; then
-        printf '\n' >> "$environment_temp"
-      fi
-      printf "WORKFLOW_POSTGRES_URL='%s'\n" "$workflow_url" >> "$environment_temp"
-      mv -f "$environment_temp" "$SERVER_ENV"
-      V0180_WORKFLOW_POSTGRES_VALUE="'${workflow_url}'"
-      V0180_WORKFLOW_POSTGRES_PRESENT=1
-    fi
-  fi
-
-  local runtime_value
-  runtime_value="$(dotenv_credential_runtime_value "$V0180_WORKFLOW_POSTGRES_VALUE")"
-  if [[ -v WORKFLOW_POSTGRES_URL && "$WORKFLOW_POSTGRES_URL" != "$runtime_value" ]]; then
-    fail "DEPLOY_V0180_WORKFLOW_URL_CONFLICT" \
-      "Exported WORKFLOW_POSTGRES_URL conflicts with the root-owned environment file"
-  fi
-  WORKFLOW_POSTGRES_URL="$runtime_value"
-  export WORKFLOW_POSTGRES_URL
-  require_metadata "$SERVER_ENV" "0:0:600"
 }
 
 install_v0160_environment_and_config() {

@@ -45,15 +45,6 @@ describe("runtime HTTP server", () => {
     expect(seen).toEqual([{ body: '{"update_id":1}', secret: "s", url: "/v1/telegram" }]);
   });
 
-  it("serves the previous addresses as the current ones until Telegram, Google and the deploy tools move over", async () => {
-    const seen: string[] = [];
-    const base = await serve([{ method: "POST", path: "/v1/telegram", async handle(request) { seen.push(new URL(request.url).pathname); return new Response("ok"); } }]);
-
-    expect((await fetch(`${base}/eve/v1/telegram`, { method: "POST" })).status).toBe(200);
-    expect((await fetch(`${base}/eve/v1/health`)).status).toBe(200);
-    expect(seen).toEqual(["/v1/telegram"]);
-  });
-
   it("answers 404 for an unknown address or method, and 500 with one log line when a route fails", async () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const base = await serve([{ method: "POST", path: "/broken", handle: async () => { throw new Error("boom"); } }]);
