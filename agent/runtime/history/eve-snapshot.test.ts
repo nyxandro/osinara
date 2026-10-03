@@ -46,9 +46,12 @@ describe("Eve turn step snapshot decoding", () => {
       history: HISTORY,
       compaction: { lastKnownInputTokens: 153733, lastKnownPromptMessageCount: 424 },
       sandboxState: SANDBOX_STATE,
-      state: { "eve.todo": { items: [{ content: "проверить", status: "pending" }] } },
+      // As in production: the session state holds only Eve's own bookkeeping.
+      state: { "eve.harness.emission": { sequence: 3, sessionStarted: true, stepIndex: 0, turnId: "turn_2" } },
     }, {
-      "eve.channel": { kind: "telegram", state: CHANNEL_STATE },
+      // Eve names a channel's kind `channel:<name>` and keeps the todo list in the session context.
+      "eve.channel": { kind: "channel:telegram", state: CHANNEL_STATE },
+      "eve.todo": { items: [{ content: "проверить", status: "pending" }] },
       "eve.initiatorAuth": INITIATOR,
       "eve.dynamicSkillManifest": { scoped: [{ name: "pohuy", description: "Режим мата" }] },
     }), codec);
@@ -88,7 +91,8 @@ describe("Eve turn step snapshot decoding", () => {
     ["a step output without a session snapshot", () => storeLikeWorkflow({ action: "complete" }, "zstd")],
     ["a history entry that is not a message", () => storeLikeWorkflow(turnStepOutput({ sessionId: SESSION_ID, history: [{ role: "robot", content: "x" }] }), "zstd")],
     ["a custom serialized type such as bytes", () => storeLikeWorkflow(turnStepOutput({ sessionId: SESSION_ID, history: [{ role: "user", content: [{ type: "file", mediaType: "image/png", data: new Uint8Array([1, 2]) }] }] }), "zstd")],
-    ["channel state of another channel", () => storeLikeWorkflow(turnStepOutput({ sessionId: SESSION_ID, history: [] }, { "eve.channel": { kind: "slack", state: {} } }), "zstd")],
+    ["channel state of another channel", () => storeLikeWorkflow(turnStepOutput({ sessionId: SESSION_ID, history: [] }, { "eve.channel": { kind: "channel:slack", state: {} } }), "zstd")],
+    ["a todo list in another shape", () => storeLikeWorkflow(turnStepOutput({ sessionId: SESSION_ID, history: [] }, { "eve.todo": { list: [] } }), "zstd")],
     ["sandbox state of another backend", () => storeLikeWorkflow(turnStepOutput({ sessionId: SESSION_ID, history: [], sandboxState: { initialized: true, session: { backendName: "vercel", metadata: {} } } }), "zstd")],
     ["sandbox state without its metadata", () => storeLikeWorkflow(turnStepOutput({ sessionId: SESSION_ID, history: [], sandboxState: { initialized: true, session: { backendName: "osinara-scoped-runner-v3" } } }), "zstd")],
     ["a skill manifest from an unexpected resolver", () => storeLikeWorkflow(turnStepOutput({ sessionId: SESSION_ID, history: [] }, { "eve.dynamicSkillManifest": { other: [] } }), "zstd")],

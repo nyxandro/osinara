@@ -64,9 +64,10 @@ function snapshot(sessionId: string, history: unknown[]) {
     compaction: { lastKnownInputTokens: 1200, lastKnownPromptMessageCount: history.length },
     sandboxState: { initialized: true, session: { backendName: "osinara-scoped-runner-v3", metadata: SANDBOX_METADATA, sessionKey: "k" } },
   }, {
-    "eve.channel": { kind: "telegram", state: { chatId: "912", chatType: "private", conversationId: null, messageThreadId: null, nextHitlCallbackId: 8 } },
+    "eve.channel": { kind: "channel:telegram", state: { chatId: "912", chatType: "private", conversationId: null, messageThreadId: null, nextHitlCallbackId: 8 } },
     "eve.initiatorAuth": { attributes: { role: "owner" }, authenticator: "telegram", principalId: "telegram:912", principalType: "user" },
     "eve.dynamicSkillManifest": { scoped: [{ name: "pohuy", description: "Режим мата" }] },
+    "eve.todo": { items: [{ content: "проверить", priority: "high", status: "pending" }] },
   }), "zstd");
 }
 
@@ -130,9 +131,10 @@ async function inTransaction<T>(work: (client: PoolClient) => Promise<T>) {
       compaction: { inputTokens: 1200, promptMessageCount: 4 },
     });
     // The session keeps its sandbox (container identity and folders), its channel state with the
-    // button counter, and its address: the next message of the chat reaches the same session.
-    const state = (await database().query("SELECT sandbox_state, channel_state, initiator_auth FROM agent_session_state WHERE session_id = $1", [SESSION])).rows[0];
+    // button counter, its todo list, and its address: the next message of the chat reaches the same session.
+    const state = (await database().query("SELECT sandbox_state, channel_state, initiator_auth, todo FROM agent_session_state WHERE session_id = $1", [SESSION])).rows[0];
     expect(state.sandbox_state).toEqual(SANDBOX_METADATA);
+    expect(state.todo).toEqual({ items: [{ content: "проверить", priority: "high", status: "pending" }] });
     expect(state.initiator_auth).toMatchObject({ principalId: "telegram:912" });
     expect(state.channel_state).toMatchObject({ chatId: "912", nextHitlCallbackId: 8 });
     const address = (await database().query(

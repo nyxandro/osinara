@@ -8,6 +8,9 @@
  * Storage layers, outermost first, as written by @workflow/world-postgres and @workflow/core:
  * CBOR byte string → optional `zstd` or `gzip` prefix with compressed bytes → `devl` prefix with a
  * devalue string → `{ sessionState: { snapshot: { version: 1, session } }, serializedContext }`.
+ * The session holds the history, compaction counters and sandbox state; the context holds the
+ * channel (`eve.channel`, kind `channel:telegram`), the todo list (`eve.todo`), the initiator and
+ * the skill manifest — checked against production snapshots on 03.10, read-only.
  * The history is AI SDK `ModelMessage[]` with plain JSON values; anything else, including an
  * encrypted payload or a custom serialized type, stops the import instead of being skipped.
  */
@@ -98,10 +101,8 @@ function readCompaction(value: unknown): EveCompactionCounters | null {
   return value as EveCompactionCounters;
 }
 
-function readTodo(state: unknown): Record<string, unknown> | null {
-  if (state === undefined) return null;
-  if (!isObject(state)) throw importFailure("состояние сессии имеет неверный вид");
-  const todo = state["eve.todo"];
+// Eve's `TodoStateKey` is a context key (`runtime/framework-tools/todo.ts`).
+function readTodo(todo: unknown): Record<string, unknown> | null {
   if (todo === undefined) return null;
   if (!isObject(todo) || !Array.isArray(todo.items) || firstNonJsonPath(todo, "todo") !== null) {
     throw importFailure("список todo имеет неверный вид");
@@ -131,10 +132,13 @@ function readInitiatorAuth(auth: unknown): Record<string, unknown> | null {
   return auth;
 }
 
-// Every conversation session Osinara ran on Eve was a Telegram one.
+// Every conversation session Osinara ran on Eve was a Telegram one; Eve named the kind
+// `channel:<channel name>` (`runtime/resolve-channel.ts`).
+const TELEGRAM_CHANNEL_KIND = "channel:telegram";
+
 function readChannelState(channel: unknown): Record<string, unknown> | null {
   if (channel === undefined) return null;
-  if (!isObject(channel) || channel.kind !== "telegram" || !isObject(channel.state)) {
+  if (!isObject(channel) || channel.kind !== TELEGRAM_CHANNEL_KIND || !isObject(channel.state)) {
     throw importFailure("состояние канала имеет неверный вид");
   }
   return channel.state;
@@ -179,6 +183,6 @@ export function decodeEveTurnStepOutput(stored: Uint8Array): EveSessionSnapshot 
     history: requireHistory(session.history),
     sandbox: readSandbox(session.sandboxState),
     sessionId: session.sessionId,
-    todo: readTodo(session.state),
+    todo: readTodo(context["eve.todo"]),
   };
 }
