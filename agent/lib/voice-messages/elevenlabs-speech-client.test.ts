@@ -57,9 +57,11 @@ describe("ElevenLabs speech client", () => {
     expect(JSON.parse(String(request.body))).toEqual({
       model_id: ELEVENLABS_TTS_MODEL_ID,
       text: "Привет! [laughs] Это голосовое.",
-      voice_settings: { stability: 0.2 },
+      voice_settings: { stability: 0.5 },
     });
-    expect(ELEVENLABS_TTS_MODEL_ID).toBe("eleven_v3");
+    expect(ELEVENLABS_TTS_MODEL_ID).toBe("eleven_v4");
+    // "Vika Grib", the owner's chosen professional Russian voice.
+    expect(ELEVENLABS_VOICE_ID).toBe("gelrownZgbRhxH6LI78J");
   });
 
   it.each([
