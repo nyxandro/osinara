@@ -6,9 +6,9 @@
  * - Size limits before and during download.
  * - Ogg/Opus content validation before sending data to Groq.
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createTelegramVoiceTranscriber } from "./groq-voice-transcription.js";
+import { createTelegramVoiceTranscriber, transcribeTelegramVoice } from "./groq-voice-transcription.js";
 
 function oggOpusBytes(): Uint8Array {
   return new TextEncoder().encode("OggS\0\0\0\0OpusHead\0voice-data");
@@ -105,5 +105,29 @@ describe("createTelegramVoiceTranscriber", () => {
       transcribeVoice({ fileId: "telegram-file-1", mimeType: "audio/ogg" }),
     ).rejects.toThrowError(/AGENT_VOICE_FILE_TOO_LARGE/);
     expect(adapter.transcribe).not.toHaveBeenCalled();
+  });
+});
+
+describe("transcribeTelegramVoice", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  // The production binding must pass the bot token: the runtime's Telegram API has no environment fallback.
+  it("fetches the voice file from Telegram with the configured bot token", async () => {
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "123:test-token");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('{"ok":true,"result":{"file_path":"voice/file.oga"}}', { status: 200 }))
+      .mockResolvedValueOnce(new Response("not an ogg file", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(transcribeTelegramVoice({ fileId: "voice-file-id" }))
+      .rejects.toMatchObject({ code: "AGENT_VOICE_CONTENT_INVALID" });
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      "https://api.telegram.org/bot123:test-token/getFile",
+      "https://api.telegram.org/file/bot123:test-token/voice/file.oga",
+    ]);
   });
 });

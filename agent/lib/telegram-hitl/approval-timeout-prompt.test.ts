@@ -5,11 +5,12 @@
  * - `timedOutPromptText`: states the timeout and that the action did not run.
  * - `createTimedOutPromptFinalizer`: surfaces a rejected Telegram edit as a stable failure.
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApprovalMessage } from "./approval-message.js";
 import {
   createTimedOutPromptFinalizer,
+  finalizeTimedOutPrompt,
   timedOutPromptEditBody,
   timedOutPromptText,
 } from "./approval-timeout-prompt.js";
@@ -82,5 +83,23 @@ describe("createTimedOutPromptFinalizer", () => {
     await expect(createTimedOutPromptFinalizer(editMessage)(CLAIM)).rejects.toThrow(
       /AGENT_APPROVAL_TIMEOUT_PROMPT_EDIT_REJECTED/u,
     );
+  });
+});
+
+describe("finalizeTimedOutPrompt", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  // The production binding must pass the bot token: the runtime's Telegram API has no environment fallback.
+  it("edits the expired card through Telegram with the configured bot token", async () => {
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "123:test-token");
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"ok":true,"result":true}', { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(finalizeTimedOutPrompt(CLAIM)).resolves.toBeUndefined();
+
+    expect(String(fetchMock.mock.calls[0]![0])).toBe("https://api.telegram.org/bot123:test-token/editMessageText");
   });
 });

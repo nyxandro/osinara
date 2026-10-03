@@ -79,6 +79,7 @@ export const withVoiceRecordingStatus = createVoiceRecordingStatus(async (target
   const response = await sendTelegramChatAction({
     action: RECORD_VOICE_ACTION,
     chatId: target.chatId,
+    credentials: { botToken: process.env.TELEGRAM_BOT_TOKEN },
     fetch: (request, init) =>
       fetch(request, { ...init, signal: AbortSignal.timeout(TELEGRAM_CHAT_ACTION_TIMEOUT_MS) }),
     ...(target.messageThreadId === undefined ? {} : { messageThreadId: target.messageThreadId }),

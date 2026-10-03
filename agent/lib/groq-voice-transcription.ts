@@ -146,10 +146,15 @@ function telegramFetchWithTimeout(signal?: AbortSignal) {
   });
 }
 
+// The runtime's Telegram API takes the bot token explicitly; a missing token fails the call.
+const telegramCredentials = () => ({ botToken: process.env.TELEGRAM_BOT_TOKEN });
+
 export const transcribeTelegramVoice = createTelegramVoiceTranscriber({
-  downloadFile: (filePath, signal) => downloadTelegramFile({ fetch: telegramFetchWithTimeout(signal), filePath }),
+  downloadFile: (filePath, signal) => downloadTelegramFile({
+    credentials: telegramCredentials(), fetch: telegramFetchWithTimeout(signal), filePath,
+  }),
   getFile: async (fileId, signal) => {
-    const file = await getTelegramFile({ fetch: telegramFetchWithTimeout(signal), fileId });
+    const file = await getTelegramFile({ credentials: telegramCredentials(), fetch: telegramFetchWithTimeout(signal), fileId });
     return { filePath: file.filePath };
   },
   maxBytes: TELEGRAM_VOICE_MAX_BYTES,

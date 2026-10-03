@@ -57,6 +57,7 @@ export function createTimedOutPromptFinalizer(
 export const finalizeTimedOutPrompt = createTimedOutPromptFinalizer(async (body) => {
   return await callTelegramApi({
     body,
+    botToken: process.env.TELEGRAM_BOT_TOKEN,
     fetch: (request, init) =>
       fetch(request, { ...init, signal: AbortSignal.timeout(TELEGRAM_API_REQUEST_TIMEOUT_MS) }),
     method: "editMessageText",
