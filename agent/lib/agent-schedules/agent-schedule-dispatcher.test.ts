@@ -2,9 +2,9 @@
  * Agent schedule dispatcher unit tests.
  *
  * Constructs covered:
- * - `createAgentScheduleDispatcher`: hands an isolated target to Eve's native channel source.
+ * - `createAgentScheduleDispatcher`: hands an isolated target to the runtime's channel source.
  * - A failed claimed job, including failed session cleanup, cannot block the remaining batch.
- * - The run prompt names Eve's exact empty-delivery marker, so a scenario can skip an empty report.
+ * - The run prompt names the runtime's exact empty-delivery marker, so a scenario can skip an empty report.
  * - A conversation occurrence is handed to its chat queue and never starts a session here.
  */
 import { describe, expect, it, vi } from "vitest";
@@ -55,7 +55,7 @@ describe("agent schedule dispatcher", () => {
       rotated: false,
       sandboxSessionId: "sandbox-1",
     });
-    const startInChat = vi.fn().mockResolvedValue({ sessionId: "eve-session-1" });
+    const startInChat = vi.fn().mockResolvedValue({ sessionId: "agent-session-1" });
 
     const dispatched = await createAgentScheduleDispatcher({
       discardSession: vi.fn(), enqueueConversation: vi.fn(),
@@ -93,7 +93,7 @@ describe("agent schedule dispatcher", () => {
     });
     expect(repository.markRunning).toHaveBeenCalledWith(job, {
       applicationSessionId: "app-session-1",
-      eveSessionId: "eve-session-1",
+      agentSessionId: "agent-session-1",
     });
   });
 
@@ -121,7 +121,7 @@ describe("agent schedule dispatcher", () => {
       rotated: false,
       sandboxSessionId: "group-sandbox-1",
     });
-    const startInChat = vi.fn().mockResolvedValue({ sessionId: "group-eve-session-1" });
+    const startInChat = vi.fn().mockResolvedValue({ sessionId: "group-agent-session-1" });
 
     await createAgentScheduleDispatcher({
       discardSession: vi.fn(), enqueueConversation: vi.fn(),
@@ -222,7 +222,7 @@ describe("agent schedule dispatcher", () => {
       markDispatchStarted: vi.fn().mockRejectedValueOnce(new Error("marker unavailable")).mockResolvedValueOnce(true),
       markRunning: vi.fn(),
     };
-    const startInChat = vi.fn().mockResolvedValue({ sessionId: "eve-session-2" });
+    const startInChat = vi.fn().mockResolvedValue({ sessionId: "agent-session-2" });
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     const dispatched = await createAgentScheduleDispatcher({
@@ -243,7 +243,7 @@ describe("agent schedule dispatcher", () => {
     expect(startInChat).toHaveBeenCalledTimes(1);
     expect(repository.markRunning).toHaveBeenCalledWith(secondJob, {
       applicationSessionId: "app-run-2",
-      eveSessionId: "eve-session-2",
+      agentSessionId: "agent-session-2",
     });
     expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("AGENT_SCHEDULE_DISPATCH_FAILED"));
     consoleError.mockRestore();
@@ -263,7 +263,7 @@ describe("agent schedule dispatcher", () => {
       markRunning: vi.fn(),
     };
     const discardSession = vi.fn().mockRejectedValueOnce(new Error("cleanup unavailable"));
-    const startInChat = vi.fn().mockResolvedValue({ sessionId: "eve-session-2" });
+    const startInChat = vi.fn().mockResolvedValue({ sessionId: "agent-session-2" });
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     await createAgentScheduleDispatcher({
@@ -285,7 +285,7 @@ describe("agent schedule dispatcher", () => {
     expect(startInChat).toHaveBeenCalledTimes(1);
     expect(repository.markRunning).toHaveBeenCalledWith(secondJob, {
       applicationSessionId: "app-run-2",
-      eveSessionId: "eve-session-2",
+      agentSessionId: "agent-session-2",
     });
     expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("AGENT_SCHEDULE_DISPATCH_FAILED"));
     consoleError.mockRestore();
@@ -293,7 +293,7 @@ describe("agent schedule dispatcher", () => {
 });
 
 describe("conversation occurrences", () => {
-  it("hands the occurrence to its chat queue without preparing a session or contacting Eve", async () => {
+  it("hands the occurrence to its chat queue without preparing a session or starting a turn", async () => {
     const conversationJob: ClaimedAgentSchedule = { ...job, executionContext: "conversation", maxRuns: 6 };
     const repository = {
       claimDue: vi.fn().mockResolvedValue([conversationJob]),

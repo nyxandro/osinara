@@ -101,7 +101,6 @@ function repository() {
   const claim: TelegramIngressClaim = {
     dispatchStarted: false,
     dispatchBinding: null,
-    recoveryCancelRequested: false,
     attemptCount: 1,
     deliveryContinuationKey: "101::",
     ingressContinuationKey: "101::",

@@ -55,8 +55,8 @@ export async function bindMemoryTurnSources(ctx: TurnContext): Promise<void> {
     sourceAttributesAbsent &&
     (await memoryTurnSourceRepository.verifyBoundResume({
       applicationSessionId,
-      eveSessionId: ctx.session.id,
-      eveTurnId: ctx.session.turn.id,
+      agentSessionId: ctx.session.id,
+      agentTurnId: ctx.session.turn.id,
       invokingActorId: invokingActor.id,
       invokingActorKind: invokingActor.kind,
     }))
@@ -81,8 +81,8 @@ export async function bindMemoryTurnSources(ctx: TurnContext): Promise<void> {
     await memoryTurnSourceRepository.bindReview({
       applicationSessionId,
       conversationId,
-      eveSessionId: ctx.session.id,
-      eveTurnId: ctx.session.turn.id,
+      agentSessionId: ctx.session.id,
+      agentTurnId: ctx.session.turn.id,
       invokingActorId: invokingActor.id,
       invokingActorKind: invokingActor.kind,
       memoryReviewBatchId,
@@ -106,8 +106,8 @@ export async function bindMemoryTurnSources(ctx: TurnContext): Promise<void> {
     applicationSessionId,
     conversationId,
     currentTimelineEntryId,
-    eveSessionId: ctx.session.id,
-    eveTurnId: ctx.session.turn.id,
+    agentSessionId: ctx.session.id,
+    agentTurnId: ctx.session.turn.id,
     invokingActorId: invokingActor.id,
     invokingActorKind: invokingActor.kind,
     ...(typeof memoryReviewBatchId === "string" ? { memoryReviewBatchId } : {}),
@@ -139,8 +139,8 @@ export async function resolveMemoryTurnSource(
     throw sourceError("personal_delta_source_forbidden");
   }
   const source = await memoryTurnSourceRepository.resolve({
-    eveSessionId: ctx.session.id,
-    eveTurnId: ctx.session.turn.id,
+    agentSessionId: ctx.session.id,
+    agentTurnId: ctx.session.turn.id,
     sourceSequence: sourceSequence ?? null,
   });
   if (!source) throw sourceError("source_not_bound_to_turn");

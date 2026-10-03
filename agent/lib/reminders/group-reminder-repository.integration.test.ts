@@ -338,7 +338,7 @@ describeWithDatabase("group reminder repository", () => {
     const auth = groupAuth(fixture, SECOND_AUTHOR);
     await groupReminderRepository.delete(auth, reminder.id, "twice-delete");
 
-    // The Eve step can replay after a crash, and the record is already gone: the repeat is a
+    // The step can replay after a crash, and the record is already gone: the repeat is a
     // confirmation, not a failure the model should report to the chat.
     await expect(groupReminderRepository.delete(auth, reminder.id, "twice-delete")).resolves.toBe(true);
   });

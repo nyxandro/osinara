@@ -73,12 +73,12 @@ async function heartbeat(
 
 async function run(dependencies: ConversationWakeupDrainDependencies, claim: ConversationWakeupClaim): Promise<void> {
   if (claim.dispatch !== null) {
-    // A hand-off Eve took before this release has no turn here to finish.
+    // A hand-off recorded before turns were journaled has no turn here to finish.
     if (claim.dispatch.turnId === null) {
       throw new AppError(LEGACY_HANDOFF_CODE, "Пробуждение было передано прежней версии и не может быть продолжено");
     }
     await dependencies.runTurn(claim.dispatch.turnId);
-    await dependencies.repository.complete(claim, claim.dispatch.eveSessionId);
+    await dependencies.repository.complete(claim, claim.dispatch.agentSessionId);
     console.info(JSON.stringify({ code: "AGENT_CONVERSATION_WAKEUP_RECOVERED", wakeupId: claim.id }));
     return;
   }
@@ -89,7 +89,7 @@ async function run(dependencies: ConversationWakeupDrainDependencies, claim: Con
   }
   const turnId = await dependencies.createTurn(claim, prepared.wakeup);
   await dependencies.runTurn(turnId);
-  await dependencies.repository.complete(claim, prepared.wakeup.eveSessionId);
+  await dependencies.repository.complete(claim, prepared.wakeup.agentSessionId);
 }
 
 async function settle(

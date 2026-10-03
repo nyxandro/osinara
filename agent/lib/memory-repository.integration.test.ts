@@ -174,7 +174,7 @@ describeWithDatabase("memoryRepository", () => {
       memoryRepository.deleteByRef(author, record.memoryRef, "group-author-delete"),
     ).resolves.toEqual({ deleted: true });
   });
-  it("returns the original record for an identical Eve replay and rejects changed input", async () => {
+  it("returns the original record for an identical replay and rejects changed input", async () => {
     const family = await createFamily("replay");
     const input = createInput("personal", "same-call");
     const first = await memoryRepository.create(family.owner, input);
@@ -241,7 +241,7 @@ describeWithDatabase("memoryRepository", () => {
       operation_actor_user_id: null,
     }] });
   });
-  it("rejects a system-authored memory mutation without Eve provenance", async () => {
+  it("rejects a system-authored memory mutation without turn provenance", async () => {
     const family = await createFamily("system-no-provenance");
 
     await expect(memoryRepository.create(family.owner, {

@@ -14,7 +14,7 @@ import { BUILT_IN_TOOL_ORDER, orderStepTools, toModelToolSet } from "./model-too
 type ProviderTool = { name: string };
 
 async function recordedTools(scenario: string): Promise<ProviderTool[]> {
-  const file = JSON.parse(await readFile(`agent/runtime/testing/eve-0.40-requests/${scenario}.json`, "utf8")) as ReferenceFile;
+  const file = JSON.parse(await readFile(`agent/runtime/testing/reference-requests/${scenario}.json`, "utf8")) as ReferenceFile;
   return (unpackReferenceFile(file)[0]!.request as { tools: ProviderTool[] }).tools;
 }
 
@@ -37,7 +37,7 @@ function plain(name: string, inputSchema: ToolDefinition["inputSchema"] = z.obje
 }
 
 describe("step tool order", () => {
-  it("puts the built-in tools first in Eve's order, then the static tools, then agent, then the rest as given", () => {
+  it("puts the built-in tools first in the reference order, then the static tools, then agent, then the rest as given", () => {
     const tools = Object.fromEntries(["remember", "agent", "todo", "glob", "bash", "ask_question", "probe_workspace", "get_current_time"]
       .map((name) => [name, plain(name)]));
 
@@ -59,12 +59,12 @@ describe("step tool order", () => {
   });
 });
 
-// Changed on purpose after Eve's requests were recorded (stage 7, family skills): a new tool, and a
+// Changed on purpose after the reference requests were recorded (stage 7, family skills): a new tool, and a
 // group skill list that also names the family's own skills.
 const CHANGED_AFTER_RECORDING = new Set(["manage_skill", "manage_telegram_group"]);
 
 describe("model-facing tool definitions", () => {
-  it("reach the model exactly as Eve sent the application tools of a private chat", async () => {
+  it("reach the model exactly as the reference requests carry the application tools of a private chat", async () => {
     const surface = buildModeToolSurface({ environment: "private", scheduledRun: false }) as Record<string, ToolDefinition>;
     const recorded = new Map((await recordedTools("private-first")).map((tool) => [tool.name, tool]));
     // Built-in tools move into the runtime in stage 4; their definitions are compared there.
@@ -80,7 +80,7 @@ describe("model-facing tool definitions", () => {
     }
   });
 
-  it("reach the model exactly as Eve sent its built-in tools", async () => {
+  it("reach the model exactly as the reference requests carry the built-in tools", async () => {
     const recorded = new Map((await recordedTools("private-first")).map((tool) => [tool.name, tool]));
     const tools = {
       ask_question: builtIns.askQuestion, bash: builtIns.bash, glob: builtIns.glob, grep: builtIns.grep,

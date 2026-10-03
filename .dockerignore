@@ -1,14 +1,9 @@
 node_modules
 **/node_modules
-**/.eve
-**/.output
 **/__pycache__
 .git
 .env*
 !.env.example
-.eve
-.workflow-data
-.output
 .runtime
 coverage
 *.log

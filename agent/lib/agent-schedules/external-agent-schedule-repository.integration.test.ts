@@ -238,7 +238,7 @@ describeWithDatabase("external agent schedule repository", () => {
     })).resolves.toEqual({ items: [], total: 0 });
   });
 
-  it("terminalizes a group run revoked between claim and Eve handoff", async () => {
+  it("terminalizes a group run revoked between claim and turn handoff", async () => {
     const setup = await fixture();
     const scheduledFor = new Date("2026-08-17T06:00:00.000Z");
     await externalAgentScheduleRepository.create(
@@ -329,13 +329,13 @@ describeWithDatabase("external agent schedule repository", () => {
 
     await expect(agentScheduleDispatchRepository.failRunByIdentityForNotification(
       job!.runId,
-      "eve-terminal-race",
+      "agent-terminal-race",
       "MODEL_SESSION_FAILED",
       new Date("2026-08-17T06:01:00.000Z"),
     )).resolves.toBe(true);
     await expect(agentScheduleDispatchRepository.markRunning(job!, {
       applicationSessionId: session.id,
-      eveSessionId: "eve-terminal-race",
+      agentSessionId: "agent-terminal-race",
     })).resolves.toBeUndefined();
     await expect(database().query(
       "SELECT status::text, error_code FROM agent_schedule_runs WHERE id = $1",
@@ -382,11 +382,11 @@ describeWithDatabase("external agent schedule repository", () => {
     });
     await agentScheduleDispatchRepository.markRunning(job!, {
       applicationSessionId: session.id,
-      eveSessionId: "eve-external-schedule",
+      agentSessionId: "agent-external-schedule",
     });
     const authorization = {
       applicationSessionId: session.id,
-      eveSessionId: "eve-external-schedule",
+      agentSessionId: "agent-external-schedule",
       familyId: setup.familyId,
       groupId: setup.groupId,
       messageThreadId: null,
@@ -420,7 +420,7 @@ describeWithDatabase("external agent schedule repository", () => {
     });
     await expect(agentScheduleDispatchRepository.failRunByIdentityForNotification(
       job!.runId,
-      "eve-external-schedule",
+      "agent-external-schedule",
       "MODEL_SESSION_FAILED",
       new Date("2026-08-17T06:01:00.000Z"),
     )).resolves.toBe(false);

@@ -41,7 +41,7 @@ groups:
         annotations:
           summary: 'Сообщение ждёт обработки более 10 минут, хотя его чат ничем не занят'
           description: 'Очередь входящих не разбирается: сообщения не берутся в работу или все места обработки заняты другими чатами. Для семьи это выглядит как молчащий ассистент.'
-          runbook: 'Проверить контейнеры agent и telegram-ingress-worker, затем npm-команду telegram-ingress-admin inspect внутри контейнера.'
+          runbook: 'Проверить контейнеры agent и telegram-ingress-worker, затем строки telegram_ingress_updates со статусами pending и processing в базе.'
 
       # One chat is busy with a single turn; the other chats are served. Measured over 30 days on
       # production up to 2026-09-24: 1540 turns, median 33 s, p99 about 10 minutes, three longer
@@ -60,7 +60,7 @@ groups:
         annotations:
           summary: 'Один ответ ассистента готовится дольше 20 минут'
           description: 'Чат этого запроса ждёт окончания хода, остальные чаты обслуживаются. Либо задача тяжёлая — много шагов модели и команд в песочнице, — либо ход завис.'
-          runbook: 'Найти идущий ход по строкам AGENT_MODEL_CALL_METRICS и AGENT_TOOL_CALL_METRICS за последние 20 минут: если вызовы идут, задача просто долгая; если строк нет, ход завис — telegram-ingress-admin inspect внутри контейнера agent.'
+          runbook: 'Найти идущий ход по строкам AGENT_MODEL_CALL_METRICS и AGENT_TOOL_CALL_METRICS за последние 20 минут: если вызовы идут, задача просто долгая; если строк нет, ход завис — строки agent_turns со статусом running в базе.'
 
       # A message that fails is final at once, so the queue never stalls and the rules above stay
       # quiet; a chat writing a few messages a minute never reaches a burst threshold either. On

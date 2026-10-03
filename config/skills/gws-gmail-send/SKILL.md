@@ -52,7 +52,7 @@ gws gmail +send --to alice@example.com --subject 'Hello' --body 'Hi!' --draft
 - Use --draft to save the message as a draft instead of sending it immediately.
 
 > [!CAUTION]
-> This is a **write** command. Execute it once; `execute_google_workspace` provides the only required Eve HITL confirmation.
+> This is a **write** command. Execute it once; `execute_google_workspace` provides the only required human approval.
 
 ## See Also
 

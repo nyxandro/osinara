@@ -6,15 +6,12 @@
  * - `instructionTurnMessages`: history as resolvers must see it — with this turn's input.
  * - `turnInputMessages`: what a turn appends after the history before its first model step.
  *
- * Derived from eve 0.40.0 `context/dynamic-instruction-lifecycle.ts`, `harness/messages.ts`
- * (`normalizeUserContent`) and the turn preamble of `harness/tool-loop.ts` (Apache-2.0, see
- * NOTICE-eve). Changes:
- * - Osinara patch carried over: resolvers see the current message and context. Eve resolved
- *   before appending them, so memory retrieval searched by the previous question.
- * - A failing resolver stops the turn before the model call. Eve logged it and dropped the block,
- *   which could leave a turn without its trust-zone rules; the application resolvers already turn
- *   every expected failure into an explicit block.
- * - Resolvers run once per turn; Eve's session-scoped resolver slot is unused by the application.
+ * - Resolvers see the current message and its context lines, so memory retrieval searches by the
+ *   question being asked.
+ * - A failing resolver stops the turn before the model call: a turn never runs without its
+ *   trust-zone rules. The application resolvers turn every expected failure into an explicit block.
+ * - Resolvers run once per turn.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { ModelMessage, UserContent } from "ai";
 

@@ -256,7 +256,7 @@ export const memoryReviewDispatchRepository = {
 
   async markRunning(
     batch: MemoryReviewClaim,
-    input: { applicationSessionId: string; eveSessionId: string },
+    input: { applicationSessionId: string; agentSessionId: string },
   ): Promise<void> {
     const result = await database().query(
       `UPDATE memory_review_batches
@@ -266,11 +266,11 @@ export const memoryReviewDispatchRepository = {
         WHERE id = $1 AND application_session_id = $3
           AND ((status = 'dispatching' AND lease_token = $2) OR
                (status = 'running' AND eve_session_id = $4))`,
-      [batch.batchId, batch.leaseToken, input.applicationSessionId, input.eveSessionId],
+      [batch.batchId, batch.leaseToken, input.applicationSessionId, input.agentSessionId],
     );
     if (result.rowCount !== 1) {
       const settled = await database().query(`SELECT 1 FROM memory_review_batches WHERE id=$1 AND application_session_id=$2
-        AND eve_session_id=$3 AND status IN ('completed','failed','waiting_model','ambiguous')`, [batch.batchId,input.applicationSessionId,input.eveSessionId]);
+        AND eve_session_id=$3 AND status IN ('completed','failed','waiting_model','ambiguous')`, [batch.batchId,input.applicationSessionId,input.agentSessionId]);
       if (settled.rowCount !== 1) throw new AppError("AGENT_MEMORY_REVIEW_RUNNING_STATE_INVALID", "Не удалось подтвердить запуск проверки памяти");
     }
   },

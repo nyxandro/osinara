@@ -133,7 +133,7 @@ async function updates() {
     const request = (requested.data as { requests: Array<{ requestId: string }> }).requests[0]!;
     const [{ sessionId }] = (await database().query<{ sessionId: string }>("SELECT session_id AS \"sessionId\" FROM agent_continuations")).rows;
     const claim = {
-      applicationSessionId: auth.attributes.applicationSessionId as string, auth, eveSessionId: sessionId!, id: "approval-1",
+      applicationSessionId: auth.attributes.applicationSessionId as string, auth, agentSessionId: sessionId!, id: "approval-1",
       kind: "tool-approval", leaseToken: "lease-1", promptText: "Подтвердите", requestId: request.requestId,
       telegramChatId: "7", telegramMessageId: "900", toolName: "change",
     } satisfies TimedOutApprovalClaim;

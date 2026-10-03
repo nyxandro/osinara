@@ -4,9 +4,9 @@
  * Constructs covered:
  * - Username-less replies to prior Osinara bot messages continue via persisted session routes.
  * - Exact replies to Osinara tool-delivered messages bypass synthetic HITL without a timeline row.
- * - Timeline-proven replies without an Eve route start a fresh application continuation.
- * - Ordinary replies remain messages when a previously live route rotates before Eve dispatch.
- * - Only authorized HITL replies retain Eve's native synthetic reply handling.
+ * - Timeline-proven replies without an agent route start a fresh application continuation.
+ * - Ordinary replies remain messages when a previously live route rotates before turn dispatch.
+ * - Only authorized HITL replies retain the runtime's synthetic reply handling.
  * - Private non-HITL replies also bypass synthetic input-response delivery.
  * - Sender-less Telegram reply references continue only when their exact persisted route exists.
  * - Replies to user messages never wake the agent merely because their route is still live.

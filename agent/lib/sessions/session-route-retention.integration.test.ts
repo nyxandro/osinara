@@ -55,7 +55,7 @@ describeWithDatabase("session route and retention isolation", () => {
     });
     await sessionRepository.registerRouteAlias(current.id, "101::911");
 
-    // The alias is not resumable before Eve binds, but prepareTurn must not fork the app session.
+    // The alias is not resumable before the agent session binds, but prepareTurn must not fork the app session.
     await expect(sessionRepository.hasRoute("101::911")).resolves.toBe(false);
     const reply = await sessionRepository.prepareTurn({
       baseContinuationToken: "101::911",
@@ -90,6 +90,6 @@ describeWithDatabase("session route and retention isolation", () => {
       new Date("2026-04-02T00:00:00.000Z"),
     );
 
-    expect(claim).toMatchObject({ eveSessionId: "wrun_eligible", id: inserted.rows[1]!.id });
+    expect(claim).toMatchObject({ agentSessionId: "wrun_eligible", id: inserted.rows[1]!.id });
   });
 });

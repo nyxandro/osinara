@@ -22,7 +22,7 @@ export interface TimedOutApprovalClaim {
   applicationSessionId: string;
   /** Revalidated Telegram auth for the resumed turn, which acts as the one who answered. */
   auth: SessionAuthContext;
-  eveSessionId: string;
+  agentSessionId: string;
   id: string;
   kind: "question" | "tool-approval";
   leaseToken: string;
@@ -106,7 +106,7 @@ async function resolveOne(
       auth: claim.auth,
       context: [approvalTimeoutContext(claim)],
       responses: [timeoutInputResponse(claim)],
-      sessionId: claim.eveSessionId,
+      sessionId: claim.agentSessionId,
     });
     active = result !== "stale";
     if (!active) {
@@ -114,7 +114,7 @@ async function resolveOne(
       console.error(JSON.stringify({
         approvalId: claim.id,
         code: TIMEOUT_SESSION_INACTIVE,
-        eveSessionId: claim.eveSessionId,
+        agentSessionId: claim.agentSessionId,
       }));
     }
   } catch (error) {
@@ -123,7 +123,7 @@ async function resolveOne(
       approvalId: claim.id,
       code: TIMEOUT_RESPONSE_FAILED,
       error: error instanceof Error ? error.message : String(error),
-      eveSessionId: claim.eveSessionId,
+      agentSessionId: claim.agentSessionId,
     }));
     try {
       await dependencies.repository.failTimeout(claim, TIMEOUT_RESPONSE_FAILED);

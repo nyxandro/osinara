@@ -18,7 +18,7 @@ export default defineTool({
   replaySafe: true,
   approval: ({ toolInput }) => toolInput?.action === "update" ? "user-approval" : "not-applicable",
   description:
-    "В личном чате владельца показать или изменить перенос фактов из внешней группы в личные профили участников. Настройка действует на группу: каждый участник, связанный с семейной учётной записью, получает только сведения о себе; личная и семейная память группе не раскрывается. Доступ появляется после доставки уведомления в группу. Сначала вызови {\"action\":\"list\"}: результат policies содержит актуальные opaque groupRef. Для изменения используй только {\"action\":\"update\",\"enabled\":true|false,\"groupRef\":\"grp_...\"}; update требует Eve HITL. Не придумывай groupRef и не используй Telegram chat ID.",
+    "В личном чате владельца показать или изменить перенос фактов из внешней группы в личные профили участников. Настройка действует на группу: каждый участник, связанный с семейной учётной записью, получает только сведения о себе; личная и семейная память группе не раскрывается. Доступ появляется после доставки уведомления в группу. Сначала вызови {\"action\":\"list\"}: результат policies содержит актуальные opaque groupRef. Для изменения используй только {\"action\":\"update\",\"enabled\":true|false,\"groupRef\":\"grp_...\"}; update требует подтверждения человека. Не придумывай groupRef и не используй Telegram chat ID.",
   inputSchema: profileProjectionInputSchema,
   async execute(input, ctx) {
     requirePrivateTelegramOwner(ctx);

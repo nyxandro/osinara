@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `startAgent`, `stopAgent`, `killAgent`: runs `application-under-test.ts` as a child process,
- *   waits until it serves `/eve/v1/health`, stops it with SIGTERM or kills it with SIGKILL.
+ *   waits until it serves `/v1/health`, stops it with SIGTERM or kills it with SIGKILL.
  * - `postUpdate`, `drain`: the webhook and the internal drain, as Telegram and the ingress worker
  *   call them.
  * - `waitForIngress`, `waitUntil`: polling the database until the application got there.
@@ -102,12 +102,12 @@ async function post(agent: RunningAgent, path: string, body: unknown): Promise<n
 }
 
 export async function postUpdate(agent: RunningAgent, update: Record<string, unknown>): Promise<void> {
-  const status = await post(agent, "/eve/v1/telegram", update);
+  const status = await post(agent, "/v1/telegram", update);
   if (status !== 200) throw new Error(`TEST_WEBHOOK_REJECTED: ${status}`);
 }
 
 export async function drain(agent: RunningAgent): Promise<void> {
-  const status = await post(agent, "/eve/v1/telegram-drain", {});
+  const status = await post(agent, "/v1/telegram-drain", {});
   if (status !== 200) throw new Error(`TEST_DRAIN_REJECTED: ${status}`);
 }
 

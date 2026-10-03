@@ -5,7 +5,7 @@
  * - `completedTelegramOutput`: separates visible text from terminal reaction directives.
  * - Pre-tool assistant chunks remain hidden because Telegram cannot render them ephemerally.
  * - Empty model steps remain invisible to avoid technical Telegram noise.
- * - Eve's `message: null` after a final step is the model's deliberate silence, not noise.
+ * - The runtime's `message: null` after a final step is the model's deliberate silence, not noise.
  * - The model may mark a final answer as a standalone message instead of a reply.
  * - `telegramOutputWithoutMemoryDirective`: the memory-usage line leaves on every branch.
  */
@@ -30,7 +30,7 @@ describe("completedTelegramOutput", () => {
     expect(
       completedTelegramOutput({
         finishReason: "tool-calls",
-        message: "Молчу <eve-empty-delivery/>",
+        message: "Молчу <empty-delivery/>",
       }),
     ).toBeNull();
   });
@@ -119,7 +119,7 @@ describe("completedTelegramOutput", () => {
     ).toEqual({ kind: "progress", message: "Секунду, ищу." });
   });
 
-  it("recognizes Eve's undelivered final step as the model's deliberate silence", () => {
+  it("recognizes an undelivered final step as the model's deliberate silence", () => {
     expect(completedTelegramOutput({ finishReason: "stop", message: null })).toEqual({ kind: "silence" });
   });
 });

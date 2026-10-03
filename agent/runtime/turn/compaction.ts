@@ -9,11 +9,9 @@
  * - `todoCompactionMessage`: the open task list, re-added after a compaction.
  * - `summarizeWithModel`, `CompactionSummaryRequest`: the summary call on the step's model.
  *
- * Derived from eve 0.40.0 `harness/compaction.ts`, `execution/session.ts` (window settings) and
- * `runtime/framework-tools/todo.ts` (`getTodoCompactionMessage`) (Apache-2.0, see NOTICE-eve).
- * Changes, as Osinara's patch required: one summary call per compaction. When the summary with
- * the text-only recent tail still does not fit, the turn fails with a coded error instead of
- * buying another summary call with a smaller tail.
+ * One summary call per compaction: when the summary with the text-only recent tail still does not
+ * fit, the turn fails with a coded error instead of buying another summary call with a smaller tail.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { generateText, type LanguageModel, type ModelMessage } from "ai";
 import type { SharedV4ProviderOptions } from "@ai-sdk/provider";
@@ -45,7 +43,7 @@ export interface CompactionSummaryRequest extends CompactionPrompt {
   readonly providerOptions: SharedV4ProviderOptions | undefined;
 }
 
-/** The step's own model and provider options, deterministic, as Eve's compaction called it. */
+/** The step's own model and provider options, deterministic. */
 export async function summarizeWithModel(request: CompactionSummaryRequest): Promise<string> {
   const result = await generateText({
     abortSignal: request.abortSignal,
@@ -61,7 +59,7 @@ export async function summarizeWithModel(request: CompactionSummaryRequest): Pro
 const COMPACTION_RECENT_WINDOW_SIZE = 10;
 const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
 const CAPPED_RESULT_ANNOTATION =
-  "[Truncated by eve: tool result reduced during context compaction. Re-run the tool if you need the full output.]";
+  "[Truncated: tool result reduced during context compaction. Re-run the tool if you need the full output.]";
 
 type ContentPart = Exclude<ModelMessage["content"], string>[number];
 

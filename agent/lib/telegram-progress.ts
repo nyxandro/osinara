@@ -17,7 +17,7 @@
  * policy never receives.
  */
 import { AppError } from "./app-error.js";
-import { EMPTY_DELIVERY_MARKER } from "../runtime/turn/step-history.js";
+import { containsEmptyDeliveryMarker } from "../runtime/turn/step-history.js";
 import {
   readMemoryUsageDirective,
   type MemoryUsageDeclaration,
@@ -61,7 +61,7 @@ export function completedTelegramOutput(data: {
     if (
       !progress ||
       progress.includes(TELEGRAM_REACTION_DIRECTIVE_FRAGMENT) ||
-      progress.includes(EMPTY_DELIVERY_MARKER)
+      containsEmptyDeliveryMarker(progress)
     ) {
       return null;
     }

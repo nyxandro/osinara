@@ -85,7 +85,7 @@ answer in `/opt/osinara/tls/.env` as `OSINARA_TLS_MODE`; `osinara status`, `doct
 | Mode | What the installer does | Preflight |
 | --- | --- | --- |
 | `managed` | Writes `/opt/osinara/tls/compose.yaml` (Traefik 3, project `osinara-tls`) and starts it after the application. | Ports `80`, `443` and `8082` must be free. |
-| `external` | Writes no Compose file and starts no proxy. The operator's existing proxy must publish `https://HOSTNAME` itself. | Port `8082` must be free. The installer briefly answers `127.0.0.1:8082/eve/v1/health` with a random token and requests `https://HOSTNAME/eve/v1/health`: the token proves a host-level proxy forwards end to end; `502`/`503`/`504` is accepted from a containerized proxy whose upstream `edge` does not exist yet; any other answer (`OSINARA_INSTALL_EXTERNAL_PROXY_MISROUTED`) or no answer (`OSINARA_INSTALL_EXTERNAL_PROXY_UNREACHABLE`) fails the install before migration. |
+| `external` | Writes no Compose file and starts no proxy. The operator's existing proxy must publish `https://HOSTNAME` itself. | Port `8082` must be free. The installer briefly answers `127.0.0.1:8082/v1/health` with a random token and requests `https://HOSTNAME/v1/health`: the token proves a host-level proxy forwards end to end; `502`/`503`/`504` is accepted from a containerized proxy whose upstream `edge` does not exist yet; any other answer (`OSINARA_INSTALL_EXTERNAL_PROXY_MISROUTED`) or no answer (`OSINARA_INSTALL_EXTERNAL_PROXY_UNREACHABLE`) fails the install before migration. |
 
 Files under `/opt/osinara/tls/` (all `root:root`):
 
@@ -94,7 +94,7 @@ Files under `/opt/osinara/tls/` (all `root:root`):
 | `.env` | `0600` | `OSINARA_HOSTNAME=…` and `OSINARA_TLS_MODE=managed` or `OSINARA_TLS_MODE=external`. |
 | `compose.yaml` | `0644` | Traefik project; present only in `managed` mode. |
 | `dynamic/` | `0750` | Traefik file-provider directory, watched for changes. |
-| `dynamic/osinara.yaml` | `0644` | Osinara router: `Host(HOSTNAME)` → `http://edge:80` with a `/eve/v1/health` health check. The installer substitutes the real hostname, so the file needs no environment. Written in both modes; in `external` mode it is a reference for the operator's own proxy configuration. |
+| `dynamic/osinara.yaml` | `0644` | Osinara router: `Host(HOSTNAME)` → `http://edge:80` with a `/v1/health` health check. The installer substitutes the real hostname, so the file needs no environment. Written in both modes; in `external` mode it is a reference for the operator's own proxy configuration. |
 
 **Sharing the managed Traefik with other projects on the same host.** Add one file per project to
 `/opt/osinara/tls/dynamic/` (for example `yana.yaml`) with its own routers, services, and middlewares.
@@ -113,7 +113,7 @@ the entrypoint name `websecure`, the certificate resolver name `letsencrypt`, an
 keeps the `{{ env "OSINARA_HOSTNAME" }}` template for hosts that run Traefik with that variable.) Never bind-mount `/opt/osinara/tls/dynamic` into a foreign proxy before installation: Docker
 would create `/opt/osinara` and the installer would refuse with `OSINARA_INSTALL_EXISTING_STATE`.
 If the installation ends with `OSINARA_INSTALL_STATE_AMBIGUOUS` because public HTTPS never became
-healthy, fix the proxy, confirm `https://HOSTNAME/eve/v1/health`, and finish the Telegram webhook
+healthy, fix the proxy, confirm `https://HOSTNAME/v1/health`, and finish the Telegram webhook
 registration manually with `setWebhook` using the secret token from `/opt/osinara/.env`; the
 installer never reruns after its migration marker.
 
@@ -135,22 +135,20 @@ sed -i -e '$a\' /opt/osinara/tls/.env                       # guarantee a traili
 grep -q '^OSINARA_TLS_MODE=' /opt/osinara/tls/.env || printf 'OSINARA_TLS_MODE=managed\n' >> /opt/osinara/tls/.env
 chmod 0600 /opt/osinara/tls/.env
 docker compose --env-file /opt/osinara/tls/.env --file /opt/osinara/tls/compose.yaml up -d --wait
-curl --fail https://HOSTNAME/eve/v1/health && rm /opt/osinara/tls/traefik-dynamic.yaml*
+curl --fail https://HOSTNAME/v1/health && rm /opt/osinara/tls/traefik-dynamic.yaml*
 ```
 
 The `osinara-tls-traefik-data` volume (ACME storage) is preserved by that restart; certificates are
 not reissued.
 
-Releases up to v0.34 ran on Eve `0.40.0` with the `@workflow/world-postgres` backend in the
-separate `osinara_workflow` database inside the existing PostgreSQL service. The agent's own runtime
-no longer uses that database: after the application migrations the `migrate` service reads it to
-carry each active conversation's history over (`import-eve-history`; a repeated run changes
-nothing), and the deploy controller still checks idleness against it. On a server that ran Eve the
-database is not changed and stays, backups included, until a later cleanup release removes it. A
-fresh installation has no such database: nothing creates it any more, and the import, having no
-history to carry over, does not connect to it.
+Releases up to v0.34 kept agent state in a separate `osinara_workflow` database inside the
+existing PostgreSQL service; v0.35 carried each active conversation's history over from it into the
+application database. The application no longer reads it. The deploy controller still checks
+idleness against it and includes it in backups until a later cleanup release removes the database.
+A fresh installation has no such database. `WORKFLOW_POSTGRES_URL` in the environment of such a
+server is no longer read either.
 
-During the one-time cutover from the Eve `0.32.0` local world, the controller archives the current
+During the one-time cutover from the v0.32 local workflow volume, the controller archives the current
 `osinara-production-eve-workflow-data-v032` volume and preserves it for explicit rollback after the
 PostgreSQL-backed candidate passes health checks.
 
@@ -274,7 +272,7 @@ bring test stacks up only for a run and take them down afterwards. The disk sche
 `DEEPSEEK_API_KEY`; during the v0.15.2 bridge it gains `MODEL_API_KEY` with the exact same credential
 token while retaining `DEEPSEEK_API_KEY` for the rollback window. It also contains
 `POSTGRES_PASSWORD`, the required internal application `DATABASE_URL`, `CLI_PROXY_API_KEY`,
-`WORKFLOW_POSTGRES_URL`, `GROQ_API_KEY`, the optional `ELEVENLABS_API_KEY`,
+`GROQ_API_KEY`, the optional `ELEVENLABS_API_KEY`,
 Telegram secrets, and environment-specific integration
 settings. It must never contain or export any of the six `OSINARA_*_IMAGE` variables or
 `SANDBOX_RUNTIME_IMAGE`; those values exist only in a validated per-release `release.env`.
@@ -462,7 +460,7 @@ verifies those durable volumes and free space, writes and validates a logical du
 database and, when present, the separate `osinara_workflow` database. It then stops application
 writers, archives `google-workspace-credentials`, `tool-environments`, `workspace-data`, and any
 current release-owned local Workflow volume, and validates every artifact. During the one-time
-PostgreSQL Workflow cutover the old Eve `0.32.0` volume is archived and deliberately preserved for
+PostgreSQL Workflow cutover the old v0.32 workflow volume is archived and deliberately preserved for
 explicit rollback; later backups use `workflow-postgres.dump` instead of a local Workflow volume.
 Any other current-owned durable volume missing from the candidate is forbidden. A missing
 current-owned volume or a pre-existing candidate-only volume fails closed, so deploy never creates

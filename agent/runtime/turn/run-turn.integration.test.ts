@@ -137,7 +137,7 @@ async function releaseRunner(turnId: string) {
     expect(await history(sessionId)).toHaveLength(4);
   });
 
-  it("shows the model a broken tool input as the error Eve reported", async () => {
+  it("shows the model a broken tool input as the reference error", async () => {
     const sessionId = await newTestSession();
     const model = scriptedModel(
       { ...toolCalls([{ id: "call-1", input: {}, name: "note" }]), toolCalls: [{ input: "[1]", toolCallId: "call-1", toolName: "note" }] },
@@ -266,7 +266,7 @@ async function releaseRunner(turnId: string) {
     const { events, observer } = recordingObserver();
     const turn = await startMessageTurn(sessionId, "что нового?");
 
-    const outcome = await runTurn(testRuntime({ agent: testAgent({}), callModel: scriptedModel(reply("<eve-empty-delivery/>")).callModel, observer }), turn.id, RUN);
+    const outcome = await runTurn(testRuntime({ agent: testAgent({}), callModel: scriptedModel(reply("<empty-delivery/>")).callModel, observer }), turn.id, RUN);
 
     expect(outcome).toEqual({ status: "completed", text: null });
     expect(events.find((event) => event.kind === "stepText")).toMatchObject({ message: null });

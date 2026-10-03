@@ -64,7 +64,7 @@ describe("minute scheduler", () => {
     expect(minutes).toHaveLength(2);
   });
 
-  it("skips a schedule's minute while its previous cycle still runs, as Eve's Nitro tasks did", async () => {
+  it("skips a schedule's minute while its previous cycle still runs", async () => {
     vi.useFakeTimers({ now: at("2026-10-02T13:47:59") });
     const infos = vi.spyOn(console, "info").mockImplementation(() => {});
     let finish!: () => void;

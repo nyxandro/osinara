@@ -5,8 +5,8 @@
  * - `todo`: the built-in definition the model sees as `todo`.
  * - `executeTodoTool`: replaces the list when `todos` is given, then returns it with counts.
  *
- * Ported from eve 0.40.0 `runtime/framework-tools/todo.ts` (Apache-2.0, see NOTICE-eve).
- * Changes: the list lives in the session tool state (`ctx.state`); texts are verbatim.
+ * The list lives in the session tool state (`ctx.state`).
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { z } from "zod";
 

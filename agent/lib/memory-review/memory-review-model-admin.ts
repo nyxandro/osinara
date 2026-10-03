@@ -6,22 +6,22 @@ import { lockReviewAttempt, requireReviewSources, reviewAttemptHasWrites, hasPen
 import { recordReviewModelWait } from "./memory-review-model-recovery.js";
 
 export async function recoverEmptyReviewModelFailure(input: {
-  batchId: string; expectedEveSessionId: string; causeCode: string; reason: string; modelRouteKey: string;
-}, dependencies: { isEveSessionTerminal(id: string): Promise<boolean> }): Promise<"waiting" | "replayed"> {
+  batchId: string; expectedAgentSessionId: string; causeCode: string; reason: string; modelRouteKey: string;
+}, dependencies: { isAgentSessionTerminal(id: string): Promise<boolean> }): Promise<"waiting" | "replayed"> {
   if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu.test(input.batchId) ||
-      !input.expectedEveSessionId.trim() || !isRecoverableModelCode(input.causeCode) ||
+      !input.expectedAgentSessionId.trim() || !isRecoverableModelCode(input.causeCode) ||
       !input.reason.trim() || input.reason.length > 2000 || !/^[0-9a-f]{64}$/u.test(input.modelRouteKey)) {
     throw new AppError("AGENT_MEMORY_REVIEW_RECOVERY_INPUT_INVALID", "Укажите пакет, точную сессию, подтверждённую причину сбоя модели и пояснение");
   }
   // Native terminal state is immutable. Verify it before taking application locks across databases.
-  if (!await dependencies.isEveSessionTerminal(input.expectedEveSessionId)) throw new AppError(
+  if (!await dependencies.isAgentSessionTerminal(input.expectedAgentSessionId)) throw new AppError(
     "AGENT_MEMORY_REVIEW_RECOVERY_SESSION_UNCONFIRMED", "Завершение исходной сессии не подтверждено. Восстановление не выполнено",
   );
   const client = await database().connect();
   try {
     await client.query("BEGIN");
     const batch = await lockReviewAttempt(client, input.batchId);
-    if (!batch || batch.batch_kind !== "background" || batch.eve_session_id !== input.expectedEveSessionId ||
+    if (!batch || batch.batch_kind !== "background" || batch.eve_session_id !== input.expectedAgentSessionId ||
         !batch.eve_turn_id || !batch.application_session_id) throw new AppError(
       "AGENT_MEMORY_REVIEW_RECOVERY_STATE_CHANGED", "Состояние пакета изменилось или его контекст отсутствует. Повторите inspect",
     );
@@ -32,7 +32,7 @@ export async function recoverEmptyReviewModelFailure(input: {
     const session = await client.query(
       `SELECT 1 FROM conversation_sessions WHERE id = $1 AND retired_at IS NOT NULL
         AND eve_session_id = $2 AND memory_review_batch_id = $3 FOR UPDATE SKIP LOCKED`,
-      [batch.application_session_id, input.expectedEveSessionId, batch.id],
+      [batch.application_session_id, input.expectedAgentSessionId, batch.id],
     );
     if (session.rowCount !== 1) throw new AppError(
       "AGENT_MEMORY_REVIEW_RECOVERY_SESSION_UNCONFIRMED", "Исходный контекст проверки ещё не закрыт или недоступен",
@@ -47,7 +47,7 @@ export async function recoverEmptyReviewModelFailure(input: {
       SELECT family_id, 'memory_review.operator_model_recovery', $2, $3::jsonb
       FROM application_conversations WHERE id = $1`, [batch.conversation_id, batch.id, JSON.stringify({
       reason: input.reason.trim(), previousDiagnosticCode: batch.diagnostic_code,
-      causeCode: input.causeCode, expectedEveSessionId: input.expectedEveSessionId,
+      causeCode: input.causeCode, expectedAgentSessionId: input.expectedAgentSessionId,
     })]);
     await client.query("COMMIT");
     return "waiting";

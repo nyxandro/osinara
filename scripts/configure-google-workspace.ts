@@ -19,7 +19,7 @@ import { basename, dirname, resolve } from "node:path";
 import { z } from "zod";
 
 const ENCRYPTION_KEY_BYTES = 32;
-const GOOGLE_OAUTH_CALLBACK_PATH = "/eve/v1/google-oauth/callback";
+const GOOGLE_OAUTH_CALLBACK_PATH = "/v1/google-oauth/callback";
 const TARGET_ENVIRONMENT_KEYS = [
   "GOOGLE_OAUTH_CLIENT_ID",
   "GOOGLE_OAUTH_CLIENT_SECRET",

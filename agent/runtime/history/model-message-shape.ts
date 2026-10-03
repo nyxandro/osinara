@@ -23,7 +23,7 @@ export function firstNonJsonPath(value: unknown, path: string): string | null {
     }
     return null;
   }
-  // devalue restores a prototype-less object as such; for JSON it is an ordinary object.
+  // A prototype-less object serializes to JSON as an ordinary object.
   const prototype = typeof value === "object" ? Object.getPrototypeOf(value) : undefined;
   if (prototype !== Object.prototype && prototype !== null) return path;
   for (const [key, item] of Object.entries(value as object)) {

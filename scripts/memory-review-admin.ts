@@ -27,14 +27,14 @@ try {
       message: "Пакет пропущен, уже записанные воспоминания оставлены. Остаток его диапазона разобран не будет" }));
   } else if (action === "recover-model" && batchId && reason && extra.length === 2) {
     const { modelProviderConfig } = await import("../agent/lib/model-provider-config.js");
-    const outcome = await recoverEmptyReviewModelFailure({ batchId, expectedEveSessionId: reason,
+    const outcome = await recoverEmptyReviewModelFailure({ batchId, expectedAgentSessionId: reason,
       causeCode: extra[0]!, reason: extra[1]!,
       modelRouteKey: modelRouteKey(modelProviderConfig.agent.transport, modelProviderConfig.agent.models.primary.id),
-    }, { isEveSessionTerminal: isRuntimeSessionIdle });
+    }, { isAgentSessionTerminal: isRuntimeSessionIdle });
     console.log(JSON.stringify({ code: "AGENT_MEMORY_REVIEW_RECOVERY_WAITING", batchId, outcome,
       message: "Пакет ожидает нового успешного обращения к модели. Повтор запустит штатный диспетчер" }));
   } else {
-    throw new AppError("AGENT_MEMORY_REVIEW_ADMIN_USAGE", "Используйте inspect, skip-unbound ID ПРИЧИНА, skip-partial ID ПРИЧИНА или recover-model ID EVE_SESSION_ID КОД_СБОЯ ПРИЧИНА");
+    throw new AppError("AGENT_MEMORY_REVIEW_ADMIN_USAGE", "Используйте inspect, skip-unbound ID ПРИЧИНА, skip-partial ID ПРИЧИНА или recover-model ID AGENT_SESSION_ID КОД_СБОЯ ПРИЧИНА");
   }
 } catch (error) {
   console.error(error);

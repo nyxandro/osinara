@@ -5,10 +5,9 @@
  * - `loadSkill`: the built-in definition the model sees as `load_skill`.
  * - `loadSkillFromSandbox`: reads `SKILL.md` under the sandbox skill root without its front matter.
  *
- * Ported from eve 0.40.0 `runtime/framework-tools/skill.ts` and `runtime/skills/sandbox-access.ts`
- * (Apache-2.0, see NOTICE-eve). Changes: Osinara has no authored or connection skills, so only the
- * turn's listed skills load; the turn syncs their packages into the sandbox before the first step.
- * Texts are verbatim.
+ * Only the turn's listed skills load; the turn syncs their packages into the sandbox before the
+ * first step.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { z } from "zod";
 

@@ -303,10 +303,10 @@ export const telegramIngressRepository: TelegramIngressRepository = {
     });
   },
 
-  async fail(updateId, leaseToken, failure, eveSessionId) {
+  async fail(updateId, leaseToken, failure, agentSessionId) {
     requireFailure(failure);
-    if (eveSessionId !== undefined) {
-      requireNonEmpty(eveSessionId, "AGENT_TELEGRAM_SESSION_INVALID", "Не задан идентификатор сессии сообщения");
+    if (agentSessionId !== undefined) {
+      requireNonEmpty(agentSessionId, "AGENT_TELEGRAM_SESSION_INVALID", "Не задан идентификатор сессии сообщения");
     }
     await requireActiveLease(updateId, leaseToken, async () => {
       const result = await database().query(
@@ -329,7 +329,7 @@ export const telegramIngressRepository: TelegramIngressRepository = {
              AND session.kind = 'canonical' AND session.retired_at IS NULL
            RETURNING session.id
          ) SELECT update_id FROM finished`,
-        [updateId, leaseToken, failure.code, failure.message, eveSessionId ?? null],
+        [updateId, leaseToken, failure.code, failure.message, agentSessionId ?? null],
       );
       return result.rowCount ?? 0;
     });

@@ -4,7 +4,7 @@
  * Constructs covered:
  * - `createControlledWebFetch`: injectable proxied HTTP executor with strict URL and resource limits;
  *   a refusing site's status reaches the model, its origin only the diagnostics.
- * - `controlledWebFetchTool`: Eve-compatible custom `web_fetch` definition.
+ * - `controlledWebFetchTool`: custom `web_fetch` definition with the built-in input contract.
  */
 import { Buffer } from "node:buffer";
 
@@ -29,7 +29,7 @@ function response(body: BodyInit | null, init?: ResponseInit): Response {
 }
 
 describe("controlled external-group web fetch", () => {
-  it("preserves the Eve input contract and always dispatches through the fixed proxy", async () => {
+  it("preserves the built-in input contract and always dispatches through the fixed proxy", async () => {
     const fetch = vi.fn(async () => response("<h1>Hello</h1>", {
       headers: { "content-type": "text/html; charset=utf-8" },
     }));

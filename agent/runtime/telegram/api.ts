@@ -7,8 +7,8 @@
  *   is stored in the database and in session history, so it never changes.
  * - `splitTelegramMessageText`: chunks within Telegram's 4096-character cap.
  *
- * Derived from eve 0.40.0 `public/channels/telegram/api.ts` (Apache-2.0, see NOTICE-eve).
- * Changes: helpers come from `../json.ts`; the bot token has no `TELEGRAM_BOT_TOKEN` fallback.
+ * The bot token is passed in; there is no environment fallback.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { isObject, parseJsonObject, type JsonObject } from "../json.js";
 import { parseTelegramChatType, type TelegramChatType } from "./inbound.js";

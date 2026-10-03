@@ -3,7 +3,7 @@
  *
  * Constructs covered:
  * - The chat shows `record_voice` for the whole synthesis: at once, again after the confirmation
- *   delay (Eve's own typing status for the tool call may arrive just after the first one), then
+ *   delay (the runtime's own typing status for the tool call may arrive just after the first one), then
  *   inside every five-second window Telegram keeps a chat action alive.
  * - The status stops with the operation and never outlives it, even with a request in flight.
  * - The status is presentation only: its failure never fails the voice note.

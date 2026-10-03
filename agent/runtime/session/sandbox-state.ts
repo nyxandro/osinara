@@ -5,7 +5,7 @@
  * - `loadSandboxState`: the stored metadata, or `null` before the session's first sandbox use.
  * - `saveFirstSandboxState`: records it once; a later open is checked against it.
  *
- * The shape is the runner backend's (`runner-sandbox-state.ts`); imported sessions carry Eve's.
+ * The shape is the runner backend's (`runner-sandbox-state.ts`).
  */
 import type { Pool } from "pg";
 

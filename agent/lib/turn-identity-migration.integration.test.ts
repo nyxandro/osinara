@@ -1,10 +1,10 @@
 /**
- * Eve execution identity migration integration tests.
+ * Migration 058: execution identity of turn-owned rows.
  *
  * Constructs covered:
- * - Existing turn-owned rows receive their verified Eve session identity.
+ * - Existing turn-owned rows receive their verified agent session identity.
  * - Catch-up extraction rows remain explicitly sessionless.
- * - Repeated Eve turn ids are isolated between framework sessions.
+ * - Repeated turn ids are isolated between agent sessions.
  */
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -19,10 +19,10 @@ const describeWithDatabase = process.env.RUN_DATABASE_INTEGRATION_TESTS === "tru
 const TEST_SCHEMA = "test_eve_turn_identity_migration";
 const MIGRATION_NAME = "058_scope_eve_turn_identity.sql";
 
-describeWithDatabase("058 Eve turn identity migration", () => {
+describeWithDatabase("058 turn identity migration", () => {
   afterAll(closeDatabase);
 
-  it("backfills persisted rows and scopes repeated turn ids by Eve session", async () => {
+  it("backfills persisted rows and scopes repeated turn ids by agent session", async () => {
     const client = await database().connect();
     try {
       await client.query(`DROP SCHEMA IF EXISTS ${TEST_SCHEMA} CASCADE`);

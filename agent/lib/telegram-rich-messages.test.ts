@@ -2,8 +2,8 @@
  * Native Telegram Rich Message delivery tests.
  *
  * Constructs covered:
- * - RichBlockThinking uses one stable draft per private chat/topic and Eve turn.
- * - Private drafts reject a missing Eve turn identity before Telegram delivery.
+ * - RichBlockThinking uses one stable draft per private chat/topic and agent turn.
+ * - Private drafts reject a missing turn identity before Telegram delivery.
  * - Completed output is persisted with sendRichMessage and anchors group conversations.
  * - The first chunk of a group response replies to the verified triggering message.
  * - Telegram rejection and ambiguous transport failures remain fail-fast without retries.
@@ -89,7 +89,7 @@ describe("Telegram rich drafts", () => {
     );
   });
 
-  it("keeps repeated updates stable within the same Eve turn", async () => {
+  it("keeps repeated updates stable within the same turn", async () => {
     const telegramFetch = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async () => telegramResponse(true));
@@ -102,7 +102,7 @@ describe("Telegram rich drafts", () => {
     );
   });
 
-  it("does not resume a pre-approval draft after HITL starts the next Eve turn", async () => {
+  it("does not resume a pre-approval draft after HITL starts the next turn", async () => {
     const telegramFetch = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async () => telegramResponse(true));
@@ -128,7 +128,7 @@ describe("Telegram rich drafts", () => {
     expect(telegramFetch).not.toHaveBeenCalled();
   });
 
-  it("rejects a private draft without an Eve turn identity before delivery", async () => {
+  it("rejects a private draft without a turn identity before delivery", async () => {
     const telegramFetch = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(telegramResponse(true));

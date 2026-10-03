@@ -8,7 +8,7 @@ const APPROVAL = approvalRequest({ callId: "c1", input: { group: "g" }, toolName
 const QUESTION = questionRequest({ callId: "c2", input: { prompt: "Дальше?" }, toolName: "ask_question" });
 
 describe("input requests", () => {
-  it("writes the pending-approvals note with Eve's wording, only for approvals", () => {
+  it("writes the pending-approvals note with the reference wording, only for approvals", () => {
     expect(renderPendingApprovalsNote([APPROVAL, QUESTION])).toBe([
       "[Pending approvals]",
       "The following tool calls are awaiting approval and have not executed:",

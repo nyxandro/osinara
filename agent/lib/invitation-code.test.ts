@@ -3,7 +3,7 @@
  *
  * Constructs covered:
  * - `createInvitationCode`: generates Telegram-compatible one-time tokens.
- * - `createInvitationCodeForOperation`: deterministically survives Eve step replay.
+ * - `createInvitationCodeForOperation`: deterministically survives a step replay.
  * - `parseInvitationStartCommand`: accepts only an exact Telegram start command.
  */
 import { describe, expect, it } from "vitest";
@@ -41,7 +41,7 @@ describe("family invitation code", () => {
     ).toBeNull();
   });
 
-  it("derives the same high-entropy token for one durable Eve operation", () => {
+  it("derives the same high-entropy token for one durable tool operation", () => {
     const first = createInvitationCodeForOperation("call-1", "signing-secret");
     const replay = createInvitationCodeForOperation("call-1", "signing-secret");
     const other = createInvitationCodeForOperation("call-2", "signing-secret");

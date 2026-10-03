@@ -64,7 +64,7 @@ export async function recoverOrphanedConversationRuns(client: PoolClient, now: D
     await finishActiveAgentScheduleRun(client, {
       applicationSessionId: orphan.application_session_id,
       completedAt: now,
-      eveSessionId: orphan.eve_session_id,
+      agentSessionId: orphan.eve_session_id,
       outcome: { errorCode: WAKEUP_TURN_LOST_CODE, kind: "failed" },
       runId: orphan.run_id,
     });

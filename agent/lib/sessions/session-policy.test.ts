@@ -16,7 +16,7 @@ import {
 const NOW = new Date("2026-07-12T12:00:00.000Z");
 
 describe("session rotation policy", () => {
-  it("keeps the existing Eve continuation token for generation zero", () => {
+  it("keeps the existing continuation token for generation zero", () => {
     expect(continuationTokenForGeneration("101::", 0)).toBe("101::");
     expect(continuationTokenForGeneration("101::", 1)).toBe("101:::osinara:1");
   });

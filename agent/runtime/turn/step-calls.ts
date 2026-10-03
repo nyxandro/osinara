@@ -10,10 +10,9 @@
  *   tool is no longer granted does not run. An `agent` call runs as a child turn (`DelegateCall`).
  * - `UNKNOWN_OUTCOME_OUTPUT`: what the model reads about a call whose outcome is unknown.
  *
- * Derived from eve 0.40.0 `harness/tool-loop.ts` (`handleStepResult`: invalid-input results,
- * approval and question extraction) and AI SDK 7.0.60 `streamText` tool execution (Apache-2.0,
- * see NOTICE-eve). Changes: the runtime runs the tools after the model call and journals every
- * transition, so a restart neither repeats a finished call nor guesses about an interrupted one.
+ * The runtime runs the tools after the model call and journals every transition, so a restart
+ * neither repeats a finished call nor guesses about an interrupted one.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { ModelMessage } from "ai";
 

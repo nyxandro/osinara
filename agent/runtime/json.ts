@@ -6,8 +6,7 @@
  * - `parseJsonObject`: normalizes an option bag into a JSON object, dropping `undefined` fields.
  * - `isObject`, `isNonEmptyString`: guards for duck-typing untrusted payloads.
  *
- * Derived from eve 0.40.0 `shared/json.ts` and `shared/guards.ts` (Apache-2.0, see NOTICE-eve).
- * Changes: only the functions the runtime uses; behavior unchanged.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 export type JsonPrimitive = boolean | number | string | null;
 export type JsonArray = readonly JsonValue[];

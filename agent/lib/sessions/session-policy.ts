@@ -20,7 +20,7 @@ export interface SessionRotationState {
 }
 
 export function continuationTokenForGeneration(baseToken: string, generation: number): string {
-  // Generation zero deliberately retains Eve's old key so deploy does not reset live chats.
+  // Generation zero keeps the original key, so a chat keeps its address across releases.
   return generation === 0 ? baseToken : `${baseToken}:osinara:${generation}`;
 }
 

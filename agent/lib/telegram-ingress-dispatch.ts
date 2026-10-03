@@ -40,7 +40,7 @@ async function bindIngressTurn(
   ingress: { readonly dispatchId: string; readonly leaseToken: string; readonly updateId: string },
   target: TelegramDispatchTarget,
 ): Promise<void> {
-  // The start index belonged to Eve's event stream; it stays filled only for the table's constraint.
+  // `dispatch_start_index` is no longer read; it stays filled only for the table's constraint.
   // The lease token: a worker whose lease expired and went to another worker binds nothing, even
   // though an interrupted dispatch keeps its attempt id for the next worker.
   const result = await client.query(

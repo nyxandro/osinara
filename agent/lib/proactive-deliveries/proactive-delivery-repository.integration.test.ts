@@ -26,7 +26,7 @@ describeWithDatabase("proactive delivery repository", () => {
   });
   afterAll(async () => closeDatabase());
 
-  it("isolates personal history and advances pending context after Eve accepts the turn", async () => {
+  it("isolates personal history and advances pending context after the runtime accepts the turn", async () => {
     const family = await database().query<{ id: string }>(
       "INSERT INTO families (name) VALUES ('Журнал') RETURNING id",
     );

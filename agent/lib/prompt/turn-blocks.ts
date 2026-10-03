@@ -256,7 +256,7 @@ export function createMemoryBlockResolver(dependencies: {
   reportFailure: (incident: MemoryContextIncident) => Promise<void>;
   authorize: (ctx: TurnBlockContext) => MemoryAuthorization;
   createProfile: (auth: MemoryAuthorization, input: CreateProfileViewInput) => Promise<ProfileView>;
-  openSelectionWindow: (conversationId: string, eveSessionId: string, turnId: string) => Promise<number>;
+  openSelectionWindow: (conversationId: string, agentSessionId: string, turnId: string) => Promise<number>;
   recordOffered: (
     window: MemorySelectionWindow | null,
     context: MemoryTurnContext,
@@ -293,8 +293,8 @@ export function createMemoryBlockResolver(dependencies: {
       phase = "retrieval";
       // The window exists only where there is a conversation to remember inside; a scheduled run
       // has none, and then the selection behaves as it always did. A turn is identified by its
-      // session together with its id: sessions carried over from Eve number turns inside the session,
-      // so `turn_0` comes round again inside one long conversation.
+      // session together with its id: older sessions number turns inside the session, so `turn_0`
+      // comes round again inside one long conversation.
       //
       // A delegated child inherits the parent's verified auth, conversation included, but it is
       // not a turn of the conversation: it runs inside one. Giving it a window would let its work
@@ -305,7 +305,7 @@ export function createMemoryBlockResolver(dependencies: {
       const window = typeof conversationId === "string"
         ? {
           conversationId,
-          eveSessionId: ctx.session.id,
+          agentSessionId: ctx.session.id,
           turnId,
           turnOrdinal: await dependencies.openSelectionWindow(
             conversationId, ctx.session.id, turnId,

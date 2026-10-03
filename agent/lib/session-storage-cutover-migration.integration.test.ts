@@ -1,5 +1,5 @@
 /**
- * Eve 0.32 application-session cutover migration integration test.
+ * Migration 065: application-session cutover of the v0.32 workflow storage.
  *
  * Constructs covered:
  * - Migration 065 audits and deletes every application session through the real pre-065 FK graph.
@@ -32,7 +32,7 @@ async function applyEarlierMigrations(client: PoolClient): Promise<void> {
   }
 }
 
-describeWithDatabase("065 Eve 0.32 session storage cutover migration", () => {
+describeWithDatabase("065 session storage cutover migration", () => {
   afterAll(closeDatabase);
 
   it("cuts incompatible sessions without deleting application-owned history", async () => {
@@ -45,7 +45,7 @@ describeWithDatabase("065 Eve 0.32 session storage cutover migration", () => {
 
       // The family, group, and user own representative durable application history.
       const family = await client.query<{ id: string }>(
-        "INSERT INTO families (name) VALUES ('Eve 0.32 cutover') RETURNING id",
+        "INSERT INTO families (name) VALUES ('v0.32 cutover') RETURNING id",
       );
       const user = await client.query<{ id: string }>(
         "INSERT INTO users (telegram_user_id, display_name) VALUES ('65001', 'Анна') RETURNING id",
@@ -111,7 +111,7 @@ describeWithDatabase("065 Eve 0.32 session storage cutover migration", () => {
            (family_id, scope, author_telegram_user_id, kind, content, source,
             confirmation, sensitivity, operation_key)
          VALUES ($1, 'family', '65001', 'fact', 'Память переживает cutover', 'test',
-                 'user_confirmed', 'normal', 'eve-032-cutover-memory') RETURNING id`,
+                 'user_confirmed', 'normal', 'v032-cutover-memory') RETURNING id`,
         [family.rows[0]!.id],
       );
 

@@ -9,7 +9,7 @@ import { database } from "../database.js";
 import {
   classifyMissedSessionEvent,
   type SessionEventResult,
-} from "./session-eve-event.js";
+} from "./session-event-order.js";
 
 const POSITIVE_BIGINT_PATTERN = /^[1-9][0-9]*$/u;
 
@@ -25,7 +25,7 @@ function requireSequence(sequence: string): void {
 export const groupTimelineCursorRepository = {
   async advance(
     applicationSessionId: string,
-    eveSessionId: string,
+    agentSessionId: string,
     sequence: string,
   ): Promise<SessionEventResult> {
     requireSequence(sequence);
@@ -35,12 +35,12 @@ export const groupTimelineCursorRepository = {
         WHERE id = $1
           AND eve_session_id = $2
            AND retired_at IS NULL`,
-      [applicationSessionId, eveSessionId, sequence],
+      [applicationSessionId, agentSessionId, sequence],
     );
     if (result.rowCount === 1) return "recorded";
     return await classifyMissedSessionEvent(
       applicationSessionId,
-      eveSessionId,
+      agentSessionId,
       "AGENT_TELEGRAM_TIMELINE_CURSOR_UPDATE_FAILED",
       "Не удалось сохранить позицию истории группового разговора",
     );

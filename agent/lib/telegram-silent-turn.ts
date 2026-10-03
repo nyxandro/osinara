@@ -14,15 +14,15 @@ const SILENT_TURN_CODE = "AGENT_TELEGRAM_SILENT_TURN";
 
 export interface TelegramSilentTurnLogInput {
   auth: { readonly attributes: Readonly<Record<string, unknown>> } | null | undefined;
-  eveSessionId: string;
-  eveTurnId: string;
+  agentSessionId: string;
+  agentTurnId: string;
 }
 
 export interface TelegramSilentTurnLogRecord {
   chatType?: string;
   code: typeof SILENT_TURN_CODE;
-  eveSessionId: string;
-  eveTurnId: string;
+  agentSessionId: string;
+  agentTurnId: string;
   groupType?: string;
   triggeredBy?: string;
 }
@@ -45,8 +45,8 @@ export function telegramSilentTurnLogRecord(
   return {
     code: SILENT_TURN_CODE,
     ...(chatType === undefined ? {} : { chatType }),
-    eveSessionId: input.eveSessionId,
-    eveTurnId: input.eveTurnId,
+    agentSessionId: input.agentSessionId,
+    agentTurnId: input.agentTurnId,
     ...(groupType === undefined ? {} : { groupType }),
     ...(triggeredBy === undefined ? {} : { triggeredBy }),
   };

@@ -23,8 +23,6 @@ export const SESSION_GROUP_ROTATION_LOCK_HASH_SEED = 3;
 export const FAMILY_SKILLS_LOCK_HASH_SEED = 4;
 export const SESSION_RETENTION_LEASE_MS = 15 * 60 * 1_000;
 export const SESSION_RETENTION_DAYS = 1;
-// A cleanup that failed is tried again later instead of parking the session for good.
-export const SESSION_RETENTION_RETRY_MS = 60 * 60 * 1_000;
 export const SESSION_TASK_ABANDONED_DAYS = 7;
 export const SESSION_TASK_MAX_ACTIVE_PER_GROUP_TOPIC = 25;
 export const SESSION_TASK_SWEEP_BATCH_SIZE = 100;
@@ -58,7 +56,6 @@ export const TELEGRAM_ATTACHMENT_REFERENCE_LIST_MAX_LIMIT = 50;
 export const TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED = 1;
 export const TELEGRAM_INGRESS_LEASE_MS = 60 * 1_000;
 export const TELEGRAM_INGRESS_ADMISSION_TIMEOUT_MS = 15 * 60 * 1_000;
-export const TELEGRAM_INGRESS_RECOVERY_MAX_ATTEMPTS = 3;
 // Bound expensive turns on the single-process deployment without letting groups occupy button slots.
 export const TELEGRAM_INGRESS_MESSAGE_CONCURRENCY = 2;
 export const TELEGRAM_INGRESS_CALLBACK_CONCURRENCY = 2;

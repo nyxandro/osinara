@@ -5,8 +5,8 @@
  * - `normalizeModelPath`: the key a stamp is stored under.
  * - `createReadFileStamp`: length and SHA-256 of the content the model last saw.
  *
- * Ported from eve 0.40.0 `runtime/framework-tools/file-state.ts` (Apache-2.0, see NOTICE-eve).
- * Changes: the stamps live in the session tool state (`ctx.state`) instead of Eve's context.
+ * The stamps live in the session tool state (`ctx.state`).
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { createHash } from "node:crypto";
 import { posix } from "node:path";

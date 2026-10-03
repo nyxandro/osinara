@@ -3,10 +3,10 @@
  *
  * Constructs covered:
  * - Pending legacy branches become requester-bound tasks with only exact HITL prompt routes.
- * - Eve Telegram route formulas are preserved for forum and main-topic prompts.
+ * - Telegram route formulas are preserved for forum and main-topic prompts.
  * - Malformed legacy topic identifiers fail with a stable diagnostic instead of coercion.
  * - Non-pending legacy branches retire with retention while scheduled sessions remain separate.
- * - No canonical Eve history is selected or copied during migration.
+ * - No canonical agent history is selected or copied during migration.
  */
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";

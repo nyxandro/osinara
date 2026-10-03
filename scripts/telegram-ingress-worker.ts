@@ -2,7 +2,7 @@
  * Telegram ingress recovery worker.
  *
  * Constructs:
- * - Polls the private Eve drain route so leased/pending updates recover after process restarts.
+ * - Polls the agent's private drain route so leased/pending updates recover after process restarts.
  * - Uses the existing Telegram webhook secret and never exposes the route through Nginx.
  */
 export {};
@@ -20,14 +20,14 @@ if (!internalBaseUrl || !webhookSecret) {
   );
 }
 
-const drainUrl = new URL("/eve/v1/telegram-drain", internalBaseUrl);
+const drainUrl = new URL("/v1/telegram-drain", internalBaseUrl);
 if (
   drainUrl.protocol !== "http:" ||
   drainUrl.hostname !== INTERNAL_AGENT_HOST ||
   drainUrl.port !== INTERNAL_AGENT_PORT ||
   drainUrl.username ||
   drainUrl.password ||
-  drainUrl.pathname !== "/eve/v1/telegram-drain"
+  drainUrl.pathname !== "/v1/telegram-drain"
 ) {
   throw new Error(
     "AGENT_TELEGRAM_WORKER_CONFIG_INVALID: Внутренний адрес drain worker должен быть безопасным HTTP URL",

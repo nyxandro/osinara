@@ -2,8 +2,8 @@
  * Critical main-agent memory path integration tests.
  *
  * Constructs covered:
- * - Step-scoped capability resolution returns Eve-branded `remember` and `load_skill` definitions.
- * - `bindMemoryTurnSources` freezes the current verified Telegram source for the Eve turn.
+ * - Step-scoped capability resolution returns the runtime's `remember` and `load_skill` definitions.
+ * - `bindMemoryTurnSources` freezes the current verified Telegram source for the agent turn.
  * - The emitted `remember` tool persists one group claim, evidence, operation, audit, and index job.
  * - Turn completion releases the source binding, and subagents never receive `remember`.
  * - A durable background review writes from its exact batch source and retires cleanly.
@@ -66,8 +66,8 @@ function sessionContext(input: {
     messages: [],
     session: {
       auth,
-      id: "eve-critical-memory-session",
-      turn: { id: "eve-critical-memory-turn" },
+      id: "agent-critical-memory-session",
+      turn: { id: "agent-critical-memory-turn" },
     },
   };
 }
@@ -109,8 +109,8 @@ function reviewContext(input: {
         },
         initiator: null,
       },
-      id: "eve-background-memory-session",
-      turn: { id: "eve-background-memory-turn" },
+      id: "agent-background-memory-session",
+      turn: { id: "agent-background-memory-turn" },
     },
   };
 }
@@ -213,8 +213,8 @@ describeWithDatabase("critical main-agent memory paths", () => {
     )).resolves.toMatchObject({ rows: [{
       content: "Проект использует синий корпус",
       embedding_job: true,
-      eve_session_id: "eve-critical-memory-session",
-      eve_turn_id: "eve-critical-memory-turn",
+      eve_session_id: "agent-critical-memory-session",
+      eve_turn_id: "agent-critical-memory-turn",
       event_type: "memory.created",
       group_id: group.rows[0]!.id,
       subject_participant_id: participant.rows[0]!.id,
@@ -274,12 +274,12 @@ describeWithDatabase("critical main-agent memory paths", () => {
       new Date("2026-08-13T10:00:01.000Z"),
     );
     expect(await memoryReviewDispatchRepository.markDispatchStarted(batch!, appSession.id)).toBe(true);
-    await sessionRepository.bindEveSession(appSession.id, "eve-background-memory-session");
-    await memoryReviewRepository.bindEveTurn({
+    await sessionRepository.bindAgentSession(appSession.id, "agent-background-memory-session");
+    await memoryReviewRepository.bindAgentTurn({
       applicationSessionId: appSession.id,
       batchId: batch!.batchId,
-      eveSessionId: "eve-background-memory-session",
-      eveTurnId: "eve-background-memory-turn",
+      agentSessionId: "agent-background-memory-session",
+      agentTurnId: "agent-background-memory-turn",
     });
     const context = reviewContext({
       applicationSessionId: appSession.id,
@@ -315,8 +315,8 @@ describeWithDatabase("critical main-agent memory paths", () => {
     await memoryReviewRepository.completeBatch({
       batchId: batch!.batchId,
       completedAt: new Date("2026-08-13T10:00:02.000Z"),
-      eveSessionId: "eve-background-memory-session",
-      eveTurnId: "eve-background-memory-turn",
+      agentSessionId: "agent-background-memory-session",
+      agentTurnId: "agent-background-memory-turn",
     });
     await releaseMemoryTurnSources(context as never);
     await expect(database().query(

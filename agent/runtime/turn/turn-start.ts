@@ -11,15 +11,13 @@
  *   caller's own records (channel state, ingress binding) commit with the turn.
  * - `waitingRequests`: what the session's parked turn waits on.
  *
- * Derived from eve 0.40.0 `harness/input-requests.ts` (`resolvePendingInput`),
- * `harness/hitl/approval-input-requests.ts`, `harness/hitl/question-input-requests.ts` and
- * `harness/pending-input-batches.ts` (Apache-2.0, see NOTICE-eve). Changes:
  * - A session has at most one parked turn: while an approval waits, other turns run without tools,
- *   and a new message dismisses a waiting question, so Eve's list of open batches is one step here.
+ *   and a new message dismisses a waiting question.
  * - A partial answer to several approvals stays on its call; its context lines wait on the parked
  *   turn for the continuation.
  * - Answers that match no waiting request are returned to the caller, which decides how the model
- *   hears about them (Eve turned them into a user message).
+ *   hears about them.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { SessionAuth } from "../context.js";
 import { questionOutput, resolveApprovalOutcome, deniedOutput, stepInputResolved } from "../hitl/input-requests.js";

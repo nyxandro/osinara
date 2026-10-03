@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isEmptyDelivery, stepHistoryMessages, stepTextEvents } from "./step-history.js";
+import { containsEmptyDeliveryMarker, EMPTY_DELIVERY_MARKER, isEmptyDelivery, stepHistoryMessages, stepTextEvents } from "./step-history.js";
 
 describe("step text events", () => {
   it("delivers text written before a tool call as its own message", () => {
@@ -18,11 +18,19 @@ describe("step text events", () => {
   });
 
   it("turns the empty-delivery marker into a deliberate silence, but not inside a tool step", () => {
+    expect(EMPTY_DELIVERY_MARKER).toBe("<empty-delivery/>");
+    expect(stepTextEvents([{ role: "assistant", content: "<empty-delivery/>" }], "stop")).toEqual([{ finishReason: "stop", message: null }]);
+    expect(stepTextEvents([{ role: "assistant", content: [{ type: "text", text: "<empty-delivery/>" }] }], "tool-calls"))
+      .toEqual([{ finishReason: "tool-calls", message: "<empty-delivery/>" }]);
+    expect(isEmptyDelivery({ finishReason: "stop", text: "ничего нового <empty-delivery/>", toolCallCount: 0 })).toBe(true);
+    expect(isEmptyDelivery({ finishReason: "stop", text: "<empty-delivery/>", toolCallCount: 1 })).toBe(false);
+  });
+
+  it("still understands the previous marker, which the model may repeat after earlier turns in its history", () => {
     expect(stepTextEvents([{ role: "assistant", content: "<eve-empty-delivery/>" }], "stop")).toEqual([{ finishReason: "stop", message: null }]);
-    expect(stepTextEvents([{ role: "assistant", content: [{ type: "text", text: "<eve-empty-delivery/>" }] }], "tool-calls"))
-      .toEqual([{ finishReason: "tool-calls", message: "<eve-empty-delivery/>" }]);
-    expect(isEmptyDelivery({ finishReason: "stop", text: "ничего нового <eve-empty-delivery/>", toolCallCount: 0 })).toBe(true);
-    expect(isEmptyDelivery({ finishReason: "stop", text: "<eve-empty-delivery/>", toolCallCount: 1 })).toBe(false);
+    expect(isEmptyDelivery({ finishReason: "stop", text: "<eve-empty-delivery/>", toolCallCount: 0 })).toBe(true);
+    expect(containsEmptyDeliveryMarker("Молчу <eve-empty-delivery/>")).toBe(true);
+    expect(containsEmptyDeliveryMarker("обычный ответ")).toBe(false);
   });
 });
 

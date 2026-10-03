@@ -34,7 +34,7 @@ function resolvedApprovalText(result: {
   selectedOptionId: string;
   selectedOptionLabel: string;
 }): string {
-  // Ядро присылает `cancel` (идентификаторы кнопок Eve сохранены); прежняя проверка на `deny` не срабатывала и оставляла английский ярлык.
+  // Отказ приходит как `cancel`: варианта `deny` у карточки нет.
   const resolution = result.selectedOptionId === "approve"
     ? "Решение: Подтверждено.\nДействие передано на выполнение."
     : result.selectedOptionId === "cancel"

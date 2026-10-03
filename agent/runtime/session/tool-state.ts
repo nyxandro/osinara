@@ -5,11 +5,10 @@
  * - `SessionToolState`: what a tool reads and writes through `ctx.state`.
  * - `sessionToolState`: the store over `agent_session_state` for one session.
  * - `clearReadFileState`: forgets every stamp; compaction calls it in its own transaction.
- * - `TodoState`, `TodoItem`, `ReadFileStamp`: the stored shapes, as Eve 0.40 kept them.
+ * - `TodoState`, `TodoItem`, `ReadFileStamp`: the stored shapes.
  *
- * Eve kept both in the session's durable context (`eve.todo`, `eve.readFile`); the runtime keeps
- * them next to the history, so they survive turns and restarts the same way. Each stamp is written
- * on its own key, so parallel reads in one step cannot overwrite each other.
+ * Both are kept next to the history, so they survive turns and restarts. Each stamp is written on
+ * its own key, so parallel reads in one step cannot overwrite each other.
  */
 import type { Pool } from "pg";
 

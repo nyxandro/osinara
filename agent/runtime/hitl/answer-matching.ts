@@ -7,9 +7,8 @@
  * - `staleResponsesMessage`: the user message the model reads for an answer to a request that was
  *   already answered or dismissed; it never authorizes an earlier action.
  *
- * Ported from eve 0.40.0 `channel/resolve-text.ts` and `harness/stale-input-responses.ts`
- * (`formatModelMessage`) (Apache-2.0, see NOTICE-eve). The texts are verbatim: transferred
- * histories already contain them.
+ * The texts are fixed: conversation histories already contain them.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { InputOption, InputRequest, InputResponse } from "./types.js";
 
@@ -51,7 +50,7 @@ export function staleResponsesMessage(responses: readonly InputResponse[], reque
       details.selectedOption = { id: option.id, label: option.label, ...(option.description === undefined ? {} : { description: option.description }) };
     }
     if (response.text !== undefined) details.text = response.text;
-    // Key order as Eve wrote it: the model reads this JSON verbatim.
+    // Fixed key order: the model reads this JSON verbatim.
     return {
       requestId: response.requestId,
       response: details,

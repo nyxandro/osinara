@@ -43,8 +43,8 @@ const groupAuthorization: MemoryAuthorization = {
 const context = {
   session: {
     auth: { current: null, initiator: null },
-    id: "eve-session-1",
-    turn: { id: "eve-turn-1", sequence: 0 },
+    id: "agent-session-1",
+    turn: { id: "agent-turn-1", sequence: 0 },
   },
 } as never;
 
@@ -53,7 +53,7 @@ describe("turn-bound memory source selection", () => {
     bind.mockClear(); verifyBoundResume.mockClear();
     await bindMemoryTurnSources({ session: { auth: { current: { attributes: {
       applicationSessionId: "session", telegramApprovalContinuation: "true",
-    } } }, id: "eve", turn: { id: "turn_2" } } } as never);
+    } } }, id: "agent-session", turn: { id: "turn_2" } } } as never);
     expect(bind).not.toHaveBeenCalled();
     expect(verifyBoundResume).not.toHaveBeenCalled();
   });
@@ -75,16 +75,16 @@ describe("turn-bound memory source selection", () => {
           },
           initiator: null,
         },
-        id: "eve-session-1",
-        turn: { id: "eve-turn-1", sequence: 0 },
+        id: "agent-session-1",
+        turn: { id: "agent-turn-1", sequence: 0 },
       },
     } as never;
 
     await expect(bindMemoryTurnSources(resumed)).resolves.toBeUndefined();
     expect(verifyBoundResume).toHaveBeenCalledWith({
       applicationSessionId: "application-session-1",
-      eveSessionId: "eve-session-1",
-      eveTurnId: "eve-turn-1",
+      agentSessionId: "agent-session-1",
+      agentTurnId: "agent-turn-1",
       invokingActorId: "caller-1",
       invokingActorKind: "telegram_user",
     });
@@ -104,8 +104,8 @@ describe("turn-bound memory source selection", () => {
           },
           initiator: null,
         },
-        id: "scheduled-eve-session-1",
-        turn: { id: "scheduled-eve-turn-1", sequence: 0 },
+        id: "scheduled-agent-session-1",
+        turn: { id: "scheduled-agent-turn-1", sequence: 0 },
       },
     } as never;
 
@@ -137,8 +137,8 @@ describe("turn-bound memory source selection", () => {
       timelineEntryId: "entry-42",
     });
     expect(resolve).toHaveBeenCalledWith({
-      eveSessionId: "eve-session-1",
-      eveTurnId: "eve-turn-1",
+      agentSessionId: "agent-session-1",
+      agentTurnId: "agent-turn-1",
       sourceSequence: "42",
     });
   });

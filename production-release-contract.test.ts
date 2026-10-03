@@ -106,7 +106,7 @@ describe("production container contract", () => {
     expect(packageJson.scripts).not.toHaveProperty("postinstall");
     expect(packageJson.dependencies).not.toHaveProperty("eve");
     expect(packageJson.dependencies).not.toHaveProperty("@workflow/world-postgres");
-    expect(packageJson.scripts["migrate:runtime"]).toBe("node .runtime/scripts/migrate.js && node .runtime/scripts/import-eve-history.js");
+    expect(packageJson.scripts["migrate:runtime"]).toBe("node .runtime/scripts/migrate.js");
   });
 
   it("pins the official Russian root CA inside the sandbox runtime", () => {

@@ -109,7 +109,7 @@ describe("independent Telegram queue progress", () => {
         const message = { message_id: item.id, date: 1700000000,
           chat: { id: item.chat, type: item.chat > 0 ? "private" : "group" },
           from: { id: 101, first_name: "Owner", is_bot: false }, text: "request" };
-        return { dispatchStarted: false, dispatchBinding: null, recoveryCancelRequested: false, updateId: String(item.id), queueId: String(item.chat), leaseToken: `lease-${item.id}`,
+        return { dispatchStarted: false, dispatchBinding: null, updateId: String(item.id), queueId: String(item.chat), leaseToken: `lease-${item.id}`,
           leaseExpiresAt: new Date(Date.now() + 60_000), attemptCount: 1,
           deliveryContinuationKey: `${item.chat}::`, ingressContinuationKey: `${item.chat}::`,
           voice: null, transcript: null, payload: { update_id: item.id,

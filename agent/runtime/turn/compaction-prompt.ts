@@ -3,12 +3,11 @@
  *
  * Exports:
  * - `COMPACTION_CHECKPOINT_MARKER`, `COMPACTION_RESUMPTION_MESSAGE`, `TODO_COMPACTION_PRESERVATION_LABEL`:
- *   the texts compaction writes into history. Transferred histories already carry them.
+ *   the texts compaction writes into history. Stored histories already carry them.
  * - `createCompactionPrompt`, `COMPACTION_PROMPT_ENVELOPE`: the summarization request.
  * - `stubContentOutputFileParts`, `TRANSCRIPT_PAYLOAD_LIMIT`: payload limits shared with compaction.
  *
- * Ported verbatim from eve 0.40.0 `harness/compaction-prompt.ts` (Apache-2.0, see NOTICE-eve).
- * Changes: none to the texts or rules; only the import path.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { ModelMessage } from "ai";
 

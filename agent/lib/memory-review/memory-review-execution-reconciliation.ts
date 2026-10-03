@@ -18,15 +18,15 @@ export async function reconcileMemoryReviewExecutions(readStatus: (sessionId: st
     try {
     const status = await readStatus(candidate.eve_session_id,candidate.eve_turn_id);
     if (status === "completed") {
-      await memoryReviewRepository.completeBatch({ batchId: candidate.id, eveSessionId: candidate.eve_session_id,
-        eveTurnId: candidate.eve_turn_id, completedAt: new Date() });
+      await memoryReviewRepository.completeBatch({ batchId: candidate.id, agentSessionId: candidate.eve_session_id,
+        agentTurnId: candidate.eve_turn_id, completedAt: new Date() });
       continue;
     }
     if (status !== "failed" && status !== "cancelled") {
       await database().query("UPDATE memory_review_batches SET updated_at=now() WHERE id=$1 AND eve_session_id=$2 AND status='running'", [candidate.id,candidate.eve_session_id]);
       if (status !== "running") await recordOperationalIncident({ key: `memory-review:${candidate.id}:outcome:${candidate.model_recovery_generation}`,
         code: "AGENT_MEMORY_REVIEW_OUTCOME_UNCONFIRMED",summary: "Не удалось прочитать подтверждение результата проверки памяти. Сообщения сохранены; проверка состояния продолжится автоматически.",
-        context: { batchId: candidate.id,eveSessionId: candidate.eve_session_id } });
+        context: { batchId: candidate.id,agentSessionId: candidate.eve_session_id } });
       continue;
     }
     const client = await database().connect();
@@ -54,7 +54,7 @@ export async function reconcileMemoryReviewExecutions(readStatus: (sessionId: st
         [batch.conversation_id,batch.id,batch.eve_session_id,batch.eve_turn_id]);
       } else {
         if (batch.application_session_id && batch.eve_session_id) await terminalizeApplicationSession(client,{
-          applicationSessionId: batch.application_session_id,eveSessionId: batch.eve_session_id,completedAt: new Date(),outcome: "failed",
+          applicationSessionId: batch.application_session_id,agentSessionId: batch.eve_session_id,completedAt: new Date(),outcome: "failed",
         });
         await client.query("DELETE FROM memory_turn_source_sets WHERE memory_review_batch_id=$1", [batch.id]);
         await client.query(`UPDATE memory_review_batches SET status='failed',diagnostic_code='AGENT_MEMORY_REVIEW_EXECUTION_STOPPED',
@@ -72,7 +72,7 @@ export async function reconcileMemoryReviewExecutions(readStatus: (sessionId: st
       await database().query("UPDATE memory_review_batches SET updated_at=now() WHERE id=$1 AND eve_session_id=$2 AND status='running'", [candidate.id,candidate.eve_session_id]);
       await recordOperationalIncident({ key: `memory-review:${candidate.id}:reconciliation:${candidate.model_recovery_generation}`,
         code: "AGENT_MEMORY_REVIEW_RECONCILIATION_FAILED",summary: "Не удалось проверить результат одного пакета памяти. Его сообщения сохранены; остальные пакеты продолжают обработку.",
-        context: { batchId: candidate.id,eveSessionId: candidate.eve_session_id } });
+        context: { batchId: candidate.id,agentSessionId: candidate.eve_session_id } });
     }
   }
 }

@@ -14,8 +14,8 @@ export async function recordTelegramFailure(input: {
   }
   const scheduledRun = updateId === undefined ? (await database().query<{ id: string }>(
     "SELECT id FROM agent_schedule_runs WHERE eve_session_id=$1 ORDER BY created_at DESC LIMIT 1", [input.sessionId])).rows[0] : undefined;
-  await recordOperationalIncident({ key: updateId !== undefined ? `telegram:${updateId}` : scheduledRun ? `schedule-run:${scheduledRun.id}` : `eve:${input.sessionId}:${input.turnId ?? "session"}`,
+  await recordOperationalIncident({ key: updateId !== undefined ? `telegram:${updateId}` : scheduledRun ? `schedule-run:${scheduledRun.id}` : `turn:${input.sessionId}:${input.turnId ?? "session"}`,
     code: "AGENT_TELEGRAM_EXECUTION_FAILED", summary: "Обработка запроса завершилась с ошибкой. Проверьте результат перед повторным выполнением.",
-    context: { eveSessionId: input.sessionId, eveTurnId: input.turnId ?? null, updateId: updateId ?? null,
+    context: { agentSessionId: input.sessionId, agentTurnId: input.turnId ?? null, updateId: updateId ?? null,
       chatId: input.chatId ?? null, causeCode: input.code } });
 }

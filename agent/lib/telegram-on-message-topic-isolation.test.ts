@@ -4,7 +4,7 @@
  * Constructs covered:
  * - Ordinary supergroup reply threads share the main group journal.
  * - Verified forum topics retain isolated journal reads.
- * - Eve delivery routing keeps the original Telegram thread in both cases.
+ * - Runtime delivery routing keeps the original Telegram thread in both cases.
  */
 import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { describe, expect, it } from "vitest";

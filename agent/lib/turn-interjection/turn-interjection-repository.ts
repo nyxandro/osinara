@@ -29,8 +29,8 @@ export interface TurnInterjectionCandidate {
 }
 
 export interface TurnInterjectionShowCoordinate {
-  eveSessionId: string;
-  eveTurnId: string;
+  agentSessionId: string;
+  agentTurnId: string;
   toolCallId: string;
 }
 
@@ -40,8 +40,8 @@ export type EarlyVoiceTranscription =
   | { status: "unavailable" };
 
 function requireCoordinate(coordinate: TurnInterjectionShowCoordinate): void {
-  requireNonEmpty(coordinate.eveSessionId, "AGENT_TURN_INTERJECTION_SESSION_INVALID", "Не удалось определить сессию текущего хода");
-  requireNonEmpty(coordinate.eveTurnId, "AGENT_TURN_INTERJECTION_TURN_INVALID", "Не удалось определить текущий ход");
+  requireNonEmpty(coordinate.agentSessionId, "AGENT_TURN_INTERJECTION_SESSION_INVALID", "Не удалось определить сессию текущего хода");
+  requireNonEmpty(coordinate.agentTurnId, "AGENT_TURN_INTERJECTION_TURN_INVALID", "Не удалось определить текущий ход");
   requireNonEmpty(coordinate.toolCallId, "AGENT_TURN_INTERJECTION_CALL_INVALID", "Не удалось определить вызов инструмента");
 }
 
@@ -91,8 +91,8 @@ export const turnInterjectionRepository = {
       [
         requireUpdateId(input.currentUpdateId),
         input.telegramUserId,
-        input.eveSessionId,
-        input.eveTurnId,
+        input.agentSessionId,
+        input.agentTurnId,
         input.toolCallId,
         input.limit,
       ],
@@ -135,8 +135,8 @@ export const turnInterjectionRepository = {
       [
         messages.map((message) => requireUpdateId(message.updateId)),
         requireApplicationSessionId(coordinate.applicationSessionId),
-        coordinate.eveSessionId,
-        coordinate.eveTurnId,
+        coordinate.agentSessionId,
+        coordinate.agentTurnId,
         coordinate.toolCallId,
         messages.map((message) => message.contentKind),
       ],
@@ -150,7 +150,7 @@ export const turnInterjectionRepository = {
     await database().query(
       `UPDATE telegram_turn_interjections SET returned_at = COALESCE(returned_at, now())
         WHERE update_id = ANY($1::bigint[]) AND eve_session_id = $2 AND eve_turn_id = $3 AND tool_call_id = $4`,
-      [updateIds.map(requireUpdateId), coordinate.eveSessionId, coordinate.eveTurnId, coordinate.toolCallId],
+      [updateIds.map(requireUpdateId), coordinate.agentSessionId, coordinate.agentTurnId, coordinate.toolCallId],
     );
   },
 
@@ -160,16 +160,16 @@ export const turnInterjectionRepository = {
     await database().query(
       `DELETE FROM telegram_turn_interjections
         WHERE eve_session_id = $1 AND eve_turn_id = $2 AND tool_call_id = $3 AND delivered_at IS NULL`,
-      [coordinate.eveSessionId, coordinate.eveTurnId, coordinate.toolCallId],
+      [coordinate.agentSessionId, coordinate.agentTurnId, coordinate.toolCallId],
     );
   },
 
   /** A model step of this turn started after every result returned so far. */
-  async markDelivered(eveSessionId: string, eveTurnId: string): Promise<number> {
+  async markDelivered(agentSessionId: string, agentTurnId: string): Promise<number> {
     const result = await database().query(
       `UPDATE telegram_turn_interjections SET delivered_at = now()
         WHERE eve_session_id = $1 AND eve_turn_id = $2 AND returned_at IS NOT NULL AND delivered_at IS NULL`,
-      [eveSessionId, eveTurnId],
+      [agentSessionId, agentTurnId],
     );
     return result.rowCount ?? 0;
   },

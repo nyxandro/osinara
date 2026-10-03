@@ -5,12 +5,10 @@
  * - Channel-owned shapes of messages, callbacks, chats, users and attachments.
  * - `parseTelegramUpdate`, `parseTelegramChatType`, `formatTelegramContextBlock`.
  *
- * Derived from eve 0.40.0 `public/channels/telegram/inbound.ts` (Apache-2.0, see NOTICE-eve).
- * Changes:
- * - Osinara patch carried over: a forum topic is read only from an explicit topic message
- *   (`is_topic_message`). Telegram also sets `message_thread_id` on ordinary replies, and that
- *   pseudo thread must not split a chat into topics.
- * - Guards come from `../json.ts`.
+ * A forum topic is read only from an explicit topic message (`is_topic_message`). Telegram also
+ * sets `message_thread_id` on ordinary replies, and that pseudo thread must not split a chat into
+ * topics.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { isNonEmptyString, isObject } from "../json.js";
 

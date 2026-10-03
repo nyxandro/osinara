@@ -2,7 +2,7 @@
  * Trusted Telegram delivery adapter tests.
  *
  * Constructs covered:
- * - `deliverFamilyInvitation`: sends the one-time link through Eve's Telegram API helper.
+ * - `deliverFamilyInvitation`: sends the one-time link through the runtime's Telegram API helper.
  * - Provider failures remain diagnosable and do not return secret data to the model.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";

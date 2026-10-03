@@ -2,7 +2,7 @@
  * Native Google Workspace gws skill package tests.
  *
  * Constructs covered:
- * - Official `googleworkspace/cli` service skills are installed as Eve skill packages.
+ * - Official `googleworkspace/cli` service skills are installed as the agent's skill packages.
  * - Shared instructions adapt authentication to Osinara's workspace-bound credentials.
  * - Authored examples stay executable through the exact argv allowlist and one-shot runner.
  */
@@ -112,7 +112,7 @@ describe("Google Workspace gws skill packages", () => {
     expect(shared).toContain("manage_google_workspace_connection");
     expect(shared).toContain("gws auth login");
     expect(shared).toContain("`ask_question` as a substitute");
-    expect(shared).toContain("automatic Eve HITL");
+    expect(shared).toContain("automatic human approval");
     expect(shared).toContain("Do not automatically retry failed `gws` mutations");
     expect(shared).toContain("Do not pass `--upload`, `--output`, `--output-dir`, `--attach`, `-a`, or `-o`");
   });
@@ -124,8 +124,8 @@ describe("Google Workspace gws skill packages", () => {
     expect(people).toContain("updateContact");
     expect(people).toContain("deleteContact");
     expect(people).toContain("batchCreateContacts");
-    expect(people).toContain("execute_google_workspace supplies mandatory Eve HITL");
-    expect(people).toContain("Update a contact through mandatory Eve HITL");
+    expect(people).toContain("execute_google_workspace supplies mandatory human approval");
+    expect(people).toContain("Update a contact through mandatory human approval");
     expect(people).toContain("metadata.sources.etag");
   });
 
@@ -150,7 +150,7 @@ describe("Google Workspace gws skill packages", () => {
     expect(joined).not.toContain("gws generate-skills");
     expect(joined).not.toMatch(/gws [^\n]+\|/u);
     expect(joined).not.toContain("confirm with the user before executing");
-    expect(joined).toContain("provides the only required Eve HITL confirmation");
+    expect(joined).toContain("provides the only required human approval");
   });
 
   it("keeps helper examples within route flags and Gmail watch bounded", async () => {

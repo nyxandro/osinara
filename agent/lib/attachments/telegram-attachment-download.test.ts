@@ -20,7 +20,7 @@ const attachment = (size: number): TelegramAttachment => ({
 });
 
 describe("createTelegramAttachmentDownloader", () => {
-  it("downloads an accepted file through Eve's public Telegram API", async () => {
+  it("downloads an accepted file through the runtime's Telegram API", async () => {
     const getFile = vi.fn().mockResolvedValue({ filePath: "documents/file.txt" });
     const downloadFile = vi.fn().mockResolvedValue(new Response("content", { status: 200 }));
     const download = createTelegramAttachmentDownloader({ downloadFile, getFile });

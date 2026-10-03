@@ -15,7 +15,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { TelegramMessage, TelegramUpdate } from "../runtime/telegram/inbound.js";
-import { TELEGRAM_HITL_CALLBACK_PREFIX } from "../runtime/telegram/hitl.js";
+import { isTelegramHitlCallback } from "../runtime/telegram/hitl.js";
 import { parseTelegramUpdate } from "../runtime/telegram/inbound.js";
 import { telegramContinuationToken } from "../runtime/telegram/api.js";
 import type { JsonObject } from "../runtime/json.js";
@@ -119,7 +119,7 @@ function queueKey(update: TelegramUpdate): string {
   const message =
     update.kind === "message" ? update.message : update.callbackQuery.message!;
 
-  // One FIFO per chat/topic is stricter than Eve's reply branches and avoids cross-anchor races.
+  // One FIFO per chat/topic is stricter than per-reply branches and avoids cross-anchor races.
   return telegramContinuationToken({
     chatId: message.chat.id,
     messageThreadId: message.messageThreadId,
@@ -284,7 +284,7 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
       if (update.kind === "callback_query") {
         const claimed = await dependencies.handleSoftwareUpdateCallback(update.callbackQuery);
         stop.throwIfAborted();
-        const runtimeButton = update.callbackQuery.data?.startsWith(TELEGRAM_HITL_CALLBACK_PREFIX) === true;
+        const runtimeButton = isTelegramHitlCallback(update.callbackQuery.data);
         if (claimed || !runtimeButton) {
           if (!claimed) console.error(JSON.stringify({ code: "AGENT_TELEGRAM_CALLBACK_UNCLAIMED", updateId: claim.updateId }));
           return null;
@@ -393,7 +393,7 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
         const origin = failedUpdate?.kind === "message" ? failedUpdate.message : failedUpdate?.callbackQuery.message;
         await dependencies.reportFailure({ key: `telegram:${claim.updateId}`, code: failure.code,
           summary: failure.message, context: { updateId: claim.updateId, queueId: claim.queueId,
-            chatId: origin?.chat.id ?? null, eveSessionId: dispatchedSessionId ?? null } });
+            chatId: origin?.chat.id ?? null, agentSessionId: dispatchedSessionId ?? null } });
       } finally {
         releaseSlot?.();
         heartbeatController.abort();

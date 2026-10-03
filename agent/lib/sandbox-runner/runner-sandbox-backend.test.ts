@@ -175,7 +175,7 @@ describe("session sandbox on the runner", () => {
 
     expect(engine.createSession).toHaveBeenCalledWith({
       access: "trusted",
-      eveSessionId: SESSION_ID,
+      agentSessionId: SESSION_ID,
       mounts: PERSONAL,
       sandboxSessionId: SANDBOX_SESSION_ID,
       seedDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),

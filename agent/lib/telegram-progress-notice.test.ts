@@ -22,8 +22,8 @@ const channel = {} as never;
 const base = {
   applicationSessionId: "00000000-0000-4000-8000-000000000001",
   channel,
-  eveSessionId: "wrun_session_1",
-  eveTurnId: "turn-1",
+  agentSessionId: "wrun_session_1",
+  agentTurnId: "turn-1",
   message: "Приступаю: сначала соберу информацию",
   stepIndex: 0,
 };
@@ -39,8 +39,8 @@ describe("Telegram progress notice", () => {
 
     expect(repository.claim).toHaveBeenCalledWith({
       applicationSessionId: base.applicationSessionId,
-      eveSessionId: base.eveSessionId,
-      eveTurnId: base.eveTurnId,
+      agentSessionId: base.agentSessionId,
+      agentTurnId: base.agentTurnId,
       stepIndex: 0,
     });
     expect(sendChunk).toHaveBeenCalledWith(base.message, channel);

@@ -6,7 +6,7 @@
  * - Tool results expose only opaque memory/thread refs and preserve immediate undo guidance.
  * - `list_memories`: projects internal records while preserving an opaque pagination cursor.
  * - `search_memories`: returns the already-safe retrieval DTO unchanged.
- * - `executeNonStreamingTool`: rejects an unexpected Eve streaming result before object assertions.
+ * - `executeNonStreamingTool`: rejects an unexpected streaming result before object assertions.
  */
 import type { ToolContext, ToolDefinition } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -126,7 +126,7 @@ async function executeNonStreamingTool<TInput, TOutput>(
   input: TInput,
   toolContext: ToolContext,
 ): Promise<TOutput> {
-  // These contracts intentionally cover one final object, never Eve's streaming executor variant.
+  // These contracts intentionally cover one final object, never a streaming executor variant.
   const result = await tool.execute(input, toolContext);
   if (isAsyncIterable(result)) {
     throw new Error(

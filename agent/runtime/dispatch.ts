@@ -9,7 +9,7 @@
  *   reports, `idle` for all background work.
  *
  * A session's turns run one at a time, in creation order (`claimTurn`), so a turn created while an
- * earlier one runs waits for it, as Eve's `queue` turn policy did. A turn this process already
+ * earlier one runs waits for it. A turn this process already
  * runs is joined, never run twice. A turn that already ended returns its stored outcome. Child
  * turns are never started here: their parent turn drives them.
  */

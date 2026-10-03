@@ -5,8 +5,7 @@
  * - `toSkillPackage`: `SKILL.md` from the definition's markdown plus its extra files, sorted by
  *   path, with names and paths checked to stay inside the skill's own directory.
  *
- * Ported from eve 0.40.0 `shared/skill-package.ts` (`normalizeSkillPackage`) (Apache-2.0, see
- * NOTICE-eve). Texts of the errors are verbatim.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { SandboxSkillPackage } from "../sandbox/types.js";
 import type { SkillDefinition } from "./definition.js";
@@ -19,7 +18,7 @@ function assertSafeSkillPackageName(name: string): void {
 }
 
 function assertSafeSkillPackageFilePath(relativePath: string): void {
-  if (relativePath === "SKILL.md") throw new Error('Skill package files must not include "SKILL.md"; eve generates it.');
+  if (relativePath === "SKILL.md") throw new Error('Skill package files must not include "SKILL.md"; it is generated from the definition.');
   if (relativePath.length === 0 || relativePath.startsWith("/") || relativePath.includes("\\") || /^[A-Za-z]:/u.test(relativePath) ||
     relativePath.split("/").some((segment) => segment.length === 0 || segment === "." || segment === "..")) {
     throw new Error("Expected skill package file paths to be relative POSIX paths.");

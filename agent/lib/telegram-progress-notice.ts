@@ -18,15 +18,15 @@ import { telegramProgressNoticeRepository } from "./telegram-progress-notice-rep
 export async function deliverTelegramProgressNotice(input: {
   applicationSessionId: string;
   channel: TelegramEventContext;
-  eveSessionId: string;
-  eveTurnId: string;
+  agentSessionId: string;
+  agentTurnId: string;
   message: string;
   stepIndex: number;
 }): Promise<void> {
   const claim = await telegramProgressNoticeRepository.claim({
     applicationSessionId: input.applicationSessionId,
-    eveSessionId: input.eveSessionId,
-    eveTurnId: input.eveTurnId,
+    agentSessionId: input.agentSessionId,
+    agentTurnId: input.agentTurnId,
     stepIndex: input.stepIndex,
   });
   if (!claim) return;

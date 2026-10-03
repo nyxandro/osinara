@@ -27,13 +27,13 @@ describe("telegramSilentTurnLogRecord", () => {
         telegramGroupTurnTrigger: "name_in_text",
         telegramUserId: "42",
       }),
-      eveSessionId: "session-1",
-      eveTurnId: "turn-1",
+      agentSessionId: "session-1",
+      agentTurnId: "turn-1",
     })).toEqual({
       code: "AGENT_TELEGRAM_SILENT_TURN",
       chatType: "supergroup",
-      eveSessionId: "session-1",
-      eveTurnId: "turn-1",
+      agentSessionId: "session-1",
+      agentTurnId: "turn-1",
       groupType: "external",
       triggeredBy: "name_in_text",
     });
@@ -42,25 +42,25 @@ describe("telegramSilentTurnLogRecord", () => {
   it("omits group fields for a private chat and ignores non-string attributes", () => {
     expect(telegramSilentTurnLogRecord({
       auth: auth({ telegramChatType: "private", telegramGroupTurnTrigger: 7 }),
-      eveSessionId: "session-2",
-      eveTurnId: "turn-2",
+      agentSessionId: "session-2",
+      agentTurnId: "turn-2",
     })).toEqual({
       code: "AGENT_TELEGRAM_SILENT_TURN",
       chatType: "private",
-      eveSessionId: "session-2",
-      eveTurnId: "turn-2",
+      agentSessionId: "session-2",
+      agentTurnId: "turn-2",
     });
   });
 
   it.each([null, undefined])("records a missing auth context (%s) as unknown chat rather than failing the turn", (auth) => {
     expect(telegramSilentTurnLogRecord({
       auth,
-      eveSessionId: "session-3",
-      eveTurnId: "turn-3",
+      agentSessionId: "session-3",
+      agentTurnId: "turn-3",
     })).toEqual({
       code: "AGENT_TELEGRAM_SILENT_TURN",
-      eveSessionId: "session-3",
-      eveTurnId: "turn-3",
+      agentSessionId: "session-3",
+      agentTurnId: "turn-3",
     });
   });
 });

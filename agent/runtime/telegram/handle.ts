@@ -6,10 +6,9 @@
  *   returned), `startTyping` (never throws), callback answers, reply-markup edits and raw requests.
  *   A bot message in a group records itself as the conversation's anchor in the state.
  *
- * Ported from eve 0.40.0 `public/channels/telegram/telegramChannel.ts` (`buildTelegramHandle`,
- * `postTelegramMessage`) (Apache-2.0, see NOTICE-eve). Changes: the session is never re-addressed
- * after a bot message (Eve's `rekey`): Osinara keeps its own routes; a typing failure is logged as
- * one JSON line.
+ * The session is never re-addressed after a bot message: the application keeps its own routes.
+ * A typing failure is logged as one JSON line.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import {
   answerTelegramCallbackQuery,

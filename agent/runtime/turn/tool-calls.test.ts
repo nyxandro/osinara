@@ -118,7 +118,7 @@ describe("tool call input", () => {
     expect(resolveToolCallInput({ input, toolCallId: "c", toolName: "t" })).toEqual({ input: expected });
   });
 
-  it("reports an input that is not an object with Eve's wording", () => {
+  it("reports an input that is not an object with the reference wording", () => {
     expect(resolveToolCallInput({ input: [1], toolCallId: "c", toolName: "t" })).toEqual({
       error: 'Failed to parse tool-call arguments for "t" (c): Expected a JSON-serializable object.',
     });

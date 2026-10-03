@@ -5,8 +5,8 @@
  * - `formatAvailableSkillsSection`: activation rules plus one line per skill with its `SKILL.md`
  *   path under the sandbox skill root, or `null` when no skill is available.
  *
- * Derived from eve 0.40.0 `execution/skills/instructions.ts` (Apache-2.0, see NOTICE-eve).
- * Changes: the caller passes the resolved skill root; the text is verbatim.
+ * The caller passes the resolved skill root.
+ * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 export interface AvailableSkillDescription {
   readonly description: string;

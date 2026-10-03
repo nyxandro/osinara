@@ -33,14 +33,14 @@ export interface CompactionCounters {
 export interface NewSessionHistory {
   readonly announcedSkills: readonly AnnouncedSkill[] | null;
   readonly applicationSessionId: string;
-  /** The channel's JSON state; carried over from Eve, or set by the channel on a new session. */
+  /** The channel's JSON state, set by the channel on a new session. */
   readonly channelState: Record<string, unknown> | null;
   /** Who opened the session; every turn sees it as `auth.initiator`. */
   readonly initiatorAuth: SessionAuthContext | null;
   readonly compaction: CompactionCounters;
   readonly history: readonly ModelMessage[];
   readonly parentSessionId: string | null;
-  /** Sandbox runner metadata carried over from Eve; a new session opens its sandbox on first use. */
+  /** Sandbox runner metadata; a new session opens its sandbox on first use. */
   readonly sandbox: Record<string, unknown> | null;
   readonly sessionId: string;
   readonly source: "eve_import" | "runtime";
