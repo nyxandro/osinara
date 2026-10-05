@@ -235,14 +235,6 @@ validate_resolved_compose_security() {
     all(.services[]; (has("build") or has("devices") or has("cap_add") or has("volumes_from")) | not) and
     all(.services[]; .logging.driver == "json-file" and
       .logging.options["max-size"] == "20m" and .logging.options["max-file"] == "5") and
-    .services["memory-extraction-worker"].healthcheck.test == [
-      "CMD", "node", "-e",
-      "const fs=require(\u0027node:fs\u0027),p=\u0027/tmp/osinara-memory-extraction-worker-ready\u0027;if(!fs.existsSync(p)||Date.now()-fs.statSync(p).mtimeMs<30000)process.exit(1)"
-    ] and
-    .services["memory-extraction-worker"].healthcheck.retries == 120 and
-    .services["memory-extraction-worker"].network_mode == "none" and
-    ((.services["memory-extraction-worker"].environment // {}) | length) == 0 and
-    ((.services["memory-extraction-worker"].volumes // []) | length) == 0 and
     ((.services.edge.networks // {}) | keys) == ["app-network", "edge-frontend"] and
     ([.services | to_entries[] |
       select((.value.networks // {}) | has("edge-frontend")) | .key] | sort) == ["edge"] and
@@ -277,7 +269,7 @@ validate_resolved_compose() {
   local expected_images_file="${WORK_DIR}/expected-images.txt"
   local config_json="${WORK_DIR}/resolved-compose.json"
   compose_candidate config --images | LC_ALL=C sort > "$images_file"
-  printf '%s\n' "$APP_IMAGE" "$APP_IMAGE" "$APP_IMAGE" "$APP_IMAGE" "$APP_IMAGE" \
+  printf '%s\n' "$APP_IMAGE" "$APP_IMAGE" "$APP_IMAGE" "$APP_IMAGE" \
     "$RUNTIME_IMAGE" "$RUNNER_IMAGE" "$EGRESS_IMAGE" "$EDGE_IMAGE" "$CLI_PROXY_IMAGE" \
     "$POSTGRES_IMAGE" "$TEI_IMAGE" | LC_ALL=C sort > "$expected_images_file"
   cmp --silent "$images_file" "$expected_images_file" ||
@@ -286,12 +278,11 @@ validate_resolved_compose() {
   compose_candidate config --format json > "$config_json"
   jq -e '
     (.services | keys) == [
-      "agent", "cli-proxy-api", "edge", "memory-embedding", "memory-embedding-worker", "memory-extraction-worker", "migrate", "postgres",
+      "agent", "cli-proxy-api", "edge", "memory-embedding", "memory-embedding-worker", "migrate", "postgres",
       "sandbox-egress-proxy", "sandbox-runner", "sandbox-runtime-image", "telegram-ingress-worker"
     ] and
     .services.agent.depends_on.migrate.condition == "service_completed_successfully" and
-    .services.agent.depends_on["cli-proxy-api"].condition == "service_healthy" and
-    .services["memory-extraction-worker"].depends_on.migrate.condition == "service_completed_successfully"
+    .services.agent.depends_on["cli-proxy-api"].condition == "service_healthy"
   ' "$config_json" >/dev/null ||
     fail "DEPLOY_COMPOSE_SERVICE_SET_INVALID" "Resolved Compose service set is not approved"
   validate_resolved_compose_security "$config_json" ||

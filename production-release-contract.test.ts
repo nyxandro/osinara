@@ -17,7 +17,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   executeComposeSecurityPredicate,
-  PRODUCTION_MEMORY_EXTRACTION_WORKER_HEALTH_COMMAND,
   resolvedComposeSecurityFixture,
 } from "./production-release-contract-fixtures.js";
 
@@ -144,26 +143,18 @@ describe("production container contract", () => {
     for (const image of requiredImages) {
       expect(compose).toContain(`image: \${${image}:?`);
     }
-    expect(compose.match(/image: \$\{OSINARA_APP_IMAGE:\?/g)).toHaveLength(5);
+    expect(compose.match(/image: \$\{OSINARA_APP_IMAGE:\?/g)).toHaveLength(4);
     expect(compose).toContain("SANDBOX_RUNTIME_IMAGE: ${SANDBOX_RUNTIME_IMAGE:?");
     expect(compose.match(/DATABASE_URL: \$\{DATABASE_URL:\?/g)).toHaveLength(3);
     expect(compose).not.toContain("DATABASE_URL: postgresql://");
   });
 
-  it("keeps the retired memory worker isolated after migrations", () => {
-    const compose = readProjectFile("compose.production.yaml");
-    const worker = service(compose, "memory-extraction-worker", "telegram-ingress-worker");
+  // The background memory pipeline was retired in v0.12.0; its idle worker left in v0.40.2.
+  it("ships no retired memory extraction worker", () => {
+    const { combined: script } = readDeployScripts();
 
-    expect(worker).toContain("image: ${OSINARA_APP_IMAGE:?");
-    expect(worker).toContain("migrate:\n        condition: service_completed_successfully");
-    expect(worker).toContain('.runtime/scripts/memory-extraction-worker.js');
-    expect(worker).toContain("network_mode: none");
-    expect(worker).not.toContain("MODEL_UPSTREAM_API_KEY");
-    expect(worker).not.toContain("DATABASE_URL");
-    expect(worker).not.toContain("MEMORY_EMBEDDING_BASE_URL");
-    expect(worker).not.toContain("model-providers.json");
-    expect(worker).toContain(PRODUCTION_MEMORY_EXTRACTION_WORKER_HEALTH_COMMAND);
-    expect(worker).toContain("restart: unless-stopped");
+    expect(readProjectFile("compose.production.yaml")).not.toContain("memory-extraction-worker");
+    expect(script).not.toContain("memory-extraction-worker");
   });
 
   it("gates the agent on migration and keeps stable state and ingress", () => {
@@ -205,7 +196,7 @@ describe("production container contract", () => {
     expect(compose).toContain("x-bounded-json-logs: &bounded-json-logs");
     expect(compose).toContain('max-size: "20m"');
     expect(compose).toContain('max-file: "5"');
-    expect(compose.match(/logging: \*bounded-json-logs/g)).toHaveLength(12);
+    expect(compose.match(/logging: \*bounded-json-logs/g)).toHaveLength(11);
   });
 
   it("limits Docker control to the runner and pins every production image", () => {
@@ -363,7 +354,7 @@ describe("server deployment contract", () => {
     expect(main.indexOf("stop_current_services")).toBeLessThan(main.indexOf("create_postgres_backup"));
     expect(main.indexOf("stop_current_services")).toBeLessThan(main.indexOf("snapshot_durable_volumes"));
     const backup = readProjectFile("scripts/production-deploy/backup.sh");
-    expect(backup).toMatch(/compose_current stop[^\n]*memory-extraction-worker/u);
+    expect(backup).toMatch(/compose_current stop edge telegram-ingress-worker memory-embedding-worker agent cli-proxy-api/u);
     expect(main.lastIndexOf("record_proposal_result")).toBeLessThan(
       main.lastIndexOf("prune_retired_release_images"),
     );
@@ -406,8 +397,6 @@ describe("server deployment contract", () => {
     expect(script).toContain("DEPLOY_COMPOSE_SERVICE_SET_INVALID");
     expect(script).toContain("DEPLOY_COMPOSE_IMAGE_SET_INVALID");
     expect(script).toContain("DEPLOY_COMPOSE_SECURITY_INVALID");
-    expect(script).toContain('.services["memory-extraction-worker"].network_mode == "none"');
-    expect(script).toContain('services["memory-extraction-worker"].healthcheck.test');
     expect(script).toContain("privileged");
     expect(script).toContain("network_mode");
     expect(script).toContain("logging.driver");
@@ -429,7 +418,7 @@ describe("server deployment contract", () => {
     expect(() => executeComposeSecurityPredicate(inheritedRunnerVolumes)).toThrow();
 
     const unsafe = structuredClone(valid) as { services: Record<string, { volumes?: unknown[] }> };
-    unsafe.services["memory-extraction-worker"]!.volumes = [{
+    unsafe.services["telegram-ingress-worker"]!.volumes = [{
       source: "/", target: "/host", type: "bind",
     }];
     expect(() => executeComposeSecurityPredicate(unsafe)).toThrow();

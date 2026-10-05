@@ -292,7 +292,7 @@ create_postgres_backup() {
 
 stop_current_services() {
   CURRENT_SERVICES_STOPPED=1
-  compose_current stop memory-extraction-worker edge telegram-ingress-worker memory-embedding-worker agent cli-proxy-api \
+  compose_current stop edge telegram-ingress-worker memory-embedding-worker agent cli-proxy-api \
     sandbox-runner sandbox-egress-proxy memory-embedding
 }
 

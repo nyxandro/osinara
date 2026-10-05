@@ -42,9 +42,6 @@ export const MEMORY_INCIDENT_QUERY_TIMEOUT_MS = 1_500;
 
 export const CONVERSATION_TIMELINE_SELECTION_MAX_ENTRIES = 50;
 
-// The retired service remains until the installed production controller removes its process contract.
-export const MEMORY_EXTRACTION_WORKER_IDLE_MILLISECONDS = 1_000;
-export const MEMORY_EXTRACTION_WORKER_READY_PATH = "/tmp/osinara-memory-extraction-worker-ready";
 /**
  * The embedding worker touches this file on every pass of its loop, and its healthcheck requires
  * it to be fresh. Without it a hung worker was indistinguishable from a healthy one: the process
@@ -70,7 +67,6 @@ export const MEMORY_EMBEDDING_LIFECYCLE_CODES = [
   MEMORY_EMBEDDING_WORKER_STARTED_CODE,
   MEMORY_EMBEDDING_WORKER_WAITING_CODE,
 ] as const;
-export const MEMORY_EXTRACTION_WORKER_STABILITY_MILLISECONDS = 30_000;
 export const MEMORY_EVIDENCE_SNIPPET_MAX_CHARACTERS = 1_000;
 
 // Live briefs are generated only for activated threads and contain whole source-backed records.

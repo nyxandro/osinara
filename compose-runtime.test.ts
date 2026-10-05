@@ -20,8 +20,6 @@ import { describe, expect, it } from "vitest";
 import {
   MEMORY_EMBEDDING_WORKER_READY_PATH,
   MEMORY_EMBEDDING_WORKER_STALE_MILLISECONDS,
-  MEMORY_EXTRACTION_WORKER_READY_PATH,
-  MEMORY_EXTRACTION_WORKER_STABILITY_MILLISECONDS,
 } from "./agent/lib/memory-config.js";
 
 interface PackageManifest {
@@ -290,14 +288,13 @@ describe("Docker Compose runtime wiring", () => {
     const compose = readFileSync(new URL("compose.yaml", projectRoot), "utf8");
     const workerEntrypoints = new Map([
       ["memory-embedding-worker", ".runtime/scripts/memory-embedding-worker.js"],
-      ["memory-extraction-worker", ".runtime/scripts/memory-extraction-worker.js"],
       ["telegram-ingress-worker", ".runtime/scripts/telegram-ingress-worker.js"],
     ]);
 
     // An explicit target prevents a later Dockerfile stage, such as Nginx edge, from silently
     // replacing the Node runtime when stages are reordered or appended.
     for (const serviceName of [
-      "agent", "memory-embedding-worker", "memory-extraction-worker", "telegram-ingress-worker",
+      "agent", "memory-embedding-worker", "telegram-ingress-worker",
     ]) {
       const serviceStart = compose.indexOf(`\n  ${serviceName}:\n`);
       const nextServiceOffset = compose.slice(serviceStart + 1).search(/\n  \S/);
@@ -338,33 +335,11 @@ describe("Docker Compose runtime wiring", () => {
     expect(workerScript).toContain("MEMORY_EMBEDDING_WORKER_STARTED_CODE");
   });
 
-  it("keeps a controller-compatible memory worker without extraction or provider calls", () => {
-    const composeFiles = ["compose.yaml", "compose.test.yaml", "compose.production.yaml"];
-    const workerScript = readFileSync(new URL("scripts/memory-extraction-worker.ts", projectRoot), "utf8");
-
-    for (const composeFile of composeFiles) {
+  it("runs no retired memory extraction worker in any stack", () => {
+    for (const composeFile of ["compose.yaml", "compose.test.yaml", "compose.production.yaml"]) {
       const compose = readFileSync(new URL(composeFile, projectRoot), "utf8");
-      const serviceStart = compose.indexOf("\n  memory-extraction-worker:\n");
-      const nextServiceOffset = compose.slice(serviceStart + 1).search(/\n  \S/u);
-      const serviceEnd = nextServiceOffset === -1
-        ? undefined
-        : serviceStart + nextServiceOffset + 1;
-      const worker = compose.slice(serviceStart, serviceEnd);
-
-      expect(serviceStart, `${composeFile} worker is absent`).toBeGreaterThanOrEqual(0);
-      expect(worker, composeFile).toContain("network_mode: none");
-      expect(worker, composeFile).not.toContain("DATABASE_URL");
-      expect(worker, composeFile).not.toContain("MEMORY_EMBEDDING_BASE_URL");
-      expect(worker, composeFile).not.toContain("MODEL_UPSTREAM_API_KEY");
-      expect(worker, composeFile).toContain("healthcheck:");
-      expect(worker, composeFile).toContain(MEMORY_EXTRACTION_WORKER_READY_PATH);
-      expect(worker, composeFile).toContain(String(MEMORY_EXTRACTION_WORKER_STABILITY_MILLISECONDS));
+      expect(compose, composeFile).not.toContain("memory-extraction-worker");
     }
-    expect(workerScript).toContain("MEMORY_EXTRACTION_WORKER_READY_PATH");
-    expect(workerScript).not.toContain("processNextMemoryExtraction");
-    expect(workerScript).not.toContain("model-registry");
-    expect(workerScript).not.toContain('from "../agent/lib/database.js"');
-    expect(workerScript).toContain("processNext: async () => false");
   });
 
   it("re-resolves the agent upstream after Docker replaces its container", () => {

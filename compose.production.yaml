@@ -193,22 +193,6 @@ services:
     restart: unless-stopped
     logging: *bounded-json-logs
 
-  memory-extraction-worker:
-    cgroup_parent: osinara.slice
-    image: ${OSINARA_APP_IMAGE:?OSINARA_APP_IMAGE must be an exact digest reference}
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-    entrypoint: ["node", ".runtime/scripts/memory-extraction-worker.js"]
-    network_mode: none
-    healthcheck:
-      test: ["CMD", "node", "-e", "const fs=require('node:fs'),p='/tmp/osinara-memory-extraction-worker-ready';if(!fs.existsSync(p)||Date.now()-fs.statSync(p).mtimeMs<30000)process.exit(1)"]
-      interval: 5s
-      timeout: 3s
-      retries: 120
-    restart: unless-stopped
-    logging: *bounded-json-logs
-
   telegram-ingress-worker:
     cgroup_parent: osinara.slice
     image: ${OSINARA_APP_IMAGE:?OSINARA_APP_IMAGE must be an exact digest reference}

@@ -253,14 +253,6 @@ describeWithDatabase("Telegram group journal ancestry and retention", () => {
        FROM generate_series(1, $2) AS value`,
       [group.groupId, TELEGRAM_GROUP_JOURNAL_RETENTION_MESSAGES],
     );
-    // The seed represents rows already snapshotted by extraction, so ordinary retention may prune it.
-    await database().query(
-      `DELETE FROM memory_extraction_retention_holds
-       WHERE timeline_entry_id IN (
-         SELECT id FROM telegram_group_messages WHERE group_id = $1
-       )`,
-      [group.groupId],
-    );
     await database().query(
       `INSERT INTO telegram_group_message_ids (group_id, telegram_message_id, entry_id)
        SELECT group_id, telegram_message_id, id
