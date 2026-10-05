@@ -18,7 +18,7 @@ const describeWithDatabase = process.env.RUN_DATABASE_INTEGRATION_TESTS === "tru
 describeWithDatabase("conversationRepository", () => {
   beforeEach(async () => {
     await database().query(
-      `TRUNCATE memory_extraction_batches, claim_evidence, memory_items_all,
+      `TRUNCATE claim_evidence, memory_items_all,
          telegram_group_messages, telegram_groups, family_memberships, users, families CASCADE`,
     );
   });

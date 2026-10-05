@@ -204,19 +204,6 @@ services:
       MEMORY_EMBEDDING_BASE_URL: http://memory-embedding:80
     restart: unless-stopped
 
-  memory-extraction-worker:
-    build:
-      context: .
-      target: runtime
-    entrypoint: ["node", ".runtime/scripts/memory-extraction-worker.js"]
-    network_mode: none
-    healthcheck:
-      test: ["CMD", "node", "-e", "const fs=require('node:fs'),p='/tmp/osinara-memory-extraction-worker-ready';if(!fs.existsSync(p)||Date.now()-fs.statSync(p).mtimeMs<30000)process.exit(1)"]
-      interval: 5s
-      timeout: 3s
-      retries: 120
-    restart: unless-stopped
-
   telegram-ingress-worker:
     build:
       context: .

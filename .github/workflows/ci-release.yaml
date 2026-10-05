@@ -291,7 +291,7 @@ jobs:
             (.services | has("cli-proxy-api") | not) and
             (.services | keys) == [
               "agent", "edge", "memory-embedding", "memory-embedding-worker",
-              "memory-extraction-worker", "migrate", "postgres", "sandbox-egress-proxy",
+              "migrate", "postgres", "sandbox-egress-proxy",
               "sandbox-runner", "sandbox-runtime-image", "telegram-ingress-worker"
             ]
           ' compose.installation.json >/dev/null

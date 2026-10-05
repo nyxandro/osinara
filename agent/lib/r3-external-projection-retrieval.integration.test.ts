@@ -161,7 +161,7 @@ async function enablePolicy(
 describeWithDatabase("R3 external projection retrieval", () => {
   beforeEach(async () => {
     await database().query(
-      `TRUNCATE memory_extraction_batches, claim_evidence, memory_items_all,
+      `TRUNCATE claim_evidence, memory_items_all,
          telegram_group_messages, telegram_groups, family_memberships, users, families CASCADE`,
     );
   });

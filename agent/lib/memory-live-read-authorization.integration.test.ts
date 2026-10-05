@@ -294,7 +294,7 @@ describeWithDatabase("live memory read authorization", () => {
     await expectDenied(fixture);
   });
 
-  it("builds source-backed blocks without persisting a generated brief cache", async () => {
+  it("builds source-backed blocks for an activated thread", async () => {
     const fixture = await createTrustedFixture();
     const briefs = createMemoryThreadBriefRepository();
 
@@ -306,10 +306,6 @@ describeWithDatabase("live memory read authorization", () => {
     })).resolves.toMatchObject({
       threads: [expect.objectContaining({ blocks: expect.any(Array) })],
     });
-    await expect(database().query(
-      "SELECT 1 FROM memory_thread_briefs AS brief JOIN memory_threads AS thread ON thread.id = brief.thread_id WHERE thread.thread_ref = $1",
-      [fixture.threadRef],
-    )).resolves.toMatchObject({ rows: [] });
   });
 
   it("denies the thread source loader directly after membership revocation", async () => {
