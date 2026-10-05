@@ -16,7 +16,7 @@
  *   loop.
  * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
-import { APICallError } from "ai";
+import { APICallError, RetryError } from "ai";
 
 import { AppError } from "../../lib/app-error.js";
 
@@ -110,9 +110,11 @@ const CONTEXT_OVERFLOW_MESSAGE = /не помещается в контекст�
 
 function isContextOverflow(error: unknown): boolean {
   for (const candidate of causeChain(error)) {
-    if (!APICallError.isInstance(candidate) || candidate.statusCode !== 400) continue;
-    const code = (candidate.data as { error?: { code?: unknown } } | undefined)?.error?.code;
-    if (code === CONTEXT_OVERFLOW_CODE || CONTEXT_OVERFLOW_MESSAGE.test(candidate.message)) return true;
+    // A retried call ends in a RetryError that keeps its last attempt in `lastError`, not in `cause`.
+    const attempt = RetryError.isInstance(candidate) ? candidate.lastError : candidate;
+    if (!APICallError.isInstance(attempt) || attempt.statusCode !== 400) continue;
+    const code = (attempt.data as { error?: { code?: unknown } } | undefined)?.error?.code;
+    if (code === CONTEXT_OVERFLOW_CODE || CONTEXT_OVERFLOW_MESSAGE.test(attempt.message)) return true;
   }
   return false;
 }
@@ -131,7 +133,7 @@ export function modelCallFailure(error: unknown): unknown {
   if (isContextOverflow(error)) {
     return new AppError(
       "AGENT_MODEL_CONTEXT_OVERFLOW",
-      "История разговора стала слишком длинной для модели, и ответить не удалось. Повторять запрос сразу бесполезно: при следующем сообщении ассистент попробует сжать историю",
+      "История разговора стала слишком длинной для модели, и ответить не удалось. Повтор того же запроса не поможет",
       { cause: error },
     );
   }
