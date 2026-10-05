@@ -2,7 +2,6 @@
  * Production release contract test fixtures.
  *
  * Exports:
- * - `PRODUCTION_MEMORY_EXTRACTION_WORKER_HEALTH_COMMAND`: exact authored and resolved command.
  * - `resolvedComposeSecurityFixture`: accepted resolved production Compose security surface.
  * - `executeComposeSecurityPredicate`: invokes the real root deployment jq predicate.
  */
@@ -10,9 +9,6 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = new URL("./", import.meta.url);
-export const PRODUCTION_MEMORY_EXTRACTION_WORKER_HEALTH_COMMAND =
-  "const fs=require('node:fs'),p='/tmp/osinara-memory-extraction-worker-ready';" +
-  "if(!fs.existsSync(p)||Date.now()-fs.statSync(p).mtimeMs<30000)process.exit(1)";
 
 export function resolvedComposeSecurityFixture(): Record<string, unknown> {
   const logging = { driver: "json-file", options: { "max-file": "5", "max-size": "20m" } };
@@ -51,13 +47,6 @@ export function resolvedComposeSecurityFixture(): Record<string, unknown> {
         volumes: [volume("memory-embedding-model-e5", "/data")],
       }),
       "memory-embedding-worker": service(),
-      "memory-extraction-worker": service({
-        healthcheck: {
-          retries: 120,
-          test: ["CMD", "node", "-e", PRODUCTION_MEMORY_EXTRACTION_WORKER_HEALTH_COMMAND],
-        },
-        network_mode: "none",
-      }),
       migrate: service(),
       postgres: service({ volumes: [volume("postgres-data", "/var/lib/postgresql/data")] }),
       "sandbox-egress-proxy": service(),

@@ -159,19 +159,18 @@ const POST_V0101_MIGRATIONS = [
   "125_empty_delivery_marker.sql",
   "126_agent_identity_names.sql",
   "127_agent_identity_data.sql",
+  "128_retire_memory_extraction_pipeline.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [
   "memory_item_refs",
   "application_conversations",
   "claim_evidence",
-  "memory_extraction_batches",
   "profile_subjects",
   "profile_views",
   "external_profile_projection_policies",
   "claim_relations",
   "claim_conflicts",
-  "memory_consolidation_jobs",
   "memory_projects",
   "memory_threads",
   "memory_thread_entries",
@@ -181,11 +180,7 @@ const EXPECTED_R0_R7_TABLES = [
   "memory_review_batches",
   "memory_review_batch_sources",
   "memory_review_owner_alerts",
-  "memory_thread_briefs",
-  "memory_extraction_retention_holds",
-  "memory_extraction_gaps",
   "telegram_final_deliveries",
-  "memory_thread_brief_jobs",
   "memory_thread_creation_attempts",
 ] as const;
 

@@ -330,12 +330,6 @@ PostgreSQL validates the current Telegram source and atomically writes optional 
 activation and context use local E5 embeddings plus deterministic source projections. Semantic
 extraction, relation/thread classifiers, and LLM-generated briefs are not part of the runtime.
 
-`memory-extraction-worker` remains in the production Compose graph only because the installed schema-v1
-controller requires that service, image slot, migration dependency, and health command. Its current
-entrypoint is an idle no-op with `network_mode: none`, no environment, and no mounts; it publishes
-readiness without database, embedding, or model calls. Removing the service requires a separate
-two-phase controller migration; do not combine it with an ordinary application release.
-
 The retained MiniMax alternative transport explicitly enables a narrow web-search adapter because
 MiniMax returns
 `content` where the Anthropic SDK requires `encrypted_content`, but rejects its own native

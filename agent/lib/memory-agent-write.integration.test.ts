@@ -48,7 +48,7 @@ describeWithDatabase("main-agent memory write", () => {
 
   afterAll(closeDatabase);
 
-  it("atomically creates an author-bound claim and thread without specialized model jobs", async () => {
+  it("atomically creates an author-bound claim and thread", async () => {
     const fixture = await createMainAgentMemoryFixture();
     const memory = await memoryRepository.create(fixture.auth, {
       confirmation: "model_high",
@@ -97,20 +97,8 @@ describeWithDatabase("main-agent memory write", () => {
       thread_subject_user_id: fixture.userId,
     }] });
     await expect(database().query(
-      `SELECT
-         (SELECT count(*)::integer FROM memory_extraction_jobs) AS extraction_jobs,
-         (SELECT count(*)::integer FROM memory_consolidation_jobs) AS consolidation_jobs,
-         (SELECT count(*)::integer FROM memory_thread_discovery_jobs) AS discovery_jobs,
-         (SELECT count(*)::integer FROM memory_thread_brief_jobs) AS brief_jobs,
-         (SELECT count(*)::integer FROM memory_thread_creation_notices
-           WHERE status = 'pending') AS pending_notices`,
-    )).resolves.toMatchObject({ rows: [{
-      brief_jobs: 0,
-      consolidation_jobs: 0,
-      discovery_jobs: 0,
-      extraction_jobs: 0,
-      pending_notices: 0,
-    }] });
+      "SELECT count(*)::integer AS pending_notices FROM memory_thread_creation_notices WHERE status = 'pending'",
+    )).resolves.toMatchObject({ rows: [{ pending_notices: 0 }] });
   });
 
   it("records review thread writes as system actions while preserving turn provenance", async () => {
