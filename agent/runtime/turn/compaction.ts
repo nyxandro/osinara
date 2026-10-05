@@ -3,9 +3,10 @@
  *
  * Exports:
  * - `compactionSettings`: the threshold (a share of the window) and the recent tail size.
- * - `shouldCompact`: the last provider-reported prompt size plus an estimate of what came after.
- * - `compactMessages`: caps old tool results if that is enough; otherwise one summary call
- *   replaces the older part with a checkpoint and keeps the recent tail.
+ * - `shouldCompact`, `PromptMeasurement`: the estimated messages plus the system prompt and tool
+ *   definitions, or plus what the provider's last count of this history showed beyond its estimate.
+ * - `compactMessages`: caps old tool results if that fits the budget `shouldCompact` measured;
+ *   otherwise one summary call replaces the older part with a checkpoint and keeps the recent tail.
  * - `todoCompactionMessage`: the open task list, re-added after a compaction.
  * - `summarizeWithModel`, `CompactionSummaryRequest`: the summary call on the step's model.
  *
@@ -73,21 +74,36 @@ export function compactionSettings(contextWindowTokens: number, thresholdPercent
   return { recentWindowSize: COMPACTION_RECENT_WINDOW_SIZE, threshold: Math.max(1, Math.floor(contextWindowTokens * thresholdPercent)) };
 }
 
-function inputTokenCount(messages: readonly ModelMessage[], counters: CompactionCounters): number {
+/** What a compaction decision knows of a request besides its messages. */
+export interface PromptMeasurement {
+  /** The provider's count of this history's last request, or none since the history was replaced. */
+  readonly counters: CompactionCounters;
+  /** `estimateFrameTokens` of this step: the system prompt and the tool definitions. */
+  readonly frameTokens: number;
+}
+
+/**
+ * The estimated size the messages of a request may reach. Besides them a request carries its frame
+ * or, once the provider has measured this history, what its count showed beyond the estimate of the
+ * measured messages; never less than the frame, so an estimate that counts high makes no room.
+ * Every decision of one compaction takes this budget: a replacement is judged by the ruler that
+ * asked for it, and the next step, measured or not, does not ask again.
+ */
+function messageBudget(messages: readonly ModelMessage[], settings: CompactionSettings, measurement: PromptMeasurement): number {
+  const { counters, frameTokens } = measurement;
   const prior = counters.inputTokens;
   const priorCount = counters.promptMessageCount;
-  if (prior === null || priorCount === null || !Number.isInteger(priorCount) || priorCount < 0 || priorCount > messages.length) {
-    return estimateTokens(messages);
-  }
-  return prior + estimateTokens(messages.slice(priorCount));
+  const measured = prior !== null && priorCount !== null && Number.isInteger(priorCount) && priorCount >= 0 && priorCount <= messages.length;
+  const besides = measured ? Math.max(frameTokens, prior - estimateTokens(messages.slice(0, priorCount))) : frameTokens;
+  return settings.threshold - besides - COMPACTION_PROMPT_OVERHEAD_TOKENS;
 }
 
-export function shouldCompact(messages: readonly ModelMessage[], settings: CompactionSettings, counters: CompactionCounters): boolean {
-  return messages.length > 0 && inputTokenCount(messages, counters) + COMPACTION_PROMPT_OVERHEAD_TOKENS > settings.threshold;
+export function shouldCompact(messages: readonly ModelMessage[], settings: CompactionSettings, measurement: PromptMeasurement): boolean {
+  return messages.length > 0 && !fits(messages, messageBudget(messages, settings, measurement));
 }
 
-function fits(messages: readonly ModelMessage[], settings: CompactionSettings, withOverhead: boolean): boolean {
-  return estimateTokens(messages) + (withOverhead ? COMPACTION_PROMPT_OVERHEAD_TOKENS : 0) <= settings.threshold;
+function fits(messages: readonly ModelMessage[], budget: number): boolean {
+  return estimateTokens(messages) <= budget;
 }
 
 function assistantMessageText(message: ModelMessage): string {
@@ -166,14 +182,14 @@ function keepNonToolResultMessages(messages: readonly ModelMessage[]): ModelMess
   return kept;
 }
 
-function selectRecentWindowSize(messages: readonly ModelMessage[], settings: CompactionSettings): number {
+function selectRecentWindowSize(messages: readonly ModelMessage[], settings: CompactionSettings, budget: number): number {
   const maxKeep = Math.min(settings.recentWindowSize, Math.max(messages.length - 1, 0));
   const reserve = Math.min(COMPACTION_SUMMARY_RESERVE_TOKENS, Math.max(64, Math.floor(settings.threshold / 4)));
   let keep = 0;
   let recentTokens = 0;
   for (let index = messages.length - 1; index >= 0 && keep < maxKeep; index -= 1) {
     const messageTokens = estimateTokens([messages[index]]);
-    if (recentTokens + messageTokens + reserve > settings.threshold) break;
+    if (recentTokens + messageTokens + reserve > budget) break;
     recentTokens += messageTokens;
     keep += 1;
   }
@@ -188,13 +204,16 @@ function splitMessages(messages: readonly ModelMessage[], keep: number) {
   return { older: messages.slice(0, split), recent: messages.slice(split) };
 }
 
+/** `measurement` is the one `shouldCompact` decided with. */
 export async function compactMessages(
   messages: readonly ModelMessage[],
   settings: CompactionSettings,
   summarize: Summarize,
+  measurement: PromptMeasurement,
 ): Promise<ModelMessage[]> {
+  const budget = messageBudget(messages, settings, measurement);
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
-  const { older, recent } = splitMessages(conversation, selectRecentWindowSize(conversation, settings));
+  const { older, recent } = splitMessages(conversation, selectRecentWindowSize(conversation, settings, budget));
   if (older.length === 0 && previousCheckpoint === undefined) return keepNonToolResultMessages(recent);
 
   const checkpointHead: ModelMessage[] = previousCheckpoint === undefined ? [] : [
@@ -202,8 +221,8 @@ export async function compactMessages(
     { content: previousCheckpoint, role: "assistant" },
   ];
   const capped = withResumptionGuard([...checkpointHead, ...capToolResults(older), ...recent], conversation);
-  // The same ruler as `shouldCompact`, so a near no-op cap cannot re-trigger compaction every step.
-  if (fits(capped, settings, true)) return capped;
+  // A near no-op cap stays over the budget that asked for compaction and goes on to the summary.
+  if (fits(capped, budget)) return capped;
 
   const summary = await summarize(createCompactionPrompt({ messages: older, previousCheckpoint, transcriptBudgetTokens: settings.threshold }));
   const summaryHead: ModelMessage[] = [
@@ -211,13 +230,13 @@ export async function compactMessages(
     { content: summary, role: "assistant" },
   ];
   const verbatim = withResumptionGuard([...summaryHead, ...recent], conversation);
-  if (fits(verbatim, settings, false)) return verbatim;
+  if (fits(verbatim, budget)) return verbatim;
   const stripped = withResumptionGuard([...summaryHead, ...keepNonToolResultMessages(recent)], conversation);
-  if (fits(stripped, settings, false)) return stripped;
+  if (fits(stripped, budget)) return stripped;
   throw new AppError(
     "AGENT_COMPACTION_OUTPUT_TOO_LARGE",
     "Разговор стал слишком длинным, и его не удалось сжать. Начните новый разговор",
-    { details: { estimatedTokens: Math.round(estimateTokens(stripped)), threshold: settings.threshold } },
+    { details: { budgetTokens: Math.round(budget), estimatedTokens: Math.round(estimateTokens(stripped)), threshold: settings.threshold } },
   );
 }
 
