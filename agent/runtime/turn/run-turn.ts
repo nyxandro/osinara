@@ -22,7 +22,7 @@
  * - A delegated child's tools see their caller as `session.parent`.
  * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
-import type { ModelMessage } from "ai";
+import type { ModelMessage, ToolSet } from "ai";
 import type { Pool } from "pg";
 
 import { AppError } from "../../lib/app-error.js";
@@ -46,7 +46,10 @@ import {
   markHistoryStarted, markInputPresented, markStepTextEmitted, parkToolCall, parkTurn, recordStep, savePreparedTurn,
   sessionAwaitsApproval, updateToolCall, type JournalDatabase,
 } from "./journal-repository.js";
-import { compactionSettings, compactMessages, shouldCompact, todoCompactionMessage, type CompactionSummaryRequest } from "./compaction.js";
+import { estimateFrameTokens } from "./compaction-estimate.js";
+import {
+  compactionSettings, compactMessages, shouldCompact, todoCompactionMessage, type CompactionSummaryRequest, type PromptMeasurement,
+} from "./compaction.js";
 import { assistantStepText, MODEL_INACTIVITY_TIMEOUT, type StepModelCall, type StepModelResponse } from "./model-call.js";
 import { modelCallFailure } from "./model-errors.js";
 import { orderStepTools, toModelToolSet } from "./model-tools.js";
@@ -121,6 +124,16 @@ function systemPrompt(agent: RuntimeAgent, prepared: PreparedTurn): string {
     instructionBlocks: prepared.instructions,
     skillsSection: prepared.skillRoot === null ? null : formatAvailableSkillsSection(prepared.skills, { skillRoot: prepared.skillRoot }),
   });
+}
+
+/** What a step's request carries besides its messages; compaction measures the same frame the model gets. */
+interface StepFrame {
+  readonly system: string;
+  readonly tools: ToolSet;
+}
+
+function stepFrame(agent: RuntimeAgent, turn: TurnRecord, tools: AnyTools): StepFrame {
+  return { system: systemPrompt(agent, requirePrepared(turn)), tools: toModelToolSet(orderStepTools(tools, agent.staticToolNames)) };
 }
 
 /** A delegated child's caller, as its tools and step hook see it, continuations included; one level deep. */
@@ -278,18 +291,19 @@ async function settleParkedStep(
 /** Returns the compacted prompt messages, now the session's history, or `null` when none was needed. */
 async function compactIfNeeded(runtime: TurnRuntime, input: {
   readonly history: SessionHistory;
+  readonly measurement: PromptMeasurement;
   readonly messages: readonly ModelMessage[];
   readonly selection: StepModelSelection;
   readonly signal: AbortSignal;
   readonly turn: TurnRecord;
 }): Promise<ModelMessage[] | null> {
   const settings = compactionSettings(input.selection.contextWindowTokens, runtime.agent.compactionThresholdPercent);
-  if (!shouldCompact(input.messages, settings, input.history.compaction)) return null;
+  if (!shouldCompact(input.messages, settings, input.measurement)) return null;
   let compacted: ModelMessage[];
   try {
     compacted = await compactMessages(input.messages, settings, (request) => runtime.summarize({
       ...request, abortSignal: input.signal, model: input.selection.model, providerOptions: input.selection.providerOptions,
-    }));
+    }), input.measurement);
   } catch (error) {
     throw modelCallFailure(error);
   }
@@ -306,13 +320,12 @@ async function compactIfNeeded(runtime: TurnRuntime, input: {
 }
 
 async function callModel(runtime: TurnRuntime, input: {
+  readonly frame: StepFrame;
   readonly messages: readonly ModelMessage[];
   readonly selection: StepModelSelection;
   readonly signal: AbortSignal;
-  readonly tools: AnyTools;
   readonly turn: TurnRecord;
 }): Promise<StepModelResponse> {
-  const { agent } = runtime;
   const { selection } = input;
   // While an approval waits, other turns of the session answer without tools.
   const toolChoice = await sessionAwaitsApproval(runtime.database, input.turn.sessionId) ? "none" : undefined;
@@ -323,9 +336,9 @@ async function callModel(runtime: TurnRuntime, input: {
       messages: input.messages,
       model: selection.model,
       providerOptions: selection.providerOptions,
-      system: systemPrompt(agent, requirePrepared(input.turn)),
+      system: input.frame.system,
       toolChoice,
-      tools: toModelToolSet(orderStepTools(input.tools, agent.staticToolNames)),
+      tools: input.frame.tools,
     });
   } catch (error) {
     throw modelCallFailure(error);
@@ -351,13 +364,15 @@ async function runStep(
   if (recorded === null) {
     if (stepIndex >= runtime.agent.maxModelSteps) throw stepLimitExceeded();
     const selection = runtime.agent.selectModel({ sessionId: turn.sessionId, stepIndex });
-    const compacted = await compactIfNeeded(runtime, { history, messages, selection, signal, turn });
+    const frame = stepFrame(runtime.agent, turn, tools);
+    const measurement = { counters: history.compaction, frameTokens: await estimateFrameTokens(frame.system, frame.tools) };
+    const compacted = await compactIfNeeded(runtime, { history, measurement, messages, selection, signal, turn });
     if (compacted !== null) {
       messages = compacted;
       turnInput = [];
     }
     await runtime.agent.stepStarted({ channel: turn.channel, session: sessionOf(turn, parent) });
-    const response = await callModel(runtime, { messages, selection, signal, tools, turn });
+    const response = await callModel(runtime, { frame, messages, selection, signal, turn });
     const calls = await planStepCalls({
       contextFor: toolContexts(runtime, turn, parent, signal), response: response.messages, toolCalls: response.toolCalls, tools,
     });

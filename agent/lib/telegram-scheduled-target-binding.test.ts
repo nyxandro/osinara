@@ -265,7 +265,7 @@ describe("scheduled Telegram target binding", () => {
     const handler = (telegramTurnEvents as Record<string, any>)["turn.failed"];
 
     await handler(
-      { code: "AGENT_MODEL_FAILED" },
+      { code: "AGENT_MODEL_FAILED", message: "Модель не смогла обработать запрос" },
       mismatchedChannel(),
       context,
     );
@@ -296,7 +296,7 @@ describe("scheduled Telegram target binding", () => {
     const handler = (telegramTurnEvents as Record<string, any>)["turn.failed"];
 
     await handler(
-      { code: "AGENT_MODEL_FAILED" },
+      { code: "AGENT_MODEL_FAILED", message: "Модель не смогла обработать запрос" },
       matchingChannel(),
       context,
     );
@@ -311,6 +311,7 @@ describe("scheduled Telegram target binding", () => {
     expect(dependencies.recordTelegramFailure).toHaveBeenCalledWith({
       chatId: "-100111",
       code: "AGENT_MODEL_FAILED",
+      message: "Модель не смогла обработать запрос",
       sessionId: "agent-session-1",
       turnId: "turn-1",
     });

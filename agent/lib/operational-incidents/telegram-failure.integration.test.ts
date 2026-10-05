@@ -33,6 +33,7 @@ describe.skipIf(!enabled)("telegram failure correlation", () => {
       await recordTelegramFailure({
         chatId: "-100111",
         code: "AGENT_TEST_FAILED",
+        message: "История разговора стала слишком длинной для модели",
         sessionId,
         turnId,
       });
@@ -47,6 +48,7 @@ describe.skipIf(!enabled)("telegram failure correlation", () => {
       expect(stored.rows).toHaveLength(1);
       expect(stored.rows[0]?.code).toBe("AGENT_TELEGRAM_EXECUTION_FAILED");
       expect(stored.rows[0]?.context).toMatchObject({
+        cause: "История разговора стала слишком длинной для модели",
         causeCode: "AGENT_TEST_FAILED",
         chatId: "-100111",
         agentSessionId: sessionId,
@@ -64,6 +66,7 @@ describe.skipIf(!enabled)("telegram failure correlation", () => {
     try {
       await recordTelegramFailure({
         code: "AGENT_TEST_FAILED",
+        message: "История разговора стала слишком длинной для модели",
         sessionId,
         updateId: "987654321",
       });

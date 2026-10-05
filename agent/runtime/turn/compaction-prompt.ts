@@ -11,7 +11,7 @@
  */
 import type { ModelMessage } from "ai";
 
-import { estimateTokens } from "./compaction-estimate.js";
+import { estimateTextTokens, estimateTokens } from "./compaction-estimate.js";
 
 export const COMPACTION_CHECKPOINT_MARKER = "Summary of our conversation so far:";
 
@@ -97,8 +97,8 @@ export function createCompactionPrompt(input: {
  * Re-renders the oldest entries with degraded (capped) conversational text
  * until the estimated prompt fits the budget. Mutates `entries` in place.
  * Savings are tracked per entry instead of re-estimating the whole prompt per
- * iteration; the char-length delta divided by 4 matches the
- * {@link estimateTokens} ruler closely enough for a soft budget.
+ * iteration, on the {@link estimateTokens} ruler; skipping JSON escaping is
+ * close enough for a soft budget.
  */
 function degradeOversizedTranscript(
   input: {
@@ -131,7 +131,7 @@ function degradeOversizedTranscript(
       continue;
     }
 
-    excessTokens -= (entry.content.length - degraded.length) / 4;
+    excessTokens -= estimateTextTokens(entry.content) - estimateTextTokens(degraded);
     entries[index] = { content: degraded, role: entry.role };
   }
 }
