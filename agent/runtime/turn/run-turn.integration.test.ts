@@ -5,6 +5,7 @@ import { AppError } from "../../lib/app-error.js";
 import { closeDatabase, database } from "../../lib/database.js";
 import { loadSessionHistory } from "../history/history-repository.js";
 import { defineTool } from "../tool.js";
+import { estimateTokens } from "./compaction-estimate.js";
 import { loadTurn } from "./journal-repository.js";
 import { EmptyModelResponseError } from "./model-errors.js";
 import { runTurn, type TurnRuntime } from "./run-turn.js";
@@ -384,5 +385,54 @@ async function releaseRunner(turnId: string) {
     const stored = await loadSessionHistory(database(), sessionId);
     expect(stored.generation).toBe(1);
     expect(stored.messages).toEqual([...sent, { role: "assistant", content: [{ type: "text", text: "Отвечаю." }] }]);
+  });
+
+  // Production, 5 October 2026: a group chat whose prompt the provider had measured past the
+  // threshold was re-saved uncompressed at every step until the model refused it.
+  it("summarizes a history the provider measured over the threshold even when capping changes nothing", async () => {
+    const long = Array.from({ length: 10 }, (_, index) => [
+      { role: "user" as const, content: `question ${index} ${"x".repeat(1_000)}` },
+      { role: "assistant" as const, content: [{ type: "text" as const, text: `answer ${index} ${"y".repeat(1_000)}` }] },
+    ]).flat();
+    const sessionId = await newTestSession(long);
+    await database().query(
+      "UPDATE agent_session_state SET compaction_input_tokens = $2, compaction_prompt_message_count = $3 WHERE session_id = $1",
+      [sessionId, Math.round(estimateTokens(long)) + 1_500, long.length],
+    );
+    const summarize = vi.fn<TurnRuntime["summarize"]>(async () => "Сводка разговора");
+    const model = scriptedModel(reply("Отвечаю."));
+    const turn = await startMessageTurn(sessionId, "новый вопрос");
+
+    await runTurn(testRuntime({
+      agent: testAgent({}, { selectModel: () => ({ contextWindowTokens: 8_000, model: "test-model-unused", providerOptions: undefined }) }),
+      callModel: model.callModel, observer: recordingObserver().observer, summarize,
+    }), turn.id, RUN);
+
+    expect(summarize).toHaveBeenCalledTimes(1);
+    expect(model.requests[0]!.messages.slice(0, 2)).toEqual([
+      { role: "user", content: "Summary of our conversation so far:" },
+      { role: "assistant", content: "Сводка разговора" },
+    ]);
+  });
+
+  it("counts the step's tool definitions before the provider has measured the history", async () => {
+    const long = Array.from({ length: 8 }, (_, index) => [
+      { role: "user" as const, content: `question ${index} ${"x".repeat(1_000)}` },
+      { role: "assistant" as const, content: [{ type: "text" as const, text: `answer ${index} ${"y".repeat(1_000)}` }] },
+    ]).flat();
+    const sessionId = await newTestSession(long);
+    const summarize = vi.fn<TurnRuntime["summarize"]>(async () => "Сводка разговора");
+    const model = scriptedModel(reply("Отвечаю."));
+    const turn = await startMessageTurn(sessionId, "новый вопрос");
+    const selectModel = () => ({ contextWindowTokens: 8_000, model: "test-model-unused", providerOptions: undefined });
+
+    // The history alone fits; with a tool whose definition is 8 000 bytes the request does not.
+    await runTurn(testRuntime({
+      agent: testAgent({ note: noteTool(undefined, { description: "d".repeat(8_000) }) }, { selectModel }),
+      callModel: model.callModel, observer: recordingObserver().observer, summarize,
+    }), turn.id, RUN);
+
+    expect(summarize).toHaveBeenCalledTimes(1);
+    expect(model.requests[0]!.messages[0]).toEqual({ role: "user", content: "Summary of our conversation so far:" });
   });
 });

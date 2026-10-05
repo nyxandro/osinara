@@ -368,7 +368,7 @@ export const telegramTurnEvents: TelegramTurnEvents = {
     if (notifyFailure) {
       const updateId = ctx.session.auth.current?.attributes.osinaraTelegramUpdateId;
       await recordTelegramFailure({ sessionId: ctx.session.id, turnId: ctx.session.turn.id,
-        ...(typeof updateId === "string" ? { updateId } : {}), code: data.code, chatId: channel.telegram.chatId });
+        ...(typeof updateId === "string" ? { updateId } : {}), code: data.code, message: data.message, chatId: channel.telegram.chatId });
     }
     if (!reviewBatchId) await sessionRepository.recordTurnFailed(sessionId, ctx.session.id);
     await telegramHitlApprovalRepository.clearForAgentSession(sessionId, ctx.session.id);

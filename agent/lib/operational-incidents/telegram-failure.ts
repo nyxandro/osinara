@@ -3,7 +3,7 @@ import { database } from "../database.js";
 import { recordOperationalIncident } from "./owner-alerts.js";
 
 export async function recordTelegramFailure(input: {
-  sessionId: string; turnId?: string; updateId?: string; code: string; chatId?: string;
+  sessionId: string; turnId?: string; updateId?: string; code: string; message: string; chatId?: string;
 }): Promise<void> {
   let updateId = input.updateId;
   if (updateId === undefined) {
@@ -17,5 +17,5 @@ export async function recordTelegramFailure(input: {
   await recordOperationalIncident({ key: updateId !== undefined ? `telegram:${updateId}` : scheduledRun ? `schedule-run:${scheduledRun.id}` : `turn:${input.sessionId}:${input.turnId ?? "session"}`,
     code: "AGENT_TELEGRAM_EXECUTION_FAILED", summary: "Обработка запроса завершилась с ошибкой. Проверьте результат перед повторным выполнением.",
     context: { agentSessionId: input.sessionId, agentTurnId: input.turnId ?? null, updateId: updateId ?? null,
-      chatId: input.chatId ?? null, causeCode: input.code } });
+      chatId: input.chatId ?? null, causeCode: input.code, cause: input.message } });
 }
