@@ -7,6 +7,7 @@
  *   definitions, or plus what the provider's last count of this history showed beyond its estimate.
  * - `compactMessages`: caps old tool results if that fits the budget `shouldCompact` measured;
  *   otherwise one summary call replaces the older part with a checkpoint and keeps the recent tail.
+ * - `capToolResults`: the capping step on its own.
  * - `todoCompactionMessage`: the open task list, re-added after a compaction.
  * - `summarizeWithModel`, `CompactionSummaryRequest`: the summary call on the step's model.
  *
@@ -123,12 +124,14 @@ function extractPreviousCheckpoint(messages: readonly ModelMessage[]) {
   return { conversation: messages.slice(2), previousCheckpoint: assistantMessageText(checkpoint) };
 }
 
-function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
+/** Caps each tool result once: a capped result keeps its text, which capping it again would erode. */
+export function capToolResults(messages: readonly ModelMessage[]): ModelMessage[] {
   return messages.map((message) => {
     if (message.role !== "tool") return message;
     let changed = false;
     const content = message.content.map((part) => {
       if (part.type !== "tool-result") return part;
+      if (part.output.type === "text" && part.output.value.startsWith(CAPPED_RESULT_ANNOTATION)) return part;
       const output = stubContentOutputFileParts(part.output) as typeof part.output;
       const serialized = JSON.stringify(output) ?? "";
       if (serialized.length <= TRANSCRIPT_PAYLOAD_LIMIT) {

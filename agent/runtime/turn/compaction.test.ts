@@ -6,7 +6,7 @@ import { AppError } from "../../lib/app-error.js";
 import type { CompactionCounters } from "../history/history-repository.js";
 import { estimateTokens } from "./compaction-estimate.js";
 import {
-  compactionSettings, compactMessages, shouldCompact, todoCompactionMessage, type PromptMeasurement, type Summarize,
+  capToolResults, compactionSettings, compactMessages, shouldCompact, todoCompactionMessage, type PromptMeasurement, type Summarize,
 } from "./compaction.js";
 
 const NO_COUNTERS = { inputTokens: null, promptMessageCount: null };
@@ -21,10 +21,14 @@ function exchange(index: number, size = 50): ModelMessage[] {
   ];
 }
 
-function toolExchange(index: number, resultSize: number, letter = "z"): ModelMessage[] {
+function toolExchange(index: number, resultSize: number, letter = "z", kind: "json" | "text" = "text"): ModelMessage[] {
+  const value = letter.repeat(resultSize);
   return [
     { role: "assistant", content: [{ type: "tool-call", toolCallId: `c${index}`, toolName: "bash", input: { command: "cat" } }] },
-    { role: "tool", content: [{ type: "tool-result", toolCallId: `c${index}`, toolName: "bash", output: { type: "text", value: letter.repeat(resultSize) } }] },
+    { role: "tool", content: [{
+      type: "tool-result", toolCallId: `c${index}`, toolName: "bash",
+      output: kind === "text" ? { type: "text", value } : { type: "json", value: { exitCode: 0, stdout: value } },
+    }] },
   ];
 }
 
@@ -46,7 +50,10 @@ const conversationArbitrary = fc.record({
   checkpoint: fc.option(fc.integer({ max: 3_000, min: 1 }), { nil: undefined }),
   chunks: fc.array(fc.oneof(
     fc.record({ kind: fc.constant("exchange" as const), letter: fc.constantFrom(...LETTERS), size: fc.integer({ max: 3_000, min: 0 }) }),
-    fc.record({ kind: fc.constant("tool" as const), letter: fc.constantFrom(...LETTERS), size: fc.integer({ max: 20_000, min: 0 }) }),
+    fc.record({
+      kind: fc.constant("tool" as const), letter: fc.constantFrom(...LETTERS), output: fc.constantFrom("json" as const, "text" as const),
+      size: fc.integer({ max: 20_000, min: 0 }),
+    }),
   ), { maxLength: 30 }),
   endsWithPerson: fc.boolean(),
 }).map(({ checkpoint, chunks, endsWithPerson }): ModelMessage[] => [
@@ -59,7 +66,7 @@ const conversationArbitrary = fc.record({
       { role: "user" as const, content: `вопрос ${index} ${chunk.letter.repeat(chunk.size)}` },
       { role: "assistant" as const, content: [{ type: "text" as const, text: `ответ ${index} ${chunk.letter.repeat(chunk.size)}` }] },
     ]
-    : toolExchange(index, chunk.size, chunk.letter)),
+    : toolExchange(index, chunk.size, chunk.letter, chunk.output)),
   ...(endsWithPerson ? [CURRENT] : []),
 ]);
 
@@ -156,6 +163,24 @@ describe("history compaction", () => {
       expect(estimateTokens(compacted) + measurement.frameTokens).toBeLessThanOrEqual(settings.threshold);
       expect(compactsAgain(compacted, settings, measurement.frameTokens)).toBe(false);
     }), { examples: [[productionLoop], [{ ...productionLoop, measurement: { counters: NO_COUNTERS, frameTokens: productionLoop.measurement.frameTokens } }]] });
+  });
+
+  // Production, 5 October 2026: 23 compactions re-capped the same results until no line of their
+  // text was left, while each kept its 2 106 characters.
+  it("caps a tool result once: a later compaction leaves it as it was", () => {
+    const messages = [...exchange(0), ...toolExchange(1, 10_000, "я"), CURRENT];
+
+    const capped = capToolResults(messages);
+
+    expect(capped[3]).toMatchObject({ role: "tool", content: [{ output: { type: "text", value: expect.stringMatching(/^\[Truncated: [^]*яя$/) } }] });
+    expect(capToolResults(capped)).toEqual(capped);
+  });
+
+  it("caps any history to the same result the second time as the first", () => {
+    fc.assert(fc.property(conversationArbitrary, (messages) => {
+      const once = capToolResults(messages);
+      expect(capToolResults(once)).toEqual(once);
+    }), { examples: [[[...toolExchange(1, 10_000, "я"), CURRENT]], [[...toolExchange(1, 10_000, "x", "json"), CURRENT]]] });
   });
 
   it("caps old tool results without a summary call when that is enough", async () => {
