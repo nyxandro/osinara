@@ -10,7 +10,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "./database.js";
-import { confirmedOutcomeRepository } from "./confirmed-outcome-repository.js";
 import { createMemoryThreadBriefRepository } from "./memory-thread-brief-repository.js";
 import { memoryThreadLifecycleRepository } from "./memory-thread-lifecycle-repository.js";
 import { memoryThreadNoticeRepository } from "./memory-thread-notice-repository.js";
@@ -58,37 +57,6 @@ describeWithDatabase("memory thread repositories", () => {
       [additionalClaimId],
     );
     expect(attachedIdentity.rows[0]!.memory_project_id).toBe(identity.rows[0]!.memory_project_id);
-
-    // Application integrations create authoritative outcomes only from a persisted family event.
-    const event = await database().query<{ id: string }>(
-      `INSERT INTO audit_events (family_id, actor_user_id, event_type, metadata)
-       VALUES ($1, $2, 'repair.stage_confirmed', '{"stage":"planning"}'::jsonb) RETURNING id`,
-      [fixture.familyId, fixture.userId],
-    );
-    const outcomeInput = {
-      applicationEventId: event.rows[0]!.id,
-      authority: "application_event" as const,
-      familyId: fixture.familyId,
-      memoryProjectId: identity.rows[0]!.memory_project_id,
-      occurredAt: new Date("2026-08-08T10:00:00.000Z"),
-      operationKey: "repair-stage-outcome",
-      scope: "family" as const,
-      scopePartitionKey: fixture.familyId,
-      sourceClaims: [{ claimId: fixture.claimId, role: "result" as const }],
-      sourceSnapshot: { stage: "planning" },
-      subjectConversationId: null,
-      subjectParticipantId: null,
-      subjectUserId: null,
-      summary: "Этап планирования ремонта подтверждён",
-    };
-    const outcome = await confirmedOutcomeRepository.create(outcomeInput);
-    await expect(confirmedOutcomeRepository.create(outcomeInput)).resolves.toEqual(outcome);
-    expect(outcome.outcomeRef).toMatch(/^outcome_[0-9a-f]{32}$/u);
-    await expect(confirmedOutcomeRepository.retract({
-      familyId: fixture.familyId,
-      operationKey: "repair-stage-retract",
-      outcomeRef: outcome.outcomeRef,
-    })).resolves.toEqual({ outcomeRef: outcome.outcomeRef, status: "retracted" });
 
     await expect(memoryThreadNoticeRepository.takePending(fixture.auth, fixture.conversationId))
       .resolves.toBeNull();

@@ -26,7 +26,6 @@ import { memoryReviewRepository } from "../lib/memory-review/memory-review-repos
 import { memoryReviewBatchId, reviewContinuationToken } from "../lib/memory-review/memory-review-session.js";
 import { applicationSessionId } from "../lib/sessions/session-context.js";
 import { sessionRepository } from "../lib/sessions/session-repository.js";
-import { recoverableModelFailureCode } from "../lib/model-failure.js";
 import { recoverDatabaseBookkeeping } from "../lib/database-recovery.js";
 
 export const MEMORY_REVIEW_CHANNEL_KIND = "memory-review";
@@ -94,7 +93,7 @@ export const memoryReviewTurnEvents: LifecycleTurnEvents = {
     );
     await recoverDatabaseBookkeeping(() => memoryReviewRepository.failRunning({
       batchId,
-      diagnosticCode: recoverableModelFailureCode(data) ?? data.code,
+      diagnosticCode: data.code,
       agentSessionId: ctx.session.id,
       agentTurnId: ctx.session.turn.id,
     }));

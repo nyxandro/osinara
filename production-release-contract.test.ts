@@ -260,7 +260,7 @@ describe("release workflow contract", () => {
     ]) {
       expect(workflow).toContain(`ghcr.io/nyxandro/${image}`);
     }
-    expect(workflow.match(/actions\/attest@/g)).toHaveLength(12);
+    expect(workflow.match(/actions\/attest@/g)).toHaveLength(10);
     expect(workflow).toContain("packages: write");
     expect(workflow).toContain("attestations: write");
     expect(workflow).toContain("id-token: write");
@@ -311,7 +311,7 @@ describe("release workflow contract", () => {
       /gh release upload[\s\S]*?osinara-linux-x64[\s\S]*?osinara-linux-x64\.sha256/u,
     );
     expect(workflow).toContain(
-      '["agent-model-providers.json", "codex-subscription-model-providers.json", "compose.production.yaml", "install.sh", "osinara-deployment.json", "osinara-installation.tar.gz", "osinara-linux-x64", "osinara-linux-x64.sha256"]',
+      '["compose.production.yaml", "install.sh", "osinara-deployment.json", "osinara-installation.tar.gz", "osinara-linux-x64", "osinara-linux-x64.sha256"]',
     );
   });
 });
@@ -323,7 +323,6 @@ describe("server deployment contract", () => {
       "source scripts/production-deploy/common.sh",
       "source scripts/production-deploy/database.sh",
       "source scripts/production-deploy/release.sh",
-      "source scripts/production-deploy/bridge.sh",
       "source scripts/production-deploy/backup.sh",
     ].join("; ")], { cwd: projectRoot })).not.toThrow();
   });
@@ -477,5 +476,30 @@ describe("server deployment contract", () => {
 
     expect(example).toContain("DATABASE_URL=\n");
     expect(example).not.toContain("OSINARA_APP_IMAGE=");
+  });
+});
+
+describe("production edge and installer contract", () => {
+  it("publishes attestations for the installer bootstrap and its checksum", () => {
+    const workflow = readProjectFile(".github/workflows/ci-release.yaml");
+
+    expect(workflow).toMatch(/Attest installer bootstrap[\s\S]*?subject-path: install\.sh/u);
+    expect(workflow).toMatch(/Attest installer checksum[\s\S]*?subject-path: osinara-linux-x64\.sha256/u);
+  });
+
+  it("exposes only edge on the dedicated frontend network", () => {
+    const compose = readProjectFile("compose.production.yaml");
+    const hostOperations = readProjectFile("scripts/provider-installer/production-host-operations.ts");
+    const valid = resolvedComposeSecurityFixture();
+    const unsafe = structuredClone(valid) as {
+      services: Record<string, { networks?: Record<string, null> }>;
+    };
+    unsafe.services.agent!.networks = { "edge-frontend": null };
+
+    expect(compose.match(/      - edge-frontend/g)).toHaveLength(1);
+    expect(compose).toContain("  edge-frontend:\n    name: osinara-production-edge-frontend");
+    expect(hostOperations).toContain('"osinara-production-edge-frontend"');
+    expect(() => executeComposeSecurityPredicate(valid)).not.toThrow();
+    expect(() => executeComposeSecurityPredicate(unsafe)).toThrow();
   });
 });

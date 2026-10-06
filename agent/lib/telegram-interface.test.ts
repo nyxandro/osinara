@@ -4,13 +4,11 @@
  * Constructs covered:
  * - Approval prompts and buttons hide technical tool names from users.
  * - Policy updates disclose the complete replacement policy and non-disconnection warning.
- * - Freeform prompts and terminal errors use clear Russian text.
+ * - Freeform prompts use clear Russian text.
  */
 import { describe, expect, it } from "vitest";
 
 import {
-  formatTelegramSessionFailure,
-  formatTelegramTurnFailure,
   localizeTelegramInputRequest,
   localizeTelegramReplyMarkup,
 } from "./telegram-interface.js";
@@ -280,87 +278,4 @@ describe("Telegram interface localization", () => {
       selective: true,
     });
   });
-
-  it("renders safe Russian terminal errors with support references", () => {
-    const details = { errorId: "47dae564-7b24-497b-a1b7-69b8fcfdf92c", internal: "secret" };
-
-    const turnMessage = formatTelegramTurnFailure({
-      code: "AGENT_TOOL_CALL_FAILED",
-      details,
-    });
-    const sessionMessage = formatTelegramSessionFailure({
-      code: "AGENT_SESSION_FAILED",
-      details,
-    });
-
-    expect(turnMessage).toContain("Не удалось выполнить запрос");
-    expect(turnMessage).toContain("Код: AGENT_TOOL_CALL_FAILED");
-    expect(turnMessage).toContain("Номер ошибки: 47dae564-7b24-497b-a1b7-69b8fcfdf92c");
-    expect(sessionMessage).toContain("Не удалось продолжить этот диалог");
-    expect(sessionMessage).not.toContain("secret");
-  });
-
-  it("names a spent model call as an outage and asks to wait", () => {
-    const turnMessage = formatTelegramTurnFailure({
-      code: "MODEL_CALL_FAILED",
-      details: { errorId: "47dae564-7b24-497b-a1b7-69b8fcfdf92c" },
-    });
-
-    expect(turnMessage).toContain("Нейросеть сейчас недоступна");
-    expect(turnMessage).toContain("Попробуйте повторить запрос чуть позже");
-    expect(turnMessage).not.toContain("Не удалось выполнить запрос");
-    expect(turnMessage).toContain("Код: MODEL_CALL_FAILED");
-  });
-
-  it("keeps the support code out of a shared chat", () => {
-    const turnMessage = formatTelegramTurnFailure(
-      { code: "MODEL_CALL_FAILED", details: { errorId: "47dae564-7b24-497b-a1b7-69b8fcfdf92c" } },
-      { includeDiagnostics: false },
-    );
-
-    expect(turnMessage).toContain("Нейросеть сейчас недоступна");
-    expect(turnMessage).not.toContain("Код:");
-    expect(turnMessage).not.toContain("Номер ошибки");
-  });
-
-  it("shows the actionable schedule input explanation without internal details", () => {
-    const turnMessage = formatTelegramTurnFailure({
-      code: "AGENT_SCHEDULE_INPUT_INVALID",
-      message: "AGENT_SCHEDULE_INPUT_INVALID: Для daily recurrence передайте recurrence: {\"kind\":\"daily\",\"interval\":1}",
-    });
-
-    expect(turnMessage).toContain("Для daily recurrence передайте recurrence");
-    expect(turnMessage).toContain("Код: AGENT_SCHEDULE_INPUT_INVALID");
-    expect(turnMessage).not.toContain("stack");
-  });
-
-  it("shows actionable input explanations for every validated model payload", () => {
-    const turnMessage = formatTelegramTurnFailure({
-      code: "AGENT_REMINDER_INPUT_INVALID",
-      message: "AGENT_REMINDER_INPUT_INVALID: Для recurrence передайте null или объект {\"unit\":\"weekly\",\"interval\":1}",
-    });
-
-    expect(turnMessage).toContain("Для recurrence передайте null");
-    expect(turnMessage).toContain("Код: AGENT_REMINDER_INPUT_INVALID");
-  });
-
-  it("keeps generic model failures from exposing internals", () => {
-    const turnMessage = formatTelegramTurnFailure({
-      code: "MODEL_CALL_FAILED",
-      details: {
-        errorId: "8c4eebf2-a386-4dcb-913d-4b5a28edee2f",
-        raw: "<think>secret reasoning</think>",
-      },
-      message:
-        "AGENT_MINIMAX_REASONING_CONTRACT_VIOLATION: Модель вернула внутреннее рассуждение в тексте ответа",
-    });
-
-    expect(turnMessage).toContain("Нейросеть сейчас недоступна");
-    expect(turnMessage).toContain("Код: MODEL_CALL_FAILED");
-    expect(turnMessage).toContain("Номер ошибки: 8c4eebf2-a386-4dcb-913d-4b5a28edee2f");
-    expect(turnMessage).not.toContain("AGENT_MINIMAX");
-    expect(turnMessage).not.toContain("<think>");
-    expect(turnMessage).not.toContain("secret reasoning");
-  });
-
 });

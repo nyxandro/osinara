@@ -337,7 +337,7 @@ export const memoryThreadLifecycleRepository = {
       );
       await client.query(
         `UPDATE memory_threads SET status = 'completed', completion_outcome_id = $2,
-                completed_at = $3, generation = generation + 1, updated_at = now()
+                completed_at = $3, updated_at = now()
          WHERE id = $1`,
         [thread.id, outcome.id, outcome.occurredAt],
       );
@@ -387,7 +387,7 @@ export const memoryThreadLifecycleRepository = {
       await verifyCurrentStatement(client, auth, thread, input.turn, false);
       await client.query(
         `UPDATE memory_threads SET status = 'active', completion_outcome_id = NULL,
-                completed_at = NULL, generation = generation + 1, updated_at = now()
+                completed_at = NULL, updated_at = now()
          WHERE id = $1`,
         [thread.id],
       );
