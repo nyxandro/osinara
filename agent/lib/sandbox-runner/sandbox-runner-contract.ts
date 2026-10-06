@@ -220,10 +220,6 @@ export function parseSandboxSessionId(value: unknown): string {
   return parseOrThrow(sessionIdSchema, value, "AGENT_SANDBOX_RUNNER_SESSION_ID_INVALID");
 }
 
-export function parseSandboxAgentSessionId(value: unknown): string {
-  return parseOrThrow(agentSessionIdSchema, value, "AGENT_SANDBOX_RUNNER_AGENT_SESSION_ID_INVALID");
-}
-
 export function parseSandboxWorkspaceId(value: unknown): string {
   return parseOrThrow(workspaceIdSchema, value, "AGENT_SANDBOX_RUNNER_WORKSPACE_ID_INVALID");
 }

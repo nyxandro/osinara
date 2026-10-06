@@ -322,7 +322,6 @@ jobs:
             --output "type=local,dest=${ARTIFACT_DIR}" .
           install -m 0755 "${ARTIFACT_DIR}/osinara-linux-x64" osinara-linux-x64
           install -m 0755 scripts/provider-installer/bootstrap.sh install.sh
-          install -m 0644 config/agent-model-providers.json agent-model-providers.json
           sha256sum osinara-linux-x64 > osinara-linux-x64.sha256
           sha256sum --check osinara-linux-x64.sha256
           PATH="$EMPTY_PATH" ./osinara-linux-x64 --help | grep --fixed-strings "osinara install"
@@ -347,16 +346,6 @@ jobs:
         with:
           subject-path: osinara-linux-x64.sha256
 
-      - name: Attest bridge model config
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763
-        with:
-          subject-path: agent-model-providers.json
-
-      - name: Attest Codex subscription model config
-        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763
-        with:
-          subject-path: config/codex-subscription-model-providers.json
-
       - name: Create or resume draft and upload exact assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -372,7 +361,6 @@ jobs:
               --title "Osinara ${TAG}" --notes-file "$RELEASE_NOTES_FILE"
           fi
           gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
-            agent-model-providers.json config/codex-subscription-model-providers.json \
             osinara-deployment.json compose.production.yaml install.sh osinara-installation.tar.gz \
             osinara-linux-x64 osinara-linux-x64.sha256
 
@@ -380,16 +368,11 @@ jobs:
           trap 'rm -rf "$VERIFY_DIR"' EXIT
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$VERIFY_DIR" \
             --pattern osinara-deployment.json --pattern compose.production.yaml \
-            --pattern agent-model-providers.json \
-            --pattern codex-subscription-model-providers.json \
             --pattern install.sh \
             --pattern osinara-installation.tar.gz \
             --pattern osinara-linux-x64 --pattern osinara-linux-x64.sha256
           cmp --silent osinara-deployment.json "$VERIFY_DIR/osinara-deployment.json"
           cmp --silent compose.production.yaml "$VERIFY_DIR/compose.production.yaml"
-          cmp --silent agent-model-providers.json "$VERIFY_DIR/agent-model-providers.json"
-          cmp --silent config/codex-subscription-model-providers.json \
-            "$VERIFY_DIR/codex-subscription-model-providers.json"
           cmp --silent install.sh "$VERIFY_DIR/install.sh"
           cmp --silent osinara-installation.tar.gz "$VERIFY_DIR/osinara-installation.tar.gz"
           cmp --silent osinara-linux-x64 "$VERIFY_DIR/osinara-linux-x64"
@@ -397,7 +380,7 @@ jobs:
           ASSETS_JSON="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets,isDraft,targetCommitish)"
           jq -e --arg sha "$GITHUB_SHA" '
             .isDraft == true and .targetCommitish == $sha and
-            ([.assets[].name] | sort) == ["agent-model-providers.json", "codex-subscription-model-providers.json", "compose.production.yaml", "install.sh", "osinara-deployment.json", "osinara-installation.tar.gz", "osinara-linux-x64", "osinara-linux-x64.sha256"]
+            ([.assets[].name] | sort) == ["compose.production.yaml", "install.sh", "osinara-deployment.json", "osinara-installation.tar.gz", "osinara-linux-x64", "osinara-linux-x64.sha256"]
           ' <<<"$ASSETS_JSON" >/dev/null
 
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

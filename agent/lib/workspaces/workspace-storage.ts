@@ -219,13 +219,6 @@ export async function deleteWorkspaceFile(
   return true;
 }
 
-export async function clearWorkspaceDirectory(root: string, workspaceId: string): Promise<void> {
-  const directory = workspaceDirectory(root, workspaceId);
-  await rm(directory, { force: true, recursive: true });
-  await rm(join(root, ".derived", workspaceId), { force: true, recursive: true });
-  await mkdir(directory, { recursive: true });
-}
-
 export async function deleteWorkspaceDirectory(root: string, workspaceId: string): Promise<void> {
   await rm(workspaceDirectory(root, workspaceId), { force: true, recursive: true });
   await rm(join(root, ".derived", workspaceId), { force: true, recursive: true });

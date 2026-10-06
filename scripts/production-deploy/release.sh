@@ -15,8 +15,6 @@ readonly POSTGRES_IMAGE="pgvector/pgvector:pg17@sha256:d2ef61f42ef767baa5a147539
 readonly TEI_IMAGE="ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07"
 readonly RETAINED_LOCAL_RELEASE_IMAGE_COUNT=2
 readonly RELEASE_DIRECTORY_NAME_PATTERN='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
-readonly V0152_MODEL_CONFIG_ASSET="agent-model-providers.json"
-readonly V0160_CODEX_MODEL_CONFIG_ASSET="codex-subscription-model-providers.json"
 
 curl_github() {
   curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
@@ -151,8 +149,6 @@ download_and_validate_release() {
   local tag_json="${WORK_DIR}/tag.json"
   local manifest="${WORK_DIR}/osinara-deployment.json"
   local compose="${WORK_DIR}/compose.production.yaml"
-  local model_config="${WORK_DIR}/${V0152_MODEL_CONFIG_ASSET}"
-  local codex_model_config="${WORK_DIR}/${V0160_CODEX_MODEL_CONFIG_ASSET}"
 
   curl_github --output "$release_json" "${GITHUB_API}/releases/tags/${tag}"
   jq -e --arg tag "$tag" --arg base "${GITHUB_RELEASES}/${tag}" '
@@ -160,25 +156,11 @@ download_and_validate_release() {
     ([.assets[] | select(.name == "osinara-deployment.json" and
       .browser_download_url == ($base + "/osinara-deployment.json"))] | length == 1) and
     ([.assets[] | select(.name == "compose.production.yaml" and
-      .browser_download_url == ($base + "/compose.production.yaml"))] | length == 1) and
-    ($tag != "v0.15.2" or
-      ([.assets[] | select(.name == "agent-model-providers.json" and
-        .browser_download_url == ($base + "/agent-model-providers.json"))] | length == 1)) and
-    ($tag != "v0.16.0" or
-      ([.assets[] | select(.name == "codex-subscription-model-providers.json" and
-        .browser_download_url == ($base + "/codex-subscription-model-providers.json"))] | length == 1))
+      .browser_download_url == ($base + "/compose.production.yaml"))] | length == 1)
   ' "$release_json" >/dev/null ||
     fail "DEPLOY_RELEASE_METADATA_INVALID" "Public release metadata is invalid"
   curl_github --output "$manifest" "${GITHUB_RELEASES}/${tag}/osinara-deployment.json"
   curl_github --output "$compose" "${GITHUB_RELEASES}/${tag}/compose.production.yaml"
-  if [[ "$version" == "0.15.2" ]]; then
-    curl_github --output "$model_config" \
-      "${GITHUB_RELEASES}/${tag}/${V0152_MODEL_CONFIG_ASSET}"
-  fi
-  if [[ "$version" == "0.16.0" ]]; then
-    curl_github --output "$codex_model_config" \
-      "${GITHUB_RELEASES}/${tag}/${V0160_CODEX_MODEL_CONFIG_ASSET}"
-  fi
   validate_manifest "$manifest" "$version"
   verify_compose_hash "$compose"
 

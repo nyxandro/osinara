@@ -33,7 +33,7 @@ bootstrap_require_metadata "/opt/osinara" "0:0:750"
 bootstrap_require_metadata "/opt/osinara/bin" "0:0:750"
 bootstrap_require_metadata "$ENTRYPOINT_PATH" "0:0:750"
 bootstrap_require_metadata "$MODULE_DIR" "0:0:750"
-for module in common database release bridge backup; do
+for module in common database release backup; do
   bootstrap_require_metadata "${MODULE_DIR}/${module}.sh" "0:0:640"
 done
 
@@ -44,8 +44,6 @@ source "${MODULE_DIR}/common.sh"
 source "${MODULE_DIR}/database.sh"
 # shellcheck source=scripts/production-deploy/release.sh
 source "${MODULE_DIR}/release.sh"
-# shellcheck source=scripts/production-deploy/bridge.sh
-source "${MODULE_DIR}/bridge.sh"
 # shellcheck source=scripts/production-deploy/backup.sh
 source "${MODULE_DIR}/backup.sh"
 
@@ -166,11 +164,10 @@ main() {
   if [[ "$INITIAL_MODE" -eq 0 ]]; then
     recheck_claim_owner
   fi
-  provision_v0152_model_bridge
-  validate_v0160_codex_bridge
+  # The agent mounts the operator's active model config read-only; a looser file fails the release.
+  require_metadata "$AGENT_MODEL_PROVIDER_CONFIG" "0:0:644"
   prepare_candidate_release
   pull_release_images
-  prepare_v0160_codex_volume
   if [[ "$INITIAL_MODE" -eq 0 ]]; then
     recheck_claim_owner
     preflight_backup
@@ -190,12 +187,9 @@ main() {
   open_deploy_window "$DEPLOY_WINDOW_METRIC"
 
   MIGRATION_STARTED=1
-  provision_v0160_codex_bridge
   start_candidate_release
   wait_for_health
-  validate_v0160_codex_model
   promote_candidate_release
-  complete_v0160_codex_bridge
   if [[ "$INITIAL_MODE" -eq 1 ]]; then
     resolve_initial_owner_chat
   fi

@@ -160,6 +160,7 @@ const POST_V0101_MIGRATIONS = [
   "126_agent_identity_names.sql",
   "127_agent_identity_data.sql",
   "128_retire_memory_extraction_pipeline.sql",
+  "129_drop_memory_thread_generation.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [

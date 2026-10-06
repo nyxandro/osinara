@@ -17,10 +17,6 @@ published releases whose API metadata does not report `immutable: true`.
 - `osinara-deployment.json` contains schema version 1, commit SHA, release version, the SHA-256 of
 the exact Compose bytes, and six exact `ghcr.io/nyxandro/...@sha256:...` references;
 - `compose.production.yaml` contains no build context or application source bind mount.
-- `agent-model-providers.json` is the exact reviewed v0.15.2 direct-provider bridge config;
-- `codex-subscription-model-providers.json` is the exact reviewed v0.16.0 production cutover config.
-  Both release assets are independently attested and checked against pinned SHA-256 values before
-  installation by their release-specific bridges.
 
 The app image runs the bundled agent `.runtime/agent/main.js`. It also contains the authored
 `agent/` tree: the agent reads `agent/instructions.md` from it, and the operator's manual `tsx`
@@ -33,8 +29,8 @@ OIDC, and attestation writes only to the release job. This follows GitHub's curr
 [publishing to GHCR](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry),
 and [container attestations](https://docs.github.com/en/actions/how-tos/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds).
 
-The standalone CLI, installation bundle, `install.sh`, CLI checksum sidecar, and bridge model config
-are each attested with `subject-path`. Verify downloaded bootstrap assets before use:
+The standalone CLI, installation bundle, `install.sh`, and CLI checksum sidecar are each attested
+with `subject-path`. Verify downloaded bootstrap assets before use:
 
 ```bash
 gh attestation verify install.sh -R nyxandro/osinara
@@ -120,7 +116,7 @@ installer never reruns after its migration marker.
 **Hosts installed before v0.24.0 (optional).** Such hosts run Traefik from a single
 `/opt/osinara/tls/traefik-dynamic.yaml` and their `tls/.env` lacks `OSINARA_TLS_MODE`. Nothing in the
 release touches that proxy: the deploy controller manages only `osinara-production`, and hosts set up
-by the bridge controller have no `osinara` CLI. Switching to the directory layout is worthwhile only
+by the root-owned deploy controller alone have no `osinara` CLI. Switching to the directory layout is worthwhile only
 when another project is added to the same Traefik or to keep the host aligned with this document.
 As root, one time:
 
@@ -177,19 +173,25 @@ application. `infra/monitoring/` holds only the three files that describe what O
 
 ## Server files
 
-Release `v0.15.2` adds a checksum-bound standalone installer for clean GNU/Linux x86_64 hosts using
-glibc. The current `osinara-linux-x64` is a glibc Node.js SEA executable and does not support
-musl-based distributions such as Alpine Linux. Existing
-production upgrades still use the root-owned bridge controller below. Fresh installations do not
-receive the five-image update controller until the planned cutover release; do not copy the legacy
-six-image controller into the fresh layout. Existing bridge servers prepare these root-owned files:
+There are two host layouts.
+
+- **Installed with `osinara install`.** The checksum-bound standalone installer runs on clean
+  GNU/Linux x86_64 hosts with glibc: `osinara-linux-x64` is a glibc Node.js SEA executable, so
+  musl-based distributions such as Alpine Linux are not supported. It writes `/opt/osinara/.env`,
+  `agent-model-providers.json`, `release.env`, `osinara-deployment.json`, `compose.installation.json`
+  (the production graph without CLIProxy) and `tls/`, then starts the stack and is maintained with
+  `osinara status`, `doctor`, `logs`, `restart` and `config`. It installs no update controller: the
+  agent still proposes new releases in Telegram, but an approved proposal is not applied on such a
+  host. Do not copy the controller below onto it — the controller validates the production service
+  set, which includes CLIProxy.
+- **The production host.** Releases are applied by the root-owned deploy controller and its minute
+  timer, installed by hand. The operator prepares these root-owned files:
 
 
 | Path                                         | Mode   | Purpose                                                          |
 | -------------------------------------------- | ------ | ---------------------------------------------------------------- |
 | `/opt/osinara/.env`                          | `0600` | Production secrets and environment-specific URLs.                |
 | `/opt/osinara/agent-model-providers.json`    | `0644` | Active reviewed provider config mounted into the agent.           |
-| `/opt/osinara/codex-auth.json`               | `0600` | One-time root-owned OpenCode OAuth seed removed after cutover.    |
 | `/opt/osinara/bin/production-deploy.sh`      | `0750` | Server deployment entrypoint.                                    |
 | `/opt/osinara/bin/production-deploy/`        | `0750` | Root-owned deployment module directory.                          |
 | `/opt/osinara/bin/production-deploy/*.sh`    | `0640` | Fixed source modules checked before execution.                   |
@@ -257,24 +259,12 @@ The ceiling covers only what runs inside `orca-remote-server.service`. Test stac
 bring test stacks up only for a run and take them down afterwards. The disk scheduler here is
 `mq-deadline`, which ignores I/O weights, so there is no I/O counterpart.
 
-`/opt/osinara/.env` must be exactly `root:root 0600`. Before v0.15.2 it contains the required
-`DEEPSEEK_API_KEY`; during the v0.15.2 bridge it gains `MODEL_API_KEY` with the exact same credential
-token while retaining `DEEPSEEK_API_KEY` for the rollback window. It also contains
+`/opt/osinara/.env` must be exactly `root:root 0600`. It contains `MODEL_API_KEY`,
 `POSTGRES_PASSWORD`, the required internal application `DATABASE_URL`, `CLI_PROXY_API_KEY`,
 `GROQ_API_KEY`, the optional `ELEVENLABS_API_KEY`,
 Telegram secrets, and environment-specific integration
 settings. It must never contain or export any of the six `OSINARA_*_IMAGE` variables or
 `SANDBOX_RUNTIME_IMAGE`; those values exist only in a validated per-release `release.env`.
-
-The one-time bridge runs only for an owner-approved transition from exact v0.15.1 to v0.15.2. The
-root controller first claims the approved proposal, verifies immutable GitHub release metadata,
-manifest, tag commit and Compose hash, then repeats the current-owner check. Before the first
-candidate `docker compose config`, it downloads `agent-model-providers.json`, verifies its pinned
-SHA-256, installs it atomically as `root:root 0644`, and atomically appends `MODEL_API_KEY` derived
-from the single validated `DEEPSEEK_API_KEY` assignment. It never removes or rewrites the legacy
-assignment. Existing `MODEL_API_KEY` or config bytes are accepted only when they match exactly;
-duplicates, unsupported dotenv syntax, another source version, or conflicting bytes fail closed.
-This makes a pre-migration retry idempotent without inventing a model, endpoint, or credential.
 
 Active model selection uses schema v4 at `/opt/osinara/agent-model-providers.json`: it selects a
 protocol-native transport, explicit output and context limits, and a discriminated image-input
@@ -282,7 +272,8 @@ capability. A supported vision route requires its own model ID and output limit;
 cannot construct a fake vision model.
 
 The v0.16.0 production route uses `gpt-5.6-luna` through CLIProxyAPI `v7.2.137` and OpenAI Chat
-Completions. The agent sends `reasoning_effort=medium` to the internal
+Completions; its reviewed model config is `config/codex-subscription-model-providers.json`.
+The agent sends `reasoning_effort=medium` to the internal
 `http://cli-proxy-api:8317/v1` boundary, caps one response at 128,000 tokens, and declares the
 provider catalog's 372,000-token context. Text, image input, and tool calls use the same selected
 model. `MODEL_API_KEY` is only the internal bearer and exactly matches `CLI_PROXY_API_KEY`; OpenCode
@@ -311,19 +302,8 @@ only authenticates the calls: without it the tool stays visible and every call f
 ElevenLabs library voice, which the API serves only on a paid ElevenLabs plan. External groups
 receive the capability only through an owner grant; scheduled turns and subagents never receive it.
 
-The one-time v0.16.0 bridge accepts only exact v0.15.14 source state. Before migration it validates
-the root-owned OAuth seed, the exact production NeuralDeep `qwen3.8-27b` config hash, the required
-model/proxy assignments and retained DeepSeek rollback credential, and
-the attested Codex config. Backup preflight creates the candidate-only auth volume; after writers are
-stopped and durable state is archived, the controller crosses `MIGRATION_STARTED`, seeds the empty
-volume, atomically installs the new model config, and replaces only `MODEL_API_KEY` with the existing
-internal proxy key. Candidate health requires both CLIProxy `/v1/models` and the agent. After
-promotion the root seed is removed; later releases archive the auth volume with other durable state.
-An explicit root-controller `--initial 0.16.0` deployment requires the same staged seed. It validates
-the initial direct-provider config and model/proxy assignments, creates an absent candidate volume,
-sets its root to `10001:10001 0700`, then follows the same irreversible provision and smoke boundary.
-The standalone fresh installer still removes CLIProxy from its generated Compose and stays on the
-selected direct provider, so it does not require this production-only OAuth seed.
+The standalone fresh installer removes CLIProxy from its generated Compose and stays on the
+selected direct provider.
 
 Long-term memory has no separate model route. The root agent decides whether to call `remember`;
 PostgreSQL validates the current Telegram source and atomically writes optional thread state. Thread
@@ -347,10 +327,9 @@ volume contains no complete `0600` Codex OAuth credential. The agent starts only
 Any release that changes the exact production service, image, mount, port, logging, dependency, or
 host-capability allowlist is also a two-phase controller migration. After canonical merge and before
 owner approval, stop only `osinara-deploy.timer`, compare the installed root-owned controller modules,
-including release-specific bridges,
-with the exact canonical release commit, and atomically install only the changed modules. Verify the
-source checksum, shell syntax, `root:root` ownership, required `0750`/`0640` modes, then restart the
-timer. The running application and database remain untouched during this controller phase. Only
+with the exact canonical release commit, and atomically install only the changed modules; a module
+the release deletes is deleted from the server in the same phase. Verify the source checksum, shell
+syntax, `root:root` ownership, required `0750`/`0640` modes, then restart the timer. The running application and database remain untouched during this controller phase. Only
 afterward may the owner approve the application release in the bound private Telegram chat.
 
 If the old controller has already rejected an immutable release, its proposal remains terminal. Do

@@ -20,8 +20,7 @@ interface VerifiedTurnAuthority {
 
 type CompletionAuthority =
   | { kind: "confirmed_outcome"; outcomeRef: string }
-  | { kind: "current_user_statement" }
-  | { kind: "formal_goal_condition"; outcomeRef: string };
+  | { kind: "current_user_statement" };
 
 interface ThreadIdentityRow {
   family_id: string;
@@ -181,7 +180,7 @@ async function createCompletionOutcome(
   sources: readonly SourceEntryRow[],
 ): Promise<{ id: string; occurredAt: Date }> {
   let applicationEventId: string;
-  let authorityKind: "application_event" | "formal_goal_condition" | "verified_user_statement";
+  let authorityKind: "application_event" | "verified_user_statement";
   let sourceConversationId: string | null = null;
   let sourceTimelineEntryId: string | null = null;
   let sourceSnapshot: unknown;
@@ -207,13 +206,11 @@ async function createCompletionOutcome(
   } else {
     const outcome = await client.query<{
       application_event_id: string;
-      authority: "application_event" | "formal_goal_condition" | "verified_user_statement";
       id: string;
       occurred_at: Date;
       summary: string;
     }>(
-      `SELECT outcome.id, outcome.application_event_id, outcome.authority::text,
-              outcome.summary, outcome.occurred_at
+      `SELECT outcome.id, outcome.application_event_id, outcome.summary, outcome.occurred_at
        FROM confirmed_outcomes AS outcome
        WHERE outcome.outcome_ref = $1 AND outcome.family_id = $2
          AND outcome.scope = $3 AND outcome.scope_partition_key = $4
@@ -225,17 +222,14 @@ async function createCompletionOutcome(
         thread.subject_user_id, thread.subject_participant_id, thread.memory_project_id],
     );
     const existing = outcome.rows[0];
-    if (!existing || (authority.kind === "formal_goal_condition" &&
-      existing.authority !== "formal_goal_condition")) {
+    if (!existing) {
       throw new AppError(
         "AGENT_MEMORY_THREAD_AUTHORITY_INVALID",
         "Указанный подтверждённый результат не доказывает завершение этой нити",
       );
     }
     applicationEventId = existing.application_event_id;
-    authorityKind = authority.kind === "formal_goal_condition"
-      ? "formal_goal_condition"
-      : "application_event";
+    authorityKind = "application_event";
     sourceSnapshot = { sourceOutcomeRef: authority.outcomeRef };
     summary = existing.summary;
     occurredAt = existing.occurred_at;
@@ -337,7 +331,7 @@ export const memoryThreadLifecycleRepository = {
       );
       await client.query(
         `UPDATE memory_threads SET status = 'completed', completion_outcome_id = $2,
-                completed_at = $3, generation = generation + 1, updated_at = now()
+                completed_at = $3, updated_at = now()
          WHERE id = $1`,
         [thread.id, outcome.id, outcome.occurredAt],
       );
@@ -387,7 +381,7 @@ export const memoryThreadLifecycleRepository = {
       await verifyCurrentStatement(client, auth, thread, input.turn, false);
       await client.query(
         `UPDATE memory_threads SET status = 'active', completion_outcome_id = NULL,
-                completed_at = NULL, generation = generation + 1, updated_at = now()
+                completed_at = NULL, updated_at = now()
          WHERE id = $1`,
         [thread.id],
       );

@@ -964,8 +964,7 @@
               "type": "string",
               "enum": [
                 "current_user_statement",
-                "confirmed_outcome",
-                "formal_goal_condition"
+                "confirmed_outcome"
               ]
             },
             "outcomeRef": {
@@ -995,7 +994,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Явно завершить или реактивировать нить памяти. complete разрешён только после проверенного текущего заявления пользователя, confirmed outcome или formal goal condition и требует sourceEntryRefs из read_memory_thread. reactivate используй только когда пользователь прямо просит продолжить именно завершённую нить; новая цель обычно создаёт новый subthread. Payload reactivate: {\"action\":\"reactivate\",\"threadRef\":\"thread_...\"}. Payload complete с текущим заявлением: {\"action\":\"complete\",\"authority\":\"current_user_statement\",\"sourceEntryRefs\":[\"entry_...\"],\"threadRef\":\"thread_...\"}. Результат возвращает актуальное состояние нити; NOT_FOUND требует заново получить threadRef."
+        "description": "Явно завершить или реактивировать нить памяти. complete разрешён только после проверенного текущего заявления пользователя или confirmed outcome и требует sourceEntryRefs из read_memory_thread. reactivate используй только когда пользователь прямо просит продолжить именно завершённую нить; новая цель обычно создаёт новый subthread. Payload reactivate: {\"action\":\"reactivate\",\"threadRef\":\"thread_...\"}. Payload complete с текущим заявлением: {\"action\":\"complete\",\"authority\":\"current_user_statement\",\"sourceEntryRefs\":[\"entry_...\"],\"threadRef\":\"thread_...\"}. Результат возвращает актуальное состояние нити; NOT_FOUND требует заново получить threadRef."
       },
       {
         "type": "function",
@@ -2942,8 +2941,7 @@
               "type": "string",
               "enum": [
                 "current_user_statement",
-                "confirmed_outcome",
-                "formal_goal_condition"
+                "confirmed_outcome"
               ]
             },
             "outcomeRef": {
@@ -2973,7 +2971,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Явно завершить или реактивировать нить памяти. complete разрешён только после проверенного текущего заявления пользователя, confirmed outcome или formal goal condition и требует sourceEntryRefs из read_memory_thread. reactivate используй только когда пользователь прямо просит продолжить именно завершённую нить; новая цель обычно создаёт новый subthread. Payload reactivate: {\"action\":\"reactivate\",\"threadRef\":\"thread_...\"}. Payload complete с текущим заявлением: {\"action\":\"complete\",\"authority\":\"current_user_statement\",\"sourceEntryRefs\":[\"entry_...\"],\"threadRef\":\"thread_...\"}. Результат возвращает актуальное состояние нити; NOT_FOUND требует заново получить threadRef."
+        "description": "Явно завершить или реактивировать нить памяти. complete разрешён только после проверенного текущего заявления пользователя или confirmed outcome и требует sourceEntryRefs из read_memory_thread. reactivate используй только когда пользователь прямо просит продолжить именно завершённую нить; новая цель обычно создаёт новый subthread. Payload reactivate: {\"action\":\"reactivate\",\"threadRef\":\"thread_...\"}. Payload complete с текущим заявлением: {\"action\":\"complete\",\"authority\":\"current_user_statement\",\"sourceEntryRefs\":[\"entry_...\"],\"threadRef\":\"thread_...\"}. Результат возвращает актуальное состояние нити; NOT_FOUND требует заново получить threadRef."
       },
       {
         "type": "function",
