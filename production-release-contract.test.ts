@@ -327,6 +327,18 @@ describe("server deployment contract", () => {
     ].join("; ")], { cwd: projectRoot })).not.toThrow();
   });
 
+  // The agent mounts the operator's model config read-only; every release, initial or update,
+  // checks its owner and mode before a candidate is prepared.
+  it("checks the mounted model config before preparing a candidate", () => {
+    const main = readProjectFile("scripts/production-deploy.sh");
+    const check = main.indexOf('require_metadata "$AGENT_MODEL_PROVIDER_CONFIG" "0:0:644"');
+
+    expect(check).toBeGreaterThan(main.indexOf('download_and_validate_release "$REQUESTED_VERSION"'));
+    expect(check).toBeLessThan(main.indexOf("\n  prepare_candidate_release\n"));
+    // Two-space indentation: the deployment body itself, not a branch of one mode.
+    expect(main).toContain('\n  require_metadata "$AGENT_MODEL_PROVIDER_CONFIG" "0:0:644"\n');
+  });
+
   it("is locked, source-independent, digest-strict, and backup-first", () => {
     const { combined: script, files } = readDeployScripts();
 

@@ -320,9 +320,9 @@ volume contains no complete `0600` Codex OAuth credential. The agent starts only
 Any release that changes the exact production service, image, mount, port, logging, dependency, or
 host-capability allowlist is also a two-phase controller migration. After canonical merge and before
 owner approval, stop only `osinara-deploy.timer`, compare the installed root-owned controller modules,
-with the exact canonical release commit, and atomically install only the changed modules. Verify the
-source checksum, shell syntax, `root:root` ownership, required `0750`/`0640` modes, then restart the
-timer. The running application and database remain untouched during this controller phase. Only
+with the exact canonical release commit, and atomically install only the changed modules; a module
+the release deletes is deleted from the server in the same phase. Verify the source checksum, shell
+syntax, `root:root` ownership, required `0750`/`0640` modes, then restart the timer. The running application and database remain untouched during this controller phase. Only
 afterward may the owner approve the application release in the bound private Telegram chat.
 
 If the old controller has already rejected an immutable release, its proposal remains terminal. Do

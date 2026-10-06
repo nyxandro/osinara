@@ -3,7 +3,6 @@
  *
  * Constructs covered:
  * - Personal, family, and external-group isolation.
- * - Delegated trusted roots are re-authorized after membership revocation.
  * - External file-operation authorization is recalculated after trust-zone changes.
  * - Family owners retain external-group workspace access while keeping their administrative role.
  * - Filesystem-first discovery, binary persistence, explicit cross-scope move, and deletion.
@@ -108,31 +107,6 @@ describeWithDatabase("workspace repository", () => {
     const memberFamily = memberMounts.find((mount) => mount.mountPoint === "family")!;
     await expect(readWorkspaceFile(root, memberFamily.workspaceId, "shared/visible.txt"))
       .resolves.toEqual(Buffer.from("общий файл"));
-  });
-
-  it("revokes delegated trusted roots when family membership is removed", async () => {
-    const f = await fixture();
-    const root = await mkdtemp(join(tmpdir(), "osinara-workspace-"));
-    roots.push(root);
-    const repository = createWorkspaceRepository(root);
-    const member = {
-      familyId: f.familyId,
-      groupId: null,
-      groupType: null,
-      role: "member" as const,
-      telegramChatType: "private" as const,
-      userId: f.memberId,
-    };
-
-    await expect(repository.trustedRoots(member)).resolves.toHaveLength(2);
-    await database().query(
-      "DELETE FROM family_memberships WHERE family_id = $1 AND user_id = $2",
-      [f.familyId, f.memberId],
-    );
-
-    await expect(repository.trustedRoots(member)).rejects.toThrowError(
-      /AGENT_WORKSPACE_ACCESS_REVOKED/u,
-    );
   });
 
   it("preserves exact binary bytes and media type for Telegram files", async () => {

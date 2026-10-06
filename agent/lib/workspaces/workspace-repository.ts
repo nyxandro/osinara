@@ -6,7 +6,6 @@
  * - `createWorkspaceRepository`: direct filesystem operations behind current access checks.
  * - `workspaceRepository`, `WORKSPACES_ROOT`: production repository rooted at `/app/workspaces`.
  * - `externalGroupRoot`: resolves a group root at the final live authorization boundary.
- * - `trustedRoots`: resolves current personal/family host roots for delegated file wrappers.
  */
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -196,34 +195,6 @@ export function createWorkspaceRepository(root: string) {
           mounts.push({ mountPoint: scope, workspaceId: workspace.id });
         }
         return mounts;
-      } finally {
-        client.release();
-      }
-    },
-
-    async trustedRoots(auth: WorkspaceAuthorization): Promise<Array<{
-      hostRoot: string;
-      mountPoint: "family" | "personal";
-    }>> {
-      const scopes = workspaceScopes(auth);
-      if (scopes.includes("group")) {
-        throw new AppError(
-          "AGENT_WORKSPACE_ACCESS_DENIED",
-          "Task worker доступен только для личного или семейного workspace",
-        );
-      }
-
-      // Resolve membership again for every wrapped file call before exposing its host-side root.
-      const client = await database().connect();
-      try {
-        const roots = [];
-        for (const scope of scopes) {
-          const workspace = await resolveWorkspace(client, auth, scope);
-          const hostRoot = resolve(root, workspace.id);
-          await mkdir(hostRoot, { recursive: true });
-          roots.push({ hostRoot, mountPoint: scope as "family" | "personal" });
-        }
-        return roots;
       } finally {
         client.release();
       }
