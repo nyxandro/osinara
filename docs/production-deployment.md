@@ -173,12 +173,19 @@ application. `infra/monitoring/` holds only the three files that describe what O
 
 ## Server files
 
-Release `v0.15.2` adds a checksum-bound standalone installer for clean GNU/Linux x86_64 hosts using
-glibc. The current `osinara-linux-x64` is a glibc Node.js SEA executable and does not support
-musl-based distributions such as Alpine Linux. Existing
-production upgrades still use the root-owned deploy controller below. Fresh installations do not
-receive the five-image update controller until the planned cutover release; do not copy the legacy
-six-image controller into the fresh layout. Servers updated by that controller prepare these root-owned files:
+There are two host layouts.
+
+- **Installed with `osinara install`.** The checksum-bound standalone installer runs on clean
+  GNU/Linux x86_64 hosts with glibc: `osinara-linux-x64` is a glibc Node.js SEA executable, so
+  musl-based distributions such as Alpine Linux are not supported. It writes `/opt/osinara/.env`,
+  `agent-model-providers.json`, `release.env`, `osinara-deployment.json`, `compose.installation.json`
+  (the production graph without CLIProxy) and `tls/`, then starts the stack and is maintained with
+  `osinara status`, `doctor`, `logs`, `restart` and `config`. It installs no update controller: the
+  agent still proposes new releases in Telegram, but an approved proposal is not applied on such a
+  host. Do not copy the controller below onto it — the controller validates the production service
+  set, which includes CLIProxy.
+- **The production host.** Releases are applied by the root-owned deploy controller and its minute
+  timer, installed by hand. The operator prepares these root-owned files:
 
 
 | Path                                         | Mode   | Purpose                                                          |
