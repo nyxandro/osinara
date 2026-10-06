@@ -71,6 +71,13 @@ describe("parseModelProviderConfig", () => {
     expect(parseModelProviderConfig(active)).toEqual(active);
   });
 
+  // The reviewed Codex subscription route is switched to by hand; a schema change must not leave it stale.
+  it("loads the reviewed Codex subscription config with the schema the agent mounts", async () => {
+    const codex = JSON.parse(await readFile("config/codex-subscription-model-providers.json", "utf8"));
+
+    expect(parseModelProviderConfig(codex)).toEqual(codex);
+  });
+
   it("accepts protocol-native primary, vision, and voice model selection", () => {
     expect(parseModelProviderConfig(validConfig)).toEqual(validConfig);
   });

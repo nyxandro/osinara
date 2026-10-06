@@ -15,7 +15,6 @@ import { pruneTelegramGroupJournal } from "../telegram-group-message-storage.js"
 import { recoverEmptyReviewModelFailure } from "./memory-review-model-admin.js";
 import { createConfiguredLanguageModel } from "../model-transport.js";
 import { modelRouteKey } from "../model-route.js";
-import { recoverableModelFailureCode } from "../model-failure.js";
 import { reconcileMemoryReviewExecutions } from "./memory-review-execution-reconciliation.js";
 import { createSessionHistory } from "../../runtime/history/history-repository.js";
 import { newSessionId, newTurnId } from "../../runtime/ids.js";
@@ -322,9 +321,8 @@ async function recordAmbiguousEnding(batchId: string): Promise<void> {
       const message = await insertReviewUserMessage({ ...fixture, sequence });
       await memoryReviewRepository.observePassiveMessage({ groupId: fixture.groupId, timelineEntryId: message.id });
     }
-    const failure = { code: "MODEL_CALL_FAILED", details: { semanticErrorId: "network-request-failed" } };
     await memoryReviewRepository.failRunning({ batchId: batch.batchId,
-      diagnosticCode: recoverableModelFailureCode(failure) ?? failure.code,
+      diagnosticCode: "AGENT_MODEL_TEMPORARILY_UNAVAILABLE",
       agentSessionId: "agent-model-failure", agentTurnId: "turn_0" });
     expect((await database().query("SELECT status FROM memory_review_batches WHERE id = $1", [batch.batchId])).rows)
       .toEqual([{ status: "waiting_model" }]);

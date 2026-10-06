@@ -5,7 +5,6 @@
  * - `localizeTelegramInputRequest`: translates approvals without changing response IDs.
  * - `localizeTelegramReplyMarkup`: translates the freeform answer placeholder.
  * - `TelegramInputRequest`: stable structural input used by the secure HITL renderer.
- * - Failure formatters: hide internals while preserving stable support references.
  */
 import {
   buildApprovalMessage,
@@ -35,8 +34,6 @@ const MANAGED_ACTION_LABELS: Readonly<Record<string, Readonly<Record<string, str
     update_skills: "изменить список skills внешней Telegram-группы",
   },
 };
-
-const ERROR_ID_PATTERN = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/iu;
 
 interface TelegramInputOption {
   description?: string;
@@ -74,16 +71,6 @@ const OPTION_LABELS: Readonly<Record<string, string>> = {
   approve: "Да, подтвердить",
   cancel: "Нет, отменить",
 };
-
-// The runtime reports an exhausted model call under this code; the message it produces carries no
-// internals, which is what makes it safe to show in a shared chat.
-export const MODEL_UNAVAILABLE_FAILURE_CODE = "MODEL_CALL_FAILED";
-
-interface FailureData {
-  code: string;
-  details?: Readonly<Record<string, unknown>>;
-  message?: string;
-}
 
 function approvalParameterLines(toolName: string, input: Record<string, unknown>): string[] {
   // Render only reviewed, user-understandable fields; unknown tool payloads remain hidden.
@@ -163,17 +150,6 @@ function approvalActionLabel(toolName: string, input: Record<string, unknown>): 
   return typeof action === "string" ? MANAGED_ACTION_LABELS[toolName]?.[action] ?? null : null;
 }
 
-function supportReference(details: FailureData["details"]): string | null {
-  if (!details) return null;
-  return ERROR_ID_PATTERN.exec(JSON.stringify(details))?.[0] ?? null;
-}
-
-function publicFailureExplanation(data: FailureData): string | null {
-  // Validation errors are authored by application code and already contain safe Russian guidance.
-  if (!data.code.endsWith("_INPUT_INVALID") || typeof data.message !== "string") return null;
-  return data.message.replace(new RegExp(`^${data.code}:\\s*`, "u"), "");
-}
-
 export function localizeTelegramInputRequest<T extends TelegramInputRequest>(request: T): T {
   // Option IDs remain unchanged because the runtime resolves callbacks by ID, not visible text.
   const options = request.options?.map((option) => ({
@@ -207,43 +183,4 @@ export function localizeTelegramReplyMarkup(
 ): Readonly<Record<string, unknown>> | undefined {
   if (replyMarkup?.force_reply !== true) return replyMarkup;
   return { ...replyMarkup, input_field_placeholder: "Введите ответ" };
-}
-
-export function formatTelegramTurnFailure(
-  data: FailureData,
-  options?: { readonly includeDiagnostics?: boolean },
-): string {
-  const includeDiagnostics = options?.includeDiagnostics !== false;
-  const errorId = supportReference(data.details);
-  const diagnostics = includeDiagnostics
-    ? [`Код: ${data.code}`, ...(errorId ? [`Номер ошибки: ${errorId}`] : [])]
-    : [];
-
-  // Every retry the runtime had is already spent by the time this runs, so the ask is to wait, not to
-  // repeat immediately, and the reason is named plainly instead of as a failed request.
-  if (data.code === MODEL_UNAVAILABLE_FAILURE_CODE) {
-    return [
-      "Нейросеть сейчас недоступна.",
-      "Попробуйте повторить запрос чуть позже.",
-      ...diagnostics,
-    ].join("\n\n");
-  }
-
-  const explanation = publicFailureExplanation(data);
-  return [
-    "Не удалось выполнить запрос.",
-    ...(explanation ? [explanation] : []),
-    "Попробуйте отправить сообщение ещё раз. Если ошибка повторится, сообщите код поддержке.",
-    ...diagnostics,
-  ].join("\n\n");
-}
-
-export function formatTelegramSessionFailure(data: FailureData): string {
-  const errorId = supportReference(data.details);
-  return [
-    "Не удалось продолжить этот диалог после ошибки.",
-    "Отправьте новое сообщение, чтобы продолжить работу.",
-    `Код: ${data.code}`,
-    ...(errorId ? [`Номер ошибки: ${errorId}`] : []),
-  ].join("\n\n");
 }
