@@ -26,10 +26,26 @@ jobs:
       - name: Run production-equivalent checks
         run: docker compose -f compose.test.yaml up --build --abort-on-container-exit --exit-code-from tests
 
+  retrieval-evals:
+    # Pinned memory retrieval quality on synthetic corpora with the production embedding model: a
+    # change that quietly loses answers or leaks another group's memory fails here, not in a chat.
+    # The switch is passed explicitly: without it every eval is skipped and the job would pass empty.
+    name: Memory retrieval evals
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out canonical source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Run retrieval evals against the pinned embedding model
+        run: >-
+          docker compose -f compose.test.yaml -f compose.memory-retrieval-eval.yaml --profile workers
+          run --rm --build -e RUN_MEMORY_RETRIEVAL_EVALS=true
+          tests sh -c "npm run migrate && npx vitest run agent/lib/memory-retrieval-eval"
+
   release:
     name: Publish immutable production release
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    needs: test
+    needs: [test, retrieval-evals]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
