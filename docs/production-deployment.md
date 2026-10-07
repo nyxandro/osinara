@@ -3,7 +3,8 @@
 ## Architecture
 
 GitHub-hosted CI runs the complete `compose.test.yaml` suite for pull requests and pushes to
-`develop` or `main`. A successful `main` run requires a new stable version in `package.json`,
+`develop` or `main`, and beside it the memory retrieval evals with the production embedding model
+(`compose.memory-retrieval-eval.yaml`); a release waits for both. A successful `main` run requires a new stable version in `package.json`,
 builds six container-only images, publishes immutable tags to GHCR, records image and file artifact attestations,
 and prepares `vVERSION` as a draft. CI uploads and byte-verifies every asset before publishing the
 draft as the latest release. A failed rerun may resume only a draft whose tag still resolves to the

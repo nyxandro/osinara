@@ -2,27 +2,32 @@
  * Live-shaped retrieval quality evaluation over the v3 corpus.
  *
  * Constructs covered:
- * - 243 synthetic records across two memory areas, embedded with the pinned multilingual E5 model.
+ * - 253 synthetic records across two memory areas, embedded with the pinned multilingual E5 model.
  * - Recall measured per query shape, so a change that helps one shape and hurts another is visible.
  * - How often the lexical branches contribute to the answer, which is the claim behind #192.
  * - Whether a multi-topic or long message surfaces every one of its topics or only the loudest.
  * - Whether the right record is offered near the top, not merely present somewhere in the twelve.
  * - Abstention on a question whose answer is absent but whose neighbour is almost right.
+ * - The shapes the real-memory golden set found failing — small talk, other words for the same
+ *   thing, a day or a period, a fact that changed — each measured by name.
+ * - A superseded version is never offered, whatever the question.
  * - The measured baseline is pinned exactly, failures included, the same practice as v2.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "../database.js";
-import { embedMemoryPassages, embedMemoryQueryChunks } from "../memory-embedding-client.js";
+import { embedMemoryQueryChunks } from "../memory-embedding-client.js";
 import { chunkMemoryContent, chunkMemoryQuery } from "../memory-embedding-chunks.js";
-import {
-  MEMORY_EMBEDDING_CHUNK_MAX_CHARACTERS,
-  MEMORY_EMBEDDING_MODEL_VERSION,
-  MEMORY_EMBEDDING_PROVIDER_BATCH_SIZE,
-  MEMORY_RETRIEVAL_LIMIT,
-} from "../memory-config.js";
+import { MEMORY_EMBEDDING_CHUNK_MAX_CHARACTERS, MEMORY_RETRIEVAL_LIMIT } from "../memory-config.js";
 import { memoryRetrievalRepository } from "../memory-retrieval-repository.js";
-import { memoryEmbeddingInput } from "../memory-embedding-header.js";
+import {
+  categoryRate,
+  evalRecordId,
+  evalResultKeys,
+  evalShare as share,
+  indexEvalRecords,
+  retrievalEvalsEnabled,
+} from "../memory-retrieval-eval-support.js";
 import { prepareMemoryQuery } from "../memory-query-preparation.js";
 import type { MemoryAuthorization } from "../memory-context.js";
 import {
@@ -32,22 +37,13 @@ import {
   MEMORY_RETRIEVAL_EVAL_RECORDS_V3,
   MEMORY_RETRIEVAL_R1_BASELINE_V3,
 } from "./index.js";
-import type { MemoryRetrievalEvalCategoryV3, MemoryRetrievalEvalQueryV3 } from "./types.js";
+import type {
+  MemoryRetrievalEvalCategoryV3,
+  MemoryRetrievalEvalQueryV3,
+  MemoryRetrievalEvalRecordV3,
+} from "./types.js";
 
-const enabled = process.env.RUN_MEMORY_RETRIEVAL_EVALS === "true";
-const databaseUrl = process.env.DATABASE_URL;
-if (enabled && (!databaseUrl || !new URL(databaseUrl).pathname.endsWith("_test"))) {
-  throw new Error("AGENT_TEST_DATABASE_UNSAFE: Для retrieval eval нужна отдельная БД *_test");
-}
-// Both eval files own the whole database in their setup, and vitest runs files in parallel unless
-// integration mode is on. Without this guard the two corpora wipe each other and the numbers below
-// would be quietly wrong instead of loudly broken.
-if (enabled && process.env.RUN_DATABASE_INTEGRATION_TESTS !== "true") {
-  throw new Error(
-    "AGENT_TEST_PARALLELISM_UNSAFE: Замеру поиска нужен RUN_DATABASE_INTEGRATION_TESTS=true",
-  );
-}
-const describeEval = enabled ? describe : describe.skip;
+const describeEval = retrievalEvalsEnabled() ? describe : describe.skip;
 
 // Production always fills every one of the twelve slots, so quality is measured at the same depth.
 const EVAL_RESULT_LIMIT = MEMORY_RETRIEVAL_LIMIT;
@@ -56,6 +52,24 @@ const EVAL_RESULT_LIMIT = MEMORY_RETRIEVAL_LIMIT;
 const EVAL_TOP_POSITIONS = 3;
 const EVAL_SETUP_TIMEOUT_MILLISECONDS = 300_000;
 const EVAL_MEASUREMENT_TIMEOUT_MILLISECONDS = 120_000;
+
+/**
+ * Shapes added from the golden set. They stay out of the aggregate numbers, which are pinned and
+ * compared against the wave-2 measurement over the shapes they were defined on.
+ */
+const GOLDEN_SET_CATEGORIES: readonly MemoryRetrievalEvalCategoryV3[] = [
+  "alias_wording",
+  "date_question",
+  "small_talk",
+  "updated_fact",
+];
+const DAY_MILLISECONDS = 86_400_000;
+
+function occurredOnDate(record: MemoryRetrievalEvalRecordV3): string | null {
+  if (record.occurredOn === undefined) return null;
+  if (typeof record.occurredOn === "string") return record.occurredOn;
+  return new Date(Date.now() - record.occurredOn.daysAgo * DAY_MILLISECONDS).toISOString().slice(0, 10);
+}
 
 /** The five shapes a live message actually takes, as opposed to a clean short question. */
 const LIVE_SHAPE_CATEGORIES: readonly MemoryRetrievalEvalCategoryV3[] = [
@@ -80,34 +94,19 @@ interface EvaluatedQueryV3 {
   topSimilarity: number | null;
 }
 
-function share(matching: number, total: number): number {
-  if (total === 0) {
-    throw new Error("AGENT_MEMORY_RETRIEVAL_EVAL_EMPTY_CATEGORY: категория выборки пуста");
-  }
-  // Three decimals keep the pinned baseline stable without hiding a one-query change.
-  return Math.round((matching / total) * 1_000) / 1_000;
+function recallOf(evaluated: readonly EvaluatedQueryV3[], category: MemoryRetrievalEvalCategoryV3): number {
+  return categoryRate(evaluated, category, (entry) => entry.hit);
 }
 
-function recallOf(
-  evaluated: readonly EvaluatedQueryV3[],
-  category: MemoryRetrievalEvalCategoryV3,
-): number {
-  const selected = evaluated.filter((entry) => entry.query.category === category);
-  return share(selected.filter((entry) => entry.hit).length, selected.length);
+/** Share of queries of one category whose answer was among the first three, not merely present. */
+function topThreeOf(evaluated: readonly EvaluatedQueryV3[], category: MemoryRetrievalEvalCategoryV3): number {
+  return categoryRate(evaluated, category, (entry) => entry.topPositionHit);
 }
 
 /** Share of queries of one category that surfaced every record they asked about, not just one. */
-function fullCoverageOf(
-  evaluated: readonly EvaluatedQueryV3[],
-  category: MemoryRetrievalEvalCategoryV3,
-): number {
-  const selected = evaluated.filter((entry) => entry.query.category === category);
-  return share(
-    selected.filter((entry) =>
-      entry.foundExpectedKeys.length === entry.query.expectedKeys.length
-    ).length,
-    selected.length,
-  );
+function fullCoverageOf(evaluated: readonly EvaluatedQueryV3[], category: MemoryRetrievalEvalCategoryV3): number {
+  return categoryRate(evaluated, category,
+    (entry) => entry.foundExpectedKeys.length === entry.query.expectedKeys.length);
 }
 
 describeEval("memory retrieval eval v3", () => {
@@ -141,38 +140,16 @@ describeEval("memory retrieval eval v3", () => {
       userId: user.rows[0]!.id,
     };
 
-    // The real chunker runs over every record: a corpus entry that outgrew one chunk must be
-    // indexed the way production would index it, not flattened into a single synthetic vector.
-    const chunked = MEMORY_RETRIEVAL_EVAL_RECORDS_V3.map((record) => ({
-      chunks: chunkMemoryContent(record.content),
-      record,
-    }));
-    const flatChunks = chunked.flatMap(({ chunks, record }) =>
-      chunks.map((chunk) => ({ chunk, record })),
-    );
-    const embeddings: number[][] = [];
-    for (let offset = 0; offset < flatChunks.length; offset += MEMORY_EMBEDDING_PROVIDER_BATCH_SIZE) {
-      embeddings.push(...await embedMemoryPassages(
-        flatChunks
-          .slice(offset, offset + MEMORY_EMBEDDING_PROVIDER_BATCH_SIZE)
-          // The same text production sends: the chunk carrying the subject it is about.
-          .map((entry) => memoryEmbeddingInput(entry.chunk.content, {
-            kind: entry.record.kind,
-            subjectLabel: entry.record.subjectLabel ?? null,
-          })),
-      ));
-    }
-
-    const insertedIds = new Map<string, string>();
-    for (const { record } of chunked) {
+    const ids = await indexEvalRecords(MEMORY_RETRIEVAL_EVAL_RECORDS_V3, async (record) => {
       // A family-scope claim belongs to the family, not to a person: the schema requires
       // owner_user_id to be empty there, and the read predicate keys off membership instead.
       const inserted = await database().query<{ id: string }>(
         `INSERT INTO memory_items
-           (family_id, owner_user_id, author_user_id, author_telegram_user_id, scope, kind,
-            content, source, confirmation, sensitivity, operation_key, embedding_status, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'eval:retrieval-v3',
-                 'user_confirmed', 'normal', $8, 'indexed', $9)
+           (id, family_id, owner_user_id, author_user_id, author_telegram_user_id, scope, kind,
+            content, source, confirmation, sensitivity, operation_key, embedding_status, updated_at,
+            occurred_on)
+         VALUES ($11, $1, $2, $3, $4, $5, $6, $7, 'eval:retrieval-v3',
+                 'user_confirmed', 'normal', $8, 'indexed', $9, $10)
          RETURNING id`,
         [
           auth.familyId,
@@ -184,29 +161,22 @@ describeEval("memory retrieval eval v3", () => {
           record.content,
           record.key,
           record.updatedAt,
+          occurredOnDate(record),
+          evalRecordId(record.key),
         ],
       );
-      insertedIds.set(record.key, inserted.rows[0]!.id);
-    }
-    for (const [index, entry] of flatChunks.entries()) {
+      return inserted.rows[0]!.id;
+    });
+    // A replaced version stays in memory as superseded, the way a correction leaves it.
+    for (const record of MEMORY_RETRIEVAL_EVAL_RECORDS_V3) {
+      if (record.supersededBy === undefined) continue;
+      const successor = ids.get(record.supersededBy);
+      if (successor === undefined) {
+        throw new Error(`AGENT_MEMORY_RETRIEVAL_EVAL_UNKNOWN_SUCCESSOR: ${record.key} → ${record.supersededBy}`);
+      }
       await database().query(
-        `INSERT INTO memory_embedding_chunks
-           (memory_item_id, chunk_index, content, embedding_input, start_offset, end_offset,
-            embedding, embedding_model)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::vector, $8)`,
-        [
-          insertedIds.get(entry.record.key),
-          entry.chunk.chunkIndex,
-          entry.chunk.content,
-          memoryEmbeddingInput(entry.chunk.content, {
-            kind: entry.record.kind,
-            subjectLabel: entry.record.subjectLabel ?? null,
-          }),
-          entry.chunk.startOffset,
-          entry.chunk.endOffset,
-          `[${embeddings[index]!.join(",")}]`,
-          MEMORY_EMBEDDING_MODEL_VERSION,
-        ],
+        "UPDATE memory_items_all SET claim_status = 'superseded', superseded_by = $2 WHERE id = $1",
+        [ids.get(record.key), successor],
       );
     }
   }, EVAL_SETUP_TIMEOUT_MILLISECONDS);
@@ -243,15 +213,7 @@ describeEval("memory retrieval eval v3", () => {
         await embedMemoryQueryChunks(prepared),
         EVAL_RESULT_LIMIT,
       );
-      const resultKeys = results.map((result) => {
-        const key = contentToKey.get(result.memory.content);
-        if (!key) {
-          throw new Error(
-            `AGENT_MEMORY_RETRIEVAL_EVAL_UNKNOWN_RECORD: ${JSON.stringify(result.memory.content)}`,
-          );
-        }
-        return key;
-      });
+      const resultKeys = evalResultKeys(results.map((result) => result.memory.content), contentToKey);
       evaluated.push({
         // Branch evidence of the records that actually came back, not of everything a branch
         // pulled from the corpus: a branch whose forty candidates all lost the fusion did not
@@ -294,7 +256,8 @@ describeEval("memory retrieval eval v3", () => {
     const positive = evaluated.filter((entry) =>
       entry.query.category !== "near_miss_negative" &&
       entry.query.category !== "negative" &&
-      entry.query.category !== "typo"
+      entry.query.category !== "typo" &&
+      !GOLDEN_SET_CATEGORIES.includes(entry.query.category)
     );
     const liveShape = positive.filter((entry) =>
       LIVE_SHAPE_CATEGORIES.includes(entry.query.category)
@@ -304,7 +267,12 @@ describeEval("memory retrieval eval v3", () => {
     const lexicalFired = (entry: EvaluatedQueryV3): boolean =>
       entry.branchesInAnswer.includes("simple") || entry.branchesInAnswer.includes("russian");
     const metrics = {
+      aliasWordingRecallAt12: recallOf(evaluated, "alias_wording"),
+      // The meaning branch finds slang on a clean corpus; whether it is offered first is the question.
+      aliasWordingTopThreeRate: topThreeOf(evaluated, "alias_wording"),
       botAddressRecallAt12: recallOf(evaluated, "bot_address"),
+      // The record of that day says what happened, not when; the date is the event's own field.
+      dateQuestionRecallAt12: recallOf(evaluated, "date_question"),
       emojiMarkupRecallAt12: recallOf(evaluated, "emoji_markup"),
       exactRecallAt12: recallOf(evaluated, "exact"),
       // Recall alone cannot see a change that keeps the answer but buries it, so this is the share
@@ -330,7 +298,10 @@ describeEval("memory retrieval eval v3", () => {
       positiveRecallAt12: share(positive.filter((entry) => entry.hit).length, positive.length),
       russianMorphologyRecallAt12: recallOf(evaluated, "russian_morphology"),
       semanticParaphraseRecallAt12: recallOf(evaluated, "semantic_paraphrase"),
+      // A greeting or a reaction, the most common real turn: for it a hit means an empty result.
+      smallTalkEmptyRate: recallOf(evaluated, "small_talk"),
       typoRecallAt12: recallOf(evaluated, "typo"),
+      updatedFactRecallAt12: recallOf(evaluated, "updated_fact"),
       voiceTranscriptRecallAt12: recallOf(evaluated, "voice_transcript"),
       yoSpellingRecallAt12: recallOf(evaluated, "yo_spelling"),
     };
@@ -341,6 +312,10 @@ describeEval("memory retrieval eval v3", () => {
     }));
 
     expect(MEMORY_RETRIEVAL_EVAL_RECORDS_V3.length).toBeGreaterThanOrEqual(200);
+    // Not a quality number: an old version offered as current is a wrong answer, never a trade-off.
+    const superseded = new Set(MEMORY_RETRIEVAL_EVAL_RECORDS_V3
+      .filter((record) => record.supersededBy !== undefined).map((record) => record.key));
+    expect(evaluated.flatMap((entry) => entry.resultKeys.filter((key) => superseded.has(key)))).toEqual([]);
     expect(metrics).toEqual(MEMORY_RETRIEVAL_R1_BASELINE_V3);
     // Candidate selection was changed to lift exactly these numbers. A later change that quietly
     // gives the gain back has to fail here rather than be noticed months later in a chat.

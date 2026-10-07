@@ -18,7 +18,11 @@ import {
   type MemoryRetrievalDiagnostics,
   type ModelMemoryContextItem,
 } from "../memory-retrieval.js";
-import { memorySelectionMetrics } from "../memory-observability.js";
+import {
+  memorySelectionMetrics,
+  offeredMemoryEvidence,
+  type OfferedMemoryEvidence,
+} from "../memory-observability.js";
 import { toModelMemory } from "../model-memory.js";
 
 const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u);
@@ -46,6 +50,8 @@ export default defineTool({
     const started = performance.now();
     let found: ModelMemoryContextItem[] | null = null;
     let diagnostics: MemoryRetrievalDiagnostics | null = null;
+    // Null for a period: those records are picked by date, so there is no rank to describe.
+    let memoryEvidence: OfferedMemoryEvidence[] | null = null;
     const auth = requireMemoryAuthorization(ctx);
     try {
       // A period is a different question from a phrase, and it is answered by the dates alone:
@@ -66,6 +72,7 @@ export default defineTool({
       const result = await retrieveRelevantMemories(auth, query);
       found = result.memories;
       diagnostics = result.diagnostics;
+      memoryEvidence = offeredMemoryEvidence(result.memories, result.rankingByMemoryRef);
       // Without the semantic branch a paraphrase simply does not match, and an empty result read
       // as «этого нет» is worse than no answer at all.
       if (!result.diagnostics.semanticBranchAvailable) {
@@ -81,6 +88,7 @@ export default defineTool({
         outcome: found === null ? "failed" : "succeeded",
         window: from === undefined && to === undefined ? null : { from: from ?? null, to: to ?? null },
         ...memorySelectionMetrics(found),
+        memoryEvidence,
         ...diagnostics,
         durationMs: Math.round(performance.now() - started),
       }));

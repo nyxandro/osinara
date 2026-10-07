@@ -158,6 +158,40 @@ groups:
           description: 'Ассистент почти всегда отвечает, не получив ни одной записи памяти. Для семьи это выглядит как забывчивость: он не помнит того, о чём ему рассказывали.'
           runbook: 'В строках AGENT_MEMORY_RETRIEVAL_METRICS смотреть semanticTopSimilarity, simpleTopRank и russianTopRank: все около нуля — сломан сервис эмбеддингов или FTS; счета высокие, а *Matched больше нуля при нулевых *Qualified — отсекают пороги поиска.'
 
+      # Memory kept offering records for three days and the model named none of them as used.
+      # Measured per turn over 23.09–06.10 — the line shipped on 20.09, and in its first three days
+      # the model wrote it in 4–48% of turns, so those days describe the rollout, not the product:
+      # about 300 records offered on a median day, 0 to 63 used per day, and never fewer than 7
+      # used over any three days in a row. Nothing at all over three days with at least a median
+      # day's offer is therefore not a quiet day: either the usage line stopped arriving or reaching
+      # the counter, or the selection fills its slots with records no answer can use.
+      #
+      # Deliberately the collapse and not a low share. A day is too small for a share: the used
+      # count runs from 0 to 63, and a threshold on it would fire on ordinary quiet days. Where the
+      # share should sit is the job of the retrieval measurements, not of a duty alert.
+      #
+      # `or vector(0)`: a minute without any usage line writes no sample, and three silent days
+      # must read as zero rather than as no data, which would keep the rule silent exactly when the
+      # line is gone.
+      #
+      # The last condition asks for offers in the oldest day of the window. Recording rules do not
+      # fill the past, so for two days after these rules are installed — or after a gap on the hub
+      # — the window holds one day, and one quiet day with a median offer would clear both other
+      # conditions: the seven-in-three-days record above is about full windows only.
+      - alert: OsinaraMemoryNeverUsed
+        expr: >-
+          (sum(sum_over_time(osinara_memory_used_1m[72h])) or vector(0)) == 0
+          and sum(sum_over_time(osinara_memory_offered_tracked_1m[72h])) >= 300
+          and sum(count_over_time(osinara_memory_offered_tracked_1m[24h] offset 48h)) > 0
+        for: 60m
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Трое суток модель не опирается ни на одну запись памяти'
+          description: 'Память подбирает записи к каждому ответу, но ассистент ни разу не назвал их полезными. Для семьи это выглядит так, будто он не помнит того, о чём ему рассказывали, хотя записи на месте.'
+          runbook: 'В строках AGENT_MEMORY_USAGE_DIRECTIVE смотреть declared и failed: declared всегда false — модель перестала писать служебную строку; failed не пусто — не работает счётчик; namedCount больше нуля при rejectedCount, равном namedCount, — модель называет записи, которых этот ход не показывал. Если строка на месте и всё отклонено правильно, смотреть memoryEvidence в AGENT_MEMORY_RETRIEVAL_METRICS: что и какими ветками подбирается.'
+
       # The family is matched by prefix because fifteen of its sixteen codes are failures. The
       # sixteenth says the indexer started, which it does on every release — and for a whole day
       # that healthy start was the only thing this alert ever counted. Codes that mean normal

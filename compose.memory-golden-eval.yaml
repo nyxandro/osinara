@@ -1,0 +1,161 @@
+# Замер качества поиска памяти на реальной копии боевой базы. Стек отделён от прода: своя сеть,
+# своя база из резервной копии релиза, своя модель векторов той же версии, что в продукте. База и
+# харнесс наружу не ходят; сервис векторов ходит — только он скачивает модель при первом старте,
+# и он же получает тексты вопросов (официальный образ, закреплённый по digest). Копия одноразовая:
+# прогон меняет в ней записи, второй прогон требует восстановить её заново.
+#
+# Папка данных (MEMORY_GOLDEN_DATA_DIR) держит настоящие сообщения и текст памяти: она живёт вне
+# репозитория, с правами 0700, и никуда не отправляется. Харнесс пишет в неё от имени её
+# владельца (MEMORY_GOLDEN_USER).
+#
+# Прогон идёт в образе osinara-test-tests (`docker compose -f compose.test.yaml build tests`),
+# исходники монтируются поверх; node_modules образа должны совпадать с lockfile.
+#
+# Восстановление не переносит настройку базы из миграции 107 (она привязана к имени базы) и не
+# собирает статистику; без них векторный поиск копии работает иначе, чем на бою. Копия с релиза
+# старше ветки догоняется миграциями. Харнесс проверяет всё это и без них не стартует.
+#
+#   mkdir -m 700 /home/vps/osinara-eval/golden-YYYY-MM-DD
+#   export MEMORY_GOLDEN_DATA_DIR=/home/vps/osinara-eval/golden-YYYY-MM-DD MEMORY_GOLDEN_USER=$(id -u):$(id -g)
+#   docker compose -f compose.memory-golden-eval.yaml up -d --wait db memory-embedding
+#   sudo cat /opt/osinara/backups/<выкатка>/postgres.dump | docker compose -f compose.memory-golden-eval.yaml \
+#     exec -T db pg_restore -U osinara_eval -d osinara_eval --no-owner --no-privileges --exit-on-error --single-transaction
+#   docker compose -f compose.memory-golden-eval.yaml run --rm --entrypoint npm harness run migrate
+#   docker compose -f compose.memory-golden-eval.yaml exec -T db psql -U osinara_eval -d osinara_eval \
+#     -c "ALTER DATABASE osinara_eval SET hnsw.iterative_scan = relaxed_order" -c "ANALYZE"
+#   docker compose -f compose.memory-golden-eval.yaml run --rm harness pools /golden
+#
+# Ответы модели на те же ходы (слой 4, scripts/memory-quality/answers/run.ts) — на свежей копии,
+# подготовленной так же. Сервису answers нужны модель продукта и её ключ: конфигурация модели
+# кладётся в папку данных как model-config.json, ключ передаётся из окружения и нигде не пишется.
+#
+#   docker cp osinara-production-agent-1:/app/config/agent-model-providers.json "$MEMORY_GOLDEN_DATA_DIR/model-config.json"
+#   read -rs MODEL_API_KEY && export MODEL_API_KEY   # не в истории команд
+#   docker compose -f compose.memory-golden-eval.yaml run --rm answers answers /golden
+#   docker compose -f compose.memory-golden-eval.yaml run --rm --no-deps answers sheet /golden
+#   # оценщику — только judging-sheet.txt; вердикты в judgments.jsonl (формат — в шапке answers/run.ts)
+#   docker compose -f compose.memory-golden-eval.yaml run --rm --no-deps answers score /golden
+#   # разметка: $MEMORY_GOLDEN_DATA_DIR/labels.jsonl и outside-pool.jsonl (формат — в шапке run.ts)
+#   docker compose -f compose.memory-golden-eval.yaml run --rm harness score /golden
+#   docker compose -f compose.memory-golden-eval.yaml down -v
+name: osinara-memory-golden
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 1.5
+    environment:
+      POSTGRES_DB: osinara_eval
+      POSTGRES_PASSWORD: eval-only-local
+      POSTGRES_USER: osinara_eval
+    healthcheck:
+      # По TCP: временный сервер первичной инициализации слушает только сокет, и проверка через сокет
+      # проходила раньше, чем база создана.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U osinara_eval -d osinara_eval"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [eval]
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  memory-embedding:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07
+    cpus: 1.5
+    mem_limit: 1536m
+    memswap_limit: 1536m
+    command:
+      - --model-id
+      - intfloat/multilingual-e5-small
+      - --revision
+      - 614241f622f53c4eeff9890bdc4f31cfecc418b3
+      - --tokenization-workers
+      - "2"
+      - --max-client-batch-size
+      - "8"
+      - --max-concurrent-requests
+      - "8"
+      - --max-batch-requests
+      - "8"
+      - --max-batch-tokens
+      - "4096"
+      - --auto-truncate=false
+    environment:
+      OMP_NUM_THREADS: "2"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+    # Внешняя сеть нужна, чтобы скачать модель при первом старте.
+    networks: [eval, model-download]
+    volumes:
+      - model:/data
+
+  harness:
+    image: osinara-test-tests:latest
+    profiles: ["run"]
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 1
+    depends_on:
+      db:
+        condition: service_healthy
+      memory-embedding:
+        condition: service_healthy
+    entrypoint: ["node", "--import", "tsx", "scripts/memory-quality/golden/run.ts"]
+    user: ${MEMORY_GOLDEN_USER:?задайте MEMORY_GOLDEN_USER=$(id -u):$(id -g) — владельца папки данных замера}
+    working_dir: /app
+    networks: [eval]
+    environment:
+      DATABASE_URL: postgresql://osinara_eval:eval-only-local@db:5432/osinara_eval
+      MEMORY_EMBEDDING_BASE_URL: http://memory-embedding:80
+    volumes:
+      - .:/app:ro
+      - /app/node_modules
+      - /app/.runtime
+      - ${MEMORY_GOLDEN_DATA_DIR:?задайте MEMORY_GOLDEN_DATA_DIR — папку данных замера вне репозитория}:/golden
+
+  answers:
+    image: osinara-test-tests:latest
+    profiles: ["run"]
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 1
+    depends_on:
+      db:
+        condition: service_healthy
+      memory-embedding:
+        condition: service_healthy
+    entrypoint: ["node", "--import", "tsx", "scripts/memory-quality/answers/run.ts"]
+    user: ${MEMORY_GOLDEN_USER:?задайте MEMORY_GOLDEN_USER=$(id -u):$(id -g) — владельца папки данных замера}
+    working_dir: /app
+    # Модель продукта снаружи: в отличие от харнесса пулов, этому сервису нужен выход в интернет.
+    networks: [eval, model-download]
+    environment:
+      DATABASE_URL: postgresql://osinara_eval:eval-only-local@db:5432/osinara_eval
+      MEMORY_EMBEDDING_BASE_URL: http://memory-embedding:80
+      # Без значения: берётся из окружения оператора и не попадает в файл.
+      MODEL_API_KEY:
+    volumes:
+      - .:/app:ro
+      - /app/node_modules
+      - /app/.runtime
+      - ${MEMORY_GOLDEN_DATA_DIR:?задайте MEMORY_GOLDEN_DATA_DIR — папку данных замера вне репозитория}:/golden
+      - type: bind
+        source: ${MEMORY_GOLDEN_DATA_DIR:?задайте MEMORY_GOLDEN_DATA_DIR — папку данных замера вне репозитория}/model-config.json
+        target: /app/config/agent-model-providers.json
+        read_only: true
+        bind:
+          create_host_path: false
+
+networks:
+  eval:
+    internal: true
+  model-download:
+
+volumes:
+  db-data:
+  model:

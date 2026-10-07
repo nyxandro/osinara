@@ -328,7 +328,7 @@ describe("memory block resolution", () => {
       retrieve: vi.fn().mockResolvedValue({
         diagnostics: { semanticBranchAvailable: true },
         memories: [],
-        retrievedClaimIds: [],
+        rankingByMemoryRef: new Map(), retrievedClaimIds: [],
         threads: { threads: [], totalCharacters: 0 },
       }),
     });
@@ -349,7 +349,7 @@ describe("memory block resolution", () => {
     const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization,
       createProfile, openSelectionWindow: async () => 1, recordOffered: vi.fn(),
       retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true }, memories,
-        retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } }),
+        rankingByMemoryRef: new Map(), retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } }),
     });
 
     try {
@@ -365,6 +365,10 @@ describe("memory block resolution", () => {
       expect(JSON.parse(info.mock.calls[0]![0] as string)).toMatchObject({
         code: "AGENT_MEMORY_RETRIEVAL_METRICS", droppedMemories: 2, memories: 4,
         offeredMemories: 2, memoryRefs: ["mem_first", "mem_second"],
+        memoryEvidence: [
+          { memoryRef: "mem_first", position: 1, ranking: null },
+          { memoryRef: "mem_second", position: 2, ranking: null },
+        ],
       });
     } finally { info.mockRestore(); }
   });
@@ -381,7 +385,7 @@ describe("memory block resolution", () => {
       openSelectionWindow: async () => 7, recordOffered,
       retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true }, memories,
         offered: { claimIdByMemoryRef: new Map(), claimIdsByConflictRef: new Map() },
-        retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } }),
+        rankingByMemoryRef: new Map(), retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } }),
     });
 
     const conversationAuth = auth({
@@ -420,7 +424,7 @@ describe("memory block resolution", () => {
       retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true },
         memories: [{ content: "важная запись", kind: "fact", memoryRef: "mem_first" }],
         offered: { claimIdByMemoryRef: new Map(), claimIdsByConflictRef: new Map() },
-        retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } }),
+        rankingByMemoryRef: new Map(), retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } }),
     });
 
     try {
@@ -471,7 +475,7 @@ describe("memory block resolution", () => {
     };
     const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization, createProfile,
       openSelectionWindow: async () => 1, recordOffered: vi.fn(),
-      retrieve: vi.fn().mockResolvedValue({ diagnostics, memories, retrievedClaimIds: [],
+      retrieve: vi.fn().mockResolvedValue({ diagnostics, memories, rankingByMemoryRef: new Map(), retrievedClaimIds: [],
         threads: { threads: [], totalCharacters: 0 } }),
     });
     try {
@@ -481,9 +485,91 @@ describe("memory block resolution", () => {
         memoryRefs: ["mem_first", "mem_second", "mem_third"],
         memoryCharacters: "Частная записьПервая версияДругая версия".length,
         memorySerializedCharacters: JSON.stringify(memories).length,
-        profileCharacters: 0, threadRefs: [], ...diagnostics,
+        profileCharacters: 0, threadRefs: [], usageTracked: false, ...diagnostics,
       });
       expect(JSON.stringify(logged)).not.toMatch(/Личный вопрос|Частная запись|Первая версия|Другая версия/u);
+    } finally { info.mockRestore(); }
+  });
+
+  it("logs where each offered record stood and which branches found it", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const memories = [
+      { content: "Код домофона 4271", kind: "fact", memoryRef: "mem_first" },
+      { conflictRef: "conflict_1", instruction: "Не выбирать версию самостоятельно",
+        type: "unresolved_conflict", versions: [
+          { content: "Первая версия", memoryRef: "mem_second" },
+          { content: "Другая версия", memoryRef: "mem_third" },
+        ] },
+      { content: "Без оценки", kind: "fact", memoryRef: "mem_fourth" },
+    ];
+    const rankingByMemoryRef = new Map([["mem_first", {
+      branches: ["simple", "semantic"], fusedScore: 0.03, semanticSimilarity: 0.83,
+    }]]);
+    const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization,
+      createProfile: vi.fn().mockResolvedValue({ subjects: [] }),
+      openSelectionWindow: async () => 3, recordOffered: vi.fn(),
+      retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true }, memories,
+        offered: { claimIdByMemoryRef: new Map(), claimIdsByConflictRef: new Map() },
+        rankingByMemoryRef, retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } }),
+    });
+    const conversationAuth = auth({
+      memoryScopes: ["personal", "family"],
+      telegramConversationId: "conversation-1",
+      telegramTurnStartedAt: "2026-08-08T10:00:00.000Z",
+      telegramUserId: "101",
+    });
+
+    try {
+      await resolve(
+        context(conversationAuth, [{ content: "какой код домофона?", role: "user" }] as ModelMessage[]),
+        TEST_TURN_ID,
+      );
+
+      const logged = JSON.parse(info.mock.calls[0]![0] as string);
+      // The place is the one the model reads the record at; a conflict holds one place for both.
+      // A record the ranking does not describe says so instead of borrowing someone else's numbers.
+      expect(logged).toMatchObject({ code: "AGENT_MEMORY_RETRIEVAL_METRICS", usageTracked: true,
+        memoryEvidence: [
+          { memoryRef: "mem_first", position: 1, ranking: {
+            branches: ["simple", "semantic"], fusedScore: 0.03, semanticSimilarity: 0.83,
+          } },
+          { conflictRef: "conflict_1", memoryRefs: ["mem_second", "mem_third"], position: 2 },
+          { memoryRef: "mem_fourth", position: 3, ranking: null },
+        ],
+      });
+      expect(JSON.stringify(logged)).not.toMatch(/домофон|4271|версия|Без оценки/u);
+    } finally { info.mockRestore(); }
+  });
+
+  it("does not count usage for a delegated child, though it inherits the conversation", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const openSelectionWindow = vi.fn(async () => 1);
+    const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization,
+      createProfile: vi.fn().mockResolvedValue({ subjects: [] }), openSelectionWindow, recordOffered: vi.fn(),
+      retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true },
+        memories: [{ content: "Код домофона 4271", kind: "fact", memoryRef: "mem_first" }],
+        offered: { claimIdByMemoryRef: new Map(), claimIdsByConflictRef: new Map() },
+        rankingByMemoryRef: new Map(), retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } }),
+    });
+    const inherited = auth({
+      memoryScopes: ["personal", "family"],
+      telegramConversationId: "conversation-1",
+      telegramTurnStartedAt: "2026-08-08T10:00:00.000Z",
+      telegramUserId: "101",
+    });
+
+    try {
+      await resolve({
+        ...context(inherited, [{ content: "какой код домофона?", role: "user" }] as ModelMessage[]),
+        channel: { kind: "subagent" },
+      }, TEST_TURN_ID);
+
+      // The child runs inside a turn of the conversation, not as one: no journal window, so none
+      // of what it was offered can ever be counted as used.
+      expect(openSelectionWindow).not.toHaveBeenCalled();
+      expect(JSON.parse(info.mock.calls[0]![0] as string)).toMatchObject({
+        code: "AGENT_MEMORY_RETRIEVAL_METRICS", outcome: "succeeded", usageTracked: false,
+      });
     } finally { info.mockRestore(); }
   });
 
@@ -528,7 +614,7 @@ describe("memory block resolution", () => {
     const retrieve = vi.fn().mockResolvedValue({
       diagnostics: { semanticBranchAvailable: true },
       memories: [],
-      retrievedClaimIds: ["claim-related"],
+      rankingByMemoryRef: new Map(), retrievedClaimIds: ["claim-related"],
       threads: { threads: [], totalCharacters: 0 },
     });
     const profile = vi.fn().mockResolvedValue({

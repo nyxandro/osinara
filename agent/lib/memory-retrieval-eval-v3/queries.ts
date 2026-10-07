@@ -2,7 +2,8 @@
  * V3 queries: the shapes a person actually types and speaks.
  *
  * Export:
- * - `MEMORY_RETRIEVAL_EVAL_QUERIES_V3`: every query with the records it is expected to surface.
+ * - `MEMORY_RETRIEVAL_EVAL_QUERIES_LIVE_SHAPES_V3`: every live-shaped query with the records it is
+ *   expected to surface.
  *
  * V1 and V2 asked short clean questions such as «Где репозиторий Orca?». Live messages do not look
  * like that: they open with the bot's name, carry emoji and Markdown, arrive from voice as one
@@ -15,7 +16,7 @@
  */
 import type { MemoryRetrievalEvalQueryV3 } from "./types.js";
 
-export const MEMORY_RETRIEVAL_EVAL_QUERIES_V3: readonly MemoryRetrievalEvalQueryV3[] = [
+export const MEMORY_RETRIEVAL_EVAL_QUERIES_LIVE_SHAPES_V3: readonly MemoryRetrievalEvalQueryV3[] = [
   // Точные токены: числа, коды, тикеры, серийники. Ради них живёт ветка simple.
   { category: "exact", expectedKeys: ["intercom-code"], key: "exact-intercom", text: "4271" },
   { category: "exact", expectedKeys: ["cold-water-meter"], key: "exact-meter",

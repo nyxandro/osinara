@@ -44,7 +44,11 @@ import {
   MemoryContextFailure, memoryFailureCode, recordMemoryContextIncident,
   type MemoryContextIncident, type MemoryContextPhase,
 } from "../memory-context-failure.js";
-import { memorySelectionMetrics } from "../memory-observability.js";
+import {
+  memorySelectionMetrics,
+  offeredMemoryEvidence,
+  type OfferedMemoryEvidence,
+} from "../memory-observability.js";
 import { applicationThreadSkillHints } from "../memory-thread-activation.js";
 import {
   formatProfileViewContext,
@@ -276,6 +280,10 @@ export function createMemoryBlockResolver(dependencies: {
     let memories: number | null = null;
     let diagnostics: MemoryRetrievalDiagnostics | null = null;
     let selection = memorySelectionMetrics(null);
+    let memoryEvidence: OfferedMemoryEvidence[] | null = null;
+    // Usage can be counted only for a selection the show journal holds: the counter accepts a
+    // named record only if this turn's journal shows it, and a turn without a window writes none.
+    let usageTracked: boolean | null = null;
     let profileCharacters: number | null = null;
     let droppedMemories: number | null = null;
     let offeredMemories: number | null = null;
@@ -312,6 +320,7 @@ export function createMemoryBlockResolver(dependencies: {
           ),
         }
         : null;
+      usageTracked = window !== null;
       const context = await dependencies.retrieve(
         authorization,
         query,
@@ -347,6 +356,7 @@ export function createMemoryBlockResolver(dependencies: {
       droppedMemories = budget.droppedMemories;
       offeredMemories = budget.memories.length;
       selection = memorySelectionMetrics(budget.memories);
+      memoryEvidence = offeredMemoryEvidence(budget.memories, context.rankingByMemoryRef);
       // The journal hears about the selection only now: a record the budget dropped was never put
       // in front of the model, and writing it down would hide it from the next turns.
       phase = "journal";
@@ -386,7 +396,8 @@ export function createMemoryBlockResolver(dependencies: {
       return MEMORY_UNAVAILABLE_BLOCK;
     } finally {
       console.info(JSON.stringify({ code: "AGENT_MEMORY_RETRIEVAL_METRICS", sessionId: ctx.session.id,
-        turnId, outcome, memories, offeredMemories, droppedMemories, ...selection, ...diagnostics,
+        turnId, outcome, memories, offeredMemories, droppedMemories, ...selection, memoryEvidence,
+        usageTracked, ...diagnostics,
         profileCharacters, profileMemoryRefs,
         threadRefs, threadCharacters, failurePhase: outcome === "failed" ? phase : null, causeCode,
         durationMs: Math.round(performance.now() - started) }));

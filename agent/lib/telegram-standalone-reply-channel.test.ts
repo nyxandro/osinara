@@ -7,6 +7,7 @@
  *   directive; the delivery identity records that choice, which the outbox hashes on retry.
  * - A standalone answer still fails on a reply context that does not belong to this chat.
  * - Only the first message of a split answer would carry the reply, so a standalone split sends none.
+ * - The memory usage line learns which kind of message carried it, final answer or a step.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -40,6 +41,7 @@ vi.mock("./conversation-timeline-repository.js", () => ({
 }));
 
 const { telegramTurnEvents } = await import("../channels/telegram.js");
+const { recordMemoryUsageDeclaration } = await import("./memory-usage-report.js");
 
 const context = {
   session: {
@@ -109,6 +111,16 @@ describe("group final-delivery reply binding", () => {
       context,
     )).rejects.toMatchObject({ code: "AGENT_TELEGRAM_REPLY_CONTEXT_INVALID" });
     expect(dependencies.deliverFinalOutput).not.toHaveBeenCalled();
+  });
+
+  it("tells the memory usage line that the message was the final answer", async () => {
+    await complete("Код домофона 4271.\n[память: нет]");
+
+    expect(recordMemoryUsageDeclaration).toHaveBeenCalledWith(expect.objectContaining({
+      declaration: { answer: "Код домофона 4271.", declared: true, memoryRefs: [] },
+      finishReason: "stop",
+      turnId: "turn-1",
+    }));
   });
 
   it("sends none of the parts of a standalone split answer as a reply", async () => {

@@ -18,7 +18,11 @@ import { chunkMemoryQuery } from "./memory-embedding-chunks.js";
 import { prepareMemoryQuery } from "./memory-query-preparation.js";
 import { MEMORY_USAGE_INSTRUCTION } from "./memory-usage-directive.js";
 import { memoryShowJournal, type MemorySelectionWindow } from "./memory-show-journal.js";
-import type { MemoryRetrievalBranchDiagnostics } from "./memory-retrieval-ranking.js";
+import {
+  memoryRankingByRef,
+  type MemoryRecordRanking,
+  type MemoryRetrievalBranchDiagnostics,
+} from "./memory-retrieval-ranking.js";
 import type { MemoryAuthorization } from "./memory-context.js";
 import type { ModelMemory } from "./model-memory.js";
 import { EVIDENCE_KIND_LEGEND, toModelMemory } from "./model-memory.js";
@@ -126,6 +130,8 @@ export interface MemoryTurnContext {
    * budget must not be written down: it was never put in front of the model.
    */
   offered: MemoryTurnOffer;
+  /** How each retrieved record was found. Log-only: it never enters the block the model reads. */
+  rankingByMemoryRef: ReadonlyMap<string, MemoryRecordRanking>;
   retrievedClaimIds: string[];
   threads: MemoryThreadContext;
 }
@@ -180,6 +186,7 @@ export async function retrieveRelevantMemories(
 ): Promise<{
   diagnostics: MemoryRetrievalDiagnostics;
   memories: ModelMemoryContextItem[];
+  rankingByMemoryRef: ReadonlyMap<string, MemoryRecordRanking>;
 }> {
   const prepared = prepareMemoryQuery(query);
   const embeddings = await embedQueryOrDegrade(prepared);
@@ -194,6 +201,7 @@ export async function retrieveRelevantMemories(
       ...retrieval.results.map((result) => toModelMemory(result.memory, result.sourceEvidence)),
       ...retrieval.conflicts.map((conflict) => ({ ...conflict, type: "unresolved_conflict" as const })),
     ],
+    rankingByMemoryRef: memoryRankingByRef(retrieval.results),
   };
 }
 
@@ -240,6 +248,7 @@ export async function retrieveMemoryTurnContext(
         ),
         claimIdsByConflictRef: retrieval.claimIdsByConflictRef,
       },
+      rankingByMemoryRef: memoryRankingByRef(retrieval.results),
       retrievedClaimIds: retrieval.relatedClaimIds,
       threads,
     };
