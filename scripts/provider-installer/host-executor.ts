@@ -10,6 +10,8 @@
  * - TLS mode is an operator decision: `managed` starts the bundled Traefik, `external` only verifies
  *   that an existing host proxy already answers for the hostname.
  * - Candidate model/environment generation without legacy proxy credentials.
+ * - The self-updating release controller is installed with the release, before migration, and
+ *   its timer is enabled once the stack runs, so approved updates apply without manual steps.
  * - Full rollback only before migrations can mutate durable PostgreSQL state.
  * - Durable migration-start marker and explicit ambiguous terminal state after that boundary.
  * - Primary installation error precedence over release-lock cleanup errors.
@@ -23,6 +25,7 @@ import type {
   TlsMode,
 } from "./contracts.js";
 import { InstallerError } from "./errors.js";
+import { DEPLOYMENT_PROFILE } from "./host-layout.js";
 
 export interface HostInstallationStageInput {
   readonly archive: Uint8Array;
@@ -49,6 +52,8 @@ export interface HostInstallationOperations {
     token: string;
   }) => Promise<void>;
   readonly createOwnerBootstrap: () => Promise<InstallationExecutionResult>;
+  readonly enableUpdater: () => Promise<void>;
+  readonly installUpdater: () => Promise<void>;
   readonly markMigrationStarted: () => Promise<void>;
   readonly preflight: (input: HostTlsInput) => Promise<void>;
   readonly pullImages: (input: HostTlsInput) => Promise<void>;
@@ -87,6 +92,8 @@ function buildEnvironment(input: InstallationExecutionInput): Buffer {
     ["DATABASE_URL", `postgresql://osinara:${input.internalSecrets.postgresPassword}@postgres:5432/osinara`],
     ["INVITATION_SIGNING_SECRET", input.internalSecrets.invitationSigningSecret],
     ["MODEL_API_KEY", input.modelApiKey],
+    // Read by the release controller through its systemd EnvironmentFile, not by the application.
+    ["OSINARA_DEPLOYMENT_PROFILE", DEPLOYMENT_PROFILE],
     ["POSTGRES_PASSWORD", input.internalSecrets.postgresPassword],
     ["PUBLIC_BASE_URL", `https://${input.hostname}`],
     ["TELEGRAM_BOT_TOKEN", input.telegramBotToken],
@@ -135,6 +142,7 @@ export function createHostInstallationExecutor(
         stagingCompleted = true;
         await operations.preflight(tls);
         await operations.pullImages(tls);
+        await operations.installUpdater();
       } catch (error) {
         if (stagingCompleted) {
           try {
@@ -158,6 +166,7 @@ export function createHostInstallationExecutor(
         // Marker durability is part of the irreversible boundary and must immediately precede Compose.
         await operations.markMigrationStarted();
         await operations.startApplication();
+        await operations.enableUpdater();
         // An external proxy is the operator's; the installer only waits for it to publish the edge.
         if (input.tlsMode === "managed") await operations.startTls();
         await operations.waitForPublicHttps(tls);

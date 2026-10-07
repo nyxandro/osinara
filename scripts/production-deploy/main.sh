@@ -1,12 +1,14 @@
 #!/bin/bash
 # Osinara production deployment orchestrator.
-# Sources fixed root-owned modules and coordinates one non-retryable release attempt.
+# Started by the launcher from one version directory of the controller tree; sources that
+# directory's root-owned modules and coordinates one non-retryable release attempt.
 set -Eeuo pipefail
 
 readonly PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-ENTRYPOINT_PATH="$(readlink -f "$0")"
-MODULE_DIR="$(dirname "$ENTRYPOINT_PATH")/production-deploy"
-readonly ENTRYPOINT_PATH MODULE_DIR
+CONTROLLER_DIR="$(dirname "$(readlink -f "$0")")"
+readonly CONTROLLER_DIR
+readonly BOOTSTRAP_CONTROLLER_ROOT="/opt/osinara/bin/controller"
+readonly BOOTSTRAP_VERSION_PATTERN='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 
 bootstrap_require_metadata() {
   local path="$1"
@@ -25,32 +27,40 @@ bootstrap_require_metadata() {
   printf '%s\n' "DEPLOY_ROOT_REQUIRED: production-deploy.sh must run as root" >&2
   exit 1
 }
-[[ "$ENTRYPOINT_PATH" == "/opt/osinara/bin/production-deploy.sh" ]] || {
-  printf '%s\n' "DEPLOY_PATH_INVALID: production deploy entrypoint path is invalid" >&2
+# Only a version directory of the root-owned controller tree may run as the controller.
+if [[ "${CONTROLLER_DIR%/*}" != "$BOOTSTRAP_CONTROLLER_ROOT" ||
+  ! "${CONTROLLER_DIR##*/}" =~ $BOOTSTRAP_VERSION_PATTERN ]]; then
+  printf '%s\n' "DEPLOY_PATH_INVALID: the controller must run from ${BOOTSTRAP_CONTROLLER_ROOT}/vX.Y.Z" >&2
   exit 1
-}
+fi
 bootstrap_require_metadata "/opt/osinara" "0:0:750"
 bootstrap_require_metadata "/opt/osinara/bin" "0:0:750"
-bootstrap_require_metadata "$ENTRYPOINT_PATH" "0:0:750"
-bootstrap_require_metadata "$MODULE_DIR" "0:0:750"
-for module in common database release backup; do
-  bootstrap_require_metadata "${MODULE_DIR}/${module}.sh" "0:0:640"
+bootstrap_require_metadata "$BOOTSTRAP_CONTROLLER_ROOT" "0:0:750"
+bootstrap_require_metadata "$CONTROLLER_DIR" "0:0:750"
+for module in main common database release backup self-update; do
+  bootstrap_require_metadata "${CONTROLLER_DIR}/${module}.sh" "0:0:640"
 done
+bootstrap_require_metadata "${CONTROLLER_DIR}/installation-compose.jq" "0:0:640"
 
-# Modules expose explicit release, database, backup, and recovery boundaries.
+# Modules expose explicit release, database, backup, self-update, and recovery boundaries.
 # shellcheck source=scripts/production-deploy/common.sh
-source "${MODULE_DIR}/common.sh"
+source "${CONTROLLER_DIR}/common.sh"
 # shellcheck source=scripts/production-deploy/database.sh
-source "${MODULE_DIR}/database.sh"
+source "${CONTROLLER_DIR}/database.sh"
 # shellcheck source=scripts/production-deploy/release.sh
-source "${MODULE_DIR}/release.sh"
+source "${CONTROLLER_DIR}/release.sh"
 # shellcheck source=scripts/production-deploy/backup.sh
-source "${MODULE_DIR}/backup.sh"
+source "${CONTROLLER_DIR}/backup.sh"
+# shellcheck source=scripts/production-deploy/self-update.sh
+source "${CONTROLLER_DIR}/self-update.sh"
 
 handle_failure() {
   local exit_code="$1"
   local line="$2"
   local reason="$3"
+  # errtrace runs this trap inside command substitutions too. Only the main process records,
+  # notifies, and recovers; a subshell exits and its failure reaches the parent's own trap.
+  [[ "$BASHPID" == "$$" ]] || exit "$exit_code"
   [[ "$FAILURE_HANDLING" -eq 1 ]] && exit "$exit_code"
   FAILURE_HANDLING=1
   trap - ERR INT TERM
@@ -109,7 +119,16 @@ handle_signal() {
 }
 
 cleanup_runtime_files() {
+  if [[ -n "$CONTROLLER_STAGING_DIR" && -d "$CONTROLLER_STAGING_DIR" ]]; then
+    rm -rf -- "$CONTROLLER_STAGING_DIR"
+  fi
   [[ -n "$WORK_DIR" && -d "$WORK_DIR" ]] && rm -rf "$WORK_DIR"
+}
+
+# Work directories outlive only a run that was killed or that handed over to a newer controller
+# (exec skips the exit trap). The lock is held here, so none of them belongs to a live run.
+remove_stale_work_dirs() {
+  find "$BASE_DIR" -mindepth 1 -maxdepth 1 -type d -name '.deploy.*' -exec rm -rf -- {} +
 }
 
 send_success_notification() {
@@ -125,18 +144,35 @@ main() {
   if [[ "$#" -eq 2 && "$1" == "--initial" ]]; then
     INITIAL_MODE=1
     REQUESTED_VERSION="$2"
+  elif [[ "$#" -eq 3 && "$1" == "--resume" ]]; then
+    RESUMED_AFTER_SELF_UPDATE=1
+  elif [[ "$#" -eq 1 && "$1" == "--preflight" ]]; then
+    PREFLIGHT_MODE=1
   elif [[ "$#" -ne 0 ]]; then
     fail "DEPLOY_ARGUMENT_INVALID" \
       "Use production-deploy.sh or production-deploy.sh --initial VERSION"
   fi
 
   require_server_boundary
+  require_deployment_profile
   require_release_environment_clean
-  exec 9>"$LOCK_FILE"
-  if ! flock -n 9; then
-    log_event "DEPLOY_ALREADY_RUNNING" "Another deployment process owns the lock"
+  # A newer controller checks the host here before its predecessor selects it; nothing is claimed,
+  # locked, or changed.
+  if [[ "$PREFLIGHT_MODE" -eq 1 ]]; then
+    set_current_release_paths
+    log_event "DEPLOY_CONTROLLER_PREFLIGHT_PASSED" "This controller accepts the host"
     return 0
   fi
+  if [[ "$RESUMED_AFTER_SELF_UPDATE" -eq 1 ]]; then
+    require_inherited_deploy_lock "$LOCK_FILE"
+  else
+    exec 9>"$LOCK_FILE"
+    if ! flock -n 9; then
+      log_event "DEPLOY_ALREADY_RUNNING" "Another deployment process owns the lock"
+      return 0
+    fi
+  fi
+  remove_stale_work_dirs
   WORK_DIR="$(mktemp -d "${BASE_DIR}/.deploy.XXXXXX")"
   # Only the lock owner ends the window, so no exit can cut a running release short. Every timer
   # tick that finds nothing to do still passes here, which is how a window left behind by a
@@ -147,6 +183,10 @@ main() {
   if [[ "$INITIAL_MODE" -eq 1 ]]; then
     require_semver "$REQUESTED_VERSION"
     require_clean_initial_state
+  elif [[ "$RESUMED_AFTER_SELF_UPDATE" -eq 1 ]]; then
+    set_current_release_paths
+    adopt_claimed_proposal "$2" "$3"
+    require_upgrade_from_current
   else
     set_current_release_paths
     reconcile_stale_deployments
@@ -163,6 +203,9 @@ main() {
   download_and_validate_release "$REQUESTED_VERSION"
   if [[ "$INITIAL_MODE" -eq 0 ]]; then
     recheck_claim_owner
+    # Release rules below belong to the release: a different controller it carries replaces this
+    # process here and continues the same claim from the top.
+    ensure_release_controller "$CONTROLLER_ROOT" "$LAUNCHER_PATH"
   fi
   # The agent mounts the operator's active model config read-only; a looser file fails the release.
   require_metadata "$AGENT_MODEL_PROVIDER_CONFIG" "0:0:644"
@@ -198,6 +241,7 @@ main() {
     "Release v${REQUESTED_VERSION} passed the production health check"
   send_success_notification
   prune_retired_release_images
+  prune_retired_controllers "$CONTROLLER_ROOT" "$LAUNCHER_PATH"
   log_event "DEPLOY_RELEASE_SUCCEEDED" "Release v${REQUESTED_VERSION} is healthy"
 }
 

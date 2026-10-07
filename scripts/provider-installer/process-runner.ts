@@ -2,6 +2,7 @@
  * Bounded privileged subprocess runner.
  *
  * Exports:
+ * - `SAFE_HOST_PATH`: the only command search path host commands run with.
  * - `runHostCommand`: runs one exact executable and returns bounded stdout or redacted diagnostics.
  */
 import { spawn } from "node:child_process";
@@ -11,7 +12,7 @@ import { InstallerError } from "./errors.js";
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 const MAX_DIAGNOSTIC_BYTES = 2 * 1024;
 const DIAGNOSTIC_EDGE_BYTES = MAX_DIAGNOSTIC_BYTES / 2;
-const SAFE_HOST_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+export const SAFE_HOST_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
 function redactDiagnosticSecrets(value: string): string {
   return value

@@ -4,13 +4,14 @@
  * Constructs covered:
  * - `acquireInstallationLock`: stale-file reuse and live kernel exclusion.
  * - Lock metadata boundary: symlink and permissive-mode files are rejected.
+ * - `acquireDeployLock`: operator commands wait out a running release instead of racing it.
  */
 import { chmod, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { acquireInstallationLock } from "./installation-lock.js";
+import { acquireDeployLock, acquireInstallationLock, withDeployLock } from "./installation-lock.js";
 
 const TEST_ROOT = `/tmp/osinara-install-lock-${process.pid}`;
 const LOCK_PATH = join(TEST_ROOT, "install.lock");
@@ -59,5 +60,43 @@ describe("initial installation kernel lock", () => {
     await expect(acquireInstallationLock(LOCK_PATH, security)).rejects.toMatchObject({
       code: "OSINARA_INSTALL_LOCK_UNTRUSTED",
     });
+  });
+});
+
+describe("deployment lock shared with the release controller", () => {
+  it("refuses an operator command when a release keeps the lock past the wait", async () => {
+    const release = await acquireDeployLock(LOCK_PATH, security, 1);
+
+    await expect(acquireDeployLock(LOCK_PATH, security, 1)).rejects.toMatchObject({
+      code: "OSINARA_OPERATION_DEPLOY_IN_PROGRESS",
+    });
+    await release();
+    const next = await acquireDeployLock(LOCK_PATH, security, 1);
+    await next();
+  });
+
+  it("waits out a short hold such as the controller's idle minute tick", async () => {
+    const tick = await acquireDeployLock(LOCK_PATH, security, 1);
+    setTimeout(() => void tick(), 300);
+
+    const command = await acquireDeployLock(LOCK_PATH, security, 5);
+
+    await command();
+  });
+
+  it("holds the lock for exactly one operator action and reports the action's own failure", async () => {
+    const result = await withDeployLock(LOCK_PATH, async () => {
+      await expect(acquireDeployLock(LOCK_PATH, security, 1)).rejects.toMatchObject({
+        code: "OSINARA_OPERATION_DEPLOY_IN_PROGRESS",
+      });
+      return "restarted";
+    }, security, 1);
+
+    expect(result).toBe("restarted");
+    await expect(withDeployLock(LOCK_PATH, async () => {
+      throw new Error("compose failed");
+    }, security, 1)).rejects.toThrow("compose failed");
+    const free = await acquireDeployLock(LOCK_PATH, security, 1);
+    await free();
   });
 });

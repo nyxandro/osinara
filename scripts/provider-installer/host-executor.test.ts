@@ -6,6 +6,7 @@
  * - Durable migration boundary, pre-migration rollback, and ambiguous-state handling.
  * - Primary installation failure precedence over release-lock cleanup failure.
  * - Exact generated environment and schema-v4 model configuration inputs.
+ * - The self-updating controller is installed before migration and enabled once the stack runs.
  */
 import { createHash } from "node:crypto";
 
@@ -68,6 +69,8 @@ function operations(events: string[]): HostInstallationOperations {
     assertHostPrerequisites: event("prerequisites"),
     commit: event("commit"),
     configureWebhook: event("webhook"),
+    enableUpdater: event("enable-updater"),
+    installUpdater: event("install-updater"),
     createOwnerBootstrap: event("bootstrap", {
       bootstrapCode: "bootstrap_secret-123",
       bootstrapExpiresAt: "2026-08-13T12:15:00.000Z",
@@ -96,8 +99,9 @@ describe("createHostInstallationExecutor", () => {
     });
 
     expect(events).toEqual([
-      "bundle", "prerequisites", "lock", "clean", "stage", "preflight", "pull",
-      "migration-marker", "application", "tls", "https", "bootstrap", "webhook", "commit", "unlock",
+      "bundle", "prerequisites", "lock", "clean", "stage", "preflight", "pull", "install-updater",
+      "migration-marker", "application", "enable-updater", "tls", "https", "bootstrap", "webhook",
+      "commit", "unlock",
     ]);
     const staged = vi.mocked(ops.stage).mock.calls[0]?.[0];
     expect(Buffer.from(staged!.archive).equals(archive)).toBe(true);
@@ -111,6 +115,8 @@ describe("createHostInstallationExecutor", () => {
     const environment = staged?.environmentBytes.toString("utf8");
     expect(environment).toContain("MODEL_API_KEY='model-secret'\n");
     expect(environment).toContain("PUBLIC_BASE_URL='https://8-8-8-8.sslip.io'\n");
+    // The deployment controller reads the profile from the same EnvironmentFile as systemd passes it.
+    expect(environment).toContain("OSINARA_DEPLOYMENT_PROFILE='installation'\n");
     expect(environment).not.toContain("WORKFLOW_");
     expect(environment).not.toContain("CLI_PROXY_API_KEY");
     expect(environment).not.toContain("MODEL_UPSTREAM_API_KEY");
@@ -130,8 +136,9 @@ describe("createHostInstallationExecutor", () => {
     expect(ops.startTls).not.toHaveBeenCalled();
     expect(ops.preflight).toHaveBeenCalledWith({ hostname: "8-8-8-8.sslip.io", tlsMode: "external" });
     expect(events).toEqual([
-      "bundle", "prerequisites", "lock", "clean", "stage", "preflight", "pull",
-      "migration-marker", "application", "https", "bootstrap", "webhook", "commit", "unlock",
+      "bundle", "prerequisites", "lock", "clean", "stage", "preflight", "pull", "install-updater",
+      "migration-marker", "application", "enable-updater", "https", "bootstrap", "webhook", "commit",
+      "unlock",
     ]);
     expect(vi.mocked(ops.stage).mock.calls[0]?.[0]).toMatchObject({ tlsMode: "external" });
   });
@@ -146,6 +153,30 @@ describe("createHostInstallationExecutor", () => {
     });
     expect(ops.rollbackPreparedState).toHaveBeenCalledOnce();
     expect(ops.startApplication).not.toHaveBeenCalled();
+    expect(ops.commit).not.toHaveBeenCalled();
+  });
+
+  it("removes attempt-created state when the updater cannot be installed", async () => {
+    const events: string[] = [];
+    const ops = operations(events);
+    vi.mocked(ops.installUpdater).mockRejectedValue(new Error("deploy tree rejected"));
+
+    await expect(createHostInstallationExecutor(ops)(input())).rejects.toMatchObject({
+      code: "OSINARA_INSTALL_HOST_PREPARE_FAILED",
+    });
+    expect(ops.rollbackPreparedState).toHaveBeenCalledOnce();
+    expect(ops.markMigrationStarted).not.toHaveBeenCalled();
+  });
+
+  it("reports an ambiguous state when updates cannot be enabled after the stack started", async () => {
+    const events: string[] = [];
+    const ops = operations(events);
+    vi.mocked(ops.enableUpdater).mockRejectedValue(new Error("systemctl failed"));
+
+    await expect(createHostInstallationExecutor(ops)(input())).rejects.toMatchObject({
+      code: "OSINARA_INSTALL_STATE_AMBIGUOUS",
+    });
+    expect(ops.rollbackPreparedState).not.toHaveBeenCalled();
     expect(ops.commit).not.toHaveBeenCalled();
   });
 

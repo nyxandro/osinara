@@ -155,6 +155,10 @@ COPY --from=build /app/migrations ./migrations
 COPY --from=build /app/package.json ./package.json
 # The license and attribution of the adapted third-party code under `agent/runtime/`.
 COPY --from=build /app/THIRD_PARTY_NOTICES.md ./THIRD_PARTY_NOTICES.md
+# The deployment controller travels with the release it deploys. The app image digest is bound by
+# the approved manifest, so a host takes the controller and its units from here, not from GitHub.
+COPY scripts/production-deploy/ ./deploy/controller/
+COPY infra/systemd/ ./deploy/systemd/
 COPY scripts/docker-entrypoint.sh /usr/local/bin/osinara-entrypoint
 RUN chmod +x /usr/local/bin/osinara-entrypoint
 EXPOSE 3000
