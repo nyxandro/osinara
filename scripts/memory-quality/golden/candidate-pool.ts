@@ -6,8 +6,10 @@
  * - `requireReviewedSearchStatement`: refuses a product statement GATES were not checked against.
  * - `ungatedSearchParameters`: the product statement's parameters with its gates opened.
  * - `requireDisposableCopy`: refuses any database that is not a fresh, complete evaluation copy.
+ * - `requireResumableCopy`: accepts only the evaluation copy a run already started on.
  * - `rewindCopyTo`: puts memory back to how it stood when a question was asked.
  * - `loadShowJournal`: what the model was shown and named as used, per turn, before any change.
+ * - `recordDetails`: a record's text and attributes by ref, deleted or not.
  * - `collectTurnCandidates`: offered and pooled records of one question with their text, and the
  *   refs that passed the gates, which only explain why a relevant pooled record was missed.
  *
@@ -154,6 +156,22 @@ export async function requireDisposableCopy(repositoryMigrations: readonly strin
 }
 
 /**
+ * A run that stopped half-way continues on the copy it spent: walked from the newest question
+ * back, the copy already stands at the last turn finished, and every remaining turn is older.
+ */
+export async function requireResumableCopy(): Promise<void> {
+  const state = (await database().query<{ name: string; started: boolean }>(
+    "SELECT current_database() AS name, to_regclass($1) IS NOT NULL AS started", [RUN_MARKER_TABLE],
+  )).rows[0]!;
+  if (!state.name.endsWith("_eval") || !state.started) {
+    throw new AppError(
+      "AGENT_MEMORY_GOLDEN_COPY_NOT_RESUMABLE",
+      `База ${state.name} не копия, на которой начат этот прогон. Продолжать можно только на ней; иначе удалите незаконченный файл и начните на свежей копии`,
+    );
+  }
+}
+
+/**
  * A record's status at the moment, for one that is retracted now: deletion and a choice between
  * versions both overwrite it, but the replacement it underwent stays in `claim_relations`, and a
  * choice made before the moment had already retracted it then.
@@ -288,7 +306,7 @@ async function candidateRows(parameters: readonly unknown[]): Promise<CandidateR
 }
 
 /** Record text straight from the table: a shown record may have been retired since. */
-async function recordDetails(memoryRefs: readonly string[]): Promise<Map<string, Omit<PoolRecord, "branches" | "semanticSimilarity">>> {
+export async function recordDetails(memoryRefs: readonly string[]): Promise<Map<string, Omit<PoolRecord, "branches" | "semanticSimilarity">>> {
   const rows = await database().query<{
     attribute: string | null; content: string; created_at: Date; kind: string; memory_ref: string;
     occurred_on: string | null; scope: string; subject_label: string | null;

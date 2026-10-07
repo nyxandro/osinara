@@ -6,6 +6,7 @@
  *   gates, the candidate pool that was labelled, and what the model then reported using.
  * - `GoldenLabels`: one turn's relevance judgement for every record of its pool.
  * - `scoreGoldenSet`: the numbers the labels support.
+ * - `requireLabels`: a turn's labels, refusing a pool record left unlabelled.
  *
  * Recall here is recall within the pool: a relevant record no branch put into the pool is
  * invisible to this score, the standard limit of pooled judgement. The pool is wide on purpose —
@@ -122,7 +123,7 @@ function requireConsistentInputs(
   }
 }
 
-function requireLabels(turn: GoldenTurn, labels: ReadonlyMap<string, boolean> | undefined): ReadonlyMap<string, boolean> {
+export function requireLabels(turn: GoldenTurn, labels: ReadonlyMap<string, boolean> | undefined): ReadonlyMap<string, boolean> {
   const missing = turn.pool.filter((record) => labels?.get(record.memoryRef) === undefined);
   if (missing.length === 0) return labels!;
   throw new AppError(

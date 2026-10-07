@@ -15,10 +15,8 @@
  * `{"turnId", "memoryRef"}` line per record a turn needed that no branch put into its pool; it
  * must exist, empty when there were none, so a forgotten file cannot pass for a perfect pool.
  */
-import { appendFileSync, existsSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-
-import { z } from "zod";
 
 import { AppError } from "../../../agent/lib/app-error.js";
 import { closeDatabase } from "../../../agent/lib/database.js";
@@ -36,7 +34,8 @@ import {
   rewindCopyTo,
   ungatedSearchParameters,
 } from "./candidate-pool.js";
-import { scoreGoldenSet, type GoldenLabels, type GoldenTurn, type NeededOutsidePool } from "./golden-score.js";
+import { loadGoldenSet, PRIVATE_FILE_MODE, requirePrivateDirectory } from "./golden-files.js";
+import { scoreGoldenSet, type NeededOutsidePool } from "./golden-score.js";
 import { loadTurnQuestions } from "./turn-queries.js";
 
 const [command, directory, ...extra] = process.argv.slice(2);
@@ -47,66 +46,8 @@ if ((command !== "pools" && command !== "score") || directory === undefined || e
   );
 }
 
-const PRIVATE_FILE_MODE = 0o600;
-
-function requirePrivateDirectory(): void {
-  let mode: number;
-  try {
-    mode = statSync(directory!).mode & 0o777;
-  } catch (error) {
-    throw new AppError("AGENT_MEMORY_GOLDEN_INPUT_UNREADABLE", `Папка данных замера ${directory} недоступна. Создайте её с правами 0700`, { cause: error });
-  }
-  if (mode !== 0o700) {
-    throw new AppError(
-      "AGENT_MEMORY_GOLDEN_DATA_DIR_EXPOSED",
-      `Папка данных замера ${directory} открыта не только владельцу (права ${mode.toString(8)}). В ней живые сообщения: выставьте права 0700`,
-    );
-  }
-}
-
-function readJsonLines(path: string): unknown[] {
-  let text: string;
-  try {
-    text = readFileSync(path, "utf8");
-  } catch (error) {
-    throw new AppError("AGENT_MEMORY_GOLDEN_INPUT_UNREADABLE", `Не удалось прочитать ${path}. Проверьте папку данных замера`, { cause: error });
-  }
-  const body = text.replace(/\n+$/u, "");
-  return body === "" ? [] : body.split("\n").map((line, index) => {
-    try {
-      return JSON.parse(line) as unknown;
-    } catch (error) {
-      throw new AppError("AGENT_MEMORY_GOLDEN_INPUT_INVALID", `Строка ${index + 1} файла ${path} не является JSON`, { cause: error });
-    }
-  });
-}
-
-const poolsLine = z.object({
-  gated: z.array(z.string()),
-  message: z.string(),
-  offered: z.array(z.object({ memoryRef: z.string().min(1), position: z.number().int().positive() })),
-  pool: z.array(z.object({ branches: z.array(z.string()), memoryRef: z.string().min(1) })),
-  production: z.object({ shown: z.array(z.string()), used: z.array(z.string()) }).nullable(),
-  query: z.string(),
-  turnId: z.string().min(1),
-});
-const labelLine = z.object({ memoryRef: z.string().min(1), relevant: z.boolean(), turnId: z.string().min(1) });
-const outsideLine = z.object({ memoryRef: z.string().min(1), turnId: z.string().min(1) });
-
-function parseLines<T>(path: string, schema: z.ZodType<T>): T[] {
-  return readJsonLines(path).map((raw, index) => {
-    const parsed = schema.safeParse(raw);
-    if (parsed.success) return parsed.data;
-    throw new AppError(
-      "AGENT_MEMORY_GOLDEN_INPUT_INVALID",
-      `Строка ${index + 1} файла ${path} не по формату из шапки run.ts`,
-      { cause: parsed.error },
-    );
-  });
-}
-
 async function pools(): Promise<void> {
-  requirePrivateDirectory();
+  requirePrivateDirectory(directory!);
   const poolsPath = join(directory!, "pools.jsonl");
   // Written aside and renamed at the end: a run cut short leaves no file that passes for a full set.
   const partialPath = `${poolsPath}.partial`;
@@ -145,24 +86,7 @@ async function pools(): Promise<void> {
 }
 
 function score(): void {
-  const turns: GoldenTurn[] = parseLines(join(directory!, "pools.jsonl"), poolsLine);
-  const byTurn = new Map<string, Map<string, boolean>>();
-  for (const label of parseLines(join(directory!, "labels.jsonl"), labelLine)) {
-    const turn = byTurn.get(label.turnId) ?? new Map<string, boolean>();
-    if (turn.has(label.memoryRef)) {
-      throw new AppError(
-        "AGENT_MEMORY_GOLDEN_LABEL_DUPLICATE",
-        `Запись ${label.memoryRef} хода ${label.turnId} размечена в labels.jsonl дважды. Оставьте одну метку`,
-      );
-    }
-    turn.set(label.memoryRef, label.relevant);
-    byTurn.set(label.turnId, turn);
-  }
-  const labels: GoldenLabels[] = [...byTurn].map(([turnId, relevant]) => ({ relevant, turnId }));
-  const outside = new Map<string, Set<string>>();
-  for (const line of parseLines(join(directory!, "outside-pool.jsonl"), outsideLine)) {
-    outside.set(line.turnId, (outside.get(line.turnId) ?? new Set<string>()).add(line.memoryRef));
-  }
+  const { labels, outside, turns } = loadGoldenSet(directory!);
   console.log(JSON.stringify(scoreGoldenSet(turns, labels, outside satisfies NeededOutsidePool), null, 2));
 }
 
