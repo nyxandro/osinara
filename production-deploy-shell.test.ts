@@ -187,7 +187,7 @@ describe("production deploy shell policies", () => {
     expect(calls.match(/volume rm osinara-production-tool-environments/g)).toHaveLength(1);
     expect(result.stdout).toContain("tracked=1 exists=1");
 
-    const deployScript = readFileSync(join(projectRoot, "scripts/production-deploy.sh"), "utf8");
+    const deployScript = readFileSync(join(projectRoot, "scripts/production-deploy/main.sh"), "utf8");
     const failureHandler = deployScript.slice(
       deployScript.indexOf("handle_failure()"),
       deployScript.indexOf("handle_signal()"),
@@ -255,7 +255,7 @@ describe("production deploy shell policies", () => {
   });
 
   it("promotes the candidate only after health and before terminal success", () => {
-    const deployScript = readFileSync(join(projectRoot, "scripts/production-deploy.sh"), "utf8");
+    const deployScript = readFileSync(join(projectRoot, "scripts/production-deploy/main.sh"), "utf8");
     const migration = deployScript.indexOf("MIGRATION_STARTED=1");
     const health = deployScript.indexOf("wait_for_health", migration);
     const promote = deployScript.indexOf("promote_candidate_release", health);

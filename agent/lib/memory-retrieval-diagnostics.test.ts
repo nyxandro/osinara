@@ -5,6 +5,8 @@
  * - Repository scores, branch evidence, database IDs, and identity metadata remain internal.
  * - Turn-level retrieval returns only the explicit model-safe memory DTO.
  * - Log-only retrieval diagnostics stay beside the memories and never enter them.
+ * - How each record was found — which branches, its similarity and fused score — travels beside
+ *   the memories as a log-only ranking keyed by the opaque ref.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -89,6 +91,26 @@ describe("retrieval diagnostics boundary", () => {
     expect(JSON.stringify(result.memories)).not.toMatch(
       /score|evidence|Similarity|Rank|00000000-0000-4000-8000-00000000000[12]/u,
     );
+  });
+
+  it("keeps how each record was found beside the memories, keyed by its opaque ref", async () => {
+    const result = await retrieveRelevantMemories({
+      familyId: "00000000-0000-4000-8000-000000000003",
+      groupId: null,
+      role: "owner",
+      scopes: ["personal"],
+      telegramActorId: "synthetic-telegram-id",
+      telegramActorKind: "telegram_user",
+      telegramUserId: "synthetic-telegram-id",
+      userId: "00000000-0000-4000-8000-000000000001",
+    }, "синтетический запрос");
+
+    expect([...result.rankingByMemoryRef]).toEqual([["mem_11111111111111111111111111111111", {
+      // The exact branch found nothing here, so it is absent rather than listed with a null.
+      branches: ["russian", "semantic"],
+      fusedScore: 0.034,
+      semanticSimilarity: 0.83,
+    }]]);
   });
 
   it("measures the query as numbers only, beside the memories rather than inside them", async () => {

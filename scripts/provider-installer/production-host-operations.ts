@@ -6,43 +6,64 @@
  *
  * Key constructs:
  * - Exact `/opt/osinara` paths, recoverable attempt state, durable migration marker, and process lock.
+ * - The release controller's layout (`releases/vX.Y.Z` selected by `current`) and its self-updating
+ *   controller with systemd units, taken from the release app image.
  * - Digest-only application Compose plus an isolated pinned Traefik project (`managed` TLS mode), or
  *   verification that an operator-owned proxy already answers for the hostname (`external` TLS mode).
  * - Bounded health checks and subprocess output without shell interpolation.
  */
 import { constants } from "node:fs";
-import { chmod, chown, lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
+import { chmod, chown, lstat, mkdir, open, realpath, rename, rm, symlink } from "node:fs/promises";
 import { createServer } from "node:net";
 
 import type { HostInstallationOperations, HostInstallationStageInput, HostTlsInput } from "./host-executor.js";
 import {
   buildTlsEnvironment,
   parseBootstrapProcessOutput,
+  releaseAppImageFromManifest,
   releaseEnvironmentFromManifest,
   renderTraefikRoute,
 } from "./host-contracts.js";
+import {
+  ATTEMPT_DIR,
+  BASE_DIR,
+  CURRENT_LINK,
+  ENV_PATH,
+  INSTALLATION_COMPOSE_NAME,
+  MANIFEST_NAME,
+  MODEL_CONFIG_PATH,
+  RELEASE_ENV_NAME,
+  RELEASE_ENV_PATH,
+  RELEASES_DIR,
+  SYSTEMD_UNIT_DIR,
+  TLS_COMPOSE_PATH,
+  TLS_DIR,
+  TLS_DYNAMIC_DIR,
+  TLS_ENV_PATH,
+  TLS_ROUTE_PATH,
+  releaseDirectory,
+} from "./host-layout.js";
 import { probeExternalProxy } from "./external-proxy-probe.js";
 import { readInstallationBundle, validateInstallationBundle } from "./installation-bundle.js";
 import { recoverPreMigrationInstallationAttempt } from "./installation-attempt.js";
 import { acquireInstallationLock } from "./installation-lock.js";
 import { InstallerError } from "./errors.js";
-import { runHostCommand } from "./process-runner.js";
+import { runHostCommand, SAFE_HOST_PATH } from "./process-runner.js";
 import { configureTelegramWebhook } from "./telegram-webhook.js";
+import {
+  enableUpdater,
+  findMissingHostCommands,
+  INSTALLED_UPDATER_LAYOUT,
+  installUpdaterFromImage,
+  removeUpdaterUnits,
+  requireAbsentUpdaterUnits,
+  UPDATER_HOST_COMMANDS,
+  updaterUnitPaths,
+} from "./updater-installation.js";
 
-const BASE_DIR = "/opt/osinara";
-const ATTEMPT_DIR = `${BASE_DIR}/.install-attempt`;
 const MIGRATION_MARKER_PATH = `${ATTEMPT_DIR}/migration-started`;
 const LOCK_PATH = "/run/osinara-install.lock";
-const ENV_PATH = `${BASE_DIR}/.env`;
-const MODEL_CONFIG_PATH = `${BASE_DIR}/agent-model-providers.json`;
-const RELEASE_ENV_PATH = `${BASE_DIR}/release.env`;
-const COMPOSE_PATH = `${BASE_DIR}/compose.installation.json`;
-const MANIFEST_PATH = `${BASE_DIR}/osinara-deployment.json`;
-const TLS_DIR = `${BASE_DIR}/tls`;
-const TLS_ENV_PATH = `${TLS_DIR}/.env`;
-const TLS_COMPOSE_PATH = `${TLS_DIR}/compose.yaml`;
-const TLS_DYNAMIC_DIR = `${TLS_DIR}/dynamic`;
-const TLS_ROUTE_PATH = `${TLS_DYNAMIC_DIR}/osinara.yaml`;
+const SYSTEMD_RUNTIME_DIR = "/run/systemd/system";
 const EDGE_LOOPBACK_PORT = 8082;
 const HTTPS_ATTEMPTS = 60;
 // An operator attaching their own proxy needs time to connect it after the edge appears.
@@ -142,9 +163,34 @@ async function requirePhysicalRootDirectory(path: string): Promise<void> {
   }
 }
 
+async function createRootDirectory(path: string, mode: number): Promise<void> {
+  await mkdir(path, { mode });
+  await chown(path, 0, 0);
+  await chmod(path, mode);
+  await requirePhysicalRootDirectory(path);
+}
+
+interface StagedRelease {
+  readonly appImage: string;
+  readonly composePath: string;
+  readonly releaseEnvPath: string;
+  readonly version: string;
+}
+
 /** Creates stateful operations used by one executor invocation. */
 export function createProductionHostOperations(): HostInstallationOperations {
   let ownsBaseDirectory = false;
+  let stagedRelease: StagedRelease | null = null;
+  let updaterUnits: string[] = [];
+
+  const requireStagedRelease = (): StagedRelease => {
+    if (!stagedRelease) throw new Error("installation release is used before it was staged");
+    return stagedRelease;
+  };
+  const applicationCompose = async (args: readonly string[]): Promise<Buffer> => {
+    const release = requireStagedRelease();
+    return await dockerCompose(release.composePath, [ENV_PATH, release.releaseEnvPath], args);
+  };
 
   const cleanupOwnedBaseDirectory = async (): Promise<void> => {
     if (!ownsBaseDirectory) return;
@@ -159,11 +205,15 @@ export function createProductionHostOperations(): HostInstallationOperations {
     },
     assertCleanState: async () => {
       // A prior crash is restartable only while its durable marker proves migrations never began.
-      await recoverPreMigrationInstallationAttempt({
+      const recovered = await recoverPreMigrationInstallationAttempt({
         attemptDir: ATTEMPT_DIR,
         baseDir: BASE_DIR,
         migrationMarker: MIGRATION_MARKER_PATH,
       });
+      // Units can exist only from that attempt: any other owner of these names would have left an
+      // /opt/osinara without the attempt marker, which the recovery above refuses to touch.
+      if (recovered) await removeUpdaterUnits(updaterUnitPaths(SYSTEMD_UNIT_DIR), runHostCommand);
+      await requireAbsentUpdaterUnits(SYSTEMD_UNIT_DIR);
       const projects = await runHostCommand({
         args: ["ps", "-a", "--filter", "label=com.docker.compose.project=osinara-production", "--quiet"],
         command: "docker",
@@ -210,6 +260,21 @@ export function createProductionHostOperations(): HostInstallationOperations {
       }
       await runHostCommand({ args: ["info"], command: "docker", timeoutMs: 30_000 });
       await runHostCommand({ args: ["compose", "version"], command: "docker", timeoutMs: 30_000 });
+      // Approved updates are applied by the release controller under systemd with these tools.
+      const missing = await findMissingHostCommands(SAFE_HOST_PATH.split(":"), UPDATER_HOST_COMMANDS);
+      if (missing.length > 0) {
+        throw new InstallerError(
+          "OSINARA_INSTALL_HOST_COMMAND_MISSING",
+          `На сервере нет команд, нужных для автообновления: ${missing.join(", ")}. Установите их (например, apt install jq util-linux curl) и повторите установку`,
+        );
+      }
+      const systemd = await lstat(SYSTEMD_RUNTIME_DIR).catch(() => null);
+      if (!systemd?.isDirectory()) {
+        throw new InstallerError(
+          "OSINARA_INSTALL_SYSTEMD_REQUIRED",
+          "Автообновление Osinara работает через systemd, а он на этом сервере не запущен. Используйте сервер с systemd",
+        );
+      }
     },
     commit: async () => {
       await rm(ATTEMPT_DIR, { force: true, recursive: true });
@@ -218,7 +283,7 @@ export function createProductionHostOperations(): HostInstallationOperations {
       await configureTelegramWebhook({ ...input, fetch: globalThis.fetch, timeoutMs: 30_000 });
     },
     createOwnerBootstrap: async () => {
-      const stdout = await dockerCompose(COMPOSE_PATH, [ENV_PATH, RELEASE_ENV_PATH], [
+      const stdout = await applicationCompose([
         "run",
         "--no-deps",
         "--rm",
@@ -229,13 +294,25 @@ export function createProductionHostOperations(): HostInstallationOperations {
       ]);
       return parseBootstrapProcessOutput(stdout);
     },
+    enableUpdater: async () => {
+      await enableUpdater(runHostCommand);
+    },
+    installUpdater: async () => {
+      const release = requireStagedRelease();
+      updaterUnits = await installUpdaterFromImage({
+        appImage: release.appImage,
+        layout: INSTALLED_UPDATER_LAYOUT,
+        releaseVersion: release.version,
+        run: runHostCommand,
+      });
+    },
     markMigrationStarted: async () => {
       // Atomic write plus file and parent-directory fsync makes the no-cleanup boundary durable.
       await writeRootFile(MIGRATION_MARKER_PATH, Buffer.from("migration-started\n", "ascii"), 0o600);
     },
     preflight: async (input: HostTlsInput) => {
       await assertPortAvailable(EDGE_LOOPBACK_PORT);
-      await dockerCompose(COMPOSE_PATH, [ENV_PATH, RELEASE_ENV_PATH], ["config", "--quiet"]);
+      await applicationCompose(["config", "--quiet"]);
       if (input.tlsMode === "managed") {
         await assertPortAvailable(80);
         await assertPortAvailable(443);
@@ -245,7 +322,7 @@ export function createProductionHostOperations(): HostInstallationOperations {
       await probeExternalProxy({ fetch: globalThis.fetch, hostname: input.hostname, listenPort: EDGE_LOOPBACK_PORT });
     },
     pullImages: async (input: HostTlsInput) => {
-      await dockerCompose(COMPOSE_PATH, [ENV_PATH, RELEASE_ENV_PATH], ["pull", "--quiet"]);
+      await applicationCompose(["pull", "--quiet"]);
       if (input.tlsMode === "managed") {
         await dockerCompose(TLS_COMPOSE_PATH, [TLS_ENV_PATH], ["pull", "--quiet"]);
       }
@@ -256,6 +333,10 @@ export function createProductionHostOperations(): HostInstallationOperations {
           "OSINARA_INSTALL_ROLLBACK_OWNERSHIP_MISSING",
           "Installer не подтвердил владение подготовленным каталогом; автоматическое удаление запрещено",
         );
+      }
+      if (updaterUnits.length > 0) {
+        await removeUpdaterUnits(updaterUnits, runHostCommand);
+        updaterUnits = [];
       }
       await cleanupOwnedBaseDirectory();
     },
@@ -269,10 +350,15 @@ export function createProductionHostOperations(): HostInstallationOperations {
         );
         return bytes;
       };
-      const releaseEnvironment = releaseEnvironmentFromManifest(
-        requireFile("installation/osinara-deployment.json"),
-        input.releaseVersion,
-      );
+      const manifest = requireFile("installation/osinara-deployment.json");
+      const releaseEnvironment = releaseEnvironmentFromManifest(manifest, input.releaseVersion);
+      const releaseDir = releaseDirectory(input.releaseVersion);
+      const release: StagedRelease = {
+        appImage: releaseAppImageFromManifest(manifest, input.releaseVersion),
+        composePath: `${releaseDir}/${INSTALLATION_COMPOSE_NAME}`,
+        releaseEnvPath: `${releaseDir}/${RELEASE_ENV_NAME}`,
+        version: input.releaseVersion,
+      };
 
       try {
         // Non-recursive creation proves this process owns the fresh base before cleanup is enabled.
@@ -280,24 +366,21 @@ export function createProductionHostOperations(): HostInstallationOperations {
         ownsBaseDirectory = true;
         await chown(BASE_DIR, 0, 0);
         await chmod(BASE_DIR, 0o750);
-        await mkdir(ATTEMPT_DIR, { mode: 0o700 });
-        await chown(ATTEMPT_DIR, 0, 0);
-        await chmod(ATTEMPT_DIR, 0o700);
-        await mkdir(TLS_DIR, { mode: 0o750 });
-        await chown(TLS_DIR, 0, 0);
-        await chmod(TLS_DIR, 0o750);
-        await mkdir(TLS_DYNAMIC_DIR, { mode: 0o750 });
-        await chown(TLS_DYNAMIC_DIR, 0, 0);
-        await chmod(TLS_DYNAMIC_DIR, 0o750);
         await requirePhysicalRootDirectory(BASE_DIR);
-        await requirePhysicalRootDirectory(ATTEMPT_DIR);
-        await requirePhysicalRootDirectory(TLS_DIR);
-        await requirePhysicalRootDirectory(TLS_DYNAMIC_DIR);
+        await createRootDirectory(ATTEMPT_DIR, 0o700);
+        await createRootDirectory(TLS_DIR, 0o750);
+        await createRootDirectory(TLS_DYNAMIC_DIR, 0o750);
+        await createRootDirectory(RELEASES_DIR, 0o750);
+        await createRootDirectory(releaseDir, 0o750);
         await writeRootFile(ENV_PATH, input.environmentBytes, 0o600);
         await writeRootFile(MODEL_CONFIG_PATH, input.modelConfigBytes, 0o644);
+        // The release controller's layout: every later update adds `releases/vX.Y.Z` and switches
+        // `current`, keeping the global release.env equal to the current release's copy.
+        await writeRootFile(release.releaseEnvPath, releaseEnvironment, 0o600);
+        await writeRootFile(release.composePath, requireFile("installation/compose.installation.json"), 0o644);
+        await writeRootFile(`${releaseDir}/${MANIFEST_NAME}`, manifest, 0o644);
+        await symlink(releaseDir, CURRENT_LINK);
         await writeRootFile(RELEASE_ENV_PATH, releaseEnvironment, 0o600);
-        await writeRootFile(COMPOSE_PATH, requireFile("installation/compose.installation.json"), 0o644);
-        await writeRootFile(MANIFEST_PATH, requireFile("installation/osinara-deployment.json"), 0o644);
         if (input.tlsMode === "managed") {
           await writeRootFile(TLS_COMPOSE_PATH, requireFile("installation/traefik-compose.yaml"), 0o644);
         }
@@ -316,9 +399,10 @@ export function createProductionHostOperations(): HostInstallationOperations {
         await cleanupOwnedBaseDirectory();
         throw error;
       }
+      stagedRelease = release;
     },
     startApplication: async () => {
-      await dockerCompose(COMPOSE_PATH, [ENV_PATH, RELEASE_ENV_PATH], [
+      await applicationCompose([
         "up", "--detach", "--remove-orphans", "--no-build", "--wait", "--wait-timeout", "600",
       ]);
     },

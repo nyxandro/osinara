@@ -3,10 +3,11 @@
 # compose скажет, что сервис не определён:
 #
 #   docker compose -f compose.test.yaml -f compose.memory-retrieval-eval.yaml --profile workers \
-#     run --rm tests npx vitest run agent/lib/memory-retrieval-eval-v3
+#     run --rm tests sh -c "npm run migrate && npx vitest run agent/lib/memory-retrieval-eval"
 #
-# Первый запуск скачивает модель в том memory-retrieval-eval-model, дальше прогон v3 занимает
-# около девяти секунд на 240 записях и 58 запросах.
+# Так же их запускает CI (задача retrieval-evals), и выпуск релиза её ждёт. Первый запуск скачивает
+# модель в том memory-retrieval-eval-model; сами замеры — v1/v2, v3 (253 записи, 92 вопроса) и
+# групповой корпус — идут около пятнадцати секунд.
 services:
   memory-embedding:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07

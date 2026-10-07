@@ -28,13 +28,10 @@ function readProjectFile(path: string): string {
 
 function readDeployScripts(): { combined: string; files: Array<{ path: string; source: string }> } {
   const moduleDirectory = new URL("scripts/production-deploy/", projectRoot);
-  const paths = [
-    "scripts/production-deploy.sh",
-    ...readdirSync(moduleDirectory)
-      .filter((name) => name.endsWith(".sh"))
-      .sort()
-      .map((name) => `scripts/production-deploy/${name}`),
-  ];
+  const paths = readdirSync(moduleDirectory)
+    .filter((name) => name.endsWith(".sh"))
+    .sort()
+    .map((name) => `scripts/production-deploy/${name}`);
   const files = paths.map((path) => ({ path, source: readProjectFile(path) }));
   return { combined: files.map(({ source }) => source).join("\n"), files };
 }
@@ -89,6 +86,30 @@ describe("production container contract", () => {
     expect(entrypoint).toContain("node .runtime/scripts/migrate.js");
     expect(entrypoint).toContain("node .runtime/scripts/validate-model-provider-config.js");
     expect(entrypoint).not.toContain("npm run migrate");
+  });
+
+  // The app image is the only digest the approved manifest binds that a host can read files from,
+  // so the controller and its units travel inside it, outside the agent's own tree.
+  it("ships the deployment controller and its units in the app image", () => {
+    const dockerfile = readProjectFile("Dockerfile");
+    const runtime = dockerfile.slice(dockerfile.indexOf(" AS runtime"), dockerfile.indexOf(" AS edge"));
+
+    expect(runtime).toContain("COPY scripts/production-deploy/ ./deploy/controller/");
+    expect(runtime).toContain("COPY infra/systemd/ ./deploy/systemd/");
+    expect(readdirSync(new URL("scripts/production-deploy/", projectRoot)).sort()).toEqual([
+      "backup.sh",
+      "common.sh",
+      "database.sh",
+      "installation-compose.jq",
+      "launcher.sh",
+      "main.sh",
+      "release.sh",
+      "self-update.sh",
+    ]);
+    expect(readdirSync(new URL("infra/systemd/", projectRoot)).sort()).toEqual([
+      "osinara-deploy.service",
+      "osinara-deploy.timer",
+    ]);
   });
 
   it("installs dependencies without install-time scripts", () => {
@@ -314,6 +335,15 @@ describe("release workflow contract", () => {
       '["compose.production.yaml", "install.sh", "osinara-deployment.json", "osinara-installation.tar.gz", "osinara-linux-x64", "osinara-linux-x64.sha256"]',
     );
   });
+
+  // The installer's first graph and every graph an installation host derives later come from one
+  // reviewed filter; an inline copy in the workflow could drift from what the controller applies.
+  it("builds the installation graph with the controller's own filter", () => {
+    const workflow = readProjectFile(".github/workflows/ci-release.yaml");
+
+    expect(workflow).toContain("jq --from-file scripts/production-deploy/installation-compose.jq");
+    expect(workflow).not.toContain('del(.services["cli-proxy-api"])');
+  });
 });
 
 describe("server deployment contract", () => {
@@ -324,13 +354,80 @@ describe("server deployment contract", () => {
       "source scripts/production-deploy/database.sh",
       "source scripts/production-deploy/release.sh",
       "source scripts/production-deploy/backup.sh",
+      "source scripts/production-deploy/self-update.sh",
     ].join("; ")], { cwd: projectRoot })).not.toThrow();
+  });
+
+  // Each release carries the controller that deploys it: the running controller installs the
+  // approved release's copy and hands over before any release rule or service is touched.
+  it("hands an approved release to the controller it carries before preparing it", () => {
+    const main = readProjectFile("scripts/production-deploy/main.sh");
+    const body = main.slice(main.indexOf("main() {"));
+    const handover = body.indexOf('ensure_release_controller "$CONTROLLER_ROOT" "$LAUNCHER_PATH"');
+
+    expect(handover).toBeGreaterThan(body.indexOf('download_and_validate_release "$REQUESTED_VERSION"'));
+    expect(handover).toBeGreaterThan(body.indexOf("recheck_claim_owner"));
+    expect(handover).toBeLessThan(body.indexOf('require_metadata "$AGENT_MODEL_PROVIDER_CONFIG"'));
+    expect(handover).toBeLessThan(body.indexOf("\n  prepare_candidate_release\n"));
+    expect(body).toContain('"$1" == "--resume"');
+    expect(body.indexOf("adopt_claimed_proposal")).toBeLessThan(body.indexOf("claim_approved_proposal"));
+    // Every module the controller sources is part of the bootstrap metadata check.
+    expect(main).toMatch(/for module in main common database release backup self-update; do/u);
+    expect(main).toContain('source "${CONTROLLER_DIR}/self-update.sh"');
+    expect(main.lastIndexOf("prune_retired_controllers")).toBeGreaterThan(
+      main.lastIndexOf('record_proposal_result "succeeded"'),
+    );
+  });
+
+  // An older controller starts a newer one through exactly these two forms, so they are frozen
+  // across versions: changing either strands the claim an older controller hands over.
+  it("keeps the cross-version preflight and resume interface", () => {
+    const main = readProjectFile("scripts/production-deploy/main.sh");
+    const selfUpdate = readProjectFile("scripts/production-deploy/self-update.sh");
+    const body = main.slice(main.indexOf("main() {"));
+    const ensure = selfUpdate.slice(selfUpdate.indexOf("ensure_release_controller() {"));
+
+    expect(body).toContain('elif [[ "$#" -eq 3 && "$1" == "--resume" ]]; then');
+    expect(body).toContain('elif [[ "$#" -eq 1 && "$1" == "--preflight" ]]; then');
+    expect(selfUpdate).toContain('exec "$launcher" --resume "$PROPOSAL_ID" "$LEASE_TOKEN"');
+    expect(selfUpdate).toContain('bash "${directory}/main.sh" --preflight');
+    // Preflight only checks: it returns before the lock, the claim, or any change.
+    const preflightReturn = body.indexOf("return 0", body.indexOf('if [[ "$PREFLIGHT_MODE" -eq 1 ]]'));
+    expect(preflightReturn).toBeLessThan(body.indexOf('exec 9>"$LOCK_FILE"'));
+    expect(preflightReturn).toBeLessThan(body.indexOf("claim_approved_proposal"));
+    // A placed controller is selected only after its own preflight passed.
+    expect(ensure.indexOf("install_release_controller")).toBeLessThan(ensure.indexOf("preflight_release_controller"));
+    expect(ensure.indexOf("preflight_release_controller")).toBeLessThan(ensure.indexOf("select_release_controller"));
+    expect(ensure.indexOf("select_release_controller")).toBeLessThan(ensure.indexOf("hand_over_to_release_controller"));
+  });
+
+  // errtrace runs the ERR trap inside every command substitution; without this guard a failing
+  // substitution would record the proposal and message the owner twice.
+  it("handles a failure once, in the main process only", () => {
+    const main = readProjectFile("scripts/production-deploy/main.sh");
+    const handler = main.slice(main.indexOf("handle_failure() {"), main.indexOf("handle_signal() {"));
+    const guard = handler.indexOf('[[ "$BASHPID" == "$$" ]] || exit "$exit_code"');
+
+    expect(guard).toBeGreaterThan(0);
+    expect(guard).toBeLessThan(handler.indexOf("FAILURE_HANDLING=1"));
+    expect(guard).toBeLessThan(handler.indexOf("record_proposal_result"));
+  });
+
+  // systemd keeps starting the same fixed path; only the launcher decides which controller runs.
+  it("starts the selected controller version through the fixed launcher", () => {
+    const launcher = readProjectFile("scripts/production-deploy/launcher.sh");
+    const serviceUnit = readProjectFile("infra/systemd/osinara-deploy.service");
+
+    expect(serviceUnit).toContain("ExecStart=/opt/osinara/bin/production-deploy.sh");
+    expect(launcher).toContain('readonly LAUNCHER_PATH="/opt/osinara/bin/production-deploy.sh"');
+    expect(launcher).toContain('readonly LAUNCHER_CONTROLLER_ROOT="/opt/osinara/bin/controller"');
+    expect(launcher).toContain('exec /bin/bash "${controller_dir}/main.sh" "$@"');
   });
 
   // The agent mounts the operator's model config read-only; every release, initial or update,
   // checks its owner and mode before a candidate is prepared.
   it("checks the mounted model config before preparing a candidate", () => {
-    const main = readProjectFile("scripts/production-deploy.sh");
+    const main = readProjectFile("scripts/production-deploy/main.sh");
     const check = main.indexOf('require_metadata "$AGENT_MODEL_PROVIDER_CONFIG" "0:0:644"');
 
     expect(check).toBeGreaterThan(main.indexOf('download_and_validate_release "$REQUESTED_VERSION"'));
@@ -358,14 +455,12 @@ describe("server deployment contract", () => {
     expect(script).toContain("127.0.0.1:8082/v1/health");
     expect(script).not.toMatch(/git\s+(pull|fetch|checkout)/);
     expect(script).not.toMatch(/docker\s+(compose\s+)?build/);
-    const main = readProjectFile("scripts/production-deploy.sh");
+    const main = readProjectFile("scripts/production-deploy/main.sh");
     expect(main.indexOf("prune_old_deploy_backups")).toBeGreaterThan(main.indexOf("snapshot_durable_volumes"));
     expect(main.indexOf("pull_release_images")).toBeLessThan(main.indexOf("create_postgres_backup"));
     expect(main.indexOf("prepare_runtime_update")).toBeLessThan(main.indexOf("stop_current_services"));
     expect(main.indexOf("stop_current_services")).toBeLessThan(main.indexOf("create_postgres_backup"));
     expect(main.indexOf("stop_current_services")).toBeLessThan(main.indexOf("snapshot_durable_volumes"));
-    const backup = readProjectFile("scripts/production-deploy/backup.sh");
-    expect(backup).toMatch(/compose_current stop edge telegram-ingress-worker memory-embedding-worker agent cli-proxy-api/u);
     expect(main.lastIndexOf("record_proposal_result")).toBeLessThan(
       main.lastIndexOf("prune_retired_release_images"),
     );
@@ -377,7 +472,7 @@ describe("server deployment contract", () => {
 
   it("supports initial deployment and records all terminal proposal states", () => {
     const { combined: script } = readDeployScripts();
-    const main = readProjectFile("scripts/production-deploy.sh");
+    const main = readProjectFile("scripts/production-deploy/main.sh");
 
     expect(script).toContain("--initial");
     for (const status of ["deploying", "succeeded", "failed", "ambiguous"]) {
@@ -419,20 +514,20 @@ describe("server deployment contract", () => {
 
   it("executes the exact resolved-Compose security predicate fail-closed", () => {
     const valid = resolvedComposeSecurityFixture();
-    expect(() => executeComposeSecurityPredicate(valid)).not.toThrow();
+    expect(() => executeComposeSecurityPredicate(valid, "production")).not.toThrow();
 
     // `volumes_from` must not bypass the exact mount allowlist through another service.
     const inheritedRunnerVolumes = structuredClone(valid) as {
       services: Record<string, { volumes_from?: string[] }>;
     };
     inheritedRunnerVolumes.services.agent!.volumes_from = ["sandbox-runner"];
-    expect(() => executeComposeSecurityPredicate(inheritedRunnerVolumes)).toThrow();
+    expect(() => executeComposeSecurityPredicate(inheritedRunnerVolumes, "production")).toThrow();
 
     const unsafe = structuredClone(valid) as { services: Record<string, { volumes?: unknown[] }> };
     unsafe.services["telegram-ingress-worker"]!.volumes = [{
       source: "/", target: "/host", type: "bind",
     }];
-    expect(() => executeComposeSecurityPredicate(unsafe)).toThrow();
+    expect(() => executeComposeSecurityPredicate(unsafe, "production")).toThrow();
 
   });
 
@@ -511,7 +606,7 @@ describe("production edge and installer contract", () => {
     expect(compose.match(/      - edge-frontend/g)).toHaveLength(1);
     expect(compose).toContain("  edge-frontend:\n    name: osinara-production-edge-frontend");
     expect(hostOperations).toContain('"osinara-production-edge-frontend"');
-    expect(() => executeComposeSecurityPredicate(valid)).not.toThrow();
-    expect(() => executeComposeSecurityPredicate(unsafe)).toThrow();
+    expect(() => executeComposeSecurityPredicate(valid, "production")).not.toThrow();
+    expect(() => executeComposeSecurityPredicate(unsafe, "production")).toThrow();
   });
 });

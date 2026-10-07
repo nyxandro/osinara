@@ -3,7 +3,8 @@
  *
  * Exports:
  * - `resolvedComposeSecurityFixture`: accepted resolved production Compose security surface.
- * - `executeComposeSecurityPredicate`: invokes the real root deployment jq predicate.
+ * - `installationComposeSecurityFixture`: the same surface without the CLIProxy gateway.
+ * - `executeComposeSecurityPredicate`: invokes the real root deployment jq predicate for a profile.
  */
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -63,11 +64,25 @@ export function resolvedComposeSecurityFixture(): Record<string, unknown> {
   };
 }
 
-export function executeComposeSecurityPredicate(config: Record<string, unknown>): void {
+/** The installation graph: what `installation-compose.jq` leaves of the production graph. */
+export function installationComposeSecurityFixture(): Record<string, unknown> {
+  const config = resolvedComposeSecurityFixture() as {
+    services: Record<string, { depends_on?: Record<string, unknown> }>;
+  };
+  delete config.services["cli-proxy-api"];
+  delete config.services.agent!.depends_on!["cli-proxy-api"];
+  return config;
+}
+
+export function executeComposeSecurityPredicate(
+  config: Record<string, unknown>,
+  profile: "installation" | "production",
+): void {
   execFileSync("bash", [
     "-c",
-    'source "$1"; validate_resolved_compose_security -',
+    'source "$1"; validate_resolved_compose_security - "$2"',
     "bash",
     fileURLToPath(new URL("scripts/production-deploy/release.sh", projectRoot)),
+    profile,
   ], { input: JSON.stringify(config), stdio: ["pipe", "pipe", "pipe"] });
 }

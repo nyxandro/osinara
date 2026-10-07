@@ -5,6 +5,7 @@
  * - `MemoryRetrievalBranchEvidence`: threshold-qualified evidence from each active branch.
  * - `MemoryRetrievalBranchDiagnostics`: log-only per-branch counts and pre-threshold best scores.
  * - `ScoredMemoryRetrievalResult`: internal diagnostic DTO that never crosses the model boundary.
+ * - `MemoryRecordRanking` / `memoryRankingByRef`: how each returned record was found, for logs.
  * - `normalizeMemoryExactDuplicateKey`: safe exact-read normalization key.
  * - `collapseExactDuplicateRetrievalResults`: preserves top-ranked representatives without writes.
  */
@@ -53,6 +54,39 @@ export interface ScoredMemoryRetrievalResult {
   memory: ReferencedMemoryItem;
   sourceEvidence?: ModelMemoryEvidence;
   score: number;
+}
+
+/** The branches under the names their diagnostics already carry: `simple*`, `russian*`, `semantic*`. */
+export type MemoryRetrievalBranch = "russian" | "semantic" | "simple";
+
+/**
+ * How one returned record was found, for logs only. A branch is listed when the record passed
+ * that branch's own gate and made its candidate limit — when `candidateLimitHit`, a record can
+ * clear the gate and still not be listed, because the branch never handed it to the fusion. The
+ * vector's similarity is kept because it is the number the semantic threshold is calibrated on,
+ * and the fused score is what decided the record's place.
+ */
+export interface MemoryRecordRanking {
+  branches: MemoryRetrievalBranch[];
+  fusedScore: number;
+  semanticSimilarity: number | null;
+}
+
+/** Keyed by the opaque ref, which is all a log line may name a record by. */
+export function memoryRankingByRef(
+  results: readonly ScoredMemoryRetrievalResult[],
+): Map<string, MemoryRecordRanking> {
+  return new Map(results.map((result) => {
+    const branches: MemoryRetrievalBranch[] = [];
+    if (result.evidence.simpleLexicalRank !== null) branches.push("simple");
+    if (result.evidence.russianMorphologyRank !== null) branches.push("russian");
+    if (result.evidence.semanticSimilarity !== null) branches.push("semantic");
+    return [result.memory.memoryRef, {
+      branches,
+      fusedScore: result.score,
+      semanticSimilarity: result.evidence.semanticSimilarity,
+    }];
+  }));
 }
 
 export function normalizeMemoryExactDuplicateKey(content: string): string {

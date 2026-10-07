@@ -103,6 +103,67 @@ SQL
   require_semver "$REQUESTED_VERSION"
 }
 
+# A controller started by a self-update continues the claim its predecessor took. The lease token
+# proves the claim is still this deployment's; the stored manifest is read again, never passed in.
+adopt_claimed_proposal() {
+  local proposal_id="$1"
+  local lease_token="$2"
+  local adopted
+  if [[ ! "$proposal_id" =~ ^[0-9a-f-]{36}$ || ! "$lease_token" =~ ^[0-9a-f-]{36}$ ]]; then
+    fail "DEPLOY_RESUME_ARGUMENT_INVALID" "Resumed deployment identity is malformed"
+    return 1
+  fi
+  # Set first: if adoption fails below, the failure is still recorded against this lease.
+  PROPOSAL_ID="$proposal_id"
+  LEASE_TOKEN="$lease_token"
+  adopted="$(psql_current --field-separator=$'\t' \
+    --set="proposal_id=${PROPOSAL_ID}" --set="lease_token=${LEASE_TOKEN}" <<'SQL'
+WITH global_owner AS (
+  SELECT max(fm.family_id::text)::uuid AS family_id,
+         max(fm.user_id::text)::uuid AS user_id,
+         max(owner_user.telegram_user_id) AS telegram_user_id
+    FROM family_memberships fm
+    JOIN users owner_user ON owner_user.id = fm.user_id
+   WHERE fm.role = 'owner'
+  HAVING count(*) = 1
+)
+SELECT proposal.target_version, proposal.telegram_chat_id,
+       proposal.manifest->>'version', proposal.manifest->>'commitSha',
+       proposal.manifest->>'composeSha256',
+       proposal.manifest->'images'->>'app', proposal.manifest->'images'->>'cliProxy',
+       proposal.manifest->'images'->>'edge',
+       proposal.manifest->'images'->>'sandboxEgressProxy',
+       proposal.manifest->'images'->>'sandboxRunner',
+       proposal.manifest->'images'->>'sandboxRuntime'
+  FROM software_update_proposals proposal
+  JOIN global_owner owner
+    ON owner.family_id = proposal.family_id
+   AND owner.user_id = proposal.expected_owner_user_id
+   AND owner.telegram_user_id = proposal.expected_owner_telegram_user_id
+ WHERE proposal.id = :'proposal_id'::uuid
+   AND proposal.status = 'deploying'
+   AND proposal.deployment_lease_token = :'lease_token'::uuid
+   AND proposal.deployment_lease_expires_at > now()
+   AND proposal.telegram_chat_type = 'private'
+   AND proposal.telegram_chat_id = proposal.expected_owner_telegram_user_id;
+SQL
+)"
+  if [[ -z "$adopted" ]]; then
+    fail "DEPLOY_RESUMED_CLAIM_INVALID" "The claim handed over by the previous controller is no longer valid"
+    return 1
+  fi
+
+  CLAIM_FOUND=1
+  IFS=$'\t' read -r REQUESTED_VERSION OWNER_CHAT_ID \
+    STORED_VERSION STORED_COMMIT STORED_COMPOSE_SHA STORED_APP STORED_CLI_PROXY STORED_EDGE \
+    STORED_EGRESS STORED_RUNNER STORED_RUNTIME <<<"$adopted"
+  if [[ ! "$OWNER_CHAT_ID" =~ ^-?[0-9]+$ ]]; then
+    fail "DEPLOY_PROPOSAL_INVALID" "Adopted proposal has invalid identity fields"
+    return 1
+  fi
+  require_semver "$REQUESTED_VERSION"
+}
+
 recheck_claim_owner() {
   local current
   current="$(psql_current --set="proposal_id=${PROPOSAL_ID}" \

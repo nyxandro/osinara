@@ -18,34 +18,48 @@
  * The baseline below is measured, not desired. Where today's pipeline fails a whole category, the
  * number says so — the same practice as v2, and the reason a later change can be proven to help.
  *
+ * The second part of the corpus comes from the real-memory golden set (`scripts/memory-quality/
+ * golden/`): small talk, other words for the same thing, questions about a day, and facts that
+ * changed — the shapes where the automatic selection failed on real turns. They are reported by
+ * name and kept out of the aggregate numbers, which stay defined over the shapes they were pinned
+ * on; their records join the corpus, so the older shapes are measured among more neighbours.
+ *
  * What this fixture deliberately does not cover, so nobody reads more into its numbers than is there:
  * - **Group memory.** The measurement runs as the owner in a private chat, where group records are
- *   not authorized at all; adding them would measure access rules, not retrieval quality, and the
- *   access rules have their own integration tests.
+ *   not authorized at all. Group retrieval is measured by its own corpus in
+ *   `memory-retrieval-eval-group/`, as a participant of an external group.
  * - **Subject identity columns.** `subject_label` here is fixture metadata, not a stored column:
  *   the harness feeds it to `memoryEmbeddingInput` so the indexed text carries the same subject
  *   header production writes. In the database `subject_label` and `subject_user_id` stay empty, so
  *   the profile projection path is untouched and its own tests own it.
- * - **Wall-clock drift.** The fused score is multiplied by the forgetting curve, computed from
- *   `now()` against a fixed corpus, so the pinned numbers are not eternal. The corpus is even in
- *   age and the multiplier moves every record together, which is why the numbers hold in practice
- *   rather than by construction.
+ * - **Age.** The fused score is multiplied by the forgetting curve, which counts age from
+ *   `created_at` — the moment the setup inserted the record, seconds before the search — so every
+ *   record is new and the multiplier is the same for all. `updatedAt` only orders records of equal
+ *   relevance, and ids derived from the keys order the rest; the numbers do not move with the
+ *   clock. The one input that does is `occurredOn.daysAgo`, which no search reads today.
  */
+import { MEMORY_RETRIEVAL_EVAL_QUERIES_LIVE_SHAPES_V3 } from "./queries.js";
+import { MEMORY_RETRIEVAL_EVAL_QUERIES_GOLDEN_SHAPES_V3 } from "./queries-golden-shapes.js";
 import { MEMORY_RETRIEVAL_EVAL_RECORDS_EVENTS_V3 } from "./records-events.js";
+import { MEMORY_RETRIEVAL_EVAL_RECORDS_HISTORY_V3 } from "./records-history.js";
 import { MEMORY_RETRIEVAL_EVAL_RECORDS_HOUSEHOLD_V3 } from "./records-household.js";
 import { MEMORY_RETRIEVAL_EVAL_RECORDS_PEOPLE_V3 } from "./records-people.js";
 import { MEMORY_RETRIEVAL_EVAL_RECORDS_WORK_V3 } from "./records-work.js";
-import type { MemoryRetrievalEvalRecordV3 } from "./types.js";
+import type { MemoryRetrievalEvalQueryV3, MemoryRetrievalEvalRecordV3 } from "./types.js";
 
-export { MEMORY_RETRIEVAL_EVAL_QUERIES_V3 } from "./queries.js";
-
-export const MEMORY_RETRIEVAL_EVAL_FIXTURE_VERSION_V3 = "memory-retrieval-v3-live-shapes";
+export const MEMORY_RETRIEVAL_EVAL_FIXTURE_VERSION_V3 = "memory-retrieval-v3-live-and-golden-shapes";
 
 export const MEMORY_RETRIEVAL_EVAL_RECORDS_V3: readonly MemoryRetrievalEvalRecordV3[] = [
   ...MEMORY_RETRIEVAL_EVAL_RECORDS_PEOPLE_V3,
   ...MEMORY_RETRIEVAL_EVAL_RECORDS_HOUSEHOLD_V3,
   ...MEMORY_RETRIEVAL_EVAL_RECORDS_WORK_V3,
   ...MEMORY_RETRIEVAL_EVAL_RECORDS_EVENTS_V3,
+  ...MEMORY_RETRIEVAL_EVAL_RECORDS_HISTORY_V3,
+];
+
+export const MEMORY_RETRIEVAL_EVAL_QUERIES_V3: readonly MemoryRetrievalEvalQueryV3[] = [
+  ...MEMORY_RETRIEVAL_EVAL_QUERIES_LIVE_SHAPES_V3,
+  ...MEMORY_RETRIEVAL_EVAL_QUERIES_GOLDEN_SHAPES_V3,
 ];
 
 /**
@@ -70,6 +84,20 @@ export const MEMORY_RETRIEVAL_EVAL_RECORDS_V3: readonly MemoryRetrievalEvalRecor
  * nouns, are recovered by the existing three branches, which is evidence against adding a fourth
  * one on trigrams (#199).
  *
+ * The golden-set shapes, measured 07.10.2026 — the records they brought did not move any number
+ * above:
+ *
+ * - `smallTalkEmptyRate` = 0. «привет», «куку», «как дела?» each get up to twelve records at
+ *   similarities of 0.786 to 0.845, above the 0.78 gate: the same as on real memory, where 88
+ *   turns that needed nothing got 11.8 records on average. A similarity gate cannot fix this for
+ *   the same reason as `negativeEmptyRate`; the question has to be recognised as not asking.
+ * - `dateQuestionRecallAt12` = 0. «Что было вчера?» cannot find the record of yesterday: the
+ *   automatic selection never reads the event date, and the record does not say the day in words.
+ * - `aliasWordingRecallAt12` = 0.875 with `aliasWordingTopThreeRate` = 0.5. The meaning branch
+ *   finds «репа», «ДР», «дейли» on this clean corpus, but half of them sit below third place; the
+ *   one miss is «тачка», which reached nothing about the car at all.
+ * - `updatedFactRecallAt12` = 1, and no superseded version is offered for any question.
+ *
  * Two numbers here are lower than they were before the long fixtures were repaired, and the
  * pipeline did not change between the two measurements. The long queries had been written against
  * a 400-character chunk limit; when the limit rose to 900 they fitted into one chunk, and the
@@ -81,7 +109,10 @@ export const MEMORY_RETRIEVAL_EVAL_RECORDS_V3: readonly MemoryRetrievalEvalRecor
  * actually stands, and that is now visible instead of averaged away.
  */
 export const MEMORY_RETRIEVAL_R1_BASELINE_V3 = {
+  aliasWordingRecallAt12: 0.875,
+  aliasWordingTopThreeRate: 0.5,
   botAddressRecallAt12: 1,
+  dateQuestionRecallAt12: 0,
   emojiMarkupRecallAt12: 1,
   exactRecallAt12: 1,
   expectedInTopThreeRate: 0.84,
@@ -97,7 +128,9 @@ export const MEMORY_RETRIEVAL_R1_BASELINE_V3 = {
   positiveRecallAt12: 0.96,
   russianMorphologyRecallAt12: 1,
   semanticParaphraseRecallAt12: 0.833,
+  smallTalkEmptyRate: 0,
   typoRecallAt12: 1,
+  updatedFactRecallAt12: 1,
   voiceTranscriptRecallAt12: 1,
   yoSpellingRecallAt12: 1,
 } as const;

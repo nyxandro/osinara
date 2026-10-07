@@ -4,6 +4,8 @@
 
 readonly BASE_DIR="/opt/osinara"
 readonly BIN_DIR="${BASE_DIR}/bin"
+readonly LAUNCHER_PATH="${BIN_DIR}/production-deploy.sh"
+readonly CONTROLLER_ROOT="${BIN_DIR}/controller"
 readonly SERVER_ENV="${BASE_DIR}/.env"
 readonly AGENT_MODEL_PROVIDER_CONFIG="${BASE_DIR}/agent-model-providers.json"
 readonly RELEASES_DIR="${BASE_DIR}/releases"
@@ -33,6 +35,8 @@ readonly RELEASE_IMAGE_VARIABLES=(
 )
 
 INITIAL_MODE=0
+PREFLIGHT_MODE=0
+DEPLOYMENT_PROFILE=""
 CLAIM_FOUND=0
 STALE_DEPLOYMENT_FOUND=0
 REQUESTED_VERSION=""
@@ -82,22 +86,52 @@ require_server_boundary() {
   if [[ "$(id -u)" -ne 0 ]]; then
     fail "DEPLOY_ROOT_REQUIRED" "production-deploy.sh must run as root"
   fi
-  if [[ "$ENTRYPOINT_PATH" != "${BIN_DIR}/production-deploy.sh" ]]; then
-    fail "DEPLOY_PATH_INVALID" "Entrypoint must be ${BIN_DIR}/production-deploy.sh"
+  if [[ "${CONTROLLER_DIR%/*}" != "$CONTROLLER_ROOT" ]]; then
+    fail "DEPLOY_PATH_INVALID" "The controller must run from a version directory in ${CONTROLLER_ROOT}"
   fi
   require_metadata "$BASE_DIR" "0:0:750"
   require_metadata "$BIN_DIR" "0:0:750"
-  require_metadata "$ENTRYPOINT_PATH" "0:0:750"
-  require_metadata "$MODULE_DIR" "0:0:750"
+  require_metadata "$LAUNCHER_PATH" "0:0:750"
+  require_metadata "$CONTROLLER_ROOT" "0:0:750"
+  require_metadata "$CONTROLLER_DIR" "0:0:750"
   require_metadata "$SERVER_ENV" "0:0:600"
   install -d -o root -g root -m 0750 "$RELEASES_DIR" "$BACKUPS_DIR"
 
   local command
-  for command in awk cmp curl df docker find flock install jq mktemp mv readlink \
-    sha256sum sort stat tail tar; do
+  for command in awk cmp curl df docker find flock install jq ln mktemp mv readlink \
+    sha256sum sort stat sync tail tar; do
     command -v "$command" >/dev/null ||
       fail "DEPLOY_COMMAND_MISSING" "Required command is unavailable: ${command}"
   done
+}
+
+# The host names the graph it runs: `production` keeps the CLIProxy subscription gateway,
+# `installation` (hosts set up by `osinara install`) runs the same release without it.
+require_deployment_profile() {
+  case "${OSINARA_DEPLOYMENT_PROFILE:-}" in
+    production | installation) DEPLOYMENT_PROFILE="$OSINARA_DEPLOYMENT_PROFILE" ;;
+    *)
+      fail "DEPLOY_PROFILE_INVALID" \
+        "OSINARA_DEPLOYMENT_PROFILE in ${SERVER_ENV} must be production or installation"
+      ;;
+  esac
+}
+
+profile_compose_name() {
+  case "$1" in
+    production) printf '%s\n' "compose.production.yaml" ;;
+    installation) printf '%s\n' "compose.installation.json" ;;
+    *) fail "DEPLOY_PROFILE_INVALID" "Unknown deployment profile: $1" ;;
+  esac
+}
+
+# The Compose file a release directory runs on this host. Every current, candidate, and promoted
+# release path goes through here, so no step can fall back to the other profile's graph.
+release_compose_path() {
+  local release_dir="$1"
+  local name
+  name="$(profile_compose_name "$DEPLOYMENT_PROFILE")"
+  printf '%s/%s\n' "$release_dir" "$name"
 }
 
 require_release_environment_clean() {
@@ -149,7 +183,7 @@ set_current_release_paths() {
   if [[ ! -L "$CURRENT_LINK" || ! -f "$GLOBAL_RELEASE_ENV" ]]; then
     fail "DEPLOY_INITIAL_REQUIRED" "Run the first deployment with --initial VERSION"
   fi
-  CURRENT_COMPOSE="${CURRENT_LINK}/compose.production.yaml"
+  CURRENT_COMPOSE="$(release_compose_path "$CURRENT_LINK")"
   CURRENT_ENV="${CURRENT_LINK}/release.env"
   [[ -f "$CURRENT_COMPOSE" && -f "$CURRENT_ENV" ]] ||
     fail "DEPLOY_CURRENT_RELEASE_INVALID" "Current release files are incomplete"

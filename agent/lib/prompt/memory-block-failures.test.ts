@@ -20,7 +20,7 @@ describe("memory failure ownership", () => {
   it.each(["authorization", "retrieval", "profile"] as const)("records the %s failure against this run without private text", async phase => {
     const error = new AppError("AGENT_TEST_MEMORY_FAILED", "private diagnostic text");
     const reportFailure = vi.fn().mockResolvedValue(undefined);
-    const retrieve = vi.fn().mockResolvedValue({ memories: [], retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } });
+    const retrieve = vi.fn().mockResolvedValue({ memories: [], rankingByMemoryRef: new Map(), retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } });
     const createProfile = vi.fn().mockRejectedValue(error);
     const recordOffered = vi.fn();
     if (phase === "retrieval") retrieve.mockRejectedValue(error);
@@ -56,7 +56,7 @@ describe("memory failure ownership", () => {
     const retrieved = await createMemoryBlockResolver({
       ...shared,
       retrieve: vi.fn().mockResolvedValue({
-        diagnostics: { semanticBranchAvailable: true }, memories: [], retrievedClaimIds: [],
+        diagnostics: { semanticBranchAvailable: true }, memories: [], rankingByMemoryRef: new Map(), retrievedClaimIds: [],
         threads: { threads: [], totalCharacters: 0 },
       }),
     })(context, "turn_0");

@@ -7,7 +7,8 @@
  * - `requireExactHealthyResponse`: redirect-free exact-URL health validation.
  * - `createProductionOperationalCommands`: secret-free operational actions for an installed host.
  *   TLS commands touch the bundled Traefik project only in `managed` mode; `external` leaves the
- *   operator's proxy alone.
+ *   operator's proxy alone. Application files are those of the release `current` selects, and a
+ *   restart waits out a running update instead of racing the release controller.
  */
 import { lstat, readFile, realpath } from "node:fs/promises";
 
@@ -16,17 +17,19 @@ import { buildOwnerBootstrapOutput } from "./configuration.js";
 import type { TlsMode } from "./contracts.js";
 import { InstallerError } from "./errors.js";
 import { parseBootstrapProcessOutput, parseTlsEnvironment } from "./host-contracts.js";
+import {
+  DEPLOY_LOCK_PATH,
+  ENV_PATH,
+  MODEL_CONFIG_PATH,
+  TLS_COMPOSE_PATH,
+  TLS_ENV_PATH,
+  resolveCurrentRelease,
+  type CurrentRelease,
+} from "./host-layout.js";
+import { withDeployLock } from "./installation-lock.js";
 import type { OperationalCommandOperations } from "./operational-commands.js";
 import { runHostCommand } from "./process-runner.js";
-
-const BASE_DIR = "/opt/osinara";
-const ENV_PATH = `${BASE_DIR}/.env`;
-const MODEL_CONFIG_PATH = `${BASE_DIR}/agent-model-providers.json`;
-const RELEASE_ENV_PATH = `${BASE_DIR}/release.env`;
-const COMPOSE_PATH = `${BASE_DIR}/compose.installation.json`;
-const MANIFEST_PATH = `${BASE_DIR}/osinara-deployment.json`;
-const TLS_ENV_PATH = `${BASE_DIR}/tls/.env`;
-const TLS_COMPOSE_PATH = `${BASE_DIR}/tls/compose.yaml`;
+import { assertUpdaterActive } from "./updater-installation.js";
 const LOCAL_HEALTH_URL = "http://127.0.0.1:8082/v1/health";
 const HEALTH_TIMEOUT_MS = 10_000;
 
@@ -102,7 +105,11 @@ export async function requireExactHealthyResponse(
   }
 }
 
-async function installationMetadata(): Promise<{
+function applicationCompose(release: CurrentRelease, args: readonly string[]): Promise<Buffer> {
+  return compose(release.composePath, [ENV_PATH, release.releaseEnvPath], args);
+}
+
+async function installationMetadata(release: CurrentRelease): Promise<{
   address: string;
   model: string;
   provider: string;
@@ -110,7 +117,7 @@ async function installationMetadata(): Promise<{
   version: string;
 }> {
   const [manifestBytes, configBytes, tlsEnvBytes] = await Promise.all([
-    requireManagedFile(MANIFEST_PATH, 0o644),
+    requireManagedFile(release.manifestPath, 0o644),
     requireManagedFile(MODEL_CONFIG_PATH, 0o644),
     requireManagedFile(TLS_ENV_PATH, 0o600),
   ]);
@@ -150,7 +157,7 @@ async function createOwnerBootstrapLink(): Promise<unknown> {
       "В установленной конфигурации отсутствует имя Telegram-бота",
     );
   }
-  const stdout = await compose(COMPOSE_PATH, [ENV_PATH, RELEASE_ENV_PATH], [
+  const stdout = await applicationCompose(await resolveCurrentRelease(), [
     "run", "--no-deps", "--rm", "--entrypoint", "node", "agent",
     ".runtime/scripts/create-bootstrap-code.js",
   ]);
@@ -173,26 +180,29 @@ export function createProductionOperationalCommands(): OperationalCommandOperati
       });
     },
     doctor: async () => {
-      const metadata = await installationMetadata();
+      const release = await resolveCurrentRelease();
+      const metadata = await installationMetadata(release);
       await Promise.all([
         requireManagedFile(ENV_PATH, 0o600),
-        requireManagedFile(RELEASE_ENV_PATH, 0o600),
-        requireManagedFile(COMPOSE_PATH, 0o644),
+        requireManagedFile(release.releaseEnvPath, 0o600),
+        requireManagedFile(release.composePath, 0o644),
         ...(metadata.tlsMode === "managed" ? [requireManagedFile(TLS_COMPOSE_PATH, 0o644)] : []),
       ]);
-      await compose(COMPOSE_PATH, [ENV_PATH, RELEASE_ENV_PATH], ["config", "--quiet"]);
+      await applicationCompose(release, ["config", "--quiet"]);
       if (metadata.tlsMode === "managed") {
         await compose(TLS_COMPOSE_PATH, [TLS_ENV_PATH], ["config", "--quiet"]);
       }
       await requireExactHealthyResponse(LOCAL_HEALTH_URL, globalThis.fetch);
       await requireExactHealthyResponse(`${metadata.address}/v1/health`, globalThis.fetch);
+      await assertUpdaterActive(runHostCommand);
       return { code: "OSINARA_DOCTOR_OK", ...metadata };
     },
     logs: async (lines) => {
-      const metadata = await installationMetadata();
+      const release = await resolveCurrentRelease();
+      const metadata = await installationMetadata(release);
       const logArgs = ["logs", "--no-color", "--no-log-prefix", "--tail", String(lines)];
       const [application, tls] = await Promise.all([
-        compose(COMPOSE_PATH, [ENV_PATH, RELEASE_ENV_PATH], logArgs),
+        applicationCompose(release, logArgs),
         metadata.tlsMode === "managed" ? compose(TLS_COMPOSE_PATH, [TLS_ENV_PATH], logArgs) : Promise.resolve(null),
       ]);
       return {
@@ -204,21 +214,25 @@ export function createProductionOperationalCommands(): OperationalCommandOperati
     },
     ownerBootstrap: createOwnerBootstrapLink,
     restart: async () => {
-      const metadata = await installationMetadata();
-      await compose(COMPOSE_PATH, [ENV_PATH, RELEASE_ENV_PATH], [
-        "up", "--detach", "--force-recreate", "--no-build", "--wait", "--wait-timeout", "600",
-      ]);
-      if (metadata.tlsMode === "managed") {
-        await compose(TLS_COMPOSE_PATH, [TLS_ENV_PATH], [
-          "up", "--detach", "--force-recreate", "--no-build", "--wait", "--wait-timeout", "120",
+      // A restart in the middle of a release would bring writers back during its backup.
+      return await withDeployLock(DEPLOY_LOCK_PATH, async () => {
+        const release = await resolveCurrentRelease();
+        const metadata = await installationMetadata(release);
+        await applicationCompose(release, [
+          "up", "--detach", "--force-recreate", "--no-build", "--wait", "--wait-timeout", "600",
         ]);
-      }
-      await requireExactHealthyResponse(LOCAL_HEALTH_URL, globalThis.fetch);
-      await requireExactHealthyResponse(`${metadata.address}/v1/health`, globalThis.fetch);
-      return { code: "OSINARA_RESTART_OK", ...metadata };
+        if (metadata.tlsMode === "managed") {
+          await compose(TLS_COMPOSE_PATH, [TLS_ENV_PATH], [
+            "up", "--detach", "--force-recreate", "--no-build", "--wait", "--wait-timeout", "120",
+          ]);
+        }
+        await requireExactHealthyResponse(LOCAL_HEALTH_URL, globalThis.fetch);
+        await requireExactHealthyResponse(`${metadata.address}/v1/health`, globalThis.fetch);
+        return { code: "OSINARA_RESTART_OK", ...metadata };
+      });
     },
     status: async () => {
-      const metadata = await installationMetadata();
+      const metadata = await installationMetadata(await resolveCurrentRelease());
       await requireExactHealthyResponse(LOCAL_HEALTH_URL, globalThis.fetch);
       await requireExactHealthyResponse(`${metadata.address}/v1/health`, globalThis.fetch);
       return { code: "OSINARA_STATUS_OK", healthy: true, ...metadata };

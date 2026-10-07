@@ -6,26 +6,25 @@
  */
 import { createProductionModelConfigDependencies } from "../model-config/production.js";
 import type { ModelConfigCandidatePaths } from "../model-config/contracts.js";
+import { ENV_PATH, resolveCurrentRelease } from "./host-layout.js";
 import { runHostCommand } from "./process-runner.js";
 
-const BASE_DIR = "/opt/osinara";
-const COMPOSE_PATH = `${BASE_DIR}/compose.installation.json`;
-const RELEASE_ENV_PATH = `${BASE_DIR}/release.env`;
 const LOCAL_HEALTH_URL = "http://127.0.0.1:8082/v1/health";
 
 async function compose(
   envPath: string,
   args: readonly string[],
 ): Promise<Buffer> {
+  const release = await resolveCurrentRelease();
   return await runHostCommand({
     args: [
       "compose",
       "--env-file",
       envPath,
       "--env-file",
-      RELEASE_ENV_PATH,
+      release.releaseEnvPath,
       "--file",
-      COMPOSE_PATH,
+      release.composePath,
       ...args,
     ],
     command: "docker",
@@ -54,7 +53,7 @@ export function createInstalledModelConfigDependencies() {
       ]);
     },
     restart: async () => {
-      await compose(`${BASE_DIR}/.env`, [
+      await compose(ENV_PATH, [
         "up",
         "--detach",
         "--force-recreate",

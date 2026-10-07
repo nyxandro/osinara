@@ -3,6 +3,7 @@
  *
  * Exports:
  * - `releaseEnvironmentFromManifest`: validates schema v1 and emits five fresh-install image refs.
+ * - `releaseAppImageFromManifest`: the app image the updater controller is taken from.
  * - `parseBootstrapProcessOutput`: validates one machine-readable bootstrap process result.
  * - `buildTlsEnvironment` / `parseTlsEnvironment`: exact `/opt/osinara/tls/.env` contract.
  * - `renderTraefikRoute`: hostname substitution for the bundled Traefik route file.
@@ -41,21 +42,11 @@ const bootstrapSchema = z.object({
   bootstrapExpiresAt: z.iso.datetime({ offset: false }),
 }).strict();
 
-export function releaseEnvironmentFromManifest(
-  bytes: Buffer,
-  expectedVersion: string,
-): Buffer {
+function parseManifest(bytes: Buffer, expectedVersion: string): z.infer<typeof manifestSchema> {
   try {
     const manifest = manifestSchema.parse(JSON.parse(bytes.toString("utf8")));
     if (manifest.version !== expectedVersion) throw new Error("release version mismatch");
-    return Buffer.from([
-      `OSINARA_APP_IMAGE=${manifest.images.app}`,
-      `OSINARA_EDGE_IMAGE=${manifest.images.edge}`,
-      `OSINARA_SANDBOX_EGRESS_PROXY_IMAGE=${manifest.images.sandboxEgressProxy}`,
-      `OSINARA_SANDBOX_RUNNER_IMAGE=${manifest.images.sandboxRunner}`,
-      `SANDBOX_RUNTIME_IMAGE=${manifest.images.sandboxRuntime}`,
-      "",
-    ].join("\n"), "utf8");
+    return manifest;
   } catch (error) {
     throw new InstallerError(
       "OSINARA_INSTALL_MANIFEST_INVALID",
@@ -63,6 +54,25 @@ export function releaseEnvironmentFromManifest(
       { cause: error },
     );
   }
+}
+
+export function releaseAppImageFromManifest(bytes: Buffer, expectedVersion: string): string {
+  return parseManifest(bytes, expectedVersion).images.app;
+}
+
+export function releaseEnvironmentFromManifest(
+  bytes: Buffer,
+  expectedVersion: string,
+): Buffer {
+  const manifest = parseManifest(bytes, expectedVersion);
+  return Buffer.from([
+    `OSINARA_APP_IMAGE=${manifest.images.app}`,
+    `OSINARA_EDGE_IMAGE=${manifest.images.edge}`,
+    `OSINARA_SANDBOX_EGRESS_PROXY_IMAGE=${manifest.images.sandboxEgressProxy}`,
+    `OSINARA_SANDBOX_RUNNER_IMAGE=${manifest.images.sandboxRunner}`,
+    `SANDBOX_RUNTIME_IMAGE=${manifest.images.sandboxRuntime}`,
+    "",
+  ].join("\n"), "utf8");
 }
 
 export function parseBootstrapProcessOutput(bytes: Buffer): InstallationExecutionResult {

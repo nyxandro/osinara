@@ -3,7 +3,8 @@
 ## Architecture
 
 GitHub-hosted CI runs the complete `compose.test.yaml` suite for pull requests and pushes to
-`develop` or `main`. A successful `main` run requires a new stable version in `package.json`,
+`develop` or `main`, and beside it the memory retrieval evals with the production embedding model
+(`compose.memory-retrieval-eval.yaml`); a release waits for both. A successful `main` run requires a new stable version in `package.json`,
 builds six container-only images, publishes immutable tags to GHCR, records image and file artifact attestations,
 and prepares `vVERSION` as a draft. CI uploads and byte-verifies every asset before publishing the
 draft as the latest release. A failed rerun may resume only a draft whose tag still resolves to the
@@ -40,10 +41,11 @@ sha256sum --check osinara-linux-x64.sha256
 
 The server does not clone the repository and never builds an image. The root-owned systemd timer
 runs `/opt/osinara/bin/production-deploy.sh` once per minute. The script takes an exclusive lock,
-claims one approved PostgreSQL proposal after rechecking the current owner, verifies the public
-release, Compose hash, fixed service/image/mount policy, and digest names. It pulls before stopping,
-backs up existing durable state, starts the released Compose graph without build, and checks
-`http://127.0.0.1:8082/v1/health`.
+claims one approved PostgreSQL proposal after rechecking the current owner, and verifies the public
+release. Before applying any release rule it makes sure it is the controller that release carries
+(see "Self-updating controller"). It then checks the Compose hash, fixed service/image/mount policy,
+and digest names, pulls before stopping, backs up existing durable state, starts the released
+Compose graph without build, and checks `http://127.0.0.1:8082/v1/health`.
 
 If GitHub loses the canonical `main` push event during an Actions outage, an operator may dispatch
 the same `CI and release` workflow manually with `gh workflow run "CI and release" --ref main`.
@@ -173,51 +175,122 @@ application. `infra/monitoring/` holds only the three files that describe what O
 
 ## Server files
 
-There are two host layouts.
+Both kinds of host share one layout and one deployment controller. They differ only in the graph
+they run, which `OSINARA_DEPLOYMENT_PROFILE` in `/opt/osinara/.env` names explicitly:
 
-- **Installed with `osinara install`.** The checksum-bound standalone installer runs on clean
-  GNU/Linux x86_64 hosts with glibc: `osinara-linux-x64` is a glibc Node.js SEA executable, so
-  musl-based distributions such as Alpine Linux are not supported. It writes `/opt/osinara/.env`,
-  `agent-model-providers.json`, `release.env`, `osinara-deployment.json`, `compose.installation.json`
-  (the production graph without CLIProxy) and `tls/`, then starts the stack and is maintained with
-  `osinara status`, `doctor`, `logs`, `restart` and `config`. It installs no update controller: the
-  agent still proposes new releases in Telegram, but an approved proposal is not applied on such a
-  host. Do not copy the controller below onto it — the controller validates the production service
-  set, which includes CLIProxy.
-- **The production host.** Releases are applied by the root-owned deploy controller and its minute
-  timer, installed by hand. The operator prepares these root-owned files:
-
+- **`installation`** — hosts set up by `osinara install`. The checksum-bound standalone installer
+  runs on clean GNU/Linux x86_64 hosts with glibc and systemd (`osinara-linux-x64` is a glibc
+  Node.js SEA executable, so musl-based distributions such as Alpine Linux are not supported). The
+  graph is the released production graph without CLIProxy: the controller derives
+  `compose.installation.json` from the verified `compose.production.yaml` with
+  `scripts/production-deploy/installation-compose.jq`, the same filter CI uses for the installer's
+  first copy. The installer writes the files below, places the controller and its units from the
+  release app image, starts the stack, and enables the timer. The host is maintained with
+  `osinara status`, `doctor`, `logs`, `restart` and `config`; `restart` and `config` take the
+  controller's lock and refuse to run while a release is being deployed.
+- **`production`** — the host with the CLIProxy subscription gateway. Its first release is
+  started by hand (see "First release"); from then on it updates exactly like an installation host.
 
 | Path                                         | Mode   | Purpose                                                          |
 | -------------------------------------------- | ------ | ---------------------------------------------------------------- |
-| `/opt/osinara/.env`                          | `0600` | Production secrets and environment-specific URLs.                |
+| `/opt/osinara/.env`                          | `0600` | Secrets, environment-specific URLs, and `OSINARA_DEPLOYMENT_PROFILE`. |
 | `/opt/osinara/agent-model-providers.json`    | `0644` | Active reviewed provider config mounted into the agent.           |
-| `/opt/osinara/bin/production-deploy.sh`      | `0750` | Server deployment entrypoint.                                    |
-| `/opt/osinara/bin/production-deploy/`        | `0750` | Root-owned deployment module directory.                          |
-| `/opt/osinara/bin/production-deploy/*.sh`    | `0640` | Fixed source modules checked before execution.                   |
+| `/opt/osinara/releases/vX.Y.Z/`              |        | One release: its Compose graph, manifest, and `release.env`.     |
+| `/opt/osinara/current`                       | link   | The running release; the controller switches it after health.   |
+| `/opt/osinara/release.env`                   | `0600` | Copy of the current release's image references.                  |
+| `/opt/osinara/bin/production-deploy.sh`      | `0750` | Launcher: the fixed systemd entrypoint.                          |
+| `/opt/osinara/bin/controller/vX.Y.Z/`        | `0750` | One controller version: `main.sh`, modules, the jq filter (`0640`). |
+| `/opt/osinara/bin/controller/current`        | link   | The controller version the launcher runs.                        |
 | `/etc/systemd/system/osinara-deploy.service` | `0644` | One-shot root service with the EnvironmentFile.                  |
 | `/etc/systemd/system/osinara-deploy.timer`   | `0644` | Persistent minute poll.                                          |
 
+`/opt/osinara`, `/opt/osinara/bin`, the controller root, and every controller version directory must
+be `root:root 0750`. The launcher accepts only a `current` link that names a version directory and
+rejects symlinks or different metadata before it starts `main.sh`; `main.sh` checks its own modules
+the same way before sourcing them. The controller creates `/opt/osinara/releases`,
+`/opt/osinara/backups`, and the atomic `/opt/osinara/release.env`.
 
-`/opt/osinara`, `/opt/osinara/bin`, and the module directory must be `root:root 0750`; the
-entrypoint must be `root:root 0750`. The script rejects symlinks or different metadata before it
-sources a module. It creates `/opt/osinara/releases`, `/opt/osinara/backups`, and the atomic
-`/opt/osinara/release.env`.
+### Self-updating controller
 
-These files are placed by the operator and **no release updates them**: a change under
-`scripts/production-deploy/` reaches the server only when it is installed by hand. After merging
-such a change, copy it across and let the next minute poll pick it up:
+The controller, its launcher, and the systemd units are part of every release: the app image
+carries them in `/app/deploy/controller` and `/app/deploy/systemd`. The app image digest is bound by
+the approved manifest, so the controller bytes are bound to the release the owner approved.
+
+After claiming a proposal and validating the public release against the approved manifest, the
+running controller pulls the release app image, extracts its controller into a staging directory,
+and checks that it is a flat set of modules that parse as shell and include `launcher.sh` and
+`main.sh`. Then:
+
+- **Identical to the running controller and launcher** — the deployment continues in the same
+  process. Most releases take this path.
+- **Different** — the new controller is placed as `bin/controller/vX.Y.Z` (the version of the
+  release that brought it) and written to disk. Before anything points at it, it runs as
+  `main.sh --preflight` and checks this host with its own rules (root, paths, required commands,
+  profile, current release); a refusal removes it and fails the proposal with
+  `DEPLOY_CONTROLLER_PREFLIGHT_FAILED`. Otherwise `controller/current` and then the launcher are
+  switched by rename, and the process is replaced by the launcher with `--resume PROPOSAL LEASE`.
+  The new controller keeps the inherited lock, re-reads the claim by its lease token, downloads and
+  validates the release again under its own rules, and deploys it. A resumed controller that still
+  differs from the release's copy fails with `DEPLOY_CONTROLLER_UPDATE_LOOP` instead of updating
+  again.
+
+`main.sh --preflight` and `launcher --resume PROPOSAL LEASE` are how an older controller starts a
+newer one, so every controller version keeps accepting both forms
+(`production-release-contract.test.ts` pins them).
+
+Nothing has been stopped at that point: a broken or refusing release controller ends the proposal as
+`failed` with the current release still running. The one window left is a resumed controller that
+cannot even start or take over the inherited lock; its claim is not recorded, and the next tick
+marks it `ambiguous` (`DEPLOY_STALE_LEASE_AMBIGUOUS`) once the 60-minute lease expires. A newer
+controller stays installed after a failed release; it has to manage the release it upgrades from,
+which is the same requirement the controller always had. After a successful release the controller
+keeps the selected version and the newest previous one and removes older ones.
+
+Because the release brings its own controller, a release that changes the exact service, image,
+mount, port, logging, dependency, or host-capability allowlist needs no manual step on the host.
+The systemd units are installed once and are not replaced by releases; a change to them is an
+operator step described in that release's notes.
+
+### Moving a host to the self-updating controller (once)
+
+A host whose controller predates self-update (`/opt/osinara/bin/production-deploy/` with modules
+next to the entrypoint) cannot install its successor itself. Before approving the first release
+that carries the self-updating controller, as root:
 
 ```bash
-sudo install -o root -g root -m 0640 scripts/production-deploy/<module>.sh \
-  /opt/osinara/bin/production-deploy/<module>.sh
-# the entrypoint itself is 0750
-sudo install -o root -g root -m 0750 scripts/production-deploy.sh \
+systemctl stop osinara-deploy.timer
+# A running deployment is not stopped by stopping the timer; wait until this prints "inactive".
+systemctl is-active osinara-deploy.service
+# Take the controller from the release app image the approved manifest names.
+APP_IMAGE=ghcr.io/nyxandro/osinara-app@sha256:...   # images.app from osinara-deployment.json
+VERSION=X.Y.Z                                      # that release
+CONTROLLER="/opt/osinara/bin/controller/v${VERSION}"
+docker pull "$APP_IMAGE"
+install -d -o root -g root -m 0750 /opt/osinara/bin/controller "$CONTROLLER"
+docker run --rm --network none --entrypoint /bin/tar "$APP_IMAGE" -c -C /app/deploy/controller . |
+  tar -x --no-same-owner -C "$CONTROLLER"
+# tar restores the image's directory mode; the launcher accepts exactly 0750 and 0640.
+chmod 0750 "$CONTROLLER"
+chmod 0640 "$CONTROLLER"/*
+ln -s "v${VERSION}" /opt/osinara/bin/controller/current
+install -o root -g root -m 0750 "$CONTROLLER/launcher.sh" /opt/osinara/bin/production-deploy.sh
+# Append on a line of its own even if the file does not end with a newline.
+grep -q '^OSINARA_DEPLOYMENT_PROFILE=' /opt/osinara/.env ||
+  printf '\nOSINARA_DEPLOYMENT_PROFILE=production\n' >> /opt/osinara/.env
+mv /opt/osinara/bin/production-deploy /opt/osinara/backups/deploy-scripts-before-self-update
+stat -c '%U:%G %a %n' /opt/osinara/bin /opt/osinara/bin/controller "$CONTROLLER" "$CONTROLLER"/* \
   /opt/osinara/bin/production-deploy.sh
+systemctl start osinara-deploy.timer
 ```
 
-A release in flight holds the lock, so install between releases and verify with
-`diff` against the repository afterwards.
+`stat` must show `root:root` with `750` for the directories and the launcher and `640` for every
+file in the version directory. The next minute poll must log `DEPLOY_NO_APPROVED_PROPOSAL`.
+
+The installed tree has to be byte-identical to the controller of the release about to be approved:
+the release then deploys without a self-update step. A tree taken from anywhere else would make the
+controller try to place its own `v${VERSION}` beside the existing one and fail with
+`DEPLOY_CONTROLLER_DIR_EXISTS`, and a version once proposed cannot be proposed again. After this
+step every later release updates the controller by itself.
 
 ### Memory protection on a shared host
 
@@ -259,7 +332,8 @@ The ceiling covers only what runs inside `orca-remote-server.service`. Test stac
 bring test stacks up only for a run and take them down afterwards. The disk scheduler here is
 `mq-deadline`, which ignores I/O weights, so there is no I/O counterpart.
 
-`/opt/osinara/.env` must be exactly `root:root 0600`. It contains `MODEL_API_KEY`,
+`/opt/osinara/.env` must be exactly `root:root 0600`. It contains `OSINARA_DEPLOYMENT_PROFILE`
+(`production` or `installation`, read only by the controller), `MODEL_API_KEY`,
 `POSTGRES_PASSWORD`, the required internal application `DATABASE_URL`, `CLI_PROXY_API_KEY`,
 `GROQ_API_KEY`, the optional `ELEVENLABS_API_KEY`,
 Telegram secrets, and environment-specific integration
@@ -324,30 +398,28 @@ request retries, cooldown scheduling, and file logging are disabled; the service
 the application network and requires the internal bearer. Its startup fails closed when the persistent
 volume contains no complete `0600` Codex OAuth credential. The agent starts only after gateway health.
 
-Any release that changes the exact production service, image, mount, port, logging, dependency, or
-host-capability allowlist is also a two-phase controller migration. After canonical merge and before
-owner approval, stop only `osinara-deploy.timer`, compare the installed root-owned controller modules,
-with the exact canonical release commit, and atomically install only the changed modules; a module
-the release deletes is deleted from the server in the same phase. Verify the source checksum, shell
-syntax, `root:root` ownership, required `0750`/`0640` modes, then restart the timer. The running application and database remain untouched during this controller phase. Only
-afterward may the owner approve the application release in the bound private Telegram chat.
-
-If the old controller has already rejected an immutable release, its proposal remains terminal. Do
-not reset, clone, or reapprove it: publish a strictly newer patch release and require a new owner
-approval. This preserves the audit trail and the no-ambiguous-retry contract.
+A proposal the controller rejected remains terminal. Do not reset, clone, or reapprove it: publish
+a strictly newer patch release and require a new owner approval. This preserves the audit trail and
+the no-ambiguous-retry contract.
 
 The server host requires Docker Engine with Compose v2, systemd, `curl`, `jq`, `flock`, `stat`,
 `sha256sum`, `tar`, and standard GNU file utilities. Missing tools are deployment errors; the
-script does not download utilities or substitute alternate commands at runtime.
+script does not download utilities or substitute alternate commands at runtime. `osinara install`
+checks the same list before it changes anything.
 
 All six GHCR packages must be publicly pullable, or Docker on the server must already be logged in
 with read-only package access. The release workflow itself never receives a custom registry secret.
 
 ## First release
 
+Installation hosts never use this mode: `osinara install` performs their first release. A
+`production` host is set up by hand. Place the controller from the release app image as in "Moving a
+host to the self-updating controller" (without moving an old module directory), install the two
+units from `/app/deploy/systemd` into `/etc/systemd/system`, and create `/opt/osinara/.env` with
+`OSINARA_DEPLOYMENT_PROFILE=production`.
+
 The first release cannot be selected from PostgreSQL because `software_update_proposals` does not
-exist before migrations. After installing the files and creating `/opt/osinara/.env`, run the
-server script once as root with `--initial VERSION`. The argument accepts only stable `X.Y.Z`.
+exist before migrations. Run the server script once as root with `--initial VERSION`. The argument accepts only stable `X.Y.Z`.
 This mode performs the same public manifest validation, digest pulls, migration gate, and health
 check, but it does not claim a proposal. It fails if `current`, `release.env`, or any container
 labelled with the `osinara-production` Compose project already exists.
