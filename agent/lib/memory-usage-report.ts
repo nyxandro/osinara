@@ -22,6 +22,12 @@ export async function recordMemoryUsageDeclaration(input: {
   auth: SessionAuth;
   declaration: MemoryUsageDeclaration;
   agentSessionId: string;
+  /**
+   * The line is written on every message of a turn, the progress note before a tool call
+   * included. `stop` marks the final answer; a report that counts the rule kept or broken has to
+   * tell the two apart, or a long tool loop reads as the model forgetting the rule.
+   */
+  finishReason: string;
   turnId: string;
 }): Promise<void> {
   const conversationId = input.auth.current?.attributes.telegramConversationId;
@@ -51,10 +57,15 @@ export async function recordMemoryUsageDeclaration(input: {
     countedCount: counted.length,
     declared: input.declaration.declared,
     failed,
+    finishReason: input.finishReason,
     namedCount: input.declaration.memoryRefs.length,
     rejectedCount: rejected.length,
+    // Opaque refs, as in the selection line: together they let a report say, per turn, which shown
+    // records the answer used and where a named-but-never-shown ref came from.
+    rejectedRefs: rejected,
     sessionId: input.agentSessionId,
     turnId: input.turnId,
     usedCount: used.length,
+    usedRefs: used,
   }));
 }

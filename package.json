@@ -19,7 +19,8 @@
     "typecheck": "tsc",
     "migrate": "node --experimental-strip-types scripts/migrate.ts",
     "migrate:runtime": "node .runtime/scripts/migrate.js",
-    "memory:reindex": "node --import tsx scripts/reindex-memory.ts"
+    "memory:reindex": "node --import tsx scripts/reindex-memory.ts",
+    "memory:usage-report": "node --import tsx scripts/memory-quality/usage-report.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.37",

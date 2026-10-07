@@ -11,18 +11,19 @@ vi.mock("./memory-thread-brief-repository.js", () => ({ memoryThreadBriefReposit
 import { retrieveMemoryTurnContext } from "./memory-retrieval.js";
 import { memoryFailureCode } from "./memory-context-failure.js";
 
+const DIAGNOSTICS = {
+  candidateLimitHit: false,
+  recentlyShown: 0,
+  russianQualified: 0, russianMatched: 0, russianTopRank: null,
+  semanticQualified: 0, semanticMatched: 0, semanticTopSimilarity: null,
+  simpleQualified: 0, simpleMatched: 0, simpleTopRank: null,
+};
+
 describe("memory retrieval failure provenance", () => {
   beforeEach(() => {
     mocks.embedding.mockReset().mockResolvedValue([[1]]);
     mocks.search.mockReset().mockResolvedValue({
-      conflicts: [], relatedClaimIds: [], results: [],
-      diagnostics: {
-        candidateLimitHit: false,
-        recentlyShown: 0,
-        russianQualified: 0, russianMatched: 0, russianTopRank: null,
-        semanticQualified: 0, semanticMatched: 0, semanticTopSimilarity: null,
-        simpleQualified: 0, simpleMatched: 0, simpleTopRank: null,
-      },
+      conflicts: [], relatedClaimIds: [], results: [], diagnostics: DIAGNOSTICS,
     });
     mocks.threads.mockReset().mockResolvedValue({ threads: [], totalCharacters: 0 });
   });
@@ -46,6 +47,31 @@ describe("memory retrieval failure provenance", () => {
     expect(mocks.search).toHaveBeenCalledWith({}, "private query", [], undefined, null);
     expect(mocks.threads).toHaveBeenCalledWith(expect.objectContaining({ queryEmbedding: null }));
   });
+  it("keeps how each selected record was found for the turn's log", async () => {
+    mocks.search.mockResolvedValue({
+      claimIdsByConflictRef: new Map(), conflicts: [], relatedClaimIds: ["claim-1"],
+      diagnostics: DIAGNOSTICS,
+      results: [{
+        evidence: { russianMorphologyRank: null, semanticSimilarity: null, simpleLexicalRank: 0.2 },
+        memory: {
+          author: { status: "current_member", telegramUserId: null, userId: null },
+          confirmation: "model_high", content: "Код домофона 4271", createdAt: "2026-07-01T10:00:00.000Z",
+          embeddingStatus: "indexed", id: "claim-1", kind: "fact",
+          memoryRef: "mem_11111111111111111111111111111111", messageThreadId: null, scope: "family",
+          sensitivity: "normal", source: "test:stages", updatedAt: "2026-07-01T10:00:00.000Z",
+        },
+        score: 0.016,
+      }],
+    });
+
+    const context = await retrieveMemoryTurnContext({} as MemoryAuthorization, "4271", []);
+
+    // A record only the exact branch found carries no similarity: the vector never vouched for it.
+    expect(context.rankingByMemoryRef.get("mem_11111111111111111111111111111111")).toEqual({
+      branches: ["simple"], fusedScore: 0.016, semanticSimilarity: null,
+    });
+  });
+
   it("carries the branch numbers of a successful turn together with the query's own", async () => {
     const context = await retrieveMemoryTurnContext({} as MemoryAuthorization, "private query", []);
     expect(context.diagnostics)

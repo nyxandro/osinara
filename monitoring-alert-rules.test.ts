@@ -14,6 +14,8 @@
  * - Messages that keep failing in one chat raise a warning whatever the chat's pace.
  * - A scheduled scenario that failed or whose delivery is unconfirmed raises a warning.
  * - Every exporter metric the state rules read is one the exporter actually publishes.
+ * - The memory log rules count only fields the application writes into the lines they count, and
+ *   the memory usage alert reads only series those rules record, a silent stretch as zero.
  *
  * The rules are YAML installed on another host, so they are read as text here for the same reason
  * `production-deploy-window.test.ts` does: the two halves of each contract live in different files
@@ -49,6 +51,24 @@ const MAX_HOLD_MINUTES = 10;
 const rules = read("infra/monitoring/rules/metrics/osinara.yaml");
 const stateRules = read("infra/monitoring/rules/metrics/osinara-state.yaml");
 const exporter = read("infra/monitoring/collector/sql-exporter.yaml");
+const logRules = read("infra/monitoring/rules/logs/osinara.yaml");
+
+/** The files that write each memory log line the log rules count, read as text like the rules. */
+const MEMORY_LINE_WRITERS: Record<string, readonly string[]> = {
+  AGENT_MEMORY_RETRIEVAL_METRICS: ["agent/lib/prompt/turn-blocks.ts", "agent/lib/memory-observability.ts"],
+  AGENT_MEMORY_USAGE_DIRECTIVE: ["agent/lib/memory-usage-report.ts"],
+};
+
+/** The log fields one LogsQL rule reads: its filters, its grouping and what it sums. */
+function logRuleFields(expression: string): string[] {
+  const filters = [...expression.matchAll(/\b([A-Za-z]+):"/gu)].map((match) => match[1]!);
+  const grouping = [...expression.matchAll(/\bby \(([^)]*)\)/gu)]
+    .flatMap((match) => match[1]!.split(",").map((field) => field.trim()));
+  const sums = [...expression.matchAll(/\bsum\((\w+)\)/gu)].map((match) => match[1]!);
+  // `project` and `code` are stream labels the collector attaches, not fields the line carries.
+  return [...new Set([...filters, ...grouping, ...sums])]
+    .filter((field) => field !== "project" && field !== "code");
+}
 
 function alertBlocks(name: string, source = rules): string[] {
   return source
@@ -172,6 +192,48 @@ describe("osinara alert rules", () => {
     for (const code of MEMORY_EMBEDDING_LIFECYCLE_CODES) {
       expect(worker, `${code} is spelled out a second time here`).not.toContain(`"${code}"`);
     }
+  });
+});
+
+describe("osinara memory usage rules", () => {
+  it("counts only fields the application writes into the memory lines it counts", () => {
+    const records = logRules.split(/^ *- record: /mu).slice(1);
+    let checked = 0;
+
+    // A rule names a log field as plain text. Rename the field in the code and the series stays
+    // empty forever: the alert built on it can never fire, and nothing reports that it went blind.
+    for (const record of records) {
+      const name = record.split("\n", 1)[0]!.trim();
+      const expression = /expr: '([^']*)'/u.exec(record)?.[1] ?? "";
+      const code = /\bcode:"([A-Z_]+)"/u.exec(expression)?.[1];
+      const writers = code === undefined ? undefined : MEMORY_LINE_WRITERS[code];
+      if (writers === undefined) continue;
+      const source = writers.map(read).join("\n");
+      for (const field of logRuleFields(expression)) {
+        expect({ field, name, written: new RegExp(`\\b${field}\\b`, "u").test(source) })
+          .toEqual({ field, name, written: true });
+      }
+      checked += 1;
+    }
+    expect(checked, "no memory rule was checked: the rule file or this test went out of step")
+      .toBeGreaterThanOrEqual(6);
+  });
+
+  it("raises OsinaraMemoryNeverUsed only on recorded series, reading a silent stretch as zero", () => {
+    const [block] = alertBlocks("OsinaraMemoryNeverUsed");
+    expect(block, "the alert this guards has been renamed").toBeDefined();
+    const recorded = new Set(
+      [...logRules.matchAll(/^ *- record: (osinara_[a-z0-9_]+)$/gmu)].map((match) => match[1]!),
+    );
+    const expression = ruleField(block!, "expr") ?? "";
+
+    for (const [series] of expression.matchAll(/osinara_[a-z0-9_]+/gu)) {
+      expect({ recorded: recorded.has(series), series }).toEqual({ recorded: true, series });
+    }
+    // Three days without a single usage line write no sample at all; without the zero the rule
+    // would see no data and stay silent exactly when the line is gone.
+    expect(expression).toContain("or vector(0)");
+    expect(holdMinutes(block!), "a single evaluation must not page").not.toBeNull();
   });
 });
 

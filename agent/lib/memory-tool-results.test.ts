@@ -19,6 +19,7 @@ const {
   requireWritableScope,
   resolveMemoryTurnSource,
   retrieveMemories,
+  searchEventWindow,
 } = vi.hoisted(() => ({
   createMemory: vi.fn(),
   listMemories: vi.fn(),
@@ -26,6 +27,7 @@ const {
   requireWritableScope: vi.fn((_authorization: unknown, scope: string) => scope),
   resolveMemoryTurnSource: vi.fn(),
   retrieveMemories: vi.fn(),
+  searchEventWindow: vi.fn(),
 }));
 
 vi.mock("./memory-context.js", () => ({
@@ -40,6 +42,13 @@ vi.mock("./memory-repository.js", () => ({
 }));
 vi.mock("./memory-retrieval.js", () => ({
   retrieveRelevantMemories: retrieveMemories,
+}));
+vi.mock("./memory-event-window-repository.js", () => ({
+  MEMORY_EVENT_WINDOW_LIMIT: 20,
+  memoryEventWindowRepository: { search: searchEventWindow },
+}));
+vi.mock("./current-time-repository.js", () => ({
+  currentTimeRepository: { findUserTimezone: vi.fn(async () => "Europe/Moscow") },
 }));
 vi.mock("./memory-observability.js", async (importOriginal) => ({
   ...await importOriginal<typeof import("./memory-observability.js")>(),
@@ -436,7 +445,9 @@ describe("model-facing memory tool results", () => {
       sensitivity: "normal",
       updatedAt: internalMemory.updatedAt,
     };
-    retrieveMemories.mockResolvedValue({ diagnostics: SEARCH_DIAGNOSTICS, memories: [safeMemory] });
+    retrieveMemories.mockResolvedValue({
+      diagnostics: SEARCH_DIAGNOSTICS, memories: [safeMemory], rankingByMemoryRef: new Map(),
+    });
 
     await expect(executeNonStreamingTool(searchMemories, { query: "чай" }, context))
       .resolves.toEqual([safeMemory]);
@@ -446,16 +457,37 @@ describe("model-facing memory tool results", () => {
   it("records an explicit search without logging its query or result text", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const found = [{ memoryRef: MEMORY_REF, content: "Частный факт" }];
-    retrieveMemories.mockResolvedValue({ diagnostics: SEARCH_DIAGNOSTICS, memories: found });
+    retrieveMemories.mockResolvedValue({ diagnostics: SEARCH_DIAGNOSTICS, memories: found,
+      rankingByMemoryRef: new Map([[MEMORY_REF, {
+        branches: ["semantic"], fusedScore: 0.016, semanticSimilarity: 0.8,
+      }]]) });
     try {
       await executeNonStreamingTool(searchMemories, { query: "Частный запрос" }, context);
       expect(JSON.parse(info.mock.calls[0]![0] as string)).toMatchObject({
         code: "AGENT_MEMORY_SEARCH_METRICS", sessionId: context.session.id,
         turnId: context.session.turn.id, callId: context.callId, outcome: "succeeded",
         memoryRefs: [MEMORY_REF], memoryCharacters: "Частный факт".length,
+        // The same place-and-branch record as the turn's own selection, so one report reads both.
+        memoryEvidence: [{ memoryRef: MEMORY_REF, position: 1, ranking: {
+          branches: ["semantic"], fusedScore: 0.016, semanticSimilarity: 0.8,
+        } }],
         ...SEARCH_DIAGNOSTICS,
       });
       expect(JSON.stringify(info.mock.calls)).not.toMatch(/Частный запрос|Частный факт/u);
+    } finally { info.mockRestore(); }
+  });
+
+  it("logs no ranking for a period, whose records are picked by date", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    searchEventWindow.mockResolvedValue([internalMemory]);
+    try {
+      await executeNonStreamingTool(searchMemories, { from: "2026-08-01", query: "август", to: "2026-08-31" },
+        context);
+      expect(retrieveMemories).not.toHaveBeenCalled();
+      expect(JSON.parse(info.mock.calls[0]![0] as string)).toMatchObject({
+        code: "AGENT_MEMORY_SEARCH_METRICS", memoryEvidence: null, memoryRefs: [MEMORY_REF],
+        outcome: "succeeded", window: { from: "2026-08-01", to: "2026-08-31" },
+      });
     } finally { info.mockRestore(); }
   });
 

@@ -107,6 +107,7 @@ export const telegramTurnEvents: TelegramTurnEvents = {
       auth: ctx.session.auth,
       declaration,
       agentSessionId: ctx.session.id,
+      finishReason: data.finishReason,
       turnId: ctx.session.turn.id,
     });
     if (output.kind === "silence") {
