@@ -282,11 +282,7 @@ jobs:
         run: |
           set -euo pipefail
           docker compose -f compose.production.yaml config --no-interpolate --format json \
-            | jq '
-                del(.services["cli-proxy-api"]) |
-                del(.services.agent.depends_on["cli-proxy-api"]) |
-                del(.volumes["cli-proxy-auth"])
-              ' > compose.installation.json
+            | jq --from-file scripts/production-deploy/installation-compose.jq > compose.installation.json
           jq -e '
             (.services | has("cli-proxy-api") | not) and
             (.services | keys) == [

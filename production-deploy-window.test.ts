@@ -372,7 +372,7 @@ describe("deployment noise window", () => {
   });
 
   it("opens the window only after a deployment is certain and closes it on every exit", () => {
-    const entrypoint = readFileSync(join(projectRoot, "scripts/production-deploy.sh"), "utf8");
+    const entrypoint = readFileSync(join(projectRoot, "scripts/production-deploy/main.sh"), "utf8");
     const main = entrypoint.slice(entrypoint.indexOf("main() {"));
 
     // Every timer tick runs this unit; almost all of them find no approved proposal and return

@@ -18,6 +18,8 @@ import { runInteractiveConfigCommand } from "./config-command.ts";
 import { InstallerError } from "./errors.ts";
 import { validateGroqVoiceCredential } from "./groq-validation.ts";
 import { createHostInstallationExecutor } from "./host-executor.ts";
+import { DEPLOY_LOCK_PATH } from "./host-layout.ts";
+import { withDeployLock } from "./installation-lock.ts";
 import { runInteractiveInstaller } from "./installer.ts";
 import { createPublicIpv4Sources, createTelegramGetMe } from "./network-adapters.ts";
 import { createOperationalCommands } from "./operational-commands.ts";
@@ -89,7 +91,11 @@ const config: CliOperation = async (args) => {
     return await runInteractiveConfigCommand({
       apply: async (input) => {
         try {
-          return await applyModelConfiguration(createInstalledModelConfigDependencies(), input);
+          // The swap restarts the agent; during a release that would race the controller's backup.
+          return await withDeployLock(
+            DEPLOY_LOCK_PATH,
+            () => applyModelConfiguration(createInstalledModelConfigDependencies(), input),
+          );
         } catch (error) {
           if (error instanceof ModelConfigError) {
             throw new InstallerError(error.code, error.message.slice(error.code.length + 2));

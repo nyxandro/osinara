@@ -86,6 +86,6 @@ prune_old_deploy_backups`);
 });
 
 it("does not prune in the deployment orchestrator before snapshot completion", () => {
-  const source = readFileSync("scripts/production-deploy.sh", "utf8");
+  const source = readFileSync("scripts/production-deploy/main.sh", "utf8");
   expect(source.indexOf("prune_old_deploy_backups")).toBeGreaterThan(source.indexOf("snapshot_durable_volumes"));
 });

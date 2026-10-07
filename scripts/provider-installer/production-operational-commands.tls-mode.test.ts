@@ -5,6 +5,7 @@
  * - `external` mode never touches the operator's proxy: no TLS Compose file, no TLS Compose commands.
  * - `managed` mode keeps the bundled Traefik project in doctor and restart.
  * - A legacy `tls/.env` without a mode is rejected instead of assuming one.
+ * - Application files come from the release `current` selects; doctor checks the update timer.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -15,7 +16,22 @@ const hostCommands = vi.hoisted(() => ({
 }));
 const files = vi.hoisted(() => new Map<string, { content: string; mode: number }>());
 
+const CURRENT_RELEASE = "/opt/osinara/releases/v0.24.0";
+
 vi.mock("./process-runner.js", () => ({ runHostCommand: hostCommands.run }));
+vi.mock("./host-layout.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./host-layout.js")>(),
+  resolveCurrentRelease: async () => ({
+    composePath: `${CURRENT_RELEASE}/compose.installation.json`,
+    directory: CURRENT_RELEASE,
+    manifestPath: `${CURRENT_RELEASE}/osinara-deployment.json`,
+    releaseEnvPath: `${CURRENT_RELEASE}/release.env`,
+  }),
+}));
+// The lock itself is covered in installation-lock.test.ts; here it only wraps the restart.
+vi.mock("./installation-lock.js", () => ({
+  withDeployLock: async <T>(_path: string, operation: () => Promise<T>) => await operation(),
+}));
 vi.mock("../model-config/schema.js", () => ({
   parseModelProviderConfigBytes: () => ({ agent: { models: { primary: { id: "test-model" } } }, provider: "deepseek" }),
 }));
@@ -40,9 +56,12 @@ const TLS_COMPOSE = "/opt/osinara/tls/compose.yaml";
 function installHost(input: { tlsEnv: string; tlsCompose: boolean }): void {
   files.clear();
   files.set("/opt/osinara/.env", { content: "TELEGRAM_BOT_USERNAME='Osinara_Bot'\n", mode: 0o600 });
-  files.set("/opt/osinara/release.env", { content: "", mode: 0o600 });
-  files.set("/opt/osinara/compose.installation.json", { content: "{}", mode: 0o644 });
-  files.set("/opt/osinara/osinara-deployment.json", { content: JSON.stringify({ version: "0.24.0" }), mode: 0o644 });
+  files.set(`${CURRENT_RELEASE}/release.env`, { content: "", mode: 0o600 });
+  files.set(`${CURRENT_RELEASE}/compose.installation.json`, { content: "{}", mode: 0o644 });
+  files.set(`${CURRENT_RELEASE}/osinara-deployment.json`, {
+    content: JSON.stringify({ version: "0.24.0" }),
+    mode: 0o644,
+  });
   files.set("/opt/osinara/agent-model-providers.json", { content: "{}", mode: 0o644 });
   files.set("/opt/osinara/tls/.env", { content: input.tlsEnv, mode: 0o600 });
   if (input.tlsCompose) files.set(TLS_COMPOSE, { content: "services: {}\n", mode: 0o644 });
@@ -90,6 +109,14 @@ describe("production operational commands by TLS mode", () => {
     installHost({ tlsCompose: false, tlsEnv: "OSINARA_HOSTNAME=bot.example.com\nOSINARA_TLS_MODE=external\n" });
     await expect(createProductionOperationalCommands().doctor()).resolves.toMatchObject({ code: "OSINARA_DOCTOR_OK" });
     expect(tlsComposeCalls()).toEqual([]);
+    expect(hostCommands.run.mock.calls[0]?.[0].args).toEqual(expect.arrayContaining([
+      `${CURRENT_RELEASE}/compose.installation.json`,
+      `${CURRENT_RELEASE}/release.env`,
+    ]));
+    expect(hostCommands.run.mock.calls.at(-1)?.[0]).toMatchObject({
+      args: ["is-active", "--quiet", "osinara-deploy.timer"],
+      command: "systemctl",
+    });
 
     installHost({ tlsCompose: false, tlsEnv: "OSINARA_HOSTNAME=bot.example.com\nOSINARA_TLS_MODE=managed\n" });
     await expect(createProductionOperationalCommands().doctor()).rejects.toThrow(/ENOENT/u);

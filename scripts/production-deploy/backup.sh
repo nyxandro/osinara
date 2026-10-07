@@ -173,6 +173,12 @@ compose_declares_volume() {
     fail "DEPLOY_COMPOSE_OWNERSHIP_UNKNOWN" "Compose file is absent: ${compose_path}"
     return 1
   fi
+  # An installation host runs the derived JSON graph; a production host the released YAML.
+  if [[ "$compose_path" == *.json ]]; then
+    jq --exit-status --arg volume "$logical_volume" '(.volumes // {}) | has($volume)' \
+      "$compose_path" >/dev/null
+    return
+  fi
   grep -Eq "^  ${logical_volume}:([[:space:]]*\\{\\})?[[:space:]]*$" "$compose_path"
 }
 
@@ -291,9 +297,13 @@ create_postgres_backup() {
 }
 
 stop_current_services() {
+  local -a services=(edge telegram-ingress-worker memory-embedding-worker agent)
+  if [[ "$DEPLOYMENT_PROFILE" == "production" ]]; then
+    services+=(cli-proxy-api)
+  fi
+  services+=(sandbox-runner sandbox-egress-proxy memory-embedding)
   CURRENT_SERVICES_STOPPED=1
-  compose_current stop edge telegram-ingress-worker memory-embedding-worker agent cli-proxy-api \
-    sandbox-runner sandbox-egress-proxy memory-embedding
+  compose_current stop "${services[@]}"
 }
 
 backup_volume() {

@@ -193,8 +193,11 @@ prepare_candidate_release() {
   install -m 0644 "${WORK_DIR}/compose.production.yaml" "${CANDIDATE_DIR}/compose.production.yaml"
   install -m 0644 "${WORK_DIR}/osinara-deployment.json" \
     "${CANDIDATE_DIR}/osinara-deployment.json"
-  CANDIDATE_COMPOSE="${CANDIDATE_DIR}/compose.production.yaml"
+  CANDIDATE_COMPOSE="$(release_compose_path "$CANDIDATE_DIR")"
   CANDIDATE_ENV="${CANDIDATE_DIR}/release.env"
+  if [[ "$DEPLOYMENT_PROFILE" == "installation" ]]; then
+    derive_installation_compose "${CANDIDATE_DIR}/compose.production.yaml" "$CANDIDATE_COMPOSE"
+  fi
   {
     printf 'OSINARA_APP_IMAGE=%s\n' "$APP_IMAGE"
     printf 'OSINARA_CLI_PROXY_IMAGE=%s\n' "$CLI_PROXY_IMAGE"
@@ -207,9 +210,20 @@ prepare_candidate_release() {
   validate_resolved_compose
 }
 
+# The installation graph is the released production graph without the CLIProxy gateway. CI builds
+# the installer's first copy with the same filter file, so both paths apply one reviewed change.
+derive_installation_compose() {
+  local source="$1"
+  local target="$2"
+  docker compose --file "$source" config --no-interpolate --format json |
+    jq --exit-status --from-file "${CONTROLLER_DIR}/installation-compose.jq" > "$target"
+  chmod 0644 "$target"
+}
+
 validate_resolved_compose_security() {
   local config_json="$1"
-  jq -e '
+  local profile="$2"
+  jq -e --arg profile "$profile" '
     all(.services[]; (.privileged // false) == false) and
     all(.services[]; (.network_mode // "") != "host") and
     all(.services[]; (.pid // "") != "host") and
@@ -223,22 +237,25 @@ validate_resolved_compose_security() {
     any(.services.agent.volumes[];
       .source == "/opt/osinara/agent-model-providers.json" and
       .target == "/app/config/agent-model-providers.json" and .read_only == true) and
-    any(.services["cli-proxy-api"].volumes[];
-      .source == "cli-proxy-auth" and
-      .target == "/var/lib/cli-proxy-api/auth" and .type == "volume") and
+    (if $profile == "production" then
+      any(.services["cli-proxy-api"].volumes[];
+        .source == "cli-proxy-auth" and
+        .target == "/var/lib/cli-proxy-api/auth" and .type == "volume")
+    else true end) and
     ([.services | to_entries[] as $service |
       ($service.value.volumes // [])[] |
-      {service: $service.key, type, source, target}] | sort_by(.service, .target)) == ([
+      {service: $service.key, type, source, target}] | sort_by(.service, .target)) == (([
         {service: "agent", type: "volume", source: "google-workspace-credentials", target: "/app/google-workspace-credentials"},
         {service: "agent", type: "volume", source: "workspace-data", target: "/app/workspaces"},
         {service: "agent", type: "bind", source: "/opt/osinara/agent-model-providers.json", target: "/app/config/agent-model-providers.json"},
-        {service: "cli-proxy-api", type: "volume", source: "cli-proxy-auth", target: "/var/lib/cli-proxy-api/auth"},
         {service: "memory-embedding", type: "volume", source: "memory-embedding-model-e5", target: "/data"},
         {service: "postgres", type: "volume", source: "postgres-data", target: "/var/lib/postgresql/data"},
         {service: "sandbox-runner", type: "bind", source: "/var/run/docker.sock", target: "/var/run/docker.sock"},
         {service: "sandbox-runner", type: "volume", source: "tool-environments", target: "/runner/tools"},
         {service: "sandbox-runner", type: "volume", source: "workspace-data", target: "/runner/workspaces"}
-      ] | sort_by(.service, .target)) and
+      ] + (if $profile == "production" then [
+        {service: "cli-proxy-api", type: "volume", source: "cli-proxy-auth", target: "/var/lib/cli-proxy-api/auth"}
+      ] else [] end)) | sort_by(.service, .target)) and
     ([.services | to_entries[] as $service | ($service.value.ports // [])[] |
       {service: $service.key, host_ip, published, target}] == [{
         service: "edge", host_ip: "127.0.0.1", published: "8082", target: 80
@@ -250,30 +267,39 @@ validate_resolved_compose() {
   local images_file="${WORK_DIR}/resolved-images.txt"
   local expected_images_file="${WORK_DIR}/expected-images.txt"
   local config_json="${WORK_DIR}/resolved-compose.json"
+  local -a expected_images=("$APP_IMAGE" "$APP_IMAGE" "$APP_IMAGE" "$APP_IMAGE"
+    "$RUNTIME_IMAGE" "$RUNNER_IMAGE" "$EGRESS_IMAGE" "$EDGE_IMAGE" "$POSTGRES_IMAGE" "$TEI_IMAGE")
+  if [[ "$DEPLOYMENT_PROFILE" == "production" ]]; then
+    expected_images+=("$CLI_PROXY_IMAGE")
+  fi
   compose_candidate config --images | LC_ALL=C sort > "$images_file"
-  printf '%s\n' "$APP_IMAGE" "$APP_IMAGE" "$APP_IMAGE" "$APP_IMAGE" \
-    "$RUNTIME_IMAGE" "$RUNNER_IMAGE" "$EGRESS_IMAGE" "$EDGE_IMAGE" "$CLI_PROXY_IMAGE" \
-    "$POSTGRES_IMAGE" "$TEI_IMAGE" | LC_ALL=C sort > "$expected_images_file"
+  printf '%s\n' "${expected_images[@]}" | LC_ALL=C sort > "$expected_images_file"
   cmp --silent "$images_file" "$expected_images_file" ||
     fail "DEPLOY_COMPOSE_IMAGE_SET_INVALID" "Resolved Compose image multiset is not approved"
 
   compose_candidate config --format json > "$config_json"
-  jq -e '
-    (.services | keys) == [
-      "agent", "cli-proxy-api", "edge", "memory-embedding", "memory-embedding-worker", "migrate", "postgres",
+  jq -e --arg profile "$DEPLOYMENT_PROFILE" '
+    (.services | keys) == (([
+      "agent", "edge", "memory-embedding", "memory-embedding-worker", "migrate", "postgres",
       "sandbox-egress-proxy", "sandbox-runner", "sandbox-runtime-image", "telegram-ingress-worker"
-    ] and
+    ] + (if $profile == "production" then ["cli-proxy-api"] else [] end)) | sort) and
     .services.agent.depends_on.migrate.condition == "service_completed_successfully" and
-    .services.agent.depends_on["cli-proxy-api"].condition == "service_healthy"
+    (if $profile == "production" then
+      .services.agent.depends_on["cli-proxy-api"].condition == "service_healthy"
+    else
+      (.services.agent.depends_on | has("cli-proxy-api") | not)
+    end)
   ' "$config_json" >/dev/null ||
     fail "DEPLOY_COMPOSE_SERVICE_SET_INVALID" "Resolved Compose service set is not approved"
-  validate_resolved_compose_security "$config_json" ||
+  validate_resolved_compose_security "$config_json" "$DEPLOYMENT_PROFILE" ||
     fail "DEPLOY_COMPOSE_SECURITY_INVALID" "Resolved Compose enables an unsafe host capability"
 }
 
 pull_release_images() {
   docker pull "$APP_IMAGE"
-  docker pull "$CLI_PROXY_IMAGE"
+  if [[ "$DEPLOYMENT_PROFILE" == "production" ]]; then
+    docker pull "$CLI_PROXY_IMAGE"
+  fi
   docker pull "$RUNTIME_IMAGE"
   docker pull "$RUNNER_IMAGE"
   docker pull "$EGRESS_IMAGE"
@@ -293,7 +319,7 @@ promote_candidate_release() {
     fail "DEPLOY_RELEASE_DIR_EXISTS" "Final release directory already exists"
   mv "$CANDIDATE_DIR" "$final_dir"
   CANDIDATE_DIR="$final_dir"
-  CANDIDATE_COMPOSE="${final_dir}/compose.production.yaml"
+  CANDIDATE_COMPOSE="$(release_compose_path "$final_dir")"
   CANDIDATE_ENV="${final_dir}/release.env"
   ln -s "$final_dir" "$temporary_link"
   mv -Tf "$temporary_link" "$CURRENT_LINK"
