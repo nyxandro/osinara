@@ -15,7 +15,7 @@ services:
     # A reservation is cgroup memory.low, not a quota: what a service holds below it is reclaimed
     # only after unprotected neighbours. It counts only up to what the parent protects, so every
     # service runs in its own osinara.slice, which the host gives the sum of the three reservations
-    # (2000 MB, docs/production-deployment.md). Protection a service does not use stays inside
+    # (2300 MB, docs/production-deployment.md). Protection a service does not use stays inside
     # the slice instead of going to development in system.slice.
     # PostgreSQL's own memory is ~160 MB (128 MB shared buffers); the rest keeps hot pages cached.
     mem_reservation: 300m
@@ -45,9 +45,13 @@ services:
     # tokenization and request handling use the third core without touching that peak, and it buys
     # 45% more indexing throughput and a third off the wait when a search queues behind a batch.
     cpus: 3.0
-    mem_limit: 1024m
-    # The model's steady footprint. Docker refuses a reservation that is not below the limit.
-    mem_reservation: 900m
+    # The peak above is a short burst; hours of ordinary traffic settle higher. At 1024 MB the
+    # service held 808 MB and had pushed 295 MB of its own pages to swap with the host idle, and
+    # the first search after a quiet half hour spent 7 to 18 seconds paging the tokenizer back in —
+    # on 08.10 past the 30-second ceiling, and the morning scenario lost its semantic branch (#352).
+    mem_limit: 1536m
+    # The steady production footprint, 1103 MB. Docker refuses a reservation not below the limit.
+    mem_reservation: 1200m
     command:
       - --model-id
       - intfloat/multilingual-e5-small

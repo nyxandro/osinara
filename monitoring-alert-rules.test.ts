@@ -182,6 +182,16 @@ describe("osinara alert rules", () => {
     }
   });
 
+  it("reports an indexing failure only from the indexer, not from a turn reading memory", () => {
+    const [block] = alertBlocks("OsinaraEmbeddingFailed");
+    const expression = ruleField(block!, "expr") ?? "";
+
+    // The agent writes the same AGENT_MEMORY_EMBEDDING_PROVIDER_* codes when a search cannot
+    // reach the service. 08.10 such a read failure fired this alert, and its runbook sent the duty
+    // reader to an indexer with no failed job (#352); OsinaraMemorySemanticBranchDown owns reads.
+    expect(expression).toContain('service="memory-embedding-worker"');
+  });
+
   it("announces the worker through the shared constant, not a second literal", () => {
     const worker = read("scripts/memory-embedding-worker.ts")
       + read("scripts/memory-embedding/worker-loop.ts");

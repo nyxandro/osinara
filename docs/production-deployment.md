@@ -305,8 +305,8 @@ at once without a restart, and survives a reboot. No release changes them.
 # Development yields first: a soft ceiling (throttles and reclaims, never kills) and a quarter of
 # the CPU share of each bot container when both want the processor.
 sudo systemctl set-property orca-remote-server.service MemoryHigh=4G CPUWeight=25
-# Parent protection for the mem_reservation values in compose.production.yaml (300 + 800 + 900 MB).
-sudo systemctl set-property osinara.slice MemoryLow=2000M
+# Parent protection for the mem_reservation values in compose.production.yaml (300 + 800 + 1200 MB).
+sudo systemctl set-property osinara.slice MemoryLow=2300M
 ```
 
 Every production service runs with `cgroup_parent: osinara.slice`. Docker creates that top-level

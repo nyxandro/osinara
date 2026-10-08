@@ -199,13 +199,15 @@ groups:
       # the one in OsinaraErrorBurst to that list: add a code there without excluding it in both and
       # the build fails, not the duty reader.
       #
-      # Still skewed, and left that way on purpose: the family also covers AGENT_MEMORY_EMBEDDING_
-      # PROVIDER_* written by the agent while *reading* memory for an answer, which this summary
-      # calls an indexing failure. Splitting read from write needs a service label this rule cannot
-      # be shown to have; #239 carries the detail.
+      # Only the indexer's lines count. The agent writes the same AGENT_MEMORY_EMBEDDING_PROVIDER_*
+      # codes when a search cannot reach the service; 08.10 such a read fired this alert and sent the
+      # duty reader to an indexer with no failed job (#352). Reads belong to
+      # OsinaraMemorySemanticBranchDown. The service label comes from the hub's shared
+      # log_code_lines_1m record (stats by host, project, service, code).
       - alert: OsinaraEmbeddingFailed
         expr: >-
           sum(sum_over_time(log_code_lines_1m{project="osinara-production",
+          service="memory-embedding-worker",
           code=~"AGENT_MEMORY_EMBEDDING_.+",
           code!="AGENT_MEMORY_EMBEDDING_WORKER_STARTED",
           code!="AGENT_MEMORY_EMBEDDING_WORKER_WAITING"}[5m])) > 0
