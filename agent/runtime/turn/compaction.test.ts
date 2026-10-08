@@ -276,9 +276,29 @@ describe("history compaction", () => {
 
     const compacted = await compactMessages(messages, { recentWindowSize: 4, threshold: 2_000 }, summarize, UNMEASURED, 4);
 
-    // The earlier summary fit and was accepted; only what came after it is lost to the refusals.
-    expect(compacted[1]).toMatchObject({ role: "assistant", content: expect.stringMatching(/^старая сводка\n\n.*could not be summarized/su) });
+    // The earlier summary fit and was accepted; only what came after it is lost to the refusals,
+    // and the notice says so instead of disowning the summary above it.
+    expect(compacted[1]).toMatchObject({
+      role: "assistant", content: expect.stringMatching(/^старая сводка\n\n.*between the summary above and the messages that follow/su),
+    });
     expect(compacted.slice(2)).toEqual(messages.slice(-4));
+  });
+
+  it("drops the earlier summary too when keeping it would leave no room for the recent messages", async () => {
+    const summarize = vi.fn<Summarize>(async () => "сводка");
+    const messages = [
+      { content: "Summary of our conversation so far:", role: "user" as const },
+      { content: `старая сводка ${"с".repeat(20_000)}`, role: "assistant" as const },
+      ...Array.from({ length: 20 }, (_, index) => exchange(index, 400)).flat(),
+      CURRENT,
+    ];
+
+    const compacted = await compactMessages(messages, { recentWindowSize: 4, threshold: 2_000 }, summarize, UNMEASURED, 4);
+
+    // The way out after four refusals must not end in a history too large to send, every message.
+    expect(compacted[1]).toMatchObject({ role: "assistant", content: expect.stringMatching(/^The earlier part of this conversation could not be summarized/u) });
+    expect(compacted.slice(2)).toEqual(messages.slice(-4));
+    expect(shouldCompact(compacted, { recentWindowSize: 4, threshold: 2_000 }, UNMEASURED)).toBe(false);
   });
 
   it("fails with a coded error instead of a second summary call when the result does not fit", async () => {

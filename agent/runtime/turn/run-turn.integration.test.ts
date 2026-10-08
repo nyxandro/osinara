@@ -1,3 +1,4 @@
+import { APICallError, RetryError } from "ai";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
@@ -433,8 +434,12 @@ async function releaseRunner(turnId: string) {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
+    // An outage reaches the summary as the SDK ends its own retries: a RetryError with no status.
+    const outage = () => new APICallError({
+      isRetryable: true, message: "overloaded", requestBodyValues: {}, statusCode: 503, url: "https://provider.test/v1",
+    });
     const transient = await runTurn(runtimeWith(async () => {
-      throw Object.assign(new Error("provider unavailable"), { isRetryable: true });
+      throw new RetryError({ errors: [outage(), outage(), outage()], message: "Failed after 3 attempts", reason: "maxRetriesExceeded" });
     }, scriptedModel()), (await startMessageTurn(sessionId, "первый")).id, RUN);
     expect(transient).toMatchObject({ code: "AGENT_MODEL_TEMPORARILY_UNAVAILABLE", status: "failed" });
     expect(await refusals()).toBe(0);
