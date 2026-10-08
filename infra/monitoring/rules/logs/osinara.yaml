@@ -53,14 +53,11 @@ groups:
       # found by its own search or list, or read in the standing profile, none of which the
       # selection offered. A selection shown a turn earlier and used now still counts.
       #
-      # The two sides do not match exactly, and the gaps are accepted rather than corrected here:
-      # - the journal also holds records the profile view showed after the budget dropped them from
-      #   the block, so they can be used without being in `offeredMemories`;
-      # - an unresolved conflict is one offered item with two versions, each countable as used —
-      #   production held no conflicts when this was written;
-      # - an answer finished after an approval arrives under a new turn id, while the journal holds
-      #   the original turn, so what it names is rejected and its offer stays in the denominator.
-      # The offline report (`npm run memory:usage-report`) tells all three apart.
+      # The two sides do not match exactly, and the gap is accepted rather than corrected here: the
+      # journal also holds records the profile view showed after the budget dropped them from the
+      # block, so they can be used without being in `offeredMemories`. The offline report
+      # (`npm run memory:usage-report`) tells it apart. An answer finished after an approval is no
+      # longer a gap: since #339 it is counted against every show its session keeps.
       - record: osinara_memory_offered_tracked_1m
         expr: 'project:"osinara-production" code:"AGENT_MEMORY_RETRIEVAL_METRICS" outcome:"succeeded" usageTracked:"true" | stats by (outcome) sum(offeredMemories) as value'
 
