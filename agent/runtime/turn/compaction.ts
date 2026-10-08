@@ -71,7 +71,10 @@ export const COMPACTION_SUMMARY_REFUSALS_BEFORE_DROP = 4;
 // What replaces the older part when it could not be summarized: the model has to know the gap is
 // there, or it answers as if the conversation began with the kept tail.
 const COMPACTION_SUMMARY_DROPPED_CHECKPOINT =
-  "The part of this conversation before the messages that follow could not be summarized: the model refused the summary request several times, so it was dropped. Nothing from that part is available. If the person refers to it, say so and ask them to repeat what matters.";
+  "The earlier part of this conversation could not be summarized: the model refused the summary request several times, so it was dropped. Nothing from it is available. If the person refers to it, say so and ask them to repeat what matters.";
+// The same gap after a summary accepted earlier, which still holds.
+const COMPACTION_SUMMARY_DROPPED_AFTER_CHECKPOINT =
+  "The part of this conversation between the summary above and the messages that follow could not be summarized: the model refused the summary request several times, so it was dropped. The summary above still holds; nothing from the dropped part is available. If the person refers to it, say so and ask them to repeat what matters.";
 const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
 const CAPPED_RESULT_ANNOTATION =
   "[Truncated: tool result reduced during context compaction. Re-run the tool if you need the full output.]";
@@ -244,25 +247,39 @@ export async function compactMessages(
   // A near no-op cap stays over the budget that asked for compaction and goes on to the summary.
   if (fits(capped, budget)) return capped;
 
-  // A summary accepted earlier fit and stays; only what came after it is lost to the refusals.
-  const summary = summaryRefusals >= COMPACTION_SUMMARY_REFUSALS_BEFORE_DROP
-    ? [previousCheckpoint, COMPACTION_SUMMARY_DROPPED_CHECKPOINT].filter((part) => part !== undefined).join("\n\n")
-    : await summarize(createCompactionPrompt({
+  /** The summary and the recent messages, verbatim or without tool results; `fitted` null when neither fits. */
+  const withSummary = (summary: string): { fitted: ModelMessage[] | null; smallest: ModelMessage[] } => {
+    const summaryHead: ModelMessage[] = [
+      { content: COMPACTION_CHECKPOINT_MARKER, role: "user" },
+      { content: summary, role: "assistant" },
+    ];
+    const verbatim = withResumptionGuard([...summaryHead, ...recent], conversation);
+    if (fits(verbatim, budget)) return { fitted: verbatim, smallest: verbatim };
+    const stripped = withResumptionGuard([...summaryHead, ...keepNonToolResultMessages(recent)], conversation);
+    return { fitted: fits(stripped, budget) ? stripped : null, smallest: stripped };
+  };
+  // After the refusals the older part is dropped. A summary accepted earlier stays when the recent
+  // messages still fit beside it; when they do not, it goes too, or this way out would end in a
+  // history too large to send on every message, which is the dead end it exists to leave.
+  const candidates = summaryRefusals >= COMPACTION_SUMMARY_REFUSALS_BEFORE_DROP
+    ? [
+      ...(previousCheckpoint === undefined ? [] : [`${previousCheckpoint}\n\n${COMPACTION_SUMMARY_DROPPED_AFTER_CHECKPOINT}`]),
+      COMPACTION_SUMMARY_DROPPED_CHECKPOINT,
+    ]
+    : [await summarize(createCompactionPrompt({
       messages: older, previousCheckpoint, strictBudget: summaryRefusals > 0,
       transcriptBudgetTokens: Math.max(1, Math.floor(settings.threshold / 2 ** summaryRefusals)),
-    }));
-  const summaryHead: ModelMessage[] = [
-    { content: COMPACTION_CHECKPOINT_MARKER, role: "user" },
-    { content: summary, role: "assistant" },
-  ];
-  const verbatim = withResumptionGuard([...summaryHead, ...recent], conversation);
-  if (fits(verbatim, budget)) return verbatim;
-  const stripped = withResumptionGuard([...summaryHead, ...keepNonToolResultMessages(recent)], conversation);
-  if (fits(stripped, budget)) return stripped;
+    }))];
+  let smallest: ModelMessage[] = [];
+  for (const summary of candidates) {
+    const assembled = withSummary(summary);
+    if (assembled.fitted !== null) return assembled.fitted;
+    smallest = assembled.smallest;
+  }
   throw new AppError(
     "AGENT_COMPACTION_OUTPUT_TOO_LARGE",
     "Разговор стал слишком длинным, и его не удалось сжать. Начните новый разговор",
-    { details: { budgetTokens: Math.round(budget), estimatedTokens: Math.round(estimateTokens(stripped)), threshold: settings.threshold } },
+    { details: { budgetTokens: Math.round(budget), estimatedTokens: Math.round(estimateTokens(smallest)), threshold: settings.threshold } },
   );
 }
 

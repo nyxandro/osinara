@@ -143,16 +143,31 @@ export function modelCallFailure(error: unknown): unknown {
 
 /** Statuses that fail every request of the account or the model, whatever the request carries. */
 const ACCOUNT_FAILURE_STATUSES: ReadonlySet<number> = new Set([401, 402, 403, 404]);
+/** The request itself was turned down: over the window, stopped by the content filter, cut at the length limit. */
+const REQUEST_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  "AGENT_MODEL_CONTEXT_OVERFLOW", "AGENT_MODEL_OUTPUT_FILTERED", "AGENT_MODEL_OUTPUT_TRUNCATED",
+]);
+
+/** The status of the failed attempt, including the last one a RetryError keeps outside `cause`. */
+function attemptStatus(error: unknown): number | undefined {
+  for (const candidate of causeChain(error)) {
+    const attempt = RetryError.isInstance(candidate) ? candidate.lastError : candidate;
+    const status = (attempt as { statusCode?: unknown } | undefined)?.statusCode;
+    if (typeof status === "number") return status;
+  }
+  return undefined;
+}
 
 /**
- * The model turned down this particular request — too large, refused by policy, answered with
- * nothing — as opposed to the service or the account failing every request: an outage, a model
- * that did not answer in time, a broken key, an unpaid balance, a model that is gone.
+ * The model turned down this particular request, as opposed to the service or the account failing
+ * every request: an outage (after `normalizeModelCallError`), a stream that broke off, a model that
+ * did not answer in time, a broken key, an unpaid balance, a model that is gone. A failure with no
+ * status at all is counted: it came back from the provider, not from the network.
  */
 export function isRequestRefusal(failure: unknown): boolean {
   if (!(failure instanceof AppError)) return false;
-  if (failure.code === "AGENT_MODEL_CONTEXT_OVERFLOW" || failure.code === "AGENT_MODEL_OUTPUT_INCOMPLETE") return true;
+  if (REQUEST_REFUSAL_CODES.has(failure.code)) return true;
   if (failure.code !== "AGENT_MODEL_CALL_FAILED") return false;
-  const status = statusCode(failure);
+  const status = attemptStatus(failure);
   return status === undefined || !ACCOUNT_FAILURE_STATUSES.has(status);
 }
