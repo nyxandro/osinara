@@ -22,7 +22,7 @@ import { z } from "zod";
 
 import { AppError } from "../../agent/lib/app-error.js";
 
-type BranchClass = "conflict" | "semantic_only" | "unknown" | "words_and_semantic" | "words_only";
+type BranchClass = "semantic_only" | "unknown" | "words_and_semantic" | "words_only";
 
 export interface MemoryUsageSummary {
   input: {
@@ -73,20 +73,13 @@ const flag = z.union([z.boolean(), z.enum(["true", "false"]).transform((text) =>
 const count = z.union([z.number().int().nonnegative(), z.string().regex(/^\d+$/u).transform(Number)]);
 const refs = jsonText(z.array(z.string().min(1)));
 
-const evidenceEntry = z.union([
-  z.object({
-    memoryRef: z.string().min(1),
-    position: z.number().int().positive(),
-    ranking: z.object({
-      branches: z.array(z.enum(["russian", "semantic", "simple"])).min(1),
-    }).nullable(),
-  }),
-  z.object({
-    conflictRef: z.string().min(1),
-    memoryRefs: z.array(z.string().min(1)).min(1),
-    position: z.number().int().positive(),
-  }),
-]);
+const evidenceEntry = z.object({
+  memoryRef: z.string().min(1),
+  position: z.number().int().positive(),
+  ranking: z.object({
+    branches: z.array(z.enum(["russian", "semantic", "simple"])).min(1),
+  }).nullable(),
+});
 
 const lineHead = { _time: z.string().min(1), sessionId: z.string().min(1), turnId: z.string().min(1) };
 
@@ -159,7 +152,6 @@ function canonical(value: unknown): string {
 }
 
 function branchOf(entry: z.infer<typeof evidenceEntry>): BranchClass {
-  if ("conflictRef" in entry) return "conflict";
   if (entry.ranking === null) return "unknown";
   const words = entry.ranking.branches.some((branch) => branch !== "semantic");
   const semantic = entry.ranking.branches.includes("semantic");
@@ -220,7 +212,7 @@ function requireFields(line: ExportedLine, index: number): void {
 
 function emptyBranches(): MemoryUsageSummary["usage"]["byBranch"] {
   const zero = () => ({ offered: 0, used: 0 });
-  return { conflict: zero(), semantic_only: zero(), unknown: zero(), words_and_semantic: zero(), words_only: zero() };
+  return { semantic_only: zero(), unknown: zero(), words_and_semantic: zero(), words_only: zero() };
 }
 
 export function summarizeMemoryUsage(rawLines: readonly unknown[]): MemoryUsageSummary {
@@ -286,7 +278,7 @@ export function summarizeMemoryUsage(rawLines: readonly unknown[]): MemoryUsageS
     if (line.outcome !== "succeeded") return;
     const evidence = line.memoryEvidence!;
     sighted([
-      ...evidence.flatMap((entry) => "conflictRef" in entry ? entry.memoryRefs : [entry.memoryRef]),
+      ...evidence.map((entry) => entry.memoryRef),
       ...line.profileMemoryRefs!,
     ]);
     if (line.usageTracked !== true) return;
@@ -296,10 +288,7 @@ export function summarizeMemoryUsage(rawLines: readonly unknown[]): MemoryUsageS
     if (current !== null && (current.time > time || (current.time === time && current.tieBreak > tieBreak))) return;
     const offered = new Map<string, Offered>();
     for (const entry of evidence) {
-      const branch = branchOf(entry);
-      for (const memoryRef of "conflictRef" in entry ? entry.memoryRefs : [entry.memoryRef]) {
-        offered.set(memoryRef, { branch, position: entry.position });
-      }
+      offered.set(entry.memoryRef, { branch: branchOf(entry), position: entry.position });
     }
     turn.selection = {
       characters: line.memorySerializedCharacters!,

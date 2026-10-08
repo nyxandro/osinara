@@ -38,15 +38,12 @@ function item(id: string): ReferencedMemoryItem {
 }
 
 function searchFinds(...ids: string[]) {
-  return vi.spyOn(memoryRetrievalRepository, "searchWithConflictClosure").mockResolvedValue({
-    claimIdsByConflictRef: new Map(),
-    conflicts: [],
+  return vi.spyOn(memoryRetrievalRepository, "searchAuthorized").mockResolvedValue({
     diagnostics: {
       candidateLimitHit: false, recentlyShown: 0, russianMatched: 1, russianQualified: 1, russianTopRank: 0.1,
       semanticMatched: 40, semanticQualified: 12, semanticTopSimilarity: 0.84,
       simpleMatched: 0, simpleQualified: 0, simpleTopRank: null,
     },
-    relatedClaimIds: ids,
     results: ids.map((id, index) => ({
       evidence: { russianMorphologyRank: 0.1, semanticSimilarity: 0.84, simpleLexicalRank: null },
       exactDuplicateIdentity: id, memory: item(id), score: 0.03 - index * 0.001, subjectLabel: null,
@@ -106,7 +103,7 @@ describe("selectMemoriesAutomatically", () => {
   });
 
   it("runs no search for small talk", async () => {
-    const search = vi.spyOn(memoryRetrievalRepository, "searchWithConflictClosure");
+    const search = vi.spyOn(memoryRetrievalRepository, "searchAuthorized");
 
     const selection = await selectMemoriesAutomatically(privateAuth, "спасибо, понял", {
       now: new Date(), window: null,

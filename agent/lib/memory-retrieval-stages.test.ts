@@ -7,7 +7,7 @@ vi.mock("./memory-embedding-client.js", () => ({
   embedMemoryQueryChunks: mocks.embedding,
   memoryQueryCentroid: (vectors: readonly (readonly number[])[]) => [...vectors[0]!],
 }));
-vi.mock("./memory-retrieval-repository.js", () => ({ memoryRetrievalRepository: { searchWithConflictClosure: mocks.search } }));
+vi.mock("./memory-retrieval-repository.js", () => ({ memoryRetrievalRepository: { searchAuthorized: mocks.search } }));
 vi.mock("./memory-thread-brief-repository.js", () => ({ memoryThreadBriefRepository: { activate: mocks.threads } }));
 import { retrieveMemoryTurnContext } from "./memory-retrieval.js";
 import { memoryFailureCode } from "./memory-context-failure.js";
@@ -24,7 +24,7 @@ describe("memory retrieval failure provenance", () => {
   beforeEach(() => {
     mocks.embedding.mockReset().mockResolvedValue([[1]]);
     mocks.search.mockReset().mockResolvedValue({
-      claimIdsByConflictRef: new Map(), conflicts: [], relatedClaimIds: [], results: [], diagnostics: DIAGNOSTICS,
+      results: [], diagnostics: DIAGNOSTICS,
     });
     mocks.threads.mockReset().mockResolvedValue({ threads: [], totalCharacters: 0 });
   });
@@ -50,7 +50,6 @@ describe("memory retrieval failure provenance", () => {
   });
   it("keeps how each selected record was found for the turn's log", async () => {
     mocks.search.mockResolvedValue({
-      claimIdsByConflictRef: new Map(), conflicts: [], relatedClaimIds: ["claim-1"],
       diagnostics: DIAGNOSTICS,
       results: [{
         evidence: { russianMorphologyRank: null, semanticSimilarity: null, simpleLexicalRank: 0.2 },

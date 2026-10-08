@@ -72,17 +72,12 @@ describe("external group tool catalog", () => {
     }
   });
 
-  it("describes memory deletion and conflict resolution without obsolete HITL claims", () => {
+  it("describes memory deletion without obsolete HITL claims", () => {
     const deleteCapability = EXTERNAL_GROUP_CAPABILITY_CATALOG.find(
       ({ name }) => name === "manage_memory.delete",
-    );
-    const conflictCapability = EXTERNAL_GROUP_CAPABILITY_CATALOG.find(
-      ({ name }) => name === "manage_memory_conflict",
     );
 
     expect(deleteCapability?.usage).toContain("мягко удалить");
     expect(deleteCapability?.usage).not.toContain("безвозвратно");
-    expect(conflictCapability?.usage).toContain("по явному решению пользователя");
-    expect(conflictCapability?.usage).not.toContain("подтверждени");
   });
 });

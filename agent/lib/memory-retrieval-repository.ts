@@ -4,7 +4,8 @@
  * Export:
  * - `memoryRetrievalRepository.search`: authorized thresholded active-claim retrieval plus
  *   log-only branch diagnostics measured in the same statement.
- * - `memoryRetrievalRepository.searchWithConflictClosure`: score-independent complete conflict groups.
+ * - `memoryRetrievalRepository.searchAuthorized`: the same search, every result authorized again
+ *   after the search, so a right revoked while it ran does not leak a record.
  */
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
@@ -69,36 +70,6 @@ interface RetrievalRow extends ReferencedMemoryRow {
   subject_user_id: string | null;
 }
 
-export interface MemoryConflictVersion {
-  content: string;
-  evidenceKind: "explicit" | "firsthand" | "inferred" | "reported" | "unresolved";
-  memoryRef: string;
-  observedAt: string;
-  sourceLabel: string;
-}
-
-export interface MemoryConflictGroup {
-  conflictRef: string;
-  instruction: "Не выбирать версию самостоятельно";
-  versions: [MemoryConflictVersion, MemoryConflictVersion];
-}
-
-interface ConflictClosureRow {
-  a_id: string;
-  a_content: string;
-  a_evidence_kind: MemoryConflictVersion["evidenceKind"];
-  a_memory_ref: string;
-  a_observed_at: Date;
-  a_source_label: string;
-  b_id: string;
-  b_content: string;
-  b_evidence_kind: MemoryConflictVersion["evidenceKind"];
-  b_memory_ref: string;
-  b_observed_at: Date;
-  b_source_label: string;
-  conflict_ref: string;
-}
-
 function vectorLiteral(vector: readonly number[]): string {
   if (
     vector.length !== MEMORY_EMBEDDING_DIMENSIONS ||
@@ -121,7 +92,7 @@ function vectorArrayLiterals(vectors: readonly (readonly number[])[]): string[] 
   return vectors.map(vectorLiteral);
 }
 
-function authorizedClaimPredicate(alias: "a" | "b" | "item" | "partner"): string {
+function authorizedClaimPredicate(alias: "item"): string {
   // The projection branch is deliberately part of the pre-ranking predicate. Exact participant
   // linkage and the live policy admit only the current private user's normal self claims; an
   // external turn has no personal scope and therefore remains confined to its own group branch.
@@ -576,17 +547,14 @@ export const memoryRetrievalRepository = {
     };
   },
 
-  async searchWithConflictClosure(
+  async searchAuthorized(
     auth: MemoryAuthorization,
     query: string,
     queryEmbeddings: readonly (readonly number[])[],
     limit = MEMORY_RETRIEVAL_LIMIT,
     window: MemorySelectionWindow | null = null,
   ): Promise<{
-    claimIdsByConflictRef: ReadonlyMap<string, readonly string[]>;
-    conflicts: MemoryConflictGroup[];
     diagnostics: MemoryRetrievalBranchDiagnostics;
-    relatedClaimIds: string[];
     results: ScoredMemoryRetrievalResult[];
   }> {
     const { diagnostics, results } = await memoryRetrievalRepository.search(
@@ -596,154 +564,18 @@ export const memoryRetrievalRepository = {
       limit,
       window,
     );
-    const selectedIds = results.map((result) => result.memory.id);
-    if (selectedIds.length === 0) {
-      return {
-        claimIdsByConflictRef: new Map(), conflicts: [], diagnostics, relatedClaimIds: [], results,
-      };
-    }
-
-    // Detect an inaccessible partner without selecting any partner content or metadata. Opaque refs
-    // are capabilities, not authorization: one visible side of an unresolved conflict is withheld.
-    const blocked = await database().query<{ selected_claim_id: string }>(
-      `SELECT DISTINCT selected.id AS selected_claim_id
-       FROM unnest($5::uuid[]) AS selected(id)
-       JOIN claim_conflicts AS conflict
-         ON selected.id IN (conflict.claim_a_id, conflict.claim_b_id)
-       JOIN memory_items AS partner ON partner.id = CASE
-         WHEN conflict.claim_a_id = selected.id THEN conflict.claim_b_id ELSE conflict.claim_a_id END
-       WHERE conflict.family_id = $1 AND conflict.resolution = 'unresolved'
-         AND NOT COALESCE(
-           partner.claim_status = 'active' AND ${authorizedClaimPredicate("partner")},
-           false
-         )`,
-      [auth.familyId, auth.scopes, auth.userId, auth.groupId, selectedIds],
-    );
-    const blockedIds = new Set(blocked.rows.map((row) => row.selected_claim_id));
-
-    // Both sides pass the full authorization predicate in one statement. An inaccessible partner
-    // suppresses the complete group rather than leaking only the selected side.
-    const closure = await database().query<ConflictClosureRow>(
-      `SELECT conflict.conflict_ref, a.id AS a_id, b.id AS b_id,
-              a.content AS a_content, ref_a.memory_ref AS a_memory_ref,
-              COALESCE(evidence_a.evidence_kind::text, 'unresolved') AS a_evidence_kind,
-              COALESCE(evidence_a.observed_at, a.created_at) AS a_observed_at,
-              CASE WHEN evidence_a.id IS NULL THEN 'Источник не установлен'
-                   ELSE concat_ws(' · ', evidence_a.author_label_snapshot,
-                                      evidence_a.origin_conversation_label_snapshot) END AS a_source_label,
-              b.content AS b_content, ref_b.memory_ref AS b_memory_ref,
-              COALESCE(evidence_b.evidence_kind::text, 'unresolved') AS b_evidence_kind,
-              COALESCE(evidence_b.observed_at, b.created_at) AS b_observed_at,
-              CASE WHEN evidence_b.id IS NULL THEN 'Источник не установлен'
-                   ELSE concat_ws(' · ', evidence_b.author_label_snapshot,
-                                      evidence_b.origin_conversation_label_snapshot) END AS b_source_label
-       FROM claim_conflicts AS conflict
-       JOIN memory_items AS a ON a.id = conflict.claim_a_id
-       JOIN memory_items AS b ON b.id = conflict.claim_b_id
-       JOIN memory_item_refs AS ref_a ON ref_a.memory_item_id = a.id
-       JOIN memory_item_refs AS ref_b ON ref_b.memory_item_id = b.id
-       LEFT JOIN LATERAL (
-         SELECT id, evidence_kind, observed_at, author_label_snapshot,
-                origin_conversation_label_snapshot
-         FROM claim_evidence WHERE claim_id = a.id AND evidence_role = 'primary'
-         ORDER BY observed_at, id LIMIT 1
-       ) AS evidence_a ON true
-       LEFT JOIN LATERAL (
-         SELECT id, evidence_kind, observed_at, author_label_snapshot,
-                origin_conversation_label_snapshot
-         FROM claim_evidence WHERE claim_id = b.id AND evidence_role = 'primary'
-         ORDER BY observed_at, id LIMIT 1
-       ) AS evidence_b ON true
-       WHERE conflict.family_id = $1 AND conflict.resolution = 'unresolved'
-         AND a.claim_status = 'active' AND b.claim_status = 'active'
-         AND (a.id = ANY($5::uuid[]) OR b.id = ANY($5::uuid[]))
-          AND ${authorizedClaimPredicate("a")}
-          AND ${authorizedClaimPredicate("b")}
-       ORDER BY conflict.conflict_ref`,
-      [auth.familyId, auth.scopes, auth.userId, auth.groupId, selectedIds],
-    );
-    const completeClosure = closure.rows.filter((row) =>
-      !blockedIds.has(row.a_id) && !blockedIds.has(row.b_id)
-    );
-
-    // Reauthorize every possible output claim after all closure reads. This final barrier removes
-    // unrelated base candidates too, while retaining a conflict only when both versions survive.
-    const outputClaimIds = [...new Set([
-      ...selectedIds,
-      ...completeClosure.flatMap((row) => [row.a_id, row.b_id]),
-    ])];
-    const finalAuthorization = await database().query<{
-      has_unresolved_conflict: boolean;
-      id: string;
-    }>(
-      `SELECT item.id,
-              EXISTS (
-                SELECT 1 FROM claim_conflicts AS item_conflict
-                WHERE item_conflict.family_id = $1
-                  AND item_conflict.resolution = 'unresolved'
-                  AND item.id IN (item_conflict.claim_a_id, item_conflict.claim_b_id)
-              ) AS has_unresolved_conflict
+    if (results.length === 0) return { diagnostics, results };
+    // Rights are checked again after the search: membership revoked between the two statements
+    // must not leave a record the turn may no longer read in front of the model.
+    const authorized = await database().query<{ id: string }>(
+      `SELECT item.id
        FROM memory_items AS item
        WHERE item.family_id = $1 AND item.claim_status = 'active'
          AND item.id = ANY($5::uuid[])
-         AND ${authorizedClaimPredicate("item")}
-         AND NOT EXISTS (
-           SELECT 1
-           FROM claim_conflicts AS final_conflict
-           JOIN memory_items AS partner ON partner.id = CASE
-             WHEN final_conflict.claim_a_id = item.id THEN final_conflict.claim_b_id
-             ELSE final_conflict.claim_a_id END
-           WHERE final_conflict.family_id = $1
-             AND final_conflict.resolution = 'unresolved'
-             AND item.id IN (final_conflict.claim_a_id, final_conflict.claim_b_id)
-             AND NOT COALESCE(
-               partner.claim_status = 'active' AND ${authorizedClaimPredicate("partner")},
-               false
-             )
-         )`,
-      [auth.familyId, auth.scopes, auth.userId, auth.groupId, outputClaimIds],
+         AND ${authorizedClaimPredicate("item")}`,
+      [auth.familyId, auth.scopes, auth.userId, auth.groupId, results.map((result) => result.memory.id)],
     );
-    const finalAuthorizedIds = new Set(finalAuthorization.rows.map((row) => row.id));
-    const finalOrdinaryIds = new Set(finalAuthorization.rows
-      .filter((row) => !row.has_unresolved_conflict)
-      .map((row) => row.id));
-    const finalClosure = completeClosure.filter((row) =>
-      finalAuthorizedIds.has(row.a_id) && finalAuthorizedIds.has(row.b_id)
-    );
-    const conflicts = finalClosure.map((row): MemoryConflictGroup => ({
-      conflictRef: row.conflict_ref,
-      instruction: "Не выбирать версию самостоятельно",
-      versions: [{
-        content: row.a_content,
-        evidenceKind: row.a_evidence_kind,
-        memoryRef: row.a_memory_ref,
-        observedAt: row.a_observed_at.toISOString(),
-        sourceLabel: row.a_source_label,
-      }, {
-        content: row.b_content,
-        evidenceKind: row.b_evidence_kind,
-        memoryRef: row.b_memory_ref,
-        observedAt: row.b_observed_at.toISOString(),
-        sourceLabel: row.b_source_label,
-      }],
-    }));
-    return {
-      // Keyed by the same ref the model-facing group carries, so a caller that kept or dropped one
-      // group can say exactly which claims it put in front of the model.
-      claimIdsByConflictRef: new Map(
-        finalClosure.map((row) => [row.conflict_ref, [row.a_id, row.b_id] as readonly string[]]),
-      ),
-      conflicts,
-      diagnostics,
-      relatedClaimIds: [...new Set([
-        ...results.filter((result) => !blockedIds.has(result.memory.id))
-          .filter((result) => finalOrdinaryIds.has(result.memory.id))
-          .map((result) => result.memory.id),
-        ...finalClosure.flatMap((row) => [row.a_id, row.b_id]),
-      ])],
-      results: results.filter((result) =>
-        finalOrdinaryIds.has(result.memory.id) && !blockedIds.has(result.memory.id)
-      ),
-    };
+    const authorizedIds = new Set(authorized.rows.map((row) => row.id));
+    return { diagnostics, results: results.filter((result) => authorizedIds.has(result.memory.id)) };
   },
 };

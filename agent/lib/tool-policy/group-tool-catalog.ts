@@ -60,10 +60,6 @@ export const EXTERNAL_GROUP_CAPABILITY_CATALOG = [
     usage: "немедленно отменить только что выполненное сохранение памяти по возвращённому memoryRef",
   },
   {
-    name: "manage_memory_conflict",
-    usage: "по явному решению пользователя разрешить показанный конфликт памяти текущей группы",
-  },
-  {
     name: "manage_memory_thread.complete",
     usage: "явно завершить нить текущей группы по проверенному событию и source refs",
   },

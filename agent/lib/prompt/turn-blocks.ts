@@ -37,8 +37,8 @@ import {
   retrieveMemoryTurnContext,
   type MemoryRetrievalDiagnostics,
   type MemoryTurnContext,
-  type ModelMemoryContextItem,
 } from "../memory-retrieval.js";
+import type { ModelMemory } from "../model-memory.js";
 import { memoryShowJournal, type MemorySelectionWindow } from "../memory-show-journal.js";
 import {
   MemoryContextFailure, memoryFailureCode, recordMemoryContextIncident,
@@ -264,7 +264,7 @@ export function createMemoryBlockResolver(dependencies: {
   recordOffered: (
     window: MemorySelectionWindow | null,
     context: MemoryTurnContext,
-    offered: readonly ModelMemoryContextItem[],
+    offered: readonly ModelMemory[],
     shownElsewhereRefs: readonly string[],
   ) => Promise<void>;
   retrieve: (
@@ -346,7 +346,7 @@ export function createMemoryBlockResolver(dependencies: {
       //
       // Only retrieved data carries the payload markers. The unavailable notice below is a rule
       // about behaviour, so it stays unwrapped and keeps its place in the instruction prefix.
-      const renderBlock = (memories: readonly ModelMemoryContextItem[]) => formatTurnMemoryContext([
+      const renderBlock = (memories: readonly ModelMemory[]) => formatTurnMemoryContext([
         ...(profile === null ? [] : [formatProfileViewContext(profile)]),
         formatRetrievedMemoryInstructions(
           memories, context.threads, context.diagnostics.semanticBranchAvailable,

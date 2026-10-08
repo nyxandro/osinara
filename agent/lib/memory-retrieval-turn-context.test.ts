@@ -57,11 +57,8 @@ function search(overrides: Partial<MemoryRetrievalBranchDiagnostics>) {
     simpleMatched: 0, simpleQualified: 0, simpleTopRank: null,
     ...overrides,
   };
-  vi.spyOn(memoryRetrievalRepository, "searchWithConflictClosure").mockResolvedValue({
-    claimIdsByConflictRef: new Map(),
-    conflicts: [],
+  vi.spyOn(memoryRetrievalRepository, "searchAuthorized").mockResolvedValue({
     diagnostics,
-    relatedClaimIds: [record.id],
     results: [{
       evidence: { russianMorphologyRank: null, semanticSimilarity: 0.815, simpleLexicalRank: null },
       exactDuplicateIdentity: "group",
@@ -76,7 +73,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("retrieveMemoryTurnContext", () => {
   it("does not search memory for a message that asks it nothing", async () => {
-    const searchSpy = vi.spyOn(memoryRetrievalRepository, "searchWithConflictClosure");
+    const searchSpy = vi.spyOn(memoryRetrievalRepository, "searchAuthorized");
     const activate = vi.spyOn(memoryThreadBriefRepository, "activate");
 
     const context = await retrieveMemoryTurnContext(auth, "Осинара, спасибо, понял", []);

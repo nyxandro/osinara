@@ -18,19 +18,17 @@
  * question.
  *
  * Refused rather than approximated: a selection without its meaning branch (the embedding service
- * was down — production would have had it), and a needed record in an unresolved conflict, which
- * production shows only as a pair of versions and the listing would show as an undisputed fact.
+ * was down — production would have had it).
  */
 import { AppError } from "../../../agent/lib/app-error.js";
-import { database } from "../../../agent/lib/database.js";
 import { MEMORY_LIST_MAX_LIMIT } from "../../../agent/lib/memory-config.js";
 import type { MemoryAuthorization } from "../../../agent/lib/memory-context.js";
 import { memoryListRepository } from "../../../agent/lib/memory-list-repository.js";
 import {
   formatRetrievedMemoryInstructions,
   retrieveMemoryTurnContext,
-  type ModelMemoryContextItem,
 } from "../../../agent/lib/memory-retrieval.js";
+import type { ModelMemory } from "../../../agent/lib/model-memory.js";
 import type { MemoryThreadContext } from "../../../agent/lib/memory-thread-context.js";
 import { toModelMemory } from "../../../agent/lib/model-memory.js";
 import { applyTurnMemoryBudget } from "../../../agent/lib/prompt/turn-memory-budget.js";
@@ -44,16 +42,16 @@ export interface MemoryBlock {
   shownRefs: string[];
 }
 
-function shownRefs(memories: readonly ModelMemoryContextItem[]): string[] {
-  return memories.flatMap((item) => "versions" in item ? item.versions.map((version) => version.memoryRef) : [item.memoryRef]);
+function shownRefs(memories: readonly ModelMemory[]): string[] {
+  return memories.map((item) => item.memoryRef);
 }
 
 function renderMemoryBlock(
-  memories: readonly ModelMemoryContextItem[],
+  memories: readonly ModelMemory[],
   threads: MemoryThreadContext | undefined,
   semanticBranchAvailable: boolean,
 ): MemoryBlock {
-  const render = (items: readonly ModelMemoryContextItem[]) =>
+  const render = (items: readonly ModelMemory[]) =>
     formatTurnMemoryContext(formatRetrievedMemoryInstructions(items, threads, semanticBranchAvailable));
   const budget = applyTurnMemoryBudget({ memories, render });
   return { block: render(budget.memories), shownRefs: shownRefs(budget.memories) };
@@ -71,26 +69,9 @@ export async function selectionBlock(auth: MemoryAuthorization, query: string): 
   return renderMemoryBlock(context.memories, context.threads, true);
 }
 
-async function requireUndisputed(memoryRefs: readonly string[]): Promise<void> {
-  const disputed = await database().query<{ memory_ref: string }>(
-    `SELECT DISTINCT ref.memory_ref
-     FROM claim_conflicts AS conflict
-     JOIN memory_item_refs AS ref ON ref.memory_item_id IN (conflict.claim_a_id, conflict.claim_b_id)
-     WHERE conflict.resolution = 'unresolved' AND ref.memory_ref = ANY($1::text[])`,
-    [[...memoryRefs]],
-  );
-  if (disputed.rows.length > 0) {
-    throw new AppError(
-      "AGENT_MEMORY_ANSWERS_NEEDED_RECORD_DISPUTED",
-      `Нужные по разметке записи стоят в неразрешённом споре версий (${disputed.rows.map((row) => row.memory_ref).join(", ")}). Идеальная подборка их так не покажет: исключите ход или доработайте харнесс`,
-    );
-  }
-}
-
 export async function idealSelectionBlock(auth: MemoryAuthorization, memoryRefs: readonly string[]): Promise<MemoryBlock> {
-  await requireUndisputed(memoryRefs);
   const wanted = new Set(memoryRefs);
-  const found = new Map<string, ModelMemoryContextItem>();
+  const found = new Map<string, ModelMemory>();
   let cursor: string | undefined;
   do {
     const page = await memoryListRepository.list(auth, { cursor, limit: MEMORY_LIST_MAX_LIMIT });

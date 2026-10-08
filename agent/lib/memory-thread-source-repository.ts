@@ -18,12 +18,10 @@ import { loadMemoryThreadSourceEvidence } from "./memory-thread-source-evidence.
 
 export interface ThreadSourceRow {
   content: string;
-  conflicting_entry_refs?: string[];
   entry_ref: string;
   occurred_at: Date;
   role: MemoryThreadBriefSource["role"];
   source_ref: string;
-  unresolved_conflict_refs?: string[];
 }
 
 export async function loadMemoryThreadSources(
@@ -34,9 +32,7 @@ export async function loadMemoryThreadSources(
   const result = await client.query<ThreadSourceRow>(
     `SELECT entry.entry_ref, entry.role::text, entry.occurred_at,
             COALESCE(claim.content, outcome.summary) AS content,
-            COALESCE(memory_ref.memory_ref, outcome.outcome_ref) AS source_ref,
-            COALESCE(conflict.conflict_refs, '{}'::text[]) AS unresolved_conflict_refs,
-            COALESCE(conflict.other_entry_refs, '{}'::text[]) AS conflicting_entry_refs
+            COALESCE(memory_ref.memory_ref, outcome.outcome_ref) AS source_ref
      FROM memory_thread_entries AS entry
      JOIN memory_threads AS thread ON thread.id = entry.thread_id
      LEFT JOIN memory_items AS claim ON claim.id = entry.source_claim_id
@@ -45,24 +41,13 @@ export async function loadMemoryThreadSources(
      LEFT JOIN memory_item_refs AS memory_ref ON memory_ref.memory_item_id = claim.id
      LEFT JOIN confirmed_outcomes AS outcome ON outcome.id = entry.source_outcome_id
        AND outcome.status = 'confirmed'
-     LEFT JOIN LATERAL (
-       SELECT array_agg(DISTINCT disputed.conflict_ref) AS conflict_refs,
-              array_agg(DISTINCT other_entry.entry_ref) AS other_entry_refs
-       FROM claim_conflicts AS disputed
-       JOIN memory_thread_entries AS other_entry ON other_entry.thread_id = entry.thread_id
-        AND other_entry.source_claim_id = CASE
-          WHEN disputed.claim_a_id = claim.id THEN disputed.claim_b_id ELSE disputed.claim_a_id END
-       WHERE disputed.resolution = 'unresolved'
-         AND claim.id IN (disputed.claim_a_id, disputed.claim_b_id)
-     ) AS conflict ON claim.id IS NOT NULL
      WHERE thread.family_id = $1
        AND ${liveMemoryReadPredicate({
          alias: "thread",
          personalIdentityColumn: "scope_partition_key",
        })}
        AND entry.thread_id = $5 AND (claim.id IS NOT NULL OR outcome.id IS NOT NULL)
-     ORDER BY CASE WHEN conflict.conflict_refs IS NOT NULL THEN 0 ELSE 1 END,
-       CASE entry.role
+     ORDER BY CASE entry.role
        WHEN 'constraint' THEN 1 WHEN 'goal' THEN 2 WHEN 'open_loop' THEN 2
        WHEN 'method' THEN 3 WHEN 'decision' THEN 4 WHEN 'outcome' THEN 4
        WHEN 'lesson' THEN 5 ELSE 6 END,
@@ -80,27 +65,20 @@ export async function loadMemoryThreadSources(
     inputCharacters += row.content.length;
   }
 
-  const selectedRefs = new Set(bounded.map((row) => row.entry_ref));
   const evidence = new Map((await loadMemoryThreadSourceEvidence(client, threadId, auth))
     .map((item) => [item.sourceEntryRef, item]));
   return bounded.flatMap((row): MemoryThreadBriefSource[] => {
-    const conflictingRefs = (row.conflicting_entry_refs ?? [])
-      .filter((entryRef) => selectedRefs.has(entryRef));
     const sourceEvidence = evidence.get(row.entry_ref);
     // Authorization may be revoked between source and evidence reads; omit content fail-closed.
     if (!sourceEvidence) return [];
     const { sourceEntryRef: _sourceEntryRef, ...modelEvidence } = sourceEvidence;
     return [{
-      ...(conflictingRefs.length === 0 ? {} : { conflictingEntryRefs: conflictingRefs }),
       content: row.content,
       evidence: modelEvidence,
       occurredAt: row.occurred_at.toISOString(),
       ref: row.entry_ref,
       role: row.role,
       sourceRef: row.source_ref,
-      ...((row.unresolved_conflict_refs?.length ?? 0) === 0 || conflictingRefs.length === 0
-        ? {}
-        : { unresolvedConflictRefs: row.unresolved_conflict_refs }),
     }];
   });
 }

@@ -30,7 +30,6 @@ import manageFamilyInvitation from "../tools/manage_family_invitation.js";
 import manageGoogleWorkspaceConnection from "../tools/manage_google_workspace_connection.js";
 import manageGmailMessage from "../tools/manage_gmail_message.js";
 import manageMemory from "../tools/manage_memory.js";
-import manageMemoryConflict from "../tools/manage_memory_conflict.js";
 import manageMemoryThread from "../tools/manage_memory_thread.js";
 import manageProfileProjection from "../tools/manage_profile_projection.js";
 import manageReminder from "../tools/manage_reminder.js";
@@ -71,7 +70,6 @@ export const TRUSTED_MODE_TOOLS: ToolMap = {
   manage_google_workspace_connection: manageGoogleWorkspaceConnection as unknown as AnyToolDefinition,
   manage_gmail_message: manageGmailMessage as unknown as AnyToolDefinition,
   manage_memory: manageMemory as unknown as AnyToolDefinition,
-  manage_memory_conflict: manageMemoryConflict as unknown as AnyToolDefinition,
   manage_memory_thread: manageMemoryThread as unknown as AnyToolDefinition,
   manage_reminder: manageReminder as unknown as AnyToolDefinition,
   read_memory_thread: readMemoryThread as unknown as AnyToolDefinition,

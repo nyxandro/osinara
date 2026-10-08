@@ -36,8 +36,6 @@ interface NormalizeModelFacingErrorContext {
 }
 
 const NOT_FOUND_CORRECTIONS: Readonly<Record<string, string>> = {
-  AGENT_MEMORY_CONFLICT_NOT_FOUND:
-    "Повторно получите актуальный конфликт из текущего блока памяти и используйте только выданные conflictRef и memoryRef.",
   AGENT_MEMORY_NOT_FOUND:
     "Вызовите list_memories или search_memories и повторите действие только с актуальным memoryRef.",
   AGENT_MEMORY_THREAD_NOT_FOUND:

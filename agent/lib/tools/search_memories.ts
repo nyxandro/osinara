@@ -17,14 +17,13 @@ import {
 import {
   retrieveRelevantMemories,
   type MemoryRetrievalDiagnostics,
-  type ModelMemoryContextItem,
 } from "../memory-retrieval.js";
 import {
   memorySelectionMetrics,
   offeredMemoryEvidence,
   type OfferedMemoryEvidence,
 } from "../memory-observability.js";
-import { toModelMemory } from "../model-memory.js";
+import { toModelMemory, type ModelMemory } from "../model-memory.js";
 
 const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u);
 // Open ends of a period, not defaults for missing data: the column itself is bounded to this range.
@@ -49,7 +48,7 @@ export default defineTool({
   }),
   async execute({ from, query, to }, ctx) {
     const started = performance.now();
-    let found: ModelMemoryContextItem[] | null = null;
+    let found: ModelMemory[] | null = null;
     let diagnostics: MemoryRetrievalDiagnostics | null = null;
     // Null for a period: those records are picked by date, so there is no rank to describe.
     let memoryEvidence: OfferedMemoryEvidence[] | null = null;
@@ -68,16 +67,13 @@ export default defineTool({
           to: to ?? LATEST_SEARCHABLE_DAY,
         });
         found = window.map((item) => toModelMemory(item));
-        await recordToolShows(ctx, found.map((item) => "memoryRef" in item ? item.memoryRef : null)
-          .filter((ref): ref is string => ref !== null), "search");
+        await recordToolShows(ctx, found.map((item) => item.memoryRef), "search");
         return found;
       }
       const result = await retrieveRelevantMemories(auth, query);
       found = result.memories;
       diagnostics = result.diagnostics;
-      await recordToolShows(ctx, found.flatMap((item) => "versions" in item
-        ? item.versions.map((version) => version.memoryRef)
-        : [item.memoryRef]), "search");
+      await recordToolShows(ctx, found.map((item) => item.memoryRef), "search");
       memoryEvidence = offeredMemoryEvidence(result.memories, result.rankingByMemoryRef);
       // Without the semantic branch a paraphrase simply does not match, and an empty result read
       // as «этого нет» is worse than no answer at all.
