@@ -33,8 +33,7 @@ import {
 } from "../history/history-repository.js";
 import { renderPendingApprovalsNote } from "../hitl/input-requests.js";
 import type { InputRequest } from "../hitl/types.js";
-import { formatAvailableSkillsSection } from "../prompt/skills-section.js";
-import { composeSystemPrompt } from "../prompt/system-prompt.js";
+import { preparedSystemPrompt } from "../prompt/system-prompt.js";
 import { instructionTurnMessages, resolveTurnInstructions, turnInputMessages } from "../prompt/turn-instructions.js";
 import type { SessionParent } from "../context.js";
 import type { RuntimeSandboxSession } from "../sandbox/types.js";
@@ -116,17 +115,6 @@ function requirePrepared(turn: TurnRecord): PreparedTurn {
   return turn.prepared;
 }
 
-function systemPrompt(agent: RuntimeAgent, prepared: PreparedTurn): string {
-  if (prepared.skills.length > 0 && prepared.skillRoot === null) {
-    throw new Error("AGENT_TURN_SKILL_ROOT_MISSING: skills are listed without a sandbox skill root");
-  }
-  return composeSystemPrompt({
-    base: agent.basePrompt,
-    instructionBlocks: prepared.instructions,
-    skillsSection: prepared.skillRoot === null ? null : formatAvailableSkillsSection(prepared.skills, { skillRoot: prepared.skillRoot }),
-  });
-}
-
 /** What a step's request carries besides its messages; compaction measures the same frame the model gets. */
 interface StepFrame {
   readonly system: string;
@@ -134,7 +122,7 @@ interface StepFrame {
 }
 
 function stepFrame(agent: RuntimeAgent, turn: TurnRecord, tools: AnyTools): StepFrame {
-  return { system: systemPrompt(agent, requirePrepared(turn)), tools: toModelToolSet(orderStepTools(tools, agent.staticToolNames)) };
+  return { system: preparedSystemPrompt(agent.basePrompt, requirePrepared(turn)), tools: toModelToolSet(orderStepTools(tools, agent.staticToolNames)) };
 }
 
 /** A delegated child's caller, as its tools and step hook see it, continuations included; one level deep. */

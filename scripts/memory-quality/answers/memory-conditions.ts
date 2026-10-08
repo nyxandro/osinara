@@ -3,14 +3,16 @@
  *
  * Exports:
  * - `ANSWER_CONDITIONS` / `AnswerCondition`:
- *   - `no_selection`: no automatic selection at all; the model has only `search_memories`.
+ *   - `no_selection`: no automatic selection at all; the model has only `search_memories`, where
+ *     the turn's surface offered it.
  *   - `selection`: the product's automatic selection, run on the copy rewound to the turn.
  *   - `ideal_selection`: exactly the records the golden set marks as needed, nothing else.
  * - `MemoryBlock` / `selectionBlock` / `idealSelectionBlock`: the block and the refs it shows.
  *
  * Both blocks go through the product's formatter, payload markers and size budget, and the ideal
  * one reads its records through the product's authorized listing: the records are shown the same
- * way in both. The profile view is left out of both alike.
+ * way in both. The profile view is left out of both alike: production's memory block, which held
+ * it, is the one block every condition replaces (`turn-prompt.ts`).
  *
  * One difference is deliberate: the selection carries the thread briefs production's selection
  * would activate, and the ideal block carries none — it is the needed records and nothing else.

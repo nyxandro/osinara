@@ -4,11 +4,15 @@
  * Exports:
  * - `composeBasePrompt`: the session's fixed part — authored instructions plus the parallel-tool rule.
  * - `composeSystemPrompt`: base, then this turn's system blocks, then the skill list, one message.
+ * - `preparedSystemPrompt`: the same message for a prepared turn, from the blocks stored with it.
  *
  * The empty-delivery marker is taught by the application prompt in every mode. The texts are
  * pinned by the reference requests in `testing/reference-requests/`.
  * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
+import type { PreparedTurn } from "../turn/turn-types.js";
+import { formatAvailableSkillsSection } from "./skills-section.js";
+
 export const PARALLEL_ACTION_INSTRUCTION =
   "Tool execution\nA single tool or subagent call runs as one serial action. If you call multiple independent tools or subagents in one response, the runtime treats that batch as parallel work. Only batch work that is independent and does not rely on another call in the same response.";
 
@@ -30,4 +34,18 @@ export function composeSystemPrompt(input: {
 }): string {
   return [input.base, ...input.instructionBlocks, ...(input.skillsSection === null ? [] : [input.skillsSection])]
     .join(BLOCK_SEPARATOR);
+}
+
+/** The answer-measurement harness rebuilds a stored turn's request through this same function. */
+export function preparedSystemPrompt(base: string, prepared: PreparedTurn): string {
+  if (prepared.skills.length > 0 && prepared.skillRoot === null) {
+    throw new Error("AGENT_TURN_SKILL_ROOT_MISSING: skills are listed without a sandbox skill root");
+  }
+  return composeSystemPrompt({
+    base,
+    instructionBlocks: prepared.instructions,
+    skillsSection: prepared.skillRoot === null
+      ? null
+      : formatAvailableSkillsSection(prepared.skills, { skillRoot: prepared.skillRoot }),
+  });
 }

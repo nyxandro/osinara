@@ -7,8 +7,15 @@
  * - `generateAnswer`: runs the request and executes `search_memories` on the rewound copy.
  *
  * The model is the configured primary model: the transport, the request shape and the
- * memory-payload projection are production's. The tool is the product's own definition, executed
- * with the turn's verified rights, so a search sees memory as it stood at the question. Streamed,
+ * memory-payload projection are production's. The tool is advertised as the turn's own surface
+ * advertised it, through the runtime's own conversion, and runs as the product's own
+ * `search_memories` with the turn's verified rights, so a search sees memory as it stood at the
+ * question. A turn whose surface had no `search_memories` gets no tool at all.
+ *
+ * The surface's wrappers are not run. In a private or family chat the wrapper collects messages
+ * the person sent while the turn ran — on the copy that would claim stored updates and could
+ * transcribe voice through the provider. In an external group it rechecks the grant this harness
+ * has just read from the same copy. Neither changes what the search returns. Streamed,
  * as the runtime streams (`agent/runtime/turn/model-call.ts`): without streaming the provider sends
  * nothing until the whole answer is written, and a long one outlives the HTTP client's five-minute
  * wait for the first byte — a failure production never meets.
@@ -17,14 +24,15 @@
  * last step's. A search that fails, or runs without its meaning branch, stops the run: the answer
  * would be measured against a search production did not have.
  */
-import { asSchema, isStepCount, streamText, tool, type ModelMessage } from "ai";
+import { isStepCount, streamText, type ModelMessage, type ToolSet } from "ai";
 
 import { AppError } from "../../../agent/lib/app-error.js";
 import { primaryModel } from "../../../agent/lib/model-registry.js";
-import { readMemoryUsageDirective } from "../../../agent/lib/memory-usage-directive.js";
 import searchMemories from "../../../agent/lib/tools/search_memories.js";
+import { readMemoryUsageDirective } from "../../../agent/lib/memory-usage-directive.js";
 import type { SessionAuth } from "../../../agent/runtime/context.js";
-import type { ToolContext } from "../../../agent/runtime/tool.js";
+import type { ToolContext, ToolDefinition } from "../../../agent/runtime/tool.js";
+import { toModelToolSet } from "../../../agent/runtime/turn/model-tools.js";
 import { stepTextEvents } from "../../../agent/runtime/turn/step-history.js";
 
 /**
@@ -32,6 +40,9 @@ import { stepTextEvents } from "../../../agent/runtime/turn/step-history.js";
  * round leaves room for a period search after them. An answer cut off here is recorded as such.
  */
 export const MAX_ANSWER_STEPS = 5;
+
+// The surface maps hold tools of different input types; the harness never relies on them here.
+type AnyToolDefinition = ToolDefinition<any, any>;
 
 const MEMORY_REF_PATTERN = /mem_[0-9a-f]{32}/gu;
 const REJECTED_INPUT_CHARACTERS = 300;
@@ -43,7 +54,7 @@ const REJECTED_INPUT_CHARACTERS = 300;
 export type AnswerOutcome = "answered" | "cut_off" | "empty" | "silent";
 
 /**
- * Every tool call the model made. Only `search_memories` is offered, but the model also reaches
+ * Every tool call the model made. At most `search_memories` is offered, but the model also reaches
  * for tools it knows from the conversation history — web search, image inspection, memory writes,
  * group history — and those come back as errors without a result.
  */
@@ -85,6 +96,8 @@ function searchInput(input: unknown): { from: string | null; query: string | nul
 export async function generateAnswer(input: {
   auth: SessionAuth;
   messages: readonly ModelMessage[];
+  /** `search_memories` as the turn's surface advertised it; null where production offered none. */
+  advertisedSearchTool: AnyToolDefinition | null;
   sessionId: string;
   system: string;
   turnId: string;
@@ -104,6 +117,43 @@ export async function generateAnswer(input: {
     toolName: "search_memories",
   }) as unknown as ToolContext;
 
+  // The model gets the raw result, as the runtime gives it for a tool without a projection.
+  if (searchMemories.toModelOutput !== undefined) {
+    throw new AppError(
+      "AGENT_MEMORY_ANSWERS_TOOL_PROJECTION_UNSUPPORTED",
+      "У search_memories появилась проекция результата для модели, а харнесс её не применяет. Доработайте харнесс",
+    );
+  }
+  const tools: ToolSet = {};
+  if (input.advertisedSearchTool !== null) {
+    // The same advertised form the runtime builds from a definition (`model-tools.ts`).
+    const advertised = toModelToolSet([["search_memories", input.advertisedSearchTool]]).search_memories!;
+    tools.search_memories = {
+      ...advertised,
+      execute: async (toolInput: unknown, options: { toolCallId: string }) => {
+        let output: unknown;
+        try {
+          output = await searchMemories.execute(
+            toolInput as Parameters<typeof searchMemories.execute>[0], context(options.toolCallId),
+          );
+        } catch (error) {
+          return stopOnSearchFailure(new AppError(
+            "AGENT_MEMORY_ANSWERS_SEARCH_FAILED",
+            "Поиск памяти упал во время замера ответов. Проверьте копию базы и сервис векторов, затем продолжите прогон",
+            { cause: error },
+          ));
+        }
+        if (typeof output === "object" && output !== null && "incompleteSelection" in output) {
+          return stopOnSearchFailure(new AppError(
+            "AGENT_MEMORY_ANSWERS_SEMANTIC_UNAVAILABLE",
+            "Поиск памяти отработал без смысловой ветки: сервис векторов недоступен. Поднимите его и продолжите прогон",
+          ));
+        }
+        return output;
+      },
+    } as ToolSet[string];
+  }
+
   const result = streamText({
     abortSignal: abort.signal,
     instructions: input.system,
@@ -114,34 +164,7 @@ export async function generateAnswer(input: {
     // Errors arrive through the stream and stop the run there; the SDK would print them again.
     onError: () => {},
     stopWhen: isStepCount(MAX_ANSWER_STEPS),
-    tools: {
-      search_memories: tool({
-        description: searchMemories.description,
-        // The same conversion the runtime applies to a tool's Standard Schema (`model-tools.ts`).
-        inputSchema: asSchema(searchMemories.inputSchema as Parameters<typeof asSchema>[0]),
-        execute: async (toolInput: unknown, options: { toolCallId: string }) => {
-          let output: unknown;
-          try {
-            output = await searchMemories.execute(
-              toolInput as Parameters<typeof searchMemories.execute>[0], context(options.toolCallId),
-            );
-          } catch (error) {
-            return stopOnSearchFailure(new AppError(
-              "AGENT_MEMORY_ANSWERS_SEARCH_FAILED",
-              "Поиск памяти упал во время замера ответов. Проверьте копию базы и сервис векторов, затем продолжите прогон",
-              { cause: error },
-            ));
-          }
-          if (typeof output === "object" && output !== null && "incompleteSelection" in output) {
-            return stopOnSearchFailure(new AppError(
-              "AGENT_MEMORY_ANSWERS_SEMANTIC_UNAVAILABLE",
-              "Поиск памяти отработал без смысловой ветки: сервис векторов недоступен. Поднимите его и продолжите прогон",
-            ));
-          }
-          return output;
-        },
-      }),
-    },
+    tools,
   });
   try {
     for await (const part of result.stream) {
