@@ -37,7 +37,7 @@ import {
   loadHistoryBefore,
   loadStoredTurn,
   turnMessages,
-  turnModeBlock,
+  turnSearchTool,
   turnSystemPrompt,
 } from "./turn-prompt.js";
 
@@ -142,7 +142,7 @@ async function answers(): Promise<void> {
     const turn = await loadStoredTurn(planned.turnId);
     const history = historyTail(await loadHistoryBefore(turn), HISTORY_TAIL_MAX_CHARACTERS);
     const messages = turnMessages(turn, history);
-    const modeBlock = await turnModeBlock(turn, messages);
+    const advertisedSearchTool = await turnSearchTool(turn, messages);
     const authorization = requireMemoryAuthorization({ session: { auth: turn.auth } } as Parameters<typeof requireMemoryAuthorization>[0]);
     const details = await recordDetails(planned.neededRefs);
     const neededRecords = planned.neededRefs.map((memoryRef) => {
@@ -163,10 +163,11 @@ async function answers(): Promise<void> {
           ? await selectionBlock(authorization, planned.query)
           : await idealSelectionBlock(authorization, planned.neededRefs);
       const answer = await answerOrFail({
+        advertisedSearchTool,
         auth: turn.auth,
         messages,
         sessionId: turn.sessionId,
-        system: turnSystemPrompt(modeBlock, memory?.block ?? null),
+        system: turnSystemPrompt(turn.prepared, memory?.block ?? null),
         turnId: turn.turnId,
       });
       const line: AnswerLine = {
