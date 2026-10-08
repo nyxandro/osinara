@@ -5,7 +5,8 @@
  * - `embedQueryOrDegrade`: the query vector, or none when the embedding service is unreachable.
  * - `SILENT_SELECTION_DIAGNOSTICS`: the branch numbers of a selection that did not search.
  * - `SelectedMemory` / `AutomaticMemorySelection`: one selected record and the whole selection.
- * - `selectMemoriesAutomatically`: small talk, the hybrid search and the date a question names.
+ * - `selectMemoriesAutomatically`: small talk, the hybrid search, the assistant named where «ты»
+ *   means it, and the date a question names.
  *
  * One function for the turn, the synthetic evaluations and the real-memory golden set, so the
  * numbers are measured on the selection people actually get and not on a part of it.
@@ -15,6 +16,7 @@ import { localDate, memoryDateWindow, type MemoryDateWindow } from "./memory-dat
 import { embedMemoryQueryChunks } from "./memory-embedding-client.js";
 import { memoryEventWindowRepository } from "./memory-event-window-repository.js";
 import { memoryFailureCode } from "./memory-context-failure.js";
+import { withAssistantName } from "./memory-persona-query.js";
 import type { MemoryAuthorization } from "./memory-context.js";
 import { MEMORY_RETRIEVAL_LIMIT } from "./memory-config.js";
 import type { ReferencedMemoryItem } from "./memory-record.js";
@@ -138,9 +140,11 @@ export async function selectMemoriesAutomatically(
     };
   }
   const limit = options.limit ?? MEMORY_RETRIEVAL_LIMIT;
-  const embeddings = await embedQueryOrDegrade(prepared);
+  // In a group «ты» is the assistant, and its records carry its name; see memory-persona-query.ts.
+  const searchText = auth.groupId === null ? prepared : withAssistantName(prepared);
+  const embeddings = await embedQueryOrDegrade(searchText);
   const retrieval = await memoryRetrievalRepository.searchWithConflictClosure(
-    auth, prepared, embeddings, limit, options.window,
+    auth, searchText, embeddings, limit, options.window,
   );
   const searched = retrieval.results.map((result): SelectedMemory => ({
     evidence: result.evidence,
