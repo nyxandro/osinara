@@ -52,8 +52,9 @@ export const MEMORY_RETRIEVAL_EVAL_QUERIES_GOLDEN_SHAPES_V3: readonly MemoryRetr
     text: "Что у нас случилось неделю назад?" },
   { category: "date_question", expectedKeys: ["valdai-trip", "valdai-fishing"], key: "date-month",
     text: "Что мы делали в июне 2025 года?" },
+  // С годом: день без года — последний прошедший, и запись 2025 года он нашёл бы только до марта 2026.
   { category: "date_question", expectedKeys: ["boiler-repair"], key: "date-exact-day",
-    text: "Что произошло 3 марта?" },
+    text: "Что произошло 3 марта 2025 года?" },
 
   // Факт обновлялся: прежняя версия хранится заменённой, ответить должна текущая.
   { category: "updated_fact", expectedKeys: ["internet-plan"], key: "updated-internet",

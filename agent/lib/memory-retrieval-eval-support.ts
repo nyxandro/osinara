@@ -7,7 +7,7 @@
  * - `evalRecordId`: the stored id of a corpus record, derived from its key.
  * - `indexEvalRecords`: stores every record and its vectors the way production indexes them.
  * - `evalResultKeys`: the corpus keys of what a search returned.
- * - `evalAutomaticSelection`: the search the automatic selection runs, its abstention included.
+ * - `evalAutomaticSelection`: the automatic selection of a turn for one prepared question.
  * - `evalShare`: a ratio rounded to three decimals — a share, or a mean per query — that refuses an
  *   empty category; `categoryRate` is that share over one category of evaluated queries.
  *
@@ -17,15 +17,17 @@
 import { createHash } from "node:crypto";
 
 import { database } from "./database.js";
-import { embedMemoryPassages, embedMemoryQueryChunks } from "./memory-embedding-client.js";
+import { embedMemoryPassages } from "./memory-embedding-client.js";
 import { chunkMemoryContent } from "./memory-embedding-chunks.js";
 import { memoryEmbeddingInput } from "./memory-embedding-header.js";
 import { MEMORY_EMBEDDING_MODEL_VERSION, MEMORY_EMBEDDING_PROVIDER_BATCH_SIZE } from "./memory-config.js";
 import type { MemoryAuthorization } from "./memory-context.js";
 import type { MemoryKind } from "./memory-record.js";
-import { memoryRetrievalRepository } from "./memory-retrieval-repository.js";
-import { SILENT_SELECTION_DIAGNOSTICS } from "./memory-retrieval.js";
-import { isSmallTalkMessage } from "./memory-small-talk.js";
+import {
+  selectMemoriesAutomatically,
+  type AutomaticMemorySelection,
+  type SelectedMemory,
+} from "./memory-automatic-selection.js";
 
 export function retrievalEvalsEnabled(): boolean {
   const enabled = process.env.RUN_MEMORY_RETRIEVAL_EVALS === "true";
@@ -148,18 +150,14 @@ export function categoryRate<Category extends string, Entry extends { query: { c
 }
 
 /**
- * What the automatic selection of a turn offers for one prepared question: a message that asks
- * memory nothing gets no search at all, everything else the search. Measuring the search alone
- * would grade small talk by a selection nobody sees any more.
+ * What the automatic selection of a turn offers for one prepared question, through the same
+ * function the turn uses: small talk, the hybrid search and the date a question names.
  */
 export async function evalAutomaticSelection(
   auth: MemoryAuthorization,
   prepared: string,
   limit: number,
-): Promise<Awaited<ReturnType<typeof memoryRetrievalRepository.search>> & { abstained: boolean }> {
-  if (isSmallTalkMessage(prepared)) {
-    return { abstained: true, diagnostics: SILENT_SELECTION_DIAGNOSTICS, results: [] };
-  }
-  const found = await memoryRetrievalRepository.search(auth, prepared, await embedMemoryQueryChunks(prepared), limit);
-  return { ...found, abstained: false };
+): Promise<AutomaticMemorySelection & { results: SelectedMemory[] }> {
+  const selection = await selectMemoriesAutomatically(auth, prepared, { limit, now: new Date(), window: null });
+  return { ...selection, results: selection.selected };
 }

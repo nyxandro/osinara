@@ -93,8 +93,10 @@ export const MEMORY_RETRIEVAL_EVAL_QUERIES_V3: readonly MemoryRetrievalEvalQuery
  *   the same reason as `negativeEmptyRate`, so the message is recognised as asking nothing before
  *   any search (#341). All eight shapes here are made of small-talk words; chatter in ordinary
  *   words is not, and the group corpus measures that half.
- * - `dateQuestionRecallAt12` = 0. «Что было вчера?» cannot find the record of yesterday: the
- *   automatic selection never reads the event date, and the record does not say the day in words.
+ * - `dateQuestionRecallAt12` = 1, from 0 before 08.10.2026. «Что было вчера?» could not find the
+ *   record of yesterday: the record does not say the day in words, and nothing read its event date.
+ *   The selection now reads an explicit day or period in the question and puts the records of it
+ *   first (#344). The exact-day question carries its year: a day without one is the latest past.
  * - `aliasWordingRecallAt12` = 0.875 with `aliasWordingTopThreeRate` = 0.5. The meaning branch
  *   finds «репа», «ДР», «дейли» on this clean corpus, but half of them sit below third place; the
  *   one miss is «тачка», which reached nothing about the car at all.
@@ -118,7 +120,7 @@ export const MEMORY_RETRIEVAL_R1_BASELINE_V3 = {
   aliasWordingRecallAt12: 0.875,
   aliasWordingTopThreeRate: 0.5,
   botAddressRecallAt12: 1,
-  dateQuestionRecallAt12: 0,
+  dateQuestionRecallAt12: 1,
   emojiMarkupRecallAt12: 1,
   exactRecallAt12: 1,
   expectedInTopThreeRate: 0.84,

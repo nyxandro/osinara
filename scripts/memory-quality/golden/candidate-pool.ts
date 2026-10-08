@@ -15,8 +15,8 @@
  * - `collectGatedCandidates`: every record that passed a branch gate for one question, with each
  *   branch's score, so another fusion of the same branches can be ranked without a new copy.
  *
- * Every number comes from the product's own search: the repository call the tools make, and the
- * statement it runs, bound once with the product's parameters and once with the gates opened.
+ * Every number comes from the product's own code: the automatic selection a turn makes, and the
+ * search statement it runs, bound once with the product's parameters and once with the gates opened.
  *
  * A question is judged against memory as it stood when it was asked. A record written from that
  * very message would otherwise be found by its own words and inflate every number, so the copy is
@@ -42,11 +42,10 @@ import {
 } from "../../../agent/lib/memory-config.js";
 import type { MemoryAuthorization } from "../../../agent/lib/memory-context.js";
 import {
-  memoryRetrievalRepository,
   memoryRetrievalSearchParameters,
   memoryRetrievalSearchStatement,
 } from "../../../agent/lib/memory-retrieval-repository.js";
-import { isSmallTalkMessage } from "../../../agent/lib/memory-small-talk.js";
+import { selectMemoriesAutomatically } from "../../../agent/lib/memory-automatic-selection.js";
 import type { GoldenTurn } from "./golden-score.js";
 import type { GoldenQuery } from "./turn-queries.js";
 
@@ -333,14 +332,13 @@ export async function collectTurnCandidates(
   embeddings: readonly (readonly number[])[],
   production: { shown: string[]; used: string[] } | null,
 ): Promise<GoldenTurn & { authorization: MemoryAuthorization; pool: PoolRecord[]; startedAt: string }> {
-  const found = await memoryRetrievalRepository.searchWithConflictClosure(
-    question.authorization, question.query, embeddings,
-  );
-  // What the automatic selection offers: a message that asks memory nothing gets nothing.
-  const selection = isSmallTalkMessage(question.query) ? { ...found, conflicts: [], results: [] } : found;
+  // What the automatic selection offered, through the turn's own function, on the day it was asked.
+  const selection = await selectMemoriesAutomatically(question.authorization, question.query, {
+    now: new Date(question.startedAt), window: null,
+  });
   // A record in two open conflicts comes back once per group: one record, offered at its first place.
   const offered = [...new Set([
-    ...selection.results.map((result) => result.memory.memoryRef),
+    ...selection.selected.map((selected) => selected.memory.memoryRef),
     ...selection.conflicts.flatMap((conflict) => conflict.versions.map((version) => version.memoryRef)),
   ])];
   const product = memoryRetrievalSearchParameters(question.authorization, question.query, embeddings);
