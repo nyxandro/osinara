@@ -163,6 +163,7 @@ const POST_V0101_MIGRATIONS = [
   "129_drop_memory_thread_generation.sql",
   "130_compaction_summary_refusals.sql",
   "131_memory_show_sources.sql",
+  "132_remove_memory_conflict_grants.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [

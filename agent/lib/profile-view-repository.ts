@@ -225,11 +225,6 @@ async function loadClaims(
      WHERE claim.family_id = $1
        AND claim.profile_eligible = true
         AND claim.claim_status = 'active'
-        AND NOT EXISTS (
-          SELECT 1 FROM claim_conflicts AS conflict
-          WHERE conflict.resolution = 'unresolved'
-            AND claim.id IN (conflict.claim_a_id, conflict.claim_b_id)
-        )
        AND claim.sensitivity = 'normal'
        AND claim.kind <> 'episode'
        AND (
@@ -390,11 +385,6 @@ export const profileViewRepository = {
            ON claim_subject.id = claim.subject_participant_id
           WHERE subject.profile_view_id = $1
             AND claim.claim_status = 'active' AND claim.profile_eligible = true
-            AND NOT EXISTS (
-              SELECT 1 FROM claim_conflicts AS conflict
-              WHERE conflict.resolution = 'unresolved'
-                AND claim.id IN (conflict.claim_a_id, conflict.claim_b_id)
-            )
            AND claim.sensitivity = 'normal' AND claim.kind <> 'episode'
            AND (
            ($2::memory_scope = 'personal' AND (

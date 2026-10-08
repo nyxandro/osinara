@@ -21,10 +21,7 @@ import { withQueryAliases } from "./memory-query-aliases.js";
 import type { MemoryAuthorization } from "./memory-context.js";
 import { MEMORY_RETRIEVAL_LIMIT } from "./memory-config.js";
 import type { ReferencedMemoryItem } from "./memory-record.js";
-import {
-  memoryRetrievalRepository,
-  type MemoryConflictGroup,
-} from "./memory-retrieval-repository.js";
+import { memoryRetrievalRepository } from "./memory-retrieval-repository.js";
 import type {
   MemoryRetrievalBranchDiagnostics,
   MemoryRetrievalBranchEvidence,
@@ -67,8 +64,6 @@ export interface SelectedMemory {
 export interface AutomaticMemorySelection {
   /** True when the message asked memory nothing and no search ran. */
   abstained: boolean;
-  claimIdsByConflictRef: ReadonlyMap<string, readonly string[]>;
-  conflicts: MemoryConflictGroup[];
   /** The day or period the question named, and how many records carried an event date in it. */
   dateWindow: (MemoryDateWindow & { records: number }) | null;
   diagnostics: MemoryRetrievalBranchDiagnostics;
@@ -135,7 +130,7 @@ export async function selectMemoriesAutomatically(
 ): Promise<AutomaticMemorySelection> {
   if (isSmallTalkMessage(prepared)) {
     return {
-      abstained: true, claimIdsByConflictRef: new Map(), conflicts: [], dateWindow: null,
+      abstained: true, dateWindow: null,
       diagnostics: SILENT_SELECTION_DIAGNOSTICS, embeddings: [], relatedClaimIds: [], selected: [],
       semanticBranchAvailable: true,
     };
@@ -146,7 +141,7 @@ export async function selectMemoriesAutomatically(
   const withAliases = withQueryAliases(prepared);
   const searchText = auth.groupId === null ? withAliases : withAssistantName(withAliases);
   const embeddings = await embedQueryOrDegrade(searchText);
-  const retrieval = await memoryRetrievalRepository.searchWithConflictClosure(
+  const retrieval = await memoryRetrievalRepository.searchAuthorized(
     auth, searchText, embeddings, limit, options.window,
   );
   const searched = retrieval.results.map((result): SelectedMemory => ({
@@ -168,16 +163,11 @@ export async function selectMemoriesAutomatically(
   }
   return {
     abstained: false,
-    claimIdsByConflictRef: retrieval.claimIdsByConflictRef,
-    conflicts: retrieval.conflicts,
     dateWindow,
     diagnostics: retrieval.diagnostics,
     embeddings,
-    // What the profile may read beside the block: exactly the records offered, conflicts included.
-    relatedClaimIds: [...new Set([
-      ...selected.map((one) => one.memory.id),
-      ...[...retrieval.claimIdsByConflictRef.values()].flat(),
-    ])],
+    // What the profile may read beside the block: exactly the records offered.
+    relatedClaimIds: selected.map((one) => one.memory.id),
     selected,
     semanticBranchAvailable: embeddings.length > 0,
   };

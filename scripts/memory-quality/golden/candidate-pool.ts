@@ -177,9 +177,8 @@ export async function requireResumableCopy(): Promise<void> {
 }
 
 /**
- * A record's status at the moment, for one that is retracted now: deletion and a choice between
- * versions both overwrite it, but the replacement it underwent stays in `claim_relations`, and a
- * choice made before the moment had already retracted it then.
+ * A record's status at the moment, for one that is retracted now: deletion overwrites it, but the
+ * replacement it underwent stays in `claim_relations`.
  */
 const SUCCESSOR_AT_MOMENT = (alias: string) => `(
   SELECT relation.target_claim_id
@@ -191,16 +190,10 @@ const SUCCESSOR_AT_MOMENT = (alias: string) => `(
   ORDER BY successor.created_at DESC
   LIMIT 1
 )`;
-const LOST_CHOICE_BEFORE_MOMENT = (alias: string) => `EXISTS (
-  SELECT 1 FROM claim_conflicts AS earlier
-  WHERE earlier.resolution = 'chosen' AND earlier.resolved_at < $1
-    AND ${alias}.id IN (earlier.claim_a_id, earlier.claim_b_id) AND earlier.chosen_claim_id <> ${alias}.id
-)`;
 const RETURN_TO_STATUS_AT_MOMENT = (candidates: string) => `
   WITH returning_records AS (
     SELECT DISTINCT candidate.id, ${SUCCESSOR_AT_MOMENT("candidate")} AS successor_id
     FROM (${candidates}) AS candidate
-    WHERE NOT ${LOST_CHOICE_BEFORE_MOMENT("candidate")}
   )
   UPDATE memory_items_all AS item
   SET deleted_at = NULL,
@@ -236,24 +229,6 @@ export async function rewindCopyTo(moment: string): Promise<void> {
        FROM memory_items_all AS successor
        WHERE successor.id = previous.superseded_by AND previous.claim_status = 'superseded'
          AND successor.created_at >= $1`,
-      [moment],
-    );
-    // A choice made later had not retracted the other version yet. Before the conflicts detected
-    // later are dropped: a conflict both detected and decided later still retracted that version.
-    await client.query(RETURN_TO_STATUS_AT_MOMENT(
-      `SELECT version.id
-       FROM claim_conflicts AS conflict
-       JOIN memory_items_all AS version ON version.id IN (conflict.claim_a_id, conflict.claim_b_id)
-       WHERE conflict.resolution = 'chosen' AND conflict.resolved_at >= $1
-         AND version.id <> conflict.chosen_claim_id AND version.claim_status = 'retracted'
-         AND version.deleted_at IS NULL`,
-    ), [moment]);
-    await client.query("DELETE FROM claim_conflicts WHERE detected_at >= $1", [moment]);
-    await client.query(
-      `UPDATE claim_conflicts
-       SET resolution = 'unresolved', chosen_claim_id = NULL, resolved_at = NULL,
-           resolved_by_user_id = NULL, resolved_by_telegram_user_id = NULL, resolution_metadata = NULL
-       WHERE resolved_at >= $1`,
       [moment],
     );
     await client.query("COMMIT");
@@ -344,11 +319,7 @@ export async function collectTurnCandidates(
   const selection = await selectMemoriesAutomatically(question.authorization, question.query, {
     now: new Date(question.startedAt), window: null,
   });
-  // A record in two open conflicts comes back once per group: one record, offered at its first place.
-  const offered = [...new Set([
-    ...selection.selected.map((selected) => selected.memory.memoryRef),
-    ...selection.conflicts.flatMap((conflict) => conflict.versions.map((version) => version.memoryRef)),
-  ])];
+  const offered = selection.selected.map((selected) => selected.memory.memoryRef);
   const product = memoryRetrievalSearchParameters(question.authorization, question.query, embeddings);
   const gated = (await candidateRows(product)).map((row) => row.memory_ref);
   const ungated = await candidateRows(ungatedSearchParameters(product));

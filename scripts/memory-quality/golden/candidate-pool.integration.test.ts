@@ -4,13 +4,9 @@
  * Constructs covered:
  * - A record younger than the question is hidden, deleted since or not; one created before it stays.
  * - A record deleted after the question is back in the status it had then — active, or superseded
- *   by its successor, or still out if a choice had already retracted it; one deleted before the
- *   question stays deleted.
+ *   by its successor; one deleted before the question stays deleted.
  * - A version whose successor is younger than the question is current again; one superseded
  *   before it stays superseded.
- * - A conflict detected after the question is gone, and the version its later choice retracted is
- *   active; one decided after it is open again with that version active; one decided before it
- *   is left as it was.
  * - A rewind to an older moment hides what was created in between, so the copy walked from the
  *   newest question back is right at every step.
  * - The pool of a question neither offers nor gates a record younger than the question.
@@ -38,7 +34,6 @@ interface StoredRecord {
 describeWithDatabase("rewindCopyTo", () => {
   let owner: MemoryAuthorization;
   const records: Record<string, StoredRecord> = {};
-  const conflicts: Record<string, string> = {};
 
   async function record(key: string, createdAt: string, content = `Запись ${key}`): Promise<StoredRecord> {
     const inserted = await database().query<{ id: string }>(
@@ -56,28 +51,6 @@ describeWithDatabase("rewindCopyTo", () => {
     );
     records[key] = { id, ref: ref.rows[0]!.memory_ref };
     return records[key]!;
-  }
-
-  async function conflict(
-    key: string, first: StoredRecord, second: StoredRecord,
-    state: { chosen?: StoredRecord; detectedAt: string; resolvedAt?: string },
-  ): Promise<void> {
-    const inserted = await database().query<{ id: string }>(
-      `INSERT INTO claim_conflicts
-         (claim_a_id, claim_b_id, family_id, scope, scope_partition_key, detection_method,
-          detected_at, resolution, chosen_claim_id, resolved_at)
-       SELECT LEAST($1::uuid, $2::uuid), GREATEST($1::uuid, $2::uuid), item.family_id, item.scope,
-              item.scope_partition_key, 'deterministic_guard', $3,
-              CASE WHEN $4::uuid IS NULL THEN 'unresolved' ELSE 'chosen' END, $4::uuid, $5::timestamptz
-       FROM memory_items_all AS item WHERE item.id = $1
-       RETURNING id`,
-      [first.id, second.id, state.detectedAt, state.chosen?.id ?? null, state.resolvedAt ?? null],
-    );
-    conflicts[key] = inserted.rows[0]!.id;
-    if (state.chosen !== undefined) {
-      const retracted = state.chosen.id === first.id ? second : first;
-      await database().query("UPDATE memory_items_all SET claim_status = 'retracted' WHERE id = $1", [retracted.id]);
-    }
   }
 
   async function state(key: string): Promise<{ claim_status: string; deleted: boolean }> {
@@ -103,17 +76,9 @@ describeWithDatabase("rewindCopyTo", () => {
     );
   }
 
-  async function conflictState(key: string): Promise<{ chosen: boolean; resolution: string } | null> {
-    const row = await database().query<{ chosen: boolean; resolution: string }>(
-      "SELECT resolution, chosen_claim_id IS NOT NULL AS chosen FROM claim_conflicts WHERE id = $1",
-      [conflicts[key]!],
-    );
-    return row.rows[0] ?? null;
-  }
-
   beforeAll(async () => {
     await database().query(
-      "TRUNCATE claim_conflicts, memory_embedding_chunks, memory_embedding_jobs, memory_items_all, family_memberships, users, families CASCADE",
+      "TRUNCATE memory_embedding_chunks, memory_embedding_jobs, memory_items_all, family_memberships, users, families CASCADE",
     );
     owner = (await createMemoryFamilyFixture("golden")).owner;
 
@@ -143,28 +108,8 @@ describeWithDatabase("rewindCopyTo", () => {
       );
     }
 
-    const disputedA = await record("disputedA", "2026-10-03T09:00:00.000Z");
-    const disputedB = await record("disputedB", "2026-10-03T09:00:00.000Z");
-    await conflict("detectedLater", disputedA, disputedB, { detectedAt: "2026-10-05T16:00:00.000Z" });
-    const decidedA = await record("decidedA", "2026-10-03T09:00:00.000Z");
-    const decidedB = await record("decidedB", "2026-10-03T09:00:00.000Z");
-    await conflict("decidedLater", decidedA, decidedB, {
-      chosen: decidedA, detectedAt: "2026-10-04T08:00:00.000Z", resolvedAt: "2026-10-05T17:00:00.000Z",
-    });
-    const settledA = await record("settledA", "2026-10-03T09:00:00.000Z");
-    const settledB = await record("settledB", "2026-10-03T09:00:00.000Z");
-    await conflict("settledEarlier", settledA, settledB, {
-      chosen: settledA, detectedAt: "2026-10-03T10:00:00.000Z", resolvedAt: "2026-10-03T11:00:00.000Z",
-    });
-
     const createdAndDeletedLater = await record("createdAndDeletedLater", "2026-10-05T13:30:00.000Z");
     await deleteLater(createdAndDeletedLater, "2026-10-05T20:00:00.000Z");
-
-    const bothLaterA = await record("bothLaterA", "2026-10-03T09:00:00.000Z");
-    const bothLaterB = await record("bothLaterB", "2026-10-03T09:00:00.000Z");
-    await conflict("bothLater", bothLaterA, bothLaterB, {
-      chosen: bothLaterA, detectedAt: "2026-10-05T16:00:00.000Z", resolvedAt: "2026-10-05T17:30:00.000Z",
-    });
 
     // Corrected before the question, then the old version deleted after it.
     const correctedThenDeleted = await record("correctedThenDeleted", "2026-10-03T09:00:00.000Z");
@@ -177,13 +122,6 @@ describeWithDatabase("rewindCopyTo", () => {
       [correctedThenDeleted.id, correction.id],
     );
     await deleteLater(correctedThenDeleted, "2026-10-05T19:00:00.000Z");
-
-    const lostEarlierA = await record("lostEarlierA", "2026-10-03T09:00:00.000Z");
-    const lostEarlierB = await record("lostEarlierB", "2026-10-03T09:00:00.000Z");
-    await conflict("lostEarlier", lostEarlierA, lostEarlierB, {
-      chosen: lostEarlierA, detectedAt: "2026-10-03T10:00:00.000Z", resolvedAt: "2026-10-03T11:00:00.000Z",
-    });
-    await deleteLater(lostEarlierB, "2026-10-05T19:30:00.000Z");
 
     await record("backupOnDisk", "2026-10-03T09:00:00.000Z", "Бэкап лежит на внешнем диске в кладовке");
     await record("backupInCloud", "2026-10-05T18:00:00.000Z", "Бэкап лежит в облаке у провайдера");
@@ -207,25 +145,12 @@ describeWithDatabase("rewindCopyTo", () => {
   it("brings a record deleted later back in the status it had at the question", async () => {
     expect(await state("correctedThenDeleted")).toEqual({ claim_status: "superseded", deleted: false });
     expect(await successorOf("correctedThenDeleted")).toBe(records.correction!.id);
-    // A choice before the question had already retracted it: out of search then as now.
-    expect(await state("lostEarlierB")).toEqual({ claim_status: "retracted", deleted: true });
   });
 
   it("makes a version current again when its successor is younger than the question", async () => {
     expect(await state("replacedLater")).toEqual({ claim_status: "active", deleted: false });
     expect(await state("lateSuccessor")).toMatchObject({ deleted: true });
     expect(await state("replacedEarlier")).toEqual({ claim_status: "superseded", deleted: false });
-  });
-
-  it("puts conflicts back as they stood at the question", async () => {
-    expect(await conflictState("detectedLater")).toBeNull();
-    expect(await conflictState("decidedLater")).toEqual({ chosen: false, resolution: "unresolved" });
-    expect(await state("decidedB")).toEqual({ claim_status: "active", deleted: false });
-    expect(await conflictState("settledEarlier")).toEqual({ chosen: true, resolution: "chosen" });
-    expect(await state("settledB")).toEqual({ claim_status: "retracted", deleted: false });
-    // Detected and decided after the question: no conflict, and the choice had retracted nothing.
-    expect(await conflictState("bothLater")).toBeNull();
-    expect(await state("bothLaterB")).toEqual({ claim_status: "active", deleted: false });
   });
 
   it("neither offers nor gates a record younger than the question", async () => {

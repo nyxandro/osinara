@@ -82,12 +82,10 @@ export async function repairAiDigestSchedule(
       FROM memory_items item JOIN memory_item_refs ref ON ref.memory_item_id=item.id
       WHERE item.family_id=$1 AND ${liveMemoryReadPredicate({ alias: "item", personalIdentityColumn: "owner_user_id" })}
         AND item.claim_status='active' AND ref.memory_ref=ANY($5::text[])
-        AND NOT EXISTS (SELECT 1 FROM claim_conflicts conflict WHERE conflict.resolution='unresolved'
-          AND item.id IN (conflict.claim_a_id,conflict.claim_b_id))
       ORDER BY ref.memory_ref ${input.apply ? "FOR SHARE OF item,ref" : ""}`,
     [schedule.family_id, ["personal", "family"], schedule.owner_user_id, null, input.sourceMemoryRefs]);
     if (sources.rows.length !== input.sourceMemoryRefs.length || sources.rows.some(row => !row.content.trim())) {
-      throw new AppError("AGENT_DIGEST_SOURCES_UNAVAILABLE", "Не все выбранные записи источников доступны и однозначны. Проверьте ссылки и права доступа");
+      throw new AppError("AGENT_DIGEST_SOURCES_UNAVAILABLE", "Не все выбранные записи источников доступны. Проверьте ссылки и права доступа");
     }
     const sourcesFile = `news-digest-sources-${schedule.id}.md`;
     const scenarioPrompt = template.replaceAll("{{sourcesPath}}", () => `/workspace/personal/${sourcesFile}`)

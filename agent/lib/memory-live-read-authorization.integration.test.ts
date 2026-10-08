@@ -7,7 +7,7 @@
  * - External groups retain their isolated group identity without granting family access.
  * - Deterministic thread sources independently revalidate stale authorization.
  * - Activation reauthorizes after every content/evidence read.
- * - List, retrieval/conflict closure, thread list/search/read, and brief activation share semantics.
+ * - List, authorized retrieval, thread list/search/read, and brief activation share semantics.
  */
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -233,7 +233,7 @@ async function expectReadable(fixture: ReadFixture): Promise<void> {
   expect((await memoryListRepository.list(fixture.auth, { limit: 20 })).items.length).toBeGreaterThan(0);
   expect((await memoryRetrievalRepository.search(fixture.auth, "ремонт", [QUERY_VECTOR])).results.length)
     .toBeGreaterThan(0);
-  expect((await memoryRetrievalRepository.searchWithConflictClosure(
+  expect((await memoryRetrievalRepository.searchAuthorized(
     fixture.auth,
     "ремонт",
     [QUERY_VECTOR],
@@ -257,11 +257,11 @@ async function expectDenied(fixture: ReadFixture): Promise<void> {
     .resolves.toMatchObject({ items: [] });
   await expect(memoryRetrievalRepository.search(fixture.auth, "ремонт", [QUERY_VECTOR]))
     .resolves.toMatchObject({ results: [] });
-  await expect(memoryRetrievalRepository.searchWithConflictClosure(
+  await expect(memoryRetrievalRepository.searchAuthorized(
     fixture.auth,
     "ремонт",
     [QUERY_VECTOR],
-  )).resolves.toMatchObject({ conflicts: [], relatedClaimIds: [], results: [] });
+  )).resolves.toMatchObject({ results: [] });
   await expect(memoryThreadQueryRepository.list(fixture.auth, { limit: 20 }))
     .resolves.toMatchObject({ items: [] });
   await expect(memoryThreadQueryRepository.search(fixture.auth, "ремонт", 20)).resolves.toEqual([]);

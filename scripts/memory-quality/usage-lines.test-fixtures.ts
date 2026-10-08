@@ -4,7 +4,7 @@
  * Exports:
  * - `ref`: a well-formed opaque memory ref from a small number.
  * - `selectionLine` / `searchLine` / `usageLine`: one exported line of each kind the report reads.
- * - `recordEntry` / `conflictEntry`: one item of a selection's `memoryEvidence`.
+ * - `recordEntry`: one item of a selection's `memoryEvidence`.
  * - `memoryLogScenario`: realistic streams of all three kinds across sessions and turns, with the
  *   numbers they must add up to, known from how the stream was built rather than from the report.
  *
@@ -30,10 +30,6 @@ export function recordEntry(position: number, memoryRef: string, branches: reado
       semanticSimilarity: branches.includes("semantic") ? 0.8 : null,
     },
   };
-}
-
-export function conflictEntry(position: number, conflictRef: string, memoryRefs: readonly string[]) {
-  return { conflictRef, memoryRefs, position };
 }
 
 export function selectionLine(input: {
@@ -114,7 +110,6 @@ const branchSet = fc.constantFrom<readonly Branch[] | null>(
 
 const turnShape = fc.record({
   branches: fc.array(branchSet, { maxLength: 4, minLength: 4 }),
-  conflict: fc.boolean(),
   // Lines a real export carries next to the ones that count: a pre-release selection, a failed
   // one, a pre-release usage line.
   noise: fc.constantFrom("none", "legacy_selection", "failed_selection", "legacy_usage"),
@@ -146,11 +141,7 @@ export interface ExpectedUsage {
 function turnLines(sessionId: string, turnId: string, startedAt: number, shape: TurnShape) {
   const at = (offset: number) => new Date(startedAt + offset).toISOString();
   const refs = shape.offered.map(ref);
-  // The last two offered refs become one unresolved conflict: one place, two versions.
-  const split = shape.conflict && refs.length >= 2 ? refs.length - 2 : refs.length;
-  const evidence: unknown[] = refs.slice(0, split)
-    .map((memoryRef, index) => recordEntry(index + 1, memoryRef, shape.branches[index]!));
-  if (split < refs.length) evidence.push(conflictEntry(split + 1, `conflict_${turnId}`, refs.slice(split)));
+  const evidence: unknown[] = refs.map((memoryRef, index) => recordEntry(index + 1, memoryRef, shape.branches[index]!));
   const profileRefs = shape.profile.map(ref);
   const selection = { evidence, profileRefs, sessionId, turnId };
 

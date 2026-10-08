@@ -50,7 +50,6 @@ import manageMemory, {
   manageMemoryPresentation,
   type ManageMemoryAction,
 } from "../tools/manage_memory.js";
-import manageMemoryConflict from "../tools/manage_memory_conflict.js";
 import manageMemoryThread from "../tools/manage_memory_thread.js";
 import remember from "../tools/remember.js";
 import readMemoryThread from "../tools/read_memory_thread.js";
@@ -188,7 +187,6 @@ const EXTERNAL_DIRECT_TOOLS: Readonly<Record<DirectExternalToolName, AnyToolDefi
   list_group_history: listGroupHistory as unknown as AnyToolDefinition,
   list_memories: listMemories as unknown as AnyToolDefinition,
   list_memory_threads: listMemoryThreads as unknown as AnyToolDefinition,
-  manage_memory_conflict: manageMemoryConflict as unknown as AnyToolDefinition,
   remember: remember as unknown as AnyToolDefinition,
   read_memory_thread: readMemoryThread as unknown as AnyToolDefinition,
   remove_group_file: removeGroupFileTool as unknown as AnyToolDefinition,

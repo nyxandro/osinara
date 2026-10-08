@@ -39,7 +39,6 @@ const EXPECTED_TOOL_MODULES = [
   "manage_gmail_message.ts",
   "manage_google_workspace_connection.ts",
   "manage_memory.ts",
-  "manage_memory_conflict.ts",
   "manage_memory_thread.ts",
   "manage_profile_projection.ts",
   "manage_reminder.ts",

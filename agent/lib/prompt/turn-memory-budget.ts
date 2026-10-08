@@ -16,11 +16,11 @@
  *   failure this ceiling exists to avoid; the caller is told instead.
  */
 import { MEMORY_TURN_BLOCK_MAX_CHARACTERS } from "../memory-config.js";
-import type { ModelMemoryContextItem } from "../memory-retrieval.js";
+import type { ModelMemory } from "../model-memory.js";
 
 export interface TurnMemoryBudget {
   droppedMemories: number;
-  memories: readonly ModelMemoryContextItem[];
+  memories: readonly ModelMemory[];
   /** The block still exceeds the ceiling with nothing left to drop: a signal, not normal trimming. */
   overBudget: boolean;
 }
@@ -31,15 +31,15 @@ export interface TurnMemoryBudget {
  * that about a profile subject or a thread.
  */
 export function applyTurnMemoryBudget(input: {
-  memories: readonly ModelMemoryContextItem[];
-  render: (memories: readonly ModelMemoryContextItem[]) => string;
+  memories: readonly ModelMemory[];
+  render: (memories: readonly ModelMemory[]) => string;
 }): TurnMemoryBudget {
   const kept = [...input.memories];
   let droppedMemories = 0;
   while (
     kept.length > 1 && input.render(kept).length > MEMORY_TURN_BLOCK_MAX_CHARACTERS
   ) {
-    kept.splice(droppableIndex(kept), 1);
+    kept.pop();
     droppedMemories += 1;
   }
   return {
@@ -47,16 +47,4 @@ export function applyTurnMemoryBudget(input: {
     memories: kept,
     overBudget: input.render(kept).length > MEMORY_TURN_BLOCK_MAX_CHARACTERS,
   };
-}
-
-/**
- * An unresolved conflict is the signal that one fact has two live versions. Dropping it leaves the
- * surviving version looking like the only truth, so conflicts go last even when the ranking put
- * them at the tail.
- */
-function droppableIndex(memories: readonly ModelMemoryContextItem[]): number {
-  for (let index = memories.length - 1; index >= 1; index -= 1) {
-    if (!("versions" in memories[index]!)) return index;
-  }
-  return memories.length - 1;
 }

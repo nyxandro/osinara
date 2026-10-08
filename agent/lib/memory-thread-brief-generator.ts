@@ -25,24 +25,20 @@ export const THREAD_BRIEF_BLOCK_KINDS = [
 export type MemoryThreadBriefBlockKind = (typeof THREAD_BRIEF_BLOCK_KINDS)[number];
 
 export interface MemoryThreadBriefSource {
-  conflictingEntryRefs?: string[];
   content: string;
   evidence: ModelMemoryEvidence;
   occurredAt: string;
   ref: string;
   role: MemoryThreadEntryRole;
   sourceRef: string;
-  unresolvedConflictRefs?: string[];
 }
 
 export interface MemoryThreadBriefBlock {
-  conflictingEntryRefs?: string[];
   content: string;
   kind: MemoryThreadBriefBlockKind;
   sourceEntryRefs: string[];
   /** Internal dedup keys; the model-facing assembler strips this field. */
   sourceRecordRefs?: string[];
-  unresolvedConflictRefs?: string[];
 }
 
 const BLOCK_KIND_BY_ROLE: Readonly<Record<MemoryThreadEntryRole, MemoryThreadBriefBlockKind>> = {
@@ -79,17 +75,7 @@ export function buildMemoryThreadBrief(input: {
       characters + source.content.length > THREAD_BRIEF_MAX_CHARACTERS) continue;
     if (kind === "episodes" && (source.content.length > THREAD_EPISODE_MAX_CHARACTERS ||
       episodes >= THREAD_CONTEXT_EPISODES_PER_THREAD)) continue;
-    blocks.push({
-      ...(source.conflictingEntryRefs === undefined
-        ? {}
-        : { conflictingEntryRefs: source.conflictingEntryRefs }),
-      content: source.content,
-      kind,
-      sourceEntryRefs: [source.ref],
-      ...(source.unresolvedConflictRefs === undefined
-        ? {}
-        : { unresolvedConflictRefs: source.unresolvedConflictRefs }),
-    });
+    blocks.push({ content: source.content, kind, sourceEntryRefs: [source.ref] });
     characters += source.content.length;
     if (kind === "episodes") episodes += 1;
     if (blocks.length >= THREAD_BRIEF_MAX_ITEMS) break;

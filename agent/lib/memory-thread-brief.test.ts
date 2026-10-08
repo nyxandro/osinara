@@ -53,23 +53,6 @@ describe("memory thread brief generator", () => {
     ]);
   });
 
-  it("preserves unresolved conflict metadata without synthesizing a conclusion", () => {
-    const blocks = buildMemoryThreadBrief({ entries: [{
-      ...SOURCE,
-      conflictingEntryRefs: ["entry_b"],
-      unresolvedConflictRefs: ["conf_0123456789abcdef0123456789abcdef"],
-    }] });
-
-    expect(blocks).toEqual([
-      {
-        conflictingEntryRefs: ["entry_b"],
-        content: SOURCE.content,
-        kind: "constraints_conflicts",
-        sourceEntryRefs: [SOURCE.ref],
-        unresolvedConflictRefs: ["conf_0123456789abcdef0123456789abcdef"],
-      },
-    ]);
-  });
 });
 
 function thread(overrides: Partial<ActivatedMemoryThread> = {}): ActivatedMemoryThread {

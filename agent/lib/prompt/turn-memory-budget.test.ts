@@ -1,25 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import { MEMORY_TURN_BLOCK_MAX_CHARACTERS } from "../memory-config.js";
-import type { ModelMemoryContextItem } from "../memory-retrieval.js";
+import type { ModelMemory } from "../model-memory.js";
 import { applyTurnMemoryBudget } from "./turn-memory-budget.js";
 
 /** Stands in for the assembled block: a fixed wrapper plus the records themselves. */
-function render(memories: readonly ModelMemoryContextItem[], otherCharacters = 0): string {
+function render(memories: readonly ModelMemory[], otherCharacters = 0): string {
   return "w".repeat(WRAPPER_CHARACTERS + otherCharacters) + JSON.stringify(memories);
 }
 
 const WRAPPER_CHARACTERS = 2_500;
 
-function record(ref: string, characters: number): ModelMemoryContextItem {
-  return { content: "я".repeat(characters), kind: "fact", memoryRef: ref } as ModelMemoryContextItem;
-}
-
-function conflict(ref: string, characters: number): ModelMemoryContextItem {
-  return {
-    type: "unresolved_conflict",
-    versions: [{ content: "я".repeat(characters), memoryRef: ref }],
-  } as unknown as ModelMemoryContextItem;
+function record(ref: string, characters: number): ModelMemory {
+  return { content: "я".repeat(characters), kind: "fact", memoryRef: ref } as ModelMemory;
 }
 
 describe("applyTurnMemoryBudget", () => {
@@ -55,29 +48,6 @@ describe("applyTurnMemoryBudget", () => {
 
     expect(result.memories).toEqual([memories[0]]);
     expect((result.memories[0] as { content: string }).content).toHaveLength(20_000);
-  });
-
-  it("drops plain records before an unresolved conflict, whatever its place in the ranking", () => {
-    const memories = [
-      record("mem_first", 12_000),
-      conflict("mem_conflict", 12_000),
-      record("mem_third", 12_000),
-      record("mem_fourth", 12_000),
-    ];
-
-    const result = applyTurnMemoryBudget({ memories, render: (kept) => render(kept, 10_000) });
-
-    expect(result.memories).toEqual([memories[0], memories[1]]);
-    expect(result.droppedMemories).toBe(2);
-  });
-
-  it("drops conflicts from the tail only when no plain record is left to drop", () => {
-    const memories = [conflict("mem_one", 20_000), conflict("mem_two", 20_000)];
-
-    const result = applyTurnMemoryBudget({ memories, render: (kept) => render(kept, 4_000) });
-
-    expect(result.memories).toEqual([memories[0]]);
-    expect(result.droppedMemories).toBe(1);
   });
 
   it("keeps the best match even when the rest of the block already fills the budget", () => {

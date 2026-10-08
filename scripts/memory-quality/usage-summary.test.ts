@@ -17,7 +17,6 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import {
-  conflictEntry,
   memoryLogScenario,
   recordEntry,
   ref,
@@ -54,7 +53,6 @@ describe("summarizeMemoryUsage", () => {
       turnsWithUse: 1,
     });
     expect(summary.usage.byBranch).toEqual({
-      conflict: { offered: 0, used: 0 },
       semantic_only: { offered: 1, used: 1 },
       unknown: { offered: 0, used: 0 },
       words_and_semantic: { offered: 1, used: 0 },
@@ -67,7 +65,7 @@ describe("summarizeMemoryUsage", () => {
     const summary = summarizeMemoryUsage([
       selectionLine({ ...earlier, evidence: [recordEntry(1, ref(9), ["semantic"])],
         time: "2026-10-07T09:00:00.000Z" }),
-      selectionLine({ ...turn, evidence: [conflictEntry(1, "conflict_1", [ref(1), ref(2)])],
+      selectionLine({ ...turn, evidence: [recordEntry(1, ref(1), ["semantic"]), recordEntry(2, ref(2), ["simple"])],
         profileRefs: [ref(5)], time: "2026-10-07T10:00:00.000Z" }),
       searchLine({ ...turn, refs: [ref(6)], time: "2026-10-07T10:00:01.000Z" }),
       usageLine({ ...turn, declared: true, finishReason: "stop", time: "2026-10-07T10:00:02.000Z",
@@ -75,7 +73,7 @@ describe("summarizeMemoryUsage", () => {
     ]);
 
     expect(summary.usage.rejected).toEqual({ inProfile: 1, inSearch: 1, shownEarlier: 1, unknown: 1 });
-    expect(summary.usage.byBranch.conflict).toEqual({ offered: 2, used: 1 });
+    expect(summary.usage.byBranch.words_only).toEqual({ offered: 1, used: 1 });
     expect(summary.usage.searches).toEqual({ calls: 1, records: 1 });
   });
 
