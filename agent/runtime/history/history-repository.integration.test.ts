@@ -58,6 +58,7 @@ async function newSession(sessionId: string, history: readonly ModelMessage[] = 
     expect(await loadSessionHistory(database(), "wrun_HISTORY0000000000000000002")).toEqual({
       announcedSkills: [{ name: "pohuy", description: "Режим мата" }],
       compaction: { inputTokens: 153733, promptMessageCount: 424 },
+      compactionSummaryRefusals: 0,
       generation: 0,
       messages: [],
       todo: { items: [{ content: "проверить", status: "pending" }] },

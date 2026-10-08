@@ -75,6 +75,11 @@ export const COMPACTION_PROMPT_ENVELOPE = {
 export function createCompactionPrompt(input: {
   readonly messages: readonly ModelMessage[];
   readonly previousCheckpoint: string | undefined;
+  /**
+   * After a refused summary request the budget is a hard limit: what capping cannot save, the
+   * oldest messages give up, with a line saying how many. Otherwise it is soft, and capping is all.
+   */
+  readonly strictBudget?: boolean;
   readonly transcriptBudgetTokens?: number;
 }): CompactionPrompt {
   const entries = input.messages.map((message) => ({
@@ -83,6 +88,9 @@ export function createCompactionPrompt(input: {
   }));
 
   degradeOversizedTranscript(input, entries);
+  if (input.strictBudget === true && input.transcriptBudgetTokens !== undefined) {
+    dropOldestOverBudget(input.previousCheckpoint, input.transcriptBudgetTokens, entries);
+  }
 
   return {
     prompt: formatCompactionPrompt({
@@ -134,6 +142,29 @@ function degradeOversizedTranscript(
     excessTokens -= estimateTextTokens(entry.content) - estimateTextTokens(degraded);
     entries[index] = { content: degraded, role: entry.role };
   }
+}
+
+/** Removes the oldest entries until the prompt fits, and says how many went. Mutates `entries`. */
+function dropOldestOverBudget(
+  previousCheckpoint: string | undefined,
+  budget: number,
+  entries: { content: string; role: ModelMessage["role"] }[],
+): void {
+  let excessTokens = estimateTokens(formatCompactionPrompt({
+    previousCheckpoint: previousCheckpoint?.trim() ?? "(none)",
+    transcript: formatCompactionTranscript(entries),
+  })) - budget;
+  let dropped = 0;
+  // The newest message stays: a summary of nothing would only repeat the previous checkpoint.
+  while (dropped < entries.length - 1 && excessTokens > 0) {
+    excessTokens -= estimateTextTokens(entries[dropped]!.content);
+    dropped += 1;
+  }
+  if (dropped === 0) return;
+  entries.splice(0, dropped, {
+    content: `[${dropped} earlier messages omitted: the previous summary request was refused]`,
+    role: "user",
+  });
 }
 
 function formatCompactionPrompt(input: {

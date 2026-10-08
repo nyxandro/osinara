@@ -9,6 +9,7 @@
  *   person may retry) or `terminal` (the turn fails, repeating cannot help).
  * - `modelCallFailure`: the coded error a turn fails with after its model call gave up; a request
  *   over the model's window gets its own code, since repeating it cannot help.
+ * - `isRequestRefusal`: whether such an error turned down this request, not every request.
  *
  * - An inactivity timeout is always retryable: tools never run inside a model call here, so a
  *   repeated call cannot repeat a side effect.
@@ -138,4 +139,20 @@ export function modelCallFailure(error: unknown): unknown {
     );
   }
   return new AppError("AGENT_MODEL_CALL_FAILED", "Модель не смогла обработать запрос. Попробуйте ещё раз", { cause: error });
+}
+
+/** Statuses that fail every request of the account or the model, whatever the request carries. */
+const ACCOUNT_FAILURE_STATUSES: ReadonlySet<number> = new Set([401, 402, 403, 404]);
+
+/**
+ * The model turned down this particular request — too large, refused by policy, answered with
+ * nothing — as opposed to the service or the account failing every request: an outage, a model
+ * that did not answer in time, a broken key, an unpaid balance, a model that is gone.
+ */
+export function isRequestRefusal(failure: unknown): boolean {
+  if (!(failure instanceof AppError)) return false;
+  if (failure.code === "AGENT_MODEL_CONTEXT_OVERFLOW" || failure.code === "AGENT_MODEL_OUTPUT_INCOMPLETE") return true;
+  if (failure.code !== "AGENT_MODEL_CALL_FAILED") return false;
+  const status = statusCode(failure);
+  return status === undefined || !ACCOUNT_FAILURE_STATUSES.has(status);
 }
