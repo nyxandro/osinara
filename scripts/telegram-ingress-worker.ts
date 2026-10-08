@@ -4,8 +4,9 @@
  * Constructs:
  * - Polls the agent's private drain route so leased/pending updates recover after process restarts.
  * - Uses the existing Telegram webhook secret and never exposes the route through Nginx.
+ * - Reports failures as a wait until the agent first answers, within a bounded start-up grace.
  */
-export {};
+import { drainFailureCode } from "./telegram-ingress-drain-failure.js";
 
 const DRAIN_INTERVAL_MS = 5_000;
 const DRAIN_REQUEST_TIMEOUT_MS = 15_000;
@@ -34,6 +35,8 @@ if (
   );
 }
 
+const startedAt = Date.now();
+let agentAnswered = false;
 while (true) {
   try {
     const response = await fetch(drainUrl, {
@@ -46,14 +49,16 @@ while (true) {
     if (!response.ok) {
       throw new Error(`AGENT_TELEGRAM_DRAIN_HTTP_FAILED: drain returned HTTP ${response.status}`);
     }
+    agentAnswered = true;
   } catch (error) {
-    // This process is the polling boundary: report every failed cycle and continue the explicit schedule.
-    console.error(
-      JSON.stringify({
-        code: "AGENT_TELEGRAM_DRAIN_FAILED",
-        error: error instanceof Error ? error.message : String(error),
-      }),
-    );
+    // This process is the polling boundary: report every failed cycle and continue the explicit
+    // schedule. While the agent is still starting the cycle is a wait, not a failure.
+    const message = error instanceof Error ? error.message : String(error);
+    if (drainFailureCode({ agentAnswered, now: Date.now(), startedAt }) === "AGENT_TELEGRAM_DRAIN_WAITING") {
+      console.info(JSON.stringify({ code: "AGENT_TELEGRAM_DRAIN_WAITING", error: message }));
+    } else {
+      console.error(JSON.stringify({ code: "AGENT_TELEGRAM_DRAIN_FAILED", error: message }));
+    }
   }
   await new Promise((resolve) => setTimeout(resolve, DRAIN_INTERVAL_MS));
 }
