@@ -4,6 +4,7 @@
  * Export:
  * - `search_memories` runs local embedding plus scoped PostgreSQL hybrid retrieval.
  */
+import { recordToolShows } from "../memory-tool-shows.js";
 import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
@@ -67,11 +68,16 @@ export default defineTool({
           to: to ?? LATEST_SEARCHABLE_DAY,
         });
         found = window.map((item) => toModelMemory(item));
+        await recordToolShows(ctx, found.map((item) => "memoryRef" in item ? item.memoryRef : null)
+          .filter((ref): ref is string => ref !== null), "search");
         return found;
       }
       const result = await retrieveRelevantMemories(auth, query);
       found = result.memories;
       diagnostics = result.diagnostics;
+      await recordToolShows(ctx, found.flatMap((item) => "versions" in item
+        ? item.versions.map((version) => version.memoryRef)
+        : [item.memoryRef]), "search");
       memoryEvidence = offeredMemoryEvidence(result.memories, result.rankingByMemoryRef);
       // Without the semantic branch a paraphrase simply does not match, and an empty result read
       // as «этого нет» is worse than no answer at all.

@@ -133,6 +133,44 @@ describeWithDatabase("memory show journal", () => {
     expect(repeated.diagnostics.recentlyShown).toBe(1);
   });
 
+  it("does not hide from the automatic selection what only a deliberate search showed", async () => {
+    // A search result sits in the history as a tool result, not as the turn's memory block; the
+    // selection's repeat filter is about its own blocks (#339).
+    const first = {
+      conversationId,
+      agentSessionId: SESSION,
+      turnId: "turn-1",
+      turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
+    };
+    const ref = (await database().query<{ memory_ref: string }>(
+      "SELECT memory_ref FROM memory_item_refs WHERE memory_item_id = $1", [shownClaimId],
+    )).rows[0]!.memory_ref;
+    await memoryShowJournal.recordShownRefs(first, [ref], "search");
+    const second = {
+      conversationId,
+      agentSessionId: SESSION,
+      turnId: "turn-2",
+      turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-2"),
+    };
+
+    const selected = await memoryRetrievalRepository.search(auth, "домофон", [vector(1, 0)], undefined, second);
+
+    expect(selected.results.map((result) => result.memory.id)).toEqual([shownClaimId]);
+    expect(selected.diagnostics.recentlyShown).toBe(0);
+  });
+
+  it("writes nothing for a turn that opened no window", async () => {
+    const ref = (await database().query<{ memory_ref: string }>(
+      "SELECT memory_ref FROM memory_item_refs WHERE memory_item_id = $1", [shownClaimId],
+    )).rows[0]!.memory_ref;
+
+    // A delegated child or a scheduled run searches inside no conversation turn of its own.
+    await memoryShowJournal.recordShownRefs({ conversationId, agentSessionId: "wrun_child", turnId: "turn-x" }, [ref], "search");
+
+    const rows = await database().query("SELECT 1 FROM memory_retrieval_shows WHERE conversation_id = $1", [conversationId]);
+    expect(rows.rowCount).toBe(0);
+  });
+
   it("offers it again once the window has moved past it", async () => {
     const first = {
       conversationId,

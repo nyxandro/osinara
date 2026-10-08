@@ -64,8 +64,9 @@ const RUN_MARKER_TABLE = "memory_golden_eval_run";
  * and quietly narrow it, so any edit stops the run until GATES are checked again.
  */
 // Reviewed 08.10.2026: the seventeenth parameter is the branch agreement factor, a multiplier on
-// the fused rank that cuts nothing, so GATES stay complete.
-const REVIEWED_STATEMENT_SHA256 = "13eda067ddf46fdb892822554976447e1cf1c85859ccbf599a275c5d0b856925";
+// the fused rank that cuts nothing, and the repeat filter reads only the selection's own shows
+// (#339) — neither is a gate, so GATES stay complete.
+const REVIEWED_STATEMENT_SHA256 = "0194f54b41172bb07dc9bc28a0f76dfdfd636496b7b78724ecdaa17cec06660d";
 const REVIEWED_PARAMETER_COUNT = 17;
 
 /** Where the gates sit in the product's parameter list, with the value each must hold there. */
@@ -264,11 +265,18 @@ export async function rewindCopyTo(moment: string): Promise<void> {
   }
 }
 
+/**
+ * What the turn's automatic selection showed, and which of it that same turn used. Since #339 the
+ * journal also holds what the model's own search, listing or the standing profile showed, and a
+ * show may be spent by a later turn of the session; neither is the selection's offer to this turn.
+ */
 export async function loadShowJournal(): Promise<Map<string, { shown: string[]; used: string[] }>> {
   const rows = await database().query<{ agent_session_id: string; memory_ref: string; turn_id: string; used: boolean }>(
-    `SELECT show.agent_session_id, show.turn_id, ref.memory_ref, show.used_at IS NOT NULL AS used
+    `SELECT show.agent_session_id, show.turn_id, ref.memory_ref,
+            show.used_turn_id IS NOT DISTINCT FROM show.turn_id AS used
      FROM memory_retrieval_shows AS show
      JOIN memory_item_refs AS ref ON ref.memory_item_id = show.claim_id
+     WHERE show.source = 'selection'
      ORDER BY show.agent_session_id, show.turn_id, ref.memory_ref`,
   );
   const journal = new Map<string, { shown: string[]; used: string[] }>();

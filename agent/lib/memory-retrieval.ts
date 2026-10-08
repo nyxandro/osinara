@@ -272,7 +272,7 @@ export async function recordOfferedMemories(
   offered: readonly ModelMemoryContextItem[],
   /**
    * Refs the block shows through the profile view. A retrieved record the budget dropped can still
-   * reach the model there; only the ones this retrieval brought count, standing claims do not.
+   * reach the model there and counts as the selection's; standing claims count as the profile's.
    */
   shownElsewhereRefs: readonly string[],
 ): Promise<void> {
@@ -286,9 +286,14 @@ export async function recordOfferedMemories(
     const claimId = context.offered.claimIdByMemoryRef.get(item.memoryRef);
     if (claimId !== undefined) claimIds.push(claimId);
   }
+  const standing: string[] = [];
   for (const ref of shownElsewhereRefs) {
     const claimId = context.offered.claimIdByMemoryRef.get(ref);
     if (claimId !== undefined) claimIds.push(claimId);
+    else standing.push(ref);
   }
   await memoryShowJournal.recordShown(window, [...new Set(claimIds)]);
+  // Standing profile claims the selection did not bring: shown all the same, so a record used
+  // from the profile counts (#339), but under their own source, which no repeat filter reads.
+  await memoryShowJournal.recordShownRefs(window, standing, "profile");
 }
