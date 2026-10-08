@@ -7,6 +7,7 @@
  * - `appendSessionHistory`: adds the messages a turn produced, after the current tail.
  * - `saveCompactionCounters`: the provider-reported prompt size the next compaction check starts from.
  * - `replaceSessionHistory`: writes a compacted history as a new generation; old rows stay as they were.
+ * - `recordCompactionSummaryRefusal`: counts a summary request the model refused.
  * - `saveAnnouncedSkills`: the skill list the session's sandbox now holds.
  * - `loadApplicationSessionId`: the application session a runtime session belongs to.
  * - `loadInitiatorAuth`: who opened the session.
@@ -50,6 +51,8 @@ export interface NewSessionHistory {
 export interface SessionHistory {
   readonly announcedSkills: readonly AnnouncedSkill[] | null;
   readonly compaction: CompactionCounters;
+  /** Summary requests the model refused in a row since this session's last compaction. */
+  readonly compactionSummaryRefusals: number;
   readonly generation: number;
   readonly messages: ModelMessage[];
   readonly todo: Record<string, unknown> | null;
@@ -106,10 +109,12 @@ export async function loadSessionHistory(client: HistoryClient, sessionId: strin
     announced_skills: AnnouncedSkill[] | null;
     compaction_input_tokens: number | null;
     compaction_prompt_message_count: number | null;
+    compaction_summary_refusals: number;
     history_generation: number;
     todo: Record<string, unknown> | null;
   }>(
-    `SELECT history_generation, compaction_input_tokens, compaction_prompt_message_count, announced_skills, todo
+    `SELECT history_generation, compaction_input_tokens, compaction_prompt_message_count, compaction_summary_refusals,
+            announced_skills, todo
        FROM agent_session_state WHERE session_id = $1`,
     [sessionId],
   )).rows[0];
@@ -123,6 +128,7 @@ export async function loadSessionHistory(client: HistoryClient, sessionId: strin
   return {
     announcedSkills: state.announced_skills,
     compaction: { inputTokens: state.compaction_input_tokens, promptMessageCount: state.compaction_prompt_message_count },
+    compactionSummaryRefusals: state.compaction_summary_refusals,
     generation: state.history_generation,
     messages: rows.map((row) => row.message),
     todo: state.todo,
@@ -166,7 +172,28 @@ export async function saveCompactionCounters(
   }
 }
 
-/** The new generation starts without provider counters: they measured the previous one. */
+/**
+ * The model refused to summarize this session's history: the next compaction asks for less. Kept
+ * outside the failing turn's transaction, which rolls back, so the refusal is not forgotten.
+ */
+export async function recordCompactionSummaryRefusal(client: HistoryClient, sessionId: string): Promise<number> {
+  const updated = (await client.query<{ refusals: number }>(
+    `UPDATE agent_session_state
+        SET compaction_summary_refusals = compaction_summary_refusals + 1, updated_at = now()
+      WHERE session_id = $1
+      RETURNING compaction_summary_refusals AS refusals`,
+    [sessionId],
+  )).rows[0];
+  if (!updated) {
+    throw new AppError("AGENT_SESSION_HISTORY_MISSING", "История разговора не найдена", { details: { sessionId } });
+  }
+  return updated.refusals;
+}
+
+/**
+ * The new generation starts without provider counters, which measured the previous one, and
+ * without refusals: the summary that replaced the history was accepted.
+ */
 export async function replaceSessionHistory(
   client: HistoryClient,
   input: { messages: readonly ModelMessage[]; sessionId: string; turnId: string },
@@ -175,7 +202,7 @@ export async function replaceSessionHistory(
   const state = (await client.query<{ generation: number }>(
     `UPDATE agent_session_state
         SET history_generation = history_generation + 1, compaction_input_tokens = NULL,
-            compaction_prompt_message_count = NULL, updated_at = now()
+            compaction_prompt_message_count = NULL, compaction_summary_refusals = 0, updated_at = now()
       WHERE session_id = $1
       RETURNING history_generation AS generation`,
     [input.sessionId],

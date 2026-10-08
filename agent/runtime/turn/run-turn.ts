@@ -28,7 +28,8 @@ import type { Pool } from "pg";
 import { AppError } from "../../lib/app-error.js";
 import type { RuntimeAgent, StepModelSelection } from "../agent-definition.js";
 import {
-  appendSessionHistory, loadSessionHistory, replaceSessionHistory, saveCompactionCounters, type SessionHistory,
+  appendSessionHistory, loadSessionHistory, recordCompactionSummaryRefusal, replaceSessionHistory, saveCompactionCounters,
+  type SessionHistory,
 } from "../history/history-repository.js";
 import { renderPendingApprovalsNote } from "../hitl/input-requests.js";
 import type { InputRequest } from "../hitl/types.js";
@@ -300,11 +301,30 @@ async function compactIfNeeded(runtime: TurnRuntime, input: {
   const settings = compactionSettings(input.selection.contextWindowTokens, runtime.agent.compactionThresholdPercent);
   if (!shouldCompact(input.messages, settings, input.measurement)) return null;
   let compacted: ModelMessage[];
+  // Set when the summary call itself failed for good: not an outage, not a cancelled turn.
+  const summary: { refusal: AppError | null } = { refusal: null };
   try {
-    compacted = await compactMessages(input.messages, settings, (request) => runtime.summarize({
-      ...request, abortSignal: input.signal, model: input.selection.model, providerOptions: input.selection.providerOptions,
-    }), input.measurement);
+    compacted = await compactMessages(input.messages, settings, async (request) => {
+      try {
+        return await runtime.summarize({
+          ...request, abortSignal: input.signal, model: input.selection.model, providerOptions: input.selection.providerOptions,
+        });
+      } catch (error) {
+        const failure = modelCallFailure(error);
+        if (failure instanceof AppError && failure.code !== "AGENT_MODEL_TEMPORARILY_UNAVAILABLE") summary.refusal = failure;
+        throw failure;
+      }
+    }, input.measurement, input.history.compactionSummaryRefusals);
   } catch (error) {
+    if (summary.refusal !== null) {
+      // The turn fails as before, but the next message asks for a smaller summary (#331).
+      const refusals = await inJournalTransaction(runtime.database,
+        (client) => recordCompactionSummaryRefusal(client, input.turn.sessionId));
+      console.warn(JSON.stringify({
+        code: "AGENT_COMPACTION_SUMMARY_REFUSED", causeCode: summary.refusal.code, refusals,
+        sessionId: input.turn.sessionId, turnId: input.turn.id,
+      }));
+    }
     throw modelCallFailure(error);
   }
   const todo = todoCompactionMessage(input.history.todo);

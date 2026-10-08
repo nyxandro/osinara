@@ -125,7 +125,7 @@ describe("history compaction", () => {
     expect(shouldCompact(messages, settings, UNMEASURED)).toBe(false);
     expect(shouldCompact(messages, settings, measurement)).toBe(true);
 
-    const compacted = await compactMessages(messages, settings, summarize, measurement);
+    const compacted = await compactMessages(messages, settings, summarize, measurement, 0);
 
     expect(summarize).toHaveBeenCalledTimes(1);
     expect(compactsAgain(compacted, settings, measurement.frameTokens)).toBe(false);
@@ -138,7 +138,7 @@ describe("history compaction", () => {
     expect(shouldCompact(messages, settings, UNMEASURED)).toBe(false);
     expect(shouldCompact(messages, settings, measurement)).toBe(true);
 
-    const compacted = await compactMessages(messages, settings, summarize, measurement);
+    const compacted = await compactMessages(messages, settings, summarize, measurement, 0);
 
     expect(summarize).toHaveBeenCalledTimes(1);
     expect(compacted.slice(0, 2)).toEqual([
@@ -154,7 +154,7 @@ describe("history compaction", () => {
       fc.pre(shouldCompact(messages, settings, measurement));
       let compacted: ModelMessage[];
       try {
-        compacted = await compactMessages(messages, settings, async () => summary, measurement);
+        compacted = await compactMessages(messages, settings, async () => summary, measurement, 0);
       } catch (error) {
         if (error instanceof AppError && error.code === "AGENT_COMPACTION_OUTPUT_TOO_LARGE") return;
         throw error;
@@ -187,7 +187,7 @@ describe("history compaction", () => {
     const summarize = vi.fn<Summarize>(async () => "сводка");
     const messages = [...exchange(0), ...toolExchange(1, 20_000), ...exchange(2), ...exchange(3), ...exchange(4), ...exchange(5), ...exchange(6), CURRENT];
 
-    const compacted = await compactMessages(messages, { recentWindowSize: 10, threshold: 2_400 }, summarize, UNMEASURED);
+    const compacted = await compactMessages(messages, { recentWindowSize: 10, threshold: 2_400 }, summarize, UNMEASURED, 0);
 
     expect(summarize).not.toHaveBeenCalled();
     expect(compacted[3]).toMatchObject({ role: "tool", content: [{ output: { type: "text", value: expect.stringMatching(/^\[Truncated: /) } }] });
@@ -199,7 +199,7 @@ describe("history compaction", () => {
     const summarize = vi.fn<Summarize>(async () => "Сделано: A. Осталось: B.");
     const messages = [...Array.from({ length: 20 }, (_, index) => exchange(index, 400)).flat(), CURRENT];
 
-    const compacted = await compactMessages(messages, { recentWindowSize: 4, threshold: 2_000 }, summarize, UNMEASURED);
+    const compacted = await compactMessages(messages, { recentWindowSize: 4, threshold: 2_000 }, summarize, UNMEASURED, 0);
 
     expect(summarize).toHaveBeenCalledTimes(1);
     expect(summarize.mock.calls[0]![0]).toMatchObject({
@@ -216,7 +216,7 @@ describe("history compaction", () => {
   it("asks the model to continue when the kept part would end on its own answer", async () => {
     const messages = Array.from({ length: 20 }, (_, index) => exchange(index, 400)).flat();
 
-    const compacted = await compactMessages(messages, { recentWindowSize: 4, threshold: 2_000 }, async () => "сводка", UNMEASURED);
+    const compacted = await compactMessages(messages, { recentWindowSize: 4, threshold: 2_000 }, async () => "сводка", UNMEASURED, 0);
 
     expect(compacted.at(-1)).toEqual({ role: "user", content: "Continue." });
   });
@@ -230,16 +230,46 @@ describe("history compaction", () => {
       CURRENT,
     ];
 
-    await compactMessages(messages, { recentWindowSize: 2, threshold: 2_000 }, summarize, UNMEASURED);
+    await compactMessages(messages, { recentWindowSize: 2, threshold: 2_000 }, summarize, UNMEASURED, 0);
 
     expect(summarize.mock.calls[0]![0].prompt).toContain("<previous-checkpoint>\nстарая сводка\n</previous-checkpoint>");
+  });
+
+  it("summarizes a smaller part of the history each time the model refused the summary", async () => {
+    const messages = [...Array.from({ length: 40 }, (_, index) => exchange(index, 2_000)).flat(), CURRENT];
+    const promptTokens = async (refusals: number) => {
+      const summarize = vi.fn<Summarize>(async () => "сводка");
+      await compactMessages(messages, { recentWindowSize: 2, threshold: 40_000 }, summarize, UNMEASURED, refusals);
+      return estimateTokens([{ content: summarize.mock.calls[0]![0].prompt, role: "user" }]);
+    };
+
+    // #331: a summary request the model refuses is refused again on the next message, the same
+    // history and the same budget, forever. Each refusal halves what the next request carries.
+    const first = await promptTokens(0);
+    const second = await promptTokens(1);
+    const third = await promptTokens(2);
+    expect(second).toBeLessThan(first);
+    expect(third).toBeLessThan(second);
+  });
+
+  it("drops the older part with a notice, without asking again, after the model refused it four times", async () => {
+    const summarize = vi.fn<Summarize>(async () => "сводка");
+    const messages = [...Array.from({ length: 20 }, (_, index) => exchange(index, 400)).flat(), CURRENT];
+
+    const compacted = await compactMessages(messages, { recentWindowSize: 4, threshold: 2_000 }, summarize, UNMEASURED, 4);
+
+    expect(summarize).not.toHaveBeenCalled();
+    expect(compacted[0]).toEqual({ role: "user", content: "Summary of our conversation so far:" });
+    expect(compacted[1]).toMatchObject({ role: "assistant", content: expect.stringContaining("could not be summarized") });
+    expect(compacted.slice(2)).toEqual(messages.slice(-4));
+    expect(shouldCompact(compacted, { recentWindowSize: 4, threshold: 2_000 }, UNMEASURED)).toBe(false);
   });
 
   it("fails with a coded error instead of a second summary call when the result does not fit", async () => {
     const summarize = vi.fn<Summarize>(async () => "s".repeat(40_000));
     const messages = Array.from({ length: 8 }, (_, index) => exchange(index, 2_000)).flat();
 
-    await expect(compactMessages(messages, { recentWindowSize: 4, threshold: 6_000 }, summarize, UNMEASURED))
+    await expect(compactMessages(messages, { recentWindowSize: 4, threshold: 6_000 }, summarize, UNMEASURED, 0))
       .rejects.toMatchObject({ code: "AGENT_COMPACTION_OUTPUT_TOO_LARGE" });
     expect(summarize).toHaveBeenCalledTimes(1);
   });
