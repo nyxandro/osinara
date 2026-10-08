@@ -327,6 +327,24 @@ and `compose-runtime.test.ts` fails when the sum and this command disagree. `mem
 the configured value; protection actually used shows up as the `low` counter in each container's
 `memory.events`, which grows when the kernel had to reclaim protected memory after all.
 
+Two more host settings keep a memory or kernel failure from turning into hours of silence. Both
+are files that survive a reboot, and deleting the file undoes them:
+
+```bash
+# zswap: swapped pages are compressed in RAM first. Swap is a file on the database's own slow disk,
+# and on 05.10 two gigabytes pushed there in 18 minutes left the database without connections (#336).
+printf 'zstd\n' | sudo tee /etc/modules-load.d/osinara-zswap.conf
+sudo tee /etc/tmpfiles.d/osinara-zswap.conf <<'TMPFILES'
+w /sys/module/zswap/parameters/compressor - - - - zstd
+w /sys/module/zswap/parameters/max_pool_percent - - - - 20
+w /sys/module/zswap/parameters/enabled - - - - Y
+TMPFILES
+sudo modprobe zstd && sudo systemd-tmpfiles --create /etc/tmpfiles.d/osinara-zswap.conf
+# A kernel panic reboots the machine in ten seconds; with the default 0 it hangs until someone
+# restarts it from outside, which on 02.10 took nearly four hours (#315).
+printf 'kernel.panic = 10\n' | sudo tee /etc/sysctl.d/90-osinara-panic.conf && sudo sysctl -p /etc/sysctl.d/90-osinara-panic.conf
+```
+
 The ceiling covers only what runs inside `orca-remote-server.service`. Test stacks such as
 `compose.test.yaml` and `docker build` run under Docker's own units in `system.slice`, outside it:
 bring test stacks up only for a run and take them down afterwards. The disk scheduler here is
