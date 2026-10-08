@@ -159,6 +159,39 @@ describe("memory embedding client", () => {
     ).rejects.toThrowError(/AGENT_MEMORY_EMBEDDING_MODEL_MISMATCH/);
   });
 
+  it("says which request of a long query went unanswered and how long it waited", async () => {
+    process.env.MEMORY_EMBEDDING_BASE_URL = "http://embedding-worker:80";
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const vector = Array.from({ length: MEMORY_EMBEDDING_DIMENSIONS }, () => 0.1);
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async (_url: string, init: RequestInit) => {
+        const input = (JSON.parse(String(init.body)) as { input: string[] }).input;
+        return Response.json({
+          data: input.map((_text, index) => ({ embedding: vector, index })),
+          model: MEMORY_EMBEDDING_MODEL,
+        });
+      })
+      .mockRejectedValueOnce(new Error("The operation was aborted due to timeout"));
+    const query = Array.from({ length: 11 }, (_unused, index) =>
+      `Тема номер ${index}. ${"слово ".repeat(MEMORY_EMBEDDING_CHUNK_MAX_CHARACTERS / 6)}`).join("\n\n");
+
+    await expect(embedMemoryQuery(query, fetchMock)).rejects.toThrowError(
+      /AGENT_MEMORY_EMBEDDING_PROVIDER_UNAVAILABLE/,
+    );
+
+    // 08.10 the morning query of eleven pieces lost its semantic branch, and the line said only
+    // "aborted due to timeout": which of the two requests stalled had to be read off timestamps.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const stalled = (JSON.parse(String(fetchMock.mock.calls[1]![1].body)) as { input: string[] }).input;
+    const line = JSON.parse(String(errors.mock.calls.at(-1)?.[0])) as Record<string, unknown>;
+    expect(line).toMatchObject({
+      code: "AGENT_MEMORY_EMBEDDING_PROVIDER_UNAVAILABLE",
+      elapsedMs: expect.any(Number),
+      endpoint: "/v1/embeddings",
+      texts: stalled.length,
+    });
+  });
+
   it.each([
     ["network", vi.fn().mockRejectedValue(new Error("connect ECONNREFUSED 10.0.0.5"))],
     ["json", vi.fn().mockResolvedValue(new Response("not-json", { status: 200 }))],

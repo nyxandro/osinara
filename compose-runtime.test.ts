@@ -47,6 +47,15 @@ const REMOVED_ANTIVIRUS_PATHS = [
  */
 const MEASURED_PEAK_MEGABYTES: Readonly<Record<number, number>> = { 1: 820, 2: 870, 3: 1250 };
 
+/**
+ * What the production embedding service holds after hours of ordinary traffic, two math threads:
+ * 808 MB resident plus 295 MB it had pushed to swap itself, 7 h 20 min after the v0.41.0 release
+ * (08.10, #352). The short saturating load behind the peak above never reaches this. Inside a
+ * 1024 MB limit the idle tokenizer pages went to swap on the slow disk, and the first search after
+ * a quiet half hour spent 7 to 18 seconds paging them back in — on 08.10 past the 30-second ceiling.
+ */
+const MEASURED_PRODUCTION_FOOTPRINT_MEGABYTES = 1103;
+
 interface EmbeddingService {
   clientBatchSize: number;
   concurrentRequests: number;
@@ -182,6 +191,20 @@ describe("Docker Compose runtime wiring", () => {
       expect(service.memoryLimitMegabytes).toBeGreaterThanOrEqual(Math.ceil(peak! * 1.15));
     },
   );
+
+  it("lets the production embedding service keep its whole working set in memory", () => {
+    const block = serviceBlock("compose.production.yaml", "memory-embedding");
+
+    // A limit below the footprint makes the service its own neighbour: it swaps itself out with
+    // the host idle and five gigabytes free. The reservation covers the same footprint so that,
+    // under host pressure, the kernel takes these pages only after every unprotected one.
+    expect(megabytes(block, "mem_limit")!).toBeGreaterThanOrEqual(
+      Math.ceil(MEASURED_PRODUCTION_FOOTPRINT_MEGABYTES * 1.15),
+    );
+    expect(megabytes(block, "mem_reservation")!).toBeGreaterThanOrEqual(
+      MEASURED_PRODUCTION_FOOTPRINT_MEGABYTES,
+    );
+  });
 
   it.each(PROTECTED_SERVICES)(
     "protects the working memory of production %s from neighbours on the host",
