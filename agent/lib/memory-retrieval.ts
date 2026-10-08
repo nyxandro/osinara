@@ -9,6 +9,7 @@
  * - `MemoryRetrievalDiagnostics`: log-only numbers about the query and each search branch.
  * - `retrieveRelevantMemories`: embeds a query locally and runs scoped hybrid search.
  * - `retrieveMemoryTurnContext`: adds activated source-backed thread briefs to ordinary retrieval.
+ * - `SILENT_SELECTION_DIAGNOSTICS`: the branch numbers of a turn that asked memory nothing.
  */
 import type { SessionAuth } from "../runtime/context.js";
 import type { ModelMessage } from "ai";
@@ -27,6 +28,7 @@ import type { MemoryAuthorization } from "./memory-context.js";
 import type { ModelMemory } from "./model-memory.js";
 import { EVIDENCE_KIND_LEGEND, toModelMemory } from "./model-memory.js";
 import { memoryRetrievalRepository } from "./memory-retrieval-repository.js";
+import { isSmallTalkMessage } from "./memory-small-talk.js";
 import type { MemoryConflictGroup } from "./memory-retrieval-repository.js";
 import { currentTelegramMessageText } from "./telegram-group-turn-context.js";
 import { escapeUntrustedContextJson } from "./untrusted-context-json.js";
@@ -47,6 +49,12 @@ export type ModelMemoryContextItem = ModelMemory | (MemoryConflictGroup & {
  * never inside them: the model sees records, the log sees why those records were the ones found.
  */
 export interface MemoryRetrievalDiagnostics extends MemoryRetrievalBranchDiagnostics {
+  /**
+   * True when the automatic selection offered nothing on purpose: the message was small talk and
+   * no search ran. Kept apart from a search that found nothing, which is what an empty-selection
+   * alert is about.
+   */
+  abstained: boolean;
   queryCharacters: number;
   queryChunks: number;
   /** False when the query vector could not be computed and only the word branches ran. */
@@ -61,9 +69,11 @@ function queryDiagnostics(
   query: string,
   branches: MemoryRetrievalBranchDiagnostics,
   semanticBranchAvailable: boolean,
+  abstained: boolean,
 ): MemoryRetrievalDiagnostics {
   return {
     ...branches,
+    abstained,
     queryCharacters: query.length,
     queryChunks: chunkMemoryQuery(query).length,
     semanticBranchAvailable,
@@ -120,6 +130,21 @@ export function formatRetrievedMemoryInstructions(
     escapeUntrustedContextJson(threads ?? { threads: [], totalCharacters: 0 }),
   ].join("\n\n");
 }
+
+/** Branch numbers of a selection that stayed silent without searching: nothing was looked at. */
+export const SILENT_SELECTION_DIAGNOSTICS: MemoryRetrievalBranchDiagnostics = {
+  candidateLimitHit: false,
+  recentlyShown: 0,
+  russianMatched: 0,
+  russianQualified: 0,
+  russianTopRank: null,
+  semanticMatched: 0,
+  semanticQualified: 0,
+  semanticTopSimilarity: null,
+  simpleMatched: 0,
+  simpleQualified: 0,
+  simpleTopRank: null,
+};
 
 export interface MemoryTurnContext {
   diagnostics: MemoryRetrievalDiagnostics;
@@ -196,12 +221,25 @@ export async function retrieveRelevantMemories(
     embeddings,
   );
   return {
-    diagnostics: queryDiagnostics(prepared, retrieval.diagnostics, embeddings.length > 0),
+    // An explicit search never abstains: the model asked on purpose.
+    diagnostics: queryDiagnostics(prepared, retrieval.diagnostics, embeddings.length > 0, false),
     memories: [
       ...retrieval.results.map((result) => toModelMemory(result.memory, result.sourceEvidence)),
       ...retrieval.conflicts.map((conflict) => ({ ...conflict, type: "unresolved_conflict" as const })),
     ],
     rankingByMemoryRef: memoryRankingByRef(retrieval.results),
+  };
+}
+
+/** What a turn that asked memory nothing carries: the numbers of a search that did not run. */
+function silentTurnContext(prepared: string): MemoryTurnContext {
+  return {
+    diagnostics: queryDiagnostics(prepared, SILENT_SELECTION_DIAGNOSTICS, true, true),
+    memories: [],
+    offered: { claimIdByMemoryRef: new Map(), claimIdsByConflictRef: new Map() },
+    rankingByMemoryRef: new Map(),
+    retrievedClaimIds: [],
+    threads: { threads: [], totalCharacters: 0 },
   };
 }
 
@@ -217,6 +255,9 @@ export async function retrieveMemoryTurnContext(
   // Not `embedding`: that step no longer fails the turn, it degrades and says so in the log.
   let phase: MemoryContextPhase = "search";
   try {
+    // A message that asks memory nothing is not searched at all: no vector, no records, no
+    // threads. The journal and the profile read the same empty selection, so nothing leaks back.
+    if (isSmallTalkMessage(prepared)) return silentTurnContext(prepared);
     const embeddings = await embedQueryOrDegrade(prepared);
     const retrieval = await memoryRetrievalRepository.searchWithConflictClosure(
       auth,
@@ -240,7 +281,7 @@ export async function retrieveMemoryTurnContext(
       skillHints,
     });
     return {
-      diagnostics: queryDiagnostics(prepared, retrieval.diagnostics, embeddings.length > 0),
+      diagnostics: queryDiagnostics(prepared, retrieval.diagnostics, embeddings.length > 0, false),
       memories,
       offered: {
         claimIdByMemoryRef: new Map(

@@ -126,6 +126,8 @@ describe("retrieval diagnostics boundary", () => {
     }, "синтетический запрос");
 
     expect(result.diagnostics).toEqual({
+      // An explicit search never stays silent: the model asked on purpose.
+      abstained: false,
       candidateLimitHit: false,
       queryCharacters: "синтетический запрос".length,
       queryChunks: 1,

@@ -1,8 +1,10 @@
 /**
  * Operator entrypoint of the real-memory retrieval measurement.
  *
- *   pools <dir>  every conversation turn of the copy → <dir>/pools.jsonl and <dir>/skipped.jsonl
- *   score <dir>  <dir>/pools.jsonl with <dir>/labels.jsonl and <dir>/outside-pool.jsonl → JSON
+ *   pools <dir>       every conversation turn of the copy → <dir>/pools.jsonl and <dir>/skipped.jsonl
+ *   candidates <dir>  every record that passed a gate, per turn, with each branch's score →
+ *                     <dir>/candidates.jsonl, for replaying another fusion against the same labels
+ *   score <dir>       <dir>/pools.jsonl with <dir>/labels.jsonl and <dir>/outside-pool.jsonl → JSON
  *
  * Run it through compose.memory-golden-eval.yaml, never against production: `pools` edits records
  * in the database it is given and refuses anything but a fresh, tuned `_eval` copy. The directory
@@ -27,6 +29,7 @@ import {
   memoryRetrievalSearchStatement,
 } from "../../../agent/lib/memory-retrieval-repository.js";
 import {
+  collectGatedCandidates,
   collectTurnCandidates,
   loadShowJournal,
   requireDisposableCopy,
@@ -39,10 +42,10 @@ import { scoreGoldenSet, type NeededOutsidePool } from "./golden-score.js";
 import { loadTurnQuestions } from "./turn-queries.js";
 
 const [command, directory, ...extra] = process.argv.slice(2);
-if ((command !== "pools" && command !== "score") || directory === undefined || extra.length > 0) {
+if (!["candidates", "pools", "score"].includes(command ?? "") || directory === undefined || extra.length > 0) {
   throw new AppError(
     "AGENT_MEMORY_GOLDEN_USAGE",
-    "Укажите команду и папку данных замера: run.ts pools <папка> или run.ts score <папка>",
+    "Укажите команду и папку данных замера: run.ts pools|candidates|score <папка>",
   );
 }
 
@@ -85,6 +88,29 @@ async function pools(): Promise<void> {
   renameSync(partialPath, poolsPath);
 }
 
+/** Same copy discipline as `pools`: rewound per question, newest first, and spent by the run. */
+async function candidates(): Promise<void> {
+  requirePrivateDirectory(directory!);
+  const outputPath = join(directory!, "candidates.jsonl");
+  const partialPath = `${outputPath}.partial`;
+  if (existsSync(outputPath) || existsSync(partialPath)) {
+    throw new AppError(
+      "AGENT_MEMORY_GOLDEN_CANDIDATES_EXIST",
+      `В ${directory} уже есть candidates.jsonl или его незаконченная часть. Новый прогон пишите в новую папку данных`,
+    );
+  }
+  await requireDisposableCopy(readdirSync(resolve("migrations")).filter((name) => name.endsWith(".sql")).sort());
+  const questions = await loadTurnQuestions();
+  writeFileSync(partialPath, "", { mode: PRIVATE_FILE_MODE });
+  for (const question of questions) {
+    if (question.kind === "skipped") continue;
+    await rewindCopyTo(question.startedAt);
+    const turn = await collectGatedCandidates(question, await embedMemoryQueryChunks(question.query));
+    appendFileSync(partialPath, `${JSON.stringify(turn)}\n`);
+  }
+  renameSync(partialPath, outputPath);
+}
+
 function score(): void {
   const { labels, outside, turns } = loadGoldenSet(directory!);
   console.log(JSON.stringify(scoreGoldenSet(turns, labels, outside satisfies NeededOutsidePool), null, 2));
@@ -92,6 +118,7 @@ function score(): void {
 
 try {
   if (command === "pools") await pools();
+  else if (command === "candidates") await candidates();
   else score();
 } finally {
   await closeDatabase();

@@ -16,13 +16,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "../database.js";
-import { embedMemoryQueryChunks } from "../memory-embedding-client.js";
 import { MEMORY_RETRIEVAL_LIMIT } from "../memory-config.js";
 import type { MemoryAuthorization } from "../memory-context.js";
 import { prepareMemoryQuery } from "../memory-query-preparation.js";
-import { memoryRetrievalRepository } from "../memory-retrieval-repository.js";
 import {
   categoryRate,
+  evalAutomaticSelection,
   evalRecordId,
   evalResultKeys,
   evalShare as share,
@@ -83,9 +82,7 @@ describeEval("memory retrieval eval: external group", () => {
   async function search(reader: MemoryAuthorization, text: string): Promise<string[]> {
     // The same text the product searches by: preparation runs before retrieval in production.
     const prepared = prepareMemoryQuery(text);
-    const { results } = await memoryRetrievalRepository.search(
-      reader, prepared, await embedMemoryQueryChunks(prepared), EVAL_RESULT_LIMIT,
-    );
+    const { results } = await evalAutomaticSelection(reader, prepared, EVAL_RESULT_LIMIT);
     return evalResultKeys(results.map((result) => result.memory.content), keyByContent);
   }
 

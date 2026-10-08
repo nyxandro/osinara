@@ -35,10 +35,13 @@ export const MEMORY_RETRIEVAL_EVAL_GROUP_RECORDS: readonly MemoryRetrievalEvalGr
  * - Questions about one person work: `participantRecallAt12` and `participantTopThreeRate` = 1.
  *   The subject header carried into the indexed text («Вика Лунина (vlunina). Вид: …») puts the
  *   person's own records first even when neighbours share the topic.
- * - The selection never stays empty when it should. `smallTalkEmptyRate` = 0 with 8.875 records
- *   per reaction on average — real memory showed 11.8 on the same kind of turn — and
- *   `participantNearMissEmptyRate` = 0: asked what Nina said about a tool she never mentioned,
- *   the search offers Nina's other records and the tool's documentation.
+ * - Small talk stays empty half the time. «ахаха», «умница», «+1» and «ну всё, я спать» are made
+ *   of small-talk words only and are not searched at all (#341, 08.10.2026); «ты подшофе?», «а мем
+ *   так-то смешной» and the other two use ordinary words and still get records — that is
+ *   `smallTalkEmptyRate` = 0.5 and 4.375 records per reaction, down from 0 and 8.875. Before the
+ *   change real memory showed 11.8 records on the same kind of turn.
+ * - `participantNearMissEmptyRate` = 0: asked what Nina said about a tool she never mentioned, the
+ *   search offers Nina's other records and the tool's documentation.
  * - The bot does not find itself. «Осинара, как ты выглядишь?» misses the avatar record: the
  *   bot's name is stripped from the start of the question before the search, and what is left,
  *   «как ты выглядишь», names nothing. «кто тебя сделал?» never carried the name and finds its
@@ -59,8 +62,8 @@ export const MEMORY_RETRIEVAL_EVAL_GROUP_BASELINE = {
   participantRecallAt12: 1,
   participantTopThreeRate: 1,
   positiveRecallAt12: 0.917,
-  smallTalkEmptyRate: 0,
-  smallTalkMeanOffered: 8.875,
+  smallTalkEmptyRate: 0.5,
+  smallTalkMeanOffered: 4.375,
   topicFullCoverageRate: 1,
   topicRecallAt12: 1,
 } as const;

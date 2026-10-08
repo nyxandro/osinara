@@ -11,6 +11,7 @@ import { database } from "./database.js";
 import {
   MEMORY_EMBEDDING_DIMENSIONS,
   MEMORY_EMBEDDING_MODEL_VERSION,
+  MEMORY_RETRIEVAL_BRANCH_AGREEMENT_FACTOR,
   MEMORY_RETRIEVAL_CANDIDATE_LIMIT,
   MEMORY_RETRIEVAL_CONFIRMATION_BOOST,
   MEMORY_RETRIEVAL_LIMIT,
@@ -417,6 +418,9 @@ export function memoryRetrievalSearchStatement(): string {
                  COALESCE(1.0 / ($12::double precision + semantic.ordinal), 0) +
                  CASE WHEN authorized.confirmation = 'user_confirmed'
                       THEN $13::double precision ELSE 0 END)
+                * CASE WHEN semantic.id IS NOT NULL
+                        AND (simple_lexical.id IS NOT NULL OR russian_morphology.id IS NOT NULL)
+                       THEN $17::double precision ELSE 1 END
                 * ${MEMORY_RETENTION_EXPRESSION})
                  AS fused_score
        FROM candidates
@@ -460,6 +464,7 @@ export function memoryRetrievalSearchParameters(
     window?.conversationId ?? null,
     window?.turnOrdinal ?? 0,
     MEMORY_RETRIEVAL_RECENT_SHOW_WINDOW_TURNS,
+    MEMORY_RETRIEVAL_BRANCH_AGREEMENT_FACTOR,
   ];
 }
 
@@ -507,6 +512,10 @@ export const memoryRetrievalRepository = {
     // Words are counted by position, not by lexeme. One hyphenated token or a URL yields several
     // lexemes at the same position, and counting those as separate words would let a single
     // «e-mail» clear a gate that asks for two of the question's words.
+    //
+    // Agreement is a multiplier too. The two word branches mostly find the same records, so their
+    // ranks add up for a record any lexical match reaches, while a record the words and the
+    // meaning both found — four times as often useful on real turns — gained nothing for it.
     //
     // Age is a multiplier on the fused rank, not a term added to it, and the same curve lives in
     // `memory-forgetting.ts` for everything outside SQL. Two copies of one formula drift silently,
