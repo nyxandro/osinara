@@ -21,7 +21,8 @@
  * `production-deploy-window.test.ts` does: the two halves of each contract live in different files
  * and break silently.
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -190,6 +191,27 @@ describe("osinara alert rules", () => {
     // reach the service. 08.10 such a read failure fired this alert, and its runbook sent the duty
     // reader to an indexer with no failed job (#352); OsinaraMemorySemanticBranchDown owns reads.
     expect(expression).toContain('service="memory-embedding-worker"');
+  });
+
+  it("keeps OsinaraErrorBurst off every line the application writes as information", () => {
+    const [block] = alertBlocks("OsinaraErrorBurst");
+    // Written with console.info and still counted: a dispatcher still busy when the next minute
+    // comes is the first sign of an overloaded host (#336), not routine.
+    const countedOnPurpose = new Set(["AGENT_SCHEDULE_CYCLE_SKIPPED"]);
+    const sources = ["agent", "scripts", "services"]
+      .flatMap((root) => readdirSync(new URL(root, projectRoot), { recursive: true, withFileTypes: true })
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".ts") && !entry.name.includes(".test"))
+        .map((entry) => readFileSync(join(entry.parentPath, entry.name), "utf8")));
+    const informational = new Set(sources.flatMap((source) =>
+      [...source.matchAll(/console\.info\(\s*JSON\.stringify\(\s*\{\s*code:\s*"(AGENT_[A-Z_]+)"/gu)].map((match) => match[1]!)));
+
+    // Every release restarts the runtime and recovers its turns; counting those lines lit the
+    // burst alert on a healthy deployment (#320) and would hide a real failure among them.
+    expect(informational.size).toBeGreaterThan(10);
+    for (const code of informational) {
+      if (countedOnPurpose.has(code)) continue;
+      expect(excludesCode(block!, code), `OsinaraErrorBurst counts the routine ${code}`).toBe(true);
+    }
   });
 
   it("announces the worker through the shared constant, not a second literal", () => {
