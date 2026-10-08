@@ -10,7 +10,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "./database.js";
-import { embedMemoryPassages, embedMemoryQueryChunks } from "./memory-embedding-client.js";
+import { embedMemoryPassages } from "./memory-embedding-client.js";
 import {
   MEMORY_EMBEDDING_MODEL_VERSION,
   MEMORY_EMBEDDING_PROVIDER_BATCH_SIZE,
@@ -30,7 +30,7 @@ import {
   MEMORY_RETRIEVAL_R1_BASELINE_V2,
 } from "./memory-retrieval-eval-fixture.v2.js";
 import { memoryEmbeddingInput } from "./memory-embedding-header.js";
-import { memoryRetrievalRepository } from "./memory-retrieval-repository.js";
+import { evalAutomaticSelection } from "./memory-retrieval-eval-support.js";
 import { prepareMemoryQuery } from "./memory-query-preparation.js";
 import type { MemoryAuthorization } from "./memory-context.js";
 
@@ -149,12 +149,7 @@ describeEval("memory retrieval eval v1", () => {
     const evaluated: EvaluatedQuery[] = [];
     for (const query of MEMORY_RETRIEVAL_EVAL_QUERIES_V1) {
       const prepared = prepareMemoryQuery(query.text);
-      const { results } = await memoryRetrievalRepository.search(
-        auth,
-        prepared,
-        await embedMemoryQueryChunks(prepared),
-        EVAL_RESULT_LIMIT,
-      );
+      const { results } = await evalAutomaticSelection(auth, prepared, EVAL_RESULT_LIMIT);
       // Every exposed attribution must carry branch-local evidence. The word branches gate on the
       // share of question terms the record holds, not on the rank they expose, so only the
       // semantic gate can be checked against the score itself.
@@ -246,12 +241,7 @@ describeEval("memory retrieval eval v1", () => {
     const evaluated: EvaluatedQuery[] = [];
     for (const query of MEMORY_RETRIEVAL_EVAL_QUERIES_V2) {
       const prepared = prepareMemoryQuery(query.text);
-      const { results } = await memoryRetrievalRepository.search(
-        auth,
-        prepared,
-        await embedMemoryQueryChunks(prepared),
-        EVAL_RESULT_LIMIT,
-      );
+      const { results } = await evalAutomaticSelection(auth, prepared, EVAL_RESULT_LIMIT);
       const resultKeys = results.map((result) =>
         requireFixtureKey(contentToKey, result.memory.content)
       );

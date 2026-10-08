@@ -6,6 +6,7 @@
  * - `RecordConversationAgentResponseInput`: successfully delivered agent response projection.
  * - `conversationTimelineRepository`: conversation-scoped inbound, delivery, context, and retention.
  */
+import { AGENT_DISPLAY_NAME } from "./agent-name.js";
 import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import type { PoolClient } from "pg";
 
@@ -22,7 +23,6 @@ import {
 } from "./telegram-group-message-storage.js";
 
 const AGENT_ACTOR_ID = "agent:osinara";
-const AGENT_DISPLAY_NAME = "Осинара";
 
 interface ConversationBoundary {
   family_id: string;

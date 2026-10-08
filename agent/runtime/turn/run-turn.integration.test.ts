@@ -415,6 +415,56 @@ async function releaseRunner(turnId: string) {
     ]);
   });
 
+  // #331: the model refusing the summary request itself used to stop the chat for good — every
+  // next message sent the same request over the same history and got the same refusal.
+  it("remembers a refused summary, and the next message asks to summarize less", async () => {
+    const long = Array.from({ length: 12 }, (_, index) => [
+      { role: "user" as const, content: `вопрос ${index} ${"x".repeat(1_200)}` },
+      { role: "assistant" as const, content: [{ type: "text" as const, text: `ответ ${index} ${"y".repeat(1_200)}` }] },
+    ]).flat();
+    const sessionId = await newTestSession(long);
+    const runtimeWith = (summarize: TurnRuntime["summarize"], model: ReturnType<typeof scriptedModel>) => testRuntime({
+      agent: testAgent({}, { selectModel: () => ({ contextWindowTokens: 8_000, model: "test-model-unused", providerOptions: undefined }) }),
+      callModel: model.callModel, observer: recordingObserver().observer, summarize,
+    });
+    const refusals = async () => (await database().query<{ count: number }>(
+      "SELECT compaction_summary_refusals AS count FROM agent_session_state WHERE session_id = $1", [sessionId],
+    )).rows[0]!.count;
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const transient = await runTurn(runtimeWith(async () => {
+      throw Object.assign(new Error("provider unavailable"), { isRetryable: true });
+    }, scriptedModel()), (await startMessageTurn(sessionId, "первый")).id, RUN);
+    expect(transient).toMatchObject({ code: "AGENT_MODEL_TEMPORARILY_UNAVAILABLE", status: "failed" });
+    expect(await refusals()).toBe(0);
+
+    // A broken key fails every request; it is not this summary being turned down.
+    const brokenKey = await runTurn(runtimeWith(async () => {
+      throw Object.assign(new Error("invalid api key"), { statusCode: 401 });
+    }, scriptedModel()), (await startMessageTurn(sessionId, "ключ")).id, RUN);
+    expect(brokenKey).toMatchObject({ code: "AGENT_MODEL_CALL_FAILED", status: "failed" });
+    expect(await refusals()).toBe(0);
+
+    const refused = await runTurn(runtimeWith(async () => {
+      throw new Error("refused: input is too long for this model");
+    }, scriptedModel()), (await startMessageTurn(sessionId, "второй")).id, RUN);
+    // The person is told the next message helps, not that repeating cannot.
+    expect(refused).toMatchObject({ code: "AGENT_COMPACTION_SUMMARY_REFUSED", status: "failed" });
+    expect(await refusals()).toBe(1);
+    expect(warn.mock.calls.map((call) => JSON.parse(call[0] as string))).toContainEqual(
+      expect.objectContaining({ code: "AGENT_COMPACTION_SUMMARY_REFUSED", refusals: 1, sessionId }),
+    );
+
+    const summarize = vi.fn<TurnRuntime["summarize"]>(async () => "Сводка разговора");
+    const answered = await runTurn(runtimeWith(summarize, scriptedModel(reply("Отвечаю."))),
+      (await startMessageTurn(sessionId, "третий")).id, RUN);
+    expect(answered).toMatchObject({ status: "completed" });
+    expect(summarize.mock.calls[0]![0].prompt).toContain("earlier messages omitted");
+    expect(await refusals()).toBe(0);
+    vi.restoreAllMocks();
+  });
+
   it("counts the step's tool definitions before the provider has measured the history", async () => {
     const long = Array.from({ length: 8 }, (_, index) => [
       { role: "user" as const, content: `question ${index} ${"x".repeat(1_000)}` },

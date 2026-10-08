@@ -5,7 +5,6 @@
  * - Automatic retrieval and `search_memories` repository path are default-off for external claims.
  * - Enabled private projection admits only claims bound to the current verified user, including later claims.
  * - External A/B retrieval remains isolated and private list does not inherit projected group records.
- * - Authorized unresolved conflicts render both incoming versions without internal identity leakage.
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -201,21 +200,7 @@ describeWithDatabase("R3 external projection retrieval", () => {
     expect(enabledA.map((result) => result.memory.content)).toEqual([
       "Анна использует проектор Альфа",
     ]);
-    await database().query(
-      `INSERT INTO claim_conflicts
-         (claim_a_id, claim_b_id, family_id, scope, scope_partition_key, detection_method)
-       VALUES (LEAST($1::uuid, $2::uuid), GREATEST($1::uuid, $2::uuid), $3,
-               'group', $4, 'deterministic_guard')`,
-      [selfA.id, otherA.id, fixture.ownerAuth.familyId, fixture.externalA.groupId],
-    );
-    const unauthorizedClosure = await memoryRetrievalRepository.searchWithConflictClosure(
-      fixture.ownerAuth, "проектор", [QUERY_VECTOR],
-    );
-    expect(unauthorizedClosure.conflicts).toEqual([]);
-    expect(unauthorizedClosure.results.map((result) => result.memory.content))
-      .not.toContain("Анна использует проектор Альфа");
-    expect(unauthorizedClosure.relatedClaimIds).not.toContain(selfA.id);
-    expect(JSON.stringify(unauthorizedClosure)).not.toMatch(
+    expect(JSON.stringify(enabledA)).not.toMatch(
       new RegExp([otherA.id, otherA.memoryRef, "Пётр использует проектор Бета"].join("|"), "u"),
     );
 
@@ -315,51 +300,5 @@ describeWithDatabase("R3 external projection retrieval", () => {
       "-1009701", "-1009702",
     ].join("|"), "u"));
     expect(safe).not.toMatch(/"(?:id|groupId|participantId|userId|telegramUserId)"/u);
-  });
-
-  it("closes an authorized incoming conflict with both versions and no silent winner", async () => {
-    const fixture = await createFixture();
-    await enablePolicy(
-      fixture.ownerAuth, fixture.externalA.groupId, "External A", "enable-a-conflict",
-    );
-    const first = await insertGroupClaim({
-      content: "Анна хранит проектор дома", conversationId: fixture.externalA.conversationId,
-      familyId: fixture.ownerAuth.familyId, groupId: fixture.externalA.groupId,
-      operationKey: "conflict-a", participantId: fixture.externalA.selfParticipantId,
-      telegramUserId: "9701",
-    });
-    const second = await insertGroupClaim({
-      content: "Анна не хранит проектор дома", conversationId: fixture.externalA.conversationId,
-      familyId: fixture.ownerAuth.familyId, groupId: fixture.externalA.groupId,
-      operationKey: "conflict-b", participantId: fixture.externalA.selfParticipantId,
-      telegramUserId: "9702",
-    });
-    await database().query(
-      `INSERT INTO claim_conflicts
-         (claim_a_id, claim_b_id, family_id, scope, scope_partition_key, detection_method)
-       VALUES (LEAST($1::uuid, $2::uuid), GREATEST($1::uuid, $2::uuid), $3,
-               'group', $4, 'deterministic_guard')`,
-      [first.id, second.id, fixture.ownerAuth.familyId, fixture.externalA.groupId],
-    );
-
-    const retrieval = await memoryRetrievalRepository.searchWithConflictClosure(
-      fixture.ownerAuth, "проектор дома", [QUERY_VECTOR],
-    );
-
-    expect(retrieval.conflicts).toHaveLength(1);
-    expect(retrieval.conflicts[0]!.versions.map((version) => version.content).sort()).toEqual([
-      "Анна не хранит проектор дома",
-      "Анна хранит проектор дома",
-    ]);
-    expect(retrieval.results.map((result) => result.memory.memoryRef))
-      .not.toEqual(expect.arrayContaining([first.memoryRef, second.memoryRef]));
-    expect(JSON.stringify(retrieval.conflicts)).not.toMatch(
-      new RegExp([first.id, second.id, fixture.externalA.groupId,
-        fixture.externalA.selfParticipantId].join("|"), "u"),
-    );
-    await expect(database().query(
-      "SELECT claim_status::text FROM memory_items WHERE id = ANY($1::uuid[]) ORDER BY id",
-      [[first.id, second.id]],
-    )).resolves.toMatchObject({ rows: [{ claim_status: "active" }, { claim_status: "active" }] });
   });
 });

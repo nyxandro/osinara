@@ -212,10 +212,6 @@ describe("recordOfferedMemories", () => {
       memories: [],
       offered: {
         claimIdByMemoryRef: new Map([["mem_first", "claim-1"], ["mem_second", "claim-2"]]),
-        claimIdsByConflictRef: new Map([
-          ["conflict-1", ["claim-a", "claim-b"]],
-          ["conflict-2", ["claim-c", "claim-d"]],
-        ]),
       },
       rankingByMemoryRef: new Map(),
       retrievedClaimIds: [],
@@ -227,14 +223,6 @@ describe("recordOfferedMemories", () => {
     return { content: "запись", kind: "fact", memoryRef } as unknown as ModelMemory;
   }
 
-  function conflict(conflictRef: string) {
-    return {
-      conflictRef,
-      instruction: "Не выбирать версию самостоятельно",
-      versions: [{ content: "одна", memoryRef: "mem_a" }, { content: "другая", memoryRef: "mem_b" }],
-    } as never;
-  }
-
   it("writes down only the records the turn actually offered", async () => {
     const recordShown = vi.spyOn(memoryShowJournal, "recordShown").mockResolvedValue();
 
@@ -242,26 +230,6 @@ describe("recordOfferedMemories", () => {
       await recordOfferedMemories(window, turnContext(), [record("mem_first")], []);
 
       expect(recordShown).toHaveBeenCalledWith(window, ["claim-1"]);
-    } finally { recordShown.mockRestore(); }
-  });
-
-  it("adds the closure of a conflict group the turn offered", async () => {
-    const recordShown = vi.spyOn(memoryShowJournal, "recordShown").mockResolvedValue();
-
-    try {
-      await recordOfferedMemories(window, turnContext(), [record("mem_first"), conflict("conflict-1")], []);
-
-      expect(recordShown).toHaveBeenCalledWith(window, ["claim-1", "claim-a", "claim-b"]);
-    } finally { recordShown.mockRestore(); }
-  });
-
-  it("keeps a dropped conflict group offerable while writing down the one that survived", async () => {
-    const recordShown = vi.spyOn(memoryShowJournal, "recordShown").mockResolvedValue();
-
-    try {
-      await recordOfferedMemories(window, turnContext(), [conflict("conflict-2")], []);
-
-      expect(recordShown).toHaveBeenCalledWith(window, ["claim-c", "claim-d"]);
     } finally { recordShown.mockRestore(); }
   });
 
@@ -276,15 +244,18 @@ describe("recordOfferedMemories", () => {
     } finally { recordShown.mockRestore(); }
   });
 
-  it("does not write down profile claims this retrieval did not bring", async () => {
+  it("writes down a standing profile claim as the profile's show, not the selection's", async () => {
     const recordShown = vi.spyOn(memoryShowJournal, "recordShown").mockResolvedValue();
+    const recordShownRefs = vi.spyOn(memoryShowJournal, "recordShownRefs").mockResolvedValue();
 
     try {
-      // A standing profile claim was never a candidate of this search, so it has no place here.
+      // A standing claim was never a candidate of this search: it must not hide anything from the
+      // next selections, yet a record the answer used from the profile has to count (#339).
       await recordOfferedMemories(window, turnContext(), [record("mem_first")], ["mem_unrelated"]);
 
       expect(recordShown).toHaveBeenCalledWith(window, ["claim-1"]);
-    } finally { recordShown.mockRestore(); }
+      expect(recordShownRefs).toHaveBeenCalledWith(window, ["mem_unrelated"], "profile");
+    } finally { recordShown.mockRestore(); recordShownRefs.mockRestore(); }
   });
 
   it("writes nothing for a turn that has no conversation to remember into", async () => {

@@ -2,7 +2,7 @@ import { APICallError, RetryError } from "ai";
 import { describe, expect, it } from "vitest";
 
 import { AppError } from "../../lib/app-error.js";
-import { classifyModelCallError, modelCallFailure } from "./model-errors.js";
+import { classifyModelCallError, isRequestRefusal, modelCallFailure, ModelInactivityError } from "./model-errors.js";
 
 // What neuraldeep answered to an oversized request on 5 October 2026: status 400, no telling code.
 const NEURALDEEP_OVERFLOW = "Слишком длинный запрос — не помещается в контекстное окно модели. Сократите историю сообщений или max_tokens.";
@@ -51,5 +51,25 @@ describe("model call failures", () => {
 
   it("leaves any other rejected request a general model failure", () => {
     expect(modelCallFailure(rejected("Unknown model"))).toMatchObject({ code: "AGENT_MODEL_CALL_FAILED" });
+  });
+});
+
+describe("isRequestRefusal", () => {
+  // #331: a summary the model turned down is asked for smaller next time, and after four refusals
+  // the older history is dropped. A broken key or an unpaid account fails every request, not
+  // this one: counting it would drop history a person never lost to a refusal.
+  it.each([
+    ["an oversized request", rejected(NEURALDEEP_OVERFLOW), true],
+    ["a request the provider rejected", rejected("content policy violation"), true],
+    ["a failure without a status", new Error("refused: input is too long for this model"), true],
+    ["an empty answer", new AppError("AGENT_MODEL_OUTPUT_INCOMPLETE", "Модель вернула пустой ответ"), true],
+    ["a broken key", rejected("invalid api key", "401", 401), false],
+    ["an unpaid account", rejected("insufficient balance", "402", 402), false],
+    ["a forbidden model", rejected("access denied", "403", 403), false],
+    ["a model that is gone", rejected("Unknown model", "404", 404), false],
+    ["a provider outage", rejected("overloaded", "503", 503), false],
+    ["a model that never answered", new ModelInactivityError("AGENT_MODEL_FIRST_CHUNK_TIMEOUT"), false],
+  ])("counts %s: %s", (_, error, expected) => {
+    expect(isRequestRefusal(modelCallFailure(error))).toBe(expected);
   });
 });

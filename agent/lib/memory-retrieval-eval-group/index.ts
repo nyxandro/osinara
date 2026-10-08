@@ -35,32 +35,42 @@ export const MEMORY_RETRIEVAL_EVAL_GROUP_RECORDS: readonly MemoryRetrievalEvalGr
  * - Questions about one person work: `participantRecallAt12` and `participantTopThreeRate` = 1.
  *   The subject header carried into the indexed text («Вика Лунина (vlunina). Вид: …») puts the
  *   person's own records first even when neighbours share the topic.
- * - The selection never stays empty when it should. `smallTalkEmptyRate` = 0 with 8.875 records
- *   per reaction on average — real memory showed 11.8 on the same kind of turn — and
- *   `participantNearMissEmptyRate` = 0: asked what Nina said about a tool she never mentioned,
- *   the search offers Nina's other records and the tool's documentation.
- * - The bot does not find itself. «Осинара, как ты выглядишь?» misses the avatar record: the
- *   bot's name is stripped from the start of the question before the search, and what is left,
- *   «как ты выглядишь», names nothing. «кто тебя сделал?» never carried the name and finds its
- *   author below third place for the same reason — «тебя» says nothing about whom. That is
- *   `botPersonaRecallAt12` = 0.75 with one persona question offered low.
- * - Other words: «железо» reaches nothing about the hosting record; «гитхаб», «гардрейлы» and
- *   «нжинкс» are found, the first at second place behind a debate about RAG.
+ * - Small talk stays empty half the time. «ахаха», «умница», «+1» and «ну всё, я спать» are made
+ *   of small-talk words only and are not searched at all (#341, 08.10.2026); «ты подшофе?», «а мем
+ *   так-то смешной» and the other two use ordinary words and still get records — that is
+ *   `smallTalkEmptyRate` = 0.5 from 0, and records per reaction fell from 8.875. Before the
+ *   change real memory showed 11.8 records on the same kind of turn.
+ * - `participantNearMissEmptyRate` = 0: asked what Nina said about a tool she never mentioned, the
+ *   search offers Nina's other records and the tool's documentation. What silence would prevent is
+ *   a neighbour's record on top, read as Nina's: `participantNearMissNeighbourTopThreeRate` was 0.6
+ *   and is 0 from 08.10.2026 (#343) — a record about another person than the one named goes below
+ *   that person's. Subject labels are stored here as production stores them, or that rule could
+ *   not be seen.
+ * - The bot finds itself, from 08.10.2026 (#346). «Осинара, как ты выглядишь?» used to miss the
+ *   avatar record: the name is cut from the start of the question, and «как ты выглядишь» named
+ *   nothing. In a group the name now goes back in where «ты» can only mean the bot, and
+ *   `botPersonaRecallAt12` rose from 0.75 to 1, every persona question with its answer first.
+ * - Other words: «железо» and «гардрейлы» are asked of the bot, so its name brings the hosting and
+ *   guardrails records to the top too — `aliasWordingRecallAt12` and its top-three rate rose from
+ *   0.75 to 1. «гитхаб» is asked with «свой», which names nobody, and is still found second.
+ * - The price is one reaction: «ты подшофе?» is about the bot as well and now gets its records,
+ *   4.75 records per small-talk line instead of 4.375.
  * - Isolation held for every question, asked by an outsider and by the family owner; the test
  *   fails on any leak, so it is not a number here.
  */
 export const MEMORY_RETRIEVAL_EVAL_GROUP_BASELINE = {
-  aliasWordingRecallAt12: 0.75,
-  aliasWordingTopThreeRate: 0.75,
-  botPersonaRecallAt12: 0.75,
-  expectedInTopThreeRate: 0.875,
+  aliasWordingRecallAt12: 1,
+  aliasWordingTopThreeRate: 1,
+  botPersonaRecallAt12: 1,
+  expectedInTopThreeRate: 1,
   linkRecallAt12: 1,
   participantNearMissEmptyRate: 0,
+  participantNearMissNeighbourTopThreeRate: 0,
   participantRecallAt12: 1,
   participantTopThreeRate: 1,
-  positiveRecallAt12: 0.917,
-  smallTalkEmptyRate: 0,
-  smallTalkMeanOffered: 8.875,
+  positiveRecallAt12: 1,
+  smallTalkEmptyRate: 0.5,
+  smallTalkMeanOffered: 4.75,
   topicFullCoverageRate: 1,
   topicRecallAt12: 1,
 } as const;

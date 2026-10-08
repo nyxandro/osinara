@@ -5,6 +5,9 @@
  * - `MemorySelectionWindow`: the conversation and turn the current selection belongs to.
  * - `memoryShowJournal.openTurn`: gives this turn its number inside the conversation.
  * - `memoryShowJournal.recordShown`: writes down what the selection offered this turn.
+ * - `memoryShowJournal.recordShownRefs`: writes down records the model saw another way — the
+ *   explicit search, the memory list, the standing profile — so using them can be counted (#339).
+ * - `MemoryShowSource`: where a show came from.
  *
  * The selection is built fresh every turn and used to know nothing about the turns before it. Rank
  * fusion is stable by construction, so a similar question inside one conversation brings up the
@@ -32,6 +35,9 @@ export interface MemorySelectionWindow {
   /** Position of this turn inside its conversation, from `openTurn`. */
   turnOrdinal: number;
 }
+
+/** `selection` is the turn's own memory block; only it hides records from the next selections. */
+export type MemoryShowSource = "list" | "profile" | "search" | "selection";
 
 export const memoryShowJournal = {
   /**
@@ -72,8 +78,8 @@ export const memoryShowJournal = {
     if (claimIds.length === 0) return;
     await database().query(
       `INSERT INTO memory_retrieval_shows
-         (conversation_id, agent_session_id, turn_id, turn_ordinal, claim_id)
-       SELECT $1, $2, $3, $4, claim FROM unnest($5::uuid[]) AS claim
+         (conversation_id, agent_session_id, turn_id, turn_ordinal, claim_id, source)
+       SELECT $1, $2, $3, $4, claim, 'selection' FROM unnest($5::uuid[]) AS claim
        ON CONFLICT (conversation_id, agent_session_id, turn_id, claim_id) DO NOTHING`,
       [
         window.conversationId,
@@ -82,6 +88,30 @@ export const memoryShowJournal = {
         window.turnOrdinal,
         [...claimIds],
       ],
+    );
+  },
+
+  /**
+   * Only for a turn that opened its window: a delegated child or a scheduled run has no turn of
+   * the conversation and writes nothing. A record shown twice in one turn keeps its first source,
+   * so the selection's own show is never relabelled by a search that found it again. Safe to
+   * repeat, which a tool marked replay-safe needs: the same turn and record make one row.
+   */
+  async recordShownRefs(
+    window: Pick<MemorySelectionWindow, "agentSessionId" | "conversationId" | "turnId">,
+    memoryRefs: readonly string[],
+    source: Exclude<MemoryShowSource, "selection">,
+  ): Promise<void> {
+    if (memoryRefs.length === 0) return;
+    await database().query(
+      `INSERT INTO memory_retrieval_shows
+         (conversation_id, agent_session_id, turn_id, turn_ordinal, claim_id, source)
+       SELECT turn.conversation_id, turn.agent_session_id, turn.turn_id, turn.turn_ordinal, ref.memory_item_id, $5
+       FROM memory_retrieval_turns AS turn
+       JOIN memory_item_refs AS ref ON ref.memory_ref = ANY($4::text[])
+       WHERE turn.conversation_id = $1 AND turn.agent_session_id = $2 AND turn.turn_id = $3
+       ON CONFLICT (conversation_id, agent_session_id, turn_id, claim_id) DO NOTHING`,
+      [window.conversationId, window.agentSessionId, window.turnId, [...new Set(memoryRefs)], source],
     );
   },
 };

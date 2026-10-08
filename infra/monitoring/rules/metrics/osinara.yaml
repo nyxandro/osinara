@@ -87,13 +87,19 @@ groups:
       # this alert during ordinary family conversation. A code missing from the list counts as a
       # problem, which is the safe direction and prompts adding it here deliberately.
       #
+      # A test reads every console.info code in the sources and fails when one is missing here,
+      # since a release restarts the runtime and recovers its turns: the start, stop and recovery
+      # lines lit this alert on a healthy deployment (#320). AGENT_SCHEDULE_CYCLE_SKIPPED is
+      # information too and stays counted on purpose: a dispatcher still busy when the next minute
+      # comes is the first sign of an overloaded host (#336).
+      #
       # The two SANDBOX_EGRESS_*_CLOSED codes are connections that ended the way web traffic ends:
       # a browser in the sandbox dropping a request, a site dropping an established tunnel. Over
       # two weeks of production they were 1255 records against 21 real rejections.
       - alert: OsinaraErrorBurst
         expr: >-
           sum by (host) (sum_over_time(log_code_lines_1m{project="osinara-production",
-          code!~"AGENT_(SCHEDULE_TICK|TELEGRAM_SILENT_TURN|MEMORY_PURGE_COMPLETED|DATABASE_BOOKKEEPING_RECOVERY|RUNTIME_DEAD_PROCESS_RECONCILED|TELEGRAM_INGRESS_RECOVERED|TELEGRAM_OBSERVER_TRANSFERRED|TELEGRAM_DATABASE_RECOVERY|MEMORY_WRITE_SUCCEEDED|MEMORY_WRITE_DEFERRED|MEMORY_INDEX_RETRY_CLAIMED|MEMORY_INDEX_CHUNK_RESPLIT|MEMORY_USAGE_DIRECTIVE|MEMORY_EMBEDDING_WORKER_STARTED|MEMORY_EMBEDDING_WORKER_WAITING|MODEL_CALL_METRICS|TOOL_CALL_METRICS|SKILL_SYNC_METRICS|MEMORY_SEARCH_METRICS|MEMORY_RETRIEVAL_METRICS|MEMORY_REVIEW_LANE_METRICS|SANDBOX_EGRESS_CLIENT_CLOSED|SANDBOX_EGRESS_UPSTREAM_CLOSED)"}[5m])) > 10
+          code!~"AGENT_(SCHEDULE_TICK|TELEGRAM_SILENT_TURN|MEMORY_PURGE_COMPLETED|DATABASE_BOOKKEEPING_RECOVERY|RUNTIME_DEAD_PROCESS_RECONCILED|TELEGRAM_INGRESS_RECOVERED|TELEGRAM_OBSERVER_TRANSFERRED|TELEGRAM_DATABASE_RECOVERY|MEMORY_WRITE_SUCCEEDED|MEMORY_WRITE_DEFERRED|MEMORY_INDEX_RETRY_CLAIMED|MEMORY_INDEX_CHUNK_RESPLIT|MEMORY_USAGE_DIRECTIVE|MEMORY_EMBEDDING_WORKER_STARTED|MEMORY_EMBEDDING_WORKER_WAITING|MODEL_CALL_METRICS|TOOL_CALL_METRICS|SKILL_SYNC_METRICS|MEMORY_SEARCH_METRICS|MEMORY_RETRIEVAL_METRICS|MEMORY_REVIEW_LANE_METRICS|SANDBOX_EGRESS_CLIENT_CLOSED|SANDBOX_EGRESS_UPSTREAM_CLOSED|CONVERSATION_WAKEUP_OBSERVER_RELEASED|CONVERSATION_WAKEUP_RECOVERED|CONVERSATION_WAKEUP_RUN_ALREADY_CLOSED|RUNNER_LOCK_RETAKEN|RUNTIME_STARTED|RUNTIME_STOPPING|SCHEDULE_CONVERSATION_ENQUEUED|TURNS_RECOVERED|TURN_DEFERRED_BY_MAINTENANCE|TELEGRAM_DRAIN_WAITING)"}[5m])) > 10
         labels:
           severity: warning
           project: osinara-production
@@ -190,7 +196,7 @@ groups:
         annotations:
           summary: 'Трое суток модель не опирается ни на одну запись памяти'
           description: 'Память подбирает записи к каждому ответу, но ассистент ни разу не назвал их полезными. Для семьи это выглядит так, будто он не помнит того, о чём ему рассказывали, хотя записи на месте.'
-          runbook: 'В строках AGENT_MEMORY_USAGE_DIRECTIVE смотреть declared и failed: declared всегда false — модель перестала писать служебную строку; failed не пусто — не работает счётчик; namedCount больше нуля при rejectedCount, равном namedCount, — модель называет записи, которых этот ход не показывал. Если строка на месте и всё отклонено правильно, смотреть memoryEvidence в AGENT_MEMORY_RETRIEVAL_METRICS: что и какими ветками подбирается.'
+          runbook: 'В строках AGENT_MEMORY_USAGE_DIRECTIVE смотреть declared и failed: declared всегда false — модель перестала писать служебную строку; failed не пусто — не работает счётчик; namedCount больше нуля при rejectedCount, равном namedCount, — модель называет записи, которых эта сессия ей не показывала; countedCount больше нуля при countedSelectionCount, равном нулю, — ответы опираются только на то, что модель нашла сама, а автоподборка предлагает не то. Если строка на месте и всё отклонено правильно, смотреть memoryEvidence в AGENT_MEMORY_RETRIEVAL_METRICS: что и какими ветками подбирается.'
 
       # The family is matched by prefix because fifteen of its sixteen codes are failures. The
       # sixteenth says the indexer started, which it does on every release — and for a whole day
@@ -199,13 +205,15 @@ groups:
       # the one in OsinaraErrorBurst to that list: add a code there without excluding it in both and
       # the build fails, not the duty reader.
       #
-      # Still skewed, and left that way on purpose: the family also covers AGENT_MEMORY_EMBEDDING_
-      # PROVIDER_* written by the agent while *reading* memory for an answer, which this summary
-      # calls an indexing failure. Splitting read from write needs a service label this rule cannot
-      # be shown to have; #239 carries the detail.
+      # Only the indexer's lines count. The agent writes the same AGENT_MEMORY_EMBEDDING_PROVIDER_*
+      # codes when a search cannot reach the service; 08.10 such a read fired this alert and sent the
+      # duty reader to an indexer with no failed job (#352). Reads belong to
+      # OsinaraMemorySemanticBranchDown. The service label comes from the hub's shared
+      # log_code_lines_1m record (stats by host, project, service, code).
       - alert: OsinaraEmbeddingFailed
         expr: >-
           sum(sum_over_time(log_code_lines_1m{project="osinara-production",
+          service="memory-embedding-worker",
           code=~"AGENT_MEMORY_EMBEDDING_.+",
           code!="AGENT_MEMORY_EMBEDDING_WORKER_STARTED",
           code!="AGENT_MEMORY_EMBEDDING_WORKER_WAITING"}[5m])) > 0

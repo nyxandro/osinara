@@ -12,9 +12,11 @@
  * - `recordDetails`: a record's text and attributes by ref, deleted or not.
  * - `collectTurnCandidates`: offered and pooled records of one question with their text, and the
  *   refs that passed the gates, which only explain why a relevant pooled record was missed.
+ * - `collectGatedCandidates`: every record that passed a branch gate for one question, with each
+ *   branch's score, so another fusion of the same branches can be ranked without a new copy.
  *
- * Every number comes from the product's own search: the repository call the tools make, and the
- * statement it runs, bound once with the product's parameters and once with the gates opened.
+ * Every number comes from the product's own code: the automatic selection a turn makes, and the
+ * search statement it runs, bound once with the product's parameters and once with the gates opened.
  *
  * A question is judged against memory as it stood when it was asked. A record written from that
  * very message would otherwise be found by its own words and inflate every number, so the copy is
@@ -40,10 +42,10 @@ import {
 } from "../../../agent/lib/memory-config.js";
 import type { MemoryAuthorization } from "../../../agent/lib/memory-context.js";
 import {
-  memoryRetrievalRepository,
   memoryRetrievalSearchParameters,
   memoryRetrievalSearchStatement,
 } from "../../../agent/lib/memory-retrieval-repository.js";
+import { selectMemoriesAutomatically } from "../../../agent/lib/memory-automatic-selection.js";
 import type { GoldenTurn } from "./golden-score.js";
 import type { GoldenQuery } from "./turn-queries.js";
 
@@ -61,8 +63,11 @@ const RUN_MARKER_TABLE = "memory_golden_eval_run";
  * new parameter or a threshold written into the text — would stay closed in the "ungated" pool
  * and quietly narrow it, so any edit stops the run until GATES are checked again.
  */
-const REVIEWED_STATEMENT_SHA256 = "193787bcba79495003422bce268b71f67a37053d5e4422c0d989c4e909fa3b41";
-const REVIEWED_PARAMETER_COUNT = 16;
+// Reviewed 08.10.2026: the seventeenth parameter is the branch agreement factor, a multiplier on
+// the fused rank that cuts nothing, and the repeat filter reads only the selection's own shows
+// (#339) — neither is a gate, so GATES stay complete.
+const REVIEWED_STATEMENT_SHA256 = "0194f54b41172bb07dc9bc28a0f76dfdfd636496b7b78724ecdaa17cec06660d";
+const REVIEWED_PARAMETER_COUNT = 17;
 
 /** Where the gates sit in the product's parameter list, with the value each must hold there. */
 const GATES = [
@@ -172,9 +177,8 @@ export async function requireResumableCopy(): Promise<void> {
 }
 
 /**
- * A record's status at the moment, for one that is retracted now: deletion and a choice between
- * versions both overwrite it, but the replacement it underwent stays in `claim_relations`, and a
- * choice made before the moment had already retracted it then.
+ * A record's status at the moment, for one that is retracted now: deletion overwrites it, but the
+ * replacement it underwent stays in `claim_relations`.
  */
 const SUCCESSOR_AT_MOMENT = (alias: string) => `(
   SELECT relation.target_claim_id
@@ -186,16 +190,10 @@ const SUCCESSOR_AT_MOMENT = (alias: string) => `(
   ORDER BY successor.created_at DESC
   LIMIT 1
 )`;
-const LOST_CHOICE_BEFORE_MOMENT = (alias: string) => `EXISTS (
-  SELECT 1 FROM claim_conflicts AS earlier
-  WHERE earlier.resolution = 'chosen' AND earlier.resolved_at < $1
-    AND ${alias}.id IN (earlier.claim_a_id, earlier.claim_b_id) AND earlier.chosen_claim_id <> ${alias}.id
-)`;
 const RETURN_TO_STATUS_AT_MOMENT = (candidates: string) => `
   WITH returning_records AS (
     SELECT DISTINCT candidate.id, ${SUCCESSOR_AT_MOMENT("candidate")} AS successor_id
     FROM (${candidates}) AS candidate
-    WHERE NOT ${LOST_CHOICE_BEFORE_MOMENT("candidate")}
   )
   UPDATE memory_items_all AS item
   SET deleted_at = NULL,
@@ -233,24 +231,6 @@ export async function rewindCopyTo(moment: string): Promise<void> {
          AND successor.created_at >= $1`,
       [moment],
     );
-    // A choice made later had not retracted the other version yet. Before the conflicts detected
-    // later are dropped: a conflict both detected and decided later still retracted that version.
-    await client.query(RETURN_TO_STATUS_AT_MOMENT(
-      `SELECT version.id
-       FROM claim_conflicts AS conflict
-       JOIN memory_items_all AS version ON version.id IN (conflict.claim_a_id, conflict.claim_b_id)
-       WHERE conflict.resolution = 'chosen' AND conflict.resolved_at >= $1
-         AND version.id <> conflict.chosen_claim_id AND version.claim_status = 'retracted'
-         AND version.deleted_at IS NULL`,
-    ), [moment]);
-    await client.query("DELETE FROM claim_conflicts WHERE detected_at >= $1", [moment]);
-    await client.query(
-      `UPDATE claim_conflicts
-       SET resolution = 'unresolved', chosen_claim_id = NULL, resolved_at = NULL,
-           resolved_by_user_id = NULL, resolved_by_telegram_user_id = NULL, resolution_metadata = NULL
-       WHERE resolved_at >= $1`,
-      [moment],
-    );
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -260,11 +240,18 @@ export async function rewindCopyTo(moment: string): Promise<void> {
   }
 }
 
+/**
+ * What the turn's automatic selection showed, and which of it that same turn used. Since #339 the
+ * journal also holds what the model's own search, listing or the standing profile showed, and a
+ * show may be spent by a later turn of the session; neither is the selection's offer to this turn.
+ */
 export async function loadShowJournal(): Promise<Map<string, { shown: string[]; used: string[] }>> {
   const rows = await database().query<{ agent_session_id: string; memory_ref: string; turn_id: string; used: boolean }>(
-    `SELECT show.agent_session_id, show.turn_id, ref.memory_ref, show.used_at IS NOT NULL AS used
+    `SELECT show.agent_session_id, show.turn_id, ref.memory_ref,
+            show.used_turn_id IS NOT DISTINCT FROM show.turn_id AS used
      FROM memory_retrieval_shows AS show
      JOIN memory_item_refs AS ref ON ref.memory_item_id = show.claim_id
+     WHERE show.source = 'selection'
      ORDER BY show.agent_session_id, show.turn_id, ref.memory_ref`,
   );
   const journal = new Map<string, { shown: string[]; used: string[] }>();
@@ -328,14 +315,11 @@ export async function collectTurnCandidates(
   embeddings: readonly (readonly number[])[],
   production: { shown: string[]; used: string[] } | null,
 ): Promise<GoldenTurn & { authorization: MemoryAuthorization; pool: PoolRecord[]; startedAt: string }> {
-  const selection = await memoryRetrievalRepository.searchWithConflictClosure(
-    question.authorization, question.query, embeddings,
-  );
-  // A record in two open conflicts comes back once per group: one record, offered at its first place.
-  const offered = [...new Set([
-    ...selection.results.map((result) => result.memory.memoryRef),
-    ...selection.conflicts.flatMap((conflict) => conflict.versions.map((version) => version.memoryRef)),
-  ])];
+  // What the automatic selection offered, through the turn's own function, on the day it was asked.
+  const selection = await selectMemoriesAutomatically(question.authorization, question.query, {
+    now: new Date(question.startedAt), window: null,
+  });
+  const offered = selection.selected.map((selected) => selected.memory.memoryRef);
   const product = memoryRetrievalSearchParameters(question.authorization, question.query, embeddings);
   const gated = (await candidateRows(product)).map((row) => row.memory_ref);
   const ungated = await candidateRows(ungatedSearchParameters(product));
@@ -373,6 +357,116 @@ export async function collectTurnCandidates(
     production,
     query: question.query,
     startedAt: question.startedAt,
+    turnId: question.turnId,
+  };
+}
+
+/** One record that passed a gate, with what each branch said about it and how the product ranked it. */
+export interface GatedCandidate {
+  attribute: string | null;
+  confirmation: string;
+  content: string;
+  createdAt: string;
+  fusedScore: number;
+  id: string;
+  kind: string;
+  memoryRef: string;
+  occurredOn: string | null;
+  russianRank: number | null;
+  scope: string;
+  semanticSimilarity: number | null;
+  simpleRank: number | null;
+  subjectLabel: string | null;
+  updatedAt: string;
+}
+
+/** The search's own branch counts, before and after each gate, as the log line carries them. */
+export interface GatedDiagnostics {
+  russianMatched: number;
+  russianQualified: number;
+  semanticMatched: number;
+  semanticQualified: number;
+  semanticTopSimilarity: number | null;
+  simpleMatched: number;
+  simpleQualified: number;
+}
+
+interface GatedRow {
+  attribute: string | null;
+  confirmation: string;
+  content: string;
+  created_at: Date;
+  fused_score: number | string;
+  id: string | null;
+  kind: string;
+  memory_ref: string;
+  occurred_on: string | Date | null;
+  russian_matched: number | string;
+  russian_morphology_rank: number | string | null;
+  russian_qualified: number | string;
+  scope: string;
+  semantic_matched: number | string;
+  semantic_qualified: number | string;
+  semantic_top_similarity: number | string | null;
+  simple_matched: number | string;
+  simple_qualified: number | string;
+  semantic_similarity: number | string | null;
+  simple_lexical_rank: number | string | null;
+  subject_label: string | null;
+  updated_at: Date;
+}
+
+const optionalNumber = (value: number | string | null) => value === null ? null : Number(value);
+
+/**
+ * The product statement with the product's own gates, unlimited: everything the twelve places
+ * were chosen from. A branch's order is recoverable from its score with `updatedAt` and `id` as
+ * the statement's tie-breakers, so any fusion of the same three branches can be replayed offline.
+ */
+export async function collectGatedCandidates(
+  question: GoldenQuery,
+  embeddings: readonly (readonly number[])[],
+): Promise<{
+  candidates: GatedCandidate[]; diagnostics: GatedDiagnostics; group: boolean; message: string; query: string;
+  turnId: string;
+}> {
+  const result = await database().query<GatedRow>(
+    memoryRetrievalSearchStatement(),
+    memoryRetrievalSearchParameters(question.authorization, question.query, embeddings),
+  );
+  // The statement always returns its diagnostics row, with or without candidates.
+  const head = result.rows[0]!;
+  return {
+    candidates: result.rows.filter((row) => row.id !== null).map((row): GatedCandidate => ({
+      attribute: row.attribute,
+      confirmation: row.confirmation,
+      content: row.content,
+      createdAt: row.created_at.toISOString(),
+      fusedScore: Number(row.fused_score),
+      id: row.id!,
+      kind: row.kind,
+      memoryRef: row.memory_ref,
+      occurredOn: row.occurred_on === null ? null : String(row.occurred_on instanceof Date
+        ? row.occurred_on.toISOString().slice(0, 10) : row.occurred_on),
+      russianRank: optionalNumber(row.russian_morphology_rank),
+      scope: row.scope,
+      semanticSimilarity: optionalNumber(row.semantic_similarity),
+      simpleRank: optionalNumber(row.simple_lexical_rank),
+      subjectLabel: row.subject_label,
+      updatedAt: row.updated_at.toISOString(),
+    })),
+    diagnostics: {
+      russianMatched: Number(head.russian_matched),
+      russianQualified: Number(head.russian_qualified),
+      semanticMatched: Number(head.semantic_matched),
+      semanticQualified: Number(head.semantic_qualified),
+      semanticTopSimilarity: optionalNumber(head.semantic_top_similarity),
+      simpleMatched: Number(head.simple_matched),
+      simpleQualified: Number(head.simple_qualified),
+    },
+    group: question.authorization.groupId !== null,
+    message: question.message,
+    query: question.query,
     turnId: question.turnId,
   };
 }

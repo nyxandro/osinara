@@ -6,6 +6,7 @@
  * - `nextTelegramGroupSequence`: transaction-scoped monotonic sequence allocation.
  * - `recordTelegramAgentResponse`: idempotent logical entry and chunk-alias persistence.
  */
+import { AGENT_DISPLAY_NAME } from "./agent-name.js";
 import type { PoolClient } from "pg";
 
 import { database } from "./database.js";
@@ -17,7 +18,6 @@ import {
 } from "./telegram-group-message-storage.js";
 
 const AGENT_ACTOR_ID = "agent:osinara";
-const AGENT_DISPLAY_NAME = "Осинара";
 
 export interface RecordTelegramAgentResponseInput {
   applicationSessionId: string | null;

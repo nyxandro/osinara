@@ -50,6 +50,21 @@ function requireEmbeddingBaseUrl(): string {
   return url.origin;
 }
 
+/**
+ * A long query goes out as several requests, each under its own ceiling, and the service does not
+ * log a request it abandoned. Without the size and the wait here, which request stalled and for
+ * how long can only be guessed from timestamps.
+ */
+function logUnavailable(endpoint: string, texts: number, startedAt: number, error: unknown): void {
+  console.error(JSON.stringify({
+    code: "AGENT_MEMORY_EMBEDDING_PROVIDER_UNAVAILABLE",
+    elapsedMs: Date.now() - startedAt,
+    endpoint,
+    error: error instanceof Error ? error.message : String(error),
+    texts,
+  }));
+}
+
 function parseVector(value: unknown): number[] | null {
   if (!Array.isArray(value) || value.length !== MEMORY_EMBEDDING_DIMENSIONS) return null;
   if (!value.every((entry) => typeof entry === "number" && Number.isFinite(entry))) return null;
@@ -67,6 +82,7 @@ async function embedMemoryTexts(
     );
   }
   const endpoint = new URL("/v1/embeddings", requireEmbeddingBaseUrl()).toString();
+  const startedAt = Date.now();
   let response: Response;
   try {
     response = await fetchImplementation(endpoint, {
@@ -80,10 +96,7 @@ async function embedMemoryTexts(
       signal: AbortSignal.timeout(EMBEDDING_REQUEST_TIMEOUT_MILLISECONDS),
     });
   } catch (error) {
-    console.error(JSON.stringify({
-      code: "AGENT_MEMORY_EMBEDDING_PROVIDER_UNAVAILABLE",
-      error: error instanceof Error ? error.message : String(error),
-    }));
+    logUnavailable("/v1/embeddings", texts.length, startedAt, error);
     throw new ModelFacingError({
       category: "dependency",
       code: "AGENT_MEMORY_EMBEDDING_PROVIDER_UNAVAILABLE",
@@ -176,6 +189,7 @@ export async function countMemoryPassageTokens(
 ): Promise<number[]> {
   if (texts.length === 0) return [];
   const endpoint = new URL("/tokenize", requireEmbeddingBaseUrl()).toString();
+  const startedAt = Date.now();
   let response: Response;
   try {
     response = await fetchImplementation(endpoint, {
@@ -185,10 +199,7 @@ export async function countMemoryPassageTokens(
       signal: AbortSignal.timeout(EMBEDDING_REQUEST_TIMEOUT_MILLISECONDS),
     });
   } catch (error) {
-    console.error(JSON.stringify({
-      code: "AGENT_MEMORY_EMBEDDING_PROVIDER_UNAVAILABLE",
-      error: error instanceof Error ? error.message : String(error),
-    }));
+    logUnavailable("/tokenize", texts.length, startedAt, error);
     throw new AppError(
       "AGENT_MEMORY_EMBEDDING_PROVIDER_UNAVAILABLE",
       "Локальный сервис памяти недоступен. Повторите попытку позже",

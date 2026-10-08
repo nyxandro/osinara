@@ -21,7 +21,8 @@
  * `production-deploy-window.test.ts` does: the two halves of each contract live in different files
  * and break silently.
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -55,7 +56,12 @@ const logRules = read("infra/monitoring/rules/logs/osinara.yaml");
 
 /** The files that write each memory log line the log rules count, read as text like the rules. */
 const MEMORY_LINE_WRITERS: Record<string, readonly string[]> = {
-  AGENT_MEMORY_RETRIEVAL_METRICS: ["agent/lib/prompt/turn-blocks.ts", "agent/lib/memory-observability.ts"],
+  AGENT_MEMORY_RETRIEVAL_METRICS: [
+    "agent/lib/prompt/turn-blocks.ts",
+    "agent/lib/memory-observability.ts",
+    // The branch diagnostics spread into the line are declared here.
+    "agent/lib/memory-retrieval.ts",
+  ],
   AGENT_MEMORY_USAGE_DIRECTIVE: ["agent/lib/memory-usage-report.ts"],
 };
 
@@ -182,6 +188,37 @@ describe("osinara alert rules", () => {
     }
   });
 
+  it("reports an indexing failure only from the indexer, not from a turn reading memory", () => {
+    const [block] = alertBlocks("OsinaraEmbeddingFailed");
+    const expression = ruleField(block!, "expr") ?? "";
+
+    // The agent writes the same AGENT_MEMORY_EMBEDDING_PROVIDER_* codes when a search cannot
+    // reach the service. 08.10 such a read failure fired this alert, and its runbook sent the duty
+    // reader to an indexer with no failed job (#352); OsinaraMemorySemanticBranchDown owns reads.
+    expect(expression).toContain('service="memory-embedding-worker"');
+  });
+
+  it("keeps OsinaraErrorBurst off every line the application writes as information", () => {
+    const [block] = alertBlocks("OsinaraErrorBurst");
+    // Written with console.info and still counted: a dispatcher still busy when the next minute
+    // comes is the first sign of an overloaded host (#336), not routine.
+    const countedOnPurpose = new Set(["AGENT_SCHEDULE_CYCLE_SKIPPED"]);
+    const sources = ["agent", "scripts", "services"]
+      .flatMap((root) => readdirSync(new URL(root, projectRoot), { recursive: true, withFileTypes: true })
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".ts") && !entry.name.includes(".test"))
+        .map((entry) => readFileSync(join(entry.parentPath, entry.name), "utf8")));
+    const informational = new Set(sources.flatMap((source) =>
+      [...source.matchAll(/console\.info\(\s*JSON\.stringify\(\s*\{\s*code:\s*"(AGENT_[A-Z_]+)"/gu)].map((match) => match[1]!)));
+
+    // Every release restarts the runtime and recovers its turns; counting those lines lit the
+    // burst alert on a healthy deployment (#320) and would hide a real failure among them.
+    expect(informational.size).toBeGreaterThan(10);
+    for (const code of informational) {
+      if (countedOnPurpose.has(code)) continue;
+      expect(excludesCode(block!, code), `OsinaraErrorBurst counts the routine ${code}`).toBe(true);
+    }
+  });
+
   it("announces the worker through the shared constant, not a second literal", () => {
     const worker = read("scripts/memory-embedding-worker.ts")
       + read("scripts/memory-embedding/worker-loop.ts");
@@ -217,6 +254,28 @@ describe("osinara memory usage rules", () => {
     }
     expect(checked, "no memory rule was checked: the rule file or this test went out of step")
       .toBeGreaterThanOrEqual(6);
+  });
+
+  it("keeps a selection that chose silence apart from a search that found nothing", () => {
+    const expression = (name: string) => {
+      const record = logRules.split(/^ *- record: /mu).find((one) => one.split("\n", 1)[0]!.trim() === name);
+      return /expr: '([^']*)'/u.exec(record ?? "")?.[1] ?? null;
+    };
+
+    // OsinaraMemoryRetrievalEmpty reads a high empty share as a broken embedding service. A turn
+    // that asked memory nothing stays empty on purpose (#341) and must not feed that ratio.
+    expect(expression("osinara_memory_retrieval_empty_1m")).toContain('abstained:"false"');
+    expect(expression("osinara_memory_retrieval_abstained_1m")).toContain('abstained:"true"');
+  });
+
+  it("counts as used only what the selection offered, so the share and its alert keep their meaning", () => {
+    const record = logRules.split(/^ *- record: /mu)
+      .find((one) => one.split("\n", 1)[0]!.trim() === "osinara_memory_used_1m");
+    const expression = /expr: '([^']*)'/u.exec(record ?? "")?.[1] ?? "";
+
+    // Since #339 the counter also takes records the model found itself; counting those against the
+    // selection's offer would hide a selection that offers nothing an answer can use.
+    expect(expression).toContain("sum(countedSelectionCount)");
   });
 
   it("raises OsinaraMemoryNeverUsed only on recorded series, reading a silent stretch as zero", () => {

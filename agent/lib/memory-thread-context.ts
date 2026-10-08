@@ -62,9 +62,7 @@ function relevanceOrder(left: ActivatedMemoryThread, right: ActivatedMemoryThrea
 }
 
 function blockCharacters(block: MemoryThreadBriefBlock): number {
-  return block.content.length +
-    (block.conflictingEntryRefs ?? []).reduce((total, ref) => total + ref.length, 0) +
-    (block.unresolvedConflictRefs ?? []).reduce((total, ref) => total + ref.length, 0);
+  return block.content.length;
 }
 
 function sourceEvidenceFor(

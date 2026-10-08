@@ -13,6 +13,8 @@
  *
  * One summary call per compaction: when the summary with the text-only recent tail still does not
  * fit, the turn fails with a coded error instead of buying another summary call with a smaller tail.
+ * A summary the model refused is not retried inside the turn either: the next message asks for a
+ * smaller one, and after `COMPACTION_SUMMARY_REFUSALS_BEFORE_DROP` refusals the older part is dropped.
  * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { generateText, type LanguageModel, type ModelMessage } from "ai";
@@ -59,6 +61,17 @@ export async function summarizeWithModel(request: CompactionSummaryRequest): Pro
 }
 
 const COMPACTION_RECENT_WINDOW_SIZE = 10;
+/**
+ * A summary request the model refuses — too large for its window by its own count, or declined
+ * outright — used to be sent again on the next message, the same history at the same budget, and
+ * the chat never answered again (#331). Each refusal halves the transcript the next request
+ * carries; after this many in a row the older part is dropped with a notice instead of asked about.
+ */
+export const COMPACTION_SUMMARY_REFUSALS_BEFORE_DROP = 4;
+// What replaces the older part when it could not be summarized: the model has to know the gap is
+// there, or it answers as if the conversation began with the kept tail.
+const COMPACTION_SUMMARY_DROPPED_CHECKPOINT =
+  "The part of this conversation before the messages that follow could not be summarized: the model refused the summary request several times, so it was dropped. Nothing from that part is available. If the person refers to it, say so and ask them to repeat what matters.";
 const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
 const CAPPED_RESULT_ANNOTATION =
   "[Truncated: tool result reduced during context compaction. Re-run the tool if you need the full output.]";
@@ -207,12 +220,16 @@ function splitMessages(messages: readonly ModelMessage[], keep: number) {
   return { older: messages.slice(0, split), recent: messages.slice(split) };
 }
 
-/** `measurement` is the one `shouldCompact` decided with. */
+/**
+ * `measurement` is the one `shouldCompact` decided with. `summaryRefusals` counts the summary
+ * requests of this session the model refused in a row since its last compaction.
+ */
 export async function compactMessages(
   messages: readonly ModelMessage[],
   settings: CompactionSettings,
   summarize: Summarize,
   measurement: PromptMeasurement,
+  summaryRefusals: number,
 ): Promise<ModelMessage[]> {
   const budget = messageBudget(messages, settings, measurement);
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
@@ -227,7 +244,13 @@ export async function compactMessages(
   // A near no-op cap stays over the budget that asked for compaction and goes on to the summary.
   if (fits(capped, budget)) return capped;
 
-  const summary = await summarize(createCompactionPrompt({ messages: older, previousCheckpoint, transcriptBudgetTokens: settings.threshold }));
+  // A summary accepted earlier fit and stays; only what came after it is lost to the refusals.
+  const summary = summaryRefusals >= COMPACTION_SUMMARY_REFUSALS_BEFORE_DROP
+    ? [previousCheckpoint, COMPACTION_SUMMARY_DROPPED_CHECKPOINT].filter((part) => part !== undefined).join("\n\n")
+    : await summarize(createCompactionPrompt({
+      messages: older, previousCheckpoint, strictBudget: summaryRefusals > 0,
+      transcriptBudgetTokens: Math.max(1, Math.floor(settings.threshold / 2 ** summaryRefusals)),
+    }));
   const summaryHead: ModelMessage[] = [
     { content: COMPACTION_CHECKPOINT_MARKER, role: "user" },
     { content: summary, role: "assistant" },

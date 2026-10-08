@@ -7,7 +7,6 @@
  * - External projection is default-off, survives subject departure, and uses reproducible view refs.
  * - Personal export remains authoritative personal memory only.
  * - Retrieval claim identities add only their verified conversation-local profile subjects.
- * - An unresolved persisted conflict excludes both properties instead of selecting one winner.
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -334,47 +333,6 @@ describeWithDatabase("R3 profile projections", () => {
       now: new Date(), provenance: profileProvenance("membership-revoked"),
       replyTelegramUserId: null, retrievalClaimIds: [],
     })).rejects.toThrowError(/AGENT_PROFILE_VIEW_MEMBERSHIP_REVOKED/u);
-  });
-
-  it("excludes both sides of an unresolved profile conflict", async () => {
-    const fixture = await createFixture();
-    const firstRef = await insertClaim({
-      content: "Анна любит кофе",
-      conversationId: fixture.personalConversationId,
-      familyId: fixture.familyId,
-      ownerUserId: fixture.userId,
-      scope: "personal",
-      subjectUserId: fixture.userId,
-    });
-    const secondRef = await insertClaim({
-      content: "Анна не любит кофе",
-      conversationId: fixture.personalConversationId,
-      familyId: fixture.familyId,
-      ownerUserId: fixture.userId,
-      scope: "personal",
-      subjectUserId: fixture.userId,
-    });
-    await database().query(
-      `INSERT INTO claim_conflicts
-         (claim_a_id, claim_b_id, family_id, scope, scope_partition_key, detection_method)
-       SELECT LEAST(a.memory_item_id, b.memory_item_id), GREATEST(a.memory_item_id, b.memory_item_id),
-              $3, 'personal', $4, 'deterministic_guard'
-       FROM memory_item_refs AS a, memory_item_refs AS b
-       WHERE a.memory_ref = $1 AND b.memory_ref = $2`,
-      [firstRef, secondRef, fixture.familyId, fixture.userId],
-    );
-
-    const view = await profileViewRepository.create(fixture.ownerAuth, {
-      conversationId: fixture.personalConversationId,
-      currentTelegramUserId: "9301",
-      explicitMentionTelegramUserIds: [],
-      now: new Date("2026-08-08T12:00:00.000Z"),
-      provenance: profileProvenance("conflict"),
-      replyTelegramUserId: null,
-      retrievalClaimIds: [],
-    });
-
-    expect(JSON.stringify(view)).not.toMatch(/любит кофе/u);
   });
 
   it("adds a verified retrieval-related subject to the current family profile view", async () => {

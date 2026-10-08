@@ -32,15 +32,15 @@ export const MEMORY_RETRIEVAL_EVAL_GROUP_QUERIES: readonly MemoryRetrievalEvalGr
     text: "Чего Артём хочет от памяти рабочего агента?" },
 
   // Про этого участника такого нет, про соседа — есть: уверенный чужой ответ хуже молчания.
-  { category: "participant_near_miss", expectedKeys: [], key: "near-miss-nina-staya",
+  { askedAbout: "ninadorn", category: "participant_near_miss", expectedKeys: [], key: "near-miss-nina-staya",
     text: "что Нина говорила про Стаю?" },
-  { category: "participant_near_miss", expectedKeys: [], key: "near-miss-roman-city",
+  { askedAbout: "rershov", category: "participant_near_miss", expectedKeys: [], key: "near-miss-roman-city",
     text: "Где живёт Роман?" },
-  { category: "participant_near_miss", expectedKeys: [], key: "near-miss-timur-talk",
+  { askedAbout: "timkhas", category: "participant_near_miss", expectedKeys: [], key: "near-miss-timur-talk",
     text: "С каким докладом выступал Тимур?" },
-  { category: "participant_near_miss", expectedKeys: [], key: "near-miss-seva-uley",
+  { askedAbout: "sevakr", category: "participant_near_miss", expectedKeys: [], key: "near-miss-seva-uley",
     text: "Сева уже пользуется Ульем?" },
-  { category: "participant_near_miss", expectedKeys: [], key: "near-miss-vika-game",
+  { askedAbout: "vlunina", category: "participant_near_miss", expectedKeys: [], key: "near-miss-vika-game",
     text: "Какую настолку советует Вика?" },
 
   // Тема, по которой писали несколько человек: полное покрытие считается отдельно.

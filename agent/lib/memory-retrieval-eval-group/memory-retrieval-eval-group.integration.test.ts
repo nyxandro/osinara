@@ -16,13 +16,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "../database.js";
-import { embedMemoryQueryChunks } from "../memory-embedding-client.js";
 import { MEMORY_RETRIEVAL_LIMIT } from "../memory-config.js";
 import type { MemoryAuthorization } from "../memory-context.js";
 import { prepareMemoryQuery } from "../memory-query-preparation.js";
-import { memoryRetrievalRepository } from "../memory-retrieval-repository.js";
 import {
   categoryRate,
+  evalAutomaticSelection,
   evalRecordId,
   evalResultKeys,
   evalShare as share,
@@ -79,13 +78,12 @@ describeEval("memory retrieval eval: external group", () => {
   let ownerInChat: MemoryAuthorization;
   const keyByContent = new Map(MEMORY_RETRIEVAL_EVAL_GROUP_RECORDS.map((record) => [record.content, record.key]));
   const areaByKey = new Map(MEMORY_RETRIEVAL_EVAL_GROUP_RECORDS.map((record) => [record.key, record.area]));
+  const subjectByKey = new Map(MEMORY_RETRIEVAL_EVAL_GROUP_RECORDS.map((record) => [record.key, record.subjectLabel]));
 
   async function search(reader: MemoryAuthorization, text: string): Promise<string[]> {
     // The same text the product searches by: preparation runs before retrieval in production.
     const prepared = prepareMemoryQuery(text);
-    const { results } = await memoryRetrievalRepository.search(
-      reader, prepared, await embedMemoryQueryChunks(prepared), EVAL_RESULT_LIMIT,
-    );
+    const { results } = await evalAutomaticSelection(reader, prepared, EVAL_RESULT_LIMIT);
     return evalResultKeys(results.map((result) => result.memory.content), keyByContent);
   }
 
@@ -128,11 +126,14 @@ describeEval("memory retrieval eval: external group", () => {
     await indexEvalRecords(MEMORY_RETRIEVAL_EVAL_GROUP_RECORDS, async (record) => {
       const inGroup = record.area === "agents_chat" || record.area === "board_club";
       const inserted = await database().query<{ id: string }>(
+        // The subject label is stored, as production stores it: the search reads it to prefer the
+        // person a question names (#343), and without it that rule could not be measured here.
         `INSERT INTO memory_items
            (id, family_id, group_id, owner_user_id, author_user_id, author_telegram_user_id, scope,
-            kind, content, source, confirmation, sensitivity, operation_key, embedding_status, updated_at)
+            kind, content, source, confirmation, sensitivity, operation_key, embedding_status, updated_at,
+            subject_label)
          VALUES ($12, $1, $2, $3, $4, $5, $6, $7, $8, 'eval:retrieval-group', $9, 'normal', $10,
-                 'indexed', $11)
+                 'indexed', $11, $13)
          RETURNING id`,
         [
           family,
@@ -147,6 +148,7 @@ describeEval("memory retrieval eval: external group", () => {
           record.key,
           record.updatedAt,
           evalRecordId(record.key),
+          record.subjectLabel ?? null,
         ],
       );
       return inserted.rows[0]!.id;
@@ -201,6 +203,14 @@ describeEval("memory retrieval eval: external group", () => {
       linkRecallAt12: rateOf(evaluated, "link_request", (entry) => entry.hit),
       // The person is not in memory with this topic, a neighbour is: silence is the right answer.
       participantNearMissEmptyRate: rateOf(evaluated, "participant_near_miss", (entry) => entry.hit),
+      // The harm silence would prevent: a neighbour's record on the topic among the first three,
+      // where the model takes it for what the person asked about said (#343).
+      participantNearMissNeighbourTopThreeRate: rateOf(evaluated, "participant_near_miss", (entry) =>
+        entry.resultKeys.slice(0, EVAL_TOP_POSITIONS).some((key) => {
+          const label = subjectByKey.get(key) ?? "";
+          const handle = /\(@?([A-Za-z0-9_]{3,})\)$/u.exec(label)?.[1];
+          return handle !== undefined && handle !== entry.query.askedAbout;
+        })),
       participantRecallAt12: rateOf(evaluated, "participant_fact", (entry) => entry.hit),
       participantTopThreeRate: rateOf(evaluated, "participant_fact", (entry) => entry.topPositionHit),
       positiveRecallAt12: share(positive.filter((entry) => entry.hit).length, positive.length),

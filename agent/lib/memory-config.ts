@@ -126,6 +126,13 @@ export const MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY = 0.78;
 // a low best score, so its tail is measured against that same low score.
 export const MEMORY_RETRIEVAL_RRF_RANK_OFFSET = 60;
 export const MEMORY_RETRIEVAL_CONFIRMATION_BOOST = 0.001;
+// A record that the word branches and the meaning branch both found is multiplied by this. On the
+// real-memory golden set (153 live turns, #342) such a record was useful 16.5% of the time against
+// 3.8-4.8% for one found by a single kind of evidence, yet it took its place by the same sum of
+// ranks. At 1.25 the first useful record of a turn sits in the first three in 69% of turns instead
+// of 64% (MRR 0.557 → 0.602), with the hit rate over twelve places unchanged; 1.5 and 3 measured
+// the same, and above 1.25 one more useful record per hundred turns left the twelve.
+export const MEMORY_RETRIEVAL_BRANCH_AGREEMENT_FACTOR = 1.25;
 // How many turns back the automatic selection remembers what it already showed. Three is short
 // enough that a record the conversation keeps needing comes back within a couple of exchanges, and
 // long enough to stop the immediate repeat that measured as half of all shows. The explicit search

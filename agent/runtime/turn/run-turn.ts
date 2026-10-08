@@ -28,12 +28,12 @@ import type { Pool } from "pg";
 import { AppError } from "../../lib/app-error.js";
 import type { RuntimeAgent, StepModelSelection } from "../agent-definition.js";
 import {
-  appendSessionHistory, loadSessionHistory, replaceSessionHistory, saveCompactionCounters, type SessionHistory,
+  appendSessionHistory, loadSessionHistory, recordCompactionSummaryRefusal, replaceSessionHistory, saveCompactionCounters,
+  type SessionHistory,
 } from "../history/history-repository.js";
 import { renderPendingApprovalsNote } from "../hitl/input-requests.js";
 import type { InputRequest } from "../hitl/types.js";
-import { formatAvailableSkillsSection } from "../prompt/skills-section.js";
-import { composeSystemPrompt } from "../prompt/system-prompt.js";
+import { preparedSystemPrompt } from "../prompt/system-prompt.js";
 import { instructionTurnMessages, resolveTurnInstructions, turnInputMessages } from "../prompt/turn-instructions.js";
 import type { SessionParent } from "../context.js";
 import type { RuntimeSandboxSession } from "../sandbox/types.js";
@@ -51,7 +51,7 @@ import {
   compactionSettings, compactMessages, shouldCompact, todoCompactionMessage, type CompactionSummaryRequest, type PromptMeasurement,
 } from "./compaction.js";
 import { assistantStepText, MODEL_INACTIVITY_TIMEOUT, type StepModelCall, type StepModelResponse } from "./model-call.js";
-import { modelCallFailure } from "./model-errors.js";
+import { isRequestRefusal, modelCallFailure } from "./model-errors.js";
 import { orderStepTools, toModelToolSet } from "./model-tools.js";
 import { executeStepCalls, planStepCalls, type CallJournal } from "./step-calls.js";
 import { failParkedTurn, failTurn, ParkedTurnTakenOver } from "./turn-failure.js";
@@ -115,17 +115,6 @@ function requirePrepared(turn: TurnRecord): PreparedTurn {
   return turn.prepared;
 }
 
-function systemPrompt(agent: RuntimeAgent, prepared: PreparedTurn): string {
-  if (prepared.skills.length > 0 && prepared.skillRoot === null) {
-    throw new Error("AGENT_TURN_SKILL_ROOT_MISSING: skills are listed without a sandbox skill root");
-  }
-  return composeSystemPrompt({
-    base: agent.basePrompt,
-    instructionBlocks: prepared.instructions,
-    skillsSection: prepared.skillRoot === null ? null : formatAvailableSkillsSection(prepared.skills, { skillRoot: prepared.skillRoot }),
-  });
-}
-
 /** What a step's request carries besides its messages; compaction measures the same frame the model gets. */
 interface StepFrame {
   readonly system: string;
@@ -133,7 +122,7 @@ interface StepFrame {
 }
 
 function stepFrame(agent: RuntimeAgent, turn: TurnRecord, tools: AnyTools): StepFrame {
-  return { system: systemPrompt(agent, requirePrepared(turn)), tools: toModelToolSet(orderStepTools(tools, agent.staticToolNames)) };
+  return { system: preparedSystemPrompt(agent.basePrompt, requirePrepared(turn)), tools: toModelToolSet(orderStepTools(tools, agent.staticToolNames)) };
 }
 
 /** A delegated child's caller, as its tools and step hook see it, continuations included; one level deep. */
@@ -300,12 +289,44 @@ async function compactIfNeeded(runtime: TurnRuntime, input: {
   const settings = compactionSettings(input.selection.contextWindowTokens, runtime.agent.compactionThresholdPercent);
   if (!shouldCompact(input.messages, settings, input.measurement)) return null;
   let compacted: ModelMessage[];
+  // Set when the summary call itself failed for good: not an outage, not a cancelled turn.
+  const summary: { refusal: AppError | null } = { refusal: null };
   try {
-    compacted = await compactMessages(input.messages, settings, (request) => runtime.summarize({
-      ...request, abortSignal: input.signal, model: input.selection.model, providerOptions: input.selection.providerOptions,
-    }), input.measurement);
+    compacted = await compactMessages(input.messages, settings, async (request) => {
+      try {
+        return await runtime.summarize({
+          ...request, abortSignal: input.signal, model: input.selection.model, providerOptions: input.selection.providerOptions,
+        });
+      } catch (error) {
+        const failure = modelCallFailure(error);
+        if (isRequestRefusal(failure)) summary.refusal = failure as AppError;
+        throw failure;
+      }
+    }, input.measurement, input.history.compactionSummaryRefusals);
   } catch (error) {
-    throw modelCallFailure(error);
+    if (summary.refusal === null) throw modelCallFailure(error);
+    // The turn fails, but the next message asks for a smaller summary (#331).
+    const refused = new AppError(
+      "AGENT_COMPACTION_SUMMARY_REFUSED",
+      "История разговора стала слишком длинной, и сжать её не удалось. Отправьте сообщение ещё раз: следующая попытка сожмёт её сильнее",
+      { cause: summary.refusal },
+    );
+    try {
+      const refusals = await inJournalTransaction(runtime.database,
+        (client) => recordCompactionSummaryRefusal(client, input.turn.sessionId));
+      console.warn(JSON.stringify({
+        code: "AGENT_COMPACTION_SUMMARY_REFUSED", causeCode: summary.refusal.code, refusals,
+        sessionId: input.turn.sessionId, turnId: input.turn.id,
+      }));
+    } catch (recordError) {
+      // The turn still fails with the refusal: a lost count only repeats this summary size once more.
+      console.error(JSON.stringify({
+        code: "AGENT_COMPACTION_SUMMARY_REFUSAL_RECORD_FAILED", causeCode: summary.refusal.code,
+        error: recordError instanceof Error ? recordError.message : String(recordError),
+        sessionId: input.turn.sessionId, turnId: input.turn.id,
+      }));
+    }
+    throw refused;
   }
   const todo = todoCompactionMessage(input.history.todo);
   const messages = todo === undefined ? compacted : [...compacted, todo];
