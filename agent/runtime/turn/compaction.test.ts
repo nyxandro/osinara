@@ -265,6 +265,22 @@ describe("history compaction", () => {
     expect(shouldCompact(compacted, { recentWindowSize: 4, threshold: 2_000 }, UNMEASURED)).toBe(false);
   });
 
+  it("keeps the summary it already had when it drops the part after it", async () => {
+    const summarize = vi.fn<Summarize>(async () => "сводка");
+    const messages = [
+      { content: "Summary of our conversation so far:", role: "user" as const },
+      { content: "старая сводка", role: "assistant" as const },
+      ...Array.from({ length: 20 }, (_, index) => exchange(index, 400)).flat(),
+      CURRENT,
+    ];
+
+    const compacted = await compactMessages(messages, { recentWindowSize: 4, threshold: 2_000 }, summarize, UNMEASURED, 4);
+
+    // The earlier summary fit and was accepted; only what came after it is lost to the refusals.
+    expect(compacted[1]).toMatchObject({ role: "assistant", content: expect.stringMatching(/^старая сводка\n\n.*could not be summarized/su) });
+    expect(compacted.slice(2)).toEqual(messages.slice(-4));
+  });
+
   it("fails with a coded error instead of a second summary call when the result does not fit", async () => {
     const summarize = vi.fn<Summarize>(async () => "s".repeat(40_000));
     const messages = Array.from({ length: 8 }, (_, index) => exchange(index, 2_000)).flat();

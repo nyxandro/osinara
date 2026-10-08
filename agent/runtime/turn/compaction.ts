@@ -71,7 +71,7 @@ export const COMPACTION_SUMMARY_REFUSALS_BEFORE_DROP = 4;
 // What replaces the older part when it could not be summarized: the model has to know the gap is
 // there, or it answers as if the conversation began with the kept tail.
 const COMPACTION_SUMMARY_DROPPED_CHECKPOINT =
-  "The earlier part of this conversation could not be summarized: the model refused the summary request several times, so it was dropped. Nothing from it is available. If the person refers to it, say so and ask them to repeat what matters.";
+  "The part of this conversation before the messages that follow could not be summarized: the model refused the summary request several times, so it was dropped. Nothing from that part is available. If the person refers to it, say so and ask them to repeat what matters.";
 const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
 const CAPPED_RESULT_ANNOTATION =
   "[Truncated: tool result reduced during context compaction. Re-run the tool if you need the full output.]";
@@ -244,8 +244,9 @@ export async function compactMessages(
   // A near no-op cap stays over the budget that asked for compaction and goes on to the summary.
   if (fits(capped, budget)) return capped;
 
+  // A summary accepted earlier fit and stays; only what came after it is lost to the refusals.
   const summary = summaryRefusals >= COMPACTION_SUMMARY_REFUSALS_BEFORE_DROP
-    ? COMPACTION_SUMMARY_DROPPED_CHECKPOINT
+    ? [previousCheckpoint, COMPACTION_SUMMARY_DROPPED_CHECKPOINT].filter((part) => part !== undefined).join("\n\n")
     : await summarize(createCompactionPrompt({
       messages: older, previousCheckpoint, strictBudget: summaryRefusals > 0,
       transcriptBudgetTokens: Math.max(1, Math.floor(settings.threshold / 2 ** summaryRefusals)),

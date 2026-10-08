@@ -439,10 +439,18 @@ async function releaseRunner(turnId: string) {
     expect(transient).toMatchObject({ code: "AGENT_MODEL_TEMPORARILY_UNAVAILABLE", status: "failed" });
     expect(await refusals()).toBe(0);
 
+    // A broken key fails every request; it is not this summary being turned down.
+    const brokenKey = await runTurn(runtimeWith(async () => {
+      throw Object.assign(new Error("invalid api key"), { statusCode: 401 });
+    }, scriptedModel()), (await startMessageTurn(sessionId, "ключ")).id, RUN);
+    expect(brokenKey).toMatchObject({ code: "AGENT_MODEL_CALL_FAILED", status: "failed" });
+    expect(await refusals()).toBe(0);
+
     const refused = await runTurn(runtimeWith(async () => {
       throw new Error("refused: input is too long for this model");
     }, scriptedModel()), (await startMessageTurn(sessionId, "второй")).id, RUN);
-    expect(refused).toMatchObject({ code: "AGENT_MODEL_CALL_FAILED", status: "failed" });
+    // The person is told the next message helps, not that repeating cannot.
+    expect(refused).toMatchObject({ code: "AGENT_COMPACTION_SUMMARY_REFUSED", status: "failed" });
     expect(await refusals()).toBe(1);
     expect(warn.mock.calls.map((call) => JSON.parse(call[0] as string))).toContainEqual(
       expect.objectContaining({ code: "AGENT_COMPACTION_SUMMARY_REFUSED", refusals: 1, sessionId }),

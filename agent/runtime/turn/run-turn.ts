@@ -52,7 +52,7 @@ import {
   compactionSettings, compactMessages, shouldCompact, todoCompactionMessage, type CompactionSummaryRequest, type PromptMeasurement,
 } from "./compaction.js";
 import { assistantStepText, MODEL_INACTIVITY_TIMEOUT, type StepModelCall, type StepModelResponse } from "./model-call.js";
-import { modelCallFailure } from "./model-errors.js";
+import { isRequestRefusal, modelCallFailure } from "./model-errors.js";
 import { orderStepTools, toModelToolSet } from "./model-tools.js";
 import { executeStepCalls, planStepCalls, type CallJournal } from "./step-calls.js";
 import { failParkedTurn, failTurn, ParkedTurnTakenOver } from "./turn-failure.js";
@@ -311,21 +311,34 @@ async function compactIfNeeded(runtime: TurnRuntime, input: {
         });
       } catch (error) {
         const failure = modelCallFailure(error);
-        if (failure instanceof AppError && failure.code !== "AGENT_MODEL_TEMPORARILY_UNAVAILABLE") summary.refusal = failure;
+        if (isRequestRefusal(failure)) summary.refusal = failure as AppError;
         throw failure;
       }
     }, input.measurement, input.history.compactionSummaryRefusals);
   } catch (error) {
-    if (summary.refusal !== null) {
-      // The turn fails as before, but the next message asks for a smaller summary (#331).
+    if (summary.refusal === null) throw modelCallFailure(error);
+    // The turn fails, but the next message asks for a smaller summary (#331).
+    const refused = new AppError(
+      "AGENT_COMPACTION_SUMMARY_REFUSED",
+      "История разговора стала слишком длинной, и сжать её не удалось. Отправьте сообщение ещё раз: следующая попытка сожмёт её сильнее",
+      { cause: summary.refusal },
+    );
+    try {
       const refusals = await inJournalTransaction(runtime.database,
         (client) => recordCompactionSummaryRefusal(client, input.turn.sessionId));
       console.warn(JSON.stringify({
         code: "AGENT_COMPACTION_SUMMARY_REFUSED", causeCode: summary.refusal.code, refusals,
         sessionId: input.turn.sessionId, turnId: input.turn.id,
       }));
+    } catch (recordError) {
+      // The turn still fails with the refusal: a lost count only repeats this summary size once more.
+      console.error(JSON.stringify({
+        code: "AGENT_COMPACTION_SUMMARY_REFUSAL_RECORD_FAILED", causeCode: summary.refusal.code,
+        error: recordError instanceof Error ? recordError.message : String(recordError),
+        sessionId: input.turn.sessionId, turnId: input.turn.id,
+      }));
     }
-    throw modelCallFailure(error);
+    throw refused;
   }
   const todo = todoCompactionMessage(input.history.todo);
   const messages = todo === undefined ? compacted : [...compacted, todo];
