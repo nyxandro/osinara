@@ -2,6 +2,7 @@
  * The assistant's own name as people actually type it.
  *
  * Exports:
+ * - `AGENT_DISPLAY_NAME`: the name as the assistant signs itself and as memory records name it.
  * - `AGENT_NAME_STEM_SOURCE`: the alternation of spellings, including the common mishearings.
  * - `isAgentNameMentioned`: true when the text names the assistant at a word boundary.
  *
@@ -9,6 +10,7 @@
  * addressed to the assistant at all; memory query preparation uses it to drop that address before
  * searching. Two copies of the list would drift, and the drift would be silent in both places.
  */
+export const AGENT_DISPLAY_NAME = "Осинара";
 export const AGENT_NAME_STEM_SOURCE = "осинар|асинар|азинар|озинар|синаар|osinar|asinar";
 
 const AGENT_NAME_PATTERN = new RegExp(

@@ -87,16 +87,29 @@ export const MEMORY_RETRIEVAL_EVAL_QUERIES_V3: readonly MemoryRetrievalEvalQuery
  * The golden-set shapes, measured 07.10.2026 — the records they brought did not move any number
  * above:
  *
- * - `smallTalkEmptyRate` = 0. «привет», «куку», «как дела?» each get up to twelve records at
- *   similarities of 0.786 to 0.845, above the 0.78 gate: the same as on real memory, where 88
- *   turns that needed nothing got 11.8 records on average. A similarity gate cannot fix this for
- *   the same reason as `negativeEmptyRate`; the question has to be recognised as not asking.
- * - `dateQuestionRecallAt12` = 0. «Что было вчера?» cannot find the record of yesterday: the
- *   automatic selection never reads the event date, and the record does not say the day in words.
- * - `aliasWordingRecallAt12` = 0.875 with `aliasWordingTopThreeRate` = 0.5. The meaning branch
- *   finds «репа», «ДР», «дейли» on this clean corpus, but half of them sit below third place; the
- *   one miss is «тачка», which reached nothing about the car at all.
+ * - `smallTalkEmptyRate` = 1, from 0 before 08.10.2026. «привет», «куку», «как дела?» each got up to
+ *   twelve records at similarities of 0.786 to 0.845, above the 0.78 gate, as on real memory, where
+ *   88 turns that needed nothing got 11.8 records on average. A similarity gate cannot fix this for
+ *   the same reason as `negativeEmptyRate`, so the message is recognised as asking nothing before
+ *   any search (#341). All eight shapes here are made of small-talk words; chatter in ordinary
+ *   words is not, and the group corpus measures that half.
+ * - `dateQuestionRecallAt12` = 1, from 0 before 08.10.2026. «Что было вчера?» could not find the
+ *   record of yesterday: the record does not say the day in words, and nothing read its event date.
+ *   The selection now reads an explicit day or period in the question and puts the records of it
+ *   first (#344). The exact-day question carries its year: a day without one is the latest past.
+ * - `aliasWordingRecallAt12` = 1 and `aliasWordingTopThreeRate` = 1, from 0.875 and 0.5 before
+ *   08.10.2026. The meaning branch found «репа», «ДР», «дейли» weakly and left half of them below
+ *   third place, and «тачка» reached nothing about the car. The search now also reads a short list
+ *   of unambiguous slang in plain words (#345). The questions here were written from the same
+ *   words the list holds, so these two numbers say the list works, not how much live slang it
+ *   covers: on the 153 golden turns it fired four times. The word branches now contribute to the
+ *   answer of more live-shaped questions as well: `lexicalBranchFireRate` 0.86 → 0.88,
+ *   `liveShapeLexicalFireRate` 0.917 → 0.958.
  * - `updatedFactRecallAt12` = 1, and no superseded version is offered for any question.
+ *
+ * `longQueryFullCoverageRate` rose from 0.333 to 0.5 with the branch agreement factor (#342): a long
+ * message's quieter topic is found by its words and its meaning both, and now outranks records
+ * that only share words with the louder one.
  *
  * Two numbers here are lower than they were before the long fixtures were repaired, and the
  * pipeline did not change between the two measurements. The long queries had been written against
@@ -109,16 +122,16 @@ export const MEMORY_RETRIEVAL_EVAL_QUERIES_V3: readonly MemoryRetrievalEvalQuery
  * actually stands, and that is now visible instead of averaged away.
  */
 export const MEMORY_RETRIEVAL_R1_BASELINE_V3 = {
-  aliasWordingRecallAt12: 0.875,
-  aliasWordingTopThreeRate: 0.5,
+  aliasWordingRecallAt12: 1,
+  aliasWordingTopThreeRate: 1,
   botAddressRecallAt12: 1,
-  dateQuestionRecallAt12: 0,
+  dateQuestionRecallAt12: 1,
   emojiMarkupRecallAt12: 1,
   exactRecallAt12: 1,
   expectedInTopThreeRate: 0.84,
-  lexicalBranchFireRate: 0.86,
-  liveShapeLexicalFireRate: 0.917,
-  longQueryFullCoverageRate: 0.333,
+  lexicalBranchFireRate: 0.88,
+  liveShapeLexicalFireRate: 0.958,
+  longQueryFullCoverageRate: 0.5,
   longQueryRecallAt12: 0.833,
   mixedLanguageRecallAt12: 1,
   multiTopicFullCoverageRate: 0.6,
@@ -128,7 +141,7 @@ export const MEMORY_RETRIEVAL_R1_BASELINE_V3 = {
   positiveRecallAt12: 0.96,
   russianMorphologyRecallAt12: 1,
   semanticParaphraseRecallAt12: 0.833,
-  smallTalkEmptyRate: 0,
+  smallTalkEmptyRate: 1,
   typoRecallAt12: 1,
   updatedFactRecallAt12: 1,
   voiceTranscriptRecallAt12: 1,

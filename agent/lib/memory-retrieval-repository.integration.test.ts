@@ -15,7 +15,10 @@ import { closeDatabase, database } from "./database.js";
 import {
   MEMORY_EMBEDDING_DIMENSIONS,
   MEMORY_EMBEDDING_MODEL_VERSION,
+  MEMORY_RETRIEVAL_BRANCH_AGREEMENT_FACTOR,
+  MEMORY_RETRIEVAL_CONFIRMATION_BOOST,
   MEMORY_RETRIEVAL_MIN_SEMANTIC_SIMILARITY,
+  MEMORY_RETRIEVAL_RRF_RANK_OFFSET,
 } from "./memory-config.js";
 import { memoryRetrievalRepository } from "./memory-retrieval-repository.js";
 
@@ -103,6 +106,40 @@ describeWithDatabase("memoryRetrievalRepository", () => {
       .toHaveLength(1);
     expect(results.map((result) => result.memory.content)).not.toContain("Скрытая аллергия на орехи");
     expect(results[0]?.evidence.russianMorphologyRank).not.toBeNull();
+  });
+
+  it("raises a record that words and meaning both found above what one kind of evidence earns", async () => {
+    const memory = await database().query<{ id: string }>(
+      `INSERT INTO memory_items
+         (family_id, owner_user_id, author_user_id, author_telegram_user_id, scope, kind,
+          content, source, confirmation, sensitivity, operation_key, embedding_status)
+       VALUES ($1, $2, $2, $3, 'personal', 'fact', 'Пользователь не ест орехи',
+               'test:agreement', 'user_confirmed', 'normal', 'agreement', 'indexed')
+       RETURNING id`,
+      [auth.familyId, auth.userId, auth.telegramUserId],
+    );
+    await database().query(
+      `INSERT INTO memory_embedding_chunks
+         (memory_item_id, chunk_index, content, embedding_input, start_offset, end_offset,
+            embedding, embedding_model)
+       VALUES ($1, 0, 'Пользователь не ест орехи', 'Пользователь не ест орехи', 0, 25, $2::vector, $3)`,
+      [memory.rows[0]!.id, `[${vector(1, 0).join(",")}]`, MEMORY_EMBEDDING_MODEL_VERSION],
+    );
+    const firstPlace = 1 / (MEMORY_RETRIEVAL_RRF_RANK_OFFSET + 1);
+
+    // On the real-memory golden set a record both kinds of evidence found was useful four times
+    // as often as one found by a single kind (16.5% against 3.8-4.8%), yet took its place by the
+    // same sum of ranks. The agreement is a multiplier on that sum.
+    const agreed = await memoryRetrievalRepository.search(auth, "орехами", [vector(1, 0)]);
+    const wordsOnly = await memoryRetrievalRepository.search(auth, "орехами", [vector(0, 1)]);
+
+    expect(agreed.results[0]!.evidence.semanticSimilarity).not.toBeNull();
+    expect(agreed.results[0]!.score).toBeCloseTo(
+      (2 * firstPlace + MEMORY_RETRIEVAL_CONFIRMATION_BOOST) * MEMORY_RETRIEVAL_BRANCH_AGREEMENT_FACTOR,
+      5,
+    );
+    expect(wordsOnly.results[0]!.evidence.semanticSimilarity).toBeNull();
+    expect(wordsOnly.results[0]!.score).toBeCloseTo(firstPlace + MEMORY_RETRIEVAL_CONFIRMATION_BOOST, 5);
   });
 
   it("reports the branch scores that the thresholds cut off, even when nothing is returned", async () => {

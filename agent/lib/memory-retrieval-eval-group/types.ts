@@ -38,6 +38,8 @@ export type MemoryRetrievalEvalGroupCategory =
   | "topic_any";
 
 export interface MemoryRetrievalEvalGroupQuery {
+  /** The handle of the person a near-miss question is about: anyone else's record is a neighbour's. */
+  askedAbout?: string;
   category: MemoryRetrievalEvalGroupCategory;
   expectedKeys: readonly string[];
   key: string;

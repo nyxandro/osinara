@@ -56,7 +56,12 @@ const logRules = read("infra/monitoring/rules/logs/osinara.yaml");
 
 /** The files that write each memory log line the log rules count, read as text like the rules. */
 const MEMORY_LINE_WRITERS: Record<string, readonly string[]> = {
-  AGENT_MEMORY_RETRIEVAL_METRICS: ["agent/lib/prompt/turn-blocks.ts", "agent/lib/memory-observability.ts"],
+  AGENT_MEMORY_RETRIEVAL_METRICS: [
+    "agent/lib/prompt/turn-blocks.ts",
+    "agent/lib/memory-observability.ts",
+    // The branch diagnostics spread into the line are declared here.
+    "agent/lib/memory-retrieval.ts",
+  ],
   AGENT_MEMORY_USAGE_DIRECTIVE: ["agent/lib/memory-usage-report.ts"],
 };
 
@@ -249,6 +254,18 @@ describe("osinara memory usage rules", () => {
     }
     expect(checked, "no memory rule was checked: the rule file or this test went out of step")
       .toBeGreaterThanOrEqual(6);
+  });
+
+  it("keeps a selection that chose silence apart from a search that found nothing", () => {
+    const expression = (name: string) => {
+      const record = logRules.split(/^ *- record: /mu).find((one) => one.split("\n", 1)[0]!.trim() === name);
+      return /expr: '([^']*)'/u.exec(record ?? "")?.[1] ?? null;
+    };
+
+    // OsinaraMemoryRetrievalEmpty reads a high empty share as a broken embedding service. A turn
+    // that asked memory nothing stays empty on purpose (#341) and must not feed that ratio.
+    expect(expression("osinara_memory_retrieval_empty_1m")).toContain('abstained:"false"');
+    expect(expression("osinara_memory_retrieval_abstained_1m")).toContain('abstained:"true"');
   });
 
   it("raises OsinaraMemoryNeverUsed only on recorded series, reading a silent stretch as zero", () => {

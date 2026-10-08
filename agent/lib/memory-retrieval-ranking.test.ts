@@ -46,6 +46,7 @@ function result(
     },
     memory,
     score,
+    subjectLabel: null,
   };
 }
 

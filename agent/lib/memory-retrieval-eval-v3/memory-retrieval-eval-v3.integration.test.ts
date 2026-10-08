@@ -16,12 +16,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "../database.js";
-import { embedMemoryQueryChunks } from "../memory-embedding-client.js";
 import { chunkMemoryContent, chunkMemoryQuery } from "../memory-embedding-chunks.js";
 import { MEMORY_EMBEDDING_CHUNK_MAX_CHARACTERS, MEMORY_RETRIEVAL_LIMIT } from "../memory-config.js";
-import { memoryRetrievalRepository } from "../memory-retrieval-repository.js";
 import {
   categoryRate,
+  evalAutomaticSelection,
   evalRecordId,
   evalResultKeys,
   evalShare as share,
@@ -45,7 +44,7 @@ import type {
 
 const describeEval = retrievalEvalsEnabled() ? describe : describe.skip;
 
-// Production always fills every one of the twelve slots, so quality is measured at the same depth.
+// Production offers up to twelve records, so quality is measured at the same depth.
 const EVAL_RESULT_LIMIT = MEMORY_RETRIEVAL_LIMIT;
 // Rank position that counts as "the answer was actually offered", not merely present somewhere in
 // the twelve. Recall alone cannot see a change that pushes the right record from first to twelfth.
@@ -207,12 +206,7 @@ describeEval("memory retrieval eval v3", () => {
       // The same text the product searches by: preparation runs before retrieval in production,
       // so a measurement that skipped it would grade a pipeline nobody runs.
       const prepared = prepareMemoryQuery(query.text);
-      const { diagnostics, results } = await memoryRetrievalRepository.search(
-        auth,
-        prepared,
-        await embedMemoryQueryChunks(prepared),
-        EVAL_RESULT_LIMIT,
-      );
+      const { diagnostics, results } = await evalAutomaticSelection(auth, prepared, EVAL_RESULT_LIMIT);
       const resultKeys = evalResultKeys(results.map((result) => result.memory.content), contentToKey);
       evaluated.push({
         // Branch evidence of the records that actually came back, not of everything a branch

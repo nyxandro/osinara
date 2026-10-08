@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MemoryAuthorization } from "./memory-context.js";
 import { AppError } from "./app-error.js";
+import { MEMORY_RETRIEVAL_LIMIT } from "./memory-config.js";
 const mocks = vi.hoisted(() => ({ embedding: vi.fn(), search: vi.fn(), threads: vi.fn() }));
 vi.mock("./memory-embedding-client.js", () => ({
   embedMemoryQueryChunks: mocks.embedding,
@@ -23,7 +24,7 @@ describe("memory retrieval failure provenance", () => {
   beforeEach(() => {
     mocks.embedding.mockReset().mockResolvedValue([[1]]);
     mocks.search.mockReset().mockResolvedValue({
-      conflicts: [], relatedClaimIds: [], results: [], diagnostics: DIAGNOSTICS,
+      claimIdsByConflictRef: new Map(), conflicts: [], relatedClaimIds: [], results: [], diagnostics: DIAGNOSTICS,
     });
     mocks.threads.mockReset().mockResolvedValue({ threads: [], totalCharacters: 0 });
   });
@@ -44,7 +45,7 @@ describe("memory retrieval failure provenance", () => {
     const context = await retrieveMemoryTurnContext({} as MemoryAuthorization, "private query", []);
 
     expect(context.diagnostics.semanticBranchAvailable).toBe(false);
-    expect(mocks.search).toHaveBeenCalledWith({}, "private query", [], undefined, null);
+    expect(mocks.search).toHaveBeenCalledWith({}, "private query", [], MEMORY_RETRIEVAL_LIMIT, null);
     expect(mocks.threads).toHaveBeenCalledWith(expect.objectContaining({ queryEmbedding: null }));
   });
   it("keeps how each selected record was found for the turn's log", async () => {

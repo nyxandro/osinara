@@ -54,6 +54,8 @@ export interface ScoredMemoryRetrievalResult {
   memory: ReferencedMemoryItem;
   sourceEvidence?: ModelMemoryEvidence;
   score: number;
+  /** Whom or what the record is about, as indexing wrote it; read to prefer a named person. */
+  subjectLabel: string | null;
 }
 
 /** The branches under the names their diagnostics already carry: `simple*`, `russian*`, `semantic*`. */

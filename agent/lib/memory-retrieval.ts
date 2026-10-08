@@ -13,7 +13,13 @@
 import type { SessionAuth } from "../runtime/context.js";
 import type { ModelMessage } from "ai";
 
-import { embedMemoryQueryChunks, memoryQueryCentroid } from "./memory-embedding-client.js";
+import {
+  embedQueryOrDegrade,
+  selectMemoriesAutomatically,
+  type AutomaticMemorySelection,
+  type SelectedMemory,
+} from "./memory-automatic-selection.js";
+import { memoryQueryCentroid } from "./memory-embedding-client.js";
 import { chunkMemoryQuery } from "./memory-embedding-chunks.js";
 import { prepareMemoryQuery } from "./memory-query-preparation.js";
 import { MEMORY_USAGE_INSTRUCTION } from "./memory-usage-directive.js";
@@ -34,7 +40,6 @@ import { memoryThreadBriefRepository } from "./memory-thread-brief-repository.js
 import type { MemoryThreadContext } from "./memory-thread-context.js";
 import {
   MemoryContextFailure,
-  memoryFailureCode,
   type MemoryContextPhase,
 } from "./memory-context-failure.js";
 
@@ -47,6 +52,17 @@ export type ModelMemoryContextItem = ModelMemory | (MemoryConflictGroup & {
  * never inside them: the model sees records, the log sees why those records were the ones found.
  */
 export interface MemoryRetrievalDiagnostics extends MemoryRetrievalBranchDiagnostics {
+  /**
+   * True when the automatic selection offered nothing on purpose: the message was small talk and
+   * no search ran. Kept apart from a search that found nothing, which is what an empty-selection
+   * alert is about.
+   */
+  abstained: boolean;
+  /**
+   * The day or period the question named and how many records carried an event date in it; null
+   * when it named none. Absent for the explicit search, which takes its period from the model.
+   */
+  dateWindow?: AutomaticMemorySelection["dateWindow"];
   queryCharacters: number;
   queryChunks: number;
   /** False when the query vector could not be computed and only the word branches ran. */
@@ -61,35 +77,15 @@ function queryDiagnostics(
   query: string,
   branches: MemoryRetrievalBranchDiagnostics,
   semanticBranchAvailable: boolean,
+  abstained: boolean,
 ): MemoryRetrievalDiagnostics {
   return {
     ...branches,
+    abstained,
     queryCharacters: query.length,
     queryChunks: chunkMemoryQuery(query).length,
     semanticBranchAvailable,
   };
-}
-
-/**
- * The query vector, or none. One unreachable service used to cost the whole turn its memory: the
- * vector was taken before the database was touched, and a failure there became «память недоступна»
- * — although two of the three branches search text in PostgreSQL and would have found the exact
- * names, numbers and file names the person asked about.
- *
- * There is no retry. The service is already unwell, and a second wait would be paid by the person
- * at exactly the wrong moment; the failure is written down once and the search goes on without it.
- */
-async function embedQueryOrDegrade(prepared: string): Promise<readonly (readonly number[])[]> {
-  try {
-    return await embedMemoryQueryChunks(prepared);
-  } catch (error) {
-    console.error(JSON.stringify({
-      code: "AGENT_MEMORY_SEMANTIC_BRANCH_UNAVAILABLE",
-      causeCode: memoryFailureCode(error) ?? "UNCLASSIFIED_EMBEDDING_ERROR",
-      queryCharacters: prepared.length,
-    }));
-    return [];
-  }
 }
 
 export function formatRetrievedMemoryInstructions(
@@ -196,13 +192,21 @@ export async function retrieveRelevantMemories(
     embeddings,
   );
   return {
-    diagnostics: queryDiagnostics(prepared, retrieval.diagnostics, embeddings.length > 0),
+    // An explicit search never abstains: the model asked on purpose.
+    diagnostics: queryDiagnostics(prepared, retrieval.diagnostics, embeddings.length > 0, false),
     memories: [
       ...retrieval.results.map((result) => toModelMemory(result.memory, result.sourceEvidence)),
       ...retrieval.conflicts.map((conflict) => ({ ...conflict, type: "unresolved_conflict" as const })),
     ],
     rankingByMemoryRef: memoryRankingByRef(retrieval.results),
   };
+}
+
+/** How each searched record was found, for logs; a record only its date brought has no rank. */
+function selectedRankingByRef(selected: readonly SelectedMemory[]): Map<string, MemoryRecordRanking> {
+  return memoryRankingByRef(selected.flatMap((one) => one.score === null ? [] : [{
+    evidence: one.evidence, exactDuplicateIdentity: "", memory: one.memory, score: one.score, subjectLabel: null,
+  }]));
 }
 
 export async function retrieveMemoryTurnContext(
@@ -217,39 +221,38 @@ export async function retrieveMemoryTurnContext(
   // Not `embedding`: that step no longer fails the turn, it degrades and says so in the log.
   let phase: MemoryContextPhase = "search";
   try {
-    const embeddings = await embedQueryOrDegrade(prepared);
-    const retrieval = await memoryRetrievalRepository.searchWithConflictClosure(
-      auth,
-      prepared,
-      embeddings,
-      undefined,
-      window,
-    );
+    const selection = await selectMemoriesAutomatically(auth, prepared, { now: new Date(), window });
     const memories: ModelMemoryContextItem[] = [
-      ...retrieval.results.map((result) => toModelMemory(result.memory, result.sourceEvidence)),
-      ...retrieval.conflicts.map((conflict) => ({ ...conflict, type: "unresolved_conflict" as const })),
+      ...selection.selected.map((selected) => toModelMemory(selected.memory, selected.sourceEvidence)),
+      ...selection.conflicts.map((conflict) => ({ ...conflict, type: "unresolved_conflict" as const })),
     ];
     phase = "threads";
-    const threads = await memoryThreadBriefRepository.activate({
-      auth,
-      // Thread activation holds one vector by contract, so the pieces fold back into their
-      // centroid here — locally, without asking the embedding service a second time. Without a
-      // vector threads still activate by what the search retrieved and by skill hints.
-      queryEmbedding: embeddings.length === 0 ? null : memoryQueryCentroid(embeddings),
-      retrievedClaimIds: retrieval.results.map((result) => result.memory.id),
-      skillHints,
-    });
+    // A message that asked memory nothing gets no threads either: silence is the whole block.
+    const threads = selection.abstained
+      ? { threads: [], totalCharacters: 0 }
+      : await memoryThreadBriefRepository.activate({
+        auth,
+        // Thread activation holds one vector by contract, so the pieces fold back into their
+        // centroid here — locally, without asking the embedding service a second time. Without a
+        // vector threads still activate by what the search retrieved and by skill hints.
+        queryEmbedding: selection.embeddings.length === 0 ? null : memoryQueryCentroid(selection.embeddings),
+        retrievedClaimIds: selection.selected.map((selected) => selected.memory.id),
+        skillHints,
+      });
     return {
-      diagnostics: queryDiagnostics(prepared, retrieval.diagnostics, embeddings.length > 0),
+      diagnostics: {
+        ...queryDiagnostics(prepared, selection.diagnostics, selection.semanticBranchAvailable, selection.abstained),
+        dateWindow: selection.dateWindow,
+      },
       memories,
       offered: {
         claimIdByMemoryRef: new Map(
-          retrieval.results.map((result) => [result.memory.memoryRef, result.memory.id] as const),
+          selection.selected.map((selected) => [selected.memory.memoryRef, selected.memory.id] as const),
         ),
-        claimIdsByConflictRef: retrieval.claimIdsByConflictRef,
+        claimIdsByConflictRef: selection.claimIdsByConflictRef,
       },
-      rankingByMemoryRef: memoryRankingByRef(retrieval.results),
-      retrievedClaimIds: retrieval.relatedClaimIds,
+      rankingByMemoryRef: selectedRankingByRef(selection.selected),
+      retrievedClaimIds: selection.relatedClaimIds,
       threads,
     };
   } catch (error) {

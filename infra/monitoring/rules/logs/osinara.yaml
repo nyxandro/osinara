@@ -21,9 +21,9 @@ groups:
 
       # Two halves of the same ratio: how many turns searched memory successfully, and how many of
       # them came back with nothing. `memories` counts what the search found; what survived the
-      # turn block ceiling is `offeredMemories`, and the difference is `droppedMemories`. Every measured production turn returned the full twelve
-      # records, so a high empty share means either the embedding service broke or a retrieval
-      # change started cutting too much. The ratio itself lives in the alert.
+      # turn block ceiling is `offeredMemories`, and the difference is `droppedMemories`. A search
+      # that runs finds something almost every time, so a high empty share means either the
+      # embedding service broke or a retrieval change started cutting too much. The ratio itself lives in the alert.
       # Both are grouped by `outcome`, like every other rule here: it is the one label the filter
       # already fixes, and grouping keeps the emitted series shaped like its neighbours instead of
       # relying on how an ungrouped `stats` row is turned into a series.
@@ -31,7 +31,13 @@ groups:
         expr: 'project:"osinara-production" code:"AGENT_MEMORY_RETRIEVAL_METRICS" outcome:"succeeded" | stats by (outcome) count() as value'
 
       - record: osinara_memory_retrieval_empty_1m
-        expr: 'project:"osinara-production" code:"AGENT_MEMORY_RETRIEVAL_METRICS" outcome:"succeeded" memories:"0" | stats by (outcome) count() as value'
+        expr: 'project:"osinara-production" code:"AGENT_MEMORY_RETRIEVAL_METRICS" outcome:"succeeded" memories:"0" abstained:"false" | stats by (outcome) count() as value'
+
+      # Turns the selection left empty on purpose: the message was small talk — greetings, thanks,
+      # laughter — and no search ran (#341). Kept out of the empty share above, which is about a
+      # search that broke; this one is the trend of how much chatter there is.
+      - record: osinara_memory_retrieval_abstained_1m
+        expr: 'project:"osinara-production" code:"AGENT_MEMORY_RETRIEVAL_METRICS" outcome:"succeeded" abstained:"true" | stats by (outcome) count() as value'
 
       # How much of what memory offers the answers actually rest on, as the model declares it in
       # its usage line. The ratio of the first two is the daily share of offered records used.
