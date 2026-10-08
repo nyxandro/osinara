@@ -89,7 +89,7 @@ describeWithDatabase("memory usage counter", () => {
 
     const outcome = await memoryUsageRepository.recordUsed(window, [shownRef, hiddenRef]);
 
-    expect(outcome).toEqual({ counted: [shownRef], rejected: [hiddenRef], used: [shownRef] });
+    expect(outcome).toEqual({ counted: [shownRef], countedFromSelection: [shownRef], rejected: [hiddenRef], used: [shownRef] });
     expect(await usageOf(shownId)).toEqual({ count: 1, used: true });
   });
 
@@ -113,11 +113,13 @@ describeWithDatabase("memory usage counter", () => {
     const outcome = await memoryUsageRepository.recordUsed(second, [shownRef]);
     const retried = await memoryUsageRepository.recordUsed(second, [shownRef]);
 
-    expect(outcome).toEqual({ counted: [shownRef], rejected: [], used: [shownRef] });
-    expect(retried).toEqual({ counted: [], rejected: [], used: [shownRef] });
+    expect(outcome).toEqual({ counted: [shownRef], countedFromSelection: [shownRef], rejected: [], used: [shownRef] });
+    expect(retried).toEqual({ counted: [], countedFromSelection: [], rejected: [], used: [shownRef] });
     expect(await usageOf(shownId)).toEqual({ count: 1, used: true });
   });
 
+  // Counted all the same, but kept apart from the selection's: the share of the offer the answers
+  // use, and the duty alert on it, are about what the automatic selection put in front of the model.
   it("counts a record the explicit search showed, and refuses one nothing showed", async () => {
     const window = {
       conversationId,
@@ -129,7 +131,7 @@ describeWithDatabase("memory usage counter", () => {
 
     const outcome = await memoryUsageRepository.recordUsed(window, [shownRef, hiddenRef]);
 
-    expect(outcome).toEqual({ counted: [shownRef], rejected: [hiddenRef], used: [shownRef] });
+    expect(outcome).toEqual({ counted: [shownRef], countedFromSelection: [], rejected: [hiddenRef], used: [shownRef] });
     expect(await usageOf(shownId)).toEqual({ count: 1, used: true });
   });
 
@@ -147,7 +149,7 @@ describeWithDatabase("memory usage counter", () => {
 
     const again = await memoryUsageRepository.recordUsed(window, [shownRef]);
 
-    expect(again).toEqual({ counted: [], rejected: [], used: [shownRef] });
+    expect(again).toEqual({ counted: [], countedFromSelection: [], rejected: [], used: [shownRef] });
     expect(await usageOf(shownId)).toEqual({ count: 1, used: true });
   });
 
@@ -170,7 +172,7 @@ describeWithDatabase("memory usage counter", () => {
 
     const outcome = await memoryUsageRepository.recordUsed(rotated, [shownRef]);
 
-    expect(outcome).toEqual({ counted: [], rejected: [shownRef], used: [] });
+    expect(outcome).toEqual({ counted: [], countedFromSelection: [], rejected: [shownRef], used: [] });
     expect(await usageOf(shownId)).toEqual({ count: 0, used: false });
   });
 
@@ -201,6 +203,6 @@ describeWithDatabase("memory usage counter", () => {
     };
 
     expect(await memoryUsageRepository.recordUsed(window, []))
-      .toEqual({ counted: [], rejected: [], used: [] });
+      .toEqual({ counted: [], countedFromSelection: [], rejected: [], used: [] });
   });
 });

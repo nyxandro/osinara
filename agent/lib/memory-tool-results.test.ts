@@ -6,6 +6,8 @@
  * - Tool results expose only opaque memory/thread refs and preserve immediate undo guidance.
  * - `list_memories`: projects internal records while preserving an opaque pagination cursor.
  * - `search_memories`: returns the already-safe retrieval DTO unchanged.
+ * - Both reading tools journal what they put in front of the model, so a record the answer rests on
+ *   counts as used (#339); a failed journal write is logged and costs the person nothing.
  * - `executeNonStreamingTool`: rejects an unexpected streaming result before object assertions.
  */
 import type { ToolContext, ToolDefinition } from "../runtime/tool.js";
@@ -17,10 +19,12 @@ const {
   listMemories,
   logMemoryWriteEvent,
   requireWritableScope,
+  recordShownRefs,
   resolveMemoryTurnSource,
   retrieveMemories,
   searchEventWindow,
 } = vi.hoisted(() => ({
+  recordShownRefs: vi.fn(),
   createMemory: vi.fn(),
   listMemories: vi.fn(),
   logMemoryWriteEvent: vi.fn(),
@@ -53,6 +57,9 @@ vi.mock("./current-time-repository.js", () => ({
 vi.mock("./memory-observability.js", async (importOriginal) => ({
   ...await importOriginal<typeof import("./memory-observability.js")>(),
   logMemoryWriteEvent,
+}));
+vi.mock("./memory-show-journal.js", () => ({
+  memoryShowJournal: { recordShownRefs },
 }));
 vi.mock("./memory-turn-source.js", () => ({
   resolveMemoryTurnSource,
@@ -431,6 +438,56 @@ describe("model-facing memory tool results", () => {
       nextCursor: "opaque-cursor",
     });
     expect(JSON.stringify(result)).not.toMatch(/user-1|7100000001|session-internal|turn-internal/u);
+  });
+
+  it("journals what each reading tool showed, under the turn of the conversation", async () => {
+    const inConversation = {
+      callId: "call-1",
+      session: {
+        auth: { current: { attributes: { telegramChatType: "private", telegramConversationId: "conversation-1" } } },
+        id: "session-internal",
+        turn: { id: "turn-internal" },
+      },
+    } as unknown as ToolContext;
+    recordShownRefs.mockReset().mockResolvedValue(undefined);
+    listMemories.mockResolvedValue({ items: [internalMemory], nextCursor: null });
+    retrieveMemories.mockResolvedValue({
+      diagnostics: SEARCH_DIAGNOSTICS, memories: [{ content: "чай", kind: "preference", memoryRef: MEMORY_REF }],
+      rankingByMemoryRef: new Map(),
+    });
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    try {
+      await executeNonStreamingTool(listMemoriesTool, { limit: 20 }, inConversation);
+      await executeNonStreamingTool(searchMemories, { query: "чай" }, inConversation);
+    } finally { info.mockRestore(); }
+
+    const window = { agentSessionId: "session-internal", conversationId: "conversation-1", turnId: "turn-internal" };
+    expect(recordShownRefs.mock.calls).toEqual([[window, [MEMORY_REF], "list"], [window, [MEMORY_REF], "search"]]);
+  });
+
+  it("still answers the search when the journal cannot be written, and says so in the log", async () => {
+    const inConversation = {
+      callId: "call-1",
+      session: {
+        auth: { current: { attributes: { telegramChatType: "private", telegramConversationId: "conversation-1" } } },
+        id: "session-internal",
+        turn: { id: "turn-internal" },
+      },
+    } as unknown as ToolContext;
+    recordShownRefs.mockReset().mockRejectedValue(new AppError("AGENT_TEST_DATABASE_DOWN", "База недоступна"));
+    const found = [{ content: "чай", kind: "preference", memoryRef: MEMORY_REF }];
+    retrieveMemories.mockResolvedValue({ diagnostics: SEARCH_DIAGNOSTICS, memories: found, rankingByMemoryRef: new Map() });
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      await expect(executeNonStreamingTool(searchMemories, { query: "чай" }, inConversation)).resolves.toEqual(found);
+      expect(JSON.parse(error.mock.calls[0]![0] as string)).toEqual({
+        causeCode: "AGENT_TEST_DATABASE_DOWN", code: "AGENT_MEMORY_SHOW_RECORD_FAILED",
+        sessionId: "session-internal", source: "search", turnId: "turn-internal",
+      });
+    } finally { info.mockRestore(); error.mockRestore(); }
   });
 
   it("returns only the safe retrieval DTO from search_memories", async () => {

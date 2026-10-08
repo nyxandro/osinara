@@ -196,7 +196,7 @@ groups:
         annotations:
           summary: 'Трое суток модель не опирается ни на одну запись памяти'
           description: 'Память подбирает записи к каждому ответу, но ассистент ни разу не назвал их полезными. Для семьи это выглядит так, будто он не помнит того, о чём ему рассказывали, хотя записи на месте.'
-          runbook: 'В строках AGENT_MEMORY_USAGE_DIRECTIVE смотреть declared и failed: declared всегда false — модель перестала писать служебную строку; failed не пусто — не работает счётчик; namedCount больше нуля при rejectedCount, равном namedCount, — модель называет записи, которых этот ход не показывал. Если строка на месте и всё отклонено правильно, смотреть memoryEvidence в AGENT_MEMORY_RETRIEVAL_METRICS: что и какими ветками подбирается.'
+          runbook: 'В строках AGENT_MEMORY_USAGE_DIRECTIVE смотреть declared и failed: declared всегда false — модель перестала писать служебную строку; failed не пусто — не работает счётчик; namedCount больше нуля при rejectedCount, равном namedCount, — модель называет записи, которых эта сессия ей не показывала; countedCount больше нуля при countedSelectionCount, равном нулю, — ответы опираются только на то, что модель нашла сама, а автоподборка предлагает не то. Если строка на месте и всё отклонено правильно, смотреть memoryEvidence в AGENT_MEMORY_RETRIEVAL_METRICS: что и какими ветками подбирается.'
 
       # The family is matched by prefix because fifteen of its sixteen codes are failures. The
       # sixteenth says the indexer started, which it does on every release — and for a whole day

@@ -43,12 +43,15 @@ groups:
       # its usage line. The ratio of the first two is the daily share of offered records used.
       #
       # Only turns with a show journal enter the denominator (`usageTracked`): the counter accepts
-      # a named record only if this turn's journal shows it, and scheduled runs or delegated
+      # a named record only if this session's journal shows it, and scheduled runs or delegated
       # children keep none, so their records could never be counted as used.
       #
       # `countedCount`, not `usedCount`: the usage line is written on every message of a turn, the
       # progress note before a tool call included, and a record named in two of them was still used
       # once. The counter moves once per show, so its own count needs no further de-duplication.
+      # And of it only `countedSelectionCount`: since #339 the counter also takes records the model
+      # found by its own search or list, or read in the standing profile, none of which the
+      # selection offered. A selection shown a turn earlier and used now still counts.
       #
       # The two sides do not match exactly, and the gaps are accepted rather than corrected here:
       # - the journal also holds records the profile view showed after the budget dropped them from
@@ -62,7 +65,7 @@ groups:
         expr: 'project:"osinara-production" code:"AGENT_MEMORY_RETRIEVAL_METRICS" outcome:"succeeded" usageTracked:"true" | stats by (outcome) sum(offeredMemories) as value'
 
       - record: osinara_memory_used_1m
-        expr: 'project:"osinara-production" code:"AGENT_MEMORY_USAGE_DIRECTIVE" | stats by (code) sum(countedCount) as value'
+        expr: 'project:"osinara-production" code:"AGENT_MEMORY_USAGE_DIRECTIVE" | stats by (code) sum(countedSelectionCount) as value'
 
       # Whether the final answer carried the usage line at all. A turn without it says nothing
       # about memory, and the rule being dropped looks exactly like memory that never helps. Only

@@ -265,11 +265,18 @@ export async function rewindCopyTo(moment: string): Promise<void> {
   }
 }
 
+/**
+ * What the turn's automatic selection showed, and which of it that same turn used. Since #339 the
+ * journal also holds what the model's own search, listing or the standing profile showed, and a
+ * show may be spent by a later turn of the session; neither is the selection's offer to this turn.
+ */
 export async function loadShowJournal(): Promise<Map<string, { shown: string[]; used: string[] }>> {
   const rows = await database().query<{ agent_session_id: string; memory_ref: string; turn_id: string; used: boolean }>(
-    `SELECT show.agent_session_id, show.turn_id, ref.memory_ref, show.used_at IS NOT NULL AS used
+    `SELECT show.agent_session_id, show.turn_id, ref.memory_ref,
+            show.used_turn_id IS NOT DISTINCT FROM show.turn_id AS used
      FROM memory_retrieval_shows AS show
      JOIN memory_item_refs AS ref ON ref.memory_item_id = show.claim_id
+     WHERE show.source = 'selection'
      ORDER BY show.agent_session_id, show.turn_id, ref.memory_ref`,
   );
   const journal = new Map<string, { shown: string[]; used: string[] }>();

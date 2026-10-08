@@ -268,6 +268,16 @@ describe("osinara memory usage rules", () => {
     expect(expression("osinara_memory_retrieval_abstained_1m")).toContain('abstained:"true"');
   });
 
+  it("counts as used only what the selection offered, so the share and its alert keep their meaning", () => {
+    const record = logRules.split(/^ *- record: /mu)
+      .find((one) => one.split("\n", 1)[0]!.trim() === "osinara_memory_used_1m");
+    const expression = /expr: '([^']*)'/u.exec(record ?? "")?.[1] ?? "";
+
+    // Since #339 the counter also takes records the model found itself; counting those against the
+    // selection's offer would hide a selection that offers nothing an answer can use.
+    expect(expression).toContain("sum(countedSelectionCount)");
+  });
+
   it("raises OsinaraMemoryNeverUsed only on recorded series, reading a silent stretch as zero", () => {
     const [block] = alertBlocks("OsinaraMemoryNeverUsed");
     expect(block, "the alert this guards has been renamed").toBeDefined();

@@ -39,7 +39,7 @@ describe("recordMemoryUsageDeclaration", () => {
   afterEach(() => info.mockRestore());
 
   it("names the used and the never-shown refs and the kind of message that carried them", async () => {
-    recordUsed.mockResolvedValue({ counted: [SHOWN], rejected: [NEVER_SHOWN], used: [SHOWN] });
+    recordUsed.mockResolvedValue({ counted: [SHOWN], countedFromSelection: [], rejected: [NEVER_SHOWN], used: [SHOWN] });
 
     await recordMemoryUsageDeclaration({
       agentSessionId: "session-1",
@@ -52,6 +52,8 @@ describe("recordMemoryUsageDeclaration", () => {
     expect(JSON.parse(info.mock.calls[0]![0] as string)).toEqual({
       code: "AGENT_MEMORY_USAGE_DIRECTIVE",
       countedCount: 1,
+      // The record came from a search, not from the selection the share of used offers is about.
+      countedSelectionCount: 0,
       declared: true,
       failed: null,
       finishReason: "stop",
@@ -66,7 +68,7 @@ describe("recordMemoryUsageDeclaration", () => {
   });
 
   it("tells a progress step apart from the final answer", async () => {
-    recordUsed.mockResolvedValue({ counted: [], rejected: [], used: [] });
+    recordUsed.mockResolvedValue({ counted: [], countedFromSelection: [], rejected: [], used: [] });
 
     await recordMemoryUsageDeclaration({
       agentSessionId: "session-1",

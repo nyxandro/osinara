@@ -34,6 +34,7 @@ export async function recordMemoryUsageDeclaration(input: {
   if (typeof conversationId !== "string") return;
 
   let counted: string[] = [];
+  let countedFromSelection: string[] = [];
   let used: string[] = [];
   let rejected: string[] = [];
   let failed: string | null = null;
@@ -43,6 +44,7 @@ export async function recordMemoryUsageDeclaration(input: {
       input.declaration.memoryRefs,
     );
     counted = outcome.counted;
+    countedFromSelection = outcome.countedFromSelection;
     used = outcome.used;
     rejected = outcome.rejected;
   } catch (error) {
@@ -55,6 +57,8 @@ export async function recordMemoryUsageDeclaration(input: {
     // Fewer counted than used means this turn was processed more than once, not that the model
     // named a record twice: the second pass recognizes the journal rows the first one marked.
     countedCount: counted.length,
+    // The part of it the automatic selection had offered; the rest the model found itself.
+    countedSelectionCount: countedFromSelection.length,
     declared: input.declaration.declared,
     failed,
     finishReason: input.finishReason,

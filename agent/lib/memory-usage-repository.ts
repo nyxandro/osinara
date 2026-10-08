@@ -30,6 +30,11 @@ import type { MemorySelectionWindow } from "./memory-show-journal.js";
 export interface MemoryUsageOutcome {
   /** Records whose counter moved on this call, as opposed to an earlier pass over the same turn. */
   counted: string[];
+  /**
+   * Of `counted`, the ones the automatic selection had offered. The share of the offer the answers
+   * use is about these: a record the model found by its own search was never part of the offer.
+   */
+  countedFromSelection: string[];
   /** Refs the model named that this session had not shown it. */
   rejected: string[];
   /** Refs the model named that this session really had shown. */
@@ -41,8 +46,8 @@ export const memoryUsageRepository = {
     window: Pick<MemorySelectionWindow, "conversationId" | "agentSessionId" | "turnId">,
     memoryRefs: readonly string[],
   ): Promise<MemoryUsageOutcome> {
-    if (memoryRefs.length === 0) return { counted: [], rejected: [], used: [] };
-    const outcome = await database().query<{ counted: boolean; memory_ref: string }>(
+    if (memoryRefs.length === 0) return { counted: [], countedFromSelection: [], rejected: [], used: [] };
+    const outcome = await database().query<{ counted_source: string | null; memory_ref: string }>(
       `WITH named AS (
          SELECT DISTINCT ref AS memory_ref FROM unnest($4::text[]) AS ref
        ),
@@ -54,7 +59,7 @@ export const memoryUsageRepository = {
        ),
        shown AS (
          SELECT named.memory_ref, show.claim_id, show.turn_id, show.turn_ordinal, show.used_at,
-                show.used_turn_id
+                show.used_turn_id, show.source
          FROM named
          JOIN memory_item_refs AS ref ON ref.memory_ref = named.memory_ref
          JOIN memory_items AS item ON item.id = ref.memory_item_id AND item.claim_status = 'active'
@@ -67,7 +72,7 @@ export const memoryUsageRepository = {
          SELECT DISTINCT claim_id FROM shown WHERE used_turn_id = $3
        ),
        target AS (
-         SELECT DISTINCT ON (claim_id) claim_id, turn_id
+         SELECT DISTINCT ON (claim_id) claim_id, turn_id, source
          FROM shown
          WHERE used_at IS NULL AND claim_id NOT IN (SELECT claim_id FROM spent_by_this_turn)
          ORDER BY claim_id, turn_ordinal DESC
@@ -89,14 +94,16 @@ export const memoryUsageRepository = {
          RETURNING item.id
        )
        -- A data-modifying CTE always runs to completion, so the counters move whether or not the
-       -- final select reads them; it reports what was shown and which of it the counter just took.
-       SELECT DISTINCT shown.memory_ref, (shown.claim_id IN (SELECT claim_id FROM target)) AS counted
-       FROM shown`,
+       -- final select reads them; it reports what was shown, which of it the counter just took and
+       -- from which show.
+       SELECT DISTINCT shown.memory_ref, target.source AS counted_source
+       FROM shown LEFT JOIN target ON target.claim_id = shown.claim_id`,
       [window.conversationId, window.agentSessionId, window.turnId, [...memoryRefs]],
     );
     const used = outcome.rows.map((row) => row.memory_ref);
     return {
-      counted: outcome.rows.filter((row) => row.counted).map((row) => row.memory_ref),
+      counted: outcome.rows.filter((row) => row.counted_source !== null).map((row) => row.memory_ref),
+      countedFromSelection: outcome.rows.filter((row) => row.counted_source === "selection").map((row) => row.memory_ref),
       rejected: memoryRefs.filter((ref) => !used.includes(ref)),
       used,
     };
