@@ -28,6 +28,7 @@ import { liveMemoryReadPredicate } from "./memory-live-read-authorization.js";
 import type { ReferencedMemoryRow } from "./memory-record.js";
 import { rowToReferencedMemory } from "./memory-record.js";
 import { externalProfileProjectionPredicate } from "./external-profile-projection-predicate.js";
+import { preferNamedPeople } from "./memory-named-people.js";
 import type { ModelMemoryEvidence } from "./model-memory.js";
 import {
   collapseExactDuplicateRetrievalResults,
@@ -207,6 +208,7 @@ function rowToScoredResult(row: RetrievalRow): ScoredMemoryRetrievalResult {
     ]),
     memory: rowToReferencedMemory(row),
     score: requiredScore(row.fused_score),
+    subjectLabel: row.subject_label,
     sourceEvidence: {
       authorLabel: row.source_author_label,
       kind: row.source_evidence_kind,
@@ -559,9 +561,11 @@ export const memoryRetrievalRepository = {
         "Не удалось измерить работу поиска памяти. Повторите запрос",
       );
     }
-    const scored = result.rows
+    // A record about another person than the one the question names goes below that person's,
+    // before the twelve places are chosen (#343, memory-named-people.ts).
+    const scored = preferNamedPeople(normalizedQuery, result.rows
       .filter((row): row is DiagnosticsColumns & RetrievalRow => row.id !== null)
-      .map(rowToScoredResult);
+      .map(rowToScoredResult));
     return {
       diagnostics: rowToBranchDiagnostics(head),
       // Duplicate collapse is read-only and happens after global rank, keeping its representative.

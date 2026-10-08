@@ -205,7 +205,7 @@ export async function retrieveRelevantMemories(
 /** How each searched record was found, for logs; a record only its date brought has no rank. */
 function selectedRankingByRef(selected: readonly SelectedMemory[]): Map<string, MemoryRecordRanking> {
   return memoryRankingByRef(selected.flatMap((one) => one.score === null ? [] : [{
-    evidence: one.evidence, exactDuplicateIdentity: "", memory: one.memory, score: one.score,
+    evidence: one.evidence, exactDuplicateIdentity: "", memory: one.memory, score: one.score, subjectLabel: null,
   }]));
 }
 

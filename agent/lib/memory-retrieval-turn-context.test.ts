@@ -65,6 +65,7 @@ function search(overrides: Partial<MemoryRetrievalBranchDiagnostics>) {
     results: [{
       evidence: { russianMorphologyRank: null, semanticSimilarity: 0.815, simpleLexicalRank: null },
       exactDuplicateIdentity: "group",
+      subjectLabel: null,
       memory: record,
       score: 0.016,
     }],

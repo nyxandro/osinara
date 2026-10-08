@@ -41,7 +41,11 @@ export const MEMORY_RETRIEVAL_EVAL_GROUP_RECORDS: readonly MemoryRetrievalEvalGr
  *   `smallTalkEmptyRate` = 0.5 from 0, and records per reaction fell from 8.875. Before the
  *   change real memory showed 11.8 records on the same kind of turn.
  * - `participantNearMissEmptyRate` = 0: asked what Nina said about a tool she never mentioned, the
- *   search offers Nina's other records and the tool's documentation.
+ *   search offers Nina's other records and the tool's documentation. What silence would prevent is
+ *   a neighbour's record on top, read as Nina's: `participantNearMissNeighbourTopThreeRate` was 0.6
+ *   and is 0 from 08.10.2026 (#343) — a record about another person than the one named goes below
+ *   that person's. Subject labels are stored here as production stores them, or that rule could
+ *   not be seen.
  * - The bot finds itself, from 08.10.2026 (#346). «Осинара, как ты выглядишь?» used to miss the
  *   avatar record: the name is cut from the start of the question, and «как ты выглядишь» named
  *   nothing. In a group the name now goes back in where «ты» can only mean the bot, and
@@ -61,6 +65,7 @@ export const MEMORY_RETRIEVAL_EVAL_GROUP_BASELINE = {
   expectedInTopThreeRate: 1,
   linkRecallAt12: 1,
   participantNearMissEmptyRate: 0,
+  participantNearMissNeighbourTopThreeRate: 0,
   participantRecallAt12: 1,
   participantTopThreeRate: 1,
   positiveRecallAt12: 1,
