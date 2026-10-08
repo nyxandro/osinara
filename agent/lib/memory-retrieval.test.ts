@@ -276,15 +276,18 @@ describe("recordOfferedMemories", () => {
     } finally { recordShown.mockRestore(); }
   });
 
-  it("does not write down profile claims this retrieval did not bring", async () => {
+  it("writes down a standing profile claim as the profile's show, not the selection's", async () => {
     const recordShown = vi.spyOn(memoryShowJournal, "recordShown").mockResolvedValue();
+    const recordShownRefs = vi.spyOn(memoryShowJournal, "recordShownRefs").mockResolvedValue();
 
     try {
-      // A standing profile claim was never a candidate of this search, so it has no place here.
+      // A standing claim was never a candidate of this search: it must not hide anything from the
+      // next selections, yet a record the answer used from the profile has to count (#339).
       await recordOfferedMemories(window, turnContext(), [record("mem_first")], ["mem_unrelated"]);
 
       expect(recordShown).toHaveBeenCalledWith(window, ["claim-1"]);
-    } finally { recordShown.mockRestore(); }
+      expect(recordShownRefs).toHaveBeenCalledWith(window, ["mem_unrelated"], "profile");
+    } finally { recordShown.mockRestore(); recordShownRefs.mockRestore(); }
   });
 
   it("writes nothing for a turn that has no conversation to remember into", async () => {

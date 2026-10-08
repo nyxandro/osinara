@@ -10,6 +10,7 @@ import { z } from "zod";
 import { MEMORY_LIST_DEFAULT_LIMIT, MEMORY_LIST_MAX_LIMIT } from "../memory-config.js";
 import { requireMemoryAuthorization } from "../memory-context.js";
 import { memoryRepository } from "../memory-repository.js";
+import { recordToolShows } from "../memory-tool-shows.js";
 import { toModelMemory } from "../model-memory.js";
 
 export default defineTool({
@@ -31,6 +32,8 @@ export default defineTool({
   }),
   async execute(input, ctx) {
     const page = await memoryRepository.list(requireMemoryAuthorization(ctx), input);
+    // Listing is reading too: a record the model used from a page counts like any other show.
+    await recordToolShows(ctx, page.items.map((item) => item.memoryRef), "list");
     return {
       items: page.items.map((item) => toModelMemory(item, item.sourceEvidence)),
       nextCursor: page.nextCursor,

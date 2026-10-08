@@ -218,14 +218,17 @@ function rowToScoredResult(row: RetrievalRow): ScoredMemoryRetrievalResult {
 }
 
 /**
- * Which journal rows the window covers: the last few turns of this conversation, this turn itself
- * excluded. A second pass over one turn finds its own shows already written, and hiding them would
- * answer the person from a different half of their memory than the first pass used.
+ * Which journal rows the window covers: what the automatic selection itself offered in the last few
+ * turns of this conversation, this turn excluded. A search result or the profile is no memory block
+ * of the turn, and hiding it here would make a deliberate lookup cost the next turn its records.
+ * A second pass over one turn finds its own shows already written, and hiding them would answer the
+ * person from a different half of their memory than the first pass used.
  *
  * The selection filter and the metric that reports how much the filter removed read the same text,
  * because two copies of one predicate drift and the number stops describing the behaviour.
  */
 const RECENT_SHOW_PREDICATE = `shown.conversation_id = $14
+                 AND shown.source = 'selection'
                  AND shown.turn_ordinal > $15::bigint - $16::bigint
                  AND shown.turn_ordinal < $15::bigint`;
 

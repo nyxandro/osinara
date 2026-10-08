@@ -5,7 +5,8 @@
  * - `110_memory_usage_counter.sql`: usage is counted apart from reinforcement.
  * - A record shown in this turn is counted once per turn it was named in.
  * - A ref the turn never showed is rejected and changes nothing.
- * - A ref from an earlier turn of the same conversation is rejected too.
+ * - A record shown by an earlier turn of the same session, or by the explicit search, is counted.
+ * - A record shown in another session of the conversation is rejected: its history is not this one.
  * - Processing one turn twice counts the record once.
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -92,7 +93,9 @@ describeWithDatabase("memory usage counter", () => {
     expect(await usageOf(shownId)).toEqual({ count: 1, used: true });
   });
 
-  it("refuses a ref that belongs to an earlier turn of the same conversation", async () => {
+  it("counts a record an earlier turn of this session showed, once per answer that named it", async () => {
+    // #339: the answer may rest on a record shown a turn or two ago that is still in the history;
+    // the counter used to refuse it, and the forgetting curve then aged it as never used.
     const first = {
       conversationId,
       agentSessionId: SESSION,
@@ -108,9 +111,26 @@ describeWithDatabase("memory usage counter", () => {
     };
 
     const outcome = await memoryUsageRepository.recordUsed(second, [shownRef]);
+    const retried = await memoryUsageRepository.recordUsed(second, [shownRef]);
 
-    expect(outcome).toEqual({ counted: [], rejected: [shownRef], used: [] });
-    expect(await usageOf(shownId)).toEqual({ count: 0, used: false });
+    expect(outcome).toEqual({ counted: [shownRef], rejected: [], used: [shownRef] });
+    expect(retried).toEqual({ counted: [], rejected: [], used: [shownRef] });
+    expect(await usageOf(shownId)).toEqual({ count: 1, used: true });
+  });
+
+  it("counts a record the explicit search showed, and refuses one nothing showed", async () => {
+    const window = {
+      conversationId,
+      agentSessionId: SESSION,
+      turnId: "turn-1",
+      turnOrdinal: await memoryShowJournal.openTurn(conversationId, SESSION, "turn-1"),
+    };
+    await memoryShowJournal.recordShownRefs(window, [shownRef], "search");
+
+    const outcome = await memoryUsageRepository.recordUsed(window, [shownRef, hiddenRef]);
+
+    expect(outcome).toEqual({ counted: [shownRef], rejected: [hiddenRef], used: [shownRef] });
+    expect(await usageOf(shownId)).toEqual({ count: 1, used: true });
   });
 
   it("counts one record once when the same turn is processed again", async () => {

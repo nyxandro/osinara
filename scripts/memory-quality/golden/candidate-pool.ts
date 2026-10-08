@@ -64,8 +64,9 @@ const RUN_MARKER_TABLE = "memory_golden_eval_run";
  * and quietly narrow it, so any edit stops the run until GATES are checked again.
  */
 // Reviewed 08.10.2026: the seventeenth parameter is the branch agreement factor, a multiplier on
-// the fused rank that cuts nothing, so GATES stay complete.
-const REVIEWED_STATEMENT_SHA256 = "13eda067ddf46fdb892822554976447e1cf1c85859ccbf599a275c5d0b856925";
+// the fused rank that cuts nothing, and the repeat filter reads only the selection's own shows
+// (#339) — neither is a gate, so GATES stay complete.
+const REVIEWED_STATEMENT_SHA256 = "0194f54b41172bb07dc9bc28a0f76dfdfd636496b7b78724ecdaa17cec06660d";
 const REVIEWED_PARAMETER_COUNT = 17;
 
 /** Where the gates sit in the product's parameter list, with the value each must hold there. */
