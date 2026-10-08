@@ -51,7 +51,7 @@ import {
   compactionSettings, compactMessages, shouldCompact, todoCompactionMessage, type CompactionSummaryRequest, type PromptMeasurement,
 } from "./compaction.js";
 import { assistantStepText, MODEL_INACTIVITY_TIMEOUT, type StepModelCall, type StepModelResponse } from "./model-call.js";
-import { isRequestRefusal, modelCallFailure } from "./model-errors.js";
+import { isRequestRefusal, modelCallFailure, normalizeModelCallError } from "./model-errors.js";
 import { orderStepTools, toModelToolSet } from "./model-tools.js";
 import { executeStepCalls, planStepCalls, type CallJournal } from "./step-calls.js";
 import { failParkedTurn, failTurn, ParkedTurnTakenOver } from "./turn-failure.js";
@@ -298,7 +298,9 @@ async function compactIfNeeded(runtime: TurnRuntime, input: {
           ...request, abortSignal: input.signal, model: input.selection.model, providerOptions: input.selection.providerOptions,
         });
       } catch (error) {
-        const failure = modelCallFailure(error);
+        // The SDK retries the summary call itself and ends an outage in a RetryError with no status
+        // of its own; normalized as the main call does, it is an outage, not a refusal.
+        const failure = modelCallFailure(normalizeModelCallError(error));
         if (isRequestRefusal(failure)) summary.refusal = failure as AppError;
         throw failure;
       }
