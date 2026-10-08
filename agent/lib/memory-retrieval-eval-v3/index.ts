@@ -97,9 +97,14 @@ export const MEMORY_RETRIEVAL_EVAL_QUERIES_V3: readonly MemoryRetrievalEvalQuery
  *   record of yesterday: the record does not say the day in words, and nothing read its event date.
  *   The selection now reads an explicit day or period in the question and puts the records of it
  *   first (#344). The exact-day question carries its year: a day without one is the latest past.
- * - `aliasWordingRecallAt12` = 0.875 with `aliasWordingTopThreeRate` = 0.5. The meaning branch
- *   finds «репа», «ДР», «дейли» on this clean corpus, but half of them sit below third place; the
- *   one miss is «тачка», which reached nothing about the car at all.
+ * - `aliasWordingRecallAt12` = 1 and `aliasWordingTopThreeRate` = 1, from 0.875 and 0.5 before
+ *   08.10.2026. The meaning branch found «репа», «ДР», «дейли» weakly and left half of them below
+ *   third place, and «тачка» reached nothing about the car. The search now also reads a short list
+ *   of unambiguous slang in plain words (#345). The questions here were written from the same
+ *   words the list holds, so these two numbers say the list works, not how much live slang it
+ *   covers: on the 153 golden turns it fired four times. The word branches now contribute to the
+ *   answer of more live-shaped questions as well: `lexicalBranchFireRate` 0.86 → 0.88,
+ *   `liveShapeLexicalFireRate` 0.917 → 0.958.
  * - `updatedFactRecallAt12` = 1, and no superseded version is offered for any question.
  *
  * `longQueryFullCoverageRate` rose from 0.333 to 0.5 with the branch agreement factor (#342): a long
@@ -117,15 +122,15 @@ export const MEMORY_RETRIEVAL_EVAL_QUERIES_V3: readonly MemoryRetrievalEvalQuery
  * actually stands, and that is now visible instead of averaged away.
  */
 export const MEMORY_RETRIEVAL_R1_BASELINE_V3 = {
-  aliasWordingRecallAt12: 0.875,
-  aliasWordingTopThreeRate: 0.5,
+  aliasWordingRecallAt12: 1,
+  aliasWordingTopThreeRate: 1,
   botAddressRecallAt12: 1,
   dateQuestionRecallAt12: 1,
   emojiMarkupRecallAt12: 1,
   exactRecallAt12: 1,
   expectedInTopThreeRate: 0.84,
-  lexicalBranchFireRate: 0.86,
-  liveShapeLexicalFireRate: 0.917,
+  lexicalBranchFireRate: 0.88,
+  liveShapeLexicalFireRate: 0.958,
   longQueryFullCoverageRate: 0.5,
   longQueryRecallAt12: 0.833,
   mixedLanguageRecallAt12: 1,
