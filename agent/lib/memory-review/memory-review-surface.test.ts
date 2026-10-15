@@ -139,6 +139,41 @@ describe("memory review model surface", () => {
     expect(schema.safeParse({ ...payload, scope: "group" }).success).toBe(false);
   });
 
+  it("fills the review run's constants and shows its required source", () => {
+    // The run may write only normal, model-selected memory of its one scope from a named message:
+    // the model is no longer asked for the three constants, and sourceSequence is required up front.
+    const schema = (buildMemoryReviewToolSurface("group").remember as unknown as {
+      inputSchema: z.ZodType;
+    }).inputSchema;
+    const parsed = schema.safeParse({
+      content: "Любит походы", kind: "preference", sourceSequence: "42", subject: { kind: "current_author" },
+    });
+
+    expect(parsed).toMatchObject({
+      data: { basis: "agent_inferred", scope: "group", sensitivity: "normal" },
+      success: true,
+    });
+    expect(schema.safeParse({ content: "Любит походы", kind: "preference", subject: { kind: "none" } }).success)
+      .toBe(false);
+    expect(schema.safeParse({
+      basis: "user_requested", content: "Любит походы", kind: "preference", sourceSequence: "42", subject: { kind: "none" },
+    }).success).toBe(false);
+    // A refusal still names the review contract by its stable code, not a bare schema message.
+    for (const wrong of [
+      { basis: "user_requested", sourceSequence: "42" },
+      { sensitivity: "sensitive", sourceSequence: "42" },
+      {},
+    ]) {
+      const refused = schema.safeParse({ content: "Любит походы", kind: "preference", subject: { kind: "none" }, ...wrong });
+      expect(JSON.stringify(refused.error?.issues)).toContain("AGENT_MEMORY_REVIEW_INPUT_INVALID");
+    }
+    const required = (z.toJSONSchema(schema as never, { io: "input" }) as { required?: string[] }).required ?? [];
+    expect(required).toContain("sourceSequence");
+    expect(required).not.toEqual(expect.arrayContaining(["basis"]));
+    expect(required).not.toContain("scope");
+    expect(required).not.toContain("sensitivity");
+  });
+
   it("offers the review run only subjects it can resolve without a profile view", () => {
     // A background run never has profile views, so a verified_ref there is refused every time (#289).
     const schema = (buildMemoryReviewToolSurface("group").remember as unknown as {

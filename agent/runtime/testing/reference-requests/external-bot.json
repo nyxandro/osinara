@@ -43,7 +43,7 @@
           "properties": {
             "filePath": {
               "type": "string",
-              "description": "The absolute path to the file to read. A leading $HOME is supported."
+              "description": "Абсолютный путь внутри /workspace/group, например /workspace/group/notes.md, или путь файла разрешённого скилла."
             },
             "limit": {
               "type": "integer",
@@ -78,7 +78,7 @@
             },
             "filePath": {
               "type": "string",
-              "description": "The absolute path to the file to write. A leading $HOME is supported."
+              "description": "Абсолютный путь внутри /workspace/group, например /workspace/group/report.html."
             }
           },
           "required": [
@@ -137,7 +137,7 @@
           },
           "additionalProperties": false
         },
-        "description": "Use this tool to create and manage a structured task list for the current session.\nThis helps you track progress, organize complex tasks, and demonstrate thoroughness.\n\nWhen to use:\n- Complex multistep tasks requiring 3 or more distinct steps\n- When the user provides multiple tasks or a numbered list\n- After receiving new instructions, to capture requirements\n- After completing a task, to mark it complete and add follow-ups\n\nWhen NOT to use:\n- Single, straightforward tasks that need no tracking\n- Purely conversational or informational requests\n\nUsage:\n- Call with `todos` to replace the entire list (full replacement write)\n- Call without `todos` to read the current list\n- Both return the full current list with status counts\n- Mark tasks in_progress when you start, completed when done\n- Only have ONE task in_progress at a time"
+        "description": "Вести список шагов длинной задачи в этом разговоре: нужен, когда в задаче три и больше отдельных шагов или человек дал сразу несколько поручений. Для простого вопроса или одного действия не нужен. Вызов с todos полностью заменяет список, без todos читает текущий; оба возвращают весь список со счётчиками. Отмечай шаг in_progress, когда начинаешь, и completed, когда закончил; в работе одновременно только один шаг."
       },
       {
         "type": "function",
@@ -247,7 +247,7 @@
             },
             "path": {
               "type": "string",
-              "description": "The directory to search in. Defaults to /workspace. Must be an absolute path or begin with $HOME/. Omit to use the default."
+              "description": "Папка поиска внутри /workspace/group; без поля поиск идёт по всей /workspace/group."
             },
             "pattern": {
               "type": "string",
@@ -294,7 +294,7 @@
             },
             "path": {
               "type": "string",
-              "description": "The directory or file to search in. Defaults to /workspace. Must be an absolute path or begin with $HOME/. Omit to use the default."
+              "description": "Папка или файл поиска внутри /workspace/group; без поля поиск идёт по всей /workspace/group."
             },
             "pattern": {
               "type": "string",
@@ -368,7 +368,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Повторно прочитать точный ordered profile selection по profileViewRef; не создаёт новую выборку."
+        "description": "Перечитать подборку сведений о людях из блока <verified_profile_view> по её profileViewRef, например когда блок обрезан или ушёл из контекста. Возвращает ту же подборку, новую не собирает."
       },
       {
         "type": "function",
@@ -546,9 +546,10 @@
               "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
             },
             "scope": {
+              "default": "group",
+              "description": "Разрешённая область памяти текущего trust zone",
               "type": "string",
-              "const": "group",
-              "description": "Разрешённая область памяти текущего trust zone"
+              "const": "group"
             },
             "sensitivity": {
               "type": "string",
@@ -639,8 +640,7 @@
                   ]
                 },
                 {
-                  "type": "string",
-                  "pattern": "^[ \\t\\r\\n]*\\{[ \\t\\r\\n]*(?:\"kind\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"current_author\"|\"kind\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"none\"|\"kind\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"verified_ref\"[ \\t\\r\\n]*,[ \\t\\r\\n]*\"subjectRef\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"(?:[^\"\\\\\\u0000-\\u001f]|\\\\(?:[\"\\\\/bfnrt]|u[0-9a-fA-F]{4}))*\"|\"subjectRef\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"(?:[^\"\\\\\\u0000-\\u001f]|\\\\(?:[\"\\\\/bfnrt]|u[0-9a-fA-F]{4}))*\"[ \\t\\r\\n]*,[ \\t\\r\\n]*\"kind\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"verified_ref\"|\"kind\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"label\"[ \\t\\r\\n]*,[ \\t\\r\\n]*\"label\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"(?:[^\"\\\\\\u0000-\\u001f]|\\\\(?:[\"\\\\/bfnrt]|u[0-9a-fA-F]{4}))*\"|\"label\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"(?:[^\"\\\\\\u0000-\\u001f]|\\\\(?:[\"\\\\/bfnrt]|u[0-9a-fA-F]{4}))*\"[ \\t\\r\\n]*,[ \\t\\r\\n]*\"kind\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"label\")[ \\t\\r\\n]*\\}[ \\t\\r\\n]*$"
+                  "type": "string"
                 }
               ],
               "description": "Кому или чему принадлежит утверждение"
@@ -746,7 +746,6 @@
             "basis",
             "content",
             "kind",
-            "scope",
             "sensitivity",
             "subject"
           ],

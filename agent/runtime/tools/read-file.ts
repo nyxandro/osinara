@@ -98,18 +98,10 @@ export async function executeReadFileOnSandbox(
 
 export const readFile = defineTool({
   description: [
-    "Read a file from the local filesystem. If the path does not exist, an error is returned.",
-    "",
-    "Usage:",
-    "- The filePath parameter should be an absolute path or begin with $HOME/.",
-    "- By default, this tool returns up to 2000 lines from the start of the file.",
-    "- The offset parameter is the line number to start from (1-indexed).",
-    "- To read later sections, call this tool again with a larger offset.",
-    '- Contents are returned with each line prefixed by its line number as `<line>: <content>`. For example, if a file has contents "foo\\n", you will receive "1: foo\\n".',
-    "- Any line longer than 2000 characters is truncated.",
-    "- Call this tool in parallel when you know there are multiple files you want to read.",
-    "- Avoid tiny repeated slices (30 line chunks). If you need more context, read a larger window.",
-  ].join("\n"),
+    "Прочитать текстовый файл рабочего окружения: filePath — абсолютный путь или путь от $HOME/. Несуществующий путь даёт ошибку.",
+    "За раз приходит до 2000 строк, начиная с offset (нумерация с 1); продолжение читай новым вызовом с большим offset. Каждая строка приходит с номером в виде `<номер>: <текст>`, строка длиннее 2000 символов обрезается.",
+    "Несколько файлов читай параллельными вызовами и не дроби файл на мелкие куски по 30 строк.",
+  ].join(" "),
   async execute(input, ctx) {
     return await executeReadFileOnSandbox(await ctx.getSandbox(), ctx.state, input);
   },

@@ -35,6 +35,12 @@ import {
   buildApprovalMessage,
   googleWorkspaceFacts,
 } from "./approval-message.js";
+import {
+  EXTERNAL_SCHEDULE_ACTION_LABELS,
+  externalScheduleFacts,
+  type ExternalScheduleTarget,
+} from "./external-schedule-approval.js";
+import { externalAgentScheduleRepository } from "../agent-schedules/external-agent-schedule-repository.js";
 import { gmailApprovalOptions, gmailApprovalPrompt } from "./gmail-approval-prompt.js";
 import { skillApprovalPrompt } from "./skill-approval-prompt.js";
 
@@ -46,6 +52,11 @@ interface ApprovalPresentationDependencies {
   findSkillGrantCatalog(ctx: Pick<SessionContext, "session">): Promise<SkillGrantCatalog>;
   findProfileProjectionGroup(groupRef: string, ctx: Pick<SessionContext, "session">): Promise<string | null>;
   findGroupTitle(telegramChatId: string, ctx: Pick<SessionContext, "session">): Promise<string | null>;
+  /** The owner's automation an update targets; fails when it is not one of theirs. */
+  findExternalSchedule(
+    id: string,
+    ctx: Pick<SessionContext, "session">,
+  ): Promise<{ title: string; telegramChatId: string; telegramGroupTitle: string }>;
   findGmailMessages(
     messageIds: readonly string[],
     profileRef: string,
@@ -130,6 +141,31 @@ export function createTelegramApprovalPresenter(
         };
       }
     }
+    if (request.display === "confirmation" && request.action.toolName === "manage_external_group_schedule") {
+      // The approval policy denied any invalid input already, so the action and its target are set.
+      const input = request.action.input;
+      if (input.action === "create" || input.action === "update") {
+        let target: ExternalScheduleTarget;
+        if (input.action === "update") {
+          const schedule = await dependencies.findExternalSchedule(String(input.id), ctx);
+          target = { automationTitle: schedule.title, groupTitle: schedule.telegramGroupTitle, telegramChatId: schedule.telegramChatId };
+        } else {
+          const telegramChatId = String(input.telegramChatId);
+          const title = await dependencies.findGroupTitle(telegramChatId, ctx);
+          if (title === null || !title.trim()) {
+            throw new AppError("AGENT_APPROVAL_GROUP_NOT_FOUND", "Группа не найдена в вашей семье. Обновите список групп и повторите запрос");
+          }
+          target = { groupTitle: title, telegramChatId };
+        }
+        return {
+          ...localized,
+          prompt: buildApprovalMessage({
+            actionLabel: EXTERNAL_SCHEDULE_ACTION_LABELS[input.action]!,
+            facts: externalScheduleFacts(input, target),
+          }),
+        };
+      }
+    }
     if (request.display === "confirmation" && request.action.toolName === "manage_skill") {
       const parsed = requireManageSkillInput(request.action.input);
       if (parsed.action !== "list" && parsed.action !== "stage" && parsed.action !== "view") {
@@ -184,6 +220,10 @@ export const presentTelegramApproval = createTelegramApprovalPresenter({
       requestedBy: owner.userId,
     });
     return groups.find((group) => group.telegramChatId === telegramChatId)?.title ?? null;
+  },
+  async findExternalSchedule(id, ctx) {
+    const owner = requirePrivateTelegramOwner(ctx);
+    return await externalAgentScheduleRepository.find({ familyId: owner.familyId, requestedBy: owner.userId }, id);
   },
   findGmailMessages: loadGmailMessageApproval,
 });

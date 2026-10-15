@@ -112,12 +112,9 @@
               "maxLength": 40
             },
             "basis": {
+              "default": "agent_inferred",
               "type": "string",
-              "enum": [
-                "agent_inferred",
-                "user_requested"
-              ],
-              "description": "agent_inferred: сама отобрала сведение из сообщения, не догадка; user_requested: автор прямо попросил сохранить"
+              "const": "agent_inferred"
             },
             "distinctFrom": {
               "description": "Только в ответ на отказ AGENT_MEMORY_SIMILAR_RECORD_EXISTS: memoryRef показанных близких записей, которые ты прочитала и считаешь другими сведениями. Не заполняй заранее",
@@ -151,22 +148,20 @@
               "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
             },
             "scope": {
+              "default": "group",
+              "description": "Разрешённая область памяти текущего trust zone",
               "type": "string",
-              "const": "group",
-              "description": "Разрешённая область памяти текущего trust zone"
+              "const": "group"
             },
             "sensitivity": {
+              "default": "normal",
               "type": "string",
-              "enum": [
-                "normal",
-                "sensitive"
-              ],
-              "description": "Чувствительность сохраняемого сведения"
+              "const": "normal"
             },
             "sourceSequence": {
-              "description": "Только для группы: номер #sequence одного сообщения из видимой дельты текущего хода; без поля источником является текущее сообщение",
               "type": "string",
-              "pattern": "^[1-9]\\d*$"
+              "pattern": "^[1-9]\\d*$",
+              "description": "Номер #sequence одного сообщения текущего пакета проверки"
             },
             "subject": {
               "anyOf": [
@@ -224,8 +219,7 @@
                   ]
                 },
                 {
-                  "type": "string",
-                  "pattern": "^[ \\t\\r\\n]*\\{[ \\t\\r\\n]*(?:\"kind\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"current_author\"|\"kind\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"none\"|\"kind\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"label\"[ \\t\\r\\n]*,[ \\t\\r\\n]*\"label\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"(?:[^\"\\\\\\u0000-\\u001f]|\\\\(?:[\"\\\\/bfnrt]|u[0-9a-fA-F]{4}))*\"|\"label\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"(?:[^\"\\\\\\u0000-\\u001f]|\\\\(?:[\"\\\\/bfnrt]|u[0-9a-fA-F]{4}))*\"[ \\t\\r\\n]*,[ \\t\\r\\n]*\"kind\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"label\")[ \\t\\r\\n]*\\}[ \\t\\r\\n]*$"
+                  "type": "string"
                 }
               ],
               "description": "Кому или чему принадлежит утверждение"
@@ -328,16 +322,14 @@
             }
           },
           "required": [
-            "basis",
             "content",
             "kind",
-            "scope",
-            "sensitivity",
+            "sourceSequence",
             "subject"
           ],
           "additionalProperties": false
         },
-        "description": "Сохранить одно конкретное сведение из sourceSequence текущего тихого batch: факт, предпочтение, личный опыт, событие, план или полезную ссылку с контекстом. Особая важность не требуется, догадки запрещены. Разрешена только normal sensitivity."
+        "description": "Сохранить одно конкретное сведение из сообщения sourceSequence текущего тихого batch: факт, предпочтение, личный опыт, событие, план или полезную ссылку с контекстом. Особая важность не требуется, догадки запрещены. Чувствительные сведения здесь не сохраняются."
       },
       {
         "type": "function",

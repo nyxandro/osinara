@@ -53,4 +53,10 @@ export function defineBashTool(input: { readonly description?: string } = {}): T
   });
 }
 
-export const bash = defineBashTool({ description: "Execute a shell command in the shared workspace environment." });
+export const bash = defineBashTool({
+  description: [
+    "Выполнить shell-команду в изолированном рабочем окружении этого чата. Доступные папки и правила работы с ними описаны в разделе «Workspace и инструменты».",
+    "Команда прерывается через 2 минуты. Результат: {exitCode, stdout, stderr, truncated}; stdout и stderr длиннее 2000 строк или 50 КБ обрезаются с начала, остаётся конец вывода, и truncated=true.",
+    "Длинный вывод сохраняй в файл и читай через read_file.",
+  ].join(" "),
+});

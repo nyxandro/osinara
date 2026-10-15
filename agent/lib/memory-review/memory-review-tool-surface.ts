@@ -5,7 +5,6 @@
  * - `buildMemoryReviewToolSurface`: memory reads and source-backed normal-sensitivity writes only.
  */
 import { defineTool, type ToolDefinition } from "../../runtime/tool.js";
-import { z } from "zod";
 
 import { AppError } from "../app-error.js";
 import { wrapModelFacingToolMap } from "../model-facing-tool.js";
@@ -15,7 +14,7 @@ import readMemoryThread from "../tools/read_memory_thread.js";
 import remember from "../tools/remember.js";
 import searchMemories from "../tools/search_memories.js";
 import searchMemoryThreads from "../tools/search_memory_threads.js";
-import { createRememberInputSchema } from "../remember-contract.js";
+import { createReviewRememberInputSchema } from "../remember-contract.js";
 import type { MemoryScope } from "../memory-context.js";
 import { authorizeCurrentExternalGroupCapability } from "../tool-policy/external-group-live-policy.js";
 import { resolveExternalGroupPolicyIdentity } from "../tool-policy/external-group-policy.js";
@@ -24,19 +23,13 @@ import type { ExternalGroupToolName } from "../tool-policy/group-tool-catalog.js
 type AnyTool = ToolDefinition<any, any>;
 
 /**
- * The run is authorized for exactly one scope, so the schema admits only that one: an external
- * group already gets its remember this way, and a model cannot name a scope it cannot express.
+ * The run is authorized for exactly one scope, so the schema admits only that one and fills it: an
+ * external group already gets its remember this way, and a model cannot name a scope it cannot
+ * express. Its other constants are filled the same way, and its source message is required.
  */
 function reviewRememberSchema(scope: MemoryScope) {
   // Review turns get no profile views: a verified_ref there was refused on every call (#289).
-  return createRememberInputSchema(z.literal(scope), { verifiedRefs: false }).refine(
-    (input) => input.basis === "agent_inferred" && input.sensitivity === "normal" &&
-      input.sourceSequence !== undefined,
-    {
-      message:
-        "AGENT_MEMORY_REVIEW_INPUT_INVALID: Для тихой проверки обязательны sourceSequence, basis agent_inferred и sensitivity normal",
-    },
-  );
+  return createReviewRememberInputSchema(scope);
 }
 
 
@@ -46,7 +39,7 @@ function reviewRemember(scope: MemoryScope): AnyTool {
     ...definition,
     approval: () => "not-applicable",
     description:
-      "Сохранить одно конкретное сведение из sourceSequence текущего тихого batch: факт, предпочтение, личный опыт, событие, план или полезную ссылку с контекстом. Особая важность не требуется, догадки запрещены. Разрешена только normal sensitivity.",
+      "Сохранить одно конкретное сведение из сообщения sourceSequence текущего тихого batch: факт, предпочтение, личный опыт, событие, план или полезную ссылку с контекстом. Особая важность не требуется, догадки запрещены. Чувствительные сведения здесь не сохраняются.",
     inputSchema: reviewRememberSchema(scope),
     async execute(input, ctx) {
       if (ctx.session.auth.current?.attributes.groupType === "external") {

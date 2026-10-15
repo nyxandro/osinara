@@ -6,7 +6,7 @@ import type { TelegramInputRequest } from "../telegram-interface.js";
 import { settledPromptText } from "./settled-prompt.js";
 
 // Family skills are not part of these cards: none exist, so the built-in catalog decides.
-const SKILL_DEPENDENCIES = { findFamilySkill: vi.fn(), findSkillGrantCatalog: vi.fn().mockResolvedValue(skillGrantCatalog(new Map())) };
+const SKILL_DEPENDENCIES = { findExternalSchedule: vi.fn(), findFamilySkill: vi.fn(), findSkillGrantCatalog: vi.fn().mockResolvedValue(skillGrantCatalog(new Map())) };
 
 const groupRef = "grp_0123456789abcdef0123456789abcdef";
 const context = { session: { auth: {} } } as never;

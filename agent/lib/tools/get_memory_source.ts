@@ -15,7 +15,7 @@ export default defineTool({
   // Repeating it after a crash is safe: it only reads.
   replaySafe: true,
   description:
-    "Показать безопасное происхождение записи личного эффективного профиля по opaque memoryRef.",
+    "Узнать, откуда взялась запись профиля: в каком чате, от кого и когда она получена, с коротким фрагментом исходного сообщения. Нужен, когда человек спрашивает «откуда ты это знаешь». memoryRef бери из памяти или профиля этого хода.",
   inputSchema: z.object({
     memoryRef: z.string().regex(MEMORY_REF_PATTERN),
   }).strict(),

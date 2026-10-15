@@ -11,6 +11,7 @@ import {
   PROACTIVE_DELIVERY_HISTORY_DEFAULT_LIMIT,
   PROACTIVE_DELIVERY_HISTORY_MAX_LIMIT,
 } from "../../config.js";
+import { isoDateTimeWithOffset } from "../model-facing-datetime.js";
 import { AppError } from "../app-error.js";
 import { requireReminderAuthorization } from "../reminders/reminder-context.js";
 import {
@@ -60,8 +61,8 @@ export default defineTool({
   ].join(" "),
   inputSchema: z.object({
     cursor: z.string().min(1).optional(),
-    deliveredAfter: z.string().datetime({ offset: true }).optional(),
-    deliveredBefore: z.string().datetime({ offset: true }).optional(),
+    deliveredAfter: isoDateTimeWithOffset("Начало периода включительно, например 2026-10-01T00:00:00+03:00.").optional(),
+    deliveredBefore: isoDateTimeWithOffset("Конец периода включительно, например 2026-10-07T23:59:59+03:00.").optional(),
     limit: z.number().int().min(1).max(PROACTIVE_DELIVERY_HISTORY_MAX_LIMIT)
       .default(PROACTIVE_DELIVERY_HISTORY_DEFAULT_LIMIT),
     query: z.string().trim().min(1).max(200).optional(),

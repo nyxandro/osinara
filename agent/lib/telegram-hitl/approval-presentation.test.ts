@@ -14,9 +14,15 @@ import { createTelegramApprovalPresenter } from "./approval-presentation.js";
 import { skillGrantCatalog } from "../family-skills/skill-grants.js";
 import { GROUP_SKILLS_BASH_CONSEQUENCE, GROUP_TOOLS_NO_BASH_CONSEQUENCE } from "./approval-consequences.js";
 import { HITL_PROMPT_CHUNK_CHARACTERS } from "./approval-message.js";
+import type { TelegramInputRequest } from "../telegram-interface.js";
 
-// Family skills are not part of these cards: none exist, so the built-in catalog decides.
-const SKILL_DEPENDENCIES = { findFamilySkill: vi.fn(), findSkillGrantCatalog: vi.fn().mockResolvedValue(skillGrantCatalog(new Map())) };
+// Family skills are not part of these cards: none exist, so the built-in catalog decides. No card
+// here changes a group automation unless it sets its own lookup.
+const SKILL_DEPENDENCIES = {
+  findExternalSchedule: vi.fn(),
+  findFamilySkill: vi.fn(),
+  findSkillGrantCatalog: vi.fn().mockResolvedValue(skillGrantCatalog(new Map())),
+};
 
 const findGroupTitle = vi.fn().mockResolvedValue("Тестовая группа");
 const findProfileProjectionGroup = vi.fn();
@@ -64,6 +70,64 @@ function gmailRequest(action: string, messageIds: string[]) {
     requestId: "request-gmail-batch",
   };
 }
+
+function automationRequest(input: TelegramInputRequest["action"]["input"]) {
+  return {
+    action: { callId: "call-automation", input, kind: "tool-call" as const, toolName: "manage_external_group_schedule" },
+    display: "confirmation" as const,
+    kind: "tool-approval" as const,
+    options: [{ id: "approve", label: "Yes", style: "primary" as const }, { id: "cancel", label: "No", style: "default" as const }],
+    prompt: "Approve tool call",
+    requestId: "request-automation",
+  };
+}
+
+describe("group automation approval presentation", () => {
+  it("names the automation and the group an update changes", async () => {
+    const findExternalSchedule = vi.fn().mockResolvedValue({
+      telegramChatId: "-1001", telegramGroupTitle: "Разработчики", title: "Недельная выжимка",
+    });
+    const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES, findExternalSchedule, findGmailMessages: vi.fn(),
+      findGroupTitle, findProfileProjectionGroup });
+
+    const request = await present(automationRequest({
+      action: "update", id: "00000000-0000-4000-8000-000000000001", maxRuns: null,
+    }), context());
+
+    expect(findExternalSchedule).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000001", expect.anything());
+    expect(request.prompt).toContain("Подтверждение: изменить автоматизацию, публикующую результат во внешнюю Telegram-группу.");
+    expect(request.prompt).toContain("Автоматизация: Недельная выжимка");
+    expect(request.prompt).toContain("Группа: Разработчики (-1001)");
+    expect(request.prompt).toContain("Число запусков: без ограничения");
+    expect(request.prompt).not.toContain("manage_external_group_schedule");
+  });
+
+  it("names the group a new automation will publish into", async () => {
+    const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES, findGmailMessages: vi.fn(),
+      findGroupTitle, findProfileProjectionGroup });
+
+    const request = await present(automationRequest({
+      action: "create", capabilityAllowlist: [], firstRunAt: "2026-10-20T09:00:00+03:00", recurrence: { kind: "once" },
+      scenarioPrompt: "Проверь сайт", telegramChatId: "-1001", timezone: "Europe/Moscow", title: "Проверка",
+      userRequest: "Проверь сайт завтра",
+    }), context());
+
+    expect(request.prompt).toContain("Группа: Тестовая группа (-1001)");
+    expect(request.prompt).toContain("Название: Проверка");
+    expect(request.prompt).toContain("Повторение: однократно");
+    expect(request.prompt).toContain("Дополнительные инструменты: нет");
+  });
+
+  it("refuses to show a card for a group outside the family", async () => {
+    const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES, findGmailMessages: vi.fn(),
+      findGroupTitle: vi.fn().mockResolvedValue(null), findProfileProjectionGroup });
+
+    await expect(present(automationRequest({
+      action: "create", capabilityAllowlist: [], firstRunAt: "2026-10-20T09:00:00+03:00", recurrence: { kind: "once" },
+      scenarioPrompt: "x", telegramChatId: "-1009", timezone: "Europe/Moscow", title: "x", userRequest: "x",
+    }), context())).rejects.toMatchObject({ code: "AGENT_APPROVAL_GROUP_NOT_FOUND" });
+  });
+});
 
 describe("Telegram approval presentation", () => {
   it.each([

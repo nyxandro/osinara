@@ -8,6 +8,7 @@
  */
 import { zodSchema } from "ai";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 
 import { externalRememberInputSchema } from "./remember-contract.js";
 
@@ -20,6 +21,21 @@ const BASE_EXTERNAL_INPUT = {
 } as const;
 
 describe("externalRememberInputSchema", () => {
+  it("fills the group's only scope when the model leaves it out", async () => {
+    // 9 of 12 rejected remember calls in production (03-15.10.2026) omitted this one-value field.
+    const { scope: _scope, ...withoutScope } = BASE_EXTERNAL_INPUT;
+    const result = await zodSchema(externalRememberInputSchema).validate!({
+      ...withoutScope,
+      subject: { kind: "current_author" },
+    });
+
+    expect(result).toMatchObject({ success: true, value: { scope: "group" } });
+    expect(externalRememberInputSchema.safeParse({ ...BASE_EXTERNAL_INPUT, scope: "personal", subject: { kind: "none" } }).success)
+      .toBe(false);
+    const required = (z.toJSONSchema(externalRememberInputSchema, { io: "input" }) as { required?: string[] }).required;
+    expect(required).not.toContain("scope");
+  });
+
   it("accepts the exact production payload through the AI SDK validator", async () => {
     const schema = zodSchema(externalRememberInputSchema);
     const result = await schema.validate!({

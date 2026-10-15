@@ -14,7 +14,7 @@ import { memoryThreadQueryRepository, THREAD_REF_PATTERN } from "../memory-threa
 export default defineTool({
   // Repeating it after a crash is safe: it only reads.
   replaySafe: true,
-  description: "Постранично показать доступные нити памяти без загрузки их полной истории.",
+  description: "Показать список нитей памяти: длинных тем с историей вроде проекта, цели или переезда. Возвращает названия, назначение и threadRef без полной истории; историю нити читай через read_memory_thread.",
   inputSchema: z.object({
     cursor: z.string().regex(THREAD_REF_PATTERN).optional(),
     limit: z.number().int().min(1).max(THREAD_HISTORY_PAGE_MAX_ENTRIES).default(20),

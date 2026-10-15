@@ -252,13 +252,9 @@ export const GLOB_INPUT_SCHEMA = z.strictObject({
 
 export const glob = defineTool({
   description: [
-    "Fast file pattern matching tool that works with any codebase size.",
-    "",
-    "Usage:",
-    '- Supports glob patterns like "**/*.js" or "src/**/*.ts".',
-    "- Returns matching file paths.",
-    "- Call this tool in parallel when you know there are multiple patterns to search for.",
-  ].join("\n"),
+    'Найти файлы по шаблону пути, например "**/*.pdf" или "reports/*.csv". Возвращает пути совпавших файлов.',
+    "Ищет только по именам и путям, не по содержимому: текст внутри файлов ищи через grep. Несколько шаблонов проверяй параллельными вызовами.",
+  ].join(" "),
   async execute(input, ctx) {
     return await executeGlobOnSandbox(await ctx.getSandbox(), input);
   },

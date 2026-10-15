@@ -77,7 +77,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Execute a shell command in the shared workspace environment."
+        "description": "Выполнить shell-команду в изолированном рабочем окружении этого чата. Доступные папки и правила работы с ними описаны в разделе «Workspace и инструменты». Команда прерывается через 2 минуты. Результат: {exitCode, stdout, stderr, truncated}; stdout и stderr длиннее 2000 строк или 50 КБ обрезаются с начала, остаётся конец вывода, и truncated=true. Длинный вывод сохраняй в файл и читай через read_file."
       },
       {
         "type": "function",
@@ -108,7 +108,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Read a file from the local filesystem. If the path does not exist, an error is returned.\n\nUsage:\n- The filePath parameter should be an absolute path or begin with $HOME/.\n- By default, this tool returns up to 2000 lines from the start of the file.\n- The offset parameter is the line number to start from (1-indexed).\n- To read later sections, call this tool again with a larger offset.\n- Contents are returned with each line prefixed by its line number as `<line>: <content>`. For example, if a file has contents \"foo\\n\", you will receive \"1: foo\\n\".\n- Any line longer than 2000 characters is truncated.\n- Call this tool in parallel when you know there are multiple files you want to read.\n- Avoid tiny repeated slices (30 line chunks). If you need more context, read a larger window."
+        "description": "Прочитать текстовый файл рабочего окружения: filePath — абсолютный путь или путь от $HOME/. Несуществующий путь даёт ошибку. За раз приходит до 2000 строк, начиная с offset (нумерация с 1); продолжение читай новым вызовом с большим offset. Каждая строка приходит с номером в виде `<номер>: <текст>`, строка длиннее 2000 символов обрезается. Несколько файлов читай параллельными вызовами и не дроби файл на мелкие куски по 30 строк."
       },
       {
         "type": "function",
@@ -132,7 +132,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Writes a file to the local filesystem.\n\nUsage:\n- This tool will overwrite the existing file if there is one at the provided path.\n- If this is an existing file, you MUST use the read_file tool first to read the file's contents. This tool will fail if you did not read the file first.\n- ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.\n- NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.\n- Only use emojis if the user explicitly requests it. Avoid writing emojis to files unless asked."
+        "description": "Создать файл или полностью заменить его содержимое: заметку, отчёт, таблицу, HTML-страницу, код или файл любого другого текстового формата, который нужен задаче. Существующий файл сначала прочитай через read_file, иначе запись откажет."
       },
       {
         "type": "function",
@@ -182,7 +182,7 @@
           },
           "additionalProperties": false
         },
-        "description": "Use this tool to create and manage a structured task list for the current session.\nThis helps you track progress, organize complex tasks, and demonstrate thoroughness.\n\nWhen to use:\n- Complex multistep tasks requiring 3 or more distinct steps\n- When the user provides multiple tasks or a numbered list\n- After receiving new instructions, to capture requirements\n- After completing a task, to mark it complete and add follow-ups\n\nWhen NOT to use:\n- Single, straightforward tasks that need no tracking\n- Purely conversational or informational requests\n\nUsage:\n- Call with `todos` to replace the entire list (full replacement write)\n- Call without `todos` to read the current list\n- Both return the full current list with status counts\n- Mark tasks in_progress when you start, completed when done\n- Only have ONE task in_progress at a time"
+        "description": "Вести список шагов длинной задачи в этом разговоре: нужен, когда в задаче три и больше отдельных шагов или человек дал сразу несколько поручений. Для простого вопроса или одного действия не нужен. Вызов с todos полностью заменяет список, без todos читает текущий; оба возвращают весь список со счётчиками. Отмечай шаг in_progress, когда начинаешь, и completed, когда закончил; в работе одновременно только один шаг."
       },
       {
         "type": "function",
@@ -304,7 +304,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Fast file pattern matching tool that works with any codebase size.\n\nUsage:\n- Supports glob patterns like \"**/*.js\" or \"src/**/*.ts\".\n- Returns matching file paths.\n- Call this tool in parallel when you know there are multiple patterns to search for."
+        "description": "Найти файлы по шаблону пути, например \"**/*.pdf\" или \"reports/*.csv\". Возвращает пути совпавших файлов. Ищет только по именам и путям, не по содержимому: текст внутри файлов ищи через grep. Несколько шаблонов проверяй параллельными вызовами."
       },
       {
         "type": "function",
@@ -351,7 +351,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Fast content search tool that works with any codebase size.\n\nUsage:\n- Searches file contents using regular expressions.\n- Supports full regex syntax (e.g. \"log.*Error\", \"function\\s+\\w+\").\n- Filter files by pattern with the glob parameter (e.g. \"*.js\", \"*.{ts,tsx}\").\n- Returns matching lines with file paths and line numbers.\n- Call this tool in parallel when you have multiple independent searches.\n- Any line longer than 2000 characters is truncated."
+        "description": "Найти текст внутри файлов по регулярному выражению или, с literal=true, по точной строке. Отобрать файлы по имени можно полем glob, например \"*.md\". Возвращает совпавшие строки с путём и номером строки; строка длиннее 2000 символов обрезается. Файлы по имени ищи через glob. Независимые поиски запускай параллельно."
       },
       {
         "type": "function",
@@ -560,7 +560,7 @@
           },
           "additionalProperties": false
         },
-        "description": "Постранично показать доступные нити памяти без загрузки их полной истории."
+        "description": "Показать список нитей памяти: длинных тем с историей вроде проекта, цели или переезда. Возвращает названия, назначение и threadRef без полной истории; историю нити читай через read_memory_thread."
       },
       {
         "type": "function",
@@ -576,12 +576,12 @@
             "deliveredAfter": {
               "type": "string",
               "format": "date-time",
-              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              "description": "Начало периода включительно, например 2026-10-01T00:00:00+03:00."
             },
             "deliveredBefore": {
               "type": "string",
               "format": "date-time",
-              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              "description": "Конец периода включительно, например 2026-10-07T23:59:59+03:00."
             },
             "limit": {
               "default": 10,
@@ -645,7 +645,8 @@
                 {
                   "type": "null"
                 }
-              ]
+              ],
+              "description": "Лимит успешных запусков в create/update, включая тихие без сообщения: «10 раз» — maxRuns:10. Без поля повтор не ограничен, null снимает лимит. Пауза, resume и run_now лимит не сбрасывают; достигнув его, расписание завершается само, вести счётчик запусков в файле не нужно."
             },
             "action": {
               "type": "string",
@@ -659,6 +660,7 @@
               ]
             },
             "executionContext": {
+              "description": "Только в create: conversation или isolated.",
               "type": "string",
               "enum": [
                 "conversation",
@@ -666,12 +668,15 @@
               ]
             },
             "firstRunAt": {
+              "description": "Только в create: первый запуск, например 2026-07-15T23:33:00+03:00.",
               "type": "string"
             },
             "id": {
+              "description": "id из list_agent_schedules; для всех действий, кроме create.",
               "type": "string"
             },
             "nextRunAt": {
+              "description": "Только в update: новое время следующего запуска с UTC offset.",
               "type": "string"
             },
             "recurrence": {
@@ -747,10 +752,12 @@
               ]
             },
             "scenarioPrompt": {
+              "description": "Задание агенту на каждый запуск.",
               "type": "string",
               "maxLength": 8000
             },
             "scope": {
+              "description": "Только в create.",
               "type": "string",
               "enum": [
                 "personal",
@@ -758,14 +765,17 @@
               ]
             },
             "timezone": {
+              "description": "Только в create: IANA, например Europe/Moscow.",
               "type": "string",
               "maxLength": 100
             },
             "title": {
+              "description": "Короткое название для списка расписаний.",
               "type": "string",
               "maxLength": 120
             },
             "userRequest": {
+              "description": "Исходная просьба человека.",
               "type": "string",
               "maxLength": 2000
             }
@@ -775,7 +785,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Для N выполнений передай maxRuns:N в create/update: это общий лимит успешных запусков, включая тихие без сообщения и completedRuns. Например, 10 раз раз в минуту: recurrence:{kind:'minutely',interval:1}, maxRuns:10. Без maxRuns повтор не ограничен; maxRuns:null снимает лимит. Лимит не сбрасывается паузой, resume или run_now. После достижения лимита расписание завершится автоматически без дополнительного запуска; не создавай файл-счётчик. Pause во время запуска возвращает pauseRequested:true: текущий запуск и его ответ завершаются, следующие отключены. Для остановки по условию используй pause, если управление расписанием разрешено в текущем чате. Для паузы из самого сценария используй schedule_id из scheduled_agent_run. Создать, изменить, приостановить, возобновить, запустить сейчас или удалить агентное расписание. Явной просьбы пользователя достаточно: выполняй без дополнительного подтверждения. Уточняй только недостающие или неоднозначные данные. Это не напоминание: schedule запускает агента по сценарию и отправляет итог. Существующее расписание сначала найди через list_agent_schedules. Create payload: {\"action\":\"create\",\"executionContext\":\"isolated\",\"title\":\"Дайджест: новые модели ИИ\",\"firstRunAt\":\"2026-07-15T23:33:00+03:00\",\"timezone\":\"Europe/Moscow\",\"recurrence\":{\"kind\":\"daily\",\"interval\":1},\"scope\":\"personal\",\"scenarioPrompt\":\"Что собрать, источники, фильтры, формат итогового сообщения и когда не присылать пустой отчет\",\"userRequest\":\"ежедневно в 23:33 МСК получать сводку\"}. executionContext обязателен в create: conversation — пробуждение в этом разговоре со всей историей, чтобы продолжить текущую задачу, maxRuns тогда обязателен; isolated — отдельный запуск с пустым контекстом для самостоятельных отчётов. Update передаёт id и только реально изменяемые поля; firstRunAt, timezone, scope и executionContext в update не передавай. Pause, resume, run_now и delete передают только action и id. Не удаляй и не пересоздавай расписание для изменения времени, повторения, заголовка, сценария или исходной просьбы: используй update, сохраняя существующий id. Recurrence: once = {\"kind\":\"once\"}; повтор = {\"kind\":\"hourly\",\"interval\":1}. kind: minutely, hourly, daily, monthly, yearly означает каждые N минут, часов, дней, месяцев, лет. interval целый от 1 до 365; минимальный период 1 минута. Для недель передай {\"kind\":\"weekly\",\"interval\":1,\"daysOfWeek\":[1,2,3,4,5]}, ISO 1=понедельник ... 7=воскресенье. Как отсчитываются повторы, описано в правилах сценариев. firstRunAt и nextRunAt всегда ISO datetime с UTC offset. timezone всегда IANA, например Europe/Moscow. scope: personal только в личном чате, family только в зарегистрированной семейной группе."
+        "description": "Создать, изменить, приостановить, возобновить, запустить сейчас или удалить агентное расписание: в заданное время запускается агент со сценарием и присылает итог. Это не напоминание с готовым текстом, для него есть manage_reminder. Существующее расписание сначала найди через list_agent_schedules. Явной просьбы пользователя достаточно: выполняй без дополнительного подтверждения. Уточняй только недостающие или неоднозначные данные. Create payload: {\"action\":\"create\",\"executionContext\":\"isolated\",\"title\":\"Дайджест: новые модели ИИ\",\"firstRunAt\":\"2026-07-15T23:33:00+03:00\",\"timezone\":\"Europe/Moscow\",\"recurrence\":{\"kind\":\"daily\",\"interval\":1},\"scope\":\"personal\",\"scenarioPrompt\":\"Что собрать, источники, фильтры, формат итогового сообщения и когда не присылать пустой отчет\",\"userRequest\":\"ежедневно в 23:33 МСК получать сводку\"}. executionContext обязателен в create: conversation — пробуждение в этом разговоре со всей историей, чтобы продолжить текущую задачу, maxRuns тогда обязателен; isolated — отдельный запуск с пустым контекстом для самостоятельных отчётов. Update передаёт id и только реально изменяемые поля; firstRunAt, timezone, scope и executionContext в update не передавай. Pause, resume, run_now и delete передают только action и id. Pause во время запуска возвращает pauseRequested:true: текущий запуск доработает, следующие отключены. Для паузы из самого сценария используй schedule_id из scheduled_agent_run. Не удаляй и не пересоздавай расписание для изменения времени, повторения, заголовка, сценария или исходной просьбы: используй update, сохраняя существующий id. Recurrence: once = {\"kind\":\"once\"}; повтор = {\"kind\":\"hourly\",\"interval\":1}. kind: minutely, hourly, daily, monthly, yearly означает каждые N минут, часов, дней, месяцев, лет. interval целый от 1 до 365; минимальный период 1 минута. Для недель передай {\"kind\":\"weekly\",\"interval\":1,\"daysOfWeek\":[1,2,3,4,5]}, ISO 1=понедельник ... 7=воскресенье. Как отсчитываются повторы, описано в правилах сценариев. firstRunAt и nextRunAt всегда ISO datetime с UTC offset. timezone всегда IANA, например Europe/Moscow. scope: personal только в личном чате, family только в зарегистрированной семейной группе."
       },
       {
         "type": "function",
@@ -1096,7 +1106,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Прочитать bounded страницу source-backed истории нити по opaque threadRef; используй cursor для углубления."
+        "description": "Прочитать историю одной нити памяти (длинной темы: проект, цель, переезд) по threadRef из list_memory_threads или search_memory_threads. Возвращает страницу записей с их источниками; следующую страницу запрашивай через cursor."
       },
       {
         "type": "function",
@@ -1115,7 +1125,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Повторно прочитать точный ordered profile selection по profileViewRef; не создаёт новую выборку."
+        "description": "Перечитать подборку сведений о людях из блока <verified_profile_view> по её profileViewRef, например когда блок обрезан или ушёл из контекста. Возвращает ту же подборку, новую не собирает."
       },
       {
         "type": "function",
@@ -1267,8 +1277,7 @@
                   ]
                 },
                 {
-                  "type": "string",
-                  "pattern": "^[ \\t\\r\\n]*\\{[ \\t\\r\\n]*(?:\"kind\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"current_author\"|\"kind\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"none\"|\"kind\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"verified_ref\"[ \\t\\r\\n]*,[ \\t\\r\\n]*\"subjectRef\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"(?:[^\"\\\\\\u0000-\\u001f]|\\\\(?:[\"\\\\/bfnrt]|u[0-9a-fA-F]{4}))*\"|\"subjectRef\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"(?:[^\"\\\\\\u0000-\\u001f]|\\\\(?:[\"\\\\/bfnrt]|u[0-9a-fA-F]{4}))*\"[ \\t\\r\\n]*,[ \\t\\r\\n]*\"kind\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"verified_ref\"|\"kind\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"label\"[ \\t\\r\\n]*,[ \\t\\r\\n]*\"label\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"(?:[^\"\\\\\\u0000-\\u001f]|\\\\(?:[\"\\\\/bfnrt]|u[0-9a-fA-F]{4}))*\"|\"label\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"(?:[^\"\\\\\\u0000-\\u001f]|\\\\(?:[\"\\\\/bfnrt]|u[0-9a-fA-F]{4}))*\"[ \\t\\r\\n]*,[ \\t\\r\\n]*\"kind\"[ \\t\\r\\n]*:[ \\t\\r\\n]*\"label\")[ \\t\\r\\n]*\\}[ \\t\\r\\n]*$"
+                  "type": "string"
                 }
               ],
               "description": "Кому или чему принадлежит утверждение"
@@ -1436,7 +1445,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Найти доступную нить памяти по смыслу названия или назначения; возвращает opaque threadRef."
+        "description": "Найти нить памяти (длинную тему с историей) по смыслу её названия или назначения, когда человек упоминает проект или цель, о которых шла речь раньше. Возвращает threadRef для read_memory_thread."
       },
       {
         "type": "function",
@@ -1557,7 +1566,6 @@
             "from": {
               "type": "string",
               "format": "date-time",
-              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
               "description": "Нижняя граница sentAt включительно. Передавай ISO 8601 datetime с UTC offset, например 2026-07-31T16:00:00Z."
             },
             "limit": {
@@ -1591,7 +1599,6 @@
             "to": {
               "type": "string",
               "format": "date-time",
-              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
               "description": "Верхняя граница sentAt включительно. Передавай ISO 8601 datetime с UTC offset, например 2026-07-31T18:00:00Z."
             }
           },
@@ -1704,7 +1711,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Execute a shell command in the shared workspace environment."
+        "description": "Выполнить shell-команду в изолированном рабочем окружении этого чата. Доступные папки и правила работы с ними описаны в разделе «Workspace и инструменты». Команда прерывается через 2 минуты. Результат: {exitCode, stdout, stderr, truncated}; stdout и stderr длиннее 2000 строк или 50 КБ обрезаются с начала, остаётся конец вывода, и truncated=true. Длинный вывод сохраняй в файл и читай через read_file."
       },
       {
         "type": "function",
@@ -1735,7 +1742,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Read a file from the local filesystem. If the path does not exist, an error is returned.\n\nUsage:\n- The filePath parameter should be an absolute path or begin with $HOME/.\n- By default, this tool returns up to 2000 lines from the start of the file.\n- The offset parameter is the line number to start from (1-indexed).\n- To read later sections, call this tool again with a larger offset.\n- Contents are returned with each line prefixed by its line number as `<line>: <content>`. For example, if a file has contents \"foo\\n\", you will receive \"1: foo\\n\".\n- Any line longer than 2000 characters is truncated.\n- Call this tool in parallel when you know there are multiple files you want to read.\n- Avoid tiny repeated slices (30 line chunks). If you need more context, read a larger window."
+        "description": "Прочитать текстовый файл рабочего окружения: filePath — абсолютный путь или путь от $HOME/. Несуществующий путь даёт ошибку. За раз приходит до 2000 строк, начиная с offset (нумерация с 1); продолжение читай новым вызовом с большим offset. Каждая строка приходит с номером в виде `<номер>: <текст>`, строка длиннее 2000 символов обрезается. Несколько файлов читай параллельными вызовами и не дроби файл на мелкие куски по 30 строк."
       },
       {
         "type": "function",
@@ -1759,7 +1766,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Writes a file to the local filesystem.\n\nUsage:\n- This tool will overwrite the existing file if there is one at the provided path.\n- If this is an existing file, you MUST use the read_file tool first to read the file's contents. This tool will fail if you did not read the file first.\n- ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.\n- NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.\n- Only use emojis if the user explicitly requests it. Avoid writing emojis to files unless asked."
+        "description": "Создать файл или полностью заменить его содержимое: заметку, отчёт, таблицу, HTML-страницу, код или файл любого другого текстового формата, который нужен задаче. Существующий файл сначала прочитай через read_file, иначе запись откажет."
       },
       {
         "type": "function",
@@ -1809,7 +1816,7 @@
           },
           "additionalProperties": false
         },
-        "description": "Use this tool to create and manage a structured task list for the current session.\nThis helps you track progress, organize complex tasks, and demonstrate thoroughness.\n\nWhen to use:\n- Complex multistep tasks requiring 3 or more distinct steps\n- When the user provides multiple tasks or a numbered list\n- After receiving new instructions, to capture requirements\n- After completing a task, to mark it complete and add follow-ups\n\nWhen NOT to use:\n- Single, straightforward tasks that need no tracking\n- Purely conversational or informational requests\n\nUsage:\n- Call with `todos` to replace the entire list (full replacement write)\n- Call without `todos` to read the current list\n- Both return the full current list with status counts\n- Mark tasks in_progress when you start, completed when done\n- Only have ONE task in_progress at a time"
+        "description": "Вести список шагов длинной задачи в этом разговоре: нужен, когда в задаче три и больше отдельных шагов или человек дал сразу несколько поручений. Для простого вопроса или одного действия не нужен. Вызов с todos полностью заменяет список, без todos читает текущий; оба возвращают весь список со счётчиками. Отмечай шаг in_progress, когда начинаешь, и completed, когда закончил; в работе одновременно только один шаг."
       },
       {
         "type": "function",
@@ -1931,7 +1938,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Fast file pattern matching tool that works with any codebase size.\n\nUsage:\n- Supports glob patterns like \"**/*.js\" or \"src/**/*.ts\".\n- Returns matching file paths.\n- Call this tool in parallel when you know there are multiple patterns to search for."
+        "description": "Найти файлы по шаблону пути, например \"**/*.pdf\" или \"reports/*.csv\". Возвращает пути совпавших файлов. Ищет только по именам и путям, не по содержимому: текст внутри файлов ищи через grep. Несколько шаблонов проверяй параллельными вызовами."
       },
       {
         "type": "function",
@@ -1978,7 +1985,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Fast content search tool that works with any codebase size.\n\nUsage:\n- Searches file contents using regular expressions.\n- Supports full regex syntax (e.g. \"log.*Error\", \"function\\s+\\w+\").\n- Filter files by pattern with the glob parameter (e.g. \"*.js\", \"*.{ts,tsx}\").\n- Returns matching lines with file paths and line numbers.\n- Call this tool in parallel when you have multiple independent searches.\n- Any line longer than 2000 characters is truncated."
+        "description": "Найти текст внутри файлов по регулярному выражению или, с literal=true, по точной строке. Отобрать файлы по имени можно полем glob, например \"*.md\". Возвращает совпавшие строки с путём и номером строки; строка длиннее 2000 символов обрезается. Файлы по имени ищи через glob. Независимые поиски запускай параллельно."
       },
       {
         "type": "function",
@@ -2187,7 +2194,7 @@
           },
           "additionalProperties": false
         },
-        "description": "Постранично показать доступные нити памяти без загрузки их полной истории."
+        "description": "Показать список нитей памяти: длинных тем с историей вроде проекта, цели или переезда. Возвращает названия, назначение и threadRef без полной истории; историю нити читай через read_memory_thread."
       },
       {
         "type": "function",
@@ -2203,12 +2210,12 @@
             "deliveredAfter": {
               "type": "string",
               "format": "date-time",
-              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              "description": "Начало периода включительно, например 2026-10-01T00:00:00+03:00."
             },
             "deliveredBefore": {
               "type": "string",
               "format": "date-time",
-              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              "description": "Конец периода включительно, например 2026-10-07T23:59:59+03:00."
             },
             "limit": {
               "default": 10,
@@ -2272,7 +2279,8 @@
                 {
                   "type": "null"
                 }
-              ]
+              ],
+              "description": "Лимит успешных запусков в create/update, включая тихие без сообщения: «10 раз» — maxRuns:10. Без поля повтор не ограничен, null снимает лимит. Пауза, resume и run_now лимит не сбрасывают; достигнув его, расписание завершается само, вести счётчик запусков в файле не нужно."
             },
             "action": {
               "type": "string",
@@ -2286,6 +2294,7 @@
               ]
             },
             "executionContext": {
+              "description": "Только в create: conversation или isolated.",
               "type": "string",
               "enum": [
                 "conversation",
@@ -2293,12 +2302,15 @@
               ]
             },
             "firstRunAt": {
+              "description": "Только в create: первый запуск, например 2026-07-15T23:33:00+03:00.",
               "type": "string"
             },
             "id": {
+              "description": "id из list_agent_schedules; для всех действий, кроме create.",
               "type": "string"
             },
             "nextRunAt": {
+              "description": "Только в update: новое время следующего запуска с UTC offset.",
               "type": "string"
             },
             "recurrence": {
@@ -2374,10 +2386,12 @@
               ]
             },
             "scenarioPrompt": {
+              "description": "Задание агенту на каждый запуск.",
               "type": "string",
               "maxLength": 8000
             },
             "scope": {
+              "description": "Только в create.",
               "type": "string",
               "enum": [
                 "personal",
@@ -2385,14 +2399,17 @@
               ]
             },
             "timezone": {
+              "description": "Только в create: IANA, например Europe/Moscow.",
               "type": "string",
               "maxLength": 100
             },
             "title": {
+              "description": "Короткое название для списка расписаний.",
               "type": "string",
               "maxLength": 120
             },
             "userRequest": {
+              "description": "Исходная просьба человека.",
               "type": "string",
               "maxLength": 2000
             }
@@ -2402,7 +2419,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Для N выполнений передай maxRuns:N в create/update: это общий лимит успешных запусков, включая тихие без сообщения и completedRuns. Например, 10 раз раз в минуту: recurrence:{kind:'minutely',interval:1}, maxRuns:10. Без maxRuns повтор не ограничен; maxRuns:null снимает лимит. Лимит не сбрасывается паузой, resume или run_now. После достижения лимита расписание завершится автоматически без дополнительного запуска; не создавай файл-счётчик. Pause во время запуска возвращает pauseRequested:true: текущий запуск и его ответ завершаются, следующие отключены. Для остановки по условию используй pause, если управление расписанием разрешено в текущем чате. Для паузы из самого сценария используй schedule_id из scheduled_agent_run. Создать, изменить, приостановить, возобновить, запустить сейчас или удалить агентное расписание. Явной просьбы пользователя достаточно: выполняй без дополнительного подтверждения. Уточняй только недостающие или неоднозначные данные. Это не напоминание: schedule запускает агента по сценарию и отправляет итог. Существующее расписание сначала найди через list_agent_schedules. Create payload: {\"action\":\"create\",\"executionContext\":\"isolated\",\"title\":\"Дайджест: новые модели ИИ\",\"firstRunAt\":\"2026-07-15T23:33:00+03:00\",\"timezone\":\"Europe/Moscow\",\"recurrence\":{\"kind\":\"daily\",\"interval\":1},\"scope\":\"personal\",\"scenarioPrompt\":\"Что собрать, источники, фильтры, формат итогового сообщения и когда не присылать пустой отчет\",\"userRequest\":\"ежедневно в 23:33 МСК получать сводку\"}. executionContext обязателен в create: conversation — пробуждение в этом разговоре со всей историей, чтобы продолжить текущую задачу, maxRuns тогда обязателен; isolated — отдельный запуск с пустым контекстом для самостоятельных отчётов. Update передаёт id и только реально изменяемые поля; firstRunAt, timezone, scope и executionContext в update не передавай. Pause, resume, run_now и delete передают только action и id. Не удаляй и не пересоздавай расписание для изменения времени, повторения, заголовка, сценария или исходной просьбы: используй update, сохраняя существующий id. Recurrence: once = {\"kind\":\"once\"}; повтор = {\"kind\":\"hourly\",\"interval\":1}. kind: minutely, hourly, daily, monthly, yearly означает каждые N минут, часов, дней, месяцев, лет. interval целый от 1 до 365; минимальный период 1 минута. Для недель передай {\"kind\":\"weekly\",\"interval\":1,\"daysOfWeek\":[1,2,3,4,5]}, ISO 1=понедельник ... 7=воскресенье. Как отсчитываются повторы, описано в правилах сценариев. firstRunAt и nextRunAt всегда ISO datetime с UTC offset. timezone всегда IANA, например Europe/Moscow. scope: personal только в личном чате, family только в зарегистрированной семейной группе."
+        "description": "Создать, изменить, приостановить, возобновить, запустить сейчас или удалить агентное расписание: в заданное время запускается агент со сценарием и присылает итог. Это не напоминание с готовым текстом, для него есть manage_reminder. Существующее расписание сначала найди через list_agent_schedules. Явной просьбы пользователя достаточно: выполняй без дополнительного подтверждения. Уточняй только недостающие или неоднозначные данные. Create payload: {\"action\":\"create\",\"executionContext\":\"isolated\",\"title\":\"Дайджест: новые модели ИИ\",\"firstRunAt\":\"2026-07-15T23:33:00+03:00\",\"timezone\":\"Europe/Moscow\",\"recurrence\":{\"kind\":\"daily\",\"interval\":1},\"scope\":\"personal\",\"scenarioPrompt\":\"Что собрать, источники, фильтры, формат итогового сообщения и когда не присылать пустой отчет\",\"userRequest\":\"ежедневно в 23:33 МСК получать сводку\"}. executionContext обязателен в create: conversation — пробуждение в этом разговоре со всей историей, чтобы продолжить текущую задачу, maxRuns тогда обязателен; isolated — отдельный запуск с пустым контекстом для самостоятельных отчётов. Update передаёт id и только реально изменяемые поля; firstRunAt, timezone, scope и executionContext в update не передавай. Pause, resume, run_now и delete передают только action и id. Pause во время запуска возвращает pauseRequested:true: текущий запуск доработает, следующие отключены. Для паузы из самого сценария используй schedule_id из scheduled_agent_run. Не удаляй и не пересоздавай расписание для изменения времени, повторения, заголовка, сценария или исходной просьбы: используй update, сохраняя существующий id. Recurrence: once = {\"kind\":\"once\"}; повтор = {\"kind\":\"hourly\",\"interval\":1}. kind: minutely, hourly, daily, monthly, yearly означает каждые N минут, часов, дней, месяцев, лет. interval целый от 1 до 365; минимальный период 1 минута. Для недель передай {\"kind\":\"weekly\",\"interval\":1,\"daysOfWeek\":[1,2,3,4,5]}, ISO 1=понедельник ... 7=воскресенье. Как отсчитываются повторы, описано в правилах сценариев. firstRunAt и nextRunAt всегда ISO datetime с UTC offset. timezone всегда IANA, например Europe/Moscow. scope: personal только в личном чате, family только в зарегистрированной семейной группе."
       },
       {
         "type": "function",
@@ -2689,7 +2706,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Прочитать bounded страницу source-backed истории нити по opaque threadRef; используй cursor для углубления."
+        "description": "Прочитать историю одной нити памяти (длинной темы: проект, цель, переезд) по threadRef из list_memory_threads или search_memory_threads. Возвращает страницу записей с их источниками; следующую страницу запрашивай через cursor."
       },
       {
         "type": "function",
@@ -2708,7 +2725,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Повторно прочитать точный ordered profile selection по profileViewRef; не создаёт новую выборку."
+        "description": "Перечитать подборку сведений о людях из блока <verified_profile_view> по её profileViewRef, например когда блок обрезан или ушёл из контекста. Возвращает ту же подборку, новую не собирает."
       },
       {
         "type": "function",
@@ -2764,7 +2781,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Найти доступную нить памяти по смыслу названия или назначения; возвращает opaque threadRef."
+        "description": "Найти нить памяти (длинную тему с историей) по смыслу её названия или назначения, когда человек упоминает проект или цель, о которых шла речь раньше. Возвращает threadRef для read_memory_thread."
       },
       {
         "type": "function",
@@ -2885,7 +2902,6 @@
             "from": {
               "type": "string",
               "format": "date-time",
-              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
               "description": "Нижняя граница sentAt включительно. Передавай ISO 8601 datetime с UTC offset, например 2026-07-31T16:00:00Z."
             },
             "limit": {
@@ -2919,7 +2935,6 @@
             "to": {
               "type": "string",
               "format": "date-time",
-              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
               "description": "Верхняя граница sentAt включительно. Передавай ISO 8601 datetime с UTC offset, например 2026-07-31T18:00:00Z."
             }
           },

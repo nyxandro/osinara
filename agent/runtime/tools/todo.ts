@@ -43,26 +43,10 @@ export async function executeTodoTool(
 
 export const todo = defineTool({
   description: [
-    "Use this tool to create and manage a structured task list for the current session.",
-    "This helps you track progress, organize complex tasks, and demonstrate thoroughness.",
-    "",
-    "When to use:",
-    "- Complex multistep tasks requiring 3 or more distinct steps",
-    "- When the user provides multiple tasks or a numbered list",
-    "- After receiving new instructions, to capture requirements",
-    "- After completing a task, to mark it complete and add follow-ups",
-    "",
-    "When NOT to use:",
-    "- Single, straightforward tasks that need no tracking",
-    "- Purely conversational or informational requests",
-    "",
-    "Usage:",
-    "- Call with `todos` to replace the entire list (full replacement write)",
-    "- Call without `todos` to read the current list",
-    "- Both return the full current list with status counts",
-    "- Mark tasks in_progress when you start, completed when done",
-    "- Only have ONE task in_progress at a time",
-  ].join("\n"),
+    "Вести список шагов длинной задачи в этом разговоре: нужен, когда в задаче три и больше отдельных шагов или человек дал сразу несколько поручений. Для простого вопроса или одного действия не нужен.",
+    "Вызов с todos полностью заменяет список, без todos читает текущий; оба возвращают весь список со счётчиками.",
+    "Отмечай шаг in_progress, когда начинаешь, и completed, когда закончил; в работе одновременно только один шаг.",
+  ].join(" "),
   async execute(input, ctx) {
     return await executeTodoTool(ctx.state, input ?? {});
   },

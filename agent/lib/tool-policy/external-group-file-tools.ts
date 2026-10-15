@@ -11,6 +11,8 @@
  * - `read_file` alone may read a currently granted dynamic skill package through canonical `$HOME`.
  * - Host-side component inspection rejects symlinks before the native executor runs.
  */
+import { z } from "zod";
+
 import { type ToolContext, type ToolDefinition, defineTool } from "../../runtime/tool.js";
 import {
   glob as runtimeGlob,
@@ -18,6 +20,10 @@ import {
   readFile as runtimeReadFile,
   writeFile as runtimeWriteFile,
 } from "../../runtime/tools/defaults.js";
+import { GLOB_INPUT_SCHEMA } from "../../runtime/tools/glob.js";
+import { GREP_INPUT_SCHEMA } from "../../runtime/tools/grep.js";
+import { READ_FILE_INPUT_SCHEMA } from "../../runtime/tools/read-file.js";
+import { WRITE_FILE_INPUT_SCHEMA } from "../../runtime/tools/write-file.js";
 
 import { SKILL_NAME_PATTERN } from "../../runtime/skills/package-validation.js";
 import { AppError } from "../app-error.js";
@@ -138,6 +144,21 @@ async function readAuthorizedSkillFile(
   }
 }
 
+// The native field texts name /workspace and $HOME, which this group cannot use. Only the texts
+// change: validation is the native one, and the scoped wrappers still reject any other root.
+const GROUP_GLOB_INPUT_SCHEMA = GLOB_INPUT_SCHEMA.extend({
+  path: z.string().describe("Папка поиска внутри /workspace/group; без поля поиск идёт по всей /workspace/group.").optional(),
+});
+const GROUP_GREP_INPUT_SCHEMA = GREP_INPUT_SCHEMA.extend({
+  path: z.string().describe("Папка или файл поиска внутри /workspace/group; без поля поиск идёт по всей /workspace/group.").optional(),
+});
+const GROUP_READ_FILE_INPUT_SCHEMA = READ_FILE_INPUT_SCHEMA.extend({
+  filePath: z.string().describe("Абсолютный путь внутри /workspace/group, например /workspace/group/notes.md, или путь файла разрешённого скилла."),
+});
+const GROUP_WRITE_FILE_INPUT_SCHEMA = WRITE_FILE_INPUT_SCHEMA.extend({
+  filePath: z.string().describe("Абсолютный путь внутри /workspace/group, например /workspace/group/report.html."),
+});
+
 export function createExternalGroupFileTools(
   dependencies: ExternalGroupFileToolDependencies,
 ): Readonly<Record<ExternalGroupFileToolName, AnyToolDefinition>> {
@@ -154,14 +175,17 @@ export function createExternalGroupFileTools(
     glob: defineTool({
       ...workspaceTools.glob,
       description: "Найти файлы по glob-шаблону только внутри абсолютного path /workspace/group.",
+      inputSchema: GROUP_GLOB_INPUT_SCHEMA,
     }),
     grep: defineTool({
       ...workspaceTools.grep,
       description: "Найти текст только внутри файлов под абсолютным path /workspace/group.",
+      inputSchema: GROUP_GREP_INPUT_SCHEMA,
     }),
     read_file: defineTool({
       ...dependencies.defaults.read_file,
       description: "Прочитать файл по абсолютному filePath внутри /workspace/group или supporting file уже разрешённого dynamic skill.",
+      inputSchema: GROUP_READ_FILE_INPUT_SCHEMA,
       async execute(input, ctx) {
         const skillPath = parseSkillFilePath((input as { filePath?: unknown }).filePath);
         if (skillPath === null) return await workspaceTools.read_file.execute(input, ctx);
@@ -171,6 +195,7 @@ export function createExternalGroupFileTools(
     write_file: defineTool({
       ...workspaceTools.write_file,
       description: "Создать или изменить файл только по абсолютному filePath внутри /workspace/group.",
+      inputSchema: GROUP_WRITE_FILE_INPUT_SCHEMA,
     }),
   };
 }

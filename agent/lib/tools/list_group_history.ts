@@ -7,6 +7,7 @@
 import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
+import { isoDateTimeWithOffset } from "../model-facing-datetime.js";
 import { searchTelegramGroupHistory } from "../telegram-group-history.js";
 import { telegramGroupJournalRepository } from "../telegram-group-journal-repository.js";
 import { loadCurrentExternalGroupCapabilities } from "../tool-policy/external-group-live-policy.js";
@@ -29,7 +30,7 @@ export default defineTool({
     beforeSequence: POSITIVE_BIGINT.describe(
       "Исключительная верхняя граница: вернуть записи с sequence строго меньше указанного. Для следующей страницы передай nextBeforeSequence предыдущего результата.",
     ).optional(),
-    from: z.iso.datetime({ offset: true }).describe(
+    from: isoDateTimeWithOffset(
       "Нижняя граница sentAt включительно. Передавай ISO 8601 datetime с UTC offset, например 2026-07-31T16:00:00Z.",
     ).optional(),
     limit: z.number().int().min(1).max(100).describe(
@@ -47,7 +48,7 @@ export default defineTool({
     sequenceTo: POSITIVE_BIGINT.describe(
       "Верхняя граница model-visible sequence включительно, например 315 включает #315.",
     ).optional(),
-    to: z.iso.datetime({ offset: true }).describe(
+    to: isoDateTimeWithOffset(
       "Верхняя граница sentAt включительно. Передавай ISO 8601 datetime с UTC offset, например 2026-07-31T18:00:00Z.",
     ).optional(),
   }).strict(),

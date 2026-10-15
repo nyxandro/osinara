@@ -10,6 +10,10 @@ import {
   buildApprovalMessage,
   genericApprovalFacts,
 } from "./telegram-hitl/approval-message.js";
+import {
+  EXTERNAL_SCHEDULE_ACTION_LABELS,
+  externalScheduleFacts,
+} from "./telegram-hitl/external-schedule-approval.js";
 
 
 const TOOL_ACTION_LABELS: Readonly<Record<string, string>> = {
@@ -17,6 +21,7 @@ const TOOL_ACTION_LABELS: Readonly<Record<string, string>> = {
 };
 
 const MANAGED_ACTION_LABELS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  manage_external_group_schedule: EXTERNAL_SCHEDULE_ACTION_LABELS,
   manage_google_workspace_connection: {
     disconnect: "отключить Google Workspace от текущей области",
   },
@@ -138,6 +143,9 @@ function approvalParameterLines(toolName: string, input: Record<string, unknown>
       ];
     case "remove_group_file":
       return line("Путь", "path");
+    case "manage_external_group_schedule":
+      // The presenter adds the automation and group it targets; this keeps the card complete without them.
+      return externalScheduleFacts(input);
     default:
       return [];
   }

@@ -18,7 +18,6 @@ import type { RegisteredGroupType } from "../family-access.js";
 import { SKILL_NAME_PATTERN } from "../../runtime/skills/package-validation.js";
 import { familySkillRepository } from "../family-skills/family-skill-repository.js";
 import { grantableSkillNames, isWorkingSkill, skillGrantCatalog, skillNeedsBash } from "../family-skills/skill-grants.js";
-import { GROUP_SAFE_SKILL_NAMES } from "../group-skills/group-skill-catalog.js";
 import { telegramGroupAdministrationRepository } from "../telegram-group-administration-repository.js";
 import {
   GROUP_TITLE_MAX_LENGTH,
@@ -87,8 +86,7 @@ const manageTelegramGroupSchema = z.object({
     "Передавайте только при action=register. Для остальных actions полностью пропустите registration.",
   ),
   skillAllowlist: z.array(z.string()).optional().describe(
-    `Передавайте только при action=update_skills. Встроенные skills: ${GROUP_SAFE_SKILL_NAMES.join(", ")}; ` +
-      "также включённые скиллы семьи из availableSafeSkills ответа status; пустой массив отзывает все skills.",
+    "Передавайте только при action=update_skills: полный список имён из availableSafeSkills ответа status; пустой массив отзывает все skills.",
   ),
   telegramChatId: z.string().optional().describe(
     "Точный отрицательный ID обязателен для start_new_context, update_policy, update_skills и remove. Для status не передавайте; для register используйте registration.telegramChatId.",

@@ -339,16 +339,9 @@ export const GREP_INPUT_SCHEMA = z.strictObject({
 
 export const grep = defineTool({
   description: [
-    "Fast content search tool that works with any codebase size.",
-    "",
-    "Usage:",
-    "- Searches file contents using regular expressions.",
-    '- Supports full regex syntax (e.g. "log.*Error", "function\\s+\\w+").',
-    '- Filter files by pattern with the glob parameter (e.g. "*.js", "*.{ts,tsx}").',
-    "- Returns matching lines with file paths and line numbers.",
-    "- Call this tool in parallel when you have multiple independent searches.",
-    "- Any line longer than 2000 characters is truncated.",
-  ].join("\n"),
+    'Найти текст внутри файлов по регулярному выражению или, с literal=true, по точной строке. Отобрать файлы по имени можно полем glob, например "*.md".',
+    "Возвращает совпавшие строки с путём и номером строки; строка длиннее 2000 символов обрезается. Файлы по имени ищи через glob. Независимые поиски запускай параллельно.",
+  ].join(" "),
   async execute(input, ctx) {
     return await executeGrepOnSandbox(await ctx.getSandbox(), input);
   },

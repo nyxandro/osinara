@@ -324,6 +324,11 @@ export const externalAgentScheduleRepository = {
     }
   },
 
+  /** One owner-managed automation, as status shows it; the approval card names what an update changes. */
+  async find(auth: ExternalAgentScheduleAuthorization, id: string) {
+    return await findStatus(auth, id);
+  },
+
   async list(input: ExternalAgentScheduleAuthorization & { telegramChatId: string | null }) {
     const result = await database().query<ExternalScheduleStatusRow>(
       `SELECT ${agentScheduleColumns("schedule")}, schedule.telegram_chat_id,

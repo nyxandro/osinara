@@ -3,7 +3,9 @@
  *
  * Constructs covered:
  * - Read-only status does not require approval and lists only owner-managed external schedules.
- * - Create needs no approval and forwards an explicit destination, capability subset, and history window.
+ * - Create and update wait for the owner's button: they decide what is published into a group, and a
+ *   delegated child reading untrusted pages can call them too. Stopping or removing needs no button.
+ * - Create forwards an explicit destination, capability subset, and history window.
  * - Invalid schema and action semantics become model-readable denials before execution.
  * - Mutations use opaque schedule IDs and never accept model-selected family or group IDs.
  */
@@ -81,7 +83,7 @@ describe("manage_external_group_schedule", () => {
     dependencies.create.mockResolvedValue({ id: "schedule-1", scope: "group" });
 
     expect(await approvalFor(input))
-      .toBe("not-applicable");
+      .toBe("user-approval");
     await manageExternalGroupSchedule.execute({
       ...input,
       capabilityAllowlist: [...input.capabilityAllowlist],
@@ -102,6 +104,12 @@ describe("manage_external_group_schedule", () => {
     );
   });
 
+  it.each(["pause", "resume", "run_now", "delete"] as const)("lets %s run without the owner's button", async (action) => {
+    const input = { action, id: "00000000-0000-4000-8000-000000000001" };
+
+    expect(await approvalFor(input)).toBe("not-applicable");
+  });
+
   it("returns a structured denial for schema-invalid approval input", () => {
     expect(approvalFor(undefined)).toEqual({
       reason:
@@ -113,7 +121,7 @@ describe("manage_external_group_schedule", () => {
   it.each([3, null])("updates only maxRuns=%s through semantic validation", async (maxRuns) => {
     const id = "00000000-0000-4000-8000-000000000001";
     const input = { action: "update" as const, id, maxRuns };
-    expect(await approvalFor(input)).toBe("not-applicable");
+    expect(await approvalFor(input)).toBe("user-approval");
     await manageExternalGroupSchedule.execute(input, context);
     expect(dependencies.update).toHaveBeenCalledWith(expect.anything(), id, expect.objectContaining({ maxRuns }));
   });
@@ -124,7 +132,7 @@ describe("manage_external_group_schedule", () => {
       recurrence: { kind, interval: 1 }, scenarioPrompt: "Проверь ресурс", telegramChatId: "-1001234567890",
       timezone: "Europe/Moscow", title: "Проверка", userRequest: "Проверяй по расписанию",
     };
-    expect(await approvalFor(input)).toBe("not-applicable");
+    expect(await approvalFor(input)).toBe("user-approval");
     await manageExternalGroupSchedule.execute(input as never, context);
     expect(dependencies.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ recurrence: input.recurrence }));
     await expect(manageExternalGroupSchedule.execute({ ...input, recurrence: { kind, interval: 0 } } as never, context))

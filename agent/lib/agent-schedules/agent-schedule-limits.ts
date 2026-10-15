@@ -33,10 +33,15 @@ export function isPauseOnlyUpdate(input: AgentScheduleUpdateInput): boolean {
     value === undefined || ["enabled", "operationKey", "requiredScope"].includes(key));
 }
 
-export const AGENT_SCHEDULE_LIMIT_DESCRIPTION =
-  "Для N выполнений передай maxRuns:N в create/update: это общий лимит успешных запусков, включая тихие без сообщения и completedRuns. " +
-  "Например, 10 раз раз в минуту: recurrence:{kind:'minutely',interval:1}, maxRuns:10. " +
-  "Без maxRuns повтор не ограничен; maxRuns:null снимает лимит. Лимит не сбрасывается паузой, resume или run_now. " +
-  "После достижения лимита расписание завершится автоматически без дополнительного запуска; не создавай файл-счётчик. " +
-  "Pause во время запуска возвращает pauseRequested:true: текущий запуск и его ответ завершаются, следующие отключены. " +
-  "Для остановки по условию используй pause, если управление расписанием разрешено в текущем чате.";
+/**
+ * The model-facing `maxRuns` field. A model once kept its own run counter in a workspace file; the
+ * last sentence says the schedule already counts.
+ */
+export const agentScheduleMaxRunsField = agentScheduleMaxRunsSchema.describe(
+  "Лимит успешных запусков в create/update, включая тихие без сообщения: «10 раз» — maxRuns:10. " +
+    "Без поля повтор не ограничен, null снимает лимит. Пауза, resume и run_now лимит не сбрасывают; " +
+    "достигнув его, расписание завершается само, вести счётчик запусков в файле не нужно.",
+);
+
+export const AGENT_SCHEDULE_PAUSE_NOTE =
+  "Pause во время запуска возвращает pauseRequested:true: текущий запуск доработает, следующие отключены.";
