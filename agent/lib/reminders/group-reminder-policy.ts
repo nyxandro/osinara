@@ -2,7 +2,6 @@
  * External-group reminder rules shared by the repository operations.
  *
  * Exports:
- * - `GROUP_REMINDER_LIVE_STATUSES`: the statuses that occupy one of the group slots.
  * - `reminderNotFound`: the refusal a participant receives for a record of another chat.
  * - `requireGroupReminderOfThisChat`: the only visibility boundary of a public chat reminder.
  * - `requireGroupReminderTime`: the accepted first-run window of a public chat.
@@ -22,11 +21,8 @@ import {
   GROUP_REMINDER_MAX_BACKDATE_MS,
   GROUP_REMINDER_MAX_PER_CHAT,
 } from "./reminder-config.js";
-import type { MutableReminderRow } from "./reminder-repository-helpers.js";
+import { type MutableReminderRow, REMINDER_LIVE_STATUSES } from "./reminder-repository-helpers.js";
 import { requireReminderDate } from "./reminder-validation.js";
-
-/** A delivered one-time reminder frees its slot; active, paused and in-flight ones hold theirs. */
-export const GROUP_REMINDER_LIVE_STATUSES = "('active', 'leased', 'paused')";
 
 export function reminderNotFound(): AppError {
   return new AppError("AGENT_REMINDER_NOT_FOUND", "Напоминание не найдено");
@@ -88,7 +84,7 @@ export async function requireFreeGroupSlot(
   const counts = await client.query<{ total: string }>(
     `SELECT count(*) AS total
      FROM reminders
-     WHERE scope = 'group' AND group_id = $1 AND status IN ${GROUP_REMINDER_LIVE_STATUSES}
+     WHERE scope = 'group' AND group_id = $1 AND status IN ${REMINDER_LIVE_STATUSES}
        AND ($2::uuid IS NULL OR id <> $2::uuid)`,
     [auth.groupId, excludeId],
   );

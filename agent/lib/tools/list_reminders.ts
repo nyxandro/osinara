@@ -2,7 +2,7 @@
  * Reminder listing tool.
  *
  * Export:
- * - `list_reminders` tool for current-user personal and family reminders.
+ * - `list_reminders` tool for upcoming personal and family reminders of the current user.
  */
 import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
@@ -18,7 +18,8 @@ export default defineTool({
   // Repeating it after a crash is safe: it only reads.
   replaySafe: true,
   description: [
-    "Постранично показать доступные текущему участнику личные и семейные напоминания.",
+    "Постранично показать предстоящие и приостановленные личные и семейные напоминания текущего участника, ближайшие первыми.",
+    "Отправленные здесь не показываются: ищи их в list_proactive_deliveries с sourceKind:\"reminder\".",
     "Результат: {items,nextCursor}; если nextCursor не null, передай его без изменений для следующей страницы.",
   ].join(" "),
   inputSchema: z.object({

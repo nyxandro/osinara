@@ -21,7 +21,6 @@ import { database } from "../database.js";
 import { decodeDateUuidCursor, encodeDateUuidCursor, paginationFilterDigest } from "../keyset-pagination.js";
 import { GROUP_REMINDER_TIMEZONE, REMINDER_LIST_MAX_LIMIT } from "./reminder-config.js";
 import {
-  GROUP_REMINDER_LIVE_STATUSES,
   requireFreeGroupSlot,
   requireGroupReminderDestination,
   requireGroupReminderOfThisChat,
@@ -32,6 +31,8 @@ import type { GroupReminderAuthorization } from "./group-reminder-context.js";
 import {
   applyReminderUpdate,
   recordReminderOperation,
+  reminderUpdateRevives,
+  requireReminderNotDelivered,
   requireReminderNotLeased,
 } from "./reminder-mutation.js";
 import {
@@ -43,6 +44,7 @@ import {
 } from "./reminder-record.js";
 import {
   REMINDER_COLUMNS,
+  REMINDER_LIVE_STATUSES,
   findReminderOperation,
   selectReminder,
 } from "./reminder-repository-helpers.js";
@@ -172,7 +174,7 @@ export const groupReminderRepository = {
       `SELECT ${REMINDER_COLUMNS}
        FROM reminders AS reminder
        WHERE reminder.scope = 'group' AND reminder.group_id = $1
-         AND reminder.status IN ${GROUP_REMINDER_LIVE_STATUSES}
+         AND reminder.status IN ${REMINDER_LIVE_STATUSES}
          AND ($2::timestamptz IS NULL OR (reminder.due_at, reminder.id) > ($2, $3::uuid))
        ORDER BY reminder.due_at, reminder.id
        LIMIT $4`,
@@ -230,6 +232,8 @@ export const groupReminderRepository = {
       const reminder = await selectReminder(client, auth.familyId, id, true);
       if (!reminder) throw reminderNotFound();
       requireGroupReminderOfThisChat(auth, reminder);
+      // Checked before the cap, so a delivered record is never answered with a full-chat refusal.
+      requireReminderNotDelivered(reminder);
       const live = reminder.status === "active" || reminder.status === "leased" ||
         reminder.status === "paused";
       if (input.enabled === false && !live) {
@@ -238,9 +242,12 @@ export const groupReminderRepository = {
           "Приостановить можно только действующее напоминание",
         );
       }
-      // Reviving a completed or failed reminder puts it back among the live ones, so it has to pass
-      // the same caps as a new one. Without this, a failed batch would launder extra slots.
-      if (input.enabled === true && !live) await requireFreeGroupSlot(client, auth, id);
+      // Reviving a failed reminder, by resuming it or by giving it a new time, puts it back among the
+      // live ones, so it has to pass the same caps as a new one. Without this, a failed batch would
+      // launder extra slots.
+      if (!live && reminderUpdateRevives(reminder, { enabled: input.enabled, firstRunAt })) {
+        await requireFreeGroupSlot(client, auth, id);
+      }
       const updated = await applyReminderUpdate(client, reminder, {
         ...(content === undefined ? {} : { content }),
         ...(input.enabled === undefined ? {} : { enabled: input.enabled }),

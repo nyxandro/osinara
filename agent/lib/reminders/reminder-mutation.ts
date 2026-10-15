@@ -4,6 +4,8 @@
  * Exports:
  * - `ReminderMutationValues`: validated optional changes of one reminder.
  * - `requireReminderNotLeased`: refuses a change while Telegram delivery is in flight.
+ * - `requireReminderNotDelivered`: keeps a delivered one-time reminder closed for any change.
+ * - `reminderUpdateRevives`: whether a change puts a stopped reminder back on schedule.
  * - `applyReminderUpdate`: recomputes schedule state and writes the row.
  * - `recordReminderOperation`: writes the replay marker of one mutation.
  *
@@ -15,6 +17,7 @@
 import type { PoolClient } from "pg";
 
 import { AppError } from "../app-error.js";
+import { ModelFacingError } from "../model-facing-error.js";
 import type { MutableReminderRow } from "./reminder-repository-helpers.js";
 import { REMINDER_COLUMNS } from "./reminder-repository-helpers.js";
 import type { ReminderRecurrence, ReminderRow, ReminderStatus } from "./reminder-record.js";
@@ -40,18 +43,44 @@ export function requireReminderNotLeased(
   }
 }
 
+/**
+ * A delivered one-time reminder is history, not a plan. Writing a new time into it once left the
+ * status untouched, so the tool reported success for a reminder that would never fire again.
+ * The refusal names the way forward itself: the generic conflict advice would have the model report
+ * a failure instead of creating the new reminder the person asked for.
+ */
+export function requireReminderNotDelivered(reminder: { status: ReminderStatus }): void {
+  if (reminder.status === "completed") {
+    throw new ModelFacingError({
+      category: "conflict",
+      code: "AGENT_REMINDER_ALREADY_DELIVERED",
+      correction:
+        "Не меняй это напоминание и не повторяй вызов для него. Если человек просит перенести или повторить его, создай новое напоминание через action=create на названное время; если время не названо, спроси его.",
+      reason: "Это напоминание уже отправлено, изменить его нельзя. Создайте новое напоминание на нужное время",
+      retryable: false,
+      sideEffectStatus: "not_started",
+    });
+  }
+}
+
+/**
+ * Resuming, or giving a failed reminder a new time, puts it back on schedule. A new time alone once
+ * left a failed reminder failed, so the tool reported a move that would never fire.
+ */
+export function reminderUpdateRevives(
+  reminder: { status: ReminderStatus },
+  values: Pick<ReminderMutationValues, "enabled" | "firstRunAt">,
+): boolean {
+  return values.enabled === true || (values.firstRunAt !== undefined && reminder.status === "failed");
+}
+
 export async function applyReminderUpdate(
   client: PoolClient,
   reminder: MutableReminderRow,
   values: ReminderMutationValues,
 ): Promise<ReminderRow> {
   requireReminderNotLeased(reminder, "update");
-  if (values.enabled === true && reminder.status === "completed" && !values.firstRunAt) {
-    throw new AppError(
-      "AGENT_REMINDER_TIME_REQUIRED",
-      "Для повторного запуска завершённого напоминания укажите новое время",
-    );
-  }
+  requireReminderNotDelivered(reminder);
   const scheduleChanged = values.firstRunAt !== undefined || values.recurrence !== undefined;
   const nextDue = values.firstRunAt ?? reminder.due_at;
   const nextRecurrence = values.recurrence === undefined
@@ -70,9 +99,9 @@ export async function applyReminderUpdate(
          available_at = CASE WHEN $5 THEN $6 ELSE available_at END,
          delayed_by_quiet_hours = CASE WHEN $5 THEN false ELSE delayed_by_quiet_hours END,
           status = CASE WHEN $7 = false THEN 'paused'::reminder_status
-                       WHEN $7 = true THEN 'active'::reminder_status ELSE status END,
-         attempts = CASE WHEN $5 OR $7 = true THEN 0 ELSE attempts END,
-         last_error_code = CASE WHEN $5 OR $7 = true THEN NULL ELSE last_error_code END,
+                       WHEN $8 THEN 'active'::reminder_status ELSE status END,
+         attempts = CASE WHEN $5 OR $8 THEN 0 ELSE attempts END,
+         last_error_code = CASE WHEN $5 OR $8 THEN NULL ELSE last_error_code END,
          updated_at = now()
      WHERE id = $1
      RETURNING ${REMINDER_COLUMNS}`,
@@ -84,6 +113,7 @@ export async function applyReminderUpdate(
       scheduleChanged,
       nextDue,
       values.enabled ?? null,
+      reminderUpdateRevives(reminder, values),
     ],
   );
   return updated.rows[0]!;

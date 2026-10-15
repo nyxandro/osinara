@@ -8,6 +8,8 @@
  * - Dispatch claims a group reminder, ignores personal quiet hours and revokes a changed zone.
  * - The trusted private-chat boundary never reaches a reminder of a public chat.
  * - No anchor may sit far in the past, and an in-flight delivery is never removed.
+ * - A delivered reminder stays closed for any change, so it cannot look moved yet never fire, and a
+ *   failed one given a new time returns to the schedule under the same cap.
  */
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -253,17 +255,68 @@ describeWithDatabase("group reminder repository", () => {
       firstRunAt: new Date("2026-09-05T15:00:00.000Z"),
       operationKey: "revive-resume",
     })).rejects.toThrowError(/AGENT_REMINDER_GROUP_CHAT_LIMIT/);
+    await expect(groupReminderRepository.update(groupAuth(fixture, FIRST_AUTHOR), revived.id, {
+      firstRunAt: new Date("2026-09-05T15:00:00.000Z"),
+      operationKey: "revive-move",
+    })).rejects.toThrowError(/AGENT_REMINDER_GROUP_CHAT_LIMIT/);
+  });
+
+  it("puts a failed reminder back on schedule when it is moved and the chat has room", async () => {
+    const fixture = await createFixture();
+    const failed = await create(fixture, FIRST_AUTHOR, "Не дошло", "2026-09-04T15:00:00.000Z", "move-failed-created");
+    await database().query(
+      "UPDATE reminders SET status = 'failed', last_error_code = 'AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED' WHERE id = $1",
+      [failed.id],
+    );
+
+    await expect(groupReminderRepository.update(groupAuth(fixture, SECOND_AUTHOR), failed.id, {
+      firstRunAt: new Date("2026-09-05T15:00:00.000Z"),
+      operationKey: "move-failed",
+    })).resolves.toMatchObject({
+      lastErrorCode: null,
+      nextRunAt: "2026-09-05T15:00:00.000Z",
+      status: "active",
+    });
   });
 
   it("refuses to pause a reminder that is no longer running", async () => {
     const fixture = await createFixture();
+    const failed = await create(fixture, FIRST_AUTHOR, "Не дошло", "2026-09-04T15:00:00.000Z", "failed-created");
+    await database().query(
+      "UPDATE reminders SET status = 'failed', last_error_code = 'AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED' WHERE id = $1",
+      [failed.id],
+    );
+
+    await expect(groupReminderRepository.update(groupAuth(fixture, FIRST_AUTHOR), failed.id, {
+      enabled: false,
+      operationKey: "failed-pause",
+    })).rejects.toThrowError(/AGENT_REMINDER_NOT_ACTIVE/);
+  });
+
+  it("refuses to move, resume or pause a reminder that was already delivered", async () => {
+    const fixture = await createFixture();
     const done = await create(fixture, FIRST_AUTHOR, "Уже отправлено", "2026-09-04T15:00:00.000Z", "done-created");
     await database().query("UPDATE reminders SET status = 'completed' WHERE id = $1", [done.id]);
 
-    await expect(groupReminderRepository.update(groupAuth(fixture, FIRST_AUTHOR), done.id, {
-      enabled: false,
-      operationKey: "done-pause",
-    })).rejects.toThrowError(/AGENT_REMINDER_NOT_ACTIVE/);
+    const changes = [
+      { firstRunAt: new Date("2026-09-05T15:00:00.000Z"), operationKey: "done-move" },
+      { enabled: true, operationKey: "done-resume" },
+      { enabled: false, operationKey: "done-pause" },
+    ];
+    for (const change of changes) {
+      await expect(groupReminderRepository.update(groupAuth(fixture, SECOND_AUTHOR), done.id, change))
+        .rejects.toThrowError(/AGENT_REMINDER_ALREADY_DELIVERED/);
+    }
+    const stored = await database().query<{ due_at: Date; status: string }>(
+      "SELECT due_at, status FROM reminders WHERE id = $1",
+      [done.id],
+    );
+    expect(stored.rows[0]).toEqual({
+      due_at: new Date("2026-09-04T15:00:00.000Z"),
+      status: "completed",
+    });
+    await expect(groupReminderRepository.delete(groupAuth(fixture, SECOND_AUTHOR), done.id, "done-delete"))
+      .resolves.toBe(true);
   });
 
   it("shows every live reminder of the chat to any participant, soonest first", async () => {

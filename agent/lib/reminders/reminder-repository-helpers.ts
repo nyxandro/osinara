@@ -3,6 +3,7 @@
  *
  * Exports:
  * - `REMINDER_COLUMNS`: shared safe projection.
+ * - `REMINDER_LIVE_STATUSES`: the statuses of a reminder that is still ahead.
  * - Membership, timezone, operation, row-lock, and mutation authorization helpers.
  */
 import type { PoolClient } from "pg";
@@ -24,6 +25,13 @@ export interface MutableReminderRow extends ReminderRow {
 export const REMINDER_COLUMNS = `id, scope, content, timezone, due_at, recurrence_unit,
   recurrence_interval, status, message_thread_id::text, forum_topic_id::text,
   last_error_code, created_at, updated_at`;
+
+/**
+ * A reminder that is still ahead: listed to people and counted against the group cap. A delivered
+ * one-time reminder lives on only as history in `proactive_deliveries`, and a failed one is
+ * reported to the owner as an operational incident.
+ */
+export const REMINDER_LIVE_STATUSES = "('active', 'leased', 'paused')";
 
 export async function requireCurrentMembership(
   client: PoolClient,

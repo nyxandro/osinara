@@ -4,10 +4,14 @@
  * Exports:
  * - `ReminderCreateInput` and `ReminderUpdateInput`: validated domain mutation inputs.
  * - `reminderRepository`: notification settings plus replay-safe create/list/update/delete.
+ *
+ * Key construct:
+ * - The list holds only what is still ahead, soonest first: delivered reminders are found through
+ *   the proactive delivery history instead.
  */
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
-import { decodeDateUuidCursor, encodeDateUuidCursor } from "../keyset-pagination.js";
+import { decodeDateUuidCursor, encodeDateUuidCursor, paginationFilterDigest } from "../keyset-pagination.js";
 import { REMINDER_LIST_MAX_LIMIT } from "./reminder-config.js";
 import type { ReminderAuthorization } from "./reminder-context.js";
 import {
@@ -20,6 +24,7 @@ import {
 } from "./reminder-record.js";
 import {
   REMINDER_COLUMNS,
+  REMINDER_LIVE_STATUSES,
   findReminderOperation,
   requireCurrentMembership,
   requireReminderMutationAccess,
@@ -244,10 +249,13 @@ export const reminderRepository = {
     if (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > REMINDER_LIST_MAX_LIMIT) {
       throw new AppError("AGENT_REMINDER_LIMIT_INVALID", "Некорректный размер страницы напоминаний");
     }
+    // The binding refuses a cursor of the former creation-time order instead of misreading it.
+    const binding = paginationFilterDigest([auth.familyId, auth.userId]);
     const cursor = decodeDateUuidCursor(
       options.cursor,
       "AGENT_REMINDER_CURSOR_INVALID",
       "Не удалось продолжить просмотр напоминаний",
+      binding,
     );
     const result = await database().query<ReminderRow>(
       `SELECT ${REMINDER_COLUMNS}
@@ -261,8 +269,9 @@ export const reminderRepository = {
              (reminder.scope = 'personal' AND reminder.owner_user_id = $2) OR
              reminder.scope = 'family'
            )
-          AND ($3::timestamptz IS NULL OR (reminder.created_at, reminder.id) < ($3, $4::uuid))
-        ORDER BY reminder.created_at DESC, reminder.id DESC
+          AND reminder.status IN ${REMINDER_LIVE_STATUSES}
+          AND ($3::timestamptz IS NULL OR (reminder.due_at, reminder.id) > ($3, $4::uuid))
+        ORDER BY reminder.due_at, reminder.id
         LIMIT $5`,
       [auth.familyId, auth.userId, cursor?.timestamp ?? null, cursor?.id ?? null, options.limit + 1],
     );
@@ -271,7 +280,7 @@ export const reminderRepository = {
     const last = rows.at(-1);
     return {
       items: rows.map(rowToReminder),
-      nextCursor: hasNext && last ? encodeDateUuidCursor(last.created_at, last.id) : null,
+      nextCursor: hasNext && last ? encodeDateUuidCursor(last.due_at, last.id, binding) : null,
     };
   },
 
