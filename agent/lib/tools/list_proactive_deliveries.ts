@@ -53,16 +53,16 @@ export default defineTool({
   // Repeating it after a crash is safe: it only reads.
   replaySafe: true,
   description: [
-    "Показать ранее доставленные в текущий чат напоминания и результаты агентных расписаний.",
-    "Используй, когда пользователь ссылается на старый дайджест, отчёт, сводку или уведомление, которого уже нет в текущем контексте.",
-    "query ищет по заголовку и тексту; sourceKind ограничивает результаты типом agent_schedule или reminder.",
-    "deliveredAfter и deliveredBefore задают включительный период по времени доставки в ISO datetime.",
-    "Результат: {items,nextCursor}; каждый item содержит отдельные поля deliveryId и sourceId. Для следующей страницы передай nextCursor без изменений.",
+    "Show reminders and agent schedule results previously delivered to the current chat.",
+    "Use it when the user refers to an old digest, report, summary or notification that is no longer in the current context.",
+    "query searches the title and text; sourceKind limits the results to agent_schedule or reminder.",
+    "deliveredAfter and deliveredBefore set an inclusive period of delivery time as an ISO datetime.",
+    "Result: {items,nextCursor}; each item has separate deliveryId and sourceId fields. For the next page pass nextCursor unchanged.",
   ].join(" "),
   inputSchema: z.object({
     cursor: z.string().min(1).optional(),
-    deliveredAfter: isoDateTimeWithOffset("Начало периода включительно, например 2026-10-01T00:00:00+03:00.").optional(),
-    deliveredBefore: isoDateTimeWithOffset("Конец периода включительно, например 2026-10-07T23:59:59+03:00.").optional(),
+    deliveredAfter: isoDateTimeWithOffset("The start of the period, inclusive, for example 2026-10-01T00:00:00+03:00.").optional(),
+    deliveredBefore: isoDateTimeWithOffset("The end of the period, inclusive, for example 2026-10-07T23:59:59+03:00.").optional(),
     limit: z.number().int().min(1).max(PROACTIVE_DELIVERY_HISTORY_MAX_LIMIT)
       .default(PROACTIVE_DELIVERY_HISTORY_DEFAULT_LIMIT),
     query: z.string().trim().min(1).max(200).optional(),

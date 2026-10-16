@@ -14,7 +14,7 @@ import { memoryExportRepository } from "../memory-export-repository.js";
 import { deliverMemoryExportFiles } from "../telegram-memory-export-delivery.js";
 
 export default defineTool({
-  description: "Выгрузить всю личную память пользователя двумя файлами, JSON и Markdown: бот сам отправляет их в этот личный чат. Только по прямой просьбе и только в личном чате; результат: {delivered, formats, recordCount}.",
+  description: "Export the user's whole personal memory as two files, JSON and Markdown: the bot itself sends them to this private chat. Only on a direct request and only in a private chat; result: {delivered, formats, recordCount}.",
   inputSchema: z.object({}),
   async execute(_input, ctx) {
     const auth = requireMemoryAuthorization(ctx);

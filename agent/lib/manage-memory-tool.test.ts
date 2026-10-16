@@ -99,9 +99,9 @@ describe("manage_memory", () => {
   });
 
   it("tells the model that edit is a complete integrity-preserving replacement", () => {
-    expect(manageMemory.description).toContain("полную новую версию записи");
-    expect(manageMemory.description).toContain("сохранив все актуальные детали");
-    expect(manageMemory.description).toContain("не выполняй необоснованную мутацию");
+    expect(manageMemory.description).toContain("full new version of the record");
+    expect(manageMemory.description).toContain("keeping all current details");
+    expect(manageMemory.description).toContain("Do not perform an unjustified mutation");
   });
 
   it("rejects malformed edit before showing private approval", async () => {

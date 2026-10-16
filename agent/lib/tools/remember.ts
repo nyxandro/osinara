@@ -27,13 +27,13 @@ export default defineTool({
   // Repeating it after a crash is safe: its effect is keyed on the call id.
   replaySafe: true,
   description: [
-    "Сохранить одно конкретное сведение только из проверенного сообщения текущего хода: факт, предпочтение, личный опыт, событие, план или полезную ссылку с контекстом. Не требуй особой важности или просьбы запомнить; не сохраняй догадки и поручения без содержательных фактов.",
-    "При самостоятельном отборе используй basis=agent_inferred, при прямой просьбе сохранить сведение basis=user_requested. Пример самостоятельного сохранения: {\"basis\":\"agent_inferred\",\"content\":\"...\",\"kind\":\"fact\",\"scope\":\"personal\",\"sensitivity\":\"normal\",\"subject\":{\"kind\":\"current_author\"}}.",
-    "В группе sourceSequence выбирает ровно одно сообщение видимой дельты. Для существующей нити используй thread.action=attach и threadRef только из list/search/read_memory_thread; thread.action=create создаёт нить атомарно.",
-    "Для события с известной датой задавай occurredOn: это день, когда оно произошло, а не день разговора. Дату не угадывай: не известна из сообщения, оставь поле пустым.",
-    "Для свойства, которое со временем меняется (предпочтение, место работы, адрес), задавай attribute — короткое имя свойства. Новая запись того же субъекта с тем же attribute переводит прежнюю в историю; прежняя не удаляется и видна в списке памяти.",
-    "Если в памяти уже есть близкое по смыслу сведение о том же субъекте, вызов отклоняется с AGENT_MEMORY_SIMILAR_RECORD_EXISTS и списком таких записей: прочитай их и реши сама — обновить существующую, задать attribute или перечислить их в distinctFrom и сохранить отдельно.",
-    "Результат содержит item.memoryRef, optional thread, supersededRefs для замещённых версий и notice для немедленного undo.",
+    "Save one specific fact only from the verified message of the current turn: a fact, a preference, first-hand experience, an event, a plan or a useful link with context. Do not require special importance or a request to remember; do not save guesses or requests without meaningful facts.",
+    "When selecting on your own use basis=agent_inferred, on a direct request to save the fact basis=user_requested. An example of saving on your own: {\"basis\":\"agent_inferred\",\"content\":\"...\",\"kind\":\"fact\",\"scope\":\"personal\",\"sensitivity\":\"normal\",\"subject\":{\"kind\":\"current_author\"}}.",
+    "In a group sourceSequence picks exactly one message of the visible delta. For an existing thread use thread.action=attach with a threadRef only from list/search/read_memory_thread; thread.action=create creates a thread atomically.",
+    "For an event with a known date set occurredOn: the day it happened, not the day of the conversation. Do not guess the date: if it is not known from the message, leave the field empty.",
+    "For a property that changes over time (a preference, a workplace, an address) set attribute, a short name of the property. A new record of the same subject with the same attribute moves the previous one into history; the previous one is not deleted and is visible in the memory list.",
+    "If memory already holds a fact close in meaning about the same subject, the call is refused with AGENT_MEMORY_SIMILAR_RECORD_EXISTS and a list of such records: read them and decide yourself whether to update the existing one, set attribute, or list them in distinctFrom and save separately.",
+    "The result contains item.memoryRef, an optional thread, supersededRefs for replaced versions and a notice for an immediate undo.",
   ].join(" "),
   inputSchema: rememberInputSchema,
   async execute(input, ctx) {

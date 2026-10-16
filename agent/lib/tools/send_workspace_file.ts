@@ -11,17 +11,17 @@ import { sendWorkspaceFileToCurrentChat } from "../attachments/workspace-file-ch
 
 export default defineTool({
   description: [
-    "Когда использовать: отправить уже существующий файл из доступного workspace в текущий Telegram-чат или тему.",
-    "Не использовать: не создаёт файл и не принимает абсолютный sandbox path.",
-    "Вход: path относительно корня выбранного scope, например reports/result.pdf; не добавляй personal, family или group в начало пути. presentation выбирает document или photo.",
-    "Результат: delivered=true, telegramMessageId, path, scope и replayed; persistenceCompleted=false или projectionCompleted=false означает, что файл уже отправлен, но служебный учёт обновился не полностью.",
-    "Ошибка: если sideEffectStatus=unknown или completed, не отправляй файл повторно без нового запроса пользователя.",
+    "When to use: send an already existing file from the available workspace to the current Telegram chat or topic.",
+    "When not to use: it does not create a file and does not accept an absolute sandbox path.",
+    "Input: path relative to the root of the chosen scope, for example reports/result.pdf; do not prepend personal, family or group to the path. presentation chooses document or photo.",
+    "Result: delivered=true, telegramMessageId, path, scope and replayed; persistenceCompleted=false or projectionCompleted=false means the file has already been sent but the internal accounting was not fully updated.",
+    "Error: if sideEffectStatus=unknown or completed, do not send the file again without a new user request.",
   ].join(" "),
   inputSchema: z.object({
-    caption: z.string().max(1_024).optional().describe("Необязательная подпись Telegram"),
-    path: z.string().min(1).max(512).describe("Относительный путь внутри выбранного scope"),
-    presentation: z.enum(["document", "photo"]).describe("Способ отправки в Telegram"),
-    scope: z.enum(["personal", "family", "group"]).describe("Workspace, относительно которого задан path"),
+    caption: z.string().max(1_024).optional().describe("An optional Telegram caption"),
+    path: z.string().min(1).max(512).describe("A relative path inside the chosen scope"),
+    presentation: z.enum(["document", "photo"]).describe("How to send it in Telegram"),
+    scope: z.enum(["personal", "family", "group"]).describe("The workspace the path is relative to"),
   }).strict(),
   async execute(input, ctx) {
     return await sendWorkspaceFileToCurrentChat(input, ctx);

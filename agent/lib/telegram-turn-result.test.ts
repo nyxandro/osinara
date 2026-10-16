@@ -57,6 +57,16 @@ function buildResult(overrides: Partial<TurnResultInput> = {}) {
   return result!;
 }
 
+describe("telegram turn verified facts", () => {
+  it("states the verified scope, role and actor of the turn in one line", () => {
+    const context = buildResult().context ?? [];
+
+    expect(context.filter((entry) => entry.startsWith("Verified"))).toEqual([
+      "Verified turn: scope personal; role owner; actor telegram_user.",
+    ]);
+  });
+});
+
 describe("telegram turn result context", () => {
   it("carries the highlighted fragment when the turn resumes a pending confirmation", () => {
     const result = buildResult({

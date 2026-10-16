@@ -18,9 +18,9 @@ export default defineTool({
   // Repeating it after a crash is safe: it only reads.
   replaySafe: true,
   description: [
-    "Постранично показать предстоящие и приостановленные личные и семейные напоминания текущего участника, ближайшие первыми.",
-    "Отправленные здесь не показываются: ищи их в list_proactive_deliveries с sourceKind:\"reminder\".",
-    "Результат: {items,nextCursor}; если nextCursor не null, передай его без изменений для следующей страницы.",
+    "List the current participant's upcoming and paused personal and family reminders page by page, nearest first.",
+    "Delivered ones are not shown here: look for them in list_proactive_deliveries with sourceKind:\"reminder\".",
+    "Result: {items,nextCursor}; if nextCursor is not null, pass it unchanged for the next page.",
   ].join(" "),
   inputSchema: z.object({
     cursor: z.string().min(1).optional(),

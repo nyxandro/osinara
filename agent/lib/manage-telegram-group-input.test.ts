@@ -157,11 +157,11 @@ describe("manage_telegram_group model input", () => {
   it("documents exact action payloads and leaves finite enums to the schema", () => {
     for (const fragment of [
       '{"action":"status"}',
-      "остальные actions только плоские поля",
-      "никогда не угадывай telegramChatId",
-      "не более одного раза",
+      "other actions only flat fields",
+      "never guess telegramChatId",
+      "no more than once",
     ]) expect(manageTelegramGroup.description).toContain(fragment);
-    // Перечисления модель получает из JSON-схемы; дублировать их прозой значит платить дважды.
+    // The model gets the enums from the JSON schema; repeating them in prose would cost twice.
     const schema = JSON.stringify(z.toJSONSchema(manageTelegramGroup.inputSchema as z.ZodType));
     for (const value of ["addressed_only", "owner_only", "family_private", "external"]) {
       expect(schema).toContain(value);

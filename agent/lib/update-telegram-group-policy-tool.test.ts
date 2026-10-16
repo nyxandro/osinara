@@ -83,18 +83,18 @@ describe("manage_telegram_group.update_policy", () => {
 
   it("describes a complete in-place replacement without type or title", () => {
     expect(manageTelegramGroup.description).toContain(
-      "ровно action, telegramChatId, messageMode и полный toolAllowlist",
+      "exactly action, telegramChatId, messageMode and the full toolAllowlist",
     );
-    expect(manageTelegramGroup.description).toContain("type и title не передавай");
+    expect(manageTelegramGroup.description).toContain("do not pass type and title");
     expect(manageTelegramGroup.description).toContain(
-      "сначала вызови status и перенеси неизменённые текущие права",
+      "first call status and carry the unchanged current permissions",
     );
-    expect(manageTelegramGroup.description).toContain("полный toolAllowlist");
+    expect(manageTelegramGroup.description).toContain("the full toolAllowlist");
     expect(manageTelegramGroup.description).toContain(
-      "добавь или удали только выбранную capability",
+      "add or remove only the chosen capability",
     );
     expect(manageTelegramGroup.description).toContain(
-      "группа, её история, workspace, память и файлы сохраняются",
+      "the group, its history, workspace, memory and files are kept",
     );
   });
 

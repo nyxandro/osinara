@@ -33,10 +33,10 @@ const TOP_LEVEL_FIELDS = [
 ] as const;
 
 const manageFamilyInvitationSchema = z.object({
-  action: z.enum(TOOL_ACTIONS).describe("Обязательный action: create или approve."),
-  candidateDisplayName: z.string().optional().describe("Обязательно только для action=approve."),
-  candidateTelegramUserId: z.string().optional().describe("Обязательно только для action=approve."),
-  invitationId: z.string().optional().describe("UUID обязателен только для action=approve."),
+  action: z.enum(TOOL_ACTIONS).describe("Required action: create or approve."),
+  candidateDisplayName: z.string().optional().describe("Required only for action=approve."),
+  candidateTelegramUserId: z.string().optional().describe("Required only for action=approve."),
+  invitationId: z.string().optional().describe("A UUID, required only for action=approve."),
 }).strict();
 
 function requireApproveInput(input: Record<string, unknown>) {
@@ -69,13 +69,13 @@ function requireManageFamilyInvitationInput(input: unknown) {
 }
 
 const TOOL_DESCRIPTION = [
-  "Создать одноразовое семейное приглашение или подтвердить кандидата из list_pending_family_invitations.",
-  "Доступно только владельцу в личном чате; оба action всегда требуют подтверждения.",
-  "Для action=create обязателен только action: {\"action\":\"create\"}; поля кандидата не передавайте.",
-  "Для action=approve обязательны action, invitationId, candidateTelegramUserId и candidateDisplayName: {\"action\":\"approve\",\"invitationId\":\"<UUID из list_pending_family_invitations>\",\"candidateTelegramUserId\":\"123456789\",\"candidateDisplayName\":\"Анна\"}.",
-  "invitationId должен быть UUID из list_pending_family_invitations; candidateTelegramUserId и candidateDisplayName должны точно соответствовать выбранному кандидату.",
-  "Не угадывай обязательные значения и не подставляй defaults: если их нет, снова запроси list_pending_family_invitations или спроси владельца.",
-  "После ошибки входных данных исправь payload по тексту ошибки и повтори не более одного раза; при повторной ошибке остановись и уточни данные.",
+  "Create a one-time family invitation or approve a candidate from list_pending_family_invitations.",
+  "Available only to the owner in a private chat; both actions always require confirmation.",
+  "For action=create only action is required: {\"action\":\"create\"}; do not pass candidate fields.",
+  "For action=approve action, invitationId, candidateTelegramUserId and candidateDisplayName are required: {\"action\":\"approve\",\"invitationId\":\"<UUID from list_pending_family_invitations>\",\"candidateTelegramUserId\":\"123456789\",\"candidateDisplayName\":\"Анна\"}.",
+  "invitationId must be a UUID from list_pending_family_invitations; candidateTelegramUserId and candidateDisplayName must match the chosen candidate exactly.",
+  "Do not guess required values and do not substitute defaults: if they are missing, request list_pending_family_invitations again or ask the owner.",
+  "After an input error, fix the payload according to the error text and retry no more than once; on a repeated error stop and clarify the data.",
 ].join(" ");
 
 export default defineTool({

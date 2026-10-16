@@ -100,7 +100,7 @@ export function conversationWakeupMessage(wakeup: PreparedConversationWakeup, no
     context: [formatCurrentTimeContext(now)],
     message: [
       "<conversation_wakeup>",
-      "Это твоё собственное пробуждение по сценарию в этом разговоре, а не сообщение человека. Правила — в разделе «Пробуждение в разговоре».",
+      "This is your own scheduled wake-up in this conversation, not a message from a person. The rules are in the \"A wake-up in the conversation\" section.",
       `schedule_id: ${wakeup.scheduleId}`,
       `title: ${wakeup.title}`,
       `scheduled_for_local: ${localScheduledTime(wakeup.scheduledFor.toISOString(), wakeup.timezone)}`,
@@ -111,11 +111,11 @@ export function conversationWakeupMessage(wakeup: PreparedConversationWakeup, no
       "note:",
       wakeup.scenarioPrompt,
       "</conversation_wakeup>",
-      "Выполни заметку с учётом всего разговора.",
-      "- Если цель достигнута или проверять больше незачем, сообщи результат и поставь сценарий на паузу через manage_agent_schedule с action pause и этим schedule_id.",
-      `- Если сообщить нечего, а проверки ещё нужны, заверши ход ровно строкой ${EMPTY_DELIVERY_MARKER} без другого текста: любая фраза вроде «пока без изменений» уйдёт в чат.`,
-      "- Если execution_number равен max_runs, это последний запуск: обязательно сообщи итог — что так и не произошло и стоит ли продолжать.",
-      "- Не ставь реакции и не сохраняй факты через remember: у пробуждения нет сообщения человека.",
+      "Carry out the note taking the whole conversation into account.",
+      "- If the goal is reached or there is nothing more to check, report the result and pause the scenario through manage_agent_schedule with action pause and this schedule_id.",
+      `- If there is nothing to report but checks are still needed, end the turn with exactly the line ${EMPTY_DELIVERY_MARKER} and no other text: any phrase like "пока без изменений" would be sent to the chat.`,
+      "- If execution_number equals max_runs, this is the last run: be sure to report the outcome, what never happened and whether it is worth continuing.",
+      "- Do not put reactions and do not save facts through remember: a wake-up has no message from a person.",
     ].join("\n"),
   };
 }

@@ -55,8 +55,8 @@ export function defineBashTool(input: { readonly description?: string } = {}): T
 
 export const bash = defineBashTool({
   description: [
-    "Выполнить shell-команду в изолированном рабочем окружении этого чата. Доступные папки и правила работы с ними описаны в разделе «Workspace и инструменты».",
-    "Команда прерывается через 2 минуты. Результат: {exitCode, stdout, stderr, truncated}; stdout и stderr длиннее 2000 строк или 50 КБ обрезаются с начала, остаётся конец вывода, и truncated=true.",
-    "Длинный вывод сохраняй в файл и читай через read_file.",
+    "Run a shell command in this chat's isolated working environment. The available folders and the rules for them are described in the \"Workspace and tools\" section.",
+    "The command is stopped after 2 minutes. Result: {exitCode, stdout, stderr, truncated}; stdout and stderr longer than 2000 lines or 50 KB are cut from the start, the end of the output stays, and truncated=true.",
+    "Save long output to a file and read it through read_file.",
   ].join(" "),
 });

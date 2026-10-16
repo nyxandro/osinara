@@ -38,7 +38,7 @@ vi.mock("../family-skills/family-skill-repository.js", () => ({
 import { createExternalGroupLoadSkillTool } from "../group-skills/group-load-skill-tool.js";
 import manageTelegramGroup from "../tools/manage_telegram_group.js";
 import { createGenerateImageTool } from "../tools/generate_image.js";
-import { externalGroupCapabilityInstructions } from "../tool-policy/external-group-capability-instructions.js";
+import { modeInstructions } from "../prompt/mode-instructions.js";
 import { GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES } from "../tool-policy/grantable-group-capabilities.js";
 import { buildModeToolSurface } from "../tool-policy/mode-tool-surface.js";
 
@@ -89,10 +89,7 @@ describe("unavailable subscription image generation", () => {
       environment: "external",
       skills: new Set(["imagegen"]),
     });
-    const instructions = externalGroupCapabilityInstructions(
-      new Set(["generate_image"]),
-      new Set(),
-    );
+    const instructions = modeInstructions({ capabilities: new Set(["generate_image"]), environment: "external" });
 
     expect(buildModeToolSurface({ environment: "private" })).not.toHaveProperty("generate_image");
     expect(external).not.toHaveProperty("generate_image");

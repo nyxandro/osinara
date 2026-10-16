@@ -33,19 +33,19 @@ const POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807n;
 export const MEMORY_SUBJECT_REF_PATTERN = /^subj_[0-9a-f]{32}$/u;
 
 const currentAuthorSubjectSchema = z.object({
-  kind: z.literal("current_author").describe("Сведение относится к автору текущего сообщения"),
+  kind: z.literal("current_author").describe("The fact concerns the author of the current message"),
 }).strict();
 const labelSubjectSchema = z.object({
-  kind: z.literal("label").describe("Текстовая тема без проверенной identity"),
-  label: z.string().trim().min(1).max(SUBJECT_LABEL_MAX_CHARACTERS).describe("Краткая нейтральная метка темы"),
+  kind: z.literal("label").describe("A text topic without a verified identity"),
+  label: z.string().trim().min(1).max(SUBJECT_LABEL_MAX_CHARACTERS).describe("A short neutral label of the topic"),
 }).strict();
-const noneSubjectSchema = z.object({ kind: z.literal("none").describe("Запись не относится к человеку") }).strict();
+const noneSubjectSchema = z.object({ kind: z.literal("none").describe("The record is not about a person") }).strict();
 
 export const memorySubjectSchema = z.discriminatedUnion("kind", [
   currentAuthorSubjectSchema,
   z.object({
-    kind: z.literal("verified_ref").describe("Сведение относится к проверенному subjectRef из контекста"),
-    subjectRef: z.string().regex(MEMORY_SUBJECT_REF_PATTERN).describe("Opaque subjectRef только из текущего profile context"),
+    kind: z.literal("verified_ref").describe("The fact concerns a verified subjectRef from the context"),
+    subjectRef: z.string().regex(MEMORY_SUBJECT_REF_PATTERN).describe("An opaque subjectRef only from the current profile context"),
   }).strict(),
   labelSubjectSchema,
   noneSubjectSchema,
@@ -90,17 +90,17 @@ const threadRoleSchema = z.enum([
 
 export const memoryThreadSchema = z.discriminatedUnion("action", [
   z.object({
-    action: z.literal("attach").describe("Прикрепить запись к существующей нити"),
-    role: threadRoleSchema.describe("Роль новой записи внутри нити"),
-    threadRef: z.string().regex(THREAD_REF_PATTERN).describe("Opaque ref из list/search/read_memory_thread"),
+    action: z.literal("attach").describe("Attach the record to an existing thread"),
+    role: threadRoleSchema.describe("The role of the new record inside the thread"),
+    threadRef: z.string().regex(THREAD_REF_PATTERN).describe("An opaque ref from list/search/read_memory_thread"),
   }).strict(),
   z.object({
-    action: z.literal("create").describe("Атомарно создать нить вместе с записью"),
-    identity: z.enum(["subject", "project"]).optional().describe("Identity только для корневой нити"),
-    parentThreadRef: z.string().regex(THREAD_REF_PATTERN).optional().describe("Родительская нить только для subthread"),
-    purpose: z.string().trim().min(1).max(THREAD_PURPOSE_MAX_CHARACTERS).describe("Устойчивое назначение нити"),
-    role: threadRoleSchema.describe("Роль первой записи внутри нити"),
-    title: z.string().trim().min(1).max(THREAD_TITLE_MAX_CHARACTERS).describe("Краткое устойчивое название нити"),
+    action: z.literal("create").describe("Atomically create a thread together with the record"),
+    identity: z.enum(["subject", "project"]).optional().describe("Identity only for a root thread"),
+    parentThreadRef: z.string().regex(THREAD_REF_PATTERN).optional().describe("The parent thread, only for a subthread"),
+    purpose: z.string().trim().min(1).max(THREAD_PURPOSE_MAX_CHARACTERS).describe("The stable purpose of the thread"),
+    role: threadRoleSchema.describe("The role of the first record inside the thread"),
+    title: z.string().trim().min(1).max(THREAD_TITLE_MAX_CHARACTERS).describe("A short stable name of the thread"),
   }).strict().refine(
     (input) => input.parentThreadRef === undefined || input.identity === undefined,
     { message: "Для subthread identity определяется только проверенной родительской нитью" },
@@ -125,7 +125,7 @@ const REVIEW_REMEMBER_FIELDS = {
   sourceSequence: z.string({ error: REVIEW_INPUT_INVALID }).regex(TIMELINE_SEQUENCE_PATTERN).refine(
     (value) => BigInt(value) <= POSTGRES_BIGINT_MAX,
     "Номер сообщения выходит за допустимые границы",
-  ).describe("Номер #sequence одного сообщения текущего пакета проверки"),
+  ).describe("The #sequence number of one message of the current review batch"),
 };
 
 type RememberScopeField = z.ZodType<"family" | "group" | "personal", "family" | "group" | "personal" | undefined>;
@@ -134,28 +134,28 @@ function rememberFields(scope: RememberScopeField, verifiedRefs: boolean) {
   const subject = verifiedRefs ? modelFacingMemorySubjectSchema : modelFacingUnverifiedMemorySubjectSchema;
   return {
     attribute: z.string().trim().min(1).max(MEMORY_ATTRIBUTE_MAX_CHARACTERS).optional().describe(
-      "Короткое имя свойства субъекта, о котором запись: «кофе», «место работы», «размер обуви». Не значение свойства и не пересказ содержания. Ставь его, когда свойство со временем меняется и новая запись отменяет прежнюю; новая запись того же субъекта с тем же именем переводит прежнюю в историю. Не ставь общее имя вроде «еда» — оно уберёт из активной памяти независимые сведения. У записи без субъекта (subject.kind=none) имя свойства действует на всю область памяти, поэтому там оно должно быть особенно точным. Для kind=episode поле недопустимо",
+      "A short name of the subject's property the record is about: \"кофе\", \"место работы\", \"размер обуви\". Not the value of the property and not a retelling of the content. Set it when the property changes over time and a new record cancels the previous one; a new record of the same subject with the same name moves the previous one into history. Do not set a general name like \"еда\": it would remove independent facts from active memory. For a record without a subject (subject.kind=none) the property name applies to the whole memory scope, so it must be especially precise there. Not allowed for kind=episode",
     ),
-    basis: z.enum(["agent_inferred", "user_requested"]).describe("agent_inferred: сама отобрала сведение из сообщения, не догадка; user_requested: автор прямо попросил сохранить"),
+    basis: z.enum(["agent_inferred", "user_requested"]).describe("agent_inferred: you selected the fact from the message yourself, not a guess; user_requested: the author explicitly asked to save it"),
     distinctFrom: z.array(z.string().regex(MEMORY_REF_PATTERN)).max(MEMORY_NEIGHBOUR_CANDIDATE_LIMIT)
       .optional().describe(
-        "Только в ответ на отказ AGENT_MEMORY_SIMILAR_RECORD_EXISTS: memoryRef показанных близких записей, которые ты прочитала и считаешь другими сведениями. Не заполняй заранее",
+        "Only in response to the AGENT_MEMORY_SIMILAR_RECORD_EXISTS refusal: the memoryRef of the shown close records that you have read and consider different facts. Do not fill it in advance",
       ),
-    content: z.string().min(1).max(MEMORY_CONTENT_MAX_CHARACTERS).describe("Одно самостоятельное конкретное сведение без догадок; сохраняй известные даты, контекст и точный URL для полезной ссылки"),
-    kind: z.enum(["profile", "preference", "fact", "episode", "family_shared"]).describe("profile: устойчивые сведения о человеке; preference: предпочтения; episode: отдельное событие или опыт; fact: прочие факты, планы, ресурсы; family_shared: общесемейные сведения"),
+    content: z.string().min(1).max(MEMORY_CONTENT_MAX_CHARACTERS).describe("One self-contained specific fact without guesses; keep known dates, the context and the exact URL for a useful link"),
+    kind: z.enum(["profile", "preference", "fact", "episode", "family_shared"]).describe("profile: stable facts about a person; preference: preferences; episode: a single event or experience; fact: other facts, plans, resources; family_shared: facts shared by the family"),
     occurredOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional().describe(
-      "День, когда событие произошло, в формате ГГГГ-ММ-ДД, если он известен из разговора. Не вычисляй его из расплывчатых слов вроде «давно» или «тем летом» и не подставляй сегодняшнюю дату: не уверена — не указывай вовсе",
+      "The day the event happened, as YYYY-MM-DD, if it is known from the conversation. Do not compute it from vague words like \"давно\" or \"тем летом\" and do not substitute today's date: if unsure, leave it out entirely",
     ),
-    scope: scope.describe("Разрешённая область памяти текущего trust zone"),
-    sensitivity: z.enum(["normal", "sensitive"]).describe("Чувствительность сохраняемого сведения"),
+    scope: scope.describe("The permitted memory scope of the current trust zone"),
+    sensitivity: z.enum(["normal", "sensitive"]).describe("The sensitivity of the fact being saved"),
     sourceSequence: z.string().regex(TIMELINE_SEQUENCE_PATTERN).refine(
       (value) => BigInt(value) <= POSTGRES_BIGINT_MAX,
       "Номер сообщения выходит за допустимые границы",
     ).optional().describe(
-      "Только для группы: номер #sequence одного сообщения из видимой дельты текущего хода; без поля источником является текущее сообщение",
+      "Only for a group: the #sequence number of one message from the visible delta of the current turn; without the field the source is the current message",
     ),
-    subject: subject.describe("Кому или чему принадлежит утверждение"),
-    thread: memoryThreadSchema.optional().describe("Необязательное атомарное создание нити или attach"),
+    subject: subject.describe("Who or what the statement belongs to"),
+    thread: memoryThreadSchema.optional().describe("An optional atomic thread create or attach"),
   };
 }
 

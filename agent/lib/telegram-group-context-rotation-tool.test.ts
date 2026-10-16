@@ -125,10 +125,10 @@ describe("manage_telegram_group.start_new_context", () => {
     const instructions = modeInstructions({ environment: "private" });
 
     expect(instructions).toContain('`{"action":"status"}`');
-    expect(instructions).toContain("сначала вызови `status`");
-    expect(instructions).toContain("скопируй `startNewContextInput`");
-    expect(instructions).toContain("не заполняй optional-поля других actions");
-    expect(instructions).toContain("всех forum-тем");
-    expect(instructions).toContain("Если запрос указывает другую группу, не вызывай `start_new_context`");
+    expect(instructions).toContain("first call `status`");
+    expect(instructions).toContain("copy the chosen group's `startNewContextInput`");
+    expect(instructions).toContain("do not fill the optional fields of other actions");
+    expect(instructions).toContain("all forum topics");
+    expect(instructions).toContain("If the request points to another group, do not call `start_new_context`");
   });
 });

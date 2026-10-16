@@ -17,15 +17,15 @@ export default defineTool({
   // Repeating it after a crash is safe: it only reads.
   replaySafe: true,
   description: [
-    "Постранично показать записи долговременной памяти, доступные в текущем чате.",
-    "Результат: {items,nextCursor}; items содержит текущую страницу, а nextCursor нужно без изменений",
-    "передать в следующий вызов. Значение null означает, что записей больше нет.",
-    "history=true добавляет прежние версии свойств (status=superseded) — например когда спрашивают, что было раньше.",
+    "List the long-term memory records available in the current chat page by page.",
+    "Result: {items,nextCursor}; items holds the current page, and nextCursor must be passed unchanged",
+    "to the next call. The value null means there are no more records.",
+    "history=true adds earlier versions of properties (status=superseded), for example when asked what it was before.",
   ].join(" "),
   inputSchema: z.object({
     cursor: z.string().optional(),
     history: z.boolean().optional().describe(
-      "Показать также прежние версии свойств: записи со status=superseded. По умолчанию только текущие",
+      "Also show earlier versions of properties: records with status=superseded. By default only current ones",
     ),
     limit: z.number().int().min(1).max(MEMORY_LIST_MAX_LIMIT).default(MEMORY_LIST_DEFAULT_LIMIT),
     scope: z.enum(["personal", "family", "group"]).optional(),

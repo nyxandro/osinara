@@ -156,17 +156,17 @@ function requireManageReminderInput(input: unknown) {
 }
 
 const TOOL_DESCRIPTION = [
-  "Создать, изменить, приостановить, возобновить или удалить обычное напоминание с текстом уведомления.",
-  "Явной просьбы пользователя достаточно: выполняй без дополнительного подтверждения. Уточняй только недостающие или неоднозначные данные.",
-  "content отправляется как готовый текст без вызова модели. Не сохраняй в нём задание что-то придумать или выполнить позже; если просят сочинить сообщение, подготовь его до создания напоминания.",
-  "content читают в момент доставки: без слов \"завтра\" и \"через час\", формат текста в инструкциях.",
-  "Это не агентное расписание: если нужен будущий автономный запуск агента с исследованием или отчётом, используй manage_agent_schedule.",
+  "Create, change, pause, resume or delete an ordinary reminder with notification text.",
+  "An explicit user request is enough: do it without additional confirmation. Ask only for missing or ambiguous data.",
+  "content is sent as ready-made text without calling the model. Do not store in it a task to come up with or do something later; if asked to compose a message, prepare it before creating the reminder.",
+  "content is read at the moment of delivery: without words like \"завтра\" and \"через час\"; the text format is in the instructions.",
+  "This is not an agent schedule: if a future autonomous run of the agent with research or a report is needed, use manage_agent_schedule.",
   "Create payload: {\"action\":\"create\",\"content\":\"Позвонить врачу\",\"firstRunAt\":\"2026-08-01T10:00:00+03:00\",\"timezone\":\"Europe/Moscow\",\"scope\":\"personal\",\"recurrence\":null}.",
-  "Повторение: без повтора recurrence=null; повтор = {\"unit\":\"minutely\",\"interval\":5}. unit: minutely, hourly, daily, weekly, monthly, yearly; interval целый от 1 до 365. Минимум 1 минута. Минуты и часы отсчитываются как длительность, остальные периоды сохраняют местное календарное время. Отсутствующая дата переносится на последний день месяца без потери исходной даты для следующих повторов. Проверка времени минутная, пропущенные повторы не догоняются.",
-  "Убрать повторение: {\"action\":\"update\",\"id\":\"<id из list_reminders>\",\"recurrence\":null}. Не удаляй и не пересоздавай напоминание для смены повторения.",
-  "Update передаёт id и только изменяемые content, firstRunAt или recurrence. Pause/resume/delete передают только action и id.",
-  "Отправленное разовое напоминание не меняется: для нового времени создай новое.",
-  "firstRunAt всегда ISO datetime с UTC offset, timezone всегда IANA. Перед update/pause/resume/delete сначала найди id через list_reminders.",
+  "Recurrence: no repeat is recurrence=null; a repeat = {\"unit\":\"minutely\",\"interval\":5}. unit: minutely, hourly, daily, weekly, monthly, yearly; interval is an integer from 1 to 365. Minimum 1 minute. Minutes and hours are counted as a duration, other periods keep the local calendar time. A missing date moves to the last day of the month without losing the original date for the following repeats. The time is checked every minute; missed repeats are not caught up.",
+  "Remove the repeat: {\"action\":\"update\",\"id\":\"<id from list_reminders>\",\"recurrence\":null}. Do not delete and re-create a reminder to change its repeat.",
+  "Update passes id and only the content, firstRunAt or recurrence being changed. Pause/resume/delete pass only action and id.",
+  "A delivered one-time reminder does not change: for a new time create a new one.",
+  "firstRunAt is always an ISO datetime with a UTC offset, timezone is always IANA. Before update/pause/resume/delete first find the id through list_reminders.",
 ].join(" ");
 
 export default defineTool({

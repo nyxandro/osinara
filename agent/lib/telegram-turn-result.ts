@@ -75,10 +75,9 @@ export function buildTelegramTurnResult(input: {
   turnStartedAt: Date;
 }): TelegramInboundResult {
   const context = [
-    `Verified conversation scope: ${input.access.memoryScopes.join(", ")}.`,
-    `Verified role: ${input.access.role}.`,
-    `Verified Telegram actor kind: ${input.actor.kind}.`,
-    "Verified Telegram delivery: reply in concise plain text by default; use supported Rich Markdown only when formatting materially improves the answer.",
+    // One line per turn: scope and role can differ between authors of a group. Delivery formatting
+    // is a constant of the core instructions, not a per-turn fact.
+    `Verified turn: scope ${input.access.memoryScopes.join(", ")}; role ${input.access.role}; actor ${input.actor.kind}.`,
     formatCurrentTimeContext(input.turnStartedAt),
   ];
   if (input.storedAttachments.length > 0) {

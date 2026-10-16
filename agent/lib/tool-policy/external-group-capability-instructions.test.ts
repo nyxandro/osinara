@@ -1,115 +1,36 @@
 /**
- * External-group effective capability instruction tests.
+ * External-group capability instruction tests.
  *
  * Constructs covered:
- * - `externalGroupCapabilityInstructions`: renders exact model-visible effective capabilities.
- * - Action-level memory grants remain granular and do not imply sibling actions.
- * - Application-core descriptors are included in the same exact effective surface.
- * - Skill loading is advertised only for the exact live group grants.
+ * - `externalGroupCapabilityInstructions`: binds the group to the tools sent with the request and the
+ *   skills of the Available skills section, without listing either again.
+ * - Delegation is described only when the application core is issued.
  */
-import { describe, expect, it, vi } from "vitest";
-
-vi.mock("../image-generation/image-generation-availability.js", () => ({
-  IMAGE_GENERATION_AVAILABLE: true,
-}));
+import { describe, expect, it } from "vitest";
 
 import { externalGroupCapabilityInstructions } from "./external-group-capability-instructions.js";
 
 describe("externalGroupCapabilityInstructions", () => {
-  it("includes always-available files and only explicitly allowed application capabilities", () => {
-    const markdown = externalGroupCapabilityInstructions(
-      new Set(["remember", "manage_memory.undo"]),
-      new Set(),
-    );
+  it("binds the turn to the tools and skills it was given without listing them again", () => {
+    // The tool definitions and the skills section already reach the model; a second list cost about
+    // 4,800 characters in every request of a fully granted group.
+    const markdown = externalGroupCapabilityInstructions({ includeApplicationCore: true });
 
-    expect(markdown).toContain("`glob`");
-    expect(markdown).toContain("`grep`");
-    expect(markdown).toContain("`read_file`");
-    expect(markdown).toContain("`write_file`");
-    expect(markdown).toContain("`remember`");
-    expect(markdown).toContain("`manage_memory` с `action=undo`");
-    expect(markdown).toContain(
-      "Effective allowlist: `glob`, `grep`, `read_file`, `write_file`, `manage_memory` с `action=undo`, `remember`.",
-    );
-    expect(markdown).not.toContain("`manage_memory` с `action=edit`");
-    expect(markdown).not.toContain("`manage_memory` с `action=delete`");
-    expect(markdown).not.toContain("`search_memories`");
+    expect(markdown).toContain("<external_group_capabilities>");
+    expect(markdown).toMatch(/only the tools sent with this request/u);
+    expect(markdown).toMatch(/Available skills/u);
+    expect(markdown).toMatch(/do not call, offer or claim/iu);
+    expect(markdown).not.toMatch(/`[a-z_]+`/u);
+    expect(markdown).not.toMatch(/[—–«»]/u);
   });
 
-  it("uses the executable manage_memory_thread name for action-level grants", () => {
-    const markdown = externalGroupCapabilityInstructions(
-      new Set(["manage_memory_thread.complete", "manage_memory_thread.reactivate"]),
-      new Set(),
-    );
-
-    expect(markdown).toContain("`manage_memory_thread` с `action=complete`");
-    expect(markdown).toContain("`manage_memory_thread` с `action=reactivate`");
-    expect(markdown).not.toContain("`manage_memory_thread.complete`");
+  it("describes delegation only when the application core is issued", () => {
+    expect(externalGroupCapabilityInstructions({ includeApplicationCore: true })).toContain("delegate");
+    expect(externalGroupCapabilityInstructions({ includeApplicationCore: false })).not.toContain("delegate");
   });
 
-  it("includes independently issued application-core and scheduled-history tools", () => {
-    const markdown = externalGroupCapabilityInstructions(new Set(), new Set(), {
-      includeApplicationCore: true,
-      scheduledHistory: true,
-      scheduledRun: false,
-    });
-
-    expect(markdown).toContain("`read_profile_view`");
-    expect(markdown).toContain("`manage_behavior_preference`");
-    expect(markdown).toContain("`read_scheduled_group_history`");
-    expect(markdown).not.toMatch(/не вызывай.*другие видимые static descriptors/isu);
-  });
-
-  it("does not advertise interactive preferences during a scheduled run", () => {
-    const markdown = externalGroupCapabilityInstructions(new Set(), new Set(), {
-      includeApplicationCore: true,
-      scheduledHistory: true,
-      scheduledRun: true,
-    });
-
-    expect(markdown).toContain("`read_profile_view`");
-    expect(markdown).toContain("`read_scheduled_group_history`");
-    expect(markdown).not.toContain("`manage_behavior_preference`");
-  });
-
-  it("forbids offering any other visible static descriptor", () => {
-    const markdown = externalGroupCapabilityInstructions(new Set(), new Set());
-
-    expect(markdown).toMatch(
-      /не вызывай, не предлагай и не утверждай, что можешь использовать инструменты, не перечисленные выше/iu,
-    );
-  });
-
-  it("advertises executable load_skill only with an exact live skill grant", () => {
-    const withoutSkills = externalGroupCapabilityInstructions(new Set(), new Set());
-    const withPohuy = externalGroupCapabilityInstructions(new Set(), new Set(["pohuy"]));
-
-    expect(withoutSkills).not.toContain("`load_skill`");
-    expect(withoutSkills).not.toContain("`pohuy`");
-    expect(withPohuy).toContain("`load_skill` с `skill=pohuy`");
-    expect(withPohuy).toContain("Effective skill allowlist: `pohuy`.");
-  });
-
-  it("advertises imagegen instructions only with generate_image", () => {
-    const denied = externalGroupCapabilityInstructions(new Set(), new Set());
-    const granted = externalGroupCapabilityInstructions(new Set(["generate_image"]), new Set());
-    const scheduled = externalGroupCapabilityInstructions(new Set(["generate_image"]), new Set(), {
-      includeApplicationCore: true,
-      scheduledHistory: true,
-      scheduledRun: true,
-    });
-
-    expect(denied).not.toContain("skill=imagegen");
-    expect(granted).toContain("`load_skill` с `skill=imagegen`");
-    expect(granted).toContain("Effective skill allowlist: `imagegen`.");
-    expect(scheduled).not.toContain("skill=imagegen");
-    expect(scheduled).not.toContain("`generate_image`");
-  });
-
-  it("omits ungranted skill identifiers and includes explicitly granted installed skills", () => {
-    const markdown = externalGroupCapabilityInstructions(new Set(), new Set());
-
-    expect(markdown).not.toMatch(/`gws-[^`]+`/u);
-    expect(externalGroupCapabilityInstructions(new Set(), new Set(["gws-gmail"]))).toContain("skill=gws-gmail");
+  it("keeps a granted skill from carrying someone else's authorization", () => {
+    expect(externalGroupCapabilityInstructions({ includeApplicationCore: false }))
+      .toContain("A permitted skill does not grant anyone else's authorization");
   });
 });

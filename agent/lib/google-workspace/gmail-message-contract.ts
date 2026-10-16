@@ -24,18 +24,18 @@ const messageIdSchema = z.string().min(1).max(512).refine(
 
 const gmailMessageInputObject = z.object({
   action: z.enum(["trash", "delete", "restore", "mark_read", "mark_unread"]).describe(
-    "Точное изменение состояния, одинаковое для всех писем пачки",
+    "The exact state change, the same for all messages of the batch",
   ),
   messageIds: z.array(messageIdSchema).min(1).max(GMAIL_MESSAGE_BATCH_MAX).refine(
     (ids) => new Set(ids).size === ids.length,
     "messageIds не должны повторяться",
   ).describe(
-    `Точные Gmail message ID из результата чтения или поиска, от 1 до ${GMAIL_MESSAGE_BATCH_MAX} за вызов`,
+    `Exact Gmail message IDs from a read or search result, from 1 to ${GMAIL_MESSAGE_BATCH_MAX} per call`,
   ),
   profileRef: z.string().min(1).max(512).refine(
     isVisibleIdentifier,
     "profileRef должен состоять из видимых символов без пробелов",
-  ).describe("Точная ссылка на Google-профиль из результата чтения Gmail"),
+  ).describe("The exact reference to the Google profile from the Gmail read result"),
 }).strict();
 
 export type GmailMessageInput = z.infer<typeof gmailMessageInputObject>;

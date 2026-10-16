@@ -98,9 +98,9 @@ export async function executeReadFileOnSandbox(
 
 export const readFile = defineTool({
   description: [
-    "Прочитать текстовый файл рабочего окружения: filePath — абсолютный путь или путь от $HOME/. Несуществующий путь даёт ошибку.",
-    "За раз приходит до 2000 строк, начиная с offset (нумерация с 1); продолжение читай новым вызовом с большим offset. Каждая строка приходит с номером в виде `<номер>: <текст>`, строка длиннее 2000 символов обрезается.",
-    "Несколько файлов читай параллельными вызовами и не дроби файл на мелкие куски по 30 строк.",
+    "Read a text file of the working environment: filePath is an absolute path or a path starting with $HOME/. A missing path gives an error.",
+    "One call returns up to 2000 lines starting at offset (1-based); read further with a new call and a larger offset. Each line comes with its number as `<number>: <text>`; a line longer than 2000 characters is truncated.",
+    "Read several files with parallel calls and do not split a file into small 30-line slices.",
   ].join(" "),
   async execute(input, ctx) {
     return await executeReadFileOnSandbox(await ctx.getSandbox(), ctx.state, input);

@@ -213,10 +213,10 @@ describe("prepareTelegramMemoryReviewTurn", () => {
       },
     });
 
-    expect(result.durableMessage).toContain("Часть истории пропущена перед #4");
+    expect(result.durableMessage).toContain("Part of the history before #4 is omitted");
     expect(result.durableMessage).toContain("current-5");
     expect(result.durableMessage.indexOf("current-5")).toBeGreaterThan(
-      result.durableMessage.indexOf("Часть истории пропущена перед #4"),
+      result.durableMessage.indexOf("Part of the history before #4 is omitted"),
     );
   });
 });

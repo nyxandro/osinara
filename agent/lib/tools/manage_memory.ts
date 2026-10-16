@@ -38,9 +38,9 @@ export type ManageMemoryAction = (typeof MANAGE_MEMORY_ACTIONS)[number];
 const ACTION_DESCRIPTIONS: Readonly<Record<ManageMemoryAction, string>> = {
   delete: 'Delete payload: {"action":"delete","memoryRef":"mem_..."}.',
   edit:
-    'Edit payload: {"action":"edit","memoryRef":"mem_...","content":"Исправленный текст","kind":"preference","sensitivity":"normal"}. kind и sensitivity необязательны.',
+    'Edit payload: {"action":"edit","memoryRef":"mem_...","content":"Исправленный текст","kind":"preference","sensitivity":"normal"}. kind and sensitivity are optional.',
   undo:
-    'Undo используется только для немедленной отмены сохранения: {"action":"undo","memoryRef":"mem_..."}.',
+    'Use undo only to cancel a save immediately: {"action":"undo","memoryRef":"mem_..."}.',
 };
 
 export function manageMemoryPresentation(actions: readonly ManageMemoryAction[]) {
@@ -50,15 +50,15 @@ export function manageMemoryPresentation(actions: readonly ManageMemoryAction[])
   const mutableActions = actions.filter((action) => action !== "undo");
   return {
     description: [
-      "Управлять доступной записью долговременной памяти только через перечисленные операции.",
+      "Manage an available long-term memory record only through the listed operations.",
       mutableActions.length > 0
-        ? `Перед ${mutableActions.join("/")} сначала получи memoryRef через remember, search_memories или list_memories.`
+        ? `Before ${mutableActions.join("/")} first get the memoryRef through remember, search_memories or list_memories.`
         : null,
       canEdit
-        ? "Edit передаёт полную новую версию записи: обогащай или исправляй её, сохранив все актуальные детали исходного текста."
+        ? "Edit passes the full new version of the record: enrich or correct it, keeping all current details of the original text."
         : null,
       mutableActions.length > 0
-        ? "Самостоятельно не выполняй необоснованную мутацию, которая ухудшает точность, полноту либо будущую полезность памяти."
+        ? "Do not perform an unjustified mutation on your own that degrades the accuracy, completeness or future usefulness of memory."
         : null,
       ...MANAGE_MEMORY_ACTIONS
         .filter((action) => actions.includes(action))

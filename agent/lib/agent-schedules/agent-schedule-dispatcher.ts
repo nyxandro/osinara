@@ -67,11 +67,11 @@ function baseContinuationToken(job: ClaimedAgentSchedule): string {
 function scheduledRunPrompt(job: ClaimedAgentSchedule): string {
   // The model still receives a normal user message, but delivery handlers suppress progress.
   return [
-    "Выполни запланированный агентный сценарий для Telegram.",
-    "Не пиши промежуточные статусы и не описывай процесс. Итоговый ответ должен быть готовым сообщением для пользователя.",
-    `Если сценарий велит ничего не присылать, когда сообщить нечего, и сейчас именно такой случай, заверши запуск ровно строкой ${EMPTY_DELIVERY_MARKER} без другого текста: это успешный запуск без сообщения, а не ошибка. Так можно, только если в этом запуске ты ничего не отправил, в том числе файлом. Любая фраза вроде «новостей нет» уйдёт в чат сообщением.`,
-    "Если обязательной авторизации или данных не хватает, задай один понятный вопрос или сообщи конкретную ошибку.",
-    "Сбой одной зависимости не отменяет независимые части задания. В результате явно отдели проверенные сведения от недоступных разделов; не объявляй неполную задачу полностью выполненной.",
+    "Carry out the scheduled agent scenario for Telegram.",
+    "Do not write intermediate statuses and do not describe the process. The final answer must be a ready message for the user, in Russian.",
+    `If the scenario says to send nothing when there is nothing to report, and this is exactly such a case, end the run with exactly the line ${EMPTY_DELIVERY_MARKER} and no other text: this is a successful run without a message, not an error. This is allowed only if you sent nothing in this run, including as a file. Any phrase like "новостей нет" goes to the chat as a message.`,
+    "If required authorization or data is missing, ask one clear question or report the specific error.",
+    "A failure of one dependency does not cancel independent parts of the task. In the result, clearly separate verified facts from unavailable sections; do not declare an incomplete task fully completed.",
     "<scheduled_agent_run>",
     `schedule_id: ${job.id}`,
     `run_id: ${job.runId}`,
@@ -82,7 +82,7 @@ function scheduledRunPrompt(job: ClaimedAgentSchedule): string {
     `completed_runs: ${job.completedRuns}`,
     `execution_number: ${job.completedRuns + 1}`,
     `max_runs: ${job.maxRuns === null ? "unlimited" : job.maxRuns}`,
-    "execution_number — номер этого выполнения; тихий запуск без сообщения тоже считается выполнением. Используй его для нумерации; счётчик хранит планировщик. При max_runs он сам завершит расписание после последнего выполнения.",
+    "execution_number is the number of this run; a silent run without a message also counts as a run. Use it for numbering; the scheduler keeps the counter. With max_runs it ends the schedule itself after the last run.",
     "original_user_request:",
     job.userRequest,
     "scenario:",

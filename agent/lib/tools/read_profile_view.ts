@@ -16,7 +16,7 @@ export default defineTool({
   // Repeating it after a crash is safe: it only reads.
   replaySafe: true,
   description:
-    "Перечитать подборку сведений о людях из блока <verified_profile_view> по её profileViewRef, например когда блок обрезан или ушёл из контекста. Возвращает ту же подборку, новую не собирает.",
+    "Re-read the selection of facts about people from the <verified_profile_view> block by its profileViewRef, for example when the block was cut or has left the context. Returns the same selection and does not build a new one.",
   inputSchema: z.object({
     profileViewRef: z.string().regex(PROFILE_VIEW_REF_PATTERN),
   }).strict(),

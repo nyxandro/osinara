@@ -22,14 +22,14 @@ const EXTERNAL_GROUP_SANDBOX_ROOT = "/workspace/group";
 
 export default defineTool({
   description: [
-    "Когда использовать: скачать по явной просьбе одно разрешённое вложение зарегистрированной Telegram-группы в её workspace.",
-    "Не использовать: не передавай придуманный или полученный в другом чате attachmentId.",
-    "Вход: attachmentId только из <telegram_attachment_refs> или журнала текущей группы.",
-    "Результат: метаданные вложения и path, который затем передай в read_file или inspect_workspace_image.",
-    "Ошибка: при NOT_FOUND заново получи attachmentId через list_telegram_attachments или историю; transport failure автоматически не повторяй.",
+    "When to use: on an explicit request, download one permitted attachment of a registered Telegram group into its workspace.",
+    "When not to use: do not pass an invented attachmentId or one obtained in another chat.",
+    "Input: an attachmentId only from <telegram_attachment_refs> or the log of the current group.",
+    "Result: the attachment metadata and a path, which you then pass to read_file or inspect_workspace_image.",
+    "Error: on NOT_FOUND get the attachmentId again through list_telegram_attachments or the history; do not repeat a transport failure automatically.",
   ].join(" "),
   inputSchema: z.object({
-    attachmentId: z.uuid().describe("Обязательный UUID вложения из <telegram_attachment_refs> или журнала текущей группы"),
+    attachmentId: z.uuid().describe("The required attachment UUID from <telegram_attachment_refs> or the log of the current group"),
   }).strict(),
   async execute(input, ctx) {
     const payload = requireInputRecord(

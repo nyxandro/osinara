@@ -2,7 +2,8 @@
  * External Telegram group capability catalog.
  *
  * Exports:
- * - `EXTERNAL_GROUP_CAPABILITY_CATALOG`: persisted capabilities with model usage metadata.
+ * - `EXTERNAL_GROUP_CAPABILITY_CATALOG`: persisted capabilities; what each does is told to the model by its
+ *   own tool descriptor, not by this catalog.
  * - `SANDBOX_FILE_CAPABILITY_CATALOG`: same-name guarded runtime capabilities for group workspaces.
  * - Derived capability-name tuples used by validation and execution policy.
  * - `ExternalGroupToolName`: validated persisted allowlist value.
@@ -14,7 +15,6 @@ interface ExternalGroupCapability<Name extends string = string> {
   // Set when the capability only exists under one model provider, so the owner-facing grant surface
   // can drop it while persisted validation still recognizes a grant made under a previous provider.
   readonly subscriptionOnly?: true;
-  readonly usage: string;
 }
 
 function capabilityNames<const Catalog extends readonly ExternalGroupCapability[]>(
@@ -27,69 +27,29 @@ function capabilityNames<const Catalog extends readonly ExternalGroupCapability[
 
 // Persisted grants are action-level where one static descriptor contains distinct side effects.
 export const EXTERNAL_GROUP_CAPABILITY_CATALOG = [
-  { name: "bash", usage: "выполнять команды в изолированном окружении текущей группы с доступом только к её файлам и публичной сети" },
+  { name: "bash" },
   {
     name: "generate_image",
     subscriptionOnly: true,
-    usage: "создавать одно GPT-Image-2 изображение в workspace текущей группы и сразу отправлять его в текущий Telegram-чат",
   },
-  {
-    name: "import_telegram_attachment",
-    usage: "принимать и импортировать UTF-8 файлы TXT, Markdown, JSON, CSV, TSV, HTML, XML и YAML из сообщений текущей группы",
-  },
-  {
-    name: "inspect_workspace_image",
-    usage: "анализировать изображение, уже находящееся в workspace текущей группы",
-  },
-  { name: "list_memories", usage: "постранично читать память текущей группы" },
-  { name: "list_memory_threads", usage: "постранично читать нити памяти текущей группы" },
-  {
-    name: "list_group_history",
-    usage: "читать и фильтровать сохранённую историю текущей Telegram-группы",
-  },
-  {
-    name: "manage_memory.delete",
-    usage: "мягко удалить запись памяти текущей группы по безопасной ссылке memoryRef",
-  },
-  {
-    name: "manage_memory.edit",
-    usage: "изменить содержимое или классификацию записи памяти текущей группы по memoryRef",
-  },
-  {
-    name: "manage_memory.undo",
-    usage: "немедленно отменить только что выполненное сохранение памяти по возвращённому memoryRef",
-  },
-  {
-    name: "manage_memory_thread.complete",
-    usage: "явно завершить нить текущей группы по проверенному событию и source refs",
-  },
-  {
-    name: "manage_memory_thread.reactivate",
-    usage: "явно реактивировать завершённую нить текущей группы",
-  },
-  { name: "read_memory_thread", usage: "читать bounded source-backed историю нити текущей группы" },
-  { name: "remember", usage: "сохранить одну запись в память текущей группы" },
-  {
-    name: "remove_group_file",
-    usage: "после подтверждения безвозвратно удалить файл из workspace текущей группы",
-  },
-  {
-    name: "search_memories",
-    usage: "найти по словам и смыслу записи памяти текущей группы",
-  },
-  { name: "search_memory_threads", usage: "искать нити памяти текущей группы по смыслу" },
-  {
-    name: "send_voice_message",
-    usage: "по явной просьбе участника озвучить ответ через ElevenLabs и отправить его голосовым сообщением в текущий чат",
-  },
-  {
-    name: "send_workspace_file",
-    usage: "отправить файл из workspace в текущий Telegram-чат или тему",
-  },
-  {
-    name: "web_fetch",
-    usage: "безопасно загрузить текст HTTP(S)-страницы через контролируемый сетевой шлюз",
-  },
+  { name: "import_telegram_attachment" },
+  { name: "inspect_workspace_image" },
+  { name: "list_memories" },
+  { name: "list_memory_threads" },
+  { name: "list_group_history" },
+  { name: "manage_memory.delete" },
+  { name: "manage_memory.edit" },
+  { name: "manage_memory.undo" },
+  { name: "manage_memory_thread.complete" },
+  { name: "manage_memory_thread.reactivate" },
+  { name: "read_memory_thread" },
+  { name: "remember" },
+  { name: "remove_group_file" },
+  { name: "search_memories" },
+  { name: "search_memory_threads" },
+  { name: "send_voice_message" },
+  { name: "send_workspace_file" },
+  { name: "web_fetch" },
 ] as const satisfies readonly ExternalGroupCapability[];
 
 export const EXTERNAL_GROUP_TOOL_NAMES = capabilityNames(
@@ -112,10 +72,10 @@ export function isSubscriptionOnlyExternalGroupToolName(value: string): boolean 
 // Same-name wrappers preserve the native tools' contracts while adding live authorization and exact
 // group-root confinement. They remain baseline capabilities and need no persisted grant.
 export const SANDBOX_FILE_CAPABILITY_CATALOG = [
-  { name: "glob", usage: "найти пути файлов в /workspace/group по glob-шаблону" },
-  { name: "grep", usage: "найти текст внутри файлов в /workspace/group" },
-  { name: "read_file", usage: "прочитать файл из /workspace/group" },
-  { name: "write_file", usage: "создать или изменить файл в /workspace/group" },
+  { name: "glob" },
+  { name: "grep" },
+  { name: "read_file" },
+  { name: "write_file" },
 ] as const satisfies readonly ExternalGroupCapability[];
 
 export const ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES = capabilityNames(
@@ -123,10 +83,10 @@ export const ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES = capabilityNames(
 );
 
 export const EXTERNAL_GROUP_BASE_TOOLS = [
-  { name: "web_search", usage: "искать актуальную информацию в интернете с источниками" },
-  { name: "web_fetch", usage: "читать публичную страницу по ссылке" },
-  { name: "get_current_time", usage: "узнать текущую дату и время" },
-  { name: "todo", usage: "вести план шагов текущей задачи" },
+  { name: "web_search" },
+  { name: "web_fetch" },
+  { name: "get_current_time" },
+  { name: "todo" },
 ] as const;
 
 // Every tool is emitted per mode, so an external group never sees a descriptor it cannot use:

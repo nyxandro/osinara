@@ -233,16 +233,7 @@ export async function dispatchTelegramMessage(
   control.signal?.throwIfAborted();
   const auth = verifiedAuth(result.auth, control);
   const context = [
-    formatTelegramContextBlock({
-      botUsername: hooks.botUsername,
-      chatId: message.chat.id,
-      chatTitle: message.chat.title,
-      chatType: message.chat.type,
-      messageId: message.messageId,
-      messageThreadId: message.messageThreadId,
-      userId: message.from?.id,
-      username: message.from?.username,
-    }),
+    formatTelegramContextBlock({ messageId: message.messageId, messageThreadId: message.messageThreadId }),
     ...(result.context ?? []),
   ];
   const text = message.text || message.caption;

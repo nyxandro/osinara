@@ -112,32 +112,32 @@ const EXTERNAL_DIRECT_TOOL_PRESENTATION: Readonly<
   generate_image: EXTERNAL_IMAGE_GENERATION_TOOL_PRESENTATION,
   inspect_workspace_image: {
     description: [
-      "Проанализировать изображение текущей внешней группы по ровно одному источнику: attachmentId, telegramMessageId или path.",
-      "Для path передавай относительный путь внутри group scope, например photos/image.png, а не /workspace/group/photos/image.png.",
-      "Результат содержит analysis, path и scope; анализ не сохраняет Telegram bytes.",
+      "Analyze an image of the current external group from exactly one source: attachmentId, telegramMessageId or path.",
+      "For path pass a relative path inside the group scope, for example photos/image.png, not /workspace/group/photos/image.png.",
+      "The result contains analysis, path and scope; the analysis does not save Telegram bytes.",
     ].join(" "),
     inputSchema: z
       .object({
         attachmentId: z.uuid().optional(),
         path: z.string().min(1).max(EXTERNAL_IMAGE_PATH_MAX_LENGTH).optional(),
         question: z.string().min(1).max(EXTERNAL_MODEL_TEXT_MAX_LENGTH),
-        scope: z.literal("group").describe("Область текущей внешней группы"),
+        scope: z.literal("group").describe("The scope of the current external group"),
         telegramMessageId: z.string().regex(/^\d+$/u).optional(),
       })
       .strict(),
   },
   import_telegram_attachment: {
     description:
-      "Скачать разрешённый UTF-8 файл TXT, Markdown, JSON, CSV, TSV, HTML, XML или YAML из сообщения текущей внешней группы в /workspace/group; после импорта прочитай возвращённый path через read_file.",
+      "Download a permitted UTF-8 TXT, Markdown, JSON, CSV, TSV, HTML, XML or YAML file from a message of the current external group into /workspace/group; after the import read the returned path through read_file.",
     inputSchema: z
       .object({
-        attachmentId: z.uuid().describe("Opaque attachmentId из текущего сообщения или истории группы"),
+        attachmentId: z.uuid().describe("An opaque attachmentId from the current message or the group history"),
       })
       .strict(),
   },
   list_memories: {
     description:
-      "Постранично показать записи долговременной памяти текущей внешней группы. Результат: {items,nextCursor}; если nextCursor не null, передай его без изменений в следующий вызов.",
+      "List the long-term memory records of the current external group page by page. Result: {items,nextCursor}; if nextCursor is not null, pass it unchanged in the next call.",
     inputSchema: z.object({
       cursor: z.string().optional(),
       limit: z.number().int().min(1).max(MEMORY_LIST_MAX_LIMIT).default(MEMORY_LIST_DEFAULT_LIMIT),
@@ -146,7 +146,7 @@ const EXTERNAL_DIRECT_TOOL_PRESENTATION: Readonly<
   },
   list_memory_threads: {
     description:
-      "Постранично показать нити памяти текущей внешней группы без полной истории. Результат: {items,nextCursor}; threadRef бери только из items, а nextCursor передавай без изменений.",
+      "List the memory threads of the current external group page by page, without their full history. Result: {items,nextCursor}; take threadRef only from items and pass nextCursor unchanged.",
     inputSchema: z
       .object({
         cursor: z.string().regex(THREAD_REF_PATTERN).optional(),
@@ -158,12 +158,12 @@ const EXTERNAL_DIRECT_TOOL_PRESENTATION: Readonly<
   },
   remember: {
     description:
-      "Сохранить одно конкретное сведение из текущего сообщения или одного проверенного sourceSequence видимой дельты в память текущей внешней группы: факт, предпочтение, личный опыт, событие, план или полезную ссылку с контекстом. Не требуй особой важности или просьбы запомнить; не сохраняй догадки.",
+      "Save one specific fact from the current message or from one verified sourceSequence of the visible delta into the current external group's memory: a fact, a preference, first-hand experience, an event, a plan or a useful link with context. Do not require special importance or a request to remember; do not save guesses.",
     inputSchema: externalRememberInputSchema,
   },
   send_workspace_file: {
     description:
-      "Отправить существующий файл из group workspace в текущий Telegram-чат или тему внешней группы. path всегда относительный внутри group scope, например reports/result.pdf; не передавай /workspace/group. Результат delivered=true подтверждает отправку; при sideEffectStatus completed или unknown не отправляй повторно.",
+      "Send an existing file from the group workspace to the current Telegram chat or topic of the external group. path is always relative inside the group scope, for example reports/result.pdf; do not pass /workspace/group. The result delivered=true confirms the sending; with sideEffectStatus completed or unknown do not send again.",
     inputSchema: z
       .object({
         caption: z.string().max(EXTERNAL_FILE_CAPTION_MAX_LENGTH).optional(),
@@ -171,9 +171,9 @@ const EXTERNAL_DIRECT_TOOL_PRESENTATION: Readonly<
           .string()
           .min(1)
           .max(EXTERNAL_IMAGE_PATH_MAX_LENGTH)
-          .describe("Относительный путь внутри group workspace, например reports/result.pdf"),
+          .describe("A relative path inside the group workspace, for example reports/result.pdf"),
         presentation: z.enum(["document", "photo"]),
-        scope: z.literal("group").describe("Workspace текущей внешней группы"),
+        scope: z.literal("group").describe("The workspace of the current external group"),
       })
       .strict(),
   },

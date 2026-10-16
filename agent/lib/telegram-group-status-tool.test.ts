@@ -177,9 +177,9 @@ describe("manage_telegram_group.status", () => {
   it("requires status before replacing an unknown current policy", () => {
     const instructions = modeInstructions({ environment: "private" });
 
-    expect(instructions).toContain("Перед `update_policy` или `update_skills` сначала вызови");
+    expect(instructions).toContain("Before `update_policy` or `update_skills`, first call");
     expect(instructions).toContain("`{\"action\":\"status\"}`");
-    expect(instructions).toContain("команду `/status`");
-    expect(instructions).toContain("одним сообщением");
+    expect(instructions).toContain("the `/status` command");
+    expect(instructions).toContain("in one message");
   });
 });

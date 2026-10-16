@@ -55,16 +55,16 @@ const TOP_LEVEL_FIELDS = [
 const manageAgentScheduleSchema = z.object({
   maxRuns: agentScheduleMaxRunsField.optional(),
   action: z.enum(TOOL_ACTIONS),
-  executionContext: z.enum(EXECUTION_CONTEXTS).optional().describe("Только в create: conversation или isolated."),
-  firstRunAt: z.string().optional().describe("Только в create: первый запуск, например 2026-07-15T23:33:00+03:00."),
-  id: z.string().optional().describe("id из list_agent_schedules; для всех действий, кроме create."),
-  nextRunAt: z.string().optional().describe("Только в update: новое время следующего запуска с UTC offset."),
+  executionContext: z.enum(EXECUTION_CONTEXTS).optional().describe("Only in create: conversation or isolated."),
+  firstRunAt: z.string().optional().describe("Only in create: the first run, for example 2026-07-15T23:33:00+03:00."),
+  id: z.string().optional().describe("The id from list_agent_schedules; for every action except create."),
+  nextRunAt: z.string().optional().describe("Only in update: the new time of the next run with a UTC offset."),
   recurrence: agentScheduleRecurrenceSchema.optional(),
-  scenarioPrompt: z.string().max(AGENT_SCHEDULE_PROMPT_MAX_LENGTH).optional().describe("Задание агенту на каждый запуск."),
-  scope: z.enum(SCOPES).optional().describe("Только в create."),
-  timezone: z.string().max(AGENT_SCHEDULE_TIMEZONE_MAX_LENGTH).optional().describe("Только в create: IANA, например Europe/Moscow."),
-  title: z.string().max(AGENT_SCHEDULE_TITLE_MAX_LENGTH).optional().describe("Короткое название для списка расписаний."),
-  userRequest: z.string().max(AGENT_SCHEDULE_USER_REQUEST_MAX_LENGTH).optional().describe("Исходная просьба человека."),
+  scenarioPrompt: z.string().max(AGENT_SCHEDULE_PROMPT_MAX_LENGTH).optional().describe("The task for the agent on every run."),
+  scope: z.enum(SCOPES).optional().describe("Only in create."),
+  timezone: z.string().max(AGENT_SCHEDULE_TIMEZONE_MAX_LENGTH).optional().describe("Only in create: IANA, for example Europe/Moscow."),
+  title: z.string().max(AGENT_SCHEDULE_TITLE_MAX_LENGTH).optional().describe("A short name for the list of schedules."),
+  userRequest: z.string().max(AGENT_SCHEDULE_USER_REQUEST_MAX_LENGTH).optional().describe("The person's original request."),
 }).strict();
 
 function inputError(message: string): never {
@@ -359,18 +359,18 @@ function requireManageAgentScheduleInput(input: unknown) {
 }
 
 const TOOL_DESCRIPTION = [
-  "Создать, изменить, приостановить, возобновить, запустить сейчас или удалить агентное расписание: в заданное время запускается агент со сценарием и присылает итог.",
-  "Это не напоминание с готовым текстом, для него есть manage_reminder. Существующее расписание сначала найди через list_agent_schedules.",
-  "Явной просьбы пользователя достаточно: выполняй без дополнительного подтверждения. Уточняй только недостающие или неоднозначные данные.",
-  "Create payload: {\"action\":\"create\",\"executionContext\":\"isolated\",\"title\":\"Дайджест: новые модели ИИ\",\"firstRunAt\":\"2026-07-15T23:33:00+03:00\",\"timezone\":\"Europe/Moscow\",\"recurrence\":{\"kind\":\"daily\",\"interval\":1},\"scope\":\"personal\",\"scenarioPrompt\":\"Что собрать, источники, фильтры, формат итогового сообщения и когда не присылать пустой отчет\",\"userRequest\":\"ежедневно в 23:33 МСК получать сводку\"}.",
-  "executionContext обязателен в create: conversation — пробуждение в этом разговоре со всей историей, чтобы продолжить текущую задачу, maxRuns тогда обязателен; isolated — отдельный запуск с пустым контекстом для самостоятельных отчётов.",
-  "Update передаёт id и только реально изменяемые поля; firstRunAt, timezone, scope и executionContext в update не передавай. Pause, resume, run_now и delete передают только action и id.",
+  "Create, change, pause, resume, run now or delete an agent schedule: at the set time the agent runs with a scenario and sends the result.",
+  "This is not a reminder with ready-made text; that is manage_reminder. Find an existing schedule through list_agent_schedules first.",
+  "An explicit user request is enough: do it without additional confirmation. Ask only for missing or ambiguous data.",
+  "Create payload: {\"action\":\"create\",\"executionContext\":\"isolated\",\"title\":\"Дайджест: новые модели ИИ\",\"firstRunAt\":\"2026-07-15T23:33:00+03:00\",\"timezone\":\"Europe/Moscow\",\"recurrence\":{\"kind\":\"daily\",\"interval\":1},\"scope\":\"personal\",\"scenarioPrompt\":\"What to collect, the sources, filters, the format of the final message and when not to send an empty report\",\"userRequest\":\"ежедневно в 23:33 МСК получать сводку\"}.",
+  "executionContext is required in create: conversation is a wake-up in this conversation with the whole history to continue the current task, and then maxRuns is required; isolated is a separate run with an empty context for independent reports.",
+  "Update passes id and only the fields that actually change; do not pass firstRunAt, timezone, scope or executionContext in update. Pause, resume, run_now and delete pass only action and id.",
   AGENT_SCHEDULE_PAUSE_NOTE,
-  "Для паузы из самого сценария используй schedule_id из scheduled_agent_run.",
-  "Не удаляй и не пересоздавай расписание для изменения времени, повторения, заголовка, сценария или исходной просьбы: используй update, сохраняя существующий id.",
-  "Recurrence: once = {\"kind\":\"once\"}; повтор = {\"kind\":\"hourly\",\"interval\":1}. kind: minutely, hourly, daily, monthly, yearly означает каждые N минут, часов, дней, месяцев, лет. interval целый от 1 до 365; минимальный период 1 минута. Для недель передай {\"kind\":\"weekly\",\"interval\":1,\"daysOfWeek\":[1,2,3,4,5]}, ISO 1=понедельник ... 7=воскресенье.",
-  "Как отсчитываются повторы, описано в правилах сценариев.",
-  "firstRunAt и nextRunAt всегда ISO datetime с UTC offset. timezone всегда IANA, например Europe/Moscow. scope: personal только в личном чате, family только в зарегистрированной семейной группе.",
+  "To pause from the scenario itself, use schedule_id from scheduled_agent_run.",
+  "Do not delete and re-create a schedule to change the time, recurrence, title, scenario or original request: use update, keeping the existing id.",
+  "Recurrence: once = {\"kind\":\"once\"}; a repeat = {\"kind\":\"hourly\",\"interval\":1}. kind: minutely, hourly, daily, monthly, yearly means every N minutes, hours, days, months, years. interval is an integer from 1 to 365; the minimum period is 1 minute. For weeks pass {\"kind\":\"weekly\",\"interval\":1,\"daysOfWeek\":[1,2,3,4,5]}, ISO 1=Monday ... 7=Sunday.",
+  "How repeats are counted is described in the scenario rules.",
+  "firstRunAt and nextRunAt are always an ISO datetime with a UTC offset. timezone is always IANA, for example Europe/Moscow. scope: personal only in a private chat, family only in a registered family group.",
 ].join(" ");
 
 export default defineTool({

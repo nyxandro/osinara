@@ -37,18 +37,18 @@ describe("Telegram group history", () => {
       properties?: Record<string, { description?: string }>;
     };
 
-    expect(description).toContain("не семантический поиск");
-    expect(description).toContain("объединяются через AND");
-    expect(description).toContain("один вызов на model step");
+    expect(description).toContain("not a semantic search");
+    expect(description).toContain("combined with AND");
+    expect(description).toContain("one call per model step");
     expect(description).toContain('{"beforeSequence":"320","limit":3}');
-    expect(schema.properties?.query?.description).toContain("буквальная подстрока");
-    expect(schema.properties?.participant?.description).toContain("username участника");
-    expect(schema.properties?.beforeSequence?.description).toContain("строго меньше");
-    expect(schema.properties?.sequenceFrom?.description).toContain("включительно");
-    expect(schema.properties?.sequenceTo?.description).toContain("включительно");
-    expect(schema.properties?.from?.description).toContain("включительно");
-    expect(schema.properties?.to?.description).toContain("включительно");
-    expect(schema.properties?.limit?.description).toContain("после применения всех фильтров");
+    expect(schema.properties?.query?.description).toContain("literal substring");
+    expect(schema.properties?.participant?.description).toContain("exact username");
+    expect(schema.properties?.beforeSequence?.description).toContain("strictly less");
+    expect(schema.properties?.sequenceFrom?.description).toContain("inclusive");
+    expect(schema.properties?.sequenceTo?.description).toContain("inclusive");
+    expect(schema.properties?.from?.description).toContain("inclusive");
+    expect(schema.properties?.to?.description).toContain("inclusive");
+    expect(schema.properties?.limit?.description).toContain("after all filters");
   });
 
   it.each([
@@ -58,13 +58,12 @@ describe("Telegram group history", () => {
       modeInstructions({
         capabilities: new Set(["list_group_history"]),
         environment: "external",
-        skills: new Set(),
       }),
     ],
   ] as const)("forbids parallel history calls in the %s mode instructions", (_mode, instructions) => {
-    expect(instructions).toContain("Не вызывай `list_group_history` параллельно");
-    expect(instructions).toContain("дождись результата текущего вызова");
-    expect(instructions).toContain("не приписывай результат другому набору фильтров");
+    expect(instructions).toContain("Do not call `list_group_history` several times in parallel");
+    expect(instructions).toContain("wait for the result of the current call");
+    expect(instructions).toContain("do not attribute a result to another set of filters");
   });
 
   it("uses the whole current verified family group without exposing a model scope", () => {

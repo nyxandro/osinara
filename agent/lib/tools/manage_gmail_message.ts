@@ -37,11 +37,11 @@ export default defineTool({
     return groupApprovalDenial({ session }) ?? "user-approval";
   },
   description: [
-    `Изменить состояние до ${GMAIL_MESSAGE_BATCH_MAX} точных Gmail-писем одним вызовом: корзина, удаление навсегда, восстановление, прочитано или непрочитано.`,
-    "Только по прямой просьбе пользователя; messageIds и profileRef копируй без изменений из результата Gmail. «Удали» без слова «навсегда» означает trash.",
-    `Все выбранные письма передавай одним вызовом, не по одному; если их больше ${GMAIL_MESSAGE_BATCH_MAX}, обработай первые ${GMAIL_MESSAGE_BATCH_MAX} и спроси, продолжать ли. Не для чтения и поиска.`,
-    "Osinara сама покажет отправителей и темы в обязательном подтверждении: не пересказывай список в чате и не спрашивай подтверждение текстом, если пользователь сам не просил показать список.",
-    "Выполнено для всей пачки только при completed=true; не повторяй автоматически.",
+    `Change the state of up to ${GMAIL_MESSAGE_BATCH_MAX} exact Gmail messages in one call: trash, delete forever, restore, mark read or unread.`,
+    "Only on the user's direct request; copy messageIds and profileRef unchanged from the Gmail result. \"Удали\" without the word \"навсегда\" means trash.",
+    `Pass all selected messages in one call, not one by one; if there are more than ${GMAIL_MESSAGE_BATCH_MAX}, process the first ${GMAIL_MESSAGE_BATCH_MAX} and ask whether to continue. Not for reading or searching.`,
+    "Osinara itself shows the senders and subjects in the mandatory confirmation: do not retell the list in the chat and do not ask for confirmation in text unless the user asked to show the list.",
+    "Done for the whole batch only with completed=true; do not repeat automatically.",
   ].join(" "),
   inputSchema: gmailMessageInputSchema,
   async execute(input, ctx) {

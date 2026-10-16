@@ -339,8 +339,8 @@ export const GREP_INPUT_SCHEMA = z.strictObject({
 
 export const grep = defineTool({
   description: [
-    'Найти текст внутри файлов по регулярному выражению или, с literal=true, по точной строке. Отобрать файлы по имени можно полем glob, например "*.md".',
-    "Возвращает совпавшие строки с путём и номером строки; строка длиннее 2000 символов обрезается. Файлы по имени ищи через glob. Независимые поиски запускай параллельно.",
+    'Find text inside files by a regular expression or, with literal=true, by an exact string. Narrow the files by name with the glob field, for example "*.md".',
+    "Returns matching lines with the path and line number; a line longer than 2000 characters is truncated. Find files by name with glob. Run independent searches in parallel.",
   ].join(" "),
   async execute(input, ctx) {
     return await executeGrepOnSandbox(await ctx.getSandbox(), input);

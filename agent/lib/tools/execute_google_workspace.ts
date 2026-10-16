@@ -18,7 +18,7 @@ export { createGoogleWorkspaceExecutor } from "../google-workspace/google-worksp
 
 const commandSchema = z.object({
   argv: z.array(z.string().min(1).max(64 * 1024)).min(1).max(128).describe(
-    "Точные аргументы gws без имени бинарника и shell quoting; API resource и method передаются отдельными элементами",
+    "Exact gws arguments without the binary name or shell quoting; the API resource and method go as separate elements"
   ),
 }).strict();
 
@@ -39,7 +39,7 @@ export default defineTool({
     }
   },
   description:
-    "Выполнить разрешённую команду Google Workspace в текущем personal/family профиле. Это единственный путь запуска gws; в Bash бинарника и Google-профиля нет. Передайте точный argv без gws. Для непрочитанной почты: [\"gmail\",\"+triage\",\"--max\",\"20\",\"--labels\"]. Для календаря: [\"calendar\",\"+agenda\",\"--today\"] (период и timezone задайте по задаче). Знак + обязателен у helper. API resource и method передавайте отдельными элементами: [\"gmail\",\"users\",\"messages\",\"list\",\"--params\",\"{\\\"userId\\\":\\\"me\\\",\\\"q\\\":\\\"is:unread\\\"}\"]. Справка: [\"schema\",\"gmail.users.messages.list\"] или [\"schema\",\"calendar.events.list\"]. Состояние Gmail-писем изменяй только через manage_gmail_message: все выбранные письма одним вызовом, до 30 messageId, вместе с profileRef из результата чтения без изменений. Mutation автоматически требует подтверждения человека со всеми аргументами и должна занимать не более 3000 символов в JSON-представлении. Файловые аргументы недоступны.",
+    "Run a permitted Google Workspace command in the current personal/family profile. This is the only way to run gws; Bash has neither the binary nor the Google profile. Pass the exact argv without gws. For unread mail: [\"gmail\",\"+triage\",\"--max\",\"20\",\"--labels\"]. For the calendar: [\"calendar\",\"+agenda\",\"--today\"] (set the period and timezone by the task). The + sign is required for a helper. Pass the API resource and method as separate elements: [\"gmail\",\"users\",\"messages\",\"list\",\"--params\",\"{\\\"userId\\\":\\\"me\\\",\\\"q\\\":\\\"is:unread\\\"}\"]. Help: [\"schema\",\"gmail.users.messages.list\"] or [\"schema\",\"calendar.events.list\"]. Change the state of Gmail messages only through manage_gmail_message: all selected messages in one call, up to 30 messageIds, together with the profileRef from the read result unchanged. A mutation automatically requires a person's confirmation with all arguments and must take no more than 3000 characters in its JSON form. File arguments are unavailable.",
   inputSchema: commandSchema,
   async execute(input, ctx) {
     classifyModelFacingGoogleWorkspaceCommand(input.argv);

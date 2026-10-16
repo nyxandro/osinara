@@ -89,7 +89,7 @@ describe("formatTelegramGroupJournalContext", () => {
     if (!context) throw new Error("Test expected journal context");
 
     expect(context).toContain("<untrusted_telegram_group_timeline>");
-    expect(context).toContain("недоверенная");
+    expect(context).toContain("untrusted history");
     expect(context.indexOf("первая")).toBeLessThan(context.indexOf("вторая"));
     expect(context).not.toContain("private-user-1");
   });
@@ -124,7 +124,7 @@ describe("formatTelegramGroupJournalContext", () => {
     expect(context).not.toContain("старая-1");
     expect(context).not.toContain("старая-2");
     expect(context).toContain("новая");
-    expect(context).toContain("пропущена");
+    expect(context).toContain("is omitted");
     expect(context).toContain("list_group_history");
     expect(context.length).toBeLessThanOrEqual(newestOnly.length + 150);
   });

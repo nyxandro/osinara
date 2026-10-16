@@ -107,10 +107,10 @@ describe("memory review model surface", () => {
 
   it("states the exact silent and source-backed review contract", () => {
     const instructions = memoryReviewInstructions("family");
-    expect(instructions).toContain("не более 50");
+    expect(instructions).toContain("no more than 50");
     expect(instructions).toContain("<memory_review_source_selection>");
     expect(instructions).toContain("sourceSequence");
-    expect(instructions).toContain("Не отправляй ответ в Telegram");
+    expect(instructions).toContain("Do not send an answer to Telegram");
     expect(instructions).toContain("sensitivity: normal");
     expect(instructions).not.toMatch(/[—–«»]/u);
   });

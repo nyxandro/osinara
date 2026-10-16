@@ -92,7 +92,6 @@ describe("mode block resolution", () => {
     const resolve = createModeBlockResolver({
       loadCapabilities: vi.fn().mockResolvedValue(new Set()),
       loadReactionPolicy: reactionPolicy,
-      loadSkills: vi.fn().mockResolvedValue(new Set()),
     });
     const scheduledCurrent = auth({ ...externalAuth.current!.attributes, scheduledRunId: "run-1" });
 
@@ -125,7 +124,6 @@ describe("mode block resolution", () => {
     const resolve = (capabilities: ReadonlySet<ExternalGroupToolName>) => createModeBlockResolver({
       loadCapabilities: vi.fn().mockResolvedValue(capabilities),
       loadReactionPolicy: reactionPolicy,
-      loadSkills: vi.fn().mockResolvedValue(new Set()),
     });
     const grantedAuth = auth({
       ...externalAuth.current!.attributes,
@@ -139,17 +137,15 @@ describe("mode block resolution", () => {
 
     expect(withoutGrant).not.toContain("send_voice_message");
     expect(groupRoot).toContain(VOICE_MESSAGE_RULES);
-    expect(groupRoot).toContain("`send_voice_message`: по явной просьбе");
-    expect(groupRoot).toContain("- отвечать голосовым сообщением");
+    expect(groupRoot).toContain("- answer with a voice message");
     expect(groupChild).not.toContain("send_voice_message");
-    expect(groupChild).not.toContain("голосовым сообщением");
+    expect(groupChild).not.toContain("voice message");
   });
 
   it("keeps every transport directive away from a subagent child", async () => {
     const resolve = createModeBlockResolver({
       loadCapabilities: vi.fn().mockResolvedValue(new Set()),
       loadReactionPolicy: vi.fn().mockResolvedValue({ allowsAll: false, emoji: ["👍", "🔥"] }),
-      loadSkills: vi.fn().mockResolvedValue(new Set()),
     });
 
     const root = await resolve(context(externalAuth));
@@ -170,26 +166,24 @@ describe("mode block resolution", () => {
     const resolve = createModeBlockResolver({
       loadCapabilities: vi.fn(),
       loadReactionPolicy: reactionPolicy,
-      loadSkills: vi.fn(),
     });
 
     const markdown = await resolve(context(privateAuth));
 
-    expect(markdown).toContain("# Текущий режим: личный чат");
+    expect(markdown).toContain("# Current mode: private chat");
   });
 
   it("returns an explicit fail-closed block instead of throwing on invalid auth", async () => {
     const resolve = createModeBlockResolver({
       loadCapabilities: vi.fn(),
       loadReactionPolicy: reactionPolicy,
-      loadSkills: vi.fn(),
     });
 
     const markdown = await resolve(context({ current: null, initiator: null }));
 
     expect(markdown).toContain("AGENT_CONVERSATION_ENVIRONMENT_INVALID");
     expect(markdown).toContain("<current_conversation_environment>");
-    expect(markdown).not.toContain("# Текущий режим: личный чат");
+    expect(markdown).not.toContain("# Current mode: private chat");
   });
 
   it("degrades to an empty allowlist when the live capability lookup fails", async () => {
@@ -197,7 +191,6 @@ describe("mode block resolution", () => {
     const resolve = createModeBlockResolver({
       loadCapabilities,
       loadReactionPolicy: reactionPolicy,
-      loadSkills: vi.fn().mockResolvedValue(new Set()),
     });
 
     const markdown = await resolve(context(externalAuth));
@@ -216,7 +209,6 @@ describe("mode block resolution", () => {
     const resolve = createModeBlockResolver({
       loadCapabilities: vi.fn().mockRejectedValue(new Error("database unavailable")),
       loadReactionPolicy: reactionPolicy,
-      loadSkills: vi.fn().mockResolvedValue(new Set()),
     });
 
     const markdown = await resolve(context(scheduledAuth));
@@ -234,7 +226,6 @@ describe("mode block resolution", () => {
     const resolve = createModeBlockResolver({
       loadCapabilities: vi.fn().mockResolvedValue(new Set()),
       loadReactionPolicy: reactionPolicy,
-      loadSkills: vi.fn().mockResolvedValue(new Set()),
     });
 
     const markdown = await resolve(context(scheduledAuth));
@@ -247,7 +238,6 @@ describe("mode block resolution", () => {
     const resolve = createModeBlockResolver({
       loadCapabilities,
       loadReactionPolicy: reactionPolicy,
-      loadSkills: vi.fn().mockResolvedValue(new Set()),
     });
 
     const markdown = await resolve(context(externalAuth));
@@ -263,45 +253,27 @@ describe("mode block resolution", () => {
     const resolve = createModeBlockResolver({
       loadCapabilities,
       loadReactionPolicy: reactionPolicy,
-      loadSkills: vi.fn().mockResolvedValue(new Set()),
     });
 
     const markdown = await resolve(context(externalAuth));
 
+    // The granted remember surfaces through its memory contract; tools are not listed again.
     expect(markdown).toContain("`remember`");
-    expect(markdown).toContain("`web_fetch`");
-  });
-
-  it("matches the external skill prompt to the current persisted grants", async () => {
-    const loadSkills = vi.fn().mockResolvedValue(new Set(["pohuy"]));
-    const resolve = createModeBlockResolver({
-      loadCapabilities: vi.fn().mockResolvedValue(new Set()),
-      loadReactionPolicy: reactionPolicy,
-      loadSkills,
-    });
-
-    const markdown = await resolve(context(externalAuth));
-
-    expect(loadSkills).toHaveBeenCalledWith("group-1");
-    expect(markdown).toContain("`load_skill` с `skill=pohuy`");
   });
 
   it("does not describe human capabilities or skills to a channel actor", async () => {
     const loadCapabilities = vi.fn().mockResolvedValue(new Set(["remember"]));
-    const loadSkills = vi.fn().mockResolvedValue(new Set(["pohuy"]));
     const resolve = createModeBlockResolver({
       loadCapabilities,
       loadReactionPolicy: reactionPolicy,
-      loadSkills,
     });
 
     const markdown = await resolve(context(channelAuth));
 
     expect(loadCapabilities).not.toHaveBeenCalled();
-    expect(loadSkills).not.toHaveBeenCalled();
     // The text-only channel surface must not gain a reaction it could apply to a channel post.
     expect(reactionPolicy).not.toHaveBeenCalled();
-    expect(markdown).not.toContain("## Реакция вместо сообщения");
+    expect(markdown).not.toContain("## A reaction instead of a message");
     expect(markdown).not.toContain("`remember`");
     expect(markdown).not.toContain("`load_skill`");
   });
@@ -338,7 +310,7 @@ describe("memory block resolution", () => {
       TEST_TURN_ID,
     );
 
-    expect(markdown).toContain("активный pipeline текущей реализации");
+    expect(markdown).toContain("active pipeline of the current implementation");
   });
 
   it("drops the lowest-ranked records when the block outgrows its budget and counts them", async () => {
@@ -582,7 +554,7 @@ describe("memory block resolution", () => {
     );
 
     expect(markdown).toContain("AGENT_MEMORY_UNAVAILABLE");
-    expect(markdown).not.toContain("активный pipeline текущей реализации");
+    expect(markdown).not.toContain("active pipeline of the current implementation");
   });
 
   it("discloses unavailable memory instead of throwing on retrieval failure", async () => {

@@ -17,10 +17,10 @@ export const EXTERNAL_IMAGE_GENERATION_TOOL_PRESENTATION: Pick<
   "description" | "inputSchema"
 > = {
   description: [
-    "Создать одно raster-изображение через GPT-Image-2, сохранить его в group workspace и сразу отправить как photo в текущую внешнюю группу.",
-    "В prompt опиши назначение, сцену, объект, композицию, стиль и запреты. Для unspecified size, quality или background передай auto.",
-    "Не используй для SVG, code-native диаграмм, редактирования существующего файла или фоновой генерации.",
-    "Если ошибка сообщает unknown status, не повторяй вызов автоматически: лимит подписки мог быть списан.",
+    "Create one raster image through GPT-Image-2, save it in the group workspace and send it right away as a photo to the current external group.",
+    "In prompt describe the purpose, scene, object, composition, style and exclusions. For an unspecified size, quality or background pass auto.",
+    "Do not use it for SVG, code-native diagrams, editing an existing file or background generation.",
+    "If the error reports an unknown status, do not repeat the call automatically: the subscription limit may have been spent.",
   ].join(" "),
   inputSchema: z.object({
     background: z.enum(["transparent", "opaque", "auto"]),

@@ -43,9 +43,9 @@ export async function executeTodoTool(
 
 export const todo = defineTool({
   description: [
-    "Вести список шагов длинной задачи в этом разговоре: нужен, когда в задаче три и больше отдельных шагов или человек дал сразу несколько поручений. Для простого вопроса или одного действия не нужен.",
-    "Вызов с todos полностью заменяет список, без todos читает текущий; оба возвращают весь список со счётчиками.",
-    "Отмечай шаг in_progress, когда начинаешь, и completed, когда закончил; в работе одновременно только один шаг.",
+    "Keep a list of steps of a long task in this conversation: needed when the task has three or more separate steps or the person gave several instructions at once. Not needed for a simple question or a single action.",
+    "A call with todos fully replaces the list, a call without todos reads the current one; both return the whole list with counters.",
+    "Mark a step in_progress when you start it and completed when it is done; only one step is in progress at a time.",
   ].join(" "),
   async execute(input, ctx) {
     return await executeTodoTool(ctx.state, input ?? {});

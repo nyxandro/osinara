@@ -39,7 +39,7 @@ function reviewRemember(scope: MemoryScope): AnyTool {
     ...definition,
     approval: () => "not-applicable",
     description:
-      "Сохранить одно конкретное сведение из сообщения sourceSequence текущего тихого batch: факт, предпочтение, личный опыт, событие, план или полезную ссылку с контекстом. Особая важность не требуется, догадки запрещены. Чувствительные сведения здесь не сохраняются.",
+      "Save one specific fact from the sourceSequence message of the current silent batch: a fact, a preference, first-hand experience, an event, a plan or a useful link with context. Special importance is not required, guesses are forbidden. Sensitive facts are not saved here.",
     inputSchema: reviewRememberSchema(scope),
     async execute(input, ctx) {
       if (ctx.session.auth.current?.attributes.groupType === "external") {

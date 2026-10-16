@@ -38,10 +38,10 @@ export function isPauseOnlyUpdate(input: AgentScheduleUpdateInput): boolean {
  * last sentence says the schedule already counts.
  */
 export const agentScheduleMaxRunsField = agentScheduleMaxRunsSchema.describe(
-  "Лимит успешных запусков в create/update, включая тихие без сообщения: «10 раз» — maxRuns:10. " +
-    "Без поля повтор не ограничен, null снимает лимит. Пауза, resume и run_now лимит не сбрасывают; " +
-    "достигнув его, расписание завершается само, вести счётчик запусков в файле не нужно.",
+  "The limit of successful runs in create/update, including silent ones without a message: \"10 раз\" means maxRuns:10. " +
+    "Without the field the repeat is unlimited, null removes the limit. Pause, resume and run_now do not reset the limit; " +
+    "once reached, the schedule ends by itself, there is no need to keep a run counter in a file.",
 );
 
 export const AGENT_SCHEDULE_PAUSE_NOTE =
-  "Pause во время запуска возвращает pauseRequested:true: текущий запуск доработает, следующие отключены.";
+  "Pause during a run returns pauseRequested:true: the current run finishes, the following ones are disabled.";

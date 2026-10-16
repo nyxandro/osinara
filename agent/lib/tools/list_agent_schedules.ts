@@ -18,9 +18,9 @@ export default defineTool({
   // Repeating it after a crash is safe: it only reads.
   replaySafe: true,
   description: [
-    "Постранично показать личные и семейные агентные расписания текущего пользователя.",
-    "Результат: {items,nextCursor}; если nextCursor не null, передай его без изменений для следующей страницы.",
-    "Используй для проверки последнего запуска перед объяснением сбоя. lastRun.executionStatus — состояние исполнения, deliveredAt — факт доставки; completed без deliveredAt — сценарий сознательно промолчал; taskOutcome=not_verified не подтверждает выполнение требований. diagnostics содержит только наблюдавшиеся ошибки, которые сами по себе не доказывают провал всей задачи. Время для пользователя бери из nextRunAtLocal и lastRun.scheduledForLocal.",
+    "List the current user's personal and family agent schedules page by page.",
+    "Result: {items,nextCursor}; if nextCursor is not null, pass it unchanged for the next page.",
+    "Use it to check the last run before explaining a failure. lastRun.executionStatus is the execution state, deliveredAt the fact of delivery; completed without deliveredAt means the scenario deliberately stayed silent; taskOutcome=not_verified does not confirm that the requirements were met. diagnostics holds only observed errors, which by themselves do not prove the whole task failed. Take times for the user from nextRunAtLocal and lastRun.scheduledForLocal.",
   ].join(" "),
   inputSchema: z.object({
     cursor: z.string().min(1).optional(),

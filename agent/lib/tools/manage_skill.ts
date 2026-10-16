@@ -38,12 +38,12 @@ const FIELDS = ["action", "name", "path", "scope", "sourceUrl", "version"] as co
 const SOURCE_URL_MAX_LENGTH = 2_000;
 
 const manageSkillSchema = z.object({
-  action: z.enum(ACTIONS).describe("list, view, stage, activate, enable, disable или delete."),
-  name: z.string().optional().describe("Имя скилла семьи: для view, activate, enable, disable, delete."),
-  path: z.string().optional().describe("Только для stage: папка скилла относительно корня scope, например skills/weather."),
-  scope: z.enum(SCOPES).optional().describe("Только для stage: рабочая область папки — personal или family."),
-  sourceUrl: z.string().optional().describe("Только для stage: адрес, откуда скилл скачан. Не передавай для скилла, написанного тобой."),
-  version: z.number().int().positive().optional().describe("Только для activate: номер версии из ответа stage или view."),
+  action: z.enum(ACTIONS).describe("list, view, stage, activate, enable, disable or delete."),
+  name: z.string().optional().describe("The name of a family skill: for view, activate, enable, disable, delete."),
+  path: z.string().optional().describe("Only for stage: the skill folder relative to the scope root, for example skills/weather."),
+  scope: z.enum(SCOPES).optional().describe("Only for stage: the workspace of the folder, personal or family."),
+  sourceUrl: z.string().optional().describe("Only for stage: the address the skill was downloaded from. Do not pass it for a skill you wrote yourself."),
+  version: z.number().int().positive().optional().describe("Only for activate: the version number from the stage or view answer."),
 }).strict();
 
 export type ManageSkillInput =
@@ -107,8 +107,8 @@ export function requireManageSkillInput(raw: unknown): ManageSkillInput {
 // The procedure (prepare a folder, stage, activate) is in the owner's private-chat instructions;
 // the private surface's tool descriptions share one size budget.
 const TOOL_DESCRIPTION = [
-  "Скиллы семьи: list, view, stage (папка скилла с SKILL.md из рабочей области сохраняется новой версией и ещё не работает),",
-  "activate (version из stage или view; после кнопки владельца работает со следующего хода, так же откатывается), enable, disable, delete.",
+  "Family skills: list, view, stage (the skill folder with SKILL.md from the workspace is saved as a new version and does not work yet),",
+  "activate (version from stage or view; after the owner's button it works from the next turn, and rolls back the same way), enable, disable, delete.",
 ].join(" ");
 
 export default defineTool({

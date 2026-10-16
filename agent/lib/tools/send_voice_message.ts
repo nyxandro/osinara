@@ -92,9 +92,9 @@ const STATUS_UNKNOWN_CODE = "AGENT_VOICE_MESSAGE_STATUS_UNKNOWN";
 
 const inputSchema = z.object({
   caption: z.string().trim().min(1).max(VOICE_CAPTION_MAX_LENGTH).optional()
-    .describe("Необязательная подпись под голосовым: ссылки, адреса, код и другие данные, которые неудобно слушать"),
+    .describe("An optional caption under the voice message: links, addresses, code and other data that are awkward to listen to"),
   text: z.string().trim().min(1).max(VOICE_MESSAGE_TEXT_MAX_LENGTH)
-    .describe("Живая устная речь для Eleven v4 с английскими тегами подачи в квадратных скобках, без Markdown, ссылок и эмодзи"),
+    .describe("Live spoken language for Eleven v4 with English delivery tags in square brackets, without Markdown, links or emoji"),
 }).strict();
 
 type SendVoiceMessageInput = z.infer<typeof inputSchema>;
@@ -289,9 +289,9 @@ export function createSendVoiceMessageTool(dependencies: SendVoiceMessageDepende
     // Repeating it after a crash is safe: its effect is keyed on the call id.
     replaySafe: true,
     description: [
-      "Только по явной просьбе ответить голосом: озвучить text через ElevenLabs и отправить голосовым в текущий чат.",
-      "text пиши как живую речь; ссылки и данные, которые неудобно слушать, передай в caption.",
-      "После delivered=true следуй nextStep, при ошибке следуй correction и не повторяй вызов.",
+      "Only on an explicit request to answer by voice: speak text through ElevenLabs and send it as a voice message to the current chat.",
+      "Write text as live speech; pass links and data that are awkward to listen to in caption.",
+      "After delivered=true follow nextStep; on an error follow correction and do not repeat the call.",
     ].join(" "),
     inputSchema,
     async execute(rawInput, ctx) {

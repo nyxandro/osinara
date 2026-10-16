@@ -31,7 +31,7 @@ const standardMessageModeSchema = z.enum(["addressed_only", "all"]);
 const externalMessageModeSchema = z
   .enum(["addressed_only", "all", "owner_only"])
   .describe(
-    "owner_only сохраняет доставленную историю для контекста, но запускает агента только для текущего владельца Osinara",
+    "owner_only keeps the delivered history for context but starts the agent only for the current Osinara owner",
   );
 
 // Only capabilities the active model provider can actually serve are grantable, so a provider that
@@ -40,7 +40,7 @@ const externalToolAllowlistSchema = z
   .array(z.enum(GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES))
   .max(TOOL_ALLOWLIST_MAX_SIZE)
   .describe(
-    "Дополнительные application tools внешней группы; glob, grep, read_file и write_file доступны в её изолированном workspace всегда",
+    "Additional application tools of an external group; glob, grep, read_file and write_file are always available in its isolated workspace",
   )
   .refine((names) => new Set(names).size === names.length, {
     message: "AGENT_GROUP_TOOL_ALLOWLIST_DUPLICATE: Список инструментов содержит повторы",

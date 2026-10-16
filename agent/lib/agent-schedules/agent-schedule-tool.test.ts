@@ -223,11 +223,11 @@ describe("manage_agent_schedule", () => {
   it("documents exact create, update, and id-only payloads without a delete/recreate workaround", () => {
     expect(manageAgentSchedule.description).toContain('Create payload: {"action":"create"');
     expect(manageAgentSchedule.description).toContain(
-      "Update передаёт id и только реально изменяемые поля",
+      "Update passes id and only the fields that actually change",
     );
     expect(manageAgentSchedule.description).toContain(
-      "Pause, resume, run_now и delete передают только action и id",
+      "Pause, resume, run_now and delete pass only action and id",
     );
-    expect(manageAgentSchedule.description).toContain("Не удаляй и не пересоздавай расписание для изменения");
+    expect(manageAgentSchedule.description).toContain("Do not delete and re-create a schedule to change");
   });
 });

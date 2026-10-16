@@ -19,7 +19,7 @@ export default defineTool({
   // Repeating it after a crash is safe: it only reads.
   replaySafe: true,
   description:
-    "Прочитать историю одной нити памяти (длинной темы: проект, цель, переезд) по threadRef из list_memory_threads или search_memory_threads. Возвращает страницу записей с их источниками; следующую страницу запрашивай через cursor.",
+    "Read the history of one memory thread (a long topic: a project, a goal, a move) by a threadRef from list_memory_threads or search_memory_threads. Returns a page of records with their sources; request the next page through cursor.",
   inputSchema: z.object({
     cursor: z.string().regex(THREAD_ENTRY_REF_PATTERN).optional(),
     limit: z.number().int().min(1).max(THREAD_HISTORY_PAGE_MAX_ENTRIES).default(20),

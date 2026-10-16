@@ -40,7 +40,7 @@ describe("memory untrusted prompt boundaries", () => {
 
     expect(profile).not.toContain(INJECTION);
     expect(profile).toContain("\\u003c/current_conversation_environment\\u003e");
-    expect(profile).toMatch(/недоверенн/iu);
+    expect(profile).toMatch(/untrusted/iu);
   });
 
   it("escapes thread brief content in the retrieved-memory block", () => {

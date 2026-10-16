@@ -150,9 +150,9 @@ describe("manage_family_invitation model input", () => {
       "invitationId",
       "candidateTelegramUserId",
       "candidateDisplayName",
-      "обязательн",
-      "не более одного раза",
-      "Не угадывай",
+      "required",
+      "no more than once",
+      "Do not guess",
     ]) expect(description).toContain(fragment);
   });
 });

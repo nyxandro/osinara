@@ -10,7 +10,7 @@ const bash = defineBashTool();
 
 export const externalGroupBash = defineTool({
   inputSchema: BASH_INPUT_SCHEMA,
-  description: "Выполнить команду в изолированном окружении текущей группы. Доступны только её файлы и публичная сеть через защищённый шлюз; личные и семейные данные не подключены.",
+  description: "Run a command in the isolated environment of the current group. Only its files and the public network through a protected gateway are available; personal and family data are not attached.",
   async execute(input, ctx) {
     const auth = requireWorkspaceAuthorization(ctx);
     if (auth.groupType !== "external" || !auth.groupId) throw new AppError("AGENT_GROUP_TOOL_FORBIDDEN", "Bash недоступен в этом режиме");

@@ -54,10 +54,10 @@ export interface ModelMemoryEvidence {
 }
 
 export const EVIDENCE_KIND_LEGEND =
-  "Значение evidence kind: firsthand это прямое заявление проверенного автора источника; " +
-  "reported это сообщено другим участником и не является подтверждением субъекта; " +
-  "inferred это выведено моделью из источника и не является прямым заявлением субъекта; " +
-  "explicit это явно сохранено пользователем; unresolved это происхождение не установлено.";
+  "Meaning of evidence kind: firsthand is a direct statement by the verified author of the source; " +
+  "reported was told by another participant and is not a confirmation by the subject; " +
+  "inferred was derived by the model from the source and is not a direct statement by the subject; " +
+  "explicit was explicitly saved by the user; unresolved means the provenance is not established.";
 
 export function toModelMemory(
   memory: ReferencedMemoryItem,

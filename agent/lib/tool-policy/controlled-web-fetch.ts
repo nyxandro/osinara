@@ -40,7 +40,7 @@ const MEDIA_TYPE_PATTERN = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/u;
 export const CONTROLLED_WEB_FETCH_INPUT_SCHEMA = z.object({
   url: z.string(),
   format: z.enum(["html", "extracted_text"])
-    .describe("html возвращает исходную HTML-разметку; extracted_text удаляет HTML-теги и возвращает обычный текст")
+    .describe("html returns the original HTML markup; extracted_text strips HTML tags and returns plain text")
     .optional(),
   timeout: z.number().positive().max(MAX_TIMEOUT_SECONDS).optional(),
 }).strict();
@@ -304,10 +304,10 @@ export const executeControlledWebFetch = createControlledWebFetch({
 
 export const controlledWebFetchTool = defineTool({
   description: [
-    "Загрузить HTTP(S)-страницу через защищённый сетевой шлюз.",
-    "Формат extracted_text удаляет HTML-теги и возвращает обычный текст; формат html возвращает исходную разметку.",
-    "По умолчанию используется extracted_text. Таймаут не более 120 секунд.",
-    "Ответ ограничен безопасными лимитами размера и числа строк и сообщает конечный URL, исходный Content-Type и признак усечения.",
+    "Load an HTTP(S) page through the protected network gateway.",
+    "The extracted_text format strips HTML tags and returns plain text; the html format returns the original markup.",
+    "extracted_text is used by default. The timeout is at most 120 seconds.",
+    "The answer is bounded by safe size and line limits and reports the final URL, the original Content-Type and a truncation flag.",
   ].join(" "),
   inputSchema: CONTROLLED_WEB_FETCH_INPUT_SCHEMA,
   async execute(input, ctx) {

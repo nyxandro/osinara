@@ -15,7 +15,7 @@ export default defineTool({
   // Repeating it after a crash is safe: it only reads.
   replaySafe: true,
   description:
-    "Узнать, откуда взялась запись профиля: в каком чате, от кого и когда она получена, с коротким фрагментом исходного сообщения. Нужен, когда человек спрашивает «откуда ты это знаешь». memoryRef бери из памяти или профиля этого хода.",
+    "Find out where a profile record came from: in which chat, from whom and when it was received, with a short fragment of the original message. Needed when the person asks \"откуда ты это знаешь\". Take the memoryRef from the memory or profile of this turn.",
   inputSchema: z.object({
     memoryRef: z.string().regex(MEMORY_REF_PATTERN),
   }).strict(),

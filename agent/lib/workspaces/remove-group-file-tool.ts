@@ -18,12 +18,12 @@ export const removeGroupFileTool = defineTool({
     return groupApprovalDenial({ session }) ?? "user-approval";
   },
   description: [
-    "Безвозвратно удалить один файл из workspace текущей внешней группы.",
-    "Передавай path относительно корня group scope, например reports/result.pdf; не добавляй group в начало пути.",
+    "Irreversibly delete one file from the workspace of the current external group.",
+    "Pass path relative to the root of the group scope, for example reports/result.pdf; do not prepend group to the path.",
   ].join(" "),
   inputSchema: z.object({
     path: z.string().min(1).max(512).describe(
-      "Относительный путь внутри group workspace без /workspace/group, например reports/result.md.",
+      "A relative path inside the group workspace without /workspace/group, for example reports/result.md.",
     ),
   }).strict(),
   async execute(input, ctx) {

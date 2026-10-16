@@ -19,7 +19,7 @@ const REACTION_SET_CLOSE_TAG = "</telegram_chat_reactions>";
 export function formatReactionSetAnnouncement(reactions: readonly string[]): string {
   return [
     REACTION_SET_OPEN_TAG,
-    `Telegram принимает в этом чате только эти реакции: ${reactions.join(" ")}`,
+    `Telegram accepts only these reactions in this chat: ${reactions.join(" ")}`,
     REACTION_SET_CLOSE_TAG,
   ].join("\n");
 }

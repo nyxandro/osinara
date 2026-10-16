@@ -477,7 +477,7 @@ describe("Telegram group turn context", () => {
 
     const result = await prepare({ ...input, currentSequence: "100" });
 
-    expect(result.durableMessage).toContain("пропущен");
+    expect(result.durableMessage).toContain("is omitted");
     expect(result.durableMessage).toContain("list_group_history");
   });
 

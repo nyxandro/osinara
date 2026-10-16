@@ -18,7 +18,7 @@ vi.mock("../tool-policy/external-group-live-policy.js", () => ({
   loadCurrentExternalGroupCapabilities,
 }));
 
-import { externalGroupCapabilityInstructions } from "../tool-policy/external-group-capability-instructions.js";
+import { modeInstructions } from "../prompt/mode-instructions.js";
 import { GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES } from "../tool-policy/grantable-group-capabilities.js";
 import { buildModeToolSurface, buildSubagentToolSurface } from "../tool-policy/mode-tool-surface.js";
 
@@ -91,17 +91,11 @@ describe("voice message tool surface", () => {
     expect(schema.safeParse({ scope: "group", text: "Привет" }).success).toBe(false);
   });
 
-  it("lets the owner grant the capability and lists it only in interactive group turns", () => {
+  it("lets the owner grant the capability and teaches it only in interactive group turns", () => {
     expect(GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES).toContain("send_voice_message");
-    const interactive = externalGroupCapabilityInstructions(GRANTED, new Set(), {
-      includeApplicationCore: true,
-      scheduledHistory: false,
-      scheduledRun: false,
-    });
-    const scheduled = externalGroupCapabilityInstructions(GRANTED, new Set(), {
-      includeApplicationCore: true,
-      scheduledHistory: false,
-      scheduledRun: true,
+    const interactive = modeInstructions({ capabilities: GRANTED, environment: "external", includeApplicationCore: true });
+    const scheduled = modeInstructions({
+      capabilities: GRANTED, environment: "external", includeApplicationCore: true, scheduledRun: true,
     });
 
     expect(interactive).toContain("`send_voice_message`");

@@ -12,7 +12,7 @@ import { sessionRepository } from "../sessions/session-repository.js";
 
 export default defineTool({
   description:
-    "Начать новый чистый контекст разговора по явной просьбе пользователя. Долговременная память, напоминания и файлы сохраняются.",
+    "Start a new clean conversation context on the user's explicit request. Long-term memory, reminders and files are kept.",
   inputSchema: z.object({}),
   async execute(_input, ctx) {
     await sessionRepository.requestRotation(applicationSessionId(ctx));

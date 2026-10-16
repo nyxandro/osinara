@@ -166,7 +166,7 @@ export default defineTool({
       ? groupApprovalDenial({ session }) ?? "user-approval"
       : "not-applicable",
   description:
-    "Управлять OAuth-профилем Google Workspace текущей personal/family области. Используй {\"action\":\"status\"} для connected/ready/missingScopes, {\"action\":\"connect\"} для защищённой OAuth-ссылки и {\"action\":\"disconnect\"} только по явной просьбе и с подтверждением человека. connect не означает ready до завершения OAuth. Команды Google выполняются только через execute_google_workspace; COMMAND_FORBIDDEN не означает read-only OAuth.",
+    "Manage the Google Workspace OAuth profile of the current personal/family scope. Use {\"action\":\"status\"} for connected/ready/missingScopes, {\"action\":\"connect\"} for a protected OAuth link and {\"action\":\"disconnect\"} only on an explicit request and with a person's confirmation. connect does not mean ready until OAuth is finished. Google commands run only through execute_google_workspace; COMMAND_FORBIDDEN does not mean a read-only OAuth.",
   inputSchema: connectionSchema,
   async execute(input, ctx) {
     const auth = await resolveGoogleWorkspaceAuthorization(ctx);

@@ -93,9 +93,9 @@ describe("notification_settings model input", () => {
       "quietStart",
       "quietEnd",
       "null",
-      "ЧЧ:ММ",
-      "не более одного раза",
-      "Не угадывай",
+      "HH:MM",
+      "no more than once",
+      "Do not guess",
     ]) expect(description).toContain(fragment);
   });
 });

@@ -40,10 +40,10 @@ const DIRECTIVE_PRESENCE_PATTERN = new RegExp(DIRECTIVE_SOURCE, "iu");
 const REF_PATTERN = new RegExp(MEMORY_REF_PATTERN, "gu");
 
 export const MEMORY_USAGE_INSTRUCTION = [
-  `Последней строкой ответа всегда пиши служебную строку вида ${MEMORY_USAGE_DIRECTIVE} и перечисляй в ней memoryRef тех записей выше, на которых держится ответ.`,
-  `Если ни одна не пригодилась, напиши [${DIRECTIVE_NAME}: нет] — это нормальный ответ, а не ошибка.`,
-  "Строка служебная: человек её не увидит, транспорт вырезает её до отправки. Она не считается текстом ответа, поэтому её можно дописать и к реакции, и к молчанию.",
-  "Ссылаться можно только на записи из этого блока.",
+  `As the last line of the answer always write a service line of the form ${MEMORY_USAGE_DIRECTIVE} listing the memoryRef of the records above that the answer rests on.`,
+  `If none was useful, write [${DIRECTIVE_NAME}: нет]; this is a normal answer, not an error.`,
+  "The line is a service line: the person will not see it, the transport cuts it out before sending. It does not count as answer text, so it can also be added to a reaction or to silence.",
+  "You may refer only to records from this block.",
 ].join(" ");
 
 export interface MemoryUsageDeclaration {

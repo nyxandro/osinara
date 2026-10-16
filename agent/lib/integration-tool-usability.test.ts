@@ -53,17 +53,17 @@ describe("integration tool usability contracts", () => {
   it("describes workspace paths as relative to the selected scope without repeating its name", () => {
     expect(inspectWorkspaceImage.description).toContain('"path":"photos/image.png"');
     expect(inspectWorkspaceImage.description).not.toContain('"path":"personal/');
-    expect(sendWorkspaceFile.description).toMatch(/относительно корня выбранного scope/iu);
-    expect(removeGroupFileTool.description).toMatch(/относительно корня group scope/iu);
+    expect(sendWorkspaceFile.description).toMatch(/relative to the root of the chosen scope/iu);
+    expect(removeGroupFileTool.description).toMatch(/relative to the root of the group scope/iu);
   });
 
   it("documents enough information to recover from each integration tool result", () => {
     for (const tool of [inspectWorkspaceImage, importTelegramAttachment, sendWorkspaceFile]) {
-      expect(tool.description).toMatch(/Когда использовать:/u);
-      expect(tool.description).toMatch(/Не использовать:/u);
-      expect(tool.description).toMatch(/Вход:/u);
-      expect(tool.description).toMatch(/Результат:/u);
-      expect(tool.description).toMatch(/Ошибка:/u);
+      expect(tool.description).toMatch(/When to use:/u);
+      expect(tool.description).toMatch(/When not to use:/u);
+      expect(tool.description).toMatch(/Input:/u);
+      expect(tool.description).toMatch(/Result:/u);
+      expect(tool.description).toMatch(/Error:/u);
     }
   });
 });

@@ -30,10 +30,10 @@ const TOP_LEVEL_FIELDS = ["action", "quietEnd", "quietStart", "timezone"] as con
 
 const nullableTimeSchema = z.union([z.string(), z.null()]).optional();
 const notificationSettingsSchema = z.object({
-  action: z.enum(TOOL_ACTIONS).describe("Обязательный action: get или set."),
-  quietEnd: nullableTimeSchema.describe("Обязательно для action=set: ЧЧ:ММ или null."),
-  quietStart: nullableTimeSchema.describe("Обязательно для action=set: ЧЧ:ММ или null."),
-  timezone: z.string().optional().describe("Обязательный IANA timezone только для action=set."),
+  action: z.enum(TOOL_ACTIONS).describe("Required action: get or set."),
+  quietEnd: nullableTimeSchema.describe("Required for action=set: HH:MM or null."),
+  quietStart: nullableTimeSchema.describe("Required for action=set: HH:MM or null."),
+  timezone: z.string().optional().describe("A required IANA timezone, only for action=set."),
 }).strict();
 
 function requiredNullableTime(input: Record<string, unknown>, key: "quietEnd" | "quietStart"): string | null {
@@ -79,14 +79,14 @@ function requireNotificationSettingsInput(input: unknown) {
 }
 
 const TOOL_DESCRIPTION = [
-  "Получить или настроить личный IANA timezone и тихие часы для напоминаний.",
-  "Сохраняй явно названные пользователем настройки без дополнительного подтверждения.",
-  "Для action=get обязателен только action: {\"action\":\"get\"}; остальные поля не передавайте.",
-  "Для action=set обязательны action, timezone, quietStart и quietEnd: {\"action\":\"set\",\"timezone\":\"Europe/Moscow\",\"quietStart\":\"22:00\",\"quietEnd\":\"08:00\"}.",
-  "timezone должен быть явным IANA timezone; quietStart и quietEnd должны быть разными значениями ЧЧ:ММ.",
-  "Чтобы отключить тихие часы, передай оба обязательных поля quietStart=null и quietEnd=null.",
-  "Не угадывай timezone или тихие часы и не подставляй defaults: если данных нет, спроси пользователя.",
-  "После ошибки входных данных исправь payload по тексту ошибки и повтори не более одного раза; при повторной ошибке остановись и уточни данные.",
+  "Get or set the personal IANA timezone and quiet hours for reminders.",
+  "Save settings the user explicitly named without additional confirmation.",
+  "For action=get only action is required: {\"action\":\"get\"}; do not pass the other fields.",
+  "For action=set action, timezone, quietStart and quietEnd are required: {\"action\":\"set\",\"timezone\":\"Europe/Moscow\",\"quietStart\":\"22:00\",\"quietEnd\":\"08:00\"}.",
+  "timezone must be an explicit IANA timezone; quietStart and quietEnd must be different HH:MM values.",
+  "To turn quiet hours off, pass both required fields quietStart=null and quietEnd=null.",
+  "Do not guess the timezone or quiet hours and do not substitute defaults: if the data is missing, ask the user.",
+  "After an input error, fix the payload according to the error text and retry no more than once; on a repeated error stop and clarify the data.",
 ].join(" ");
 
 export default defineTool({

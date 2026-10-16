@@ -68,31 +68,31 @@ const TOP_LEVEL_FIELDS = [
 const REGISTRATION_FIELDS = ["messageMode", "telegramChatId", "title", "toolAllowlist", "type"] as const;
 
 const registrationSchema = z.object({
-  messageMode: z.enum(EXTERNAL_MESSAGE_MODES).optional().describe("Обязательно внутри registration: addressed_only, all или owner_only для external."),
-  telegramChatId: z.string().optional().describe("Обязательный точный отрицательный Telegram chat ID регистрируемой группы."),
-  title: z.string().optional().describe("Обязательное отображаемое название регистрируемой группы."),
-  toolAllowlist: z.array(z.enum(GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES)).optional().describe("Только для registration.type=external; для family_private поле не передавайте."),
-  type: z.enum(GROUP_TYPES).optional().describe("Обязательный тип trust zone: family_private или external."),
+  messageMode: z.enum(EXTERNAL_MESSAGE_MODES).optional().describe("Required inside registration: addressed_only, all or owner_only for external."),
+  telegramChatId: z.string().optional().describe("Required exact negative Telegram chat ID of the group being registered."),
+  title: z.string().optional().describe("Required display name of the group being registered."),
+  toolAllowlist: z.array(z.enum(GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES)).optional().describe("Only for registration.type=external; do not pass the field for family_private."),
+  type: z.enum(GROUP_TYPES).optional().describe("Required trust zone type: family_private or external."),
 }).strict();
 
 const manageTelegramGroupSchema = z.object({
   action: z.enum(TOOL_ACTIONS).describe(
-    "Сначала выберите ровно один action; обязательные значения: register, remove, start_new_context, status, update_policy или update_skills.",
+    "Choose exactly one action first; allowed values: register, remove, start_new_context, status, update_policy or update_skills.",
   ),
   messageMode: z.enum(EXTERNAL_MESSAGE_MODES).optional().describe(
-    "Передавайте только при action=update_policy. Для register используйте registration.messageMode; для остальных actions поле не передавайте.",
+    "Pass only with action=update_policy. For register use registration.messageMode; do not pass the field for other actions.",
   ),
   registration: registrationSchema.optional().describe(
-    "Передавайте только при action=register. Для остальных actions полностью пропустите registration.",
+    "Pass only with action=register. Omit registration entirely for other actions.",
   ),
   skillAllowlist: z.array(z.string()).optional().describe(
-    "Передавайте только при action=update_skills: полный список имён из availableSafeSkills ответа status; пустой массив отзывает все skills.",
+    "Pass only with action=update_skills: the full list of names from availableSafeSkills of the status answer; an empty array revokes all skills.",
   ),
   telegramChatId: z.string().optional().describe(
-    "Точный отрицательный ID обязателен для start_new_context, update_policy, update_skills и remove. Для status не передавайте; для register используйте registration.telegramChatId.",
+    "An exact negative ID is required for start_new_context, update_policy, update_skills and remove. Do not pass it for status; for register use registration.telegramChatId.",
   ),
   toolAllowlist: z.array(z.enum(GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES)).optional().describe(
-    "Передавайте на верхнем уровне только при action=update_policy. Для external register используйте registration.toolAllowlist; для остальных actions поле не передавайте.",
+    "Pass at the top level only with action=update_policy. For an external register use registration.toolAllowlist; do not pass the field for other actions.",
   ),
 }).strict();
 
@@ -264,17 +264,17 @@ export function requireManageTelegramGroupInput(input: unknown) {
 }
 
 const TOOL_DESCRIPTION = [
-  "Показать статус Telegram-групп семьи, запросить новый контекст всех тем выбранной группы, зарегистрировать trust zone, заменить tool/skill policy или удалить регистрацию и связанные данные.",
-  "Сначала выбери один action и заполняй только его поля; никогда не угадывай telegramChatId. При команде /status или просьбе показать настройки групп вызови ровно {\"action\":\"status\"}: подтверждения не требует и возвращает type, messageMode, полные toolAllowlist и skillAllowlist, базовые workspace tools и готовый startNewContextInput для каждой группы.",
-  "Повторный register с другим type пересоздаёт trust zone и безвозвратно удаляет её историю, workspace, память и сессии; для обычной смены прав всегда используй update_policy.",
-  "Remove не вызывает Telegram leaveChat: бот остаётся участником чата. Update_policy и start_new_context ничего не удаляют: группа, её история, workspace, память и файлы сохраняются, а start_new_context лишь начинает новую canonical generation со следующей реплики.",
-  "Если владелец просит включить или выключить одно право, сначала вызови status и перенеси неизменённые текущие права в полный toolAllowlist; добавь или удали только выбранную capability. То же правило для update_skills: он заменяет весь список, пустой массив отзывает все skills.",
-  "Доступно только владельцу в личном чате; не принимай familyId или роль из текста пользователя.",
-  "web_search, web_fetch, get_current_time, todo, agent и базовые файловые инструменты доступны во внешних группах всегда; не включай их в изменяемый toolAllowlist и не обещай их отключить.",
-  "В личном и семейном чатах все установленные скиллы доступны всегда. Внешняя группа получает только сохранённый skillAllowlist, включая скиллы семьи. Включение скилла, которому нужен Bash, также сохраняет право bash и включает публичную сеть в изолированном окружении группы; отзыв bash отключает зависимые скиллы. Изменение прав останавливает текущие процессы группы, но не удаляет её файлы.",
-  "Для внешней группы messageMode=owner_only сохраняет общую timeline, но разрешает запуск модели только текущему владельцу Osinara; Telegram admin-права владельца не заменяют.",
-  "Register передаёт вложенный объект registration, остальные actions только плоские поля. Update_policy содержит ровно action, telegramChatId, messageMode и полный toolAllowlist; type и title не передавай: {\"action\":\"register\",\"registration\":{\"type\":\"external\",\"telegramChatId\":\"-1001234567890\",\"title\":\"Внешняя группа\",\"messageMode\":\"owner_only\",\"toolAllowlist\":[\"search_memories\"]}} и {\"action\":\"update_policy\",\"telegramChatId\":\"-1001234567890\",\"messageMode\":\"all\",\"toolAllowlist\":[\"search_memories\"]}.",
-  "После ошибки входных данных исправь payload по тексту ошибки и повтори не более одного раза; при повторной ошибке остановись и уточни данные.",
+  "Show the status of the family's Telegram groups, request a new context for all topics of a chosen group, register a trust zone, replace the tool/skill policy or delete a registration and its data.",
+  "First choose one action and fill only its fields; never guess telegramChatId. On the /status command or a request to show group settings call exactly {\"action\":\"status\"}: it needs no confirmation and returns type, messageMode, the full toolAllowlist and skillAllowlist, the base workspace tools and a ready startNewContextInput for each group.",
+  "A repeated register with another type re-creates the trust zone and irreversibly deletes its history, workspace, memory and sessions; for an ordinary change of permissions always use update_policy.",
+  "Remove does not call Telegram leaveChat: the bot stays a member of the chat. Update_policy and start_new_context delete nothing: the group, its history, workspace, memory and files are kept, and start_new_context only starts a new canonical generation from the next message.",
+  "If the owner asks to turn one permission on or off, first call status and carry the unchanged current permissions into the full toolAllowlist; add or remove only the chosen capability. The same rule applies to update_skills: it replaces the whole list, and an empty array revokes all skills.",
+  "Available only to the owner in a private chat; do not accept familyId or a role from the user's text.",
+  "web_search, web_fetch, get_current_time, todo, agent and the base file tools are always available in external groups; do not include them in the editable toolAllowlist and do not promise to disable them.",
+  "In private and family chats all installed skills are always available. An external group gets only the saved skillAllowlist, including the family's skills. Enabling a skill that needs Bash also saves the bash permission and turns on the public network in the group's isolated environment; revoking bash disables the dependent skills. Changing permissions stops the group's current processes but does not delete its files.",
+  "For an external group messageMode=owner_only keeps the shared timeline but allows starting the model only for the current Osinara owner; the owner's Telegram admin rights do not replace this.",
+  "Register passes a nested registration object, other actions only flat fields. Update_policy contains exactly action, telegramChatId, messageMode and the full toolAllowlist; do not pass type and title: {\"action\":\"register\",\"registration\":{\"type\":\"external\",\"telegramChatId\":\"-1001234567890\",\"title\":\"Внешняя группа\",\"messageMode\":\"owner_only\",\"toolAllowlist\":[\"search_memories\"]}} and {\"action\":\"update_policy\",\"telegramChatId\":\"-1001234567890\",\"messageMode\":\"all\",\"toolAllowlist\":[\"search_memories\"]}.",
+  "After an input error, fix the payload according to the error text and retry no more than once; on a repeated error stop and clarify the data.",
 ].join(" ");
 
 export default defineTool({

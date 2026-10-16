@@ -364,7 +364,7 @@ describe("external group tool surface", () => {
     expect(ungranted).not.toHaveProperty("ask_question");
     expect(ungranted).not.toHaveProperty("bash");
     expect(granted).not.toHaveProperty("ask_question");
-    expect(granted.bash?.description).toMatch(/изолированном окружении текущей группы/u);
+    expect(granted.bash?.description).toMatch(/isolated environment of the current group/u);
   });
 
   it("denies a capability revoked after descriptor resolution despite a stale auth grant", async () => {

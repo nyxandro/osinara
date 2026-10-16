@@ -61,8 +61,8 @@ export async function executeWriteFileOnSandbox(
 
 export const writeFile = defineTool({
   description: [
-    "Создать файл или полностью заменить его содержимое: заметку, отчёт, таблицу, HTML-страницу, код или файл любого другого текстового формата, который нужен задаче.",
-    "Существующий файл сначала прочитай через read_file, иначе запись откажет.",
+    "Create a file or fully replace its content: a note, a report, a table, an HTML page, code or a file of any other text format the task needs.",
+    "Read an existing file through read_file first, otherwise the write is refused.",
   ].join(" "),
   async execute(input, ctx) {
     return await executeWriteFileOnSandbox(await ctx.getSandbox(), ctx.state, input);

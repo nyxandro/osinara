@@ -3,9 +3,9 @@ import { z } from "zod";
 import { AppError } from "./app-error.js";
 
 export const profileProjectionInputSchema = z.object({
-  action: z.enum(["list", "update"]).describe("list читает политики; update изменяет одну"),
-  enabled: z.boolean().optional().describe("Обязательно только для action=update"),
-  groupRef: z.string().regex(/^grp_[0-9a-f]{32}$/u).optional().describe("Обязательно для update; только из результата action=list"),
+  action: z.enum(["list", "update"]).describe("list reads the policies; update changes one"),
+  enabled: z.boolean().optional().describe("Required only for action=update"),
+  groupRef: z.string().regex(/^grp_[0-9a-f]{32}$/u).optional().describe("Required for update; only from the result of action=list"),
 }).strict();
 
 export function requireProfileProjectionUpdate(input: unknown): { enabled: boolean; groupRef: string } {

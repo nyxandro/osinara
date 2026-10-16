@@ -252,8 +252,8 @@ export const GLOB_INPUT_SCHEMA = z.strictObject({
 
 export const glob = defineTool({
   description: [
-    'Найти файлы по шаблону пути, например "**/*.pdf" или "reports/*.csv". Возвращает пути совпавших файлов.',
-    "Ищет только по именам и путям, не по содержимому: текст внутри файлов ищи через grep. Несколько шаблонов проверяй параллельными вызовами.",
+    'Find files by a path pattern, for example "**/*.pdf" or "reports/*.csv". Returns the paths of matching files.',
+    "Matches only names and paths, not content: search text inside files with grep. Check several patterns with parallel calls.",
   ].join(" "),
   async execute(input, ctx) {
     return await executeGlobOnSandbox(await ctx.getSandbox(), input);

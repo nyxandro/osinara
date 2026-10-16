@@ -37,7 +37,7 @@ describe("turn interjection marker", () => {
       expect(modeInstructions({ environment, scheduledRun: true })).not.toContain(TURN_INTERJECTION_RULES);
       expect(modeInstructions({ environment, subagentTurn: true })).not.toContain(TURN_INTERJECTION_RULES);
     }
-    expect(modeInstructions({ capabilities: new Set(), environment: "external", skills: new Set() }))
+    expect(modeInstructions({ capabilities: new Set(), environment: "external" }))
       .not.toContain(TURN_INTERJECTION_RULES);
   });
 });
@@ -77,8 +77,8 @@ describe("formatTurnInterjectionBlock", () => {
 
 describe("alreadySeenTurnContext", () => {
   it("tells whether the agent saw the content or only a notice", () => {
-    expect(alreadySeenTurnContext("text")).toContain("уже видел");
-    expect(alreadySeenTurnContext("voice")).toContain("уже видел");
-    expect(alreadySeenTurnContext("notice")).toContain("впервые");
+    expect(alreadySeenTurnContext("text")).toContain("already saw");
+    expect(alreadySeenTurnContext("voice")).toContain("already saw");
+    expect(alreadySeenTurnContext("notice")).toContain("for the first time");
   });
 });

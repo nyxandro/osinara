@@ -90,23 +90,14 @@ export type TelegramUpdate =
   | { readonly kind: "callback_query"; readonly callbackQuery: TelegramCallbackQuery }
   | { readonly kind: "message"; readonly message: TelegramMessage };
 
-const TELEGRAM_RESPONSE_INSTRUCTIONS =
-  "Reply for Telegram in concise plain text. Avoid tables, long code fences, " +
-  "and formatting that depends on Markdown rendering.";
-
 /**
- * Inbound identity and response guidance that {@link formatTelegramContextBlock}
- * renders into the model-visible context block.
+ * What {@link formatTelegramContextBlock} renders: only what changes from one message to the next.
+ * The block repeats in every turn of the history, so constants of the chat (its id, type, title, the
+ * bot's and the author's identity) are left out; the mode block states the chat's environment.
  */
 export interface TelegramInboundContext {
-  readonly botUsername?: string;
-  readonly chatId: string;
-  readonly chatTitle?: string;
-  readonly chatType: TelegramChatType;
   readonly messageId: string;
   readonly messageThreadId?: number;
-  readonly userId?: string;
-  readonly username?: string;
 }
 
 /** Parses one JSON-decoded Telegram update payload. */
@@ -122,26 +113,14 @@ export function parseTelegramUpdate(value: unknown): TelegramUpdate | null {
   return null;
 }
 
-/**
- * Renders one {@link TelegramInboundContext} as a deterministic
- * `<telegram_context>` block with fixed response instructions and the chat and
- * user identity fields.
- */
+/** Renders one {@link TelegramInboundContext} as a deterministic `<telegram_context>` block. */
 export function formatTelegramContextBlock(context: TelegramInboundContext): string {
   const lines = [
     "<telegram_context>",
-    "response_medium: telegram",
-    `response_instructions: ${TELEGRAM_RESPONSE_INSTRUCTIONS}`,
-    `chat_id: ${context.chatId}`,
-    `chat_type: ${context.chatType}`,
-    ...(context.chatTitle ? [`chat_title: ${context.chatTitle}`] : []),
     `message_id: ${context.messageId}`,
     ...(context.messageThreadId !== undefined
       ? [`message_thread_id: ${context.messageThreadId}`]
       : []),
-    ...(context.userId ? [`user_id: ${context.userId}`] : []),
-    ...(context.username ? [`username: ${context.username}`] : []),
-    ...(context.botUsername ? [`bot_username: ${context.botUsername}`] : []),
     "</telegram_context>",
   ];
   return lines.join("\n");

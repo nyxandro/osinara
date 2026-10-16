@@ -226,8 +226,9 @@ describe("createTelegramMessageHandler", () => {
       scope: "personal",
     });
     expect(result?.context?.join("\n")).toContain("inbox/1/договор.pdf");
-    expect(result?.context?.join("\n")).toContain("plain text by default");
-    expect(result?.context?.join("\n")).toContain("Rich Markdown only when formatting");
+    // Delivery formatting is a constant of the core instructions, not a per-turn line.
+    expect(result?.context?.join("\n")).toContain("Verified turn: scope personal");
+    expect(result?.context?.join("\n")).not.toContain("Rich Markdown");
   });
 
   it("persists a captionless private photo and exposes its trusted workspace path", async () => {

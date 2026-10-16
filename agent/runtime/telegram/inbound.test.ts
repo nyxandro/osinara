@@ -120,33 +120,12 @@ describe("parseTelegramUpdate", () => {
 });
 
 describe("Telegram context rendering", () => {
-  it("renders a deterministic context block", () => {
-    expect(
-      formatTelegramContextBlock({
-        botUsername: "testbot",
-        chatId: "-1001",
-        chatTitle: "Ops",
-        chatType: "supergroup",
-        messageId: "10",
-        messageThreadId: 7,
-        userId: "42",
-        username: "ada",
-      }),
-    ).toContain("<telegram_context>\nresponse_medium: telegram");
-  });
-
-  it("renders chat and actor identity into the block", () => {
-    const block = formatTelegramContextBlock({
-      chatId: "42",
-      chatType: "private",
-      messageId: "1",
-      userId: "7",
-      username: "ada",
-    });
-
-    expect(block).toContain("<telegram_context>");
-    expect(block).toContain("chat_id: 42");
-    expect(block).toContain("user_id: 7");
-    expect(block).toContain("username: ada");
+  it("carries only what changes from one message to the next", () => {
+    // The block is repeated in every turn of the history: constants of the chat cost a few hundred
+    // characters each time, and the response rule it once held contradicted the core instructions.
+    expect(formatTelegramContextBlock({ messageId: "10", messageThreadId: 7 }))
+      .toBe("<telegram_context>\nmessage_id: 10\nmessage_thread_id: 7\n</telegram_context>");
+    expect(formatTelegramContextBlock({ messageId: "1" }))
+      .toBe("<telegram_context>\nmessage_id: 1\n</telegram_context>");
   });
 });

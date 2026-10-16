@@ -84,13 +84,13 @@ const IMAGE_QUALITIES = ["low", "medium", "high", "auto"] as const;
 const IMAGE_BACKGROUNDS = ["transparent", "opaque", "auto"] as const;
 
 const inputSchema = z.object({
-  background: z.enum(IMAGE_BACKGROUNDS).describe("transparent, opaque или auto"),
+  background: z.enum(IMAGE_BACKGROUNDS).describe("transparent, opaque or auto"),
   caption: z.string().min(1).max(IMAGE_CAPTION_MAX_LENGTH).optional()
-    .describe("Необязательная подпись к отправленному изображению"),
+    .describe("An optional caption for the sent image"),
   prompt: z.string().min(1).max(IMAGE_PROMPT_MAX_LENGTH)
-    .describe("Полная визуальная спецификация изображения без служебных инструкций"),
-  quality: z.enum(IMAGE_QUALITIES).describe("low, medium, high или auto"),
-  size: z.enum(IMAGE_SIZES).describe("1024x1024, 1536x1024, 1024x1536 или auto"),
+    .describe("The full visual specification of the image without service instructions"),
+  quality: z.enum(IMAGE_QUALITIES).describe("low, medium, high or auto"),
+  size: z.enum(IMAGE_SIZES).describe("1024x1024, 1536x1024, 1024x1536 or auto"),
 }).strict();
 
 type GenerateImageInput = z.infer<typeof inputSchema>;
@@ -213,11 +213,11 @@ export function createGenerateImageTool(dependencies: GenerateImageDependencies)
     // Repeating it after a crash is safe: its effect is keyed on the call id.
     replaySafe: true,
     description: [
-      "Когда использовать: создать одно новое raster-изображение через GPT-Image-2 и сразу отправить его в текущий Telegram-чат.",
-      "Не использовать: для SVG, диаграмм из кода, редактирования существующего файла или незапрошенной фоновой генерации.",
-      "Вход: prompt описывает назначение, сцену, объект, композицию, стиль и запреты. Если размер или качество не заданы пользователем, передай auto.",
-      "Результат: изображение сохраняется без перезаписи в generated-images и доставляется как photo; returned path можно использовать в следующих запросах.",
-      "Ошибка: status unknown означает возможное списание лимита подписки; не повторяй вызов автоматически.",
+      "When to use: create one new raster image through GPT-Image-2 and send it to the current Telegram chat right away.",
+      "When not to use: for SVG, diagrams from code, editing an existing file or unrequested background generation.",
+      "Input: prompt describes the purpose, scene, object, composition, style and exclusions. If the size or quality is not set by the user, pass auto.",
+      "Result: the image is saved without overwriting into generated-images and delivered as a photo; the returned path can be used in later requests.",
+      "Error: status unknown means the subscription limit may have been spent; do not repeat the call automatically.",
     ].join(" "),
     inputSchema,
     async execute(rawInput, ctx) {

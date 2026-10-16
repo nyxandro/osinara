@@ -103,7 +103,7 @@ async function channelState(sessionId: string) {
     expect(await findContinuation(database(), { channelKind: "telegram", token: "7::" })).toBe(first.sessionId);
     expect(await channelState(first.sessionId)).toMatchObject({ chatId: "7", chatType: "private", triggeringUserId: "42" });
     const turn = await loadTurn(database(), first.turnId);
-    expect(turn.input).toEqual({ context: [expect.stringMatching(/^<telegram_context>\n[\s\S]*message_id: 100\n[\s\S]*bot_username: osinara_bot\n<\/telegram_context>$/u), "<app>контекст</app>"], message: "привет" });
+    expect(turn.input).toEqual({ context: ["<telegram_context>\nmessage_id: 100\n</telegram_context>", "<app>контекст</app>"], message: "привет" });
     expect(turn.auth.current?.attributes).toMatchObject({ osinaraTelegramUpdateId: "1" });
     expect(turn.auth.initiator?.attributes).toMatchObject({ osinaraTelegramUpdateId: "1" });
     expect(turn.channel).toEqual({ continuationToken: "7::", kind: "telegram", metadata: { chatId: "7", chatType: "private", triggeringUserId: "42" } });

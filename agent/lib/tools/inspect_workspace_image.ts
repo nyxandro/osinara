@@ -29,17 +29,17 @@ const TELEGRAM_MESSAGE_ID_PATTERN = /^\d+$/u;
 
 const inspectWorkspaceImageSchema = z.object({
   attachmentId: z.uuid()
-    .describe("UUID вложения из <telegram_attachment_refs> или журнала; не передавай вместе с path или telegramMessageId")
+    .describe("The attachment UUID from <telegram_attachment_refs> or the log; do not pass it together with path or telegramMessageId")
     .optional(),
   path: z.string().min(1).max(512)
-    .describe("Путь относительно корня выбранного scope, например photos/image.png; не добавляй имя scope в начало")
+    .describe("A path relative to the root of the chosen scope, for example photos/image.png; do not prepend the scope name")
     .optional(),
   question: z.string().min(1).max(4_000)
-    .describe("Обязательный конкретный вопрос к vision-модели об изображении"),
+    .describe("A required specific question to the vision model about the image"),
   scope: z.enum(SCOPES)
-    .describe("Обязательная область, относительно корня которой разрешается path"),
+    .describe("The required scope whose root path is resolved against"),
   telegramMessageId: z.string().regex(TELEGRAM_MESSAGE_ID_PATTERN)
-    .describe("Числовой ID текущего Telegram-сообщения; не передавай вместе с attachmentId или path")
+    .describe("The numeric ID of the current Telegram message; do not pass it together with attachmentId or path")
     .optional(),
 }).passthrough();
 
@@ -81,11 +81,11 @@ function requireImageInput(input: Record<string, unknown>) {
 }
 
 const TOOL_DESCRIPTION = [
-  "Когда использовать: ответить на конкретный вопрос об изображении из workspace или Telegram через vision-модель.",
-  "Не использовать: не передавай несколько источников и не используй tool для не-графических файлов.",
-  "Вход: для reply ancestry или <telegram_attachment_refs> передай attachmentId; для текущего Telegram-вложения используй {\"telegramMessageId\":\"773\",\"scope\":\"personal\",\"question\":\"Что изображено?\"}; для файла используй относительный path {\"path\":\"photos/image.png\",\"scope\":\"personal\",\"question\":\"Что изображено?\"}. Передавай ровно один источник.",
-  "Результат: analysis, фактические path и scope; анализ не сохраняет Telegram bytes в workspace.",
-  "Ошибка: исправь источник или вопрос только если retryable=true; provider failure автоматически не повторяй.",
+  "When to use: answer a specific question about an image from the workspace or Telegram through the vision model.",
+  "When not to use: do not pass several sources and do not use the tool for non-graphic files.",
+  "Input: for the reply ancestry or <telegram_attachment_refs> pass attachmentId; for the current Telegram attachment use {\"telegramMessageId\":\"773\",\"scope\":\"personal\",\"question\":\"Что изображено?\"}; for a file use a relative path {\"path\":\"photos/image.png\",\"scope\":\"personal\",\"question\":\"Что изображено?\"}. Pass exactly one source.",
+  "Result: analysis, the actual path and scope; the analysis does not save Telegram bytes to the workspace.",
+  "Error: fix the source or the question only if retryable=true; do not repeat a provider failure automatically.",
 ].join(" ");
 
 export default defineTool({

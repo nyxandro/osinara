@@ -14,14 +14,14 @@ import { THREAD_ENTRY_REF_PATTERN, THREAD_REF_PATTERN } from "../memory-thread-q
 
 const OUTCOME_REF_PATTERN = /^outcome_[0-9a-f]{32}$/u;
 const inputSchema = z.object({
-  action: z.enum(["complete", "reactivate"]).describe("Одна lifecycle-операция"),
+  action: z.enum(["complete", "reactivate"]).describe("One lifecycle operation"),
   authority: z.enum(["current_user_statement", "confirmed_outcome"]).optional()
-    .describe("Обязательно только для complete"),
+    .describe("Required only for complete"),
   outcomeRef: z.string().regex(OUTCOME_REF_PATTERN).optional()
-    .describe("Только подтверждённый ref из текущего outcome context; не нужен для current_user_statement"),
+    .describe("Only a confirmed ref from the current outcome context; not needed for current_user_statement"),
   sourceEntryRefs: z.array(z.string().regex(THREAD_ENTRY_REF_PATTERN)).min(1).max(20).optional()
-    .describe("Для complete: refs доказательств только из read_memory_thread"),
-  threadRef: z.string().regex(THREAD_REF_PATTERN).describe("Opaque ref только из list/search/read_memory_thread"),
+    .describe("For complete: evidence refs only from read_memory_thread"),
+  threadRef: z.string().regex(THREAD_REF_PATTERN).describe("An opaque ref only from list/search/read_memory_thread"),
 }).strict();
 
 function verifiedTurn(ctx: Parameters<typeof requireMemoryAuthorization>[0]) {
@@ -41,11 +41,11 @@ export default defineTool({
   // Repeating it after a crash is safe: its effect is keyed on the call id.
   replaySafe: true,
   description: [
-    "Явно завершить или реактивировать нить памяти.",
-    "complete разрешён только после проверенного текущего заявления пользователя или confirmed outcome и требует sourceEntryRefs из read_memory_thread.",
-    "reactivate используй только когда пользователь прямо просит продолжить именно завершённую нить; новая цель обычно создаёт новый subthread.",
-    "Payload reactivate: {\"action\":\"reactivate\",\"threadRef\":\"thread_...\"}. Payload complete с текущим заявлением: {\"action\":\"complete\",\"authority\":\"current_user_statement\",\"sourceEntryRefs\":[\"entry_...\"],\"threadRef\":\"thread_...\"}.",
-    "Результат возвращает актуальное состояние нити; NOT_FOUND требует заново получить threadRef.",
+    "Explicitly complete or reactivate a memory thread.",
+    "complete is allowed only after a verified current statement of the user or a confirmed outcome and requires sourceEntryRefs from read_memory_thread.",
+    "Use reactivate only when the user directly asks to continue exactly the completed thread; a new goal usually creates a new subthread.",
+    "Payload reactivate: {\"action\":\"reactivate\",\"threadRef\":\"thread_...\"}. Payload complete with a current statement: {\"action\":\"complete\",\"authority\":\"current_user_statement\",\"sourceEntryRefs\":[\"entry_...\"],\"threadRef\":\"thread_...\"}.",
+    "The result returns the current state of the thread; NOT_FOUND requires getting the threadRef again.",
   ].join(" "),
   inputSchema,
   async execute(input, ctx) {

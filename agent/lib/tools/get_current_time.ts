@@ -13,11 +13,11 @@ import { requireReminderAuthorization } from "../reminders/reminder-context.js";
 import { GROUP_REMINDER_TIMEZONE } from "../reminders/reminder-config.js";
 
 const TOOL_DESCRIPTION = [
-  "Получить точные текущие дату и время из системных часов.",
-  "Без timezone использует настроенный IANA timezone текущего пользователя; если он не настроен, возвращает только UTC.",
-  "Во внешней группе без timezone использует общий часовой пояс группы, не личные настройки участника.",
-  "Для времени в другом часовом поясе передай timezone, например {\"timezone\":\"Asia/Tokyo\"}.",
-  "Используй для уточнения текущего времени, даты, дня недели, timezone или после долгой операции; не угадывай эти значения.",
+  "Get the exact current date and time from the system clock.",
+  "Without timezone it uses the current user's configured IANA timezone; if none is configured, it returns only UTC.",
+  "In an external group without timezone it uses the group's shared timezone, not a participant's personal settings.",
+  "For the time in another timezone pass timezone, for example {\"timezone\":\"Asia/Tokyo\"}.",
+  "Use it to check the current time, date, weekday, timezone or after a long operation; do not guess these values.",
 ].join(" ");
 
 export default defineTool({

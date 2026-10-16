@@ -24,14 +24,16 @@ import {
 // The generic contract used to be appended to every descriptor. It now lives once here, so the
 // surfaces stay small while the rules the model needs are still guaranteed to reach it.
 const REQUIRED_CORE_RULES = [
-  "только когда его назначение прямо соответствует текущей задаче",
-  "Передавай только поля схемы этого инструмента",
-  "только по успешному результату инструмента",
+  "only when its purpose directly matches the current task",
+  "Pass only the fields of this tool's schema",
+  "only on a successful tool result",
   "sideEffectStatus",
 ] as const;
 // Raised from 25 000 for `manage_skill` (family skills), whose procedure lives in the owner's
-// private-chat instructions so that its own description stays short.
-const TOTAL_DESCRIPTION_MAX_CHARACTERS = 25_300;
+// private-chat instructions so that its own description stays short; then to 26 000 when the
+// descriptions moved to English, which takes about 3% more characters for the same text while the
+// production model counts about 5% fewer tokens for the private chat's whole tool set (17 084 → 16 239).
+const TOTAL_DESCRIPTION_MAX_CHARACTERS = 26_000;
 // The runtime's built-ins are in every prompt anyway; the budget is the application's own.
 const NATIVE_DESCRIPTIONS = new Set([agentTool, askQuestion, bash, glob, grep, loadSkill, readFile, todo, writeFile].map((definition) => definition.description));
 
@@ -90,7 +92,7 @@ describe("model-facing tool contracts", () => {
     const external = surfaces().external;
 
     expect(external.send_workspace_file!.description).toContain("reports/result.pdf");
-    expect(external.send_workspace_file!.description).toContain("не передавай /workspace/group");
+    expect(external.send_workspace_file!.description).toContain("do not pass /workspace/group");
     expect(external.inspect_workspace_image!.description).toContain("photos/image.png");
     expect(external.read_file!.description).toContain("/workspace/group");
   });

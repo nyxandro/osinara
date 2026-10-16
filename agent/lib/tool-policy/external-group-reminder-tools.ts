@@ -142,28 +142,28 @@ function requireManageInput(input: unknown) {
 }
 
 const MANAGE_DESCRIPTION = [
-  "Создать, изменить, приостановить, возобновить или удалить напоминание этого чата: в указанное время бот сам пришлёт сюда его текст.",
-  "Явной просьбы участника достаточно: выполняй без дополнительного подтверждения. Недостающие или неоднозначные данные уточняй обычным сообщением в чат.",
-  "content отправляется как готовый текст без вызова модели. Не сохраняй в нём задание что-то придумать или выполнить позже; если просят сочинить сообщение, подготовь его до создания напоминания.",
-  "content читают в момент доставки: без слов \"завтра\" и \"через час\", формат текста в инструкциях.",
-  "Это не автономный запуск агента: работать по расписанию, искать в сети и готовить отчёты в этом чате нельзя.",
-  "Напоминания принадлежат чату: любой участник может изменить и удалить любое из них, а не только своё.",
-  `Лимит: не больше ${GROUP_REMINDER_MAX_PER_CHAT} действующих напоминаний на весь чат.`,
-  `Часовой пояс чата всегда ${GROUP_REMINDER_TIMEZONE}, менять его нельзя; называй время по Москве, когда подтверждаешь напоминание.`,
+  "Create, change, pause, resume or delete a reminder of this chat: at the given time the bot itself posts its text here.",
+  "A participant's explicit request is enough: do it without additional confirmation. Clarify missing or ambiguous data with an ordinary message in the chat.",
+  "content is sent as ready-made text without calling the model. Do not store in it a task to come up with or do something later; if asked to compose a message, prepare it before creating the reminder.",
+  "content is read at the moment of delivery: without words like \"завтра\" and \"через час\"; the text format is in the instructions.",
+  "This is not an autonomous run of the agent: working on a schedule, searching the web and preparing reports is not possible in this chat.",
+  "Reminders belong to the chat: any participant may change and delete any of them, not only their own.",
+  `Limit: no more than ${GROUP_REMINDER_MAX_PER_CHAT} active reminders for the whole chat.`,
+  `The chat's timezone is always ${GROUP_REMINDER_TIMEZONE} and cannot be changed; name the time in Moscow time when you confirm a reminder.`,
   "Create payload: {\"action\":\"create\",\"content\":\"Созвон по проекту\",\"firstRunAt\":\"2026-09-04T18:00:00+03:00\",\"recurrence\":null}.",
-  "Повторение: без повтора recurrence=null; для повтора передай {\"unit\":\"minutely\",\"interval\":5}. unit: minutely, hourly, daily, weekly, monthly, yearly; interval целый от 1 до 365. Минимум 1 минута. Минуты и часы отсчитываются как длительность, календарные периоды сохраняют местное время. Отсутствующая дата переносится на последний день месяца без потери исходной даты для следующих повторов. Проверка времени минутная, пропущенные повторы не догоняются.",
-  "Update передаёт id и только изменяемые content, firstRunAt или recurrence. Pause/resume/delete передают только action и id.",
-  "Отправленное разовое напоминание не меняется: для нового времени создай новое.",
-  "Один вызов работает ровно с одним напоминанием. Просьбу о нескольких выполняй отдельными вызовами без поштучного согласования; сообщай только об успешно выполненных действиях.",
-  "Человек называет напоминание словами, а не id: найди нужную запись через list_reminders и, если под описание подходит несколько, уточни какую именно.",
-  `firstRunAt всегда ISO datetime с московским смещением ${MOSCOW_OFFSET_SUFFIX}: другое смещение отклоняется, чтобы подтверждённое человеку время совпадало с сохранённым.`,
-  "Напоминание уходит в общий чат, а не в тему форума.",
+  "Recurrence: no repeat is recurrence=null; for a repeat pass {\"unit\":\"minutely\",\"interval\":5}. unit: minutely, hourly, daily, weekly, monthly, yearly; interval is an integer from 1 to 365. Minimum 1 minute. Minutes and hours are counted as a duration, calendar periods keep the local time. A missing date moves to the last day of the month without losing the original date for the following repeats. The time is checked every minute; missed repeats are not caught up.",
+  "Update passes id and only the content, firstRunAt or recurrence being changed. Pause/resume/delete pass only action and id.",
+  "A delivered one-time reminder does not change: for a new time create a new one.",
+  "One call works with exactly one reminder. Carry out a request about several with separate calls without agreeing on each; report only actions that succeeded.",
+  "A person names a reminder in words, not by id: find the needed record through list_reminders and, if several match the description, ask which one.",
+  `firstRunAt is always an ISO datetime with the Moscow offset ${MOSCOW_OFFSET_SUFFIX}: another offset is rejected, so that the time confirmed to the person matches the saved one.`,
+  "The reminder goes to the general chat, not to a forum topic.",
 ].join(" ");
 
 const LIST_DESCRIPTION = [
-  "Постранично показать действующие напоминания этого чата, ближайшие первыми: их видит любой участник, включая приостановленные. Уже отправленные здесь не показываются.",
-  "Используй перед изменением или удалением, чтобы найти id записи по названию, которое произнёс человек.",
-  "Результат: {items,nextCursor}; если nextCursor не null, передай его без изменений для следующей страницы.",
+  "List the active reminders of this chat page by page, nearest first: any participant sees them, including paused ones. Already delivered ones are not shown here.",
+  "Use it before a change or deletion to find the record's id by the name the person said.",
+  "Result: {items,nextCursor}; if nextCursor is not null, pass it unchanged for the next page.",
 ].join(" ");
 
 export const EXTERNAL_GROUP_REMINDER_TOOLS: Readonly<Record<string, AnyToolDefinition>> = {
