@@ -23,10 +23,18 @@ export interface ProfileViewClaim {
   sourceAuthorLabel: string;
 }
 
+/**
+ * Why a subject is in a stored snapshot. Snapshots saved before 2026-10-16 may also say
+ * `retrieval_related`: a person the turn's memory selection found a record about. New views leave
+ * such people out (over 14 days of a live group their 7 333 profile facts were never used), but a
+ * stored snapshot is still read back by its ref.
+ */
+export type StoredProfileSubjectPriority = ProfileSubjectPriority | "retrieval_related";
+
 export interface ProfileViewSubject {
   claims: ProfileViewClaim[];
   label: string;
-  priority: ProfileSubjectPriority;
+  priority: StoredProfileSubjectPriority;
   subjectRef: string;
   totalCharacters: number;
 }
@@ -46,7 +54,6 @@ export interface CreateProfileViewInput {
   provenance: { sessionId: string; turnId: string };
   replyTelegramUserId: string | null;
   replyTimelineSequence?: string | null;
-  retrievalClaimIds: readonly string[];
 }
 
 export function toProfileView(input: {

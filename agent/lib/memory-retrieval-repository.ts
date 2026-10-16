@@ -536,7 +536,7 @@ export const memoryRetrievalRepository = {
       );
     }
     // A record about another person than the one the question names goes below that person's,
-    // before the twelve places are chosen (#343, memory-named-people.ts).
+    // before the offered places are chosen (#343, memory-named-people.ts).
     const scored = preferNamedPeople(normalizedQuery, result.rows
       .filter((row): row is DiagnosticsColumns & RetrievalRow => row.id !== null)
       .map(rowToScoredResult));

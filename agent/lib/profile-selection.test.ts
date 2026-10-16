@@ -35,7 +35,7 @@ function candidate(input: Partial<ProfileClaimCandidate> & {
     originLabel: "Семейный чат",
     originScope: "family",
     observedAt: "2026-08-08T10:00:00.000Z",
-    priority: "retrieval_related",
+    priority: "explicit_mention",
     profileEligible: true,
     sensitivity: "normal",
     sourceAuthorLabel: "Анна",
@@ -48,11 +48,11 @@ function candidate(input: Partial<ProfileClaimCandidate> & {
 describe("R3 profile selection", () => {
   it("selects no more than four prioritized subjects without injecting all participants", () => {
     const priorities = [
-      "retrieval_related",
+      "explicit_mention",
       "explicit_mention",
       "reply_subject",
       "current_author",
-      "retrieval_related",
+      "explicit_mention",
     ] as const;
     const candidates = priorities.map((priority, index) => candidate({
       memoryRef: `mem_${String(index).padStart(32, "0")}`,
@@ -67,8 +67,10 @@ describe("R3 profile selection", () => {
       "current_author",
       "reply_subject",
       "explicit_mention",
-      "retrieval_related",
+      "explicit_mention",
     ]);
+    // Among equal mentions the order is the subject ref, so the last mention is the one left out.
+    expect(selected.subjects.map((subject) => subject.subjectRef.slice(-1))).toEqual(["3", "2", "0", "1"]);
   });
 
   it("keeps only whole eligible claims within all character and count budgets", () => {

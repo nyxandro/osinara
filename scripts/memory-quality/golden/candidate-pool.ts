@@ -50,7 +50,7 @@ import type { GoldenTurn } from "./golden-score.js";
 import type { GoldenQuery } from "./turn-queries.js";
 
 /**
- * Ten a branch, gates opened: beyond the twelve offered this adds what each branch would have
+ * Ten a branch, gates opened: beyond the records offered this adds what each branch would have
  * brought next and what its gate cut, while keeping a pool one judge can read through honestly.
  * Twenty made 8121 pairs over 153 turns, most of them the gated set nobody offered.
  */
@@ -326,7 +326,7 @@ export async function collectTurnCandidates(
 
   const reached = new Map(ungated.map((row) => [row.memory_ref, row]));
   // The gated set is not judged as a whole: it only says, for a relevant record in the pool that
-  // was not offered, whether a gate cut it or the twelve places went to others.
+  // was not offered, whether a gate cut it or the offered places went to others.
   const refs = [...new Set([...offered, ...reached.keys(), ...production?.shown ?? []])];
   const details = await recordDetails(refs);
   const pool = refs.map((memoryRef): PoolRecord => {
@@ -419,7 +419,7 @@ interface GatedRow {
 const optionalNumber = (value: number | string | null) => value === null ? null : Number(value);
 
 /**
- * The product statement with the product's own gates, unlimited: everything the twelve places
+ * The product statement with the product's own gates, unlimited: everything the offered places
  * were chosen from. A branch's order is recoverable from its score with `updatedAt` and `id` as
  * the statement's tie-breakers, so any fusion of the same three branches can be replayed offline.
  */

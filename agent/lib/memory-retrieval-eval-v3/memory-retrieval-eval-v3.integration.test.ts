@@ -6,7 +6,7 @@
  * - Recall measured per query shape, so a change that helps one shape and hurts another is visible.
  * - How often the lexical branches contribute to the answer, which is the claim behind #192.
  * - Whether a multi-topic or long message surfaces every one of its topics or only the loudest.
- * - Whether the right record is offered near the top, not merely present somewhere in the twelve.
+ * - Whether the right record is offered near the top, not merely present somewhere in the offer.
  * - Abstention on a question whose answer is absent but whose neighbour is almost right.
  * - The shapes the real-memory golden set found failing — small talk, other words for the same
  *   thing, a day or a period, a fact that changed — each measured by name.
@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "../database.js";
 import { chunkMemoryContent, chunkMemoryQuery } from "../memory-embedding-chunks.js";
-import { MEMORY_EMBEDDING_CHUNK_MAX_CHARACTERS, MEMORY_RETRIEVAL_LIMIT } from "../memory-config.js";
+import { MEMORY_EMBEDDING_CHUNK_MAX_CHARACTERS, MEMORY_TURN_SELECTION_LIMIT } from "../memory-config.js";
 import {
   categoryRate,
   evalAutomaticSelection,
@@ -44,10 +44,11 @@ import type {
 
 const describeEval = retrievalEvalsEnabled() ? describe : describe.skip;
 
-// Production offers up to twelve records, so quality is measured at the same depth.
-const EVAL_RESULT_LIMIT = MEMORY_RETRIEVAL_LIMIT;
+// Quality is measured at the depth a turn is offered. The metric names still say "At12": they keep
+// the keys of the earlier measurements, which were taken when a turn was offered twelve records.
+const EVAL_RESULT_LIMIT = MEMORY_TURN_SELECTION_LIMIT;
 // Rank position that counts as "the answer was actually offered", not merely present somewhere in
-// the twelve. Recall alone cannot see a change that pushes the right record from first to twelfth.
+// the offer. Recall alone cannot see a change that pushes the right record from first to last.
 const EVAL_TOP_POSITIONS = 3;
 const EVAL_SETUP_TIMEOUT_MILLISECONDS = 300_000;
 const EVAL_MEASUREMENT_TIMEOUT_MILLISECONDS = 120_000;

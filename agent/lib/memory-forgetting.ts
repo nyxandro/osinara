@@ -1,5 +1,5 @@
 /**
- * How much a record's age should cost it a place among the twelve.
+ * How much a record's age should cost it a place among the records offered to the model.
  *
  * Exports:
  * - `MEMORY_RETENTION_BASE_DAYS`: how long each kind of record stays fully available.
@@ -15,7 +15,7 @@
  * `floor + (1 - floor) × R`. A multiplier makes the old record yield its place; the floor makes
  * sure it only yields it, never disappears: nothing here removes anything, and there is no cutoff
  * a record can fall below. Ageing applies to the deliberate search as well as to the automatic
- * selection, because both read the same statement and both hand the model twelve records; what
+ * selection, because both read the same statement and both hand the model a short ranked list; what
  * the search keeps is the whole corpus to choose from, not an exemption from order.
  *
  * Strength grows with use: `S = S0 × (1 + ln(1 + n))`. A record used four times lasts about 2.6

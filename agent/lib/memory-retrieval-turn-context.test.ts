@@ -83,7 +83,6 @@ describe("retrieveMemoryTurnContext", () => {
     expect(activate).not.toHaveBeenCalled();
     expect(context.memories).toEqual([]);
     expect(context.offered.claimIdByMemoryRef.size).toBe(0);
-    expect(context.retrievedClaimIds).toEqual([]);
     expect(context.diagnostics.abstained).toBe(true);
   });
 

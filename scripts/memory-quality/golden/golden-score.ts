@@ -16,7 +16,7 @@ import { AppError } from "../../../agent/lib/app-error.js";
 
 export interface GoldenTurn {
   /**
-   * Every record that passed its branch gate, before the twelve places were filled. Not all of it
+   * Every record that passed its branch gate, before the offered places were filled. Not all of it
    * is in the pool: it only classifies a relevant pooled record that was not offered.
    */
   gated: readonly string[];
@@ -55,7 +55,7 @@ export interface GoldenScore {
   meanReciprocalRank: number | null;
   /**
    * Relevant records not offered: a branch reached them and its gate cut them, they passed a gate
-   * and lost the twelve places, or no branch reached them at all — production showed them, and
+   * and lost the offered places, or no branch reached them at all — production showed them, and
    * the replay found them in none of its branches.
    */
   missedRelevant: { cutByGate: number; notReachedInReplay: number; outranked: number };

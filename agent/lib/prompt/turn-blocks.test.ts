@@ -300,7 +300,7 @@ describe("memory block resolution", () => {
       retrieve: vi.fn().mockResolvedValue({
         diagnostics: { semanticBranchAvailable: true },
         memories: [],
-        rankingByMemoryRef: new Map(), retrievedClaimIds: [],
+        rankingByMemoryRef: new Map(),
         threads: { threads: [], totalCharacters: 0 },
       }),
     });
@@ -321,7 +321,7 @@ describe("memory block resolution", () => {
     const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization,
       createProfile, openSelectionWindow: async () => 1, recordOffered: vi.fn(),
       retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true }, memories,
-        rankingByMemoryRef: new Map(), retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } }),
+        rankingByMemoryRef: new Map(), threads: { threads: [], totalCharacters: 0 } }),
     });
 
     try {
@@ -357,7 +357,7 @@ describe("memory block resolution", () => {
       openSelectionWindow: async () => 7, recordOffered,
       retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true }, memories,
         offered: { claimIdByMemoryRef: new Map() },
-        rankingByMemoryRef: new Map(), retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } }),
+        rankingByMemoryRef: new Map(), threads: { threads: [], totalCharacters: 0 } }),
     });
 
     const conversationAuth = auth({
@@ -396,7 +396,7 @@ describe("memory block resolution", () => {
       retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true },
         memories: [{ content: "важная запись", kind: "fact", memoryRef: "mem_first" }],
         offered: { claimIdByMemoryRef: new Map() },
-        rankingByMemoryRef: new Map(), retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } }),
+        rankingByMemoryRef: new Map(), threads: { threads: [], totalCharacters: 0 } }),
     });
 
     try {
@@ -445,7 +445,7 @@ describe("memory block resolution", () => {
     };
     const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization, createProfile,
       openSelectionWindow: async () => 1, recordOffered: vi.fn(),
-      retrieve: vi.fn().mockResolvedValue({ diagnostics, memories, rankingByMemoryRef: new Map(), retrievedClaimIds: [],
+      retrieve: vi.fn().mockResolvedValue({ diagnostics, memories, rankingByMemoryRef: new Map(),
         threads: { threads: [], totalCharacters: 0 } }),
     });
     try {
@@ -475,7 +475,7 @@ describe("memory block resolution", () => {
       openSelectionWindow: async () => 3, recordOffered: vi.fn(),
       retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true }, memories,
         offered: { claimIdByMemoryRef: new Map() },
-        rankingByMemoryRef, retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } }),
+        rankingByMemoryRef, threads: { threads: [], totalCharacters: 0 } }),
     });
     const conversationAuth = auth({
       memoryScopes: ["personal", "family"],
@@ -513,7 +513,7 @@ describe("memory block resolution", () => {
       retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true },
         memories: [{ content: "Код домофона 4271", kind: "fact", memoryRef: "mem_first" }],
         offered: { claimIdByMemoryRef: new Map() },
-        rankingByMemoryRef: new Map(), retrievedClaimIds: [], threads: { threads: [], totalCharacters: 0 } }),
+        rankingByMemoryRef: new Map(), threads: { threads: [], totalCharacters: 0 } }),
     });
     const inherited = auth({
       memoryScopes: ["personal", "family"],
@@ -574,11 +574,13 @@ describe("memory block resolution", () => {
     expect(markdown).toContain("AGENT_MEMORY_UNAVAILABLE");
   });
 
-  it("builds the same-turn profile from verified signals and retrieval-related claim identities", async () => {
+  // People the selection merely found a record about stay out: over 14 days of a live group their
+  // 7 333 profile facts were never used, and they were a third of every group memory block.
+  it("builds the same-turn profile only from the verified author, reply and mention signals", async () => {
     const retrieve = vi.fn().mockResolvedValue({
       diagnostics: { semanticBranchAvailable: true },
       memories: [],
-      rankingByMemoryRef: new Map(), retrievedClaimIds: ["claim-related"],
+      rankingByMemoryRef: new Map(),
       threads: { threads: [], totalCharacters: 0 },
     });
     const profile = vi.fn().mockResolvedValue({
@@ -587,7 +589,7 @@ describe("memory block resolution", () => {
       subjects: [{
         claims: [],
         label: "Пётр",
-        priority: "retrieval_related",
+        priority: "explicit_mention",
         subjectRef: "subj_11111111111111111111111111111111",
         totalCharacters: 0,
       }],
@@ -623,10 +625,9 @@ describe("memory block resolution", () => {
       provenance: { sessionId: "session-1", turnId: TEST_TURN_ID },
       replyTelegramUserId: "203",
       replyTimelineSequence: "44",
-      retrievalClaimIds: ["claim-related"],
     });
     expect(markdown).toContain("<verified_profile_view");
-    expect(markdown).toContain('"priority":"retrieval_related"');
+    expect(markdown).toContain('"priority":"explicit_mention"');
   });
 });
 

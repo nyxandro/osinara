@@ -92,7 +92,7 @@ describeWithDatabase("memory retrieval without the embedding service", () => {
   it("still finds by words when the query vector cannot be computed", async () => {
     const context = await retrieveMemoryTurnContext(auth, "какой код домофона", []);
 
-    expect(context.retrievedClaimIds).toEqual([claimId]);
+    expect([...context.offered.claimIdByMemoryRef.values()]).toEqual([claimId]);
   });
 
   it("tells the model the selection is incomplete", async () => {

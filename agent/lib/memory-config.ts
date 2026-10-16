@@ -19,7 +19,15 @@ export const MEMORY_SCOPE_QUOTAS = {
 export const MEMORY_CONTENT_MAX_LENGTH = 4_000;
 export const MEMORY_LIST_DEFAULT_LIMIT = 20;
 export const MEMORY_LIST_MAX_LIMIT = 50;
+// The most records one explicit `search_memories` call may return.
 export const MEMORY_RETRIEVAL_LIMIT = 12;
+/**
+ * How many records the automatic selection puts in a turn's memory block. The model used about one
+ * in seventy shown records (14 days to 2026-10-16), so the block mostly carries what nobody reads,
+ * and it is recomputed on every message. On the golden set of 153 live turns (2026-10-06, r5) eight
+ * places keep 53 of the 54 turns that got a useful record at twelve; six keep only 49.
+ */
+export const MEMORY_TURN_SELECTION_LIMIT = 8;
 export const MEMORY_RETRIEVAL_CANDIDATE_LIMIT = 40;
 /**
  * Total size of the assembled turn memory block: retrieved records, profile and threads together

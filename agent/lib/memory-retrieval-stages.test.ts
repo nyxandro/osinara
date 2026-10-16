@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MemoryAuthorization } from "./memory-context.js";
 import { AppError } from "./app-error.js";
-import { MEMORY_RETRIEVAL_LIMIT } from "./memory-config.js";
+import { MEMORY_RETRIEVAL_LIMIT, MEMORY_TURN_SELECTION_LIMIT } from "./memory-config.js";
 const mocks = vi.hoisted(() => ({ embedding: vi.fn(), search: vi.fn(), threads: vi.fn() }));
 vi.mock("./memory-embedding-client.js", () => ({
   embedMemoryQueryChunks: mocks.embedding,
@@ -9,7 +9,7 @@ vi.mock("./memory-embedding-client.js", () => ({
 }));
 vi.mock("./memory-retrieval-repository.js", () => ({ memoryRetrievalRepository: { searchAuthorized: mocks.search } }));
 vi.mock("./memory-thread-brief-repository.js", () => ({ memoryThreadBriefRepository: { activate: mocks.threads } }));
-import { retrieveMemoryTurnContext } from "./memory-retrieval.js";
+import { retrieveMemoryTurnContext, retrieveRelevantMemories } from "./memory-retrieval.js";
 import { memoryFailureCode } from "./memory-context-failure.js";
 
 const DIAGNOSTICS = {
@@ -45,8 +45,20 @@ describe("memory retrieval failure provenance", () => {
     const context = await retrieveMemoryTurnContext({} as MemoryAuthorization, "private query", []);
 
     expect(context.diagnostics.semanticBranchAvailable).toBe(false);
-    expect(mocks.search).toHaveBeenCalledWith({}, "private query", [], MEMORY_RETRIEVAL_LIMIT, null);
+    expect(mocks.search).toHaveBeenCalledWith({}, "private query", [], MEMORY_TURN_SELECTION_LIMIT, null);
     expect(mocks.threads).toHaveBeenCalledWith(expect.objectContaining({ queryEmbedding: null }));
+  });
+  it("offers a turn eight records, fewer than the twelve an explicit search may read", async () => {
+    // Golden set of 153 live turns (2026-10-06, r5): of the 54 turns where twelve places offered a
+    // useful record, eight places keep 53, with a third fewer records in every turn's block.
+    await retrieveMemoryTurnContext({} as MemoryAuthorization, "private query", []);
+
+    expect(mocks.search).toHaveBeenCalledWith({}, "private query", [[1]], 8, null);
+
+    // An explicit search names no limit and so reads up to the repository's own maximum.
+    await retrieveRelevantMemories({} as MemoryAuthorization, "private query");
+    expect(mocks.search).toHaveBeenLastCalledWith({}, "private query", [[1]]);
+    expect(MEMORY_RETRIEVAL_LIMIT).toBe(12);
   });
   it("keeps how each selected record was found for the turn's log", async () => {
     mocks.search.mockResolvedValue({

@@ -12,7 +12,7 @@
  *
  * Saving a claim checks only for an identical string today, so «Аня не ест глютен» and «у Ани
  * непереносимость глютена» become two records. Nobody sees the second one appear, but both queue
- * for the same twelve slots and both count against the quota.
+ * for the same few slots and both count against the quota.
  *
  * **The code never merges anything by itself.** The measurement in #208 is the reason: on the same
  * embedding model, real duplicates sit at about 0.934 and genuinely different facts about one

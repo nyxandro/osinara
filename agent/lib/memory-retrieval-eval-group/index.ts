@@ -70,7 +70,8 @@ export const MEMORY_RETRIEVAL_EVAL_GROUP_BASELINE = {
   participantTopThreeRate: 1,
   positiveRecallAt12: 1,
   smallTalkEmptyRate: 0.5,
-  smallTalkMeanOffered: 4.75,
+  // 3.25 since a turn is offered eight records instead of twelve (2026-10-16).
+  smallTalkMeanOffered: 3.25,
   topicFullCoverageRate: 1,
   topicRecallAt12: 1,
 } as const;

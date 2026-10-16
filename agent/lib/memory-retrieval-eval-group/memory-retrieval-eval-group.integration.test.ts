@@ -16,7 +16,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "../database.js";
-import { MEMORY_RETRIEVAL_LIMIT } from "../memory-config.js";
+import { MEMORY_TURN_SELECTION_LIMIT } from "../memory-config.js";
 import type { MemoryAuthorization } from "../memory-context.js";
 import { prepareMemoryQuery } from "../memory-query-preparation.js";
 import {
@@ -42,8 +42,8 @@ import type {
 
 const describeEval = retrievalEvalsEnabled() ? describe : describe.skip;
 
-// Production fills every one of the twelve slots, so quality is measured at the same depth.
-const EVAL_RESULT_LIMIT = MEMORY_RETRIEVAL_LIMIT;
+// Quality is measured at the depth a turn is offered.
+const EVAL_RESULT_LIMIT = MEMORY_TURN_SELECTION_LIMIT;
 const EVAL_TOP_POSITIONS = 3;
 const EVAL_SETUP_TIMEOUT_MILLISECONDS = 300_000;
 const EVAL_MEASUREMENT_TIMEOUT_MILLISECONDS = 120_000;

@@ -218,7 +218,6 @@ describeWithDatabase("R3 profile projections", () => {
       now: new Date("2026-08-08T12:00:00.000Z"),
       provenance: profileProvenance("personal-default"),
       replyTelegramUserId: null,
-      retrievalClaimIds: [],
     });
     expect(personalDefault.subjects.flatMap((subject) => subject.claims.map((claim) => claim.content)))
       .toEqual(expect.arrayContaining([
@@ -244,7 +243,6 @@ describeWithDatabase("R3 profile projections", () => {
       now: new Date("2026-08-08T12:00:00.000Z"),
       provenance: profileProvenance("personal-pending-notice"),
       replyTelegramUserId: null,
-      retrievalClaimIds: [],
     });
     expect(JSON.stringify(personalPendingNotice)).not.toContain("Факт только из External A");
 
@@ -264,7 +262,6 @@ describeWithDatabase("R3 profile projections", () => {
       now: new Date("2026-08-08T12:00:00.000Z"),
       provenance: profileProvenance("personal-enabled"),
       replyTelegramUserId: null,
-      retrievalClaimIds: [],
     });
     const enabledContents = personalEnabled.subjects.flatMap(
       (subject) => subject.claims.map((claim) => claim.content),
@@ -294,7 +291,6 @@ describeWithDatabase("R3 profile projections", () => {
       now: new Date("2026-08-08T12:00:00.000Z"),
       provenance: profileProvenance("external-a"),
       replyTelegramUserId: null,
-      retrievalClaimIds: [],
     });
     const externalContents = JSON.stringify(externalAView);
     expect(externalContents).toContain("Факт только из External A");
@@ -316,7 +312,6 @@ describeWithDatabase("R3 profile projections", () => {
       now: new Date("2026-08-08T12:00:00.000Z"),
       provenance: profileProvenance("after-departure"),
       replyTelegramUserId: null,
-      retrievalClaimIds: [],
     });
     expect(JSON.stringify(afterDeparture)).toContain("Позднее подтверждение после ухода");
     expect(JSON.stringify(afterDeparture)).toContain(laterClaim);
@@ -331,11 +326,11 @@ describeWithDatabase("R3 profile projections", () => {
       conversationId: fixture.personalConversationId,
       currentTelegramUserId: "9301", explicitMentionTelegramUserIds: [],
       now: new Date(), provenance: profileProvenance("membership-revoked"),
-      replyTelegramUserId: null, retrievalClaimIds: [],
+      replyTelegramUserId: null,
     })).rejects.toThrowError(/AGENT_PROFILE_VIEW_MEMBERSHIP_REVOKED/u);
   });
 
-  it("adds a verified retrieval-related subject to the current family profile view", async () => {
+  it("leaves a member the turn is not about out of the family profile view until mentioned", async () => {
     const fixture = await createFixture();
     const petr = await database().query<{ id: string }>(
       "INSERT INTO users (telegram_user_id, display_name) VALUES ('9302', 'Пётр') RETURNING id",
@@ -351,39 +346,48 @@ describeWithDatabase("R3 profile projections", () => {
        VALUES ($1, $2, 'family', $2, '9302', $3, 'Пётр', now(), now())`,
       [fixture.familyConversationId, fixture.familyId, petr.rows[0]!.id],
     );
-    const memoryRef = await insertClaim({
+    await insertClaim({
       content: "Пётр предпочитает улун",
       conversationId: fixture.familyConversationId,
       familyId: fixture.familyId,
       scope: "family",
       subjectUserId: petr.rows[0]!.id,
     });
-    const claim = await database().query<{ memory_item_id: string }>(
-      "SELECT memory_item_id FROM memory_item_refs WHERE memory_ref = $1",
-      [memoryRef],
-    );
-
-    const view = await profileViewRepository.create({
-      ...fixture.ownerAuth,
-      groupId: fixture.familyGroupId,
-      scopes: ["family"],
-    }, {
+    const familyAuth = { ...fixture.ownerAuth, groupId: fixture.familyGroupId, scopes: ["family" as const] };
+    const input = {
       conversationId: fixture.familyConversationId,
       currentTelegramUserId: "9301",
-      explicitMentionTelegramUserIds: [],
       now: new Date("2026-08-08T12:00:00.000Z"),
-      provenance: profileProvenance("retrieval-related"),
       replyTelegramUserId: null,
-      retrievalClaimIds: [claim.rows[0]!.memory_item_id],
+    };
+
+    // A record about Пётр may well be retrieved for this turn; that alone does not bring his profile.
+    const unrelated = await profileViewRepository.create(familyAuth, {
+      ...input, explicitMentionTelegramUserIds: [], provenance: profileProvenance("not-about-petr"),
+    });
+    const mentioned = await profileViewRepository.create(familyAuth, {
+      ...input, explicitMentionTelegramUserIds: ["9302"], provenance: profileProvenance("mentions-petr"),
     });
 
-    expect(view.subjects).toEqual(expect.arrayContaining([
+    expect(unrelated.subjects.map((subject) => subject.label)).not.toContain("Пётр");
+
+    // Snapshots saved before 2026-10-16 still name people found through retrieved records; the model
+    // may read such a snapshot again by its ref from the conversation history.
+    await database().query(
+      `UPDATE profile_view_subjects SET priority_reason = 'retrieval_related'
+       WHERE profile_view_id = (SELECT id FROM profile_views WHERE profile_view_ref = $1)`,
+      [mentioned.profileViewRef],
+    );
+    await expect(profileViewRepository.read(familyAuth, mentioned.profileViewRef)).resolves.toMatchObject({
+      subjects: expect.arrayContaining([expect.objectContaining({ label: "Пётр", priority: "retrieval_related" })]),
+    });
+    expect(mentioned.subjects).toEqual(expect.arrayContaining([
       expect.objectContaining({
         claims: expect.arrayContaining([
           expect.objectContaining({ content: "Пётр предпочитает улун" }),
         ]),
         label: "Пётр",
-        priority: "retrieval_related",
+        priority: "explicit_mention",
       }),
     ]));
   });

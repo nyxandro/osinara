@@ -124,7 +124,6 @@ export interface MemoryTurnContext {
   offered: MemoryTurnOffer;
   /** How each retrieved record was found. Log-only: it never enters the block the model reads. */
   rankingByMemoryRef: ReadonlyMap<string, MemoryRecordRanking>;
-  retrievedClaimIds: string[];
   threads: MemoryThreadContext;
 }
 
@@ -244,7 +243,6 @@ export async function retrieveMemoryTurnContext(
         ),
       },
       rankingByMemoryRef: selectedRankingByRef(selection.selected),
-      retrievedClaimIds: selection.relatedClaimIds,
       threads,
     };
   } catch (error) {

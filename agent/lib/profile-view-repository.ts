@@ -24,6 +24,7 @@ import {
   type ProfileView,
   type ProfileViewClaim,
   type ProfileViewSubject,
+  type StoredProfileSubjectPriority,
 } from "./profile-view.js";
 
 export {
@@ -159,36 +160,23 @@ async function loadSubjects(
      LEFT JOIN users AS app_user ON app_user.id = subject.subject_user_id
      LEFT JOIN conversation_participants AS participant ON participant.id = subject.subject_participant_id
      WHERE subject.conversation_id = $1
-       AND (
-         (CASE WHEN subject.subject_user_id IS NOT NULL
-               THEN app_user.telegram_user_id ELSE participant.telegram_user_id END) = ANY($2::text[])
-          OR EXISTS (
-            SELECT 1
-            FROM memory_items AS related_claim
-            LEFT JOIN conversation_participants AS related_subject
-              ON related_subject.id = related_claim.subject_participant_id
-            WHERE related_claim.id = ANY($3::uuid[])
-              AND (
-                (subject.subject_user_id IS NOT NULL AND (
-                  related_claim.subject_user_id = subject.subject_user_id OR
-                  related_subject.linked_user_id = subject.subject_user_id
-                )) OR
-                (subject.subject_participant_id IS NOT NULL AND
-                  related_claim.subject_participant_id = subject.subject_participant_id)
-              )
-          )
-       )
-       AND ($4::memory_scope <> 'family' OR EXISTS (
+       AND (CASE WHEN subject.subject_user_id IS NOT NULL
+                 THEN app_user.telegram_user_id ELSE participant.telegram_user_id END) = ANY($2::text[])
+       AND ($3::memory_scope <> 'family' OR EXISTS (
          SELECT 1 FROM family_memberships AS membership
-         WHERE membership.family_id = $5 AND membership.user_id = subject.subject_user_id
+         WHERE membership.family_id = $4 AND membership.user_id = subject.subject_user_id
        ))
      ORDER BY subject.subject_ref`,
-    [input.conversationId, telegramUserIds, input.retrievalClaimIds, conversation.scope, auth.familyId],
+    [input.conversationId, telegramUserIds, conversation.scope, auth.familyId],
   );
-  return result.rows.map((row) => ({
-    ...row,
-    priority: signals.get(row.telegram_user_id) ?? "retrieval_related",
-  }));
+  return result.rows.map((row) => {
+    // Subjects are selected by these very Telegram ids, so each row has the signal that chose it.
+    const priority = signals.get(row.telegram_user_id);
+    if (priority === undefined) {
+      throw new Error(`AGENT_PROFILE_SUBJECT_SIGNAL_MISSING: subject ${row.subject_ref} has no verified signal`);
+    }
+    return { ...row, priority };
+  });
 }
 
 async function loadClaims(
@@ -364,7 +352,7 @@ export const profileViewRepository = {
         origin_label_snapshot: string;
         origin_scope: MemoryScope;
         source_author_label_snapshot: string;
-        priority_reason: ProfileSubjectPriority;
+        priority_reason: StoredProfileSubjectPriority;
         subject_label_snapshot: string;
         subject_ordinal: number;
         subject_ref_snapshot: string;

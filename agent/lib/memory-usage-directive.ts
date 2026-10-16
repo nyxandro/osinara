@@ -9,7 +9,7 @@
  *   delivery barrier decides whether this turn may have side effects at all.
  *
  * Why this exists: memory cannot tell a record that earns its place in every other conversation
- * from one that has not been useful once since it was written. Both queue for the same twelve
+ * from one that has not been useful once since it was written. Both queue for the same few
  * slots. On production the reinforcement counter stood at zero for 1456 records out of 1465 and
  * had never reached two, because it counts a fact being *observed again*, not a record being used.
  *

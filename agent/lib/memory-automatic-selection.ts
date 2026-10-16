@@ -19,7 +19,7 @@ import { memoryFailureCode } from "./memory-context-failure.js";
 import { withAssistantName } from "./memory-persona-query.js";
 import { withQueryAliases } from "./memory-query-aliases.js";
 import type { MemoryAuthorization } from "./memory-context.js";
-import { MEMORY_RETRIEVAL_LIMIT } from "./memory-config.js";
+import { MEMORY_TURN_SELECTION_LIMIT } from "./memory-config.js";
 import type { ReferencedMemoryItem } from "./memory-record.js";
 import { memoryRetrievalRepository } from "./memory-retrieval-repository.js";
 import type {
@@ -69,7 +69,6 @@ export interface AutomaticMemorySelection {
   diagnostics: MemoryRetrievalBranchDiagnostics;
   /** The query vector by pieces; empty when the service was unreachable or no search ran. */
   embeddings: readonly (readonly number[])[];
-  relatedClaimIds: string[];
   selected: SelectedMemory[];
   semanticBranchAvailable: boolean;
 }
@@ -131,11 +130,11 @@ export async function selectMemoriesAutomatically(
   if (isSmallTalkMessage(prepared)) {
     return {
       abstained: true, dateWindow: null,
-      diagnostics: SILENT_SELECTION_DIAGNOSTICS, embeddings: [], relatedClaimIds: [], selected: [],
+      diagnostics: SILENT_SELECTION_DIAGNOSTICS, embeddings: [], selected: [],
       semanticBranchAvailable: true,
     };
   }
-  const limit = options.limit ?? MEMORY_RETRIEVAL_LIMIT;
+  const limit = options.limit ?? MEMORY_TURN_SELECTION_LIMIT;
   // Slang read in plain words too (memory-query-aliases.ts); in a group «ты» is the assistant, and
   // its records carry its name (memory-persona-query.ts).
   const withAliases = withQueryAliases(prepared);
@@ -166,8 +165,6 @@ export async function selectMemoriesAutomatically(
     dateWindow,
     diagnostics: retrieval.diagnostics,
     embeddings,
-    // What the profile may read beside the block: exactly the records offered.
-    relatedClaimIds: selected.map((one) => one.memory.id),
     selected,
     semanticBranchAvailable: embeddings.length > 0,
   };

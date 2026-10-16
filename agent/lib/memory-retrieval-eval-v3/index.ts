@@ -120,6 +120,13 @@ export const MEMORY_RETRIEVAL_EVAL_QUERIES_V3: readonly MemoryRetrievalEvalQuery
  * easier question than the one the name promised. A long rambling message still finds most of its
  * topics — `longQueryRecallAt12` holds at 0.833 — but covering *all* of them is where the pipeline
  * actually stands, and that is now visible instead of averaged away.
+ *
+ * Since 2026-10-16 a turn is offered eight records instead of twelve, and the numbers are measured
+ * at that depth; the "At12" names are kept for continuity with the rows above. Three numbers moved:
+ * `positiveRecallAt12` 0.96 → 0.94 and `semanticParaphraseRecallAt12` 0.833 → 0.667 (one question
+ * each), `longQueryFullCoverageRate` 0.5 → 0.333 (a long message has fewer places for its quieter
+ * topics). The real-memory golden set put the same trade at one turn in 61, for a third less text in
+ * every turn's block.
  */
 export const MEMORY_RETRIEVAL_R1_BASELINE_V3 = {
   aliasWordingRecallAt12: 1,
@@ -131,16 +138,16 @@ export const MEMORY_RETRIEVAL_R1_BASELINE_V3 = {
   expectedInTopThreeRate: 0.84,
   lexicalBranchFireRate: 0.88,
   liveShapeLexicalFireRate: 0.958,
-  longQueryFullCoverageRate: 0.5,
+  longQueryFullCoverageRate: 0.333,
   longQueryRecallAt12: 0.833,
   mixedLanguageRecallAt12: 1,
   multiTopicFullCoverageRate: 0.6,
   multiTopicRecallAt12: 1,
   nearMissEmptyRate: 0,
   negativeEmptyRate: 0.5,
-  positiveRecallAt12: 0.96,
+  positiveRecallAt12: 0.94,
   russianMorphologyRecallAt12: 1,
-  semanticParaphraseRecallAt12: 0.833,
+  semanticParaphraseRecallAt12: 0.667,
   smallTalkEmptyRate: 1,
   typoRecallAt12: 1,
   updatedFactRecallAt12: 1,

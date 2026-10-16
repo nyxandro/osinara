@@ -316,7 +316,7 @@ export function createMemoryBlockResolver(dependencies: {
       diagnostics = context.diagnostics;
       outcome = "succeeded";
       phase = "profile";
-      const profileInput = telegramProfileInput(ctx, context.retrievedClaimIds, turnId);
+      const profileInput = telegramProfileInput(ctx, turnId);
       const profile = profileInput === null
         ? null
         : await dependencies.createProfile(authorization, profileInput);
@@ -392,7 +392,6 @@ export function createMemoryBlockResolver(dependencies: {
 
 function telegramProfileInput(
   ctx: TurnBlockContext,
-  retrievalClaimIds: readonly string[],
   turnId: string,
 ): CreateProfileViewInput | null {
   if (isTelegramChannelSession(ctx.session.auth)) return null;
@@ -429,7 +428,6 @@ function telegramProfileInput(
     provenance: { sessionId: ctx.session.id, turnId },
     replyTelegramUserId: replyTelegramUserId ?? null,
     ...(replyTimelineSequence === undefined ? {} : { replyTimelineSequence }),
-    retrievalClaimIds: [...retrievalClaimIds],
   };
 }
 

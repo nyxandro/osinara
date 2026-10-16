@@ -18,11 +18,12 @@ import {
   PROFILE_SELECTION_DORMANCY_MILLISECONDS,
 } from "./memory-config.js";
 
+// Who a new profile view is about: the author, the person they reply to, and anyone they mention.
+// A person the memory selection merely found a record about is not included (see `profile-view.ts`).
 export type ProfileSubjectPriority =
   | "current_author"
   | "explicit_mention"
-  | "reply_subject"
-  | "retrieval_related";
+  | "reply_subject";
 
 export interface ProfileClaimCandidate {
   claimStatus: "active" | "duplicate" | "superseded";
@@ -65,7 +66,6 @@ const SUBJECT_PRIORITY: Readonly<Record<ProfileSubjectPriority, number>> = {
   current_author: 0,
   reply_subject: 1,
   explicit_mention: 2,
-  retrieval_related: 3,
 };
 const KIND_PRIORITY: Readonly<Record<MemoryKind, number>> = {
   profile: 0,

@@ -214,7 +214,6 @@ describe("recordOfferedMemories", () => {
         claimIdByMemoryRef: new Map([["mem_first", "claim-1"], ["mem_second", "claim-2"]]),
       },
       rankingByMemoryRef: new Map(),
-      retrievedClaimIds: [],
       threads: { threads: [], totalCharacters: 0 } as MemoryTurnContext["threads"],
     };
   }

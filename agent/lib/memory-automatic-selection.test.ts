@@ -70,7 +70,6 @@ describe("selectMemoriesAutomatically", () => {
       .toEqual(["topic-and-day", "day-newest", "day-older", "topic-only"]);
     expect(selection.selected[1]!.score).toBeNull();
     expect(selection.dateWindow).toEqual({ form: "yesterday", from: "2026-10-07", records: 3, to: "2026-10-07" });
-    expect(selection.relatedClaimIds).toEqual(["topic-and-day", "day-newest", "day-older", "topic-only"]);
   });
 
   it("reads a group's day on the group's calendar", async () => {
