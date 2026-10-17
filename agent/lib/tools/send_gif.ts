@@ -58,7 +58,7 @@ const inputSchema = z.object({
   brief: z.string().trim().min(1).max(GIF_BRIEF_MAX_LENGTH)
     .describe("For the model that looks at the candidates: what the reply must express and in which tone, in one or two sentences, and whether a rude gesture is acceptable"),
   caption: z.string().trim().min(1).max(GIF_CAPTION_MAX_LENGTH).optional()
-    .describe("An optional short phrase shown under the GIF"),
+    .describe("Usually omitted. Your own short line to the person under the GIF, in the first person, for example \"Держи свою Теслу\"; never a note about the request or the search"),
   query: z.string().trim().min(1).max(GIF_QUERY_MAX_LENGTH)
     .describe("An English search phrase of one to five words naming the emotion, gesture or situation, for example \"eye roll\", \"slow clap\", \"middle finger\""),
 }).strict();
