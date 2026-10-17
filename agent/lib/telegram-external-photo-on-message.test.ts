@@ -8,7 +8,13 @@
  * - Revoked, mixed, malformed, and non-image documents fail closed.
  */
 import type { TelegramMessage } from "../runtime/telegram/inbound.js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// These cases exercise image inspection, so they state a vision model rather than inheriting the
+// checked-in provider config.
+vi.mock("./model-vision-availability.js", () => ({
+  MODEL_VISION_AVAILABLE: true,
+}));
 
 import {
   BOT_USERNAME,

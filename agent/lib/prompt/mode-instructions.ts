@@ -11,12 +11,16 @@
  * - External-group rules follow the effective allowlist, so revoked capabilities leave no guidance.
  */
 import { EXTERNAL_GROUP_MODEL_POLICY } from "../external-group-model-policy.js";
+import { GIF_REPLIES_AVAILABLE } from "../gifs/gif-reply-availability.js";
+import { MODEL_VISION_AVAILABLE } from "../model-vision-availability.js";
+import { servableExternalGroupCapabilities } from "../tool-policy/grantable-group-capabilities.js";
 import { externalGroupCapabilityInstructions } from "../tool-policy/external-group-capability-instructions.js";
 import type { ExternalGroupToolName } from "../tool-policy/group-tool-catalog.js";
 import { TURN_INTERJECTION_RULES } from "../turn-interjection/turn-interjection-block.js";
 
 import {
   CURRENT_MESSAGE_REPLY_CONTRACT,
+  GIF_REPLY_RULES,
   IMAGE_INSPECTION_CONTRACT,
   MEMORY_DEEPENING_PROTOCOL,
   MEMORY_EXACT_DUPLICATE_HANDLING,
@@ -50,12 +54,12 @@ import {
 } from "./group-fragments.js";
 import {
   CURRENT_TIME_TOOL_RULES,
-  OFFICE_DOCUMENT_RULES,
   PROACTIVE_DELIVERY_RULES,
   PROGRESS_UPDATE_RULES,
   SKILL_RULES,
   START_NEW_CONTEXT_RULES,
   VOICE_TRANSCRIPTION_RULES,
+  officeDocumentRules,
   trustedBehaviorPreferenceRules,
   trustedCredentialRules,
   REMINDER_SCENARIO_BOUNDARY,
@@ -92,6 +96,22 @@ function block(sections: readonly (string | null)[]): string {
   return `${ENVIRONMENT_OPEN_TAG}\n${body}\n${ENVIRONMENT_CLOSE_TAG}`;
 }
 
+/** A GIF answers a live participant: neither a scheduled report nor a delegated child sends one. */
+function liveGifReplies(scheduledRun: boolean, subagentTurn: boolean): boolean {
+  return GIF_REPLIES_AVAILABLE && !scheduledRun && !subagentTurn;
+}
+
+/** The zone's image route is named only when the model can actually inspect images. */
+function trustedImagesAndFilesSection(imageInspection: string): string {
+  return [
+    "## Images and files",
+    UNTRUSTED_FILE_CONTENT_RULES,
+    MODEL_VISION_AVAILABLE ? imageInspection : null,
+    SEND_WORKSPACE_FILE_RULES,
+    officeDocumentRules(MODEL_VISION_AVAILABLE),
+  ].filter((part): part is string => part !== null).join("\n\n");
+}
+
 const PRIVATE_INSTRUCTION_SECTIONS = [
   "# Current mode: private chat",
   VERIFIED_BLOCK_NOTICE,
@@ -118,15 +138,9 @@ The \`<current_telegram_message>\` block holds the current message of this conve
 Incoming files are saved at the path from \`<workspace_attachments>\`; the model receives only their untrusted metadata, not the content. An unknown binary format has \`mediaType: application/octet-stream\`. Do not run a received binary, installer, script or executable archive automatically: without an explicit request only safe operations are allowed, such as identifying the type, computing a hash, viewing the archive structure, storing, copying and sending.
 
 ${VOICE_TRANSCRIPTION_RULES}`,
-  `## Images and files
-
-${UNTRUSTED_FILE_CONTENT_RULES}
-
-${IMAGE_INSPECTION_CONTRACT} For a record from \`<workspace_attachments>\` pass \`telegramMessageId\`, the permitted scope and the user's specific question without retyping the long \`path\`; for another image in the workspace pass the exact available \`path\`.
-
-${SEND_WORKSPACE_FILE_RULES}
-
-${OFFICE_DOCUMENT_RULES}`,
+  trustedImagesAndFilesSection(
+    `${IMAGE_INSPECTION_CONTRACT} For a record from \`<workspace_attachments>\` pass \`telegramMessageId\`, the permitted scope and the user's specific question without retyping the long \`path\`; for another image in the workspace pass the exact available \`path\`.`,
+  ),
   REMINDER_SCENARIO_BOUNDARY,
   trustedReminderRules("personal"),
   trustedScheduleRules("personal"),
@@ -160,6 +174,7 @@ function privateInstructions(
     scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
     scheduledRun || subagentTurn ? null : VOICE_MESSAGE_RULES,
+    liveGifReplies(scheduledRun, subagentTurn) ? GIF_REPLY_RULES : null,
     scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
     scheduledRun ? null : trustedBehaviorPreferenceRules(),
   ]);
@@ -194,15 +209,9 @@ ${FAMILY_APPROVAL_UNAVAILABLE}`,
 Incoming photos and documents are first available as safe metadata in \`<telegram_attachment_refs>\` and take no workspace space. Download only the needed attachment through \`import_telegram_attachment\` by its \`attachmentId\`; the model does not receive the file content automatically, and after success use the returned \`path\`. If the needed reference is not in the current context, get the latest references of this group and topic through \`list_telegram_attachments\`. Do not claim that a file is available, read or saved before the corresponding tool's successful result.
 
 ${VOICE_TRANSCRIPTION_RULES}`,
-  `## Images and files
-
-${UNTRUSTED_FILE_CONTENT_RULES}
-
-${IMAGE_INSPECTION_CONTRACT} For an image from \`<telegram_attachment_refs>\` or the reply ancestry pass its \`attachmentId\`: the bytes are loaded only into memory, and the analysis by itself never saves a file. For an already saved file pass the exact available \`path\`.
-
-${SEND_WORKSPACE_FILE_RULES}
-
-${OFFICE_DOCUMENT_RULES}`,
+  trustedImagesAndFilesSection(
+    `${IMAGE_INSPECTION_CONTRACT} For an image from \`<telegram_attachment_refs>\` or the reply ancestry pass its \`attachmentId\`: the bytes are loaded only into memory, and the analysis by itself never saves a file. For an already saved file pass the exact available \`path\`.`,
+  ),
   REMINDER_SCENARIO_BOUNDARY,
   trustedReminderRules("family"),
   trustedScheduleRules("family"),
@@ -227,6 +236,7 @@ function familyInstructions(
     scheduledRun || subagentTurn ? null : GROUP_STANDALONE_MESSAGE_RULES,
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
     scheduledRun || subagentTurn ? null : VOICE_MESSAGE_RULES,
+    liveGifReplies(scheduledRun, subagentTurn) ? GIF_REPLY_RULES : null,
     scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
     scheduledRun ? null : trustedBehaviorPreferenceRules(),
   ]);
@@ -253,7 +263,7 @@ function externalMemorySection(
 }
 
 function externalInstructions(
-  capabilities: ReadonlySet<ExternalGroupToolName>,
+  grantedCapabilities: ReadonlySet<ExternalGroupToolName>,
   reactions: readonly string[] | null,
   includeApplicationCore = true,
   scheduledRun = false,
@@ -261,6 +271,8 @@ function externalInstructions(
   channelAuthored = false,
   subagentTurn = false,
 ): string {
+  // A grant the active runtime cannot serve leaves no guidance, like a revoked one.
+  const capabilities = servableExternalGroupCapabilities(grantedCapabilities);
   // Reminders are ungranted but need a participant who can own one and a live turn to ask in.
   const reminders = includeApplicationCore && !scheduledRun;
   // The voice tool answers a live participant in the chat itself, so a scheduled run and a child
@@ -352,6 +364,8 @@ Do not use personal or family accounts, tokens or browser authorizations. This g
     scheduledRun || subagentTurn ? null : GROUP_STANDALONE_MESSAGE_RULES,
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
     voiceMessages ? VOICE_MESSAGE_RULES : null,
+    // GIF replies need no grant but belong to the application core of a live turn.
+    includeApplicationCore && liveGifReplies(scheduledRun, subagentTurn) ? GIF_REPLY_RULES : null,
     includeApplicationCore && !scheduledRun ? trustedBehaviorPreferenceRules() : null,
     reminders ? GROUP_REMINDER_RULES : null,
     reminders ? GROUP_SCENARIO_RULES : null,

@@ -11,7 +11,13 @@
  * - Voice transcript persistence: paid provider results survive delivery retries.
  */
 import type { TelegramMessage } from "../runtime/telegram/inbound.js";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+// External photos are taken in only for image inspection, so these cases state a vision model
+// rather than inheriting the checked-in provider config.
+vi.mock("./model-vision-availability.js", () => ({
+  MODEL_VISION_AVAILABLE: true,
+}));
 
 import { closeDatabase, database } from "./database.js";
 import { telegramIngressRepository } from "./telegram-ingress-repository.js";

@@ -41,10 +41,13 @@ import readProfileView from "../tools/read_profile_view.js";
 import remember from "../tools/remember.js";
 import searchMemories from "../tools/search_memories.js";
 import searchMemoryThreads from "../tools/search_memory_threads.js";
+import sendGif from "../tools/send_gif.js";
 import sendVoiceMessage from "../tools/send_voice_message.js";
 import sendWorkspaceFile from "../tools/send_workspace_file.js";
 import startNewContext from "../tools/start_new_context.js";
 import { IMAGE_GENERATION_AVAILABLE } from "../image-generation/image-generation-availability.js";
+import { GIF_REPLIES_AVAILABLE } from "../gifs/gif-reply-availability.js";
+import { MODEL_VISION_AVAILABLE } from "../model-vision-availability.js";
 import { conversationWebFetch, conversationWebSearch } from "./conversation-web-tools.js";
 
 type AnyToolDefinition = ToolDefinition<any, any>;
@@ -59,7 +62,10 @@ export const TRUSTED_MODE_TOOLS: ToolMap = {
     ? { generate_image: generateImage as unknown as AnyToolDefinition }
     : {}),
   get_current_time: getCurrentTime as unknown as AnyToolDefinition,
-  inspect_workspace_image: inspectWorkspaceImage as unknown as AnyToolDefinition,
+  // Without image input every call would fail, so the descriptor is not offered at all.
+  ...(MODEL_VISION_AVAILABLE
+    ? { inspect_workspace_image: inspectWorkspaceImage as unknown as AnyToolDefinition }
+    : {}),
   list_agent_schedules: listAgentSchedules as unknown as AnyToolDefinition,
   list_memories: listMemories as unknown as AnyToolDefinition,
   list_memory_threads: listMemoryThreads as unknown as AnyToolDefinition,
@@ -77,6 +83,8 @@ export const TRUSTED_MODE_TOOLS: ToolMap = {
   remember: remember as unknown as AnyToolDefinition,
   search_memories: searchMemories as unknown as AnyToolDefinition,
   search_memory_threads: searchMemoryThreads as unknown as AnyToolDefinition,
+  // Choosing a GIF needs image input and a KLIPY key; without them the tool is not offered at all.
+  ...(GIF_REPLIES_AVAILABLE ? { send_gif: sendGif as unknown as AnyToolDefinition } : {}),
   send_voice_message: sendVoiceMessage as unknown as AnyToolDefinition,
   send_workspace_file: sendWorkspaceFile as unknown as AnyToolDefinition,
   start_new_context: startNewContext as unknown as AnyToolDefinition,

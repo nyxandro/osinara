@@ -9,6 +9,7 @@ import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { materializeTelegramAttachment } from "../attachments/telegram-attachment-materializer.js";
+import { MODEL_VISION_AVAILABLE } from "../model-vision-availability.js";
 import {
   requireInputRecord,
   requireOnlyFields,
@@ -25,7 +26,10 @@ export default defineTool({
     "When to use: on an explicit request, download one permitted attachment of a registered Telegram group into its workspace.",
     "When not to use: do not pass an invented attachmentId or one obtained in another chat.",
     "Input: an attachmentId only from <telegram_attachment_refs> or the log of the current group.",
-    "Result: the attachment metadata and a path, which you then pass to read_file or inspect_workspace_image.",
+    // Image inspection exists only with a model that accepts images.
+    MODEL_VISION_AVAILABLE
+      ? "Result: the attachment metadata and a path, which you then pass to read_file or inspect_workspace_image."
+      : "Result: the attachment metadata and a path, which you then pass to read_file.",
     "Error: on NOT_FOUND get the attachmentId again through list_telegram_attachments or the history; do not repeat a transport failure automatically.",
   ].join(" "),
   inputSchema: z.object({

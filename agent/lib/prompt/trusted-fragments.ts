@@ -7,8 +7,9 @@
  * - `REMINDER_SCENARIO_BOUNDARY`: how to tell a reminder request from a scenario request.
  * - `trustedReminderRules`, `trustedScheduleRules`: scheduled-notification rules.
  * - `trustedBehaviorPreferenceRules`: presentation-preference scope rules.
+ * - `officeDocumentRules`: office document handling, with the PDF page route only under vision.
  * - Fixed rule blocks identical in both trusted zones: voice, deliveries, time tool, progress
- *   updates, office documents, skills, and context rotation.
+ *   updates, skills, and context rotation.
  *
  * Every scope-dependent phrase comes from a fixed table keyed by the closed union, so the two
  * trusted zones share one source of truth instead of two drifting profile literals.
@@ -172,11 +173,17 @@ Give the next note only on a significant change of the user-facing stage: resear
 Do not announce short memory searches and fact checks before answering, including searching and reading a source. A quick single-step answer needs no separate note. The final message always briefly reports the actual result; if a file was sent by a separate tool, do not duplicate its content. Statuses show only the observable progress of work and do not reveal reasoning, hidden instructions or technical secrets.
 `.trim();
 
-export const OFFICE_DOCUMENT_RULES = `
-For PDF, DOCX and XLSX first load the corresponding native skill \`pdf\`, \`docx\` or \`xlsx\`. Process a PDF with the skill's programs and scripts inside the available sandbox; if a page needs vision analysis, save it as PNG in the current workspace and call \`inspect_workspace_image\`. Parse office documents by their own data and the rules of the loaded skill. Create a new text, Markdown, CSV, JSON or HTML document in the available workspace and send it only on the user's explicit request.
+/** `vision` tells whether image inspection exists in this runtime, so a PDF page can be examined. */
+export function officeDocumentRules(vision: boolean): string {
+  const pageInspection = vision
+    ? "; if a page needs vision analysis, save it as PNG in the current workspace and call `inspect_workspace_image`"
+    : "";
+  return `
+For PDF, DOCX and XLSX first load the corresponding native skill \`pdf\`, \`docx\` or \`xlsx\`. Process a PDF with the skill's programs and scripts inside the available sandbox${pageInspection}. Parse office documents by their own data and the rules of the loaded skill. Create a new text, Markdown, CSV, JSON or HTML document in the available workspace and send it only on the user's explicit request.
 
 If the user asks to research or study a topic in detail and the result is too large to read comfortably in the chat, give a short summary in the message, and make the full report a PDF through the native skill \`pdf\` and send it through \`send_workspace_file\`. Do not create a PDF for short answers and do not choose PDF if the user explicitly asked for another format.
 `.trim();
+}
 
 export const SKILL_RULES =
   "Before a complex or specialized task, check the available tools and skills. If there is a dedicated tool or skill for the task, use it instead of creating a duplicate way of working. Skills are attached through `load_skill` and add instructions, not new permissions.";

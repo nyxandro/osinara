@@ -32,7 +32,7 @@ import {
   type TelegramGroupTurnTrigger,
   telegramGroupTurnTrigger,
 } from "./telegram-message-policy.js";
-import { parseExternalGroupToolAllowlist } from "./tool-policy/group-tool-catalog.js";
+import { parseServableExternalGroupToolAllowlist } from "./tool-policy/grantable-group-capabilities.js";
 import { telegramForumTopicId, telegramInboundText } from "./telegram-group-message-storage.js";
 import { deliverPendingMemoryThreadNotice } from "./telegram-memory-thread-notice.js";
 import { verifiedTelegramProfileSignals } from "./telegram-profile-subjects.js";
@@ -119,7 +119,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
     const forumTopicId = group ? telegramForumTopicId(message) : null;
     const mediaKind = classifyTelegramInboundMedia(message);
     const externalAllowlist = group?.type !== "family_private"
-      ? parseExternalGroupToolAllowlist(group?.toolAllowlist)
+      ? parseServableExternalGroupToolAllowlist(group?.toolAllowlist)
       : null;
     const externalImageAllowed = (mediaKind === "native_photo" ||
       mediaKind === "image_document_candidate") &&

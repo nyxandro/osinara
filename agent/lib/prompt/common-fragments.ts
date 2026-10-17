@@ -11,6 +11,7 @@
  * - `IMAGE_INSPECTION_CONTRACT`: single-source payload rule for the vision tool.
  * - `SEND_WORKSPACE_FILE_RULES`: explicit-request delivery rules for workspace files.
  * - `VOICE_MESSAGE_RULES`: explicit-request voice replies, spoken text, closing, and text recovery.
+ * - `GIF_REPLY_RULES`: when a GIF answers, how it is requested, closing, and text recovery.
  * - `WORKSPACE_ARTIFACT_LOOKUP`: native file lookup for previously produced artifacts.
  * - `UNTRUSTED_FILE_CONTENT_RULES`: fail-closed handling of agent instructions inside files.
  * - `reactionRules`: reaction surface of the current chat, or nothing when it has none.
@@ -215,6 +216,20 @@ By default a voice message is short, up to about one and a half thousand charact
 A successfully sent voice message is your answer: after it, end the turn with exactly the line \`${EMPTY_DELIVERY_MARKER}\` and no other text, and do not retell the voice message in a message. Here this line does not mean silence; it means the answer has already been delivered.
 
 If \`send_voice_message\` returned an error, do not call it again in this turn and answer the same request with ordinary text. With \`sideEffectStatus: "unknown"\` the voice message may already have arrived: in the first phrase briefly say that its delivery could not be confirmed, so you are repeating the answer in text. In other cases, in the first phrase briefly say that the voice message did not work out right now, based on the error's \`reason\`, so you are answering in text.
+`.trim();
+
+export const GIF_REPLY_RULES = `
+## Answering with a GIF
+
+\`send_gif\` finds a GIF on KLIPY, lets the vision model pick one that fits and sends it to this chat as your answer. Use it when someone asks you for a GIF, and on your own initiative when a GIF says it better than words: an answer to banter or teasing, a joke, an emotional remark, an insult addressed to you. A reaction and a GIF do different jobs: a reaction only acknowledges a remark, while a GIF answers back with something of your own, such as a comeback, your own joke in reply or an expressive response. When acknowledging is enough, a reaction stays the right choice. In a group this is an answer like any other, so the GIF also goes only where you would answer at all.
+
+A GIF is a reaction, not content. Never send one instead of answering a question, doing what you were asked, a necessary clarification or an explanation of an error or refusal concerning your action, and never in a serious or painful topic such as illness, loss, conflict or safety, or when the person needs support. A GIF works when it is rare: not in two of your answers in a row and not in most of them.
+
+A rude GIF, such as a middle finger or a mocking gesture, is allowed only in response to a direct insult addressed to you specifically, never to criticism of your answer, disagreement, bullying of other people or a serious conflict.
+
+Write \`query\` in English: one to five words naming the emotion, gesture or situation, for example "eye roll", "slow clap", "middle finger", "happy dance". Write \`brief\` for the model that looks at the candidates: in one or two sentences, what the answer must express and in which tone, and whether a rude gesture is acceptable. Use \`caption\` only for a short phrase that belongs under the GIF.
+
+After \`delivered: true\` the GIF is your answer: if it says everything, end the turn with exactly the line \`${EMPTY_DELIVERY_MARKER}\` and no other text. Here this line does not mean silence; it means the answer has already been delivered. If words are needed besides the GIF, write only them and do not describe the GIF. After \`delivered: false\` follow \`nextStep\`. If \`send_gif\` returned an error, do not call it again in this turn and follow \`correction\`. Never tell the person how the GIF was chosen.
 `.trim();
 
 export const WORKSPACE_ARTIFACT_LOOKUP =

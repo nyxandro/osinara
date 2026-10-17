@@ -7,22 +7,18 @@
  *
  * Key constructs:
  * - The durable reservation precedes Telegram; a confirmed send is never repeated for bookkeeping.
- * - Tool deliveries bypass Telegram channel events, so confirmed group deliveries are projected into
- *   the group timeline here and bound to a reply route before a participant can answer them.
- * - A voice note replaces the final text reply, so in a private chat it is projected into the
- *   conversation timeline exactly like the channel projects a delivered answer.
+ * - The confirmed delivery is projected into the conversation history; a voice note replaces the
+ *   final text reply, so in a private chat it is projected like a delivered answer.
  */
 import { basename } from "node:path";
 
 import type { ToolContext } from "../../runtime/tool.js";
 
-import { AppError, isAppError } from "../app-error.js";
-import { conversationTimelineRepository } from "../conversation-timeline-repository.js";
+import { isAppError } from "../app-error.js";
 import {
-  applicationSessionId,
-  registerTelegramMessageRoutes,
-} from "../sessions/session-context.js";
-import { telegramGroupJournalRepository } from "../telegram-group-journal-repository.js";
+  recordToolDeliveryInTimeline,
+  toolDeliveryTimelineTarget,
+} from "../telegram-tool-delivery-timeline.js";
 import {
   requireTelegramDeliveryTarget,
   requireWorkspaceAuthorization,
@@ -43,30 +39,13 @@ export interface WorkspaceFileChatDeliveryInput {
   timelineText?: string;
 }
 
-function currentForumTopicId(ctx: ToolContext): string | undefined {
-  const forumTopicId = ctx.session.auth.current?.attributes.telegramForumTopicId;
-  if (forumTopicId !== undefined &&
-    (typeof forumTopicId !== "string" || !/^[1-9][0-9]*$/u.test(forumTopicId))) {
-    throw new AppError(
-      "AGENT_TELEGRAM_FORUM_TOPIC_INVALID",
-      "Не удалось определить тему для истории отправленного файла",
-    );
-  }
-  return forumTopicId;
-}
-
-function stringAttribute(ctx: ToolContext, name: string): string | null {
-  const value = ctx.session.auth.current?.attributes[name];
-  return typeof value === "string" ? value : null;
-}
-
 export async function sendWorkspaceFileToCurrentChat(
   input: WorkspaceFileChatDeliveryInput,
   ctx: ToolContext,
 ) {
   const auth = requireWorkspaceAuthorization(ctx);
   const target = requireTelegramDeliveryTarget(ctx);
-  const forumTopicId = currentForumTopicId(ctx);
+  const timelineTarget = toolDeliveryTimelineTarget(ctx);
   const reservation = await workspaceFileDeliveryRepository.begin(auth, {
     ...target,
     operationKey: ctx.callId,
@@ -110,65 +89,23 @@ export async function sendWorkspaceFileToCurrentChat(
   }
 
   const fileName = basename(reservation.file.path);
-  const contentText = input.timelineText ?? (input.caption?.trim() || `Отправлен файл «${fileName}».`);
-  const conversationId = stringAttribute(ctx, "telegramConversationId");
-  const privateVoiceReply = auth.groupId === null && input.presentation === "voice" &&
-    conversationId !== null;
-  let projectionCompleted = true;
-  if (auth.groupId !== null || privateVoiceReply) {
-    const sessionId = applicationSessionId(ctx);
-    const replyToEntryId = stringAttribute(ctx, "telegramTimelineEntryId");
-    try {
-      if (auth.groupId !== null) {
-        await telegramGroupJournalRepository.recordAgentResponse({
-          applicationSessionId: sessionId,
-          // The timeline stores readable attachments only; a voice note is kept as its spoken text.
-          ...(input.presentation === "voice"
-            ? {}
-            : {
-              attachment: {
-                fileName,
-                kind: input.presentation,
-                mediaType: reservation.file.mediaType,
-                size: reservation.bytes.byteLength,
-              },
-            }),
-          contentText,
-          deliveredAt: new Date(),
-          groupId: auth.groupId,
-          messageThreadId: forumTopicId ?? null,
-          replyToEntryId,
-          telegramMessageIds: [delivery.telegramMessageId],
-        });
-      } else {
-        await conversationTimelineRepository.recordAgentResponse({
-          applicationSessionId: sessionId,
-          contentText,
-          conversationId: conversationId!,
-          deliveredAt: new Date(),
-          messageThreadId: null,
-          replyToEntryId,
-          telegramMessageIds: [delivery.telegramMessageId],
-        });
-      }
-      await registerTelegramMessageRoutes({
-        applicationSessionId: sessionId,
-        chatId: target.chatId,
-        messageIds: [delivery.telegramMessageId],
-        ...(target.messageThreadId === undefined
-          ? {}
-          : { messageThreadId: target.messageThreadId }),
-      });
-    } catch (error) {
-      // Telegram already confirmed the side effect; surfacing an error would invite a duplicate send.
-      projectionCompleted = false;
-      console.error(JSON.stringify({
-        code: "AGENT_WORKSPACE_FILE_PROJECTION_FAILED",
-        error: error instanceof Error ? error.message : String(error),
-        telegramMessageId: delivery.telegramMessageId,
-      }));
-    }
-  }
+  const projectionCompleted = await recordToolDeliveryInTimeline(ctx, timelineTarget, {
+    // The timeline stores readable attachments only; a voice note is kept as its spoken text.
+    ...(input.presentation === "voice"
+      ? {}
+      : {
+        attachment: {
+          fileName,
+          kind: input.presentation,
+          mediaType: reservation.file.mediaType,
+          size: reservation.bytes.byteLength,
+        },
+      }),
+    contentText: input.timelineText ?? (input.caption?.trim() || `Отправлен файл «${fileName}».`),
+    failureCode: "AGENT_WORKSPACE_FILE_PROJECTION_FAILED",
+    replacesAnswer: input.presentation === "voice",
+    telegramMessageId: delivery.telegramMessageId,
+  });
   return {
     delivered: true,
     path: reservation.file.path,

@@ -5,11 +5,8 @@
  * - `createWorkspaceImageInspector`: validates and submits authorized image bytes.
  * - `inspectWorkspaceImage`: production server-configured protocol-native vision inspector.
  */
-import { generateText } from "ai";
-
 import { VISION_MAX_FILE_BYTES } from "../../config.js";
-import { visionModel } from "../model-registry.js";
-import { modelProviderConfig } from "../model-provider-config.js";
+import { analyzeImageWithVisionModel } from "../vision-model-analysis.js";
 import { AppError, isAppError } from "../app-error.js";
 import { ModelFacingError } from "../model-facing-error.js";
 import { downloadTelegramAttachment } from "../attachments/telegram-attachment-download.js";
@@ -46,7 +43,6 @@ interface WorkspaceImageInspectorDependencies {
     scope: WorkspaceScope,
     telegramMessageId: string,
   ): Promise<WorkspaceBinaryFile>;
-  supportsImageInput: boolean;
 }
 
 type WorkspaceImageLocation =
@@ -101,14 +97,6 @@ export function createWorkspaceImageInspector(
   ) => {
     // Capability changes must not bypass the same live scope authorization used by file reads.
     await dependencies.authorizeScope(auth, input.scope);
-    if (!dependencies.supportsImageInput) {
-      return {
-        code: "AGENT_MODEL_IMAGE_INPUT_UNSUPPORTED",
-        message:
-          "Подключённая модель не поддерживает анализ изображений. Опишите содержимое изображения текстом",
-        supported: false as const,
-      };
-    }
 
     if ("attachmentId" in input) {
       assertAttachmentScope(auth, input.scope);
@@ -189,31 +177,10 @@ export function createWorkspaceImageInspector(
 }
 
 export const inspectWorkspaceImage = createWorkspaceImageInspector({
-  async analyze(input) {
-    if (visionModel === null) {
-      throw new AppError(
-        "AGENT_MODEL_VISION_CONFIG_INCONSISTENT",
-        "Конфигурация vision-модели не соответствует заявленной поддержке изображений",
-      );
-    }
-    const result = await generateText({
-      ...(input.abortSignal === undefined ? {} : { abortSignal: input.abortSignal }),
-      messages: [{
-        content: [
-          { text: input.question, type: "text" },
-          { data: input.bytes, mediaType: input.mediaType, type: "file" },
-        ],
-        role: "user",
-      }],
-      maxRetries: 0,
-      model: visionModel,
-    });
-    return result.text;
-  },
+  analyze: analyzeImageWithVisionModel,
   authorizeScope: workspaceBinaryRepository.authorizeScope,
   downloadTelegramAttachment,
   findTelegramAttachment: telegramGroupAttachmentRepository.find,
   readBinary: workspaceBinaryRepository.readBinary,
   readTelegramInboxAttachment: workspaceBinaryRepository.readTelegramInboxAttachment,
-  supportsImageInput: modelProviderConfig.agent.models.vision.supportsImageInput,
 });

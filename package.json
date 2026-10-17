@@ -1,6 +1,6 @@
 {
   "name": "osinara-family-agent",
-  "version": "0.45.0",
+  "version": "0.46.0",
   "private": true,
   "type": "module",
   "imports": {
@@ -34,6 +34,7 @@
     "dockerode": "5.0.1",
     "file-type": "22.0.1",
     "pg": "8.22.0",
+    "sharp": "0.35.5",
     "tar-stream": "3.2.0",
     "tsx": "4.23.0",
     "undici": "8.9.0",

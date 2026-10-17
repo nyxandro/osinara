@@ -15,6 +15,12 @@ import { z } from "zod";
 const loadCurrentExternalGroupCapabilities = vi.hoisted(() => vi.fn());
 const authorizeCurrentExternalGroupCapability = vi.hoisted(() => vi.fn());
 
+// These cases exercise image inspection, so they state a vision model rather than inheriting the
+// checked-in provider config.
+vi.mock("../model-vision-availability.js", () => ({
+  MODEL_VISION_AVAILABLE: true,
+}));
+
 vi.mock("./external-group-live-policy.js", () => ({
   loadCurrentExternalGroupCapabilities,
   authorizeCurrentExternalGroupCapability,

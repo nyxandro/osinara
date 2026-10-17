@@ -29,11 +29,12 @@ import {
   GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES,
   isGrantableExternalGroupToolName,
   selectGrantableExternalGroupTools,
+  unservableCapabilityReason,
 } from "../tool-policy/grantable-group-capabilities.js";
 import {
   ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES,
   EXTERNAL_GROUP_BASE_TOOLS,
-  isSubscriptionOnlyExternalGroupToolName,
+  isExternalGroupToolName,
 } from "../tool-policy/group-tool-catalog.js";
 import {
   requireAction,
@@ -127,17 +128,13 @@ function requireExternalToolAllowlist(raw: unknown, policyLabel: string): string
     toolInputError(INPUT_ERROR_CODE, `toolAllowlist должен содержать не больше ${TOOL_ALLOWLIST_MAX_SIZE} tools`);
   }
   const names = raw.map((name) => {
-    // A catalog capability that the active model provider cannot serve gets its own diagnosis, so
-    // the owner learns the grant is impossible instead of reading it as a malformed payload.
-    if (
-      typeof name === "string" &&
-      isSubscriptionOnlyExternalGroupToolName(name) &&
-      !isGrantableExternalGroupToolName(name)
-    ) {
+    // A catalog capability that the active runtime cannot serve gets its own diagnosis, so the
+    // owner learns the grant is impossible instead of reading it as a malformed payload.
+    const reason = typeof name === "string" && isExternalGroupToolName(name) ? unservableCapabilityReason(name) : null;
+    if (typeof name === "string" && reason !== null) {
       toolInputError(
         INPUT_ERROR_CODE,
-        `Capability ${name} недоступна: текущая модель агента работает не через подписку OpenAI Codex. ` +
-          "Выдать это право нельзя; передайте toolAllowlist без него",
+        `Capability ${name} недоступна: ${reason}. Выдать это право нельзя; передайте toolAllowlist без него`,
       );
     }
     if (typeof name !== "string" || !isGrantableExternalGroupToolName(name)) {

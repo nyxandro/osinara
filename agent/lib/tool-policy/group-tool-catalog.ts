@@ -7,14 +7,21 @@
  * - `SANDBOX_FILE_CAPABILITY_CATALOG`: same-name guarded runtime capabilities for group workspaces.
  * - Derived capability-name tuples used by validation and execution policy.
  * - `ExternalGroupToolName`: validated persisted allowlist value.
- * - `isSubscriptionOnlyExternalGroupToolName`: marks capabilities tied to a specific provider.
+ * - `ExternalGroupCapabilityRequirement`, `externalGroupCapabilityRequirement`: what the active
+ *   runtime must offer for a capability to work at all.
  * - `parseExternalGroupToolAllowlist`: validates the complete persisted policy atomically.
  */
+/**
+ * A runtime property a capability depends on: subscription image generation exists only under one
+ * model provider, and image inspection only with a model that accepts images.
+ */
+export type ExternalGroupCapabilityRequirement = "image_generation" | "vision";
+
 interface ExternalGroupCapability<Name extends string = string> {
   readonly name: Name;
-  // Set when the capability only exists under one model provider, so the owner-facing grant surface
-  // can drop it while persisted validation still recognizes a grant made under a previous provider.
-  readonly subscriptionOnly?: true;
+  // Set when the capability works only with a specific runtime, so the owner-facing grant surface
+  // can drop it while persisted validation still recognizes a grant made under a previous runtime.
+  readonly requires?: ExternalGroupCapabilityRequirement;
 }
 
 function capabilityNames<const Catalog extends readonly ExternalGroupCapability[]>(
@@ -30,10 +37,13 @@ export const EXTERNAL_GROUP_CAPABILITY_CATALOG = [
   { name: "bash" },
   {
     name: "generate_image",
-    subscriptionOnly: true,
+    requires: "image_generation",
   },
   { name: "import_telegram_attachment" },
-  { name: "inspect_workspace_image" },
+  {
+    name: "inspect_workspace_image",
+    requires: "vision",
+  },
   { name: "list_memories" },
   { name: "list_memory_threads" },
   { name: "list_group_history" },
@@ -57,16 +67,18 @@ export const EXTERNAL_GROUP_TOOL_NAMES = capabilityNames(
 );
 export type ExternalGroupToolName = (typeof EXTERNAL_GROUP_TOOL_NAMES)[number];
 
-// Persisted validation stays provider-agnostic on purpose: a grant made while another provider was
-// active must keep the surrounding policy parseable instead of invalidating every other capability.
-const SUBSCRIPTION_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set(
+// Persisted validation stays runtime-agnostic on purpose: a grant made while another provider or
+// model was active must keep the surrounding policy parseable instead of invalidating every other
+// capability.
+const CAPABILITY_REQUIREMENTS: ReadonlyMap<string, ExternalGroupCapabilityRequirement> = new Map(
   (EXTERNAL_GROUP_CAPABILITY_CATALOG as readonly ExternalGroupCapability[])
-    .filter(({ subscriptionOnly }) => subscriptionOnly === true)
-    .map(({ name }) => name),
+    .flatMap(({ name, requires }) => requires === undefined ? [] : [[name, requires] as const]),
 );
 
-export function isSubscriptionOnlyExternalGroupToolName(value: string): boolean {
-  return SUBSCRIPTION_ONLY_TOOL_NAMES.has(value);
+export function externalGroupCapabilityRequirement(
+  value: string,
+): ExternalGroupCapabilityRequirement | null {
+  return CAPABILITY_REQUIREMENTS.get(value) ?? null;
 }
 
 // Same-name wrappers preserve the native tools' contracts while adding live authorization and exact

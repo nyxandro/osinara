@@ -353,7 +353,7 @@ bring test stacks up only for a run and take them down afterwards. The disk sche
 `/opt/osinara/.env` must be exactly `root:root 0600`. It contains `OSINARA_DEPLOYMENT_PROFILE`
 (`production` or `installation`, read only by the controller), `MODEL_API_KEY`,
 `POSTGRES_PASSWORD`, the required internal application `DATABASE_URL`, `CLI_PROXY_API_KEY`,
-`GROQ_API_KEY`, the optional `ELEVENLABS_API_KEY`,
+`GROQ_API_KEY`, the optional `ELEVENLABS_API_KEY` and `KLIPY_API_KEY`,
 Telegram secrets, and environment-specific integration
 settings. It must never contain or export any of the six `OSINARA_*_IMAGE` variables or
 `SANDBOX_RUNTIME_IMAGE`; those values exist only in a validated per-release `release.env`.
@@ -393,6 +393,24 @@ only authenticates the calls: without it the tool stays visible and every call f
 `AGENT_VOICE_MESSAGE_CONFIG_MISSING`, after which the agent answers in text. The pinned voice is an
 ElevenLabs library voice, which the API serves only on a paid ElevenLabs plan. External groups
 receive the capability only through an owner grant; scheduled turns and subagents never receive it.
+
+Interactive root turns may answer with a GIF through the application-owned `send_gif` boundary, on
+request and on the model's own initiative. One call makes one KLIPY search for 18 results with the
+content filter of the conversation kind (`high` in a family group, `medium` in a private chat and an
+external group), downloads the small animated WebP previews only from `static.klipy.com`, takes the
+middle frame of each and shows the vision model numbered sheets of six, at most three sheets. The
+chosen MP4 URL goes to Telegram `sendAnimation` unchanged; the backend never stores KLIPY media. The
+tool is not replay-safe, so a call interrupted by a restart reaches the model as an unknown outcome
+instead of a second GIF. It exists only when the active model config accepts images and
+`KLIPY_API_KEY` is set: otherwise neither the tool nor its prompt rules appear anywhere. External
+groups get it without a grant; scheduled turns and subagents never receive it. KLIPY's usage terms
+require their written approval for server-side requests and for choosing among results.
+
+Every capability that needs image input follows the same `supportsImageInput` flag of the active
+model config: without it `inspect_workspace_image` is not offered in any mode, its prompt guidance
+and the PDF page route disappear, external groups take in no photos for it, and `manage_telegram_group`
+rejects the grant. A grant made under an image-capable model is reported as
+`unavailableConfiguredTools` until such a model is configured again.
 
 The standalone fresh installer removes CLIProxy from its generated Compose and stays on the
 selected direct provider.

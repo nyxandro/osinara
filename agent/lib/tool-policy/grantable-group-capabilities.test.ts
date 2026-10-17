@@ -13,6 +13,9 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("../image-generation/image-generation-availability.js", () => ({
   IMAGE_GENERATION_AVAILABLE: false,
 }));
+vi.mock("../model-vision-availability.js", () => ({
+  MODEL_VISION_AVAILABLE: true,
+}));
 
 import {
   GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES,
@@ -21,7 +24,7 @@ import {
 } from "./grantable-group-capabilities.js";
 import {
   EXTERNAL_GROUP_TOOL_NAMES,
-  isSubscriptionOnlyExternalGroupToolName,
+  externalGroupCapabilityRequirement,
   parseExternalGroupToolAllowlist,
 } from "./group-tool-catalog.js";
 
@@ -34,7 +37,9 @@ describe("grantable external group capabilities without a Codex subscription", (
 
   it("keeps every other catalog capability grantable", () => {
     expect([...GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES]).toEqual(
-      EXTERNAL_GROUP_TOOL_NAMES.filter((name) => name !== "web_fetch" && !isSubscriptionOnlyExternalGroupToolName(name)),
+      EXTERNAL_GROUP_TOOL_NAMES.filter((name) =>
+        name !== "web_fetch" && externalGroupCapabilityRequirement(name) !== "image_generation"
+      ),
     );
     expect(GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES.length).toBeGreaterThan(0);
   });

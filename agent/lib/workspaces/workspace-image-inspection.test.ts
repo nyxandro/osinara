@@ -6,7 +6,6 @@
  * - Telegram inbox images resolve by stable message ID instead of a model-copied filename.
  * - Opaque journal attachments are downloaded and analyzed without a workspace write.
  * - Revoked live attachment access stops before Telegram download and vision analysis.
- * - Unsupported model capability returns a stable tool result before file or provider access.
  * - Non-image and provider-oversized files fail before a paid model call.
  * - Provider failures are normalized for persisted and ephemeral Telegram images.
  */
@@ -31,7 +30,6 @@ describe("createWorkspaceImageInspector", () => {
     const inspect = createWorkspaceImageInspector({
       analyze,
       authorizeScope,
-      supportsImageInput: true,
       readBinary: vi.fn().mockResolvedValue({
         bytes: Buffer.from("image"),
         file: { mediaType: "image/png", path: "photos/calendar.png" },
@@ -58,7 +56,6 @@ describe("createWorkspaceImageInspector", () => {
     const inspect = createWorkspaceImageInspector({
       analyze,
       authorizeScope,
-      supportsImageInput: true,
       readBinary: vi.fn().mockResolvedValue({
         bytes: Buffer.from("document"),
         file: { mediaType: "application/pdf", path: "docs/report.pdf" },
@@ -82,7 +79,6 @@ describe("createWorkspaceImageInspector", () => {
     const inspect = createWorkspaceImageInspector({
       analyze,
       authorizeScope,
-      supportsImageInput: true,
       readBinary: vi.fn().mockResolvedValue({
         bytes: new Uint8Array(VISION_MAX_FILE_BYTES + 1),
         file: { mediaType: "image/png", path: "photos/oversized.png" },
@@ -115,7 +111,6 @@ describe("createWorkspaceImageInspector", () => {
     const inspect = createWorkspaceImageInspector({
       analyze,
       authorizeScope,
-      supportsImageInput: true,
       readBinary: vi.fn(),
       readTelegramInboxAttachment,
       downloadTelegramAttachment: vi.fn(),
@@ -141,7 +136,6 @@ describe("createWorkspaceImageInspector", () => {
     const inspect = createWorkspaceImageInspector({
       analyze,
       authorizeScope,
-      supportsImageInput: true,
       downloadTelegramAttachment,
       findTelegramAttachment: vi.fn().mockResolvedValue({
         attachment: {
@@ -196,7 +190,6 @@ describe("createWorkspaceImageInspector", () => {
       )),
       readBinary: vi.fn(),
       readTelegramInboxAttachment: vi.fn(),
-      supportsImageInput: true,
     });
 
     await expect(inspect({
@@ -225,7 +218,6 @@ describe("createWorkspaceImageInspector", () => {
       )),
       readBinary: vi.fn(),
       readTelegramInboxAttachment: vi.fn(),
-      supportsImageInput: true,
     });
 
     await expect(inspect({
@@ -249,7 +241,6 @@ describe("createWorkspaceImageInspector", () => {
     const inspect = createWorkspaceImageInspector({
       analyze,
       authorizeScope,
-      supportsImageInput: true,
       downloadTelegramAttachment: vi.fn().mockResolvedValue(Buffer.from("plain text")),
       findTelegramAttachment: vi.fn().mockResolvedValue({
         attachment: {
@@ -280,59 +271,6 @@ describe("createWorkspaceImageInspector", () => {
     expect(analyze).not.toHaveBeenCalled();
   });
 
-  it("reports unavailable image input without reading or downloading bytes", async () => {
-    const analyze = vi.fn();
-    const authorizeUnavailableScope = vi.fn(async () => undefined);
-    const readBinary = vi.fn();
-    const readTelegramInboxAttachment = vi.fn();
-    const downloadTelegramAttachment = vi.fn();
-    const findTelegramAttachment = vi.fn();
-    const inspect = createWorkspaceImageInspector({
-      analyze,
-      authorizeScope: authorizeUnavailableScope,
-      downloadTelegramAttachment,
-      findTelegramAttachment,
-      readBinary,
-      readTelegramInboxAttachment,
-      supportsImageInput: false,
-    });
-
-    await expect(inspect(auth, {
-      path: "photos/calendar.png",
-      question: "Что изображено?",
-      scope: "personal",
-    })).resolves.toEqual({
-      code: "AGENT_MODEL_IMAGE_INPUT_UNSUPPORTED",
-      message: "Подключённая модель не поддерживает анализ изображений. Опишите содержимое изображения текстом",
-      supported: false,
-    });
-    expect(readBinary).not.toHaveBeenCalled();
-    expect(readTelegramInboxAttachment).not.toHaveBeenCalled();
-    expect(downloadTelegramAttachment).not.toHaveBeenCalled();
-    expect(findTelegramAttachment).not.toHaveBeenCalled();
-    expect(analyze).not.toHaveBeenCalled();
-    expect(authorizeUnavailableScope).toHaveBeenCalledWith(auth, "personal");
-  });
-
-  it("preserves scope denial when image input is unavailable", async () => {
-    const denied = new Error("AGENT_WORKSPACE_ACCESS_DENIED: область недоступна");
-    const inspect = createWorkspaceImageInspector({
-      analyze: vi.fn(),
-      authorizeScope: vi.fn().mockRejectedValue(denied),
-      downloadTelegramAttachment: vi.fn(),
-      findTelegramAttachment: vi.fn(),
-      readBinary: vi.fn(),
-      readTelegramInboxAttachment: vi.fn(),
-      supportsImageInput: false,
-    });
-
-    await expect(inspect(auth, {
-      path: "photos/calendar.png",
-      question: "Что изображено?",
-      scope: "group",
-    })).rejects.toBe(denied);
-  });
-
   it("normalizes a raw vision provider failure without exposing provider internals", async () => {
     const inspect = createWorkspaceImageInspector({
       analyze: vi.fn().mockRejectedValue(new Error("upstream API key invalid")),
@@ -344,7 +282,6 @@ describe("createWorkspaceImageInspector", () => {
         file: { mediaType: "image/png", path: "image.png", scope: "personal" },
       }),
       readTelegramInboxAttachment: vi.fn(),
-      supportsImageInput: true,
     });
 
     await expect(inspect(auth, {
@@ -380,7 +317,6 @@ describe("createWorkspaceImageInspector", () => {
       }),
       readBinary: vi.fn(),
       readTelegramInboxAttachment: vi.fn(),
-      supportsImageInput: true,
     });
 
     await expect(inspect({

@@ -24,6 +24,7 @@ import { agentTool } from "../../runtime/tools/delegate.js";
 import { z } from "zod";
 
 import { AppError } from "../app-error.js";
+import { GIF_REPLIES_AVAILABLE } from "../gifs/gif-reply-availability.js";
 import { IMAGE_GENERATION_AVAILABLE } from "../image-generation/image-generation-availability.js";
 import { isImageGenerationSkillName } from "../image-generation/image-generation-skill.js";
 import { EXTERNAL_IMAGE_GENERATION_TOOL_PRESENTATION } from "../image-generation/image-generation-tool-presentation.js";
@@ -57,6 +58,7 @@ import readScheduledGroupHistory from "../tools/read_scheduled_group_history.js"
 import readProfileView from "../tools/read_profile_view.js";
 import searchMemories from "../tools/search_memories.js";
 import searchMemoryThreads from "../tools/search_memory_threads.js";
+import sendGif from "../tools/send_gif.js";
 import sendVoiceMessage from "../tools/send_voice_message.js";
 import sendWorkspaceFile from "../tools/send_workspace_file.js";
 import { removeGroupFileTool } from "../workspaces/remove-group-file-tool.js";
@@ -67,6 +69,7 @@ import { resolveExternalGroupPolicyIdentity } from "./external-group-policy.js";
 import { EXTERNAL_GROUP_REMINDER_TOOLS } from "./external-group-reminder-tools.js";
 import { scheduledExternalTool } from "./scheduled-external-tool.js";
 import { withTurnInterjectionSurface } from "../turn-interjection/turn-interjection-surface.js";
+import { servableExternalGroupCapabilities } from "./grantable-group-capabilities.js";
 import { isExternalGroupToolName, type ExternalGroupToolName } from "./group-tool-catalog.js";
 import {
   FAMILY_ONLY_TOOLS,
@@ -309,6 +312,8 @@ function buildExternalToolSurface(
     surface.read_profile_view = readProfileView as unknown as AnyToolDefinition;
     if (!scheduledRun) {
       surface.manage_behavior_preference = manageBehaviorPreference as unknown as AnyToolDefinition;
+      // A GIF answers a live participant, so it needs no grant but never runs in a background run.
+      if (GIF_REPLIES_AVAILABLE) surface.send_gif = sendGif as unknown as AnyToolDefinition;
       // Reminders need no grant: the caps are enforced per Telegram author and per chat, and a
       // background run has no participant who could own a new one.
       Object.assign(surface, EXTERNAL_GROUP_REMINDER_TOOLS);
@@ -401,6 +406,7 @@ const TRUSTED_SCHEDULED_SURFACES: Readonly<Record<"family" | "private", ToolMap>
       manage_behavior_preference: _manageBehaviorPreference,
       manage_skill: _manageSkill,
       remember: _remember,
+      send_gif: _sendGif,
       send_voice_message: _sendVoiceMessage,
       ...readOnlyPromptSurface
     } = surface;
@@ -418,9 +424,10 @@ export function buildModeToolSurface(input: ModeToolSurfaceInput): ToolMap {
   }
 
   // A malformed allowlist value means the trusted snapshot is corrupt, so deny every capability.
+  // A grant the active runtime cannot serve gives no descriptor.
   const allowed = [...input.capabilities].some((name) => !isExternalGroupToolName(name))
     ? new Set<ExternalGroupToolName>()
-    : input.capabilities;
+    : servableExternalGroupCapabilities(input.capabilities);
   const includeApplicationCore = input.includeApplicationCore !== false;
   const scheduledHistory = input.scheduledHistory === true;
   const scheduledRun = input.scheduledRun === true || scheduledHistory;
@@ -465,6 +472,7 @@ export function buildSubagentToolSurface(input: ModeToolSurfaceInput): ToolMap {
     manage_reminder: _manageReminder,
     manage_skill: _manageSkill,
     remember: _remember,
+    send_gif: _sendGif,
     send_voice_message: _sendVoiceMessage,
     ...surface
   } = buildModeToolSurface(effectiveInput);

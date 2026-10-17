@@ -10,6 +10,7 @@
 import type { PoolClient } from "pg";
 
 import { AppError } from "../app-error.js";
+import { unservableCapabilityReason } from "../tool-policy/grantable-group-capabilities.js";
 import {
   EXTERNAL_GROUP_BASE_TOOLS,
   parseExternalGroupToolAllowlist,
@@ -58,6 +59,14 @@ export function requireGrantedExternalScheduleCapabilities(
   group: ReadonlySet<ExternalGroupToolName>,
 ): ExternalScheduleCapability[] {
   for (const capability of scheduled) {
+    // A grant kept from another runtime would be silently absent from every run of the automation.
+    const unavailable = unservableCapabilityReason(capability);
+    if (unavailable !== null) {
+      throw new AppError(
+        "AGENT_EXTERNAL_SCHEDULE_CAPABILITY_UNAVAILABLE",
+        `Capability ${capability} сейчас недоступна: ${unavailable}`,
+      );
+    }
     if (!BASELINE_TOOL_NAMES.has(capability) && !group.has(capability)) {
       throw new AppError(
         "AGENT_EXTERNAL_SCHEDULE_CAPABILITY_NOT_GRANTED",

@@ -2,26 +2,70 @@
  * Owner-facing grant surface for external Telegram group capabilities.
  *
  * Exports:
+ * - `isServableExternalGroupCapability`, `servableExternalGroupCapabilities`,
+ *   `parseServableExternalGroupToolAllowlist`: what the active runtime can actually serve out of a
+ *   persisted grant.
+ * - `unservableCapabilityReason`: the owner-facing reason a capability cannot work right now.
  * - `GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES`: capabilities the owner can actually grant right now.
  * - `isGrantableExternalGroupToolName`: exact guard for model-provided allowlist items.
  * - `selectGrantableExternalGroupTools`: splits a persisted allowlist into effective and inert.
  *
  * Key constructs:
- * - Provider-coupled capabilities disappear from the grant contract instead of being granted inert.
+ * - Runtime-coupled capabilities disappear from the grant contract instead of being granted inert.
  * - Persisted parsing stays in `group-tool-catalog.ts` so a stale grant never corrupts a policy.
  */
 import { IMAGE_GENERATION_AVAILABLE } from "../image-generation/image-generation-availability.js";
+import { MODEL_VISION_AVAILABLE } from "../model-vision-availability.js";
 import {
   EXTERNAL_GROUP_CAPABILITY_CATALOG,
-  isSubscriptionOnlyExternalGroupToolName,
+  externalGroupCapabilityRequirement,
+  parseExternalGroupToolAllowlist,
+  type ExternalGroupCapabilityRequirement,
   type ExternalGroupToolName,
 } from "./group-tool-catalog.js";
 
+// Both flags come from the validated runtime config, which cannot change without a process restart.
+const REQUIREMENT_SATISFIED: Readonly<Record<ExternalGroupCapabilityRequirement, boolean>> = {
+  image_generation: IMAGE_GENERATION_AVAILABLE,
+  vision: MODEL_VISION_AVAILABLE,
+};
 
-// Only subscription-backed image generation is provider-coupled today. Resolving the flag once at
-// module load matches the validated runtime config, which cannot change without a process restart.
+export function isServableExternalGroupCapability(name: ExternalGroupToolName): boolean {
+  const requirement = externalGroupCapabilityRequirement(name);
+  return requirement === null || REQUIREMENT_SATISFIED[requirement];
+}
+
+const UNSERVABLE_REASONS: Readonly<Record<ExternalGroupCapabilityRequirement, string>> = {
+  image_generation: "текущая модель агента работает не через подписку OpenAI Codex",
+  vision: "подключённая модель агента не видит изображения",
+};
+
+/** Why a catalog capability cannot work in this runtime, or `null` when it can. */
+export function unservableCapabilityReason(name: ExternalGroupToolName): string | null {
+  const requirement = externalGroupCapabilityRequirement(name);
+  return requirement === null || REQUIREMENT_SATISFIED[requirement] ? null : UNSERVABLE_REASONS[requirement];
+}
+
+/**
+ * A grant persisted under a runtime that could serve it stays in PostgreSQL, but it must give the
+ * current turn no descriptor, guidance, intake or execution right.
+ */
+export function servableExternalGroupCapabilities(
+  allowed: ReadonlySet<ExternalGroupToolName>,
+): ReadonlySet<ExternalGroupToolName> {
+  return new Set([...allowed].filter(isServableExternalGroupCapability));
+}
+
+/** A persisted allowlist as the current runtime can serve it; `null` still marks a corrupt policy. */
+export function parseServableExternalGroupToolAllowlist(
+  value: unknown,
+): ReadonlySet<ExternalGroupToolName> | null {
+  const allowed = parseExternalGroupToolAllowlist(value);
+  return allowed === null ? null : servableExternalGroupCapabilities(allowed);
+}
+
 function isGrantableCapability(name: ExternalGroupToolName): boolean {
-  return name !== "web_fetch" && (!isSubscriptionOnlyExternalGroupToolName(name) || IMAGE_GENERATION_AVAILABLE);
+  return name !== "web_fetch" && isServableExternalGroupCapability(name);
 }
 
 /**
@@ -44,12 +88,12 @@ export function isGrantableExternalGroupToolName(
 export interface GrantableExternalGroupToolSelection {
   /** Persisted grants that the current runtime can still honour and the owner can re-submit. */
   readonly effective: readonly ExternalGroupToolName[];
-  /** Persisted entries that grant nothing now: provider-gated capabilities and unknown names. */
+  /** Persisted entries that grant nothing now: runtime-gated capabilities and unknown names. */
   readonly unavailable: readonly string[];
 }
 
 /**
- * A grant persisted under a previous provider stays in PostgreSQL but must never be presented as an
+ * A grant persisted under a previous runtime stays in PostgreSQL but must never be presented as an
  * active right, otherwise the owner-facing status would invite a policy update that fails closed.
  * An unrecognized persisted name is reported too rather than hidden: `parseExternalGroupToolAllowlist`
  * treats it as corruption of the whole policy, so a silently trimmed status would look healthy while

@@ -8,7 +8,7 @@ import type { PoolClient } from "pg";
 
 import { TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED } from "../config.js";
 import { AppError } from "./app-error.js";
-import { parseExternalGroupToolAllowlist } from "./tool-policy/group-tool-catalog.js";
+import { parseServableExternalGroupToolAllowlist } from "./tool-policy/grantable-group-capabilities.js";
 import { database } from "./database.js";
 import {
   requireFailure,
@@ -117,7 +117,7 @@ export const telegramIngressRepository: TelegramIngressRepository = {
         [input.chatId],
       );
       const policy = group.rows[0];
-      const externalAllowlist = parseExternalGroupToolAllowlist(policy?.tool_allowlist);
+      const externalAllowlist = parseServableExternalGroupToolAllowlist(policy?.tool_allowlist);
       if (policy?.type === "family_private") {
         await client.query("COMMIT");
         return true;

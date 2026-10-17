@@ -34,9 +34,9 @@ import {
 } from "../voice-messages/voice-message-operation-repository.js";
 import { voiceMessageFailure, voiceMessageInputError } from "../voice-messages/voice-message-errors.js";
 import {
-  withVoiceRecordingStatus,
-  type VoiceRecordingStatusTarget,
-} from "../voice-messages/voice-recording-status.js";
+  telegramChatActionStatus,
+  type ChatActionStatusTarget,
+} from "../telegram-chat-action-status.js";
 import {
   requireTelegramDeliveryTarget,
   requireWorkspaceAuthorization,
@@ -54,7 +54,7 @@ interface SendVoiceMessageDependencies {
     scope: WorkspaceScope;
     text: string;
   }, ctx: ToolContext): Promise<Record<string, unknown>>;
-  recordingStatus<T>(target: VoiceRecordingStatusTarget, operation: () => Promise<T>): Promise<T>;
+  recordingStatus<T>(target: ChatActionStatusTarget, operation: () => Promise<T>): Promise<T>;
   operations: {
     begin(input: {
       inputHash: string;
@@ -315,7 +315,7 @@ export default createSendVoiceMessageTool({
       : `Голосовое сообщение: ${input.text}\n\nПодпись: ${input.caption}`,
   }, ctx),
   operations: voiceMessageOperationRepository,
-  recordingStatus: withVoiceRecordingStatus,
+  recordingStatus: telegramChatActionStatus({ action: "record_voice", failureCode: "AGENT_VOICE_RECORDING_STATUS_FAILED" }),
   speech: elevenLabsSpeechClient,
   workspaces: workspaceBinaryRepository,
 });

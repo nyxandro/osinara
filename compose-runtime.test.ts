@@ -124,6 +124,7 @@ describe("Docker Compose runtime wiring", () => {
       );
       expect(agent).toContain("      GROQ_API_KEY: ${GROQ_API_KEY-}\n");
       expect(agent).toContain("      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY-}\n");
+      expect(agent).toContain("      KLIPY_API_KEY: ${KLIPY_API_KEY-}\n");
     }
     expect(localCompose).not.toContain("MODEL_UPSTREAM_API_KEY");
     expect(productionCompose).not.toContain("MODEL_UPSTREAM_API_KEY");

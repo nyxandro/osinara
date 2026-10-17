@@ -10,7 +10,14 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// These cases exercise image inspection, so they state a vision model rather than inheriting the
+// checked-in provider config.
+vi.mock("./model-vision-availability.js", () => ({
+  MODEL_VISION_AVAILABLE: true,
+}));
+
 import { askQuestion, bash, glob, grep, loadSkill, readFile, todo, writeFile } from "../runtime/tools/defaults.js";
 import { agentTool } from "../runtime/tools/delegate.js";
 
