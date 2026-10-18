@@ -8,7 +8,8 @@
  * - `memoryNeighbourProbePassage`: the text that vector is built from.
  * - `requireMemoryNeighbourDecision`: the gate itself, run inside the write transaction.
  * - `MemoryNeighbourRefusal`: the stop, which is a product outcome and not a failure.
- * - `memoryNeighbourRefusalResult`: what the model is answered with instead.
+ * - `memoryNeighbourRefusalResult`: what the model is answered with instead; the silent review,
+ *   which has no edit tool, is not advised to refine the existing record.
  *
  * Saving a claim checks only for an identical string today, so «Аня не ест глютен» and «у Ани
  * непереносимость глютена» become two records. Nobody sees the second one appear, but both queue
@@ -164,13 +165,19 @@ export class MemoryNeighbourRefusal extends Error {
 }
 
 /** The answer the model gets instead of the refusal, with the texts it has to read. */
-export function memoryNeighbourRefusalResult(refusal: MemoryNeighbourRefusal) {
+export function memoryNeighbourRefusalResult(
+  refusal: MemoryNeighbourRefusal,
+  // The silent review writes and reads only: pointed at manage_memory it chases a call it cannot make.
+  writer: { readonly editAvailable: boolean },
+) {
   return {
     code: "AGENT_MEMORY_SIMILAR_RECORD_EXISTS",
     correction: [
       "Прочитай эти записи и выбери одно из трёх.",
-      "То же самое другими словами — не сохраняй заново; если новая формулировка точнее или полнее, обнови существующую через manage_memory action=edit.",
-      "Другое свойство того же человека — задай attribute, короткое имя свойства, и сохрани как новую версию именно этого свойства.",
+      writer.editAvailable
+        ? "То же самое другими словами — не сохраняй заново; если новая формулировка точнее или полнее, обнови существующую через manage_memory action=edit."
+        : "То же самое другими словами — не сохраняй заново, даже если новая формулировка чуть точнее.",
+      "Новое значение свойства, у которого одно значение за раз (город, место работы), — задай attribute, короткое имя свойства, и сохрани как новую версию именно этого свойства.",
       "Действительно отдельное сведение — повтори вызов, перечислив в distinctFrom все memoryRef из этого списка.",
     ].join(" "),
     distinctFrom: refusal.neighbours.map((one) => one.memoryRef),

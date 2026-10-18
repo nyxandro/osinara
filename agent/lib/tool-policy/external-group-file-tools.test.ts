@@ -21,7 +21,7 @@ import type { WorkspaceAuthorization } from "../workspaces/workspace-repository.
 import { createExternalGroupFileTools } from "./external-group-file-tools.js";
 
 const GROUP_ROOT = "/workspace/group";
-const SKILL_REFERENCE = "$HOME/.agents/skills/pohuy/references/slovar.md";
+const SKILL_REFERENCE = "$HOME/.agents/skills/behavior-preferences/references/slovar.md";
 const AUTHORIZATION = {
   familyId: "family-1",
   groupId: "group-1",
@@ -74,7 +74,7 @@ describe("external-group file tools", () => {
     await mkdir(join(root, "docs"));
     await writeFile(join(root, "docs", "allowed.txt"), "allowed\n");
     authorize = vi.fn(async (_auth: WorkspaceAuthorization) => root);
-    loadGroupSkillAllowlist = vi.fn(async (_groupId: string) => new Set(["pohuy"]));
+    loadGroupSkillAllowlist = vi.fn(async (_groupId: string) => new Set(["behavior-preferences"]));
     executors = {
       glob: vi.fn(async (input) => ({ input })),
       grep: vi.fn(async (input) => ({ input })),
@@ -130,11 +130,11 @@ describe("external-group file tools", () => {
 
   it.each([
     SKILL_REFERENCE,
-    "/home/agent/.agents/skills/pohuy/references/slovar.md",
-    "$HOME/.agents/skills/pohuy/SKILL.md",
+    "/home/agent/.agents/skills/behavior-preferences/references/slovar.md",
+    "$HOME/.agents/skills/behavior-preferences/SKILL.md",
   ])("canonicalizes and executes an allowed skill file read from %s", async (filePath) => {
     const expectedFilePath = filePath.endsWith("/SKILL.md")
-      ? "$HOME/.agents/skills/pohuy/SKILL.md"
+      ? "$HOME/.agents/skills/behavior-preferences/SKILL.md"
       : SKILL_REFERENCE;
     const input = { filePath, limit: 25, offset: 2 };
 
@@ -192,8 +192,8 @@ describe("external-group file tools", () => {
 
   it.each([
     "$HOME/.agents/skills/unknown/references/file.md",
-    "$HOME/.agents/skills/pohuy/references/../secret.md",
-    "/home/agent/.agents/skills/pohuy//secret.md",
+    "$HOME/.agents/skills/behavior-preferences/references/../secret.md",
+    "/home/agent/.agents/skills/behavior-preferences//secret.md",
   ])("denies an unknown or malformed skill file path: %s", async (filePath) => {
     await expect(tools().read_file!.execute({ filePath }, context())).rejects.toThrowError(
       /AGENT_GROUP_(?:FILE_PATH|SKILL)_FORBIDDEN/u,
@@ -202,8 +202,8 @@ describe("external-group file tools", () => {
   });
 
   it.each([
-    ["glob", { path: "$HOME/.agents/skills/pohuy", pattern: "**/*" }],
-    ["grep", { path: "/home/agent/.agents/skills/pohuy", pattern: "secret" }],
+    ["glob", { path: "$HOME/.agents/skills/behavior-preferences", pattern: "**/*" }],
+    ["grep", { path: "/home/agent/.agents/skills/behavior-preferences", pattern: "secret" }],
     ["write_file", { content: "replace", filePath: SKILL_REFERENCE }],
   ] as const)("keeps %s forbidden under the skill package root", async (name, input) => {
     await expect(tools()[name]!.execute(input, context())).rejects.toThrowError(

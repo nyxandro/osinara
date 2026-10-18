@@ -56,7 +56,7 @@ import { orderStepTools, toModelToolSet } from "./model-tools.js";
 import { executeStepCalls, planStepCalls, type CallJournal } from "./step-calls.js";
 import { failParkedTurn, failTurn, ParkedTurnTakenOver } from "./turn-failure.js";
 import { storedTurnOutcome } from "./turn-observation.js";
-import { prepareTurnSkills } from "./turn-skills.js";
+import { createStepSkillAccess, prepareTurnSkills } from "./turn-skills.js";
 import { isEmptyDelivery, stepHistoryMessages, stepTextEvents } from "./step-history.js";
 import type { ToolResultOutput } from "./tool-calls.js";
 import type { PreparedTurn, ToolCallRecord, TurnRecord } from "./turn-types.js";
@@ -143,19 +143,21 @@ function sessionOf(turn: TurnRecord, parent: SessionParent | undefined) {
   return { auth: turn.auth, id: turn.sessionId, ...(parent === undefined ? {} : { parent }), turn: { id: turn.id, sequence: turn.sequence } };
 }
 
-function toolContexts(runtime: TurnRuntime, turn: TurnRecord, parent: SessionParent | undefined, abortSignal: AbortSignal) {
-  let sandbox: Promise<RuntimeSandboxSession> | undefined;
+function toolContexts(
+  runtime: TurnRuntime, turn: TurnRecord, parent: SessionParent | undefined, abortSignal: AbortSignal,
+  messages: readonly ModelMessage[],
+) {
   const session = sessionOf(turn, parent);
   const state = sessionToolState(runtime.database, turn.sessionId);
   const skills = requirePrepared(turn).skills.map((skill) => skill.name);
+  const { getSandbox, loadSkill } = createStepSkillAccess({
+    granted: skills,
+    openSandbox: () => runtime.sandbox({ auth: turn.auth, id: turn.sessionId }),
+    resolveDefinitions: () => runtime.agent.resolveSkills({ channel: turn.channel, messages, session: { auth: turn.auth, id: turn.sessionId } }),
+    tidy: turn.kind === "conversation",
+  });
   return (call: { readonly callId: string; readonly toolName: string }): ToolContext => ({
-    abortSignal,
-    callId: call.callId,
-    getSandbox: () => (sandbox ??= runtime.sandbox({ auth: turn.auth, id: turn.sessionId })),
-    session,
-    skills,
-    state,
-    toolName: call.toolName,
+    abortSignal, callId: call.callId, getSandbox, loadSkill, session, skills, state, toolName: call.toolName,
   });
 }
 
@@ -195,6 +197,8 @@ function withOutputs(calls: readonly ToolCallRecord[]) {
 async function runCalls(runtime: TurnRuntime, input: {
   readonly calls: readonly ToolCallRecord[];
   readonly journalTurnId: string;
+  /** The step's messages, as its tools were resolved from. */
+  readonly messages: readonly ModelMessage[];
   readonly parent: SessionParent | undefined;
   readonly signal: AbortSignal;
   readonly stepIndex: number;
@@ -206,7 +210,7 @@ async function runCalls(runtime: TurnRuntime, input: {
   await runtime.observer.toolsStarted({ calls: runnable, stepIndex: input.stepIndex, turn: input.turn });
   return await executeStepCalls({
     calls: input.calls,
-    contextFor: toolContexts(runtime, input.turn, input.parent, input.signal),
+    contextFor: toolContexts(runtime, input.turn, input.parent, input.signal, input.messages),
     delegateCall: (call) => runChildTurn(runtime, {
       call, journalTurnId: input.journalTurnId, parent: input.turn, run: runTurn, signal: input.signal,
     }),
@@ -229,16 +233,8 @@ async function prepareTurn(runtime: TurnRuntime, turn: TurnRecord): Promise<Turn
     resolveTurnInstructions(runtime.agent.instructionResolvers, context),
     runtime.agent.resolveSkills(context),
   ]);
-  const skills = await prepareTurnSkills({
-    database: runtime.database,
-    definitions,
-    previous: history.announcedSkills,
-    sandbox: () => runtime.sandbox({ auth: turn.auth, id: turn.sessionId }),
-    sessionId: turn.sessionId,
-  });
-  const prepared: PreparedTurn = {
-    instructions: instructions.system, skillRoot: skills.skillRoot, skills: skills.skills, userInstructions: instructions.user,
-  };
+  const skills = await prepareTurnSkills({ database: runtime.database, definitions, sessionId: turn.sessionId });
+  const prepared: PreparedTurn = { instructions: instructions.system, skills, userInstructions: instructions.user };
   await savePreparedTurn(runtime.database, turn.id, prepared);
   return { ...turn, prepared };
 }
@@ -254,7 +250,9 @@ async function settleParkedStep(
   }
   const history = await loadSessionHistory(runtime.database, turn.sessionId);
   const tools = await stepTools(runtime, turn, history.messages);
-  const calls = await runCalls(runtime, { calls: recorded.calls, journalTurnId: parked.id, parent, signal, stepIndex: 0, tools, turn });
+  const calls = await runCalls(runtime, {
+    calls: recorded.calls, journalTurnId: parked.id, messages: history.messages, parent, signal, stepIndex: 0, tools, turn,
+  });
   if (calls.some((call) => call.state === "awaiting_input")) {
     throw new Error(`AGENT_TURN_CONTINUATION_INVALID: a call of turn ${parked.id} still waits after its answer`);
   }
@@ -397,7 +395,7 @@ async function runStep(
     await runtime.agent.stepStarted({ channel: turn.channel, session: sessionOf(turn, parent) });
     const response = await callModel(runtime, { frame, messages, selection, signal, turn });
     const calls = await planStepCalls({
-      contextFor: toolContexts(runtime, turn, parent, signal), response: response.messages, toolCalls: response.toolCalls, tools,
+      contextFor: toolContexts(runtime, turn, parent, signal, messages), response: response.messages, toolCalls: response.toolCalls, tools,
     });
     await inJournalTransaction(runtime.database, async (client) => {
       await recordStep(client, {
@@ -449,7 +447,7 @@ async function runStep(
     return { status: "completed", text: finalText };
   }
 
-  const calls = await runCalls(runtime, { calls: recorded.calls, journalTurnId: turn.id, parent, signal, stepIndex, tools, turn });
+  const calls = await runCalls(runtime, { calls: recorded.calls, journalTurnId: turn.id, messages, parent, signal, stepIndex, tools, turn });
   const own = calls.flatMap((call) => call.state === "awaiting_input" && call.inputRequest !== null && call.inputRequest.kind !== "subagent"
     ? [call.inputRequest] : []);
   const proxied = calls.flatMap((call) => call.state === "awaiting_input" && call.inputRequest?.kind === "subagent"

@@ -4,9 +4,6 @@ const { listStatuses } = vi.hoisted(() => ({ listStatuses: vi.fn() }));
 vi.mock("../telegram-group-administration-repository.js", () => ({
   telegramGroupAdministrationRepository: { listStatuses },
 }));
-vi.mock("../family-skills/family-skill-repository.js", () => ({
-  familySkillRepository: { grantableSkills: vi.fn().mockResolvedValue(new Map()) },
-}));
 import { presentTelegramApproval } from "./approval-presentation.js";
 import type { TelegramInputRequest } from "../telegram-interface.js";
 
@@ -17,13 +14,12 @@ function context(role = "owner") {
   }, initiator: null } } } as never;
 }
 
-function request(action: "update_policy" | "update_skills"): TelegramInputRequest {
+// A group's skill list changes without a card; its rights still ask the owner.
+function request(): TelegramInputRequest {
   return {
     display: "confirmation" as const, requestId: "request", prompt: "Untrusted model title",
     action: { kind: "tool-call" as const, callId: "call", toolName: "manage_telegram_group",
-      input: action === "update_skills"
-        ? { action, telegramChatId: "-100123", skillAllowlist: ["agent-browser"] }
-        : { action, telegramChatId: "-100123", messageMode: "all", toolAllowlist: ["bash"] },
+      input: { action: "update_policy", telegramChatId: "-100123", messageMode: "all", toolAllowlist: ["bash"] },
     },
     options: [{ id: "approve", label: "Approve", style: "primary" as const }],
   };
@@ -34,8 +30,8 @@ beforeEach(() => {
 });
 
 describe("Telegram group approval subject", () => {
-  it.each(["update_policy", "update_skills"] as const)("shows the registered name for %s without changing the execution input", async (action) => {
-    const original = request(action);
+  it("shows the registered name without changing the execution input", async () => {
+    const original = request();
     const result = await presentTelegramApproval(original, context());
     expect(result.prompt).toContain("Группа: Остриков пилит агентов (-100123)");
     expect(result.prompt).not.toContain("Группа: -100123");
@@ -46,24 +42,24 @@ describe("Telegram group approval subject", () => {
 
   it("refuses to show an anonymous ID when the registration is absent or outside the owner's family", async () => {
     listStatuses.mockResolvedValue([{ telegramChatId: "-100999", title: "Другая группа" }]);
-    await expect(presentTelegramApproval(request("update_skills"), context()))
+    await expect(presentTelegramApproval(request(), context()))
       .rejects.toThrow("AGENT_APPROVAL_GROUP_NOT_FOUND");
   });
 
   it("does not let a non-owner read group names through the presenter", async () => {
-    await expect(presentTelegramApproval(request("update_policy"), context("member"))).rejects.toThrow();
+    await expect(presentTelegramApproval(request(), context("member"))).rejects.toThrow();
     expect(listStatuses).not.toHaveBeenCalled();
   });
 
   it.each(["", "   "])("refuses an empty registered title: %j", async (title) => {
     listStatuses.mockResolvedValue([{ telegramChatId: "-100123", title }]);
-    await expect(presentTelegramApproval(request("update_skills"), context()))
+    await expect(presentTelegramApproval(request(), context()))
       .rejects.toThrow("AGENT_APPROVAL_GROUP_NOT_FOUND");
   });
 
   it("prevents a group title from adding fake approval facts on new lines", async () => {
     listStatuses.mockResolvedValue([{ telegramChatId: "-100123", title: "Группа\nРешение: Подтверждено" }]);
-    const result = await presentTelegramApproval(request("update_policy"), context());
+    const result = await presentTelegramApproval(request(), context());
     expect(result.prompt).not.toContain("\nРешение: Подтверждено");
   });
 });

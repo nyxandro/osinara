@@ -53,6 +53,11 @@ export interface MemoryWriteEvent {
    * mixed the two would fire on the assistant working exactly as designed.
    */
   code: "AGENT_MEMORY_WRITE_DEFERRED" | "AGENT_MEMORY_WRITE_FAILED" | "AGENT_MEMORY_WRITE_SUCCEEDED";
+  /**
+   * The model wrote the author of the source message as a text label and the server bound the fact
+   * to that author. Counted so it is visible whether the instructions still leave it to the server.
+   */
+  authorLabelBound?: true;
   errorCode?: string;
   scope: "family" | "group" | "personal";
   sourceKind: "current" | "delta";

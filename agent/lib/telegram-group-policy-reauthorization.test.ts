@@ -26,7 +26,7 @@ describe("Telegram group policy reauthorization", () => {
       type: "external" as const,
     };
     repository.telegram.findGroup
-      .mockResolvedValueOnce({ ...group, skillAllowlist: ["pohuy"] })
+      .mockResolvedValueOnce({ ...group, skillAllowlist: ["behavior-preferences"] })
       .mockResolvedValueOnce({ ...group, skillAllowlist: [] });
     repository.telegram.findIdentity.mockResolvedValue({
       familyId: "family-1",

@@ -1,9 +1,10 @@
 /**
  * The release's built-in skills, read once from `config/skills/` at process start.
  *
- * Export:
+ * Exports:
  * - `GROUP_SAFE_SKILL_DEFINITIONS`: every built-in skill by name, checked by the same rules as a
  *   family's own skill (`validateSkillPackage`), without the family size limits.
+ * - `readSkillPackageFiles`: one packaged skill's files from a release folder.
  *
  * A broken built-in package stops the process at start: it is the release's own content.
  */
@@ -16,8 +17,9 @@ import { AppError } from "../app-error.js";
 import { GOOGLE_WORKSPACE_EXECUTION_GUIDE } from "../google-workspace/google-workspace-skill-instructions.js";
 import { GROUP_SAFE_SKILL_NAMES, SKILL_CATALOG_ROOT, type GroupSafeSkillName } from "./group-skill-catalog.js";
 
-function readPackageFiles(name: string): SkillPackageFile[] {
-  const root = join(SKILL_CATALOG_ROOT, name);
+/** A packaged skill's files under `catalogRoot/name`, service files skipped, symbolic links refused. */
+export function readSkillPackageFiles(catalogRoot: string, name: string): SkillPackageFile[] {
+  const root = join(catalogRoot, name);
   const files: SkillPackageFile[] = [];
   const pending = [""];
   while (pending.length > 0) {
@@ -36,7 +38,7 @@ function readPackageFiles(name: string): SkillPackageFile[] {
 }
 
 function loadSkill(name: string): SkillDefinition {
-  const validated = validateSkillPackage({ expectedName: name, files: readPackageFiles(name), limits: null });
+  const validated = validateSkillPackage({ expectedName: name, files: readSkillPackageFiles(SKILL_CATALOG_ROOT, name), limits: null });
   const markdown = name.startsWith("gws-")
     ? `${GOOGLE_WORKSPACE_EXECUTION_GUIDE}\n\n${validated.markdown}`
     : validated.markdown;

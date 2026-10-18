@@ -39,6 +39,7 @@ import {
   type MemoryTurnContext,
 } from "../memory-retrieval.js";
 import type { ModelMemory } from "../model-memory.js";
+import { PROFILE_REPEAT_WINDOW_TURNS } from "../memory-config.js";
 import { memoryShowJournal, type MemorySelectionWindow } from "../memory-show-journal.js";
 import {
   MemoryContextFailure, memoryFailureCode, recordMemoryContextIncident,
@@ -258,6 +259,8 @@ export function createMemoryBlockResolver(dependencies: {
     skillHints: readonly string[],
     window: MemorySelectionWindow | null,
   ) => Promise<MemoryTurnContext>;
+  /** Claims this session showed in its last turns, which the profile then leaves out. */
+  shownRecentlyInSession: (window: MemorySelectionWindow) => Promise<ReadonlySet<string>>;
 }) {
   return async function resolve(ctx: TurnBlockContext, turnId: string): Promise<string | null> {
     const started = performance.now();
@@ -270,6 +273,7 @@ export function createMemoryBlockResolver(dependencies: {
     // named record only if this turn's journal shows it, and a turn without a window writes none.
     let usageTracked: boolean | null = null;
     let profileCharacters: number | null = null;
+    let profileLeftOutClaims: number | null = null;
     let droppedMemories: number | null = null;
     let offeredMemories: number | null = null;
     let profileMemoryRefs: string[] | null = null;
@@ -317,10 +321,22 @@ export function createMemoryBlockResolver(dependencies: {
       outcome = "succeeded";
       phase = "profile";
       const profileInput = telegramProfileInput(ctx, turnId);
+      // Facts this session showed in its last turns are left out: repeated every turn, the same
+      // facts read to the model as what matters, and it brought them up unasked. A turn with no
+      // window of its own (a delegated child, a scheduled run) gets the whole profile.
+      let hiddenClaimIds: ReadonlySet<string> = new Set();
+      if (profileInput !== null && window !== null) {
+        phase = "journal";
+        hiddenClaimIds = await dependencies.shownRecentlyInSession(window);
+        phase = "profile";
+      }
       const profile = profileInput === null
         ? null
-        : await dependencies.createProfile(authorization, profileInput);
+        : await dependencies.createProfile(authorization, { ...profileInput, hiddenClaimIds });
       profileCharacters = profile === null ? 0 : JSON.stringify(profile.subjects).length;
+      profileLeftOutClaims = profile === null ? 0 : profile.subjects.reduce(
+        (sum, subject) => sum + (subject.recentlyShownClaimsLeftOut ?? 0), 0,
+      );
       profileMemoryRefs = profile === null ? []
         : profile.subjects.flatMap((subject) => subject.claims.map((claim) => claim.memoryRef));
       threadRefs = context.threads.threads.map((thread) => thread.threadRef);
@@ -383,7 +399,7 @@ export function createMemoryBlockResolver(dependencies: {
       console.info(JSON.stringify({ code: "AGENT_MEMORY_RETRIEVAL_METRICS", sessionId: ctx.session.id,
         turnId, outcome, memories, offeredMemories, droppedMemories, ...selection, memoryEvidence,
         usageTracked, ...diagnostics,
-        profileCharacters, profileMemoryRefs,
+        profileCharacters, profileLeftOutClaims, profileMemoryRefs,
         threadRefs, threadCharacters, failurePhase: outcome === "failed" ? phase : null, causeCode,
         durationMs: Math.round(performance.now() - started) }));
     }
@@ -393,7 +409,7 @@ export function createMemoryBlockResolver(dependencies: {
 function telegramProfileInput(
   ctx: TurnBlockContext,
   turnId: string,
-): CreateProfileViewInput | null {
+): Omit<CreateProfileViewInput, "hiddenClaimIds"> | null {
   if (isTelegramChannelSession(ctx.session.auth)) return null;
   const attributes = ctx.session.auth.current?.attributes;
   const conversationId = attributes?.telegramConversationId;
@@ -473,6 +489,8 @@ export const resolveMemoryBlock = createMemoryBlockResolver({
   openSelectionWindow: memoryShowJournal.openTurn,
   recordOffered: recordOfferedMemories,
   retrieve: retrieveMemoryTurnContext,
+  shownRecentlyInSession: (window) =>
+    memoryShowJournal.shownRecentlyInSession(window, PROFILE_REPEAT_WINDOW_TURNS),
 });
 
 export const resolvePreferenceBlock = createPreferenceBlockResolver({

@@ -59,13 +59,13 @@ describeWithDatabase("Telegram group skill policy repository", () => {
     await expect(telegramGroupAdministrationRepository.updateSkills({
       familyId: current.familyId,
       requestedBy: current.ownerId,
-      skillAllowlist: ["pohuy"],
+      skillAllowlist: ["behavior-preferences"],
       telegramChatId: current.telegramChatId,
-    })).resolves.toEqual({ groupId: current.groupId, skillsNeedBash: false });
+    })).resolves.toEqual({ groupId: current.groupId });
     await expect(database().query<{ skill_allowlist: string[] }>(
       "SELECT skill_allowlist FROM telegram_groups WHERE id = $1",
       [current.groupId],
-    )).resolves.toMatchObject({ rows: [{ skill_allowlist: ["pohuy"] }] });
+    )).resolves.toMatchObject({ rows: [{ skill_allowlist: ["behavior-preferences"] }] });
 
     await telegramGroupAdministrationRepository.updateSkills({
       familyId: current.familyId,
@@ -91,13 +91,13 @@ describeWithDatabase("Telegram group skill policy repository", () => {
     await expect(telegramGroupAdministrationRepository.updateSkills({
       familyId: current.familyId,
       requestedBy: current.ownerId,
-      skillAllowlist: ["pohuy"],
+      skillAllowlist: ["behavior-preferences"],
       telegramChatId: current.telegramChatId,
     })).rejects.toThrowError(/AGENT_OWNER_REQUIRED/u);
     await expect(telegramGroupAdministrationRepository.updateSkills({
       familyId: other.familyId,
       requestedBy: other.ownerId,
-      skillAllowlist: ["pohuy"],
+      skillAllowlist: ["behavior-preferences"],
       telegramChatId: current.telegramChatId,
     })).rejects.toThrowError(/AGENT_GROUP_NOT_FOUND/u);
   });
@@ -118,19 +118,28 @@ describeWithDatabase("Telegram group skill policy repository", () => {
     )).rejects.toThrow();
   });
 
-  it("saves browser prerequisites once and removes dependent skills when Bash is revoked", async () => {
+  it("adds a script skill only with Bash already granted and removes it when Bash is revoked", async () => {
     const current = await fixture("4405");
+    // A skill list changes without a confirmation, so it never grants Bash by itself.
+    await expect(telegramGroupAdministrationRepository.updateSkills({
+      familyId: current.familyId, requestedBy: current.ownerId,
+      skillAllowlist: ["agent-browser", "behavior-preferences"], telegramChatId: current.telegramChatId,
+    })).rejects.toThrow("AGENT_GROUP_SKILL_NEEDS_BASH");
+    await telegramGroupAdministrationRepository.updatePolicy({
+      familyId: current.familyId, requestedBy: current.ownerId, telegramChatId: current.telegramChatId,
+      messageMode: "all", toolAllowlist: ["bash"],
+    });
     await telegramGroupAdministrationRepository.updateSkills({
       familyId: current.familyId, requestedBy: current.ownerId,
-      skillAllowlist: ["agent-browser", "pohuy"], telegramChatId: current.telegramChatId,
+      skillAllowlist: ["agent-browser", "behavior-preferences"], telegramChatId: current.telegramChatId,
     });
     expect((await database().query("SELECT tool_allowlist,skill_allowlist FROM telegram_groups WHERE id=$1", [current.groupId])).rows)
-      .toEqual([{ tool_allowlist: ["bash"], skill_allowlist: ["agent-browser", "pohuy"] }]);
+      .toEqual([{ tool_allowlist: ["bash"], skill_allowlist: ["agent-browser", "behavior-preferences"] }]);
     await telegramGroupAdministrationRepository.updatePolicy({
       familyId: current.familyId, requestedBy: current.ownerId, telegramChatId: current.telegramChatId,
       messageMode: "all", toolAllowlist: ["remember"],
     });
     expect((await database().query("SELECT tool_allowlist,skill_allowlist FROM telegram_groups WHERE id=$1", [current.groupId])).rows)
-      .toEqual([{ tool_allowlist: ["remember"], skill_allowlist: ["pohuy"] }]);
+      .toEqual([{ tool_allowlist: ["remember"], skill_allowlist: ["behavior-preferences"] }]);
   });
 });

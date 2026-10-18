@@ -280,6 +280,7 @@ export async function recordOfferedMemories(
   }
   await memoryShowJournal.recordShown(window, [...new Set(claimIds)]);
   // Standing profile claims the selection did not bring: shown all the same, so a record used
-  // from the profile counts (#339), but under their own source, which no repeat filter reads.
+  // from the profile counts (#339). Their own source keeps them out of the selection's repeat
+  // filter; the profile's own window reads them.
   await memoryShowJournal.recordShownRefs(window, standing, "profile");
 }

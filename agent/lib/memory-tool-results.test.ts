@@ -581,7 +581,44 @@ describe("model-facing memory tool results", () => {
     }, context);
 
     expect(result).toMatchObject({ code: "AGENT_MEMORY_SIMILAR_RECORD_EXISTS", saved: false });
+    expect((result as { correction: string }).correction).toContain("manage_memory");
     expect(JSON.stringify(failed)).not.toContain("глютен");
     expect(failed.at(-1)).toMatchObject({ code: "AGENT_MEMORY_WRITE_DEFERRED" });
+  });
+
+  it("does not point a silent review at an edit tool it was never given", async () => {
+    // The review surface carries remember and reads only, so advice to edit through
+    // manage_memory sends it after a call it cannot make.
+    createMemory.mockRejectedValue(new MemoryNeighbourRefusal([
+      { content: "Не ест глютен", memoryRef: MEMORY_REF },
+    ]));
+    resolveMemoryTurnSource.mockResolvedValue({
+      conversationId: "c", isCurrent: false, isReview: true,
+      messageThreadId: null, sourceMessageId: "1", timelineEntryId: "t",
+    });
+    const reviewContext = {
+      ...context,
+      session: {
+        ...context.session,
+        auth: { current: { attributes: { memoryReviewBatchId: "batch-1", telegramChatType: "supergroup" } } },
+      },
+    } as unknown as ToolContext;
+
+    const result = await executeNonStreamingTool(remember, {
+      basis: "agent_inferred", content: "У Ани непереносимость глютена", kind: "fact",
+      scope: "group", sensitivity: "normal", sourceSequence: "42", subject: { kind: "current_author" },
+    }, reviewContext);
+
+    expect(result).toMatchObject({ code: "AGENT_MEMORY_SIMILAR_RECORD_EXISTS", saved: false });
+    expect((result as { correction: string }).correction).not.toContain("manage_memory");
+
+    createMemory.mockResolvedValue(internalMemory);
+    const saved = await executeNonStreamingTool(remember, {
+      basis: "agent_inferred", content: "Аня (anya_k) живёт в Казани", kind: "fact",
+      scope: "group", sensitivity: "normal", sourceSequence: "42", subject: { kind: "current_author" },
+    }, reviewContext);
+
+    // An undo it cannot call is the same dead end on the success path.
+    expect((saved as { notice: string }).notice).not.toContain("manage_memory");
   });
 });

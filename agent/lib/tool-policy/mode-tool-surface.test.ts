@@ -247,7 +247,7 @@ describe("external group tool surface", () => {
     const granted = buildModeToolSurface({
       capabilities: new Set(),
       environment: "external",
-      skills: new Set(["pohuy"]),
+      skills: new Set(["behavior-preferences"]),
     }).load_skill!;
 
     expect(withoutSkills).not.toHaveProperty("load_skill");
@@ -330,7 +330,7 @@ describe("external group tool surface", () => {
     const surface = buildModeToolSurface({
       capabilities: new Set(EXTERNAL_GROUP_TOOL_NAMES),
       environment: "external",
-      skills: new Set(["pohuy"]),
+      skills: new Set(["behavior-preferences"]),
     });
     const descriptions = Object.values(surface)
       .map(({ description }) => description)

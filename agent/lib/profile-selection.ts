@@ -3,7 +3,8 @@
  *
  * Exports:
  * - Profile candidate, selected claim, subject, and selection contracts.
- * - `selectProfileClaims`: applies eligibility, dormancy, subject, count, and character budgets.
+ * - `selectProfileClaims`: applies eligibility, dormancy, the repeat window, subject, count, and
+ *   character budgets.
  */
 import type {
   MemoryConfirmation,
@@ -38,6 +39,8 @@ export interface ProfileClaimCandidate {
   observedAt: string;
   priority: ProfileSubjectPriority;
   profileEligible: boolean;
+  /** The session put it in front of the model within its repeat window; it is not shown again. */
+  recentlyShown: boolean;
   sensitivity: MemorySensitivity;
   sourceAuthorLabel: string;
   subjectLabel: string;
@@ -51,6 +54,8 @@ export interface SelectedProfileClaim extends ProfileClaimCandidate {
 
 export interface SelectedProfileSubject {
   claims: SelectedProfileClaim[];
+  /** Facts that belong in this card but were shown within the repeat window, so are left out. */
+  leftOutClaims: number;
   priority: ProfileSubjectPriority;
   subjectLabel: string;
   subjectRef: string;
@@ -122,6 +127,10 @@ export function selectProfileClaims(
 
   const subjects: SelectedProfileSubject[] = [];
   let totalCharacters = 0;
+  // The budget is spent on the whole card, recently shown facts included, and only then are those
+  // left out. Spent on what is shown, every freed place went to the next fact in line, and a large
+  // profile paged through itself thirty facts a turn.
+  let cardCharacters = 0;
   for (const [subjectRef, subjectCandidates] of orderedSubjects) {
     const priority = [...subjectCandidates]
       .sort((left, right) => SUBJECT_PRIORITY[left.priority] - SUBJECT_PRIORITY[right.priority])[0]!
@@ -131,23 +140,36 @@ export function selectProfileClaims(
     );
     const claims: SelectedProfileClaim[] = [];
     let subjectCharacters = 0;
+    let cardClaims = 0;
+    let cardSubjectCharacters = 0;
+    let leftOutClaims = 0;
     for (const claim of deduplicated.values()) {
       const renderedText = renderClaim(claim);
       if (
-        claims.length >= PROFILE_CONTEXT_MAX_CLAIMS_PER_SUBJECT ||
+        cardClaims >= PROFILE_CONTEXT_MAX_CLAIMS_PER_SUBJECT ||
         renderedText.length > PROFILE_CONTEXT_MAX_SUBJECT_CHARACTERS ||
-        subjectCharacters + renderedText.length > PROFILE_CONTEXT_MAX_SUBJECT_CHARACTERS ||
-        totalCharacters + renderedText.length > PROFILE_CONTEXT_MAX_CHARACTERS
+        cardSubjectCharacters + renderedText.length > PROFILE_CONTEXT_MAX_SUBJECT_CHARACTERS ||
+        cardCharacters + renderedText.length > PROFILE_CONTEXT_MAX_CHARACTERS
       ) {
+        continue;
+      }
+      cardClaims += 1;
+      cardSubjectCharacters += renderedText.length;
+      cardCharacters += renderedText.length;
+      if (claim.recentlyShown) {
+        leftOutClaims += 1;
         continue;
       }
       claims.push({ ...claim, renderedText });
       subjectCharacters += renderedText.length;
       totalCharacters += renderedText.length;
     }
-    if (claims.length === 0) continue;
+    // A person whose facts were all just shown stays without them: their ref is the only way this
+    // turn can link a new fact to them, and leaving them out would make it a bare text label.
+    if (claims.length === 0 && leftOutClaims === 0) continue;
     subjects.push({
       claims,
+      leftOutClaims,
       priority,
       subjectLabel: subjectCandidates[0]!.subjectLabel,
       subjectRef,

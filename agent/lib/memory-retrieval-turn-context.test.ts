@@ -4,6 +4,7 @@
  * Constructs covered:
  * - A message that asks memory nothing is not searched and offers no records, saying so in diagnostics.
  * - A message with any word outside small talk is searched as before.
+ * - A file sent without a caption is not searched: the placeholder text is not the person's words.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -14,6 +15,7 @@ import { memoryRetrievalRepository } from "./memory-retrieval-repository.js";
 import type { MemoryRetrievalBranchDiagnostics } from "./memory-retrieval-ranking.js";
 import { retrieveMemoryTurnContext } from "./memory-retrieval.js";
 import { memoryThreadBriefRepository } from "./memory-thread-brief-repository.js";
+import { CAPTIONLESS_ATTACHMENT_MODEL_TEXT } from "./telegram-model-placeholders.js";
 
 vi.mock("./memory-embedding-client.js", async (importOriginal) => ({
   ...await importOriginal<typeof import("./memory-embedding-client.js")>(),
@@ -83,6 +85,19 @@ describe("retrieveMemoryTurnContext", () => {
     expect(activate).not.toHaveBeenCalled();
     expect(context.memories).toEqual([]);
     expect(context.offered.claimIdByMemoryRef.size).toBe(0);
+    expect(context.diagnostics.abstained).toBe(true);
+  });
+
+  it("does not search memory with the placeholder of a file sent without a caption", async () => {
+    // 2026-10-09..16: the placeholder went to the search twice and brought eight records each time.
+    const searchSpy = vi.spyOn(memoryRetrievalRepository, "searchAuthorized");
+    const activate = vi.spyOn(memoryThreadBriefRepository, "activate");
+
+    const context = await retrieveMemoryTurnContext(auth, CAPTIONLESS_ATTACHMENT_MODEL_TEXT, []);
+
+    expect(searchSpy).not.toHaveBeenCalled();
+    expect(activate).not.toHaveBeenCalled();
+    expect(context.memories).toEqual([]);
     expect(context.diagnostics.abstained).toBe(true);
   });
 

@@ -46,7 +46,7 @@ describeWithDatabase("Telegram group status repository", () => {
       `INSERT INTO telegram_groups
          (family_id, telegram_chat_id, title, type, message_mode, tool_allowlist, skill_allowlist)
        VALUES
-         ($1, '-1002', 'Внешняя', 'external', 'owner_only', ARRAY['search_memories'], ARRAY['pohuy']),
+         ($1, '-1002', 'Внешняя', 'external', 'owner_only', ARRAY['search_memories'], ARRAY['behavior-preferences']),
          ($1, '-1001', 'Семья', 'family_private', 'all', '{}', '{}'),
          ($2, '-1003', 'Чужая', 'external', 'addressed_only', ARRAY['remember'], '{}')`,
       [current.familyId, other.familyId],
@@ -58,7 +58,7 @@ describeWithDatabase("Telegram group status repository", () => {
     })).resolves.toEqual([
       {
         messageMode: "owner_only",
-        skillAllowlist: ["pohuy"],
+        skillAllowlist: ["behavior-preferences"],
         telegramChatId: "-1002",
         title: "Внешняя",
         toolAllowlist: ["search_memories"],

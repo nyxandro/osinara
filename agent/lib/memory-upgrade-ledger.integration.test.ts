@@ -164,6 +164,10 @@ const POST_V0101_MIGRATIONS = [
   "130_compaction_summary_refusals.sql",
   "131_memory_show_sources.sql",
   "132_remove_memory_conflict_grants.sql",
+  "133_memory_placeholder_attribute_repair.sql",
+  "134_memory_author_label_rebinding.sql",
+  "135_remove_t_invest_and_pohuy_skills.sql",
+  "136_family_skill_library.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [

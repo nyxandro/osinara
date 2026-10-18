@@ -43,13 +43,12 @@ const PROSE_MENTION = `Записи приходят в блоке ${TURN_MEMORY
 const PRODUCTION_MEMORY = formatTurnMemoryContext("<retrieved_memory>[{\"memoryRef\":\"mem_a\"}]</retrieved_memory>");
 
 function prepared(instructions: string[], extra: Partial<PreparedTurn> = {}): PreparedTurn {
-  return { instructions, skillRoot: null, skills: [], userInstructions: [], ...extra };
+  return { instructions, skills: [], userInstructions: [], ...extra };
 }
 
 describe("turnSystemPrompt", () => {
   it("gives production's system prompt back byte for byte when production's block is put back", () => {
     const stored = prepared([MODE_BLOCK, PROSE_MENTION, PRODUCTION_MEMORY], {
-      skillRoot: "/workspace/skills",
       skills: [{ description: "Сводка расходов", name: "budget" }],
     });
 

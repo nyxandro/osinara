@@ -102,7 +102,7 @@ describe("manage_telegram_group.update_policy", () => {
     await expect(manageTelegramGroup.execute({
       ...input,
       registration: {},
-      skillAllowlist: ["pohuy"],
+      skillAllowlist: ["behavior-preferences"],
     }, context("private"))).resolves.toMatchObject({ policyUpdated: true });
     expect(updatePolicy).toHaveBeenCalledWith(expect.objectContaining({
       messageMode: "owner_only",

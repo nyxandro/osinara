@@ -41,6 +41,9 @@ export interface SandboxSkillPackage {
 
 export interface RuntimeSandboxSession extends SandboxSession {
   stop(): Promise<void>;
-  /** Puts the turn's skill packages under the skill root in one batch and removes revoked ones. */
-  syncSkills(packages: readonly SandboxSkillPackage[], removed: readonly string[]): Promise<void>;
+  /**
+   * Writes each package under the skill root as an exact copy (files outside it are removed).
+   * With `keep`, every other entry of the skill root goes too; `null` removes nothing else.
+   */
+  syncSkills(packages: readonly SandboxSkillPackage[], keep: readonly string[] | null): Promise<void>;
 }

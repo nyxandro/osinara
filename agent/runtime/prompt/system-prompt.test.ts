@@ -36,17 +36,18 @@ describe("system prompt composition", () => {
     expect(base).toBe("Instructions (instructions)\n# Правила");
   });
 
+  // The recorded skill list predates skills leaving the sandbox (its lines carry paths), so the
+  // composition is checked with the recorded section as is; the section itself is pinned below.
   it("joins the base prompt, turn blocks and the skill list exactly as the recorded request", async () => {
     const recorded = await firstSystemPrompt("external-bot");
     const base = composeBasePrompt({ instructions: await productionInstructions(), toolsAvailable: true });
     const skillsStart = recorded.lastIndexOf("\n\nAvailable skills\n");
     const turnBlocks = recorded.slice(base.length + 2, skillsStart).split("\n\n<").map((block, index) => index === 0 ? block : `<${block}`);
-    const skillLine = recorded.slice(recorded.lastIndexOf("\n- pohuy: ") + "\n- pohuy: ".length, recorded.lastIndexOf(" (path: "));
 
     expect(composeSystemPrompt({
       base,
       instructionBlocks: turnBlocks,
-      skillsSection: formatAvailableSkillsSection([{ name: "pohuy", description: skillLine }], { skillRoot: "/.agents/skills" }),
+      skillsSection: recorded.slice(skillsStart + 2),
     })).toBe(recorded);
   });
 
@@ -57,11 +58,14 @@ describe("system prompt composition", () => {
 
 describe("available skills section", () => {
   it("is absent for an empty skill list", () => {
-    expect(formatAvailableSkillsSection([], { skillRoot: "/home/agent/.agents/skills" })).toBeNull();
+    expect(formatAvailableSkillsSection([])).toBeNull();
   });
 
-  it("points every skill at its SKILL.md under the sandbox skill root", () => {
-    expect(formatAvailableSkillsSection([{ name: "pdf", description: "PDF files" }], { skillRoot: "/home/agent/.agents/skills" }))
-      .toContain("Skill files live under `/home/agent/.agents/skills/<skill>/`.\nWhen a loaded SKILL.md mentions sibling files such as `references/foo.md`, resolve them relative to the directory containing that specific SKILL.md.\n- pdf: PDF files (path: /home/agent/.agents/skills/pdf/SKILL.md)");
+  it("lists every skill by name and description, and says where a loaded skill's files appear", () => {
+    const section = formatAvailableSkillsSection([{ name: "pdf", description: "PDF files" }, { name: "digest", description: "Сводки" }]);
+
+    expect(section).toContain("are placed under `$HOME/.agents/skills/<skill>/` when you load it");
+    expect(section).toContain("Anything else under `$HOME/.agents/skills/` is not a skill of this run.");
+    expect(section!.endsWith("\n- pdf: PDF files\n- digest: Сводки")).toBe(true);
   });
 });

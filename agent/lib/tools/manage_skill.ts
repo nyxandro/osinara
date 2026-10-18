@@ -1,25 +1,32 @@
 /**
- * The owner's own skills: list, view, store from a workspace folder, confirm, enable, disable, delete.
+ * The family's skill library from a member's private chat: list, view, save, checkout, rollback,
+ * enable, disable, delete — without confirmation buttons.
  *
  * Exports:
- * - `manage_skill`: the tool, available only to the owner in the private chat.
- * - `requireManageSkillInput`: the one parser of its input, shared with the approval card.
+ * - `manage_skill`: the tool, in a family member's private chat.
+ * - `requireManageSkillInput`: the one parser of its input.
  *
  * Key constructs:
- * - A skill folder is checked like a built-in skill and stored as a new version; nothing changes
- *   until the owner confirms that version with a button (`activate`). The current version keeps
- *   working meanwhile, and every earlier version stays for a rollback.
- * - The confirmed skill works from the next turn on, in private and family chats; an external
- *   group gets it only when the owner adds it to that group's skills.
+ * - Any member saves a skill from a workspace folder; it becomes the current version at once and is
+ *   enabled for its author. Everyone else enables it for themselves; a family group gets it from its
+ *   list. A new version, a rollback or a deletion is the author's or the owner's.
+ * - The application, not the model, sends a notice of every change to whom it concerns
+ *   (`family-skills/family-skill-notices.ts`). An external group's skills stay with the owner
+ *   (`manage_telegram_group`).
  */
 import { z } from "zod";
 
-import { defineTool } from "../../runtime/tool.js";
+import { defineTool, type ToolContext } from "../../runtime/tool.js";
 import { FAMILY_SKILL_LIMITS, SKILL_NAME_PATTERN, validateSkillPackage } from "../../runtime/skills/package-validation.js";
 import { AppError } from "../app-error.js";
-import { requirePrivateTelegramOwner } from "../family-context.js";
+import { database } from "../database.js";
+import { requirePrivateTelegramMember } from "../family-context.js";
+import { requireNoDraftPathReference } from "../family-skills/draft-path-check.js";
+import { familySkillChanges, type FamilySkillActor } from "../family-skills/family-skill-changes.js";
 import { familySkillRepository } from "../family-skills/family-skill-repository.js";
-import { readWorkspaceSkillFolder } from "../family-skills/workspace-skill-folder.js";
+import { familySkillUsage } from "../family-skills/family-skill-usage.js";
+import { isServiceSkillName } from "../family-skills/service-skills.js";
+import { readWorkspaceSkillFolder, skillManifest, writeWorkspaceSkillFolder } from "../family-skills/workspace-skill-folder.js";
 import { GROUP_SAFE_SKILL_NAMES, isGroupSafeSkillName } from "../group-skills/group-skill-catalog.js";
 import { isImageGenerationSkillName } from "../image-generation/image-generation-skill.js";
 import {
@@ -32,25 +39,30 @@ import {
 } from "../tool-input-validation.js";
 
 const INPUT_ERROR_CODE = "AGENT_SKILL_INPUT_INVALID";
-const ACTIONS = ["activate", "delete", "disable", "enable", "list", "stage", "view"] as const;
+const ACTIONS = ["checkout", "delete", "disable", "enable", "list", "rollback", "save", "view"] as const;
 const SCOPES = ["personal", "family"] as const;
-const FIELDS = ["action", "name", "path", "scope", "sourceUrl", "version"] as const;
+const TARGETS = ["me", "family_group"] as const;
+const FIELDS = ["action", "group", "name", "path", "scope", "sourceUrl", "target", "version"] as const;
 const SOURCE_URL_MAX_LENGTH = 2_000;
 
 const manageSkillSchema = z.object({
-  action: z.enum(ACTIONS).describe("list, view, stage, activate, enable, disable or delete."),
-  name: z.string().optional().describe("The name of a family skill: for view, activate, enable, disable, delete."),
-  path: z.string().optional().describe("Only for stage: the skill folder relative to the scope root, for example skills/weather."),
-  scope: z.enum(SCOPES).optional().describe("Only for stage: the workspace of the folder, personal or family."),
-  sourceUrl: z.string().optional().describe("Only for stage: the address the skill was downloaded from. Do not pass it for a skill you wrote yourself."),
-  version: z.number().int().positive().optional().describe("Only for activate: the version number from the stage or view answer."),
+  action: z.enum(ACTIONS).describe("list, view, save, checkout, rollback, enable, disable or delete."),
+  group: z.string().optional().describe("Only with target=family_group: the telegramChatId of the family group from list."),
+  name: z.string().optional().describe("The family skill's name: for view, checkout, rollback, enable, disable, delete."),
+  path: z.string().optional().describe("Only for save: the skill folder relative to the scope root, for example skills/weather."),
+  scope: z.enum(SCOPES).optional().describe("Only for save: the workspace of the folder, personal or family."),
+  sourceUrl: z.string().optional().describe("Only for save: the address the skill was downloaded from. Do not pass it for a skill you wrote."),
+  target: z.enum(TARGETS).optional().describe("Only for enable and disable: me (this person's chats) or family_group."),
+  version: z.number().int().positive().optional().describe("Only for rollback: the version number from view."),
 }).strict();
 
 export type ManageSkillInput =
   | { readonly action: "list" }
-  | { readonly action: "delete" | "disable" | "enable" | "view"; readonly name: string }
-  | { readonly action: "activate"; readonly name: string; readonly version: number }
-  | { readonly action: "stage"; readonly path: string; readonly scope: (typeof SCOPES)[number]; readonly sourceUrl?: string };
+  | { readonly action: "checkout" | "delete" | "view"; readonly name: string }
+  | { readonly action: "rollback"; readonly name: string; readonly version: number }
+  | { readonly action: "disable" | "enable"; readonly name: string; readonly target: "me" }
+  | { readonly action: "disable" | "enable"; readonly group: string; readonly name: string; readonly target: "family_group" }
+  | { readonly action: "save"; readonly path: string; readonly scope: (typeof SCOPES)[number]; readonly sourceUrl?: string };
 
 function requireName(input: Record<string, unknown>): string {
   const name = requiredString(input, "name", INPUT_ERROR_CODE, "weather", { maxLength: 63 });
@@ -83,7 +95,7 @@ export function requireManageSkillInput(raw: unknown): ManageSkillInput {
     only([]);
     return { action };
   }
-  if (action === "stage") {
+  if (action === "save") {
     only(["path", "scope", "sourceUrl"]);
     return {
       action,
@@ -92,75 +104,124 @@ export function requireManageSkillInput(raw: unknown): ManageSkillInput {
       ...(input.sourceUrl === undefined ? {} : { sourceUrl: requireSourceUrl(input.sourceUrl) }),
     };
   }
-  if (action === "activate") {
+  if (action === "rollback") {
     only(["name", "version"]);
     const version = input.version;
     if (typeof version !== "number" || !Number.isSafeInteger(version) || version <= 0) {
-      toolInputError(INPUT_ERROR_CODE, "Для activate передайте version: номер версии из ответа stage или view");
+      toolInputError(INPUT_ERROR_CODE, "Для rollback передайте version: номер версии из ответа view");
     }
     return { action, name: requireName(input), version };
+  }
+  if (action === "enable" || action === "disable") {
+    const target = requiredEnum(input, "target", TARGETS, INPUT_ERROR_CODE);
+    if (target === "me") {
+      only(["name", "target"]);
+      return { action, name: requireName(input), target };
+    }
+    only(["group", "name", "target"]);
+    return { action, group: requiredString(input, "group", INPUT_ERROR_CODE, "-1001234567890", { maxLength: 32 }), name: requireName(input), target };
   }
   only(["name"]);
   return { action, name: requireName(input) };
 }
 
-// The procedure (prepare a folder, stage, activate) is in the owner's private-chat instructions;
-// the private surface's tool descriptions share one size budget.
+function builtInSkillChangeRefused(name: string): AppError {
+  return new AppError("AGENT_SKILL_BUILT_IN",
+    `${name} — встроенный скилл: он работает в личных и семейных чатах всегда, его не включают и не меняют`, { details: { name } });
+}
+
+// The procedure (prepare a folder, save, enable) is in the service skill skill-manager; the private
+// surface's tool descriptions share one size budget.
 const TOOL_DESCRIPTION = [
-  "Family skills: list, view, stage (the skill folder with SKILL.md from the workspace is saved as a new version and does not work yet),",
-  "activate (version from stage or view; after the owner's button it works from the next turn, and rolls back the same way), enable, disable, delete.",
+  "The family's skill library, without confirmation: list, view (versions), save (a workspace skill folder becomes the skill's current version at once; a new skill is enabled for you),",
+  "checkout (writes the current version into skills/<name>/ in your personal workspace for editing), rollback, enable and disable (target me, or family_group with its group from list), delete.",
+  "A new version, a rollback or a deletion is the author's or the owner's. Changes work from the next message. Load skill-manager first.",
 ].join(" ");
 
+function actorOf(ctx: ToolContext, familyId: string, userId: string): FamilySkillActor {
+  return { familyId, operationKey: `${ctx.session.turn.id}:${ctx.callId}`, userId };
+}
+
+async function familyGroups(familyId: string): Promise<Array<{ readonly group: string; readonly title: string }>> {
+  return (await database().query<{ telegram_chat_id: string; title: string }>(
+    "SELECT telegram_chat_id, title FROM telegram_groups WHERE family_id = $1 AND type = 'family_private' ORDER BY title",
+    [familyId],
+  )).rows.map((row) => ({ group: row.telegram_chat_id, title: row.title }));
+}
+
 export default defineTool({
-  approval: ({ toolInput }) => {
-    const parsed = requireManageSkillInput(toolInput);
-    return parsed.action === "list" || parsed.action === "view" || parsed.action === "stage" ? "not-applicable" : "user-approval";
-  },
+  approval: () => "not-applicable",
   description: TOOL_DESCRIPTION,
   inputSchema: manageSkillSchema,
   async execute(input, ctx) {
     const parsed = requireManageSkillInput(input);
-    const owner = requirePrivateTelegramOwner(ctx);
+    const member = requirePrivateTelegramMember(ctx);
+    const actor = actorOf(ctx, member.familyId, member.userId);
+    if (parsed.action !== "list" && parsed.action !== "save" && isGroupSafeSkillName(parsed.name)) {
+      throw builtInSkillChangeRefused(parsed.name);
+    }
     switch (parsed.action) {
-      case "list":
-        return { builtIn: [...GROUP_SAFE_SKILL_NAMES], family: await familySkillRepository.list(owner.familyId) };
+      case "list": {
+        const family = await familySkillRepository.list(member.familyId, member.userId);
+        const usage = await familySkillUsage(member.familyId, family.map((skill) => skill.name));
+        return {
+          builtIn: [...GROUP_SAFE_SKILL_NAMES],
+          family: family.map((skill) => ({ ...skill, usage: usage.get(skill.name) })),
+          familyGroups: await familyGroups(member.familyId),
+        };
+      }
       case "view":
-        return await familySkillRepository.versions(owner.familyId, parsed.name);
-      case "stage": {
+        return await familySkillRepository.versions(member.familyId, member.userId, parsed.name);
+      case "save": {
         const files = await readWorkspaceSkillFolder(ctx, { path: parsed.path, scope: parsed.scope });
         const skill = validateSkillPackage({ files, limits: FAMILY_SKILL_LIMITS });
-        if (isGroupSafeSkillName(skill.name) || isImageGenerationSkillName(skill.name)) {
+        if (isGroupSafeSkillName(skill.name) || isImageGenerationSkillName(skill.name) || isServiceSkillName(skill.name)) {
           throw new AppError("AGENT_SKILL_NAME_TAKEN", `Имя ${skill.name} занято встроенным скиллом. Переименуйте скилл в SKILL.md`);
         }
-        const stored = await familySkillRepository.stage({
-          createdBy: owner.userId,
-          familyId: owner.familyId,
-          origin: parsed.sourceUrl === undefined ? { kind: "authored" } : { kind: "downloaded", url: parsed.sourceUrl },
-          skill,
+        requireNoDraftPathReference(skill);
+        const saved = await familySkillChanges.save({
+          actor, origin: parsed.sourceUrl === undefined ? { kind: "authored" } : { kind: "downloaded", url: parsed.sourceUrl }, skill,
         });
         return {
           description: skill.description,
           files: skill.files.map(({ executable, path, size }) => ({ executable, path, size })),
           name: skill.name,
-          stored: stored.created ? "new_version" : "same_as_latest",
-          version: stored.version,
-          nextStep: `Скилл ещё не работает. Чтобы включить эту версию, вызови manage_skill с action=activate, name=${skill.name}, version=${stored.version}: владелец подтвердит кнопкой.`,
+          status: saved.newSkill ? "saved_and_enabled_for_you" : saved.previousVersion === saved.version ? "unchanged" : "current_version_replaced",
+          version: saved.version,
+          ...(saved.previousVersion === null || saved.previousVersion === saved.version ? {} : { previousVersion: saved.previousVersion }),
+          worksFrom: "next_message",
         };
       }
-      case "activate": {
-        const { previousVersion } = await familySkillRepository.activate({
-          familyId: owner.familyId, name: parsed.name, requestedBy: owner.userId, version: parsed.version,
+      case "checkout": {
+        const current = await familySkillRepository.currentPackage(member.familyId, parsed.name);
+        const path = `skills/${parsed.name}`;
+        await writeWorkspaceSkillFolder(ctx, {
+          files: [
+            { content: Buffer.from(skillManifest({ ...current, name: parsed.name }), "utf8"), path: "SKILL.md" },
+            ...current.files,
+          ],
+          path,
         });
-        return { name: parsed.name, previousVersion, status: "active_from_next_turn", version: parsed.version };
+        return { files: ["SKILL.md", ...current.files.map((file) => file.path)], path, scope: "personal", version: current.version };
+      }
+      case "rollback": {
+        const { previousVersion } = await familySkillChanges.rollback({ actor, name: parsed.name, version: parsed.version });
+        return { name: parsed.name, previousVersion, version: parsed.version, worksFrom: "next_message" };
       }
       case "enable":
-      case "disable":
-        await familySkillRepository.setEnabled({
-          enabled: parsed.action === "enable", familyId: owner.familyId, name: parsed.name, requestedBy: owner.userId,
+      case "disable": {
+        const enabled = parsed.action === "enable";
+        if (parsed.target === "me") {
+          const { changed } = await familySkillChanges.setEnabledForSelf({ actor, enabled, name: parsed.name });
+          return { changed, name: parsed.name, target: "me", worksFrom: "next_message" };
+        }
+        const { changed, title } = await familySkillChanges.setInFamilyGroup({
+          actor, enabled, name: parsed.name, telegramChatId: parsed.group,
         });
-        return { name: parsed.name, status: parsed.action === "enable" ? "enabled_from_next_turn" : "disabled_from_next_turn" };
+        return { changed, group: title, name: parsed.name, target: "family_group", worksFrom: "next_message" };
+      }
       case "delete":
-        await familySkillRepository.remove({ familyId: owner.familyId, name: parsed.name, requestedBy: owner.userId });
+        await familySkillChanges.remove({ actor, name: parsed.name });
         return { name: parsed.name, status: "deleted" };
     }
   },

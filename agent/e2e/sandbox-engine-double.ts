@@ -15,7 +15,7 @@
  */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
@@ -91,7 +91,10 @@ export function createSandboxEngineDouble(input: { readonly db: Pick<Pool, "quer
     async stopSession() {},
     async syncSkills(sessionId, request) {
       let written = 0;
+      let removed = 0;
       for (const skill of request.packages) {
+        // The runner leaves an exact copy; the double gets there by rewriting the whole directory.
+        await rm(real(sessionId, `${SKILL_ROOT}/${skill.name}`), { force: true, recursive: true });
         for (const file of skill.files) {
           const target = real(sessionId, `${SKILL_ROOT}/${skill.name}/${file.path}`);
           await mkdir(dirname(target), { recursive: true });
@@ -99,8 +102,14 @@ export function createSandboxEngineDouble(input: { readonly db: Pick<Pool, "quer
           written += 1;
         }
       }
-      for (const name of request.removed) await rm(real(sessionId, `${SKILL_ROOT}/${name}`), { force: true, recursive: true });
-      return { checked: written, removed: request.removed.length, written };
+      if (request.keep !== undefined) {
+        const present = await readdir(real(sessionId, SKILL_ROOT)).catch(() => [] as string[]);
+        for (const name of present.filter((entry) => !request.keep!.includes(entry))) {
+          await rm(real(sessionId, `${SKILL_ROOT}/${name}`), { force: true, recursive: true });
+          removed += 1;
+        }
+      }
+      return { checked: written, removed, written };
     },
     async writeFile(sessionId, path, content) {
       const target = real(sessionId, path);

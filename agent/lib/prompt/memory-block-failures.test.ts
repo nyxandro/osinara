@@ -4,6 +4,7 @@ import { createMemoryBlockResolver, type TurnBlockContext } from "./turn-blocks.
 import type { MemoryAuthorization } from "../memory-context.js";
 import { TURN_MEMORY_OPEN_TAG } from "./turn-memory-context.js";
 
+const nothingShownRecently = async () => new Set<string>();
 const authorization: MemoryAuthorization = {
   familyId: "family", groupId: null, role: "owner", scopes: ["personal"],
   telegramActorId: "101", telegramActorKind: "telegram_user", telegramUserId: "101", userId: "user",
@@ -26,7 +27,7 @@ describe("memory failure ownership", () => {
     if (phase === "retrieval") retrieve.mockRejectedValue(error);
     const resolve = createMemoryBlockResolver({
       authorize: () => { if (phase === "authorization") throw error; return authorization; },
-      openSelectionWindow: async () => 1, recordOffered, retrieve, createProfile,
+      openSelectionWindow: async () => 1, recordOffered, retrieve, createProfile, shownRecentlyInSession: nothingShownRecently,
       reportFailure,
     });
     const ctx = phase !== "profile" ? context : { ...context, session: { ...context.session, auth: {
@@ -51,7 +52,7 @@ describe("memory failure ownership", () => {
     // notice would deliver a rule about behaviour as if a person had just said it.
     const shared = {
       authorize: () => authorization, createProfile: vi.fn(), openSelectionWindow: async () => 1,
-      recordOffered: vi.fn(), reportFailure: vi.fn(),
+      recordOffered: vi.fn(), shownRecentlyInSession: nothingShownRecently, reportFailure: vi.fn(),
     };
     const retrieved = await createMemoryBlockResolver({
       ...shared,
@@ -74,7 +75,7 @@ describe("memory failure ownership", () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const resolve = createMemoryBlockResolver({ authorize: () => authorization,
-        openSelectionWindow: async () => 1, recordOffered: vi.fn(),
+        openSelectionWindow: async () => 1, recordOffered: vi.fn(), shownRecentlyInSession: nothingShownRecently,
         retrieve: vi.fn().mockRejectedValue(new Error("unavailable")), createProfile: vi.fn(),
         reportFailure: vi.fn().mockRejectedValue(new Error("incident DB down")),
       });

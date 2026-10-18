@@ -17,9 +17,8 @@ interface ThreadActivationCandidate {
   titleSimilarity: number | null;
 }
 
-const REVIEWED_SKILL_THREAD_HINTS: Readonly<Record<string, string>> = {
-  "t-invest": "Инвестиции",
-};
+// Empty since the built-in t-invest skill was removed: no reviewed skill maps to a thread now.
+const REVIEWED_SKILL_THREAD_HINTS: Readonly<Record<string, string>> = {};
 
 export function applicationThreadSkillHints(messages: readonly ModelMessage[]): string[] {
   const hints = new Set<string>();

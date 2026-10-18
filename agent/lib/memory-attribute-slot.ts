@@ -39,6 +39,14 @@ export const MEMORY_ATTRIBUTE_MAX_CHARACTERS = 40;
 /** Supersession by slot, told apart from supersession by correction, which undo must not touch. */
 const SLOT_RELATION = "temporal_update";
 
+/**
+ * Words a model writes for «no value». Taken as a name, each becomes one slot shared by every fact
+ * about the person that carries it: in September and October 2026 the silent review stored ten
+ * records with "null", and three were retired by unrelated facts. Refused rather than read as no
+ * slot, so the model learns to leave the field out.
+ */
+const PLACEHOLDER_ATTRIBUTES: ReadonlySet<string> = new Set(["null", "none", "undefined"]);
+
 function attributeRefusal(message: string): AppError {
   return new AppError("AGENT_MEMORY_ATTRIBUTE_INVALID", message);
 }
@@ -57,6 +65,11 @@ export function normalizeMemoryAttribute(value: string, kind: MemoryKind): strin
   if (!normalized || normalized.length > MEMORY_ATTRIBUTE_MAX_CHARACTERS) {
     throw attributeRefusal(
       `Имя свойства должно быть коротким названием от 1 до ${MEMORY_ATTRIBUTE_MAX_CHARACTERS} символов, например «кофе» или «место работы»`,
+    );
+  }
+  if (PLACEHOLDER_ATTRIBUTES.has(normalized)) {
+    throw attributeRefusal(
+      `«${normalized}» не имя свойства: если у факта нет свойства с одним значением, не передавайте attribute вовсе`,
     );
   }
   return normalized;

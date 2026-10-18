@@ -3,42 +3,35 @@
  *
  * Exports:
  * - `loadSkill`: the built-in definition the model sees as `load_skill`.
- * - `loadSkillFromSandbox`: reads `SKILL.md` under the sandbox skill root without its front matter.
+ * - `formatLoadedSkill`: the text the model receives for a loaded skill.
  *
- * Only the turn's listed skills load; the turn syncs their packages into the sandbox before the
- * first step.
+ * The instructions come from the turn's skill definitions, not from the sandbox. Only a skill that
+ * has files writes them there, as an exact copy, and the answer names their directory.
  * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { z } from "zod";
 
-import { resolveSandboxSkillRoot } from "../sandbox/paths.js";
-import type { SandboxSession } from "../sandbox/types.js";
+import type { LoadedSkill } from "../skills/definition.js";
 import { defineTool } from "../tool.js";
 
 const FRONTMATTER_PATTERN = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/u;
+// A skill such as docx carries dozens of files; the model needs the layout, not every path.
+const LISTED_FILES_MAX = 40;
 
 export const LOAD_SKILL_INPUT_SCHEMA = z.strictObject({
   skill: z.string().describe("Available skill name or id."),
 });
 
-function assertSafeSkillId(id: string): void {
-  if (id.length === 0 || id.trim() !== id || id.startsWith(".") || id.includes("/") || id.includes("\\") ||
-    id.includes("..") || /^[A-Za-z]:/u.test(id)) {
-    throw new Error('Expected skill id to be a non-empty safe path segment without whitespace, separators, "." prefix, or "..".');
-  }
-}
-
-export async function loadSkillFromSandbox(
-  sandbox: Pick<SandboxSession, "readTextFile" | "run">,
-  id: string,
-  availableNames: readonly string[],
-): Promise<string> {
-  assertSafeSkillId(id);
-  const path = `${await resolveSandboxSkillRoot(sandbox)}/${id}/SKILL.md`;
-  const instructions = await sandbox.readTextFile({ path });
-  if (instructions !== null) return instructions.replace(FRONTMATTER_PATTERN, "");
-  const hint = availableNames.length > 0 ? ` Available skills: ${availableNames.join(", ")}.` : "";
-  throw new Error(`No skill named "${id}" at ${path}.${hint}`);
+export function formatLoadedSkill(skill: LoadedSkill): string {
+  const instructions = skill.markdown.replace(FRONTMATTER_PATTERN, "");
+  if (skill.files === null) return instructions;
+  const listed = skill.files.paths.slice(0, LISTED_FILES_MAX);
+  const more = skill.files.paths.length - listed.length;
+  return [
+    instructions.trimEnd(),
+    "",
+    `Skill files: \`${skill.files.directory}/\` (${listed.join(", ")}${more > 0 ? `, and ${more} more` : ""}).`,
+  ].join("\n");
 }
 
 export const loadSkill = defineTool({
@@ -49,12 +42,7 @@ export const loadSkill = defineTool({
     'Choose the "skill" value from the Available skills block.',
   ].join(" "),
   async execute({ skill }, ctx) {
-    const available = [...new Set(ctx.skills)].sort();
-    if (!available.includes(skill)) {
-      const hint = available.length > 0 ? ` Available skills: ${available.join(", ")}.` : "";
-      throw new Error(`No skill named "${skill}".${hint}`);
-    }
-    return await loadSkillFromSandbox(await ctx.getSandbox(), skill, available);
+    return formatLoadedSkill(await ctx.loadSkill(skill));
   },
   inputSchema: LOAD_SKILL_INPUT_SCHEMA,
   replaySafe: true,

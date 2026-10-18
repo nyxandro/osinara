@@ -123,7 +123,7 @@ export class SandboxRunnerClient {
     const result = await response.json() as SkillSyncResult;
     if (!result || ![result.checked, result.written, result.removed].every((value) => Number.isSafeInteger(value) && value >= 0) ||
         result.checked !== request.packages.reduce((count, pkg) => count + pkg.files.length, 0) ||
-        result.written > result.checked || result.removed > request.removed.length) {
+        result.written > result.checked) {
       throw new Error("AGENT_SANDBOX_RUNNER_SKILLS_RESPONSE_INVALID: Incomplete skill synchronization result");
     }
     return result;

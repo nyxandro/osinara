@@ -37,8 +37,8 @@ export interface PreparedTurn {
   readonly instructions: readonly string[];
   /** User-role blocks written into history with the turn input. */
   readonly userInstructions: readonly ModelMessage[];
+  /** A turn prepared before skills left the sandbox also stored `skillRoot`; it is ignored. */
   readonly skills: readonly AvailableSkillDescription[];
-  readonly skillRoot: string | null;
 }
 
 export interface TurnRecord {

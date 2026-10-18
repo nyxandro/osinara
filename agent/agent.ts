@@ -8,8 +8,8 @@
  *   before each model step (delivery of the messages shown to a running turn).
  *
  * The block order is explicit here: the trust zone rules first,
- * then delegation and chat preferences, the reaction set (a user-role history entry), and the
- * volatile memory payload last.
+ * then delegation and chat preferences, the reaction set and the previous-task note (user-role
+ * history entries), and the volatile memory payload last.
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -18,6 +18,7 @@ import { AGENT_COMPACTION_THRESHOLD, AGENT_MAX_MODEL_STEPS_PER_TURN } from "./co
 import { conversationModeInstructions } from "./instructions/conversation-mode.js";
 import { delegationInstructions } from "./instructions/delegation.js";
 import { presentationPreferenceInstructions } from "./instructions/presentation-preferences.js";
+import { previousTaskStepsInstructions } from "./instructions/previous-task-steps.js";
 import { reactionSetInstructions } from "./instructions/reaction-set.js";
 import { retrievedMemoryInstructions } from "./instructions/retrieved-memory.js";
 import { modelProviderConfig } from "./lib/model-provider-config.js";
@@ -43,6 +44,7 @@ export function createOsinaraAgent(): RuntimeAgent {
       delegationInstructions,
       presentationPreferenceInstructions,
       reactionSetInstructions,
+      previousTaskStepsInstructions,
       retrievedMemoryInstructions,
     ],
     maxModelSteps: AGENT_MAX_MODEL_STEPS_PER_TURN,

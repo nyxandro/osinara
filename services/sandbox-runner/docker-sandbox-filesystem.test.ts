@@ -68,7 +68,7 @@ describe("Docker sandbox filesystem bridge", () => {
 
     const content = await createEngine(docker).readFile(
       SANDBOX_SESSION_ID,
-      "/tmp/home/.agents/skills/pohuy/SKILL.md",
+      "/tmp/home/.agents/skills/behavior-preferences/SKILL.md",
     );
 
     expect(new TextDecoder().decode(content)).toBe("skill instructions");
@@ -127,7 +127,7 @@ describe("Docker sandbox filesystem bridge", () => {
 
     await createEngine(docker).writeFile(
       SANDBOX_SESSION_ID,
-      "/tmp/home/.agents/skills/pohuy/LICENSE.txt",
+      "/tmp/home/.agents/skills/behavior-preferences/LICENSE.txt",
       new TextEncoder().encode("MIT"),
     );
 
@@ -138,7 +138,7 @@ describe("Docker sandbox filesystem bridge", () => {
     const commands = container.exec.mock.calls.map(([options]) => options.Cmd.at(-1));
     expect(commands).toEqual([
       expect.stringMatching(/^mkdir -p -- .*\.osinara-sandbox-uploads/u),
-      expect.stringMatching(/^mv -T -- .* ".*\/tmp\/home\/\.agents\/skills\/pohuy\/LICENSE\.txt"$/u),
+      expect.stringMatching(/^mv -T -- .* ".*\/tmp\/home\/\.agents\/skills\/behavior-preferences\/LICENSE\.txt"$/u),
     ]);
   });
 
@@ -169,7 +169,7 @@ describe("Docker sandbox filesystem bridge", () => {
 
     await expect(createEngine(docker).writeFile(
       SANDBOX_SESSION_ID,
-      "/tmp/home/.agents/skills/pohuy",
+      "/tmp/home/.agents/skills/behavior-preferences",
       new TextEncoder().encode("must-not-land-inside-directory"),
     )).rejects.toThrowError(
       /AGENT_SANDBOX_RUNNER_FILE_COMMIT_FAILED: Не удалось записать файл/u,

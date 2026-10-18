@@ -90,7 +90,7 @@ describe("conversationWakeupAuth", () => {
       groupId: "group-1",
       messageThreadId: "7",
       scope: "family",
-      skillAllowlist: ["pohuy"],
+      skillAllowlist: ["behavior-preferences"],
       telegramChatId: "-2001",
       telegramChatType: "supergroup",
     }, NOW, DISPATCH);
@@ -99,7 +99,7 @@ describe("conversationWakeupAuth", () => {
       groupId: "group-1",
       groupType: "family_private",
       memoryScopes: ["family"],
-      skillAllowlist: ["pohuy"],
+      skillAllowlist: ["behavior-preferences"],
       telegramForumTopicId: "7",
       telegramMessageThreadId: "7",
     });

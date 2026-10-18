@@ -5,6 +5,7 @@
  * - `requireFamilyCaller`: validates a family-authenticated session.
  * - `requireOwner`: enforces owner-only administration.
  * - `requirePrivateTelegramOwner`: limits secret delivery to the verified owner chat.
+ * - `requirePrivateTelegramMember`: a family member in their own private chat.
  */
 import type { SessionContext } from "../runtime/context.js";
 
@@ -59,4 +60,14 @@ export function requirePrivateTelegramOwner(ctx: Pick<SessionContext, "session">
     );
   }
   return { ...owner, telegramChatId: attributes.telegramChatId };
+}
+
+/** A family member in their own private chat with the agent, whatever their role. */
+export function requirePrivateTelegramMember(ctx: Pick<SessionContext, "session">): FamilyCaller {
+  const member = requireFamilyCaller(ctx);
+  const attributes = resolveSessionCaller(ctx)?.attributes;
+  if (resolveSessionCaller(ctx)?.authenticator !== "telegram" || attributes?.telegramChatType !== "private") {
+    throw new AppError("AGENT_PRIVATE_CHAT_REQUIRED", "Скиллы семьи меняются только в личном чате с агентом");
+  }
+  return member;
 }

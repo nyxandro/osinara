@@ -11,17 +11,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createTelegramApprovalPresenter } from "./approval-presentation.js";
-import { skillGrantCatalog } from "../family-skills/skill-grants.js";
-import { GROUP_SKILLS_BASH_CONSEQUENCE, GROUP_TOOLS_NO_BASH_CONSEQUENCE } from "./approval-consequences.js";
+import { GROUP_TOOLS_NO_BASH_CONSEQUENCE } from "./approval-consequences.js";
 import { HITL_PROMPT_CHUNK_CHARACTERS } from "./approval-message.js";
 import type { TelegramInputRequest } from "../telegram-interface.js";
 
-// Family skills are not part of these cards: none exist, so the built-in catalog decides. No card
-// here changes a group automation unless it sets its own lookup.
+// No card here changes a group automation unless it sets its own lookup. Skill changes have no
+// cards at all: they need no confirmation.
 const SKILL_DEPENDENCIES = {
   findExternalSchedule: vi.fn(),
-  findFamilySkill: vi.fn(),
-  findSkillGrantCatalog: vi.fn().mockResolvedValue(skillGrantCatalog(new Map())),
 };
 
 const findGroupTitle = vi.fn().mockResolvedValue("Тестовая группа");
@@ -144,10 +141,9 @@ describe("Telegram approval presentation", () => {
     }, context());
     expect(result.prompt).toContain(`Режим сообщений: ${explanation}`);
   });
-  it("shows executable dependencies and their revocation from the exact group input", async () => {
+  it("shows the revocation of executable dependencies from the exact group input", async () => {
     const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES, findProfileProjectionGroup, findGroupTitle, findGmailMessages: vi.fn() });
     for (const [input, consequence] of [
-      [{ action: "update_skills", telegramChatId: "-100123", skillAllowlist: ["agent-browser"] }, GROUP_SKILLS_BASH_CONSEQUENCE],
       [{ action: "update_policy", telegramChatId: "-100123", messageMode: "all", toolAllowlist: [] }, GROUP_TOOLS_NO_BASH_CONSEQUENCE],
     ] as const) {
       const result = await present({

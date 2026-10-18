@@ -480,7 +480,7 @@ describe("createTelegramMessageHandler", () => {
       familyId: "family-1",
       groupId: "group-1",
       messageMode: "addressed_only",
-      skillAllowlist: ["pohuy"],
+      skillAllowlist: ["behavior-preferences"],
       telegramChatId: "group-101",
       toolAllowlist: [],
       type: "external",
@@ -498,7 +498,7 @@ describe("createTelegramMessageHandler", () => {
 
     expect(result?.auth?.attributes).toMatchObject({
       groupId: "group-1",
-      skillAllowlist: ["pohuy"],
+      skillAllowlist: ["behavior-preferences"],
       telegramGroupTurnTrigger: "name_in_text",
     });
     expect(repository.groupContext.prepare).toHaveBeenCalledWith(

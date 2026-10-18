@@ -19,7 +19,7 @@ Osinara — семейный ИИ-ассистент в Telegram.
 - Личная, семейная и групповая долговременная память с раздельным доступом.
 - Напоминания и автономные агентные сценарии по расписанию.
 - Поиск в интернете, чтение страниц и работа с файлами.
-- Подключаемые skills, Google Workspace, T-Invest и генерация изображений.
+- Подключаемые skills, Google Workspace и генерация изображений.
 - Изолированные рабочие окружения для инструментов и делегирование задач.
 - Подтверждения действий человеком и обновление приложения через релизы.
 
@@ -48,7 +48,8 @@ Sandbox-runner исполняет команды в Docker; доступ к се
 - `agent/lib/` — прикладная логика, работа с БД и тесты рядом с кодом.
 - `agent/lib/reminders/`, `agent/lib/agent-schedules/` — напоминания и сценарии.
 - `agent/schedules/` — периодические диспетчеры backend.
-- `agent/skills/`, `config/skills/` — выдача и пакеты установленных skills.
+- `agent/skills/`, `config/skills/` — выдача и пакеты встроенных skills; `config/service-skills/` — служебный
+  `skill-manager`; `agent/lib/family-skills/` — библиотека скиллов семьи (план: `docs/plans/skills-plan.md`).
 - `services/` — sandbox-runner и сетевой proxy.
 - `migrations/`, `scripts/` — миграции, workers и эксплуатационные команды.
 - `config/`, `infra/`, `compose*.yaml` — настройки приложения и инфраструктура.

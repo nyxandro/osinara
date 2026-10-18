@@ -8,7 +8,7 @@
  * - The opt-in tone skill is not part of any static skill list.
  * - The compiled dynamic resolver stays step-scoped and avoids durable helper-closure replay.
  */
-import { readFile, readdir } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -65,7 +65,6 @@ const EXPECTED_SKILL_DIRECTORIES = [
   "docx",
   "find-docs",
   "pdf",
-  "t-invest",
   "xlsx",
 ] as const;
 
@@ -103,21 +102,6 @@ describe("agent capability surface", () => {
       .map((entry) => entry.name)
       .sort();
     expect(skillFiles).toEqual(["scoped.ts"]);
-  });
-
-  it("keeps the opt-in profanity package outside static discovery", async () => {
-    const packageRoot = resolve(AGENT_ROOT, "../config/skills/pohuy");
-    const skill = await readFile(`${packageRoot}/SKILL.md`, "utf8");
-
-    // Activation guidance is emitted only when policy grants this dynamic skill.
-    expect(skill).toContain("Загружай только по явной просьбе");
-
-    // The dynamic definition ships all sibling references with the sandbox package.
-    const references = await readdir(`${packageRoot}/references`);
-    expect(references.sort()).toEqual(["ontologia.md", "sceny.md", "slovar.md"]);
-
-    // The vendored copy must not try to reach the upstream repository from the sandbox.
-    expect(skill).not.toContain("raw.githubusercontent.com");
   });
 
   it("requires every native skill package to declare SKILL.md", async () => {

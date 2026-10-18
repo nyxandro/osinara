@@ -33,10 +33,14 @@ const POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807n;
 export const MEMORY_SUBJECT_REF_PATTERN = /^subj_[0-9a-f]{32}$/u;
 
 const currentAuthorSubjectSchema = z.object({
-  kind: z.literal("current_author").describe("The fact concerns the author of the current message"),
+  kind: z.literal("current_author").describe(
+    "The fact concerns the author of the source message: the sourceSequence message, or the current message without it",
+  ),
 }).strict();
 const labelSubjectSchema = z.object({
-  kind: z.literal("label").describe("A text topic without a verified identity"),
+  kind: z.literal("label").describe(
+    "A text topic, or a person who is not the author of the source message, without a verified identity",
+  ),
   label: z.string().trim().min(1).max(SUBJECT_LABEL_MAX_CHARACTERS).describe("A short neutral label of the topic"),
 }).strict();
 const noneSubjectSchema = z.object({ kind: z.literal("none").describe("The record is not about a person") }).strict();

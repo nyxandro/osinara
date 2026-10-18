@@ -90,22 +90,41 @@ describe("session sandbox on the runner", () => {
   it("rechecks the live group skill list before materializing a previously granted package", async () => {
     const engine = fakeEngine();
     const { session } = await open(engine, GROUP);
-    const packages = [{ name: "pohuy", files: [{ relativePath: "SKILL.md", content: Buffer.from("ok") }] }];
-    policy.tools = ["bash"]; policy.skills = ["pohuy"];
-    await session.syncSkills(packages, []);
+    const packages = [{ name: "behavior-preferences", files: [{ relativePath: "SKILL.md", content: Buffer.from("ok") }] }];
+    policy.tools = ["bash"]; policy.skills = ["behavior-preferences"];
+    await session.syncSkills(packages, ["behavior-preferences"]);
     expect(engine.syncSkills).toHaveBeenCalledOnce();
     vi.mocked(engine.createSession).mockClear(); vi.mocked(engine.syncSkills).mockClear(); policy.skills = [];
-    await expect(session.syncSkills(packages, [])).rejects.toThrow("AGENT_GROUP_SKILL_FORBIDDEN");
+    await expect(session.syncSkills(packages, ["behavior-preferences"])).rejects.toThrow("AGENT_GROUP_SKILL_FORBIDDEN");
     expect(engine.createSession).not.toHaveBeenCalled(); expect(engine.syncSkills).not.toHaveBeenCalled();
   });
 
-  it("forwards a complete skill batch with the exact selected container identity", async () => {
+  it("forwards a skill package and the keep list with the exact selected container identity", async () => {
     const engine = fakeEngine();
     const { session } = await open(engine, PERSONAL);
-    await session.syncSkills([{ name: "test", files: [{ relativePath: "SKILL.md", content: Buffer.from("ok") }] }], ["removed"]);
+    await session.syncSkills([{ name: "test", files: [{ relativePath: "SKILL.md", content: Buffer.from("ok") }] }], ["pdf", "test"]);
     expect(engine.syncSkills).toHaveBeenCalledWith(SANDBOX_SESSION_ID, {
-      expectedInstanceId: "f".repeat(64), packages: [{ name: "test", files: [{ path: "SKILL.md", contentBase64: "b2s=" }] }], removed: ["removed"],
+      expectedInstanceId: "f".repeat(64), keep: ["pdf", "test"], packages: [{ name: "test", files: [{ path: "SKILL.md", contentBase64: "b2s=" }] }],
     }, expect.any(AbortSignal));
+  });
+
+  it("adds a package without a keep list, and tidies with an empty package list", async () => {
+    const engine = fakeEngine();
+    const { session } = await open(engine, PERSONAL);
+    await session.syncSkills([{ name: "test", files: [{ relativePath: "SKILL.md", content: Buffer.from("ok") }] }], null);
+    await session.syncSkills([], ["pdf"]);
+    expect(vi.mocked(engine.syncSkills).mock.calls.map(([, request]) => request)).toEqual([
+      { expectedInstanceId: "f".repeat(64), packages: [{ name: "test", files: [{ path: "SKILL.md", contentBase64: "b2s=" }] }] },
+      { expectedInstanceId: "f".repeat(64), keep: ["pdf"], packages: [] },
+    ]);
+  });
+
+  it("does nothing for a session without workspace mounts", async () => {
+    const engine = fakeEngine();
+    const { session } = await open(engine, []);
+    await session.syncSkills([], ["pdf"]);
+    expect(engine.createSession).not.toHaveBeenCalled();
+    expect(engine.syncSkills).not.toHaveBeenCalled();
   });
 
   it.each([false, true])("passes the Bash requirement through the group bash tool (revoked=%s)", async (revoked) => {

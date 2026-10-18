@@ -8,7 +8,7 @@
  * - `saveCompactionCounters`: the provider-reported prompt size the next compaction check starts from.
  * - `replaceSessionHistory`: writes a compacted history as a new generation; old rows stay as they were.
  * - `recordCompactionSummaryRefusal`: counts a summary request the model refused.
- * - `saveAnnouncedSkills`: the skill list the session's sandbox now holds.
+ * - `saveAnnouncedSkills`: the skill list the model was last told about (a record for diagnosis).
  * - `loadApplicationSessionId`: the application session a runtime session belongs to.
  * - `loadInitiatorAuth`: who opened the session.
  *

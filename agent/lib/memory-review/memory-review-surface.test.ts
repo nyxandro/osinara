@@ -4,6 +4,7 @@
  * Constructs covered:
  * - Internal review turns expose memory reads and `remember`, but override every unrelated built-in.
  * - Review instructions require all 50 sources, forbid sensitive writes, and suppress chat output.
+ * - Review instructions name no application tool the review run is not given.
  * - Live authorization failures use the common structured model-facing error contract.
  * - Review `remember` offers only subjects that need no profile view.
  */
@@ -24,6 +25,20 @@ import { memoryReviewInstructions } from "./memory-review-prompt.js";
 import { rememberInputSchema } from "../remember-contract.js";
 import { memoryReviewScope } from "./memory-review-session.js";
 import { memoryReviewBatchIdFromContinuationToken } from "./memory-review-session.js";
+import { EXTERNAL_GROUP_TOOL_NAMES } from "../tool-policy/group-tool-catalog.js";
+import {
+  FAMILY_ONLY_TOOL_NAMES,
+  PRIVATE_ONLY_TOOL_NAMES,
+  TRUSTED_MODE_TOOL_NAMES,
+} from "../tool-policy/trusted-mode-tool-catalog.js";
+
+// Every application tool name a mode can emit; the review prompt may cite only its own subset.
+const APPLICATION_TOOL_NAMES = [...new Set([
+  ...TRUSTED_MODE_TOOL_NAMES,
+  ...PRIVATE_ONLY_TOOL_NAMES,
+  ...FAMILY_ONLY_TOOL_NAMES,
+  ...EXTERNAL_GROUP_TOOL_NAMES,
+])];
 
 function externalAuth(): SessionAuth {
   return {
@@ -121,6 +136,17 @@ describe("memory review model surface", () => {
     expect(memoryReviewInstructions("family")).toContain('scope "family"');
     expect(memoryReviewInstructions("group")).toContain('scope "group"');
     expect(memoryReviewInstructions("group")).not.toMatch(/[—–«»]/u);
+  });
+
+  it("names in its instructions only the tools the review run actually has", () => {
+    // A rule that points at a missing tool cannot be followed: from 2026-09-20 the review was told
+    // to refine stored records through `manage_memory`, which its surface never carried.
+    for (const scope of ["family", "group"] as const) {
+      const instructions = memoryReviewInstructions(scope);
+      const surface = Object.keys(buildMemoryReviewToolSurface(scope));
+      const named = APPLICATION_TOOL_NAMES.filter((name) => instructions.includes(`\`${name}\``));
+      expect(named.filter((name) => !surface.includes(name))).toEqual([]);
+    }
   });
 
   it("gives the review run a remember that accepts only its own scope", () => {

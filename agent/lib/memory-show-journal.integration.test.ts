@@ -9,6 +9,7 @@
  * - It comes back on its own once the window has moved past it.
  * - The explicit search is not bounded by the window at all.
  * - The journal stays bounded instead of growing by twelve rows a turn forever.
+ * - The profile is told what this session showed in its recent turns, from any source, and only that.
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -18,6 +19,7 @@ import {
   MEMORY_EMBEDDING_MODEL_VERSION,
   MEMORY_RETRIEVAL_RECENT_SHOW_WINDOW_TURNS,
   MEMORY_RETRIEVAL_SHOW_JOURNAL_RETAINED_TURNS,
+  PROFILE_REPEAT_WINDOW_TURNS,
 } from "./memory-config.js";
 import { memoryRetrievalRepository } from "./memory-retrieval-repository.js";
 import { memoryShowJournal } from "./memory-show-journal.js";
@@ -245,6 +247,41 @@ describeWithDatabase("memory show journal", () => {
 
     expect(Number(shows.rows[0]!.count)).toBe(0);
     expect(Number(turns.rows[0]!.count)).toBe(MEMORY_RETRIEVAL_SHOW_JOURNAL_RETAINED_TURNS);
+  });
+
+  it("tells the profile what this session showed in its recent turns, and nothing else", async () => {
+    const window = async (session: string, turnId: string) => ({
+      conversationId,
+      agentSessionId: session,
+      turnId,
+      turnOrdinal: await memoryShowJournal.openTurn(conversationId, session, turnId),
+    });
+    const shownIn = async (opened: Awaited<ReturnType<typeof window>>) =>
+      memoryShowJournal.shownRecentlyInSession(opened, PROFILE_REPEAT_WINDOW_TURNS);
+    const first = await window(SESSION, "turn-1");
+    const ref = await database().query<{ memory_ref: string }>(
+      "SELECT memory_ref FROM memory_item_refs WHERE memory_item_id = $1", [shownClaimId],
+    );
+    await memoryShowJournal.recordShownRefs(first, [ref.rows[0]!.memory_ref], "profile");
+
+    expect(await shownIn(await window(SESSION, "turn-2"))).toEqual(new Set([shownClaimId]));
+    // A second pass over the first turn must not hide what that very turn put in front of the model.
+    expect(await shownIn(await window(SESSION, "turn-1"))).toEqual(new Set());
+
+    // Hidden through the last turn of the window, back on the first turn after it.
+    let late = await window(SESSION, "turn-3");
+    while (late.turnOrdinal < first.turnOrdinal + PROFILE_REPEAT_WINDOW_TURNS - 1) {
+      late = await window(SESSION, `turn-${late.turnOrdinal + 1}`);
+    }
+    expect(await shownIn(late)).toEqual(new Set([shownClaimId]));
+    expect(await shownIn(await window(SESSION, `turn-${late.turnOrdinal + 1}`))).toEqual(new Set());
+
+    // A new session starts from an empty conversation, so it gets the whole card again; what the
+    // selection shows there counts the same as the profile's own show.
+    const fresh = await window("wrun_shows_second", "turn-1");
+    expect(await shownIn(fresh)).toEqual(new Set());
+    await memoryShowJournal.recordShown(fresh, [shownClaimId]);
+    expect(await shownIn(await window("wrun_shows_second", "turn-2"))).toEqual(new Set([shownClaimId]));
   });
 
   it("never hides anything from a deliberate search", async () => {

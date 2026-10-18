@@ -215,6 +215,7 @@ describeWithDatabase("R3 profile projections", () => {
       conversationId: fixture.personalConversationId,
       currentTelegramUserId: "9301",
       explicitMentionTelegramUserIds: [],
+      hiddenClaimIds: new Set(),
       now: new Date("2026-08-08T12:00:00.000Z"),
       provenance: profileProvenance("personal-default"),
       replyTelegramUserId: null,
@@ -240,6 +241,7 @@ describeWithDatabase("R3 profile projections", () => {
       conversationId: fixture.personalConversationId,
       currentTelegramUserId: "9301",
       explicitMentionTelegramUserIds: [],
+      hiddenClaimIds: new Set(),
       now: new Date("2026-08-08T12:00:00.000Z"),
       provenance: profileProvenance("personal-pending-notice"),
       replyTelegramUserId: null,
@@ -259,6 +261,7 @@ describeWithDatabase("R3 profile projections", () => {
       conversationId: fixture.personalConversationId,
       currentTelegramUserId: "9301",
       explicitMentionTelegramUserIds: [],
+      hiddenClaimIds: new Set(),
       now: new Date("2026-08-08T12:00:00.000Z"),
       provenance: profileProvenance("personal-enabled"),
       replyTelegramUserId: null,
@@ -288,6 +291,7 @@ describeWithDatabase("R3 profile projections", () => {
       conversationId: fixture.externalAConversationId,
       currentTelegramUserId: "9301",
       explicitMentionTelegramUserIds: [],
+      hiddenClaimIds: new Set(),
       now: new Date("2026-08-08T12:00:00.000Z"),
       provenance: profileProvenance("external-a"),
       replyTelegramUserId: null,
@@ -309,6 +313,7 @@ describeWithDatabase("R3 profile projections", () => {
       conversationId: fixture.personalConversationId,
       currentTelegramUserId: "9301",
       explicitMentionTelegramUserIds: [],
+      hiddenClaimIds: new Set(),
       now: new Date("2026-08-08T12:00:00.000Z"),
       provenance: profileProvenance("after-departure"),
       replyTelegramUserId: null,
@@ -324,7 +329,7 @@ describeWithDatabase("R3 profile projections", () => {
     );
     await expect(profileViewRepository.create(fixture.ownerAuth, {
       conversationId: fixture.personalConversationId,
-      currentTelegramUserId: "9301", explicitMentionTelegramUserIds: [],
+      currentTelegramUserId: "9301", explicitMentionTelegramUserIds: [], hiddenClaimIds: new Set(),
       now: new Date(), provenance: profileProvenance("membership-revoked"),
       replyTelegramUserId: null,
     })).rejects.toThrowError(/AGENT_PROFILE_VIEW_MEMBERSHIP_REVOKED/u);
@@ -357,6 +362,7 @@ describeWithDatabase("R3 profile projections", () => {
     const input = {
       conversationId: fixture.familyConversationId,
       currentTelegramUserId: "9301",
+      hiddenClaimIds: new Set<string>(),
       now: new Date("2026-08-08T12:00:00.000Z"),
       replyTelegramUserId: null,
     };
@@ -390,5 +396,61 @@ describeWithDatabase("R3 profile projections", () => {
         priority: "explicit_mention",
       }),
     ]));
+  });
+
+  it("leaves out a fact this session just showed and keeps the person, so the turn can still name them", async () => {
+    const fixture = await createFixture();
+    const petr = await database().query<{ id: string }>(
+      "INSERT INTO users (telegram_user_id, display_name) VALUES ('9302', 'Пётр') RETURNING id",
+    );
+    await database().query(
+      "INSERT INTO family_memberships (family_id, user_id, role) VALUES ($1, $2, 'member')",
+      [fixture.familyId, petr.rows[0]!.id],
+    );
+    await database().query(
+      `INSERT INTO conversation_participants
+         (conversation_id, family_id, scope, scope_partition_key, telegram_user_id,
+          linked_user_id, display_name_snapshot, first_observed_at, last_observed_at)
+       VALUES ($1, $2, 'family', $2, '9302', $3, 'Пётр', now(), now())`,
+      [fixture.familyConversationId, fixture.familyId, petr.rows[0]!.id],
+    );
+    const shownRef = await insertClaim({
+      content: "Пётр предпочитает улун",
+      conversationId: fixture.familyConversationId,
+      familyId: fixture.familyId,
+      scope: "family",
+      subjectUserId: petr.rows[0]!.id,
+    });
+    const shown = await database().query<{ memory_item_id: string }>(
+      "SELECT memory_item_id FROM memory_item_refs WHERE memory_ref = $1", [shownRef],
+    );
+    const familyAuth = { ...fixture.ownerAuth, groupId: fixture.familyGroupId, scopes: ["family" as const] };
+
+    const view = await profileViewRepository.create(familyAuth, {
+      conversationId: fixture.familyConversationId,
+      currentTelegramUserId: "9301",
+      explicitMentionTelegramUserIds: ["9302"],
+      hiddenClaimIds: new Set([shown.rows[0]!.memory_item_id]),
+      now: new Date("2026-08-08T12:00:00.000Z"),
+      provenance: profileProvenance("petr-just-shown"),
+      replyTelegramUserId: null,
+    });
+
+    const petrSubject = view.subjects.find((subject) => subject.label === "Пётр");
+    expect(petrSubject).toMatchObject({
+      claims: [], priority: "explicit_mention", recentlyShownClaimsLeftOut: 1, totalCharacters: 0,
+    });
+    // Reading the view again by its ref keeps the person too.
+    await expect(profileViewRepository.read(familyAuth, view.profileViewRef)).resolves.toMatchObject({
+      subjects: expect.arrayContaining([expect.objectContaining({ claims: [], label: "Пётр" })]),
+    });
+    // A write about another person resolves its subjectRef against the stored view of this turn.
+    const stored = await database().query<{ subject_ref_snapshot: string }>(
+      `SELECT selected.subject_ref_snapshot FROM profile_views AS view
+       JOIN profile_view_subjects AS selected ON selected.profile_view_id = view.id
+       WHERE view.profile_view_ref = $1`,
+      [view.profileViewRef],
+    );
+    expect(stored.rows.map((row) => row.subject_ref_snapshot)).toContain(petrSubject!.subjectRef);
   });
 });

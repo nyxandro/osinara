@@ -6,6 +6,7 @@ import { AppError } from "../../lib/app-error.js";
 import { closeDatabase, database } from "../../lib/database.js";
 import { loadSessionHistory } from "../history/history-repository.js";
 import { defineTool } from "../tool.js";
+import { loadSkill } from "../tools/load-skill.js";
 import { estimateTokens } from "./compaction-estimate.js";
 import { loadTurn } from "./journal-repository.js";
 import { EmptyModelResponseError } from "./model-errors.js";
@@ -27,16 +28,16 @@ async function history(sessionId: string) {
   return (await loadSessionHistory(database(), sessionId)).messages;
 }
 
-// A sandbox whose home is "/", as on the reference bench, that records skill syncs.
+// A sandbox that records skill syncs and how often the turn opened it.
 function skillSandbox() {
-  const syncs: Array<{ packages: Array<{ files: string[]; name: string }>; removed: string[] }> = [];
+  const syncs: Array<{ keep: string[] | null; packages: Array<{ files: string[]; name: string }> }> = [];
   const sandbox = {
-    async run() { return { exitCode: 0, stderr: "", stdout: "/\n" }; },
-    async syncSkills(packages: ReadonlyArray<{ files: ReadonlyArray<{ relativePath: string }>; name: string }>, removed: readonly string[]) {
-      syncs.push({ packages: packages.map((pkg) => ({ files: pkg.files.map((file) => file.relativePath), name: pkg.name })), removed: [...removed] });
+    async syncSkills(packages: ReadonlyArray<{ files: ReadonlyArray<{ relativePath: string }>; name: string }>, keep: readonly string[] | null) {
+      syncs.push({ keep: keep === null ? null : [...keep], packages: packages.map((pkg) => ({ files: pkg.files.map((file) => file.relativePath), name: pkg.name })) });
     },
   } as never;
-  return { sandbox, syncs };
+  const opened = vi.fn(async () => sandbox);
+  return { opened, sandbox, syncs };
 }
 
 // A process that dies mid-turn: the promise never settles and the turn keeps its runner.
@@ -319,42 +320,50 @@ async function releaseRunner(turnId: string) {
     const resolve = vi.fn((_context: unknown) => ({ content: "<osinara_turn_memory>…</osinara_turn_memory>", role: "system" as const }));
     const agent = testAgent({ note: noteTool() }, {
       instructionResolvers: [{ name: "memory", resolve }, { name: "reactions", resolve: () => ({ content: "<reaction_set/>", role: "user" }) }],
-      resolveSkills: async () => ({ pohuy: { description: "Режим", markdown: "---\nname: pohuy\n---\nтекст" } }),
+      resolveSkills: async () => ({ digest: { description: "Сводка", markdown: "текст" } }),
     });
     const turn = await startMessageTurn(sessionId, "привет");
+    const { opened } = skillSandbox();
 
-    await runTurn({ ...testRuntime({ agent, callModel: model.callModel, observer: recordingObserver().observer }), sandbox: async () => skillSandbox().sandbox }, turn.id, RUN);
+    await runTurn({ ...testRuntime({ agent, callModel: model.callModel, observer: recordingObserver().observer }), sandbox: opened }, turn.id, RUN);
 
     expect(resolve).toHaveBeenCalledTimes(1);
     expect(resolve.mock.calls[0]![0]).toMatchObject({ messages: [{ role: "user", content: "привет" }], turnId: turn.id });
     for (const request of model.requests) {
       expect(request.system).toMatch(/^Instructions \(instructions\)\nправила\n\n<osinara_turn_memory>…<\/osinara_turn_memory>\n\nAvailable skills\n/);
-      expect(request.system).toContain("- pohuy: Режим (path: /.agents/skills/pohuy/SKILL.md)");
+      expect(request.system.endsWith("\n- digest: Сводка")).toBe(true);
     }
     expect((await history(sessionId)).slice(0, 2)).toEqual([{ role: "user", content: "<reaction_set/>" }, { role: "user", content: "привет" }]);
+    // Listing skills needs no sandbox, and the note tool never asked for one.
+    expect(opened).not.toHaveBeenCalled();
   });
 
-  it("syncs the turn's skills into the sandbox in one batch and removes the ones no longer granted", async () => {
+  it("opens the sandbox only for a loaded skill's files, tidies the skill root, and writes that skill alone", async () => {
     const sessionId = await newTestSession();
-    const { sandbox, syncs } = skillSandbox();
-    let granted: Record<string, { description: string; files?: Record<string, string>; markdown: string }> = {
+    const { opened, syncs } = skillSandbox();
+    const granted = {
+      brief: { description: "Кратко", markdown: "Пиши кратко." },
       digest: { description: "Сводка", files: { "references/b.md": "b", "references/a.md": "a" }, markdown: "# digest" },
     };
-    const agent = testAgent({}, { resolveSkills: async () => granted });
-    const run = async (text: string) => {
-      const turn = await startMessageTurn(sessionId, text);
-      await runTurn({ ...testRuntime({ agent, callModel: scriptedModel(reply("ok")).callModel, observer: recordingObserver().observer }), sandbox: async () => sandbox }, turn.id, RUN);
+    const agent = testAgent({ load_skill: loadSkill }, { resolveSkills: async () => granted });
+    const run = async (...steps: Parameters<typeof scriptedModel>) => {
+      const turn = await startMessageTurn(sessionId, "сделай");
+      await runTurn({ ...testRuntime({ agent, callModel: scriptedModel(...steps).callModel, observer: recordingObserver().observer }), sandbox: opened }, turn.id, RUN);
     };
 
-    await run("первый");
-    granted = {};
-    await run("второй");
-    await run("третий");
+    await run(reply("ok"));
+    await run(toolCalls([{ id: "call-brief", input: { skill: "brief" }, name: "load_skill" }]), reply("ok"));
+    expect(opened).not.toHaveBeenCalled();
 
+    await run(toolCalls([{ id: "call-digest", input: { skill: "digest" }, name: "load_skill" }]), reply("ok"));
+
+    // Only skills with files keep a directory, so an instructions-only skill leaves no copy behind.
     expect(syncs).toEqual([
-      { packages: [{ files: ["SKILL.md", "references/a.md", "references/b.md"], name: "digest" }], removed: [] },
-      { packages: [], removed: ["digest"] },
+      { keep: ["digest"], packages: [] },
+      { keep: ["digest"], packages: [{ files: ["SKILL.md", "references/a.md", "references/b.md"], name: "digest" }] },
     ]);
+    expect(JSON.stringify(await history(sessionId)))
+      .toContain("Skill files: `$HOME/.agents/skills/digest/` (references/a.md, references/b.md).");
   });
 
   it("compacts a long history before the step and keeps the turn input once", async () => {

@@ -10,6 +10,7 @@ const CONTEXT = {
   abortSignal: new AbortController().signal,
   callId: "call-1",
   getSandbox: async () => { throw new Error("TEST_SANDBOX_UNUSED"); },
+  loadSkill: async () => { throw new Error("TEST_SKILL_UNUSED"); },
   session: { auth: { current: null, initiator: null }, id: "wrun_01M3YNFXVX5WCP17ZVB8ZTMQAR", turn: { id: "turn_01M3YNFXVX5WCP17ZVB8ZTMQAS", sequence: 0 } },
   skills: [],
   state: memoryToolState().state,

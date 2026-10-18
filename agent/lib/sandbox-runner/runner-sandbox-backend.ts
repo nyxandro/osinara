@@ -11,8 +11,8 @@
  *   session without mounts (silent memory review) has no compute at all.
  * - Stored metadata (`agent_session_state.sandbox_state`) restores the same
  *   container identity and mounts; compute itself is disposable, workspaces live on volumes.
- * - Skills arrive as one verified batch per turn (`syncSkills`); there are no build-time seed
- *   templates: the container starts empty and the turn syncs its skills before the first step.
+ * - Skills arrive through `syncSkills` only: a skill's package when the model loads it, and the
+ *   list of the turn's skills to tidy the skill root. There are no build-time seed templates.
  */
 import { posix } from "node:path";
 
@@ -70,7 +70,7 @@ function buildSession(input: {
   ensure: (requiredCapability?: "bash") => Promise<{ sessionId: string; instanceId: string }>;
   id: () => string;
   stop: () => Promise<void>;
-  syncSkills: (packages: readonly SandboxSkillPackage[], removed: readonly string[]) => Promise<void>;
+  syncSkills: (packages: readonly SandboxSkillPackage[], keep: readonly string[] | null) => Promise<void>;
 }): RuntimeSandboxSession {
   async function spawn(options: GroupSandboxCommandOptions): Promise<Experimental_SandboxProcess> {
     const { sessionId, instanceId } = await input.ensure(options.requiredGroupCapability);
@@ -244,15 +244,16 @@ export function openRunnerSandbox(input: {
     id: () => use.sandboxSessionId,
     // The runner operation is idempotent; a session without compute has nothing to stop.
     stop: async () => { if (request !== null) await client.stop(request.sandboxSessionId); },
-    async syncSkills(packages, removed) {
-      if (packages.length === 0 && removed.length === 0) return;
+    async syncSkills(packages, keep) {
+      // A session without workspace mounts has no sandbox and so no skill root to tidy.
+      if ((packages.length === 0 && keep === null) || request === null) return;
       const started = performance.now();
       const sync = async (access: SandboxAccess) => {
         const { sessionId, instanceId } = await ensureWithAccess(access);
         return client.syncSkills(sessionId, { expectedInstanceId: instanceId,
           packages: packages.map((pkg) => ({ name: pkg.name, files: pkg.files.map((file) => ({
             path: file.relativePath, contentBase64: Buffer.from(file.content).toString("base64"),
-          })) })), removed: [...removed],
+          })) })), ...(keep === null ? {} : { keep: [...keep] }),
         });
       };
       const group = groupMount();

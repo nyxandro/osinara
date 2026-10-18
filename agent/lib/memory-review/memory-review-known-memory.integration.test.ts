@@ -5,6 +5,7 @@
  * - The batch prompt carries the records this conversation already stored.
  * - It carries the tail of messages the previous batch had already read.
  * - Both blocks are escaped the same way the batch itself is: they are untrusted data.
+ * - A record without a slot is shown without the field, never as `"attribute": null`.
  * - Neither block leaks another family's memory or another conversation's messages.
  *
  * The review received only the fifty messages of its batch and nothing else, so it could not know
@@ -18,6 +19,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, database } from "../database.js";
 import { selectMemoryReviewContext } from "./memory-review-known-memory.js";
 import { MEMORY_REVIEW_KNOWN_RECORD_LIMIT } from "./memory-review-config.js";
+import { formatMemoryReviewContext } from "./memory-review-prompt.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 const describeWithDatabase = enabled ? describe : describe.skip;
@@ -65,14 +67,19 @@ describeWithDatabase("memory review known memory", () => {
     await closeDatabase();
   });
 
-  async function store(content: string, family = familyId, partition = groupId): Promise<void> {
+  async function store(
+    content: string,
+    family = familyId,
+    partition = groupId,
+    attribute: string | null = null,
+  ): Promise<void> {
     await database().query(
       `INSERT INTO memory_items
          (family_id, group_id, author_telegram_user_id, scope, kind, content, source,
-          confirmation, sensitivity, operation_key)
+          confirmation, sensitivity, operation_key, attribute)
        VALUES ($1, $2, 'review-author', 'group', 'fact', $3, 'test:review', 'model_high',
-               'normal', $3)`,
-      [family, partition, content],
+               'normal', $3, $4)`,
+      [family, partition, content, attribute],
     );
   }
 
@@ -95,6 +102,20 @@ describeWithDatabase("memory review known memory", () => {
     });
 
     expect(context.known.map((record) => record.content)).toEqual(["Аня не ест глютен"]);
+  });
+
+  it("leaves the slot out of a record that has none, so there is no null for the review to copy", async () => {
+    await store("Работает в «Ладоге»", familyId, groupId, "место работы");
+    await store("Любит TDD");
+
+    const context = await selectMemoryReviewContext(client, {
+      conversationId, familyId, scope: "group", scopePartitionKey: groupId, predecessorSequence: "10",
+    });
+
+    const block = formatMemoryReviewContext(context);
+    expect(block).toContain('"attribute":"место работы"');
+    expect(block).not.toContain('"attribute":null');
+    expect(context.known.find((record) => record.content === "Любит TDD")).not.toHaveProperty("attribute");
   });
 
   it("shows the tail of messages the previous batch had already read", async () => {

@@ -15,7 +15,7 @@ export async function withGroupSandboxAccess<T>(
     await client.query("BEGIN");
     const result = await client.query<{ family_skills: string[]; tool_allowlist: string[]; skill_allowlist: string[] }>(
       `SELECT g.tool_allowlist, g.skill_allowlist,
-              ARRAY(SELECT s.name FROM family_skills s WHERE s.family_id = g.family_id AND s.enabled) AS family_skills
+              ARRAY(SELECT s.name FROM family_skills s WHERE s.family_id = g.family_id AND s.active_version IS NOT NULL) AS family_skills
          FROM workspaces w JOIN telegram_groups g ON g.id=w.group_id
        WHERE w.id=$1 AND w.scope='group' AND g.type='external' AND w.family_id=g.family_id
        FOR SHARE OF g`, [workspaceId],
@@ -27,7 +27,7 @@ export async function withGroupSandboxAccess<T>(
     }
     if (requiredSkills.length > 0) {
       const skills = parseGroupSkillAllowlist(result.rows[0]!.skill_allowlist);
-      // A family skill the owner disabled since the turn began is not synced either.
+      // A family skill deleted since the turn began is not synced either.
       const family = new Set(result.rows[0]!.family_skills);
       const granted = (name: string) => skills!.has(name) && (isGroupSafeSkillName(name) || family.has(name));
       if (!skills || requiredSkills.some((name) => name === "imagegen" ? !allowed.has("generate_image") : !granted(name))) {

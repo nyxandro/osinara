@@ -11,6 +11,7 @@
  * - Correcting a record keeps its slot, so the next version still replaces it.
  * - Removing a middle version hands its history to the current one instead of reviving it.
  * - Removing a corrected record does not bring back the wording that was corrected.
+ * - The word "null" is refused as a slot and leaves nothing stored.
  *
  * The danger this file is really about is the second one from the issue: a slot named too widely
  * («еда») would silently retire independent facts. That is why every test here asserts what was
@@ -243,5 +244,19 @@ describeWithDatabase("memory attribute slot", () => {
       attribute: "как именно этот человек предпочитает пить кофе по утрам в будние дни",
       auth: owner, content: "Пьёт кофе без сахара", key: "slot-12",
     })).rejects.toMatchObject({ code: "AGENT_MEMORY_ATTRIBUTE_INVALID" });
+  });
+
+  it("refuses the word null as a slot, so unrelated facts cannot retire one another through it", async () => {
+    const earlier = await remember({ auth: owner, content: "Большой фанат TDD", key: "slot-13" });
+    // Stored before the refusal existed, the way ten production records were.
+    await database().query("UPDATE memory_items_all SET attribute = 'null' WHERE id = $1", [earlier.id]);
+
+    await expect(remember({
+      attribute: "null", auth: owner, content: "Нанимает людей, в чей код может не смотреть", key: "slot-14",
+    })).rejects.toMatchObject({ code: "AGENT_MEMORY_ATTRIBUTE_INVALID" });
+
+    expect((await statusOf(earlier.id)).claim_status).toBe("active");
+    const stored = await database().query("SELECT 1 FROM memory_items_all WHERE operation_key = 'slot-14'");
+    expect(stored.rowCount).toBe(0);
   });
 });

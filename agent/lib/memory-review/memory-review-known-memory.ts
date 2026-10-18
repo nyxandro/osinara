@@ -30,7 +30,14 @@ import {
 } from "./memory-review-config.js";
 
 export interface MemoryReviewKnownRecord {
-  attribute: string | null;
+  /**
+   * Absent rather than null when the record has no slot, as in every other model-facing record.
+   * Shown `"attribute": null` on most records, the review most likely copied it into its own writes:
+   * all ten production records with the slot "null" came from it, on 23.09 and 02.10.2026, within
+   * two weeks after this block appeared. The raw calls are not journaled that far back, so the
+   * cause is not proven.
+   */
+  attribute?: string;
   content: string;
   kind: string;
   memoryRef: string;
@@ -93,7 +100,7 @@ export async function selectMemoryReviewContext(client: PoolClient, input: {
   );
   return {
     known: known.rows.map((row) => ({
-      attribute: row.attribute,
+      ...(row.attribute === null ? {} : { attribute: row.attribute }),
       content: row.content,
       kind: row.kind,
       memoryRef: row.memory_ref,

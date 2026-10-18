@@ -94,7 +94,7 @@ describe("sandbox runner HTTP server", () => {
     });
     const request = fetch(`${baseUrl}/v1/sessions/${SANDBOX_SESSION_ID}/skills`, {
       method: "POST", headers: { "content-type": "application/json" }, signal: controller.signal,
-      body: JSON.stringify({ expectedInstanceId: "a".repeat(64), packages: [], removed: [] }),
+      body: JSON.stringify({ expectedInstanceId: "a".repeat(64), packages: [], keep: [] }),
     });
     const rejected = expect(request).rejects.toThrow();
     await vi.waitFor(() => expect(deliveredSignal).toBeDefined()); controller.abort();
@@ -102,7 +102,7 @@ describe("sandbox runner HTTP server", () => {
   });
   it("validates a bulk skill update and refuses traversal before engine execution", async () => {
     const engine = fakeEngine(); const baseUrl = await start(engine);
-    const body = { expectedInstanceId: "a".repeat(64), removed: [], packages: [{ name: "test", files: [{ path: "SKILL.md", contentBase64: "b2s=" }] }] };
+    const body = { expectedInstanceId: "a".repeat(64), keep: ["test"], packages: [{ name: "test", files: [{ path: "SKILL.md", contentBase64: "b2s=" }] }] };
     const response = await fetch(`${baseUrl}/v1/sessions/${SANDBOX_SESSION_ID}/skills`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
     });
@@ -113,6 +113,13 @@ describe("sandbox runner HTTP server", () => {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
     });
     expect(invalid.status).toBe(400);
+    // A keep list that would remove the very package being written is a contradiction.
+    body.packages[0]!.files[0]!.path = "SKILL.md";
+    body.keep = ["other"];
+    const contradictory = await fetch(`${baseUrl}/v1/sessions/${SANDBOX_SESSION_ID}/skills`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    });
+    expect(contradictory.status).toBe(400);
     expect(engine.syncSkills).toHaveBeenCalledOnce();
   });
   it("reports revoked instance identity without losing its stable error code", async () => {

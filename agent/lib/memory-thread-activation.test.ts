@@ -36,21 +36,13 @@ describe("memory thread activation", () => {
     }])).toEqual([]);
   });
 
-  it("derives investment hints only from application-owned reviewed skill identifiers", () => {
-    const messages = [{
-      content: [{
-        input: { skill: "t-invest" },
-        toolCallId: "call-1",
-        toolName: "load_skill",
-        type: "tool-call",
-      }],
-      role: "assistant",
-    }] as unknown as ModelMessage[];
-
-    expect(applicationThreadSkillHints(messages)).toEqual(["Инвестиции"]);
-    expect(applicationThreadSkillHints([{
-      content: [{ input: { skill: "unknown" }, toolCallId: "call-2", toolName: "load_skill", type: "tool-call" }],
-      role: "assistant",
-    }] as unknown as ModelMessage[])).toEqual([]);
+  it("derives no thread hint from a skill the application has not reviewed for one", () => {
+    // t-invest was the only reviewed skill; it left the built-in set, and its old loads hint nothing.
+    for (const skill of ["t-invest", "unknown"]) {
+      expect(applicationThreadSkillHints([{
+        content: [{ input: { skill }, toolCallId: "call-1", toolName: "load_skill", type: "tool-call" }],
+        role: "assistant",
+      }] as unknown as ModelMessage[])).toEqual([]);
+    }
   });
 });

@@ -1,8 +1,15 @@
-/** Atomic owner-managed group permissions and executable skill dependencies. */
+/**
+ * Atomic owner-managed group permissions and executable skill dependencies.
+ *
+ * A skill list changes without a confirmation button, so it never grants Bash by itself: a skill
+ * that runs scripts needs the group to have Bash already, which only a confirmed rights change gives.
+ * Each skill list change sends the owner a notice (`family-skills/family-skill-notices.ts`).
+ */
 import type { PoolClient } from "pg";
-import { SANDBOX_RUNNER_BASE_URL, TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED } from "../config.js";
+import { FAMILY_SKILLS_LOCK_HASH_SEED, SANDBOX_RUNNER_BASE_URL, TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED } from "../config.js";
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
+import { enqueueFamilySkillNotice } from "./family-skills/family-skill-notices.js";
 import { grantableFamilySkills } from "./family-skills/family-skill-repository.js";
 import { requireGrantableSkills, skillGrantCatalog, skillNeedsBash } from "./family-skills/skill-grants.js";
 import { parseGroupSkillAllowlist } from "./group-skills/group-skill-catalog.js";
@@ -19,10 +26,9 @@ export async function stopGroupSandboxes(client: PoolClient, groupId: string): P
   for (const session of sessions.rows) await runner.stop(session.thread_id);
 }
 
-/** `skillsNeedBash`: the group's skills run scripts, so Bash stays (or was just) granted with them. */
 export async function updateGroupPermissions(
   input: TelegramGroupPolicyUpdate | TelegramGroupSkillUpdate,
-): Promise<{ groupId: string; skillsNeedBash: boolean }> {
+): Promise<{ groupId: string }> {
   const changingSkills = "skillAllowlist" in input;
   const providedSkills = changingSkills ? parseGroupSkillAllowlist(input.skillAllowlist) : null;
   const providedTools = "toolAllowlist" in input ? parseExternalGroupToolAllowlist(input.toolAllowlist) : null;
@@ -37,20 +43,31 @@ export async function updateGroupPermissions(
       [input.familyId, input.requestedBy],
     );
     if (!owner.rowCount) throw new AppError("AGENT_OWNER_REQUIRED", "Это действие доступно только владельцу");
+    // The family's skill lock first, in the same order as every skill change: a skill deleted meanwhile
+    // cannot stay on this list and be granted again to a later skill under its name.
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,$2))", [input.familyId, FAMILY_SKILLS_LOCK_HASH_SEED]);
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,$2))", [input.telegramChatId, TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED]);
     const result = await client.query<{
-      id: string; family_id: string; type: string; message_mode: string; skill_allowlist: string[]; tool_allowlist: string[];
-    }>("SELECT id,family_id,type,message_mode,skill_allowlist,tool_allowlist FROM telegram_groups WHERE telegram_chat_id=$1 FOR UPDATE", [input.telegramChatId]);
+      id: string; family_id: string; type: string; message_mode: string; skill_allowlist: string[]; title: string; tool_allowlist: string[];
+    }>("SELECT id,family_id,type,message_mode,skill_allowlist,title,tool_allowlist FROM telegram_groups WHERE telegram_chat_id=$1 FOR UPDATE", [input.telegramChatId]);
     const group = result.rows[0];
     if (!group || group.family_id !== input.familyId) throw new AppError("AGENT_GROUP_NOT_FOUND", "Группа не найдена в вашей семье");
-    if (group.type !== "external") throw new AppError("AGENT_GROUP_POLICY_UPDATE_UNSUPPORTED", "В семейном чате все установленные скиллы доступны автоматически");
+    if (group.type !== "external") {
+      throw new AppError("AGENT_GROUP_POLICY_UPDATE_UNSUPPORTED",
+        "В семейном чате встроенные скиллы работают всегда, а скиллы семьи включает любой член семьи через manage_skill");
+    }
     // The family's skills are read under the same transaction, so the check and the grant agree.
     const catalog = skillGrantCatalog(await grantableFamilySkills(client, input.familyId));
     if (changingSkills) requireGrantableSkills(catalog, [...providedSkills!]);
     const needsBash = (name: string) => skillNeedsBash(catalog, name);
     let skills = changingSkills ? [...providedSkills!] : group.skill_allowlist;
     const tools = new Set(changingSkills ? group.tool_allowlist : [...providedTools!]);
-    if (changingSkills && skills.some(needsBash)) tools.add("bash");
+    const withoutBash = changingSkills && !tools.has("bash") ? skills.filter(needsBash) : [];
+    if (withoutBash.length > 0) {
+      throw new AppError("AGENT_GROUP_SKILL_NEEDS_BASH",
+        `Скиллам ${withoutBash.join(", ")} нужны команды в песочнице, а у группы их нет. Сначала разрешите группе bash ` +
+        "(это изменение прав группы, с подтверждением), затем добавьте скиллы", { details: { skills: withoutBash.join(",") } });
+    }
     if (!changingSkills && !tools.has("bash")) skills = skills.filter((name) => !needsBash(name));
     const toolAllowlist = [...tools];
     const changed = JSON.stringify(skills) !== JSON.stringify(group.skill_allowlist) ||
@@ -62,13 +79,21 @@ export async function updateGroupPermissions(
       "UPDATE telegram_groups SET skill_allowlist=$2,tool_allowlist=$3,message_mode=$4 WHERE id=$1",
       [group.id, skills, toolAllowlist, "messageMode" in input ? input.messageMode : group.message_mode],
     );
-    await client.query(
+    const audit = await client.query<{ id: string }>(
       `INSERT INTO audit_events(family_id,event_type,subject_id,metadata)
-       VALUES($1,'telegram_group.permissions_updated',$2,$3)`,
+       VALUES($1,'telegram_group.permissions_updated',$2,$3) RETURNING id`,
       [input.familyId, group.id, { requestedBy: input.requestedBy, skillAllowlist: skills, toolAllowlist }],
     );
+    if (changingSkills && JSON.stringify(skills) !== JSON.stringify(group.skill_allowlist)) {
+      await enqueueFamilySkillNotice(client, {
+        familyId: input.familyId,
+        operationKey: `group-skills:${audit.rows[0]!.id}`,
+        recipient: { userId: input.requestedBy },
+        text: `Скиллы группы «${group.title}» теперь: ${skills.length === 0 ? "нет ни одного" : skills.join(", ")}.`,
+      });
+    }
     await client.query("COMMIT");
-    return { groupId: group.id, skillsNeedBash: skills.some(needsBash) };
+    return { groupId: group.id };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

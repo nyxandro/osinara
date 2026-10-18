@@ -10,6 +10,7 @@ import type { SessionContext } from "../runtime/context.js";
 
 import { AppError } from "./app-error.js";
 import type { MemoryAuthorization } from "./memory-context.js";
+import type { SourceAuthorNames } from "./memory-subject-author-label.js";
 import { memoryTurnSourceRepository } from "./memory-turn-source-repository.js";
 import { resolveTelegramSessionActor } from "./telegram-session-actor.js";
 import { conversationWakeupRunId } from "./conversation-wakeups/conversation-wakeup-turn.js";
@@ -125,6 +126,7 @@ export async function resolveMemoryTurnSource(
   auth: MemoryAuthorization,
   sourceSequence?: string,
 ): Promise<{
+  author: SourceAuthorNames;
   conversationId: string;
   isCurrent: boolean;
   isReview: boolean;
@@ -153,6 +155,7 @@ export async function resolveMemoryTurnSource(
     throw sourceError("source_authorization_mismatch");
   }
   return {
+    author: source.author,
     conversationId: source.conversationId,
     isCurrent: source.isCurrent,
     isReview: source.isReview,

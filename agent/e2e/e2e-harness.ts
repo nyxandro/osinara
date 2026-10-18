@@ -167,7 +167,7 @@ export async function seedFamily(): Promise<{ readonly familyId: string; readonl
   );
   const external = (await db.query<{ id: string }>(
     `INSERT INTO telegram_groups (family_id, telegram_chat_id, title, type, message_mode, skill_allowlist, tool_allowlist)
-     VALUES ($1, $2, 'E2E external chat', 'external', 'all', ARRAY['pohuy'], ARRAY['remember', 'bash']) RETURNING id`,
+     VALUES ($1, $2, 'E2E external chat', 'external', 'all', ARRAY['behavior-preferences'], ARRAY['remember', 'bash']) RETURNING id`,
     [family.id, String(CHATS.external)],
   )).rows[0]!;
   return { externalGroupId: external.id, familyId: family.id, ownerId: owner.id };

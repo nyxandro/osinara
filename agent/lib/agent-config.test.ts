@@ -38,7 +38,7 @@ describe("Osinara agent", () => {
 
   it("resolves the turn blocks in their fixed order", () => {
     expect(agent.instructionResolvers.map((resolver) => resolver.name)).toEqual([
-      "conversation-mode", "delegation", "presentation-preferences", "reaction-set", "retrieved-memory",
+      "conversation-mode", "delegation", "presentation-preferences", "reaction-set", "previous-task-steps", "retrieved-memory",
     ]);
   });
 

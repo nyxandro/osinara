@@ -9,6 +9,7 @@
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
 import { reviewSourceBindingHash, turnSourceBindingHash } from "./memory-turn-source-binding-hash.js";
+import type { SourceAuthorNames } from "./memory-subject-author-label.js";
 import type { TelegramActorKind, TelegramTimelineActorKind } from "./telegram-inbound-actor.js";
 
 // The timeline discriminator each invoking actor kind must carry on its own current message.
@@ -32,6 +33,8 @@ export interface BindMemoryTurnSourcesInput {
 }
 
 export interface ResolvedMemoryTurnSource {
+  /** How Telegram named the author of the source message, so a label naming them can be bound. */
+  author: SourceAuthorNames;
   conversationId: string;
   invokingActorId: string;
   invokingActorKind: TelegramActorKind;
@@ -45,6 +48,8 @@ export interface ResolvedMemoryTurnSource {
 }
 
 interface SourceRow {
+  author_display_name_shared: boolean;
+  author_participant_name: string | null;
   conversation_id: string;
   invoking_actor_id: string;
   invoking_actor_kind: TelegramActorKind;
@@ -53,6 +58,8 @@ interface SourceRow {
   message_thread_id: string | null;
   scope: ResolvedMemoryTurnSource["scope"];
   scope_partition_key: string;
+  sender_display_name: string | null;
+  sender_username: string | null;
   source_message_id: string;
   timeline_entry_id: string;
 }
@@ -280,7 +287,18 @@ export const memoryTurnSourceRepository = {
                conversation.scope::text,
               conversation.scope_partition_key::text,
               message.telegram_message_id::text AS source_message_id,
-              message.message_thread_id::text
+              message.message_thread_id::text,
+              message.sender_username, message.sender_display_name,
+              participant.display_name_snapshot AS author_participant_name,
+              -- Normalized the way memory-subject-author-label.ts compares names.
+              EXISTS (
+                SELECT 1 FROM conversation_participants AS other
+                WHERE other.conversation_id = message.conversation_id
+                  AND other.telegram_user_id IS DISTINCT FROM message.telegram_user_id
+                  AND lower(btrim(regexp_replace(normalize(other.display_name_snapshot, NFKC), '\\s+', ' ', 'g')))
+                      IN (lower(btrim(regexp_replace(normalize(message.sender_display_name, NFKC), '\\s+', ' ', 'g'))),
+                          lower(btrim(regexp_replace(normalize(participant.display_name_snapshot, NFKC), '\\s+', ' ', 'g'))))
+              ) AS author_display_name_shared
        FROM memory_turn_sources AS source
        JOIN memory_turn_source_sets AS source_set
          ON source_set.agent_session_id = source.agent_session_id
@@ -289,6 +307,9 @@ export const memoryTurnSourceRepository = {
         LEFT JOIN memory_review_batches AS review_batch
           ON review_batch.id = source_set.memory_review_batch_id
        JOIN telegram_group_messages AS message ON message.id = source.timeline_entry_id
+       LEFT JOIN conversation_participants AS participant
+         ON participant.conversation_id = message.conversation_id
+        AND participant.telegram_user_id = message.telegram_user_id
        WHERE source.agent_session_id = $1 AND source.agent_turn_id = $2
          AND message.actor_kind IN ('user', 'telegram_bot') AND message.content_text IS NOT NULL
          AND (($3::bigint IS NULL AND source.is_current) OR source.timeline_sequence = $3::bigint)`,
@@ -297,6 +318,12 @@ export const memoryTurnSourceRepository = {
     const row = result.rows[0];
     return row
       ? {
+          author: {
+            displayNameShared: row.author_display_name_shared,
+            displayNames: [row.sender_display_name, row.author_participant_name]
+              .filter((name): name is string => name !== null),
+            username: row.sender_username,
+          },
           conversationId: row.conversation_id,
           invokingActorId: row.invoking_actor_id,
           invokingActorKind: row.invoking_actor_kind,

@@ -2,14 +2,15 @@
  * Minute dispatcher for durable silent memory-review batches.
  *
  * Export:
- * - `memoryReviewDispatchSchedule`: delivers severe alerts and starts ready review turns: a full
- *   50-message batch, or a shorter one whose oldest message has waited out its age limit. It also
- *   releases deploy admissions of processes that are gone.
+ * - `memoryReviewDispatchSchedule`: delivers severe alerts and family skill notices, and starts
+ *   ready review turns: a full 50-message batch, or a shorter one whose oldest message has waited
+ *   out its age limit. It also releases deploy admissions of processes that are gone.
  * - Records a completed cycle for external monitoring; a failed cycle records nothing.
  */
 import type { RuntimeSchedule } from "../runtime/scheduler.js";
 import { withRuntimeAdmission } from "../lib/runtime-maintenance.js";
 import { withScheduleHeartbeat } from "../lib/schedule-heartbeat.js";
+import { dispatchFamilySkillNotices } from "../lib/family-skills/family-skill-notices.js";
 import { dispatchOperationalIncidents } from "../lib/operational-incidents/owner-alerts.js";
 import { reconcileRuntimeAdmissions } from "../lib/runtime-admission-reconciliation.js";
 
@@ -22,6 +23,7 @@ async function dispatchMemoryReviewCycle(startReview: MemoryReviewStart) {
   const initial = await Promise.allSettled([
     dispatchOperationalIncidents(),
     dispatchMemoryReviewOwnerAlerts(),
+    dispatchFamilySkillNotices(),
     dispatchPendingMemoryReviews(startReview),
   ]);
   const final = await Promise.allSettled([dispatchMemoryReviewOwnerAlerts(), dispatchOperationalIncidents()]);

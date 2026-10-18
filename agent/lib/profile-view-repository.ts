@@ -267,6 +267,7 @@ export const profileViewRepository = {
           observedAt: claim.observed_at.toISOString(),
           priority: subject.priority,
           profileEligible: claim.profile_eligible,
+          recentlyShown: input.hiddenClaimIds.has(claim.id),
           sensitivity: claim.sensitivity,
           sourceAuthorLabel: claim.source_author_label,
           subjectLabel: subject.display_label_snapshot,
@@ -352,15 +353,9 @@ export const profileViewRepository = {
         origin_label_snapshot: string;
         origin_scope: MemoryScope;
         source_author_label_snapshot: string;
-        priority_reason: StoredProfileSubjectPriority;
-        subject_label_snapshot: string;
         subject_ordinal: number;
-        subject_ref_snapshot: string;
-        subject_total_characters: number;
       }>(
-        `SELECT subject.ordinal AS subject_ordinal, subject.subject_ref_snapshot,
-                subject.subject_label_snapshot, subject.priority_reason,
-                subject.total_characters AS subject_total_characters,
+        `SELECT subject.ordinal AS subject_ordinal,
                 selected.claim_ordinal, selected.memory_ref_snapshot,
                 selected.content_snapshot, selected.kind, selected.confirmation,
                 selected.origin_scope, selected.origin_label_snapshot, selected.evidence_kind,
@@ -392,15 +387,28 @@ export const profileViewRepository = {
           "Состав или доступ к этому снимку профиля изменился. Создайте новый снимок",
         );
       }
-      const subjects = new Map<number, ProfileViewSubject>();
+      // People come from their own rows: one whose facts were all left out as recently shown has no
+      // claim row, and a re-read built from claims alone would drop them from the view.
+      const subjectRows = await client.query<{
+        ordinal: number;
+        priority_reason: StoredProfileSubjectPriority;
+        subject_label_snapshot: string;
+        subject_ref_snapshot: string;
+        total_characters: number;
+      }>(
+        `SELECT ordinal, subject_ref_snapshot, subject_label_snapshot, priority_reason, total_characters
+         FROM profile_view_subjects WHERE profile_view_id = $1 ORDER BY ordinal`,
+        [view.id],
+      );
+      const subjects = new Map<number, ProfileViewSubject>(subjectRows.rows.map((row) => [row.ordinal, {
+        claims: [],
+        label: row.subject_label_snapshot,
+        priority: row.priority_reason,
+        subjectRef: row.subject_ref_snapshot,
+        totalCharacters: row.total_characters,
+      }]));
       for (const row of rows.rows) {
-        const subject = subjects.get(row.subject_ordinal) ?? {
-          claims: [],
-          label: row.subject_label_snapshot,
-          priority: row.priority_reason,
-          subjectRef: row.subject_ref_snapshot,
-          totalCharacters: row.subject_total_characters,
-        };
+        const subject = subjects.get(row.subject_ordinal)!;
         subject.claims.push({
           confirmation: row.confirmation,
           content: row.content_snapshot,
@@ -411,7 +419,6 @@ export const profileViewRepository = {
           origin: { label: row.origin_label_snapshot, scope: row.origin_scope },
           sourceAuthorLabel: row.source_author_label_snapshot,
         });
-        subjects.set(row.subject_ordinal, subject);
       }
       await client.query("COMMIT");
       return {

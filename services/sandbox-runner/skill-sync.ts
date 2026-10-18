@@ -89,7 +89,7 @@ export async function syncSkillFiles(
   catch (cause) { throw new Error("AGENT_SANDBOX_RUNNER_SKILLS_RESPONSE_INVALID: Invalid synchronization result", { cause }); }
   const expectedFiles = request.packages.reduce((count, pkg) => count + pkg.files.length, 0);
   if (!value || ![value.checked, value.written, value.removed].every(count => Number.isSafeInteger(count) && count >= 0) ||
-      value.checked !== expectedFiles || value.written > value.checked || value.removed > request.removed.length) {
+      value.checked !== expectedFiles || value.written > value.checked) {
     throw new Error("AGENT_SANDBOX_RUNNER_SKILLS_RESPONSE_INVALID: Missing synchronization result");
   }
   return value;

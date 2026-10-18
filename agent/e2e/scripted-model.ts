@@ -11,7 +11,7 @@
  *   the answer is the empty-delivery marker (silence);
  * - `f`: the provider fails;
  * - `p`: one `manage_profile_projection` call that needs the owner's button;
- * - `s`: `load_skill` of `pohuy`; `d`: delegate to a subagent, which answers `child-<marker>`;
+ * - `s`: `load_skill` of `behavior-preferences`; `d`: delegate to a subagent, which answers `child-<marker>`;
  * - every other turn runs one `bash` command; `k` makes it never finish (the process is killed
  *   under it), `h` makes it wait until the test releases the marker;
  * - then the answer `reply-<marker>`; `w` makes it wait until the test releases the marker.
@@ -99,7 +99,7 @@ async function rootStep(db: Pick<Pool, "query">, marker: string, user: string, r
   if (results.some((result) => result.output.type === "error-text" && !resultText(result).includes("AGENT_TOOL_OUTCOME_UNKNOWN"))) {
     throw new Error(`TEST_TOOL_FAILED: ${JSON.stringify(results.at(-1))}`);
   }
-  if (flags.includes("s") && !has("load_skill")) return { toolCall: { input: { skill: "pohuy" }, name: "load_skill" } };
+  if (flags.includes("s") && !has("load_skill")) return { toolCall: { input: { skill: "behavior-preferences" }, name: "load_skill" } };
   if (flags.includes("d") && !has("agent")) return { toolCall: { input: { message: `child:${marker}` }, name: "agent" } };
   if (!flags.includes("p") && !has("bash")) {
     const hold = flags.includes("k") ? " # e2e-block" : flags.includes("h") ? ` # e2e-hold:${marker}` : "";

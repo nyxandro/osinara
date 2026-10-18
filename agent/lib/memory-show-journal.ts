@@ -7,6 +7,8 @@
  * - `memoryShowJournal.recordShown`: writes down what the selection offered this turn.
  * - `memoryShowJournal.recordShownRefs`: writes down records the model saw another way — the
  *   explicit search, the memory list, the standing profile — so using them can be counted (#339).
+ * - `memoryShowJournal.shownRecentlyInSession`: what this session put in front of the model in its
+ *   last turns, from any source, so the profile does not repeat it.
  * - `MemoryShowSource`: where a show came from.
  *
  * The selection is built fresh every turn and used to know nothing about the turns before it. Rank
@@ -89,6 +91,26 @@ export const memoryShowJournal = {
         [...claimIds],
       ],
     );
+  },
+
+  /**
+   * Bounded to the session, not the conversation: the memory block never enters history, so a new
+   * session starts with no record of what an earlier one was shown. The current turn is left out,
+   * so a second pass over it sees the same profile as the first.
+   */
+  async shownRecentlyInSession(window: MemorySelectionWindow, turns: number): Promise<Set<string>> {
+    if (turns > MEMORY_RETRIEVAL_SHOW_JOURNAL_RETAINED_TURNS) {
+      throw new Error(
+        `AGENT_MEMORY_SHOW_WINDOW_INVALID: window of ${turns} turns exceeds the ${MEMORY_RETRIEVAL_SHOW_JOURNAL_RETAINED_TURNS} the journal keeps`,
+      );
+    }
+    const shown = await database().query<{ claim_id: string }>(
+      `SELECT DISTINCT claim_id FROM memory_retrieval_shows
+       WHERE conversation_id = $1 AND agent_session_id = $2
+         AND turn_ordinal > $3::bigint - $4::bigint AND turn_ordinal < $3::bigint`,
+      [window.conversationId, window.agentSessionId, window.turnOrdinal, turns],
+    );
+    return new Set(shown.rows.map((row) => row.claim_id));
   },
 
   /**

@@ -8,6 +8,7 @@
  * - `parseGroupSkillAllowlist`: fail-closed persisted-policy parser: a malformed or duplicate name
  *   rejects the whole list; whether a name still exists is decided when skills are given out.
  * - `skillRequiresBash`: built-in skills that run scripts.
+ * - `EXTERNAL_GROUP_BASE_SKILLS`: the list a newly registered external group starts with.
  */
 import { readdirSync } from "node:fs";
 import { resolve } from "node:path";
@@ -27,7 +28,15 @@ export const GROUP_SAFE_SKILL_NAMES = Object.freeze(installedNames) as readonly 
 export type GroupSafeSkillName = string;
 
 // Executable skill dependencies are owner-visible and saved with the group's tool policy.
-const BASH_SKILLS = new Set(["agent-browser", "docx", "pdf", "xlsx", "t-invest", "find-docs"]);
+const BASH_SKILLS = new Set(["agent-browser", "docx", "pdf", "xlsx", "find-docs"]);
+
+/**
+ * What a newly registered external group starts with (owner's decision, 18.10.2026): the set his
+ * groups had. The skills that run scripts stay out while the group has no Bash.
+ */
+export const EXTERNAL_GROUP_BASE_SKILLS: readonly string[] = Object.freeze(
+  ["agent-browser", "behavior-preferences", "docx", "find-docs", "pdf", "xlsx"],
+);
 export function skillRequiresBash(name: string): boolean { return BASH_SKILLS.has(name); }
 
 export function isGroupSafeSkillName(value: string): boolean {

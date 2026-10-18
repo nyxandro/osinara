@@ -38,14 +38,9 @@ export function composeSystemPrompt(input: {
 
 /** The answer-measurement harness rebuilds a stored turn's request through this same function. */
 export function preparedSystemPrompt(base: string, prepared: PreparedTurn): string {
-  if (prepared.skills.length > 0 && prepared.skillRoot === null) {
-    throw new Error("AGENT_TURN_SKILL_ROOT_MISSING: skills are listed without a sandbox skill root");
-  }
   return composeSystemPrompt({
     base,
     instructionBlocks: prepared.instructions,
-    skillsSection: prepared.skillRoot === null
-      ? null
-      : formatAvailableSkillsSection(prepared.skills, { skillRoot: prepared.skillRoot }),
+    skillsSection: formatAvailableSkillsSection(prepared.skills),
   });
 }

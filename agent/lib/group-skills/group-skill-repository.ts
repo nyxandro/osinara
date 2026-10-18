@@ -4,8 +4,8 @@
  * Exports:
  * - `GroupSkillPolicyRepository`: injectable exact-group allowlist contract.
  * - `groupSkillPolicyRepository`: fail-closed production implementation. It returns the skills the
- *   group's list grants that still exist now: built-in ones and the family's enabled ones. A family
- *   skill the owner disabled or deleted drops out of the result while the stored list stays as is.
+ *   group's list grants that still exist now: built-in ones and the family's saved ones. A family
+ *   skill deleted since drops out of the result while the stored list stays as is.
  */
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
@@ -23,7 +23,7 @@ export const groupSkillPolicyRepository: GroupSkillPolicyRepository = {
   async loadGroupSkillAllowlist(groupId) {
     const result = await database().query<{ family_skills: string[]; skill_allowlist: string[] }>(
       `SELECT g.skill_allowlist,
-              ARRAY(SELECT s.name FROM family_skills s WHERE s.family_id = g.family_id AND s.enabled) AS family_skills
+              ARRAY(SELECT s.name FROM family_skills s WHERE s.family_id = g.family_id AND s.active_version IS NOT NULL) AS family_skills
          FROM telegram_groups g
         WHERE g.id = $1`,
       [groupId],

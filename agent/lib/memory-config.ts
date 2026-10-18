@@ -5,7 +5,7 @@
  * - `MEMORY_SCOPE_QUOTAS`: agreed maximum record counts by scope.
  * - Retrieval and thread-creation gates, ranking calibration, pagination, E5, and chunking.
  * - Timeline-selection and retired-worker controller compatibility constants.
- * - R3 always-on profile subject, claim, character, and inactivity limits.
+ * - R3 always-on profile subject, claim, character, inactivity limits and repeat window.
  * - Durable profile-projection notice delivery lease.
  * - Source-backed thread context, activation, episode, and history budgets.
  * - Durable memory-thread notice delivery lease.
@@ -106,6 +106,15 @@ export const PROFILE_CONTEXT_MAX_CHARACTERS = 12_000;
 export const PROFILE_CONTEXT_MAX_CLAIMS_PER_SUBJECT = 30;
 export const PROFILE_CONTEXT_MAX_SUBJECT_CHARACTERS = 8_000;
 export const PROFILE_SELECTION_DORMANCY_MILLISECONDS = 60 * 24 * 60 * 60 * 1_000;
+/**
+ * How many turns of one session a profile claim stays out of the profile once the model has seen
+ * it. The profile used to carry every claim in every turn: from 2026-10-08 to 2026-10-16 seventeen
+ * claims about one person went into the turns of their private chat 609 times, about 36 each, and
+ * the answers used them 11 times. A model shown the same facts as a verified profile every turn
+ * reads them as what matters and brings them up unasked. Twenty is the number a neighbouring
+ * project runs its author card on; it has to stay inside what the show journal keeps.
+ */
+export const PROFILE_REPEAT_WINDOW_TURNS = 20;
 export const PROFILE_PROJECTION_NOTICE_LEASE_MILLISECONDS = 5 * 60 * 1_000;
 
 // Branch gates apply before reciprocal-rank fusion.

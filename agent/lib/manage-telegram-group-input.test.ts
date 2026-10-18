@@ -145,9 +145,9 @@ describe("manage_telegram_group model input", () => {
     });
     await expect(manageTelegramGroup.execute({
       action: "update_skills",
-      skillAllowlist: ["pohuy"],
+      skillAllowlist: ["behavior-preferences"],
       telegramChatId: "-1001234567890",
-    }, context)).resolves.toMatchObject({ skillAllowlist: ["pohuy"] });
+    }, context)).resolves.toMatchObject({ skillAllowlist: ["behavior-preferences"] });
     await expect(manageTelegramGroup.execute({
       action: "remove",
       telegramChatId: "-1001234567890",

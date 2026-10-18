@@ -20,10 +20,6 @@ export const PROFILE_PROJECTION_DISABLE_CONSEQUENCE =
 export const GOOGLE_WORKSPACE_CONSEQUENCE =
   "Команда будет выполнена один раз в текущем профиле. Автоматического повтора при ошибке не будет.";
 
-export const GROUP_SKILLS_BASH_CONSEQUENCE =
-  "Скиллы будут разрешены до отзыва. Для их работы также включатся Bash и доступ к публичным сайтам в отдельном окружении группы. Личные файлы и авторизации туда не передаются. Текущие процессы группы будут остановлены, её файлы сохранятся.";
-export const GROUP_SKILLS_CONSEQUENCE =
-  "Полный список скиллов группы будет заменён указанным и сохранится до следующего изменения. Текущие процессы группы будут остановлены, её файлы сохранятся.";
 export const GROUP_TOOLS_BASH_CONSEQUENCE =
   "Права группы будут заменены указанным списком. Bash позволяет выполнять команды и менять файлы группы; доступ к публичным сайтам идёт через защищённый шлюз. Личные файлы и авторизации не передаются. Текущие процессы группы будут остановлены.";
 export const GROUP_TOOLS_NO_BASH_CONSEQUENCE =
@@ -35,6 +31,6 @@ export function allApprovalConsequences(): string[] {
     PROFILE_PROJECTION_ENABLE_CONSEQUENCE,
     PROFILE_PROJECTION_DISABLE_CONSEQUENCE,
     GOOGLE_WORKSPACE_CONSEQUENCE,
-    GROUP_SKILLS_BASH_CONSEQUENCE, GROUP_SKILLS_CONSEQUENCE, GROUP_TOOLS_BASH_CONSEQUENCE, GROUP_TOOLS_NO_BASH_CONSEQUENCE,
+    GROUP_TOOLS_BASH_CONSEQUENCE, GROUP_TOOLS_NO_BASH_CONSEQUENCE,
   ];
 }

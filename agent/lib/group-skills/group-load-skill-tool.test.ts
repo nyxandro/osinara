@@ -40,7 +40,7 @@ function context(): ToolContext {
 describe("external group load_skill", () => {
   it("delegates only after a live grant check", async () => {
     const executeNative = vi.fn().mockResolvedValue({ loaded: true });
-    const loadGroupSkillAllowlist = vi.fn().mockResolvedValue(new Set(["pohuy"]));
+    const loadGroupSkillAllowlist = vi.fn().mockResolvedValue(new Set(["behavior-preferences"]));
     const authorizeImageGeneration = vi.fn();
     const tool = createExternalGroupLoadSkillTool({
       authorizeImageGeneration,
@@ -48,7 +48,7 @@ describe("external group load_skill", () => {
       loadGroupSkillAllowlist,
     });
 
-    await expect(tool.execute({ skill: "pohuy" }, context())).resolves.toEqual({ loaded: true });
+    await expect(tool.execute({ skill: "behavior-preferences" }, context())).resolves.toEqual({ loaded: true });
     expect(loadGroupSkillAllowlist).toHaveBeenCalledWith("group-1");
     expect(executeNative).toHaveBeenCalledOnce();
     expect(authorizeImageGeneration).not.toHaveBeenCalled();
@@ -94,7 +94,7 @@ describe("external group load_skill", () => {
       loadGroupSkillAllowlist,
     });
 
-    await expect(tool.execute({ skill: "pohuy" }, context())).rejects.toThrowError(
+    await expect(tool.execute({ skill: "behavior-preferences" }, context())).rejects.toThrowError(
       /AGENT_GROUP_SKILL_FORBIDDEN/u,
     );
     await expect(tool.execute({ skill: "unknown" }, context())).rejects.toThrowError(

@@ -45,6 +45,7 @@ import {
 } from "./telegram-message-policy.js";
 import { telegramIngressControl } from "./telegram-ingress-dispatch.js";
 import { combineTelegramMediaGroup } from "./telegram-media-group.js";
+import { CAPTIONLESS_ATTACHMENT_MODEL_TEXT } from "./telegram-model-placeholders.js";
 import { combineTelegramBurst } from "./telegram-private-burst-message.js";
 import { recordOperationalIncident } from "./operational-incidents/owner-alerts.js";
 import { isDatabaseUnavailable, waitForApplicationDatabase } from "./database-recovery.js";
@@ -99,7 +100,6 @@ export interface TelegramDurableIngressHandler {
 }
 
 const LEASE_HEARTBEAT_DIVISOR = 3;
-const CAPTIONLESS_ATTACHMENT_MODEL_TEXT = "Пользователь отправил файл без подписи.";
 
 function updateId(raw: Record<string, unknown>): string {
   const parsed = telegramUpdateIdSchema.safeParse(raw.update_id);

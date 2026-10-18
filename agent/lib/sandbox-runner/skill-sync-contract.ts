@@ -7,10 +7,14 @@ const path = z.string().min(1).max(4096).refine((value) => !value.includes("\\")
 const schema = z.strictObject({
   expectedInstanceId: z.string().regex(/^[a-f0-9]{64}$/u),
   packages: z.array(z.strictObject({ name, files: z.array(z.strictObject({ path, contentBase64: z.base64() })).min(1).max(512) })).max(128),
-  removed: z.array(name).max(128),
+  // Every skill the turn grants: anything else under the skill root is removed. Absent for a
+  // delegated child, which shares its parent's sandbox and only adds the packages it loads.
+  keep: z.array(name).max(256).optional(),
 }).superRefine((request, ctx) => {
   const names = request.packages.map((pkg) => pkg.name);
-  if (new Set(names).size !== names.length || new Set(request.removed).size !== request.removed.length || request.removed.some((item) => names.includes(item))) {
+  const keep = request.keep;
+  if (new Set(names).size !== names.length || (keep !== undefined &&
+      (new Set(keep).size !== keep.length || names.some((item) => !keep.includes(item))))) {
     ctx.addIssue({ code: "custom", message: "Conflicting skill names" });
   }
   for (const pkg of request.packages) {

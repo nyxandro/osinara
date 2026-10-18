@@ -13,11 +13,13 @@
 import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
+import { isScheduledSession } from "../agent-schedules/scheduled-session.js";
+import { AppError } from "../app-error.js";
 import { requirePrivateTelegramOwner } from "../family-context.js";
 import type { RegisteredGroupType } from "../family-access.js";
 import { SKILL_NAME_PATTERN } from "../../runtime/skills/package-validation.js";
 import { familySkillRepository } from "../family-skills/family-skill-repository.js";
-import { grantableSkillNames, isWorkingSkill, skillGrantCatalog, skillNeedsBash } from "../family-skills/skill-grants.js";
+import { grantableSkillNames, skillGrantCatalog, skillNeedsBash } from "../family-skills/skill-grants.js";
 import { telegramGroupAdministrationRepository } from "../telegram-group-administration-repository.js";
 import {
   GROUP_TITLE_MAX_LENGTH,
@@ -268,7 +270,7 @@ const TOOL_DESCRIPTION = [
   "If the owner asks to turn one permission on or off, first call status and carry the unchanged current permissions into the full toolAllowlist; add or remove only the chosen capability. The same rule applies to update_skills: it replaces the whole list, and an empty array revokes all skills.",
   "Available only to the owner in a private chat; do not accept familyId or a role from the user's text.",
   "web_search, web_fetch, get_current_time, todo, agent and the base file tools are always available in external groups; do not include them in the editable toolAllowlist and do not promise to disable them.",
-  "In private and family chats all installed skills are always available. An external group gets only the saved skillAllowlist, including the family's skills. Enabling a skill that needs Bash also saves the bash permission and turns on the public network in the group's isolated environment; revoking bash disables the dependent skills. Changing permissions stops the group's current processes but does not delete its files.",
+  "In private and family chats every built-in skill is always available; the family's own skills are enabled per person and per family group through manage_skill. An external group gets only the saved skillAllowlist, including the family's skills; update_skills needs no confirmation and the owner gets a notice. A skill that needs Bash can be added only when the group already has bash (update_policy, with confirmation); revoking bash disables the dependent skills. Changing permissions stops the group's current processes but does not delete its files.",
   "For an external group messageMode=owner_only keeps the shared timeline but allows starting the model only for the current Osinara owner; the owner's Telegram admin rights do not replace this.",
   "Register passes a nested registration object, other actions only flat fields. Update_policy contains exactly action, telegramChatId, messageMode and the full toolAllowlist; do not pass type and title: {\"action\":\"register\",\"registration\":{\"type\":\"external\",\"telegramChatId\":\"-1001234567890\",\"title\":\"Внешняя группа\",\"messageMode\":\"owner_only\",\"toolAllowlist\":[\"search_memories\"]}} and {\"action\":\"update_policy\",\"telegramChatId\":\"-1001234567890\",\"messageMode\":\"all\",\"toolAllowlist\":[\"search_memories\"]}.",
   "After an input error, fix the payload according to the error text and retry no more than once; on a repeated error stop and clarify the data.",
@@ -277,7 +279,9 @@ const TOOL_DESCRIPTION = [
 export default defineTool({
   approval: ({ toolInput }) => {
     const parsed = requireManageTelegramGroupInput(toolInput);
-    return parsed.action === "status" || parsed.action === "start_new_context"
+    // A group's skill list changes without a button (the owner gets a notice); its tool rights,
+    // Bash included, still ask the owner: they decide what outsiders can make the agent do.
+    return parsed.action === "status" || parsed.action === "start_new_context" || parsed.action === "update_skills"
       ? "not-applicable"
       : "user-approval";
   },
@@ -294,19 +298,18 @@ export default defineTool({
       });
       const catalog = skillGrantCatalog(await familySkillRepository.grantableSkills(owner.familyId));
       const skillNames = grantableSkillNames(catalog);
-      const workingSkills = skillNames.filter((name) => isWorkingSkill(catalog, name));
       return {
         availableSafeSkills: skillNames,
         skillRequirements: Object.fromEntries(skillNames.map((name) => [name, {
           tools: skillNeedsBash(catalog, name) ? ["bash"] : [],
-          ...(isWorkingSkill(catalog, name) ? {} : { disabledFamilySkill: true }),
-          ...(name.startsWith("gws-") || name === "t-invest" ? { connectionRequired: true, externalConnectionAvailable: false } : {}),
+          ...(name.startsWith("gws-") ? { connectionRequired: true, externalConnectionAvailable: false } : {}),
         }])),
         groups: groups.map((group) => {
           if (group.type === "family_private") {
+            // Every built-in skill works in a family group; the family's own ones come from its list.
             return {
               ...group,
-              effectiveSkills: workingSkills,
+              effectiveSkills: [...catalog.builtIn, ...group.skillAllowlist.filter((name) => catalog.family.has(name))],
               builtInWorkspaceTools: [],
               effectiveConfiguredTools: [],
               policySummary:
@@ -322,14 +325,14 @@ export default defineTool({
           // A grant persisted under a previous model provider stays in PostgreSQL but is inert, so
           // status reports the round-trippable allowlist and names the dead grants separately.
           const { effective, unavailable } = selectGrantableExternalGroupTools(group.toolAllowlist);
-          // A disabled family skill stays in the stored list but is inert until it is enabled again.
-          const inactiveSkills = group.skillAllowlist.filter((name) => !workingSkills.includes(name));
+          // A name no skill answers to any more (removed from the release) stays in the list but is inert.
+          const inactiveSkills = group.skillAllowlist.filter((name) => !skillNames.includes(name));
           return {
             ...group,
             builtInWorkspaceTools,
             alwaysAvailableTools: [...builtInWorkspaceTools, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent"],
             effectiveConfiguredTools: [...new Set([...builtInWorkspaceTools, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent", ...effective])],
-            effectiveSkills: group.skillAllowlist.filter((name) => workingSkills.includes(name)),
+            effectiveSkills: group.skillAllowlist.filter((name) => skillNames.includes(name)),
             ...(inactiveSkills.length === 0 ? {} : { inactiveConfiguredSkills: inactiveSkills }),
             policySummary: unavailable.length === 0
               ? "Базовые workspace tools плюс полный настроенный allowlist внешней группы."
@@ -383,6 +386,12 @@ export default defineTool({
       };
     }
     if (parsed.action === "update_skills") {
+      // Without a button only the owner's own conversation may change what outsiders get: a schedule
+      // or a delegated task (which reads untrusted pages) never does.
+      if (ctx.session.parent !== undefined || isScheduledSession(ctx)) {
+        throw new AppError("AGENT_GROUP_SKILLS_CONVERSATION_REQUIRED",
+          "Скиллы группы владелец меняет сам в личном разговоре с агентом, а не расписание или вспомогательная задача");
+      }
       const { skillAllowlist, telegramChatId } = parsed;
       const result = await telegramGroupAdministrationRepository.updateSkills({
         familyId: owner.familyId,
@@ -394,7 +403,6 @@ export default defineTool({
         groupId: result.groupId,
         skillAllowlist,
         skillsUpdated: true,
-        ...(result.skillsNeedBash ? { automaticallyEnabledTools: ["bash"], publicInternetEnabled: true } : {}),
         takesEffect: "next_group_turn" as const,
         telegramChatId,
       };

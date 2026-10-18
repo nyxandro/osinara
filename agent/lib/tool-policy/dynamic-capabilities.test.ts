@@ -167,11 +167,11 @@ describe("dynamic capability resolver", () => {
       groupId: "group-1",
       groupType: "external",
       memoryScopes: ["group"],
-      skillAllowlist: ["pohuy"],
+      skillAllowlist: ["behavior-preferences"],
       telegramChatType: "supergroup",
       toolAllowlist: [],
     };
-    loadGroupSkillAllowlist.mockResolvedValue(new Set(["pohuy"]));
+    loadGroupSkillAllowlist.mockResolvedValue(new Set(["behavior-preferences"]));
     expect(await resolve(attributes)).toHaveProperty("load_skill");
     expect(loadGroupSkillAllowlist).toHaveBeenCalledWith("group-1");
 
@@ -229,7 +229,7 @@ describe("dynamic capability resolver", () => {
       groupId: "group-1",
       groupType: "external",
       memoryScopes: ["group"],
-      skillAllowlist: ["pohuy"],
+      skillAllowlist: ["behavior-preferences"],
       telegramChatType: "supergroup",
       toolAllowlist: ["remember"],
     }],

@@ -48,17 +48,17 @@ describe("manage_telegram_group.update_skills", () => {
   beforeEach(() => {
     listStatuses.mockReset();
     updateSkills.mockReset();
-    updateSkills.mockResolvedValue({ groupId: "group-1", skillsNeedBash: false });
+    updateSkills.mockResolvedValue({ groupId: "group-1" });
   });
 
   it("replaces the exact group allowlist with reviewed skills", async () => {
     await expect(manageTelegramGroup.execute({
       action: "update_skills",
-      skillAllowlist: ["pohuy"],
+      skillAllowlist: ["behavior-preferences"],
       telegramChatId: "-1001234567890",
     }, context())).resolves.toEqual({
       groupId: "group-1",
-      skillAllowlist: ["pohuy"],
+      skillAllowlist: ["behavior-preferences"],
       skillsUpdated: true,
       takesEffect: "next_group_turn",
       telegramChatId: "-1001234567890",
@@ -66,7 +66,7 @@ describe("manage_telegram_group.update_skills", () => {
     expect(updateSkills).toHaveBeenCalledWith({
       familyId: "family-1",
       requestedBy: "owner-1",
-      skillAllowlist: ["pohuy"],
+      skillAllowlist: ["behavior-preferences"],
       telegramChatId: "-1001234567890",
     });
   });
@@ -82,15 +82,15 @@ describe("manage_telegram_group.update_skills", () => {
         toolAllowlist: [],
         type: "external",
       },
-      skillAllowlist: ["pohuy"],
+      skillAllowlist: ["behavior-preferences"],
       telegramChatId: "-1001234567890",
       toolAllowlist: ["remember"],
     }, context())).resolves.toMatchObject({
-      skillAllowlist: ["pohuy"],
+      skillAllowlist: ["behavior-preferences"],
       skillsUpdated: true,
     });
     expect(updateSkills).toHaveBeenCalledWith(expect.objectContaining({
-      skillAllowlist: ["pohuy"],
+      skillAllowlist: ["behavior-preferences"],
       telegramChatId: "-1001234567890",
     }));
   });
@@ -105,7 +105,7 @@ describe("manage_telegram_group.update_skills", () => {
     } as never, context())).rejects.toThrowError(/AGENT_TELEGRAM_GROUP_INPUT_INVALID.*availableSafeSkills/u);
     await expect(manageTelegramGroup.execute({
       action: "update_skills",
-      skillAllowlist: ["pohuy", "pohuy"],
+      skillAllowlist: ["behavior-preferences", "behavior-preferences"],
       telegramChatId: "-1001234567890",
     }, context())).rejects.toThrowError(/не должен содержать повторы/u);
     expect(updateSkills).not.toHaveBeenCalled();

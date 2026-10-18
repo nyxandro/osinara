@@ -51,7 +51,7 @@ function externalGroup(messageMode: "addressed_only" | "all" | "owner_only" = "a
     familyId: "family-1",
     groupId: "group-1",
     messageMode,
-    skillAllowlist: ["pohuy"],
+    skillAllowlist: ["behavior-preferences"],
     telegramChatId: "group-101",
     toolAllowlist: ["list_group_history", "remember"],
     type: "external" as const,

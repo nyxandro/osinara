@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { memoryToolState } from "../session/tool-state.test-fixtures.js";
+import type { LoadedSkill } from "../skills/definition.js";
 import { executeBashOnSandbox } from "./bash.js";
 import { executeGlobOnSandbox } from "./glob.js";
 import { executeGrepOnSandbox } from "./grep.js";
-import { loadSkill } from "./load-skill.js";
+import { formatLoadedSkill, loadSkill } from "./load-skill.js";
 import { executeReadFileOnSandbox } from "./read-file.js";
 import { executeTodoTool } from "./todo.js";
 import { executeWriteFileOnSandbox } from "./write-file.js";
@@ -92,26 +93,32 @@ describe("todo", () => {
 });
 
 describe("load_skill", () => {
-  function context(skills: string[], files: Record<string, string>, home = "/home/agent") {
-    const { sandbox } = fakeSandbox(files, home);
-    return { getSandbox: async () => sandbox, skills } as never;
+  function context(loaded: LoadedSkill) {
+    return { loadSkill: async () => loaded } as never;
   }
 
-  it("loads a listed skill from the sandbox skill root without its front matter", async () => {
-    const ctx = context(["pohuy"], { "/home/agent/.agents/skills/pohuy/SKILL.md": "---\nname: pohuy\n---\nОтвечай прямо." });
+  it("returns an instructions-only skill without its front matter", async () => {
+    const ctx = context({ files: null, markdown: "---\nname: digest\n---\nОтвечай прямо." });
 
-    expect(await loadSkill.execute({ skill: "pohuy" }, ctx)).toBe("Отвечай прямо.");
+    expect(await loadSkill.execute({ skill: "digest" }, ctx)).toBe("Отвечай прямо.");
   });
 
-  it("names the available skills when asked for another one", async () => {
-    await expect(loadSkill.execute({ skill: "secret" }, context(["pohuy", "digest"], {})))
-      .rejects.toThrow('No skill named "secret". Available skills: digest, pohuy.');
+  it("names the directory and files of a skill that has them", async () => {
+    const ctx = context({
+      files: { directory: "$HOME/.agents/skills/pdf", paths: ["forms.md", "scripts/fill.py"] },
+      markdown: "Заполняй формы.\n",
+    });
+
+    expect(await loadSkill.execute({ skill: "pdf" }, ctx))
+      .toBe("Заполняй формы.\n\nSkill files: `$HOME/.agents/skills/pdf/` (forms.md, scripts/fill.py).");
   });
 
-  it("uses the documented /workspace/skills root when the sandbox has no usable home", async () => {
-    const ctx = context(["pohuy"], { "/workspace/skills/pohuy/SKILL.md": "текст" }, "");
+  it("lists the first files of a large skill and counts the rest", () => {
+    const paths = Array.from({ length: 45 }, (_, index) => `scripts/file-${String(index).padStart(2, "0")}.py`);
+    const text = formatLoadedSkill({ files: { directory: "$HOME/.agents/skills/docx", paths }, markdown: "Документы." });
 
-    expect(await loadSkill.execute({ skill: "pohuy" }, ctx)).toBe("текст");
+    expect(text).toContain("scripts/file-39.py, and 5 more).");
+    expect(text).not.toContain("scripts/file-40.py");
   });
 });
 

@@ -82,11 +82,6 @@ Osinara — self-hosted агент, который живёт в Telegram и р�
 - OAuth-подключение владельца; токены шифруются и не попадают в текст модели.
 - Пример: «что у меня в календаре на среду», «найди письмо от подрядчика и вытащи сумму».
 
-### 📈 Т-Инвестиции
-
-- Портфель, позиции, свободные деньги, котировки, операции, дивиденды, комиссии, доходность.
-- Сделки — только по явной команде. Это доступ к данным и расчётам, не инвестиционные рекомендации.
-
 ### 🌐 Веб
 
 - `agent-browser` — автоматизация браузера: открыть, заполнить, нажать, забрать данные.
@@ -231,7 +226,6 @@ Highlighted skill groups:
 | Documents | `pdf`, `docx`, `xlsx`. |
 | Browser and research | `agent-browser`, `find-docs`. |
 | Personalization | `behavior-preferences`. |
-| Tone, opt-in | `pohuy` — режим ответов с матом, грузится только по явной просьбе. |
 | Image generation | Dynamic `imagegen` доступен root-agent только вместе с активным subscription-backed `generate_image`; без provider `codex-subscription` ни tool, ни skill не существуют и не выдаются. |
 
 ## Release Badges

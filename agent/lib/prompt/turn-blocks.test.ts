@@ -25,6 +25,7 @@ import { formatReactionSetAnnouncement } from "../telegram-reaction-announcement
 import { TELEGRAM_DEFAULT_REACTIONS } from "../telegram-reaction-set.js";
 
 const createProfile = vi.fn();
+const nothingShownRecently = async () => new Set<string>();
 const TEST_TURN_ID = "turn-1";
 
 function auth(attributes: SessionAuthContext["attributes"]): SessionAuth {
@@ -72,7 +73,7 @@ const channelAuth: SessionAuth = {
       groupType: "external",
       memoryScopes: ["group"],
       role: "external",
-      skillAllowlist: ["pohuy"],
+      skillAllowlist: ["behavior-preferences"],
       telegramActorId: "-1001783384254",
       telegramActorKind: "telegram_channel",
       telegramChatType: "supergroup",
@@ -296,7 +297,7 @@ describe("memory block resolution", () => {
       reportFailure: vi.fn(),
       authorize: () => authorization,
       createProfile,
-      openSelectionWindow: async () => 1, recordOffered: vi.fn(),
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(), shownRecentlyInSession: nothingShownRecently,
       retrieve: vi.fn().mockResolvedValue({
         diagnostics: { semanticBranchAvailable: true },
         memories: [],
@@ -319,7 +320,7 @@ describe("memory block resolution", () => {
       content: `${memoryRef}:${"я".repeat(18_000)}`, kind: "fact", memoryRef,
     }));
     const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization,
-      createProfile, openSelectionWindow: async () => 1, recordOffered: vi.fn(),
+      createProfile, openSelectionWindow: async () => 1, recordOffered: vi.fn(), shownRecentlyInSession: nothingShownRecently,
       retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true }, memories,
         rankingByMemoryRef: new Map(), threads: { threads: [], totalCharacters: 0 } }),
     });
@@ -354,7 +355,7 @@ describe("memory block resolution", () => {
     const subjects = [{ claims: [{ content: "короткое утверждение", memoryRef: "mem_third" }] }];
     const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization,
       createProfile: vi.fn().mockResolvedValue({ subjects }),
-      openSelectionWindow: async () => 7, recordOffered,
+      openSelectionWindow: async () => 7, recordOffered, shownRecentlyInSession: nothingShownRecently,
       retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true }, memories,
         offered: { claimIdByMemoryRef: new Map() },
         rankingByMemoryRef: new Map(), threads: { threads: [], totalCharacters: 0 } }),
@@ -392,7 +393,7 @@ describe("memory block resolution", () => {
     const subjects = [{ claims: [{ content: "я".repeat(40_000), memoryRef: "mem_profile" }] }];
     const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization,
       createProfile: vi.fn().mockResolvedValue({ subjects }),
-      openSelectionWindow: async () => 1, recordOffered: vi.fn(),
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(), shownRecentlyInSession: nothingShownRecently,
       retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true },
         memories: [{ content: "важная запись", kind: "fact", memoryRef: "mem_first" }],
         offered: { claimIdByMemoryRef: new Map() },
@@ -416,7 +417,7 @@ describe("memory block resolution", () => {
   it("returns no block when the turn carries no user text", async () => {
     const retrieve = vi.fn();
     const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization, createProfile,
-      openSelectionWindow: async () => 1, recordOffered: vi.fn(), retrieve });
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(), shownRecentlyInSession: nothingShownRecently, retrieve });
 
     expect(await resolve(context(privateAuth), TEST_TURN_ID)).toBeNull();
     expect(retrieve).not.toHaveBeenCalled();
@@ -444,7 +445,7 @@ describe("memory block resolution", () => {
       simpleTopRank: null,
     };
     const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization, createProfile,
-      openSelectionWindow: async () => 1, recordOffered: vi.fn(),
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(), shownRecentlyInSession: nothingShownRecently,
       retrieve: vi.fn().mockResolvedValue({ diagnostics, memories, rankingByMemoryRef: new Map(),
         threads: { threads: [], totalCharacters: 0 } }),
     });
@@ -472,7 +473,7 @@ describe("memory block resolution", () => {
     }]]);
     const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization,
       createProfile: vi.fn().mockResolvedValue({ subjects: [] }),
-      openSelectionWindow: async () => 3, recordOffered: vi.fn(),
+      openSelectionWindow: async () => 3, recordOffered: vi.fn(), shownRecentlyInSession: nothingShownRecently,
       retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true }, memories,
         offered: { claimIdByMemoryRef: new Map() },
         rankingByMemoryRef, threads: { threads: [], totalCharacters: 0 } }),
@@ -510,6 +511,7 @@ describe("memory block resolution", () => {
     const openSelectionWindow = vi.fn(async () => 1);
     const resolve = createMemoryBlockResolver({ reportFailure: vi.fn(), authorize: () => authorization,
       createProfile: vi.fn().mockResolvedValue({ subjects: [] }), openSelectionWindow, recordOffered: vi.fn(),
+      shownRecentlyInSession: nothingShownRecently,
       retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true },
         memories: [{ content: "Код домофона 4271", kind: "fact", memoryRef: "mem_first" }],
         offered: { claimIdByMemoryRef: new Map() },
@@ -540,7 +542,7 @@ describe("memory block resolution", () => {
   it("discloses unavailable memory instead of throwing on authorization failure", async () => {
     const resolve = createMemoryBlockResolver({
       reportFailure: vi.fn(),
-      openSelectionWindow: async () => 1, recordOffered: vi.fn(),
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(), shownRecentlyInSession: nothingShownRecently,
       authorize: () => {
         throw new Error("AGENT_MEMORY_CONTEXT_INVALID: нет области памяти");
       },
@@ -562,7 +564,7 @@ describe("memory block resolution", () => {
       reportFailure: vi.fn(),
       authorize: () => authorization,
       createProfile,
-      openSelectionWindow: async () => 1, recordOffered: vi.fn(),
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(), shownRecentlyInSession: nothingShownRecently,
       retrieve: vi.fn().mockRejectedValue(new Error("embedding service down")),
     });
 
@@ -599,7 +601,7 @@ describe("memory block resolution", () => {
       reportFailure: vi.fn(),
       authorize: () => authorization,
       createProfile: profile,
-      openSelectionWindow: async () => 1, recordOffered: vi.fn(),
+      openSelectionWindow: async () => 1, recordOffered: vi.fn(), shownRecentlyInSession: nothingShownRecently,
       retrieve,
     });
     const telegramAuth = auth({
@@ -621,6 +623,7 @@ describe("memory block resolution", () => {
       conversationId: "conversation-1",
       currentTelegramUserId: "101",
       explicitMentionTelegramUserIds: ["202"],
+      hiddenClaimIds: new Set(),
       now: new Date("2026-08-08T10:00:00.000Z"),
       provenance: { sessionId: "session-1", turnId: TEST_TURN_ID },
       replyTelegramUserId: "203",

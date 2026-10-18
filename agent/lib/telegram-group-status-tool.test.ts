@@ -64,7 +64,7 @@ describe("manage_telegram_group.status", () => {
     listStatuses.mockResolvedValue([
       {
         messageMode: "owner_only",
-        skillAllowlist: ["pohuy"],
+        skillAllowlist: ["behavior-preferences"],
         telegramChatId: "-1002",
         title: "Внешняя",
         toolAllowlist: ["search_memories"],
@@ -86,8 +86,7 @@ describe("manage_telegram_group.status", () => {
       availableSafeSkills: [...GROUP_SAFE_SKILL_NAMES],
       skillRequirements: expect.objectContaining({
         "agent-browser": { tools: ["bash"] },
-        pohuy: { tools: [] },
-        "t-invest": { tools: ["bash"], connectionRequired: true, externalConnectionAvailable: false },
+        "behavior-preferences": { tools: [] },
         "gws-gmail": { tools: [], connectionRequired: true, externalConnectionAvailable: false },
       }),
       groups: [
@@ -95,7 +94,7 @@ describe("manage_telegram_group.status", () => {
           builtInWorkspaceTools: ["glob", "grep", "read_file", "write_file"],
           alwaysAvailableTools: ["glob", "grep", "read_file", "write_file", "web_search", "web_fetch", "get_current_time", "todo", "agent"],
           effectiveConfiguredTools: ["glob", "grep", "read_file", "write_file", "web_search", "web_fetch", "get_current_time", "todo", "agent", "search_memories"],
-          effectiveSkills: ["pohuy"],
+          effectiveSkills: ["behavior-preferences"],
           policySummary: "Базовые workspace tools плюс полный настроенный allowlist внешней группы.",
           toolAccessMode: "external_allowlist",
           toolAllowlist: ["search_memories"],
@@ -148,7 +147,7 @@ describe("manage_telegram_group.status", () => {
     expect(listStatuses).not.toHaveBeenCalled();
   });
 
-  it("skips HITL only for read-only status and non-destructive context rotation", () => {
+  it("skips HITL only for read-only status, context rotation and the skill list", () => {
     expect(approvalFor({ action: "status" })).toBe("not-applicable");
     expect(approvalFor({ action: "start_new_context", telegramChatId: "-1001" })).toBe("not-applicable");
     expect(approvalFor({
@@ -161,7 +160,7 @@ describe("manage_telegram_group.status", () => {
       action: "update_skills",
       skillAllowlist: [],
       telegramChatId: "-1001",
-    })).toBe("user-approval");
+    })).toBe("not-applicable");
     expect(approvalFor({ action: "remove", telegramChatId: "-1001" })).toBe("user-approval");
     expect(approvalFor({
       action: "register",

@@ -6,7 +6,7 @@ import { syncSkillFiles, syncSandboxSkills } from "./skill-sync.js";
 import { createSandboxActivityRegistry } from "./docker-sandbox-lifecycle.js";
 import { executeSandboxProcess } from "./docker-sandbox-process.js";
 vi.mock("./docker-sandbox-process.js", () => ({ executeSandboxProcess: vi.fn() }));
-const request = { expectedInstanceId: "a".repeat(64), removed: [], packages: [{ name: "test", files: [{ path: "SKILL.md", contentBase64: "cmV2aWV3ZWQ=" }] }] };
+const request = { expectedInstanceId: "a".repeat(64), keep: ["test"], packages: [{ name: "test", files: [{ path: "SKILL.md", contentBase64: "cmV2aWV3ZWQ=" }] }] };
 beforeEach(() => vi.mocked(executeSandboxProcess).mockReset().mockResolvedValue({ exitCode: 0, stdout: '{"checked":1,"written":1,"removed":0}', stderr: "", processId: "test" }));
 
 describe("skill synchronization execution boundary", () => {
