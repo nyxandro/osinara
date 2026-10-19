@@ -73,6 +73,7 @@ describe("isRequestRefusal", () => {
     ["a failure without a status", new Error("refused: input is too long for this model"), true],
     ["a summary the content filter stopped", new AppError("AGENT_MODEL_OUTPUT_FILTERED", "Ограничения безопасности"), true],
     ["a summary cut at the length limit", new AppError("AGENT_MODEL_OUTPUT_TRUNCATED", "Ограничение длины"), true],
+    ["a summary that spent its limit on reasoning", new AppError("AGENT_MODEL_REASONING_EXHAUSTED", "Не успела ответить"), true],
     ["a broken key", rejected("invalid api key", "401", 401), false],
     ["a broken key after a retried outage",
       retried("errorNotRetryable", rejected("overloaded", "503", 503), rejected("invalid api key", "401", 401)), false],
@@ -85,6 +86,9 @@ describe("isRequestRefusal", () => {
     ["a provider stream that broke off",
       new AppError("AGENT_MODEL_OUTPUT_INCOMPLETE", "Модель не завершила ответ", { isRetryable: true }), false],
     ["a model that never answered", new ModelInactivityError("AGENT_MODEL_FIRST_CHUNK_TIMEOUT"), false],
+    ["a connection the provider closed mid-answer", new TypeError("terminated", {
+      cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET", name: "SocketError" }),
+    }), false],
   ])("counts %s: %s", (_, error, expected) => {
     expect(isRequestRefusal(modelCallFailure(normalizeModelCallError(error)))).toBe(expected);
   });

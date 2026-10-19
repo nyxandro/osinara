@@ -11,8 +11,8 @@
  *   over the model's window gets its own code, since repeating it cannot help.
  * - `isRequestRefusal`: whether such an error turned down this request, not every request.
  *
- * - An inactivity timeout is always retryable: tools never run inside a model call here, so a
- *   repeated call cannot repeat a side effect.
+ * - An inactivity timeout and a response body cut off mid-answer are always retryable: tools never
+ *   run inside a model call here, so a repeated call cannot repeat a side effect.
  * - AI SDK's exhausted transport retries end the call instead of being multiplied by the outer
  *   loop.
  * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
@@ -86,6 +86,14 @@ function statusCode(error: unknown): number | undefined {
   return undefined;
 }
 
+// undici, behind Node's fetch, ends a response body the provider or the network cut off with this
+// TypeError, its cause the socket error; its own body timeout ends one the same way. An abort of ours
+// ends the body with the abort's own reason instead, and `callOnce` maps that before classifying.
+// The break comes after the response started, so AI SDK's transport retries never see it (#385).
+function isBrokenResponseBody(candidate: unknown): boolean {
+  return candidate instanceof TypeError && candidate.message === "terminated";
+}
+
 export function classifyModelCallError(error: unknown): ModelCallFailureClass {
   for (const candidate of causeChain(error)) {
     const name = (candidate as { name?: unknown }).name;
@@ -94,7 +102,7 @@ export function classifyModelCallError(error: unknown): ModelCallFailureClass {
   // Its own reissue path repeats an empty answer once, with a notice; a plain retry would not.
   if (error instanceof EmptyModelResponseError) return "recoverable";
   for (const candidate of causeChain(error)) {
-    if ((candidate as { isRetryable?: unknown }).isRetryable === true) return "retry";
+    if ((candidate as { isRetryable?: unknown }).isRetryable === true || isBrokenResponseBody(candidate)) return "retry";
   }
   const status = statusCode(error);
   if (status !== undefined) {
@@ -143,9 +151,12 @@ export function modelCallFailure(error: unknown): unknown {
 
 /** Statuses that fail every request of the account or the model, whatever the request carries. */
 const ACCOUNT_FAILURE_STATUSES: ReadonlySet<number> = new Set([401, 402, 403, 404]);
-/** The request itself was turned down: over the window, stopped by the content filter, cut at the length limit. */
+/**
+ * The request itself was turned down: over the window, stopped by the content filter, cut at the
+ * length limit, or the limit spent on reasoning before any answer.
+ */
 const REQUEST_REFUSAL_CODES: ReadonlySet<string> = new Set([
-  "AGENT_MODEL_CONTEXT_OVERFLOW", "AGENT_MODEL_OUTPUT_FILTERED", "AGENT_MODEL_OUTPUT_TRUNCATED",
+  "AGENT_MODEL_CONTEXT_OVERFLOW", "AGENT_MODEL_OUTPUT_FILTERED", "AGENT_MODEL_OUTPUT_TRUNCATED", "AGENT_MODEL_REASONING_EXHAUSTED",
 ]);
 
 /** The status of the failed attempt, including the last one a RetryError keeps outside `cause`. */
