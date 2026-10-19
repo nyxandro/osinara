@@ -359,6 +359,61 @@ describe("createConfiguredLanguageModel", () => {
     }).rejects.toThrow("AGENT_MODEL_OUTPUT_TRUNCATED");
   });
 
+  describe("an output limit spent on reasoning alone", () => {
+    const transport = {
+      baseUrl: "https://example-provider.test/v1",
+      protocol: "openai-chat-completions",
+      providerName: "compatible-provider",
+      reasoning: null,
+    } as const;
+
+    it("is told apart from an answer cut at the limit in a stream", async () => {
+      const model = createConfiguredLanguageModel({
+        apiKey: "model-secret",
+        fetch: async () => new Response([
+          { reasoning_content: "Рассуждение без конца" },
+          { content: "   " },
+        ].map((delta) => `data: ${JSON.stringify({
+          choices: [{ delta, index: 0 }], created: 1, id: "completion-reasoning", model: "compatible-model", object: "chat.completion.chunk",
+        })}\n\n`).join("") + `data: ${JSON.stringify({
+          choices: [{ delta: {}, finish_reason: "length", index: 0 }], created: 1, id: "completion-reasoning", model: "compatible-model", object: "chat.completion.chunk",
+        })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" }, status: 200 }),
+        maxOutputTokens: 8_000,
+        modelId: "compatible-model",
+        transport,
+      });
+      const { stream } = await model.doStream({
+        prompt: [{ content: [{ text: "Проверка", type: "text" }], role: "user" }],
+      } as LanguageModelV4CallOptions);
+
+      await expect(async () => {
+        for await (const _part of stream) {
+          // Full consumption reaches the finish event.
+        }
+      }).rejects.toThrow("AGENT_MODEL_REASONING_EXHAUSTED");
+    });
+
+    it("is told apart from an answer cut at the limit in a whole response", async () => {
+      const model = createConfiguredLanguageModel({
+        apiKey: "model-secret",
+        fetch: async () => jsonResponse({
+          choices: [{ finish_reason: "length", index: 0, message: { content: null, reasoning_content: "Рассуждение без конца", role: "assistant" } }],
+          created: 1,
+          id: "completion-reasoning",
+          model: "compatible-model",
+          object: "chat.completion",
+        }),
+        maxOutputTokens: 8_000,
+        modelId: "compatible-model",
+        transport,
+      });
+
+      await expect(model.doGenerate({
+        prompt: [{ content: [{ text: "Проверка", type: "text" }], role: "user" }],
+      } as LanguageModelV4CallOptions)).rejects.toThrow("AGENT_MODEL_REASONING_EXHAUSTED");
+    });
+  });
+
   it("preserves native Anthropic thinking signatures through a tool turn", async () => {
     const requests: Array<{ body: Record<string, unknown>; headers: Headers; url: string }> = [];
     const responses = [

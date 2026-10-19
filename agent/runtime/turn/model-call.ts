@@ -6,14 +6,16 @@
  *   outputs. Long reasoning is fine while it keeps streaming.
  * - `callStepModel`: calls the model for one step and returns the assistant message and its tool
  *   calls; tool calls are executed afterwards by the turn, never inside the call.
- * - `EMPTY_RESPONSE_NUDGE`: the wire-only notice of the one reissue after an empty answer.
+ * - `EMPTY_RESPONSE_NUDGE`, `REASONING_EXHAUSTED_NUDGE`: the wire-only notices of the one reissue
+ *   after an empty answer or after an output limit spent on reasoning alone.
  * - `assistantStepText`: the visible text of a step's response.
  *
  * Recovery, in order:
  * - AI SDK's own transport retries cover a request that never got a response (its default, 2).
  * - A `retry`-class failure — a stream broken after it started, an inactivity window — repeats the
  *   call up to three attempts with exponential backoff. No side effect can repeat: tools run later.
- * - An empty answer is reissued once with `EMPTY_RESPONSE_NUDGE` appended to that request only.
+ * - An empty answer, or one whose output limit went on reasoning before any word, is reissued once
+ *   with its notice appended to that request only. A call earns one reissue, whichever it was.
  * On the Anthropic protocol every attempt carries prompt-cache breakpoints (`prompt-cache.ts`).
  *
  * The runtime owns both inactivity windows over the parts it reads, so the first window also covers
@@ -24,6 +26,7 @@
 import { NoOutputGeneratedError, streamText, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
 import type { SharedV4ProviderOptions } from "@ai-sdk/provider";
 
+import { AppError } from "../../lib/app-error.js";
 import {
   classifyModelCallError,
   EmptyModelResponseError,
@@ -36,6 +39,8 @@ import { markPromptCache, usesAnthropicPromptCache } from "./prompt-cache.js";
 export const MODEL_INACTIVITY_TIMEOUT = Object.freeze({ firstOutputMs: 5 * 60 * 1000, gapMs: 5 * 60 * 1000 });
 export const EMPTY_RESPONSE_NUDGE =
   "Your previous reply was empty and was not delivered. Answer now from the tool results above; do not re-run tools or mention this notice.";
+export const REASONING_EXHAUSTED_NUDGE =
+  "Your previous reply spent its whole output limit on reasoning and was not delivered. Keep your reasoning short this time: answer or call the next tool right away; do not mention this notice.";
 
 const MODEL_CALL_MAX_ATTEMPTS = 3;
 const MODEL_CALL_RETRY_BASE_DELAY_MS = 500;
@@ -160,11 +165,19 @@ async function callWithRetries(input: StepModelCall, trailingUserNote: string | 
   }
 }
 
+/** The notice of the one reissue this failure earns, if it earns one. */
+function reissueNotice(error: unknown): string | undefined {
+  if (error instanceof EmptyModelResponseError) return EMPTY_RESPONSE_NUDGE;
+  if (error instanceof AppError && error.code === "AGENT_MODEL_REASONING_EXHAUSTED") return REASONING_EXHAUSTED_NUDGE;
+  return undefined;
+}
+
 export async function callStepModel(input: StepModelCall, timing: ModelCallTiming = REAL_TIMING): Promise<StepModelResponse> {
   try {
     return await callWithRetries(input, undefined, timing);
   } catch (error) {
-    if (!(error instanceof EmptyModelResponseError)) throw error;
-    return await callWithRetries(input, EMPTY_RESPONSE_NUDGE, timing);
+    const notice = reissueNotice(error);
+    if (notice === undefined) throw error;
+    return await callWithRetries(input, notice, timing);
   }
 }

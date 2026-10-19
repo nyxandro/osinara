@@ -185,17 +185,22 @@ function createTransportDefaultsMiddleware(
     },
     async wrapGenerate({ doGenerate }) {
       const result = await doGenerate();
-      assertCompleteFinishReason(result.finishReason);
+      assertCompleteFinishReason(result.finishReason, result.content.some((part) =>
+        (part.type === "text" && part.text.trim().length > 0) || part.type === "tool-call"));
       return result;
     },
     async wrapStream({ doStream }) {
       const result = await doStream();
+      let answered = false;
       return {
         ...result,
         stream: result.stream.pipeThrough(
           new TransformStream<LanguageModelV4StreamPart, LanguageModelV4StreamPart>({
             transform(part, controller) {
-              if (part.type === "finish") assertCompleteFinishReason(part.finishReason);
+              if ((part.type === "text-delta" && part.delta.trim().length > 0) || part.type === "tool-input-start" || part.type === "tool-call") {
+                answered = true;
+              }
+              if (part.type === "finish") assertCompleteFinishReason(part.finishReason, answered);
               controller.enqueue(part);
             },
           }),
@@ -205,8 +210,17 @@ function createTransportDefaultsMiddleware(
   };
 }
 
-function assertCompleteFinishReason(finishReason: LanguageModelV4FinishReason): void {
+/** `answered`: the model produced visible text or began a tool call; reasoning alone does not count. */
+function assertCompleteFinishReason(finishReason: LanguageModelV4FinishReason, answered: boolean): void {
   if (finishReason.unified === "stop" || finishReason.unified === "tool-calls") return;
+  if (finishReason.unified === "length" && !answered) {
+    // A reasoning model can spend the whole limit before its first word (#384). Unlike a long answer
+    // cut at the limit, such a call may go another way when reissued, so it gets its own code.
+    throw new AppError(
+      "AGENT_MODEL_REASONING_EXHAUSTED",
+      "Модель слишком долго рассуждала и не успела ответить. Попробуйте ещё раз или разбейте задачу на части",
+    );
+  }
   if (finishReason.unified === "length") {
     throw new AppError(
       "AGENT_MODEL_OUTPUT_TRUNCATED",
@@ -220,8 +234,8 @@ function assertCompleteFinishReason(finishReason: LanguageModelV4FinishReason): 
     );
   }
   // An unfinished answer means the provider stream broke, not that the request was wrong. Marking
-  // it retryable is what lets the runtime reissue this one call: truncation by length and a content filter
-  // stay terminal above, because repeating either produces the same result.
+  // it retryable is what lets the runtime reissue this one call: an answer cut by length and a content
+  // filter stay terminal above, because repeating either produces the same result.
   throw new AppError(
     "AGENT_MODEL_OUTPUT_INCOMPLETE",
     "Модель не завершила ответ. Попробуйте повторить запрос или сформулировать его иначе",

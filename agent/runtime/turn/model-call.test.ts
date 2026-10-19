@@ -1,10 +1,15 @@
-import { APICallError, RetryError, tool } from "ai";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { APICallError, RetryError, tool, type LanguageModel } from "ai";
 import { z } from "zod";
 import type { LanguageModelV4CallOptions, LanguageModelV4StreamPart } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
-import { callStepModel, EMPTY_RESPONSE_NUDGE, type StepModelCall } from "./model-call.js";
+import { createConfiguredLanguageModel } from "../../lib/model-transport.js";
+import { callStepModel, EMPTY_RESPONSE_NUDGE, REASONING_EXHAUSTED_NUDGE, type StepModelCall } from "./model-call.js";
 
 const USAGE = { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 2, text: 2, reasoning: 0 } };
 const FINISH = (unified: "stop" | "tool-calls"): LanguageModelV4StreamPart => ({ type: "finish", finishReason: { raw: undefined, unified }, usage: USAGE });
@@ -50,7 +55,28 @@ function model(...scripts: Script[]) {
   });
 }
 
-function call(provider: MockLanguageModelV4, overrides: Partial<StepModelCall> = {}): StepModelCall {
+// One Chat Completions stream chunk, as an OpenAI-compatible provider sends it.
+function chunk(delta: Record<string, unknown>, finishReason: string | null = null): string {
+  return `data: ${JSON.stringify({ choices: [{ delta, finish_reason: finishReason, index: 0 }], created: 1, id: "c", model: "m", object: "chat.completion.chunk" })}\n\n`;
+}
+
+// The application's own transport over a scripted provider: one response body per request.
+function configuredModel(bodies: readonly string[]) {
+  const requests: string[] = [];
+  const configured = createConfiguredLanguageModel({
+    apiKey: "model-secret",
+    fetch: async (_url, init) => {
+      requests.push(String(init?.body));
+      return new Response(bodies[Math.min(requests.length, bodies.length) - 1], { headers: { "content-type": "text/event-stream" }, status: 200 });
+    },
+    maxOutputTokens: 16_384,
+    modelId: "qwen3.8-27b",
+    transport: { baseUrl: "https://provider.test/v1", protocol: "openai-chat-completions", providerName: "neuraldeep", reasoning: null },
+  });
+  return { model: configured, requests };
+}
+
+function call(provider: LanguageModel, overrides: Partial<StepModelCall> = {}): StepModelCall {
   return {
     abortSignal: new AbortController().signal,
     inactivity: FAST,
@@ -170,6 +196,63 @@ describe("step model call", () => {
 
     await expect(callStepModel(call(provider), NO_WAIT)).rejects.toMatchObject({ name: "EmptyModelResponseError" });
     expect(provider.doStreamCalls).toHaveLength(2);
+  });
+
+  // #384: on 19.10 the model reasoned for ten minutes and spent all 16,384 output tokens before a word.
+  const REASONING_ONLY = chunk({ reasoning_content: "думаю и думаю" }) + chunk({}, "length") + "data: [DONE]\n\n";
+  const ANSWER = chunk({ content: "ответ" }) + chunk({}, "stop") + "data: [DONE]\n\n";
+
+  it("reissues once with a notice a call that spent its whole output limit on reasoning", async () => {
+    const provider = configuredModel([REASONING_ONLY, ANSWER]);
+
+    const response = await callStepModel(call(provider.model), NO_WAIT);
+
+    expect(response.text).toBe("ответ");
+    expect(provider.requests).toHaveLength(2);
+    expect(JSON.parse(provider.requests[1]!).messages.at(-1)).toEqual({ role: "user", content: REASONING_EXHAUSTED_NUDGE });
+  });
+
+  it("gives up after one reissue that spends its limit on reasoning again", async () => {
+    const provider = configuredModel([REASONING_ONLY]);
+
+    await expect(callStepModel(call(provider.model), NO_WAIT)).rejects.toMatchObject({ code: "AGENT_MODEL_REASONING_EXHAUSTED" });
+    expect(provider.requests).toHaveLength(2);
+  });
+
+  it("does not reissue an answer cut at the length limit", async () => {
+    const provider = configuredModel([chunk({ content: "длинный ответ" }) + chunk({}, "length") + "data: [DONE]\n\n", ANSWER]);
+
+    await expect(callStepModel(call(provider.model), NO_WAIT)).rejects.toMatchObject({ code: "AGENT_MODEL_OUTPUT_TRUNCATED" });
+    expect(provider.requests).toHaveLength(1);
+  });
+
+  it("repeats a call whose connection the provider closed in the middle of the answer", async () => {
+    // #385: undici ends such a body with TypeError "terminated", which has no status and no retry flag.
+    let requests = 0;
+    const server = createServer((request, response) => {
+      request.resume();
+      requests += 1;
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      if (requests > 1) {
+        response.end(chunk({ content: "ответ" }) + chunk({}, "stop") + "data: [DONE]\n\n");
+        return;
+      }
+      response.write(chunk({ reasoning_content: "думаю" }));
+      setTimeout(() => response.socket?.destroy(), 20);
+    });
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+    try {
+      const { port } = server.address() as AddressInfo;
+      const provider = createOpenAICompatible({ apiKey: "k", baseURL: `http://127.0.0.1:${port}/v1`, name: "neuraldeep" });
+
+      const response = await callStepModel(call(provider("qwen3.8-27b"), { inactivity: { firstOutputMs: 5_000, gapMs: 5_000 } }), NO_WAIT);
+
+      expect(response.text).toBe("ответ");
+      expect(requests).toBe(2);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((done) => server.close(done));
+    }
   });
 
   it("retries a transient provider failure and succeeds", async () => {
