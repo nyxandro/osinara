@@ -60,7 +60,7 @@ function thread(overrides: Partial<ActivatedMemoryThread> = {}): ActivatedMemory
     blocks: [{ content: SOURCE.content, kind: "constraints_conflicts", sourceEntryRefs: [SOURCE.ref] }],
     episodes: [],
     purpose: "Сохранять решения и результаты",
-    relevance: { retrievalHits: 1, skillHint: false, titleMatch: false },
+    relevance: { retrievalHits: 1, titleMatch: false },
     sourceEvidence: [{ ...SOURCE.evidence, sourceEntryRef: SOURCE.ref }],
     status: "active",
     threadRef: "thread_0123456789abcdef0123456789abcdef",
@@ -70,16 +70,16 @@ function thread(overrides: Partial<ActivatedMemoryThread> = {}): ActivatedMemory
 }
 
 describe("memory thread context assembly", () => {
-  it("prioritizes skill, title, and retrieval hits and caps context at two threads", () => {
+  it("prioritizes a title match, then retrieval hits, and caps context at two threads", () => {
     const context = assembleMemoryThreadContext([
-      thread({ threadRef: "thread_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", relevance: { retrievalHits: 9, skillHint: false, titleMatch: false } }),
-      thread({ threadRef: "thread_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", relevance: { retrievalHits: 1, skillHint: false, titleMatch: true } }),
-      thread({ threadRef: "thread_cccccccccccccccccccccccccccccccc", relevance: { retrievalHits: 0, skillHint: true, titleMatch: false } }),
+      thread({ threadRef: "thread_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", relevance: { retrievalHits: 2, titleMatch: false } }),
+      thread({ threadRef: "thread_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", relevance: { retrievalHits: 1, titleMatch: true } }),
+      thread({ threadRef: "thread_cccccccccccccccccccccccccccccccc", relevance: { retrievalHits: 9, titleMatch: false } }),
     ]);
 
     expect(context.threads.map((item) => item.threadRef)).toEqual([
-      "thread_cccccccccccccccccccccccccccccccc",
       "thread_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "thread_cccccccccccccccccccccccccccccccc",
     ]);
     expect(context.totalCharacters).toBeLessThanOrEqual(16_000);
   });

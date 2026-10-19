@@ -9,6 +9,7 @@
  *   changes; an external group gets a family skill only from the owner, a script skill only with Bash.
  * - Broken packages, taken names, missing folders and a skill pointing at its draft are refused; a
  *   checkout writes the current version back into the draft folder; versions are pruned.
+ * - The library with its usage and a skill's versions reach the model as data, as the turn runs the call.
  */
 import { symlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -16,7 +17,9 @@ import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import type { SessionAuth } from "../../runtime/context.js";
+import { newSessionId, newTurnId } from "../../runtime/ids.js";
 import type { ToolContext } from "../../runtime/tool.js";
+import { executeToolCall } from "../../runtime/turn/tool-calls.js";
 import { closeDatabase, database } from "../database.js";
 import { groupSkillPolicyRepository } from "../group-skills/group-skill-repository.js";
 import { resolveConversationSkills } from "../group-skills/group-skill-resolver.js";
@@ -150,6 +153,45 @@ async function run(f: Fixture, who: Person, input: Record<string, unknown>) {
 async function save(f: Fixture, who: Person, input: Record<string, string>) {
   return await run(f, who, { action: "save", scope: "personal", ...input });
 }
+
+/** The call as a turn runs it: the result reaches the model as data or as an error text. */
+async function modelOutput(f: Fixture, who: Person, input: Record<string, unknown>) {
+  return await executeToolCall(manageSkill, input, {
+    ...context(privateAuth(f, who)), abortSignal: new AbortController().signal, toolName: "manage_skill",
+  } as ToolContext);
+}
+
+/** A completed `load_skill` in the person's private chat, as the turn journal keeps it. */
+async function recordSkillLoad(f: Fixture, who: Person, skill: string): Promise<void> {
+  const conversation = (await database().query<{ id: string }>(
+    `INSERT INTO conversation_sessions
+       (thread_id, generation, family_id, owner_user_id, scope, kind, conversation_key, continuation_token, started_at, last_activity_at)
+     VALUES (gen_random_uuid(), 0, $1, $2, 'personal', 'canonical', $3, $3, now(), now()) RETURNING id`,
+    [f.familyId, who.id, `private:${who.telegramId}`],
+  )).rows[0]!;
+  const sessionId = newSessionId();
+  const turnId = newTurnId();
+  await database().query(
+    "INSERT INTO agent_session_state (session_id, application_session_id, source) VALUES ($1, $2, 'runtime')",
+    [sessionId, conversation.id],
+  );
+  await database().query(
+    `INSERT INTO agent_turns (id, session_id, sequence, kind, status, auth, channel, input, completed_at)
+     VALUES ($1, $2, 0, 'conversation', 'completed', $3, '{"kind":"telegram"}', '{}', now())`,
+    [turnId, sessionId, JSON.stringify(privateAuth(f, who))],
+  );
+  await database().query(
+    "INSERT INTO agent_turn_steps (turn_id, step_index, response, finish_reason) VALUES ($1, 0, '[]', 'tool-calls')",
+    [turnId],
+  );
+  await database().query(
+    `INSERT INTO agent_tool_calls (turn_id, step_index, call_id, position, tool_name, input, state, output)
+     VALUES ($1, 0, 'load-1', 0, 'load_skill', $2, 'completed', '{"type":"text","value":"Инструкция"}')`,
+    [turnId, JSON.stringify({ skill })],
+  );
+}
+
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 async function notices(recipient: { userId: string } | { groupId: string }): Promise<string[]> {
   return (await database().query<{ text: string }>(
@@ -422,5 +464,19 @@ describeWithDatabase("family skill library", () => {
     await run(f, f.owner, { action: "rollback", name: "weather", version: 3 });
     expect(await versions()).toEqual([7, 6, 5, 4, 3]);
     expect((await resolveConversationSkills(privateAuth(f, f.owner))).weather?.description).toBe("Прогноз v3");
+  });
+
+  it("shows the model the library with its usage and a skill's versions once the skill was used", async () => {
+    const f = await fixture("5514");
+    await writeFolder(f, f.owner, "skills/weather", { "SKILL.md": weather("Прогноз") });
+    await save(f, f.owner, { path: "skills/weather" });
+    await recordSkillLoad(f, f.member, "weather");
+
+    await expect(modelOutput(f, f.member, { action: "list" })).resolves.toMatchObject({
+      type: "json", value: { family: [{ name: "weather", usage: { lastLoadedAt: expect.stringMatching(ISO_TIME), loads: 1 } }] },
+    });
+    await expect(modelOutput(f, f.member, { action: "view", name: "weather" })).resolves.toMatchObject({
+      type: "json", value: { versions: [{ createdAt: expect.stringMatching(ISO_TIME), version: 1 }] },
+    });
   });
 });

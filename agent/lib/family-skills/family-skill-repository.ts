@@ -25,7 +25,8 @@ export interface StoredSkillFile {
 }
 
 export interface FamilySkillVersion {
-  readonly createdAt: Date;
+  /** ISO time: a tool result reaches the model as JSON, which has no dates. */
+  readonly createdAt: string;
   readonly description: string;
   readonly files: readonly StoredSkillFile[];
   /** Bytes of the `SKILL.md` instructions after the header. */
@@ -66,7 +67,7 @@ interface VersionRow {
 
 function toVersion(row: VersionRow): FamilySkillVersion {
   return {
-    createdAt: row.created_at,
+    createdAt: row.created_at.toISOString(),
     description: row.description,
     files: row.files.map(({ executable, path, size }) => ({ executable, path, size })),
     markdownSize: row.markdown_size,

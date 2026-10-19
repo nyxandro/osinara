@@ -90,13 +90,13 @@ describeWithDatabase("memory retrieval without the embedding service", () => {
   afterAll(async () => closeDatabase());
 
   it("still finds by words when the query vector cannot be computed", async () => {
-    const context = await retrieveMemoryTurnContext(auth, "какой код домофона", []);
+    const context = await retrieveMemoryTurnContext(auth, "какой код домофона");
 
     expect([...context.offered.claimIdByMemoryRef.values()]).toEqual([claimId]);
   });
 
   it("tells the model the selection is incomplete", async () => {
-    const context = await retrieveMemoryTurnContext(auth, "какой код домофона", []);
+    const context = await retrieveMemoryTurnContext(auth, "какой код домофона");
 
     expect(context.diagnostics.semanticBranchAvailable).toBe(false);
   });
@@ -104,7 +104,7 @@ describeWithDatabase("memory retrieval without the embedding service", () => {
   it("writes the failure down instead of degrading quietly", async () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    await retrieveMemoryTurnContext(auth, "какой код домофона", []);
+    await retrieveMemoryTurnContext(auth, "какой код домофона");
 
     expect(logged.mock.calls.map(([line]) => String(line)).join("\n"))
       .toContain("AGENT_MEMORY_SEMANTIC_BRANCH_UNAVAILABLE");
@@ -121,7 +121,7 @@ describeWithDatabase("memory retrieval without the embedding service", () => {
   it("goes back to the whole pipeline once the service answers again", async () => {
     embedding.fail = false;
 
-    const context = await retrieveMemoryTurnContext(auth, "какой код домофона", []);
+    const context = await retrieveMemoryTurnContext(auth, "какой код домофона");
 
     expect(context.diagnostics.semanticBranchAvailable).toBe(true);
   });

@@ -14,7 +14,8 @@ import { database } from "../database.js";
 const USAGE_WINDOW_DAYS = 30;
 
 export interface SkillUsage {
-  readonly lastLoadedAt: Date | null;
+  /** ISO time: a tool result reaches the model as JSON, which has no dates. */
+  readonly lastLoadedAt: string | null;
   readonly loads: number;
 }
 
@@ -32,6 +33,6 @@ export async function familySkillUsage(familyId: string, names: readonly string[
       GROUP BY 1`,
     [familyId, [...names], USAGE_WINDOW_DAYS],
   )).rows;
-  const usage = new Map(rows.map((row) => [row.name, { lastLoadedAt: row.last_loaded_at, loads: row.loads }]));
+  const usage = new Map(rows.map((row) => [row.name, { lastLoadedAt: row.last_loaded_at.toISOString(), loads: row.loads }]));
   return new Map(names.map((name) => [name, usage.get(name) ?? { lastLoadedAt: null, loads: 0 }]));
 }

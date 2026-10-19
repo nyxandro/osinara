@@ -50,7 +50,6 @@ import {
   offeredMemoryEvidence,
   type OfferedMemoryEvidence,
 } from "../memory-observability.js";
-import { applicationThreadSkillHints } from "../memory-thread-activation.js";
 import {
   formatProfileViewContext,
   profileViewRepository,
@@ -256,7 +255,6 @@ export function createMemoryBlockResolver(dependencies: {
   retrieve: (
     auth: MemoryAuthorization,
     query: string,
-    skillHints: readonly string[],
     window: MemorySelectionWindow | null,
   ) => Promise<MemoryTurnContext>;
   /** Claims this session showed in its last turns, which the profile then leaves out. */
@@ -310,12 +308,7 @@ export function createMemoryBlockResolver(dependencies: {
         }
         : null;
       usageTracked = window !== null;
-      const context = await dependencies.retrieve(
-        authorization,
-        query,
-        applicationThreadSkillHints(ctx.messages),
-        window,
-      );
+      const context = await dependencies.retrieve(authorization, query, window);
       memories = context.memories.length;
       diagnostics = context.diagnostics;
       outcome = "succeeded";

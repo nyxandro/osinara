@@ -31,7 +31,7 @@ describe("memory retrieval failure provenance", () => {
   it.each(["search", "threads"] as const)("keeps the original %s failure and never continues to later stages", async phase => {
     const failure = new AppError("AGENT_TEST_DEPENDENCY_FAILED", "Причина отказа");
     mocks[phase].mockRejectedValue(failure);
-    const result = retrieveMemoryTurnContext({} as MemoryAuthorization, "private query", []);
+    const result = retrieveMemoryTurnContext({} as MemoryAuthorization, "private query");
     await expect(result).rejects.toMatchObject({ phase, cause: failure });
     await result.catch(error => expect(memoryFailureCode(error)).toBe("AGENT_TEST_DEPENDENCY_FAILED"));
     if (phase !== "threads") expect(mocks.threads).not.toHaveBeenCalled();
@@ -42,7 +42,7 @@ describe("memory retrieval failure provenance", () => {
     // its failure costs the selection its semantic half and nothing else.
     mocks.embedding.mockRejectedValue(new AppError("AGENT_TEST_DEPENDENCY_FAILED", "Причина отказа"));
 
-    const context = await retrieveMemoryTurnContext({} as MemoryAuthorization, "private query", []);
+    const context = await retrieveMemoryTurnContext({} as MemoryAuthorization, "private query");
 
     expect(context.diagnostics.semanticBranchAvailable).toBe(false);
     expect(mocks.search).toHaveBeenCalledWith({}, "private query", [], MEMORY_TURN_SELECTION_LIMIT, null);
@@ -51,7 +51,7 @@ describe("memory retrieval failure provenance", () => {
   it("offers a turn eight records, fewer than the twelve an explicit search may read", async () => {
     // Golden set of 153 live turns (2026-10-06, r5): of the 54 turns where twelve places offered a
     // useful record, eight places keep 53, with a third fewer records in every turn's block.
-    await retrieveMemoryTurnContext({} as MemoryAuthorization, "private query", []);
+    await retrieveMemoryTurnContext({} as MemoryAuthorization, "private query");
 
     expect(mocks.search).toHaveBeenCalledWith({}, "private query", [[1]], 8, null);
 
@@ -76,7 +76,7 @@ describe("memory retrieval failure provenance", () => {
       }],
     });
 
-    const context = await retrieveMemoryTurnContext({} as MemoryAuthorization, "4271", []);
+    const context = await retrieveMemoryTurnContext({} as MemoryAuthorization, "4271");
 
     // A record only the exact branch found carries no similarity: the vector never vouched for it.
     expect(context.rankingByMemoryRef.get("mem_11111111111111111111111111111111")).toEqual({
@@ -85,7 +85,7 @@ describe("memory retrieval failure provenance", () => {
   });
 
   it("carries the branch numbers of a successful turn together with the query's own", async () => {
-    const context = await retrieveMemoryTurnContext({} as MemoryAuthorization, "private query", []);
+    const context = await retrieveMemoryTurnContext({} as MemoryAuthorization, "private query");
     expect(context.diagnostics)
       .toMatchObject({ queryCharacters: "private query".length, queryChunks: 1, simpleMatched: 0 });
   });

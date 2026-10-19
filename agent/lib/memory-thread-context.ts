@@ -32,7 +32,7 @@ export interface ActivatedMemoryThread {
   completionEpisode?: { content: string; sourceEntryRefs: string[]; sourceRecordRefs?: string[] };
   episodes: readonly { content: string; sourceEntryRefs: string[]; sourceRecordRefs?: string[] }[];
   purpose: string;
-  relevance: { retrievalHits: number; skillHint: boolean; titleMatch: boolean };
+  relevance: { retrievalHits: number; titleMatch: boolean };
   sourceEvidence: readonly MemoryThreadSourceEvidence[];
   status: "active" | "completed";
   threadRef: string;
@@ -53,7 +53,6 @@ export interface MemoryThreadContext {
 }
 
 function relevanceOrder(left: ActivatedMemoryThread, right: ActivatedMemoryThread): number {
-  if (left.relevance.skillHint !== right.relevance.skillHint) return left.relevance.skillHint ? -1 : 1;
   if (left.relevance.titleMatch !== right.relevance.titleMatch) return left.relevance.titleMatch ? -1 : 1;
   if (left.relevance.retrievalHits !== right.relevance.retrievalHits) {
     return right.relevance.retrievalHits - left.relevance.retrievalHits;

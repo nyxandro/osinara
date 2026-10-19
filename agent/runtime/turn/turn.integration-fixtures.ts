@@ -142,7 +142,7 @@ export async function newTestSession(
   const sessionId = newSessionId();
   const { applicationSessionId } = await createApplicationSession(sessionId);
   await createSessionHistory(database(), {
-    announcedSkills: null, applicationSessionId, channelState: null, compaction: { inputTokens: null, promptMessageCount: null }, initiatorAuth: null,
+    applicationSessionId, channelState: null, compaction: { inputTokens: null, promptMessageCount: null }, initiatorAuth: null,
     history, parentSessionId: options.parentSessionId ?? null, sandbox: null, sessionId, source: "runtime", todo: null,
   });
   return sessionId;

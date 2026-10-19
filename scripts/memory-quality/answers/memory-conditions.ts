@@ -61,7 +61,7 @@ function renderMemoryBlock(
 
 export async function selectionBlock(auth: MemoryAuthorization, query: string): Promise<MemoryBlock> {
   // No selection window: the show journal of the copy describes production's turns, not these.
-  const context = await retrieveMemoryTurnContext(auth, query, [], null);
+  const context = await retrieveMemoryTurnContext(auth, query, null);
   if (!context.diagnostics.semanticBranchAvailable) {
     throw new AppError(
       "AGENT_MEMORY_ANSWERS_SEMANTIC_UNAVAILABLE",
