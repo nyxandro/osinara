@@ -187,9 +187,9 @@ export function createMemoryThreadBriefRepository() {
         )) AND (COALESCE(hits.retrieval_hits, 0) > 0
          OR (thread.title_embedding_model = $7
            AND 1 - (thread.title_embedding <=> $6::vector) >= $8))
-       ORDER BY -- Without a query vector the comparison is NULL, and NULLs sort first under DESC:
-                -- threads with a current title embedding would jump ahead of better-matching ones.
-                COALESCE(thread.title_embedding_model = $7 AND
+       -- Without a query vector the comparison is NULL, and NULLs sort first under DESC:
+       -- threads with a current title embedding would jump ahead of better-matching ones.
+       ORDER BY COALESCE(thread.title_embedding_model = $7 AND
                   1 - (thread.title_embedding <=> $6::vector) >= $8, false) DESC,
                 retrieval_hits DESC, thread.updated_at DESC
         LIMIT $9`,

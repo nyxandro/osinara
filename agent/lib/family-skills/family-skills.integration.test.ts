@@ -467,7 +467,7 @@ describeWithDatabase("family skill library", () => {
   });
 
   it("shows the model the library with its usage and a skill's versions once the skill was used", async () => {
-    const f = await fixture("5513");
+    const f = await fixture("5514");
     await writeFolder(f, f.owner, "skills/weather", { "SKILL.md": weather("Прогноз") });
     await save(f, f.owner, { path: "skills/weather" });
     await recordSkillLoad(f, f.member, "weather");
