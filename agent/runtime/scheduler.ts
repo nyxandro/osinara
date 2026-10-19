@@ -138,10 +138,21 @@ export function startScheduler(input: {
     const next = new Date(current);
     next.setSeconds(0, 0);
     next.setMinutes(next.getMinutes() + 1);
+    wait(next, next.getTime() - current.getTime());
+  }
+
+  // setTimeout keeps its own clock and may fire a moment before `now()` reaches the minute. Running
+  // then would start the minute early and arm the same minute again (#381), so the rest is waited out.
+  function wait(minute: Date, delay: number): void {
     timer = setTimeout(() => {
-      tick(next);
+      const left = minute.getTime() - now().getTime();
+      if (left > 0) {
+        wait(minute, left);
+        return;
+      }
+      tick(minute);
       arm();
-    }, next.getTime() - current.getTime());
+    }, delay);
   }
 
   arm();

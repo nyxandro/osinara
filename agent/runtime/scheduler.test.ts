@@ -89,6 +89,30 @@ describe("minute scheduler", () => {
     ]);
   });
 
+  it("runs a minute once and not before the clock reaches it when the timer fires a moment early", async () => {
+    // #381: setTimeout keeps its own clock; about once in two hours it fired while Date still read :59.999.
+    vi.useFakeTimers({ now: at("2026-10-02T13:47:30") });
+    const infos = vi.spyOn(console, "info").mockImplementation(() => {});
+    let lag = 0;
+    const clock = () => new Date(Date.now() - lag);
+    const runs: string[] = [];
+    const scheduler = startScheduler({
+      now: clock,
+      schedules: [{ cron: "* * * * *", name: "dispatch", run: ({ waitUntil }) => {
+        runs.push(clock().toISOString());
+        waitUntil(new Promise((resolve) => setTimeout(resolve, 20)));
+      } }],
+    });
+    // From here the process clock reads a millisecond behind the timer's own.
+    lag = 1;
+
+    await vi.advanceTimersByTimeAsync(90_100);
+    await scheduler.stop(10);
+
+    expect(runs).toEqual([at("2026-10-02T13:48:00").toISOString(), at("2026-10-02T13:49:00").toISOString()]);
+    expect(infos).not.toHaveBeenCalled();
+  });
+
   it("logs a schedule that throws and keeps running the others", async () => {
     vi.useFakeTimers({ now: at("2026-10-02T13:47:59") });
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
