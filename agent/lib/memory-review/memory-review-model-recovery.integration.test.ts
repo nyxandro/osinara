@@ -83,7 +83,7 @@ async function recordAmbiguousEnding(batchId: string): Promise<void> {
     const agentSessionId = newSessionId();
     const turnId = newTurnId();
     const { fixture,batch,session } = await runningReview(agentSessionId, turnId);
-    await createSessionHistory(database(), { announcedSkills: null, applicationSessionId: session.id, channelState: null,
+    await createSessionHistory(database(), { applicationSessionId: session.id, channelState: null,
       compaction: { inputTokens: null, promptMessageCount: null }, history: [], initiatorAuth: null, parentSessionId: null,
       sandbox: null, sessionId: agentSessionId, source: "runtime", todo: null });
     await database().query(`INSERT INTO agent_turns (id, session_id, sequence, kind, status, auth, channel, input, error_code, completed_at)

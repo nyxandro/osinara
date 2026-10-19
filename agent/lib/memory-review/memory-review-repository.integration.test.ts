@@ -197,7 +197,7 @@ describeWithDatabase("memory review repository", () => {
     });
     const runtimeSession = newSessionId();
     await createSessionHistory(database(), {
-      announcedSkills: null, applicationSessionId: session.rows[0]!.id, channelState: null,
+      applicationSessionId: session.rows[0]!.id, channelState: null,
       compaction: { inputTokens: null, promptMessageCount: null }, history: [], initiatorAuth: null, parentSessionId: null,
       sandbox: null, sessionId: runtimeSession, source: "runtime", todo: null,
     });

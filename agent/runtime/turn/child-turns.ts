@@ -52,7 +52,6 @@ async function startChild(runtime: TurnRuntime, input: {
   return await inJournalTransaction(runtime.database, async (client) => {
     const sessionId = newSessionId();
     await createSessionHistory(client, {
-      announcedSkills: null,
       applicationSessionId: await loadApplicationSessionId(client, input.parent.sessionId),
       channelState: null,
       compaction: { inputTokens: null, promptMessageCount: null },

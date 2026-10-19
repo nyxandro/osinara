@@ -4,7 +4,6 @@
  * Exports:
  * - `SkillDefinition`, `SkillFileContent`: a skill's description, `SKILL.md` body and files.
  * - `defineSkill`: types a skill definition; extra keys are a compile error.
- * - `AnnouncedSkill`: one entry of the skill list the model was last told about.
  * - `LoadedSkill`: what loading one skill gives the model.
  *
  * Plain objects: the runtime identifies skills by catalog name.
@@ -18,11 +17,6 @@ export interface SkillDefinition {
   readonly markdown: string;
   readonly metadata?: Record<string, string>;
   readonly files?: Readonly<Record<string, SkillFileContent>>;
-}
-
-export interface AnnouncedSkill {
-  readonly description: string;
-  readonly name: string;
 }
 
 /** What `load_skill` hands the model: the instructions and, for a skill with files, where they are. */

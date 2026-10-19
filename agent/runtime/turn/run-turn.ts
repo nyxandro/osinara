@@ -233,7 +233,7 @@ async function prepareTurn(runtime: TurnRuntime, turn: TurnRecord): Promise<Turn
     resolveTurnInstructions(runtime.agent.instructionResolvers, context),
     runtime.agent.resolveSkills(context),
   ]);
-  const skills = await prepareTurnSkills({ database: runtime.database, definitions, sessionId: turn.sessionId });
+  const skills = prepareTurnSkills(definitions);
   const prepared: PreparedTurn = { instructions: instructions.system, skills, userInstructions: instructions.user };
   await savePreparedTurn(runtime.database, turn.id, prepared);
   return { ...turn, prepared };

@@ -244,7 +244,7 @@ describeWithDatabase("conversation wake-ups", () => {
 
   it("creates its turn in the conversation's runtime session, bound to the item, and a reclaim finds that turn", async () => {
     await createSessionHistory(database(), {
-      announcedSkills: null, applicationSessionId: sessionId, channelState: null,
+      applicationSessionId: sessionId, channelState: null,
       compaction: { inputTokens: null, promptMessageCount: null }, history: [], initiatorAuth: null, parentSessionId: null,
       sandbox: null, sessionId: "ses_agent_1", source: "imported", todo: null,
     });

@@ -8,7 +8,6 @@
  * - `saveCompactionCounters`: the provider-reported prompt size the next compaction check starts from.
  * - `replaceSessionHistory`: writes a compacted history as a new generation; old rows stay as they were.
  * - `recordCompactionSummaryRefusal`: counts a summary request the model refused.
- * - `saveAnnouncedSkills`: the skill list the model was last told about (a record for diagnosis).
  * - `loadApplicationSessionId`: the application session a runtime session belongs to.
  * - `loadInitiatorAuth`: who opened the session.
  *
@@ -21,7 +20,6 @@ import type { PoolClient } from "pg";
 
 import { AppError } from "../../lib/app-error.js";
 import type { SessionAuthContext } from "../context.js";
-import type { AnnouncedSkill } from "../skills/definition.js";
 import { describeHistoryProblem } from "./model-message-shape.js";
 
 export type HistoryClient = Pick<PoolClient, "query">;
@@ -32,7 +30,6 @@ export interface CompactionCounters {
 }
 
 export interface NewSessionHistory {
-  readonly announcedSkills: readonly AnnouncedSkill[] | null;
   readonly applicationSessionId: string;
   /** The channel's JSON state, set by the channel on a new session. */
   readonly channelState: Record<string, unknown> | null;
@@ -49,7 +46,6 @@ export interface NewSessionHistory {
 }
 
 export interface SessionHistory {
-  readonly announcedSkills: readonly AnnouncedSkill[] | null;
   readonly compaction: CompactionCounters;
   /** Summary requests the model refused in a row since this session's last compaction. */
   readonly compactionSummaryRefusals: number;
@@ -85,14 +81,13 @@ export async function createSessionHistory(client: HistoryClient, input: NewSess
   const created = await client.query(
     `INSERT INTO agent_session_state
        (session_id, application_session_id, parent_session_id, source, compaction_input_tokens,
-        compaction_prompt_message_count, announced_skills, todo, sandbox_state, channel_state, initiator_auth)
-     VALUES ($1, $2, $3, $4, $5, $6, $7::json, $8::json, $9::json, $10::json, $11::json)
+        compaction_prompt_message_count, todo, sandbox_state, channel_state, initiator_auth)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::json, $8::json, $9::json, $10::json)
      ON CONFLICT (session_id) DO NOTHING
      RETURNING session_id`,
     [
       input.sessionId, input.applicationSessionId, input.parentSessionId, input.source,
       input.compaction.inputTokens, input.compaction.promptMessageCount,
-      input.announcedSkills === null ? null : JSON.stringify(input.announcedSkills),
       input.todo === null ? null : JSON.stringify(input.todo),
       input.sandbox === null ? null : JSON.stringify(input.sandbox),
       input.channelState === null ? null : JSON.stringify(input.channelState),
@@ -106,15 +101,13 @@ export async function createSessionHistory(client: HistoryClient, input: NewSess
 
 export async function loadSessionHistory(client: HistoryClient, sessionId: string): Promise<SessionHistory> {
   const state = (await client.query<{
-    announced_skills: AnnouncedSkill[] | null;
     compaction_input_tokens: number | null;
     compaction_prompt_message_count: number | null;
     compaction_summary_refusals: number;
     history_generation: number;
     todo: Record<string, unknown> | null;
   }>(
-    `SELECT history_generation, compaction_input_tokens, compaction_prompt_message_count, compaction_summary_refusals,
-            announced_skills, todo
+    `SELECT history_generation, compaction_input_tokens, compaction_prompt_message_count, compaction_summary_refusals, todo
        FROM agent_session_state WHERE session_id = $1`,
     [sessionId],
   )).rows[0];
@@ -126,7 +119,6 @@ export async function loadSessionHistory(client: HistoryClient, sessionId: strin
     [sessionId, state.history_generation],
   )).rows;
   return {
-    announcedSkills: state.announced_skills,
     compaction: { inputTokens: state.compaction_input_tokens, promptMessageCount: state.compaction_prompt_message_count },
     compactionSummaryRefusals: state.compaction_summary_refusals,
     generation: state.history_generation,
@@ -211,19 +203,6 @@ export async function replaceSessionHistory(
     throw new AppError("AGENT_SESSION_HISTORY_MISSING", "История разговора не найдена", { details: { sessionId: input.sessionId } });
   }
   await insertMessages(client, { firstPosition: 0, generation: state.generation, messages, sessionId: input.sessionId, turnId: input.turnId });
-}
-
-export async function saveAnnouncedSkills(
-  client: HistoryClient,
-  input: { sessionId: string; skills: readonly AnnouncedSkill[] },
-): Promise<void> {
-  const updated = await client.query(
-    "UPDATE agent_session_state SET announced_skills = $2::json, updated_at = now() WHERE session_id = $1",
-    [input.sessionId, JSON.stringify(input.skills)],
-  );
-  if (updated.rowCount !== 1) {
-    throw new AppError("AGENT_SESSION_HISTORY_MISSING", "История разговора не найдена", { details: { sessionId: input.sessionId } });
-  }
 }
 
 export async function loadApplicationSessionId(client: HistoryClient, sessionId: string): Promise<string> {

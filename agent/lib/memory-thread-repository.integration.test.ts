@@ -66,21 +66,13 @@ describeWithDatabase("memory thread repositories", () => {
       auth: fixture.auth,
       queryEmbedding: TITLE_VECTOR,
       retrievedClaimIds: [fixture.claimId],
-      skillHints: [] as string[],
     };
     const first = await briefs.activate(activation);
     const second = await briefs.activate(activation);
     const fromTitle = await briefs.activate({ ...activation, retrievedClaimIds: [] });
-    const fromSkill = await briefs.activate({
-      ...activation,
-      queryEmbedding: [-1, ...Array.from({ length: 383 }, () => 0)],
-      retrievedClaimIds: [],
-      skillHints: ["Ремонт"],
-    });
 
     expect(first).toEqual(second);
     expect(fromTitle.threads[0]?.title).toBe("Ремонт");
-    expect(fromSkill.threads[0]?.title).toBe("Ремонт");
     expect(JSON.stringify(first)).toContain("Ремонт будет продолжаться поэтапно");
     expect(JSON.stringify(first)).not.toMatch(/"(?:id|familyId|groupId|userId|scopePartitionKey)"/u);
     await database().query(
@@ -164,7 +156,6 @@ describeWithDatabase("memory thread repositories", () => {
       auth: fixture.auth,
       queryEmbedding: TITLE_VECTOR,
       retrievedClaimIds: [fixture.claimId],
-      skillHints: [],
     });
     const completedContext = context.threads.find((thread) => thread.threadRef === child.rows[0]!.thread_ref);
     const serializedContext = JSON.stringify(context);
@@ -322,7 +313,6 @@ describeWithDatabase("memory thread repositories", () => {
       auth: { ...fixture.auth, scopes: ["personal", "family"] },
       queryEmbedding: TITLE_VECTOR,
       retrievedClaimIds: [claim.rows[0]!.id],
-      skillHints: [],
     })).resolves.toEqual({ threads: [], totalCharacters: 0 });
   });
 });
