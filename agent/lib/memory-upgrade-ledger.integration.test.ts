@@ -168,6 +168,7 @@ const POST_V0101_MIGRATIONS = [
   "134_memory_author_label_rebinding.sql",
   "135_remove_t_invest_and_pohuy_skills.sql",
   "136_family_skill_library.sql",
+  "137_drop_session_announced_skills.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [

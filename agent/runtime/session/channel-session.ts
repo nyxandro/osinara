@@ -36,7 +36,6 @@ export async function openChannelSession(client: HistoryClient, input: {
   }
   const sessionId = newSessionId();
   await createSessionHistory(client, {
-    announcedSkills: null,
     applicationSessionId,
     channelState: input.channelState === null ? null : { ...input.channelState },
     compaction: { inputTokens: null, promptMessageCount: null },

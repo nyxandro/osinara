@@ -78,7 +78,7 @@ describe("retrieveMemoryTurnContext", () => {
     const searchSpy = vi.spyOn(memoryRetrievalRepository, "searchAuthorized");
     const activate = vi.spyOn(memoryThreadBriefRepository, "activate");
 
-    const context = await retrieveMemoryTurnContext(auth, "Осинара, спасибо, понял", []);
+    const context = await retrieveMemoryTurnContext(auth, "Осинара, спасибо, понял");
 
     // 08.10 golden set: 88 of 153 live turns needed no memory and every one got 11.8 records.
     expect(searchSpy).not.toHaveBeenCalled();
@@ -93,7 +93,7 @@ describe("retrieveMemoryTurnContext", () => {
     const searchSpy = vi.spyOn(memoryRetrievalRepository, "searchAuthorized");
     const activate = vi.spyOn(memoryThreadBriefRepository, "activate");
 
-    const context = await retrieveMemoryTurnContext(auth, CAPTIONLESS_ATTACHMENT_MODEL_TEXT, []);
+    const context = await retrieveMemoryTurnContext(auth, CAPTIONLESS_ATTACHMENT_MODEL_TEXT);
 
     expect(searchSpy).not.toHaveBeenCalled();
     expect(activate).not.toHaveBeenCalled();
@@ -105,7 +105,7 @@ describe("retrieveMemoryTurnContext", () => {
     search({ russianMatched: 3, russianTopRank: 0.1 });
     vi.spyOn(memoryThreadBriefRepository, "activate").mockResolvedValue({ threads: [], totalCharacters: 0 });
 
-    const context = await retrieveMemoryTurnContext(auth, "спасибо, а как называют этот чат?", []);
+    const context = await retrieveMemoryTurnContext(auth, "спасибо, а как называют этот чат?");
 
     expect(context.memories.map((memory) => "memoryRef" in memory ? memory.memoryRef : null))
       .toEqual([record.memoryRef]);

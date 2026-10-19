@@ -3,8 +3,8 @@
  * when the model loads that skill.
  *
  * Exports:
- * - `prepareTurnSkills`: the turn's skill list, recorded for the session. It never opens the sandbox,
- *   so a plain message does not wake it.
+ * - `prepareTurnSkills`: the turn's skill list for the prompt. It never opens the sandbox, so a plain
+ *   message does not wake it.
  * - `createStepSkillAccess`: the sandbox and the `load_skill` loader one step's tool contexts share.
  *   Loading reads the skill's current definition and, for a skill that has files, writes its package
  *   into the sandbox skill root as an exact copy before returning the instructions.
@@ -17,11 +17,9 @@
  * a turn running beside them.
  * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
-import type { Pool } from "pg";
-
-import { saveAnnouncedSkills } from "../history/history-repository.js";
+import type { AvailableSkillDescription } from "../prompt/skills-section.js";
 import type { RuntimeSandboxSession } from "../sandbox/types.js";
-import type { AnnouncedSkill, LoadedSkill, SkillDefinition } from "../skills/definition.js";
+import type { LoadedSkill, SkillDefinition } from "../skills/definition.js";
 import { toSkillPackage } from "../skills/packages.js";
 
 /** Where a loaded skill's files live, as the model writes the path; bash and file tools expand `$HOME`. */
@@ -29,14 +27,8 @@ export const SKILL_DIRECTORY_FOR_MODEL = "$HOME/.agents/skills";
 
 type SkillDefinitions = Readonly<Record<string, SkillDefinition>>;
 
-export async function prepareTurnSkills(input: {
-  readonly database: Pick<Pool, "query">;
-  readonly definitions: SkillDefinitions;
-  readonly sessionId: string;
-}): Promise<AnnouncedSkill[]> {
-  const skills = Object.entries(input.definitions).map(([name, skill]) => ({ description: skill.description, name }));
-  await saveAnnouncedSkills(input.database, { sessionId: input.sessionId, skills });
-  return skills;
+export function prepareTurnSkills(definitions: SkillDefinitions): AvailableSkillDescription[] {
+  return Object.entries(definitions).map(([name, skill]) => ({ description: skill.description, name }));
 }
 
 function noSuchSkill(name: string, granted: readonly string[]): Error {

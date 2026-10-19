@@ -247,7 +247,6 @@ async function expectReadable(fixture: ReadFixture): Promise<void> {
     auth: fixture.auth,
     queryEmbedding: QUERY_VECTOR,
     retrievedClaimIds: [fixture.claimId],
-    skillHints: [],
   })).threads).toHaveLength(1);
 }
 
@@ -271,7 +270,6 @@ async function expectDenied(fixture: ReadFixture): Promise<void> {
     auth: fixture.auth,
     queryEmbedding: QUERY_VECTOR,
     retrievedClaimIds: [fixture.claimId],
-    skillHints: [],
   })).resolves.toEqual({ threads: [], totalCharacters: 0 });
 }
 
@@ -302,7 +300,6 @@ describeWithDatabase("live memory read authorization", () => {
       auth: fixture.auth,
       queryEmbedding: QUERY_VECTOR,
       retrievedClaimIds: [fixture.claimId],
-      skillHints: [],
     })).resolves.toMatchObject({
       threads: [expect.objectContaining({ blocks: expect.any(Array) })],
     });
@@ -337,7 +334,6 @@ describeWithDatabase("live memory read authorization", () => {
       auth: fixture.auth,
       queryEmbedding: QUERY_VECTOR,
       retrievedClaimIds: [fixture.claimId],
-      skillHints: [] as string[],
     };
     await expect(briefs.activate(activation)).resolves.toMatchObject({
       threads: [expect.objectContaining({ blocks: expect.any(Array) })],

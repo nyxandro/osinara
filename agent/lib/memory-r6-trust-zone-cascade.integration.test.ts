@@ -276,7 +276,6 @@ describeWithDatabase("complete R6 trust-zone cascade", () => {
       },
       queryEmbedding: Array<number>(MEMORY_EMBEDDING_DIMENSIONS).fill(0),
       retrievedClaimIds: [familyZone.claimId],
-      skillHints: [],
     })).resolves.toEqual({ threads: [], totalCharacters: 0 });
   });
 });

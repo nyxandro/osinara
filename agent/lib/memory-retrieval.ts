@@ -205,7 +205,6 @@ function selectedRankingByRef(selected: readonly SelectedMemory[]): Map<string, 
 export async function retrieveMemoryTurnContext(
   auth: MemoryAuthorization,
   query: string,
-  skillHints: readonly string[],
   /** Absent for a turn with no conversation of its own: nothing to remember showing into. */
   window: MemorySelectionWindow | null = null,
 ): Promise<MemoryTurnContext> {
@@ -226,10 +225,9 @@ export async function retrieveMemoryTurnContext(
         auth,
         // Thread activation holds one vector by contract, so the pieces fold back into their
         // centroid here — locally, without asking the embedding service a second time. Without a
-        // vector threads still activate by what the search retrieved and by skill hints.
+        // vector threads still activate by what the search retrieved.
         queryEmbedding: selection.embeddings.length === 0 ? null : memoryQueryCentroid(selection.embeddings),
         retrievedClaimIds: selection.selected.map((selected) => selected.memory.id),
-        skillHints,
       });
     return {
       diagnostics: {

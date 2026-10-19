@@ -34,7 +34,6 @@ interface ActivatedThreadRow {
   id: string;
   purpose: string;
   retrieval_hits: number;
-  skill_hint: boolean;
   status: "active" | "completed";
   thread_ref: string;
   title: string;
@@ -156,11 +155,7 @@ export function createMemoryThreadBriefRepository() {
     /** Null when the embedding service was unreachable: threads then activate without similarity. */
     queryEmbedding: readonly number[] | null;
     retrievedClaimIds: readonly string[];
-    skillHints: readonly string[];
   }): Promise<MemoryThreadContext> {
-    const hints = [...new Set(input.skillHints.map((hint) =>
-      hint.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("ru-RU")
-    ))];
     const result = await database().query<ActivatedThreadRow>(
       `WITH hits AS (
          SELECT entry.thread_id, count(*)::integer AS retrieval_hits
@@ -172,8 +167,7 @@ export function createMemoryThreadBriefRepository() {
        )
        SELECT thread.id, thread.thread_ref, thread.title, thread.purpose, thread.status::text,
                COALESCE(hits.retrieval_hits, 0) AS retrieval_hits,
-              thread.title_normalized = ANY($7::text[]) AS skill_hint,
-              CASE WHEN thread.title_embedding_model = $8
+              CASE WHEN thread.title_embedding_model = $7
                 THEN 1 - (thread.title_embedding <=> $6::vector) ELSE NULL END AS title_similarity
        FROM memory_threads AS thread LEFT JOIN hits ON hits.thread_id = thread.id
        WHERE thread.family_id = $1 AND ${liveMemoryReadPredicate({
@@ -190,19 +184,18 @@ export function createMemoryThreadBriefRepository() {
             AND available_outcome.status = 'confirmed'
           WHERE available_entry.thread_id = thread.id
             AND (available_claim.id IS NOT NULL OR available_outcome.id IS NOT NULL)
-        )) AND (COALESCE(hits.retrieval_hits, 0) > 0 OR thread.title_normalized = ANY($7::text[])
-         OR (thread.title_embedding_model = $8
-           AND 1 - (thread.title_embedding <=> $6::vector) >= $9))
-       ORDER BY skill_hint DESC,
-                -- Without a query vector the comparison is NULL, and NULLs sort first under DESC:
-                -- threads with a current title embedding would jump ahead of better-matching ones.
-                COALESCE(thread.title_embedding_model = $8 AND
-                  1 - (thread.title_embedding <=> $6::vector) >= $9, false) DESC,
+        )) AND (COALESCE(hits.retrieval_hits, 0) > 0
+         OR (thread.title_embedding_model = $7
+           AND 1 - (thread.title_embedding <=> $6::vector) >= $8))
+       -- Without a query vector the comparison is NULL, and NULLs sort first under DESC:
+       -- threads with a current title embedding would jump ahead of better-matching ones.
+       ORDER BY COALESCE(thread.title_embedding_model = $7 AND
+                  1 - (thread.title_embedding <=> $6::vector) >= $8, false) DESC,
                 retrieval_hits DESC, thread.updated_at DESC
-        LIMIT $10`,
+        LIMIT $9`,
       [input.auth.familyId, input.auth.scopes, input.auth.userId, input.auth.groupId,
         input.retrievedClaimIds,
-        input.queryEmbedding === null ? null : vectorLiteral(input.queryEmbedding), hints,
+        input.queryEmbedding === null ? null : vectorLiteral(input.queryEmbedding),
          MEMORY_EMBEDDING_MODEL_VERSION, THREAD_TITLE_MIN_SEMANTIC_SIMILARITY,
          THREAD_CONTEXT_MAX_THREADS],
     );
@@ -225,7 +218,6 @@ export function createMemoryThreadBriefRepository() {
           purpose: thread.purpose,
           relevance: {
             retrievalHits: thread.retrieval_hits,
-            skillHint: thread.skill_hint,
             titleMatch: similarity !== null && similarity >= THREAD_TITLE_MIN_SEMANTIC_SIMILARITY,
           },
           sourceEvidence,
@@ -250,7 +242,6 @@ export function createMemoryThreadBriefRepository() {
         purpose: thread.purpose,
         relevance: {
           retrievalHits: thread.retrieval_hits,
-          skillHint: thread.skill_hint,
           titleMatch: similarity !== null && similarity >= THREAD_TITLE_MIN_SEMANTIC_SIMILARITY,
         },
         sourceEvidence,
