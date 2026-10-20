@@ -197,6 +197,7 @@ describe("production container contract", () => {
       "postgres-data",
       "memory-embedding-model-e5",
       "google-workspace-credentials",
+      "network-access",
       "tool-environments",
       "workspace-data",
       "cli-proxy-auth",
@@ -608,5 +609,30 @@ describe("production edge and installer contract", () => {
     expect(hostOperations).toContain('"osinara-production-edge-frontend"');
     expect(() => executeComposeSecurityPredicate(valid, "production")).not.toThrow();
     expect(() => executeComposeSecurityPredicate(unsafe, "production")).toThrow();
+  });
+
+  // The proxy opens owner-approved IP destinations only to requests that reach it through the trusted
+  // sandbox network, so the agent's own page fetches and other services must never join that network.
+  it("keeps the trusted sandbox network to the proxy and its grant file read-only", () => {
+    type Graph = {
+      services: Record<string, { networks?: Record<string, unknown>; volumes?: Array<Record<string, unknown>> }>;
+    };
+    const compose = readProjectFile("compose.production.yaml");
+    const valid = resolvedComposeSecurityFixture();
+    const agentOnTrustedNetwork = structuredClone(valid) as Graph;
+    agentOnTrustedNetwork.services.agent!.networks = { "sandbox-egress": null };
+    const aliasOnAppNetwork = structuredClone(valid) as Graph;
+    aliasOnAppNetwork.services["sandbox-egress-proxy"]!.networks = {
+      "app-network": { aliases: ["sandbox-trusted-egress-proxy"] },
+      "sandbox-egress": null,
+    };
+    const writableGrants = structuredClone(valid) as Graph;
+    writableGrants.services["sandbox-egress-proxy"]!.volumes![0]!.read_only = false;
+
+    expect(compose.match(/sandbox-trusted-egress-proxy/g)).toHaveLength(1);
+    expect(() => executeComposeSecurityPredicate(valid, "production")).not.toThrow();
+    for (const unsafe of [agentOnTrustedNetwork, aliasOnAppNetwork, writableGrants]) {
+      expect(() => executeComposeSecurityPredicate(unsafe, "production")).toThrow();
+    }
   });
 });

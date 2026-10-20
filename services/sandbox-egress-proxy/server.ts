@@ -4,11 +4,16 @@
  * Exports:
  * - `bindTunnelLifecycle`: prevents either side of a CONNECT tunnel from becoming orphaned.
  * - `connectWithDeadline`: bounds TCP establishment without timing out an established idle tunnel.
+ * - `SandboxEgressProxyOptions`: the owner-approved network access gate and how often open
+ *   connections to IP destinations are rechecked against it.
  * - `createSandboxEgressProxy`: creates the internal proxy server.
  *
  * Security invariants:
  * - DNS is resolved at the proxy and the validated IP is pinned for the connection.
- * - Private/reserved destinations and ports other than HTTP(S) are rejected.
+ * - A host name reaches only public destinations on ports 80 and 443.
+ * - An IP address on any port is reached only when the network access gate allows it; a host name
+ *   made of digits and dots is treated as an address and never resolved. An open connection to it
+ *   is closed once a recheck finds the grant gone.
  * - Proxy credentials and hop-by-hop headers are never forwarded.
  * - Logs name the destination host, never a full URL: it may carry credentials or tokens.
  */
@@ -20,9 +25,13 @@ import {
   SANDBOX_EGRESS_UPSTREAM_CLOSED_CODE,
   writeEgressLog,
 } from "./egress-log.js";
+import { createGrantedConnectionRegistry } from "./granted-connection-registry.js";
+import { NetworkAccessRefusal, type NetworkAccessGate } from "./network-access-gate.js";
 import { resolvePublicInternetAddress } from "./public-dns-resolver.js";
 
 const ALLOWED_PORTS = new Set([80, 443]);
+const MAX_PORT = 65_535;
+const IP_LITERAL_HOST = /^[0-9.]+$/u;
 const CONNECT_TIMEOUT_MS = 15_000;
 // How a client closing its side of the connection surfaces on the proxy socket.
 const CLIENT_CLOSED_ERROR_CODES = new Set(["ECONNRESET", "EPIPE"]);
@@ -40,6 +49,8 @@ const HOP_BY_HOP_HEADERS = new Set([
 interface ResolvedTarget {
   address: string;
   family: 4;
+  /** The network access gate allowed it, so the connection is rechecked while it stays open. */
+  granted: boolean;
   hostname: string;
   port: number;
 }
@@ -80,18 +91,43 @@ export function connectWithDeadline(
   return socket;
 }
 
-function parsePort(value: string): number {
+export interface SandboxEgressProxyOptions {
+  readonly grantRecheckMilliseconds: number;
+  readonly networkAccess: NetworkAccessGate;
+}
+
+function parseDestinationPort(hostname: string, value: string): number {
   const port = Number(value);
-  if (!Number.isSafeInteger(port) || !ALLOWED_PORTS.has(port)) {
+  if (!/^[0-9]+$/u.test(value) || port < 1 || port > MAX_PORT) {
+    throw new Error("AGENT_SANDBOX_EGRESS_PORT_FORBIDDEN: Port is not a valid TCP port");
+  }
+  // The network access gate decides the port of an IP address; a host name only reaches the web.
+  if (!IP_LITERAL_HOST.test(hostname) && !ALLOWED_PORTS.has(port)) {
     throw new Error("AGENT_SANDBOX_EGRESS_PORT_FORBIDDEN: Only ports 80 and 443 are allowed");
   }
   return port;
 }
 
-async function resolvePublicTarget(hostname: string, port: number): Promise<ResolvedTarget> {
+async function resolveTarget(
+  networkAccess: NetworkAccessGate,
+  hostname: string,
+  port: number,
+  localAddress: string | undefined,
+): Promise<ResolvedTarget> {
+  if (IP_LITERAL_HOST.test(hostname)) {
+    await networkAccess.authorize({ address: hostname, localAddress, port });
+    return { address: hostname, family: 4, granted: true, hostname, port };
+  }
   // Resolve outside host VPN fake-IP DNS, then pin the validated address for this connection.
   const publicAddress = await resolvePublicInternetAddress(hostname);
-  return { ...publicAddress, hostname, port };
+  return { ...publicAddress, granted: false, hostname, port };
+}
+
+// The sandbox sees why an IP destination was refused; every other refusal stays generic.
+function refusalBody(error: unknown): string {
+  return error instanceof NetworkAccessRefusal
+    ? `${error.code}: ${error.clientMessage}\n`
+    : "AGENT_SANDBOX_EGRESS_FORBIDDEN: Destination is not allowed\n";
 }
 
 function filteredHeaders(headers: IncomingHttpHeaders): IncomingHttpHeaders {
@@ -113,8 +149,9 @@ function connectTargetForLog(target: string | undefined): string | null {
   return target === undefined ? null : target.slice(target.lastIndexOf("@") + 1);
 }
 
-function rejectSocket(socket: Socket, status: number, message: string): void {
-  socket.end(`HTTP/1.1 ${status} ${message}\r\nConnection: close\r\n\r\n`);
+function rejectSocket(socket: Socket, status: number, message: string, body = ""): void {
+  const content = body ? `Content-Type: text/plain\r\nContent-Length: ${Buffer.byteLength(body)}\r\n` : "";
+  socket.end(`HTTP/1.1 ${status} ${message}\r\n${content}Connection: close\r\n\r\n${body}`);
 }
 
 function guardClientSocket(socket: Socket, phase: () => ConnectPhase): () => boolean {
@@ -137,15 +174,16 @@ function guardClientSocket(socket: Socket, phase: () => ConnectPhase): () => boo
   return () => unavailable;
 }
 
-export function createSandboxEgressProxy() {
+export function createSandboxEgressProxy({ grantRecheckMilliseconds, networkAccess }: SandboxEgressProxyOptions) {
+  const grantedConnections = createGrantedConnectionRegistry(networkAccess, grantRecheckMilliseconds);
   const server = createServer((incoming, outgoing) => {
     void (async () => {
       const targetUrl = new URL(incoming.url ?? "");
       if (targetUrl.protocol !== "http:" || targetUrl.username || targetUrl.password) {
         throw new Error("AGENT_SANDBOX_EGRESS_URL_FORBIDDEN: Only credential-free HTTP URLs are allowed");
       }
-      const port = parsePort(targetUrl.port || "80");
-      const target = await resolvePublicTarget(targetUrl.hostname, port);
+      const port = parseDestinationPort(targetUrl.hostname, targetUrl.port || "80");
+      const target = await resolveTarget(networkAccess, targetUrl.hostname, port, incoming.socket.localAddress);
       const upstream = httpRequest({
         family: target.family,
         headers: { ...filteredHeaders(incoming.headers), host: targetUrl.host },
@@ -175,6 +213,18 @@ export function createSandboxEgressProxy() {
         if (!outgoing.headersSent) outgoing.writeHead(502);
         outgoing.end("AGENT_SANDBOX_EGRESS_FAILED: Public destination request failed\n");
       });
+      if (target.granted) {
+        const untrack = grantedConnections.track({
+          address: target.address,
+          close: () => {
+            upstream.destroy();
+            outgoing.destroy();
+          },
+          localAddress: incoming.socket.localAddress,
+          port,
+        });
+        outgoing.once("close", untrack);
+      }
       incoming.pipe(upstream);
     })().catch((error: unknown) => {
       writeEgressLog({
@@ -183,7 +233,7 @@ export function createSandboxEgressProxy() {
         host: urlHost(incoming.url),
       });
       if (!outgoing.headersSent) outgoing.writeHead(403);
-      outgoing.end("AGENT_SANDBOX_EGRESS_FORBIDDEN: Destination is not allowed\n");
+      outgoing.end(refusalBody(error));
     });
   });
 
@@ -193,9 +243,9 @@ export function createSandboxEgressProxy() {
     void (async () => {
       const match = /^\[?([^\]]+)\]?:([0-9]+)$/u.exec(request.url ?? "");
       if (!match) throw new Error("AGENT_SANDBOX_EGRESS_CONNECT_INVALID: Invalid CONNECT target");
-      const port = parsePort(match[2]!);
+      const port = parseDestinationPort(match[1]!, match[2]!);
       phase = "resolution";
-      const target = await resolvePublicTarget(match[1]!, port);
+      const target = await resolveTarget(networkAccess, match[1]!, port, clientSocket.localAddress);
       if (clientUnavailable()) return;
       phase = "connect";
       const upstream = connectWithDeadline(() => connect({
@@ -207,6 +257,18 @@ export function createSandboxEgressProxy() {
       if (clientUnavailable()) {
         upstream.destroy();
         return;
+      }
+      if (target.granted) {
+        const untrack = grantedConnections.track({
+          address: target.address,
+          close: () => {
+            upstream.destroy();
+            clientSocket.destroy();
+          },
+          localAddress: clientSocket.localAddress,
+          port,
+        });
+        upstream.once("close", untrack);
       }
       upstream.once("connect", () => {
         phase = "tunnel";
@@ -233,9 +295,10 @@ export function createSandboxEgressProxy() {
         phase,
         target: connectTargetForLog(request.url),
       });
-      rejectSocket(clientSocket, 403, "Forbidden");
+      rejectSocket(clientSocket, 403, "Forbidden", refusalBody(error));
     });
   });
 
+  server.on("close", () => grantedConnections.stop());
   return server;
 }

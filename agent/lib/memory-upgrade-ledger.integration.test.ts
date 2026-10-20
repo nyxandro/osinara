@@ -169,6 +169,7 @@ const POST_V0101_MIGRATIONS = [
   "135_remove_t_invest_and_pohuy_skills.sql",
   "136_family_skill_library.sql",
   "137_drop_session_announced_skills.sql",
+  "138_network_access_grants.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [

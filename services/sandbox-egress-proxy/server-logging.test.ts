@@ -36,6 +36,13 @@ vi.mock("./public-dns-resolver.js", () => ({
 const { createSandboxEgressProxy } = await import("./server.js");
 const { SANDBOX_EGRESS_ROUTINE_CODES } = await import("./egress-log.js");
 
+// These cases use host names only, which never reach the network access gate.
+const hostNamesOnly = {
+  authorize: async () => {
+    throw new Error("The network access gate must not be consulted for a host name");
+  },
+};
+
 type LoggedLine = { stream: "error" | "info"; text: string };
 
 let lines: LoggedLine[];
@@ -57,7 +64,7 @@ async function settle(): Promise<void> {
 }
 
 async function openTunnel(target: string) {
-  const server = createSandboxEgressProxy();
+  const server = createSandboxEgressProxy({ grantRecheckMilliseconds: 60_000, networkAccess: hostNamesOnly });
   const client = new PassThrough() as unknown as Socket;
   const upstream = new PassThrough() as unknown as Socket;
   network.connect.mockReturnValue(upstream);
@@ -192,7 +199,7 @@ describe("sandbox egress proxy log records", () => {
   });
 
   it("logs a rejected HTTP request by host only, never with the credentials in its URL", async () => {
-    const server = createSandboxEgressProxy();
+    const server = createSandboxEgressProxy({ grantRecheckMilliseconds: 60_000, networkAccess: hostNamesOnly });
     const incoming = { headers: {}, method: "GET", url: "http://user:s3cret@example.com/path?token=t0ken" };
     const outgoing = { end: vi.fn(), headersSent: false, writeHead: vi.fn() };
 
@@ -210,11 +217,11 @@ describe("sandbox egress proxy log records", () => {
   });
 
   it("records a failed plain HTTP request as one failure line", async () => {
-    const server = createSandboxEgressProxy();
+    const server = createSandboxEgressProxy({ grantRecheckMilliseconds: 60_000, networkAccess: hostNamesOnly });
     const upstream = Object.assign(new PassThrough(), { destroy: vi.fn() });
     network.request.mockReturnValue(upstream as unknown as ClientRequest);
     const incoming = Object.assign(new PassThrough(), {
-      headers: {}, method: "GET", url: "http://example.com/page?token=t0ken",
+      headers: {}, method: "GET", socket: { localAddress: "172.20.0.3" }, url: "http://example.com/page?token=t0ken",
     });
     const outgoing = Object.assign(new EventEmitter(), { end: vi.fn(), headersSent: false, writeHead: vi.fn() });
 

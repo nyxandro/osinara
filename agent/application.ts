@@ -9,7 +9,8 @@
  *
  * Start, in order:
  * 1. The runner lock: one agent process per database; a second one stops here with
- *    `AGENT_RUNTIME_ALREADY_RUNNING`.
+ *    `AGENT_RUNTIME_ALREADY_RUNNING`. Then the owner-approved network access grants are published
+ *    again from the database for the sandbox egress proxy.
  * 2. The runtime: Osinara's agent, the model call, sandboxes, compaction, and an observer per
  *    channel (Telegram delivers, the memory review only records how its turn ended).
  * 3. Recovery: turns an earlier process left running continue from the journal, and what it left
@@ -29,6 +30,7 @@ import { createConversationWakeupProcessor } from "./lib/conversation-wakeups/co
 import { conversationWakeupRepository } from "./lib/conversation-wakeups/conversation-wakeup-repository.js";
 import { createConversationWakeupTurn } from "./lib/conversation-wakeups/conversation-wakeup-turn-start.js";
 import { database, openDedicatedConnection } from "./lib/database.js";
+import { networkAccessPublisher } from "./lib/network-access/network-access-projection.js";
 import { withRuntimeAdmission } from "./lib/runtime-maintenance.js";
 import { createApprovalTimeoutResolver } from "./lib/telegram-hitl/approval-timeout.js";
 import { finalizeTimedOutPrompt } from "./lib/telegram-hitl/approval-timeout-prompt.js";
@@ -103,6 +105,9 @@ async function reportsBeforeRequests(dispatcher: TurnDispatcher): Promise<void> 
 export async function startApplication(options: ApplicationOptions): Promise<RunningApplication> {
   const db = database();
   const runnerLock = await acquireRunnerLock(openDedicatedConnection, options.onRunnerLockTaken);
+  // The sandbox egress proxy reads only the published grant file; rebuild it from the database
+  // before any turn can run, which also repairs a publication lost to a crash.
+  await networkAccessPublisher.publish();
   const telegram = createTelegramChannel({
     botToken: options.botToken,
     botUsername: options.botUsername,
