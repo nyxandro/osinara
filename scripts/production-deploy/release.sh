@@ -234,6 +234,14 @@ validate_resolved_compose_security() {
     ((.services.edge.networks // {}) | keys) == ["app-network", "edge-frontend"] and
     ([.services | to_entries[] |
       select((.value.networks // {}) | has("edge-frontend")) | .key] | sort) == ["edge"] and
+    ([.services | to_entries[] |
+      select((.value.networks // {}) | has("sandbox-egress")) | .key]) == ["sandbox-egress-proxy"] and
+    ([.services[] | (.networks // {}) | to_entries[] | (.value.aliases // [])[] |
+      select(. == "sandbox-trusted-egress-proxy")] | length) == 1 and
+    (.services["sandbox-egress-proxy"].networks["sandbox-egress"].aliases // []) ==
+      ["sandbox-trusted-egress-proxy"] and
+    any(.services["sandbox-egress-proxy"].volumes[];
+      .source == "network-access" and .target == "/app/network-access" and .read_only == true) and
     any(.services.agent.volumes[];
       .source == "/opt/osinara/agent-model-providers.json" and
       .target == "/app/config/agent-model-providers.json" and .read_only == true) and
@@ -246,10 +254,12 @@ validate_resolved_compose_security() {
       ($service.value.volumes // [])[] |
       {service: $service.key, type, source, target}] | sort_by(.service, .target)) == (([
         {service: "agent", type: "volume", source: "google-workspace-credentials", target: "/app/google-workspace-credentials"},
+        {service: "agent", type: "volume", source: "network-access", target: "/app/network-access"},
         {service: "agent", type: "volume", source: "workspace-data", target: "/app/workspaces"},
         {service: "agent", type: "bind", source: "/opt/osinara/agent-model-providers.json", target: "/app/config/agent-model-providers.json"},
         {service: "memory-embedding", type: "volume", source: "memory-embedding-model-e5", target: "/data"},
         {service: "postgres", type: "volume", source: "postgres-data", target: "/var/lib/postgresql/data"},
+        {service: "sandbox-egress-proxy", type: "volume", source: "network-access", target: "/app/network-access"},
         {service: "sandbox-runner", type: "bind", source: "/var/run/docker.sock", target: "/var/run/docker.sock"},
         {service: "sandbox-runner", type: "volume", source: "tool-environments", target: "/runner/tools"},
         {service: "sandbox-runner", type: "volume", source: "workspace-data", target: "/runner/workspaces"}

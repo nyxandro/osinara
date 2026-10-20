@@ -39,8 +39,10 @@ const REQUIRED_CORE_RULES = [
 // Raised from 25 000 for `manage_skill` (family skills), whose procedure lives in the owner's
 // private-chat instructions so that its own description stays short; then to 26 000 when the
 // descriptions moved to English, which takes about 3% more characters for the same text while the
-// production model counts about 5% fewer tokens for the private chat's whole tool set (17 084 → 16 239).
-const TOTAL_DESCRIPTION_MAX_CHARACTERS = 26_000;
+// production model counts about 5% fewer tokens for the private chat's whole tool set (17 084 → 16 239);
+// then to 26 700 for `manage_network_access` (owner-approved sandbox access to IP addresses), which
+// left 83 characters of headroom and needs 680.
+const TOTAL_DESCRIPTION_MAX_CHARACTERS = 26_700;
 // The runtime's built-ins are in every prompt anyway; the budget is the application's own.
 const NATIVE_DESCRIPTIONS = new Set([agentTool, askQuestion, bash, glob, grep, loadSkill, readFile, todo, writeFile].map((definition) => definition.description));
 

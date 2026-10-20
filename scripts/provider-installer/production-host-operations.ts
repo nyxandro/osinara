@@ -74,6 +74,7 @@ const PRODUCTION_DOCKER_RESOURCES = [
   "osinara-production-postgres-data",
   "osinara-production-memory-embedding-model-e5",
   "osinara-production-google-workspace-credentials",
+  "osinara-production-network-access",
   "osinara-production-tool-environments",
   "osinara-production-workspace-data",
   "osinara-production-app-network",

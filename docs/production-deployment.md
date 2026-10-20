@@ -523,7 +523,8 @@ application database. It then stops application writers, archives `cli-proxy-aut
 artifact. A current-owned durable volume missing from the candidate is forbidden. A missing
 current-owned volume or a pre-existing candidate-only volume fails closed, so deploy never creates
 an empty replacement for active data or silently reuses bytes of unknown provenance. The
-reconstructible embedding model volume is omitted.
+reconstructible embedding model volume is omitted, and so is `network-access`: the agent rewrites
+its grant file from the database on every start.
 Candidate release files remain in a unique temporary directory and become `releases/vVERSION` only
 after health succeeds.
 

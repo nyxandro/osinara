@@ -31,6 +31,7 @@ import manageGoogleWorkspaceConnection from "../tools/manage_google_workspace_co
 import manageGmailMessage from "../tools/manage_gmail_message.js";
 import manageMemory from "../tools/manage_memory.js";
 import manageMemoryThread from "../tools/manage_memory_thread.js";
+import manageNetworkAccess from "../tools/manage_network_access.js";
 import manageProfileProjection from "../tools/manage_profile_projection.js";
 import manageReminder from "../tools/manage_reminder.js";
 import manageSkill from "../tools/manage_skill.js";
@@ -97,6 +98,7 @@ export const PRIVATE_ONLY_TOOLS: ToolMap = {
   list_pending_family_invitations: listPendingFamilyInvitations as unknown as AnyToolDefinition,
   manage_external_group_schedule: manageExternalGroupSchedule as unknown as AnyToolDefinition,
   manage_family_invitation: manageFamilyInvitation as unknown as AnyToolDefinition,
+  manage_network_access: manageNetworkAccess as unknown as AnyToolDefinition,
   manage_profile_projection: manageProfileProjection as unknown as AnyToolDefinition,
   manage_skill: manageSkill as unknown as AnyToolDefinition,
   manage_telegram_group: manageTelegramGroup as unknown as AnyToolDefinition,
