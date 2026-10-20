@@ -40,6 +40,7 @@ const EXPECTED_TOOL_MODULES = [
   "manage_google_workspace_connection.ts",
   "manage_memory.ts",
   "manage_memory_thread.ts",
+  "manage_network_access.ts",
   "manage_profile_projection.ts",
   "manage_reminder.ts",
   "manage_skill.ts",

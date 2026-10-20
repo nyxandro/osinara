@@ -60,8 +60,9 @@ describe("step tool order", () => {
 });
 
 // Changed on purpose after the reference requests were recorded (stage 7, family skills): a new tool, and a
-// group skill list that also names the family's own skills.
-const CHANGED_AFTER_RECORDING = new Set(["manage_skill", "manage_telegram_group"]);
+// group skill list that also names the family's own skills. Owner-approved network access added its tool
+// on 20.10.2026.
+const CHANGED_AFTER_RECORDING = new Set(["manage_network_access", "manage_skill", "manage_telegram_group"]);
 
 describe("model-facing tool definitions", () => {
   it("reach the model exactly as the reference requests carry the application tools of a private chat", async () => {

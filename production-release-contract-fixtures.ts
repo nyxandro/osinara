@@ -31,6 +31,7 @@ export function resolvedComposeSecurityFixture(): Record<string, unknown> {
         },
         volumes: [
           volume("google-workspace-credentials", "/app/google-workspace-credentials"),
+          volume("network-access", "/app/network-access"),
           volume("workspace-data", "/app/workspaces"),
           volume("/opt/osinara/agent-model-providers.json", "/app/config/agent-model-providers.json", "bind", true),
         ],
@@ -50,7 +51,10 @@ export function resolvedComposeSecurityFixture(): Record<string, unknown> {
       "memory-embedding-worker": service(),
       migrate: service(),
       postgres: service({ volumes: [volume("postgres-data", "/var/lib/postgresql/data")] }),
-      "sandbox-egress-proxy": service(),
+      "sandbox-egress-proxy": service({
+        networks: { "app-network": null, "sandbox-egress": { aliases: ["sandbox-trusted-egress-proxy"] } },
+        volumes: [volume("network-access", "/app/network-access", "volume", true)],
+      }),
       "sandbox-runner": service({
         volumes: [
           volume("/var/run/docker.sock", "/var/run/docker.sock", "bind"),

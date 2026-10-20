@@ -332,6 +332,26 @@ describe("Telegram interface localization", () => {
     expect(request.prompt).toContain("отключить Google Workspace от текущей области");
   });
 
+  it("shows the owner exactly which address a network access request opens", () => {
+    const request = localizeTelegramInputRequest({
+      action: {
+        callId: "call-1",
+        input: { action: "request", address: "100.91.171.16", port: 8123, purpose: "Home Assistant" },
+        kind: "tool-call" as const,
+        toolName: "manage_network_access",
+      },
+      display: "confirmation" as const,
+      kind: "tool-approval" as const,
+      options: [],
+      prompt: "Approve tool call",
+      requestId: "request-network-access",
+    });
+
+    expect(request.prompt).toContain("открыть агенту доступ к адресу в вашей сети");
+    expect(request.prompt).toContain("Адрес: 100.91.171.16:8123");
+    expect(request.prompt).toContain("Устройство: Home Assistant");
+  });
+
   it("localizes the freeform answer placeholder", () => {
     expect(
       localizeTelegramReplyMarkup({

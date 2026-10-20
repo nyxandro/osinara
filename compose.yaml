@@ -75,6 +75,8 @@ services:
     volumes:
       - ./config/agent-model-providers.json:/app/config/agent-model-providers.json:ro
       - google-workspace-credentials:/app/google-workspace-credentials
+      # A host directory, not a named volume: `npm run dev` on the host writes the same grant file.
+      - ./network-access:/app/network-access
       - workspace-data:/app/workspaces
 
   migrate:
@@ -140,14 +142,20 @@ services:
       timeout: 3s
       retries: 20
     networks:
-      - default
-      - sandbox-egress
+      default:
+      sandbox-egress:
+        # Resolves only on the trusted sandbox network: the proxy finds its own address there and
+        # opens owner-approved IP destinations only to requests that arrive on it.
+        aliases:
+          - sandbox-trusted-egress-proxy
     read_only: true
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
     tmpfs:
       - /tmp:size=32m,mode=1777
+    volumes:
+      - ./network-access:/app/network-access:ro
 
   memory-embedding:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256:ad950d30878eceb72aaf32024d26fa2b1d04a75304fa0b4776b49aa1941fea07

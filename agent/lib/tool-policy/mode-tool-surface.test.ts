@@ -115,6 +115,14 @@ describe("trusted mode tool surfaces", () => {
     expect(names({ environment: "family" })).not.toContain("manage_skill");
   });
 
+  it("requests network access only in an interactive turn of the private chat", () => {
+    // A scheduled turn has nobody to confirm, a delegated task reads untrusted pages.
+    expect(names({ environment: "private" })).toContain("manage_network_access");
+    expect(names({ environment: "private", scheduledRun: true })).not.toContain("manage_network_access");
+    expect(Object.keys(buildSubagentToolSurface({ environment: "private" }))).not.toContain("manage_network_access");
+    expect(names({ environment: "family" })).not.toContain("manage_network_access");
+  });
+
   it("never exposes another zone's tools", () => {
     const privateNames = names({ environment: "private" });
     const familyNames = names({ environment: "family" });

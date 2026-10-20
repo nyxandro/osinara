@@ -17,3 +17,6 @@ result-chat.json
 # Production inputs the Telegram conversation bench copies in for one run (bench-runner.ts).
 stress/telegram-conversation/config/
 stress/telegram-conversation/agent/instructions.md
+
+# Grant file the agent republishes on every start (`npm run dev` writes it into the repository root).
+/network-access/

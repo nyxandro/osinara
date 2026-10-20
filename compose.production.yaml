@@ -157,6 +157,7 @@ services:
     volumes:
       - /opt/osinara/agent-model-providers.json:/app/config/agent-model-providers.json:ro
       - google-workspace-credentials:/app/google-workspace-credentials
+      - network-access:/app/network-access
       - workspace-data:/app/workspaces
 
   migrate:
@@ -281,8 +282,12 @@ services:
       timeout: 3s
       retries: 20
     networks:
-      - app-network
-      - sandbox-egress
+      app-network:
+      sandbox-egress:
+        # Resolves only on the trusted sandbox network: the proxy finds its own address there and
+        # opens owner-approved IP destinations only to requests that arrive on it.
+        aliases:
+          - sandbox-trusted-egress-proxy
     read_only: true
     restart: unless-stopped
     logging: *bounded-json-logs
@@ -290,6 +295,9 @@ services:
       - no-new-privileges:true
     tmpfs:
       - /tmp:size=32m,mode=1777
+    volumes:
+      # Rebuilt by the agent from the database on every start, so it needs no backup.
+      - network-access:/app/network-access:ro
 
 volumes:
   cli-proxy-auth:
@@ -300,6 +308,8 @@ volumes:
     name: osinara-production-memory-embedding-model-e5
   google-workspace-credentials:
     name: osinara-production-google-workspace-credentials
+  network-access:
+    name: osinara-production-network-access
   tool-environments:
     name: osinara-production-tool-environments
   workspace-data:

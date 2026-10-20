@@ -29,6 +29,9 @@ const MANAGED_ACTION_LABELS: Readonly<Record<string, Readonly<Record<string, str
     approve: "добавить участника в семью",
     create: "создать приглашение в семейного агента",
   },
+  manage_network_access: {
+    request: "открыть агенту доступ к адресу в вашей сети. Доступ получат песочницы семьи, внешние группы — нет",
+  },
   manage_telegram_group: {
     register:
       "подключить Telegram-группу. Если чат уже подключён с другим типом, его история, workspace, память и сессии будут безвозвратно удалены",
@@ -141,6 +144,14 @@ function approvalParameterLines(toolName: string, input: Record<string, unknown>
         ...line("Кандидат", "candidateDisplayName"),
         ...line("Telegram user ID", "candidateTelegramUserId"),
       ];
+    case "manage_network_access": {
+      const address = value("address");
+      const port = input.port;
+      return [
+        ...(address && typeof port === "number" ? [`Адрес: ${address}:${port}`] : []),
+        ...line("Устройство", "purpose"),
+      ];
+    }
     case "remove_group_file":
       return line("Путь", "path");
     case "manage_external_group_schedule":

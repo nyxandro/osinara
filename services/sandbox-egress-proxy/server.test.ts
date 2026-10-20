@@ -17,6 +17,13 @@ import {
   createSandboxEgressProxy,
 } from "./server.js";
 
+// These cases use host names only, which never reach the network access gate.
+const hostNamesOnly = {
+  authorize: async () => {
+    throw new Error("The network access gate must not be consulted for a host name");
+  },
+};
+
 function upstreamSocket(): Socket {
   return Object.assign(new EventEmitter(), {
     destroy: vi.fn(),
@@ -35,7 +42,7 @@ describe("sandbox egress proxy server", () => {
   it("handles an EPIPE from a disconnected CONNECT client", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(console, "info").mockImplementation(() => undefined);
-    const server = createSandboxEgressProxy();
+    const server = createSandboxEgressProxy({ grantRecheckMilliseconds: 60_000, networkAccess: hostNamesOnly });
     const clientSocket = new PassThrough() as unknown as Socket;
     const error = Object.assign(new Error("client disconnected"), { code: "EPIPE" });
 
