@@ -31,6 +31,12 @@ export const MEMORY_REVIEW_BATCH_SIZE = 50;
  * tokens, against 865 pairs of near-duplicate records the review keeps producing.
  */
 export const MEMORY_REVIEW_KNOWN_RECORD_LIMIT = 15;
+/**
+ * How many property names per author of a batch the review is shown. A name is a few words, and
+ * on production a person has at most a handful; the bound only keeps one long-lived author from
+ * growing the prompt without end.
+ */
+export const MEMORY_REVIEW_AUTHOR_PROPERTY_LIMIT = 12;
 /** How many already-reviewed messages precede the batch, so the model sees where it begins. */
 export const MEMORY_REVIEW_REVIEWED_TAIL_LIMIT = 5;
 export const MEMORY_REVIEW_DISPATCH_BATCH_SIZE = 10;

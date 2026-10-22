@@ -4,7 +4,8 @@
  * Exports:
  * - `MEMORY_ATTRIBUTE_MAX_CHARACTERS`: how long a slot name may be.
  * - `normalizeMemoryAttribute`: the stored form of a slot name, or a refusal.
- * - `supersedeMemoryAttributeSlot`: retires the previous holder of this slot.
+ * - `supersedeMemoryAttributeSlot`: retires the previous holder of this slot, only when the write
+ *   named it.
  * - `releaseMemoryAttributeSlot`: puts the chain back together when a version is removed.
  *
  * «Пью кофе без сахара» used to lie down beside «пьёт кофе с двумя ложками» as an equal, because
@@ -13,10 +14,13 @@
  * current. The person reads that as an assistant that did not remember.
  *
  * The slot is a short name of the property, never its value, and the model assigns it the way it
- * already assigns the kind and the subject. Two guards stand against the dangerous case — a slot
+ * already assigns the kind and the subject. Three guards stand against the dangerous case — a slot
  * named so widely («еда») that it retires independent facts:
  *
  * - the name is bounded to a name, not a sentence, and is refused otherwise;
+ * - nothing is retired that the write did not name in `replaces`: the model is shown the current
+ *   version's text and decides, because by the name alone it retired a true fact in half of the
+ *   production replacements (see `memory-attribute-replacement-refusal.ts`);
  * - retiring is reversible and visible: the previous version keeps its text, stays in the list and
  *   the export, points at its replacement, and comes back if the write is undone.
  *
@@ -32,9 +36,15 @@
 import type { PoolClient } from "pg";
 
 import { AppError } from "./app-error.js";
+import { MemoryAttributeReplacementRefusal } from "./memory-attribute-replacement-refusal.js";
 import type { MemoryKind } from "./memory-record.js";
 
 export const MEMORY_ATTRIBUTE_MAX_CHARACTERS = 40;
+/**
+ * How many current versions one write may retire. A slot normally has one; more appear only when
+ * two writes of the same property raced before the slot lock existed, and each still has to be named.
+ */
+export const MEMORY_ATTRIBUTE_REPLACEMENT_LIMIT = 5;
 
 /** Supersession by slot, told apart from supersession by correction, which undo must not touch. */
 const SLOT_RELATION = "temporal_update";
@@ -104,16 +114,30 @@ export async function lockMemoryAttributeSlot(
  * of memory and its partition, the project, the subject in all of its forms, and the slot name.
  * The comparison reads the stored row rather than repeating its values as parameters, so a column
  * added to the subject cannot be forgotten on one side of the match.
+ *
+ * The new record is already inserted, so a stop rolls the whole write back with it. The slot lock
+ * taken before the insert keeps the set of holders read here unchanged until the retirement.
+ *
+ * `revealSensitive` is false for the silent review, which is never shown a sensitive record: such a
+ * holder is named by its ref with the text withheld, so the review cannot judge it and leaves it.
  */
 export async function supersedeMemoryAttributeSlot(
   client: PoolClient,
   claimId: string,
+  declared: { readonly replaces: readonly string[]; readonly revealSensitive: boolean },
 ): Promise<string[]> {
-  const retired = await client.query<{ id: string }>(
-    `UPDATE memory_items_all AS previous
-     SET claim_status = 'superseded', superseded_by = fresh.id, updated_at = now()
-     FROM memory_items_all AS fresh
-     WHERE fresh.id = $1 AND fresh.attribute IS NOT NULL
+  const holders = await client.query<{
+    attribute: string;
+    content: string;
+    id: string;
+    memory_ref: string;
+    sensitivity: string;
+  }>(
+    `SELECT previous.id, previous.attribute, previous.content, previous.sensitivity, ref.memory_ref
+     FROM memory_items_all AS previous
+     JOIN memory_item_refs AS ref ON ref.memory_item_id = previous.id
+     JOIN memory_items_all AS fresh ON fresh.id = $1
+     WHERE fresh.attribute IS NOT NULL
        AND previous.id <> fresh.id
        AND previous.claim_status = 'active' AND previous.deleted_at IS NULL
        AND previous.family_id = fresh.family_id
@@ -126,10 +150,39 @@ export async function supersedeMemoryAttributeSlot(
        AND previous.subject_conversation_id IS NOT DISTINCT FROM fresh.subject_conversation_id
        AND previous.subject_family_id IS NOT DISTINCT FROM fresh.subject_family_id
        AND previous.subject_label IS NOT DISTINCT FROM fresh.subject_label
-     RETURNING previous.id`,
+     ORDER BY previous.created_at, previous.id
+     FOR UPDATE OF previous`,
     [claimId],
   );
-  if (retired.rowCount === 0) return [];
+  // Every current version has to be named: one left out would be retired unseen, which is the
+  // very write this stop exists for.
+  if (holders.rows.some((holder) => !declared.replaces.includes(holder.memory_ref))) {
+    throw new MemoryAttributeReplacementRefusal(
+      holders.rows[0]!.attribute,
+      holders.rows.map((holder) => ({
+        content: holder.sensitivity === "normal" || declared.revealSensitive
+          ? holder.content
+          : "Текст скрыт: чувствительная запись.",
+        memoryRef: holder.memory_ref,
+      })),
+    );
+  }
+  // A ref of anything else does not stand in for a holder, and is not quietly ignored either: the
+  // model would believe it replaced a record that stays current beside the new one.
+  if (declared.replaces.some((ref) => !holders.rows.some((holder) => holder.memory_ref === ref))) {
+    throw new AppError(
+      "AGENT_MEMORY_ATTRIBUTE_REPLACEMENT_INVALID",
+      "В replaces можно назвать только действующую запись этого же свойства у того же субъекта — её показывает отказ AGENT_MEMORY_ATTRIBUTE_REPLACEMENT_UNCONFIRMED. Запись без этого свойства перечисли в distinctFrom и сохрани новую рядом",
+    );
+  }
+  if (holders.rowCount === 0) return [];
+  const retired = await client.query<{ id: string }>(
+    `UPDATE memory_items_all
+     SET claim_status = 'superseded', superseded_by = $1, updated_at = now()
+     WHERE id = ANY($2::uuid[])
+     RETURNING id`,
+    [claimId, holders.rows.map((holder) => holder.id)],
+  );
   // The relation is the readable half of the same fact, and it is also what tells slot supersession
   // apart from a correction later on: a version changed over time, decided by the model's slot name
   // applied by a deterministic rule, not guessed by the code.

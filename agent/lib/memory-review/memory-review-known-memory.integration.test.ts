@@ -7,6 +7,8 @@
  * - Both blocks are escaped the same way the batch itself is: they are untrusted data.
  * - A record without a slot is shown without the field, never as `"attribute": null`.
  * - Neither block leaks another family's memory or another conversation's messages.
+ * - The property names already set for the authors of the batch are listed per author, so a new
+ *   value is written under the same name and meets the version it replaces.
  *
  * The review received only the fifty messages of its batch and nothing else, so it could not know
  * that the fact in front of it was written down last week in different words — and wrote it again.
@@ -18,7 +20,10 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "../database.js";
 import { selectMemoryReviewContext } from "./memory-review-known-memory.js";
-import { MEMORY_REVIEW_KNOWN_RECORD_LIMIT } from "./memory-review-config.js";
+import {
+  MEMORY_REVIEW_AUTHOR_PROPERTY_LIMIT,
+  MEMORY_REVIEW_KNOWN_RECORD_LIMIT,
+} from "./memory-review-config.js";
 import { formatMemoryReviewContext } from "./memory-review-prompt.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
@@ -83,14 +88,49 @@ describeWithDatabase("memory review known memory", () => {
     );
   }
 
-  async function message(sequence: number, text: string, conversation = conversationId) {
-    await database().query(
+  async function message(
+    sequence: number,
+    text: string,
+    conversation = conversationId,
+    author = { name: "Автор", telegramUserId: "review-author", username: null as string | null },
+  ): Promise<string> {
+    const inserted = await database().query<{ id: string }>(
       `INSERT INTO telegram_group_messages
          (conversation_id, group_id, telegram_message_id, sequence_id, actor_kind, actor_id,
-          telegram_user_id, sender_display_name, sender_is_bot, message_kind, content_text, sent_at)
-       VALUES ($1, $2, $3, $3, 'user', 'telegram:review-author', 'review-author', 'Автор',
-               false, 'text', $4, now())`,
-      [conversation, groupId, sequence, text],
+          telegram_user_id, sender_display_name, sender_username, sender_is_bot, message_kind,
+          content_text, sent_at)
+       VALUES ($1, $2, $3, $3, 'user', 'telegram:' || $5, $5, $6, $7, false, 'text', $4, now())
+       RETURNING id`,
+      [conversation, groupId, sequence, text, author.telegramUserId, author.name, author.username],
+    );
+    return inserted.rows[0]!.id;
+  }
+
+  async function participant(telegramUserId: string, name: string): Promise<string> {
+    const inserted = await database().query<{ id: string }>(
+      `INSERT INTO conversation_participants
+         (conversation_id, family_id, scope, scope_partition_key, telegram_user_id,
+          display_name_snapshot, first_observed_at, last_observed_at)
+       VALUES ($1, $2, 'group', $3, $4, $5, now(), now()) RETURNING id`,
+      [conversationId, familyId, groupId, telegramUserId, name],
+    );
+    return inserted.rows[0]!.id;
+  }
+
+  async function storeAbout(
+    participantId: string,
+    content: string,
+    attribute: string | null,
+    options: { sensitivity?: "normal" | "sensitive" } = {},
+  ): Promise<void> {
+    await database().query(
+      `INSERT INTO memory_items
+         (family_id, group_id, author_telegram_user_id, scope, kind, content, source,
+          confirmation, sensitivity, operation_key, attribute, origin_conversation_id,
+          subject_participant_id, subject_conversation_id)
+       VALUES ($1, $2, 'review-author', 'group', 'profile', $3, 'test:review', 'model_high',
+               $5, $3, $4, $6, $7, $6)`,
+      [familyId, groupId, content, attribute, options.sensitivity ?? "normal", conversationId, participantId],
     );
   }
 
@@ -99,6 +139,7 @@ describeWithDatabase("memory review known memory", () => {
 
     const context = await selectMemoryReviewContext(client, {
       conversationId, familyId, scope: "group", scopePartitionKey: groupId, predecessorSequence: "10",
+      sourceEntryIds: [],
     });
 
     expect(context.known.map((record) => record.content)).toEqual(["Аня не ест глютен"]);
@@ -110,6 +151,7 @@ describeWithDatabase("memory review known memory", () => {
 
     const context = await selectMemoryReviewContext(client, {
       conversationId, familyId, scope: "group", scopePartitionKey: groupId, predecessorSequence: "10",
+      sourceEntryIds: [],
     });
 
     const block = formatMemoryReviewContext(context);
@@ -125,6 +167,7 @@ describeWithDatabase("memory review known memory", () => {
 
     const context = await selectMemoryReviewContext(client, {
       conversationId, familyId, scope: "group", scopePartitionKey: groupId, predecessorSequence: "2",
+      sourceEntryIds: [],
     });
 
     expect(context.reviewed.map((entry) => entry.contentText)).toEqual(["Первое", "Второе"]);
@@ -135,6 +178,7 @@ describeWithDatabase("memory review known memory", () => {
 
     const context = await selectMemoryReviewContext(client, {
       conversationId, familyId, scope: "group", scopePartitionKey: groupId, predecessorSequence: "10",
+      sourceEntryIds: [],
     });
 
     expect(context.known).toEqual([]);
@@ -147,8 +191,49 @@ describeWithDatabase("memory review known memory", () => {
 
     const context = await selectMemoryReviewContext(client, {
       conversationId, familyId, scope: "group", scopePartitionKey: groupId, predecessorSequence: "10",
+      sourceEntryIds: [],
     });
 
     expect(context.known).toHaveLength(MEMORY_REVIEW_KNOWN_RECORD_LIMIT);
+  });
+
+  it("names the properties already set for the authors of the batch, and nobody else's", async () => {
+    // Without the list the review named one property in new words — «гейминг» beside «gaming» —
+    // and the new value never met the version it was meant to replace.
+    const author = await participant("review-author", "Автор");
+    const bystander = await participant("bystander", "Сосед");
+    await storeAbout(author, "Работает в «Ладоге»", "место работы");
+    await storeAbout(author, "Живёт в Казани", "город");
+    await storeAbout(author, "Любит TDD", null);
+    await storeAbout(author, "Диагноз", "здоровье", { sensitivity: "sensitive" });
+    await storeAbout(bystander, "Живёт в Твери", "родной город");
+    const source = await message(11, "Переехал в Москву", conversationId, {
+      name: "Автор", telegramUserId: "review-author", username: "author_k",
+    });
+
+    const context = await selectMemoryReviewContext(client, {
+      conversationId, familyId, scope: "group", scopePartitionKey: groupId, predecessorSequence: "10",
+      sourceEntryIds: [source],
+    });
+
+    expect(context.authorProperties).toEqual([
+      { attributes: ["город", "место работы"], senderDisplayName: "Автор", senderUsername: "author_k" },
+    ]);
+    expect(formatMemoryReviewContext(context)).toContain("<untrusted_memory_review_author_properties>");
+  });
+
+  it("keeps each author's list bounded", async () => {
+    const author = await participant("review-author", "Автор");
+    for (let index = 0; index < MEMORY_REVIEW_AUTHOR_PROPERTY_LIMIT + 3; index += 1) {
+      await storeAbout(author, `Факт ${index}`, `свойство ${String(index).padStart(2, "0")}`);
+    }
+    const source = await message(11, "Новость");
+
+    const context = await selectMemoryReviewContext(client, {
+      conversationId, familyId, scope: "group", scopePartitionKey: groupId, predecessorSequence: "10",
+      sourceEntryIds: [source],
+    });
+
+    expect(context.authorProperties[0]!.attributes).toHaveLength(MEMORY_REVIEW_AUTHOR_PROPERTY_LIMIT);
   });
 });

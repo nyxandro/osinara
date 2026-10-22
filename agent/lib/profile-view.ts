@@ -13,6 +13,8 @@ import { EVIDENCE_KIND_LEGEND } from "./model-memory.js";
 import { escapeUntrustedContextJson } from "./untrusted-context-json.js";
 
 export interface ProfileViewClaim {
+  /** The property this fact is the current value of; absent rather than null when it has none. */
+  attribute?: string;
   confirmation: MemoryConfirmation;
   content: string;
   evidenceKind: "explicit" | "firsthand" | "inferred" | "reported" | "unresolved";
@@ -73,6 +75,7 @@ export function toProfileView(input: {
     profileViewRef: input.profileViewRef,
     subjects: input.selection.subjects.map((subject) => ({
       claims: subject.claims.map((claim) => ({
+        ...(claim.attribute === null ? {} : { attribute: claim.attribute }),
         confirmation: claim.confirmation,
         content: claim.content,
         evidenceKind: claim.evidenceKind,

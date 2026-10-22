@@ -4,7 +4,9 @@
  * Exports:
  * - Profile candidate, selected claim, subject, and selection contracts.
  * - `selectProfileClaims`: applies eligibility, dormancy, the repeat window, subject, count, and
- *   character budgets.
+ *   character budgets. Within a kind, after facts the person confirmed, facts with a property
+ *   (`attribute`) come first by its name: each is the person's current value of something that has
+ *   one value at a time. Confirmed facts stay ahead: older records carry wide property names.
  */
 import type {
   MemoryConfirmation,
@@ -27,6 +29,7 @@ export type ProfileSubjectPriority =
   | "reply_subject";
 
 export interface ProfileClaimCandidate {
+  attribute: string | null;
   claimStatus: "active" | "duplicate" | "superseded";
   confirmation: MemoryConfirmation;
   content: string;
@@ -87,12 +90,15 @@ function isDormant(lastVerifiedAt: string, now: Date): boolean {
 }
 
 function renderClaim(candidate: ProfileClaimCandidate): string {
-  return `- [${candidate.originScope}: ${candidate.originLabel}] ${candidate.content}`;
+  const property = candidate.attribute === null ? "" : `${candidate.attribute}: `;
+  return `- [${candidate.originScope}: ${candidate.originLabel}] ${property}${candidate.content}`;
 }
 
 function compareClaims(left: ProfileClaimCandidate, right: ProfileClaimCandidate): number {
   return KIND_PRIORITY[left.kind] - KIND_PRIORITY[right.kind] ||
     Number(right.confirmation === "user_confirmed") - Number(left.confirmation === "user_confirmed") ||
+    Number(right.attribute !== null) - Number(left.attribute !== null) ||
+    (left.attribute ?? "").localeCompare(right.attribute ?? "", "ru") ||
     ORIGIN_PRIORITY[left.originScope] - ORIGIN_PRIORITY[right.originScope] ||
     right.updatedAt.localeCompare(left.updatedAt) ||
     left.memoryRef.localeCompare(right.memoryRef);

@@ -106,7 +106,7 @@
           "type": "object",
           "properties": {
             "attribute": {
-              "description": "A short name of the subject's property the record is about: \"кофе\", \"место работы\", \"размер обуви\". Not the value of the property and not a retelling of the content. Set it when the property changes over time and a new record cancels the previous one; a new record of the same subject with the same name moves the previous one into history. Do not set a general name like \"еда\": it would remove independent facts from active memory. For a record without a subject (subject.kind=none) the property name applies to the whole memory scope, so it must be especially precise there. Not allowed for kind=episode",
+              "description": "A short Russian name of a property of the subject that holds one value at a time, so that a new value replaces the old one: \"город\", \"место работы\", \"должность\", \"день рождения\", \"как пьёт кофе\". Not the value and not a retelling of the content. Leave it out for anything that has several values at once: hobbies, tools, resources, links, plans, likes and dislikes in general. A new record of the same subject with the same name retires the current one, so if one exists the write is refused with its text until you name it in replaces. For a record without a subject (subject.kind=none) the name covers the whole memory scope. Not allowed for kind=episode",
               "type": "string",
               "minLength": 1,
               "maxLength": 40
@@ -118,6 +118,16 @@
             },
             "distinctFrom": {
               "description": "Only in response to the AGENT_MEMORY_SIMILAR_RECORD_EXISTS refusal: the memoryRef of the shown close records that you have read and consider different facts. Do not fill it in advance",
+              "maxItems": 5,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^mem_[0-9a-f]{32}$"
+              }
+            },
+            "replaces": {
+              "description": "Only together with attribute: the memoryRef of every current record of this property that the new value replaces, after you have read its text and it is no longer true. Take them from the AGENT_MEMORY_ATTRIBUTE_REPLACEMENT_UNCONFIRMED refusal or from a shown record with the same attribute. Leave it out for the first record of a property",
+              "minItems": 1,
               "maxItems": 5,
               "type": "array",
               "items": {

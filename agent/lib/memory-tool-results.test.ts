@@ -6,6 +6,8 @@
  * - Tool results expose only opaque memory/thread refs and preserve immediate undo guidance.
  * - `list_memories`: projects internal records while preserving an opaque pagination cursor.
  * - `search_memories`: returns the already-safe retrieval DTO unchanged.
+ * - `remember`: a stop before retiring the current version of a property is an answer with that
+ *   version's text, never a logged failure; `replaces` reaches the repository as the model sent it.
  * - Both reading tools journal what they put in front of the model, so a record the answer rests on
  *   counts as used (#339); a failed journal write is logged and costs the person nothing.
  * - `executeNonStreamingTool`: rejects an unexpected streaming result before object assertions.
@@ -74,6 +76,7 @@ vi.mock("./session-auth.js", () => ({
 }));
 import { AppError } from "./app-error.js";
 import listMemoriesTool from "./tools/list_memories.js";
+import { MemoryAttributeReplacementRefusal } from "./memory-attribute-replacement-refusal.js";
 import { MemoryNeighbourRefusal } from "./memory-neighbour-gate.js";
 import remember from "./tools/remember.js";
 import searchMemories from "./tools/search_memories.js";
@@ -620,5 +623,45 @@ describe("model-facing memory tool results", () => {
 
     // An undo it cannot call is the same dead end on the success path.
     expect((saved as { notice: string }).notice).not.toContain("manage_memory");
+  });
+
+  it("answers a stop before retiring the current version with its text and how to name it", async () => {
+    const logged: unknown[] = [];
+    vi.mocked(logMemoryWriteEvent).mockImplementation((event) => void logged.push(event));
+    createMemory.mockRejectedValue(new MemoryAttributeReplacementRefusal("место работы", [
+      { content: "Работает в 7RL, делают AI-агентов", memoryRef: MEMORY_REF },
+    ]));
+
+    const result = await executeNonStreamingTool(remember, {
+      attribute: "место работы", basis: "agent_inferred", content: "7 лет проработал на производстве плитки",
+      kind: "profile", scope: "personal", sensitivity: "normal", subject: { kind: "current_author" },
+    }, context);
+
+    expect(result).toMatchObject({
+      code: "AGENT_MEMORY_ATTRIBUTE_REPLACEMENT_UNCONFIRMED",
+      current: [{ content: "Работает в 7RL, делают AI-агентов", memoryRef: MEMORY_REF }],
+      saved: false,
+    });
+    expect((result as { correction: string }).correction).toContain("replaces");
+    expect((result as { correction: string }).correction).toContain("«место работы»");
+    expect(JSON.stringify(logged)).not.toContain("7RL");
+    expect(logged.at(-1)).toMatchObject({
+      code: "AGENT_MEMORY_WRITE_DEFERRED",
+      errorCode: "AGENT_MEMORY_ATTRIBUTE_REPLACEMENT_UNCONFIRMED",
+    });
+  });
+
+  it("passes the versions the model named to the write", async () => {
+    createMemory.mockResolvedValue(internalMemory);
+
+    await executeNonStreamingTool(remember, {
+      attribute: "место работы", basis: "agent_inferred", content: "Работает в «Ладожце»",
+      kind: "profile", replaces: [MEMORY_REF], scope: "personal", sensitivity: "normal",
+      subject: { kind: "current_author" },
+    }, context);
+
+    expect(createMemory).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      attribute: "место работы", replaces: [MEMORY_REF],
+    }));
   });
 });

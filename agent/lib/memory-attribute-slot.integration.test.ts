@@ -12,15 +12,20 @@
  * - Removing a middle version hands its history to the current one instead of reviving it.
  * - Removing a corrected record does not bring back the wording that was corrected.
  * - The word "null" is refused as a slot and leaves nothing stored.
+ * - The current version is retired only when the write names it in `replaces`; otherwise the write
+ *   is refused with that version's text, and a ref of anything else does not stand in for it.
  *
  * The danger this file is really about is the second one from the issue: a slot named too widely
  * («еда») would silently retire independent facts. That is why every test here asserts what was
- * *not* touched as well as what was.
+ * *not* touched as well as what was. On production half of the slot replacements up to 21.10.2026
+ * were wrong — six of twelve, among them three links shared by different people under «resource»,
+ * each retiring the one before — so a replacement now needs the model to name what it retires.
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "./database.js";
 import type { MemoryAuthorization } from "./memory-context.js";
+import { MemoryAttributeReplacementRefusal } from "./memory-attribute-replacement-refusal.js";
 import { memoryRepository } from "./memory-repository.js";
 import { memoryUndoRepository } from "./memory-undo-repository.js";
 import {
@@ -51,6 +56,7 @@ describeWithDatabase("memory attribute slot", () => {
     auth: MemoryAuthorization;
     content: string;
     key: string;
+    replaces?: readonly string[];
     scope?: "family" | "personal";
     subject?: { kind: "current_author" } | { kind: "none" };
   }) {
@@ -58,6 +64,7 @@ describeWithDatabase("memory attribute slot", () => {
     const source = await createMemoryCorrectionSource(input.auth, scope);
     return memoryRepository.create(input.auth, {
       ...(input.attribute === undefined ? {} : { attribute: input.attribute }),
+      ...(input.replaces === undefined ? {} : { replaces: input.replaces }),
       confirmation: "user_confirmed",
       content: input.content,
       explicitSource: {
@@ -92,7 +99,7 @@ describeWithDatabase("memory attribute slot", () => {
     });
 
     const fresh = await remember({
-      attribute: "кофе", auth: owner, content: "Пьёт кофе без сахара", key: "slot-2",
+      attribute: "кофе", auth: owner, content: "Пьёт кофе без сахара", key: "slot-2", replaces: [old.memoryRef],
     });
 
     expect(await statusOf(old.id)).toEqual({
@@ -141,6 +148,7 @@ describeWithDatabase("memory attribute slot", () => {
 
     const fresh = await remember({
       attribute: "  место  работы ", auth: owner, content: "Работает в «Ладожце»", key: "slot-10",
+      replaces: [old.memoryRef],
     });
 
     expect((await statusOf(old.id)).superseded_by).toBe(fresh.id);
@@ -174,7 +182,7 @@ describeWithDatabase("memory attribute slot", () => {
       attribute: "кофе", auth: owner, content: "Пьёт кофе с двумя ложками сахара", key: "slot-13",
     });
     const fresh = await remember({
-      attribute: "кофе", auth: owner, content: "Пьёт кофе без сахара", key: "slot-14",
+      attribute: "кофе", auth: owner, content: "Пьёт кофе без сахара", key: "slot-14", replaces: [old.memoryRef],
     });
 
     await memoryUndoRepository.undoCreate(owner, fresh.id, {
@@ -192,7 +200,9 @@ describeWithDatabase("memory attribute slot", () => {
     const old = await remember({
       attribute: "кофе", auth: owner, content: "Пьёт кофе с двумя ложками сахара", key: "slot-15",
     });
-    await remember({ attribute: "кофе", auth: owner, content: "Пьёт кофе без сахара", key: "slot-16" });
+    await remember({
+      attribute: "кофе", auth: owner, content: "Пьёт кофе без сахара", key: "slot-16", replaces: [old.memoryRef],
+    });
 
     const current = await memoryRepository.list(owner, { limit: 20 });
     const history = await memoryRepository.list(owner, { history: true, limit: 20 });
@@ -225,10 +235,10 @@ describeWithDatabase("memory attribute slot", () => {
       attribute: "кофе", auth: owner, content: "С двумя ложками", key: "slot-18",
     });
     const middle = await remember({
-      attribute: "кофе", auth: owner, content: "С одной ложкой", key: "slot-19",
+      attribute: "кофе", auth: owner, content: "С одной ложкой", key: "slot-19", replaces: [oldest.memoryRef],
     });
     const current = await remember({
-      attribute: "кофе", auth: owner, content: "Без сахара", key: "slot-20",
+      attribute: "кофе", auth: owner, content: "Без сахара", key: "slot-20", replaces: [middle.memoryRef],
     });
 
     await memoryRepository.deleteByRef(owner, middle.memoryRef, "slot-19-delete");
@@ -258,5 +268,66 @@ describeWithDatabase("memory attribute slot", () => {
     expect((await statusOf(earlier.id)).claim_status).toBe("active");
     const stored = await database().query("SELECT 1 FROM memory_items_all WHERE operation_key = 'slot-14'");
     expect(stored.rowCount).toBe(0);
+  });
+
+  it("refuses to retire the current version unless the write names it, and shows its text", async () => {
+    // 18.10.2026 a past job retired the current one under «место работы» because nothing asked
+    // whether the two texts were versions of one property: the model only ever saw the new one.
+    const current = await remember({
+      attribute: "место работы", auth: owner, content: "Работает в 7RL, делают AI-агентов", key: "slot-21",
+    });
+
+    const refused = await remember({
+      attribute: "место работы", auth: owner, content: "7 лет проработал на производстве плитки", key: "slot-22",
+    }).catch((error: unknown) => error);
+
+    expect(refused).toBeInstanceOf(MemoryAttributeReplacementRefusal);
+    expect(refused).toMatchObject({
+      attribute: "место работы",
+      code: "AGENT_MEMORY_ATTRIBUTE_REPLACEMENT_UNCONFIRMED",
+      current: [{ content: "Работает в 7RL, делают AI-агентов", memoryRef: current.memoryRef }],
+    });
+    expect(await statusOf(current.id))
+      .toEqual({ claim_status: "active", content: "Работает в 7RL, делают AI-агентов", superseded_by: null });
+    const stored = await database().query("SELECT 1 FROM memory_items_all WHERE operation_key = 'slot-22'");
+    expect(stored.rowCount).toBe(0);
+  });
+
+  it("does not let a ref of another record stand in for the current version", async () => {
+    const current = await remember({
+      attribute: "кофе", auth: owner, content: "Пьёт кофе с двумя ложками сахара", key: "slot-23",
+    });
+    const unrelated = await remember({ auth: owner, content: "Любит зелёный чай", key: "slot-24" });
+
+    await expect(remember({
+      attribute: "кофе", auth: owner, content: "Пьёт кофе без сахара", key: "slot-25",
+      replaces: [unrelated.memoryRef],
+    })).rejects.toMatchObject({ code: "AGENT_MEMORY_ATTRIBUTE_REPLACEMENT_UNCONFIRMED" });
+
+    expect((await statusOf(current.id)).claim_status).toBe("active");
+    expect((await statusOf(unrelated.id)).claim_status).toBe("active");
+  });
+
+  it("asks nothing for the first version of a property", async () => {
+    const first = await remember({
+      attribute: "город", auth: owner, content: "Живёт в Казани", key: "slot-26",
+    });
+
+    expect((await statusOf(first.id)).claim_status).toBe("active");
+  });
+
+  it("lists every current version of a record without a person, so one link cannot retire another", async () => {
+    // Three links from three people under «resource» retired each other in a live group: without a
+    // person the slot covers the whole area of memory.
+    const first = await remember({
+      attribute: "ресурсы", auth: owner, content: "Сервис zarub_robot для зарубежных карт",
+      key: "slot-27", scope: "family", subject: { kind: "none" },
+    });
+
+    await expect(remember({
+      attribute: "ресурсы", auth: owner, content: "Мануал по OpenSpec",
+      key: "slot-28", scope: "family", subject: { kind: "none" },
+    })).rejects.toMatchObject({ current: [{ memoryRef: first.memoryRef }] });
+    expect((await statusOf(first.id)).claim_status).toBe("active");
   });
 });

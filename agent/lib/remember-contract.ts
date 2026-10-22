@@ -17,7 +17,10 @@
  */
 import { z } from "zod";
 
-import { MEMORY_ATTRIBUTE_MAX_CHARACTERS } from "./memory-attribute-slot.js";
+import {
+  MEMORY_ATTRIBUTE_MAX_CHARACTERS,
+  MEMORY_ATTRIBUTE_REPLACEMENT_LIMIT,
+} from "./memory-attribute-slot.js";
 import { MEMORY_NEIGHBOUR_CANDIDATE_LIMIT } from "./memory-neighbour-gate.js";
 import { MEMORY_REF_PATTERN } from "./model-memory.js";
 import {
@@ -138,12 +141,16 @@ function rememberFields(scope: RememberScopeField, verifiedRefs: boolean) {
   const subject = verifiedRefs ? modelFacingMemorySubjectSchema : modelFacingUnverifiedMemorySubjectSchema;
   return {
     attribute: z.string().trim().min(1).max(MEMORY_ATTRIBUTE_MAX_CHARACTERS).optional().describe(
-      "A short name of the subject's property the record is about: \"кофе\", \"место работы\", \"размер обуви\". Not the value of the property and not a retelling of the content. Set it when the property changes over time and a new record cancels the previous one; a new record of the same subject with the same name moves the previous one into history. Do not set a general name like \"еда\": it would remove independent facts from active memory. For a record without a subject (subject.kind=none) the property name applies to the whole memory scope, so it must be especially precise there. Not allowed for kind=episode",
+      "A short Russian name of a property of the subject that holds one value at a time, so that a new value replaces the old one: \"город\", \"место работы\", \"должность\", \"день рождения\", \"как пьёт кофе\". Not the value and not a retelling of the content. Leave it out for anything that has several values at once: hobbies, tools, resources, links, plans, likes and dislikes in general. A new record of the same subject with the same name retires the current one, so if one exists the write is refused with its text until you name it in replaces. For a record without a subject (subject.kind=none) the name covers the whole memory scope. Not allowed for kind=episode",
     ),
     basis: z.enum(["agent_inferred", "user_requested"]).describe("agent_inferred: you selected the fact from the message yourself, not a guess; user_requested: the author explicitly asked to save it"),
     distinctFrom: z.array(z.string().regex(MEMORY_REF_PATTERN)).max(MEMORY_NEIGHBOUR_CANDIDATE_LIMIT)
       .optional().describe(
         "Only in response to the AGENT_MEMORY_SIMILAR_RECORD_EXISTS refusal: the memoryRef of the shown close records that you have read and consider different facts. Do not fill it in advance",
+      ),
+    replaces: z.array(z.string().regex(MEMORY_REF_PATTERN)).min(1).max(MEMORY_ATTRIBUTE_REPLACEMENT_LIMIT)
+      .optional().describe(
+        "Only together with attribute: the memoryRef of every current record of this property that the new value replaces, after you have read its text and it is no longer true. Take them from the AGENT_MEMORY_ATTRIBUTE_REPLACEMENT_UNCONFIRMED refusal or from a shown record with the same attribute. Leave it out for the first record of a property",
       ),
     content: z.string().min(1).max(MEMORY_CONTENT_MAX_CHARACTERS).describe("One self-contained specific fact without guesses; keep known dates, the context and the exact URL for a useful link"),
     kind: z.enum(["profile", "preference", "fact", "episode", "family_shared"]).describe("profile: stable facts about a person; preference: preferences; episode: a single event or experience; fact: other facts, plans, resources; family_shared: facts shared by the family"),
@@ -167,6 +174,7 @@ function rememberFields(scope: RememberScopeField, verifiedRefs: boolean) {
 interface RememberCheckInput {
   readonly attribute?: string;
   readonly kind: string;
+  readonly replaces?: readonly string[];
   readonly scope: string;
   readonly sensitivity: string;
   readonly sourceSequence?: string;
@@ -195,6 +203,14 @@ function checkRememberInput(input: RememberCheckInput, context: z.RefinementCtx)
       code: "custom",
       message: "AGENT_MEMORY_THREAD_INPUT_INVALID: Project identity недоступна в личной записи",
       path: ["thread", "identity"],
+    });
+  }
+  if (input.replaces !== undefined && input.attribute === undefined) {
+    context.addIssue({
+      code: "custom",
+      message:
+        "AGENT_MEMORY_ATTRIBUTE_INVALID: replaces задаётся только вместе с attribute: заменить можно лишь действующую запись того же свойства",
+      path: ["replaces"],
     });
   }
   if (input.attribute !== undefined && input.kind === "episode") {

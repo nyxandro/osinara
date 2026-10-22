@@ -6,6 +6,7 @@
  * - Sensitive, episode, inactive, and dormant candidates never enter always-on profile context.
  * - Priority and output remain deterministic regardless of PostgreSQL input order.
  * - A claim this session showed recently is left out; its person stays, so the ref stays usable.
+ * - Within a kind, facts with a property come first by property name, and the card names it.
  */
 import { describe, expect, it } from "vitest";
 
@@ -19,6 +20,7 @@ import {
   selectProfileClaims,
   type ProfileClaimCandidate,
 } from "./profile-selection.js";
+import { toProfileView } from "./profile-view.js";
 
 const NOW = new Date("2026-08-08T12:00:00.000Z");
 
@@ -27,6 +29,7 @@ function candidate(input: Partial<ProfileClaimCandidate> & {
   subjectRef: string;
 }): ProfileClaimCandidate {
   return {
+    attribute: null,
     claimStatus: "active",
     confirmation: "model_high",
     content: `claim-${input.memoryRef}`,
@@ -201,5 +204,25 @@ describe("R3 profile selection", () => {
 
     expect(selectProfileClaims(candidates, NOW))
       .toEqual(selectProfileClaims([...candidates].reverse(), NOW));
+  });
+
+  it("puts facts with a property first within their kind, by property name, and names the property", () => {
+    // A property holds the person's current value of something that has one value at a time, so it
+    // is what a card should not lose to its budget, and the model should see which property it is.
+    const subjectRef = "subj_00000000000000000000000000000001";
+    const later = "2026-08-08T11:30:00.000Z";
+    const selected = selectProfileClaims([
+      candidate({ content: "Любит TDD", memoryRef: "mem_a", subjectRef, updatedAt: later }),
+      candidate({ attribute: "место работы", content: "Работает в 7RL", memoryRef: "mem_b", subjectRef }),
+      candidate({ attribute: "город", content: "Живёт в Казани", memoryRef: "mem_c", subjectRef }),
+      candidate({ content: "Инженер", kind: "profile", memoryRef: "mem_d", subjectRef }),
+    ], NOW);
+
+    expect(selected.subjects[0]!.claims.map((claim) => claim.memoryRef)).toEqual(["mem_d", "mem_c", "mem_b", "mem_a"]);
+    expect(selected.subjects[0]!.claims[1]!.renderedText).toContain("город: Живёт в Казани");
+
+    const view = toProfileView({ generatedAt: NOW, profileViewRef: "pview_1", selection: selected });
+    expect(view.subjects[0]!.claims[1]).toMatchObject({ attribute: "город", content: "Живёт в Казани" });
+    expect(view.subjects[0]!.claims[0]).not.toHaveProperty("attribute");
   });
 });

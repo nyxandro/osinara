@@ -5,12 +5,16 @@
  * - strict normalization of a JSON-serialized `subject` emitted by a model provider;
  * - normalization through the same AI SDK schema adapter used for tool calls;
  * - rejection of malformed or structurally invalid serialized subjects.
+ * - `replaces` only together with `attribute`: it names the current version of that property.
  */
 import { zodSchema } from "ai";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-import { externalRememberInputSchema } from "./remember-contract.js";
+import {
+  createReviewRememberInputSchema,
+  externalRememberInputSchema,
+} from "./remember-contract.js";
 
 const BASE_EXTERNAL_INPUT = {
   basis: "agent_inferred",
@@ -77,5 +81,36 @@ describe("externalRememberInputSchema", () => {
       ...BASE_EXTERNAL_INPUT,
       subject,
     }).success).toBe(false);
+  });
+});
+
+describe("replaces", () => {
+  const FACT = {
+    basis: "agent_inferred",
+    content: "Пух (nyxandro) работает в 7RL",
+    kind: "profile",
+    sensitivity: "normal",
+    subject: { kind: "current_author" },
+  } as const;
+  const CURRENT = "mem_0123456789abcdef0123456789abcdef";
+
+  it("is taken together with the property it names a version of", () => {
+    expect(externalRememberInputSchema.safeParse({ ...FACT, attribute: "место работы", replaces: [CURRENT] }).success)
+      .toBe(true);
+    expect(createReviewRememberInputSchema("group").safeParse({
+      ...FACT, attribute: "место работы", replaces: [CURRENT], sourceSequence: "42",
+    }).success).toBe(true);
+  });
+
+  it("is refused without a property: only the current version of a property can be replaced", () => {
+    const result = externalRememberInputSchema.safeParse({ ...FACT, replaces: [CURRENT] });
+
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result.error?.issues)).toContain("AGENT_MEMORY_ATTRIBUTE_INVALID");
+  });
+
+  it("accepts only opaque memory refs", () => {
+    expect(externalRememberInputSchema.safeParse({ ...FACT, attribute: "место работы", replaces: ["7RL"] }).success)
+      .toBe(false);
   });
 });

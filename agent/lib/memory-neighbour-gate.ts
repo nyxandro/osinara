@@ -23,8 +23,9 @@
  * texts and the conversation, decides what they are.
  *
  * Getting through is deliberate and specific: the model repeats the refs it was shown in
- * `distinctFrom`. A neighbour it has not named stops the write again, so a blanket declaration
- * carried over from an earlier turn cannot wave through something new.
+ * `distinctFrom`, or in `replaces` when the new record retires that neighbour as the current
+ * version of its property. A neighbour it has not named stops the write again, so a blanket
+ * declaration carried over from an earlier turn cannot wave through something new.
  *
  * The gate can only see records the indexing worker has already reached, so two paraphrases
  * written inside one turn do not stop each other. That gap is covered from the other side: the
@@ -46,6 +47,7 @@ const MEMORY_NEIGHBOUR_SIMILARITY = 0.93;
 export const MEMORY_NEIGHBOUR_CANDIDATE_LIMIT = 5;
 
 interface NeighbourRow {
+  attribute: string | null;
   content: string;
   memory_ref: string;
   similarity: number | string;
@@ -100,7 +102,7 @@ export async function requireMemoryNeighbourDecision(
 ): Promise<void> {
   if (input.probe === null) return;
   const neighbours = await client.query<NeighbourRow>(
-    `SELECT ref.memory_ref, item.content,
+    `SELECT ref.memory_ref, item.content, item.attribute,
             max(1 - (chunk.embedding <=> $1::vector)) AS similarity
      FROM memory_embedding_chunks AS chunk
      JOIN memory_items AS item ON item.id = chunk.memory_item_id
@@ -116,7 +118,7 @@ export async function requireMemoryNeighbourDecision(
        AND item.subject_conversation_id IS NOT DISTINCT FROM $8
        AND item.subject_label IS NOT DISTINCT FROM $9
        AND chunk.embedding_model = $10
-     GROUP BY ref.memory_ref, item.content
+     GROUP BY ref.memory_ref, item.content, item.attribute
      HAVING max(1 - (chunk.embedding <=> $1::vector)) >= $11
      ORDER BY similarity DESC
      LIMIT $12`,
@@ -139,7 +141,10 @@ export async function requireMemoryNeighbourDecision(
     .filter((row) => !input.declaredRefs.includes(row.memory_ref));
   if (undeclared.length === 0) return;
 
+  // The property is shown so the model can tell a version it may name in `replaces` from a record
+  // that holds no property and can only be kept beside the new one.
   throw new MemoryNeighbourRefusal(undeclared.map((row) => ({
+    ...(row.attribute === null ? {} : { attribute: row.attribute }),
     content: row.content,
     memoryRef: row.memory_ref,
   })));
@@ -156,7 +161,7 @@ export class MemoryNeighbourRefusal extends Error {
   /** The stable code, so a caller that only classifies failures reads this one like any other. */
   readonly code = "AGENT_MEMORY_SIMILAR_RECORD_EXISTS";
 
-  constructor(readonly neighbours: readonly { content: string; memoryRef: string }[]) {
+  constructor(readonly neighbours: readonly { attribute?: string; content: string; memoryRef: string }[]) {
     // The message carries the code alone: the neighbours are memory content, and a message is the
     // part that ends up in a log when something up the stack decides this was a failure.
     super("AGENT_MEMORY_SIMILAR_RECORD_EXISTS");
@@ -177,7 +182,7 @@ export function memoryNeighbourRefusalResult(
       writer.editAvailable
         ? "То же самое другими словами — не сохраняй заново; если новая формулировка точнее или полнее, обнови существующую через manage_memory action=edit."
         : "То же самое другими словами — не сохраняй заново, даже если новая формулировка чуть точнее.",
-      "Новое значение свойства, у которого одно значение за раз (город, место работы), — задай attribute, короткое имя свойства, и сохрани как новую версию именно этого свойства.",
+      "Новое значение свойства, у которого одно значение за раз (город, место работы), — задай attribute, короткое имя свойства; если у записи из списка то же attribute и она больше не верна, перечисли её memoryRef в replaces, а запись без attribute — в distinctFrom.",
       "Действительно отдельное сведение — повтори вызов, перечислив в distinctFrom все memoryRef из этого списка.",
     ].join(" "),
     distinctFrom: refusal.neighbours.map((one) => one.memoryRef),
