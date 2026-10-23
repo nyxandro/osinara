@@ -18,6 +18,10 @@ import { bindSourceAuthorLabel } from "../memory-subject-author-label.js";
 import { resolveMemoryTurnSource } from "../memory-turn-source.js";
 import { toModelMemory } from "../model-memory.js";
 import {
+  MemoryAttributeReplacementRefusal,
+  memoryAttributeReplacementRefusalResult,
+} from "../memory-attribute-replacement-refusal.js";
+import {
   MemoryNeighbourRefusal,
   memoryNeighbourRefusalResult,
 } from "../memory-neighbour-gate.js";
@@ -32,8 +36,8 @@ export default defineTool({
     "When selecting on your own use basis=agent_inferred, on a direct request to save the fact basis=user_requested. An example of saving on your own: {\"basis\":\"agent_inferred\",\"content\":\"...\",\"kind\":\"fact\",\"scope\":\"personal\",\"sensitivity\":\"normal\",\"subject\":{\"kind\":\"current_author\"}}.",
     "In a group sourceSequence picks exactly one message of the visible delta. For an existing thread use thread.action=attach with a threadRef only from list/search/read_memory_thread; thread.action=create creates a thread atomically.",
     "For an event with a known date set occurredOn: the day it happened, not the day of the conversation. Do not guess the date: if it is not known from the message, leave the field empty.",
-    "For a property that changes over time (a preference, a workplace, an address) set attribute, a short name of the property. A new record of the same subject with the same attribute moves the previous one into history; the previous one is not deleted and is visible in the memory list.",
-    "If memory already holds a fact close in meaning about the same subject, the call is refused with AGENT_MEMORY_SIMILAR_RECORD_EXISTS and a list of such records: read them and decide yourself whether to update the existing one, set attribute, or list them in distinctFrom and save separately.",
+    "For a property that holds one value at a time (a city, a workplace, a birthday) set attribute, its short name. A new value moves the current record of that property into history; while one exists, the call is refused with its text until you name it in replaces.",
+    "If memory already holds a fact close in meaning about the same subject, the call is refused with AGENT_MEMORY_SIMILAR_RECORD_EXISTS and a list of such records: read them and decide yourself whether to update the existing one, save a new value with attribute and replaces, or list them in distinctFrom and save separately.",
     "The result contains item.memoryRef, an optional thread, supersededRefs for replaced versions and a notice for an immediate undo.",
   ].join(" "),
   inputSchema: rememberInputSchema,
@@ -80,6 +84,7 @@ export default defineTool({
         ...(reviewBatchId === null ? {} : { memoryReviewBatchId: reviewBatchId }),
         ...(input.attribute === undefined ? {} : { attribute: input.attribute }),
         ...(input.distinctFrom === undefined ? {} : { distinctFrom: input.distinctFrom }),
+        ...(input.replaces === undefined ? {} : { replaces: input.replaces }),
         ...(input.occurredOn === undefined ? {} : { occurredOn: input.occurredOn }),
         // A request to save another participant's delta message is not that author's endorsement.
         confirmation: input.basis === "user_requested" && source.isCurrent
@@ -104,18 +109,23 @@ export default defineTool({
       });
     } catch (error) {
       // A stop for review is the product working, not a failure: answered, not thrown. Thrown, it
-      // would be logged by the framework with its whole payload, and the neighbours it names are
+      // would be logged by the framework with its whole payload, and the records it names are
       // memory content — it would leave the application for the log store on every refusal.
-      if (error instanceof MemoryNeighbourRefusal) {
+      // Both stops run inside the write, so the source is resolved by the time either refuses.
+      const deferred = error instanceof MemoryNeighbourRefusal
+        ? memoryNeighbourRefusalResult(error, { editAvailable: source !== null && !source.isReview })
+        : error instanceof MemoryAttributeReplacementRefusal
+          ? memoryAttributeReplacementRefusalResult(error)
+          : null;
+      if (deferred !== null) {
         logMemoryWriteEvent({
           code: "AGENT_MEMORY_WRITE_DEFERRED",
-          errorCode: "AGENT_MEMORY_SIMILAR_RECORD_EXISTS",
+          errorCode: deferred.code,
           scope,
           sourceKind: source?.isCurrent === true ? "current" : requestedSourceKind,
           threadAction: input.thread?.action ?? "none",
         });
-        // The gate runs inside the write, so the source is resolved by the time it refuses.
-        return memoryNeighbourRefusalResult(error, { editAvailable: source !== null && !source.isReview });
+        return deferred;
       }
       const errorCode = isAppError(error)
         ? error.code

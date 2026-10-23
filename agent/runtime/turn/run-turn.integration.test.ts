@@ -1,4 +1,4 @@
-import { APICallError, RetryError } from "ai";
+import { APICallError, InvalidToolInputError, RetryError, TypeValidationError } from "ai";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
@@ -154,6 +154,35 @@ async function releaseRunner(turnId: string) {
       type: "tool-result", toolCallId: "call-1", toolName: "note",
       output: { type: "error-text", value: 'Failed to parse tool-call arguments for "note" (call-1): Expected a JSON-serializable object.' },
     }] });
+  });
+
+  it("answers a call its schema refused in the common error format, journals what the model sent and counts it", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const sessionId = await newTestSession();
+    const sent = { text: 7 };
+    const refusal = new InvalidToolInputError({
+      cause: new TypeValidationError({ cause: z.object({ text: z.string() }).safeParse(sent).error, value: sent }),
+      toolInput: JSON.stringify(sent),
+      toolName: "note",
+    });
+    const model = scriptedModel(
+      { ...toolCalls([{ id: "call-1", input: sent, name: "note" }]), toolCalls: [{ input: sent, refused: { error: refusal }, toolCallId: "call-1", toolName: "note" }] },
+      reply("ок"),
+    );
+    const execute = vi.fn(() => "noted");
+    const turn = await startMessageTurn(sessionId, "запиши");
+
+    await runTurn(testRuntime({ agent: testAgent({ note: noteTool(execute) }), callModel: model.callModel, observer: recordingObserver().observer }), turn.id, RUN);
+
+    expect(execute).not.toHaveBeenCalled();
+    const output = (model.requests[1]!.messages.at(-1) as { content: Array<{ output: { value: string } }> }).content[0]!.output;
+    expect(output.value).toMatch(/^ModelFacingError: AGENT_TOOL_INPUT_INVALID: \{/u);
+    expect(JSON.parse(output.value.slice(output.value.indexOf("{")))).toMatchObject({ field: "text", retryable: true, sideEffectStatus: "not_started" });
+    const journal = await database().query("SELECT input, state FROM agent_tool_calls WHERE call_id = 'call-1'");
+    expect(journal.rows).toEqual([{ input: sent, state: "completed" }]);
+    const metrics = info.mock.calls.map(([line]) => String(line)).filter((line) => line.includes("AGENT_TOOL_CALL_METRICS"));
+    expect(metrics.map((line) => JSON.parse(line))).toMatchObject([{ callId: "call-1", errorCode: "AGENT_TOOL_INPUT_INVALID", outcome: "failed", toolName: "note", turnId: turn.id }]);
+    info.mockRestore();
   });
 
   it("does not ask the model again for a step recorded before a crash", async () => {

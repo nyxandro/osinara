@@ -206,6 +206,12 @@
               "type": "number",
               "exclusiveMinimum": 0,
               "maximum": 120
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 5242880,
+              "description": "Where to start reading the page text, in characters: pass nextOffset from the previous answer to read the next portion, with the same format. The page is downloaded again, so if it changed meanwhile the portions may not line up. 0 by default"
             }
           },
           "required": [
@@ -213,7 +219,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Load an HTTP(S) page through the protected network gateway. The extracted_text format strips HTML tags and returns plain text; the html format returns the original markup. extracted_text is used by default. The timeout is at most 120 seconds. The answer is bounded by safe size and line limits and reports the final URL, the original Content-Type and a truncation flag."
+        "description": "Load an HTTP(S) page through the protected network gateway. The extracted_text format strips HTML tags and returns plain text; the html format returns the original markup. extracted_text is used by default. The timeout is at most 120 seconds. The answer is bounded by safe size and line limits and reports the final URL, the original Content-Type and a truncation flag; a longer page is read on with offset set to the returned nextOffset."
       },
       {
         "type": "function",
@@ -908,13 +914,24 @@
               "type": "string"
             },
             "kind": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "profile",
+                "preference",
+                "fact",
+                "episode",
+                "family_shared"
+              ]
             },
             "memoryRef": {
               "type": "string"
             },
             "sensitivity": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "normal",
+                "sensitive"
+              ]
             }
           },
           "required": [
@@ -1066,7 +1083,11 @@
               ]
             },
             "scope": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "personal",
+                "family"
+              ]
             },
             "timezone": {
               "type": "string"
@@ -1135,7 +1156,7 @@
           "type": "object",
           "properties": {
             "attribute": {
-              "description": "A short name of the subject's property the record is about: \"кофе\", \"место работы\", \"размер обуви\". Not the value of the property and not a retelling of the content. Set it when the property changes over time and a new record cancels the previous one; a new record of the same subject with the same name moves the previous one into history. Do not set a general name like \"еда\": it would remove independent facts from active memory. For a record without a subject (subject.kind=none) the property name applies to the whole memory scope, so it must be especially precise there. Not allowed for kind=episode",
+              "description": "A short Russian name of a property of the subject that holds one value at a time, so that a new value replaces the old one: \"город\", \"место работы\", \"должность\", \"день рождения\", \"как пьёт кофе\". Not the value and not a retelling of the content. Leave it out for anything that has several values at once: hobbies, tools, resources, links, plans, likes and dislikes in general. A new record of the same subject with the same name retires the current one, so if one exists the write is refused with its text until you name it in replaces. For a record without a subject (subject.kind=none) the name covers the whole memory scope. Not allowed for kind=episode. The outcome of a discussion in a group is one record named \"итог: <short topic>\" with kind=fact, subject.kind=none and no thread; a continued discussion replaces it the same way",
               "type": "string",
               "minLength": 1,
               "maxLength": 40
@@ -1150,6 +1171,16 @@
             },
             "distinctFrom": {
               "description": "Only in response to the AGENT_MEMORY_SIMILAR_RECORD_EXISTS refusal: the memoryRef of the shown close records that you have read and consider different facts. Do not fill it in advance",
+              "maxItems": 5,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^mem_[0-9a-f]{32}$"
+              }
+            },
+            "replaces": {
+              "description": "Only together with attribute: the memoryRef of every current record of this property that the new value replaces, after you have read its text and it is no longer true. Take them from the AGENT_MEMORY_ATTRIBUTE_REPLACEMENT_UNCONFIRMED refusal or from a shown record with the same attribute. Leave it out for the first record of a property",
+              "minItems": 1,
               "maxItems": 5,
               "type": "array",
               "items": {
@@ -1389,7 +1420,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Save one specific fact only from the verified message of the current turn: a fact, a preference, first-hand experience, an event, a plan or a useful link with context. Do not require special importance or a request to remember; do not save guesses or requests without meaningful facts. When selecting on your own use basis=agent_inferred, on a direct request to save the fact basis=user_requested. An example of saving on your own: {\"basis\":\"agent_inferred\",\"content\":\"...\",\"kind\":\"fact\",\"scope\":\"personal\",\"sensitivity\":\"normal\",\"subject\":{\"kind\":\"current_author\"}}. In a group sourceSequence picks exactly one message of the visible delta. For an existing thread use thread.action=attach with a threadRef only from list/search/read_memory_thread; thread.action=create creates a thread atomically. For an event with a known date set occurredOn: the day it happened, not the day of the conversation. Do not guess the date: if it is not known from the message, leave the field empty. For a property that changes over time (a preference, a workplace, an address) set attribute, a short name of the property. A new record of the same subject with the same attribute moves the previous one into history; the previous one is not deleted and is visible in the memory list. If memory already holds a fact close in meaning about the same subject, the call is refused with AGENT_MEMORY_SIMILAR_RECORD_EXISTS and a list of such records: read them and decide yourself whether to update the existing one, set attribute, or list them in distinctFrom and save separately. The result contains item.memoryRef, an optional thread, supersededRefs for replaced versions and a notice for an immediate undo."
+        "description": "Save one specific fact only from the verified message of the current turn: a fact, a preference, first-hand experience, an event, a plan or a useful link with context. Do not require special importance or a request to remember; do not save guesses or requests without meaningful facts. When selecting on your own use basis=agent_inferred, on a direct request to save the fact basis=user_requested. An example of saving on your own: {\"basis\":\"agent_inferred\",\"content\":\"...\",\"kind\":\"fact\",\"scope\":\"personal\",\"sensitivity\":\"normal\",\"subject\":{\"kind\":\"current_author\"}}. In a group sourceSequence picks exactly one message of the visible delta. For an existing thread use thread.action=attach with a threadRef only from list/search/read_memory_thread; thread.action=create creates a thread atomically. For an event with a known date set occurredOn: the day it happened, not the day of the conversation. Do not guess the date: if it is not known from the message, leave the field empty. For a property that holds one value at a time (a city, a workplace, a birthday) set attribute, its short name. A new value moves the current record of that property into history; while one exists, the call is refused with its text until you name it in replaces. If memory already holds a fact close in meaning about the same subject, the call is refused with AGENT_MEMORY_SIMILAR_RECORD_EXISTS and a list of such records: read them and decide yourself whether to update the existing one, save a new value with attribute and replaces, or list them in distinctFrom and save separately. The result contains item.memoryRef, an optional thread, supersededRefs for replaced versions and a notice for an immediate undo."
       },
       {
         "type": "function",
@@ -2227,6 +2258,12 @@
               "type": "number",
               "exclusiveMinimum": 0,
               "maximum": 120
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 5242880,
+              "description": "Where to start reading the page text, in characters: pass nextOffset from the previous answer to read the next portion, with the same format. The page is downloaded again, so if it changed meanwhile the portions may not line up. 0 by default"
             }
           },
           "required": [
@@ -2234,7 +2271,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Load an HTTP(S) page through the protected network gateway. The extracted_text format strips HTML tags and returns plain text; the html format returns the original markup. extracted_text is used by default. The timeout is at most 120 seconds. The answer is bounded by safe size and line limits and reports the final URL, the original Content-Type and a truncation flag."
+        "description": "Load an HTTP(S) page through the protected network gateway. The extracted_text format strips HTML tags and returns plain text; the html format returns the original markup. extracted_text is used by default. The timeout is at most 120 seconds. The answer is bounded by safe size and line limits and reports the final URL, the original Content-Type and a truncation flag; a longer page is read on with offset set to the returned nextOffset."
       },
       {
         "type": "function",
@@ -2848,13 +2885,24 @@
               "type": "string"
             },
             "kind": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "profile",
+                "preference",
+                "fact",
+                "episode",
+                "family_shared"
+              ]
             },
             "memoryRef": {
               "type": "string"
             },
             "sensitivity": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "normal",
+                "sensitive"
+              ]
             }
           },
           "required": [

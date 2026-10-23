@@ -361,7 +361,8 @@ export async function createMemoryClaim(
     // identical text is not a decision for the model to make, and a refusal here costs the person
     // nothing because no record has been created yet.
     await requireMemoryNeighbourDecision(client, {
-      declaredRefs: input.distinctFrom ?? [],
+      // A version the write retires is one the model has read and decided about.
+      declaredRefs: [...input.distinctFrom ?? [], ...input.replaces ?? []],
       familyId: auth.familyId,
       memoryProjectId: threadWrite?.identity.memoryProjectId ?? null,
       probe: guards.neighbourProbe,
@@ -441,7 +442,8 @@ export async function createMemoryClaim(
     // memory is never left without an answer to the property even for the length of a transaction.
     const superseded = guards.attribute === null
       ? []
-      : await supersedeMemoryAttributeSlot(client, row.id);
+      : await supersedeMemoryAttributeSlot(client, row.id,
+        { replaces: input.replaces ?? [], revealSensitive: input.systemActor !== true });
     await insertCreateOperation(client, auth, input, inputHash, row.id, threadWrite);
     await client.query("INSERT INTO memory_embedding_jobs (memory_item_id) VALUES ($1)", [row.id]);
     await client.query(

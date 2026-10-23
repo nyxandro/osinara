@@ -147,6 +147,18 @@ describe("model-facing tool input hardening", () => {
     await expect(executeInvalidToolInput(tool, {} as never, context)).rejects.toThrowError(message);
   });
 
+  it("names the allowed values of fixed-choice fields in the schema the model reads", () => {
+    type Properties = { properties: Record<string, { enum?: string[] }> };
+    const memory = z.toJSONSchema(manageMemory.inputSchema as z.ZodType) as Properties;
+    const reminder = z.toJSONSchema(manageReminder.inputSchema as z.ZodType) as Properties;
+
+    expect(memory.properties.kind!.enum).toEqual(["profile", "preference", "fact", "episode", "family_shared"]);
+    expect(memory.properties.sensitivity!.enum).toEqual(["normal", "sensitive"]);
+    expect(reminder.properties.scope!.enum).toEqual(["personal", "family"]);
+    expect((manageMemory.inputSchema as z.ZodType).safeParse({ action: "edit", kind: "note" }).success).toBe(false);
+    expect((manageReminder.inputSchema as z.ZodType).safeParse({ action: "create", scope: "group" }).success).toBe(false);
+  });
+
   it("explains the exact reminder recurrence shape when interval is missing", async () => {
     await expect(manageReminder.execute({
       action: "create",

@@ -6,6 +6,12 @@
  * - `CONTROLLED_WEB_FETCH_INPUT_SCHEMA`: validated input contract, the same as the native `web_fetch`.
  * - `createControlledWebFetch`: injectable secure HTTP executor for isolated tests.
  * - `controlledWebFetchTool`: custom `web_fetch` definition, compatible with the native one.
+ *
+ * A page is read in portions of at most `CONTROLLED_WEB_FETCH_MAX_MODEL_BYTES` and
+ * `CONTROLLED_WEB_FETCH_MAX_MODEL_LINES`. Everything past the first portion used to be lost: a
+ * release list on GitHub ended mid-page (12.10.2026) and the agent went around through the API.
+ * `offset` continues from `nextOffset` of the previous answer; the page is downloaded again each
+ * time, so nothing is kept between calls and the tool stays a plain read.
  */
 import { Buffer } from "node:buffer";
 
@@ -43,6 +49,10 @@ export const CONTROLLED_WEB_FETCH_INPUT_SCHEMA = z.object({
     .describe("html returns the original HTML markup; extracted_text strips HTML tags and returns plain text")
     .optional(),
   timeout: z.number().positive().max(MAX_TIMEOUT_SECONDS).optional(),
+  // A character takes at least one byte, so no page text is longer than the body limit.
+  offset: z.number().int().min(0).max(CONTROLLED_WEB_FETCH_MAX_BODY_BYTES)
+    .describe("Where to start reading the page text, in characters: pass nextOffset from the previous answer to read the next portion, with the same format. The page is downloaded again, so if it changed meanwhile the portions may not line up. 0 by default")
+    .optional(),
 }).strict();
 
 type ControlledWebFetchInput = z.infer<typeof CONTROLLED_WEB_FETCH_INPUT_SCHEMA>;
@@ -51,6 +61,10 @@ interface ControlledWebFetchResult {
   content: string;
   contentType: string;
   finalUrl: string;
+  /** Where the next portion starts, or null when this one reaches the end of the page. */
+  nextOffset: number | null;
+  offset: number;
+  totalCharacters: number;
   truncated: boolean;
 }
 
@@ -184,20 +198,51 @@ function truncateUtf8(value: string, maxBytes: number): string {
   const bytes = Buffer.from(value, "utf8");
   if (bytes.byteLength <= maxBytes) return value;
 
-  // TextDecoder drops an incomplete trailing code point rather than emitting malformed UTF-8.
-  return new TextDecoder("utf-8", { fatal: false })
+  // TextDecoder drops an incomplete trailing code point rather than emitting malformed UTF-8. A
+  // portion may open with U+FEFF, which is text here, not a byte order mark to strip.
+  return new TextDecoder("utf-8", { fatal: false, ignoreBOM: true })
     .decode(bytes.subarray(0, maxBytes))
     .replace(/\uFFFD$/u, "");
 }
 
-function boundModelContent(value: string): { content: string; truncated: boolean } {
+/**
+ * The portion is always a prefix of the text from where it starts: the line bound keeps whole lines and the
+ * byte bound drops an incomplete trailing code point, so the next portion starts exactly at its end
+ * and the portions together are the whole page.
+ */
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
+function boundModelContent(
+  value: string,
+  offset: number,
+): Pick<ControlledWebFetchResult, "content" | "nextOffset" | "offset" | "totalCharacters" | "truncated"> {
   const safeText = value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu, "");
-  const lines = safeText.split("\n");
+  if (offset > 0 && offset >= safeText.length) {
+    throw new AppError(
+      "AGENT_WEB_FETCH_INPUT_INVALID",
+      `Указанное место за концом страницы: сейчас в ней ${safeText.length} знаков. Если страница изменилась, прочитайте её заново с начала`,
+    );
+  }
+  // An offset of the model's own may fall between the two halves of a character; start at its first.
+  const start = offset > 0 && isLowSurrogate(safeText.charCodeAt(offset)) && isHighSurrogate(safeText.charCodeAt(offset - 1))
+    ? offset - 1
+    : offset;
+  const lines = safeText.slice(start).split("\n");
   const lineBounded = lines.slice(0, CONTROLLED_WEB_FETCH_MAX_MODEL_LINES).join("\n");
   const content = truncateUtf8(lineBounded, CONTROLLED_WEB_FETCH_MAX_MODEL_BYTES);
+  const end = start + content.length;
   return {
     content,
-    truncated: lines.length > CONTROLLED_WEB_FETCH_MAX_MODEL_LINES || content !== lineBounded,
+    nextOffset: end < safeText.length ? end : null,
+    offset: start,
+    totalCharacters: safeText.length,
+    truncated: end < safeText.length,
   };
 }
 
@@ -261,7 +306,7 @@ export function createControlledWebFetch(dependencies: ControlledWebFetchDepende
         const formatted = responseContentType === HTML_CONTENT_TYPE && requestedFormat !== "html"
           ? htmlToText(decoded)
           : decoded;
-        const bounded = boundModelContent(formatted);
+        const bounded = boundModelContent(formatted, input.offset ?? 0);
         return {
           ...bounded,
           contentType: responseContentType,
@@ -307,7 +352,7 @@ export const controlledWebFetchTool = defineTool({
     "Load an HTTP(S) page through the protected network gateway.",
     "The extracted_text format strips HTML tags and returns plain text; the html format returns the original markup.",
     "extracted_text is used by default. The timeout is at most 120 seconds.",
-    "The answer is bounded by safe size and line limits and reports the final URL, the original Content-Type and a truncation flag.",
+    "The answer is bounded by safe size and line limits and reports the final URL, the original Content-Type and a truncation flag; a longer page is read on with offset set to the returned nextOffset.",
   ].join(" "),
   inputSchema: CONTROLLED_WEB_FETCH_INPUT_SCHEMA,
   async execute(input, ctx) {

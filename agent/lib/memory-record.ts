@@ -89,6 +89,8 @@ export interface CreateMemoryInput {
   attribute?: string;
   /** Refs of the close neighbours the model has read and declared separate from this one. */
   distinctFrom?: readonly string[];
+  /** Refs of the current versions of `attribute` the model has read and retires with this record. */
+  replaces?: readonly string[];
   /** The day the event happened, when the conversation gave it; never guessed. */
   occurredOn?: string;
   confirmation: MemoryConfirmation;
