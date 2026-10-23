@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { APICallError, RetryError, tool, type LanguageModel } from "ai";
+import { APICallError, InvalidToolInputError, NoSuchToolError, RetryError, tool, type LanguageModel } from "ai";
 import { z } from "zod";
 import type { LanguageModelV4CallOptions, LanguageModelV4StreamPart } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
@@ -108,6 +108,25 @@ describe("step model call", () => {
     expect(sent.prompt[0]).toEqual({ role: "system", content: "Instructions (instructions)\nправила" });
     expect(sent.providerOptions).toEqual({ neuraldeep: { user: "wrun_X" } });
     expect(sent.toolChoice).toEqual({ type: "none" });
+  });
+
+  it("hands over a call refused by its schema with the input the model sent and the reason", async () => {
+    const provider = model(async () => ({ stream: streamOf([
+      { type: "stream-start", warnings: [] },
+      { type: "tool-call", toolCallId: "c1", toolName: "bash", input: '{"command":7,"extra":true}' },
+      { type: "tool-call", toolCallId: "c2", toolName: "fax", input: '{"to":"1"}' },
+      FINISH("tool-calls"),
+    ]) }));
+    const tools = { bash: tool({ description: "bash", inputSchema: z.object({ command: z.string() }).strict() }) };
+
+    const response = await callStepModel(call(provider, { tools }), NO_WAIT);
+
+    expect(response.toolCalls).toMatchObject([
+      { input: { command: 7, extra: true }, toolCallId: "c1", toolName: "bash" },
+      { input: { to: "1" }, toolCallId: "c2", toolName: "fax" },
+    ]);
+    expect(InvalidToolInputError.isInstance(response.toolCalls[0]!.refused?.error)).toBe(true);
+    expect(NoSuchToolError.isInstance(response.toolCalls[1]!.refused?.error)).toBe(true);
   });
 
   it("marks the cached prefix for a provider on the Anthropic protocol, the empty-answer reissue included", async () => {

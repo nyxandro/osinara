@@ -3,8 +3,8 @@
  *
  * Exports:
  * - `planStepCalls`: each call of a fresh model response becomes a journal record — a result
- *   already known (broken input, unknown tool, policy denial), a request for a person, or a plan
- *   to run it.
+ *   already known (an input the schema refused, an unknown tool, a policy denial), a request for a
+ *   person, or a plan to run it.
  * - `executeStepCalls`: runs the planned calls concurrently, writing the intent before each one;
  *   after a crash it reruns an interrupted call only when the tool is replay-safe, and a call whose
  *   tool is no longer granted does not run. An `agent` call runs as a child turn (`DelegateCall`).
@@ -14,12 +14,11 @@
  * neither repeats a finished call nor guesses about an interrupted one.
  * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
-import type { ModelMessage } from "ai";
-
 import { approvalRequest, ASK_QUESTION_TOOL_NAME, deniedOutput, questionRequest } from "../hitl/input-requests.js";
 import type { ToolContext, ToolDefinition } from "../tool.js";
 import type { StepToolCall } from "./model-call.js";
 import { decideToolApproval, executeToolCall, resolveToolCallInput, type ToolResultOutput } from "./tool-calls.js";
+import { logRejectedToolCall, rejectedToolCall } from "./tool-input-errors.js";
 import type { SubagentInputRequest, ToolCallRecord } from "./turn-types.js";
 
 export type PlannedCall = Omit<ToolCallRecord, "stepIndex">;
@@ -37,31 +36,20 @@ function unavailableOutput(toolName: string): ToolResultOutput {
   };
 }
 
-// Results AI SDK already produced inside the response: an unknown tool or an input that failed its schema.
-function synthesizedOutputs(response: readonly ModelMessage[]): Map<string, ToolResultOutput> {
-  const outputs = new Map<string, ToolResultOutput>();
-  for (const message of response) {
-    if (message.role !== "tool") continue;
-    for (const part of message.content) {
-      if (part.type === "tool-result") outputs.set(part.toolCallId, part.output);
-    }
-  }
-  return outputs;
-}
-
 export async function planStepCalls(input: {
   readonly contextFor: (call: { readonly callId: string; readonly toolName: string }) => ToolContext;
-  readonly response: readonly ModelMessage[];
   readonly toolCalls: readonly StepToolCall[];
   readonly tools: Readonly<Record<string, AnyToolDefinition>>;
 }): Promise<PlannedCall[]> {
-  const synthesized = synthesizedOutputs(input.response);
   const planned: PlannedCall[] = [];
   for (const [position, call] of input.toolCalls.entries()) {
     const base = { callId: call.toolCallId, inputRequest: null, inputResponse: null, position, toolName: call.toolName };
-    const known = synthesized.get(call.toolCallId);
-    if (known !== undefined) {
-      planned.push({ ...base, input: {}, output: known, state: "completed" });
+    if (call.refused !== undefined) {
+      // AI SDK refused it before any tool could run; the journal keeps what the model sent.
+      const rejected = rejectedToolCall({ error: call.refused.error, input: call.input, toolName: call.toolName });
+      const { session } = input.contextFor(base);
+      logRejectedToolCall({ callId: call.toolCallId, metrics: rejected.metrics, sessionId: session.id, toolName: call.toolName, turnId: session.turn.id });
+      planned.push({ ...base, input: rejected.input, output: rejected.output, state: "completed" });
       continue;
     }
     const parsed = resolveToolCallInput(call);
