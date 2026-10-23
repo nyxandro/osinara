@@ -160,8 +160,9 @@ export async function lockMemoryAttributeSlot(
  * The new record is already inserted, so a stop rolls the whole write back with it. The slot lock
  * taken before the insert keeps the set of holders read here unchanged until the retirement.
  *
- * `revealSensitive` is false for the silent review, which is never shown a sensitive record: such a
- * holder is named by its ref with the text withheld, so the review cannot judge it and leaves it.
+ * `revealSensitive` is false for the silent review, which is never shown a sensitive record: when
+ * such a holder exists the write stops without its text or ref, and the holder is never retired by
+ * that write.
  */
 export async function supersedeMemoryAttributeSlot(
   client: PoolClient,
@@ -196,17 +197,17 @@ export async function supersedeMemoryAttributeSlot(
      FOR UPDATE OF previous`,
     [claimId],
   );
+  // A version the writer cannot read is never retired by it, named or not: its ref may be known
+  // from elsewhere, and naming it would retire a fact nobody looked at.
+  if (!declared.revealSensitive && holders.rows.some((holder) => holder.sensitivity !== "normal")) {
+    throw new MemoryAttributeReplacementRefusal(holders.rows[0]!.attribute, [], { hiddenSensitive: true });
+  }
   // Every current version has to be named: one left out would be retired unseen, which is the
   // very write this stop exists for.
   if (holders.rows.some((holder) => !declared.replaces.includes(holder.memory_ref))) {
     throw new MemoryAttributeReplacementRefusal(
       holders.rows[0]!.attribute,
-      holders.rows.map((holder) => ({
-        content: holder.sensitivity === "normal" || declared.revealSensitive
-          ? holder.content
-          : "Текст скрыт: чувствительная запись.",
-        memoryRef: holder.memory_ref,
-      })),
+      holders.rows.map((holder) => ({ content: holder.content, memoryRef: holder.memory_ref })),
     );
   }
   // A ref of anything else does not stand in for a holder, and is not quietly ignored either: the

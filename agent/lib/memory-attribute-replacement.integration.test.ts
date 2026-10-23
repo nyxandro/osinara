@@ -147,7 +147,7 @@ describeWithDatabase("memory attribute replacement", () => {
     expect(stored.rowCount).toBe(0);
   });
 
-  it("withholds the text of a sensitive version from the silent review", async () => {
+  it("never lets the silent review retire a sensitive version it cannot read", async () => {
     const sensitive = await write("replacement-9", {
       attribute: "здоровье", content: "Диагноз: мигрень", sensitivity: "sensitive",
     });
@@ -156,12 +156,25 @@ describeWithDatabase("memory attribute replacement", () => {
     const client = await database().connect();
     try {
       await client.query("BEGIN");
-      const refused = await supersedeMemoryAttributeSlot(client, fresh.id, { replaces: [], revealSensitive: false })
-        .catch((error: unknown) => error);
+      // Its ref may be known from elsewhere (a neighbour refusal); named or not, the version stays.
+      for (const replaces of [[], [sensitive.memoryRef]]) {
+        await client.query("SAVEPOINT attempt");
+        const refused = await supersedeMemoryAttributeSlot(client, fresh.id, { replaces, revealSensitive: false })
+          .catch((error: unknown) => error);
+        await client.query("ROLLBACK TO SAVEPOINT attempt");
 
-      expect(refused).toBeInstanceOf(MemoryAttributeReplacementRefusal);
-      expect((refused as MemoryAttributeReplacementRefusal).current)
-        .toEqual([{ content: "Текст скрыт: чувствительная запись.", memoryRef: sensitive.memoryRef }]);
+        expect(refused).toBeInstanceOf(MemoryAttributeReplacementRefusal);
+        expect(refused).toMatchObject({ current: [], hiddenSensitive: true });
+      }
+      const status = await client.query<{ claim_status: string }>(
+        "SELECT claim_status FROM memory_items_all WHERE id = $1", [sensitive.id],
+      );
+      expect(status.rows[0]!.claim_status).toBe("active");
+      // In a conversation the person may read it, so there it is shown and can be named as usual.
+      const shown = await supersedeMemoryAttributeSlot(client, fresh.id, { replaces: [], revealSensitive: true })
+        .catch((error: unknown) => error);
+      expect((shown as MemoryAttributeReplacementRefusal).current)
+        .toEqual([{ content: "Диагноз: мигрень", memoryRef: sensitive.memoryRef }]);
     } finally {
       await client.query("ROLLBACK");
       client.release();

@@ -26,17 +26,33 @@ export interface CurrentAttributeVersion {
  */
 export class MemoryAttributeReplacementRefusal extends Error {
   readonly code = "AGENT_MEMORY_ATTRIBUTE_REPLACEMENT_UNCONFIRMED";
+  /**
+   * The silent review is never shown a sensitive record, so it can neither judge nor retire one: it
+   * is told the version stays and given no ref to name, and the version stays even if it names one.
+   */
+  readonly hiddenSensitive: boolean;
 
   constructor(
     readonly attribute: string,
     readonly current: readonly CurrentAttributeVersion[],
+    options: { readonly hiddenSensitive?: boolean } = {},
   ) {
     super("AGENT_MEMORY_ATTRIBUTE_REPLACEMENT_UNCONFIRMED");
     this.name = "MemoryAttributeReplacementRefusal";
+    this.hiddenSensitive = options.hiddenSensitive === true;
   }
 }
 
 export function memoryAttributeReplacementRefusalResult(refusal: MemoryAttributeReplacementRefusal) {
+  if (refusal.hiddenSensitive) {
+    return {
+      code: refusal.code,
+      correction: `Запись не сохранена: под свойством «${refusal.attribute}» у этого субъекта уже есть чувствительная запись, которую здесь нельзя ни прочитать, ни заменить. Другой факт, который должен остаться рядом, сохрани без attribute; новое значение этого свойства или то же самое не сохраняй.`,
+      current: [],
+      reason: "Действующая версия этого свойства чувствительна, и фоновая проверка не может её заменить.",
+      saved: false,
+    };
+  }
   return {
     code: refusal.code,
     correction: [

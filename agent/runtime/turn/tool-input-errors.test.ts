@@ -57,7 +57,7 @@ describe("a tool call refused before it ran", () => {
         { code: "invalid_value", field: "kind" },
         { code: "invalid_value", field: "scope" },
         { code: "invalid_type", field: "subject.kind" },
-        { code: "unrecognized_keys", field: "extra" },
+        { code: "unrecognized_keys", field: "*" },
       ],
       issueCount: 4,
     });
@@ -169,6 +169,18 @@ describe("a tool call refused before it ran", () => {
     expect(flooded.metrics.issues.length).toBeLessThanOrEqual(5);
     expect(flooded.metrics.issueCount).toBe(1);
     expect(flooded.metrics.issues[0]!.field.length).toBeLessThanOrEqual(120);
+  });
+
+  it("tells the model an unknown key by name but keeps the name out of the metrics line", () => {
+    // A key is the model's own text; it may carry an address or a name.
+    const schema = z.object({ subject: z.object({ kind: z.string() }).strict() }).strict();
+    const input = { subject: { kind: "none", "ivan@example.com": true } };
+
+    const rejected = rejectedToolCall({ error: invalidInput(schema, input), input, toolName: "remember" });
+
+    expect(contractOf(rejected.output).reason).toContain("ivan@example.com");
+    expect(rejected.metrics.issues).toEqual([{ code: "unrecognized_keys", field: "subject.*" }]);
+    expect(JSON.stringify(rejected.metrics)).not.toContain("ivan");
   });
 
   it("reports a refusal without a library error as an input error, not as a crash", () => {

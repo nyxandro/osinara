@@ -22,8 +22,10 @@ import type { ToolResultOutput } from "./tool-calls.js";
 
 /** How many problems the reason and the metrics line list; the rest are counted. */
 const LISTED_ISSUES_LIMIT = 5;
-/** A field name in the metrics line; unknown keys are the model's own words and are cut. */
+/** A field name in the metrics line, as a last bound on what a path can carry. */
 const LOGGED_FIELD_MAX_CHARACTERS = 120;
+// A path segment the schema itself names; anything else came from the model and is logged as `*`.
+const SCHEMA_SEGMENT = /^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|\d+)$/u;
 
 interface SchemaIssue {
   readonly code?: string;
@@ -68,6 +70,15 @@ function fieldOf(issue: SchemaIssue): string {
     return issue.keys.map((key) => [...path, key].join(".")).join(", ");
   }
   return path.join(".");
+}
+
+/**
+ * The field as the metrics line names it. An unknown key is the model's own text — it may carry an
+ * address or a name — so the model is told it exactly, while the log keeps only where it was.
+ */
+function loggedFieldOf(issue: SchemaIssue): string {
+  const path = (issue.path ?? []).map((segment) => SCHEMA_SEGMENT.test(String(segment)) ? String(segment) : "*");
+  return (issue.code === "unrecognized_keys" ? [...path, "*"] : path).join(".").slice(0, LOGGED_FIELD_MAX_CHARACTERS);
 }
 
 /**
@@ -122,7 +133,12 @@ function invalidInputCall(toolName: string, input: unknown, error: unknown): Rej
   const listed = (issues ?? []).map((issue) => {
     const field = fieldOf(issue);
     const message = russianMessage(issue, input);
-    return { code: issue.code ?? "invalid", field, text: (issue.path ?? []).length > 0 ? `${field}: ${message}` : message };
+    return {
+      code: issue.code ?? "invalid",
+      field,
+      loggedField: loggedFieldOf(issue),
+      text: (issue.path ?? []).length > 0 ? `${field}: ${message}` : message,
+    };
   });
   const shown = listed.slice(0, LISTED_ISSUES_LIMIT).map((issue) => issue.text);
   if (listed.length > LISTED_ISSUES_LIMIT) shown.push(`и ещё ${listed.length - LISTED_ISSUES_LIMIT}`);
@@ -132,14 +148,13 @@ function invalidInputCall(toolName: string, input: unknown, error: unknown): Rej
       ? `Поля вызова не прошли проверку схемы: ${shown.join("; ")}.`
       : "Поля вызова не прошли проверку схемы.";
   const field = listed[0]?.field;
-  const logged = notJson ? [{ code: "json_parse", field: "" }] : listed.map(({ code, field }) => ({ code, field }));
+  const logged = notJson ? [{ code: "json_parse", field: "" }] : listed.map(({ code, loggedField }) => ({ code, field: loggedField }));
   return {
     input: isObject(input) ? input : {},
     metrics: {
       errorCode: "AGENT_TOOL_INPUT_INVALID",
       issueCount: logged.length,
-      issues: logged.slice(0, LISTED_ISSUES_LIMIT)
-        .map((issue) => ({ code: issue.code, field: issue.field.slice(0, LOGGED_FIELD_MAX_CHARACTERS) })),
+      issues: logged.slice(0, LISTED_ISSUES_LIMIT),
     },
     output: refusalOutput(new ModelFacingError({
       category: "input",

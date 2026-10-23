@@ -651,6 +651,19 @@ describe("model-facing memory tool results", () => {
     });
   });
 
+  it("tells the silent review a hidden sensitive version stays, and offers no ref to replace it with", async () => {
+    createMemory.mockRejectedValue(new MemoryAttributeReplacementRefusal("здоровье", [], { hiddenSensitive: true }));
+
+    const result = await executeNonStreamingTool(remember, {
+      attribute: "здоровье", basis: "agent_inferred", content: "Новая запись о здоровье",
+      kind: "profile", scope: "personal", sensitivity: "normal", subject: { kind: "current_author" },
+    }, context);
+
+    expect(result).toMatchObject({ code: "AGENT_MEMORY_ATTRIBUTE_REPLACEMENT_UNCONFIRMED", current: [], saved: false });
+    expect((result as { correction: string }).correction).toContain("без attribute");
+    expect((result as { correction: string }).correction).not.toContain("replaces");
+  });
+
   it("passes the versions the model named to the write", async () => {
     createMemory.mockResolvedValue(internalMemory);
 
