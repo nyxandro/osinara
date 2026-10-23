@@ -206,6 +206,12 @@
               "type": "number",
               "exclusiveMinimum": 0,
               "maximum": 120
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 5242880,
+              "description": "Where to start reading the page text, in characters: pass nextOffset from the previous answer to read the next portion, with the same format. The page is downloaded again, so if it changed meanwhile the portions may not line up. 0 by default"
             }
           },
           "required": [
@@ -213,7 +219,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Load an HTTP(S) page through the protected network gateway. The extracted_text format strips HTML tags and returns plain text; the html format returns the original markup. extracted_text is used by default. The timeout is at most 120 seconds. The answer is bounded by safe size and line limits and reports the final URL, the original Content-Type and a truncation flag."
+        "description": "Load an HTTP(S) page through the protected network gateway. The extracted_text format strips HTML tags and returns plain text; the html format returns the original markup. extracted_text is used by default. The timeout is at most 120 seconds. The answer is bounded by safe size and line limits and reports the final URL, the original Content-Type and a truncation flag; a longer page is read on with offset set to the returned nextOffset."
       },
       {
         "type": "function",
@@ -798,13 +804,24 @@
               "type": "string"
             },
             "kind": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "profile",
+                "preference",
+                "fact",
+                "episode",
+                "family_shared"
+              ]
             },
             "memoryRef": {
               "type": "string"
             },
             "sensitivity": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "normal",
+                "sensitive"
+              ]
             }
           },
           "required": [
@@ -956,7 +973,11 @@
               ]
             },
             "scope": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "personal",
+                "family"
+              ]
             },
             "timezone": {
               "type": "string"

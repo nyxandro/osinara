@@ -5,9 +5,12 @@
  * - `createControlledWebFetch`: injectable proxied HTTP executor with strict URL and resource limits;
  *   a refusing site's status reaches the model, its origin only the diagnostics.
  * - `controlledWebFetchTool`: custom `web_fetch` definition with the built-in input contract.
+ * - A page longer than one portion is read on by `offset`: every portion starts where the previous
+ *   one ended, and all of them together are the whole page text.
  */
 import { Buffer } from "node:buffer";
 
+import fc from "fast-check";
 import { ProxyAgent, type RequestInit, type Response } from "undici";
 import { describe, expect, it, vi } from "vitest";
 
@@ -23,6 +26,11 @@ import {
 } from "./controlled-web-fetch.js";
 
 type FetchCall = [URL | string, RequestInit | undefined];
+
+// A lone surrogate does not survive a UTF-8 round trip: it comes back as U+FFFD.
+function wellFormed(text: string): boolean {
+  return Buffer.from(text, "utf8").toString("utf8") === text;
+}
 
 function response(body: BodyInit | null, init?: ResponseInit): Response {
   return new globalThis.Response(body, init) as unknown as Response;
@@ -174,6 +182,9 @@ describe("controlled external-group web fetch", () => {
         content: result.content,
         contentType: "text/plain",
         finalUrl: "https://example.com/text",
+        nextOffset: result.content.length,
+        offset: 0,
+        totalCharacters: CONTROLLED_WEB_FETCH_MAX_MODEL_BYTES,
         truncated: true,
       },
     });
@@ -244,5 +255,106 @@ describe("controlled external-group web fetch", () => {
       "AGENT_WEB_FETCH_REQUEST_FAILED: Не удалось загрузить страницу через защищённый шлюз. Попробуйте позже",
     );
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads a long page on from where the previous portion ended, letters and emoji intact", async () => {
+    const page = "Привет, мир 😀 ".repeat(4_900);
+    const fetch = vi.fn(async () => response(page));
+    const execute = createControlledWebFetch({ dispatcher: {} as never, fetch });
+
+    const first = await execute({ url: "https://example.com/long" });
+    const second = await execute({ offset: first.nextOffset!, url: "https://example.com/long" });
+    const third = await execute({ offset: second.nextOffset!, url: "https://example.com/long" });
+
+    expect(first).toMatchObject({ offset: 0, totalCharacters: page.length, truncated: true });
+    expect(second).toMatchObject({ offset: first.nextOffset, truncated: true });
+    expect(third).toMatchObject({ nextOffset: null, truncated: false });
+    expect(first.content + second.content + third.content).toBe(page);
+    for (const portion of [first, second, third]) {
+      expect(wellFormed(portion.content)).toBe(true);
+      expect(Buffer.byteLength(portion.content, "utf8")).toBeLessThanOrEqual(CONTROLLED_WEB_FETCH_MAX_MODEL_BYTES);
+    }
+  });
+
+  it("reads on past the line limit without losing the line break between portions", async () => {
+    const page = Array.from({ length: CONTROLLED_WEB_FETCH_MAX_MODEL_LINES + 5 }, (_, index) => `строка ${index}`).join("\n");
+    const execute = createControlledWebFetch({ dispatcher: {} as never, fetch: vi.fn(async () => response(page)) });
+
+    const first = await execute({ url: "https://example.com/lines" });
+    const rest = await execute({ offset: first.nextOffset!, url: "https://example.com/lines" });
+
+    expect(first.content.split("\n")).toHaveLength(CONTROLLED_WEB_FETCH_MAX_MODEL_LINES);
+    expect(rest).toMatchObject({ nextOffset: null, offset: first.nextOffset });
+    expect(first.content + rest.content).toBe(page);
+  });
+
+  it("refuses to start past the end of the page, naming its length", async () => {
+    const execute = createControlledWebFetch({ dispatcher: {} as never, fetch: vi.fn(async () => response("короткая")) });
+
+    await expect(execute({ offset: 8, url: "https://example.com/short" }))
+      .rejects.toThrowError(/AGENT_WEB_FETCH_INPUT_INVALID: .*8 знаков/u);
+    await expect(execute({ offset: 0, url: "https://example.com/short" }))
+      .resolves.toMatchObject({ content: "короткая", nextOffset: null, totalCharacters: 8 });
+    expect(CONTROLLED_WEB_FETCH_INPUT_SCHEMA.safeParse({ offset: -1, url: "https://example.com" }).success).toBe(false);
+    expect(CONTROLLED_WEB_FETCH_INPUT_SCHEMA.safeParse({ offset: 1.5, url: "https://example.com" }).success).toBe(false);
+    expect(CONTROLLED_WEB_FETCH_INPUT_SCHEMA.safeParse({ offset: CONTROLLED_WEB_FETCH_MAX_BODY_BYTES + 1, url: "https://example.com" }).success)
+      .toBe(false);
+  });
+
+  it("keeps a byte order mark that opens a portion, so the next portion starts right after it", async () => {
+    // A decoder drops a leading U+FEFF by default: the portion came back one character short and
+    // the next one began in the middle of an emoji.
+    const page = `a\uFEFF${"😀".repeat(CONTROLLED_WEB_FETCH_MAX_MODEL_BYTES / 4)}`;
+    const execute = createControlledWebFetch({ dispatcher: {} as never, fetch: vi.fn(async () => response(page)) });
+    const portions: string[] = [];
+    let offset: number | null = 1;
+
+    while (offset !== null) {
+      const portion = await execute({ offset, url: "https://example.com/bom" });
+      expect(wellFormed(portion.content)).toBe(true);
+      portions.push(portion.content);
+      offset = portion.nextOffset;
+    }
+
+    expect(portions[0]!.startsWith("\uFEFF")).toBe(true);
+    expect(portions.join("")).toBe(page.slice(1));
+  });
+
+  it("starts an offset that falls inside a character at the start of that character", async () => {
+    const execute = createControlledWebFetch({ dispatcher: {} as never, fetch: vi.fn(async () => response("😀😀😀")) });
+
+    const portion = await execute({ offset: 3, url: "https://example.com/emoji" });
+
+    expect(portion).toMatchObject({ content: "😀😀", nextOffset: null, offset: 2 });
+  });
+
+  it("gives back the whole page text when all portions are read one after another", async () => {
+    // What the channel can carry: any code point, line breaks and control characters, in runs long
+    // enough to cross both the byte and the line limit of a portion.
+    const piece = fc.oneof(
+      fc.string({ maxLength: 6, unit: "binary" }),
+      fc.constantFrom("\n", "\r\n", "\t", "\u0007", "😀", "я", "line\n"),
+    );
+    const page = fc.tuple(fc.array(piece, { maxLength: 12, minLength: 1 }), fc.integer({ max: 12_000, min: 0 }))
+      .map(([pieces, times]) => pieces.join("").repeat(times));
+    // Control characters other than tab and line breaks are never shown; that is the page text.
+    const visible = (text: string) => text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu, "");
+
+    await fc.assert(fc.asyncProperty(page, async (text) => {
+      const execute = createControlledWebFetch({ dispatcher: {} as never, fetch: async () => response(text) });
+      const portions: string[] = [];
+      let offset: number | null = 0;
+      while (offset !== null) {
+        const portion = await execute({ offset, url: "https://example.com/any" });
+        expect(wellFormed(portion.content)).toBe(true);
+        expect(Buffer.byteLength(portion.content, "utf8")).toBeLessThanOrEqual(CONTROLLED_WEB_FETCH_MAX_MODEL_BYTES);
+        expect(portion.content.split("\n").length).toBeLessThanOrEqual(CONTROLLED_WEB_FETCH_MAX_MODEL_LINES);
+        expect(portion.totalCharacters).toBe(visible(text).length);
+        expect(portion.content.length > 0 || portion.nextOffset === null).toBe(true);
+        portions.push(portion.content);
+        offset = portion.nextOffset;
+      }
+      expect(portions.join("")).toBe(visible(text));
+    }), { examples: [[""], ["\n".repeat(CONTROLLED_WEB_FETCH_MAX_MODEL_LINES)], ["😀".repeat(CONTROLLED_WEB_FETCH_MAX_MODEL_BYTES)]], numRuns: 60 });
   });
 });

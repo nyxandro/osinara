@@ -106,7 +106,7 @@
           "type": "object",
           "properties": {
             "attribute": {
-              "description": "A short Russian name of a property of the subject that holds one value at a time, so that a new value replaces the old one: \"город\", \"место работы\", \"должность\", \"день рождения\", \"как пьёт кофе\". Not the value and not a retelling of the content. Leave it out for anything that has several values at once: hobbies, tools, resources, links, plans, likes and dislikes in general. A new record of the same subject with the same name retires the current one, so if one exists the write is refused with its text until you name it in replaces. For a record without a subject (subject.kind=none) the name covers the whole memory scope. Not allowed for kind=episode",
+              "description": "A short Russian name of a property of the subject that holds one value at a time, so that a new value replaces the old one: \"город\", \"место работы\", \"должность\", \"день рождения\", \"как пьёт кофе\". Not the value and not a retelling of the content. Leave it out for anything that has several values at once: hobbies, tools, resources, links, plans, likes and dislikes in general. A new record of the same subject with the same name retires the current one, so if one exists the write is refused with its text until you name it in replaces. For a record without a subject (subject.kind=none) the name covers the whole memory scope. Not allowed for kind=episode. The outcome of a discussion in a group is one record named \"итог: <short topic>\" with kind=fact, subject.kind=none and no thread; a continued discussion replaces it the same way",
               "type": "string",
               "minLength": 1,
               "maxLength": 40

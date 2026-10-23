@@ -161,6 +161,12 @@
               "type": "number",
               "exclusiveMinimum": 0,
               "maximum": 120
+            },
+            "offset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 5242880,
+              "description": "Where to start reading the page text, in characters: pass nextOffset from the previous answer to read the next portion, with the same format. The page is downloaded again, so if it changed meanwhile the portions may not line up. 0 by default"
             }
           },
           "required": [
@@ -168,7 +174,7 @@
           ],
           "additionalProperties": false
         },
-        "description": "Load an HTTP(S) page through the protected network gateway. The extracted_text format strips HTML tags and returns plain text; the html format returns the original markup. extracted_text is used by default. The timeout is at most 120 seconds. The answer is bounded by safe size and line limits and reports the final URL, the original Content-Type and a truncation flag."
+        "description": "Load an HTTP(S) page through the protected network gateway. The extracted_text format strips HTML tags and returns plain text; the html format returns the original markup. extracted_text is used by default. The timeout is at most 120 seconds. The answer is bounded by safe size and line limits and reports the final URL, the original Content-Type and a truncation flag; a longer page is read on with offset set to the returned nextOffset."
       },
       {
         "type": "function",
@@ -501,7 +507,7 @@
           "type": "object",
           "properties": {
             "attribute": {
-              "description": "A short Russian name of a property of the subject that holds one value at a time, so that a new value replaces the old one: \"город\", \"место работы\", \"должность\", \"день рождения\", \"как пьёт кофе\". Not the value and not a retelling of the content. Leave it out for anything that has several values at once: hobbies, tools, resources, links, plans, likes and dislikes in general. A new record of the same subject with the same name retires the current one, so if one exists the write is refused with its text until you name it in replaces. For a record without a subject (subject.kind=none) the name covers the whole memory scope. Not allowed for kind=episode",
+              "description": "A short Russian name of a property of the subject that holds one value at a time, so that a new value replaces the old one: \"город\", \"место работы\", \"должность\", \"день рождения\", \"как пьёт кофе\". Not the value and not a retelling of the content. Leave it out for anything that has several values at once: hobbies, tools, resources, links, plans, likes and dislikes in general. A new record of the same subject with the same name retires the current one, so if one exists the write is refused with its text until you name it in replaces. For a record without a subject (subject.kind=none) the name covers the whole memory scope. Not allowed for kind=episode. The outcome of a discussion in a group is one record named \"итог: <short topic>\" with kind=fact, subject.kind=none and no thread; a continued discussion replaces it the same way",
               "type": "string",
               "minLength": 1,
               "maxLength": 40
