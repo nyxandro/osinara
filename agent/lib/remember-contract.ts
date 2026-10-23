@@ -18,6 +18,7 @@
 import { z } from "zod";
 
 import {
+  discussionSummaryTopic,
   MEMORY_ATTRIBUTE_MAX_CHARACTERS,
   MEMORY_ATTRIBUTE_REPLACEMENT_LIMIT,
 } from "./memory-attribute-slot.js";
@@ -129,7 +130,7 @@ const REVIEW_INPUT_INVALID =
 const REVIEW_REMEMBER_FIELDS = {
   basis: z.literal("agent_inferred", { error: REVIEW_INPUT_INVALID }).default("agent_inferred"),
   sensitivity: z.literal("normal", { error: REVIEW_INPUT_INVALID }).default("normal"),
-  sourceSequence: z.string({ error: REVIEW_INPUT_INVALID }).regex(TIMELINE_SEQUENCE_PATTERN).refine(
+  sourceSequence: z.string({ error: REVIEW_INPUT_INVALID }).regex(TIMELINE_SEQUENCE_PATTERN, { abort: true }).refine(
     (value) => BigInt(value) <= POSTGRES_BIGINT_MAX,
     "Номер сообщения выходит за допустимые границы",
   ).describe("The #sequence number of one message of the current review batch"),
@@ -141,7 +142,7 @@ function rememberFields(scope: RememberScopeField, verifiedRefs: boolean) {
   const subject = verifiedRefs ? modelFacingMemorySubjectSchema : modelFacingUnverifiedMemorySubjectSchema;
   return {
     attribute: z.string().trim().min(1).max(MEMORY_ATTRIBUTE_MAX_CHARACTERS).optional().describe(
-      "A short Russian name of a property of the subject that holds one value at a time, so that a new value replaces the old one: \"город\", \"место работы\", \"должность\", \"день рождения\", \"как пьёт кофе\". Not the value and not a retelling of the content. Leave it out for anything that has several values at once: hobbies, tools, resources, links, plans, likes and dislikes in general. A new record of the same subject with the same name retires the current one, so if one exists the write is refused with its text until you name it in replaces. For a record without a subject (subject.kind=none) the name covers the whole memory scope. Not allowed for kind=episode",
+      "A short Russian name of a property of the subject that holds one value at a time, so that a new value replaces the old one: \"город\", \"место работы\", \"должность\", \"день рождения\", \"как пьёт кофе\". Not the value and not a retelling of the content. Leave it out for anything that has several values at once: hobbies, tools, resources, links, plans, likes and dislikes in general. A new record of the same subject with the same name retires the current one, so if one exists the write is refused with its text until you name it in replaces. For a record without a subject (subject.kind=none) the name covers the whole memory scope. Not allowed for kind=episode. The outcome of a discussion in a group is one record named \"итог: <short topic>\" with kind=fact, subject.kind=none and no thread; a continued discussion replaces it the same way",
     ),
     basis: z.enum(["agent_inferred", "user_requested"]).describe("agent_inferred: you selected the fact from the message yourself, not a guess; user_requested: the author explicitly asked to save it"),
     distinctFrom: z.array(z.string().regex(MEMORY_REF_PATTERN)).max(MEMORY_NEIGHBOUR_CANDIDATE_LIMIT)
@@ -159,7 +160,7 @@ function rememberFields(scope: RememberScopeField, verifiedRefs: boolean) {
     ),
     scope: scope.describe("The permitted memory scope of the current trust zone"),
     sensitivity: z.enum(["normal", "sensitive"]).describe("The sensitivity of the fact being saved"),
-    sourceSequence: z.string().regex(TIMELINE_SEQUENCE_PATTERN).refine(
+    sourceSequence: z.string().regex(TIMELINE_SEQUENCE_PATTERN, { abort: true }).refine(
       (value) => BigInt(value) <= POSTGRES_BIGINT_MAX,
       "Номер сообщения выходит за допустимые границы",
     ).optional().describe(
@@ -180,6 +181,40 @@ interface RememberCheckInput {
   readonly sourceSequence?: string;
   readonly subject: { readonly kind: string };
   readonly thread?: { readonly action: string; readonly identity?: string };
+}
+
+/** Every version of a summary must land in the same slot: the topic, about no one, outside a project. */
+function checkDiscussionSummary(input: RememberCheckInput, topic: string, context: z.RefinementCtx): void {
+  if (topic === "") {
+    context.addIssue({
+      code: "custom",
+      message:
+        "AGENT_MEMORY_ATTRIBUTE_INVALID: Итог обсуждения называется «итог: <тема>»: после двоеточия назовите тему, например «итог: платный канал по эвалам»",
+      path: ["attribute"],
+    });
+  }
+  if (input.subject.kind !== "none") {
+    context.addIssue({
+      code: "custom",
+      message: "AGENT_MEMORY_ATTRIBUTE_INVALID: Итог обсуждения сохраняется с subject.kind=none: он о теме разговора, а не о человеке",
+      path: ["subject"],
+    });
+  }
+  if (input.kind !== "fact") {
+    context.addIssue({
+      code: "custom",
+      message: "AGENT_MEMORY_ATTRIBUTE_INVALID: Итог обсуждения сохраняется как kind=fact",
+      path: ["kind"],
+    });
+  }
+  if (input.thread !== undefined) {
+    context.addIssue({
+      code: "custom",
+      message:
+        "AGENT_MEMORY_ATTRIBUTE_INVALID: Итог обсуждения сохраняется без нити; вывод по теме, которую ведёт нить, прикрепите к ней записью без этого свойства",
+      path: ["thread"],
+    });
+  }
 }
 
 function checkRememberInput(input: RememberCheckInput, context: z.RefinementCtx): void {
@@ -221,6 +256,8 @@ function checkRememberInput(input: RememberCheckInput, context: z.RefinementCtx)
       path: ["attribute"],
     });
   }
+  const summaryTopic = input.attribute === undefined ? null : discussionSummaryTopic(input.attribute);
+  if (summaryTopic !== null) checkDiscussionSummary(input, summaryTopic, context);
   if (input.sourceSequence !== undefined && input.sensitivity === "sensitive") {
     context.addIssue({
       code: "custom",

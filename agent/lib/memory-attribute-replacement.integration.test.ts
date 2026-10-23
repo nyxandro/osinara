@@ -7,6 +7,8 @@
  * - Two current versions of one property (written before the slot lock existed) both have to be
  *   named; naming one retires nothing.
  * - The silent review is never shown the text of a sensitive version it would replace.
+ * - A discussion summary is one current record per topic of the whole conversation: a continued
+ *   discussion replaces it only by naming it, another topic stays beside it.
  */
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -87,6 +89,32 @@ describeWithDatabase("memory attribute replacement", () => {
 
     expect(saved.supersededRefs).toEqual([current.memoryRef]);
     expect(saved.thread).toMatchObject({ action: "created" });
+  });
+
+  it("keeps one current summary per discussion topic and replaces it only by naming it", async () => {
+    const summary = (operationKey: string, attribute: string, content: string, replaces?: readonly string[]) => write(operationKey, {
+      attribute,
+      content,
+      explicitSource: { conversationId: fixture.conversationId, subject: { kind: "none" }, timelineEntryId: fixture.timelineEntryId },
+      kind: "fact",
+      ...(replaces === undefined ? {} : { replaces }),
+    });
+    const vacation = await summary("summary-1", "итог: отпуск летом", "Обсуждали отпуск: едем в Казань в июле, билеты ещё не куплены.");
+    const kitchen = await summary("summary-2", "итог: ремонт кухни", "Обсуждали ремонт кухни: начинаем в августе.");
+
+    const refused = await summary("summary-3", "Итог: отпуск летом", "Отпуск: Казань, 12–20 июля, билеты куплены.")
+      .catch((error: unknown) => error);
+
+    expect(refused).toBeInstanceOf(MemoryAttributeReplacementRefusal);
+    expect((refused as MemoryAttributeReplacementRefusal).current).toEqual([
+      { content: "Обсуждали отпуск: едем в Казань в июле, билеты ещё не куплены.", memoryRef: vacation.memoryRef },
+    ]);
+
+    const updated = await summary("summary-4", "Итог: отпуск летом", "Отпуск: Казань, 12–20 июля, билеты куплены.", [vacation.memoryRef]);
+
+    expect(updated.supersededRefs).toEqual([vacation.memoryRef]);
+    expect([await status(vacation.id), await status(kitchen.id), await status(updated.id)])
+      .toEqual(["superseded", "active", "active"]);
   });
 
   it("needs every current version named, and retires nothing when one is left out", async () => {

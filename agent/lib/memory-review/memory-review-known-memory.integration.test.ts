@@ -9,6 +9,8 @@
  * - Neither block leaks another family's memory or another conversation's messages.
  * - The property names already set for the authors of the batch are listed per author, so a new
  *   value is written under the same name and meets the version it replaces.
+ * - The topics this conversation already keeps a discussion summary of are listed, newest first, so
+ *   a continued discussion updates its summary instead of starting a second one.
  *
  * The review received only the fifty messages of its batch and nothing else, so it could not know
  * that the fact in front of it was written down last week in different words — and wrote it again.
@@ -22,6 +24,7 @@ import { closeDatabase, database } from "../database.js";
 import { selectMemoryReviewContext } from "./memory-review-known-memory.js";
 import {
   MEMORY_REVIEW_AUTHOR_PROPERTY_LIMIT,
+  MEMORY_REVIEW_DISCUSSION_SUMMARY_LIMIT,
   MEMORY_REVIEW_KNOWN_RECORD_LIMIT,
 } from "./memory-review-config.js";
 import { formatMemoryReviewContext } from "./memory-review-prompt.js";
@@ -235,5 +238,61 @@ describeWithDatabase("memory review known memory", () => {
     });
 
     expect(context.authorProperties[0]!.attributes).toHaveLength(MEMORY_REVIEW_AUTHOR_PROPERTY_LIMIT);
+  });
+
+  async function storeSummary(
+    attribute: string,
+    createdAt: string,
+    options: { family?: string; partition?: string; sensitivity?: "normal" | "sensitive"; status?: "active" | "retracted" } = {},
+  ): Promise<void> {
+    await database().query(
+      `INSERT INTO memory_items
+         (family_id, group_id, author_telegram_user_id, scope, kind, content, source,
+          confirmation, sensitivity, operation_key, attribute, claim_status, created_at)
+       VALUES ($1, $2, 'review-author', 'group', 'fact', $3, 'test:review', 'model_high',
+               $4, $3, $3, $5, $6)`,
+      [options.family ?? familyId, options.partition ?? groupId, attribute, options.sensitivity ?? "normal",
+        options.status ?? "active", createdAt],
+    );
+  }
+
+  it("names the topics this conversation already keeps a discussion summary of, newest first", async () => {
+    await storeSummary("итог: платный канал по эвалам", "2026-10-21T10:00:00Z");
+    await storeSummary("итог: встречи по пятницам", "2026-10-22T10:00:00Z");
+    await storeSummary("итог: снятая запись", "2026-10-20T10:00:00Z", { status: "retracted" });
+    await storeSummary("итог: здоровье", "2026-10-22T11:00:00Z", { sensitivity: "sensitive" });
+    await storeSummary("итог: чужое", "2026-10-22T12:00:00Z", { family: otherFamilyId, partition: otherGroupId });
+    await store("Полезный ресурс", familyId, groupId, "ресурс");
+    const author = await participant("review-author", "Автор");
+    await storeAbout(author, "Итог про человека", "итог: про автора");
+
+    const context = await selectMemoryReviewContext(client, {
+      conversationId, familyId, scope: "group", scopePartitionKey: groupId, predecessorSequence: "10",
+      sourceEntryIds: [],
+    });
+
+    expect(context.discussionSummaries).toEqual(["итог: встречи по пятницам", "итог: платный канал по эвалам"]);
+    const block = formatMemoryReviewContext(context);
+    expect(block).toContain("<untrusted_memory_review_discussion_summaries>");
+    expect(block).toContain("итог: встречи по пятницам");
+  });
+
+  it("keeps the summary list bounded and leaves the block out when there is none", async () => {
+    const empty = await selectMemoryReviewContext(client, {
+      conversationId, familyId, scope: "group", scopePartitionKey: groupId, predecessorSequence: "10",
+      sourceEntryIds: [],
+    });
+    expect(formatMemoryReviewContext(empty)).not.toContain("discussion_summaries");
+    for (let index = 0; index < MEMORY_REVIEW_DISCUSSION_SUMMARY_LIMIT + 3; index += 1) {
+      await storeSummary(`итог: тема ${String(index).padStart(2, "0")}`, `2026-10-${String(index + 1).padStart(2, "0")}T10:00:00Z`);
+    }
+
+    const context = await selectMemoryReviewContext(client, {
+      conversationId, familyId, scope: "group", scopePartitionKey: groupId, predecessorSequence: "10",
+      sourceEntryIds: [],
+    });
+
+    expect(context.discussionSummaries).toHaveLength(MEMORY_REVIEW_DISCUSSION_SUMMARY_LIMIT);
+    expect(context.discussionSummaries[0]).toBe(`итог: тема ${String(MEMORY_REVIEW_DISCUSSION_SUMMARY_LIMIT + 2).padStart(2, "0")}`);
   });
 });

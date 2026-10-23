@@ -3,6 +3,8 @@
  *
  * Exports:
  * - `MEMORY_ATTRIBUTE_MAX_CHARACTERS`: how long a slot name may be.
+ * - `MEMORY_DISCUSSION_SUMMARY_PREFIX`, `discussionSummaryTopic`: the slot of a discussion summary,
+ *   one current record per topic of a conversation.
  * - `normalizeMemoryAttribute`: the stored form of a slot name, or a refusal.
  * - `supersedeMemoryAttributeSlot`: retires the previous holder of this slot, only when the write
  *   named it.
@@ -57,8 +59,45 @@ const SLOT_RELATION = "temporal_update";
  */
 const PLACEHOLDER_ATTRIBUTES: ReadonlySet<string> = new Set(["null", "none", "undefined"]);
 
+/**
+ * A long discussion in a group used to leave either nothing or a record per step, so «к чему мы
+ * пришли по X» had nothing to be answered from (17.10.2026; on 21.10 the model tried to keep such an
+ * outcome under a text label inside a thread and was refused). A summary is a slot whose name
+ * carries the topic: `итог: <тема>`. It is a fact about no person, so its slot is the topic within
+ * the conversation's whole area of memory, and the next version of the same discussion retires it
+ * through the ordinary replacement. Every version has to hold the same slot, which is why the
+ * contract keeps a summary off a person, off an event and out of a thread (a thread's project is
+ * part of the slot).
+ */
+export const MEMORY_DISCUSSION_SUMMARY_PREFIX = "итог:";
+
 function attributeRefusal(message: string): AppError {
   return new AppError("AGENT_MEMORY_ATTRIBUTE_INVALID", message);
+}
+
+function attributeText(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase("ru-RU")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+// «итог: тема» in any spacing; «итог», «итоги встречи» or «итог обсуждения» without the colon are
+// meant as a summary too and name no topic, while «итоговая оценка» is an ordinary property.
+const SUMMARY_NAME = /^итог\s*:\s*(.*)$/u;
+const SUMMARY_WITHOUT_TOPIC = /^итоги?(?:\s|$)/u;
+
+/**
+ * The topic of a summary's slot name: empty when the name is meant as a summary but names no
+ * topic — that would be one summary for the whole conversation, and the next topic would be told to
+ * replace another one's; null when the name is not a summary's.
+ */
+export function discussionSummaryTopic(value: string): string | null {
+  const text = attributeText(value);
+  const named = SUMMARY_NAME.exec(text);
+  if (named !== null) return named[1]!.trim();
+  return SUMMARY_WITHOUT_TOPIC.test(text) ? "" : null;
 }
 
 export function normalizeMemoryAttribute(value: string, kind: MemoryKind): string {
@@ -67,11 +106,14 @@ export function normalizeMemoryAttribute(value: string, kind: MemoryKind): strin
       "Событие не имеет свойства, которое меняется со временем: сохраните его без имени свойства",
     );
   }
-  const normalized = value
-    .normalize("NFKC")
-    .toLocaleLowerCase("ru-RU")
-    .replace(/\s+/gu, " ")
-    .trim();
+  const topic = discussionSummaryTopic(value);
+  if (topic === "") {
+    throw attributeRefusal(
+      "Итог обсуждения называется «итог: <тема>»: после двоеточия назовите тему, например «итог: платный канал по эвалам»",
+    );
+  }
+  // One spelling, so «итог:отпуск» and «Итог : отпуск» are the same summary.
+  const normalized = topic === null ? attributeText(value) : `${MEMORY_DISCUSSION_SUMMARY_PREFIX} ${topic}`;
   if (!normalized || normalized.length > MEMORY_ATTRIBUTE_MAX_CHARACTERS) {
     throw attributeRefusal(
       `Имя свойства должно быть коротким названием от 1 до ${MEMORY_ATTRIBUTE_MAX_CHARACTERS} символов, например «кофе» или «место работы»`,

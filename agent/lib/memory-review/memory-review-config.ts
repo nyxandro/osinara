@@ -37,6 +37,12 @@ export const MEMORY_REVIEW_KNOWN_RECORD_LIMIT = 15;
  * growing the prompt without end.
  */
 export const MEMORY_REVIEW_AUTHOR_PROPERTY_LIMIT = 12;
+/**
+ * How many discussion summaries of the conversation the review is shown by name. A name is a short
+ * topic; the list is what lets a discussion continued in the next batch meet its summary instead of
+ * starting a second one, and the newest topics are the ones a batch continues.
+ */
+export const MEMORY_REVIEW_DISCUSSION_SUMMARY_LIMIT = 20;
 /** How many already-reviewed messages precede the batch, so the model sees where it begins. */
 export const MEMORY_REVIEW_REVIEWED_TAIL_LIMIT = 5;
 export const MEMORY_REVIEW_DISPATCH_BATCH_SIZE = 10;

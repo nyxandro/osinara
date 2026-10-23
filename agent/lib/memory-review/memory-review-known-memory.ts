@@ -3,22 +3,24 @@
  *
  * Exports:
  * - `MemoryReviewKnownRecord`: one stored record as the review is shown it.
- * - `selectMemoryReviewContext`: the records, the already-read messages and the authors' property
- *   names for one batch.
+ * - `selectMemoryReviewContext`: the records, the already-read messages, the authors' property
+ *   names and the conversation's discussion summaries for one batch.
  *
  * The review used to receive its fifty messages and nothing else. It could not know that the fact
  * in front of it had been written down last week in other words, so it wrote it again: 865 pairs
  * of records about one subject sit at similarity 0.90 or above on 1464 indexed records, and memory
  * grew from 39 records in July to 1112 in September.
  *
- * Three blocks, and each answers a different question. The records answer «is this already known»,
+ * Four blocks, and each answers a different question. The records answer «is this already known»,
  * and give the review a third option besides saving and not saving: refine what exists. The tail
  * of already-read messages answers «where does my batch begin», so a fact spread over the boundary
  * is not read as a new one. The property names already set for the batch's authors answer «what is
  * this property called here», so a new value meets the version it replaces instead of starting a
- * second one under new words («гейминг» beside «gaming»).
+ * second one under new words («гейминг» beside «gaming»). The topics the conversation already keeps
+ * a discussion summary of answer the same question for a discussion: a batch that continues one
+ * updates its summary by the same name.
  *
- * All three are bounded on purpose. Everything here is paid for on every batch, and a conversation
+ * All four are bounded on purpose. Everything here is paid for on every batch, and a conversation
  * that has been running for a year would otherwise carry its whole memory into every prompt.
  *
  * All run on the caller's connection: the dispatcher holds an open transaction with row leases
@@ -27,8 +29,10 @@
  */
 import type { PoolClient } from "pg";
 
+import { MEMORY_DISCUSSION_SUMMARY_PREFIX } from "../memory-attribute-slot.js";
 import {
   MEMORY_REVIEW_AUTHOR_PROPERTY_LIMIT,
+  MEMORY_REVIEW_DISCUSSION_SUMMARY_LIMIT,
   MEMORY_REVIEW_KNOWN_RECORD_LIMIT,
   MEMORY_REVIEW_REVIEWED_TAIL_LIMIT,
 } from "./memory-review-config.js";
@@ -62,6 +66,8 @@ export interface MemoryReviewAuthorProperties {
 
 export interface MemoryReviewContext {
   authorProperties: MemoryReviewAuthorProperties[];
+  /** Slot names (`итог: <тема>`) of the conversation's current discussion summaries, newest first. */
+  discussionSummaries: string[];
   known: MemoryReviewKnownRecord[];
   reviewed: MemoryReviewReviewedMessage[];
 }
@@ -145,12 +151,31 @@ export async function selectMemoryReviewContext(client: PoolClient, input: {
     [input.sourceEntryIds, input.conversationId, input.familyId, input.scope,
       input.scopePartitionKey, MEMORY_REVIEW_AUTHOR_PROPERTY_LIMIT],
   );
+  // A summary is about no one and outside any thread's project, so its slot is the topic within the
+  // whole area; one with a subject or a project is not a summary a new version could replace.
+  const summaries = await client.query<{ attribute: string }>(
+    `SELECT item.attribute
+     FROM memory_items AS item
+     WHERE item.family_id = $1 AND item.scope = $2::memory_scope
+       AND item.scope_partition_key = $3 AND item.claim_status = 'active'
+       AND item.sensitivity = 'normal'
+       AND left(item.attribute, length($4)) = $4
+       AND item.subject_user_id IS NULL AND item.subject_participant_id IS NULL
+       AND item.subject_conversation_id IS NULL AND item.subject_family_id IS NULL
+       AND item.subject_label IS NULL AND item.memory_project_id IS NULL
+     GROUP BY item.attribute
+     ORDER BY max(item.created_at) DESC, item.attribute
+     LIMIT $5`,
+    [input.familyId, input.scope, input.scopePartitionKey, MEMORY_DISCUSSION_SUMMARY_PREFIX,
+      MEMORY_REVIEW_DISCUSSION_SUMMARY_LIMIT],
+  );
   return {
     authorProperties: authors.rows.flatMap((row) => row.attributes === null ? [] : [{
       attributes: row.attributes,
       senderDisplayName: row.sender_display_name,
       ...(row.sender_username === null ? {} : { senderUsername: row.sender_username }),
     }]),
+    discussionSummaries: summaries.rows.map((row) => row.attribute),
     known: known.rows.map((row) => ({
       ...(row.attribute === null ? {} : { attribute: row.attribute }),
       content: row.content,
