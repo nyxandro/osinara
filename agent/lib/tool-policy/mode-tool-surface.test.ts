@@ -7,6 +7,7 @@
  * - Granted capabilities re-check the live policy at execution and stay action-level for memory.
  * - HITL approval configuration survives dynamic emission.
  * - Native subagents stay unavailable externally and cannot make root-owned durable-memory decisions.
+ * - A subagent gets an explicit list of research and sandbox tools, never the root's administration.
  */
 import type { SessionAuth } from "../../runtime/context.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -30,6 +31,7 @@ import { FAMILY_ONLY_TOOL_NAMES, PRIVATE_ONLY_TOOL_NAMES, TRUSTED_MODE_TOOL_NAME
 import { agentTool } from "../../runtime/tools/delegate.js";
 import { bash as nativeBash, glob as nativeGlob, grep as nativeGrep, readFile as nativeReadFile, writeFile as nativeWriteFile } from "../../runtime/tools/defaults.js";
 import { TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES } from "../turn-interjection/turn-interjection-surface.js";
+import { SUBAGENT_TOOL_NAMES } from "./subagent-tool-names.js";
 import { ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, EXTERNAL_GROUP_BASE_TOOLS, EXTERNAL_GROUP_TOOL_NAMES, type ExternalGroupToolName } from "./group-tool-catalog.js";
 
 function names(input: Parameters<typeof buildModeToolSurface>[0]): string[] {
@@ -193,6 +195,66 @@ describe("trusted mode tool surfaces", () => {
         skills: new Set<string>(),
       }),
     ).not.toHaveProperty("remember");
+  });
+});
+
+describe("subagent tool surface", () => {
+  const subagentSurfaces = () => ({
+    external: buildSubagentToolSurface({
+      capabilities: new Set(EXTERNAL_GROUP_TOOL_NAMES),
+      environment: "external",
+      skills: new Set(["pdf"]),
+    }),
+    family: buildSubagentToolSurface({ environment: "family" }),
+    private: buildSubagentToolSurface({ environment: "private" }),
+  });
+
+  it("gives a delegated task in a private chat exactly the research and sandbox tools", () => {
+    // Pinned by name, so widening the subagent list is a decision a reviewer sees in this test.
+    expect(Object.keys(subagentSurfaces().private).sort()).toEqual([
+      "ask_question", "bash", "execute_google_workspace", "get_current_time", "get_memory_source", "glob",
+      "grep", "inspect_workspace_image", "list_agent_schedules", "list_memories", "list_memory_threads",
+      "list_proactive_deliveries", "load_skill", "read_file", "read_memory_thread", "read_profile_view",
+      "search_memories", "search_memory_threads", "todo", "web_fetch", "web_search", "write_file",
+    ]);
+    for (const [zone, surface] of Object.entries(subagentSurfaces())) {
+      expect(Object.keys(surface).filter((name) => !SUBAGENT_TOOL_NAMES.has(name)), zone).toEqual([]);
+    }
+  });
+
+  it("keeps the root's administration and outward actions off a delegated task", () => {
+    // A child mostly reads untrusted pages; text there must not be able to set up a daily scenario,
+    // edit memory, reset the conversation or post into the chat in the person's name.
+    const { external, family, private: personal } = subagentSurfaces();
+    for (const name of [
+      "export_memory", "list_pending_family_invitations", "manage_agent_schedule",
+      "manage_external_group_schedule", "manage_family_invitation", "manage_gmail_message",
+      "manage_google_workspace_connection", "manage_memory", "manage_memory_thread",
+      "manage_profile_projection", "manage_telegram_group", "notification_settings",
+      "send_workspace_file", "start_new_context",
+    ]) {
+      expect(buildModeToolSurface({ environment: "private" }), `root ${name}`).toHaveProperty(name);
+      expect(personal, name).not.toHaveProperty(name);
+    }
+    expect(family).not.toHaveProperty("manage_memory");
+    for (const name of ["manage_memory", "manage_memory_thread", "remove_group_file", "send_workspace_file"]) {
+      expect(external, name).not.toHaveProperty(name);
+    }
+  });
+
+  it("keeps the tools a delegated research or document task works with", () => {
+    const { external, family, private: personal } = subagentSurfaces();
+    for (const name of [
+      "ask_question", "bash", "execute_google_workspace", "get_current_time", "glob", "grep",
+      "list_memories", "load_skill", "read_file", "read_memory_thread", "search_memories", "todo",
+      "web_fetch", "web_search", "write_file",
+    ]) {
+      expect(personal, name).toHaveProperty(name);
+    }
+    expect(family).toHaveProperty("list_group_history");
+    for (const name of ["bash", "read_file", "search_memories", "web_fetch", "web_search"]) {
+      expect(external, name).toHaveProperty(name);
+    }
   });
 });
 

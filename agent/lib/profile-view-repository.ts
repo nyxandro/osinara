@@ -52,6 +52,7 @@ interface SubjectRow {
 }
 
 interface ClaimRow {
+  attribute: string | null;
   claim_status: "active" | "duplicate" | "superseded";
   confirmation: MemoryConfirmation;
   content: string;
@@ -192,7 +193,7 @@ async function loadClaims(
     subject.subject_participant_id ? [subject.subject_participant_id] : []
   );
   const result = await client.query<ClaimRow>(
-    `SELECT claim.id, ref.memory_ref, claim.content, claim.kind, claim.confirmation,
+    `SELECT claim.id, ref.memory_ref, claim.attribute, claim.content, claim.kind, claim.confirmation,
             claim.sensitivity, claim.claim_status, claim.profile_eligible, claim.updated_at,
              claim.subject_user_id, claim.subject_participant_id,
              claim_subject.linked_user_id AS linked_subject_user_id,
@@ -255,6 +256,7 @@ export const profileViewRepository = {
           : subjectByUser.get(claim.subject_user_id ?? claim.linked_subject_user_id ?? "");
         if (!subject) return [];
         return [{
+          attribute: claim.attribute,
           claimStatus: claim.claim_status,
           confirmation: claim.confirmation,
           content: claim.content,
@@ -343,6 +345,8 @@ export const profileViewRepository = {
       if (!view) throw new AppError("AGENT_PROFILE_VIEW_NOT_FOUND", "Снимок профиля не найден");
       const conversation = await requireConversationAccess(client, auth, view.viewer_conversation_id);
       const rows = await client.query<{
+        // Read from the record itself: a slot is never changed once written, a correction keeps it.
+        attribute: string | null;
         claim_ordinal: number;
         confirmation: MemoryConfirmation;
         content_snapshot: string;
@@ -355,7 +359,7 @@ export const profileViewRepository = {
         source_author_label_snapshot: string;
         subject_ordinal: number;
       }>(
-        `SELECT subject.ordinal AS subject_ordinal,
+        `SELECT subject.ordinal AS subject_ordinal, claim.attribute,
                 selected.claim_ordinal, selected.memory_ref_snapshot,
                 selected.content_snapshot, selected.kind, selected.confirmation,
                 selected.origin_scope, selected.origin_label_snapshot, selected.evidence_kind,
@@ -410,6 +414,7 @@ export const profileViewRepository = {
       for (const row of rows.rows) {
         const subject = subjects.get(row.subject_ordinal)!;
         subject.claims.push({
+          ...(row.attribute === null ? {} : { attribute: row.attribute }),
           confirmation: row.confirmation,
           content: row.content_snapshot,
           evidenceKind: row.evidence_kind,

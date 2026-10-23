@@ -55,7 +55,7 @@ const manageReminderSchema = z.object({
   firstRunAt: z.string().optional(),
   id: z.string().optional(),
   recurrence: z.union([recurrenceSchema, z.null()]).optional(),
-  scope: z.string().optional(),
+  scope: z.enum(SCOPES).optional(),
   timezone: z.string().optional(),
 }).strict();
 

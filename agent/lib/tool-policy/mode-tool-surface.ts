@@ -5,7 +5,7 @@
  * - `ModeToolSurfaceInput`: verified facts a tool surface may be built from.
  * - `TRUSTED_MODE_TOOL_NAMES`, `PRIVATE_ONLY_TOOL_NAMES`, `FAMILY_ONLY_TOOL_NAMES`: the matrix.
  * - `buildModeToolSurface`: the exact root-agent tool map for one verified turn.
- * - `buildSubagentToolSurface`: the same trust zone without root-owned durable writes.
+ * - `buildSubagentToolSurface`: the same trust zone, cut to the explicit list of subagent tools.
  *
  * Key constructs:
  * - Every tool is emitted per mode, the runtime's built-ins included, so a tool that cannot work in
@@ -68,6 +68,7 @@ import { authorizeCurrentExternalGroupCapability } from "./external-group-live-p
 import { resolveExternalGroupPolicyIdentity } from "./external-group-policy.js";
 import { EXTERNAL_GROUP_REMINDER_TOOLS } from "./external-group-reminder-tools.js";
 import { scheduledExternalTool } from "./scheduled-external-tool.js";
+import { SUBAGENT_TOOL_NAMES } from "./subagent-tool-names.js";
 import { withTurnInterjectionSurface } from "../turn-interjection/turn-interjection-surface.js";
 import { servableExternalGroupCapabilities } from "./grantable-group-capabilities.js";
 import { isExternalGroupToolName, type ExternalGroupToolName } from "./group-tool-catalog.js";
@@ -464,20 +465,9 @@ export function buildSubagentToolSurface(input: ModeToolSurfaceInput): ToolMap {
       skills: new Set([...input.skills].filter((name) => !isImageGenerationSkillName(name))),
     }
     : input;
-  // Delegation is one level deep: a child has no `agent` of its own. A delegated task (often reading
-  // untrusted pages) does not manage the family's skills or ask to open network destinations.
-  const {
-    agent: _agent,
-    generate_image: _generateImage,
-    list_reminders: _listReminders,
-    manage_behavior_preference: _manageBehaviorPreference,
-    manage_network_access: _manageNetworkAccess,
-    manage_reminder: _manageReminder,
-    manage_skill: _manageSkill,
-    remember: _remember,
-    send_gif: _sendGif,
-    send_voice_message: _sendVoiceMessage,
-    ...surface
-  } = buildModeToolSurface(effectiveInput);
-  return surface;
+  // Delegation is one level deep, so `agent` is not on the list; neither is anything a delegated
+  // task (often reading untrusted pages) should not do on its own, see `SUBAGENT_TOOL_NAMES`.
+  return Object.fromEntries(
+    Object.entries(buildModeToolSurface(effectiveInput)).filter(([name]) => SUBAGENT_TOOL_NAMES.has(name)),
+  );
 }

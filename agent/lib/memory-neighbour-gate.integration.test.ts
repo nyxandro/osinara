@@ -5,6 +5,8 @@
  * - A paraphrase of an existing record stops the write and names its neighbours.
  * - The model gets through by declaring the neighbours it has looked at.
  * - A neighbour it has not seen stops the write again, so the declaration cannot be blanket.
+ * - A neighbour the write retires through `replaces` counts as looked at: naming it there is the
+ *   decision the gate asks for, and the stop would otherwise send the model round in a circle.
  * - Another subject, another area of memory, and an episode are never gated.
  * - Without the embedding service the write goes through: a helper check must not block memory.
  *
@@ -70,17 +72,21 @@ describeWithDatabase("memory neighbour gate", () => {
   afterAll(async () => closeDatabase());
 
   async function remember(input: {
+    attribute?: string;
     auth?: MemoryAuthorization;
     content: string;
     distinctFrom?: string[];
     key: string;
     kind?: "episode" | "preference";
+    replaces?: string[];
     scope?: "family" | "personal";
   }) {
     const auth = input.auth ?? owner;
     const scope = input.scope ?? "personal";
     const source = await createMemoryCorrectionSource(auth, scope);
     return memoryRepository.create(auth, {
+      ...(input.attribute === undefined ? {} : { attribute: input.attribute }),
+      ...(input.replaces === undefined ? {} : { replaces: input.replaces }),
       confirmation: "user_confirmed",
       content: input.content,
       ...(input.distinctFrom === undefined ? {} : { distinctFrom: input.distinctFrom }),
@@ -143,6 +149,18 @@ describeWithDatabase("memory neighbour gate", () => {
     await expect(remember({
       content: "У Ани непереносимость глютена", distinctFrom: [first.memoryRef], key: "gate-7",
     })).rejects.toMatchObject({ code: "AGENT_MEMORY_SIMILAR_RECORD_EXISTS" });
+  });
+
+  it("lets through a new version that names the neighbour it replaces", async () => {
+    const stored = await remember({ attribute: "кофе", content: "Пьёт кофе с сахаром", key: "gate-14" });
+    await index(stored.id, 0);
+    embedded.next = [vector(10)];
+
+    const saved = await remember({
+      attribute: "кофе", content: "Пьёт кофе без сахара", key: "gate-15", replaces: [stored.memoryRef],
+    });
+
+    expect(saved.supersededRefs).toEqual([stored.memoryRef]);
   });
 
   it("never compares across subjects", async () => {

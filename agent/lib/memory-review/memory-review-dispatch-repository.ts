@@ -204,6 +204,7 @@ export const memoryReviewDispatchRepository = {
           predecessorSequence: row.predecessor_sequence,
           scope: row.scope,
           scopePartitionKey: row.scope === "group" ? row.group_id : row.family_id,
+          sourceEntryIds: sources.rows.map((source) => source.id),
         });
         const contextBlocks = formatMemoryReviewContext(context);
         claims.push({

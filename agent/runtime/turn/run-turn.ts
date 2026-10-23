@@ -395,7 +395,7 @@ async function runStep(
     await runtime.agent.stepStarted({ channel: turn.channel, session: sessionOf(turn, parent) });
     const response = await callModel(runtime, { frame, messages, selection, signal, turn });
     const calls = await planStepCalls({
-      contextFor: toolContexts(runtime, turn, parent, signal, messages), response: response.messages, toolCalls: response.toolCalls, tools,
+      contextFor: toolContexts(runtime, turn, parent, signal, messages), toolCalls: response.toolCalls, tools,
     });
     await inJournalTransaction(runtime.database, async (client) => {
       await recordStep(client, {

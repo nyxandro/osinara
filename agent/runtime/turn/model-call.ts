@@ -61,6 +61,8 @@ export interface StepModelCall {
 
 export interface StepToolCall {
   readonly input: unknown;
+  /** Set when AI SDK refused the call before it could run: its input failed the schema, or no such tool. */
+  readonly refused?: { readonly error: unknown };
   readonly toolCallId: string;
   readonly toolName: string;
 }
@@ -143,7 +145,12 @@ async function callOnce(input: StepModelCall, trailingUserNote: string | undefin
       finishReason,
       messages: [...messages],
       text,
-      toolCalls: toolCalls.map((call) => ({ input: call.input, toolCallId: call.toolCallId, toolName: call.toolName })),
+      toolCalls: toolCalls.map((call) => ({
+        input: call.input,
+        ...(call.invalid === true ? { refused: { error: call.error } } : {}),
+        toolCallId: call.toolCallId,
+        toolName: call.toolName,
+      })),
       usage,
     };
   } catch (error) {

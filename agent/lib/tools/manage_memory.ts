@@ -67,9 +67,9 @@ export function manageMemoryPresentation(actions: readonly ManageMemoryAction[])
     inputSchema: z.object({
       action: z.enum([firstAction, ...otherActions]),
       content: z.string().optional(),
-      kind: z.string().optional(),
+      kind: z.enum(MEMORY_KINDS).optional(),
       memoryRef: z.string().optional(),
-      sensitivity: z.string().optional(),
+      sensitivity: z.enum(MEMORY_SENSITIVITIES).optional(),
     }).strict(),
   };
 }
