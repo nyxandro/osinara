@@ -7,9 +7,12 @@
  * Key construct:
  * - The header is bold through a Telegram `entities` span rather than a parse mode, so the reminder
  *   text written by a person is sent exactly as stored and never needs escaping.
- * - A reminder with reply buttons stages them before the send and activates them after it.
+ * - A reminder with reply buttons goes out as a rich message, the only kind that carries them, with
+ *   its text kept literal; the buttons are staged before the send and activated after it. The
+ *   receipt keeps the plain text either way.
  */
 import { callTelegramApi } from "../../runtime/telegram/api.js";
+import type { JsonObject } from "../../runtime/json.js";
 
 import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../../config.js";
 import { AppError } from "../app-error.js";
@@ -75,18 +78,31 @@ async function activateReminderButtons(
   }
 }
 
+function reminderRequest(
+  job: ClaimedReminder,
+  text: string,
+  buttons: { markdown: string } | null,
+): { body: JsonObject; method: string } {
+  const threadId = messageThreadId(job.messageThreadId);
+  const thread: JsonObject = threadId === undefined ? {} : { message_thread_id: threadId };
+  if (buttons !== null) {
+    return { body: { chat_id: job.telegramChatId, ...thread, rich_message: { markdown: buttons.markdown } }, method: "sendRichMessage" };
+  }
+  // Telegram counts entity offsets in UTF-16 code units, which is what String length is.
+  const entities = [{ length: REMINDER_HEADER.length, offset: 0, type: "bold" }];
+  return { body: { chat_id: job.telegramChatId, entities, ...thread, text }, method: "sendMessage" };
+}
+
 export async function deliverTelegramReminder(job: ClaimedReminder): Promise<ProactiveDeliveryReceipt> {
   const delayedNotice = job.delayed
     ? `Доставлено с задержкой. Изначальное время: ${formatScheduledTime(job)} (${job.timezone}).`
     : null;
   const text = [REMINDER_HEADER, job.content, delayedNotice].filter(Boolean).join("\n\n");
-  // Telegram counts entity offsets in UTF-16 code units, which is what String length is.
-  const entities = [{ length: REMINDER_HEADER.length, offset: 0, type: "bold" }];
   const buttons = await reminderReplyButtons({
     addresseeTelegramUserId: job.addresseeTelegramUserId,
     buttons: job.buttons,
-    messageEntities: entities,
-    messageText: text,
+    content: job.content,
+    delayedNotice,
     reminderId: job.id,
     scope: job.scope,
     telegramChatId: job.telegramChatId,
@@ -99,18 +115,9 @@ export async function deliverTelegramReminder(job: ClaimedReminder): Promise<Pro
   // Telegram has no idempotency key; the durable marker is written before this boundary call.
   try {
     const response = await callTelegramApi({
-      body: {
-        chat_id: job.telegramChatId,
-        entities,
-        ...(job.messageThreadId === null
-          ? {}
-          : { message_thread_id: messageThreadId(job.messageThreadId) }),
-        ...(buttons === null ? {} : { reply_markup: buttons.replyMarkup }),
-        text,
-      },
+      ...reminderRequest(job, text, buttons),
       botToken: requireBotToken(),
       fetch: fetchWithTimeout,
-      method: "sendMessage",
     });
     if (!response.ok) {
       providerStatus = response.status;

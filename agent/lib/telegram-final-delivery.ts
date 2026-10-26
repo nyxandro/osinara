@@ -32,10 +32,12 @@ export async function deliverTelegramFinalOutput(input: {
   agentSessionId: string;
   agentTurnId: string;
   markdown: string;
+  /** The answer carries reply buttons: its last message is rich, the only kind that holds them. */
+  replyButtons: boolean;
   /** `last` marks the final message of the answer, the one that carries reply buttons. */
   sendChunk(chunk: TelegramFinalPresentationChunk, ordinal: number, last: boolean): Promise<SentTelegramMessage>;
 }): Promise<SentTelegramMessage[]> {
-  const chunks = formatTelegramFinalPresentation(input.markdown);
+  const chunks = formatTelegramFinalPresentation(input.markdown, { replyButtons: input.replyButtons });
   const legacyChunks = formatTelegramRichMessages(input.markdown);
   const outputHash = hash({
     chunks: chunks.map((chunk) => hash(chunk.text)),

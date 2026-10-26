@@ -141,7 +141,7 @@ Inline: `**bold**`, `*italic*`, `~~strikethrough~~`, `==highlighted==`, `||spoil
 
 Blocks: headings `##` and `###`; paragraphs separated by a blank line; lists with the marker `-` and a space or `1.` and a space; a checklist `- [ ]` and `- [x]`; a quote with lines starting with `>` and a space; a separator `---`; a code block in triple backticks with the language; a block formula `$$...$$`; a Markdown table; a collapsible block `<details><summary>`.
 
-Of HTML, the markup passes only `<details>`, `<summary>`, `<u>`, `<ins>`, `<sub>` and `<sup>`. Of attributes, only `open` on `<details>` is allowed. Any other tag or attribute the user will see as text. Do not use footnotes like `[^1]`, anchors or links to other places of the same answer: a long answer may be split into several messages, and such links will stop working. Do not insert images, video or audio with markup.
+Of HTML, the markup passes only `<details>`, `<summary>`, `<u>`, `<ins>`, `<sub>` and `<sup>`, plus the reply button tags where the current mode describes them. Of attributes, only `open` on `<details>` is allowed, and `style` on a reply button. Any other tag or attribute the user will see as text. Do not use footnotes like `[^1]`, anchors or links to other places of the same answer: a long answer may be split into several messages, and such links will stop working. Do not insert images, video or audio with markup.
 
 ## Choosing a structure
 

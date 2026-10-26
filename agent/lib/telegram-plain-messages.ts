@@ -2,8 +2,7 @@
  * Native ordinary Telegram text delivery.
  *
  * Export:
- * - `postTelegramPlainMessageChunk`: sends one provider-sized text chunk without parse mode, with
- *   an optional inline keyboard.
+ * - `postTelegramPlainMessageChunk`: sends one provider-sized text chunk without parse mode.
  */
 import { TELEGRAM_MESSAGE_TEXT_MAX_LENGTH } from "../runtime/telegram/api.js";
 import type { TelegramEventContext } from "../runtime/telegram/channel-types.js";
@@ -17,7 +16,6 @@ export async function postTelegramPlainMessageChunk(
   text: string,
   channel: TelegramEventContext,
   replyParameters?: TelegramReplyParameters,
-  replyMarkup?: Readonly<Record<string, unknown>>,
 ): Promise<SentTelegramMessage> {
   if (!text || text.length > TELEGRAM_MESSAGE_TEXT_MAX_LENGTH) {
     throw new AppError(
@@ -30,7 +28,6 @@ export async function postTelegramPlainMessageChunk(
   // type without moving the conversation's anchor before the durable receipt is committed.
   return await postTelegramMessageWithReceiptWithoutContinuationChange(channel, {
     ...(replyParameters === undefined ? {} : { reply_parameters: replyParameters }),
-    ...(replyMarkup === undefined ? {} : { reply_markup: replyMarkup }),
     text,
   });
 }

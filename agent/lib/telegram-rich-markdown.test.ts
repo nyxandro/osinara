@@ -78,6 +78,18 @@ describe("sanitizeTelegramRichMarkdown", () => {
     expect(sanitizeTelegramRichMarkdown(markdown)).toBe(markdown);
   });
 
+  it.each([
+    ["an indented line after a paragraph", "Смотрите:\n    <tg-button type=\"web_app\" url=\"https://evil.example\">Открыть</tg-button>"],
+    ["an escaped backtick", "Смотрите: \\`<tg-button type=\"url\" url=\"tg://resolve?domain=x\">Открыть</tg-button>\\`"],
+    ["an unclosed fence", "Смотрите:\n```\n<tg-button-row><tg-button type=\"copy_text\" text=\"x\">Копировать</tg-button></tg-button-row>"],
+  ])("never lets a Telegram tag through %s, where it would be live", (_case, markdown) => {
+    const sanitized = sanitizeTelegramRichMarkdown(markdown);
+
+    expect(sanitized).not.toMatch(/<\/?tg-/u);
+    // The reader still sees the same characters: the break is an invisible zero-width space.
+    expect(sanitized.replaceAll("\u200B", "")).toContain("tg-button");
+  });
+
   it("rejects tables wider than Telegram Rich Message supports", () => {
     const row = `| ${Array.from({ length: 21 }, (_, index) => `C${index}`).join(" | ")} |`;
 

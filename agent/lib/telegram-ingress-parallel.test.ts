@@ -36,7 +36,7 @@ describe("independent Telegram queue progress", () => {
       complete: vi.fn(async (id: string) => { completed.push(Number(id)); }), fail: vi.fn() };
     const handler = createTelegramDurableIngress({ reportFailure: vi.fn(), repository: repository as unknown as TelegramIngressRepository,
       botUsername: "osinara_bot", leaseMilliseconds: 60_000, acceptMedia: vi.fn(), authorizeVoice: vi.fn(),
-      dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), transcribeVoice: vi.fn(),
+      dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), replyButtonsOnArrival: vi.fn(async () => undefined), handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), transcribeVoice: vi.fn(),
       dispatch: vi.fn(async (update: TelegramUpdate) => { dispatched.push(updateMessageId(update)); return dispatchedTurn(update); }),
       runTurn: vi.fn(async (turnId: string) => {
         const kind = turnId.startsWith("turn_message") ? "message" : "callback_query";
@@ -69,7 +69,7 @@ describe("independent Telegram queue progress", () => {
       privateBurstReadyIn: vi.fn(async () => null), complete: vi.fn(), fail: vi.fn() };
     const handler = createTelegramDurableIngress({ reportFailure: vi.fn(), repository: repository as unknown as TelegramIngressRepository,
       botUsername: "osinara_bot", leaseMilliseconds: 60_000, acceptMedia: vi.fn(), authorizeVoice: vi.fn(),
-      dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), transcribeVoice: vi.fn(),
+      dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), replyButtonsOnArrival: vi.fn(async () => undefined), handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), transcribeVoice: vi.fn(),
       dispatch: vi.fn(async (update: TelegramUpdate) => { dispatched.push(updateMessageId(update)); return dispatchedTurn(update); }),
       runTurn: vi.fn(async () => { await messageGate; return { status: "completed" as const, text: null }; }),
       processConversationWakeup: vi.fn(async ({ slots }) => {
@@ -132,7 +132,7 @@ describe("independent Telegram queue progress", () => {
     const dispatched: number[] = [];
     const handler = createTelegramDurableIngress({ reportFailure: vi.fn(), repository, botUsername: "osinara_bot",
       leaseMilliseconds: 60_000, acceptMedia: vi.fn(), authorizeVoice: vi.fn(),
-      dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), transcribeVoice: vi.fn(),
+      dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), replyButtonsOnArrival: vi.fn(async () => undefined), handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), transcribeVoice: vi.fn(),
       dispatch: vi.fn(async (update: TelegramUpdate) => { dispatched.push(updateMessageId(update)); return dispatchedTurn(update); }),
       runTurn: vi.fn(async (turnId: string) => {
         if (turnId.endsWith("_1")) await groupGate;

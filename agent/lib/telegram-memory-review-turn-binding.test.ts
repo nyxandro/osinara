@@ -49,7 +49,7 @@ vi.mock("./memory-review/memory-review-repository.js", () => ({
   },
 }));
 
-vi.mock("./reply-buttons/reply-button-delivery.js", () => ({ stagedReplyButtons: vi.fn(async () => null) }));
+vi.mock("./reply-buttons/reply-button-delivery.js", () => ({ reportUndeliveredReplyButtons: vi.fn(), turnReplyButtons: vi.fn(() => null) }));
 const { telegramTurnEvents } = await import("../channels/telegram.js");
 
 function context(attributes: Record<string, string>) {

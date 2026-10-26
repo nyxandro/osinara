@@ -7,6 +7,8 @@
  * Key constructs:
  * - Object-shaped model schema avoids root JSON Schema unions in tool descriptors.
  * - Action-specific validators return actionable Russian AppError messages.
+ * - Reply buttons are written as Telegram button markup at the end of `content`, as in an answer;
+ *   the reminder keeps its text and its buttons apart, and new content brings its own buttons.
  */
 import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
@@ -18,7 +20,8 @@ import {
 import { requireReminderAuthorization } from "../reminders/reminder-context.js";
 import { REMINDER_RECURRENCE_UNITS, type ReminderRecurrence } from "../reminders/reminder-record.js";
 import { reminderRepository } from "../reminders/reminder-repository.js";
-import { parseReplyButtonRows, REPLY_BUTTON_ROWS_SCHEMA, type ReplyButtonRows } from "../reply-buttons/reply-button-contract.js";
+import type { ReplyButtonRows } from "../reply-buttons/reply-button-contract.js";
+import { readReplyButtonMarkup } from "../reply-buttons/reply-button-markup.js";
 import {
   optionalIsoDate,
   optionalString,
@@ -37,7 +40,6 @@ const TOOL_ACTIONS = ["create", "update", "pause", "resume", "delete"] as const;
 const SCOPES = ["personal", "family"] as const;
 const TOP_LEVEL_FIELDS = [
   "action",
-  "buttons",
   "content",
   "firstRunAt",
   "id",
@@ -51,11 +53,13 @@ const recurrenceSchema = z.object({
   unit: z.enum(REMINDER_RECURRENCE_UNITS),
 }).strict();
 
+// Room for the button markup of six buttons on top of the text itself.
+const REMINDER_BUTTON_MARKUP_MAX_LENGTH = 1_000;
+const BUTTON_MARKUP_EXAMPLE =
+  "<tg-button-row><tg-button style=\"success\">✅ Оплатил</tg-button><tg-button>⏰ Через час</tg-button></tg-button-row>";
+
 const manageReminderSchema = z.object({
   action: z.enum(TOOL_ACTIONS),
-  buttons: z.union([REPLY_BUTTON_ROWS_SCHEMA, z.null()])
-    .describe("Optional reply buttons sent with every delivery, rows as in attach_reply_buttons; null on update removes them")
-    .optional(),
   content: z.string().optional(),
   firstRunAt: z.string().optional(),
   id: z.string().optional(),
@@ -100,32 +104,41 @@ function requireReminderId(input: Record<string, unknown>): string {
   return requiredUuid(input, "id", INPUT_ERROR_CODE, "напоминание из list_reminders");
 }
 
-/** Absent keeps the current buttons; null removes them, which only an update can do. */
-function optionalReplyButtons(raw: unknown, allowNull: boolean): ReplyButtonRows | null | undefined {
-  if (raw === undefined) return undefined;
-  if (raw === null) {
-    if (allowNull) return null;
-    toolInputError(INPUT_ERROR_CODE, "Для action=create не передавайте buttons, если кнопки не нужны");
+/** The reminder text and the buttons written at its end; refused markup reaches the model. */
+function reminderContent(raw: string): { buttons: ReplyButtonRows | null; content: string } {
+  const reading = readReplyButtonMarkup(raw);
+  if (reading.error !== null) {
+    toolInputError(INPUT_ERROR_CODE, `${reading.error.message}. Кнопки пишутся в конце content: ${BUTTON_MARKUP_EXAMPLE}`);
   }
-  return parseReplyButtonRows(raw);
+  const content = reading.markdown.trim();
+  if (!content) toolInputError(INPUT_ERROR_CODE, "Поле content должно содержать текст напоминания, а не только кнопки");
+  if (content.length > REMINDER_CONTENT_MAX_LENGTH) {
+    toolInputError(INPUT_ERROR_CODE, `Текст напоминания без кнопок должен быть не длиннее ${REMINDER_CONTENT_MAX_LENGTH} символов`);
+  }
+  return { buttons: reading.rows, content: reading.rows === null ? raw : content };
+}
+
+function contentInput(input: Record<string, unknown>, required: boolean) {
+  const options = { maxLength: REMINDER_CONTENT_MAX_LENGTH + REMINDER_BUTTON_MARKUP_MAX_LENGTH };
+  const raw = required
+    ? requiredString(input, "content", INPUT_ERROR_CODE, "Позвонить врачу", options)
+    : optionalString(input, "content", INPUT_ERROR_CODE, "Позвонить врачу", options);
+  return raw === undefined ? undefined : reminderContent(raw);
 }
 
 function requireCreateInput(input: Record<string, unknown>) {
   requireOnlyFields(input, [
     "action",
-    "buttons",
     "content",
     "firstRunAt",
     "recurrence",
     "scope",
     "timezone",
   ], "action=create", INPUT_ERROR_CODE);
-  const buttons = optionalReplyButtons(input.buttons, false);
+  const { buttons, content } = contentInput(input, true)!;
   return {
-    ...(buttons === undefined || buttons === null ? {} : { buttons }),
-    content: requiredString(input, "content", INPUT_ERROR_CODE, "Позвонить врачу", {
-      maxLength: REMINDER_CONTENT_MAX_LENGTH,
-    }),
+    ...(buttons === null ? {} : { buttons }),
+    content,
     firstRunAt: requiredIsoDate(input, "firstRunAt", INPUT_ERROR_CODE),
     recurrence: requireReminderRecurrence(input.recurrence),
     scope: requiredEnum(input, "scope", SCOPES, INPUT_ERROR_CODE) as (typeof SCOPES)[number],
@@ -136,7 +149,6 @@ function requireCreateInput(input: Record<string, unknown>) {
 function requireUpdateInput(input: Record<string, unknown>) {
   requireOnlyFields(input, [
     "action",
-    "buttons",
     "content",
     "firstRunAt",
     "id",
@@ -145,19 +157,22 @@ function requireUpdateInput(input: Record<string, unknown>) {
     "scope",
     "timezone",
   ], "action=update", INPUT_ERROR_CODE);
-  const content = optionalString(input, "content", INPUT_ERROR_CODE, "Позвонить врачу", {
-    maxLength: REMINDER_CONTENT_MAX_LENGTH,
-  });
+  // New content brings its own buttons or none; without new content the buttons stay.
+  const content = contentInput(input, false);
   const firstRunAt = optionalIsoDate(input, "firstRunAt", INPUT_ERROR_CODE);
   const recurrence = optionalReminderRecurrence(input.recurrence);
-  const buttons = optionalReplyButtons(input.buttons, true);
-  if (buttons === undefined && content === undefined && firstRunAt === undefined && recurrence === undefined) {
+  if (content === undefined && firstRunAt === undefined && recurrence === undefined) {
     toolInputError(
       INPUT_ERROR_CODE,
-      "Для action=update передайте хотя бы одно изменение: content, firstRunAt, recurrence или buttons",
+      "Для action=update передайте хотя бы одно изменение: content, firstRunAt или recurrence",
     );
   }
-  return { buttons, content, firstRunAt, id: requireReminderId(input), recurrence };
+  return {
+    ...(content === undefined ? {} : content),
+    firstRunAt,
+    id: requireReminderId(input),
+    recurrence,
+  };
 }
 
 function requireIdOnlyInput(input: Record<string, unknown>, action: ReminderAction): string {
@@ -184,8 +199,8 @@ const TOOL_DESCRIPTION = [
   "Create payload: {\"action\":\"create\",\"content\":\"Позвонить врачу\",\"firstRunAt\":\"2026-08-01T10:00:00+03:00\",\"timezone\":\"Europe/Moscow\",\"scope\":\"personal\",\"recurrence\":null}.",
   "Recurrence: no repeat is recurrence=null; a repeat = {\"unit\":\"minutely\",\"interval\":5}. unit: minutely, hourly, daily, weekly, monthly, yearly; interval is an integer from 1 to 365. Minimum 1 minute. Minutes and hours are counted as a duration, other periods keep the local calendar time. A missing date moves to the last day of the month without losing the original date for the following repeats. The time is checked every minute; missed repeats are not caught up.",
   "Remove the repeat: {\"action\":\"update\",\"id\":\"<id from list_reminders>\",\"recurrence\":null}. Do not delete and re-create a reminder to change its repeat.",
-  "Update passes id and only the content, firstRunAt, recurrence or buttons being changed. Pause/resume/delete pass only action and id.",
-  "buttons: optional reply buttons under every delivery, rows as in attach_reply_buttons.",
+  "Update passes id and only the content, firstRunAt or recurrence being changed. Pause/resume/delete pass only action and id.",
+  "content may end with reply buttons in the button markup of the instructions; new content brings its own buttons or none.",
   "A delivered one-time reminder does not change: for a new time create a new one.",
   "firstRunAt is always an ISO datetime with a UTC offset, timezone is always IANA. Before update/pause/resume/delete first find the id through list_reminders.",
 ].join(" ");

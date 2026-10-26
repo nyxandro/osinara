@@ -247,13 +247,17 @@ describeWithDatabase("reminder repositories", () => {
       timezone: "Europe/Moscow",
     });
 
-    expect(reminder.buttons).toEqual(buttons);
+    // The model reads the buttons back as the markup it writes them in.
+    expect(reminder.content).toBe("Оплатить интернет\n\n<tg-button-row><tg-button style=\"success\">✅ Оплатил</tg-button>" +
+      "<tg-button>⏰ Через час</tg-button></tg-button-row>");
     const [claimed] = await reminderDispatchRepository.claimDue({ leaseMilliseconds: 300_000, limit: 10, now: new Date("2026-07-13T06:00:30.000Z") });
     expect(claimed).toMatchObject({ addresseeTelegramUserId: "reminder-member", buttons, telegramChatType: "private" });
 
     await database().query("UPDATE reminders SET status = 'active', lease_token = NULL, lease_expires_at = NULL WHERE id = $1", [reminder.id]);
-    const cleared = await reminderRepository.update(auth, reminder.id, { buttons: null, operationKey: "buttons-removed" });
-    expect(cleared.buttons).toBeNull();
+    const cleared = await reminderRepository.update(auth, reminder.id, {
+      buttons: null, content: "Оплатить интернет", operationKey: "buttons-removed",
+    });
+    expect(cleared.content).toBe("Оплатить интернет");
   });
 
   it("refuses to move, resume or pause a reminder that was already delivered", async () => {

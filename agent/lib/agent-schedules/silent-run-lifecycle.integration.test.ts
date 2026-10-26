@@ -117,7 +117,7 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
     try {
       await expect(deliverTelegramFinalOutput({ applicationSessionId: receipt.applicationSessionId,
         deliveryIdentity: { chatId: "123" }, agentSessionId: receipt.agentSessionId, agentTurnId: "turn_0",
-        markdown: "Чейнжлог", sendChunk: vi.fn().mockResolvedValue({ chatType: "private", messageId: "1234" }) }))
+        markdown: "Чейнжлог", replyButtons: false, sendChunk: vi.fn().mockResolvedValue({ chatType: "private", messageId: "1234" }) }))
         .rejects.toBe(outage);
     } finally {
       confirm.mockRestore();

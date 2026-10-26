@@ -4,10 +4,12 @@
  * Exports:
  * - `ReplyButtonSet`: one stored set as the delivery, press and dismissal paths read it.
  * - `ReplyButtonPressClaim`: the outcome of claiming one press.
- * - `replyButtonRepository`: staging by a turn or a reminder, delivery bookkeeping, the press
- *   claim and the dismissal by the addressee's own message.
+ * - `replyButtonRepository`: staging with the exact text of the message, activation once Telegram
+ *   confirmed it, the press claim and the dismissal by the addressee's own message.
  *
  * Key constructs:
+ * - Every set is staged together with the rich markdown of its message, so a settled caption is
+ *   written under the same words.
  * - A press is claimed in one statement: only the addressee, only a set still offering its buttons,
  *   only once. The same callback query repeated after a crash finds its own claim again.
  * - A set whose message went out before its number was saved (a crash in between) still accepts
@@ -17,21 +19,17 @@
  * - Dismissal touches only sets that were visible before the addressee's message was written:
  *   buttons the agent offered after it, in answer to it, stay.
  */
-import type { JsonObject } from "../../runtime/json.js";
-
-import { AppError } from "../app-error.js";
 import { database } from "../database.js";
 import type { ReplyButtonRows } from "./reply-button-contract.js";
 
-export type ReplyButtonMessageFormat = "plain" | "rich";
+// Buttons live only in rich messages; the column keeps the message's format explicit.
+const RICH_MESSAGE_FORMAT = "rich";
 
 export interface ReplyButtonSet {
   addresseeTelegramUserId: string;
   buttons: ReplyButtonRows;
   id: string;
-  /** Formatting entities of a plain message, kept so the settled caption does not strip them. */
-  messageEntities: readonly JsonObject[] | null;
-  messageFormat: ReplyButtonMessageFormat | null;
+  /** The rich markdown of the message without its buttons. */
   messageText: string | null;
   resolvedAt: Date | null;
   selectedIndex: number | null;
@@ -51,8 +49,6 @@ interface SetRow {
   addressee_telegram_user_id: string;
   buttons: ReplyButtonRows;
   id: string;
-  message_entities: readonly JsonObject[] | null;
-  message_format: ReplyButtonMessageFormat | null;
   message_text: string | null;
   resolved_at: Date | null;
   selected_index: number | null;
@@ -64,15 +60,13 @@ interface SetRow {
 }
 
 const SET_COLUMNS = `id, token, telegram_chat_id, telegram_chat_type, addressee_telegram_user_id, buttons,
-  telegram_message_id::text, message_text, message_format, message_entities, selected_index, resolved_at, status`;
+  telegram_message_id::text, message_text, selected_index, resolved_at, status`;
 
 function toSet(row: SetRow): ReplyButtonSet {
   return {
     addresseeTelegramUserId: row.addressee_telegram_user_id,
     buttons: row.buttons,
     id: row.id,
-    messageEntities: row.message_entities,
-    messageFormat: row.message_format,
     messageText: row.message_text,
     resolvedAt: row.resolved_at,
     selectedIndex: row.selected_index,
@@ -91,53 +85,34 @@ interface ReplyButtonTarget {
 }
 
 export const replyButtonRepository = {
-  /** The buttons of one turn; a second call of the tool in the same turn replaces them. */
+  /**
+   * The buttons of a turn's final answer with the text of its last message. A replay of the same
+   * delivery finds the set still staged and keeps its token, so the message it sends is the same.
+   */
   async stageForTurn(input: ReplyButtonTarget & {
     agentSessionId: string;
     agentTurnId: string;
     buttons: ReplyButtonRows;
+    messageText: string;
     token: string;
-  }): Promise<void> {
-    await database().query(
+  }): Promise<ReplyButtonSet> {
+    const result = await database().query<SetRow>(
       `INSERT INTO telegram_reply_button_sets
          (token, origin, agent_session_id, agent_turn_id, telegram_chat_id, telegram_chat_type,
-          addressee_telegram_user_id, buttons, status)
-       VALUES ($1, 'turn', $2, $3, $4, $5, $6, $7::jsonb, 'staged')
+          addressee_telegram_user_id, buttons, status, message_text, message_format)
+       VALUES ($1, 'turn', $2, $3, $4, $5, $6, $7::jsonb, 'staged', $8, $9)
        ON CONFLICT (agent_turn_id) WHERE status = 'staged'
-       DO UPDATE SET token = EXCLUDED.token, buttons = EXCLUDED.buttons,
-                     telegram_chat_id = EXCLUDED.telegram_chat_id,
-                     telegram_chat_type = EXCLUDED.telegram_chat_type,
-                     addressee_telegram_user_id = EXCLUDED.addressee_telegram_user_id`,
+       DO UPDATE SET message_text = EXCLUDED.message_text
+       RETURNING ${SET_COLUMNS}`,
       [input.token, input.agentSessionId, input.agentTurnId, input.telegramChatId, input.telegramChatType,
-        input.addresseeTelegramUserId, JSON.stringify(input.buttons)],
+        input.addresseeTelegramUserId, JSON.stringify(input.buttons), input.messageText, RICH_MESSAGE_FORMAT],
     );
-  },
-
-  /**
-   * The buttons a turn's final answer carries. A turn that continues after an approval is a new turn
-   * resuming the parked one, so buttons staged before the approval are found through that chain;
-   * the newest set wins.
-   */
-  async findStagedForTurn(agentTurnId: string): Promise<ReplyButtonSet | null> {
-    const result = await database().query<SetRow>(
-      `WITH RECURSIVE chain (id, resumes_turn_id) AS (
-         SELECT id, resumes_turn_id FROM agent_turns WHERE id = $1
-         UNION ALL
-         SELECT turn.id, turn.resumes_turn_id FROM agent_turns AS turn JOIN chain ON turn.id = chain.resumes_turn_id
-       )
-       SELECT ${SET_COLUMNS} FROM telegram_reply_button_sets
-        WHERE status = 'staged' AND (agent_turn_id = $1 OR agent_turn_id IN (SELECT id FROM chain))
-        ORDER BY created_at DESC, id DESC
-        LIMIT 1`,
-      [agentTurnId],
-    );
-    return result.rows[0] ? toSet(result.rows[0]) : null;
+    return toSet(result.rows[0]!);
   },
 
   /** A reminder's buttons for one delivery: its text is known before the message is sent. */
   async stageForReminder(input: ReplyButtonTarget & {
     buttons: ReplyButtonRows;
-    messageEntities: readonly JsonObject[];
     messageText: string;
     reminderId: string;
     token: string;
@@ -145,25 +120,28 @@ export const replyButtonRepository = {
     const result = await database().query<SetRow>(
       `INSERT INTO telegram_reply_button_sets
          (token, origin, reminder_id, telegram_chat_id, telegram_chat_type, addressee_telegram_user_id,
-          buttons, status, message_text, message_format, message_entities)
-       VALUES ($1, 'reminder', $2, $3, $4, $5, $6::jsonb, 'staged', $7, 'plain', $8::jsonb)
+          buttons, status, message_text, message_format)
+       VALUES ($1, 'reminder', $2, $3, $4, $5, $6::jsonb, 'staged', $7, $8)
        RETURNING ${SET_COLUMNS}`,
       [input.token, input.reminderId, input.telegramChatId, input.telegramChatType, input.addresseeTelegramUserId,
-        JSON.stringify(input.buttons), input.messageText, JSON.stringify(input.messageEntities)],
+        JSON.stringify(input.buttons), input.messageText, RICH_MESSAGE_FORMAT],
     );
     return toSet(result.rows[0]!);
   },
 
-  /** The exact text the buttons go out under, written before that message is sent. */
-  async recordMessageText(id: string, messageText: string, messageFormat: ReplyButtonMessageFormat): Promise<void> {
-    const result = await database().query(
-      `UPDATE telegram_reply_button_sets SET message_text = $2, message_format = $3
-        WHERE id = $1 AND status = 'staged'`,
-      [id, messageText, messageFormat],
+  /**
+   * A turn's answer is out: the buttons staged for it are offered under its last message. Nothing
+   * happens when its buttons never went out with it, and a set pressed before this already holds
+   * its message number.
+   */
+  async activateForTurn(agentTurnId: string, telegramMessageId: string): Promise<void> {
+    await database().query(
+      `UPDATE telegram_reply_button_sets
+          SET telegram_message_id = coalesce(telegram_message_id, $2::bigint),
+              status = 'active', activated_at = now()
+        WHERE agent_turn_id = $1 AND status = 'staged'`,
+      [agentTurnId, telegramMessageId],
     );
-    if (result.rowCount !== 1) {
-      throw new AppError("AGENT_REPLY_BUTTONS_STATE_INVALID", "Кнопки ответа уже не ждут отправки");
-    }
   },
 
   /** The message is out: its buttons are offered. A press that arrived first keeps its outcome. */
@@ -251,19 +229,42 @@ export const replyButtonRepository = {
     return result.rows[0]?.open === true;
   },
 
-  /** The addressee wrote instead of tapping: every set they could still tap before that goes away. */
+  /** Whether the person has buttons on screen in this chat; a read, so most messages write nothing. */
+  async hasActiveForAddressee(input: { addresseeTelegramUserId: string; telegramChatId: string }): Promise<boolean> {
+    const result = await database().query<{ offered: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM telegram_reply_button_sets
+          WHERE telegram_chat_id = $1 AND addressee_telegram_user_id = $2 AND status = 'active'
+       ) AS offered`,
+      [input.telegramChatId, input.addresseeTelegramUserId],
+    );
+    return result.rows[0]?.offered === true;
+  },
+
+  /**
+   * The addressee wrote instead of tapping: every set they could still tap before that goes away,
+   * except one whose tap arrived earlier and is still waiting to be decided.
+   */
   async dismissForAddressee(input: {
     addresseeTelegramUserId: string;
+    /** The update of the message: a tap with an earlier update came first. */
+    afterUpdateId: string;
     telegramChatId: string;
     writtenAt: Date;
   }): Promise<ReplyButtonSet[]> {
     const result = await database().query<SetRow>(
-      `UPDATE telegram_reply_button_sets
+      `UPDATE telegram_reply_button_sets AS offered
           SET status = 'dismissed', resolved_at = now()
-        WHERE telegram_chat_id = $1 AND addressee_telegram_user_id = $2
-          AND status = 'active' AND activated_at < $3
+        WHERE offered.telegram_chat_id = $1 AND offered.addressee_telegram_user_id = $2
+          AND offered.status = 'active' AND offered.activated_at < $3
+          AND NOT EXISTS (
+            SELECT 1 FROM telegram_ingress_updates AS tap
+             WHERE tap.status IN ('pending', 'processing') AND tap.update_id < $4::bigint
+               AND tap.payload #>> '{callback_query,data}' LIKE 'rb:' || offered.token || ':%'
+               AND tap.payload #>> '{callback_query,from,id}' = offered.addressee_telegram_user_id
+          )
         RETURNING ${SET_COLUMNS}`,
-      [input.telegramChatId, input.addresseeTelegramUserId, input.writtenAt],
+      [input.telegramChatId, input.addresseeTelegramUserId, input.writtenAt, input.afterUpdateId],
     );
     return result.rows.map(toSet);
   },

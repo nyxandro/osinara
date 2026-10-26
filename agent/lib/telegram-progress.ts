@@ -13,6 +13,10 @@
  * included. It is removed here, ahead of the decision, so no branch can deliver it and so a
  * reaction is still recognized as the whole message it has to be.
  *
+ * Reply buttons are written in the text as Telegram's button markup. They leave a final answer as
+ * its buttons, or as the reason they were refused, so the delivery can attach or report them; an
+ * interim note never carries buttons, and its markup is removed and reported the same way.
+ *
  * Provider adapters route typed reasoning parts to dedicated runtime events that this delivery
  * policy never receives.
  */
@@ -22,6 +26,7 @@ import {
   readMemoryUsageDirective,
   type MemoryUsageDeclaration,
 } from "./memory-usage-directive.js";
+import { readReplyButtonMarkup, type ReplyButtonMarkupReading } from "./reply-buttons/reply-button-markup.js";
 import { stripTelegramAsideDirectives } from "./telegram-authored-split.js";
 import { readTelegramStandaloneDirective } from "./telegram-standalone-directive.js";
 import {
@@ -34,11 +39,20 @@ const TELEGRAM_REACTION_DIRECTIVE_PATTERN =
   /^<telegram-reaction>(?<emoji>[^<]*)<\/telegram-reaction>$/u;
 const TELEGRAM_REACTION_DIRECTIVE_FRAGMENT = "telegram-reaction";
 
+/** Button markup found in the text: present only when the model wrote some. */
+export type CompletedReplyButtons = Pick<ReplyButtonMarkupReading, "error" | "rows">;
+
 export type CompletedTelegramOutput =
   | { emoji: TelegramMessageReactionEmoji; kind: "reaction" }
-  | { kind: "message"; message: string; standalone: boolean }
-  | { kind: "progress"; message: string }
+  | { kind: "message"; message: string; replyButtons?: CompletedReplyButtons; standalone: boolean }
+  | { kind: "progress"; message: string; replyButtons?: CompletedReplyButtons }
   | { kind: "silence" };
+
+function withoutReplyButtons(markdown: string): { markdown: string; replyButtons?: CompletedReplyButtons } {
+  const reading = readReplyButtonMarkup(markdown);
+  if (reading.rows === null && reading.error === null) return { markdown };
+  return { markdown: reading.markdown, replyButtons: { error: reading.error, rows: reading.rows } };
+}
 
 export function completedTelegramOutput(data: {
   finishReason: string;
@@ -56,7 +70,9 @@ export function completedTelegramOutput(data: {
 
   // Text authored before a tool call is what a person reads while a long task runs.
   if (data.finishReason === TOOL_CALLS_FINISH_REASON) {
-    const progress = stripTelegramAsideDirectives(readTelegramStandaloneDirective(message).markdown);
+    const { markdown: progress, replyButtons } = withoutReplyButtons(
+      stripTelegramAsideDirectives(readTelegramStandaloneDirective(message).markdown),
+    );
     // Transport directives belong to the final answer; interim noise is dropped, never delivered.
     if (
       !progress ||
@@ -65,11 +81,14 @@ export function completedTelegramOutput(data: {
     ) {
       return null;
     }
-    return { kind: "progress", message: progress };
+    return { kind: "progress", message: progress, ...(replyButtons === undefined ? {} : { replyButtons }) };
   }
 
-  // The reply choice is removed first, so a reaction is still recognized as the whole message.
-  const { markdown: answer, standalone } = readTelegramStandaloneDirective(message);
+  // The reply choice and the buttons are removed first, so a reaction is still recognized as the
+  // whole message.
+  const standaloneReading = readTelegramStandaloneDirective(message);
+  const { markdown: answer, replyButtons } = withoutReplyButtons(standaloneReading.markdown);
+  const standalone = standaloneReading.standalone;
 
   // Reaction is a terminal transport directive and can never be mixed with user-visible text.
   const reaction = TELEGRAM_REACTION_DIRECTIVE_PATTERN.exec(answer)?.groups?.emoji;
@@ -84,7 +103,7 @@ export function completedTelegramOutput(data: {
   }
   // An answer made of transport directives alone has no visible content to deliver.
   if (!stripTelegramAsideDirectives(answer)) return null;
-  return { kind: "message", message: answer, standalone };
+  return { kind: "message", message: answer, ...(replyButtons === undefined ? {} : { replyButtons }), standalone };
 }
 
 export function telegramOutputWithoutMemoryDirective(data: {

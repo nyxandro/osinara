@@ -1,11 +1,12 @@
 /**
- * The shape of reply buttons: what the model passes, what Telegram receives, and what a press
- * carries back.
+ * The shape of reply buttons: what is stored, what a press carries back, and the rules every
+ * button follows wherever it was written.
  *
  * Exports:
- * - `REPLY_BUTTON_ROWS_SCHEMA`, `parseReplyButtonRows`: the model-facing rows and their validation.
+ * - `ReplyButton`, `ReplyButtonRows`, `ReplyButtonColor`: one stored set, row by row.
+ * - `REPLY_BUTTON_STYLES`: the Telegram style name of each color.
+ * - `validateReplyButtonLabel`: the rules of one label.
  * - `replyButtonLabels`: the labels in press order; a press carries the index into this list.
- * - `replyButtonKeyboard`: the Telegram inline keyboard of one stored set.
  * - `REPLY_BUTTON_CALLBACK_PREFIX`, `parseReplyButtonCallback`: the callback data of a button.
  * - `newReplyButtonToken`: the unguessable id of one set inside the callback data.
  * - `selectedReplyCaption`, `DISMISSED_REPLY_CAPTION`: the line a settled message gets.
@@ -18,7 +19,6 @@
  *   settled caption can quote it inside the original rich message without escaping.
  */
 import { randomBytes } from "node:crypto";
-import { z } from "zod";
 
 import { AppError } from "../app-error.js";
 
@@ -30,15 +30,22 @@ export const DISMISSED_REPLY_CAPTION = "Ничего не выбрано";
 /** Turn auth attribute of a press: the message whose button was tapped, for replies and reactions. */
 export const REPLY_BUTTON_MESSAGE_ATTRIBUTE = "telegramReplyButtonMessageId";
 
-const INPUT_ERROR_CODE = "AGENT_REPLY_BUTTONS_INPUT_INVALID";
+const INVALID_CODE = "AGENT_REPLY_BUTTONS_INVALID";
 // Telegram rich markdown reads these as formatting, links, math or HTML.
 const MARKUP_CHARACTERS = /[*_~=|`[\]<>\\$#]/u;
+// Telegram allows only plain text in a button label, and it turns links, mentions, e-mails, phone
+// numbers and commands into entities; such a label could make it refuse the whole message. A site
+// counts by a common top-level domain, so "Node.js", a date or an amount stays a plain label.
+const AUTO_ENTITY_PATTERN = new RegExp([
+  "https?:\\/\\/", "www\\.", "@[\\p{L}\\p{N}_]", "^\\/[\\p{L}\\p{N}_]", "\\+\\d[\\d\\s()-]{6,}\\d",
+  "[\\p{L}\\p{N}-]\\.(?:ru|рф|su|com|net|org|info|biz|io|me|co|app|dev|ai|tv|by|kz|ua|uz|de|uk|online|site|shop|store|pro|xyz|tech)(?![\\p{L}\\p{N}])",
+].join("|"), "iu");
 const TOKEN_BYTES = 16;
 const CALLBACK_PATTERN = /^rb:([A-Za-z0-9_-]{22}):([0-9])$/u;
 
 // Telegram's own style names: green, red and blue buttons.
-const TELEGRAM_STYLES = { blue: "primary", green: "success", red: "danger" } as const;
-export type ReplyButtonColor = keyof typeof TELEGRAM_STYLES;
+export const REPLY_BUTTON_STYLES = { blue: "primary", green: "success", red: "danger" } as const;
+export type ReplyButtonColor = keyof typeof REPLY_BUTTON_STYLES;
 
 export interface ReplyButton {
   readonly color?: ReplyButtonColor;
@@ -47,66 +54,23 @@ export interface ReplyButton {
 
 export type ReplyButtonRows = readonly (readonly ReplyButton[])[];
 
-const BUTTON_SCHEMA = z.strictObject({
-  color: z.enum(["green", "red", "blue"])
-    .describe("Optional. green: the main yes; red: cancel or something irreversible; blue: the main alternative. Leave the rest uncolored.")
-    .optional(),
-  text: z.string()
-    .describe(`What the person answers by tapping, 1-${REPLY_BUTTON_TEXT_MAX_LENGTH} characters, may start with an emoji, e.g. "✅ Да, заказываем"`),
-});
-
-export const REPLY_BUTTON_ROWS_SCHEMA = z.array(
-  z.array(BUTTON_SCHEMA).describe(`One row of 1-${REPLY_BUTTONS_ROW_MAX} buttons shown side by side`),
-).describe(`Rows from top to bottom, ${REPLY_BUTTONS_MAX} buttons at most in total`);
-
-function inputError(message: string): never {
-  throw new AppError(INPUT_ERROR_CODE, message);
-}
-
-/** Validates rows the model passed; every rule is stated in the error the model reads. */
-export function parseReplyButtonRows(raw: unknown): ReplyButtonRows {
-  const parsed = REPLY_BUTTON_ROWS_SCHEMA.safeParse(raw);
-  if (!parsed.success) {
-    inputError("Кнопки передаются как rows: массив рядов, в ряду объекты {\"text\":\"✅ Да\",\"color\":\"green\"}; color необязателен: green, red или blue");
+/** One line of 1-40 characters without markup; returns it trimmed. */
+export function validateReplyButtonLabel(label: string): string {
+  const text = label.trim();
+  if (text.length === 0 || Array.from(text).length > REPLY_BUTTON_TEXT_MAX_LENGTH || /[\r\n]/u.test(text)) {
+    throw new AppError(INVALID_CODE, `Текст кнопки — одна строка от 1 до ${REPLY_BUTTON_TEXT_MAX_LENGTH} символов: «${text}»`);
   }
-  const rows = parsed.data;
-  const total = rows.reduce((sum, row) => sum + row.length, 0);
-  if (rows.length === 0 || total === 0 || total > REPLY_BUTTONS_MAX) {
-    inputError(`Нужно от 1 до ${REPLY_BUTTONS_MAX} кнопок`);
+  if (MARKUP_CHARACTERS.test(text)) {
+    throw new AppError(INVALID_CODE, `В тексте кнопки не должно быть символов разметки * _ ~ = | \` [ ] < > \\ $ #: «${text}»`);
   }
-  if (rows.some((row) => row.length === 0 || row.length > REPLY_BUTTONS_ROW_MAX)) {
-    inputError(`В каждом ряду от 1 до ${REPLY_BUTTONS_ROW_MAX} кнопок`);
+  if (AUTO_ENTITY_PATTERN.test(text)) {
+    throw new AppError(INVALID_CODE, `В тексте кнопки не должно быть ссылок, @упоминаний, почты, телефонов и команд: «${text}»`);
   }
-  const seen = new Set<string>();
-  const normalized = rows.map((row) => row.map((button) => {
-    const text = button.text.trim();
-    if (text.length === 0 || Array.from(text).length > REPLY_BUTTON_TEXT_MAX_LENGTH || /[\r\n]/u.test(text)) {
-      inputError(`Текст кнопки — одна строка от 1 до ${REPLY_BUTTON_TEXT_MAX_LENGTH} символов: «${text}»`);
-    }
-    if (MARKUP_CHARACTERS.test(text)) {
-      inputError(`В тексте кнопки не должно быть символов разметки * _ ~ = | \` [ ] < > \\ $ #: «${text}»`);
-    }
-    const key = text.toLowerCase();
-    if (seen.has(key)) inputError(`Тексты кнопок не должны повторяться: «${text}»`);
-    seen.add(key);
-    return button.color === undefined ? { text } : { color: button.color, text };
-  }));
-  return normalized;
+  return text;
 }
 
 export function replyButtonLabels(rows: ReplyButtonRows): string[] {
   return rows.flatMap((row) => row.map((button) => button.text));
-}
-
-export function replyButtonKeyboard(token: string, rows: ReplyButtonRows): { inline_keyboard: { [key: string]: string }[][] } {
-  let index = 0;
-  return {
-    inline_keyboard: rows.map((row) => row.map((button) => ({
-      callback_data: `${REPLY_BUTTON_CALLBACK_PREFIX}${token}:${index++}`,
-      ...(button.color === undefined ? {} : { style: TELEGRAM_STYLES[button.color] }),
-      text: button.text,
-    }))),
-  };
 }
 
 export function isReplyButtonCallback(data: string | undefined): data is string {

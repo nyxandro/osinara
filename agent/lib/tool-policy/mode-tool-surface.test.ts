@@ -137,19 +137,6 @@ describe("trusted mode tool surfaces", () => {
     }
   });
 
-  it("offers reply buttons in the trusted zones, scheduled runs included, and nowhere else", () => {
-    for (const environment of ["private", "family"] as const) {
-      for (const scheduledRun of [false, true]) {
-        expect(names({ environment, scheduledRun }), `${environment} scheduled=${scheduledRun}`).toContain("attach_reply_buttons");
-      }
-    }
-    expect(names({ capabilities: new Set(), environment: "external", skills: new Set<string>() })).not.toContain("attach_reply_buttons");
-    for (const environment of ["private", "family"] as const) {
-      // A child answers its parent, never the person.
-      expect(Object.keys(buildSubagentToolSurface({ environment }))).not.toContain("attach_reply_buttons");
-    }
-  });
-
   it("gives trusted zones the always-registered built-ins, and external groups no Bash", () => {
     for (const environment of ["private", "family"] as const) {
       for (const scheduledRun of [false, true]) {

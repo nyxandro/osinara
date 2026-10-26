@@ -2,7 +2,8 @@
  * Reply button dismissal tests.
  *
  * Constructs covered:
- * - Only a person's own message dismisses their buttons, as of the moment it was written.
+ * - Only a person's own message dismisses their buttons, as of the moment it was written and of
+ *   its place in the update order, so a tap that came first still counts.
  * - Every dismissed message gets the "nothing chosen" caption, and one failed edit does not keep
  *   the others.
  */
@@ -37,10 +38,11 @@ describe("reply button dismissal", () => {
     const sets = [{ id: "set-1" }, { id: "set-2" }];
     const { dismiss, repository, telegram } = dismissal(sets);
 
-    await dismiss(message({ first_name: "Андрей", id: 101, is_bot: false }));
+    await dismiss(message({ first_name: "Андрей", id: 101, is_bot: false }), "7002");
 
     expect(repository.dismissForAddressee).toHaveBeenCalledWith({
       addresseeTelegramUserId: "101",
+      afterUpdateId: "7002",
       telegramChatId: "-100777",
       writtenAt: new Date(1_793_000_000 * 1_000),
     });
@@ -50,8 +52,8 @@ describe("reply button dismissal", () => {
   it("ignores a message of another bot or without a sender", async () => {
     const { dismiss, repository } = dismissal([]);
 
-    await dismiss(message({ first_name: "Бот", id: 555, is_bot: true }));
-    await dismiss(message(null));
+    await dismiss(message({ first_name: "Бот", id: 555, is_bot: true }), "7002");
+    await dismiss(message(null), "7002");
 
     expect(repository.dismissForAddressee).not.toHaveBeenCalled();
   });
@@ -62,7 +64,7 @@ describe("reply button dismissal", () => {
     telegram.settle.mockRejectedValueOnce(new Error("message to edit not found"));
     vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    await dismiss(message({ first_name: "Андрей", id: 101, is_bot: false }));
+    await dismiss(message({ first_name: "Андрей", id: 101, is_bot: false }), "7002");
 
     expect(telegram.settle).toHaveBeenCalledTimes(2);
     vi.restoreAllMocks();
