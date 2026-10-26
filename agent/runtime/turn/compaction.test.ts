@@ -131,6 +131,24 @@ describe("history compaction", () => {
     expect(compactsAgain(compacted, settings, measurement.frameTokens)).toBe(false);
   });
 
+  it("leaves out of the summary what the application restates by itself after a compaction", async () => {
+    const restated: ModelMessage = { role: "user", content: "<restated>факт, который потом отзовут</restated>" };
+    const messages = [restated, ...productionLoop.messages];
+    const settings = {
+      ...productionLoop.settings,
+      restatedAfterCompaction: (message: ModelMessage) =>
+        typeof message.content === "string" && message.content.startsWith("<restated>"),
+    };
+    const measurement = { counters: providerCount(messages, messages.length - 1, 0, 120), frameTokens: 0 };
+    const summarize = vi.fn<Summarize>(async () => "сводка");
+
+    const compacted = await compactMessages(messages, settings, summarize, measurement, 0);
+
+    expect(summarize).toHaveBeenCalledTimes(1);
+    expect(summarize.mock.calls[0]![0].prompt).not.toContain("факт, который потом отзовут");
+    expect(JSON.stringify(compacted)).not.toContain("факт, который потом отзовут");
+  });
+
   it("summarizes when the provider measured the prompt over the threshold and capping has nothing to cut", async () => {
     const { messages, settings } = productionLoop;
     const measurement = { counters: providerCount(messages, messages.length - 1, 0, 120), frameTokens: 0 };

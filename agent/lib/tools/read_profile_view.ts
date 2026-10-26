@@ -2,7 +2,7 @@
  * Reproducible profile view reader tool.
  *
  * Export:
- * - `read_profile_view`: reads the exact ordered snapshot when current access is unchanged.
+ * - `read_profile_view`: reads the ordered snapshot again, without the facts that no longer hold.
  */
 import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
@@ -16,7 +16,7 @@ export default defineTool({
   // Repeating it after a crash is safe: it only reads.
   replaySafe: true,
   description:
-    "Re-read the selection of facts about people from the <verified_profile_view> block by its profileViewRef, for example when the block was cut or has left the context. Returns the same selection and does not build a new one.",
+    "Re-read the facts about people of a <profile_card> or <verified_profile_view> block by its profileViewRef, for example when the block has left the context. Returns the same selection; facts no longer valid are left out and listed in withdrawnMemoryRefs, erasedClaims counts those deleted for good.",
   inputSchema: z.object({
     profileViewRef: z.string().regex(PROFILE_VIEW_REF_PATTERN),
   }).strict(),

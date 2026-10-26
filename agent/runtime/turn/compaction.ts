@@ -36,6 +36,12 @@ import {
 
 export interface CompactionSettings {
   readonly recentWindowSize: number;
+  /**
+   * Messages the application sends again by itself once compaction removed them. The summary
+   * leaves them out: retold there, what they said would outlive a later withdrawal by the
+   * application, which can withdraw only from its own messages.
+   */
+  readonly restatedAfterCompaction?: (message: ModelMessage) => boolean;
   readonly threshold: number;
 }
 
@@ -267,7 +273,8 @@ export async function compactMessages(
       COMPACTION_SUMMARY_DROPPED_CHECKPOINT,
     ]
     : [await summarize(createCompactionPrompt({
-      messages: older, previousCheckpoint, strictBudget: summaryRefusals > 0,
+      messages: older.filter((message) => settings.restatedAfterCompaction?.(message) !== true),
+      previousCheckpoint, strictBudget: summaryRefusals > 0,
       transcriptBudgetTokens: Math.max(1, Math.floor(settings.threshold / 2 ** summaryRefusals)),
     }))];
   let smallest: ModelMessage[] = [];

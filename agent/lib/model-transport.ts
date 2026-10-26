@@ -30,7 +30,7 @@ import { createModelCallMetrics } from "./model-call-metrics.js";
 import type { SuccessfulModelCall } from "./model-availability-repository.js";
 import { modelRouteKey } from "./model-route.js";
 import { modelSuccessObserver } from "./model-success-observer.js";
-import { projectTurnMemory } from "./prompt/turn-memory-projection.js";
+import { projectTurnTail } from "./prompt/turn-memory-projection.js";
 
 export interface ConfiguredLanguageModelOptions {
   readonly apiKey: string;
@@ -175,7 +175,7 @@ function createTransportDefaultsMiddleware(
         ...params,
         maxOutputTokens: params.maxOutputTokens ?? maxOutputTokens,
         prompt: transport.protocol === "openai-chat-completions"
-          ? projectTurnMemory(removeUnresolvedOpenAIToolCalls(params.prompt))
+          ? projectTurnTail(removeUnresolvedOpenAIToolCalls(params.prompt))
           : params.prompt,
         providerOptions: {
           ...params.providerOptions,
