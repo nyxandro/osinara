@@ -11,11 +11,8 @@
  *   runtime must offer for a capability to work at all.
  * - `parseExternalGroupToolAllowlist`: validates the complete persisted policy atomically.
  */
-/**
- * A runtime property a capability depends on: subscription image generation exists only under one
- * model provider, and image inspection only with a model that accepts images.
- */
-export type ExternalGroupCapabilityRequirement = "image_generation" | "vision";
+/** A runtime property a capability depends on: image inspection works only with a model that accepts images. */
+export type ExternalGroupCapabilityRequirement = "vision";
 
 interface ExternalGroupCapability<Name extends string = string> {
   readonly name: Name;
@@ -35,10 +32,6 @@ function capabilityNames<const Catalog extends readonly ExternalGroupCapability[
 // Persisted grants are action-level where one static descriptor contains distinct side effects.
 export const EXTERNAL_GROUP_CAPABILITY_CATALOG = [
   { name: "bash" },
-  {
-    name: "generate_image",
-    requires: "image_generation",
-  },
   { name: "import_telegram_attachment" },
   {
     name: "inspect_workspace_image",

@@ -6,7 +6,7 @@
  * - Anthropic Messages and OpenAI Chat Completions remain provider-name independent.
  * - Required endpoint, authentication, thinking, capability, and context metadata fail fast.
  * - MiniMax and OpenCode Go transports enforce their exact protocol-native cross-field contracts.
- * - Codex subscription transport is limited to the internal CLIProxy service boundary.
+ * - The removed Codex subscription provider and its gateway address are rejected.
  * - Voice-enabled startup requires an explicit Groq credential.
  * - Canonical runtime output limits reject values above the application-tested cap.
  * - Active schema is the host-mounted provider selection contract.
@@ -69,13 +69,6 @@ describe("parseModelProviderConfig", () => {
     const active = JSON.parse(await readFile("config/agent-model-providers.json", "utf8"));
 
     expect(parseModelProviderConfig(active)).toEqual(active);
-  });
-
-  // The reviewed Codex subscription route is switched to by hand; a schema change must not leave it stale.
-  it("loads the reviewed Codex subscription config with the schema the agent mounts", async () => {
-    const codex = JSON.parse(await readFile("config/codex-subscription-model-providers.json", "utf8"));
-
-    expect(parseModelProviderConfig(codex)).toEqual(codex);
   });
 
   it("accepts protocol-native primary, vision, and voice model selection", () => {
@@ -177,22 +170,13 @@ describe("parseModelProviderConfig", () => {
     })).toThrow("AGENT_MODEL_PROVIDER_CONFIG_INVALID");
   });
 
-  it("accepts only the exact internal Codex subscription transport", () => {
+  // The subscription gateway was removed on 2026-10-26; a config still naming it must stop startup
+  // instead of sending the agent's requests to a service that no longer runs.
+  it("rejects the removed Codex subscription provider and its gateway address", () => {
     const codexSubscription = {
       ...validConfig,
       agent: {
-        models: {
-          primary: {
-            contextWindowTokens: 372_000,
-            id: "gpt-5.6-luna",
-            maxOutputTokens: 128_000,
-          },
-          vision: {
-            id: "gpt-5.6-luna",
-            maxOutputTokens: 128_000,
-            supportsImageInput: true,
-          },
-        },
+        ...validConfig.agent,
         transport: {
           baseUrl: "http://cli-proxy-api:8317/v1",
           protocol: "openai-chat-completions",
@@ -201,47 +185,14 @@ describe("parseModelProviderConfig", () => {
         },
       },
       provider: "codex-subscription",
-    } as const;
+    };
 
-    expect(parseModelProviderConfig(codexSubscription)).toEqual(codexSubscription);
+    expect(() => parseModelProviderConfig(codexSubscription)).toThrow("AGENT_MODEL_PROVIDER_CONFIG_INVALID");
     expect(() => parseModelProviderConfig({
-      ...codexSubscription,
+      ...validConfig,
       agent: {
-        ...codexSubscription.agent,
-        transport: {
-          ...codexSubscription.agent.transport,
-          baseUrl: "http://untrusted-proxy:8317/v1",
-        },
-      },
-    })).toThrow("AGENT_MODEL_PROVIDER_CONFIG_INVALID");
-    expect(() => parseModelProviderConfig({
-      ...codexSubscription,
-      agent: {
-        ...codexSubscription.agent,
-        transport: {
-          ...codexSubscription.agent.transport,
-          reasoning: { effort: "high", format: "reasoning-object", type: "effort" },
-        },
-      },
-    })).toThrow("AGENT_MODEL_PROVIDER_CONFIG_INVALID");
-    expect(() => parseModelProviderConfig({
-      ...codexSubscription,
-      agent: {
-        ...codexSubscription.agent,
-        transport: {
-          ...codexSubscription.agent.transport,
-          reasoning: { effort: "low", format: "reasoning-effort", type: "effort" },
-        },
-      },
-    })).toThrow("AGENT_MODEL_PROVIDER_CONFIG_INVALID");
-    expect(() => parseModelProviderConfig({
-      ...codexSubscription,
-      agent: {
-        ...codexSubscription.agent,
-        transport: {
-          ...codexSubscription.agent.transport,
-          reasoning: { format: "reasoning-effort", type: "none" },
-        },
+        ...validConfig.agent,
+        transport: { ...validConfig.agent.transport, baseUrl: "http://cli-proxy-api:8317/v1" },
       },
     })).toThrow("AGENT_MODEL_PROVIDER_CONFIG_INVALID");
   });

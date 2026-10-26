@@ -14,29 +14,6 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
-  cli-proxy-api:
-    profiles: ["codex-subscription"]
-    build:
-      context: .
-      target: cli-proxy
-    environment:
-      CLI_PROXY_API_KEY: ${CLI_PROXY_API_KEY:?CLI_PROXY_API_KEY is required}
-    healthcheck:
-      test: ["CMD-SHELL", "curl --fail --silent --show-error --header \"Authorization: Bearer $${CLI_PROXY_API_KEY}\" http://127.0.0.1:8317/v1/models >/dev/null"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-    networks:
-      - default
-    read_only: true
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    tmpfs:
-      - /run/cli-proxy-api:size=16m,mode=0700,uid=10001,gid=10001
-    volumes:
-      - cli-proxy-auth:/var/lib/cli-proxy-api/auth
-
   agent:
     build:
       context: .
@@ -236,7 +213,6 @@ services:
       - ./infra/nginx.conf:/etc/nginx/nginx.conf:ro
 
 volumes:
-  cli-proxy-auth:
   google-workspace-credentials:
   postgres-data:
   memory-embedding-model-e5:

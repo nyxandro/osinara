@@ -128,6 +128,38 @@ describe("GitHub software release client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  // The subscription gateway left the project on 2026-10-26. The first release without it still
+  // names its old image so that the bot and the deploy controller already on a server accept it; the
+  // releases after it do not name it at all.
+  it.each([
+    ["no longer names", (images: Record<string, string>) => {
+      const { cliProxy: _retired, ...rest } = images;
+      return rest;
+    }],
+    ["still names", (images: Record<string, string>) => images],
+  ])("accepts a manifest that %s the retired gateway image, keeping it as published", async (_name, shape) => {
+    const manifest = deploymentManifest({ images: shape(deploymentManifest().images) });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(githubRelease()))
+      .mockResolvedValueOnce(jsonResponse(manifest));
+    const client = createGitHubSoftwareReleaseClient({ fetch: fetchMock, timeoutMs: 1_000 });
+
+    await expect(client.latestNewerThan("0.1.0")).resolves.toMatchObject({ manifest });
+  });
+
+  it("still rejects a malformed retired gateway image", async () => {
+    const manifest = deploymentManifest({
+      images: { ...deploymentManifest().images, cliProxy: "ghcr.io/nyxandro/osinara-cli-proxy:latest" },
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(githubRelease()))
+      .mockResolvedValueOnce(jsonResponse(manifest));
+    const client = createGitHubSoftwareReleaseClient({ fetch: fetchMock, timeoutMs: 1_000 });
+
+    await expect(client.latestNewerThan("0.1.0"))
+      .rejects.toThrowError(/AGENT_SOFTWARE_MANIFEST_INVALID/);
+  });
+
   it.each([
     ["missing", { composeSha256: undefined }],
     ["not a digest", { composeSha256: "sha256:invalid" }],

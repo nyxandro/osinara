@@ -45,13 +45,12 @@ function service(compose: string, name: string, nextName: string): string {
 }
 
 describe("production container contract", () => {
-  it("publishes six container-only first-party targets with OCI provenance", () => {
+  it("publishes five container-only first-party targets with OCI provenance", () => {
     const dockerfile = readProjectFile("Dockerfile");
     const entrypoint = readProjectFile("scripts/docker-entrypoint.sh");
 
     for (const target of [
       "runtime",
-      "cli-proxy",
       "sandbox-runtime",
       "sandbox-runner",
       "sandbox-egress-proxy",
@@ -72,9 +71,8 @@ describe("production container contract", () => {
     expect(dockerfile).toContain(
       "FROM nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de",
     );
-    expect(dockerfile).toContain(
-      "FROM eceasy/cli-proxy-api@sha256:591a09c19de769be09a2e56277365cd568b83fc7d98c94d2e7e7bef7069f7422 AS cli-proxy",
-    );
+    // The subscription gateway left on 2026-10-26; its upstream image must not come back.
+    expect(dockerfile).not.toContain("cli-proxy");
 
     // The agent runs bundled; its authored tree stays for `instructions.md` and operator `tsx` commands.
     const runtime = dockerfile.slice(dockerfile.indexOf(" AS runtime"));
@@ -155,7 +153,6 @@ describe("production container contract", () => {
 
     const requiredImages = [
       "OSINARA_APP_IMAGE",
-      "OSINARA_CLI_PROXY_IMAGE",
       "SANDBOX_RUNTIME_IMAGE",
       "OSINARA_SANDBOX_RUNNER_IMAGE",
       "OSINARA_SANDBOX_EGRESS_PROXY_IMAGE",
@@ -168,6 +165,7 @@ describe("production container contract", () => {
     expect(compose).toContain("SANDBOX_RUNTIME_IMAGE: ${SANDBOX_RUNTIME_IMAGE:?");
     expect(compose.match(/DATABASE_URL: \$\{DATABASE_URL:\?/g)).toHaveLength(3);
     expect(compose).not.toContain("DATABASE_URL: postgresql://");
+    expect(compose).not.toContain("cli-proxy");
   });
 
   // The background memory pipeline was retired in v0.12.0; its idle worker left in v0.40.2.
@@ -200,7 +198,6 @@ describe("production container contract", () => {
       "network-access",
       "tool-environments",
       "workspace-data",
-      "cli-proxy-auth",
     ]) {
       const physicalName = `osinara-production-${volume}`;
       expect(compose).toMatch(new RegExp(`  ${volume}:\\n    name: ${physicalName}\\n`));
@@ -218,7 +215,7 @@ describe("production container contract", () => {
     expect(compose).toContain("x-bounded-json-logs: &bounded-json-logs");
     expect(compose).toContain('max-size: "20m"');
     expect(compose).toContain('max-file: "5"');
-    expect(compose.match(/logging: \*bounded-json-logs/g)).toHaveLength(11);
+    expect(compose.match(/logging: \*bounded-json-logs/g)).toHaveLength(10);
   });
 
   it("limits Docker control to the runner and pins every production image", () => {
@@ -274,7 +271,6 @@ describe("release workflow contract", () => {
     }
     for (const image of [
       "osinara-app",
-      "osinara-cli-proxy",
       "osinara-sandbox-runtime",
       "osinara-sandbox-runner",
       "osinara-sandbox-egress-proxy",
@@ -282,7 +278,7 @@ describe("release workflow contract", () => {
     ]) {
       expect(workflow).toContain(`ghcr.io/nyxandro/${image}`);
     }
-    expect(workflow.match(/actions\/attest@/g)).toHaveLength(10);
+    expect(workflow.match(/actions\/attest@/g)).toHaveLength(9);
     expect(workflow).toContain("packages: write");
     expect(workflow).toContain("attestations: write");
     expect(workflow).toContain("id-token: write");
@@ -344,6 +340,19 @@ describe("release workflow contract", () => {
 
     expect(workflow).toContain("jq --from-file scripts/production-deploy/installation-compose.jq");
     expect(workflow).not.toContain('del(.services["cli-proxy-api"])');
+  });
+
+  // Controllers and apps of v0.49.0 and older refuse a manifest without the gateway image, so the
+  // first release after its removal names the last published image instead of building a new one.
+  it("names the retired gateway image in the manifest without building it", () => {
+    const workflow = readProjectFile(".github/workflows/ci-release.yaml");
+
+    expect(workflow).toContain(
+      "RETIRED_CLI_PROXY_IMAGE: ghcr.io/nyxandro/osinara-cli-proxy@sha256:e8def6e9183c77670b741b5dac84de05284e6865b346e3a33722e9d14a55d240",
+    );
+    expect(workflow).toContain('--arg cliProxy "$RETIRED_CLI_PROXY_IMAGE"');
+    expect(workflow).not.toContain("target: cli-proxy");
+    expect(workflow).not.toContain("steps.cli-proxy");
   });
 });
 
@@ -509,26 +518,26 @@ describe("server deployment contract", () => {
     expect(script).toContain("logging.driver");
     expect(script).toContain("/var/run/docker.sock");
     expect(script).toContain("/opt/osinara/agent-model-providers.json");
-    expect(script).toContain("osinara-production-cli-proxy-auth");
+    expect(script).not.toContain("osinara-production-cli-proxy-auth");
     expect(script).toContain(".read_only == true");
   });
 
   it("executes the exact resolved-Compose security predicate fail-closed", () => {
     const valid = resolvedComposeSecurityFixture();
-    expect(() => executeComposeSecurityPredicate(valid, "production")).not.toThrow();
+    expect(() => executeComposeSecurityPredicate(valid)).not.toThrow();
 
     // `volumes_from` must not bypass the exact mount allowlist through another service.
     const inheritedRunnerVolumes = structuredClone(valid) as {
       services: Record<string, { volumes_from?: string[] }>;
     };
     inheritedRunnerVolumes.services.agent!.volumes_from = ["sandbox-runner"];
-    expect(() => executeComposeSecurityPredicate(inheritedRunnerVolumes, "production")).toThrow();
+    expect(() => executeComposeSecurityPredicate(inheritedRunnerVolumes)).toThrow();
 
     const unsafe = structuredClone(valid) as { services: Record<string, { volumes?: unknown[] }> };
     unsafe.services["telegram-ingress-worker"]!.volumes = [{
       source: "/", target: "/host", type: "bind",
     }];
-    expect(() => executeComposeSecurityPredicate(unsafe, "production")).toThrow();
+    expect(() => executeComposeSecurityPredicate(unsafe)).toThrow();
 
   });
 
@@ -607,8 +616,8 @@ describe("production edge and installer contract", () => {
     expect(compose.match(/      - edge-frontend/g)).toHaveLength(1);
     expect(compose).toContain("  edge-frontend:\n    name: osinara-production-edge-frontend");
     expect(hostOperations).toContain('"osinara-production-edge-frontend"');
-    expect(() => executeComposeSecurityPredicate(valid, "production")).not.toThrow();
-    expect(() => executeComposeSecurityPredicate(unsafe, "production")).toThrow();
+    expect(() => executeComposeSecurityPredicate(valid)).not.toThrow();
+    expect(() => executeComposeSecurityPredicate(unsafe)).toThrow();
   });
 
   // The proxy opens owner-approved IP destinations only to requests that reach it through the trusted
@@ -630,9 +639,9 @@ describe("production edge and installer contract", () => {
     writableGrants.services["sandbox-egress-proxy"]!.volumes![0]!.read_only = false;
 
     expect(compose.match(/sandbox-trusted-egress-proxy/g)).toHaveLength(1);
-    expect(() => executeComposeSecurityPredicate(valid, "production")).not.toThrow();
+    expect(() => executeComposeSecurityPredicate(valid)).not.toThrow();
     for (const unsafe of [agentOnTrustedNetwork, aliasOnAppNetwork, writableGrants]) {
-      expect(() => executeComposeSecurityPredicate(unsafe, "production")).toThrow();
+      expect(() => executeComposeSecurityPredicate(unsafe)).toThrow();
     }
   });
 });

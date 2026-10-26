@@ -37,7 +37,6 @@ Osinara — self-hosted агент, который живёт в Telegram и р�
 | Расписания | Напоминания и автономные agent schedules: личные и семейные сценарии, а также owner-approved отчёты во внешние группы с отдельной fresh session, минимальным capability allowlist и bounded snapshot истории. |
 | Голос | Groq Whisper transcription перед основным agent turn с повторной проверкой authorization; по явной просьбе root-agent озвучивает ответ через ElevenLabs `eleven_v4` и отправляет голосовым без скрытых повторов, а при сбое озвучки отвечает текстом. |
 | Workspaces | Изолированные personal, family и group файловые области, attachment persistence, безопасная отправка файлов. |
-| Изображения | Root-agent создаёт одно WebP через `gpt-image-2`, сохраняет его в authorized workspace и доставляет в Telegram без скрытых повторов; внешней группе capability выдаёт владелец из личного чата. |
 | Google Workspace | Native `gws` skills для Gmail, Calendar, Drive, Docs, Sheets и People через workspace-bound OAuth credentials. |
 | Sandbox | Долгоживущие Docker sandbox sessions с scoped mounts, isolated tools volume, egress proxy и fail-closed policy. |
 | Оркестрация | В trusted private/family режимах root-agent делегирует большие задачи подагенту `agent` со свежим контекстом и теми же разрешёнными tools, skills, connections, sandbox и workspace; во внешних группах child delegation запрещена. |
@@ -122,10 +121,10 @@ Osinara — self-hosted агент, который живёт в Telegram и р�
 
 | Где | Память | Файлы | Инструменты |
 | --- | --- | --- | --- |
-| Личный чат | `personal` и `family` | `/workspace/personal`, `/workspace/family` | Полный trusted sandbox и personal tools environment; при активной Codex-подписке root-agent может создавать изображения; по явной просьбе root-agent отвечает голосовым через ElevenLabs. |
-| Семейная группа | Только `family` | `/workspace/family` | Trusted sandbox и family tools environment; при активной Codex-подписке root-agent может создавать изображения; по явной просьбе root-agent отвечает голосовым через ElevenLabs. |
-| Внешняя группа | Только `group` | `/workspace/group` | Без Bash, произвольного сетевого доступа и persistent credentials; `web_fetch`, `generate_image` и `send_voice_message` доступны только через отдельные owner grants, причём `generate_image` предлагается владельцу лишь при активном provider `codex-subscription`; безопасные file tools и настраиваемый импорт UTF-8 TXT/MD/JSON/CSV/TSV/HTML/XML/YAML/YML из Telegram. |
-| Native child | Та же проверенная identity и scopes, что у parent turn | Тот же разрешённый workspace и sandbox | Тот же trust-zone surface, кроме root-owned `remember`, `generate_image` и `send_voice_message`; отдельные history и state. |
+| Личный чат | `personal` и `family` | `/workspace/personal`, `/workspace/family` | Полный trusted sandbox и personal tools environment; по явной просьбе root-agent отвечает голосовым через ElevenLabs. |
+| Семейная группа | Только `family` | `/workspace/family` | Trusted sandbox и family tools environment; по явной просьбе root-agent отвечает голосовым через ElevenLabs. |
+| Внешняя группа | Только `group` | `/workspace/group` | Без Bash, произвольного сетевого доступа и persistent credentials; `web_fetch` и `send_voice_message` доступны только через отдельные owner grants; безопасные file tools и настраиваемый импорт UTF-8 TXT/MD/JSON/CSV/TSV/HTML/XML/YAML/YML из Telegram. |
+| Native child | Та же проверенная identity и scopes, что у parent turn | Тот же разрешённый workspace и sandbox | Тот же trust-zone surface, кроме root-owned `remember` и `send_voice_message`; отдельные history и state. |
 
 ---
 
@@ -226,7 +225,6 @@ Highlighted skill groups:
 | Documents | `pdf`, `docx`, `xlsx`. |
 | Browser and research | `agent-browser`, `find-docs`. |
 | Personalization | `behavior-preferences`. |
-| Image generation | Dynamic `imagegen` доступен root-agent только вместе с активным subscription-backed `generate_image`; без provider `codex-subscription` ни tool, ни skill не существуют и не выдаются. |
 
 ## Release Badges
 

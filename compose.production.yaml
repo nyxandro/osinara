@@ -86,34 +86,6 @@ services:
     volumes:
       - memory-embedding-model-e5:/data
 
-  cli-proxy-api:
-    cgroup_parent: osinara.slice
-    image: ${OSINARA_CLI_PROXY_IMAGE:?OSINARA_CLI_PROXY_IMAGE must be an exact digest reference}
-    environment:
-      CLI_PROXY_API_KEY: ${CLI_PROXY_API_KEY:?CLI_PROXY_API_KEY is required}
-    healthcheck:
-      test: ["CMD-SHELL", "curl --fail --silent --show-error --header \"Authorization: Bearer $${CLI_PROXY_API_KEY}\" http://127.0.0.1:8317/v1/models >/dev/null"]
-      # Этот компонент пишет строку журнала на каждый запрос, и отключить её нечем: журнал ведёт
-      # сторонний бинарник. Опрос раз в пять секунд давал 100 194 строки за неделю из 355 135 по
-      # всему проекту. Пока контейнер поднимается, проверка идёт часто; дальше раз в полминуты —
-      # этого хватает, чтобы заметить смерть процесса, и в шесть раз меньше шума.
-      interval: 30s
-      start_period: 100s
-      start_interval: 2s
-      timeout: 5s
-      retries: 3
-    networks:
-      - app-network
-    read_only: true
-    restart: unless-stopped
-    logging: *bounded-json-logs
-    security_opt:
-      - no-new-privileges:true
-    tmpfs:
-      - /run/cli-proxy-api:size=16m,mode=0700,uid=10001,gid=10001
-    volumes:
-      - cli-proxy-auth:/var/lib/cli-proxy-api/auth
-
   agent:
     cgroup_parent: osinara.slice
     image: ${OSINARA_APP_IMAGE:?OSINARA_APP_IMAGE must be an exact digest reference}
@@ -121,8 +93,6 @@ services:
     mem_reservation: 800m
     command: ["start-after-migration"]
     depends_on:
-      cli-proxy-api:
-        condition: service_healthy
       migrate:
         condition: service_completed_successfully
       memory-embedding:
@@ -300,8 +270,6 @@ services:
       - network-access:/app/network-access:ro
 
 volumes:
-  cli-proxy-auth:
-    name: osinara-production-cli-proxy-auth
   postgres-data:
     name: osinara-production-postgres-data
   memory-embedding-model-e5:

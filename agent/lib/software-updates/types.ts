@@ -12,7 +12,8 @@ export interface SoftwareUpdateManifest {
   composeSha256: string;
   images: {
     app: string;
-    cliProxy: string;
+    /** Transitional: named only by the first release without the gateway; see the release client. */
+    cliProxy?: string;
     edge: string;
     sandboxEgressProxy: string;
     sandboxRunner: string;

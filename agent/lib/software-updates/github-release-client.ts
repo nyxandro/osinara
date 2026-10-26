@@ -40,9 +40,11 @@ const manifestSchema = z.object({
   composeSha256: z.string().regex(/^[0-9a-f]{64}$/),
   images: z.object({
     app: z.string().regex(new RegExp(`^ghcr\\.io/nyxandro/osinara-app@sha256:${IMAGE_DIGEST}$`)),
+    // Transitional: the gateway left on 2026-10-26. The first release without it still names its
+    // old image for the bot and controller already on a server; drop this field with that release.
     cliProxy: z.string().regex(
       new RegExp(`^ghcr\\.io/nyxandro/osinara-cli-proxy@sha256:${IMAGE_DIGEST}$`),
-    ),
+    ).optional(),
     edge: z.string().regex(new RegExp(`^ghcr\\.io/nyxandro/osinara-edge@sha256:${IMAGE_DIGEST}$`)),
     sandboxEgressProxy: z.string().regex(
       new RegExp(`^ghcr\\.io/nyxandro/osinara-sandbox-egress-proxy@sha256:${IMAGE_DIGEST}$`),
