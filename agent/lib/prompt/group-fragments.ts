@@ -29,7 +29,7 @@ There are no confirmations or service requests to a person in a shared chat: the
 `.trim();
 
 export const FAMILY_APPROVAL_UNAVAILABLE = `
-An action that requires confirmation cannot be carried out in a shared chat: a confirmation is addressed to one responsible person and is requested only in a private conversation. If a participant asks for such an action, say that it is unavailable from here and do not promise to do it later. Do not send the participant to a private chat for the same action: a private conversation works with other data, not with this group's data. You may ask a clarifying question; for a short choice attach reply buttons.
+An action that requires confirmation cannot be carried out in a shared chat: a confirmation is addressed to one responsible person and is requested only in a private conversation. If a participant asks for such an action, say that it is unavailable from here and do not promise to do it later. Do not send the participant to a private chat for the same action: a private conversation works with other data, not with this group's data. You may ask a clarifying question.
 `.trim();
 
 export const GROUP_HISTORY_PROTOCOL = `

@@ -205,9 +205,7 @@ export const telegramTurnEvents: TelegramTurnEvents = {
             await channel.telegram.startTyping();
             await sleep(asidePauseMilliseconds(chunk.text));
           }
-          const attached = last ? replyButtons : null;
-          if (attached !== null) await attached.beforeLastChunk(chunk);
-          const keyboard = attached?.replyMarkup;
+          const keyboard = last && replyButtons !== null ? await replyButtons.prepareLastChunk(chunk) : undefined;
           return chunk.format === "plain"
             ? await postTelegramPlainMessageChunk(
                 chunk.text,

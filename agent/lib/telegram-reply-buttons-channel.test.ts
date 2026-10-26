@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const dependencies = vi.hoisted(() => ({
   afterDelivery: vi.fn(),
-  beforeLastChunk: vi.fn(),
+  prepareLastChunk: vi.fn(),
   postPlain: vi.fn(),
   staged: vi.fn(),
 }));
@@ -72,18 +72,19 @@ describe("reply buttons on the final answer", () => {
   });
 
   it("puts the keyboard on the last message only and activates it under that message", async () => {
+    dependencies.prepareLastChunk.mockResolvedValue(KEYBOARD);
     dependencies.staged.mockResolvedValue({
       afterDelivery: dependencies.afterDelivery,
-      beforeLastChunk: dependencies.beforeLastChunk,
-      replyMarkup: KEYBOARD,
+      prepareLastChunk: dependencies.prepareLastChunk,
     });
 
     await complete();
 
     expect(dependencies.staged).toHaveBeenCalledWith({ agentTurnId: "turn-1", telegramChatId: "101" });
     expect(dependencies.postPlain.mock.calls.map((call) => call[3])).toEqual([undefined, KEYBOARD]);
-    expect(dependencies.beforeLastChunk).toHaveBeenCalledWith(expect.objectContaining({ format: "plain", text: "Оформляем?" }));
-    expect(dependencies.beforeLastChunk.mock.invocationCallOrder[0]).toBeLessThan(dependencies.postPlain.mock.invocationCallOrder[1]!);
+    expect(dependencies.prepareLastChunk).toHaveBeenCalledTimes(1);
+    expect(dependencies.prepareLastChunk).toHaveBeenCalledWith(expect.objectContaining({ format: "plain", text: "Оформляем?" }));
+    expect(dependencies.prepareLastChunk.mock.invocationCallOrder[0]).toBeLessThan(dependencies.postPlain.mock.invocationCallOrder[1]!);
     expect(dependencies.afterDelivery).toHaveBeenCalledWith([
       { chatType: "private", messageId: "601" },
       { chatType: "private", messageId: "602" },

@@ -7,9 +7,10 @@
  * - The addressee's press is answered, the message gets the choice as a caption, and the press
  *   continues as the addressee's message quoting the message it was made under.
  * - In a private chat that message replies to the buttons' message only when a conversation owns
- *   that message, otherwise it goes to the main conversation; in a group it always replies, which
- *   addresses it to the agent there.
- * - A replayed press rebuilds the same message without touching Telegram again.
+ *   that message and takes replies, otherwise it goes to the main conversation; in a group it always
+ *   replies, which addresses it to the agent there.
+ * - A replayed press rebuilds the same message and settles its buttons again; a press on buttons
+ *   already decided settles them again too.
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -51,6 +52,7 @@ function selected(overrides: Partial<ReplyButtonSet> = {}): ReplyButtonSet {
     messageText: "Корзина собрана. Итого 2 340 ₽. Оформляем?",
     resolvedAt: PRESSED_AT,
     selectedIndex: 0,
+    status: "selected",
     telegramChatId: "101",
     telegramChatType: "private",
     telegramMessageId: "50",
@@ -59,11 +61,13 @@ function selected(overrides: Partial<ReplyButtonSet> = {}): ReplyButtonSet {
   };
 }
 
-function handler(claim: unknown, routed = false) {
-  const repository = { claimPress: vi.fn().mockResolvedValue(claim) };
-  const routes = { hasRoute: vi.fn().mockResolvedValue(routed) };
+function handler(claim: unknown, routeOpen = false) {
+  const repository = {
+    claimPress: vi.fn().mockResolvedValue(claim),
+    replyRouteIsOpen: vi.fn().mockResolvedValue(routeOpen),
+  };
   const telegram = { answerPress: vi.fn().mockResolvedValue(undefined), settle: vi.fn().mockResolvedValue(undefined) };
-  return { handle: createReplyButtonPressHandler({ repository, routes, telegram }), repository, routes, telegram };
+  return { handle: createReplyButtonPressHandler({ repository, telegram }), repository, telegram };
 }
 
 describe("reply button press", () => {
@@ -100,11 +104,11 @@ describe("reply button press", () => {
   });
 
   it("turns a private press under a message no conversation owns into a message of the main one", async () => {
-    const { handle, routes, telegram } = handler({ set: selected(), status: "claimed" });
+    const { handle, repository, telegram } = handler({ set: selected(), status: "claimed" });
 
     const outcome = await handle(press(), "7001");
 
-    expect(routes.hasRoute).toHaveBeenCalledWith("101::50");
+    expect(repository.replyRouteIsOpen).toHaveBeenCalledWith("101::50");
     expect(telegram.answerPress).toHaveBeenCalledWith({ callbackQueryId: "cb-1" });
     expect(telegram.settle).toHaveBeenCalledWith(selected(), "Выбрано: ✅ Да, заказываем");
     if (outcome.status !== "message") throw new Error("TEST_EXPECTED_MESSAGE");
@@ -119,7 +123,7 @@ describe("reply button press", () => {
     expect(outcome.message.raw.date).toBe(PRESSED_AT.getTime() / 1_000);
   });
 
-  it("answers a private press as a reply when a conversation owns the buttons' message", async () => {
+  it("answers a private press as a reply when an open conversation owns the buttons' message", async () => {
     const { handle } = handler({ set: selected(), status: "claimed" }, true);
 
     const outcome = await handle(press(), "7001");
@@ -151,15 +155,30 @@ describe("reply button press", () => {
     expect(outcome.message.text).not.toContain("конец");
   });
 
-  it("rebuilds a replayed press without answering or editing again", async () => {
+  it("rebuilds a replayed press and settles its buttons again", async () => {
     const { handle, telegram } = handler({ set: selected(), status: "replayed" });
 
     const first = await handle(press(), "7001");
     const second = await handle(press(), "7001");
 
     expect(second).toEqual(first);
-    expect(telegram.answerPress).not.toHaveBeenCalled();
-    expect(telegram.settle).not.toHaveBeenCalled();
+    expect(telegram.settle.mock.calls).toEqual([
+      [selected(), "Выбрано: ✅ Да, заказываем"],
+      [selected(), "Выбрано: ✅ Да, заказываем"],
+    ]);
+  });
+
+  it.each([
+    ["selected", { selectedIndex: 1, status: "selected" }, "Выбрано: ❌ Отмена"],
+    ["dismissed", { selectedIndex: null, status: "dismissed" }, "Ничего не выбрано"],
+  ] as const)("settles buttons already %s when one of them is pressed again", async (_case, overrides, caption) => {
+    const decided = selected(overrides);
+    const { handle, telegram } = handler({ decided, status: "expired" });
+
+    await expect(handle(press(), "7001")).resolves.toEqual({ status: "answered" });
+
+    expect(telegram.answerPress).toHaveBeenCalledWith({ callbackQueryId: "cb-1", text: "Эти кнопки уже не действуют" });
+    expect(telegram.settle).toHaveBeenCalledWith(decided, caption);
   });
 
   it("still continues the recorded choice when Telegram refuses the caption", async () => {

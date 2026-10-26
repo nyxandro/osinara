@@ -7,6 +7,7 @@ import {
   type TelegramPrivateBurstPolicy,
 } from "./telegram-ingress-contract.js";
 import { joinTelegramBurst, requireTelegramPrivateBurstPolicy } from "./telegram-private-burst.js";
+import { REPLY_BUTTON_CALLBACK_PREFIX } from "./reply-buttons/reply-button-contract.js";
 
 export async function claimNextTelegramIngress(leaseMilliseconds: number, burst: TelegramPrivateBurstPolicy) {
   requireLeaseMilliseconds(leaseMilliseconds);
@@ -26,8 +27,11 @@ export async function claimNextTelegramIngress(leaseMilliseconds: number, burst:
               AND (item.media_group_leader_id IS NULL OR item.media_group_late)
              AND (item.media_group_ready_at IS NULL OR item.media_group_closed_at IS NOT NULL
                OR item.media_group_ready_at <= now())
+             -- While a release drains, a button press still completes, but a reply button stands for a
+             -- new message and waits like one.
              AND EXISTS (SELECT 1 FROM admission WHERE phase = 'ready' OR
-               (phase = 'draining' AND (item.dispatch_started_at IS NOT NULL OR item.payload ? 'callback_query')))
+               (phase = 'draining' AND (item.dispatch_started_at IS NOT NULL OR (item.payload ? 'callback_query'
+                 AND NOT coalesce((item.payload #>> '{callback_query,data}') LIKE ($4::text || '%'), false)))))
            AND NOT EXISTS (
              SELECT 1 FROM telegram_ingress_updates earlier
              WHERE earlier.queue_id = item.queue_id AND earlier.update_id < item.update_id
@@ -66,7 +70,7 @@ export async function claimNextTelegramIngress(leaseMilliseconds: number, burst:
            item.dispatch_turn_id,
           item.voice_file_id, item.voice_file_size::text, item.voice_mime_type,
           item.voice_transcript, item.media_group_key, item.media_group_late, candidate.current_continuation_key`,
-      [leaseMilliseconds, burst.quietMilliseconds, burst.maxWaitMilliseconds],
+      [leaseMilliseconds, burst.quietMilliseconds, burst.maxWaitMilliseconds, REPLY_BUTTON_CALLBACK_PREFIX],
     );
     const row = result.rows[0];
     const claim = row ? mapTelegramIngressClaim(row) : null;

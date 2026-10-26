@@ -380,7 +380,10 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
 
         // SQL coalesces each queue behind its live leased head. A waiter whose lease was lost
         // cannot dispatch after acquiring a slot; callbacks have capacity separate from model turns.
-        const slots = acceptedUpdate.kind === "callback_query" ? callbackSlots : messageSlots;
+        // A reply button starts a new turn like a message, so it takes a message slot.
+        const slots = acceptedUpdate.kind === "callback_query" && !isReplyButtonCallback(acceptedUpdate.callbackQuery.data)
+          ? callbackSlots
+          : messageSlots;
         const waitedForSlot = slots.tryAcquire() === undefined;
         if (waitedForSlot) await slots.acquire();
         releaseSlot = () => slots.release();

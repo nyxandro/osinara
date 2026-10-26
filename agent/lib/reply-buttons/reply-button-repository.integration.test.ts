@@ -3,6 +3,7 @@
  *
  * Constructs covered:
  * - One staged set per turn: a second call of the tool replaces the first.
+ * - A turn that continues after an approval finds the buttons its parked turn staged.
  * - A press is claimed once, by the addressee, in the set's own chat and message; the same callback
  *   finds its claim again after a crash; anyone else is refused without consuming it.
  * - A set whose message went out before its number was saved still accepts its press.
@@ -12,6 +13,10 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "../database.js";
+import { newTurnId } from "../../runtime/ids.js";
+import { createTurn, inJournalTransaction } from "../../runtime/turn/journal-repository.js";
+import { newTestSession, OWNER_AUTH, startMessageTurn } from "../../runtime/turn/turn.integration-fixtures.js";
+import { sessionRepository } from "../sessions/session-repository.js";
 import { replyButtonRepository } from "./reply-button-repository.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
@@ -45,7 +50,7 @@ function pressOf(overrides: Partial<Parameters<typeof replyButtonRepository.clai
 
 describeWithDatabase("reply button repository", () => {
   beforeEach(async () => {
-    await database().query("TRUNCATE telegram_reply_button_sets, users, families CASCADE");
+    await database().query("TRUNCATE telegram_reply_button_sets, conversation_session_routes, conversation_sessions, family_memberships, users, families CASCADE");
   });
   afterAll(closeDatabase);
 
@@ -57,6 +62,19 @@ describeWithDatabase("reply button repository", () => {
     expect((await database().query("SELECT 1 FROM telegram_reply_button_sets")).rowCount).toBe(1);
   });
 
+  it("finds buttons the parked turn staged from the turn that continues it", async () => {
+    const sessionId = await newTestSession();
+    const parked = await startMessageTurn(sessionId, "оформи заказ");
+    const continuation = await inJournalTransaction(database(), async (client) => await createTurn(client, {
+      auth: OWNER_AUTH, channel: parked.channel, id: newTurnId(),
+      input: { context: [] }, kind: "conversation", parent: null, resumesTurnId: parked.id, sessionId,
+    }));
+    await stageTurn(parked.id);
+
+    await expect(replyButtonRepository.findStagedForTurn(continuation.id)).resolves.toMatchObject({ token: TOKEN });
+    await expect(replyButtonRepository.findStagedForTurn("turn_unrelated")).resolves.toBeNull();
+  });
+
   it("claims a press once and finds the same claim for the same callback", async () => {
     await delivered("turn_1", "50");
 
@@ -66,7 +84,7 @@ describeWithDatabase("reply button repository", () => {
 
     expect(first).toMatchObject({ set: { selectedIndex: 0, telegramMessageId: "50" }, status: "claimed" });
     expect(replay).toMatchObject({ set: { selectedIndex: 0 }, status: "replayed" });
-    expect(second).toEqual({ status: "expired" });
+    expect(second).toMatchObject({ decided: { selectedIndex: 0, status: "selected" }, status: "expired" });
   });
 
   it("refuses anyone but the addressee without consuming the buttons", async () => {
@@ -120,6 +138,27 @@ describeWithDatabase("reply button repository", () => {
     expect(Object.fromEntries(statuses.map((row) => [row.id, row.status]))).toEqual({
       [before.id]: "dismissed", [other.id]: "active", [after.id]: "active",
     });
+  });
+
+  it("treats a reply route as open only into a live conversation that waits for no approval", async () => {
+    const family = await database().query<{ id: string }>("INSERT INTO families (name) VALUES ('Маршруты') RETURNING id");
+    const user = await database().query<{ id: string }>(
+      "INSERT INTO users (telegram_user_id, display_name) VALUES ('101', 'Владелец') RETURNING id");
+    await database().query("INSERT INTO family_memberships (family_id, user_id, role) VALUES ($1, $2, 'owner')",
+      [family.rows[0]!.id, user.rows[0]!.id]);
+    const session = await sessionRepository.prepareTurn({
+      baseContinuationToken: "101::", familyId: family.rows[0]!.id, groupId: null, kind: "canonical", now: new Date(),
+      scope: "personal", telegramForumTopicId: null, userId: user.rows[0]!.id,
+    });
+    await sessionRepository.registerRouteAlias(session.id, "101::50");
+
+    await expect(replyButtonRepository.replyRouteIsOpen("101::50")).resolves.toBe(true);
+    await expect(replyButtonRepository.replyRouteIsOpen("101::51")).resolves.toBe(false);
+    await sessionRepository.parkSession({
+      applicationSessionId: session.id, pendingRequestId: "approval-1", requesterTelegramUserId: "101",
+      requesterUserId: user.rows[0]!.id,
+    });
+    await expect(replyButtonRepository.replyRouteIsOpen("101::50")).resolves.toBe(false);
   });
 
   it("stages a reminder's buttons with its text and entities", async () => {

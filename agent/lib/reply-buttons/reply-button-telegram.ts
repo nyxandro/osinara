@@ -46,6 +46,15 @@ function requireBotToken(): string {
 const timedFetch: typeof fetch = (request, init) =>
   fetch(request, { ...init, signal: AbortSignal.timeout(TELEGRAM_API_REQUEST_TIMEOUT_MS) });
 
+// Telegram refuses an edit that changes nothing: the message already shows what the edit asked for.
+const NOT_MODIFIED = "message is not modified";
+
+function alreadySettled(response: TelegramApiResponse): boolean {
+  const body = response.body;
+  return typeof body === "object" && body !== null && "description" in body &&
+    typeof body.description === "string" && body.description.includes(NOT_MODIFIED);
+}
+
 /** Telegram's own explanation of a refusal, when it gave one, with the HTTP status. */
 function failureDetails(response: TelegramApiResponse): Record<string, number | string> {
   const body = response.body;
@@ -93,7 +102,7 @@ export const replyButtonTelegram: ReplyButtonTelegram = {
     const body = settledBody(set, caption);
     if (body !== null) {
       const edited = await request("editMessageText", { ...target, ...body, reply_markup: EMPTY_KEYBOARD });
-      if (edited.ok) return;
+      if (edited.ok || alreadySettled(edited)) return;
       console.error(JSON.stringify({
         code: "AGENT_REPLY_BUTTONS_CAPTION_FAILED",
         ...failureDetails(edited),
@@ -102,7 +111,7 @@ export const replyButtonTelegram: ReplyButtonTelegram = {
       }));
     }
     const cleared = await request("editMessageReplyMarkup", { ...target, reply_markup: EMPTY_KEYBOARD });
-    if (!cleared.ok) {
+    if (!cleared.ok && !alreadySettled(cleared)) {
       throw new AppError("AGENT_REPLY_BUTTONS_CLEAR_FAILED", "Telegram не убрал кнопки под сообщением", {
         details: failureDetails(cleared),
       });

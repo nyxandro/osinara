@@ -12,6 +12,8 @@
  *   only once. The same callback query repeated after a crash finds its own claim again.
  * - A set whose message went out before its number was saved (a crash in between) still accepts
  *   its press: the token is unguessable and the chat must match, so the message comes from the press.
+ * - A press on buttons already decided returns the set, so its message can be settled again when an
+ *   earlier edit never landed.
  * - Dismissal touches only sets that were visible before the addressee's message was written:
  *   buttons the agent offered after it, in answer to it, stay.
  */
@@ -33,6 +35,7 @@ export interface ReplyButtonSet {
   messageText: string | null;
   resolvedAt: Date | null;
   selectedIndex: number | null;
+  status: "active" | "dismissed" | "selected" | "staged";
   telegramChatId: string;
   telegramChatType: "group" | "private" | "supergroup";
   telegramMessageId: string | null;
@@ -41,7 +44,8 @@ export interface ReplyButtonSet {
 
 export type ReplyButtonPressClaim =
   | { set: ReplyButtonSet; status: "claimed" | "replayed" }
-  | { status: "expired" | "forbidden" };
+  | { decided?: ReplyButtonSet; status: "expired" }
+  | { status: "forbidden" };
 
 interface SetRow {
   addressee_telegram_user_id: string;
@@ -52,6 +56,7 @@ interface SetRow {
   message_text: string | null;
   resolved_at: Date | null;
   selected_index: number | null;
+  status: ReplyButtonSet["status"];
   telegram_chat_id: string;
   telegram_chat_type: "group" | "private" | "supergroup";
   telegram_message_id: string | null;
@@ -59,7 +64,7 @@ interface SetRow {
 }
 
 const SET_COLUMNS = `id, token, telegram_chat_id, telegram_chat_type, addressee_telegram_user_id, buttons,
-  telegram_message_id::text, message_text, message_format, message_entities, selected_index, resolved_at`;
+  telegram_message_id::text, message_text, message_format, message_entities, selected_index, resolved_at, status`;
 
 function toSet(row: SetRow): ReplyButtonSet {
   return {
@@ -71,6 +76,7 @@ function toSet(row: SetRow): ReplyButtonSet {
     messageText: row.message_text,
     resolvedAt: row.resolved_at,
     selectedIndex: row.selected_index,
+    status: row.status,
     telegramChatId: row.telegram_chat_id,
     telegramChatType: row.telegram_chat_type,
     telegramMessageId: row.telegram_message_id,
@@ -107,9 +113,22 @@ export const replyButtonRepository = {
     );
   },
 
+  /**
+   * The buttons a turn's final answer carries. A turn that continues after an approval is a new turn
+   * resuming the parked one, so buttons staged before the approval are found through that chain;
+   * the newest set wins.
+   */
   async findStagedForTurn(agentTurnId: string): Promise<ReplyButtonSet | null> {
     const result = await database().query<SetRow>(
-      `SELECT ${SET_COLUMNS} FROM telegram_reply_button_sets WHERE agent_turn_id = $1 AND status = 'staged'`,
+      `WITH RECURSIVE chain (id, resumes_turn_id) AS (
+         SELECT id, resumes_turn_id FROM agent_turns WHERE id = $1
+         UNION ALL
+         SELECT turn.id, turn.resumes_turn_id FROM agent_turns AS turn JOIN chain ON turn.id = chain.resumes_turn_id
+       )
+       SELECT ${SET_COLUMNS} FROM telegram_reply_button_sets
+        WHERE status = 'staged' AND (agent_turn_id = $1 OR agent_turn_id IN (SELECT id FROM chain))
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1`,
       [agentTurnId],
     );
     return result.rows[0] ? toSet(result.rows[0]) : null;
@@ -170,8 +189,8 @@ export const replyButtonRepository = {
     const client = await database().connect();
     try {
       await client.query("BEGIN");
-      const found = await client.query<SetRow & { callback_query_id: string | null; status: string }>(
-        `SELECT ${SET_COLUMNS}, status, callback_query_id
+      const found = await client.query<SetRow & { callback_query_id: string | null }>(
+        `SELECT ${SET_COLUMNS}, callback_query_id
            FROM telegram_reply_button_sets WHERE token = $1 FOR UPDATE`,
         [input.token],
       );
@@ -193,7 +212,8 @@ export const replyButtonRepository = {
       const offered = row.status === "active" || (row.status === "staged" && row.message_text !== null);
       if (!offered || input.index >= row.buttons.flat().length) {
         await client.query("ROLLBACK");
-        return { status: "expired" };
+        const decided = row.status === "selected" || row.status === "dismissed";
+        return decided ? { decided: toSet(row), status: "expired" } : { status: "expired" };
       }
       const claimed = await client.query<SetRow>(
         `UPDATE telegram_reply_button_sets
@@ -212,6 +232,23 @@ export const replyButtonRepository = {
     } finally {
       client.release();
     }
+  },
+
+  /**
+   * Whether a reply to this route reaches a conversation that will take it as a message: one that
+   * exists and does not wait for an approval, which turns away replies.
+   */
+  async replyRouteIsOpen(baseContinuationToken: string): Promise<boolean> {
+    const result = await database().query<{ open: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM conversation_session_routes AS route
+           JOIN conversation_sessions AS session ON session.id = route.session_id
+          WHERE route.base_continuation_token = $1
+            AND session.retired_at IS NULL AND NOT session.pending_operation
+       ) AS open`,
+      [baseContinuationToken],
+    );
+    return result.rows[0]?.open === true;
   },
 
   /** The addressee wrote instead of tapping: every set they could still tap before that goes away. */

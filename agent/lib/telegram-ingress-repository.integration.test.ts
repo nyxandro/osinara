@@ -90,6 +90,29 @@ describeWithDatabase("telegramIngressRepository", () => {
     await closeDatabase();
   });
 
+  it("lets a button press finish during a release drain but holds a reply button like a message", async () => {
+    const press = (updateId: string, chatId: number, data: string) => ({
+      continuationKey: `${chatId}::`,
+      payload: {
+        callback_query: { data, from: { id: chatId, is_bot: false }, id: `cb-${updateId}`,
+          message: { chat: { id: chatId, type: "private" }, message_id: 50 } },
+        update_id: Number(updateId),
+      },
+      updateId,
+    });
+    await telegramIngressRepository.enqueue(press("3001", 101, `rb:${"A".repeat(22)}:0`));
+    await telegramIngressRepository.enqueue(press("3002", 202, "hitl:0"));
+    await database().query(
+      "UPDATE runtime_maintenance SET phase = 'draining', owner_token = gen_random_uuid(), updated_at = now()");
+    try {
+      expect((await telegramIngressRepository.claimNext(LEASE_MILLISECONDS, NO_BURSTS))?.updateId).toBe("3002");
+      expect(await telegramIngressRepository.claimNext(LEASE_MILLISECONDS, NO_BURSTS)).toBeNull();
+    } finally {
+      await database().query("UPDATE runtime_maintenance SET phase = 'ready', owner_token = NULL, updated_at = now()");
+    }
+    expect((await telegramIngressRepository.claimNext(LEASE_MILLISECONDS, NO_BURSTS))?.updateId).toBe("3001");
+  });
+
   it("deduplicates an identical update and rejects a conflicting replay", async () => {
     const update = updateInput("1001", "telegram:private:101", "первое сообщение");
 
