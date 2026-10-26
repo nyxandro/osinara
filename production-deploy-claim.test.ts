@@ -6,6 +6,8 @@
  *   into the same variables, so a release a resumed controller validates is the one approved.
  * - `adopt_claimed_proposal` binds the claim before reading it, so a failed adoption is still
  *   recorded against the handed-over lease.
+ * - The retired gateway image is the last column: a manifest without it leaves a trailing empty
+ *   field, while an empty field in the middle would collapse under the tab IFS and shift the rest.
  */
 import { spawnSync } from "node:child_process";
 
@@ -14,12 +16,12 @@ import { describe, expect, it } from "vitest";
 const projectRoot = new URL("./", import.meta.url).pathname;
 const PROPOSAL = "11111111-1111-4111-8111-111111111111";
 const LEASE = "22222222-2222-4222-8222-222222222222";
+const RETIRED_GATEWAY = `ghcr.io/nyxandro/osinara-cli-proxy@sha256:${"2".repeat(64)}`;
 const MANIFEST = [
   "1.4.0",
   "a".repeat(40),
   "b".repeat(64),
   `ghcr.io/nyxandro/osinara-app@sha256:${"1".repeat(64)}`,
-  `ghcr.io/nyxandro/osinara-cli-proxy@sha256:${"2".repeat(64)}`,
   `ghcr.io/nyxandro/osinara-edge@sha256:${"3".repeat(64)}`,
   `ghcr.io/nyxandro/osinara-sandbox-egress-proxy@sha256:${"4".repeat(64)}`,
   `ghcr.io/nyxandro/osinara-sandbox-runner@sha256:${"5".repeat(64)}`,
@@ -27,8 +29,8 @@ const MANIFEST = [
 ];
 const PRINT_CLAIM = `
   printf '%s|' "$PROPOSAL_ID" "$LEASE_TOKEN" "$REQUESTED_VERSION" "$OWNER_CHAT_ID" "$STORED_VERSION" \\
-    "$STORED_COMMIT" "$STORED_COMPOSE_SHA" "$STORED_APP" "$STORED_CLI_PROXY" "$STORED_EDGE" \\
-    "$STORED_EGRESS" "$STORED_RUNNER" "$STORED_RUNTIME"
+    "$STORED_COMMIT" "$STORED_COMPOSE_SHA" "$STORED_APP" "$STORED_EDGE" \\
+    "$STORED_EGRESS" "$STORED_RUNNER" "$STORED_RUNTIME" "$STORED_CLI_PROXY"
 `;
 
 function runShell(source: string, row: readonly string[] = []) {
@@ -54,17 +56,36 @@ describe("claim and adoption of an approved release", () => {
       claim_approved_proposal
       LEASE_TOKEN=${LEASE}
       ${PRINT_CLAIM}
-    `, [PROPOSAL, "1.4.0", "777", ...MANIFEST]);
+    `, [PROPOSAL, "1.4.0", "777", ...MANIFEST, RETIRED_GATEWAY]);
     const adopted = runShell(`
       ${DATABASE}
       adopt_claimed_proposal ${PROPOSAL} ${LEASE}
       ${PRINT_CLAIM}
-    `, ["1.4.0", "777", ...MANIFEST]);
+    `, ["1.4.0", "777", ...MANIFEST, RETIRED_GATEWAY]);
 
     expect(claimed.status, claimed.stderr).toBe(0);
     expect(adopted.status, adopted.stderr).toBe(0);
     expect(adopted.stdout).toBe(claimed.stdout);
-    expect(adopted.stdout).toBe(`${[PROPOSAL, LEASE, "1.4.0", "777", ...MANIFEST].join("|")}|`);
+    expect(adopted.stdout).toBe(`${[PROPOSAL, LEASE, "1.4.0", "777", ...MANIFEST, RETIRED_GATEWAY].join("|")}|`);
+  });
+
+  it("reads a manifest without the retired gateway image without shifting the other images", () => {
+    const claimed = runShell(`
+      ${DATABASE}
+      claim_approved_proposal
+      LEASE_TOKEN=${LEASE}
+      ${PRINT_CLAIM}
+    `, [PROPOSAL, "1.4.0", "777", ...MANIFEST, ""]);
+    const adopted = runShell(`
+      ${DATABASE}
+      adopt_claimed_proposal ${PROPOSAL} ${LEASE}
+      ${PRINT_CLAIM}
+    `, ["1.4.0", "777", ...MANIFEST, ""]);
+
+    expect(claimed.status, claimed.stderr).toBe(0);
+    expect(claimed.stdout).toBe(`${[PROPOSAL, LEASE, "1.4.0", "777", ...MANIFEST, ""].join("|")}|`);
+    expect(adopted.status, adopted.stderr).toBe(0);
+    expect(adopted.stdout).toBe(claimed.stdout);
   });
 
   it("keeps the handed-over claim bound when it can no longer be adopted", () => {

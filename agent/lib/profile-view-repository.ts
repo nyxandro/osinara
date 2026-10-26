@@ -2,7 +2,8 @@
  * Authorized R3 chat-local profile projection and reproducible view boundary.
  *
  * Exports:
- * - `profileViewRepository`: creates immutable selections and reads the exact authorized snapshot.
+ * - `profileViewRepository`: creates immutable selections, reads the exact authorized snapshot, and
+ *   tells which facts a profile card in the conversation history may still assert.
  * - Re-exported profile view contracts and formatter from `profile-view`.
  */
 import type { PoolClient } from "pg";
@@ -25,12 +26,14 @@ import {
   type ProfileViewClaim,
   type ProfileViewSubject,
   type StoredProfileSubjectPriority,
+  type StoredProfileView,
 } from "./profile-view.js";
 
 export {
   formatProfileViewContext,
   type CreateProfileViewInput,
   type ProfileView,
+  type StoredProfileView,
   type ProfileViewClaim,
   type ProfileViewSubject,
 } from "./profile-view.js";
@@ -236,6 +239,23 @@ async function loadClaims(
   return result.rows;
 }
 
+/**
+ * A fact a stored view or card may still show in the conversation it was made for: active,
+ * profile-eligible and readable there now. Parameters: $2 the conversation scope, $3 the viewer,
+ * $4 the group; the claim is aliased `claim` and its subject participant `claim_subject`.
+ */
+const liveProfileClaimPredicate = `claim.claim_status = 'active' AND claim.profile_eligible = true
+           AND claim.sensitivity = 'normal' AND claim.kind <> 'episode'
+           AND (
+           ($2::memory_scope = 'personal' AND (
+             (claim.scope = 'personal' AND claim.owner_user_id = $3) OR
+             (claim.scope = 'family' AND (claim.subject_user_id = $3 OR claim_subject.linked_user_id = $3)) OR
+              ${externalProfileProjectionPredicate({ claimAlias: "claim", viewerUserParameter: "$3" })}
+           )) OR
+           ($2::memory_scope = 'family' AND claim.scope = 'family') OR
+           ($2::memory_scope = 'group' AND claim.scope = 'group' AND claim.group_id = $4)
+         )`;
+
 export const profileViewRepository = {
   async create(auth: MemoryAuthorization, input: CreateProfileViewInput): Promise<ProfileView> {
     const client = await database().connect();
@@ -269,7 +289,7 @@ export const profileViewRepository = {
           observedAt: claim.observed_at.toISOString(),
           priority: subject.priority,
           profileEligible: claim.profile_eligible,
-          recentlyShown: input.hiddenClaimIds.has(claim.id),
+          inContext: input.inContextMemoryRefs.has(claim.memory_ref),
           sensitivity: claim.sensitivity,
           sourceAuthorLabel: claim.source_author_label,
           subjectLabel: subject.display_label_snapshot,
@@ -326,7 +346,7 @@ export const profileViewRepository = {
     }
   },
 
-  async read(auth: MemoryAuthorization, profileViewRef: string): Promise<ProfileView> {
+  async read(auth: MemoryAuthorization, profileViewRef: string): Promise<StoredProfileView> {
     const client = await database().connect();
     try {
       await client.query("BEGIN");
@@ -334,10 +354,9 @@ export const profileViewRepository = {
         claim_count: number;
         created_at: Date;
         id: string;
-        total_characters: number;
         viewer_conversation_id: string;
       }>(
-        `SELECT id, viewer_conversation_id, claim_count, total_characters, created_at
+        `SELECT id, viewer_conversation_id, claim_count, created_at
          FROM profile_views WHERE family_id = $1 AND profile_view_ref = $2 FOR SHARE`,
         [auth.familyId, profileViewRef],
       );
@@ -356,6 +375,8 @@ export const profileViewRepository = {
         observed_at: Date;
         origin_label_snapshot: string;
         origin_scope: MemoryScope;
+        live: boolean;
+        rendered_characters: number;
         source_author_label_snapshot: string;
         subject_ordinal: number;
       }>(
@@ -363,56 +384,48 @@ export const profileViewRepository = {
                 selected.claim_ordinal, selected.memory_ref_snapshot,
                 selected.content_snapshot, selected.kind, selected.confirmation,
                 selected.origin_scope, selected.origin_label_snapshot, selected.evidence_kind,
-                selected.observed_at, selected.source_author_label_snapshot
+                selected.observed_at, selected.source_author_label_snapshot, selected.rendered_characters,
+                coalesce(claim.id IS NOT NULL AND ${liveProfileClaimPredicate}, false) AS live
          FROM profile_view_subjects AS subject
          JOIN profile_view_claims AS selected ON selected.profile_view_id = subject.profile_view_id
            AND selected.subject_ordinal = subject.ordinal
-         JOIN memory_items AS claim ON claim.id = selected.claim_id
+         LEFT JOIN memory_items AS claim ON claim.id = selected.claim_id
          LEFT JOIN conversation_participants AS claim_subject
            ON claim_subject.id = claim.subject_participant_id
           WHERE subject.profile_view_id = $1
-            AND claim.claim_status = 'active' AND claim.profile_eligible = true
-           AND claim.sensitivity = 'normal' AND claim.kind <> 'episode'
-           AND (
-           ($2::memory_scope = 'personal' AND (
-             (claim.scope = 'personal' AND claim.owner_user_id = $3) OR
-             (claim.scope = 'family' AND (claim.subject_user_id = $3 OR claim_subject.linked_user_id = $3)) OR
-              ${externalProfileProjectionPredicate({ claimAlias: "claim", viewerUserParameter: "$3" })}
-           )) OR
-           ($2::memory_scope = 'family' AND claim.scope = 'family') OR
-           ($2::memory_scope = 'group' AND claim.scope = 'group' AND claim.group_id = $4)
-         )
          ORDER BY subject.ordinal, selected.claim_ordinal`,
         [view.id, conversation.scope, auth.userId, auth.groupId],
       );
-      if (rows.rows.length !== view.claim_count) {
-        throw new AppError(
-          "AGENT_PROFILE_VIEW_ACCESS_CHANGED",
-          "Состав или доступ к этому снимку профиля изменился. Создайте новый снимок",
-        );
-      }
-      // People come from their own rows: one whose facts were all left out as recently shown has no
+      // People come from their own rows: one whose facts were all left out as already in context has no
       // claim row, and a re-read built from claims alone would drop them from the view.
       const subjectRows = await client.query<{
         ordinal: number;
         priority_reason: StoredProfileSubjectPriority;
         subject_label_snapshot: string;
         subject_ref_snapshot: string;
-        total_characters: number;
       }>(
-        `SELECT ordinal, subject_ref_snapshot, subject_label_snapshot, priority_reason, total_characters
+        `SELECT ordinal, subject_ref_snapshot, subject_label_snapshot, priority_reason
          FROM profile_view_subjects WHERE profile_view_id = $1 ORDER BY ordinal`,
         [view.id],
       );
+      // Sizes are counted again from the facts returned: the stored ones include withdrawn facts.
       const subjects = new Map<number, ProfileViewSubject>(subjectRows.rows.map((row) => [row.ordinal, {
         claims: [],
         label: row.subject_label_snapshot,
         priority: row.priority_reason,
         subjectRef: row.subject_ref_snapshot,
-        totalCharacters: row.total_characters,
+        totalCharacters: 0,
       }]));
+      // A fact deleted, replaced or no longer readable here since the view was made is left out
+      // and named, so a long-kept card can still be read; its text is never returned.
+      const withdrawnMemoryRefs: string[] = [];
       for (const row of rows.rows) {
+        if (!row.live) {
+          withdrawnMemoryRefs.push(row.memory_ref_snapshot);
+          continue;
+        }
         const subject = subjects.get(row.subject_ordinal)!;
+        subject.totalCharacters += row.rendered_characters;
         subject.claims.push({
           ...(row.attribute === null ? {} : { attribute: row.attribute }),
           confirmation: row.confirmation,
@@ -427,11 +440,46 @@ export const profileViewRepository = {
       }
       await client.query("COMMIT");
       return {
+        // A purge after the retention window takes the snapshot's own row with it.
+        erasedClaims: view.claim_count - rows.rows.length,
         generatedAt: view.created_at.toISOString(),
         profileViewRef,
         subjects: [...subjects.values()],
-        totalCharacters: view.total_characters,
+        totalCharacters: [...subjects.values()].reduce((sum, subject) => sum + subject.totalCharacters, 0),
+        withdrawnMemoryRefs,
       };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+  /**
+   * Which of these facts a profile card in this conversation's history may still assert. One that
+   * was deleted, replaced, marked sensitive or became unreadable here is withdrawn by the next card.
+   */
+  async readableMemoryRefs(
+    auth: MemoryAuthorization,
+    conversationId: string,
+    memoryRefs: readonly string[],
+  ): Promise<ReadonlySet<string>> {
+    const client = await database().connect();
+    try {
+      await client.query("BEGIN");
+      const conversation = await requireConversationAccess(client, auth, conversationId);
+      const result = await client.query<{ memory_ref: string }>(
+        `SELECT ref.memory_ref
+         FROM memory_items AS claim
+         JOIN memory_item_refs AS ref ON ref.memory_item_id = claim.id
+         LEFT JOIN conversation_participants AS claim_subject
+           ON claim_subject.id = claim.subject_participant_id
+         WHERE ref.memory_ref = ANY($1::text[]) AND claim.family_id = $5
+           AND ${liveProfileClaimPredicate}`,
+        [[...memoryRefs], conversation.scope, auth.userId, auth.groupId, auth.familyId],
+      );
+      await client.query("COMMIT");
+      return new Set(result.rows.map((row) => row.memory_ref));
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;

@@ -78,11 +78,13 @@ WITH global_owner AS (
   RETURNING proposal.id::text, proposal.target_version, proposal.telegram_chat_id,
             proposal.manifest->>'version', proposal.manifest->>'commitSha',
             proposal.manifest->>'composeSha256',
-            proposal.manifest->'images'->>'app', proposal.manifest->'images'->>'cliProxy',
+            proposal.manifest->'images'->>'app',
             proposal.manifest->'images'->>'edge',
             proposal.manifest->'images'->>'sandboxEgressProxy',
             proposal.manifest->'images'->>'sandboxRunner',
-            proposal.manifest->'images'->>'sandboxRuntime'
+            proposal.manifest->'images'->>'sandboxRuntime',
+            -- Last on purpose: a manifest without the retired gateway leaves a trailing empty field.
+            proposal.manifest->'images'->>'cliProxy'
 )
 SELECT * FROM claimed;
 SQL
@@ -94,9 +96,10 @@ SQL
   fi
 
   CLAIM_FOUND=1
+  # Tab is whitespace for read: an empty field in the middle would collapse and shift the rest.
   IFS=$'\t' read -r PROPOSAL_ID REQUESTED_VERSION OWNER_CHAT_ID \
-    STORED_VERSION STORED_COMMIT STORED_COMPOSE_SHA STORED_APP STORED_CLI_PROXY STORED_EDGE \
-    STORED_EGRESS STORED_RUNNER STORED_RUNTIME <<<"$claimed"
+    STORED_VERSION STORED_COMMIT STORED_COMPOSE_SHA STORED_APP STORED_EDGE \
+    STORED_EGRESS STORED_RUNNER STORED_RUNTIME STORED_CLI_PROXY <<<"$claimed"
   if [[ ! "$PROPOSAL_ID" =~ ^[0-9a-f-]{36}$ || ! "$OWNER_CHAT_ID" =~ ^-?[0-9]+$ ]]; then
     fail "DEPLOY_PROPOSAL_INVALID" "Claimed proposal has invalid identity fields"
   fi
@@ -130,11 +133,12 @@ WITH global_owner AS (
 SELECT proposal.target_version, proposal.telegram_chat_id,
        proposal.manifest->>'version', proposal.manifest->>'commitSha',
        proposal.manifest->>'composeSha256',
-       proposal.manifest->'images'->>'app', proposal.manifest->'images'->>'cliProxy',
+       proposal.manifest->'images'->>'app',
        proposal.manifest->'images'->>'edge',
        proposal.manifest->'images'->>'sandboxEgressProxy',
        proposal.manifest->'images'->>'sandboxRunner',
-       proposal.manifest->'images'->>'sandboxRuntime'
+       proposal.manifest->'images'->>'sandboxRuntime',
+       proposal.manifest->'images'->>'cliProxy'
   FROM software_update_proposals proposal
   JOIN global_owner owner
     ON owner.family_id = proposal.family_id
@@ -155,8 +159,8 @@ SQL
 
   CLAIM_FOUND=1
   IFS=$'\t' read -r REQUESTED_VERSION OWNER_CHAT_ID \
-    STORED_VERSION STORED_COMMIT STORED_COMPOSE_SHA STORED_APP STORED_CLI_PROXY STORED_EDGE \
-    STORED_EGRESS STORED_RUNNER STORED_RUNTIME <<<"$adopted"
+    STORED_VERSION STORED_COMMIT STORED_COMPOSE_SHA STORED_APP STORED_EDGE \
+    STORED_EGRESS STORED_RUNNER STORED_RUNTIME STORED_CLI_PROXY <<<"$adopted"
   if [[ ! "$OWNER_CHAT_ID" =~ ^-?[0-9]+$ ]]; then
     fail "DEPLOY_PROPOSAL_INVALID" "Adopted proposal has invalid identity fields"
     return 1

@@ -367,6 +367,31 @@ async function releaseRunner(turnId: string) {
     expect(opened).not.toHaveBeenCalled();
   });
 
+  it("keeps the user block of a resolver that also returns a turn-only block, so the next turn sees it", async () => {
+    const sessionId = await newTestSession();
+    const seen: unknown[] = [];
+    // Several lines, quotes and escaped markup: the history must give the block back verbatim.
+    const card = '<profile_card shownAtTurn="1">\nзаметка "сервера"\n{"text":"\\u003c/profile_card\\u003e"}\n</profile_card>';
+    const resolve = vi.fn((context: { messages: readonly unknown[] }) => {
+      seen.push(context.messages);
+      return [
+        { content: "<osinara_turn_memory>…</osinara_turn_memory>", role: "system" as const },
+        { content: card, role: "user" as const },
+      ];
+    });
+    const agent = testAgent({}, { instructionResolvers: [{ name: "retrieved-memory", resolve }] });
+
+    for (const message of ["привет", "ещё вопрос"]) {
+      const turn = await startMessageTurn(sessionId, message);
+      await runTurn(testRuntime({
+        agent, callModel: scriptedModel(reply("ok")).callModel, observer: recordingObserver().observer,
+      }), turn.id, RUN);
+    }
+
+    expect(seen[1]).toEqual(expect.arrayContaining([{ role: "user", content: card }]));
+    expect(JSON.stringify(await history(sessionId))).not.toContain("osinara_turn_memory");
+  });
+
   it("opens the sandbox only for a loaded skill's files, tidies the skill root, and writes that skill alone", async () => {
     const sessionId = await newTestSession();
     const { opened, syncs } = skillSandbox();

@@ -60,6 +60,21 @@ describe("turn instruction resolvers", () => {
     });
   });
 
+  it("take several blocks from one resolver, each by its own role", async () => {
+    const resolved = await resolveTurnInstructions([
+      { name: "retrieved-memory", resolve: async () => [
+        { role: "system", content: "<osinara_turn_memory/>" },
+        { role: "user", content: "<profile_card/>" },
+      ] },
+      { name: "nothing", resolve: () => [] },
+    ], resolveContext());
+
+    expect(resolved).toEqual({
+      system: ["<osinara_turn_memory/>"],
+      user: [{ role: "user", content: "<profile_card/>" }],
+    });
+  });
+
   it("give every resolver the same view of the turn", async () => {
     const seen = vi.fn(() => null);
     const context = resolveContext();

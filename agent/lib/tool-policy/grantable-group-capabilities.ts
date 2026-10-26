@@ -14,7 +14,6 @@
  * - Runtime-coupled capabilities disappear from the grant contract instead of being granted inert.
  * - Persisted parsing stays in `group-tool-catalog.ts` so a stale grant never corrupts a policy.
  */
-import { IMAGE_GENERATION_AVAILABLE } from "../image-generation/image-generation-availability.js";
 import { MODEL_VISION_AVAILABLE } from "../model-vision-availability.js";
 import {
   EXTERNAL_GROUP_CAPABILITY_CATALOG,
@@ -24,9 +23,8 @@ import {
   type ExternalGroupToolName,
 } from "./group-tool-catalog.js";
 
-// Both flags come from the validated runtime config, which cannot change without a process restart.
+// The flag comes from the validated runtime config, which cannot change without a process restart.
 const REQUIREMENT_SATISFIED: Readonly<Record<ExternalGroupCapabilityRequirement, boolean>> = {
-  image_generation: IMAGE_GENERATION_AVAILABLE,
   vision: MODEL_VISION_AVAILABLE,
 };
 
@@ -36,7 +34,6 @@ export function isServableExternalGroupCapability(name: ExternalGroupToolName): 
 }
 
 const UNSERVABLE_REASONS: Readonly<Record<ExternalGroupCapabilityRequirement, string>> = {
-  image_generation: "текущая модель агента работает не через подписку OpenAI Codex",
   vision: "подключённая модель агента не видит изображения",
 };
 

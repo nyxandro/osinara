@@ -30,7 +30,7 @@ export async function withGroupSandboxAccess<T>(
       // A family skill deleted since the turn began is not synced either.
       const family = new Set(result.rows[0]!.family_skills);
       const granted = (name: string) => skills!.has(name) && (isGroupSafeSkillName(name) || family.has(name));
-      if (!skills || requiredSkills.some((name) => name === "imagegen" ? !allowed.has("generate_image") : !granted(name))) {
+      if (!skills || requiredSkills.some((name) => !granted(name))) {
         throw new AppError("AGENT_GROUP_SKILL_FORBIDDEN", "Список скиллов группы изменился. Повторите запрос с актуальными правами");
       }
     }

@@ -3,7 +3,7 @@
  *
  * Exports:
  * - Profile candidate, selected claim, subject, and selection contracts.
- * - `selectProfileClaims`: applies eligibility, dormancy, the repeat window, subject, count, and
+ * - `selectProfileClaims`: applies eligibility, dormancy, facts already in context, subject, count, and
  *   character budgets. Within a kind, after facts the person confirmed, facts with a property
  *   (`attribute`) come first by its name: each is the person's current value of something that has
  *   one value at a time. Confirmed facts stay ahead: older records carry wide property names.
@@ -42,8 +42,8 @@ export interface ProfileClaimCandidate {
   observedAt: string;
   priority: ProfileSubjectPriority;
   profileEligible: boolean;
-  /** The session put it in front of the model within its repeat window; it is not shown again. */
-  recentlyShown: boolean;
+  /** A profile card in the conversation history still holds it; it is not sent again. */
+  inContext: boolean;
   sensitivity: MemorySensitivity;
   sourceAuthorLabel: string;
   subjectLabel: string;
@@ -57,8 +57,8 @@ export interface SelectedProfileClaim extends ProfileClaimCandidate {
 
 export interface SelectedProfileSubject {
   claims: SelectedProfileClaim[];
-  /** Facts that belong in this card but were shown within the repeat window, so are left out. */
-  leftOutClaims: number;
+  /** Facts that belong in this card but a card in history still holds, so are left out. */
+  claimsInContext: number;
   priority: ProfileSubjectPriority;
   subjectLabel: string;
   subjectRef: string;
@@ -133,7 +133,7 @@ export function selectProfileClaims(
 
   const subjects: SelectedProfileSubject[] = [];
   let totalCharacters = 0;
-  // The budget is spent on the whole card, recently shown facts included, and only then are those
+  // The budget is spent on the whole card, facts already in context included, and only then are those
   // left out. Spent on what is shown, every freed place went to the next fact in line, and a large
   // profile paged through itself thirty facts a turn.
   let cardCharacters = 0;
@@ -148,7 +148,7 @@ export function selectProfileClaims(
     let subjectCharacters = 0;
     let cardClaims = 0;
     let cardSubjectCharacters = 0;
-    let leftOutClaims = 0;
+    let claimsInContext = 0;
     for (const claim of deduplicated.values()) {
       const renderedText = renderClaim(claim);
       if (
@@ -162,20 +162,20 @@ export function selectProfileClaims(
       cardClaims += 1;
       cardSubjectCharacters += renderedText.length;
       cardCharacters += renderedText.length;
-      if (claim.recentlyShown) {
-        leftOutClaims += 1;
+      if (claim.inContext) {
+        claimsInContext += 1;
         continue;
       }
       claims.push({ ...claim, renderedText });
       subjectCharacters += renderedText.length;
       totalCharacters += renderedText.length;
     }
-    // A person whose facts were all just shown stays without them: their ref is the only way this
+    // A person whose facts are all in context stays without them: their ref is the only way this
     // turn can link a new fact to them, and leaving them out would make it a bare text label.
-    if (claims.length === 0 && leftOutClaims === 0) continue;
+    if (claims.length === 0 && claimsInContext === 0) continue;
     subjects.push({
       claims,
-      leftOutClaims,
+      claimsInContext,
       priority,
       subjectLabel: subjectCandidates[0]!.subjectLabel,
       subjectRef,

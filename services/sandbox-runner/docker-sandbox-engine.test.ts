@@ -90,11 +90,13 @@ describe("buildSandboxContainerOptions", () => {
       }),
     });
     expect(options.Labels).toMatchObject({
-      "dev.osinara.sandbox.policy-version": "10",
+      "dev.osinara.sandbox.policy-version": "11",
       "dev.osinara.sandbox.project": "osinara",
       "dev.osinara.sandbox.session-id": SANDBOX_SESSION_ID,
     });
     expect(options.Env).toEqual(expect.arrayContaining([
+      // An idle Chrome holds ~700 MB; restore keeps logins, so it closes after 10 minutes, not an hour.
+      "AGENT_BROWSER_IDLE_TIMEOUT_MS=600000",
       "AGENT_BROWSER_RESTORE=osinara",
       "AGENT_BROWSER_RESTORE_SAVE=auto",
       "AGENT_BROWSER_SESSION=osinara",
@@ -103,6 +105,8 @@ describe("buildSandboxContainerOptions", () => {
       "NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/russian-trusted-root-ca.crt",
       "NODE_USE_ENV_PROXY=1",
       "NPM_CONFIG_PREFIX=/tools/personal/npm",
+      // The image's own packages, such as `docx` for the docx skill, resolve after the scope's.
+      "NODE_PATH=/tools/personal/npm/lib/node_modules:/opt/sandbox-tools/node_modules",
     ]));
     expect(options.Env).not.toEqual(expect.arrayContaining([
       expect.stringContaining("GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE"),

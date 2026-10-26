@@ -104,6 +104,7 @@ export function testAgent(tools: Readonly<Record<string, ToolDefinition<any, any
     compactionThresholdPercent: 0.75,
     instructionResolvers: [],
     maxModelSteps: 32,
+    restatedAfterCompaction: () => false,
     resolveSkills: async () => ({}),
     resolveTools: async () => tools,
     selectModel: ({ sessionId }) => ({

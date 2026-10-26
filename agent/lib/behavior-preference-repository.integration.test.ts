@@ -257,6 +257,23 @@ describeWithDatabase("behaviorPreferenceRepository", () => {
     })).rejects.toThrowError(/AGENT_BEHAVIOR_PREFERENCE_REVISION_CONFLICT/u);
   });
 
+  it("lets one turn edit the notes again, but not a turn of an older message", async () => {
+    const fixture = await createFixture("same-turn");
+    const older = await source(fixture.privateConversationId, fixture.ownerTelegramUserId);
+    const current = await source(fixture.privateConversationId, fixture.ownerTelegramUserId);
+
+    await behaviorPreferenceRepository.mutate(current, {
+      action: "append", content: "Пух улетает сегодня в 18:00 +03:00.", expectedRevision: 0,
+    });
+    // The agent tidies the notes in the same turn: a second edit of one message is not an old one.
+    await expect(behaviorPreferenceRepository.mutate(current, {
+      action: "replace", content: "Пух улетает 26.10.2026 в 18:00 +03:00.", expectedRevision: 1,
+    })).resolves.toMatchObject({ content: "Пух улетает 26.10.2026 в 18:00 +03:00.", revision: 2 });
+    await expect(behaviorPreferenceRepository.mutate(older, {
+      action: "clear", expectedRevision: 2,
+    })).rejects.toThrowError(/AGENT_BEHAVIOR_PREFERENCE_REVISION_CONFLICT/u);
+  });
+
   it("serializes concurrent first writes before a prompt row exists", async () => {
     const fixture = await createFixture("concurrent-first-write");
     const owner = await source(fixture.familyConversationId, fixture.ownerTelegramUserId);

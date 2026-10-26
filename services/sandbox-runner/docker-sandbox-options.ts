@@ -24,13 +24,18 @@ export interface SandboxDockerRuntime {
   workspaceVolume: string;
 }
 
-export const SANDBOX_CONTAINER_POLICY_VERSION = "10";
+export const SANDBOX_CONTAINER_POLICY_VERSION = "11";
 
 const AGENT_BROWSER_SESSION_NAME = "osinara";
 const AGENT_BROWSER_RESTORE_SAVE_POLICY = "auto";
+// An idle Chrome holds about 700 MB of a small host. The saved restore state keeps cookies and
+// logins across a restart, so closing after 10 idle minutes costs only reopening the page.
+const AGENT_BROWSER_IDLE_TIMEOUT_MILLISECONDS = 10 * 60 * 1000;
 const PROXY_URL = "http://sandbox-egress-proxy:3128";
 const BASE_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 const GOOGLE_WORKSPACE_BINARY = "/opt/osinara/gws";
+// Packages the image ships for skills, such as `docx`; the scope's own installs come first.
+const SANDBOX_TOOLS_NODE_MODULES = "/opt/sandbox-tools/node_modules";
 const RUSSIAN_TRUSTED_ROOT_CA_PATH =
   "/usr/local/share/ca-certificates/russian-trusted-root-ca.crt";
 const SANDBOX_CPU_NANOSECONDS = 1_000_000_000;
@@ -89,6 +94,7 @@ function toolsEnvironment(primary: SandboxRunnerMount): string[] {
   const root = `/tools/${primary.mountPoint}`;
   const executablePaths = [`${root}/npm/bin`, `${root}/python/bin`, `${root}/bin`];
   return [
+    `AGENT_BROWSER_IDLE_TIMEOUT_MS=${AGENT_BROWSER_IDLE_TIMEOUT_MILLISECONDS}`,
     `AGENT_BROWSER_RESTORE=${AGENT_BROWSER_SESSION_NAME}`,
     `AGENT_BROWSER_RESTORE_SAVE=${AGENT_BROWSER_RESTORE_SAVE_POLICY}`,
     `AGENT_BROWSER_SESSION=${AGENT_BROWSER_SESSION_NAME}`,
@@ -97,7 +103,7 @@ function toolsEnvironment(primary: SandboxRunnerMount): string[] {
     `HOME=${root}/home`,
     `PATH=${[...executablePaths, BASE_PATH].join(":")}`,
     `NPM_CONFIG_PREFIX=${root}/npm`,
-    `NODE_PATH=${root}/npm/lib/node_modules`,
+    `NODE_PATH=${root}/npm/lib/node_modules:${SANDBOX_TOOLS_NODE_MODULES}`,
     `NODE_EXTRA_CA_CERTS=${RUSSIAN_TRUSTED_ROOT_CA_PATH}`,
     "NODE_USE_ENV_PROXY=1",
     `PIP_CACHE_DIR=${root}/cache/pip`,

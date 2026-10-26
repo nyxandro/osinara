@@ -5,13 +5,18 @@
  * - `TurnBlockContext`: the minimal resolve context a block resolver reads.
  * - `createModeBlockResolver` / `resolveModeBlock`: verified mode rulebook for the current turn.
  * - `createReactionSetBlockResolver` / `resolveReactionSetBlock`: reaction set announced in history.
- * - `createMemoryBlockResolver` / `resolveMemoryBlock`: authorized long-term memory records,
- *   wrapped in the payload markers; a memory service notice is returned unwrapped.
- * - `createPreferenceBlockResolver` / `resolvePreferenceBlock`: one editable chat prompt.
+ * - `MemoryTurnBlocks`: the turn's own memory block and the profile card it writes into history.
+ * - `createMemoryBlockResolver` / `resolveMemoryBlock`: authorized long-term memory records and the
+ *   people of the turn, wrapped in the payload markers, plus the profile card; a memory service
+ *   notice is returned unwrapped.
+ * - `createPreferenceBlockResolver` / `resolvePreferenceBlock`: the chat notes, or a notice that
+ *   they could not be read.
  *
  * Key constructs:
  * - Turn blocks are resolved anew on each turn, so a selection never outlives its turn. Explicit unavailable blocks
  *   explain known failures to the model; `null` is used only when no context is needed.
+ * - The profile card is the exception: it stays in history, so its facts are not sent again while a
+ *   card there still holds them (`turn-profile.ts`).
  */
 import type { SessionAuth } from "../../runtime/context.js";
 import type { ModelMessage } from "ai";
@@ -39,7 +44,6 @@ import {
   type MemoryTurnContext,
 } from "../memory-retrieval.js";
 import type { ModelMemory } from "../model-memory.js";
-import { PROFILE_REPEAT_WINDOW_TURNS } from "../memory-config.js";
 import { memoryShowJournal, type MemorySelectionWindow } from "../memory-show-journal.js";
 import {
   MemoryContextFailure, memoryFailureCode, recordMemoryContextIncident,
@@ -50,10 +54,7 @@ import {
   offeredMemoryEvidence,
   type OfferedMemoryEvidence,
 } from "../memory-observability.js";
-import {
-  formatProfileViewContext,
-  profileViewRepository,
-} from "../profile-view-repository.js";
+import { profileViewRepository } from "../profile-view-repository.js";
 import type { CreateProfileViewInput, ProfileView } from "../profile-view.js";
 import { isTelegramChannelSession } from "../telegram-session-actor.js";
 import {
@@ -77,6 +78,7 @@ import { isScheduledSession } from "../agent-schedules/scheduled-session.js";
 import { modeInstructions } from "./mode-instructions.js";
 import { applyTurnMemoryBudget } from "./turn-memory-budget.js";
 import { formatTurnMemoryContext } from "./turn-memory-context.js";
+import { resolveTurnProfile } from "./turn-profile.js";
 
 export interface TurnBlockContext {
   readonly channel?: { readonly kind?: string };
@@ -114,6 +116,20 @@ const MEMORY_UNAVAILABLE_BLOCK = [
   "Do not claim that you checked memory and do not conclude that there are no records.",
   "Continue the original task in the parts that do not depend on memory. This service block is not a new request.",
   "For the parts that need memory, state the specific limitation: the needed facts cannot be checked right now. Do not invent them and do not declare the task fully completed.",
+].join(" ");
+
+export interface MemoryTurnBlocks {
+  /** Retrieved records, threads and the people of the turn, or a notice; lives in this turn only. */
+  memory: string | null;
+  /** New and withdrawn facts about the turn's people, written into history as a user-role message. */
+  profileCard: string | null;
+}
+
+const NO_MEMORY_BLOCKS: MemoryTurnBlocks = { memory: null, profileCard: null };
+
+const CHAT_NOTES_UNAVAILABLE_BLOCK = [
+  "AGENT_CHAT_NOTES_UNAVAILABLE: The notes of this chat could not be read in this turn.",
+  "Do not assume they are empty and do not change them now; continue the task without them.",
 ].join(" ");
 
 function logBlockFailure(code: string, error: unknown): void {
@@ -252,15 +268,19 @@ export function createMemoryBlockResolver(dependencies: {
     offered: readonly ModelMemory[],
     shownElsewhereRefs: readonly string[],
   ) => Promise<void>;
+  /** Which facts that profile cards in history assert are still readable in this conversation. */
+  readableMemoryRefs: (
+    auth: MemoryAuthorization,
+    conversationId: string,
+    memoryRefs: readonly string[],
+  ) => Promise<ReadonlySet<string>>;
   retrieve: (
     auth: MemoryAuthorization,
     query: string,
     window: MemorySelectionWindow | null,
   ) => Promise<MemoryTurnContext>;
-  /** Claims this session showed in its last turns, which the profile then leaves out. */
-  shownRecentlyInSession: (window: MemorySelectionWindow) => Promise<ReadonlySet<string>>;
 }) {
-  return async function resolve(ctx: TurnBlockContext, turnId: string): Promise<string | null> {
+  return async function resolve(ctx: TurnBlockContext, turnId: string): Promise<MemoryTurnBlocks> {
     const started = performance.now();
     let outcome = "skipped";
     let memories: number | null = null;
@@ -272,6 +292,7 @@ export function createMemoryBlockResolver(dependencies: {
     let usageTracked: boolean | null = null;
     let profileCharacters: number | null = null;
     let profileLeftOutClaims: number | null = null;
+    let profileWithdrawnClaims: number | null = null;
     let droppedMemories: number | null = null;
     let offeredMemories: number | null = null;
     let profileMemoryRefs: string[] | null = null;
@@ -284,7 +305,7 @@ export function createMemoryBlockResolver(dependencies: {
       phase = "query";
       const delegated = ctx.channel?.kind === "subagent" || Boolean(ctx.session.parent);
       const query = memoryRetrievalQuery(ctx.session.auth, ctx.messages, delegated);
-      if (query === null) return null;
+      if (query === null) return NO_MEMORY_BLOCKS;
       phase = "retrieval";
       // The window exists only where there is a conversation to remember inside; a scheduled run
       // has none, and then the selection behaves as it always did. A turn is identified by its
@@ -313,25 +334,18 @@ export function createMemoryBlockResolver(dependencies: {
       diagnostics = context.diagnostics;
       outcome = "succeeded";
       phase = "profile";
-      const profileInput = telegramProfileInput(ctx, turnId);
-      // Facts this session showed in its last turns are left out: repeated every turn, the same
-      // facts read to the model as what matters, and it brought them up unasked. A turn with no
-      // window of its own (a delegated child, a scheduled run) gets the whole profile.
-      let hiddenClaimIds: ReadonlySet<string> = new Set();
-      if (profileInput !== null && window !== null) {
-        phase = "journal";
-        hiddenClaimIds = await dependencies.shownRecentlyInSession(window);
-        phase = "profile";
-      }
-      const profile = profileInput === null
-        ? null
-        : await dependencies.createProfile(authorization, { ...profileInput, hiddenClaimIds });
-      profileCharacters = profile === null ? 0 : JSON.stringify(profile.subjects).length;
-      profileLeftOutClaims = profile === null ? 0 : profile.subjects.reduce(
-        (sum, subject) => sum + (subject.recentlyShownClaimsLeftOut ?? 0), 0,
-      );
-      profileMemoryRefs = profile === null ? []
-        : profile.subjects.flatMap((subject) => subject.claims.map((claim) => claim.memoryRef));
+      const profile = await resolveTurnProfile({
+        authorization,
+        createProfile: dependencies.createProfile,
+        messages: ctx.messages,
+        profileInput: telegramProfileInput(ctx, turnId),
+        readableMemoryRefs: dependencies.readableMemoryRefs,
+        turnOrdinal: window?.turnOrdinal ?? null,
+      });
+      profileCharacters = profile.characters;
+      profileLeftOutClaims = profile.claimsInContext;
+      profileWithdrawnClaims = profile.withdrawnClaims;
+      profileMemoryRefs = profile.memoryRefs;
       threadRefs = context.threads.threads.map((thread) => thread.threadRef);
       threadCharacters = JSON.stringify(context.threads).length;
       // The block is the one part of the request the model recomputes every message, so its total
@@ -341,7 +355,7 @@ export function createMemoryBlockResolver(dependencies: {
       // Only retrieved data carries the payload markers. The unavailable notice below is a rule
       // about behaviour, so it stays unwrapped and keeps its place in the instruction prefix.
       const renderBlock = (memories: readonly ModelMemory[]) => formatTurnMemoryContext([
-        ...(profile === null ? [] : [formatProfileViewContext(profile)]),
+        ...(profile.context === null ? [] : [profile.context]),
         formatRetrievedMemoryInstructions(
           memories, context.threads, context.diagnostics.semanticBranchAvailable,
         ),
@@ -363,11 +377,12 @@ export function createMemoryBlockResolver(dependencies: {
         // while this one counts the assembled block, which is how they can outgrow it.
         console.warn(JSON.stringify({
           code: "AGENT_MEMORY_TURN_BLOCK_OVER_BUDGET", blockCharacters: block.length,
-          droppedMemories, offeredMemories, profileCharacters, threadCharacters,
+          droppedMemories, offeredMemories, threadCharacters,
+          profileBlockCharacters: profile.context?.length ?? 0,
           sessionId: ctx.session.id, turnId,
         }));
       }
-      return block;
+      return { memory: block, profileCard: profile.card };
     } catch (error) {
       outcome = "failed";
       if (error instanceof MemoryContextFailure) phase = error.phase;
@@ -387,12 +402,12 @@ export function createMemoryBlockResolver(dependencies: {
         console.error(JSON.stringify({ code: "AGENT_MEMORY_INCIDENT_RECORD_FAILED",
           sessionId: ctx.session.id, turnId, causeCode: memoryFailureCode(recordError) }));
       }
-      return MEMORY_UNAVAILABLE_BLOCK;
+      return { memory: MEMORY_UNAVAILABLE_BLOCK, profileCard: null };
     } finally {
       console.info(JSON.stringify({ code: "AGENT_MEMORY_RETRIEVAL_METRICS", sessionId: ctx.session.id,
         turnId, outcome, memories, offeredMemories, droppedMemories, ...selection, memoryEvidence,
         usageTracked, ...diagnostics,
-        profileCharacters, profileLeftOutClaims, profileMemoryRefs,
+        profileCharacters, profileLeftOutClaims, profileWithdrawnClaims, profileMemoryRefs,
         threadRefs, threadCharacters, failurePhase: outcome === "failed" ? phase : null, causeCode,
         durationMs: Math.round(performance.now() - started) }));
     }
@@ -402,7 +417,7 @@ export function createMemoryBlockResolver(dependencies: {
 function telegramProfileInput(
   ctx: TurnBlockContext,
   turnId: string,
-): Omit<CreateProfileViewInput, "hiddenClaimIds"> | null {
+): Omit<CreateProfileViewInput, "inContextMemoryRefs"> | null {
   if (isTelegramChannelSession(ctx.session.auth)) return null;
   const attributes = ctx.session.auth.current?.attributes;
   const conversationId = attributes?.telegramConversationId;
@@ -449,9 +464,9 @@ export function createPreferenceBlockResolver(dependencies: {
       const authorization = dependencies.authorize(ctx);
       return buildBehaviorPreferenceInstructions(await dependencies.get(authorization));
     } catch (error) {
-      // The editable prompt only shapes presentation, so an absent block is safe on failure.
+      // The notes hold current circumstances and open matters, so a turn without them is told so.
       logBlockFailure("AGENT_BEHAVIOR_PREFERENCE_UNAVAILABLE", error);
-      return null;
+      return CHAT_NOTES_UNAVAILABLE_BLOCK;
     }
   };
 }
@@ -481,9 +496,8 @@ export const resolveMemoryBlock = createMemoryBlockResolver({
   createProfile: profileViewRepository.create,
   openSelectionWindow: memoryShowJournal.openTurn,
   recordOffered: recordOfferedMemories,
+  readableMemoryRefs: profileViewRepository.readableMemoryRefs,
   retrieve: retrieveMemoryTurnContext,
-  shownRecentlyInSession: (window) =>
-    memoryShowJournal.shownRecentlyInSession(window, PROFILE_REPEAT_WINDOW_TURNS),
 });
 
 export const resolvePreferenceBlock = createPreferenceBlockResolver({

@@ -111,7 +111,7 @@ function megabytes(block: string, key: string): number | undefined {
 const PROTECTED_SERVICES = ["postgres", "agent", "memory-embedding"] as const;
 
 describe("Docker Compose runtime wiring", () => {
-  it("wires the agent to a healthy persistent Codex subscription gateway", () => {
+  it("wires the agent straight to the selected provider without a subscription gateway", () => {
     const localCompose = readFileSync(new URL("compose.yaml", projectRoot), "utf8");
     const productionCompose = readFileSync(new URL("compose.production.yaml", projectRoot), "utf8");
     for (const compose of [localCompose, productionCompose]) {
@@ -128,15 +128,11 @@ describe("Docker Compose runtime wiring", () => {
     }
     expect(localCompose).not.toContain("MODEL_UPSTREAM_API_KEY");
     expect(productionCompose).not.toContain("MODEL_UPSTREAM_API_KEY");
+    // The subscription gateway left on 2026-10-26 with its service, OAuth volume and profile.
     for (const compose of [localCompose, productionCompose]) {
-      expect(compose).toContain("cli-proxy-auth:/var/lib/cli-proxy-api/auth\n");
+      expect(compose).not.toContain("cli-proxy");
+      expect(compose).not.toContain("codex-subscription");
     }
-    const productionAgent = productionCompose.slice(
-      productionCompose.indexOf("\n  agent:\n"),
-      productionCompose.indexOf("\n  sandbox-runtime-image:\n"),
-    );
-    expect(productionAgent).toContain("cli-proxy-api:\n        condition: service_healthy");
-    expect(localCompose).toContain('    profiles: ["codex-subscription"]\n');
     expect(productionCompose).toContain(
       "- /opt/osinara/agent-model-providers.json:/app/config/agent-model-providers.json:ro",
     );

@@ -27,6 +27,8 @@ readonly DEPLOY_WINDOW_METRIC="/var/lib/monitoring-agent/textfile/osinara-deploy
 readonly DEPLOY_WINDOW_SECONDS=1800
 readonly RELEASE_IMAGE_VARIABLES=(
   OSINARA_APP_IMAGE
+  # The gateway left on 2026-10-26, but release.env files of older releases still name its image:
+  # keeping the name lets pruning remove that image together with its release.
   OSINARA_CLI_PROXY_IMAGE
   SANDBOX_RUNTIME_IMAGE
   OSINARA_SANDBOX_RUNNER_IMAGE
@@ -105,8 +107,8 @@ require_server_boundary() {
   done
 }
 
-# The host names the graph it runs: `production` keeps the CLIProxy subscription gateway,
-# `installation` (hosts set up by `osinara install`) runs the same release without it.
+# The host names the graph it runs. The profiles told apart the CLIProxy subscription gateway,
+# which left on 2026-10-26: both now run the same graph, and a later release drops the setting.
 require_deployment_profile() {
   case "${OSINARA_DEPLOYMENT_PROFILE:-}" in
     production | installation) DEPLOYMENT_PROFILE="$OSINARA_DEPLOYMENT_PROFILE" ;;
