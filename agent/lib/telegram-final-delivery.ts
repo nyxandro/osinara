@@ -32,7 +32,8 @@ export async function deliverTelegramFinalOutput(input: {
   agentSessionId: string;
   agentTurnId: string;
   markdown: string;
-  sendChunk(chunk: TelegramFinalPresentationChunk, ordinal: number): Promise<SentTelegramMessage>;
+  /** `last` marks the final message of the answer, the one that carries reply buttons. */
+  sendChunk(chunk: TelegramFinalPresentationChunk, ordinal: number, last: boolean): Promise<SentTelegramMessage>;
 }): Promise<SentTelegramMessage[]> {
   const chunks = formatTelegramFinalPresentation(input.markdown);
   const legacyChunks = formatTelegramRichMessages(input.markdown);
@@ -58,7 +59,7 @@ export async function deliverTelegramFinalOutput(input: {
   const sent: SentTelegramMessage[] = [];
   try {
     for (const [ordinal, chunk] of chunks.entries()) {
-      const message = await input.sendChunk(chunk, ordinal);
+      const message = await input.sendChunk(chunk, ordinal, ordinal === chunks.length - 1);
       await telegramFinalDeliveryRepository.confirmChunk({
         chatType: message.chatType,
         contentHash: hash(chunk.text),

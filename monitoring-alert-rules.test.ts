@@ -152,8 +152,8 @@ describe("osinara alert rules", () => {
   it("holds the scheduler heartbeat alerts longer than a release takes to report", () => {
     const blocks = alertBlocks("OsinaraSchedulerHeartbeatMissing");
 
-    // One per dispatcher; all three fire together, because all three wait on the same restart.
-    expect(blocks.length, "one rule per dispatcher").toBe(3);
+    // One per dispatcher; all of them fire together, because all of them wait on the same restart.
+    expect(blocks.length, "one rule per dispatcher").toBe(4);
     for (const block of blocks) {
       const hold = holdMinutes(block);
       expect(hold, `rule fires on a single evaluation:\n${block}`).not.toBeNull();

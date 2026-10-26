@@ -3,7 +3,6 @@
  *
  * Exports:
  * - `localizeTelegramInputRequest`: translates approvals without changing response IDs.
- * - `localizeTelegramReplyMarkup`: translates the freeform answer placeholder.
  * - `TelegramInputRequest`: stable structural input used by the secure HITL renderer.
  */
 import {
@@ -65,11 +64,8 @@ export interface TelegramInputRequest {
     kind: "tool-call";
     toolName: string;
   };
-  allowFreeform?: boolean;
-  display?: "confirmation" | "select" | "text";
-  /** Framework-owned source of the request. Only `tool-approval` is an application confirmation. */
-  kind?: "question" | "tool-approval";
-  options?: TelegramInputOption[];
+  kind: "tool-approval";
+  options: TelegramInputOption[];
   prompt: string;
   requestId: string;
 }
@@ -171,21 +167,15 @@ function approvalActionLabel(toolName: string, input: Record<string, unknown>): 
 
 export function localizeTelegramInputRequest<T extends TelegramInputRequest>(request: T): T {
   // Option IDs remain unchanged because the runtime resolves callbacks by ID, not visible text.
-  const options = request.options?.map((option) => ({
+  const options = request.options.map((option) => ({
     ...option,
     label: OPTION_LABELS[option.id] ?? option.label,
   }));
-
-  // Only an application tool approval gets the composed confirmation; a question keeps its own prompt.
-  if (request.display !== "confirmation" || request.kind !== "tool-approval") {
-    return options ? { ...request, options } : request;
-  }
-
   const actionLabel = approvalActionLabel(request.action.toolName, request.action.input);
   const reviewed = approvalParameterLines(request.action.toolName, request.action.input);
   return {
     ...request,
-    ...(options ? { options } : {}),
+    options,
     prompt: buildApprovalMessage({
       actionLabel,
       // A reviewed tool that shows no parameters chose that deliberately. Only a tool with no
@@ -195,11 +185,4 @@ export function localizeTelegramInputRequest<T extends TelegramInputRequest>(req
         : genericApprovalFacts(request.action.input),
     }),
   };
-}
-
-export function localizeTelegramReplyMarkup(
-  replyMarkup: Readonly<Record<string, unknown>> | undefined,
-): Readonly<Record<string, unknown>> | undefined {
-  if (replyMarkup?.force_reply !== true) return replyMarkup;
-  return { ...replyMarkup, input_field_placeholder: "Введите ответ" };
 }

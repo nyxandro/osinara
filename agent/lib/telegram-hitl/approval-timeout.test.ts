@@ -7,7 +7,6 @@
  * - Durable terminal state is written only after the session recorded the synthetic cancellation.
  * - A failed response releases the lease so the next sweep retries instead of freezing the chat.
  * - Neither a failed settlement nor a failed lease release abandons the rest of the leased batch.
- * - A question is answered as "no answer", not as an option the user never saw.
  */
 import type { SessionAuthContext } from "../../runtime/context.js";
 import { describe, expect, it, vi } from "vitest";
@@ -40,7 +39,6 @@ function claim(overrides: Partial<TimedOutApprovalClaim> = {}): TimedOutApproval
     auth: VERIFIED_AUTH,
     agentSessionId: "wrun_parked",
     id: "approval-1",
-    kind: "tool-approval",
     leaseToken: "lease-1",
     promptText: "Подтвердите действие: исправить запись в памяти.",
     requestId: "aitxt-request-1",
@@ -96,19 +94,6 @@ describe("createApprovalTimeoutResolver", () => {
     expect(auth.authenticator).toBe("telegram");
     expect(auth.attributes).toMatchObject({ applicationSessionId: "app-session-1" });
     expect(auth.principalType).toBe("user");
-  });
-
-  it("answers an unanswered question without inventing a selected option", async () => {
-    const { respond, values } = dependencies();
-    values.repository.claimExpired.mockResolvedValue([
-      claim({ kind: "question", toolName: "ask_question" }),
-    ]);
-
-    await createApprovalTimeoutResolver(values as never)(NOW);
-
-    const [{ responses }] = respond.mock.calls[0]!;
-    expect(responses[0]).not.toHaveProperty("optionId");
-    expect(responses[0]).toMatchObject({ requestId: "aitxt-request-1" });
   });
 
   it("writes terminal state only after the session recorded the cancellation", async () => {

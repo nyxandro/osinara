@@ -257,15 +257,12 @@ async function settleParkedStep(
     throw new Error(`AGENT_TURN_CONTINUATION_INVALID: a call of turn ${parked.id} still waits after its answer`);
   }
   const prepared = requirePrepared(turn);
-  const message = turnInputMessages({ context: [], message: turn.input.message, userInstructions: [] });
   const context = turn.input.context.map((entry): ModelMessage => ({ role: "user", content: entry }));
-  // A button press puts its context lines before the restored transcript; a new message that
-  // dismissed a question comes after it, as usual.
+  // The answer's context lines go before the restored transcript of the parked step.
   const messages = [
     ...prepared.userInstructions,
-    ...(message.length === 0 ? context : []),
+    ...context,
     ...stepHistoryMessages({ calls: withOutputs(calls), response: recorded.step.response }),
-    ...(message.length === 0 ? [] : [...context, ...message]),
   ];
   await inJournalTransaction(runtime.database, async (client) => {
     await appendSessionHistory(client, { messages, sessionId: turn.sessionId, turnId: turn.id });
@@ -468,7 +465,7 @@ async function runStep(
       await runtime.observer.inputRequested({ requests, stepIndex, turn });
     } catch (error) {
       if (signal.aborted) throw error;
-      // A new message may have closed the parked turn meanwhile: then the next turn reports.
+      // An answer may have closed the parked turn meanwhile: then its continuation reports.
       const failed = await failParkedTurn(runtime.database, turn, error);
       if (failed === null) throw new ParkedTurnTakenOver(turn.id);
       return failed;

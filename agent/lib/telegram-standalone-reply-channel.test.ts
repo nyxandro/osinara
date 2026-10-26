@@ -40,6 +40,7 @@ vi.mock("./conversation-timeline-repository.js", () => ({
   conversationTimelineRepository: { recordAgentResponse: vi.fn() },
 }));
 
+vi.mock("./reply-buttons/reply-button-delivery.js", () => ({ stagedReplyButtons: vi.fn(async () => null) }));
 const { telegramTurnEvents } = await import("../channels/telegram.js");
 const { recordMemoryUsageDeclaration } = await import("./memory-usage-report.js");
 

@@ -8,6 +8,7 @@
 import type { SessionContext } from "../../runtime/context.js";
 
 import { AppError } from "../app-error.js";
+import { CONVERSATION_WAKEUP_SCHEDULE_ATTRIBUTE } from "../conversation-wakeups/conversation-wakeup-turn.js";
 import { resolveSessionCaller } from "../session-auth.js";
 
 export interface AgentScheduleAuthorization {
@@ -25,6 +26,8 @@ export interface AgentScheduleAuthorization {
   telegramUpdateId?: string;
   telegramUserId: string;
   userId: string;
+  /** Set only in a wake-up turn: the schedule that woke it, which the turn may still adjust. */
+  wakeupScheduleId?: string;
 }
 
 export function requireAgentScheduleAuthorization(
@@ -79,5 +82,8 @@ export function requireAgentScheduleAuthorization(
       : {}),
     telegramUserId: attributes.telegramUserId,
     userId: caller.principalId,
+    ...(typeof attributes[CONVERSATION_WAKEUP_SCHEDULE_ATTRIBUTE] === "string"
+      ? { wakeupScheduleId: attributes[CONVERSATION_WAKEUP_SCHEDULE_ATTRIBUTE] }
+      : {}),
   };
 }

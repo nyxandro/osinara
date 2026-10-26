@@ -12,6 +12,8 @@ import type { ClaimedReminder } from "./reminder-dispatch-repository.js";
 import { createReminderDispatcher } from "./reminder-dispatcher.js";
 
 const job: ClaimedReminder = {
+  addresseeTelegramUserId: "101",
+  buttons: null,
   familyId: "00000000-0000-4000-8000-000000000010",
   forumTopicId: null,
   content: "Позвонить врачу",
@@ -24,6 +26,7 @@ const job: ClaimedReminder = {
   ownerUserId: "00000000-0000-4000-8000-000000000011",
   scope: "personal",
   telegramChatId: "101",
+  telegramChatType: "private",
   timezone: "Europe/Moscow",
 };
 

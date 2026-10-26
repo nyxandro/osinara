@@ -26,9 +26,7 @@ const describeWithDatabase = enabled ? describe : describe.skip;
 const OWNER_TELEGRAM_ID = "timeout-owner";
 const NOW = new Date("2026-08-24T12:00:00.000Z");
 
-async function fixture(
-  kind: "question" | "tool-approval" = "tool-approval",
-): Promise<{ sessionId: string }> {
+async function fixture(): Promise<{ sessionId: string }> {
   const family = await database().query<{ id: string }>(
     "INSERT INTO families (name) VALUES ('Timeout') RETURNING id",
   );
@@ -59,17 +57,14 @@ async function fixture(
     requesterUserId: owner.rows[0]!.id,
   });
   await sessionRepository.registerRouteAlias(session.id, "700::2801");
-  await registerApproval(session.id, kind);
+  await registerApproval(session.id);
   return { sessionId: session.id };
 }
 
-async function registerApproval(
-  sessionId: string,
-  kind: "question" | "tool-approval",
-): Promise<void> {
+async function registerApproval(sessionId: string): Promise<void> {
   await telegramHitlApprovalRepository.register({
     applicationSessionId: sessionId,
-    kind,
+    kind: "tool-approval",
     callbackData: ["hitl:0", "hitl:1"],
     callbackOptions: [
       { callbackData: "hitl:0", label: "Да, подтвердить", optionId: "approve" },
@@ -111,15 +106,6 @@ describeWithDatabase("approval timeout repository", () => {
     );
   });
   afterAll(async () => closeDatabase());
-
-  it("bounds an unanswered agent question the same way as an approval", async () => {
-    await fixture("question");
-    await ageApproval(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS + 1_000);
-
-    await expect(
-      approvalTimeoutRepository.claimExpired(NOW, TELEGRAM_HITL_APPROVAL_TIMEOUT_MS),
-    ).resolves.toHaveLength(1);
-  });
 
   it("never cancels a pre-migration row with no request kind", async () => {
     await fixture();
@@ -206,7 +192,7 @@ describeWithDatabase("approval timeout repository", () => {
     await approvalTimeoutRepository.completeTimeout(claim!, NOW);
 
     // The runtime may replay `input.requested`; the ON CONFLICT branch must clear the timeout state.
-    await expect(registerApproval(current.sessionId, "tool-approval")).resolves.toBeUndefined();
+    await expect(registerApproval(current.sessionId)).resolves.toBeUndefined();
     const row = await database().query<{ consumed_at: Date | null; timed_out_at: Date | null }>(
       "SELECT consumed_at, timed_out_at FROM telegram_hitl_approvals",
     );

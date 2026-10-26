@@ -2,8 +2,7 @@
  * Creating turns: a new input, or a person's answer to a parked turn.
  *
  * Exports:
- * - `startTurn`: a turn for new input. A new message dismisses a parked question: the question is
- *   answered as ignored and the new turn writes that exchange into history before its own input.
+ * - `startTurn`: a turn for new input.
  * - `respondToInput`: records answers on the parked turn's calls. Once they release the step, the
  *   parked turn ends and a continuation turn is created; the caller runs it with `runTurn`. An
  *   answer to a request a child turn raised goes to the child's session first.
@@ -11,8 +10,7 @@
  *   caller's own records (channel state, ingress binding) commit with the turn.
  * - `waitingRequests`: what the session's parked turn waits on.
  *
- * - A session has at most one parked turn: while an approval waits, other turns run without tools,
- *   and a new message dismisses a waiting question.
+ * - A session has at most one parked turn: while an approval waits, other turns run without tools.
  * - A partial answer to several approvals stays on its call; its context lines wait on the parked
  *   turn for the continuation.
  * - Answers that match no waiting request are returned to the caller, which decides how the model
@@ -20,7 +18,7 @@
  * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { SessionAuth } from "../context.js";
-import { questionOutput, resolveApprovalOutcome, deniedOutput, stepInputResolved } from "../hitl/input-requests.js";
+import { resolveApprovalOutcome, deniedOutput, stepInputResolved } from "../hitl/input-requests.js";
 import type { InputRequest, InputResponse } from "../hitl/types.js";
 import { newTurnId } from "../ids.js";
 import {
@@ -56,19 +54,7 @@ interface StartInput {
 }
 
 export async function startTurnWithClient(client: JournalClient, input: StartInput): Promise<TurnRecord> {
-  const waiting = await findWaitingTurn(client, input.sessionId);
-  let resumesTurnId: string | null = null;
-  if (waiting !== null && input.input.message !== undefined) {
-    const awaiting = await parkedCalls(client, waiting);
-    if (awaiting.every((call) => call.inputRequest?.kind === "question")) {
-      for (const call of awaiting) {
-        await updateToolCall(client, { callId: call.callId, output: questionOutput(undefined), state: "completed", turnId: waiting.id });
-      }
-      await closeParkedTurn(client, waiting.id);
-      resumesTurnId = waiting.id;
-    }
-  }
-  return await createTurn(client, { ...input, id: newTurnId(), resumesTurnId });
+  return await createTurn(client, { ...input, id: newTurnId(), resumesTurnId: null });
 }
 
 export async function startTurn(database: JournalDatabase, input: StartInput): Promise<TurnRecord> {
@@ -90,14 +76,13 @@ export type InputResponseOutcome =
   | { readonly stale: readonly InputResponse[]; readonly status: "stale" };
 
 async function settleCall(client: JournalClient, turnId: string, call: ToolCallRecord, response: InputResponse | undefined) {
-  if (call.inputRequest?.kind === "tool-approval") {
-    const outcome = resolveApprovalOutcome(response);
-    await updateToolCall(client, outcome.approved
-      ? { callId: call.callId, output: null, state: "planned", turnId }
-      : { callId: call.callId, output: deniedOutput(outcome.reason), state: "completed", turnId });
-    return;
+  if (call.inputRequest?.kind !== "tool-approval") {
+    throw new Error(`AGENT_TURN_INPUT_REQUEST_INVALID: call ${call.callId} of turn ${turnId} waits for an unknown request`);
   }
-  await updateToolCall(client, { callId: call.callId, output: questionOutput(response), state: "completed", turnId });
+  const outcome = resolveApprovalOutcome(response);
+  await updateToolCall(client, outcome.approved
+    ? { callId: call.callId, output: null, state: "planned", turnId }
+    : { callId: call.callId, output: deniedOutput(outcome.reason), state: "completed", turnId });
 }
 
 interface RespondInput {
@@ -108,8 +93,8 @@ interface RespondInput {
   readonly sessionId: string;
 }
 
-// The step of a parked turn is released once its own requests are answered (approvals all, a
-// question-only step on its first answer) and every child it waits on continued.
+// The step of a parked turn is released once every approval it raised is answered and every child
+// it waits on continued.
 export async function respondWithClient(client: JournalClient, input: RespondInput): Promise<InputResponseOutcome> {
   const waiting = await findWaitingTurn(client, input.sessionId);
   if (waiting === null) return { stale: input.responses, status: "stale" };

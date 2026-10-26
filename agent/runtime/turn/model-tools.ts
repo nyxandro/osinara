@@ -16,7 +16,7 @@ import type { JsonObject } from "../json.js";
 import type { ToolDefinition, ToolInputSchema } from "../tool.js";
 
 export const BUILT_IN_TOOL_ORDER = [
-  "ask_question", "bash", "read_file", "write_file", "todo", "web_fetch", "load_skill",
+  "bash", "read_file", "write_file", "todo", "web_fetch", "load_skill",
 ] as const;
 const DELEGATION_TOOL_NAME = "agent";
 

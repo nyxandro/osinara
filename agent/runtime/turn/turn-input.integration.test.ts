@@ -26,12 +26,6 @@ function guardedTool(execute = vi.fn(async ({ group }: { group: string }) => ({ 
   }) };
 }
 
-const askQuestion = defineTool({
-  description: "Спросить",
-  execute: async (): Promise<string> => { throw new Error("ask_question never executes"); },
-  inputSchema: z.object({ prompt: z.string(), options: z.array(z.object({ id: z.string(), label: z.string() })).optional() }),
-});
-
 async function history(sessionId: string) {
   return (await loadSessionHistory(database(), sessionId)).messages;
 }
@@ -152,71 +146,6 @@ async function continueWith(sessionId: string, continuationId: string, guarded: 
     await runTurn(testRuntime({ agent: testAgent({}), callModel: model.callModel, observer: recordingObserver().observer }), turn.id, RUN);
 
     expect(model.requests[0]!.toolChoice).toBe("none");
-  });
-
-  it("feeds the answer to a question back as its tool result", async () => {
-    const sessionId = await newTestSession();
-    const turn = await startMessageTurn(sessionId, "спроси");
-    const parked = await runTurn(testRuntime({
-      agent: testAgent({ ask_question: askQuestion }),
-      callModel: scriptedModel(toolCalls([{ id: "call-q", input: { options: [{ id: "continue", label: "Продолжить" }], prompt: "Дальше?" }, name: "ask_question" }])).callModel,
-      observer: recordingObserver().observer,
-    }), turn.id, RUN);
-    expect(parked).toMatchObject({ requests: [{ display: "select", kind: "question", prompt: "Дальше?", requestId: "call-q" }], status: "waiting_input" });
-    expect(await history(sessionId)).toEqual([{ role: "user", content: "спроси" }]);
-
-    const resumed = await respond(sessionId, [{ optionId: "continue", requestId: "call-q" }]);
-    if (resumed.status !== "resumed") throw new Error(resumed.status);
-    const model = scriptedModel(reply("Продолжаю."));
-    await runTurn(testRuntime({ agent: testAgent({ ask_question: askQuestion }), callModel: model.callModel, observer: recordingObserver().observer }), resumed.continuation.id, RUN);
-
-    expect(model.requests[0]!.messages.at(-1)).toEqual({ role: "tool", content: [{
-      type: "tool-result", toolCallId: "call-q", toolName: "ask_question", output: { type: "json", value: { optionId: "continue", status: "answered" } },
-    }] });
-  });
-
-  it("leaves a question to the next message when showing it fails after that message dismissed it", async () => {
-    const sessionId = await newTestSession();
-    const { events, observer } = recordingObserver({
-      inputRequested: async () => {
-        await startMessageTurn(sessionId, "другое");
-        throw new Error("TEST_CARD_REFUSED");
-      },
-    });
-    const turn = await startMessageTurn(sessionId, "спроси");
-
-    const outcome = await runTurn(testRuntime({
-      agent: testAgent({ ask_question: askQuestion }),
-      callModel: scriptedModel(toolCalls([{ id: "call-q", input: { prompt: "Дальше?" }, name: "ask_question" }])).callModel,
-      observer,
-    }), turn.id, RUN);
-
-    expect(outcome).toEqual({ status: "completed", text: null });
-    expect(await loadTurn(database(), turn.id)).toMatchObject({ status: "completed" });
-    expect(events.filter((event) => event.kind === "turnFinished")).toEqual([]);
-  });
-
-  it("dismisses a waiting question when a new message arrives, before that message", async () => {
-    const sessionId = await newTestSession();
-    const turn = await startMessageTurn(sessionId, "спроси");
-    await runTurn(testRuntime({
-      agent: testAgent({ ask_question: askQuestion }),
-      callModel: scriptedModel(toolCalls([{ id: "call-q", input: { prompt: "Дальше?" }, name: "ask_question" }])).callModel,
-      observer: recordingObserver().observer,
-    }), turn.id, RUN);
-
-    const next = await startMessageTurn(sessionId, "забудь, другое", ["<telegram_context/>"]);
-    const model = scriptedModel(reply("Хорошо."));
-    await runTurn(testRuntime({ agent: testAgent({ ask_question: askQuestion }), callModel: model.callModel, observer: recordingObserver().observer }), next.id, RUN);
-
-    expect(model.requests[0]!.messages).toEqual([
-      { role: "user", content: "спроси" },
-      { role: "assistant", content: [{ type: "tool-call", toolCallId: "call-q", toolName: "ask_question", input: { prompt: "Дальше?" } }] },
-      { role: "tool", content: [{ type: "tool-result", toolCallId: "call-q", toolName: "ask_question", output: { type: "json", value: { status: "ignored" } } }] },
-      { role: "user", content: "<telegram_context/>" },
-      { role: "user", content: "забудь, другое" },
-    ]);
-    expect(await loadTurn(database(), turn.id)).toMatchObject({ status: "completed" });
   });
 
   it("fails the turn when its request cannot be shown to the person", async () => {

@@ -6,6 +6,8 @@
  *   is acknowledged, and the drain that processes stored updates in each chat's order.
  * - `TelegramDurableIngressHandler`: the webhook handler with its `drain`.
  * - Application software-update callbacks complete before any turn is dispatched.
+ * - A reply-button press continues as the addressee's own message; the addressee's written message
+ *   first removes the buttons they did not tap.
  * - A chat queue with no waiting update may run one due wake-up of its own conversation.
  *
  * One update runs to the end of its turn before the next update of its chat starts. The update
@@ -48,6 +50,8 @@ import { combineTelegramMediaGroup } from "./telegram-media-group.js";
 import { CAPTIONLESS_ATTACHMENT_MODEL_TEXT } from "./telegram-model-placeholders.js";
 import { combineTelegramBurst } from "./telegram-private-burst-message.js";
 import { recordOperationalIncident } from "./operational-incidents/owner-alerts.js";
+import { isReplyButtonCallback } from "./reply-buttons/reply-button-contract.js";
+import type { ReplyButtonPressOutcome } from "./reply-buttons/reply-button-press.js";
 import { isDatabaseUnavailable, waitForApplicationDatabase } from "./database-recovery.js";
 
 const telegramUpdateIdSchema = z.union([z.number().int().nonnegative().safe(), z.string().regex(/^\d+$/)]);
@@ -78,6 +82,12 @@ export interface DurableIngressDependencies {
   handleSoftwareUpdateCallback(
     query: Extract<TelegramUpdate, { kind: "callback_query" }>["callbackQuery"],
   ): Promise<boolean>;
+  handleReplyButtonPress(
+    query: Extract<TelegramUpdate, { kind: "callback_query" }>["callbackQuery"],
+    updateId: string,
+  ): Promise<ReplyButtonPressOutcome>;
+  /** Removes the reply buttons the message's author had not tapped before writing it. */
+  dismissReplyButtons(message: TelegramMessage): Promise<void>;
   leaseMilliseconds: number;
   /** Runs at most one due wake-up of an idle chat queue on the wake-up slots, never a message slot. */
   processConversationWakeup?(input: { slots: Sema }): Promise<boolean>;
@@ -279,9 +289,17 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
     const stop = AbortSignal.any([admission.signal, signal]);
     try {
       let update = acceptedUpdate;
-      // Software updates are application-owned. Runtime buttons reach the application's guard,
-      // which checks the exact pending request and current approver.
-      if (update.kind === "callback_query") {
+      let replyButtonMessageId: string | undefined;
+      if (update.kind === "callback_query" && isReplyButtonCallback(update.callbackQuery.data)) {
+        // A reply button stands for its addressee's answer and continues as their message.
+        const pressed = await dependencies.handleReplyButtonPress(update.callbackQuery, claim.updateId);
+        stop.throwIfAborted();
+        if (pressed.status === "answered") return null;
+        update = { kind: "message", message: pressed.message };
+        replyButtonMessageId = pressed.buttonMessageId;
+      } else if (update.kind === "callback_query") {
+        // Software updates are application-owned. Runtime buttons reach the application's guard,
+        // which checks the exact pending request and current approver.
         const claimed = await dependencies.handleSoftwareUpdateCallback(update.callbackQuery);
         stop.throwIfAborted();
         const runtimeButton = isTelegramHitlCallback(update.callbackQuery.data);
@@ -289,6 +307,18 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
           if (!claimed) console.error(JSON.stringify({ code: "AGENT_TELEGRAM_CALLBACK_UNCLAIMED", updateId: claim.updateId }));
           return null;
         }
+      } else {
+        try {
+          await dependencies.dismissReplyButtons(update.message);
+        } catch (error) {
+          // The buttons stay on screen; the person's message matters more than their removal.
+          console.error(JSON.stringify({
+            code: "AGENT_REPLY_BUTTONS_DISMISS_FAILED",
+            error: error instanceof Error ? error.message : String(error),
+            updateId: claim.updateId,
+          }));
+        }
+        stop.throwIfAborted();
       }
       update = await withVoiceTranscript(claim, update, stop);
       // A dispatch interrupted before its turn existed is prepared again under its own attempt id:
@@ -301,6 +331,7 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
       const result = await dependencies.dispatch(withCaptionlessAttachmentText(update), telegramIngressControl({
         deadlineAt: deadlineAt.toISOString(), dispatchId, leaseToken: claim.leaseToken, replaying: claim.dispatchStarted, signal: stop,
         updateId: claim.updateId,
+        ...(replyButtonMessageId === undefined ? {} : { replyButtonMessageId }),
       }));
       clearTimeout(timer);
       if (result.status === "dropped") return null;
@@ -349,7 +380,10 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
 
         // SQL coalesces each queue behind its live leased head. A waiter whose lease was lost
         // cannot dispatch after acquiring a slot; callbacks have capacity separate from model turns.
-        const slots = acceptedUpdate.kind === "callback_query" ? callbackSlots : messageSlots;
+        // A reply button starts a new turn like a message, so it takes a message slot.
+        const slots = acceptedUpdate.kind === "callback_query" && !isReplyButtonCallback(acceptedUpdate.callbackQuery.data)
+          ? callbackSlots
+          : messageSlots;
         const waitedForSlot = slots.tryAcquire() === undefined;
         if (waitedForSlot) await slots.acquire();
         releaseSlot = () => slots.release();

@@ -147,7 +147,6 @@ describe("Telegram channel sender routing", () => {
     const result = await createTelegramMessageHandler(repository)(telegramContext().context, message);
 
     expect(repository.hitl.authorizeReply).not.toHaveBeenCalled();
-    expect(result?.replyHandling).toBe("message");
     expect(result?.auth?.principalType).toBe("service");
   });
 });

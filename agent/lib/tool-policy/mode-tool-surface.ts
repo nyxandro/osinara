@@ -10,7 +10,7 @@
  * Key constructs:
  * - Every tool is emitted per mode, the runtime's built-ins included, so a tool that cannot work in
  *   the current trust zone has no descriptor at all. Trusted modes get the runtime's built-ins
- *   (agent, ask_question, bash, read_file, write_file, todo, load_skill); an external group
+ *   (agent, bash, read_file, write_file, todo, load_skill); an external group
  *   gets only its own file tools, its granted capabilities and, without a verified registration,
  *   nothing beyond answering in text.
  * - External groups re-check every granted capability at execution time against the live policy.
@@ -19,7 +19,7 @@
  *   Scheduled surfaces do not.
  */
 import { defineTool, type ToolContext, type ToolDefinition } from "../../runtime/tool.js";
-import { askQuestion, bash, loadSkill, readFile, todo, writeFile } from "../../runtime/tools/defaults.js";
+import { bash, loadSkill, readFile, todo, writeFile } from "../../runtime/tools/defaults.js";
 import { agentTool } from "../../runtime/tools/delegate.js";
 import { z } from "zod";
 
@@ -355,7 +355,6 @@ function allowlistKey(allowed: ReadonlySet<ExternalGroupToolName>): string {
 // their errors are already written for the model.
 const TRUSTED_BUILT_IN_TOOLS: ToolMap = {
   agent: agentTool as AnyToolDefinition,
-  ask_question: askQuestion as AnyToolDefinition,
   bash: bash as AnyToolDefinition,
   load_skill: loadSkill as AnyToolDefinition,
   read_file: readFile as AnyToolDefinition,
@@ -375,11 +374,9 @@ const TRUSTED_APPLICATION_SURFACES: Readonly<Record<"family" | "private", ToolMa
 };
 
 // An interactive turn also receives, with each tool result, the messages its author sent meanwhile.
-// The interjection surface brings its own sandbox built-ins; delegation, questions, todo and skills
-// stay as is.
+// The interjection surface brings its own sandbox built-ins; delegation, todo and skills stay as is.
 const UNWRAPPED_BUILT_INS: ToolMap = {
   agent: TRUSTED_BUILT_IN_TOOLS.agent!,
-  ask_question: TRUSTED_BUILT_IN_TOOLS.ask_question!,
   load_skill: TRUSTED_BUILT_IN_TOOLS.load_skill!,
   todo: TRUSTED_BUILT_IN_TOOLS.todo!,
 };

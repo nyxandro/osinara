@@ -8,6 +8,7 @@
  */
 import type { ToolDefinition } from "../../runtime/tool.js";
 
+import attachReplyButtons from "../tools/attach_reply_buttons.js";
 import executeGoogleWorkspace from "../tools/execute_google_workspace.js";
 import exportMemory from "../tools/export_memory.js";
 import getCurrentTime from "../tools/get_current_time.js";
@@ -56,6 +57,7 @@ type ToolMap = Readonly<Record<string, AnyToolDefinition>>;
 export const TRUSTED_MODE_TOOLS: ToolMap = {
   web_fetch: conversationWebFetch as AnyToolDefinition,
   web_search: conversationWebSearch as AnyToolDefinition,
+  attach_reply_buttons: attachReplyButtons as unknown as AnyToolDefinition,
   execute_google_workspace: executeGoogleWorkspace as unknown as AnyToolDefinition,
   get_current_time: getCurrentTime as unknown as AnyToolDefinition,
   // Without image input every call would fail, so the descriptor is not offered at all.

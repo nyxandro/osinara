@@ -8,6 +8,8 @@
  * - Object-shaped model schema publishes machine-visible actions without a root JSON Schema union.
  * - Exact nested recurrence variants describe one-time and minute-to-year schedules.
  * - A semantic parser validates execution input before trusted boundaries run.
+ * - A monitor's check runs once in the turn's own sandbox before it is saved: a broken script is
+ *   refused at once, and an event that already happened is reported now instead of watched for.
  */
 import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
@@ -24,6 +26,11 @@ import { AGENT_SCHEDULE_SIMPLE_RECURRENCE_KINDS, type AgentScheduleSimpleRecurre
 import { agentScheduleRecurrenceSchema } from "../agent-schedules/agent-schedule-recurrence-schema.js";
 import type { AgentScheduleInputRecurrence } from "../agent-schedules/agent-schedule-validation.js";
 import { AppError } from "../app-error.js";
+import { SCHEDULE_CHECK_COMMAND_MAX_LENGTH } from "../agent-schedules/agent-schedule-check-contract.js";
+import { resolveCreatedScheduleCheck } from "../agent-schedules/agent-schedule-check-policy.js";
+import { scheduleCheckRepository } from "../agent-schedules/agent-schedule-check-repository.js";
+import { runScheduleCheckIn } from "../agent-schedules/agent-schedule-check-runner.js";
+import { escapeUntrustedContextJson } from "../untrusted-context-json.js";
 import { AGENT_SCHEDULE_PAUSE_NOTE, agentScheduleMaxRunsField, requireAgentScheduleMaxRuns } from "../agent-schedules/agent-schedule-limits.js";
 
 const TOOL_ACTIONS = ["create", "update", "pause", "resume", "run_now", "delete"] as const;
@@ -38,6 +45,8 @@ type ToolAction = (typeof TOOL_ACTIONS)[number];
 type ScheduleScope = (typeof SCOPES)[number];
 
 const TOP_LEVEL_FIELDS = [
+  "checkCommand",
+  "checkUntil",
   "maxRuns",
   "action",
   "executionContext",
@@ -53,6 +62,9 @@ const TOP_LEVEL_FIELDS = [
 ] as const;
 
 const manageAgentScheduleSchema = z.object({
+  checkCommand: z.string().max(SCHEDULE_CHECK_COMMAND_MAX_LENGTH).optional()
+    .describe("Turns a conversation wake-up into a monitor: a Bash check the scheduler runs without you."),
+  checkUntil: z.string().optional().describe("With checkCommand: the end of the watch, ISO with a UTC offset."),
   maxRuns: agentScheduleMaxRunsField.optional(),
   action: z.enum(TOOL_ACTIONS),
   executionContext: z.enum(EXECUTION_CONTEXTS).optional().describe("Only in create: conversation or isolated."),
@@ -244,8 +256,17 @@ function requiredExecutionContext(input: Record<string, unknown>): (typeof EXECU
   return value as (typeof EXECUTION_CONTEXTS)[number];
 }
 
+function optionalCheckCommand(input: Record<string, unknown>): string | undefined {
+  const value = input.checkCommand;
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") inputError("Поле checkCommand должно быть строкой с Bash-скриптом проверки");
+  return value;
+}
+
 function requireCreateInput(input: Record<string, unknown>) {
   requireOnlyFields(input, [
+    "checkCommand",
+    "checkUntil",
     "maxRuns",
     "action",
     "executionContext",
@@ -258,6 +279,8 @@ function requireCreateInput(input: Record<string, unknown>) {
     "userRequest",
   ], "action=create");
   return {
+    checkCommand: optionalCheckCommand(input),
+    checkUntil: optionalDate(input, "checkUntil"),
     executionContext: requiredExecutionContext(input),
     firstRunAt: requiredDate(input, "firstRunAt"),
     maxRuns: requireAgentScheduleMaxRuns(input.maxRuns),
@@ -292,6 +315,8 @@ function requireCreateInput(input: Record<string, unknown>) {
 
 function requireUpdateInput(input: Record<string, unknown>) {
   requireOnlyFields(input, [
+    "checkCommand",
+    "checkUntil",
     "maxRuns",
     "action",
     // MiniMax may materialize these known create-only siblings from the shared root schema.
@@ -307,6 +332,8 @@ function requireUpdateInput(input: Record<string, unknown>) {
     "userRequest",
   ], "action=update");
   const nextRunAt = optionalDate(input, "nextRunAt");
+  const checkCommand = optionalCheckCommand(input);
+  const checkUntil = optionalDate(input, "checkUntil");
   const maxRuns = requireAgentScheduleMaxRuns(input.maxRuns);
   const recurrence = optionalRecurrence(input.recurrence);
   const scenarioPrompt = optionalString(
@@ -329,15 +356,17 @@ function requireUpdateInput(input: Record<string, unknown>) {
   );
   if (
     nextRunAt === undefined &&
+    checkCommand === undefined &&
+    checkUntil === undefined &&
     maxRuns === undefined &&
     recurrence === undefined &&
     scenarioPrompt === undefined &&
     title === undefined &&
     userRequest === undefined
   ) {
-    inputError("Для action=update передайте хотя бы одно поле изменения: maxRuns, nextRunAt, recurrence, scenarioPrompt, title или userRequest");
+    inputError("Для action=update передайте хотя бы одно поле изменения: checkCommand, checkUntil, maxRuns, nextRunAt, recurrence, scenarioPrompt, title или userRequest");
   }
-  return { id: requiredUuid(input), maxRuns, nextRunAt, recurrence, scenarioPrompt, title, userRequest };
+  return { checkCommand, checkUntil, id: requiredUuid(input), maxRuns, nextRunAt, recurrence, scenarioPrompt, title, userRequest };
 }
 
 function requireIdOnlyInput(input: Record<string, unknown>, action: ToolAction): string {
@@ -356,6 +385,25 @@ function requireManageAgentScheduleInput(input: unknown) {
   if (action === "create") return { action, values: requireCreateInput(payload) } as const;
   if (action === "update") return { action, values: requireUpdateInput(payload) } as const;
   return { action, id: requireIdOnlyInput(payload, action) } as const;
+}
+
+/** A monitor is saved only with a check that works and has not fired yet. */
+async function requireCheckWaiting(sandbox: Parameters<typeof runScheduleCheckIn>[0], command: string): Promise<void> {
+  const outcome = await runScheduleCheckIn(sandbox, command);
+  if (outcome.kind === "failed") {
+    throw new AppError(
+      outcome.errorCode,
+      `Проверка не прошла пробный запуск: код выхода ${outcome.exitCode}, ${escapeUntrustedContextJson(outcome.detail)}. ` +
+        "Монитор не сохранён: исправьте checkCommand и повторите",
+    );
+  }
+  if (outcome.kind === "fired") {
+    throw new AppError(
+      "AGENT_SCHEDULE_CHECK_ALREADY_FIRED",
+      `Условие уже выполнено, монитор не сохранён. Проверка напечатала: ${escapeUntrustedContextJson(outcome.output)}. ` +
+        "Сообщите результат человеку сейчас",
+    );
+  }
 }
 
 const TOOL_DESCRIPTION = [
@@ -381,6 +429,18 @@ export default defineTool({
   async execute(input, ctx) {
     const parsed = requireManageAgentScheduleInput(input);
     const authorization = requireAgentScheduleAuthorization(ctx);
+    if (parsed.action === "create") {
+      // Settings are refused before the script runs, so an invalid monitor never executes anything.
+      resolveCreatedScheduleCheck(parsed.values, new Date());
+    }
+    if ((parsed.action === "create" || parsed.action === "update") && parsed.values.checkCommand !== undefined) {
+      const preflight = await scheduleCheckRepository.prepareChange(authorization, {
+        ...(parsed.action === "update" ? { id: parsed.values.id } : {}),
+        operationKey: ctx.callId,
+      });
+      // A replayed call returns what it already saved; trying its check again could only mislead.
+      if (preflight === "ready") await requireCheckWaiting(await ctx.getSandbox(), parsed.values.checkCommand);
+    }
     if (parsed.action === "create") {
       return await agentScheduleRepository.create(authorization, {
         ...parsed.values,

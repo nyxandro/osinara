@@ -1,11 +1,10 @@
 /**
- * Requests that wait for a person, and what the model reads once they are answered.
+ * Approvals that wait for a person, and what the model reads once they are answered.
  *
  * Exports:
- * - `ASK_QUESTION_TOOL_NAME`: the built-in tool whose call parks for a person's answer.
- * - `approvalRequest`, `questionRequest`: the request a parked call shows to the person.
+ * - `approvalRequest`: the request a parked call shows to the person.
  * - `renderPendingApprovalsNote`: the note written into history while approvals wait.
- * - `resolveApprovalOutcome`, `deniedOutput`, `questionOutput`: the tool result the model reads.
+ * - `resolveApprovalOutcome`, `deniedOutput`: the tool result the model reads.
  * - `stepInputResolved`: whether the answers given so far release the parked step.
  *
  * One parked step is one batch: the batch rules apply to the step's calls. The texts are fixed;
@@ -15,9 +14,8 @@
 import { createIdGenerator } from "ai";
 
 import type { ToolResultOutput } from "../turn/tool-calls.js";
-import type { InputOption, InputRequest, InputResponse } from "./types.js";
+import type { InputRequest, InputResponse } from "./types.js";
 
-export const ASK_QUESTION_TOOL_NAME = "ask_question";
 export const TOOL_EXECUTION_DENIED_MESSAGE = "Tool execution was denied.";
 const IGNORED_INPUT_REASON = "Ignored because the user continued without responding.";
 const INVALID_APPROVAL_MESSAGE = "Invalid approval response.";
@@ -35,8 +33,6 @@ interface ParkedCall {
 export function approvalRequest(call: ParkedCall, requestId: string = createApprovalId()): InputRequest {
   return {
     action: { callId: call.callId, input: call.input, kind: "tool-call", toolName: call.toolName },
-    allowFreeform: false,
-    display: "confirmation",
     kind: "tool-approval",
     options: [{ id: "approve", label: "Approve" }, { id: "cancel", label: "Cancel" }],
     prompt: `Approve tool call: ${call.toolName}`,
@@ -44,26 +40,12 @@ export function approvalRequest(call: ParkedCall, requestId: string = createAppr
   };
 }
 
-export function questionRequest(call: ParkedCall): InputRequest {
-  const options = call.input.options as readonly InputOption[] | undefined;
-  return {
-    action: { callId: call.callId, input: call.input, kind: "tool-call", toolName: call.toolName },
-    ...(call.input.allowFreeform === undefined ? {} : { allowFreeform: call.input.allowFreeform as boolean }),
-    display: options === undefined ? "text" : "select",
-    kind: "question",
-    ...(options === undefined ? {} : { options }),
-    prompt: String(call.input.prompt),
-    requestId: call.callId,
-  };
-}
-
 export function renderPendingApprovalsNote(requests: readonly InputRequest[]): string | undefined {
-  const approvals = requests.filter((request) => request.kind === "tool-approval");
-  if (approvals.length === 0) return undefined;
+  if (requests.length === 0) return undefined;
   return [
     PENDING_APPROVALS_LABEL,
     "The following tool calls are awaiting approval and have not executed:",
-    ...approvals.map((request) => JSON.stringify({ requestId: request.requestId, toolName: request.action.toolName })),
+    ...requests.map((request) => JSON.stringify({ requestId: request.requestId, toolName: request.action.toolName })),
   ].join("\n");
 }
 
@@ -83,25 +65,7 @@ export function deniedOutput(reason: string | undefined): ToolResultOutput {
   return reason === undefined ? { type: "execution-denied" } : { type: "execution-denied", reason };
 }
 
-export function questionOutput(response: InputResponse | undefined): ToolResultOutput {
-  if (response === undefined) return { type: "json", value: { status: "ignored" } };
-  // JSON drops an absent field, as stored results always did.
-  return {
-    type: "json",
-    value: {
-      ...(response.optionId === undefined ? {} : { optionId: response.optionId }),
-      ...(response.text === undefined ? {} : { text: response.text }),
-      status: "answered",
-    },
-  };
-}
-
-/**
- * A step with an approval waits for an answer to every approval; questions answered by then are
- * read, the rest are ignored. A question-only step continues on the first answer.
- */
+/** A parked step waits for an answer to every approval it raised. */
 export function stepInputResolved(requests: readonly InputRequest[], responses: ReadonlyMap<string, InputResponse>): boolean {
-  const approvals = requests.filter((request) => request.kind === "tool-approval");
-  if (approvals.length > 0) return approvals.every((request) => responses.has(request.requestId));
-  return requests.some((request) => responses.has(request.requestId));
+  return requests.every((request) => responses.has(request.requestId));
 }

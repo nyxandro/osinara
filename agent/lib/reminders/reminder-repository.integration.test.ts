@@ -232,6 +232,30 @@ describeWithDatabase("reminder repositories", () => {
     });
   });
 
+  it("keeps a reminder's reply buttons and hands them with its author to the dispatcher", async () => {
+    const fixture = await createFixture();
+    const auth = privateAuth(fixture, "member");
+    await reminderRepository.configureNotifications(auth, { quietEnd: null, quietStart: null, timezone: "Europe/Moscow" });
+    const buttons = [[{ color: "green" as const, text: "✅ Оплатил" }, { text: "⏰ Через час" }]];
+    const reminder = await reminderRepository.create(auth, {
+      buttons,
+      content: "Оплатить интернет",
+      firstRunAt: new Date("2026-07-13T06:00:00.000Z"),
+      operationKey: "buttons-created",
+      recurrence: { interval: 1, unit: "monthly" },
+      scope: "personal",
+      timezone: "Europe/Moscow",
+    });
+
+    expect(reminder.buttons).toEqual(buttons);
+    const [claimed] = await reminderDispatchRepository.claimDue({ leaseMilliseconds: 300_000, limit: 10, now: new Date("2026-07-13T06:00:30.000Z") });
+    expect(claimed).toMatchObject({ addresseeTelegramUserId: "reminder-member", buttons, telegramChatType: "private" });
+
+    await database().query("UPDATE reminders SET status = 'active', lease_token = NULL, lease_expires_at = NULL WHERE id = $1", [reminder.id]);
+    const cleared = await reminderRepository.update(auth, reminder.id, { buttons: null, operationKey: "buttons-removed" });
+    expect(cleared.buttons).toBeNull();
+  });
+
   it("refuses to move, resume or pause a reminder that was already delivered", async () => {
     const fixture = await createFixture();
     const auth = privateAuth(fixture, "member");

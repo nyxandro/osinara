@@ -54,5 +54,6 @@ export async function advanceReactivatedSchedule(client: PoolClient, scheduleId:
     "Попытка этого однократного расписания уже завершена. Укажите новое время или выберите «запустить сейчас»");
   const next = await nextAgentScheduleOccurrence(client, scheduleId, kind, terminal.rows[0]!.after);
   if (!next) return;
-  await client.query("UPDATE agent_schedules SET next_run_at=$2,occurrence_index=$3 WHERE id=$1", [scheduleId, next.next_run_at, next.next_index]);
+  // A monitor's next check never lands after its window.
+  await client.query("UPDATE agent_schedules SET next_run_at=least($2::timestamptz,check_until),occurrence_index=$3 WHERE id=$1", [scheduleId, next.next_run_at, next.next_index]);
 }

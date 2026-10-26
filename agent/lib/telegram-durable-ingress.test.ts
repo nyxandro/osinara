@@ -15,6 +15,9 @@
  * - A private chat still receiving a burst is claimed the moment its quiet window ends, not at the
  *   next poll, with the configured window.
  * - A claimed burst is dispatched as one message carrying every part in chat order.
+ * - A reply-button press continues as the message its handler built, with the buttons' message in
+ *   the turn's attributes; an answered press dispatches nothing.
+ * - A person's message first dismisses their earlier buttons, and a failed dismissal does not stop it.
  */
 import { parseTelegramUpdate } from "../runtime/telegram/inbound.js";
 import type { RouteContext } from "../runtime/server.js";
@@ -71,7 +74,7 @@ function ingress(
     authorizeVoice: vi.fn().mockResolvedValue(true),
     botUsername: "osinara_bot",
     dispatch: vi.fn().mockResolvedValue(DISPATCHED),
-    handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false),
+    dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false),
     leaseMilliseconds: 60_000,
     admissionMilliseconds: 60_000,
     repository: storage.value,
@@ -231,6 +234,65 @@ describe("createTelegramDurableIngress", () => {
     expect(dependencies.dispatch).not.toHaveBeenCalled();
     expect(storage.value.beginDispatch).not.toHaveBeenCalled();
     expect(storage.value.complete).toHaveBeenCalledWith("1002", storage.claim.leaseToken, undefined);
+    vi.restoreAllMocks();
+  });
+
+  it("continues a reply-button press as the message its handler built", async () => {
+    const storage = repository();
+    const pressPayload = { ...callbackPayload(), callback_query: { ...(callbackPayload().callback_query as object), data: `rb:${"A".repeat(22)}:0` } };
+    storage.value.claimNext = vi.fn()
+      .mockResolvedValueOnce({ ...storage.claim, payload: pressPayload, updateId: "1002", voice: null })
+      .mockResolvedValueOnce(null);
+    const pressed = parseTelegramUpdate({ message: { chat: { id: 101, type: "private" }, date: 1_700_000_001,
+      from: { first_name: "Анна", id: 101, is_bot: false }, message_id: 2 ** 40 + 1002, text: "[Tapped button «Да» under your message: «Берём?»]" }, update_id: 1002 });
+    if (pressed?.kind !== "message") throw new Error("TEST_MESSAGE_INVALID");
+    const handleReplyButtonPress = vi.fn().mockResolvedValue({ buttonMessageId: "78", message: pressed.message, status: "message" });
+    const { dependencies, handle } = ingress(storage, { handleReplyButtonPress });
+
+    await runDrain(handle, pressPayload);
+
+    expect(handleReplyButtonPress).toHaveBeenCalledWith(expect.objectContaining({ id: "callback-1" }), "1002");
+    expect(dependencies.handleSoftwareUpdateCallback).not.toHaveBeenCalled();
+    expect(dependencies.dismissReplyButtons).not.toHaveBeenCalled();
+    const [update, control] = vi.mocked(dependencies.dispatch).mock.calls[0]!;
+    expect(update).toEqual({ kind: "message", message: pressed.message });
+    expect(control.attributes).toMatchObject({ telegramReplyButtonMessageId: "78" });
+    expect(dependencies.runTurn).toHaveBeenCalledWith("turn_one");
+  });
+
+  it("dispatches nothing for a press its handler already answered", async () => {
+    const storage = repository();
+    const pressPayload = { ...callbackPayload(), callback_query: { ...(callbackPayload().callback_query as object), data: `rb:${"A".repeat(22)}:0` } };
+    storage.value.claimNext = vi.fn()
+      .mockResolvedValueOnce({ ...storage.claim, payload: pressPayload, updateId: "1002", voice: null })
+      .mockResolvedValueOnce(null);
+    const { dependencies, handle } = ingress(storage, { handleReplyButtonPress: vi.fn().mockResolvedValue({ status: "answered" }) });
+
+    await runDrain(handle, pressPayload);
+
+    expect(dependencies.dispatch).not.toHaveBeenCalled();
+    expect(storage.value.beginDispatch).not.toHaveBeenCalled();
+    expect(storage.value.complete).toHaveBeenCalledWith("1002", storage.claim.leaseToken, undefined);
+  });
+
+  it("dismisses the author's buttons before their message, and goes on when that fails", async () => {
+    const storage = repository();
+    const order: string[] = [];
+    const dismissReplyButtons = vi.fn(async () => {
+      order.push("dismiss");
+      throw new Error("database busy");
+    });
+    const dispatch = vi.fn(async () => {
+      order.push("dispatch");
+      return DISPATCHED;
+    });
+    const { handle } = ingress(storage, { dismissReplyButtons, dispatch });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await runDrain(handle, voicePayload());
+
+    expect(dismissReplyButtons).toHaveBeenCalledWith(expect.objectContaining({ messageId: "77" }));
+    expect(order).toEqual(["dismiss", "dispatch"]);
     vi.restoreAllMocks();
   });
 

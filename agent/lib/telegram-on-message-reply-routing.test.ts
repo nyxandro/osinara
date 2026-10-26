@@ -82,7 +82,6 @@ describe("createTelegramMessageHandler reply routing", () => {
     }));
     expect(result).toMatchObject({
       continuationToken: "group-101::340:osinara:2",
-      replyHandling: "message",
     });
   });
 
@@ -162,7 +161,6 @@ describe("createTelegramMessageHandler reply routing", () => {
     }));
     expect(result).toMatchObject({
       continuationToken: "group-101::340:osinara:2",
-      replyHandling: "message",
     });
     expect(result?.auth?.attributes).toMatchObject({
       telegramReplyToMessageId: "342",
@@ -218,7 +216,6 @@ describe("createTelegramMessageHandler reply routing", () => {
     });
     expect(result).toMatchObject({
       continuationToken: "group-101::88:osinara:1",
-      replyHandling: "message",
     });
   });
 
@@ -249,42 +246,7 @@ describe("createTelegramMessageHandler reply routing", () => {
     expect(repository.session.prepareTurn).toHaveBeenCalledWith(expect.objectContaining({
       baseContinuationToken: "telegram-101::88",
     }));
-    expect(result).toMatchObject({ replyHandling: "message" });
-  });
-
-  it("preserves native reply handling for an authorized HITL response", async () => {
-    const repository = familyGroupRepository();
-    repository.telegram.findIdentity.mockResolvedValue({
-      familyId: "family-1",
-      role: "member",
-      userId: "user-1",
-    });
-    repository.journal.record.mockResolvedValue({
-      entryId: "00000000-0000-4000-8000-000000000341",
-      replyToAgent: true,
-      sequenceId: "343",
-      status: "inserted",
-    });
-    repository.session.hasRoute.mockResolvedValue(false);
-    repository.hitl.authorizeReply.mockResolvedValue("authorized");
-    const handler = createTelegramMessageHandler(repository);
-
-    const result = await handler({ ...telegramContext().context,ingressRecovery: { updateId: "343",dispatchId: "123e4567-e89b-42d3-a456-426614174000" } }, {
-      ...groupMessage("да"),
-      messageId: "343",
-      replyToMessage: {
-        chat: { id: "group-101", type: "group" },
-        from: { firstName: "Osinara", id: "bot-1", isBot: true },
-        messageId: "341",
-      },
-    });
-
-    expect(repository.session.prepareAuthorizedResponse).toHaveBeenCalledWith(expect.objectContaining({
-      ingress: expect.objectContaining({ updateId: "343" }),
-    }));
     expect(result).not.toBeNull();
-    expect(result).not.toHaveProperty("replyHandling");
-    expect(repository.memoryReview.prepareInteractiveTurn).not.toHaveBeenCalled();
   });
 
   it("continues a sender-less reply to an exact known Osinara route", async () => {

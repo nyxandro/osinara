@@ -24,8 +24,8 @@ shell quoting, pipes, redirects, substitutions, or command chaining. For example
 
 The boundary classifies the reviewed command path as read or mutation. Every
 mutation is paused for human approval and displays the complete argv, including all
-recipients, IDs, bodies, ranges, and other material parameters. Never use
-`ask_question` as a substitute for this approval.
+recipients, IDs, bodies, ranges, and other material parameters. A question in
+the chat, with or without reply buttons, is never a substitute for this approval.
 
 ## Osinara Runtime Authentication
 

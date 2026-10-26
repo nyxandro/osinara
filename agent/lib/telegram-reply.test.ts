@@ -3,6 +3,7 @@
  *
  * Constructs covered:
  * - `telegramTurnReplyParameters`: binds group output to the verified triggering message.
+ * - A tapped reply button is answered under the buttons' message.
  * - Private and non-message turns remain unthreaded.
  * - Mismatched channel/auth state fails closed.
  */
@@ -41,6 +42,16 @@ describe("telegramTurnReplyParameters", () => {
       telegramChatType: "supergroup",
       telegramReplyToMessageId: "77",
     }))).toEqual({ allow_sending_without_reply: true, message_id: 77 });
+  });
+
+  it("answers a tapped reply button under the message whose button was tapped", () => {
+    // The press itself has a message number Telegram never issued.
+    expect(telegramTurnReplyParameters(state(), context({
+      telegramChatId: "-1001",
+      telegramChatType: "supergroup",
+      telegramReplyButtonMessageId: "50",
+      telegramReplyToMessageId: String(2 ** 40 + 7001),
+    }))).toEqual({ allow_sending_without_reply: true, message_id: 50 });
   });
 
   it("does not add reply metadata to private or callback-originated turns", () => {

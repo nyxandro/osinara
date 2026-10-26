@@ -297,7 +297,6 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
     await repositories.conversations.syncTimelineParticipants(conversation.id, [inboundTimeline.entryId]);
     // A persisted agent timeline anchor is trusted even when Telegram omits compact sender metadata.
     const replyAuthorization = await authorizeTelegramReply({
-      ...(ctx.ingressRecovery ? { ingress: ctx.ingressRecovery } : {}),
       actor,
       botUsername,
       exactReplyRoute,
@@ -309,11 +308,9 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       verifiedReplyRoute,
     });
     if (!replyAuthorization.accepted) return null;
-    const replyHandling = replyAuthorization.replyHandling;
-    const resumesPendingTask = replyAuthorization.resumesPendingTask;
     verifiedReplyRoute = replyAuthorization.verifiedReplyRoute;
 
-    // Context snapshots and one-time notices are consumed only after reply/HITL authorization has
+    // Context snapshots and one-time notices are consumed only after reply authorization has
     // proved that this accepted message will continue into an agent turn.
     const profileSignals = actor.kind !== "telegram_channel"
       ? verifiedTelegramProfileSignals(message)
@@ -363,21 +360,9 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
     const resolvedSessionScope = telegramSessionScope(decision);
     const verifiedForumTopicId = forumTopicId === null ? null : Number(forumTopicId);
     const baseContinuationToken = group
-      ? resumesPendingTask
-        ? telegramBaseContinuationToken(message, verifiedReplyRoute ?? exactReplyRoute)
-        : groupCanonicalContinuationToken(group.groupId, verifiedForumTopicId)
+      ? groupCanonicalContinuationToken(group.groupId, verifiedForumTopicId)
       : telegramBaseContinuationToken(message, verifiedReplyRoute);
-    let appSession: PreparedSession;
-    let responseSessionId: string | undefined;
-    if (resumesPendingTask) {
-      if (!ctx.ingressRecovery) throw new AppError("AGENT_RESPONSE_INGRESS_MISSING", "Не найден проверенный источник ответа");
-      const response = await repositories.session.prepareAuthorizedResponse({
-        ingress: ctx.ingressRecovery,familyId: access.familyId,groupId: resolvedSessionScope.groupId,
-        userId: resolvedSessionScope.userId,scope: resolvedSessionScope.scope,now: turnStartedAt,telegramForumTopicId: verifiedForumTopicId,
-      });
-      appSession=response;
-      responseSessionId=response.nativeSessionId;
-    } else appSession = await repositories.session.prepareTurn({
+    const appSession: PreparedSession = await repositories.session.prepareTurn({
       baseContinuationToken,
       familyId: access.familyId,
       kind: "canonical",
@@ -390,7 +375,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       ? await repositories.turnInterjections.findDeliveredContentKind(ctx.ingressRecovery.updateId, appSession.id)
       : null;
     // Messages its author sends while this turn works can reach it only in the trusted zones.
-    const turnInterjectionMarker = ctx.ingressRecovery && !resumesPendingTask &&
+    const turnInterjectionMarker = ctx.ingressRecovery &&
       actor.kind === "telegram_user" && (group === null || group.type === "family_private")
       ? createTurnInterjectionMarker()
       : null;
@@ -445,8 +430,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
         "AGENT_CONVERSATION_TURN_CONTEXT_MISSING: Не удалось подготовить историю разговора",
       );
     }
-    // An authorized response resumes the existing turn and source set; no new turn will bind a batch.
-    const groupTurnContext = group && actor.kind !== "telegram_channel" && !resumesPendingTask
+    const groupTurnContext = group && actor.kind !== "telegram_channel"
       ? await prepareTelegramMemoryReviewTurn({
           applicationSessionId: appSession.id,
           conversationId: conversation.id,
@@ -499,13 +483,9 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       pendingDelivery: pendingDeliveries,
       profileSignals,
       profileReplyTimelineSequence: inboundTimeline.replyToSequenceId,
-      replyHandling,
-      replyQuotedText,
-      resumesPendingTask,
       plannedWakeups,
       shownDuringTurn,
       turnInterjectionMarker,
-      ...(responseSessionId === undefined ? {} : { responseSessionId }),
       storedAttachments,
       timelineEntryId: inboundTimeline.entryId,
       turnContext: groupTurnContext,

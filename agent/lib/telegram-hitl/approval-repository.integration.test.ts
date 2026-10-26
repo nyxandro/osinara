@@ -5,7 +5,7 @@
  * - `telegramHitlApprovalRepository.register`: binds a rendered request to one Telegram user.
  * - `claimCallback`: atomically rejects foreign, stale, and repeated callback attempts.
  * - Pending approvals survive the turn that pauses for user input.
- * - `authorizeReply`: atomically protects and consumes accepted text replies.
+ * - `authorizeReply`: a text reply never decides a pending approval.
  * - Consumed prompts become ordinary ancestry for any later author without weakening pending binds.
  * - Owner-only external approvals recheck the current owner role before resuming the turn.
  */
@@ -28,7 +28,6 @@ const OWNER_TELEGRAM_ID = "hitl-owner";
 
 async function fixture(
   options: {
-    freeform?: boolean;
     messageMode?: "addressed_only" | "owner_only";
     scope?: "family" | "group";
     type?: "external" | "family_private";
@@ -75,9 +74,9 @@ async function fixture(
   await sessionRepository.registerRouteAlias(session.id, "-1001:55:88");
   await telegramHitlApprovalRepository.register({
     applicationSessionId: session.id,
-    kind: options.freeform ? "question" : "tool-approval",
-    callbackData: options.freeform ? [] : ["hitl:0", "hitl:1"],
-    callbackOptions: options.freeform ? [] : [
+    kind: "tool-approval",
+    callbackData: ["hitl:0", "hitl:1"],
+    callbackOptions: [
       { callbackData: "hitl:0", label: "Да, подтвердить", optionId: "approve" },
       { callbackData: "hitl:1", label: "Нет, отклонить", optionId: "deny" },
     ],
@@ -131,21 +130,6 @@ describeWithDatabase("Telegram HITL approval repository", () => {
     expect(await telegramHitlApprovalRepository.claimCallback({ ...input,ingress: { ...input.ingress,callbackQueryId: "another" } }))
       .toEqual({ status: "expired" });
   });
-  it("retains the meaning of the same text answer when preparation resumes after consumption", async () => {
-    await fixture({ freeform: true });
-    await database().query("TRUNCATE telegram_ingress_queues CASCADE");
-    await telegramIngressRepository.enqueue({ updateId: "901",continuationKey: "-1001:55:",payload: { update_id: 901,
-      message: { message_id: 100,chat: { id: "-1001" },from: { id: OWNER_TELEGRAM_ID },reply_to_message: { message_id: 88 },text: "Да" } } });
-    const claim = (await telegramIngressRepository.claimNext(60000, NO_BURSTS))!;
-    const dispatchId=crypto.randomUUID();
-    await telegramIngressRepository.beginDispatch("901",claim.leaseToken,dispatchId);
-    const input = { baseContinuationToken: "-1001:55:88",telegramChatId: "-1001",telegramMessageId: "88",telegramUserId: OWNER_TELEGRAM_ID,
-      ingress: { updateId: "901",dispatchId } };
-    expect(await telegramHitlApprovalRepository.authorizeReply(input)).toBe("authorized");
-    expect(await telegramHitlApprovalRepository.authorizeReply(input)).toBe("authorized");
-    expect((await database().query("SELECT response_turn_id FROM telegram_ingress_updates WHERE update_id=901")).rows[0].response_turn_id).toBe("turn_0");
-  });
-
   it("rejects another group member without consuming the initiator's approval", async () => {
     const current = await fixture();
 
@@ -401,44 +385,6 @@ describeWithDatabase("Telegram HITL approval repository", () => {
         telegramUserId: OWNER_TELEGRAM_ID,
       }),
     ).resolves.toEqual({ status: "forbidden" });
-  });
-
-  it("protects and atomically consumes a text reply from the expected identity", async () => {
-    await fixture({ freeform: true });
-
-    await expect(
-      telegramHitlApprovalRepository.authorizeReply({
-        baseContinuationToken: "-1001:55:88",
-        telegramChatId: "-1001",
-        telegramMessageId: "88",
-        telegramUserId: "202",
-      }),
-    ).resolves.toBe("forbidden");
-    await expect(
-      telegramHitlApprovalRepository.authorizeReply({
-        baseContinuationToken: "-1001:55:88",
-        telegramChatId: "-1001",
-        telegramMessageId: "88",
-        telegramUserId: OWNER_TELEGRAM_ID,
-      }),
-    ).resolves.toBe("authorized");
-    await expect(sessionRepository.hasRoute("-1001:55:88")).resolves.toBe(false);
-    await expect(
-      telegramHitlApprovalRepository.authorizeReply({
-        baseContinuationToken: "-1001:55:88",
-        telegramChatId: "-1001",
-        telegramMessageId: "88",
-        telegramUserId: "202",
-      }),
-    ).resolves.toBe("not_applicable");
-    await expect(
-      telegramHitlApprovalRepository.authorizeReply({
-        baseContinuationToken: "-1001:55:999",
-        telegramChatId: "-1001",
-        telegramMessageId: "999",
-        telegramUserId: OWNER_TELEGRAM_ID,
-      }),
-    ).resolves.toBe("not_applicable");
   });
 
   it("does not consume an approval button when its message receives an ordinary text reply", async () => {

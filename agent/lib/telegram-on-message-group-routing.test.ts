@@ -81,7 +81,7 @@ describe("createTelegramMessageHandler group routing", () => {
     });
   });
 
-  it("blocks another group member replying to a pending HITL prompt", async () => {
+  it("blocks a group reply aimed at a conversation whose approval no longer waits", async () => {
     const repository = repositories();
     repository.telegram.findGroup.mockResolvedValue({
       familyId: "family-1",
@@ -97,7 +97,7 @@ describe("createTelegramMessageHandler group routing", () => {
       role: "member",
       userId: "user-2",
     });
-    repository.hitl.authorizeReply.mockResolvedValue("forbidden");
+    repository.hitl.authorizeReply.mockResolvedValue("expired");
     const handler = createTelegramMessageHandler(repository);
     const { context, sendMessage } = telegramContext();
     const message: TelegramMessage = {

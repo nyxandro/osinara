@@ -18,6 +18,7 @@ import { externalGroupCapabilityInstructions } from "../tool-policy/external-gro
 import type { ExternalGroupToolName } from "../tool-policy/group-tool-catalog.js";
 import { TURN_INTERJECTION_RULES } from "../turn-interjection/turn-interjection-block.js";
 import { chatNotesRules } from "./chat-notes-fragments.js";
+import { REPLY_BUTTON_RULES } from "./reply-button-fragments.js";
 
 import {
   CURRENT_MESSAGE_REPLY_CONTRACT,
@@ -178,6 +179,8 @@ function privateInstructions(
     scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
     // A delegated child has no notes tool; it reads the notes and leaves keeping them to the turn.
     scheduledRun || subagentTurn ? null : chatNotesRules("private"),
+    // A child answers its parent, never the person, so it offers no buttons.
+    subagentTurn ? null : REPLY_BUTTON_RULES,
   ]);
 }
 
@@ -246,6 +249,8 @@ function familyInstructions(
     scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
     // A delegated child has no notes tool; it reads the notes and leaves keeping them to the turn.
     scheduledRun || subagentTurn ? null : chatNotesRules("family"),
+    // A child answers its parent, never the person, so it offers no buttons.
+    subagentTurn ? null : REPLY_BUTTON_RULES,
   ]);
 }
 

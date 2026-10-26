@@ -1,11 +1,10 @@
 /**
- * The application's reply-authorization boundary with the runtime's reply rule.
- * Ordinary conversation must start a turn, never a synthetic response to another bot.
+ * The application's reply-authorization boundary: a reply to a bot is an ordinary message turn,
+ * unless it targets a conversation whose approval no longer waits.
  */
 import { describe, expect, it } from "vitest";
 
 import { parseTelegramUpdate } from "../runtime/telegram/inbound.js";
-import { replyInputResponse } from "../runtime/telegram/telegram-dispatch.js";
 import { createTelegramMessageHandler } from "./telegram-on-message.js";
 import { BOT_USERNAME, repositories, telegramContext } from "./telegram-on-message.test-fixtures.js";
 
@@ -15,8 +14,7 @@ describe("Telegram reply dispatch", () => {
     { actor: "bot", addressed: true, target: "other", authorization: "not_applicable", dispatch: "send" },
     { actor: "channel", addressed: true, target: "other", authorization: "not_applicable", dispatch: "send" },
     { actor: "human", addressed: false, target: "other", authorization: "not_applicable", dispatch: "none" },
-    { actor: "human", addressed: true, target: "osinara", authorization: "authorized", dispatch: "respond" },
-    { actor: "human", addressed: true, target: "osinara", authorization: "forbidden", dispatch: "none" },
+    { actor: "human", addressed: true, target: "osinara", authorization: "not_applicable", dispatch: "send" },
     { actor: "human", addressed: true, target: "osinara", authorization: "expired", dispatch: "none" },
   ] as const)(
     "$actor reply to $target, addressed=$addressed, authorization=$authorization uses $dispatch",
@@ -84,19 +82,13 @@ describe("Telegram reply dispatch", () => {
       const result = await createTelegramMessageHandler(repository)({ ...telegramContext().context,
         ingressRecovery: { updateId: "1001", dispatchId: "123e4567-e89b-42d3-a456-426614174000" } }, update.message);
 
-      const decision = result === null ? "none" : replyInputResponse(update.message, result) === undefined ? "send" : "respond";
-      expect(decision).toBe(dispatch);
+      expect(result === null ? "none" : "send").toBe(dispatch);
       if (dispatch === "send") {
         expect(result?.message).toBe(durableMessage);
         expect(result?.auth?.attributes).toMatchObject({ memoryScopes: ["group"] });
         expect(repository.session.prepareTurn).toHaveBeenCalledWith(expect.objectContaining({
           baseContinuationToken: "osinara:group:group-1:main",
           kind: "canonical",
-        }));
-      } else if (dispatch === "respond") {
-        expect(replyInputResponse(update.message, result!)).toEqual({ requestId: "telegram_reply:3493", text });
-        expect(repository.session.prepareAuthorizedResponse).toHaveBeenCalledWith(expect.objectContaining({
-          ingress: expect.objectContaining({ updateId: "1001" }),
         }));
       } else {
         expect(repository.session.prepareTurn).not.toHaveBeenCalled();

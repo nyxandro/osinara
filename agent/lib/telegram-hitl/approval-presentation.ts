@@ -71,7 +71,7 @@ export function createTelegramApprovalPresenter(
 ): TelegramApprovalPresenter {
   return async (request, ctx) => {
     const localized = localizeTelegramInputRequest(request);
-    if (request.display === "confirmation" && request.action.toolName === "manage_profile_projection") {
+    if (request.action.toolName === "manage_profile_projection") {
       const input = requireProfileProjectionUpdate(request.action.input);
       const label = await dependencies.findProfileProjectionGroup(input.groupRef, ctx);
       if (label === null || !label.trim()) throw new AppError("AGENT_PROFILE_PROJECTION_GROUP_NOT_FOUND",
@@ -94,7 +94,7 @@ export function createTelegramApprovalPresenter(
         })),
       };
     }
-    if (request.display === "confirmation" && request.action.toolName === "manage_telegram_group") {
+    if (request.action.toolName === "manage_telegram_group") {
       const parsed = requireManageTelegramGroupInput(request.action.input);
       if (parsed.action === "update_policy") {
         const chatId = parsed.policy.telegramChatId;
@@ -117,7 +117,7 @@ export function createTelegramApprovalPresenter(
         };
       }
     }
-    if (request.display === "confirmation" && request.action.toolName === "manage_external_group_schedule") {
+    if (request.action.toolName === "manage_external_group_schedule") {
       // The approval policy denied any invalid input already, so the action and its target are set.
       const input = request.action.input;
       if (input.action === "create" || input.action === "update") {
@@ -142,10 +142,7 @@ export function createTelegramApprovalPresenter(
         };
       }
     }
-    if (
-      request.display === "confirmation" &&
-      request.action.toolName === "manage_gmail_message"
-    ) {
+    if (request.action.toolName === "manage_gmail_message") {
       const input = requireGmailMessageInput(request.action.input);
       const subject = await dependencies.findGmailMessages(input.messageIds, input.profileRef, ctx);
       return {
@@ -154,10 +151,7 @@ export function createTelegramApprovalPresenter(
         prompt: gmailApprovalPrompt(input.action, input.messageIds, subject),
       };
     }
-    if (
-      request.display === "confirmation" &&
-      request.action.toolName === "execute_google_workspace"
-    ) {
+    if (request.action.toolName === "execute_google_workspace") {
       return {
         ...localized,
         prompt: buildApprovalMessage({

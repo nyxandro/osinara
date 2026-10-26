@@ -20,9 +20,12 @@ import { AppError } from "../app-error.js";
 import { ModelFacingError } from "../model-facing-error.js";
 import type { MutableReminderRow } from "./reminder-repository-helpers.js";
 import { REMINDER_COLUMNS } from "./reminder-repository-helpers.js";
+import type { ReplyButtonRows } from "../reply-buttons/reply-button-contract.js";
 import type { ReminderRecurrence, ReminderRow, ReminderStatus } from "./reminder-record.js";
 
 export interface ReminderMutationValues {
+  /** New reply buttons, or null to remove them; absent keeps the current ones. */
+  buttons?: ReplyButtonRows | null;
   content?: string;
   enabled?: boolean;
   firstRunAt?: Date;
@@ -102,6 +105,7 @@ export async function applyReminderUpdate(
                        WHEN $8 THEN 'active'::reminder_status ELSE status END,
          attempts = CASE WHEN $5 OR $8 THEN 0 ELSE attempts END,
          last_error_code = CASE WHEN $5 OR $8 THEN NULL ELSE last_error_code END,
+         reply_buttons = CASE WHEN $9 THEN $10::jsonb ELSE reply_buttons END,
          updated_at = now()
      WHERE id = $1
      RETURNING ${REMINDER_COLUMNS}`,
@@ -114,6 +118,8 @@ export async function applyReminderUpdate(
       nextDue,
       values.enabled ?? null,
       reminderUpdateRevives(reminder, values),
+      values.buttons !== undefined,
+      values.buttons === undefined || values.buttons === null ? null : JSON.stringify(values.buttons),
     ],
   );
   return updated.rows[0]!;
