@@ -19,9 +19,13 @@ import {
   REMINDER_DISPATCH_LATE_AFTER_MILLISECONDS,
   REMINDER_DISPATCH_MAX_SAFE_ATTEMPTS,
 } from "./reminder-config.js";
+import type { ReplyButtonRows } from "../reply-buttons/reply-button-contract.js";
 import type { ReminderRecurrenceUnit, ReminderScope } from "./reminder-record.js";
 
 export interface ClaimedReminder {
+  /** Who may tap the reminder's buttons: its author, as a Telegram user id. */
+  addresseeTelegramUserId: string | null;
+  buttons: ReplyButtonRows | null;
   content: string;
   delayed: boolean;
   dueAt: string;
@@ -34,6 +38,7 @@ export interface ClaimedReminder {
   ownerUserId: string | null;
   scope: ReminderScope;
   telegramChatId: string;
+  telegramChatType: string | null;
   timezone: string;
 }
 
@@ -44,6 +49,7 @@ interface ClaimOptions {
 }
 
 interface ClaimedRow {
+  addressee_telegram_user_id: string | null;
   content: string;
   delayed: boolean;
   due_at: Date;
@@ -54,8 +60,10 @@ interface ClaimedRow {
   lease_token: string;
   message_thread_id: string | null;
   owner_user_id: string | null;
+  reply_buttons: ReplyButtonRows | null;
   scope: ReminderScope;
   telegram_chat_id: string;
+  telegram_chat_type: string | null;
   timezone: string;
 }
 
@@ -217,7 +225,13 @@ export const reminderDispatchRepository = {
          RETURNING reminder.id, reminder.family_id, reminder.owner_user_id, reminder.group_id,
                    reminder.content, reminder.scope, reminder.timezone, reminder.telegram_chat_id,
                     reminder.message_thread_id::text, reminder.forum_topic_id::text,
-                    reminder.due_at, reminder.lease_token::text,
+                    reminder.due_at, reminder.lease_token::text, reminder.reply_buttons,
+                   CASE WHEN reminder.scope = 'group' THEN reminder.author_telegram_user_id
+                        ELSE (SELECT author.telegram_user_id FROM users AS author WHERE author.id = reminder.author_user_id)
+                   END AS addressee_telegram_user_id,
+                   CASE WHEN reminder.scope = 'personal' THEN 'private'
+                        ELSE (SELECT group_row.telegram_chat_type FROM telegram_groups AS group_row WHERE group_row.id = reminder.group_id)
+                   END AS telegram_chat_type,
                    (reminder.delayed_by_quiet_hours OR reminder.due_at < $1 - ($5::text || ' milliseconds')::interval) AS delayed`,
         [
           options.now,
@@ -229,6 +243,8 @@ export const reminderDispatchRepository = {
       );
       await client.query("COMMIT");
       return claimed.rows.map((row) => ({
+        addresseeTelegramUserId: row.addressee_telegram_user_id,
+        buttons: row.reply_buttons,
         content: row.content,
         delayed: row.delayed,
         dueAt: row.due_at.toISOString(),
@@ -241,6 +257,7 @@ export const reminderDispatchRepository = {
         ownerUserId: row.owner_user_id,
         scope: row.scope,
         telegramChatId: row.telegram_chat_id,
+        telegramChatType: row.telegram_chat_type,
         timezone: row.timezone,
       }));
     } catch (error) {

@@ -17,6 +17,7 @@ import type { JournalClient } from "../runtime/turn/journal-repository.js";
 
 import { AppError } from "./app-error.js";
 import { prepareTelegramIngress, type TelegramPreparationContext } from "./telegram-ingress-preparation.js";
+import { REPLY_BUTTON_MESSAGE_ATTRIBUTE } from "./reply-buttons/reply-button-contract.js";
 
 export class TelegramProcessingTimeout extends AppError {
   constructor() {
@@ -62,6 +63,8 @@ export function telegramIngressControl(input: {
   readonly leaseToken: string;
   /** A replay of an interrupted dispatch: a rejected button is not announced a second time. */
   readonly replaying: boolean;
+  /** The message whose reply button this update pressed; the turn replies and reacts to it. */
+  readonly replyButtonMessageId?: string;
   readonly signal: AbortSignal;
   readonly updateId: string;
 }): TelegramDispatchControl {
@@ -72,6 +75,9 @@ export function telegramIngressControl(input: {
       osinaraTelegramDeadlineAt: input.deadlineAt,
       osinaraTelegramIngressId: input.dispatchId,
       osinaraTelegramUpdateId: input.updateId,
+      ...(input.replyButtonMessageId === undefined
+        ? {}
+        : { [REPLY_BUTTON_MESSAGE_ATTRIBUTE]: input.replyButtonMessageId }),
     },
     bind: (client, target) => bindIngressTurn(client, binding, target),
     prepareCallback: (context, query, token, prepare) => {

@@ -32,7 +32,7 @@ function fixture(count: number) {
   const handler = createTelegramDurableIngress({
     reportFailure: vi.fn(),
     acceptMedia: vi.fn(), authorizeVoice: vi.fn(), botUsername: "osinara_bot", dispatch,
-    handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), leaseMilliseconds: 1_000,
+    dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), leaseMilliseconds: 1_000,
     repository, runTurn, transcribeVoice: vi.fn(),
   });
   async function drain() {

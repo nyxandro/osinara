@@ -9,6 +9,7 @@ import type { TelegramChannelState } from "../runtime/telegram/channel-types.js"
 import type { SessionContext } from "../runtime/context.js";
 
 import { AppError } from "./app-error.js";
+import { REPLY_BUTTON_MESSAGE_ATTRIBUTE } from "./reply-buttons/reply-button-contract.js";
 
 const POSITIVE_MESSAGE_ID_PATTERN = /^[1-9]\d*$/u;
 
@@ -25,7 +26,9 @@ export function telegramTurnReplyParameters(
   // Private chats are already one-to-one; callback turns intentionally omit the message-origin key.
   if (state.chatType !== "group" && state.chatType !== "supergroup") return undefined;
   const auth = ctx.session.auth.current;
-  const replyToMessageId = auth?.attributes.telegramReplyToMessageId;
+  // A tapped reply button has no message of its own: the answer replies to the buttons' message.
+  const tappedUnder = auth?.attributes[REPLY_BUTTON_MESSAGE_ATTRIBUTE];
+  const replyToMessageId = tappedUnder !== undefined ? tappedUnder : auth?.attributes.telegramReplyToMessageId;
   if (!auth || replyToMessageId === undefined) return undefined;
 
   // Reply metadata may only cross the channel boundary when it belongs to this exact verified chat.

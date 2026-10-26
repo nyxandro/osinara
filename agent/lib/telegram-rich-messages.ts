@@ -15,6 +15,7 @@
 import { createHash } from "node:crypto";
 
 import { callTelegramApi, type TelegramApiResponse } from "../runtime/telegram/api.js";
+import type { JsonObject } from "../runtime/json.js";
 import type { TelegramChannelState, TelegramHandle } from "../runtime/telegram/channel-types.js";
 import type { TelegramChatType } from "../runtime/telegram/inbound.js";
 
@@ -229,6 +230,7 @@ function richBody(
   richMessage: Readonly<{ html: string } | { markdown: string }>,
   privateOnly: boolean,
   replyParameters?: TelegramReplyParameters,
+  replyMarkup?: JsonObject,
 ): TelegramApiBody {
   return {
     chat_id: numericChatId(target, privateOnly),
@@ -238,6 +240,7 @@ function richBody(
     ...(replyParameters === undefined
       ? {}
       : { reply_parameters: replyParameters }),
+    ...(replyMarkup === undefined ? {} : { reply_markup: replyMarkup }),
     rich_message: richMessage,
   };
 }
@@ -285,10 +288,11 @@ export async function postTelegramRichMessageChunk(
   target: TelegramRichTarget,
   state?: TelegramRichAnchorState,
   replyParameters?: TelegramReplyParameters,
+  replyMarkup?: JsonObject,
 ): Promise<SentTelegramMessage> {
   const response = await requestTelegramRichApi(
     "sendRichMessage",
-    richBody(target, { markdown }, false, replyParameters),
+    richBody(target, { markdown }, false, replyParameters, replyMarkup),
   );
   const sent = requireSentMessage(response);
 

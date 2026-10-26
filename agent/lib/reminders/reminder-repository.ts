@@ -11,6 +11,7 @@
  */
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
+import type { ReplyButtonRows } from "../reply-buttons/reply-button-contract.js";
 import { decodeDateUuidCursor, encodeDateUuidCursor, paginationFilterDigest } from "../keyset-pagination.js";
 import { REMINDER_LIST_MAX_LIMIT } from "./reminder-config.js";
 import type { ReminderAuthorization } from "./reminder-context.js";
@@ -45,6 +46,8 @@ import {
 } from "./reminder-validation.js";
 
 export interface ReminderCreateInput {
+  /** Reply buttons sent with every delivery; absent for none. */
+  buttons?: ReplyButtonRows;
   content: string;
   firstRunAt: Date;
   operationKey: string;
@@ -55,6 +58,7 @@ export interface ReminderCreateInput {
 }
 
 export interface ReminderUpdateInput {
+  buttons?: ReplyButtonRows | null;
   content?: string;
   enabled?: boolean;
   firstRunAt?: Date;
@@ -198,9 +202,9 @@ export const reminderRepository = {
         `INSERT INTO reminders
            (family_id, owner_user_id, author_user_id, group_id, scope, content, timezone,
              telegram_chat_id, message_thread_id, forum_topic_id, recurrence_unit, recurrence_interval,
-            recurrence_anchor_local, recurrence_anchor_at, due_at, available_at)
+            recurrence_anchor_local, recurrence_anchor_at, due_at, available_at, reply_buttons)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::bigint, $10::bigint, $11, $12,
-                  $13::timestamptz AT TIME ZONE $7, $13, $13, $13)
+                  $13::timestamptz AT TIME ZONE $7, $13, $13, $13, $14::jsonb)
          RETURNING ${REMINDER_COLUMNS}`,
         [
           auth.familyId,
@@ -216,6 +220,7 @@ export const reminderRepository = {
           recurrence?.unit ?? null,
           recurrence?.interval ?? null,
           firstRunAt,
+          input.buttons === undefined ? null : JSON.stringify(input.buttons),
         ],
       );
       const reminder = inserted.rows[0]!;
@@ -289,7 +294,8 @@ export const reminderRepository = {
     id: string,
     input: ReminderUpdateInput,
   ): Promise<ReminderRecord> {
-    if (input.content === undefined && input.enabled === undefined && input.firstRunAt === undefined && input.recurrence === undefined) {
+    if (input.buttons === undefined && input.content === undefined && input.enabled === undefined &&
+      input.firstRunAt === undefined && input.recurrence === undefined) {
       throw new AppError("AGENT_REMINDER_UPDATE_INVALID", "Не указаны изменения напоминания");
     }
     const content = input.content === undefined ? undefined : requireReminderContent(input.content);
@@ -310,6 +316,7 @@ export const reminderRepository = {
       if (!reminder) throw new AppError("AGENT_REMINDER_NOT_FOUND", "Напоминание не найдено");
       await requireReminderMutationAccess(client, auth, reminder);
       const updated = await applyReminderUpdate(client, reminder, {
+        ...(input.buttons === undefined ? {} : { buttons: input.buttons }),
         ...(content === undefined ? {} : { content }),
         ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
         ...(firstRunAt === undefined ? {} : { firstRunAt }),

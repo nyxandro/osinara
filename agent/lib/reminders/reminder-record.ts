@@ -8,6 +8,8 @@
  */
 import { createHash } from "node:crypto";
 
+import type { ReplyButtonRows } from "../reply-buttons/reply-button-contract.js";
+
 export type ReminderScope = "family" | "group" | "personal";
 export type ReminderStatus = "active" | "completed" | "failed" | "leased" | "paused";
 export const REMINDER_RECURRENCE_UNITS = ["daily", "weekly", "monthly", "minutely", "hourly", "yearly"] as const;
@@ -19,6 +21,8 @@ export interface ReminderRecurrence {
 }
 
 export interface ReminderRecord {
+  /** Reply buttons sent with every delivery, or null for none. */
+  buttons: ReplyButtonRows | null;
   content: string;
   createdAt: string;
   id: string;
@@ -42,6 +46,7 @@ export interface ReminderRow {
   message_thread_id: string | null;
   recurrence_interval: number | null;
   recurrence_unit: ReminderRecurrenceUnit | null;
+  reply_buttons: ReplyButtonRows | null;
   scope: ReminderScope;
   status: ReminderStatus;
   timezone: string;
@@ -50,6 +55,7 @@ export interface ReminderRow {
 
 export function rowToReminder(row: ReminderRow): ReminderRecord {
   return {
+    buttons: row.reply_buttons,
     content: row.content,
     createdAt: row.created_at.toISOString(),
     id: row.id,
