@@ -9,3 +9,5 @@ coverage
 *.log
 result-chat.json
 course
+.agents
+.claude

@@ -36,6 +36,10 @@ import { deliverTelegramFinalOutput } from "../lib/telegram-final-delivery.js";
 import { prepareTelegramTurn } from "../lib/telegram-turn-preparation.js";
 import { postTelegramRichMessageChunk } from "../lib/telegram-rich-messages.js";
 import { postTelegramPlainMessageChunk } from "../lib/telegram-plain-messages.js";
+import { stagedReplyButtons } from "../lib/reply-buttons/reply-button-delivery.js";
+import { REPLY_BUTTON_MESSAGE_ATTRIBUTE } from "../lib/reply-buttons/reply-button-contract.js";
+import { dismissReplyButtonsOnMessage } from "../lib/reply-buttons/reply-button-dismissal.js";
+import { handleReplyButtonPress } from "../lib/reply-buttons/reply-button-press.js";
 import {
   applicationSessionId,
   registerTelegramDeliveredMessageRoutes,
@@ -142,7 +146,10 @@ export const telegramTurnEvents: TelegramTurnEvents = {
       return;
     }
     if (output.kind === "reaction") {
-      const telegramMessageId = currentAttributes?.telegramMessageId;
+      // A tapped reply button stands for a message Telegram never saw: the reaction goes to the
+      // message whose button was tapped.
+      const tappedUnder = currentAttributes?.[REPLY_BUTTON_MESSAGE_ATTRIBUTE];
+      const telegramMessageId = typeof tappedUnder === "string" ? tappedUnder : currentAttributes?.telegramMessageId;
       if (isScheduledSession(ctx) || typeof telegramMessageId !== "string") {
         throw new AppError(
           "AGENT_TELEGRAM_REACTION_TARGET_MISSING",
@@ -175,6 +182,11 @@ export const telegramTurnEvents: TelegramTurnEvents = {
       : telegramTurnReplyParameters(channel.state, ctx);
     const replyParameters = output.standalone ? undefined : turnReplyParameters;
     const durableText = stripTelegramAsideDirectives(message);
+    // Buttons the turn staged go out under the last message of its final answer.
+    const replyButtons = await stagedReplyButtons({
+      agentTurnId: ctx.session.turn.id,
+      telegramChatId: channel.telegram.chatId,
+    });
     let sentMessages: Awaited<ReturnType<typeof deliverTelegramFinalOutput>>;
     try {
       sentMessages = await deliverTelegramFinalOutput({
@@ -187,23 +199,26 @@ export const telegramTurnEvents: TelegramTurnEvents = {
         agentSessionId: ctx.session.id,
         agentTurnId: ctx.session.turn.id,
         markdown: isScheduledSession(ctx) ? durableText : message,
-        sendChunk: async (chunk, ordinal) => {
+        sendChunk: async (chunk, ordinal, last) => {
           // An authored aside is a second thought, so it arrives after a visible typing pause.
           if (chunk.pacing === "aside") {
             await channel.telegram.startTyping();
             await sleep(asidePauseMilliseconds(chunk.text));
           }
+          const keyboard = last && replyButtons !== null ? await replyButtons.prepareLastChunk(chunk) : undefined;
           return chunk.format === "plain"
             ? await postTelegramPlainMessageChunk(
                 chunk.text,
                 channel,
                 ordinal === 0 ? replyParameters : undefined,
+                keyboard,
               )
             : await postTelegramRichMessageChunk(
                 chunk.text,
                 channel.telegram,
                 channel.state,
                 ordinal === 0 ? replyParameters : undefined,
+                keyboard,
               );
         },
       });
@@ -237,6 +252,7 @@ export const telegramTurnEvents: TelegramTurnEvents = {
       }
       throw error;
     }
+    await replyButtons?.afterDelivery(sentMessages);
     const deliveredAt = new Date();
     const groupId = scheduledDelivery?.groupId ??
       (typeof currentAttributes?.groupId === "string" ? currentAttributes.groupId : null);
@@ -456,6 +472,8 @@ export function createTelegramIngress(runtime: Pick<DurableIngressDependencies, 
     },
     authorizeVoice: authorizeTelegramVoice,
     botUsername: requiredBotUsername(),
+    dismissReplyButtons: dismissReplyButtonsOnMessage,
+    handleReplyButtonPress,
     handleSoftwareUpdateCallback,
     leaseMilliseconds: TELEGRAM_INGRESS_LEASE_MS,
     reportFailure: recordOperationalIncident,

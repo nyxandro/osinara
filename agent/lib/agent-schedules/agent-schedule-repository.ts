@@ -9,7 +9,14 @@ import type { PoolClient } from "pg";
 
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
-import { isPauseOnlyUpdate, requireAgentScheduleMaxRuns, requireScheduleLimitConsistency, requireScheduleLimitRemaining } from "./agent-schedule-limits.js";
+import {
+  isPauseOnlyUpdate,
+  isWakeupContentUpdate,
+  requireAgentScheduleMaxRuns,
+  requireScheduleLimitConsistency,
+  requireScheduleLimitRemaining,
+} from "./agent-schedule-limits.js";
+import { requireMonitorWindowOpen, resolveCreatedScheduleCheck, resolveUpdatedScheduleCheck } from "./agent-schedule-check-policy.js";
 import { advanceReactivatedSchedule } from "./agent-schedule-next-occurrence.js";
 import type { AgentScheduleAuthorization } from "./agent-schedule-context.js";
 import { recurrenceValues } from "./agent-schedule-recurrence.js";
@@ -47,6 +54,7 @@ import {
   type ConversationBinding,
   isConversationWakeupIdle,
   rebindConversationSchedule,
+  requireCheckChangedInScheduleChat,
   requireConversationBinding,
   requireConversationCapacity,
   requireConversationRunLimit,
@@ -59,6 +67,9 @@ import {
 } from "./external-agent-schedule-policy.js";
 
 export interface AgentScheduleCreateInput {
+  /** A monitor's check and the end of its watch; both or neither. */
+  checkCommand?: string;
+  checkUntil?: Date;
   executionContext: AgentScheduleExecutionContext;
   maxRuns?: number | null;
   firstRunAt: Date;
@@ -72,6 +83,8 @@ export interface AgentScheduleCreateInput {
 }
 
 export interface AgentScheduleUpdateInput {
+  checkCommand?: string;
+  checkUntil?: Date;
   maxRuns?: number | null;
   capabilityAllowlist?: ExternalScheduleCapability[];
   enabled?: boolean;
@@ -116,6 +129,13 @@ export const agentScheduleRepository = {
     requireScheduleLimitConsistency(maxRuns === undefined ? null : maxRuns, 0, recurrence.kind);
     const conversation = requireExecutionContext(input.executionContext) === "conversation";
     if (conversation) requireConversationRunLimit(maxRuns);
+    const check = resolveCreatedScheduleCheck({
+      checkCommand: input.checkCommand,
+      checkUntil: input.checkUntil,
+      executionContext: input.executionContext,
+      firstRunAt,
+      recurrence,
+    }, new Date());
     const inputHash = agentScheduleOperationHash({
       ...input,
       firstRunAt: firstRunAt.toISOString(),
@@ -169,10 +189,10 @@ export const agentScheduleRepository = {
             user_request, scenario_prompt, timezone, recurrence_kind,
             recurrence_interval, recurrence_days_of_week, recurrence_anchor_local, recurrence_anchor_at,
               next_run_at, telegram_chat_id, telegram_chat_type, message_thread_id, forum_topic_id, max_runs,
-              execution_context, conversation_session_id, ingress_queue_id)
+              execution_context, conversation_session_id, ingress_queue_id, check_command, check_until)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
                   $13::timestamptz AT TIME ZONE $9, $13, $13, $14, $15, $16::bigint, $17::bigint, $18,
-                  $19, $20::uuid, $21::uuid)
+                  $19, $20::uuid, $21::uuid, $22, $23)
          RETURNING ${AGENT_SCHEDULE_COLUMNS}`,
         [
           auth.familyId,
@@ -196,6 +216,8 @@ export const agentScheduleRepository = {
           input.executionContext,
           binding?.conversationSessionId ?? null,
           binding?.ingressQueueId ?? null,
+          check?.checkCommand ?? null,
+          check?.checkUntil ?? null,
         ],
       );
       const schedule = inserted.rows[0]!;
@@ -242,6 +264,8 @@ export const agentScheduleRepository = {
   ): Promise<AgentScheduleRecord> {
     if (
       input.capabilityAllowlist === undefined &&
+      input.checkCommand === undefined &&
+      input.checkUntil === undefined &&
       input.maxRuns === undefined &&
       input.enabled === undefined &&
       input.historyWindowDays === undefined &&
@@ -306,7 +330,9 @@ export const agentScheduleRepository = {
           "Окно истории доступно только для автоматизации внешней группы",
         );
       }
-      if (schedule.status === "leased" && !isPauseOnlyUpdate(input)) {
+      // The wake-up turn of this very schedule may still fix its check or note while it runs.
+      const ownWakeup = auth.wakeupScheduleId === id && isWakeupContentUpdate(input);
+      if (schedule.status === "leased" && !isPauseOnlyUpdate(input) && !ownWakeup) {
         throw new AppError(
           "AGENT_SCHEDULE_RUN_IN_PROGRESS",
           "Запланированный сценарий сейчас выполняется. Повторите изменение после завершения",
@@ -324,6 +350,15 @@ export const agentScheduleRepository = {
       if (schedule.execution_context === "conversation") requireConversationRunLimit(nextMaxRuns);
       requireScheduleLimitConsistency(nextMaxRuns, schedule.completed_runs, nextRecurrence.kind);
       if (input.enabled === true) requireScheduleLimitRemaining(nextMaxRuns, schedule.completed_runs);
+      if (input.checkCommand !== undefined) requireCheckChangedInScheduleChat(auth, schedule);
+      const now = new Date();
+      const check = resolveUpdatedScheduleCheck({
+        checkCommand: schedule.check_command,
+        checkUntil: schedule.check_until,
+        executionContext: schedule.execution_context,
+        nextRunAt: schedule.next_run_at,
+      }, { checkCommand: input.checkCommand, checkUntil: input.checkUntil, nextRunAt }, nextRecurrence, now);
+      if (input.enabled === true) requireMonitorWindowOpen(check.checkUntil, now);
       const capabilityAllowlist = await requireUpdatedExternalScheduleCapabilities(
         client,
         schedule,
@@ -349,7 +384,8 @@ export const agentScheduleRepository = {
                             WHEN $13::integer IS NOT NULL AND completed_runs >= $13 THEN 'completed'::agent_schedule_status
                             WHEN $10 = false THEN 'paused'::agent_schedule_status
                             WHEN $10 = true THEN 'active'::agent_schedule_status ELSE status END,
-               pause_requested = (status = 'leased' AND $10 = false), max_runs = $13,
+               pause_requested = CASE WHEN $10::boolean IS NULL THEN pause_requested ELSE (status = 'leased' AND $10 = false) END,
+               max_runs = $13,
               attempts = CASE WHEN $8 OR $10 = true THEN 0 ELSE attempts END,
               -- A person pausing a wake-up that paused by itself takes it off the agent's resume list.
               last_error_code = CASE WHEN $8 OR $10 = true THEN NULL
@@ -357,6 +393,10 @@ export const agentScheduleRepository = {
                                      ELSE last_error_code END,
               history_window_days = $11,
               tool_allowlist = $12,
+              check_command = $14, check_until = $15,
+              -- A replaced script is a new check: its predecessor's failures do not count against it.
+              check_failures = CASE WHEN $16 THEN 0 ELSE check_failures END,
+              last_check_error_code = CASE WHEN $16 THEN NULL ELSE last_check_error_code END,
               updated_at = now()
          WHERE id = $1
          RETURNING ${AGENT_SCHEDULE_COLUMNS}`,
@@ -374,6 +414,9 @@ export const agentScheduleRepository = {
           historyWindowDays === undefined ? schedule.history_window_days : historyWindowDays,
           capabilityAllowlist ?? schedule.tool_allowlist,
           nextMaxRuns,
+          check.checkCommand,
+          check.checkUntil,
+          check.commandChanged,
         ],
       );
       if (input.enabled === true && nextRunAt === undefined) {
@@ -484,6 +527,7 @@ export const agentScheduleRepository = {
         );
       }
       requireScheduleLimitRemaining(schedule.max_runs, schedule.completed_runs);
+      requireMonitorWindowOpen(schedule.check_until, new Date());
       if (schedule.execution_context === "conversation") await rebindConversationSchedule(client, auth, schedule);
       const updated = await client.query<AgentScheduleRow>(
         `UPDATE agent_schedules

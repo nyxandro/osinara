@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "developing-ai-agents": {
+      "source": "ilkruglov/developing-ai-agents-skill",
+      "sourceType": "github",
+      "skillPath": "plugins/developing-ai-agents/skills/developing-ai-agents/SKILL.md",
+      "computedHash": "d1aa177553ef96d80908f3ad929a5b75b07fdc75ca283bdc3cff1f5a261d4e80"
+    },
+    "github-actions-docs": {
+      "source": "xixu-me/skills",
+      "sourceType": "github",
+      "skillPath": "skills/github-actions-docs/SKILL.md",
+      "computedHash": "e9ac24e79715ef3060bd4ae376052f8d863b830604e69cb513b39764bf47ee53"
+    },
+    "telegram-bot-development": {
+      "source": "nyxandro/telegram-bot-development-skill",
+      "sourceType": "github",
+      "skillPath": "telegram-bot-development/SKILL.md",
+      "computedHash": "b958150fd65a26fb8c51fd788cf472e0375a12559dd9e4a8bf66d09357b3bd32"
+    }
+  }
+}

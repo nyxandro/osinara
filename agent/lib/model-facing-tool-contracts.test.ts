@@ -18,7 +18,7 @@ vi.mock("./model-vision-availability.js", () => ({
   MODEL_VISION_AVAILABLE: true,
 }));
 
-import { askQuestion, bash, glob, grep, loadSkill, readFile, todo, writeFile } from "../runtime/tools/defaults.js";
+import { bash, glob, grep, loadSkill, readFile, todo, writeFile } from "../runtime/tools/defaults.js";
 import { agentTool } from "../runtime/tools/delegate.js";
 
 import { buildMemoryReviewToolSurface } from "./memory-review/memory-review-tool-surface.js";
@@ -41,10 +41,11 @@ const REQUIRED_CORE_RULES = [
 // descriptions moved to English, which takes about 3% more characters for the same text while the
 // production model counts about 5% fewer tokens for the private chat's whole tool set (17 084 → 16 239);
 // then to 26 700 for `manage_network_access` (owner-approved sandbox access to IP addresses), which
-// left 83 characters of headroom and needs 680.
-const TOTAL_DESCRIPTION_MAX_CHARACTERS = 26_700;
+// left 83 characters of headroom and needs 680; then to 27 000 for reply buttons (`attach_reply_buttons`
+// and the `buttons` of `manage_reminder`), whose rules live in the trusted-zone instructions.
+const TOTAL_DESCRIPTION_MAX_CHARACTERS = 27_000;
 // The runtime's built-ins are in every prompt anyway; the budget is the application's own.
-const NATIVE_DESCRIPTIONS = new Set([agentTool, askQuestion, bash, glob, grep, loadSkill, readFile, todo, writeFile].map((definition) => definition.description));
+const NATIVE_DESCRIPTIONS = new Set([agentTool, bash, glob, grep, loadSkill, readFile, todo, writeFile].map((definition) => definition.description));
 
 function surfaces() {
   const externalInput = {

@@ -8,100 +8,12 @@ import { sessionRepository } from "../sessions/session-repository.js";
 import { memoryReviewDispatchRepository } from "./memory-review-dispatch-repository.js";
 import { memoryReviewRepository } from "./memory-review-repository.js";
 import { insertReviewUserMessage } from "./memory-review.integration-fixtures.js";
-import { createTelegramMessageHandler } from "../telegram-on-message.js";
-import { groupMessage, repositories, telegramContext } from "../telegram-on-message.test-fixtures.js";
-import { conversationRepository } from "../conversation-repository.js";
 
 const describeWithDatabase = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true" ? describe : describe.skip;
 
 describeWithDatabase("memory review completion after session rotation", () => {
   beforeEach(async () => { await database().query("TRUNCATE users, families CASCADE"); });
   afterAll(closeDatabase);
-
-  it("does not orphan a second review batch when a reply resumes a pending turn", async () => {
-    const fixture = await createMainAgentMemoryFixture();
-    const sessionInput = {
-      baseContinuationToken: `osinara:group:${fixture.groupId}:main`,
-      familyId: fixture.familyId, groupId: fixture.groupId, kind: "canonical" as const,
-      now: new Date(), scope: "family" as const, telegramForumTopicId: null, userId: null,
-    };
-    const original = await sessionRepository.prepareTurn(sessionInput);
-    await sessionRepository.bindAgentSession(original.id, "agent-pending");
-    const batch = await memoryReviewRepository.prepareInteractiveTurn({
-      applicationSessionId: original.id, groupId: fixture.groupId, timelineEntryId: fixture.timelineEntryId,
-    });
-    await memoryReviewRepository.bindAgentTurn({
-      applicationSessionId: original.id, batchId: batch!.batchId, agentSessionId: "agent-pending", agentTurnId: "turn-1",
-    });
-    await memoryTurnSourceRepository.bind({
-      applicationSessionId: original.id, conversationId: fixture.conversationId,
-      currentTimelineEntryId: fixture.timelineEntryId, agentSessionId: "agent-pending", agentTurnId: "turn-1",
-      invokingActorId: "agent-memory-author", invokingActorKind: "telegram_user",
-      memoryReviewBatchId: batch!.batchId, memoryReviewSourceEntryIds: batch!.sourceEntryIds,
-      visibleTimelineEntryIds: [fixture.timelineEntryId],
-    });
-    await sessionRepository.parkSession({
-      applicationSessionId: original.id, pendingRequestId: "question-1",
-      requesterTelegramUserId: "agent-memory-author", requesterUserId: fixture.userId,
-    });
-    await sessionRepository.registerRouteAlias(original.id, "group-101::9000");
-    const reply = await insertReviewUserMessage({
-      conversationId: fixture.conversationId, groupId: fixture.groupId, sequence: 2,
-    });
-    const deps = repositories();
-    deps.telegram.findGroup.mockResolvedValue({
-      familyId: fixture.familyId, groupId: fixture.groupId, messageMode: "addressed_only",
-      skillAllowlist: [], telegramChatId: "group-101", toolAllowlist: [], type: "family_private",
-    });
-    deps.telegram.findIdentity.mockResolvedValue({ familyId: fixture.familyId, role: "owner", userId: fixture.userId });
-    deps.hitl.authorizeReply.mockResolvedValue("authorized");
-    deps.journal.record.mockResolvedValue({
-      entryId: reply.id, replyToAgent: true, replyTargetUnavailable: false,
-      replyToSequenceId: "1", sequenceId: "2", status: "inserted",
-    });
-    const handler = createTelegramMessageHandler({
-      ...deps, conversations: conversationRepository, session: { ...sessionRepository,
-        prepareAuthorizedResponse: async () => ({ ...original,nativeSessionId: "agent-pending" }) }, memoryReview: memoryReviewRepository,
-    });
-    const result = await handler({ ...telegramContext().context,ingressRecovery: { updateId: "2",dispatchId: crypto.randomUUID() } }, {
-      ...groupMessage("да"), messageId: "2",
-      from: { firstName: "User", id: "agent-memory-author", isBot: false },
-      replyToMessage: {
-        messageId: "9000", chat: { id: "group-101", type: "group" },
-        from: { id: "bot", firstName: "Osinara", isBot: true, username: "osinara_bot" },
-      },
-    });
-    expect(result).not.toBeNull();
-    expect(result?.auth?.attributes.memoryReviewBatchId).toBeUndefined();
-    expect((await database().query("SELECT id FROM memory_review_batches")).rows).toEqual([{ id: batch!.batchId }]);
-    await sessionRepository.resumePendingSession(original.id, "agent-pending");
-    await memoryReviewRepository.completeBatch({
-      batchId: batch!.batchId, completedAt: new Date(), agentSessionId: "agent-pending", agentTurnId: "turn-1",
-    });
-    const next = await sessionRepository.prepareTurn(sessionInput);
-    const third = await insertReviewUserMessage({
-      conversationId: fixture.conversationId, groupId: fixture.groupId, sequence: 3,
-    });
-    const nextBatch = await memoryReviewRepository.prepareInteractiveTurn({
-      applicationSessionId: next.id, groupId: fixture.groupId, timelineEntryId: third.id,
-    });
-    expect(nextBatch?.sourceEntryIds).toEqual([reply.id, third.id]);
-    await memoryReviewRepository.bindAgentTurn({
-      applicationSessionId: next.id, batchId: nextBatch!.batchId, agentSessionId: "agent-next", agentTurnId: "turn-0",
-    });
-    await memoryTurnSourceRepository.bind({
-      applicationSessionId: next.id, conversationId: fixture.conversationId, currentTimelineEntryId: third.id,
-      agentSessionId: "agent-next", agentTurnId: "turn-0", invokingActorId: "agent-memory-author", invokingActorKind: "telegram_user",
-      memoryReviewBatchId: nextBatch!.batchId, memoryReviewSourceEntryIds: nextBatch!.sourceEntryIds,
-      visibleTimelineEntryIds: [reply.id, third.id],
-    });
-    await memoryReviewRepository.completeBatch({
-      batchId: nextBatch!.batchId, completedAt: new Date(), agentSessionId: "agent-next", agentTurnId: "turn-0",
-    });
-    await memoryReviewDispatchRepository.claimPending({ leaseMilliseconds: 60_000, limit: 10, now: new Date(Date.now() + 2 * 60 * 60 * 1_000) });
-    expect(await memoryReviewRepository.getLaneCursor({ conversationId: fixture.conversationId, messageThreadId: null })).toBe("3");
-    expect((await database().query("SELECT count(*)::integer AS count FROM memory_review_owner_alerts")).rows).toEqual([{ count: 0 }]);
-  });
 
   it("closes a finished old turn and its successor without a false skipped-pass alert", async () => {
     const fixture = await createMainAgentMemoryFixture();

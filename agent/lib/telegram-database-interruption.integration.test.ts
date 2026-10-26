@@ -80,7 +80,7 @@ suite("Telegram recovery across PostgreSQL interruption", () => {
       }
     } };
     const ingress = createTelegramDurableIngress({ reportFailure: vi.fn(), repository, botUsername: "osinara_bot", leaseMilliseconds: 60000,
-      acceptMedia: vi.fn(), authorizeVoice: vi.fn(), dispatch: telegram.dispatch, handleSoftwareUpdateCallback: vi.fn(),
+      acceptMedia: vi.fn(), authorizeVoice: vi.fn(), dispatch: telegram.dispatch, dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), handleSoftwareUpdateCallback: vi.fn(),
       runTurn: telegram.runTurn, transcribeVoice: vi.fn() });
     const work: Promise<unknown>[] = [];
     await ingress.drain({ waitUntil: task => { work.push(task); } });

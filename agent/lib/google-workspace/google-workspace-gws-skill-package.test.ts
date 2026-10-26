@@ -111,7 +111,7 @@ describe("Google Workspace gws skill packages", () => {
     expect(shared).toContain("execute_google_workspace");
     expect(shared).toContain("manage_google_workspace_connection");
     expect(shared).toContain("gws auth login");
-    expect(shared).toContain("`ask_question` as a substitute");
+    expect(shared).toContain("is never a substitute for this approval");
     expect(shared).toContain("automatic human approval");
     expect(shared).toContain("Do not automatically retry failed `gws` mutations");
     expect(shared).toContain("Do not pass `--upload`, `--output`, `--output-dir`, `--attach`, `-a`, or `-o`");

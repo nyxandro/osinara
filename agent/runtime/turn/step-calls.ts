@@ -3,8 +3,8 @@
  *
  * Exports:
  * - `planStepCalls`: each call of a fresh model response becomes a journal record — a result
- *   already known (an input the schema refused, an unknown tool, a policy denial), a request for a
- *   person, or a plan to run it.
+ *   already known (an input the schema refused, an unknown tool, a policy denial), an approval
+ *   request for a person, or a plan to run it.
  * - `executeStepCalls`: runs the planned calls concurrently, writing the intent before each one;
  *   after a crash it reruns an interrupted call only when the tool is replay-safe, and a call whose
  *   tool is no longer granted does not run. An `agent` call runs as a child turn (`DelegateCall`).
@@ -14,7 +14,7 @@
  * neither repeats a finished call nor guesses about an interrupted one.
  * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
-import { approvalRequest, ASK_QUESTION_TOOL_NAME, deniedOutput, questionRequest } from "../hitl/input-requests.js";
+import { approvalRequest, deniedOutput } from "../hitl/input-requests.js";
 import type { ToolContext, ToolDefinition } from "../tool.js";
 import type { StepToolCall } from "./model-call.js";
 import { decideToolApproval, executeToolCall, resolveToolCallInput, type ToolResultOutput } from "./tool-calls.js";
@@ -61,13 +61,9 @@ export async function planStepCalls(input: {
     if (definition === undefined) {
       throw new Error(`AGENT_TURN_TOOL_MISSING: tool "${call.toolName}" of call ${call.toolCallId} is not in the step's tool set`);
     }
-    const parked = { callId: call.toolCallId, input: parsed.input, toolName: call.toolName };
-    if (call.toolName === ASK_QUESTION_TOOL_NAME) {
-      planned.push({ ...base, input: parsed.input, inputRequest: questionRequest(parked), output: null, state: "awaiting_input" });
-      continue;
-    }
     const decision = await decideToolApproval(definition, parsed.input, input.contextFor(base));
     if (decision.kind === "ask") {
+      const parked = { callId: call.toolCallId, input: parsed.input, toolName: call.toolName };
       planned.push({ ...base, input: parsed.input, inputRequest: approvalRequest(parked), output: null, state: "awaiting_input" });
     } else if (decision.kind === "deny") {
       planned.push({ ...base, input: parsed.input, output: deniedOutput(decision.reason), state: "completed" });

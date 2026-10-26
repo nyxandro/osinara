@@ -50,6 +50,7 @@ vi.mock("./conversation-wakeup-run-repository.js", () => ({
   conversationWakeupRunRepository: { admitTurn: vi.fn(), finishTurn: dependencies.finishTurn },
 }));
 
+vi.mock("../reply-buttons/reply-button-delivery.js", () => ({ stagedReplyButtons: vi.fn(async () => null) }));
 const { telegramTurnEvents } = await import("../../channels/telegram.js");
 
 function context(attributes: Record<string, string>) {

@@ -56,12 +56,8 @@ export async function prepareTelegramIngress(input: {
         () => Reflect.apply(value, target, args));
     },
   });
-  let result = await input.prepare({ ...input.context, telegram,
+  const result = await input.prepare({ ...input.context, telegram,
     ingressRecovery: { updateId: input.updateId, dispatchId: input.dispatchId } }, input.message);
-  const response = (await database().query<{ response_session_id: string | null }>(
-    "SELECT response_session_id FROM telegram_ingress_updates WHERE update_id=$1 AND dispatch_id=$2", [input.updateId,input.dispatchId])).rows[0];
-  if (response?.response_session_id && result?.auth) result = { ...result,auth: { ...result.auth,
-    attributes: { ...result.auth.attributes,osinaraTelegramResponseSessionId: response.response_session_id } } };
   const saved = await database().query(`UPDATE telegram_ingress_updates SET preparation_result=$3::jsonb,
     preparation_completed_at=now() WHERE update_id=$1 AND dispatch_id=$2 AND status='processing' AND lease_expires_at>now()`,
   [input.updateId, input.dispatchId, JSON.stringify(result)]);

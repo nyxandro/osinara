@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SCHEDULE_HEARTBEAT_CODE, type ScheduleName, withScheduleHeartbeat } from "./schedule-heartbeat.js";
 
 const SCHEDULE_FILES: Readonly<Record<ScheduleName, string>> = {
+  "agent-schedule-check-dispatch": "agent/schedules/agent-schedule-check-dispatch.ts",
   "agent-schedule-dispatch": "agent/schedules/agent-schedule-dispatch.ts",
   "memory-review-dispatch": "agent/schedules/memory-review-dispatch.ts",
   "reminder-dispatch": "agent/schedules/reminder-dispatch.ts",

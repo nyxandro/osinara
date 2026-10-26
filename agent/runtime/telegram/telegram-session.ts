@@ -26,7 +26,6 @@ export function telegramInitialState(botUsername: string | undefined): TelegramC
     hitlCallbacks: {},
     messageThreadId: null,
     nextHitlCallbackId: 0,
-    pendingFreeformReplies: {},
     triggeringUserId: null,
   };
 }

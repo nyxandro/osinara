@@ -38,16 +38,16 @@ function plain(name: string, inputSchema: ToolDefinition["inputSchema"] = z.obje
 
 describe("step tool order", () => {
   it("puts the built-in tools first in the reference order, then the static tools, then agent, then the rest as given", () => {
-    const tools = Object.fromEntries(["remember", "agent", "todo", "glob", "bash", "ask_question", "probe_workspace", "get_current_time"]
+    const tools = Object.fromEntries(["remember", "agent", "todo", "glob", "bash", "probe_workspace", "get_current_time"]
       .map((name) => [name, plain(name)]));
 
     expect(orderStepTools(tools, ["probe_workspace"]).map(([name]) => name))
-      .toEqual(["ask_question", "bash", "todo", "probe_workspace", "agent", "remember", "glob", "get_current_time"]);
+      .toEqual(["bash", "todo", "probe_workspace", "agent", "remember", "glob", "get_current_time"]);
   });
 
   it("keeps the recorded order of every scenario's tool set", async () => {
     for (const scenario of ["private-first", "family-group", "external-human", "scheduled-isolated"]) {
-      const recorded = (await recordedTools(scenario)).map((tool) => tool.name);
+      const recorded = (await recordedTools(scenario)).map((tool) => tool.name).filter((name) => !REMOVED_AFTER_RECORDING.has(name));
       const shuffled = Object.fromEntries([...recorded].reverse().map((name) => [name, plain(name)]));
       const surfaceOrder = recorded.filter((name) => !(BUILT_IN_TOOL_ORDER as readonly string[]).includes(name) &&
         name !== "probe_workspace" && name !== "agent");
@@ -61,8 +61,14 @@ describe("step tool order", () => {
 
 // Changed on purpose after the reference requests were recorded (stage 7, family skills): a new tool, and a
 // group skill list that also names the family's own skills. Owner-approved network access added its tool
-// on 20.10.2026.
-const CHANGED_AFTER_RECORDING = new Set(["manage_network_access", "manage_skill", "manage_telegram_group"]);
+// on 20.10.2026; on 26.10.2026 monitors added the check of `manage_agent_schedule`, and reply buttons
+// their tool and the `buttons` of `manage_reminder`.
+const CHANGED_AFTER_RECORDING = new Set([
+  "attach_reply_buttons", "manage_agent_schedule", "manage_network_access", "manage_reminder", "manage_skill",
+  "manage_telegram_group",
+]);
+// The built-in `ask_question` left on 26.10.2026: buttons under the answer replaced it.
+const REMOVED_AFTER_RECORDING = new Set(["ask_question"]);
 
 describe("model-facing tool definitions", () => {
   it("reach the model exactly as the reference requests carry the application tools of a private chat", async () => {
@@ -84,13 +90,13 @@ describe("model-facing tool definitions", () => {
   it("reach the model exactly as the reference requests carry the built-in tools", async () => {
     const recorded = new Map((await recordedTools("private-first")).map((tool) => [tool.name, tool]));
     const tools = {
-      ask_question: builtIns.askQuestion, bash: builtIns.bash, glob: builtIns.glob, grep: builtIns.grep,
+      bash: builtIns.bash, glob: builtIns.glob, grep: builtIns.grep,
       load_skill: builtIns.loadSkill, read_file: builtIns.readFile, todo: builtIns.todo, write_file: builtIns.writeFile,
     };
 
     const sent = await providerTools(toModelToolSet(orderStepTools(tools)));
 
-    expect(sent.map((tool) => tool.name)).toEqual(["ask_question", "bash", "read_file", "write_file", "todo", "load_skill", "glob", "grep"]);
+    expect(sent.map((tool) => tool.name)).toEqual(["bash", "read_file", "write_file", "todo", "load_skill", "glob", "grep"]);
     for (const tool of sent) expect(JSON.stringify(tool), tool.name).toBe(JSON.stringify(recorded.get(tool.name)));
   });
 

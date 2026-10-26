@@ -7,12 +7,14 @@
  * Key construct:
  * - The header is bold through a Telegram `entities` span rather than a parse mode, so the reminder
  *   text written by a person is sent exactly as stored and never needs escaping.
+ * - A reminder with reply buttons stages them before the send and activates them after it.
  */
 import { callTelegramApi } from "../../runtime/telegram/api.js";
 
 import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../../config.js";
 import { AppError } from "../app-error.js";
 import type { ProactiveDeliveryReceipt } from "../proactive-deliveries/proactive-delivery-repository.js";
+import { reminderReplyButtons } from "../reply-buttons/reply-button-delivery.js";
 import type { ClaimedReminder } from "./reminder-dispatch-repository.js";
 
 function requireBotToken(): string {
@@ -53,11 +55,43 @@ function sentMessageId(body: unknown): string {
   return typeof result.message_id === "number" ? String(result.message_id) : "";
 }
 
+/**
+ * The reminder is delivered either way: a failed activation leaves its buttons pressable but not
+ * removed by a later message, and must not turn a delivered reminder into a failed one.
+ */
+async function activateReminderButtons(
+  buttons: { activate(messageId: string): Promise<void> },
+  messageId: string,
+  reminderId: string,
+): Promise<void> {
+  try {
+    await buttons.activate(messageId);
+  } catch (error) {
+    console.error(JSON.stringify({
+      code: "AGENT_REMINDER_BUTTONS_ACTIVATION_FAILED",
+      error: error instanceof Error ? error.message : String(error),
+      reminderId,
+    }));
+  }
+}
+
 export async function deliverTelegramReminder(job: ClaimedReminder): Promise<ProactiveDeliveryReceipt> {
   const delayedNotice = job.delayed
     ? `Доставлено с задержкой. Изначальное время: ${formatScheduledTime(job)} (${job.timezone}).`
     : null;
   const text = [REMINDER_HEADER, job.content, delayedNotice].filter(Boolean).join("\n\n");
+  // Telegram counts entity offsets in UTF-16 code units, which is what String length is.
+  const entities = [{ length: REMINDER_HEADER.length, offset: 0, type: "bold" }];
+  const buttons = await reminderReplyButtons({
+    addresseeTelegramUserId: job.addresseeTelegramUserId,
+    buttons: job.buttons,
+    messageEntities: entities,
+    messageText: text,
+    reminderId: job.id,
+    scope: job.scope,
+    telegramChatId: job.telegramChatId,
+    telegramChatType: job.telegramChatType,
+  });
   const signal = AbortSignal.timeout(TELEGRAM_API_REQUEST_TIMEOUT_MS);
   const fetchWithTimeout: typeof fetch = (request, init) => fetch(request, { ...init, signal });
 
@@ -67,11 +101,11 @@ export async function deliverTelegramReminder(job: ClaimedReminder): Promise<Pro
     const response = await callTelegramApi({
       body: {
         chat_id: job.telegramChatId,
-        // Telegram counts entity offsets in UTF-16 code units, which is what String length is.
-        entities: [{ length: REMINDER_HEADER.length, offset: 0, type: "bold" }],
+        entities,
         ...(job.messageThreadId === null
           ? {}
           : { message_thread_id: messageThreadId(job.messageThreadId) }),
+        ...(buttons === null ? {} : { reply_markup: buttons.replyMarkup }),
         text,
       },
       botToken: requireBotToken(),
@@ -89,6 +123,7 @@ export async function deliverTelegramReminder(job: ClaimedReminder): Promise<Pro
         "Telegram принял напоминание, но не подтвердил идентификатор сообщения",
       );
     }
+    if (buttons !== null) await activateReminderButtons(buttons, messageId, job.id);
     return { messageId, text };
   } catch (error) {
     console.error(JSON.stringify({

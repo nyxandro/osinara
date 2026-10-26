@@ -17,7 +17,7 @@ function context(role = "owner") {
 // A group's skill list changes without a card; its rights still ask the owner.
 function request(): TelegramInputRequest {
   return {
-    display: "confirmation" as const, requestId: "request", prompt: "Untrusted model title",
+    kind: "tool-approval", requestId: "request", prompt: "Untrusted model title",
     action: { kind: "tool-call" as const, callId: "call", toolName: "manage_telegram_group",
       input: { action: "update_policy", telegramChatId: "-100123", messageMode: "all", toolAllowlist: ["bash"] },
     },

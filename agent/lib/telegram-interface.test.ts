@@ -4,13 +4,11 @@
  * Constructs covered:
  * - Approval prompts and buttons hide technical tool names from users.
  * - Policy updates disclose the complete replacement policy and non-disconnection warning.
- * - Freeform prompts use clear Russian text.
  */
 import { describe, expect, it } from "vitest";
 
 import {
   localizeTelegramInputRequest,
-  localizeTelegramReplyMarkup,
 } from "./telegram-interface.js";
 
 describe("Telegram interface localization", () => {
@@ -22,7 +20,6 @@ describe("Telegram interface localization", () => {
         kind: "tool-call" as const,
         toolName: "manage_telegram_group",
       },
-      display: "confirmation" as const,
       kind: "tool-approval" as const,
       options: [
         { id: "approve", label: "Yes", style: "primary" as const },
@@ -49,7 +46,6 @@ describe("Telegram interface localization", () => {
         kind: "tool-call" as const,
         toolName: "remove_group_file",
       },
-      display: "confirmation" as const,
       kind: "tool-approval" as const,
       options: [
         { id: "approve", label: "Yes" },
@@ -74,7 +70,6 @@ describe("Telegram interface localization", () => {
   it("uses a generic Russian prompt for an unknown tool", () => {
     const request = localizeTelegramInputRequest({
       action: { callId: "call-1", input: {}, kind: "tool-call" as const, toolName: "future_tool" },
-      display: "confirmation" as const,
       kind: "tool-approval" as const,
       options: [
         { id: "approve", label: "Yes" },
@@ -98,7 +93,6 @@ describe("Telegram interface localization", () => {
         kind: "tool-call" as const,
         toolName: "manage_telegram_group",
       },
-      display: "confirmation" as const,
       kind: "tool-approval" as const,
       options: [
         { id: "approve", label: "Yes", style: "danger" as const },
@@ -130,7 +124,6 @@ describe("Telegram interface localization", () => {
         kind: "tool-call" as const,
         toolName: "manage_telegram_group",
       },
-      display: "confirmation" as const,
       kind: "tool-approval" as const,
       options: [],
       prompt: "Approve tool call",
@@ -163,7 +156,6 @@ describe("Telegram interface localization", () => {
         kind: "tool-call" as const,
         toolName: "manage_external_group_schedule",
       },
-      display: "confirmation" as const,
       kind: "tool-approval" as const,
       options: [],
       prompt: "Approve tool call",
@@ -194,7 +186,6 @@ describe("Telegram interface localization", () => {
         kind: "tool-call" as const,
         toolName: "manage_external_group_schedule",
       },
-      display: "confirmation" as const,
       kind: "tool-approval" as const,
       options: [],
       prompt: "Approve tool call",
@@ -227,7 +218,6 @@ describe("Telegram interface localization", () => {
         kind: "tool-call" as const,
         toolName: "manage_telegram_group",
       },
-      display: "confirmation" as const,
       kind: "tool-approval" as const,
       options: [],
       prompt: "Approve tool call",
@@ -251,7 +241,6 @@ describe("Telegram interface localization", () => {
         kind: "tool-call" as const,
         toolName: "manage_telegram_group",
       },
-      display: "confirmation" as const,
       kind: "tool-approval" as const,
       options: [],
       prompt: "Approve tool call",
@@ -273,7 +262,6 @@ describe("Telegram interface localization", () => {
         kind: "tool-call" as const,
         toolName: "manage_telegram_group",
       },
-      display: "confirmation" as const,
       kind: "tool-approval" as const,
       options: [],
       prompt: "Approve tool call",
@@ -302,7 +290,6 @@ describe("Telegram interface localization", () => {
         kind: "tool-call" as const,
         toolName: "manage_telegram_group",
       },
-      display: "confirmation" as const,
       kind: "tool-approval" as const,
       options: [],
       prompt: "Approve tool call",
@@ -322,7 +309,6 @@ describe("Telegram interface localization", () => {
         kind: "tool-call" as const,
         toolName: "manage_google_workspace_connection",
       },
-      display: "confirmation" as const,
       kind: "tool-approval" as const,
       options: [],
       prompt: "Approve tool call",
@@ -340,7 +326,6 @@ describe("Telegram interface localization", () => {
         kind: "tool-call" as const,
         toolName: "manage_network_access",
       },
-      display: "confirmation" as const,
       kind: "tool-approval" as const,
       options: [],
       prompt: "Approve tool call",
@@ -350,19 +335,5 @@ describe("Telegram interface localization", () => {
     expect(request.prompt).toContain("открыть агенту доступ к адресу в вашей сети");
     expect(request.prompt).toContain("Адрес: 100.91.171.16:8123");
     expect(request.prompt).toContain("Устройство: Home Assistant");
-  });
-
-  it("localizes the freeform answer placeholder", () => {
-    expect(
-      localizeTelegramReplyMarkup({
-        force_reply: true,
-        input_field_placeholder: "Type your answer",
-        selective: true,
-      }),
-    ).toEqual({
-      force_reply: true,
-      input_field_placeholder: "Введите ответ",
-      selective: true,
-    });
   });
 });

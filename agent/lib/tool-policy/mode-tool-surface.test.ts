@@ -39,7 +39,7 @@ function names(input: Parameters<typeof buildModeToolSurface>[0]): string[] {
 }
 
 // Built-ins every trusted turn has that the interjection surface does not wrap.
-const UNWRAPPED_BUILT_IN_NAMES = ["agent", "ask_question", "load_skill", "todo"];
+const UNWRAPPED_BUILT_IN_NAMES = ["agent", "load_skill", "todo"];
 
 function externalAuth(toolAllowlist: readonly string[]): SessionAuth {
   return {
@@ -137,16 +137,28 @@ describe("trusted mode tool surfaces", () => {
     }
   });
 
-  it("gives trusted zones the always-registered built-ins, and external groups no questions or Bash", () => {
+  it("offers reply buttons in the trusted zones, scheduled runs included, and nowhere else", () => {
+    for (const environment of ["private", "family"] as const) {
+      for (const scheduledRun of [false, true]) {
+        expect(names({ environment, scheduledRun }), `${environment} scheduled=${scheduledRun}`).toContain("attach_reply_buttons");
+      }
+    }
+    expect(names({ capabilities: new Set(), environment: "external", skills: new Set<string>() })).not.toContain("attach_reply_buttons");
+    for (const environment of ["private", "family"] as const) {
+      // A child answers its parent, never the person.
+      expect(Object.keys(buildSubagentToolSurface({ environment }))).not.toContain("attach_reply_buttons");
+    }
+  });
+
+  it("gives trusted zones the always-registered built-ins, and external groups no Bash", () => {
     for (const environment of ["private", "family"] as const) {
       for (const scheduledRun of [false, true]) {
         expect(names({ environment, scheduledRun }), `${environment} scheduled=${scheduledRun}`).toEqual(expect.arrayContaining([
-          "ask_question", "bash", "load_skill", "read_file", "todo", "write_file",
+          "bash", "load_skill", "read_file", "todo", "write_file",
         ]));
       }
     }
     const external = names({ capabilities: new Set(), environment: "external", skills: new Set<string>() });
-    expect(external).not.toContain("ask_question");
     expect(external).not.toContain("bash");
   });
 
@@ -212,7 +224,7 @@ describe("subagent tool surface", () => {
   it("gives a delegated task in a private chat exactly the research and sandbox tools", () => {
     // Pinned by name, so widening the subagent list is a decision a reviewer sees in this test.
     expect(Object.keys(subagentSurfaces().private).sort()).toEqual([
-      "ask_question", "bash", "execute_google_workspace", "get_current_time", "get_memory_source", "glob",
+      "bash", "execute_google_workspace", "get_current_time", "get_memory_source", "glob",
       "grep", "inspect_workspace_image", "list_agent_schedules", "list_memories", "list_memory_threads",
       "list_proactive_deliveries", "load_skill", "read_file", "read_memory_thread", "read_profile_view",
       "search_memories", "search_memory_threads", "todo", "web_fetch", "web_search", "write_file",
@@ -245,7 +257,7 @@ describe("subagent tool surface", () => {
   it("keeps the tools a delegated research or document task works with", () => {
     const { external, family, private: personal } = subagentSurfaces();
     for (const name of [
-      "ask_question", "bash", "execute_google_workspace", "get_current_time", "glob", "grep",
+      "bash", "execute_google_workspace", "get_current_time", "glob", "grep",
       "list_memories", "load_skill", "read_file", "read_memory_thread", "search_memories", "todo",
       "web_fetch", "web_search", "write_file",
     ]) {
@@ -433,13 +445,11 @@ describe("external group tool surface", () => {
     });
   });
 
-  it("never offers questions to an external group, and Bash only with its grant", () => {
+  it("offers Bash to an external group only with its grant", () => {
     const ungranted = buildModeToolSurface({ capabilities: new Set(), environment: "external", skills: new Set<string>() });
     const granted = buildModeToolSurface({ capabilities: new Set(["bash"]), environment: "external", skills: new Set<string>() });
 
-    expect(ungranted).not.toHaveProperty("ask_question");
     expect(ungranted).not.toHaveProperty("bash");
-    expect(granted).not.toHaveProperty("ask_question");
     expect(granted.bash?.description).toMatch(/isolated environment of the current group/u);
   });
 

@@ -20,7 +20,7 @@ function request(enabled: boolean): TelegramInputRequest {
   return {
     action: { callId: "policy-call", kind: "tool-call", toolName: "manage_profile_projection",
       input: { action: "update", enabled, groupRef } },
-    display: "confirmation", kind: "tool-approval", requestId: "policy-approval",
+    kind: "tool-approval", requestId: "policy-approval",
     prompt: "Send all private memories to the public group",
     options: [{ id: "approve", label: "Approve", style: "primary" }, { id: "cancel", label: "Cancel" }],
   };

@@ -60,6 +60,8 @@ describe("software update callback durable ingress", () => {
       authorizeVoice: vi.fn(),
       botUsername: "osinara_bot",
       dispatch,
+      dismissReplyButtons: vi.fn(async () => undefined),
+      handleReplyButtonPress: vi.fn(),
       handleSoftwareUpdateCallback,
       leaseMilliseconds: 60_000,
       repository,

@@ -68,7 +68,7 @@ export interface TurnRecord {
 }
 
 /**
- * - `awaiting_input`: waits for a person (approval or question);
+ * - `awaiting_input`: waits for a person's approval;
  * - `planned`: decided to run, not started;
  * - `intent`: written just before running, so the action may have started;
  * - `completed`: the result for the model is recorded;

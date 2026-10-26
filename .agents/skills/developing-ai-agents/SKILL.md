@@ -1,0 +1,202 @@
+---
+name: developing-ai-agents
+description: Use when designing, implementing, reviewing, debugging, or evaluating an AI agent, especially for context engineering, tool interfaces, Harness reliability, memory, evaluation, post-training, continual evolution or self-evolution, asynchronous or realtime interaction, computer use, or multi-agent coordination. Do not use for ordinary non-agent application code. Not for AI infrastructure — GPU and serving capacity sizing, training clusters, or serving cost per token on given hardware (use designing-ai-infra); the agent's own logic, prompts, tools and memory, and its context, token use, cost and latency as design and eval concerns, stay here.
+---
+
+# Разработка AI-агентов
+
+Проектируй агента как проверяемую систему, а не как «промпт плюс мощная модель». Опирайся на русское издание книги Bojie Li «AI-агенты изнутри: принципы проектирования и инженерная практика» и на факты из текущего проекта.
+
+## Рабочий контракт
+
+1. Сначала изучи реальные требования, код, конфигурацию, трассы, метрики и ограничения. Не называй гипотезу причиной без доказательств.
+2. Разделяй:
+   - **evidence** — что подтверждено кодом, логом, тестом или измерением;
+   - **inference** — наиболее вероятное объяснение;
+   - **unknown** — что ещё нужно измерить.
+3. Начинай ответ с решения или диагноза. После него дай минимальную архитектуру, порядок реализации, проверки и риски.
+4. Для review или diagnosis оставайся read-only, пока пользователь явно не попросит изменить систему. Для реализации соблюдай инструкции репозитория и TDD.
+5. Книжные принципы считай устойчивыми инженерными эвристиками. Актуальность моделей, SDK, API, протоколов, цен, лимитов и поддержки провайдеров проверяй по первичным текущим источникам.
+6. По умолчанию укладывай архитектурный ответ в 1200 слов. Расширяй его только по явному запросу; если деталей больше, приоритизируй решения, contracts и проверки, а не полный checklist.
+
+## С чего начать: маршрут по задаче
+
+| Запрос выглядит как | Начни с | Добери при необходимости |
+|---|---|---|
+| спроектировать агента с нуля | [playbooks/design-agent.md](references/playbooks/design-agent.md) | [templates/agent-design.md](references/templates/agent-design.md), [patterns.md](references/patterns.md) |
+| разобрать trace, найти причину сбоя | [playbooks/diagnose-trace.md](references/playbooks/diagnose-trace.md) | [templates/trace-diagnosis.md](references/templates/trace-diagnosis.md), [antipatterns.md](references/antipatterns.md) |
+| review существующей агентной системы | [playbooks/harness-review.md](references/playbooks/harness-review.md) | [templates/harness-spec.md](references/templates/harness-spec.md) |
+| построить или починить evals | [playbooks/build-evals.md](references/playbooks/build-evals.md) | [templates/eval-plan.md](references/templates/eval-plan.md) |
+| память, RAG, самоулучшение | [playbooks/memory-design.md](references/playbooks/memory-design.md) | [templates/memory-policy.md](references/templates/memory-policy.md) |
+| голос, realtime, асинхронность, Computer Use | [playbooks/realtime-latency.md](references/playbooks/realtime-latency.md) | [chapters/ch06](references/chapters/ch06-interaction.md) |
+| один агент или несколько | [playbooks/multi-agent-choice.md](references/playbooks/multi-agent-choice.md) | [chapters/ch10](references/chapters/ch10-multi-agent.md) |
+| контракт инструмента, права, песочница | [templates/tool-contract.md](references/templates/tool-contract.md) | [chapters/ch04](references/chapters/ch04-tools.md) |
+| симптом известен, причина нет | [antipatterns.md](references/antipatterns.md) | playbook по нужной области |
+| что говорит книга по теме | [source-map.md](references/source-map.md) | нужный конспект главы |
+| спорный вопрос проектирования, похожий на «вопрос для размышления» | [chapters/ch12](references/chapters/ch12-reference-answers.md) | ответ в `references/source-book/reference-answers.md` |
+
+Загружай только релевантные файлы. Не помещай всю книгу в контекст одновременно.
+
+## Основная модель
+
+> **AI-агент = LLM + контекст + инструменты**
+
+- **LLM** принимает решения, но не хранит надёжное состояние системы.
+- **Контекст** определяет, что агент видит сейчас: инструкции, состояние, историю и результаты действий; определения инструментов входят сюда же и занимают тот же бюджет.
+- **Инструменты** превращают намерение в наблюдаемое действие во внешнем мире.
+- **Harness** связывает три части в управляемый замкнутый контур.
+
+При сбое сначала локализуй дефект по этим четырём областям. Не начинай с замены модели, пока не проверены context lifecycle, tool contract и Harness.
+
+Источники: `references/source-book/chapter1.md:13`, `references/source-book/chapter1.md:164`, `references/source-book/chapter1.md:266`.
+
+## Выбери минимальную архитектуру
+
+Двигайся по лестнице сложности и остановись на первом варианте, который выполняет задачу:
+
+1. **Один вызов модели** — задача одношаговая, без внешнего состояния и действий.
+2. **Детерминированный workflow** — шаги известны заранее; модель заполняет ограниченные участки.
+3. **Один автономный агент** — следующий шаг зависит от нового наблюдения или результата инструмента.
+4. **Несколько агентов** — есть измеримая польза от нового внешнего свидетельства, разделения контекста, специализации или параллельной работы.
+
+Не добавляй multi-agent только ради «дебатов»: повторная генерация над тем же контекстом может увеличить стоимость, задержку и коррелированные ошибки. Сравни с сильным single-agent baseline: заранее выбери фиксируемый ресурс, например токены или стоимость, а время, вызовы и качество измеряй отдельно. Разделение контекста и параллелизм — проверяемые гипотезы пользы, не гарантии. В разделе о критерии (`references/source-book/chapter10.md:52`) автор называет единственный критерий — новую информацию, недоступную одиночному агенту; ограничения этого аргумента и отдельную оценку разделения контекста и вычислений добавляет русское издание. В ответах на вопросы автор сам называет преимуществами различные роли и изоляцию контекстов (`references/source-book/reference-answers.md:498`, `references/source-book/reference-answers.md:502`).
+
+Источники: `references/source-book/chapter1.md:344`, `references/source-book/chapter1.md:375`, `references/source-book/chapter10.md:48`.
+
+## Спроектируй Harness
+
+Проверь пять функций как один контур:
+
+| Функция | Вопрос | Production-механизм |
+|---|---|---|
+| Context | Достаточно ли релевантной информации для следующего решения? | стабильный префикс, ограниченная траектория, явное состояние |
+| Tools | Понятен ли модели контракт действия и результата? | узкие схемы, типы, идемпотентность, структурированные ошибки |
+| Constraints | Что запрещено по умолчанию? | least privilege, allowlist, sandbox, лимиты, approval gates |
+| Verification | Как результат проверяется независимо от заявления агента? | тест, schema, oracle, verifier, изолированный evaluator |
+| Correction | Как система обнаруживает сбой, восстанавливается и не повторяет его? | retry policy, rollback, checkpoint, bounded loop, escalation |
+
+Каждое действие должно оставлять проверяемое наблюдение, которое возвращается в контекст. Устанавливай `max_steps`, deadline, budget, cancellation и terminal states. Скрывай промежуточную ошибку от пользователя лишь пока существует ограниченный путь восстановления; затем сообщай точный blocker.
+
+Подробно: [chapters/ch01](references/chapters/ch01-agent-foundations.md). Источник: `references/source-book/chapter1.md:324`.
+
+## Надёжность: сбои, повторы, восстановление
+
+Классифицируй сбой до того, как считать попытки. Первый вопрос — не «повторить ли», а «имеет ли повтор смысл».
+
+| Уровень | Типичные сбои | Что делать |
+|---|---|---|
+| API | 429, перегрузка, таймаут, разрыв, обрезка вывода | незаметный повтор с задержкой, если повтор безопасен; таймаут внешнего действия — неизвестный исход: сначала сверка |
+| Инструменты | несуществующий инструмент, неверные параметры, одинаковая ошибка подряд | менять вызов; повтор без изменения бесполезен |
+| Контекст | переполнение окна, неудачное сжатие, повреждённая траектория | пересборка из durable state |
+| Поток управления | цикл без прогресса, спираль в самой логике recovery | предохранитель и эскалация |
+
+Обязательные механизмы:
+
+- **Неизвестный исход не равен неудаче.** После таймаута побочный эффект мог произойти. Переводи вызов в состояние `unknown`, сверяй фактическое состояние провайдера и только затем решай. Поздний результат применяй как versioned transition, а не как новый вызов. У автора сетевые сбои входят в повторяемые временные ошибки; условие безопасности повтора добавляет русское издание (`references/source-book/chapter5.md:196`).
+- **Отпечаток вызова** по паре «инструмент + параметры» — сигнал возможного цикла, который счётчик попыток не видит. Одинаковый вызов бывает осмысленным опросом меняющегося состояния: прогресс проверяй по результатам и версии состояния. У автора повторяющийся отпечаток — однозначный сигнал цикла; оговорку добавляет русское издание (`references/source-book/chapter5.md:200`).
+- **Беззвучное зависание опаснее разрыва**: разрыв даёт ошибку, зависание — нет. Нужен мониторинг активности потока, а не только перехват исключений.
+- **Эскалация с ростом видимости**: незаметный повтор → повтор с изменением → откат к устойчивому состоянию → сообщение пользователю → передача человеку. Уровень выше только после исчерпания нижнего.
+- **Durable checkpoint** переживает рестарт и содержит: цель, ограничения, принятые решения, изменённые файлы, доказательства тестов, незавершённую работу, следующее действие и план отката. Возобновление начинается со сверки записи с фактическим состоянием.
+
+Тесты надёжности покрывают: повторную и внеочередную доставку события, поздний успех после таймаута, аварийную остановку с последующим возобновлением, отмену до и после фиксации побочного эффекта.
+
+Подробно: [chapters/ch05](references/chapters/ch05-coding-agents.md). Источники: `references/source-book/chapter5.md:181`, `references/source-book/chapter6.md:31`.
+
+## Контекст
+
+1. Отдели **стабильный префикс** (системные инструкции, tool definitions) от **динамической траектории**. Изменение токенов нарушает повторное использование с первой изменённой позиции. Стабильность префикса не гарантирует попадание в кэш и не делает ввод бесплатным: проверяй условия и тариф кэша.
+2. Держи рабочее состояние явно и проецируй его в конец контекста: цель, решения, ограничения, активный шаг, артефакты, тесты, риски, следующий шаг.
+3. Не используй transcript одновременно как журнал, память и source of truth.
+4. Сжимай по уровням: ограничить вывод инструмента → удалить шум → микро-сжать однотипное → архивировать этап в typed summary → пересобрать контекст как circuit breaker.
+5. При сжатии всегда сохраняй решения, ограничения, изменённые файлы, результаты тестов, идентификаторы артефактов, незавершённую работу и rollback plan.
+6. Для независимой подзадачи предпочитай изолированный дочерний контекст: изоляция дешевле сжатия.
+
+Подробно: [chapters/ch02](references/chapters/ch02-context-engineering.md). Источники: `references/source-book/chapter2.md:372`, `references/source-book/chapter2.md:437`, `references/source-book/chapter2.md:994`, `references/source-book/chapter2.md:1092`.
+
+## Инструменты и безопасность
+
+Для каждого инструмента зафиксируй: одну capability и точную schema; preconditions, side effects, timeout, retry semantics, idempotency key; ошибки как данные (код, причина, retryable, remediation); provenance результата; permissions; sandbox для недоверенного кода; human approval перед необратимым действием.
+
+Описание инструмента отвечает на вопрос «когда применять», а не только «что умеет», и содержит контрпримеры — чего инструмент не делает.
+
+Выбирай специализированный tool для стабильной операции со строгим контрактом; Skill + универсальный executor — для меняющегося процесса, требующего рассуждения. Не превращай универсальный shell/browser в неограниченный capability.
+
+При росте числа инструментов проверяй точность выбора и расход контекста: когда инструментов больше ста, даже самые передовые LLM легко ошибаются при выборе. Само количество не отключает кэш: важны стабильность схем и их порядка. У автора каждое изменение набора инструментов инвалидирует KV-кэш; границу инвалидации уточняет русское издание (`references/source-book/chapter4.md:141`). Если полный каталог ухудшает результаты, сравни с послойным раскрытием — сначала указатель, затем схема нужного инструмента. Размещение каталога Skills и способ активации зависят от Harness; не считай метасообщение в хвосте универсальным протоколом.
+
+Инструмент, созданный агентом, до попадания в библиотеку проходит: проверку происхождения и зависимостей, запуск в песочнице без секретов, сети и записи по умолчанию, контрактные и adversarial тесты, review разрешений. Иначе ошибка распространится на все последующие задачи.
+
+Недоверенный контент (веб-страницы, документы, результаты инструментов, записи памяти) остаётся данными: он не размещается там, где живут инструкции, и не влияет на права. Enforcement — вне промпта.
+
+Подробно: [chapters/ch04](references/chapters/ch04-tools.md), [chapters/ch05](references/chapters/ch05-coding-agents.md). Источники: `references/source-book/chapter4.md:11`, `references/source-book/chapter4.md:38`, `references/source-book/chapter4.md:137`, `references/source-book/chapter2.md:732`, `references/source-book/chapter9.md:356`.
+
+## Память и самоулучшение
+
+Для запроса о самообучении **явно сопоставь в ответе все три механизма**, прежде чем выбрать один:
+
+1. **Post-training** изменяет веса и требует тренировочного контура и оценки.
+2. **In-context learning** действует только в текущем контексте.
+3. **Externalized learning** сохраняет опыт во внешних версионируемых носителях без изменения весов.
+
+Для безопасной первой версии предпочитай externalized learning и выбирай носитель по характеру способности: факты и условия действия → knowledge base; стратегия, выражаемая словами → prompt или Skill; точный процесс, ограничение или право → code/tool; пользовательское состояние → typed memory с provenance и retention policy. Только многомерные способности (восприятие, стиль, неявные стратегии) уходят в параметры.
+
+Постобучение рассматривай только после исправления интерфейса и контекста, и сначала определи, чего не хватает: базовых знаний (Mid-training), протокола (SFT) или стратегии (RL). Если остаётся нестабильность формата на распределении задач, SFT на чистых демонстрациях с отдельным holdout — рабочий вариант. RL нужен там, где траектории уже различаются по проверяемому вознаграждению, а среда развёртывания отличается от демонстраций.
+
+Не превращай сырой лог или единичную неудачу в правило. Проводи цепочку `episode → extraction → candidate → review/eval → promotion` и храни origin, supporting episodes, confidence, version, scope и rollback. Предпочитай локальные патчи правил полному переписыванию промпта. Запись в память проходит ту же проверку доверия, что и внешний ввод, иначе инъекция переживёт сессию; агент не меняет корень доверия, который утверждает его собственные обновления.
+
+Подробно: [chapters/ch03](references/chapters/ch03-memory-and-knowledge.md), [chapters/ch09](references/chapters/ch09-continual-evolution.md), [chapters/ch08](references/chapters/ch08-post-training.md). Источники: `references/source-book/chapter3.md:47`, `references/source-book/chapter9.md:58`, `references/source-book/chapter9.md:270`, `references/source-book/chapter9.md:356`, `references/source-book/chapter8.md:458`.
+
+## Построй eval-loop до оптимизации
+
+1. Зафиксируй baseline и версии модели, prompt, tools, data и среды.
+2. Собери задачи из реального распределения, граничные и adversarial случаи. Отдели development set от holdout и не тюнись на holdout.
+3. Используй внешне проверяемый outcome, а не самооценку агента. Где точного oracle нет — rubric с весами, ловушками и вето, pairwise evaluation, blinded judge, калибровка на человеческой выборке.
+4. Измеряй минимум: task success (различая Pass@k и Pass^k), constraint violations отдельной метрикой, ошибки выбора и вызова инструментов, latency/tokens/cost, recovery и каскадные ошибки.
+5. Меняй один механизм за раз или проводи ablation; переключатели абляции закладывай до фиксации конфигурации в коде.
+6. Для стохастической системы измерь границу шума повторными прогонами: разница меньше неё решением не является. При сравнении многих вариантов повышай порог.
+7. Выпускай через shadow/canary, держи проверенный rollback, отслеживай drift после релиза.
+
+Если данных ещё нет, дай instrumentation plan и эксперимент; не заявляй улучшение заранее.
+
+Подробно: [chapters/ch07](references/chapters/ch07-evaluation.md). Источники: `references/source-book/chapter7.md:169`, `references/source-book/chapter7.md:136`, `references/source-book/chapter7.md:716`, `references/source-book/chapter7.md:766`.
+
+## Realtime и multi-agent
+
+Для запроса о голосовой архитектуре **явно сравни в ответе все три парадигмы**, даже если одна быстро исключается:
+
+- **Cascading**: streaming ASR → LLM/agent → streaming TTS; проще контролировать и измерять, хороший v1.
+- **Omni**: единая модель для нескольких модальностей; выигрыш в задержке, но не обязательно в точности.
+- **Full-Duplex**: одновременное восприятие и выражение, barge-in; максимальная естественность и максимальная сложность гонок.
+
+Задай измеримый latency budget, разложенный по стадиям. Если product SLA неизвестен, объяви конкретный provisional budget гипотезой (не отраслевым фактом) и укажи, какими p50/p95 traces он будет откалиброван. Раздели fast interaction loop и slow reasoning; передавай `turn_id`, версию состояния, deadline, cancellation и structured result. Устаревший результат не озвучивается и не продолжает side effects. Отмена — не одно действие: остановка генерации, остановка вывода, отмена инструмента, отказ от повтора необратимого эффекта, компенсация обратимого. У автора команда «Стоп» немедленно прекращает выполнение; различие запроса отмены и подтверждённой остановки вводит русское издание (`references/source-book/chapter6.md:280`).
+
+Race-тесты обязательны и покрывают: перебивание до фиксации побочного эффекта и после неё, приход медленного результата после смены хода, коррекцию частичного распознавания, потерю сети в середине потока, запрет на озвучивание устаревшего результата.
+
+Для multi-agent зафиксируй две оси: shared или isolated contexts; peer, manager или decentralized topology. Раздели data plane (файлы, артефакты, версии, ownership) и control plane (задачи, сообщения, heartbeat, cancellation). Независимый verifier читает исходное evidence, а не пересказ proposer-а.
+
+В сравнении single-agent и multi-agent отдельно проверяй каскадные ошибки: внедри правдоподобное неверное upstream evidence и измерь `false_accept`, `cascade_depth` и итоговый вред. `handoff failure` эту проверку не заменяет.
+
+Подробно: [chapters/ch06](references/chapters/ch06-interaction.md), [chapters/ch10](references/chapters/ch10-multi-agent.md). Источники: `references/source-book/chapter6.md:323`, `references/source-book/chapter6.md:429`, `references/source-book/chapter10.md:13`, `references/source-book/chapter10.md:579`.
+
+## Формат результата
+
+Начинай с вердикта или решения в первых строках — не с изложения контекста. Адаптируй глубину к запросу, но по умолчанию выдай:
+
+1. **Решение** — минимальный выбранный вариант и что не делать сейчас.
+2. **Evidence / inference / unknown** — подтверждённое, объяснение и неизмеренное; отдельно выдели то, что требует проверки по текущей документации провайдера и не может быть подтверждено книгой.
+3. **Архитектура** — компоненты, состояние, контракты и failure paths.
+4. **Порядок реализации** — тонкие vertical slices с тестами.
+5. **Доказательство эффекта** — baseline, eval design, метрики и release gate.
+6. **Риски и rollback**.
+7. **Источники книги** — точные `references/source-book/*.md:line`; только для реально применённых идей.
+
+Не перегружай ответ универсальным checklist и не повторяй один механизм в нескольких разделах. Привязывай каждый механизм к наблюдаемому failure mode и проверке. По умолчанию держи результат не длиннее 1200 слов.
+
+## Все материалы
+
+**Справочники:** [cheatsheet.md](references/cheatsheet.md) — быстрый выбор архитектуры и проверок · [patterns.md](references/patterns.md) — 16 паттернов «failure mode → механизм → проверка» · [antipatterns.md](references/antipatterns.md) — каталог ошибок по симптомам · [glossary.md](references/glossary.md) — термины · [source-map.md](references/source-map.md) — карта книги по темам.
+
+**Конспекты глав:** [ch00 введение](references/chapters/ch00-introduction.md) · [ch01 основы, ReAct, Harness](references/chapters/ch01-agent-foundations.md) · [ch02 контекст, кэш, сжатие](references/chapters/ch02-context-engineering.md) · [ch03 память и RAG](references/chapters/ch03-memory-and-knowledge.md) · [ch04 инструменты и MCP](references/chapters/ch04-tools.md) · [ch05 coding-агенты и recovery](references/chapters/ch05-coding-agents.md) · [ch06 асинхронность, голос, Computer Use, роботы](references/chapters/ch06-interaction.md) · [ch07 оценка](references/chapters/ch07-evaluation.md) · [ch08 постобучение](references/chapters/ch08-post-training.md) · [ch09 непрерывная эволюция](references/chapters/ch09-continual-evolution.md) · [ch10 multi-agent](references/chapters/ch10-multi-agent.md) · [ch11 послесловие](references/chapters/ch11-afterword.md) · [ch12 справочные ответы на вопросы для размышления](references/chapters/ch12-reference-answers.md)
+
+**Процедуры:** [design-agent](references/playbooks/design-agent.md) · [diagnose-trace](references/playbooks/diagnose-trace.md) · [harness-review](references/playbooks/harness-review.md) · [build-evals](references/playbooks/build-evals.md) · [memory-design](references/playbooks/memory-design.md) · [realtime-latency](references/playbooks/realtime-latency.md) · [multi-agent-choice](references/playbooks/multi-agent-choice.md)
+
+**Артефакты:** [agent-design](references/templates/agent-design.md) · [harness-spec](references/templates/harness-spec.md) · [tool-contract](references/templates/tool-contract.md) · [eval-plan](references/templates/eval-plan.md) · [memory-policy](references/templates/memory-policy.md) · [trace-diagnosis](references/templates/trace-diagnosis.md)

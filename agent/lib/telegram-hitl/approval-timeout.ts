@@ -24,7 +24,6 @@ export interface TimedOutApprovalClaim {
   auth: SessionAuthContext;
   agentSessionId: string;
   id: string;
-  kind: "question" | "tool-approval";
   leaseToken: string;
   promptText: string;
   requestId: string;
@@ -57,12 +56,9 @@ const TIMEOUT_LEASE_RELEASE_FAILED = "AGENT_APPROVAL_TIMEOUT_LEASE_RELEASE_FAILE
 const TIMEOUT_SESSION_INACTIVE = "AGENT_APPROVAL_TIMEOUT_SESSION_INACTIVE";
 const TIMEOUT_PROMPT_FINALIZE_FAILED = "AGENT_APPROVAL_TIMEOUT_PROMPT_FINALIZE_FAILED";
 const TIMEOUT_MINUTES = Math.round(TELEGRAM_HITL_APPROVAL_TIMEOUT_MS / 60_000);
-const NO_ANSWER_TEXT = "Пользователь не ответил на вопрос вовремя.";
 
 export function approvalTimeoutContext(claim: TimedOutApprovalClaim): string {
-  const subject = claim.kind === "question"
-    ? "не ответил на заданный вопрос"
-    : claim.toolName === null
+  const subject = claim.toolName === null
     ? "не подтвердил запрошенное действие"
     : `не подтвердил действие «${claim.toolName}»`;
   return [
@@ -72,11 +68,9 @@ export function approvalTimeoutContext(claim: TimedOutApprovalClaim): string {
   ].join(" ");
 }
 
-/** An approval resolves only by option id; a question has no option the user ever saw. */
+/** An approval resolves only by option id: an unanswered one is cancelled. */
 function timeoutInputResponse(claim: TimedOutApprovalClaim): InputResponse {
-  return claim.kind === "question"
-    ? { requestId: claim.requestId, text: NO_ANSWER_TEXT }
-    : { optionId: "cancel", requestId: claim.requestId };
+  return { optionId: "cancel", requestId: claim.requestId };
 }
 
 export function createApprovalTimeoutResolver(dependencies: ApprovalTimeoutDependencies) {

@@ -22,6 +22,9 @@ export type AgentScheduleRecurrence =
   | { daysOfWeek: number[]; interval: number; kind: "weekly" };
 
 export interface AgentScheduleRow {
+  check_command: string | null;
+  check_failures: number;
+  check_until: Date | null;
   completed_runs: number;
   execution_context: AgentScheduleExecutionContext;
   max_runs: number | null;
@@ -30,6 +33,8 @@ export interface AgentScheduleRow {
   history_window_days: number | null;
   id: string;
   forum_topic_id: string | null;
+  last_check_error_code: string | null;
+  last_checked_at: Date | null;
   last_error_code: string | null;
   message_thread_id: string | null;
   next_run_at: Date;
@@ -46,7 +51,18 @@ export interface AgentScheduleRow {
   user_request: string;
 }
 
+/** A monitor's check as the agent sees it in the list: the script, the window, and how it fares. */
+export interface AgentScheduleCheckRecord {
+  command: string;
+  consecutiveFailures: number;
+  lastCheckedAt: string | null;
+  lastErrorCode: string | null;
+  until: string;
+}
+
 export interface AgentScheduleRecord {
+  /** Present only on a monitor, so plain schedules list exactly as before. */
+  check?: AgentScheduleCheckRecord;
   completedRuns: number;
   executionContext: AgentScheduleExecutionContext;
   maxRuns: number | null;
@@ -78,8 +94,21 @@ function rowRecurrence(row: AgentScheduleRow): AgentScheduleRecurrence {
   };
 }
 
-export function rowToAgentSchedule(row: AgentScheduleRow): AgentScheduleRecord {
+function rowCheck(row: AgentScheduleRow): AgentScheduleCheckRecord | null {
+  if (row.check_command === null || row.check_until === null) return null;
   return {
+    command: row.check_command,
+    consecutiveFailures: row.check_failures,
+    lastCheckedAt: row.last_checked_at?.toISOString() ?? null,
+    lastErrorCode: row.last_check_error_code,
+    until: row.check_until.toISOString(),
+  };
+}
+
+export function rowToAgentSchedule(row: AgentScheduleRow): AgentScheduleRecord {
+  const check = rowCheck(row);
+  return {
+    ...(check === null ? {} : { check }),
     completedRuns: row.completed_runs,
     executionContext: row.execution_context,
     maxRuns: row.max_runs,

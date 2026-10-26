@@ -21,6 +21,7 @@ import {
 } from "./turn-blocks.js";
 import { EMPTY_DELIVERY_MARKER } from "../../runtime/turn/step-history.js";
 import { VOICE_MESSAGE_RULES } from "./common-fragments.js";
+import { REPLY_BUTTON_RULES } from "./reply-button-fragments.js";
 import { formatReactionSetAnnouncement } from "../telegram-reaction-announcement.js";
 import { TELEGRAM_DEFAULT_REACTIONS } from "../telegram-reaction-set.js";
 
@@ -142,6 +143,21 @@ describe("mode block resolution", () => {
     expect(groupRoot).toContain("- answer with a voice message");
     expect(groupChild).not.toContain("send_voice_message");
     expect(groupChild).not.toContain("voice message");
+  });
+
+  it("teaches reply buttons where the tool exists and nowhere else", async () => {
+    const resolve = createModeBlockResolver({
+      loadCapabilities: vi.fn().mockResolvedValue(new Set(["remember"])),
+      loadReactionPolicy: reactionPolicy,
+    });
+
+    const personal = await resolve(context(privateAuth));
+    const personalChild = await resolve({ ...context(privateAuth), channel: { kind: "subagent" } });
+    const external = await resolve(context(externalAuth));
+
+    expect(personal).toContain(REPLY_BUTTON_RULES);
+    expect(personalChild).not.toContain("attach_reply_buttons");
+    expect(external).not.toContain("attach_reply_buttons");
   });
 
   it("keeps every transport directive away from a subagent child", async () => {

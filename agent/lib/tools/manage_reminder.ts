@@ -18,6 +18,7 @@ import {
 import { requireReminderAuthorization } from "../reminders/reminder-context.js";
 import { REMINDER_RECURRENCE_UNITS, type ReminderRecurrence } from "../reminders/reminder-record.js";
 import { reminderRepository } from "../reminders/reminder-repository.js";
+import { parseReplyButtonRows, REPLY_BUTTON_ROWS_SCHEMA, type ReplyButtonRows } from "../reply-buttons/reply-button-contract.js";
 import {
   optionalIsoDate,
   optionalString,
@@ -36,6 +37,7 @@ const TOOL_ACTIONS = ["create", "update", "pause", "resume", "delete"] as const;
 const SCOPES = ["personal", "family"] as const;
 const TOP_LEVEL_FIELDS = [
   "action",
+  "buttons",
   "content",
   "firstRunAt",
   "id",
@@ -51,6 +53,9 @@ const recurrenceSchema = z.object({
 
 const manageReminderSchema = z.object({
   action: z.enum(TOOL_ACTIONS),
+  buttons: z.union([REPLY_BUTTON_ROWS_SCHEMA, z.null()])
+    .describe("Optional reply buttons sent with every delivery, rows as in attach_reply_buttons; null on update removes them")
+    .optional(),
   content: z.string().optional(),
   firstRunAt: z.string().optional(),
   id: z.string().optional(),
@@ -95,16 +100,29 @@ function requireReminderId(input: Record<string, unknown>): string {
   return requiredUuid(input, "id", INPUT_ERROR_CODE, "напоминание из list_reminders");
 }
 
+/** Absent keeps the current buttons; null removes them, which only an update can do. */
+function optionalReplyButtons(raw: unknown, allowNull: boolean): ReplyButtonRows | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) {
+    if (allowNull) return null;
+    toolInputError(INPUT_ERROR_CODE, "Для action=create не передавайте buttons, если кнопки не нужны");
+  }
+  return parseReplyButtonRows(raw);
+}
+
 function requireCreateInput(input: Record<string, unknown>) {
   requireOnlyFields(input, [
     "action",
+    "buttons",
     "content",
     "firstRunAt",
     "recurrence",
     "scope",
     "timezone",
   ], "action=create", INPUT_ERROR_CODE);
+  const buttons = optionalReplyButtons(input.buttons, false);
   return {
+    ...(buttons === undefined || buttons === null ? {} : { buttons }),
     content: requiredString(input, "content", INPUT_ERROR_CODE, "Позвонить врачу", {
       maxLength: REMINDER_CONTENT_MAX_LENGTH,
     }),
@@ -118,6 +136,7 @@ function requireCreateInput(input: Record<string, unknown>) {
 function requireUpdateInput(input: Record<string, unknown>) {
   requireOnlyFields(input, [
     "action",
+    "buttons",
     "content",
     "firstRunAt",
     "id",
@@ -131,13 +150,14 @@ function requireUpdateInput(input: Record<string, unknown>) {
   });
   const firstRunAt = optionalIsoDate(input, "firstRunAt", INPUT_ERROR_CODE);
   const recurrence = optionalReminderRecurrence(input.recurrence);
-  if (content === undefined && firstRunAt === undefined && recurrence === undefined) {
+  const buttons = optionalReplyButtons(input.buttons, true);
+  if (buttons === undefined && content === undefined && firstRunAt === undefined && recurrence === undefined) {
     toolInputError(
       INPUT_ERROR_CODE,
-      "Для action=update передайте хотя бы одно изменение: content, firstRunAt или recurrence",
+      "Для action=update передайте хотя бы одно изменение: content, firstRunAt, recurrence или buttons",
     );
   }
-  return { content, firstRunAt, id: requireReminderId(input), recurrence };
+  return { buttons, content, firstRunAt, id: requireReminderId(input), recurrence };
 }
 
 function requireIdOnlyInput(input: Record<string, unknown>, action: ReminderAction): string {
@@ -164,7 +184,8 @@ const TOOL_DESCRIPTION = [
   "Create payload: {\"action\":\"create\",\"content\":\"Позвонить врачу\",\"firstRunAt\":\"2026-08-01T10:00:00+03:00\",\"timezone\":\"Europe/Moscow\",\"scope\":\"personal\",\"recurrence\":null}.",
   "Recurrence: no repeat is recurrence=null; a repeat = {\"unit\":\"minutely\",\"interval\":5}. unit: minutely, hourly, daily, weekly, monthly, yearly; interval is an integer from 1 to 365. Minimum 1 minute. Minutes and hours are counted as a duration, other periods keep the local calendar time. A missing date moves to the last day of the month without losing the original date for the following repeats. The time is checked every minute; missed repeats are not caught up.",
   "Remove the repeat: {\"action\":\"update\",\"id\":\"<id from list_reminders>\",\"recurrence\":null}. Do not delete and re-create a reminder to change its repeat.",
-  "Update passes id and only the content, firstRunAt or recurrence being changed. Pause/resume/delete pass only action and id.",
+  "Update passes id and only the content, firstRunAt, recurrence or buttons being changed. Pause/resume/delete pass only action and id.",
+  "buttons: optional reply buttons under every delivery, rows as in attach_reply_buttons.",
   "A delivered one-time reminder does not change: for a new time create a new one.",
   "firstRunAt is always an ISO datetime with a UTC offset, timezone is always IANA. Before update/pause/resume/delete first find the id through list_reminders.",
 ].join(" ");

@@ -17,6 +17,7 @@ const job: ClaimedAgentSchedule = {
   completedRuns: 0,
   executionContext: "isolated",
   maxRuns: null,
+  monitor: false,
   authorUserId: "user-1",
   capabilityAllowlist: [],
   familyId: "family-1",

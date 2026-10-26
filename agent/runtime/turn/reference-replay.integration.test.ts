@@ -175,7 +175,6 @@ async function replay(scenario: string, input: {
   it.each([
     ["approval", { guarded: ["manage_profile_projection"], respond: { optionId: "approve" } }],
     ["approval-denied", { guarded: ["manage_profile_projection"], respond: { optionId: "cancel" } }],
-    ["question", { respond: { optionId: "continue" } }],
   ] as const)("continues %s exactly as the reference did", async (scenario, input) => {
     const { prompts, sent } = await replay(scenario, input);
 

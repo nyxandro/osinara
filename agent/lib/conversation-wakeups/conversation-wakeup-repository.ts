@@ -117,45 +117,55 @@ async function requireOwned(
   return row;
 }
 
+/**
+ * Hands a claimed conversation occurrence to its chat queue inside the caller's transaction, so a
+ * monitor records why it woke the agent in the same commit. A schedule whose conversation is gone
+ * is parked instead.
+ */
+export async function enqueueConversationWakeup(
+  client: PoolClient,
+  job: { id: string; leaseToken: string; runId: string },
+): Promise<"parked" | "queued"> {
+  const schedule = await client.query<{ conversation_session_id: string | null; ingress_queue_id: string | null }>(
+    `SELECT conversation_session_id::text, ingress_queue_id::text FROM agent_schedules
+      WHERE id = $1 AND status = 'leased' AND lease_token = $2 AND execution_context = 'conversation'
+        AND dispatch_started_at IS NULL
+      FOR UPDATE`,
+    [job.id, job.leaseToken],
+  );
+  const row = schedule.rows[0];
+  if (!row) throw new AppError("AGENT_SCHEDULE_LEASE_STALE", "Запуск расписания уже неактуален");
+  const run = await client.query(
+    `UPDATE agent_schedule_runs
+        SET status = 'dispatching', dispatch_started_at = now(), recovery_protocol = 2,
+            application_session_id = $4, updated_at = now()
+      WHERE id = $1 AND schedule_id = $2 AND lease_token = $3 AND status = 'claimed'`,
+    [job.runId, job.id, job.leaseToken, row.conversation_session_id],
+  );
+  if (run.rowCount !== 1) throw new AppError("AGENT_SCHEDULE_LEASE_STALE", "Запуск расписания уже неактуален");
+  if (row.conversation_session_id === null || row.ingress_queue_id === null) {
+    await withdrawUnstartedRun(client, job.id, job.runId, CONVERSATION_CHANGED_CODE);
+    return "parked";
+  }
+  await client.query(
+    `UPDATE agent_schedules SET dispatch_started_at = now(), lease_expires_at = 'infinity', updated_at = now()
+      WHERE id = $1`,
+    [job.id],
+  );
+  await client.query(
+    "INSERT INTO telegram_ingress_wakeups (queue_id, schedule_id, run_id) VALUES ($1, $2, $3)",
+    [row.ingress_queue_id, job.id, job.runId],
+  );
+  return "queued";
+}
+
 export const conversationWakeupRepository = {
   /**
    * Hands a leased conversation occurrence to its chat queue. Without a live conversation binding
    * the schedule is parked instead, because its note has no context anywhere else.
    */
   async enqueue(job: { id: string; leaseToken: string; runId: string }): Promise<"parked" | "queued"> {
-    return await inTransaction(async (client) => {
-      const schedule = await client.query<{ conversation_session_id: string | null; ingress_queue_id: string | null }>(
-        `SELECT conversation_session_id::text, ingress_queue_id::text FROM agent_schedules
-          WHERE id = $1 AND status = 'leased' AND lease_token = $2 AND execution_context = 'conversation'
-            AND dispatch_started_at IS NULL
-          FOR UPDATE`,
-        [job.id, job.leaseToken],
-      );
-      const row = schedule.rows[0];
-      if (!row) throw new AppError("AGENT_SCHEDULE_LEASE_STALE", "Запуск расписания уже неактуален");
-      const run = await client.query(
-        `UPDATE agent_schedule_runs
-            SET status = 'dispatching', dispatch_started_at = now(), recovery_protocol = 2,
-                application_session_id = $4, updated_at = now()
-          WHERE id = $1 AND schedule_id = $2 AND lease_token = $3 AND status = 'claimed'`,
-        [job.runId, job.id, job.leaseToken, row.conversation_session_id],
-      );
-      if (run.rowCount !== 1) throw new AppError("AGENT_SCHEDULE_LEASE_STALE", "Запуск расписания уже неактуален");
-      if (row.conversation_session_id === null || row.ingress_queue_id === null) {
-        await withdrawUnstartedRun(client, job.id, job.runId, CONVERSATION_CHANGED_CODE);
-        return "parked";
-      }
-      await client.query(
-        `UPDATE agent_schedules SET dispatch_started_at = now(), lease_expires_at = 'infinity', updated_at = now()
-          WHERE id = $1`,
-        [job.id],
-      );
-      await client.query(
-        "INSERT INTO telegram_ingress_wakeups (queue_id, schedule_id, run_id) VALUES ($1, $2, $3)",
-        [row.ingress_queue_id, job.id, job.runId],
-      );
-      return "queued";
-    });
+    return await inTransaction((client) => enqueueConversationWakeup(client, job));
   },
 
   /** Claims a wake-up whose chat lane is free, or reclaims one whose processor lost its lease. */

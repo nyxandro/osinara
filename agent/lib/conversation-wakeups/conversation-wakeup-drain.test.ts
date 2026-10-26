@@ -35,7 +35,7 @@ const wakeup = {
   maxRuns: 3, messageThreadId: null, role: "owner", runId: "run-1", sandboxSessionId: "thread-1",
   scenarioPrompt: "Проверь заказ", scheduledFor: new Date("2026-09-25T10:00:00Z"), scheduleId: "schedule-1",
   scope: "personal", skillAllowlist: [], telegramChatId: "101", telegramChatType: "private", telegramUserId: "101",
-  timezone: "UTC", title: "Заказ", userRequest: "Скажи, когда привезут",
+  timezone: "UTC", title: "Заказ", userRequest: "Скажи, когда привезут", check: null,
 } satisfies PreparedConversationWakeup;
 
 let dependencies: ConversationWakeupDrainDependencies & {
