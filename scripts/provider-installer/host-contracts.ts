@@ -19,9 +19,10 @@ const manifestSchema = z.object({
   composeSha256: z.string().regex(/^[0-9a-f]{64}$/u),
   images: z.object({
     app: z.string().regex(new RegExp(`^ghcr\\.io/nyxandro/osinara-app@sha256:${IMAGE_DIGEST}$`, "u")),
+    // Transitional: named only by the first release without the subscription gateway (2026-10-26).
     cliProxy: z.string().regex(
       new RegExp(`^ghcr\\.io/nyxandro/osinara-cli-proxy@sha256:${IMAGE_DIGEST}$`, "u"),
-    ),
+    ).optional(),
     edge: z.string().regex(new RegExp(`^ghcr\\.io/nyxandro/osinara-edge@sha256:${IMAGE_DIGEST}$`, "u")),
     sandboxEgressProxy: z.string().regex(
       new RegExp(`^ghcr\\.io/nyxandro/osinara-sandbox-egress-proxy@sha256:${IMAGE_DIGEST}$`, "u"),

@@ -2,7 +2,7 @@
  * Turn-scoped instructions: application resolvers and the messages a turn adds to history.
  *
  * Exports:
- * - `InstructionResolver`: one named block source; `resolveTurnInstructions` runs them in order.
+ * - `InstructionResolver`: one named source of blocks; `resolveTurnInstructions` runs them in order.
  * - `instructionTurnMessages`: history as resolvers must see it — with this turn's input.
  * - `turnInputMessages`: what a turn appends after the history before its first model step.
  *
@@ -10,7 +10,8 @@
  *   question being asked.
  * - A failing resolver stops the turn before the model call: a turn never runs without its
  *   trust-zone rules. The application resolvers turn every expected failure into an explicit block.
- * - Resolvers run once per turn.
+ * - Resolvers run once per turn. One source may return several blocks when they come from one
+ *   computation, such as a turn's memory block and the profile card it writes into history.
  * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { ModelMessage, UserContent } from "ai";
@@ -27,9 +28,11 @@ export interface InstructionResolveContext extends DynamicResolveContext {
   readonly turnId: string;
 }
 
+export type ResolvedInstructions = InstructionBlock | readonly InstructionBlock[] | null;
+
 export interface InstructionResolver {
   readonly name: string;
-  resolve(context: InstructionResolveContext): InstructionBlock | null | Promise<InstructionBlock | null>;
+  resolve(context: InstructionResolveContext): ResolvedInstructions | Promise<ResolvedInstructions>;
 }
 
 export interface TurnInput {
@@ -88,9 +91,9 @@ export async function resolveTurnInstructions(
   }));
   const system: string[] = [];
   const user: ModelMessage[] = [];
-  for (const block of blocks) {
-    const content = block?.content.trim();
-    if (!block || !content) continue;
+  for (const block of blocks.flatMap((resolved) => resolved === null ? [] : [resolved].flat())) {
+    const content = block.content.trim();
+    if (!content) continue;
     if (block.role === "system") system.push(content);
     else user.push({ role: "user", content });
   }

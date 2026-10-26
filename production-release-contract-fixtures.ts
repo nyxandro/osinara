@@ -2,9 +2,8 @@
  * Production release contract test fixtures.
  *
  * Exports:
- * - `resolvedComposeSecurityFixture`: accepted resolved production Compose security surface.
- * - `installationComposeSecurityFixture`: the same surface without the CLIProxy gateway.
- * - `executeComposeSecurityPredicate`: invokes the real root deployment jq predicate for a profile.
+ * - `resolvedComposeSecurityFixture`: accepted resolved release Compose security surface.
+ * - `executeComposeSecurityPredicate`: invokes the real root deployment jq predicate.
  */
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -26,7 +25,6 @@ export function resolvedComposeSecurityFixture(): Record<string, unknown> {
     services: {
       agent: service({
         depends_on: {
-          "cli-proxy-api": { condition: "service_healthy", required: true },
           migrate: { condition: "service_completed_successfully", required: true },
         },
         volumes: [
@@ -34,11 +32,6 @@ export function resolvedComposeSecurityFixture(): Record<string, unknown> {
           volume("network-access", "/app/network-access"),
           volume("workspace-data", "/app/workspaces"),
           volume("/opt/osinara/agent-model-providers.json", "/app/config/agent-model-providers.json", "bind", true),
-        ],
-      }),
-      "cli-proxy-api": service({
-        volumes: [
-          volume("cli-proxy-auth", "/var/lib/cli-proxy-api/auth"),
         ],
       }),
       edge: service({
@@ -68,25 +61,11 @@ export function resolvedComposeSecurityFixture(): Record<string, unknown> {
   };
 }
 
-/** The installation graph: what `installation-compose.jq` leaves of the production graph. */
-export function installationComposeSecurityFixture(): Record<string, unknown> {
-  const config = resolvedComposeSecurityFixture() as {
-    services: Record<string, { depends_on?: Record<string, unknown> }>;
-  };
-  delete config.services["cli-proxy-api"];
-  delete config.services.agent!.depends_on!["cli-proxy-api"];
-  return config;
-}
-
-export function executeComposeSecurityPredicate(
-  config: Record<string, unknown>,
-  profile: "installation" | "production",
-): void {
+export function executeComposeSecurityPredicate(config: Record<string, unknown>): void {
   execFileSync("bash", [
     "-c",
-    'source "$1"; validate_resolved_compose_security - "$2"',
+    'source "$1"; validate_resolved_compose_security -',
     "bash",
     fileURLToPath(new URL("scripts/production-deploy/release.sh", projectRoot)),
-    profile,
   ], { input: JSON.stringify(config), stdio: ["pipe", "pipe", "pipe"] });
 }

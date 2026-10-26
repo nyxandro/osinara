@@ -215,7 +215,7 @@ describeWithDatabase("R3 profile projections", () => {
       conversationId: fixture.personalConversationId,
       currentTelegramUserId: "9301",
       explicitMentionTelegramUserIds: [],
-      hiddenClaimIds: new Set(),
+      inContextMemoryRefs: new Set(),
       now: new Date("2026-08-08T12:00:00.000Z"),
       provenance: profileProvenance("personal-default"),
       replyTelegramUserId: null,
@@ -241,7 +241,7 @@ describeWithDatabase("R3 profile projections", () => {
       conversationId: fixture.personalConversationId,
       currentTelegramUserId: "9301",
       explicitMentionTelegramUserIds: [],
-      hiddenClaimIds: new Set(),
+      inContextMemoryRefs: new Set(),
       now: new Date("2026-08-08T12:00:00.000Z"),
       provenance: profileProvenance("personal-pending-notice"),
       replyTelegramUserId: null,
@@ -261,7 +261,7 @@ describeWithDatabase("R3 profile projections", () => {
       conversationId: fixture.personalConversationId,
       currentTelegramUserId: "9301",
       explicitMentionTelegramUserIds: [],
-      hiddenClaimIds: new Set(),
+      inContextMemoryRefs: new Set(),
       now: new Date("2026-08-08T12:00:00.000Z"),
       provenance: profileProvenance("personal-enabled"),
       replyTelegramUserId: null,
@@ -280,7 +280,7 @@ describeWithDatabase("R3 profile projections", () => {
     // Происхождение объясняется один раз в шапке выборки, в записи остаётся только evidenceKind.
     expect(reported).toMatchObject({ evidenceKind: "reported", sourceAuthorLabel: "Анна" });
     await expect(profileViewRepository.read(fixture.ownerAuth, personalEnabled.profileViewRef))
-      .resolves.toEqual(personalEnabled);
+      .resolves.toEqual({ ...personalEnabled, erasedClaims: 0, withdrawnMemoryRefs: [] });
 
     const externalAAuth: MemoryAuthorization = {
       ...fixture.ownerAuth,
@@ -291,7 +291,7 @@ describeWithDatabase("R3 profile projections", () => {
       conversationId: fixture.externalAConversationId,
       currentTelegramUserId: "9301",
       explicitMentionTelegramUserIds: [],
-      hiddenClaimIds: new Set(),
+      inContextMemoryRefs: new Set(),
       now: new Date("2026-08-08T12:00:00.000Z"),
       provenance: profileProvenance("external-a"),
       replyTelegramUserId: null,
@@ -313,7 +313,7 @@ describeWithDatabase("R3 profile projections", () => {
       conversationId: fixture.personalConversationId,
       currentTelegramUserId: "9301",
       explicitMentionTelegramUserIds: [],
-      hiddenClaimIds: new Set(),
+      inContextMemoryRefs: new Set(),
       now: new Date("2026-08-08T12:00:00.000Z"),
       provenance: profileProvenance("after-departure"),
       replyTelegramUserId: null,
@@ -329,7 +329,7 @@ describeWithDatabase("R3 profile projections", () => {
     );
     await expect(profileViewRepository.create(fixture.ownerAuth, {
       conversationId: fixture.personalConversationId,
-      currentTelegramUserId: "9301", explicitMentionTelegramUserIds: [], hiddenClaimIds: new Set(),
+      currentTelegramUserId: "9301", explicitMentionTelegramUserIds: [], inContextMemoryRefs: new Set(),
       now: new Date(), provenance: profileProvenance("membership-revoked"),
       replyTelegramUserId: null,
     })).rejects.toThrowError(/AGENT_PROFILE_VIEW_MEMBERSHIP_REVOKED/u);
@@ -362,7 +362,7 @@ describeWithDatabase("R3 profile projections", () => {
     const input = {
       conversationId: fixture.familyConversationId,
       currentTelegramUserId: "9301",
-      hiddenClaimIds: new Set<string>(),
+      inContextMemoryRefs: new Set<string>(),
       now: new Date("2026-08-08T12:00:00.000Z"),
       replyTelegramUserId: null,
     };
@@ -398,7 +398,7 @@ describeWithDatabase("R3 profile projections", () => {
     ]));
   });
 
-  it("leaves out a fact this session just showed and keeps the person, so the turn can still name them", async () => {
+  it("leaves out a fact a card in history still holds and keeps the person, so the turn can still name them", async () => {
     const fixture = await createFixture();
     const petr = await database().query<{ id: string }>(
       "INSERT INTO users (telegram_user_id, display_name) VALUES ('9302', 'Пётр') RETURNING id",
@@ -421,16 +421,13 @@ describeWithDatabase("R3 profile projections", () => {
       scope: "family",
       subjectUserId: petr.rows[0]!.id,
     });
-    const shown = await database().query<{ memory_item_id: string }>(
-      "SELECT memory_item_id FROM memory_item_refs WHERE memory_ref = $1", [shownRef],
-    );
     const familyAuth = { ...fixture.ownerAuth, groupId: fixture.familyGroupId, scopes: ["family" as const] };
 
     const view = await profileViewRepository.create(familyAuth, {
       conversationId: fixture.familyConversationId,
       currentTelegramUserId: "9301",
       explicitMentionTelegramUserIds: ["9302"],
-      hiddenClaimIds: new Set([shown.rows[0]!.memory_item_id]),
+      inContextMemoryRefs: new Set([shownRef]),
       now: new Date("2026-08-08T12:00:00.000Z"),
       provenance: profileProvenance("petr-just-shown"),
       replyTelegramUserId: null,
@@ -438,7 +435,7 @@ describeWithDatabase("R3 profile projections", () => {
 
     const petrSubject = view.subjects.find((subject) => subject.label === "Пётр");
     expect(petrSubject).toMatchObject({
-      claims: [], priority: "explicit_mention", recentlyShownClaimsLeftOut: 1, totalCharacters: 0,
+      claims: [], claimsInContext: 1, priority: "explicit_mention", totalCharacters: 0,
     });
     // Reading the view again by its ref keeps the person too.
     await expect(profileViewRepository.read(familyAuth, view.profileViewRef)).resolves.toMatchObject({
@@ -452,5 +449,99 @@ describeWithDatabase("R3 profile projections", () => {
       [view.profileViewRef],
     );
     expect(stored.rows.map((row) => row.subject_ref_snapshot)).toContain(petrSubject!.subjectRef);
+  });
+
+  it("tells which facts a card in history may still hold, by the live rules of the chat", async () => {
+    const fixture = await createFixture();
+    const personal = (content: string) => insertClaim({
+      content, conversationId: fixture.personalConversationId, familyId: fixture.familyId,
+      ownerUserId: fixture.userId, scope: "personal", subjectUserId: fixture.userId,
+    });
+    const kept = await personal("Любит улун");
+    const deleted = await personal("Живёт в Казани");
+    const superseded = await personal("Работает в банке");
+    const sensitive = await personal("Принимает лекарство");
+    const familyFact = await insertClaim({
+      content: "День рождения 18 апреля", conversationId: fixture.familyConversationId,
+      familyId: fixture.familyId, scope: "family", subjectUserId: fixture.userId,
+    });
+    const externalFact = await insertClaim({
+      content: "Пишет про агентов", conversationId: fixture.externalAConversationId,
+      familyId: fixture.familyId, groupId: fixture.externalAGroupId, scope: "group",
+      subjectParticipantId: fixture.externalAParticipantId,
+    });
+    const idOf = async (memoryRef: string) => (await database().query<{ memory_item_id: string }>(
+      "SELECT memory_item_id FROM memory_item_refs WHERE memory_ref = $1", [memoryRef],
+    )).rows[0]!.memory_item_id;
+    await database().query(
+      "UPDATE memory_items_all SET deleted_at = now(), claim_status = 'retracted' WHERE id = $1",
+      [await idOf(deleted)],
+    );
+    await database().query(
+      "UPDATE memory_items SET claim_status = 'superseded', superseded_by = $2 WHERE id = $1",
+      [await idOf(superseded), await idOf(kept)],
+    );
+    await database().query(
+      "UPDATE memory_items SET sensitivity = 'sensitive' WHERE id = $1", [await idOf(sensitive)],
+    );
+    const unknown = "mem_00000000000000000000000000000000";
+    const all = [kept, deleted, superseded, sensitive, familyFact, externalFact, unknown];
+
+    await expect(profileViewRepository.readableMemoryRefs(
+      fixture.ownerAuth, fixture.personalConversationId, all,
+    )).resolves.toEqual(new Set([kept, familyFact]));
+
+    const familyAuth = { ...fixture.ownerAuth, groupId: fixture.familyGroupId, scopes: ["family" as const] };
+    await expect(profileViewRepository.readableMemoryRefs(
+      familyAuth, fixture.familyConversationId, all,
+    )).resolves.toEqual(new Set([familyFact]));
+
+    const externalA = { ...fixture.ownerAuth, groupId: fixture.externalAGroupId, scopes: ["group" as const] };
+    await expect(profileViewRepository.readableMemoryRefs(
+      externalA, fixture.externalAConversationId, all,
+    )).resolves.toEqual(new Set([externalFact]));
+    const externalB = { ...fixture.ownerAuth, groupId: fixture.externalBGroupId, scopes: ["group" as const] };
+    await expect(profileViewRepository.readableMemoryRefs(
+      externalB, fixture.externalBConversationId, all,
+    )).resolves.toEqual(new Set());
+    // The chat of another conversation is refused before any fact is read.
+    await expect(profileViewRepository.readableMemoryRefs(
+      externalB, fixture.externalAConversationId, all,
+    )).rejects.toMatchObject({ code: "AGENT_PROFILE_VIEW_SCOPE_DENIED" });
+  });
+
+  it("re-reads a stored view without the facts withdrawn since, and names them", async () => {
+    const fixture = await createFixture();
+    const kept = await insertClaim({
+      content: "Любит улун", conversationId: fixture.personalConversationId, familyId: fixture.familyId,
+      ownerUserId: fixture.userId, scope: "personal", subjectUserId: fixture.userId,
+    });
+    const deleted = await insertClaim({
+      content: "Живёт в Казани", conversationId: fixture.personalConversationId, familyId: fixture.familyId,
+      ownerUserId: fixture.userId, scope: "personal", subjectUserId: fixture.userId,
+    });
+    const view = await profileViewRepository.create(fixture.ownerAuth, {
+      conversationId: fixture.personalConversationId,
+      currentTelegramUserId: "9301",
+      explicitMentionTelegramUserIds: [],
+      inContextMemoryRefs: new Set(),
+      now: new Date("2026-08-08T12:00:00.000Z"),
+      provenance: profileProvenance("reread-withdrawn"),
+      replyTelegramUserId: null,
+    });
+    await database().query(
+      `UPDATE memory_items_all SET deleted_at = now(), claim_status = 'retracted'
+       WHERE id = (SELECT memory_item_id FROM memory_item_refs WHERE memory_ref = $1)`,
+      [deleted],
+    );
+
+    const reread = await profileViewRepository.read(fixture.ownerAuth, view.profileViewRef);
+
+    expect(reread.subjects.flatMap((subject) => subject.claims.map((claim) => claim.memoryRef))).toEqual([kept]);
+    expect(reread.withdrawnMemoryRefs).toEqual([deleted]);
+    expect(reread.erasedClaims).toBe(0);
+    // Sizes describe what is returned, not what the view held when it was made.
+    expect(reread.totalCharacters).toBeLessThan(view.totalCharacters);
+    expect(reread.totalCharacters).toBe(reread.subjects.reduce((sum, subject) => sum + subject.totalCharacters, 0));
   });
 });

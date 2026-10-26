@@ -10,7 +10,7 @@
  * Every member is explicit: the runtime has no fallback model, no default resolver order and no
  * default limits.
  */
-import type { LanguageModel } from "ai";
+import type { LanguageModel, ModelMessage } from "ai";
 import type { SharedV4ProviderOptions } from "@ai-sdk/provider";
 
 import type { DynamicResolveContext, SessionAuth, SessionParent, SessionTurn } from "./context.js";
@@ -44,6 +44,8 @@ export interface RuntimeAgent {
   readonly instructionResolvers: readonly InstructionResolver[];
   /** Model calls one turn may make; the next one fails the turn with a coded error. */
   readonly maxModelSteps: number;
+  /** History messages the application sends again after a compaction; the summary leaves them out. */
+  readonly restatedAfterCompaction: (message: ModelMessage) => boolean;
   /** Authored tools placed right after the built-ins, before `agent` and the surface. */
   readonly staticToolNames: readonly string[];
   /** The turn's skills by name; the runtime syncs their packages into the sandbox and lists them. */

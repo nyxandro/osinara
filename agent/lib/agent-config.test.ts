@@ -42,6 +42,11 @@ describe("Osinara agent", () => {
     ]);
   });
 
+  it("keeps profile cards out of a compaction summary, since they are sent again after it", () => {
+    expect(agent.restatedAfterCompaction({ role: "user", content: '<profile_card shownAtTurn="1">' })).toBe(true);
+    expect(agent.restatedAfterCompaction({ role: "user", content: "<current_telegram_message/>" })).toBe(false);
+  });
+
   it("routes every step to the primary model with the session's provider options", () => {
     const selection = agent.selectModel({ sessionId: CONTEXT.session.id, stepIndex: 3 });
 

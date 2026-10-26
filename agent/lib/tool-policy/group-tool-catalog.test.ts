@@ -33,10 +33,6 @@ describe("external group tool catalog", () => {
     expect(EXTERNAL_GROUP_TOOL_NAMES).toContain("import_telegram_attachment");
   });
 
-  it("offers owner-grantable subscription image generation", () => {
-    expect(EXTERNAL_GROUP_TOOL_NAMES).toContain("generate_image");
-  });
-
   it("names every persisted and always-available capability exactly once", () => {
     expect(EXTERNAL_GROUP_CAPABILITY_CATALOG.map(({ name }) => name)).toEqual(
       EXTERNAL_GROUP_TOOL_NAMES,

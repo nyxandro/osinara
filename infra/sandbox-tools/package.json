@@ -2,6 +2,7 @@
   "name": "osinara-sandbox-tools",
   "private": true,
   "dependencies": {
-    "agent-browser": "0.36.0"
+    "agent-browser": "0.39.3",
+    "docx": "9.10.0"
   }
 }

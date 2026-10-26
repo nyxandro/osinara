@@ -6,6 +6,10 @@ readonly GITHUB_REPOSITORY="nyxandro/osinara"
 readonly GITHUB_API="https://api.github.com/repos/${GITHUB_REPOSITORY}"
 readonly GITHUB_RELEASES="https://github.com/${GITHUB_REPOSITORY}/releases/download"
 readonly APP_IMAGE_PREFIX="ghcr.io/nyxandro/osinara-app@sha256:"
+# Transitional: the subscription gateway left on 2026-10-26. The first release without it still
+# names its old image so the controller already on a server accepts that release; this one only
+# checks the reference and binds it to the approved bytes. Releases may stop naming it only once
+# production and every `osinara install` host run that first release or newer.
 readonly CLI_PROXY_IMAGE_PREFIX="ghcr.io/nyxandro/osinara-cli-proxy@sha256:"
 readonly EDGE_IMAGE_PREFIX="ghcr.io/nyxandro/osinara-edge@sha256:"
 readonly EGRESS_IMAGE_PREFIX="ghcr.io/nyxandro/osinara-sandbox-egress-proxy@sha256:"
@@ -105,19 +109,21 @@ validate_manifest() {
     (.commitSha | test("^[0-9a-f]{40}$")) and
     (.composeSha256 | test("^[0-9a-f]{64}$")) and
     (.images | type == "object" and
-      keys == ["app", "cliProxy", "edge", "sandboxEgressProxy", "sandboxRunner", "sandboxRuntime"])
+      (keys - ["cliProxy"]) == ["app", "edge", "sandboxEgressProxy", "sandboxRunner", "sandboxRuntime"])
   ' "$manifest" >/dev/null || fail "DEPLOY_MANIFEST_INVALID" "Deployment manifest schema is invalid"
 
   MANIFEST_COMMIT="$(jq -er '.commitSha' "$manifest")"
   MANIFEST_COMPOSE_SHA="$(jq -er '.composeSha256' "$manifest")"
   APP_IMAGE="$(jq -er '.images.app' "$manifest")"
-  CLI_PROXY_IMAGE="$(jq -er '.images.cliProxy' "$manifest")"
+  CLI_PROXY_IMAGE="$(jq -r '.images.cliProxy // ""' "$manifest")"
   EDGE_IMAGE="$(jq -er '.images.edge' "$manifest")"
   EGRESS_IMAGE="$(jq -er '.images.sandboxEgressProxy' "$manifest")"
   RUNNER_IMAGE="$(jq -er '.images.sandboxRunner' "$manifest")"
   RUNTIME_IMAGE="$(jq -er '.images.sandboxRuntime' "$manifest")"
   require_image_ref "$APP_IMAGE" "$APP_IMAGE_PREFIX"
-  require_image_ref "$CLI_PROXY_IMAGE" "$CLI_PROXY_IMAGE_PREFIX"
+  if [[ -n "$CLI_PROXY_IMAGE" ]]; then
+    require_image_ref "$CLI_PROXY_IMAGE" "$CLI_PROXY_IMAGE_PREFIX"
+  fi
   require_image_ref "$EDGE_IMAGE" "$EDGE_IMAGE_PREFIX"
   require_image_ref "$EGRESS_IMAGE" "$EGRESS_IMAGE_PREFIX"
   require_image_ref "$RUNNER_IMAGE" "$RUNNER_IMAGE_PREFIX"
@@ -200,7 +206,6 @@ prepare_candidate_release() {
   fi
   {
     printf 'OSINARA_APP_IMAGE=%s\n' "$APP_IMAGE"
-    printf 'OSINARA_CLI_PROXY_IMAGE=%s\n' "$CLI_PROXY_IMAGE"
     printf 'SANDBOX_RUNTIME_IMAGE=%s\n' "$RUNTIME_IMAGE"
     printf 'OSINARA_SANDBOX_RUNNER_IMAGE=%s\n' "$RUNNER_IMAGE"
     printf 'OSINARA_SANDBOX_EGRESS_PROXY_IMAGE=%s\n' "$EGRESS_IMAGE"
@@ -210,8 +215,9 @@ prepare_candidate_release() {
   validate_resolved_compose
 }
 
-# The installation graph is the released production graph without the CLIProxy gateway. CI builds
-# the installer's first copy with the same filter file, so both paths apply one reviewed change.
+# The installation graph is the released production graph passed through the shared filter. CI
+# builds the installer's first copy with the same file. Since the subscription gateway left
+# (2026-10-26) the filter changes nothing; the two profiles go away in a following release.
 derive_installation_compose() {
   local source="$1"
   local target="$2"
@@ -222,8 +228,7 @@ derive_installation_compose() {
 
 validate_resolved_compose_security() {
   local config_json="$1"
-  local profile="$2"
-  jq -e --arg profile "$profile" '
+  jq -e '
     all(.services[]; (.privileged // false) == false) and
     all(.services[]; (.network_mode // "") != "host") and
     all(.services[]; (.pid // "") != "host") and
@@ -245,14 +250,9 @@ validate_resolved_compose_security() {
     any(.services.agent.volumes[];
       .source == "/opt/osinara/agent-model-providers.json" and
       .target == "/app/config/agent-model-providers.json" and .read_only == true) and
-    (if $profile == "production" then
-      any(.services["cli-proxy-api"].volumes[];
-        .source == "cli-proxy-auth" and
-        .target == "/var/lib/cli-proxy-api/auth" and .type == "volume")
-    else true end) and
     ([.services | to_entries[] as $service |
       ($service.value.volumes // [])[] |
-      {service: $service.key, type, source, target}] | sort_by(.service, .target)) == (([
+      {service: $service.key, type, source, target}] | sort_by(.service, .target)) == ([
         {service: "agent", type: "volume", source: "google-workspace-credentials", target: "/app/google-workspace-credentials"},
         {service: "agent", type: "volume", source: "network-access", target: "/app/network-access"},
         {service: "agent", type: "volume", source: "workspace-data", target: "/app/workspaces"},
@@ -263,9 +263,7 @@ validate_resolved_compose_security() {
         {service: "sandbox-runner", type: "bind", source: "/var/run/docker.sock", target: "/var/run/docker.sock"},
         {service: "sandbox-runner", type: "volume", source: "tool-environments", target: "/runner/tools"},
         {service: "sandbox-runner", type: "volume", source: "workspace-data", target: "/runner/workspaces"}
-      ] + (if $profile == "production" then [
-        {service: "cli-proxy-api", type: "volume", source: "cli-proxy-auth", target: "/var/lib/cli-proxy-api/auth"}
-      ] else [] end)) | sort_by(.service, .target)) and
+      ] | sort_by(.service, .target)) and
     ([.services | to_entries[] as $service | ($service.value.ports // [])[] |
       {service: $service.key, host_ip, published, target}] == [{
         service: "edge", host_ip: "127.0.0.1", published: "8082", target: 80
@@ -279,37 +277,26 @@ validate_resolved_compose() {
   local config_json="${WORK_DIR}/resolved-compose.json"
   local -a expected_images=("$APP_IMAGE" "$APP_IMAGE" "$APP_IMAGE" "$APP_IMAGE"
     "$RUNTIME_IMAGE" "$RUNNER_IMAGE" "$EGRESS_IMAGE" "$EDGE_IMAGE" "$POSTGRES_IMAGE" "$TEI_IMAGE")
-  if [[ "$DEPLOYMENT_PROFILE" == "production" ]]; then
-    expected_images+=("$CLI_PROXY_IMAGE")
-  fi
   compose_candidate config --images | LC_ALL=C sort > "$images_file"
   printf '%s\n' "${expected_images[@]}" | LC_ALL=C sort > "$expected_images_file"
   cmp --silent "$images_file" "$expected_images_file" ||
     fail "DEPLOY_COMPOSE_IMAGE_SET_INVALID" "Resolved Compose image multiset is not approved"
 
   compose_candidate config --format json > "$config_json"
-  jq -e --arg profile "$DEPLOYMENT_PROFILE" '
-    (.services | keys) == (([
+  jq -e '
+    (.services | keys) == [
       "agent", "edge", "memory-embedding", "memory-embedding-worker", "migrate", "postgres",
       "sandbox-egress-proxy", "sandbox-runner", "sandbox-runtime-image", "telegram-ingress-worker"
-    ] + (if $profile == "production" then ["cli-proxy-api"] else [] end)) | sort) and
-    .services.agent.depends_on.migrate.condition == "service_completed_successfully" and
-    (if $profile == "production" then
-      .services.agent.depends_on["cli-proxy-api"].condition == "service_healthy"
-    else
-      (.services.agent.depends_on | has("cli-proxy-api") | not)
-    end)
+    ] and
+    .services.agent.depends_on.migrate.condition == "service_completed_successfully"
   ' "$config_json" >/dev/null ||
     fail "DEPLOY_COMPOSE_SERVICE_SET_INVALID" "Resolved Compose service set is not approved"
-  validate_resolved_compose_security "$config_json" "$DEPLOYMENT_PROFILE" ||
+  validate_resolved_compose_security "$config_json" ||
     fail "DEPLOY_COMPOSE_SECURITY_INVALID" "Resolved Compose enables an unsafe host capability"
 }
 
 pull_release_images() {
   docker pull "$APP_IMAGE"
-  if [[ "$DEPLOYMENT_PROFILE" == "production" ]]; then
-    docker pull "$CLI_PROXY_IMAGE"
-  fi
   docker pull "$RUNTIME_IMAGE"
   docker pull "$RUNNER_IMAGE"
   docker pull "$EGRESS_IMAGE"

@@ -25,9 +25,6 @@ import { z } from "zod";
 
 import { AppError } from "../app-error.js";
 import { GIF_REPLIES_AVAILABLE } from "../gifs/gif-reply-availability.js";
-import { IMAGE_GENERATION_AVAILABLE } from "../image-generation/image-generation-availability.js";
-import { isImageGenerationSkillName } from "../image-generation/image-generation-skill.js";
-import { EXTERNAL_IMAGE_GENERATION_TOOL_PRESENTATION } from "../image-generation/image-generation-tool-presentation.js";
 import { wrapModelFacingToolMap } from "../model-facing-tool.js";
 import { authorizeAgentScheduleDelivery } from "../agent-schedules/agent-schedule-delivery-authorization.js";
 import { scheduledDeliveryMetadata } from "../agent-schedules/scheduled-session.js";
@@ -36,7 +33,6 @@ import { SKILL_NAME_PATTERN } from "../../runtime/skills/package-validation.js";
 import { MEMORY_LIST_DEFAULT_LIMIT, MEMORY_LIST_MAX_LIMIT, THREAD_HISTORY_PAGE_MAX_ENTRIES } from "../memory-config.js";
 import { THREAD_REF_PATTERN } from "../memory-thread-query-repository.js";
 import { externalRememberInputSchema } from "../remember-contract.js";
-import generateImage from "../tools/generate_image.js";
 import getCurrentTime from "../tools/get_current_time.js";
 import { conversationWebFetch, conversationWebSearch } from "./conversation-web-tools.js";
 import { externalGroupBash } from "./external-group-bash.js";
@@ -113,7 +109,6 @@ const EXTERNAL_FILE_CAPTION_MAX_LENGTH = 1_024;
 const EXTERNAL_DIRECT_TOOL_PRESENTATION: Readonly<
   Partial<Record<DirectExternalToolName, Pick<AnyToolDefinition, "description" | "inputSchema">>>
 > = {
-  generate_image: EXTERNAL_IMAGE_GENERATION_TOOL_PRESENTATION,
   inspect_workspace_image: {
     description: [
       "Analyze an image of the current external group from exactly one source: attachmentId, telegramMessageId or path.",
@@ -185,7 +180,6 @@ const EXTERNAL_DIRECT_TOOL_PRESENTATION: Readonly<
 
 const EXTERNAL_DIRECT_TOOLS: Readonly<Record<DirectExternalToolName, AnyToolDefinition>> = {
   bash: externalGroupBash,
-  generate_image: generateImage as unknown as AnyToolDefinition,
   import_telegram_attachment: importTelegramAttachment as unknown as AnyToolDefinition,
   inspect_workspace_image: inspectWorkspaceImage as unknown as AnyToolDefinition,
   list_group_history: listGroupHistory as unknown as AnyToolDefinition,
@@ -299,11 +293,9 @@ function buildExternalToolSurface(
   scheduledRun: boolean,
   skills: ReadonlySet<string>,
 ): ToolMap {
-  const imageGenerationAllowed = IMAGE_GENERATION_AVAILABLE &&
-    !scheduledRun && allowed.has("generate_image");
   const surface: Record<string, AnyToolDefinition> = {
     ...EXTERNAL_GROUP_FILE_TOOLS,
-    ...(skills.size > 0 || imageGenerationAllowed ? { load_skill: externalGroupLoadSkillTool } : {}),
+    ...(skills.size > 0 ? { load_skill: externalGroupLoadSkillTool } : {}),
   };
   if (includeApplicationCore) {
     surface.web_search = conversationWebSearch as AnyToolDefinition;
@@ -329,8 +321,6 @@ function buildExternalToolSurface(
     if (capability === "web_fetch") continue;
     // A scheduled prompt has no current user message that can back a new memory claim.
     if (scheduledRun && capability === "remember") continue;
-    // Billable image generation requires a current interactive request, never a background run.
-    if (capability === "generate_image" && !imageGenerationAllowed) continue;
     // A voice note spends ElevenLabs credits and replaces a reply, so it needs a live participant.
     if (scheduledRun && capability === "send_voice_message") continue;
     if (capability.startsWith("manage_memory.")) continue;
@@ -404,7 +394,6 @@ const TRUSTED_SCHEDULED_SURFACES: Readonly<Record<"family" | "private", ToolMap>
     // Family skills are managed only in a conversation with the owner, and nobody is there to confirm
     // network access.
     const {
-      generate_image: _generateImage,
       manage_behavior_preference: _manageBehaviorPreference,
       manage_network_access: _manageNetworkAccess,
       manage_skill: _manageSkill,
@@ -434,13 +423,9 @@ export function buildModeToolSurface(input: ModeToolSurfaceInput): ToolMap {
   const includeApplicationCore = input.includeApplicationCore !== false;
   const scheduledHistory = input.scheduledHistory === true;
   const scheduledRun = input.scheduledRun === true || scheduledHistory;
-  const validatedSkills: ReadonlySet<string> = [...input.skills].some((name) =>
-    !SKILL_NAME_PATTERN.test(name) && !isImageGenerationSkillName(name)
-  ) ? new Set() : input.skills;
-  const skills = IMAGE_GENERATION_AVAILABLE &&
-    !scheduledRun && allowed.has("generate_image")
-    ? validatedSkills
-    : new Set([...validatedSkills].filter((name) => !isImageGenerationSkillName(name)));
+  const skills: ReadonlySet<string> = [...input.skills].some((name) => !SKILL_NAME_PATTERN.test(name))
+    ? new Set()
+    : input.skills;
   const key = [
     includeApplicationCore ? "core" : "failed",
     scheduledHistory ? "history" : "ordinary",
@@ -459,10 +444,7 @@ export function buildSubagentToolSurface(input: ModeToolSurfaceInput): ToolMap {
   const effectiveInput = input.environment === "external"
     ? {
       ...input,
-      capabilities: new Set([...input.capabilities].filter((name) =>
-        name !== "generate_image" && name !== "send_voice_message"
-      )),
-      skills: new Set([...input.skills].filter((name) => !isImageGenerationSkillName(name))),
+      capabilities: new Set([...input.capabilities].filter((name) => name !== "send_voice_message")),
     }
     : input;
   // Delegation is one level deep, so `agent` is not on the list; neither is anything a delegated

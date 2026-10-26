@@ -19,12 +19,9 @@ import { AppError } from "../app-error.js";
 import { resolveConversationEnvironment, type ConversationEnvironment } from "../conversation-environment.js";
 import { familySkillRepository, type FamilySkillSelection } from "../family-skills/family-skill-repository.js";
 import { SERVICE_SKILL_DEFINITIONS } from "../family-skills/service-skills.js";
-import { IMAGE_GENERATION_AVAILABLE } from "../image-generation/image-generation-availability.js";
-import { IMAGE_GENERATION_SKILL_DEFINITION, IMAGE_GENERATION_SKILL_NAME } from "../image-generation/image-generation-skill.js";
 import {
   resolveExternalGroupPolicyIdentity,
   resolveExternalGroupSkillPolicy,
-  resolveExternalGroupToolPolicy,
 } from "../tool-policy/external-group-policy.js";
 import { GROUP_SAFE_SKILL_NAMES, isGroupSafeSkillName } from "./group-skill-catalog.js";
 import { GROUP_SAFE_SKILL_DEFINITIONS } from "./group-skill-definitions.js";
@@ -69,15 +66,11 @@ export async function resolveConversationSkills(
   const family = selection === null ? {} : await familySkillRepository.loadWorking(familyId!, selection);
   const catalog: Record<string, SkillDefinition> = { ...family, ...GROUP_SAFE_SKILL_DEFINITIONS };
   const names = external ? granted : [...granted, ...Object.keys(family).filter((name) => !isGroupSafeSkillName(name))];
-  const tools = resolveExternalGroupToolPolicy(auth);
   const live = options.scheduledRun !== true && options.subagent !== true;
-  const imageGenerationEnabled = IMAGE_GENERATION_AVAILABLE && live &&
-    (!external || (tools.restricted && tools.allowed.has("generate_image")));
   return {
     ...Object.fromEntries(names.flatMap((name) => catalog[name] === undefined ? [] : [[name, catalog[name]]])),
     // Skills are changed only in a person's own conversation, never by a schedule or a delegated task.
     ...(environment === "private" && live ? SERVICE_SKILL_DEFINITIONS : {}),
-    ...(imageGenerationEnabled ? { [IMAGE_GENERATION_SKILL_NAME]: IMAGE_GENERATION_SKILL_DEFINITION } : {}),
   };
 }
 

@@ -19,13 +19,13 @@ import {
 const digest = (name: string, character: string): string =>
   `ghcr.io/nyxandro/${name}@sha256:${character.repeat(64)}`;
 
-function manifest(): Buffer {
+function manifest(options: { retiredGateway?: boolean } = {}): Buffer {
   return Buffer.from(JSON.stringify({
     commitSha: "1".repeat(40),
     composeSha256: "2".repeat(64),
     images: {
       app: digest("osinara-app", "a"),
-      cliProxy: digest("osinara-cli-proxy", "b"),
+      ...(options.retiredGateway === false ? {} : { cliProxy: digest("osinara-cli-proxy", "b") }),
       edge: digest("osinara-edge", "c"),
       sandboxEgressProxy: digest("osinara-sandbox-egress-proxy", "d"),
       sandboxRunner: digest("osinara-sandbox-runner", "e"),
@@ -42,6 +42,15 @@ describe("production host contracts", () => {
 
     expect(environment).toContain(`OSINARA_APP_IMAGE=${digest("osinara-app", "a")}\n`);
     expect(environment).toContain(`OSINARA_EDGE_IMAGE=${digest("osinara-edge", "c")}\n`);
+    expect(environment).not.toContain("OSINARA_CLI_PROXY_IMAGE");
+  });
+
+  // The first release without the subscription gateway still names its image; later ones do not.
+  it("accepts a manifest that no longer names the retired gateway image", () => {
+    const environment = releaseEnvironmentFromManifest(manifest({ retiredGateway: false }), "0.15.3")
+      .toString("utf8");
+
+    expect(environment).toContain(`OSINARA_APP_IMAGE=${digest("osinara-app", "a")}\n`);
     expect(environment).not.toContain("OSINARA_CLI_PROXY_IMAGE");
   });
 

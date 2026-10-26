@@ -5,7 +5,7 @@
 GitHub-hosted CI runs the complete `compose.test.yaml` suite for pull requests and pushes to
 `develop` or `main`, and beside it the memory retrieval evals with the production embedding model
 (`compose.memory-retrieval-eval.yaml`); a release waits for both. A successful `main` run requires a new stable version in `package.json`,
-builds six container-only images, publishes immutable tags to GHCR, records image and file artifact attestations,
+builds five container-only images, publishes immutable tags to GHCR, records image and file artifact attestations,
 and prepares `vVERSION` as a draft. CI uploads and byte-verifies every asset before publishing the
 draft as the latest release. A failed rerun may resume only a draft whose tag still resolves to the
 same commit; a published release or unrelated tag requires a package version bump.
@@ -16,7 +16,11 @@ Repository-level immutable releases are mandatory; both the application checker 
 published releases whose API metadata does not report `immutable: true`.
 
 - `osinara-deployment.json` contains schema version 1, commit SHA, release version, the SHA-256 of
-the exact Compose bytes, and six exact `ghcr.io/nyxandro/...@sha256:...` references;
+the exact Compose bytes, and five exact `ghcr.io/nyxandro/...@sha256:...` references. Releases
+after the subscription gateway left still name its last published image as `cliProxy`, because
+controllers and applications of v0.49.0 and older refuse a manifest without it. Drop the field only
+after production and every `osinara install` host run such a release: an application still on
+v0.49.0 rejects every manifest without it and never proposes an update again;
 - `compose.production.yaml` contains no build context or application source bind mount.
 
 The app image runs the bundled agent `.runtime/agent/main.js`. It also contains the authored
@@ -181,15 +185,15 @@ they run, which `OSINARA_DEPLOYMENT_PROFILE` in `/opt/osinara/.env` names explic
 - **`installation`** — hosts set up by `osinara install`. The checksum-bound standalone installer
   runs on clean GNU/Linux x86_64 hosts with glibc and systemd (`osinara-linux-x64` is a glibc
   Node.js SEA executable, so musl-based distributions such as Alpine Linux are not supported). The
-  graph is the released production graph without CLIProxy: the controller derives
-  `compose.installation.json` from the verified `compose.production.yaml` with
-  `scripts/production-deploy/installation-compose.jq`, the same filter CI uses for the installer's
-  first copy. The installer writes the files below, places the controller and its units from the
+  graph is the released production graph: the controller derives `compose.installation.json` from
+  the verified `compose.production.yaml` with `scripts/production-deploy/installation-compose.jq`,
+  the same filter CI uses for the installer's first copy. Since the subscription gateway left on
+  2026-10-26 the filter changes nothing; a later release removes the two profiles. The installer writes the files below, places the controller and its units from the
   release app image, starts the stack, and enables the timer. The host is maintained with
   `osinara status`, `doctor`, `logs`, `restart` and `config`; `restart` and `config` take the
   controller's lock and refuse to run while a release is being deployed.
-- **`production`** — the host with the CLIProxy subscription gateway. Its first release is
-  started by hand (see "First release"); from then on it updates exactly like an installation host.
+- **`production`** — the host whose first release was started by hand (see "First release"); from
+  then on it updates exactly like an installation host.
 
 | Path                                         | Mode   | Purpose                                                          |
 | -------------------------------------------- | ------ | ---------------------------------------------------------------- |
@@ -352,10 +356,9 @@ bring test stacks up only for a run and take them down afterwards. The disk sche
 
 `/opt/osinara/.env` must be exactly `root:root 0600`. It contains `OSINARA_DEPLOYMENT_PROFILE`
 (`production` or `installation`, read only by the controller), `MODEL_API_KEY`,
-`POSTGRES_PASSWORD`, the required internal application `DATABASE_URL`, `CLI_PROXY_API_KEY`,
-`GROQ_API_KEY`, the optional `ELEVENLABS_API_KEY` and `KLIPY_API_KEY`,
+`POSTGRES_PASSWORD`, the required internal application `DATABASE_URL`, `GROQ_API_KEY`, the optional `ELEVENLABS_API_KEY` and `KLIPY_API_KEY`,
 Telegram secrets, and environment-specific integration
-settings. It must never contain or export any of the six `OSINARA_*_IMAGE` variables or
+settings. It must never contain or export any `OSINARA_*_IMAGE` variable or
 `SANDBOX_RUNTIME_IMAGE`; those values exist only in a validated per-release `release.env`.
 
 Active model selection uses schema v4 at `/opt/osinara/agent-model-providers.json`: it selects a
@@ -363,26 +366,18 @@ protocol-native transport, explicit output and context limits, and a discriminat
 capability. A supported vision route requires its own model ID and output limit; an unsupported route
 cannot construct a fake vision model.
 
-The v0.16.0 production route uses `gpt-5.6-luna` through CLIProxyAPI `v7.2.137` and OpenAI Chat
-Completions; its reviewed model config is `config/codex-subscription-model-providers.json`.
-The agent sends `reasoning_effort=medium` to the internal
-`http://cli-proxy-api:8317/v1` boundary, caps one response at 128,000 tokens, and declares the
-provider catalog's 372,000-token context. Text, image input, and tool calls use the same selected
-model. `MODEL_API_KEY` is only the internal bearer and exactly matches `CLI_PROXY_API_KEY`; OpenCode
-OAuth remains inside `osinara-production-cli-proxy-auth` and is writable only by CLIProxy uid 10001
-so refreshed access and refresh tokens survive container replacement.
+Every provider base URL must use HTTPS: the agent talks to the selected provider directly. The
+CLIProxyAPI subscription gateway, its `codex-subscription` provider and the `generate_image` tool
+with its `imagegen` skill left the project on 2026-10-26.
 
-With this provider active, interactive root turns may call the application-owned `generate_image`
-boundary for exactly one `gpt-image-2` WebP. The agent reserves the call in PostgreSQL before the
-billable request, never retries an ambiguous transport or provider result, stores confirmed bytes in
-the authorized workspace, and uses the existing exact-once Telegram file delivery. External groups
-receive the capability only after the owner changes the complete group policy from the private chat;
-scheduled turns and subagents never receive it. Under any other model provider the tool, its
-`imagegen` skill, and its owner grant all disappear: `manage_telegram_group` rejects the capability
-instead of persisting an inert grant, and a grant made while Codex was active is reported as
-`unavailableConfiguredTools` until the provider is restored. CLIProxy is configured with
-`disable-image-generation: chat`: `/v1/images/*` remains available to the controlled application
-client, while CLIProxy cannot inject its own hidden image tool into ordinary model calls.
+The first release without the gateway removes its container but leaves two things on the production
+host on purpose: the `osinara-production-cli-proxy-auth` volume and `CLI_PROXY_API_KEY` in
+`/opt/osinara/.env`. The v0.49.0 Compose graph requires that key on every command, including the
+controller's restore of the current release and `psql` through it, and its gateway needs the volume.
+Keep both while v0.49.0 can still be restored or rolled back to; after the new release has run
+stably, remove them together by hand: `docker volume rm osinara-production-cli-proxy-auth` and the
+`CLI_PROXY_API_KEY` line. Deployment backups no longer archive the volume, so only backups taken
+by v0.49.0 and earlier hold a copy of it.
 
 Interactive root turns may call the application-owned `send_voice_message` boundary when the current
 message explicitly asks for a voice reply. It synthesizes one ElevenLabs `eleven_v4` Ogg Opus note
@@ -412,9 +407,6 @@ and the PDF page route disappear, external groups take in no photos for it, and 
 rejects the grant. A grant made under an image-capable model is reported as
 `unavailableConfiguredTools` until such a model is configured again.
 
-The standalone fresh installer removes CLIProxy from its generated Compose and stays on the
-selected direct provider.
-
 Long-term memory has no separate model route. The root agent decides whether to call `remember`;
 PostgreSQL validates the current Telegram source and atomically writes optional thread state. Thread
 activation and context use local E5 embeddings plus deterministic source projections. Semantic
@@ -429,11 +421,6 @@ exact result value for SDK parsing; history converts each matched provider pair 
 MiniMax emits the Anthropic field and accepts native provider-tool history, or when the AI SDK
 supports the complete MiniMax dialect natively.
 
-The `cli-proxy-api` service is an active internal subscription gateway. Management routes, plugins,
-request retries, cooldown scheduling, and file logging are disabled; the service is reachable only on
-the application network and requires the internal bearer. Its startup fails closed when the persistent
-volume contains no complete `0600` Codex OAuth credential. The agent starts only after gateway health.
-
 A proposal the controller rejected remains terminal. Do not reset, clone, or reapprove it: publish
 a strictly newer patch release and require a new owner approval. This preserves the audit trail and
 the no-ambiguous-retry contract.
@@ -443,7 +430,7 @@ The server host requires Docker Engine with Compose v2, systemd, `curl`, `jq`, `
 script does not download utilities or substitute alternate commands at runtime. `osinara install`
 checks the same list before it changes anything.
 
-All six GHCR packages must be publicly pullable, or Docker on the server must already be logged in
+All five GHCR packages must be publicly pullable, or Docker on the server must already be logged in
 with read-only package access. The release workflow itself never receives a custom registry secret.
 
 ## First release
@@ -518,8 +505,8 @@ is removed after migration starts, and pre-existing candidate-only bytes remain 
 
 Before every non-initial update the script derives the backup set from the current immutable Compose,
 verifies those durable volumes and free space, and writes and validates a logical dump of the
-application database. It then stops application writers, archives `cli-proxy-auth`,
-`google-workspace-credentials`, `tool-environments` and `workspace-data`, and validates every
+application database. It then stops application writers, archives `google-workspace-credentials`,
+`tool-environments` and `workspace-data`, and validates every
 artifact. A current-owned durable volume missing from the candidate is forbidden. A missing
 current-owned volume or a pre-existing candidate-only volume fails closed, so deploy never creates
 an empty replacement for active data or silently reuses bytes of unknown provenance. The

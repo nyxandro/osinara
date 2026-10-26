@@ -17,6 +17,7 @@ import { servableExternalGroupCapabilities } from "../tool-policy/grantable-grou
 import { externalGroupCapabilityInstructions } from "../tool-policy/external-group-capability-instructions.js";
 import type { ExternalGroupToolName } from "../tool-policy/group-tool-catalog.js";
 import { TURN_INTERJECTION_RULES } from "../turn-interjection/turn-interjection-block.js";
+import { chatNotesRules } from "./chat-notes-fragments.js";
 
 import {
   CURRENT_MESSAGE_REPLY_CONTRACT,
@@ -60,7 +61,6 @@ import {
   START_NEW_CONTEXT_RULES,
   VOICE_TRANSCRIPTION_RULES,
   officeDocumentRules,
-  trustedBehaviorPreferenceRules,
   trustedCredentialRules,
   REMINDER_SCENARIO_BOUNDARY,
   trustedReminderRules,
@@ -176,7 +176,8 @@ function privateInstructions(
     scheduledRun || subagentTurn ? null : VOICE_MESSAGE_RULES,
     liveGifReplies(scheduledRun, subagentTurn) ? GIF_REPLY_RULES : null,
     scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
-    scheduledRun ? null : trustedBehaviorPreferenceRules(),
+    // A delegated child has no notes tool; it reads the notes and leaves keeping them to the turn.
+    scheduledRun || subagentTurn ? null : chatNotesRules("private"),
   ]);
 }
 
@@ -243,7 +244,8 @@ function familyInstructions(
     scheduledRun || subagentTurn ? null : VOICE_MESSAGE_RULES,
     liveGifReplies(scheduledRun, subagentTurn) ? GIF_REPLY_RULES : null,
     scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
-    scheduledRun ? null : trustedBehaviorPreferenceRules(),
+    // A delegated child has no notes tool; it reads the notes and leaves keeping them to the turn.
+    scheduledRun || subagentTurn ? null : chatNotesRules("family"),
   ]);
 }
 
@@ -371,7 +373,7 @@ Do not use personal or family accounts, tokens or browser authorizations. This g
     voiceMessages ? VOICE_MESSAGE_RULES : null,
     // GIF replies need no grant but belong to the application core of a live turn.
     includeApplicationCore && liveGifReplies(scheduledRun, subagentTurn) ? GIF_REPLY_RULES : null,
-    includeApplicationCore && !scheduledRun ? trustedBehaviorPreferenceRules() : null,
+    includeApplicationCore && !scheduledRun && !subagentTurn ? chatNotesRules("external") : null,
     reminders ? GROUP_REMINDER_RULES : null,
     reminders ? GROUP_SCENARIO_RULES : null,
     channelAuthored ? CHANNEL_AUTHORED_REMINDER_NOTICE : null,

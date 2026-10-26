@@ -284,7 +284,10 @@ async function compactIfNeeded(runtime: TurnRuntime, input: {
   readonly signal: AbortSignal;
   readonly turn: TurnRecord;
 }): Promise<ModelMessage[] | null> {
-  const settings = compactionSettings(input.selection.contextWindowTokens, runtime.agent.compactionThresholdPercent);
+  const settings = {
+    ...compactionSettings(input.selection.contextWindowTokens, runtime.agent.compactionThresholdPercent),
+    restatedAfterCompaction: runtime.agent.restatedAfterCompaction,
+  };
   if (!shouldCompact(input.messages, settings, input.measurement)) return null;
   let compacted: ModelMessage[];
   // Set when the summary call itself failed for good: not an outage, not a cancelled turn.

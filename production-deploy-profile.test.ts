@@ -4,11 +4,12 @@
  * Constructs covered:
  * - `require_deployment_profile`: the host names its graph explicitly; nothing is guessed.
  * - `profile_compose_name`: production runs the released YAML, installation the derived JSON.
- * - `derive_installation_compose`: the shared filter drops exactly the CLIProxy gateway.
- * - `validate_resolved_compose` / `validate_resolved_compose_security`: each profile accepts only
- *   its own service, image, and mount set.
+ * - `derive_installation_compose`: since the subscription gateway left (2026-10-26) the shared
+ *   filter changes nothing; the profiles themselves go away in a following release.
+ * - `validate_resolved_compose` / `validate_resolved_compose_security`: both profiles accept the
+ *   one release service, image, and mount set, and nothing of the retired gateway.
  * - `compose_declares_volume`, `stop_current_services`, `pull_release_images`: backup and
- *   downtime follow the profile's graph.
+ *   downtime follow the graph and never touch the retired gateway.
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,7 +20,6 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   executeComposeSecurityPredicate,
-  installationComposeSecurityFixture,
   resolvedComposeSecurityFixture,
 } from "./production-release-contract-fixtures.js";
 
@@ -57,10 +57,8 @@ function temporaryDirectory(prefix: string): string {
 }
 
 /** What `docker compose config --format json` reports for a release graph, with its volumes. */
-function resolvedCompose(profile: "installation" | "production"): Record<string, unknown> {
-  const services = profile === "production"
-    ? resolvedComposeSecurityFixture()
-    : installationComposeSecurityFixture();
+function resolvedCompose(): Record<string, unknown> {
+  const services = resolvedComposeSecurityFixture();
   const volumes: Record<string, unknown> = {
     "google-workspace-credentials": { name: "osinara-production-google-workspace-credentials" },
     "memory-embedding-model-e5": { name: "osinara-production-memory-embedding-model-e5" },
@@ -68,33 +66,30 @@ function resolvedCompose(profile: "installation" | "production"): Record<string,
     "tool-environments": { name: "osinara-production-tool-environments" },
     "workspace-data": { name: "osinara-production-workspace-data" },
   };
-  if (profile === "production") volumes["cli-proxy-auth"] = { name: "osinara-production-cli-proxy-auth" };
   return { name: "osinara-production", ...services, volumes };
 }
 
-/** The image list `docker compose config --images` prints for a profile's resolved graph. */
-function resolvedImages(profile: "installation" | "production"): string {
-  return [
-    "$APP_IMAGE", "$APP_IMAGE", "$APP_IMAGE", "$APP_IMAGE", "$RUNTIME_IMAGE", "$RUNNER_IMAGE",
-    "$EGRESS_IMAGE", "$EDGE_IMAGE", "$POSTGRES_IMAGE", "$TEI_IMAGE",
-    ...(profile === "production" ? ["$CLI_PROXY_IMAGE"] : []),
-  ].join(" ");
-}
+/** The image list `docker compose config --images` prints for the resolved release graph. */
+const RESOLVED_IMAGES = [
+  "$APP_IMAGE", "$APP_IMAGE", "$APP_IMAGE", "$APP_IMAGE", "$RUNTIME_IMAGE", "$RUNNER_IMAGE",
+  "$EGRESS_IMAGE", "$EDGE_IMAGE", "$POSTGRES_IMAGE", "$TEI_IMAGE",
+].join(" ");
 
 function validateResolvedCompose(
   hostProfile: "installation" | "production",
-  graph: "installation" | "production",
+  config: Record<string, unknown> = resolvedCompose(),
+  images = RESOLVED_IMAGES,
 ) {
   const directory = temporaryDirectory("osinara-profile-validate-");
   const configPath = join(directory, "config.json");
-  writeFileSync(configPath, JSON.stringify(resolvedCompose(graph)), "utf8");
+  writeFileSync(configPath, JSON.stringify(config), "utf8");
   return runShell(`
     ${MODULES}
     ${IMAGES}
     DEPLOYMENT_PROFILE=${hostProfile}
     WORK_DIR=${JSON.stringify(directory)}
     compose_candidate() {
-      if [[ "$*" == "config --images" ]]; then printf '%s\\n' ${resolvedImages(graph)}; return 0; fi
+      if [[ "$*" == "config --images" ]]; then printf '%s\\n' ${images}; return 0; fi
       if [[ "$*" == "config --format json" ]]; then cat ${JSON.stringify(configPath)}; return 0; fi
       return 2
     }
@@ -158,8 +153,8 @@ describe("release compose path", () => {
     expect(result.stdout).toBe(`${path}\n`);
   });
 
-  // An installation host has no CLI_PROXY_API_KEY: any step that ran the YAML graph there would
-  // fail interpolation, so current, candidate, and promoted paths all follow the profile.
+  // Each host runs the graph its profile names, so current, candidate, and promoted paths all
+  // follow the profile; a step that read the other graph would run a release the host never had.
   it("routes every current and candidate Compose path through the profile", () => {
     const sources = ["common.sh", "release.sh", "backup.sh", "main.sh", "self-update.sh"]
       .map((name) => readFileSync(join(projectRoot, "scripts/production-deploy", name), "utf8"))
@@ -175,13 +170,13 @@ describe("release compose path", () => {
 });
 
 describe("installation graph", () => {
-  it("drops the CLIProxy gateway, its volume, and the agent's wait for it", () => {
+  it("leaves the released graph unchanged now that the gateway is gone", () => {
     const directory = temporaryDirectory("osinara-profile-derive-");
     const source = join(directory, "compose.production.yaml");
     const target = join(directory, "compose.installation.json");
     const configPath = join(directory, "production-config.json");
     writeFileSync(source, "name: osinara-production\n", "utf8");
-    writeFileSync(configPath, JSON.stringify(resolvedCompose("production")), "utf8");
+    writeFileSync(configPath, JSON.stringify(resolvedCompose()), "utf8");
 
     const result = runShell(`
       ${MODULES}
@@ -195,51 +190,38 @@ describe("installation graph", () => {
     `);
 
     expect(result.status, result.stderr).toBe(0);
-    const derived = JSON.parse(readFileSync(target, "utf8")) as {
-      services: Record<string, { depends_on?: Record<string, unknown> }>;
-      volumes: Record<string, unknown>;
-    };
-    expect(Object.keys(derived.services)).not.toContain("cli-proxy-api");
-    expect(Object.keys(derived.volumes)).not.toContain("cli-proxy-auth");
-    expect(Object.keys(derived.services.agent!.depends_on!)).toEqual(["migrate"]);
-    expect(Object.keys(derived.services).sort()).toEqual(
-      Object.keys(installationComposeSecurityFixture().services as object).sort(),
-    );
+    expect(JSON.parse(readFileSync(target, "utf8"))).toEqual(resolvedCompose());
   });
 });
 
 describe("resolved graph per profile", () => {
-  it.each(["production", "installation"] as const)("accepts the %s graph on its own host", (profile) => {
-    const result = validateResolvedCompose(profile, profile);
+  it.each(["production", "installation"] as const)("accepts the release graph on a %s host", (profile) => {
+    const result = validateResolvedCompose(profile);
 
     expect(result.status, result.stderr).toBe(0);
   });
 
-  it.each([
-    ["installation", "production"],
-    ["production", "installation"],
-  ] as const)("refuses on a %s host the %s graph", (hostProfile, graph) => {
-    const result = validateResolvedCompose(hostProfile, graph);
+  // The graph of v0.49.0 and earlier: the agent waited for the subscription gateway.
+  it.each(["production", "installation"] as const)("refuses on a %s host a graph with the retired gateway", (profile) => {
+    const withGateway = resolvedCompose() as {
+      services: Record<string, { depends_on?: Record<string, unknown>; logging?: unknown; volumes?: unknown[] }>;
+    };
+    withGateway.services.agent!.depends_on!["cli-proxy-api"] = { condition: "service_healthy", required: true };
+    withGateway.services["cli-proxy-api"] = { logging: withGateway.services.edge!.logging };
+
+    const result = validateResolvedCompose(profile, withGateway, `${RESOLVED_IMAGES} $CLI_PROXY_IMAGE`);
 
     expect(result.status).toBe(1);
     expect(result.stderr).toMatch(/DEPLOY_COMPOSE_(IMAGE|SERVICE)_SET_INVALID/u);
   });
 
-  it("accepts the installation mount surface only on an installation host", () => {
-    const installation = installationComposeSecurityFixture();
-
-    expect(() => executeComposeSecurityPredicate(installation, "installation")).not.toThrow();
-    expect(() => executeComposeSecurityPredicate(installation, "production")).toThrow();
-    expect(() => executeComposeSecurityPredicate(resolvedComposeSecurityFixture(), "installation")).toThrow();
-  });
-
-  it("keeps rejecting host mounts on an installation host", () => {
-    const unsafe = installationComposeSecurityFixture() as {
+  it("keeps rejecting host mounts", () => {
+    const unsafe = resolvedComposeSecurityFixture() as {
       services: Record<string, { volumes?: unknown[] }>;
     };
     unsafe.services["telegram-ingress-worker"]!.volumes = [{ source: "/", target: "/host", type: "bind" }];
 
-    expect(() => executeComposeSecurityPredicate(unsafe, "installation")).toThrow();
+    expect(() => executeComposeSecurityPredicate(unsafe)).toThrow();
   });
 });
 
@@ -247,7 +229,7 @@ describe("backup and downtime per profile", () => {
   it("reads volume ownership from a JSON installation graph", () => {
     const directory = temporaryDirectory("osinara-profile-volume-");
     const compose = join(directory, "compose.installation.json");
-    writeFileSync(compose, JSON.stringify(resolvedCompose("installation")), "utf8");
+    writeFileSync(compose, JSON.stringify(resolvedCompose()), "utf8");
 
     const result = runShell(`
       ${MODULES}
@@ -265,7 +247,7 @@ describe("backup and downtime per profile", () => {
   });
 
   it.each([
-    ["production", "edge telegram-ingress-worker memory-embedding-worker agent cli-proxy-api sandbox-runner sandbox-egress-proxy memory-embedding"],
+    ["production", "edge telegram-ingress-worker memory-embedding-worker agent sandbox-runner sandbox-egress-proxy memory-embedding"],
     ["installation", "edge telegram-ingress-worker memory-embedding-worker agent sandbox-runner sandbox-egress-proxy memory-embedding"],
   ])("stops the writers of the %s graph", (profile, services) => {
     const result = runShell(`
@@ -279,10 +261,7 @@ describe("backup and downtime per profile", () => {
     expect(result.stdout).toBe(`stop ${services}\n`);
   });
 
-  it.each([
-    ["production", true],
-    ["installation", false],
-  ])("pulls the CLIProxy image on a %s host: %s", (profile, pullsCliProxy) => {
+  it.each(["production", "installation"])("never pulls the retired gateway image on a %s host", (profile) => {
     const result = runShell(`
       ${MODULES}
       ${IMAGES}
@@ -293,7 +272,7 @@ describe("backup and downtime per profile", () => {
     `);
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout.includes("osinara-cli-proxy@sha256")).toBe(pullsCliProxy);
+    expect(result.stdout).not.toContain("osinara-cli-proxy");
     expect(result.stdout).toContain("osinara-app@sha256");
     expect(result.stdout).toContain("compose pull --quiet");
   });

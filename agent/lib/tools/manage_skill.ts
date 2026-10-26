@@ -28,7 +28,6 @@ import { familySkillUsage } from "../family-skills/family-skill-usage.js";
 import { isServiceSkillName } from "../family-skills/service-skills.js";
 import { readWorkspaceSkillFolder, skillManifest, writeWorkspaceSkillFolder } from "../family-skills/workspace-skill-folder.js";
 import { GROUP_SAFE_SKILL_NAMES, isGroupSafeSkillName } from "../group-skills/group-skill-catalog.js";
-import { isImageGenerationSkillName } from "../image-generation/image-generation-skill.js";
 import {
   requireAction,
   requiredEnum,
@@ -175,7 +174,7 @@ export default defineTool({
       case "save": {
         const files = await readWorkspaceSkillFolder(ctx, { path: parsed.path, scope: parsed.scope });
         const skill = validateSkillPackage({ files, limits: FAMILY_SKILL_LIMITS });
-        if (isGroupSafeSkillName(skill.name) || isImageGenerationSkillName(skill.name) || isServiceSkillName(skill.name)) {
+        if (isGroupSafeSkillName(skill.name) || isServiceSkillName(skill.name)) {
           throw new AppError("AGENT_SKILL_NAME_TAKEN", `Имя ${skill.name} занято встроенным скиллом. Переименуйте скилл в SKILL.md`);
         }
         requireNoDraftPathReference(skill);

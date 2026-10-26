@@ -5,8 +5,7 @@ description: Browser automation CLI for AI agents. Use when the user needs to in
 
 # agent-browser
 
-Fast browser automation CLI for AI agents. Chrome/Chromium via CDP with
-accessibility-tree snapshots and compact `@eN` element refs.
+Fast browser automation CLI for AI agents. Chrome/Chromium via CDP with accessibility-tree snapshots and compact `@eN` element refs.
 
 Install: `npm i -g agent-browser && agent-browser install`
 
@@ -16,21 +15,20 @@ Osinara preconfigures `AGENT_BROWSER_SESSION=osinara`, `AGENT_BROWSER_RESTORE=os
 
 Open once, then use separate `snapshot`, `fill`, `click`, `screenshot`, and other commands as needed. A screenshot or completed CLI process does not close Chromium. Never call `close` or `close --all` until the entire user task is complete. Before claiming the browser or authorization was lost, run `agent-browser session info --json`; after a real sandbox recreation, the configured restore state reloads cookies and localStorage on the next `open`.
 
-Bound every CLI call with `timeout --signal=TERM --kill-after=5s 45s agent-browser ...`. Run `open`, `wait`, `eval`, and `close` as separate Bash calls; never chain multiple browser calls into one command. If `open` times out, inspect `session info --json` and report the timeout. Retry once only when the session check identifies a startup/runtime transient; otherwise switch origin instead of repeating the blocked site.
+The daemon closes Chromium after 10 idle minutes. The configured restore state brings cookies and logins back on the next `open`, but open tabs are gone: open the page again instead of reporting a lost session.
+
+Bound every CLI call with `timeout --signal=TERM --kill-after=5s 45s agent-browser ...`. Run `open`, `wait`, `eval`, and `close` as separate Bash calls; never chain multiple browser calls into one command. If `open` times out, inspect `session info --json` and report the timeout. Retry once only when the session check identifies a startup/runtime transient; otherwise switch origin instead of repeating the blocked site. Never repeat a `click`, `fill`, `type`, `press` or other changing command whose result reports `outcome_unknown`: the action may already have happened, so take a fresh `snapshot` and decide from what the page shows. When checking the same page again, `snapshot -i --delta` returns only what changed.
 
 ## Start here
 
-This file is a discovery stub, not the usage guide. Before running any
-`agent-browser` command, load the actual workflow content from the CLI:
+This file is a discovery stub, not the usage guide. Before running any `agent-browser` command, load the actual workflow content from the CLI:
 
 ```bash
 agent-browser skills get core             # start here - workflows, common patterns, troubleshooting
 agent-browser skills get core --full      # include full command reference and templates
 ```
 
-The CLI serves skill content that always matches the installed version,
-so instructions never go stale. The content in this stub cannot change
-between releases, which is why it just points at `skills get core`.
+The CLI serves skill content that always matches the installed version, so instructions never go stale. The content in this stub cannot change between releases, which is why it just points at `skills get core`.
 
 ## Specialized skills
 
@@ -40,12 +38,13 @@ Load a specialized skill when the task falls outside browser web pages:
 agent-browser skills get electron          # Electron desktop apps (VS Code, Slack, Discord, Figma, ...)
 agent-browser skills get slack             # Slack workspace automation
 agent-browser skills get dogfood           # Exploratory testing / QA / bug hunts
+agent-browser skills get derive-client     # Record a HAR, derive a standalone API client for a site
 agent-browser skills get vercel-sandbox    # agent-browser inside Vercel Sandbox microVMs
+agent-browser skills get protected-vercel-deployments  # Access protected Vercel deployments
 agent-browser skills get agentcore         # AWS Bedrock AgentCore cloud browsers
 ```
 
-Run `agent-browser skills list` to see everything available on the
-installed version.
+Run `agent-browser skills list` to see everything available on the installed version.
 
 ## Why agent-browser
 

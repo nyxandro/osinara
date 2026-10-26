@@ -4,7 +4,7 @@
  * Exports:
  * - `AgentModelTransport`: supported protocol and reasoning transport union.
  * - `ModelProviderConfig`: validated provider, model, vision, and optional voice contract.
- * - `ModelProviderId`: supported direct and internal subscription providers.
+ * - `ModelProviderId`: supported model providers.
  * - `parseModelProviderConfig`: validates decoded configuration without filesystem access.
  * - `validateModelProviderRuntimeEnvironment`: enforces config-dependent startup credentials.
  */
@@ -15,9 +15,7 @@ import { MODEL_PROVIDER_MAX_OUTPUT_TOKENS } from "./model-provider-limits.js";
 import { getOpenCodeGoProtocol } from "./provider-catalog/opencode-go-models.js";
 
 const modelIdSchema = z.string().trim().min(1).max(200);
-const CODEX_SUBSCRIPTION_BASE_URL = "http://cli-proxy-api:8317/v1";
 const modelProviderIdSchema = z.enum([
-  "codex-subscription",
   "deepseek",
   "minimax",
   "neuraldeep",
@@ -28,8 +26,8 @@ const reasoningEffortSchema = z.enum(["max", "xhigh", "high", "medium", "low", "
 const maxOutputTokensSchema = z.number().int().positive().max(MODEL_PROVIDER_MAX_OUTPUT_TOKENS);
 const modelBaseUrlSchema = z.url().superRefine((value, context) => {
   const url = new URL(value);
-  if (url.protocol !== "https:" && value !== CODEX_SUBSCRIPTION_BASE_URL) {
-    context.addIssue({ code: "custom", message: "HTTPS or the fixed internal gateway is required" });
+  if (url.protocol !== "https:") {
+    context.addIssue({ code: "custom", message: "HTTPS is required" });
   }
   if (url.search || url.hash || url.pathname.endsWith("/messages")) {
     context.addIssue({ code: "custom", message: "base URL must not include request details" });
@@ -97,7 +95,6 @@ const modelProviderConfigSchema = z.object({
 }).strict().superRefine((config, context) => {
   const transport = config.agent.transport;
   const expectedBaseUrl = {
-    "codex-subscription": CODEX_SUBSCRIPTION_BASE_URL,
     deepseek: "https://api.deepseek.com",
     minimax: "https://api.minimax.io/anthropic/v1",
     neuraldeep: "https://api.neuraldeep.ru/v1",
@@ -113,20 +110,6 @@ const modelProviderConfigSchema = z.object({
   }
 
   // Fixed providers cannot borrow another provider's protocol or request format.
-  if (config.provider === "codex-subscription" && (
-    transport.protocol !== "openai-chat-completions" ||
-    transport.providerName !== "codex-subscription" ||
-    transport.reasoning === null ||
-    transport.reasoning.type !== "effort" ||
-    transport.reasoning.effort !== "medium" ||
-    transport.reasoning.format !== "reasoning-effort"
-  )) {
-    context.addIssue({
-      code: "custom",
-      message: "Codex subscription transport mismatch",
-      path: ["agent", "transport"],
-    });
-  }
   if (config.provider === "deepseek" && (
     transport.protocol !== "openai-chat-completions" ||
     transport.providerName !== "deepseek" ||

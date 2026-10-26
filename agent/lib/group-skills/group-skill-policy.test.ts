@@ -9,10 +9,6 @@
 import type { SessionAuth } from "../../runtime/context.js";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("../image-generation/image-generation-availability.js", () => ({
-  IMAGE_GENERATION_AVAILABLE: true,
-}));
-
 import {
   GROUP_SAFE_SKILL_NAMES,
   parseGroupSkillAllowlist,
@@ -89,21 +85,7 @@ describe("group skill policy", () => {
 
     await expect(resolve(auth("private"))).resolves.toHaveProperty("behavior-preferences");
     const skills = await resolve(auth("private"));
-    expect(skills).toHaveProperty("imagegen");
-    await expect(resolve(auth("private"), { subagent: true })).resolves.not.toHaveProperty("imagegen");
     for (const name of TRUSTED_GOOGLE_WORKSPACE_SKILL_NAMES) expect(skills).toHaveProperty(name);
-  });
-
-  it("ties external imagegen instructions to the generate_image capability", async () => {
-    const resolve = resolveConversationSkills;
-
-    await expect(resolve(auth("external", [], ["generate_image"])))
-      .resolves.toHaveProperty("imagegen");
-    await expect(resolve(auth("external", [], ["generate_image"]), { scheduledRun: true }))
-      .resolves.not.toHaveProperty("imagegen");
-    await expect(resolve(auth("external", [], ["generate_image"]), { subagent: true }))
-      .resolves.not.toHaveProperty("imagegen");
-    await expect(resolve(auth("external"))).resolves.not.toHaveProperty("imagegen");
   });
 
   it("does not advertise trusted-only Google Workspace skills to an external group", async () => {

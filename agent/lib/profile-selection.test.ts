@@ -5,7 +5,7 @@
  * - `selectProfileClaims`: subject, per-subject, and total whole-claim budgets.
  * - Sensitive, episode, inactive, and dormant candidates never enter always-on profile context.
  * - Priority and output remain deterministic regardless of PostgreSQL input order.
- * - A claim this session showed recently is left out; its person stays, so the ref stays usable.
+ * - A claim a card in history still holds is left out; its person stays, so the ref stays usable.
  * - Within a kind, facts with a property come first by property name, and the card names it.
  */
 import { describe, expect, it } from "vitest";
@@ -41,7 +41,7 @@ function candidate(input: Partial<ProfileClaimCandidate> & {
     observedAt: "2026-08-08T10:00:00.000Z",
     priority: "explicit_mention",
     profileEligible: true,
-    recentlyShown: false,
+    inContext: false,
     sensitivity: "normal",
     sourceAuthorLabel: "Анна",
     subjectLabel: input.subjectRef,
@@ -131,13 +131,11 @@ describe("R3 profile selection", () => {
     expect(selectProfileClaims([reactivated], NOW).subjects).toHaveLength(1);
   });
 
-  it("leaves out what this session showed recently and keeps the rest of the card", () => {
-    // Production, 2026-10-08 to 2026-10-16: seventeen facts about one person went into 609 turns
-    // of their private chat, about 36 times each, and were used 11 times.
+  it("leaves out what a card in history still holds and keeps the rest of the card", () => {
     const author = "subj_11111111111111111111111111111111";
     const selected = selectProfileClaims([
       candidate({ memoryRef: "mem_11111111111111111111111111111111", priority: "current_author",
-        recentlyShown: true, subjectRef: author }),
+        inContext: true, subjectRef: author }),
       candidate({ memoryRef: "mem_22222222222222222222222222222222", priority: "current_author",
         subjectRef: author }),
     ], NOW);
@@ -147,38 +145,38 @@ describe("R3 profile selection", () => {
       .toEqual(["mem_22222222222222222222222222222222"]);
   });
 
-  it("keeps a person whose every fact was shown recently, without facts, so their ref stays usable", () => {
+  it("keeps a person whose every fact is already in context, without facts, so their ref stays usable", () => {
     // A fact about another person is linked to them only through a subjectRef of this turn's
     // view; dropping the person with their facts would leave that write nothing to name.
     const replied = candidate({
       memoryRef: "mem_33333333333333333333333333333333", priority: "reply_subject",
-      recentlyShown: true, subjectRef: "subj_33333333333333333333333333333333",
+      inContext: true, subjectRef: "subj_33333333333333333333333333333333",
     });
 
     const selected = selectProfileClaims([replied], NOW);
 
     expect(selected.subjects).toEqual([expect.objectContaining({
-      claims: [], leftOutClaims: 1, priority: "reply_subject",
+      claims: [], claimsInContext: 1, priority: "reply_subject",
       subjectRef: "subj_33333333333333333333333333333333", totalCharacters: 0,
     })]);
     expect(selected.totalCharacters).toBe(0);
   });
 
-  it("keeps a just-shown fact in its place in the budget, so the card does not page through the rest", async () => {
+  it("keeps a fact in context in its place in the budget, so the card does not page through the rest", async () => {
     // Freed places used to go to the next facts in line: a person with sixty facts got thirty new
     // ones in the second turn and thirty more in the third, each time presented as their profile.
     const subjectRef = "subj_44444444444444444444444444444444";
     const refs = Array.from({ length: PROFILE_CONTEXT_MAX_CLAIMS_PER_SUBJECT + 1 },
       (_, index) => `mem_${String(index).padStart(32, "0")}`);
     const candidates = refs.map((memoryRef, index) => candidate({
-      memoryRef, priority: "current_author", recentlyShown: index === 0, subjectRef,
+      memoryRef, priority: "current_author", inContext: index === 0, subjectRef,
     }));
 
     const [subject] = selectProfileClaims(candidates, NOW).subjects;
 
     expect(subject!.claims.map((claim) => claim.memoryRef))
       .toEqual(refs.slice(1, PROFILE_CONTEXT_MAX_CLAIMS_PER_SUBJECT));
-    expect(subject!.leftOutClaims).toBe(1);
+    expect(subject!.claimsInContext).toBe(1);
   });
 
   it("produces identical ordered metadata for every input order", () => {

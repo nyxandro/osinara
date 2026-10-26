@@ -23,6 +23,7 @@ import { reactionSetInstructions } from "./instructions/reaction-set.js";
 import { retrievedMemoryInstructions } from "./instructions/retrieved-memory.js";
 import { modelProviderConfig } from "./lib/model-provider-config.js";
 import { primaryModel } from "./lib/model-registry.js";
+import { isProfileCardMessage } from "./lib/prompt/profile-card.js";
 import { resolveSessionModelSelection } from "./lib/neuraldeep-session-routing.js";
 import type { RuntimeAgent } from "./runtime/agent-definition.js";
 import { composeBasePrompt } from "./runtime/prompt/system-prompt.js";
@@ -48,6 +49,7 @@ export function createOsinaraAgent(): RuntimeAgent {
       retrievedMemoryInstructions,
     ],
     maxModelSteps: AGENT_MAX_MODEL_STEPS_PER_TURN,
+    restatedAfterCompaction: isProfileCardMessage,
     resolveSkills: resolveScopedSkills,
     resolveTools: resolveToolSurface,
     selectModel: ({ sessionId }) => resolveSessionModelSelection({

@@ -10,7 +10,6 @@ import type { ToolDefinition } from "../../runtime/tool.js";
 
 import executeGoogleWorkspace from "../tools/execute_google_workspace.js";
 import exportMemory from "../tools/export_memory.js";
-import generateImage from "../tools/generate_image.js";
 import getCurrentTime from "../tools/get_current_time.js";
 import getMemorySource from "../tools/get_memory_source.js";
 import importTelegramAttachment from "../tools/import_telegram_attachment.js";
@@ -46,7 +45,6 @@ import sendGif from "../tools/send_gif.js";
 import sendVoiceMessage from "../tools/send_voice_message.js";
 import sendWorkspaceFile from "../tools/send_workspace_file.js";
 import startNewContext from "../tools/start_new_context.js";
-import { IMAGE_GENERATION_AVAILABLE } from "../image-generation/image-generation-availability.js";
 import { GIF_REPLIES_AVAILABLE } from "../gifs/gif-reply-availability.js";
 import { MODEL_VISION_AVAILABLE } from "../model-vision-availability.js";
 import { conversationWebFetch, conversationWebSearch } from "./conversation-web-tools.js";
@@ -59,9 +57,6 @@ export const TRUSTED_MODE_TOOLS: ToolMap = {
   web_fetch: conversationWebFetch as AnyToolDefinition,
   web_search: conversationWebSearch as AnyToolDefinition,
   execute_google_workspace: executeGoogleWorkspace as unknown as AnyToolDefinition,
-  ...(IMAGE_GENERATION_AVAILABLE
-    ? { generate_image: generateImage as unknown as AnyToolDefinition }
-    : {}),
   get_current_time: getCurrentTime as unknown as AnyToolDefinition,
   // Without image input every call would fail, so the descriptor is not offered at all.
   ...(MODEL_VISION_AVAILABLE

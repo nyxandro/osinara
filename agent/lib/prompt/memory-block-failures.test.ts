@@ -4,7 +4,8 @@ import { createMemoryBlockResolver, type TurnBlockContext } from "./turn-blocks.
 import type { MemoryAuthorization } from "../memory-context.js";
 import { TURN_MEMORY_OPEN_TAG } from "./turn-memory-context.js";
 
-const nothingShownRecently = async () => new Set<string>();
+const allStillReadable = async (_auth: unknown, _conversationId: string, refs: readonly string[]) =>
+  new Set(refs);
 const authorization: MemoryAuthorization = {
   familyId: "family", groupId: null, role: "owner", scopes: ["personal"],
   telegramActorId: "101", telegramActorKind: "telegram_user", telegramUserId: "101", userId: "user",
@@ -27,7 +28,7 @@ describe("memory failure ownership", () => {
     if (phase === "retrieval") retrieve.mockRejectedValue(error);
     const resolve = createMemoryBlockResolver({
       authorize: () => { if (phase === "authorization") throw error; return authorization; },
-      openSelectionWindow: async () => 1, recordOffered, retrieve, createProfile, shownRecentlyInSession: nothingShownRecently,
+      openSelectionWindow: async () => 1, recordOffered, retrieve, createProfile, readableMemoryRefs: allStillReadable,
       reportFailure,
     });
     const ctx = phase !== "profile" ? context : { ...context, session: { ...context.session, auth: {
@@ -36,7 +37,7 @@ describe("memory failure ownership", () => {
         telegramTurnStartedAt: "2026-09-13T07:00:00Z",
       } },
     } } };
-    expect(await resolve(ctx, "turn_0")).toContain("AGENT_MEMORY_UNAVAILABLE");
+    expect((await resolve(ctx, "turn_0")).memory).toContain("AGENT_MEMORY_UNAVAILABLE");
     expect(reportFailure).toHaveBeenCalledExactlyOnceWith({
       causeCode: "AGENT_TEST_MEMORY_FAILED", phase, runId: "run", scheduleId: "schedule", sessionId: "session", turnId: "turn_0",
     });
@@ -52,16 +53,16 @@ describe("memory failure ownership", () => {
     // notice would deliver a rule about behaviour as if a person had just said it.
     const shared = {
       authorize: () => authorization, createProfile: vi.fn(), openSelectionWindow: async () => 1,
-      recordOffered: vi.fn(), shownRecentlyInSession: nothingShownRecently, reportFailure: vi.fn(),
+      recordOffered: vi.fn(), readableMemoryRefs: allStillReadable, reportFailure: vi.fn(),
     };
-    const retrieved = await createMemoryBlockResolver({
+    const { memory: retrieved } = await createMemoryBlockResolver({
       ...shared,
       retrieve: vi.fn().mockResolvedValue({
         diagnostics: { semanticBranchAvailable: true }, memories: [], rankingByMemoryRef: new Map(),
         threads: { threads: [], totalCharacters: 0 },
       }),
     })(context, "turn_0");
-    const notice = await createMemoryBlockResolver({
+    const { memory: notice } = await createMemoryBlockResolver({
       ...shared,
       retrieve: vi.fn().mockRejectedValue(new Error("embedding service down")),
     })(context, "turn_0");
@@ -75,11 +76,11 @@ describe("memory failure ownership", () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const resolve = createMemoryBlockResolver({ authorize: () => authorization,
-        openSelectionWindow: async () => 1, recordOffered: vi.fn(), shownRecentlyInSession: nothingShownRecently,
+        openSelectionWindow: async () => 1, recordOffered: vi.fn(), readableMemoryRefs: allStillReadable,
         retrieve: vi.fn().mockRejectedValue(new Error("unavailable")), createProfile: vi.fn(),
         reportFailure: vi.fn().mockRejectedValue(new Error("incident DB down")),
       });
-      expect(await resolve(context, "turn_0")).toContain("AGENT_MEMORY_UNAVAILABLE");
+      expect((await resolve(context, "turn_0")).memory).toContain("AGENT_MEMORY_UNAVAILABLE");
       expect(log.mock.calls.map(([value]) => JSON.parse(value))).toContainEqual(expect.objectContaining({
         code: "AGENT_MEMORY_INCIDENT_RECORD_FAILED", sessionId: "session", turnId: "turn_0",
       }));

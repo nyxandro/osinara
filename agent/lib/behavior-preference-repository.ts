@@ -1,5 +1,5 @@
 /**
- * PostgreSQL storage for one user-managed operational prompt per Telegram chat.
+ * PostgreSQL storage for the notes of each Telegram chat (one editable text per chat).
  *
  * Exports:
  * - `BehaviorPreferenceMutation`: append, replace, or clear with optimistic revision.
@@ -237,7 +237,8 @@ export const behaviorPreferenceRepository = {
           `Оперативные инструкции уже изменились. Текущая revision: ${current?.revision ?? 0}`,
         );
       }
-      if (current && BigInt(auth.sourceSequence) <= BigInt(current.last_source_sequence)) {
+      // A turn may tidy the notes more than once; only a turn of an older message is too late.
+      if (current && BigInt(auth.sourceSequence) < BigInt(current.last_source_sequence)) {
         throw new AppError(
           "AGENT_BEHAVIOR_PREFERENCE_REVISION_CONFLICT",
           "Более новое сообщение уже изменило оперативные инструкции",
