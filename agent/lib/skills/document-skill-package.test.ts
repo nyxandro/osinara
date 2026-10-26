@@ -4,7 +4,8 @@
  * Constructs covered:
  * - PDF supporting-file links match Linux case-sensitive package paths.
  * - DOCX and XLSX scripts are invoked from their materialized skill roots.
- * - The DOCX quick start imports every Node.js module it uses.
+ * - The sandbox image ships every program the DOCX and XLSX skills call; on 2026-10-19 the agent
+ *   found no LibreOffice there and had to work around the skill.
  */
 import { readFile } from "node:fs/promises";
 
@@ -37,9 +38,24 @@ describe("document skill packages", () => {
     }
   });
 
-  it("imports fs before the DOCX quick start writes a file", async () => {
-    const skill = await skillFile("docx");
+  it("ships in the sandbox image every program the DOCX and XLSX skills call", async () => {
+    const docx = await skillFile("docx");
+    const xlsx = await skillFile("xlsx");
+    const dockerfile = await readFile(new URL("../../../Dockerfile", import.meta.url), "utf8");
+    const sandboxTools = JSON.parse(
+      await readFile(new URL("../../../infra/sandbox-tools/package.json", import.meta.url), "utf8"),
+    ) as { dependencies: Record<string, string> };
+    const runtimeStage = dockerfile.slice(
+      dockerfile.indexOf("AS sandbox-runtime"), dockerfile.indexOf("AS sandbox-runner"),
+    );
 
-    expect(skill.indexOf("require('node:fs')")).toBeLessThan(skill.indexOf("fs.writeFileSync"));
+    expect(docx).toContain("require('docx')");
+    expect(sandboxTools.dependencies).toHaveProperty("docx");
+    expect(docx).toContain("pandoc -t markdown");
+    expect(docx).toContain("pdftoppm");
+    expect(`${docx}\n${xlsx}`).toContain("soffice.py");
+    for (const apt of ["libreoffice-calc", "libreoffice-writer", "pandoc", "poppler-utils"]) {
+      expect(runtimeStage, apt).toMatch(new RegExp(`^\\s+${apt} \\\\$`, "mu"));
+    }
   });
 });

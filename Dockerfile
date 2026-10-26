@@ -97,6 +97,9 @@ RUN apt-get update \
       libxfixes3 \
       libxkbcommon0 \
       libxrandr2 \
+      libreoffice-calc \
+      libreoffice-writer \
+      pandoc \
       poppler-utils \
       python3 \
       python3-pip \
