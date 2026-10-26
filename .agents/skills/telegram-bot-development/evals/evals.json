@@ -1,0 +1,162 @@
+{
+ "skill_name": "telegram-bot-development",
+ "evals": [
+  {
+   "id": 1,
+   "name": "streaming-ai-answer-aiogram",
+   "prompt": "У меня бот на aiogram 3 (Python), проект лежит в <a project with the library installed in .venv>. Бот отвечает через LLM, ответ генерируется секунд 20. Хочу, чтобы пользователь видел ответ по мере генерации, как в ChatGPT, и мог остановить генерацию кнопкой. Напиши обработчик и объясни, что ещё надо настроить.",
+   "expected_output": "Uses the native streaming drafts (send_message_draft with draft_id, can_stop), handles the stopped_message_generation update and makes sure it is delivered (default, or in an explicit allowed_updates list), keeps drafts within the published rate limits, sends the final answer as a normal message, checks the installed aiogram supports it, states the Bot API version checked.",
+   "assertions": [
+    "uses the native streaming draft method (send_message_draft / sendMessageDraft)",
+    "shows a Stop button (can_stop) and handles the stopped_message_generation update",
+    "makes sure the stop update reaches the bot: delivered by default, or included when the bot passes its own allowed_updates list",
+    "sends the final answer as a normal message after the drafts",
+    "states which Bot API version / docs it checked",
+    "does not build the solution on an edit_message_text loop",
+    "keeps draft updates within the limits published on core.telegram.org/api/bots/ai, section \"Live response streaming\" (20 calls in 5 s and 40 in 30 s per chat, about one per second, when written in October 2026; if the page now gives other figures, those are the correct ones) and does not claim the docs publish no limit for drafts"
+   ],
+   "files": []
+  },
+  {
+   "id": 2,
+   "name": "ephemeral-hint-ptb",
+   "prompt": "Бот на python-telegram-bot 22.8 (проект в <a project with the library installed in .venv>) работает в группе. Когда новый участник жмёт инлайн-кнопку «Правила», хочу показать правила так, чтобы их видел только он и чат не засорялся. Как это сделать правильно? Нужен код.",
+   "expected_output": "Proposes ephemeral messages via ephemeral_message_parameters (not the replaced receiver_user_id/callback_query_id), notices python-telegram-bot 22.8 lacks it and uses a raw call or an upgrade, answers the callback query.",
+   "assertions": [
+    "proposes ephemeral messages (visible to one user in the group)",
+    "uses ephemeral_message_parameters, not the replaced receiver_user_id / callback_query_id",
+    "notices python-telegram-bot 22.8 lacks it and offers a raw call (do_api_request) or an upgrade",
+    "answers the callback query"
+   ],
+   "files": []
+  },
+  {
+   "id": 3,
+   "name": "webhook-review-grammy",
+   "prompt": "Проверь мой вебхук бота на надёжность и безопасность перед запуском: evals/files/webhook.ts. Что сломается в проде и как исправить?",
+   "expected_output": "Finds: no secret_token header check; heavy work inside the webhook request (retries, duplicates); no update_id dedup with a non-idempotent bonus grant; chat_member not in allowed_updates so the handler never fires; callback query never answered; token logged; raw LLM text with MarkdownV2 breaks; long LLM call needs feedback/streaming.",
+   "assertions": [
+    "flags the missing X-Telegram-Bot-Api-Secret-Token / secret_token check",
+    "flags heavy work inside the webhook request (retries, duplicates)",
+    "flags missing update_id dedup, so the bonus can be granted twice",
+    "flags that chat_member is not delivered unless listed in allowed_updates",
+    "flags that the callback query is never answered",
+    "flags the token written to logs",
+    "flags raw LLM text sent with MarkdownV2 (escaping)"
+   ],
+   "files": [
+    "evals/files/webhook.ts"
+   ]
+  },
+  {
+   "id": 4,
+   "name": "rich-tables-streaming-aiogram",
+   "prompt": "Бот на aiogram 3, проект в <a project with aiogram 3.31 installed in .venv; the bot is evals/files/aiogram_bot.py>. Нейросеть отвечает сравнительными таблицами в Markdown, а в Telegram они приходят палками и дефисами, и ответ ещё ждать по полминуты. Сделай, чтобы таблицы выглядели настоящими таблицами, а ответ появлялся по мере генерации. Напиши код и скажи, что ещё настроить.",
+   "expected_output": "Sends the model's Markdown as a rich message (sendRichMessage with InputRichMessage in rich Markdown, which renders tables natively) and streams it with sendRichMessageDraft; sends the final answer as a persistent rich message; checks that aiogram 3.31 supports the rich methods; states the Bot API version checked.",
+   "assertions": [
+    "renders the table through rich messages (send_rich_message / sendRichMessage with rich Markdown or table blocks), not a <pre> block, an image or a hand-made text table as the main solution",
+    "streams with the native rich draft (send_rich_message_draft / sendRichMessageDraft), not an edit_message_text loop",
+    "sends the final answer as a persistent rich message after the drafts",
+    "checks that the installed aiogram supports the rich-message methods (script or package code)",
+    "states which Bot API version / docs it checked",
+    "does not claim that Telegram cannot render real tables",
+    "keeps draft updates within the limits published on core.telegram.org/api/bots/ai, section \"Live response streaming\" (20 calls in 5 s and 40 in 30 s per chat, about one per second, when written in October 2026; if the page now gives other figures, those are the correct ones) and does not claim the docs publish no limit for drafts",
+    "does not build extras the user did not ask for (Stop button, long-answer splitting, concurrency guards) without presenting them as options",
+    "handles group chats, where drafts are not available (no draft calls there; a typing action or a plain final message instead)",
+    "the streamed drafts do not show raw Markdown table pipes (an unfinished table or a header row without its separator is held back)"
+   ],
+   "files": [
+    "evals/files/aiogram_bot.py"
+   ]
+  },
+  {
+   "id": 5,
+   "name": "stars-topics-fee-decision",
+   "prompt": "У нас AI-бот, продаём подписку за Telegram Stars. Хотим две вещи: чтобы ответ печатался по мере генерации, и чтобы у каждого пользователя были отдельные треды под разные разговоры. Что включать в BotFather и во что это нам обойдётся? Код пока не нужен, нужно решение.",
+   "expected_output": "Explains that enabling topics in private chats puts a non-refundable fee (developer terms 6.2.6: 15% when written in October 2026; if the terms now state another figure, that one is correct) on every Stars purchase in the bot; that streaming drafts are open to all bots since Bot API 9.5 and do not need topics; flags that the terms still tie streaming to topics; gives options with gains and costs and recommends one; lists the BotFather settings.",
+   "assertions": [
+    "states that enabling topics in private chats puts a fee on every Stars purchase in the bot, with the figure from developer terms 6.2.6 (15% when written in October 2026; if the terms now state another figure, that one is correct)",
+    "states that streaming drafts do not require topics in private chats (open to all bots since Bot API 9.5)",
+    "points out that the developer terms (6.2.6) still tie streaming to enabling topics, contrary to the changelog, and leaves resolving it to the owner (e.g. confirm with @BotSupport) instead of declaring one side outdated",
+    "gives options with what each gives and costs, and recommends one",
+    "lists the BotFather settings the owner must change by hand",
+    "states which Bot API version / docs it checked",
+    "keeps draft updates within the limits published on core.telegram.org/api/bots/ai, section \"Live response streaming\" (20 calls in 5 s and 40 in 30 s per chat, about one per second, when written in October 2026; if the page now gives other figures, those are the correct ones) and does not claim the docs publish no limit for drafts"
+   ],
+   "files": []
+  },
+  {
+   "id": 6,
+   "name": "ephemeral-sendmessage-grammy",
+   "prompt": "Бот на grammY, проект в <a project with grammy 1.46.0 installed in node_modules; the bot is evals/files/grammy_rules.ts>. В группе новые участники жмут кнопку «Правила», а бот отвечает всем в чат, чат засоряется. Нужно, чтобы правила видел только тот, кто нажал. Наша версия grammY это вообще умеет? Перепиши обработчик.",
+   "expected_output": "Uses an ephemeral message: ephemeral_message_parameters { receiver_user_id, callback_query_id } on sendMessage/reply (the Bot API 10.3 shape, not the 10.2 top-level parameters); confirms at the method level that the installed grammY / @grammyjs/types accepts it; answers the callback query; addresses that delivery is not guaranteed.",
+   "assertions": [
+    "uses an ephemeral message visible only to the user who pressed the button",
+    "passes ephemeral_message_parameters on sendMessage / ctx.reply, not receiver_user_id / callback_query_id as top-level parameters",
+    "confirms that the installed grammY / @grammyjs/types accepts ephemeral_message_parameters on sendMessage, not just that the name exists somewhere",
+    "answers the callback query",
+    "addresses that an ephemeral message is not guaranteed to arrive (offline user) or offers a fallback",
+    "states which Bot API version / docs it checked"
+   ],
+   "files": [
+    "evals/files/grammy_rules.ts"
+   ]
+  }
+ ],
+ "iteration_1": {
+  "date": "2026-10-23",
+  "with_skill": {
+   "pass_rate": 1.0,
+   "time_s": 531,
+   "tokens": 143421
+  },
+  "without_skill": {
+   "pass_rate": 1.0,
+   "time_s": 442,
+   "tokens": 105611
+  },
+  "note": "assertions did not discriminate: the baseline also read the live docs because the owner global rules forbid coding from memory; with the skill answers were broader (more review findings, rich drafts) but cost about 20% more time and 35% more tokens"
+ },
+ "iteration_2": {
+  "date": "2026-10-23",
+  "evals": [
+   4,
+   5,
+   6
+  ],
+  "with_skill": {
+   "pass_rate": 1.0,
+   "factual_errors": 4,
+   "time_s": 510,
+   "tokens": 135527
+  },
+  "without_skill": {
+   "pass_rate": 1.0,
+   "factual_errors": 2,
+   "time_s": 507,
+   "tokens": 126176
+  },
+  "note": "blind grading; assertions did not discriminate, factual errors did. Both with-skill errors came from the skill itself: 'a few draft updates per second' (docs: 20 per 5 s, 40 per 30 s per chat, on api/bots/ai) and 'subscribe to stopped_message_generation' (it is delivered by default). Eval 6: with skill 0 errors, without 1."
+ },
+ "iteration_3": {
+  "date": "2026-10-23",
+  "evals": [
+   4,
+   5
+  ],
+  "baseline": "without_skill runs reused from iteration_2, regraded with the iteration_3 assertions",
+  "with_skill": {
+   "pass_rate": 1.0,
+   "factual_errors": 0,
+   "time_s": 462,
+   "tokens": 144992
+  },
+  "without_skill": {
+   "pass_rate": 1.0,
+   "factual_errors": 2,
+   "time_s": 605,
+   "tokens": 140219
+  },
+  "note": "after fixing the draft limits and the stop-update guidance, with-skill runs made no factual errors; eval 5 with skill judged better (left the terms/changelog conflict to the owner), eval 4 a near tie (baseline hid unfinished table rows better). Assertions still all pass in both configurations; tightened afterwards (draft limits, owner decision on the conflict, raw pipes in drafts)."
+ }
+}
