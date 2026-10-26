@@ -53,7 +53,8 @@ describeWithDatabase("126 agent identity names", () => {
       "memory_turn_source_sets.agent_turn_id",
       "telegram_final_deliveries.agent_turn_id",
     ]));
-    expect(identity.rows).toHaveLength(26);
+    // 28 since `telegram_reply_button_sets` (migration 141) carries both.
+    expect(identity.rows).toHaveLength(28);
   });
 
   it("labels carried-over sessions as imported and drops the removed recovery state", async () => {

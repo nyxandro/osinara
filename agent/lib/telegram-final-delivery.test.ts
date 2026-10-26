@@ -89,9 +89,11 @@ describe("Telegram final delivery", () => {
     await expect(deliverTelegramFinalOutput({ ...base, sendChunk }))
       .rejects.toThrowError("database disconnected after Telegram accepted");
     expect(sendChunk).toHaveBeenCalledTimes(1);
+    // The only chunk is also the last one, the one that would carry reply buttons.
     expect(sendChunk).toHaveBeenCalledWith(
       { format: "plain", pacing: "immediate", text: "Готово" },
       0,
+      true,
     );
     expect(repository.fail).toHaveBeenCalledWith(
       "00000000-0000-4000-8000-000000000002",
