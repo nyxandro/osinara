@@ -28,6 +28,16 @@ export function requireScheduleLimitRemaining(maxRuns: number | null, completedR
     "Расписание уже выполнило заданное количество раз. Увеличьте или снимите лимит перед возобновлением");
 }
 
+// What a wake-up turn may adjust in its own schedule while that schedule is still leased by the turn:
+// the check, the window and the note, never when or how often it runs.
+const WAKEUP_CONTENT_FIELDS = new Set(["checkCommand", "checkUntil", "scenarioPrompt", "title", "userRequest"]);
+
+export function isWakeupContentUpdate(input: AgentScheduleUpdateInput): boolean {
+  const changed = Object.entries(input).filter(([key, value]) =>
+    value !== undefined && !["operationKey", "requiredScope"].includes(key));
+  return changed.length > 0 && changed.every(([key]) => WAKEUP_CONTENT_FIELDS.has(key));
+}
+
 export function isPauseOnlyUpdate(input: AgentScheduleUpdateInput): boolean {
   return input.enabled === false && Object.entries(input).every(([key, value]) =>
     value === undefined || ["enabled", "operationKey", "requiredScope"].includes(key));

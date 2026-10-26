@@ -27,6 +27,8 @@ const SELF_PAUSED_CODES = [CONVERSATION_CHANGED_CODE, WAKEUP_HANDOFF_FAILED_CODE
 const PLANNED_WAKEUPS_LIMIT = 10;
 
 export interface PlannedConversationWakeup {
+  /** A monitor's watch; absent on a plain wake-up. */
+  check: { failures: number; lastCheckedAt: Date | null; lastErrorCode: string | null; until: Date } | null;
   completedRuns: number;
   lastErrorCode: string | null;
   maxRuns: number;
@@ -41,7 +43,11 @@ export interface PlannedConversationWakeup {
 export const conversationWakeupContextRepository = {
   async listPlanned(updateId: string, familyId: string, authorUserId: string): Promise<PlannedConversationWakeup[]> {
     const result = await database().query<{
+      check_failures: number;
+      check_until: Date | null;
       completed_runs: number;
+      last_check_error_code: string | null;
+      last_checked_at: Date | null;
       id: string;
       last_error_code: string | null;
       max_runs: number;
@@ -52,7 +58,8 @@ export const conversationWakeupContextRepository = {
       title: string;
     }>(
       `SELECT schedule.id::text, schedule.title, schedule.status, schedule.next_run_at, schedule.timezone,
-              schedule.completed_runs, schedule.max_runs, schedule.last_error_code, schedule.pause_requested
+              schedule.completed_runs, schedule.max_runs, schedule.last_error_code, schedule.pause_requested,
+              schedule.check_until, schedule.last_checked_at, schedule.check_failures, schedule.last_check_error_code
          FROM telegram_ingress_updates update_row
          JOIN agent_schedules schedule ON schedule.ingress_queue_id = update_row.queue_id
         WHERE update_row.update_id = $1 AND schedule.family_id = $2 AND schedule.author_user_id = $3
@@ -65,6 +72,14 @@ export const conversationWakeupContextRepository = {
       [requireUpdateId(updateId), familyId, authorUserId, PLANNED_WAKEUPS_LIMIT, SELF_PAUSED_CODES],
     );
     return result.rows.map((row) => ({
+      check: row.check_until === null
+        ? null
+        : {
+          failures: row.check_failures,
+          lastCheckedAt: row.last_checked_at,
+          lastErrorCode: row.last_check_error_code,
+          until: row.check_until,
+        },
       completedRuns: row.completed_runs,
       lastErrorCode: row.last_error_code,
       maxRuns: row.max_runs,
@@ -89,6 +104,16 @@ function state(wakeup: PlannedConversationWakeup): string {
 export function formatPlannedWakeupsContext(wakeups: readonly PlannedConversationWakeup[]): string | null {
   if (wakeups.length === 0) return null;
   const entries = wakeups.map((wakeup) => ({
+    ...(wakeup.check === null ? {} : {
+      monitor: {
+        failingChecksInRow: wakeup.check.failures,
+        lastCheckError: wakeup.check.lastErrorCode,
+        lastCheckedLocal: wakeup.check.lastCheckedAt === null
+          ? null
+          : localScheduledTime(wakeup.check.lastCheckedAt.toISOString(), wakeup.timezone),
+        watchUntilLocal: localScheduledTime(wakeup.check.until.toISOString(), wakeup.timezone),
+      },
+    }),
     executionsDone: wakeup.completedRuns,
     maxRuns: wakeup.maxRuns,
     nextRunLocal: localScheduledTime(wakeup.nextRunAt.toISOString(), wakeup.timezone),

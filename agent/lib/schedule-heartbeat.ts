@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `SCHEDULE_HEARTBEAT_CODE`: stable code external monitoring matches on.
- * - `ScheduleName`: the four dispatchers that report, as a closed set.
+ * - `ScheduleName`: the dispatchers that report, as a closed set.
  * - `withScheduleHeartbeat`: runs one dispatcher cycle and records it only when it completed.
  *
  * A stopped scheduler produces no error: reminders simply never arrive. The only observable
@@ -20,6 +20,7 @@ export const SCHEDULE_HEARTBEAT_CODE = "AGENT_SCHEDULE_TICK";
 
 /** Names are a closed set so a typo cannot reach runtime and silence a dispatcher's heartbeat. */
 export type ScheduleName =
+  | "agent-schedule-check-dispatch"
   | "agent-schedule-dispatch"
   | "memory-review-dispatch"
   | "reminder-dispatch"

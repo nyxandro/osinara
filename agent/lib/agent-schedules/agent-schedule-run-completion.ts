@@ -6,9 +6,11 @@
  * - `finishActiveAgentScheduleRun`: marks a running hand-off completed or failed and advances recurrence.
  * - `completeDeliveredAgentScheduleRun`: atomically records Telegram delivery and successful completion.
  *
- * Key construct:
+ * Key constructs:
  * - A deliberately silent run advances `completed_runs` like a delivered one: `max_runs` limits
  *   executions, and a limited scenario that keeps finding nothing to report must still end.
+ * - A monitor's next tick never lands after its window, and the run due at the window's end is its
+ *   last: the watch is over once the agent reported how it went.
  */
 import type { PoolClient } from "pg";
 
@@ -20,6 +22,7 @@ import type { AgentScheduleRecurrenceKind } from "./agent-schedule-record.js";
 
 interface ActiveRunRow {
   delivery_may_have_happened: boolean;
+  monitor_window_closed: boolean;
   completed_runs: number;
   max_runs: number | null;
   pause_requested: boolean;
@@ -77,6 +80,7 @@ export async function finishActiveAgentScheduleRun(
   const active = await client.query<ActiveRunRow>(
     `SELECT run.id AS run_id, schedule.id AS schedule_id, schedule.family_id,
             schedule.recurrence_kind, schedule.max_runs, schedule.completed_runs, schedule.pause_requested,
+            coalesce(run.scheduled_for >= schedule.check_until, false) AS monitor_window_closed,
             EXISTS (
               SELECT 1 FROM telegram_final_deliveries delivery
               WHERE delivery.application_session_id = run.application_session_id
@@ -122,7 +126,7 @@ export async function finishActiveAgentScheduleRun(
   // A storage error can hide the transport's ambiguity code. The durable outbox is authoritative.
   const deliveryUnconfirmed = errorCode !== null &&
     (row.delivery_may_have_happened || UNCONFIRMED_DELIVERY_CODES.has(errorCode));
-  const next = limitReached || deliveryUnconfirmed
+  const next = limitReached || deliveryUnconfirmed || row.monitor_window_closed
     ? null : await nextAgentScheduleOccurrence(client, row.schedule_id, row.recurrence_kind, input.completedAt);
   if (!next) {
     await client.query(
@@ -144,7 +148,7 @@ export async function finishActiveAgentScheduleRun(
 
   await client.query(
     `UPDATE agent_schedules
-        SET status = $6, occurrence_index = $2, next_run_at = $3,
+        SET status = $6, occurrence_index = $2, next_run_at = least($3::timestamptz, check_until),
             attempts = 0, lease_token = NULL, lease_expires_at = NULL,
             dispatch_started_at = NULL, last_error_code = $4, updated_at = $5,
             completed_runs = $7, pause_requested = false

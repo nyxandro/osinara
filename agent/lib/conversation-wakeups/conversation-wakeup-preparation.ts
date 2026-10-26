@@ -7,8 +7,7 @@
  * - `prepareConversationWakeup`: checks the schedule, its author, its chat, and its conversation.
  *
  * Key constructs:
- * - The conversation must still be the chat's live canonical session. A session that the next
- *   message will replace, because it failed, counts as a changed conversation.
+ * - The conversation must still be the chat's live canonical session (`loadLiveConversationSession`).
  * - A conversation that waits for a person's answer to an approval is not interrupted: its next
  *   turn must be that answer, so the wake-up waits and is tried again later.
  * - A queue item whose schedule no longer waits for it is closed, so it never holds the lane.
@@ -16,6 +15,8 @@
 import type { PoolClient } from "pg";
 
 import { AGENT_SCHEDULE_CONVERSATION_DEFER_MILLISECONDS } from "../agent-schedules/agent-schedule-config.js";
+import type { ScheduleCheckTrigger } from "../agent-schedules/agent-schedule-check-contract.js";
+import { loadLiveConversationSession } from "./conversation-live-session.js";
 import {
   CONVERSATION_CHANGED_CODE,
   closeWakeup,
@@ -25,10 +26,20 @@ import {
   withdrawUnstartedRun,
 } from "./conversation-wakeup-transitions.js";
 
+/** Why a monitor woke the agent; absent on a plain wake-up. */
+export interface PreparedMonitorCheck {
+  /** The run due at the end of the watch: after it the monitor is over. */
+  last: boolean;
+  output: string | null;
+  trigger: ScheduleCheckTrigger;
+  until: Date;
+}
+
 export interface PreparedConversationWakeup {
   applicationConversationId: string;
   applicationSessionId: string;
   authorUserId: string;
+  check: PreparedMonitorCheck | null;
   completedRuns: number;
   agentSessionId: string;
   familyId: string;
@@ -75,6 +86,10 @@ const STALE = {
 interface LoadedWakeup {
   application_conversation_id: string | null;
   author_user_id: string;
+  check_last: boolean;
+  check_output: string | null;
+  check_trigger: ScheduleCheckTrigger | null;
+  check_until: Date | null;
   completed_runs: number;
   conversation_session_id: string | null;
   family_id: string;
@@ -105,6 +120,8 @@ async function loadClaimed(client: PoolClient, claim: { id: string; leaseToken: 
   const loaded = await client.query<LoadedWakeup>(
     `SELECT schedule.id::text AS schedule_id, schedule.status::text AS schedule_status,
             run.id::text AS run_id, run.status::text AS run_status, run.scheduled_for,
+            run.check_trigger, run.check_output, schedule.check_until,
+            coalesce(run.scheduled_for >= schedule.check_until, false) AS check_last,
             schedule.family_id::text, schedule.author_user_id::text, schedule.scope,
             schedule.group_id::text, schedule.title, schedule.user_request, schedule.scenario_prompt,
             schedule.timezone, schedule.completed_runs, schedule.max_runs, schedule.pause_requested,
@@ -184,27 +201,15 @@ export async function prepareConversationWakeup(
       telegramChatId: row.telegram_chat_id,
       telegramForumTopicId: row.forum_topic_id,
     });
-    const session = await client.query<{
-      agent_session_id: string | null;
-      id: string;
-      pending_operation: boolean;
-      rotation_requested: boolean;
-      thread_id: string;
-    }>(
-      `SELECT session.id::text, session.thread_id::text, session.agent_session_id, session.pending_operation,
-              session.rotation_requested_at IS NOT NULL AS rotation_requested
-         FROM conversation_session_routes route
-         JOIN conversation_sessions session ON session.id = route.session_id
-        WHERE route.base_continuation_token = $1 AND session.retired_at IS NULL AND session.kind = 'canonical'
-          AND session.id = $2::uuid`,
-      [route, row.conversation_session_id],
-    );
-    const live = session.rows[0];
-    if (!live || live.agent_session_id === null || live.rotation_requested) {
+    const live = await loadLiveConversationSession(client, {
+      baseContinuationToken: route,
+      conversationSessionId: row.conversation_session_id,
+    });
+    if (!live) {
       await withdraw(client, row, claim.id, CONVERSATION_CHANGED_CODE);
       return { kind: "withdrawn" };
     }
-    if (live.pending_operation) {
+    if (live.pendingOperation) {
       await defer(client, claim.id);
       return { kind: "deferred" };
     }
@@ -212,10 +217,13 @@ export async function prepareConversationWakeup(
       kind: "ready",
       wakeup: {
         applicationConversationId: row.application_conversation_id,
-        applicationSessionId: live.id,
+        applicationSessionId: live.applicationSessionId,
         authorUserId: row.author_user_id,
+        check: row.check_trigger === null || row.check_until === null
+          ? null
+          : { last: row.check_last, output: row.check_output, trigger: row.check_trigger, until: row.check_until },
         completedRuns: row.completed_runs,
-        agentSessionId: live.agent_session_id,
+        agentSessionId: live.agentSessionId,
         familyId: row.family_id,
         forumTopicId: row.forum_topic_id,
         groupId: row.group_id,
@@ -223,7 +231,7 @@ export async function prepareConversationWakeup(
         messageThreadId: row.message_thread_id,
         role: row.role,
         runId: row.run_id,
-        sandboxSessionId: live.thread_id,
+        sandboxSessionId: live.sandboxSessionId,
         scenarioPrompt: row.scenario_prompt,
         scheduledFor: row.scheduled_for,
         scheduleId: row.schedule_id,

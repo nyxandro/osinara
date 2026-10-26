@@ -97,15 +97,34 @@ export async function requireConversationCapacity(
   }
 }
 
+type ScheduleChat = { message_thread_id: string | null; scope: AgentScheduleScope; telegram_chat_id: string };
+
+function isScheduleChat(auth: AgentScheduleAuthorization, schedule: ScheduleChat): boolean {
+  // A personal schedule is stored without a thread, exactly as it was created.
+  const currentThread = schedule.scope === "personal" ? null : auth.messageThreadId;
+  return auth.telegramChatId === schedule.telegram_chat_id && currentThread === schedule.message_thread_id;
+}
+
+/**
+ * A monitor's check runs in its own chat's sandbox, so only a turn of that chat may change it: from
+ * another chat the script would be written by one conversation and run with another's files.
+ */
+export function requireCheckChangedInScheduleChat(auth: AgentScheduleAuthorization, schedule: ScheduleChat): void {
+  if (!isScheduleChat(auth, schedule)) {
+    throw new AppError(
+      "AGENT_SCHEDULE_CHECK_CHAT_MISMATCH",
+      "Проверку монитора можно менять только в том чате, за которым он следит",
+    );
+  }
+}
+
 /** A resumed wake-up continues in the conversation the person resumes it from, in the same chat. */
 export async function rebindConversationSchedule(
   client: PoolClient,
   auth: AgentScheduleAuthorization,
-  schedule: { id: string; message_thread_id: string | null; scope: AgentScheduleScope; telegram_chat_id: string },
+  schedule: ScheduleChat & { id: string },
 ): Promise<void> {
-  // A personal schedule is stored without a thread, exactly as it was created.
-  const currentThread = schedule.scope === "personal" ? null : auth.messageThreadId;
-  if (auth.telegramChatId !== schedule.telegram_chat_id || currentThread !== schedule.message_thread_id) {
+  if (!isScheduleChat(auth, schedule)) {
     throw new AppError(
       "AGENT_SCHEDULE_CONVERSATION_CHAT_MISMATCH",
       "Возобновить пробуждение можно только в том чате, где оно поставлено",

@@ -24,6 +24,7 @@ import { createTelegramIngress, telegramChannelHooks, telegramTurnEvents } from 
 import { googleOAuthRoutes } from "./channels/google-oauth.js";
 import { createMemoryReviewStart, MEMORY_REVIEW_CHANNEL_KIND, memoryReviewTurnEvents } from "./channels/memory-review.js";
 import { TELEGRAM_INGRESS_LEASE_MS } from "./config.js";
+import { createScheduleCheckRunner } from "./lib/agent-schedules/agent-schedule-check-runner.js";
 import { AGENT_SCHEDULE_CONVERSATION_ADMISSION_MILLISECONDS } from "./lib/agent-schedules/agent-schedule-config.js";
 import type { ScheduledChatStart } from "./lib/agent-schedules/agent-schedule-dispatcher.js";
 import { createConversationWakeupProcessor } from "./lib/conversation-wakeups/conversation-wakeup-drain.js";
@@ -47,6 +48,7 @@ import { lifecycleTurnObserver } from "./runtime/turn/lifecycle-observer.js";
 import { callStepModel } from "./runtime/turn/model-call.js";
 import { routeTurnObservers } from "./runtime/turn/observer-routing.js";
 import { createSessionSandboxes } from "./sandbox.js";
+import { agentScheduleCheckDispatchSchedule } from "./schedules/agent-schedule-check-dispatch.js";
 import { agentScheduleDispatchSchedule } from "./schedules/agent-schedule-dispatch.js";
 import { memoryReviewDispatchSchedule } from "./schedules/memory-review-dispatch.js";
 import { reminderDispatchSchedule } from "./schedules/reminder-dispatch.js";
@@ -115,6 +117,8 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
     events: telegramTurnEvents,
     ...telegramChannelHooks,
   });
+  // Turns and monitor checks open a chat's sandbox the same way, from the same verified identity.
+  const sessionSandboxes = createSessionSandboxes({ baseUrl: options.sandboxRunnerBaseUrl, database: db });
   const dispatcher = createTurnDispatcher({
     // A turn that already exists may finish while a deploy drains, never once it is frozen.
     admit: (work) => withRuntimeAdmission("callback", work),
@@ -128,7 +132,7 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
         telegram: telegram.observer,
       }),
       runnerId: options.runnerId,
-      sandbox: createSessionSandboxes({ baseUrl: options.sandboxRunnerBaseUrl, database: db }),
+      sandbox: sessionSandboxes,
       summarize: summarizeWithModel,
     },
     waitMilliseconds: TURN_WAIT_MILLISECONDS,
@@ -183,6 +187,7 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
         }),
       }),
       agentScheduleDispatchSchedule(startInChat),
+      agentScheduleCheckDispatchSchedule(createScheduleCheckRunner({ openSandbox: sessionSandboxes })),
       memoryReviewDispatchSchedule(createMemoryReviewStart({ database: db, dispatcher })),
       softwareUpdateCheckSchedule(),
       { cron: "* * * * *", name: "turn-recovery", run: ({ waitUntil }) => waitUntil(dispatcher.recover()) },

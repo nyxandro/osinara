@@ -9,6 +9,7 @@
  * - `inTransaction`: runs one wake-up transition atomically.
  * - `closeWakeup`: makes the queue item terminal and frees its chat's lane.
  * - `withdrawUnstartedRun`: removes a run whose turn never started and parks its schedule.
+ * - `parkLeasedSchedule`: releases a leased schedule as paused.
  * - `failUnstartedRun`: fails a run whose turn will never start, together with its schedule.
  *
  * Key constructs:
@@ -78,6 +79,12 @@ export async function withdrawUnstartedRun(
     [runId],
   );
   if (removed.rowCount !== 1) return false;
+  await parkLeasedSchedule(client, scheduleId, code);
+  return true;
+}
+
+/** Releases a leased schedule as paused; with a code, the agent sees it paused by itself. */
+export async function parkLeasedSchedule(client: PoolClient, scheduleId: string, code: string | null): Promise<void> {
   await client.query(
     `UPDATE agent_schedules
         SET status = 'paused', pause_requested = false, lease_token = NULL, lease_expires_at = NULL,
@@ -93,7 +100,6 @@ export async function withdrawUnstartedRun(
       [scheduleId, code],
     );
   }
-  return true;
 }
 
 export async function failUnstartedRun(client: PoolClient, scheduleId: string, runId: string, code: string): Promise<void> {

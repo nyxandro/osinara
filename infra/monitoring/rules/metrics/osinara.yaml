@@ -6,7 +6,7 @@ groups:
     rules:
       # One rule per dispatcher: silence is the only signal a stopped scheduler produces.
       # Each is gated on the application still writing logs, so enabling this file, restarting the
-      # hub, or a server that is simply gone does not fire four scheduler alerts at once. A dead
+      # hub, or a server that is simply gone does not fire every scheduler alert at once. A dead
       # server is already covered by HostDown and ContainerExited.
       #
       # Each is also stood down while a release is running: the deployment stops every container,
@@ -65,6 +65,21 @@ groups:
 
       - alert: OsinaraSchedulerHeartbeatMissing
         expr: >-
+          absent_over_time(osinara_schedule_tick_1m{schedule="agent-schedule-check-dispatch"}[5m])
+          and on() present_over_time(log_lines_1m{project="osinara-production"}[5m])
+          unless on() deploy_window_end_timestamp_seconds{project="osinara-production"} > time()
+        for: 5m
+        labels:
+          severity: warning
+          project: osinara-production
+          schedule: agent-schedule-check-dispatch
+        annotations:
+          summary: 'Мониторы агента не проверяются 5 минут'
+          description: 'Ежеминутный цикл проверок мониторов не отчитался об успешном цикле. Агент не узнает о событиях, за которыми следят мониторы.'
+          runbook: 'Проверить контейнер agent, доступность базы и sandbox-runner. Искать в логах AGENT_SCHEDULE_CHECK_DISPATCH_FAILED и AGENT_SCHEDULE_CHECK_UNAVAILABLE.'
+
+      - alert: OsinaraSchedulerHeartbeatMissing
+        expr: >-
           absent_over_time(osinara_schedule_tick_1m{schedule="memory-review-dispatch"}[5m])
           and on() present_over_time(log_lines_1m{project="osinara-production"}[5m])
           unless on() deploy_window_end_timestamp_seconds{project="osinara-production"} > time()
@@ -99,7 +114,7 @@ groups:
       - alert: OsinaraErrorBurst
         expr: >-
           sum by (host) (sum_over_time(log_code_lines_1m{project="osinara-production",
-          code!~"AGENT_(SCHEDULE_TICK|TELEGRAM_SILENT_TURN|MEMORY_PURGE_COMPLETED|DATABASE_BOOKKEEPING_RECOVERY|RUNTIME_DEAD_PROCESS_RECONCILED|TELEGRAM_INGRESS_RECOVERED|TELEGRAM_OBSERVER_TRANSFERRED|TELEGRAM_DATABASE_RECOVERY|MEMORY_WRITE_SUCCEEDED|MEMORY_WRITE_DEFERRED|MEMORY_INDEX_RETRY_CLAIMED|MEMORY_INDEX_CHUNK_RESPLIT|MEMORY_USAGE_DIRECTIVE|MEMORY_EMBEDDING_WORKER_STARTED|MEMORY_EMBEDDING_WORKER_WAITING|MODEL_CALL_METRICS|TOOL_CALL_METRICS|SKILL_SYNC_METRICS|MEMORY_SEARCH_METRICS|MEMORY_RETRIEVAL_METRICS|MEMORY_REVIEW_LANE_METRICS|SANDBOX_EGRESS_CLIENT_CLOSED|SANDBOX_EGRESS_UPSTREAM_CLOSED|CONVERSATION_WAKEUP_OBSERVER_RELEASED|CONVERSATION_WAKEUP_RECOVERED|CONVERSATION_WAKEUP_RUN_ALREADY_CLOSED|RUNNER_LOCK_RETAKEN|RUNTIME_STARTED|RUNTIME_STOPPING|SCHEDULE_CONVERSATION_ENQUEUED|TURNS_RECOVERED|TURN_DEFERRED_BY_MAINTENANCE|TELEGRAM_DRAIN_WAITING)"}[5m])) > 10
+          code!~"AGENT_(SCHEDULE_TICK|SCHEDULE_CHECK|TELEGRAM_SILENT_TURN|MEMORY_PURGE_COMPLETED|DATABASE_BOOKKEEPING_RECOVERY|RUNTIME_DEAD_PROCESS_RECONCILED|TELEGRAM_INGRESS_RECOVERED|TELEGRAM_OBSERVER_TRANSFERRED|TELEGRAM_DATABASE_RECOVERY|MEMORY_WRITE_SUCCEEDED|MEMORY_WRITE_DEFERRED|MEMORY_INDEX_RETRY_CLAIMED|MEMORY_INDEX_CHUNK_RESPLIT|MEMORY_USAGE_DIRECTIVE|MEMORY_EMBEDDING_WORKER_STARTED|MEMORY_EMBEDDING_WORKER_WAITING|MODEL_CALL_METRICS|TOOL_CALL_METRICS|SKILL_SYNC_METRICS|MEMORY_SEARCH_METRICS|MEMORY_RETRIEVAL_METRICS|MEMORY_REVIEW_LANE_METRICS|SANDBOX_EGRESS_CLIENT_CLOSED|SANDBOX_EGRESS_UPSTREAM_CLOSED|CONVERSATION_WAKEUP_OBSERVER_RELEASED|CONVERSATION_WAKEUP_RECOVERED|CONVERSATION_WAKEUP_RUN_ALREADY_CLOSED|RUNNER_LOCK_RETAKEN|RUNTIME_STARTED|RUNTIME_STOPPING|SCHEDULE_CONVERSATION_ENQUEUED|TURNS_RECOVERED|TURN_DEFERRED_BY_MAINTENANCE|TELEGRAM_DRAIN_WAITING)"}[5m])) > 10
         labels:
           severity: warning
           project: osinara-production

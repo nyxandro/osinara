@@ -28,7 +28,9 @@ export function agentScheduleColumns(qualifier?: string): string {
   ${column("timezone")}, ${column("recurrence_kind")}, ${column("recurrence_interval")}, ${column("recurrence_days_of_week")},
   ${column("next_run_at")}, ${column("status")}, ${column("message_thread_id")}::text, ${column("forum_topic_id")}::text,
   ${column("history_window_days")}, ${column("tool_allowlist")}, ${column("last_error_code")}, ${column("created_at")}, ${column("updated_at")},
-  ${column("max_runs")}, ${column("completed_runs")}, ${column("pause_requested")}, ${column("execution_context")}`;
+  ${column("max_runs")}, ${column("completed_runs")}, ${column("pause_requested")}, ${column("execution_context")},
+  ${column("check_command")}, ${column("check_until")}, ${column("check_failures")}, ${column("last_checked_at")},
+  ${column("last_check_error_code")}`;
 }
 
 export const AGENT_SCHEDULE_COLUMNS = agentScheduleColumns();
