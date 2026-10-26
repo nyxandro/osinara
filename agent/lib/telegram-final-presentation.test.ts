@@ -6,6 +6,8 @@
  * - Supported formatting selects Rich Message delivery.
  * - Long output is collapsed even when the model omits the mandatory details block.
  * - Authored asides become paced messages unless the answer is collapsed as long.
+ * - An answer with reply buttons ends in a rich message, its plain text stays literal, and its
+ *   closing question stays outside the generated accordion.
  */
 import { describe, expect, it } from "vitest";
 
@@ -148,5 +150,39 @@ describe("Telegram final presentation", () => {
     expect(formatTelegramFinalPresentation(`**Риск высокий.**\n\n${body}`)[0]!.text).toBe(
       `**Риск высокий.**\n\n<details><summary>Полный ответ</summary>\n\n${body.trim()}\n\n</details>`,
     );
+  });
+
+  describe("with reply buttons", () => {
+    it("sends even a plain answer as a rich message, since only one carries buttons", () => {
+      expect(formatTelegramFinalPresentation("Заказываем?", { replyButtons: true }))
+        .toEqual([{ format: "rich", pacing: "immediate", text: "<p>Заказываем?</p>" }]);
+    });
+
+    it("keeps plain text literal there: prices, signs and every line break", () => {
+      const text = "Нашёл два варианта:\nПицца — 650 ₽, $5\n# Суши <лучше> & дешевле\n\nЧто берём?";
+
+      expect(formatTelegramFinalPresentation(text, { replyButtons: true })[0]!.text).toBe(
+        "<p>Нашёл два варианта:<br>Пицца — 650 ₽, $5<br># Суши &lt;лучше&gt; &amp; дешевле</p>\n\n<p>Что берём?</p>",
+      );
+    });
+
+    it("keeps the closing question of a long answer outside the accordion", () => {
+      const body = "подробность ".repeat(70).trim();
+      const chunks = formatTelegramFinalPresentation(`короткий вывод\n\n${body}\n\nЗаказываем?`, { replyButtons: true });
+
+      expect(chunks).toEqual([{
+        format: "rich",
+        pacing: "immediate",
+        text: `короткий вывод\n\n<details><summary>Полный ответ</summary>\n\n${body}\n\n</details>\n\nЗаказываем?`,
+      }]);
+    });
+
+    it("makes only the last message rich when the answer has an aside", () => {
+      expect(formatTelegramFinalPresentation(`Готово\n${TELEGRAM_ASIDE_DIRECTIVE}\nПовторить заказ?`, { replyButtons: true }))
+        .toEqual([
+          { format: "plain", pacing: "immediate", text: "Готово" },
+          { format: "rich", pacing: "aside", text: "<p>Повторить заказ?</p>" },
+        ]);
+    });
   });
 });

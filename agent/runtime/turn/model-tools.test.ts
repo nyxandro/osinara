@@ -62,10 +62,9 @@ describe("step tool order", () => {
 // Changed on purpose after the reference requests were recorded (stage 7, family skills): a new tool, and a
 // group skill list that also names the family's own skills. Owner-approved network access added its tool
 // on 20.10.2026; on 26.10.2026 monitors added the check of `manage_agent_schedule`, and reply buttons
-// their tool and the `buttons` of `manage_reminder`.
+// written in a reminder's `content` changed `manage_reminder`.
 const CHANGED_AFTER_RECORDING = new Set([
-  "attach_reply_buttons", "manage_agent_schedule", "manage_network_access", "manage_reminder", "manage_skill",
-  "manage_telegram_group",
+  "manage_agent_schedule", "manage_network_access", "manage_reminder", "manage_skill", "manage_telegram_group",
 ]);
 // The built-in `ask_question` left on 26.10.2026: buttons under the answer replaced it.
 const REMOVED_AFTER_RECORDING = new Set(["ask_question"]);

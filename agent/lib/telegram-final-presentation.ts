@@ -4,12 +4,16 @@
  * Exports:
  * - `TelegramChunkPacing`: whether a chunk opens an authored aside or continues immediately.
  * - `TelegramFinalPresentationChunk`: one plain or rich provider-sized delivery unit.
+ * - `TelegramFinalPresentationOptions`: what the answer carries besides its text.
  * - `formatTelegramFinalPresentation`: selects plain text unless supported markup is present.
  *
  * Key construct:
  * - Transport selection depends on authored syntax, not message length or a hidden default.
  * - An authored aside is a separate paced message; a length-driven split never is.
  * - Every authored message passes the length policy on its own.
+ * - Reply buttons exist only in a rich message, so an answer carrying them ends in one. Text that
+ *   would have gone plain stays literal there, line breaks included, and the question the buttons
+ *   answer is kept below a generated accordion rather than hidden inside it.
  */
 import { splitTelegramMessageText } from "../runtime/telegram/api.js";
 
@@ -18,8 +22,14 @@ import {
   hasTelegramRichDetailsBlock,
 } from "./telegram-rich-markdown.js";
 import { splitTelegramAuthoredParts } from "./telegram-authored-split.js";
+import { literalRichParagraphs } from "./telegram-rich-literal.js";
 
 export type TelegramChunkPacing = "aside" | "immediate";
+
+export interface TelegramFinalPresentationOptions {
+  /** Reply buttons go out under the last message of the answer. */
+  readonly replyButtons?: boolean;
+}
 
 export interface TelegramFinalPresentationChunk {
   readonly format: "plain" | "rich";
@@ -77,7 +87,12 @@ function neutralizeMalformedDetails(markdown: string): string {
   );
 }
 
-function collapseLongAnswer(markdown: string): string {
+function isShortPlainBlock(block: string | undefined): block is string {
+  return block !== undefined && characterLength(block) <= LONG_ANSWER_LEAD_MAX_CHARACTERS &&
+    !usesSupportedRichBlockFormatting(block);
+}
+
+function collapseLongAnswer(markdown: string, keepClosing: boolean): string {
   if (!isLongAnswer(markdown) || hasTelegramRichDetailsBlock(markdown)) return markdown;
   // Invalid details-like HTML is made inert before the valid backend wrapper is introduced.
   const safeMarkdown = /<\/?details(?:\s[^>]*)?>/iu.test(markdown)
@@ -85,42 +100,52 @@ function collapseLongAnswer(markdown: string): string {
     : markdown;
   const blocks = safeMarkdown.split(/\n\s*\n/gu).filter((part) => part.trim().length > 0);
   const first = blocks[0]?.trim();
-  const keepLead = first !== undefined && blocks.length > 1 &&
-    characterLength(first) <= LONG_ANSWER_LEAD_MAX_CHARACTERS &&
-    !usesSupportedRichBlockFormatting(first);
-  const body = (keepLead ? blocks.slice(1) : blocks).join("\n\n");
+  const keepLead = blocks.length > 1 && isShortPlainBlock(first);
+  const rest = keepLead ? blocks.slice(1) : blocks;
+  // The question reply buttons answer stays visible next to them.
+  const last = rest.at(-1)?.trim();
+  const closing = keepClosing && rest.length > 1 && isShortPlainBlock(last) ? last : undefined;
+  const body = (closing === undefined ? rest : rest.slice(0, -1)).join("\n\n");
   const details = `<details><summary>${LONG_ANSWER_SUMMARY}</summary>\n\n${body}\n\n</details>`;
-  return keepLead ? `${first}\n\n${details}` : details;
+  return [keepLead ? first : undefined, details, closing].filter((part) => part !== undefined).join("\n\n");
 }
 
 function formatPart(
   markdown: string,
   pacing: TelegramChunkPacing,
+  carriesButtons: boolean,
 ): TelegramFinalPresentationChunk[] {
   // Only the opening chunk carries the pause: a provider-sized overflow is the same utterance.
   const chunkPacing = (index: number): TelegramChunkPacing => index === 0 ? pacing : "immediate";
+  const collapsed = collapseLongAnswer(markdown, carriesButtons);
 
   // Plain text uses Telegram's ordinary 4096-character transport and never receives parse mode.
-  if (!usesSupportedRichFormatting(markdown)) {
-    return splitTelegramMessageText(markdown)
+  if (!usesSupportedRichFormatting(collapsed)) {
+    if (carriesButtons) {
+      return splitTelegramMessageText(collapsed)
+        .map((text, index) => ({ format: "rich", pacing: chunkPacing(index), text: literalRichParagraphs(text) }));
+    }
+    return splitTelegramMessageText(collapsed)
       .map((text, index) => ({ format: "plain", pacing: chunkPacing(index), text }));
   }
-  return formatTelegramRichMessages(markdown)
+  return formatTelegramRichMessages(collapsed)
     .map((text, index) => ({ format: "rich", pacing: chunkPacing(index), text }));
 }
 
 export function formatTelegramFinalPresentation(
   markdown: string,
+  options: TelegramFinalPresentationOptions = {},
 ): TelegramFinalPresentationChunk[] {
   const normalized = markdown.trim();
   if (!normalized) return [];
   const { asides, main } = splitTelegramAuthoredParts(normalized);
   if (!main) return [];
+  const buttons = options.replyButtons === true;
 
   // The length policy applies to each authored message on its own, so a long main answer still
   // collapses without swallowing the asides its author separated from it.
   return [
-    ...formatPart(collapseLongAnswer(main), "immediate"),
-    ...asides.flatMap((aside) => formatPart(collapseLongAnswer(aside), "aside")),
+    ...formatPart(main, "immediate", buttons && asides.length === 0),
+    ...asides.flatMap((aside, index) => formatPart(aside, "aside", buttons && index === asides.length - 1)),
   ];
 }

@@ -18,6 +18,8 @@
  * - A reply-button press continues as the message its handler built, with the buttons' message in
  *   the turn's attributes; an answered press dispatches nothing.
  * - A person's message first dismisses their earlier buttons, and a failed dismissal does not stop it.
+ * - Reply buttons react on arrival, as soon as the update is stored and before its place in the
+ *   chat queue comes: the queue may be busy with a turn of minutes.
  */
 import { parseTelegramUpdate } from "../runtime/telegram/inbound.js";
 import type { RouteContext } from "../runtime/server.js";
@@ -75,6 +77,7 @@ function ingress(
     botUsername: "osinara_bot",
     dispatch: vi.fn().mockResolvedValue(DISPATCHED),
     dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false),
+    replyButtonsOnArrival: vi.fn(async () => undefined),
     leaseMilliseconds: 60_000,
     admissionMilliseconds: 60_000,
     repository: storage.value,
@@ -88,16 +91,17 @@ function ingress(
 async function deliver(handle: ReturnType<typeof createTelegramDurableIngress>, raw: Record<string, unknown>) {
   const update = parseTelegramUpdate(raw);
   if (!update) throw new Error("AGENT_TEST_TELEGRAM_UPDATE_INVALID: Не создано тестовое обновление");
-  let backgroundTask: Promise<unknown> | undefined;
-  const context: RouteContext = { waitUntil(task) { backgroundTask = task; } };
+  // The drain is scheduled last; earlier tasks run alongside it.
+  const tasks: Promise<unknown>[] = [];
+  const context: RouteContext = { waitUntil(task) { tasks.push(task); } };
   const response = await handle({ ...context, raw: raw as JsonObject, update });
-  return { background: backgroundTask, response, update };
+  return { background: tasks.at(-1), response, tasks, update };
 }
 
 async function runDrain(handle: ReturnType<typeof createTelegramDurableIngress>, raw: Record<string, unknown>): Promise<void> {
-  const { background } = await deliver(handle, raw);
+  const { background, tasks } = await deliver(handle, raw);
   if (!background) throw new Error("AGENT_TEST_BACKGROUND_TASK_MISSING: Durable ingress did not schedule a drain");
-  await background;
+  await Promise.all(tasks);
 }
 
 function repository() {
@@ -260,6 +264,22 @@ describe("createTelegramDurableIngress", () => {
     expect(dependencies.runTurn).toHaveBeenCalledWith("turn_one");
   });
 
+  it("lets reply buttons react on arrival, before the busy chat queue reaches the press", async () => {
+    const storage = repository();
+    storage.value.claimNext.mockReset().mockResolvedValue(null);
+    const pressPayload = { ...callbackPayload(), callback_query: { ...(callbackPayload().callback_query as object), data: `rb:${"A".repeat(22)}:0` } };
+    const { dependencies, handle } = ingress(storage);
+
+    const { tasks, update } = await deliver(handle, pressPayload);
+    await Promise.all(tasks);
+
+    expect(storage.value.enqueue).toHaveBeenCalledTimes(1);
+    expect(dependencies.replyButtonsOnArrival).toHaveBeenCalledWith(update, "1002");
+    expect(vi.mocked(storage.value.enqueue).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(dependencies.replyButtonsOnArrival).mock.invocationCallOrder[0]!);
+    expect(dependencies.handleReplyButtonPress).not.toHaveBeenCalled();
+  });
+
   it("dispatches nothing for a press its handler already answered", async () => {
     const storage = repository();
     const pressPayload = { ...callbackPayload(), callback_query: { ...(callbackPayload().callback_query as object), data: `rb:${"A".repeat(22)}:0` } };
@@ -291,7 +311,7 @@ describe("createTelegramDurableIngress", () => {
 
     await runDrain(handle, voicePayload());
 
-    expect(dismissReplyButtons).toHaveBeenCalledWith(expect.objectContaining({ messageId: "77" }));
+    expect(dismissReplyButtons).toHaveBeenCalledWith(expect.objectContaining({ messageId: "77" }), "1001");
     expect(order).toEqual(["dismiss", "dispatch"]);
     vi.restoreAllMocks();
   });
@@ -369,6 +389,7 @@ describe("createTelegramDurableIngress", () => {
     expect(storage.value.enqueue).not.toHaveBeenCalled();
     expect(dependencies.transcribeVoice).not.toHaveBeenCalled();
     expect(dependencies.dispatch).not.toHaveBeenCalled();
+    expect(dependencies.replyButtonsOnArrival).not.toHaveBeenCalled();
     expect(background).toBeUndefined();
   });
 

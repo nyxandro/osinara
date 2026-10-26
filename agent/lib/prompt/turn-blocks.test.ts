@@ -145,7 +145,7 @@ describe("mode block resolution", () => {
     expect(groupChild).not.toContain("voice message");
   });
 
-  it("teaches reply buttons where the tool exists and nowhere else", async () => {
+  it("teaches reply buttons in the trusted zones and nowhere else", async () => {
     const resolve = createModeBlockResolver({
       loadCapabilities: vi.fn().mockResolvedValue(new Set(["remember"])),
       loadReactionPolicy: reactionPolicy,
@@ -156,8 +156,8 @@ describe("mode block resolution", () => {
     const external = await resolve(context(externalAuth));
 
     expect(personal).toContain(REPLY_BUTTON_RULES);
-    expect(personalChild).not.toContain("attach_reply_buttons");
-    expect(external).not.toContain("attach_reply_buttons");
+    expect(personalChild).not.toContain("tg-button");
+    expect(external).not.toContain("tg-button");
   });
 
   it("keeps every transport directive away from a subagent child", async () => {

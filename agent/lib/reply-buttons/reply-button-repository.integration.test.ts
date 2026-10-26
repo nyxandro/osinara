@@ -2,20 +2,18 @@
  * Reply button persistence integration tests.
  *
  * Constructs covered:
- * - One staged set per turn: a second call of the tool replaces the first.
- * - A turn that continues after an approval finds the buttons its parked turn staged.
+ * - One staged set per turn: a replay of its delivery finds it again with the same token and
+ *   records the text of the message once more.
  * - A press is claimed once, by the addressee, in the set's own chat and message; the same callback
  *   finds its claim again after a crash; anyone else is refused without consuming it.
  * - A set whose message went out before its number was saved still accepts its press.
- * - The addressee's message dismisses only the sets they could tap before writing it.
- * - A reminder's set carries its text and formatting entities.
+ * - The addressee's message dismisses only the sets they could tap before writing it, and leaves a
+ *   set whose tap arrived earlier and still waits to be decided.
+ * - A reminder's set carries its text.
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "../database.js";
-import { newTurnId } from "../../runtime/ids.js";
-import { createTurn, inJournalTransaction } from "../../runtime/turn/journal-repository.js";
-import { newTestSession, OWNER_AUTH, startMessageTurn } from "../../runtime/turn/turn.integration-fixtures.js";
 import { sessionRepository } from "../sessions/session-repository.js";
 import { replyButtonRepository } from "./reply-button-repository.js";
 
@@ -27,16 +25,14 @@ const ROWS = [[{ color: "green" as const, text: "✅ Да" }, { text: "❌ Не�
 const TARGET = { addresseeTelegramUserId: "101", telegramChatId: "101", telegramChatType: "private" as const };
 const TOKEN = "AbCdEfGhIjKlMnOpQrStUv";
 
-async function stageTurn(turnId: string, token: string = TOKEN) {
-  await replyButtonRepository.stageForTurn({ ...TARGET, agentSessionId: "wrun_1", agentTurnId: turnId, buttons: ROWS, token });
-  const set = await replyButtonRepository.findStagedForTurn(turnId);
-  if (set === null) throw new Error("TEST_SET_MISSING");
-  return set;
+async function stageTurn(turnId: string, token: string = TOKEN, target = TARGET, messageText = "Берём?") {
+  return await replyButtonRepository.stageForTurn({
+    ...target, agentSessionId: "wrun_1", agentTurnId: turnId, buttons: ROWS, messageText, token,
+  });
 }
 
 async function delivered(turnId: string, messageId: string, token: string = TOKEN) {
   const set = await stageTurn(turnId, token);
-  await replyButtonRepository.recordMessageText(set.id, "Берём?", "plain");
   await replyButtonRepository.activate(set.id, messageId);
   return set;
 }
@@ -50,29 +46,29 @@ function pressOf(overrides: Partial<Parameters<typeof replyButtonRepository.clai
 
 describeWithDatabase("reply button repository", () => {
   beforeEach(async () => {
-    await database().query("TRUNCATE telegram_reply_button_sets, conversation_session_routes, conversation_sessions, family_memberships, users, families CASCADE");
+    await database().query("TRUNCATE telegram_reply_button_sets, telegram_ingress_updates, telegram_ingress_queues, conversation_session_routes, conversation_sessions, family_memberships, users, families CASCADE");
   });
   afterAll(closeDatabase);
 
-  it("keeps one staged set per turn, the last one the tool wrote", async () => {
-    await stageTurn("turn_1", "A".repeat(22));
-    const replaced = await stageTurn("turn_1", "B".repeat(22));
+  it("keeps one staged set per turn and its token when the delivery is replayed", async () => {
+    const first = await stageTurn("turn_1", "A".repeat(22), TARGET, "Берём?");
+    const replayed = await stageTurn("turn_1", "B".repeat(22), TARGET, "Берём пиццу?");
 
-    expect(replaced).toMatchObject({ buttons: ROWS, token: "B".repeat(22) });
-    expect((await database().query("SELECT 1 FROM telegram_reply_button_sets")).rowCount).toBe(1);
+    expect(replayed).toMatchObject({ buttons: ROWS, id: first.id, messageText: "Берём пиццу?", token: "A".repeat(22) });
+    expect((await database().query("SELECT message_format FROM telegram_reply_button_sets")).rows).toEqual([
+      { message_format: "rich" },
+    ]);
   });
 
-  it("finds buttons the parked turn staged from the turn that continues it", async () => {
-    const sessionId = await newTestSession();
-    const parked = await startMessageTurn(sessionId, "оформи заказ");
-    const continuation = await inJournalTransaction(database(), async (client) => await createTurn(client, {
-      auth: OWNER_AUTH, channel: parked.channel, id: newTurnId(),
-      input: { context: [] }, kind: "conversation", parent: null, resumesTurnId: parked.id, sessionId,
-    }));
-    await stageTurn(parked.id);
+  it("activates a turn's staged buttons under its last message", async () => {
+    await stageTurn("turn_1");
 
-    await expect(replyButtonRepository.findStagedForTurn(continuation.id)).resolves.toMatchObject({ token: TOKEN });
-    await expect(replyButtonRepository.findStagedForTurn("turn_unrelated")).resolves.toBeNull();
+    await replyButtonRepository.activateForTurn("turn_1", "50");
+    await replyButtonRepository.activateForTurn("turn_1", "52");
+    await replyButtonRepository.activateForTurn("turn_unrelated", "51");
+
+    expect((await database().query("SELECT status, telegram_message_id::text FROM telegram_reply_button_sets")).rows)
+      .toEqual([{ status: "active", telegram_message_id: "50" }]);
   });
 
   it("claims a press once and finds the same claim for the same callback", async () => {
@@ -104,33 +100,24 @@ describeWithDatabase("reply button repository", () => {
 
   it("accepts a press on a message whose number was not saved yet and binds it", async () => {
     const set = await stageTurn("turn_1");
-    await replyButtonRepository.recordMessageText(set.id, "Берём?", "plain");
 
     await expect(pressOf()).resolves.toMatchObject({ set: { telegramMessageId: "50" }, status: "claimed" });
     await replyButtonRepository.activate(set.id, "50");
     expect((await database().query("SELECT status FROM telegram_reply_button_sets")).rows).toEqual([{ status: "selected" }]);
   });
 
-  it("refuses a press on buttons that never went out", async () => {
-    await stageTurn("turn_1");
-
-    await expect(pressOf()).resolves.toEqual({ status: "expired" });
-  });
-
   it("dismisses only the addressee's buttons offered before their message", async () => {
     const before = await delivered("turn_1", "50", "A".repeat(22));
-    await replyButtonRepository.stageForTurn({ ...TARGET, addresseeTelegramUserId: "202", agentSessionId: "wrun_1",
-      agentTurnId: "turn_2", buttons: ROWS, token: "B".repeat(22) });
-    const other = (await replyButtonRepository.findStagedForTurn("turn_2"))!;
-    await replyButtonRepository.recordMessageText(other.id, "Берём?", "plain");
+    const other = await stageTurn("turn_2", "B".repeat(22), { ...TARGET, addresseeTelegramUserId: "202" });
     await replyButtonRepository.activate(other.id, "51");
     const writtenAt = new Date(Date.now() + 1_000);
-    const after = await stageTurn("turn_3", "C".repeat(22));
-    await replyButtonRepository.recordMessageText(after.id, "Ещё?", "plain");
+    const after = await stageTurn("turn_3", "C".repeat(22), TARGET, "Ещё?");
     await database().query("UPDATE telegram_reply_button_sets SET status = 'active', telegram_message_id = 52, activated_at = $2 WHERE id = $1",
       [after.id, new Date(writtenAt.getTime() + 1_000)]);
 
-    const dismissed = await replyButtonRepository.dismissForAddressee({ addresseeTelegramUserId: "101", telegramChatId: "101", writtenAt });
+    const dismissed = await replyButtonRepository.dismissForAddressee({
+      addresseeTelegramUserId: "101", afterUpdateId: "9000", telegramChatId: "101", writtenAt,
+    });
 
     expect(dismissed.map((set) => set.id)).toEqual([before.id]);
     expect(dismissed[0]).toMatchObject({ messageText: "Берём?", telegramMessageId: "50" });
@@ -138,6 +125,48 @@ describeWithDatabase("reply button repository", () => {
     expect(Object.fromEntries(statuses.map((row) => [row.id, row.status]))).toEqual({
       [before.id]: "dismissed", [other.id]: "active", [after.id]: "active",
     });
+  });
+
+  it("leaves buttons whose earlier tap still waits to be decided", async () => {
+    const tapped = await delivered("turn_1", "50", "A".repeat(22));
+    const untouched = await delivered("turn_2", "51", "B".repeat(22));
+    const queue = await database().query<{ id: string }>(
+      "INSERT INTO telegram_ingress_queues (current_continuation_key) VALUES ('101::') RETURNING id");
+    await database().query(
+      `INSERT INTO telegram_ingress_updates (update_id, queue_id, ingress_continuation_key, payload, status)
+       VALUES (8999, $1, '101::', $2::jsonb, 'pending'), (9001, $1, '101::', $3::jsonb, 'pending')`,
+      [queue.rows[0]!.id, JSON.stringify({ callback_query: { data: `rb:${"A".repeat(22)}:0`, from: { id: 101 } }, update_id: 8999 }),
+        JSON.stringify({ callback_query: { data: `rb:${"B".repeat(22)}:0`, from: { id: 101 } }, update_id: 9001 })],
+    );
+
+    const dismissed = await replyButtonRepository.dismissForAddressee({
+      addresseeTelegramUserId: "101", afterUpdateId: "9000", telegramChatId: "101", writtenAt: new Date(Date.now() + 1_000),
+    });
+
+    // The tap on B came after the message, so B goes; the tap on A came first and keeps A.
+    expect(dismissed.map((set) => set.id)).toEqual([untouched.id]);
+    await expect(pressOf({ telegramMessageId: "50", token: tapped.token })).resolves.toMatchObject({ status: "claimed" });
+  });
+
+  it("does not let another member's earlier tap keep the addressee's buttons", async () => {
+    const offered = await delivered("turn_1", "50", "A".repeat(22));
+    const queue = await database().query<{ id: string }>(
+      "INSERT INTO telegram_ingress_queues (current_continuation_key) VALUES ('101::') RETURNING id");
+    await database().query(
+      `INSERT INTO telegram_ingress_updates (update_id, queue_id, ingress_continuation_key, payload, status)
+       VALUES (8999, $1, '101::', $2::jsonb, 'pending')`,
+      [queue.rows[0]!.id, JSON.stringify({ callback_query: { data: `rb:${"A".repeat(22)}:0`, from: { id: 202 } }, update_id: 8999 })],
+    );
+    await expect(replyButtonRepository.hasActiveForAddressee({ addresseeTelegramUserId: "101", telegramChatId: "101" }))
+      .resolves.toBe(true);
+
+    const dismissed = await replyButtonRepository.dismissForAddressee({
+      addresseeTelegramUserId: "101", afterUpdateId: "9000", telegramChatId: "101", writtenAt: new Date(Date.now() + 1_000),
+    });
+
+    expect(dismissed.map((set) => set.id)).toEqual([offered.id]);
+    await expect(replyButtonRepository.hasActiveForAddressee({ addresseeTelegramUserId: "101", telegramChatId: "101" }))
+      .resolves.toBe(false);
   });
 
   it("treats a reply route as open only into a live conversation that waits for no approval", async () => {
@@ -161,7 +190,7 @@ describeWithDatabase("reply button repository", () => {
     await expect(replyButtonRepository.replyRouteIsOpen("101::50")).resolves.toBe(false);
   });
 
-  it("stages a reminder's buttons with its text and entities", async () => {
+  it("stages a reminder's buttons with its text", async () => {
     const family = await database().query<{ id: string }>("INSERT INTO families (name) VALUES ('Кнопки') RETURNING id");
     const user = await database().query<{ id: string }>(
       "INSERT INTO users (telegram_user_id, display_name) VALUES ('101', 'Владелец') RETURNING id");
@@ -172,12 +201,12 @@ describeWithDatabase("reply button repository", () => {
       [family.rows[0]!.id, user.rows[0]!.id]);
 
     const set = await replyButtonRepository.stageForReminder({
-      ...TARGET, buttons: ROWS, messageEntities: [{ length: 14, offset: 0, type: "bold" }],
-      messageText: "⏰ Напоминание:\n\nОплатить интернет", reminderId: reminder.rows[0]!.id, token: TOKEN,
+      ...TARGET, buttons: ROWS, messageText: "**⏰ Напоминание:**\n\n<p>Оплатить интернет</p>",
+      reminderId: reminder.rows[0]!.id, token: TOKEN,
     });
     await replyButtonRepository.activate(set.id, "70");
 
-    expect(set).toMatchObject({ messageEntities: [{ length: 14, offset: 0, type: "bold" }], messageFormat: "plain" });
+    expect(set).toMatchObject({ messageText: "**⏰ Напоминание:**\n\n<p>Оплатить интернет</p>", status: "staged" });
     await expect(pressOf({ telegramMessageId: "70" })).resolves.toMatchObject({ status: "claimed" });
   });
 });

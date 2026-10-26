@@ -87,7 +87,9 @@ export interface DurableIngressDependencies {
     updateId: string,
   ): Promise<ReplyButtonPressOutcome>;
   /** Removes the reply buttons the message's author had not tapped before writing it. */
-  dismissReplyButtons(message: TelegramMessage): Promise<void>;
+  dismissReplyButtons(message: TelegramMessage, updateId: string): Promise<void>;
+  /** Reply buttons react to a stored update at once, ahead of the chat queue; never rejects. */
+  replyButtonsOnArrival(update: TelegramUpdate, updateId: string): Promise<void>;
   leaseMilliseconds: number;
   /** Runs at most one due wake-up of an idle chat queue on the wake-up slots, never a message slot. */
   processConversationWakeup?(input: { slots: Sema }): Promise<boolean>;
@@ -291,7 +293,8 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
       let update = acceptedUpdate;
       let replyButtonMessageId: string | undefined;
       if (update.kind === "callback_query" && isReplyButtonCallback(update.callbackQuery.data)) {
-        // A reply button stands for its addressee's answer and continues as their message.
+        // A reply button stands for its addressee's answer and continues as their message. It was
+        // answered on arrival; this step answers it only if the arrival never decided it.
         const pressed = await dependencies.handleReplyButtonPress(update.callbackQuery, claim.updateId);
         stop.throwIfAborted();
         if (pressed.status === "answered") return null;
@@ -309,9 +312,10 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
         }
       } else {
         try {
-          await dependencies.dismissReplyButtons(update.message);
+          await dependencies.dismissReplyButtons(update.message, claim.updateId);
         } catch (error) {
-          // The buttons stay on screen; the person's message matters more than their removal.
+          // Normally done on arrival already; repeated in order in case the arrival never ran. The
+          // buttons stay on screen; the person's message matters more than their removal.
           console.error(JSON.stringify({
             code: "AGENT_REPLY_BUTTONS_DISMISS_FAILED",
             error: error instanceof Error ? error.message : String(error),
@@ -464,6 +468,8 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
       updateId: incomingUpdateId,
       ...(voice ? { voice } : {}),
     });
+    // A tapped button answers at once, while its message waits for the chat queue like any other.
+    context.waitUntil(dependencies.replyButtonsOnArrival(context.update, incomingUpdateId));
     scheduleDrain(context);
     return new Response("ok");
   };

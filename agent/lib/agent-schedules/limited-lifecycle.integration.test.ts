@@ -180,7 +180,7 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
     try {
       await expect(deliverTelegramFinalOutput({ applicationSessionId: receipt.applicationSessionId,
         deliveryIdentity: { chatId: "123" }, agentSessionId: receipt.agentSessionId, agentTurnId: "turn_0",
-        markdown: "Погода", sendChunk })).rejects.toBe(outage);
+        markdown: "Погода", replyButtons: false, sendChunk })).rejects.toBe(outage);
     } finally {
       confirm.mockRestore();
     }
