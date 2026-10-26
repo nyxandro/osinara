@@ -58,12 +58,12 @@ function gmailRequest(action: string, messageIds: string[]) {
       kind: "tool-call" as const,
       toolName: "manage_gmail_message",
     },
-    display: "confirmation" as const,
     options: [
       { id: "approve", label: "Yes", style: "primary" as const },
       { id: "deny", label: "No", style: "default" as const },
     ],
     prompt: "Approve tool call",
+    kind: "tool-approval" as const,
     requestId: "request-gmail-batch",
   };
 }
@@ -71,7 +71,6 @@ function gmailRequest(action: string, messageIds: string[]) {
 function automationRequest(input: TelegramInputRequest["action"]["input"]) {
   return {
     action: { callId: "call-automation", input, kind: "tool-call" as const, toolName: "manage_external_group_schedule" },
-    display: "confirmation" as const,
     kind: "tool-approval" as const,
     options: [{ id: "approve", label: "Yes", style: "primary" as const }, { id: "cancel", label: "No", style: "default" as const }],
     prompt: "Approve tool call",
@@ -136,7 +135,8 @@ describe("Telegram approval presentation", () => {
     const result = await present({
       action: { callId: "group-call", kind: "tool-call", toolName: "manage_telegram_group",
         input: { action: "update_policy", telegramChatId: "-100123", messageMode, toolAllowlist: [] } },
-      display: "confirmation", prompt: "Approval", requestId: "group-request",
+      kind: "tool-approval" as const,
+      prompt: "Approval", requestId: "group-request",
       options: [{ id: "approve", label: "Yes", style: "primary" }],
     }, context());
     expect(result.prompt).toContain(`Режим сообщений: ${explanation}`);
@@ -148,7 +148,8 @@ describe("Telegram approval presentation", () => {
     ] as const) {
       const result = await present({
         action: { callId: "group-call", kind: "tool-call", toolName: "manage_telegram_group", input },
-        display: "confirmation", prompt: "No permission changes", requestId: "group-request",
+        kind: "tool-approval" as const,
+        prompt: "No permission changes", requestId: "group-request",
         options: [{ id: "approve", label: "Yes", style: "primary" }],
       }, context());
       expect(result.prompt).toContain(consequence);
@@ -188,12 +189,12 @@ describe("Telegram approval presentation", () => {
         kind: "tool-call",
         toolName: "manage_gmail_message",
       },
-      display: "confirmation",
       options: [
         { id: "approve", label: "Yes", style: "primary" },
         { id: "deny", label: "No", style: "default" },
       ],
       prompt: "Approve tool call",
+      kind: "tool-approval" as const,
       requestId: "request-gmail",
     }, context());
 
@@ -237,9 +238,9 @@ describe("Telegram approval presentation", () => {
         kind: "tool-call",
         toolName: "manage_gmail_message",
       },
-      display: "confirmation",
       options: [],
       prompt: "Approve tool call",
+      kind: "tool-approval" as const,
       requestId: "request-gmail-hostile",
     }, context());
 
@@ -274,9 +275,9 @@ describe("Telegram approval presentation", () => {
         kind: "tool-call",
         toolName: "manage_gmail_message",
       },
-      display: "confirmation",
       options: [],
       prompt: "Approve tool call",
+      kind: "tool-approval" as const,
       requestId: "request-long-id",
     }, context());
 
@@ -541,8 +542,7 @@ describe("Telegram approval presentation", () => {
         kind: "tool-call",
         toolName: "execute_google_workspace",
       },
-      display: "confirmation",
-      kind: "tool-approval",
+      kind: "tool-approval" as const,
       options: [
         { id: "approve", label: "Yes", style: "primary" },
         { id: "cancel", label: "No", style: "default" },

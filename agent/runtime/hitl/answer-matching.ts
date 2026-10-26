@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `resolveTextToResponses`: a text message as the answer to waiting requests — an option by id,
- *   label or number, or free text where the request allows it.
+ *   label or number.
  * - `staleResponsesMessage`: the user message the model reads for an answer to a request that was
  *   already answered or dismissed; it never authorizes an earlier action.
  *
@@ -25,12 +25,8 @@ function matchOption(normalized: string, options: readonly InputOption[]): Input
 function resolveTextToResponse(text: string, request: InputRequest): InputResponse | undefined {
   const trimmed = text.trim();
   if (trimmed.length === 0) return undefined;
-  if (request.options !== undefined && request.options.length > 0) {
-    const matched = matchOption(trimmed.toLowerCase(), request.options);
-    if (matched !== undefined) return { optionId: matched.id, requestId: request.requestId };
-  }
-  const acceptsFreeform = request.allowFreeform === true || request.options === undefined || request.options.length === 0;
-  return acceptsFreeform ? { requestId: request.requestId, text: trimmed } : undefined;
+  const matched = matchOption(trimmed.toLowerCase(), request.options);
+  return matched === undefined ? undefined : { optionId: matched.id, requestId: request.requestId };
 }
 
 export function resolveTextToResponses(text: string, requests: readonly InputRequest[]): InputResponse[] {
@@ -44,30 +40,21 @@ export function staleResponsesMessage(responses: readonly InputResponse[], reque
   const resolved = responses.map((response) => {
     const request = requests.get(response.requestId);
     const option = request?.options?.find((candidate) => candidate.id === response.optionId);
-    const details: { optionId?: string; selectedOption?: { description?: string; id: string; label: string }; text?: string } = {};
+    const details: { optionId?: string; selectedOption?: { description?: string; id: string; label: string } } = {};
     if (response.optionId !== undefined) details.optionId = response.optionId;
     if (option !== undefined) {
       details.selectedOption = { id: option.id, label: option.label, ...(option.description === undefined ? {} : { description: option.description }) };
     }
-    if (response.text !== undefined) details.text = response.text;
     // Fixed key order: the model reads this JSON verbatim.
     return {
       requestId: response.requestId,
       response: details,
-      ...(request === undefined ? {} : { prompt: request.prompt, requestType: request.kind === "tool-approval" ? "approval" : "question" }),
+      ...(request === undefined ? {} : { prompt: request.prompt, requestType: "approval" }),
     };
   });
-  // Without the request's metadata the answer may still be an approval, so the notice stays.
-  const mayIncludeApproval = responses.some((response) => {
-    const request = requests.get(response.requestId);
-    return request === undefined || request.kind === "tool-approval";
-  });
-  const approvalNotice = mayIncludeApproval
-    ? " This does not authorize an earlier action; request approval again if that action is still needed."
-    : "";
   return [
     "The user submitted the following response to an earlier interactive prompt.",
-    `Treat it as new input at the current point in the conversation and decide whether it is still relevant.${approvalNotice}`,
+    "Treat it as new input at the current point in the conversation and decide whether it is still relevant. This does not authorize an earlier action; request approval again if that action is still needed.",
     JSON.stringify(resolved, null, 2),
   ].join("\n");
 }

@@ -53,7 +53,6 @@ export interface TelegramContext {
 export interface TelegramHitlState {
   hitlCallbacks?: Record<string, InputResponse>;
   nextHitlCallbackId?: number;
-  pendingFreeformReplies?: Record<string, string>;
 }
 
 export interface TelegramChannelState extends TelegramHitlState {
@@ -117,8 +116,6 @@ export type TelegramInboundResult = {
   readonly continuationToken?: string;
   /** Replaces only what the model sees, e.g. a merged burst or a voice transcript. */
   readonly message?: string;
-  /** `"message"` makes a reply to a bot message an ordinary message, not an answer to a prompt. */
-  readonly replyHandling?: "message";
   readonly title?: string;
 } | null;
 

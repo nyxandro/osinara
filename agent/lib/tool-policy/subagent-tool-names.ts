@@ -3,8 +3,8 @@
  *
  * Export:
  * - `SUBAGENT_TOOL_NAMES`: research, reading and sandbox work; nothing that changes the family's
- *   settings, memory, schedules or groups, or posts into the chat. A question to the person
- *   (`ask_question`) stays: it goes through the parent and waits for the person's own answer.
+ *   settings, memory, schedules or groups, or posts into the chat. A child that needs the person's
+ *   answer says so in its result, and the root asks.
  *
  * A child mostly reads untrusted pages, and text there can read as an instruction. It used to get
  * the root's surface minus a list of exceptions, so every new administration tool reached it by
@@ -14,7 +14,6 @@
  * the child's result first. Google Workspace stays: its changes already wait for the owner's button.
  */
 export const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set([
-  "ask_question",
   "bash",
   "execute_google_workspace",
   "get_current_time",

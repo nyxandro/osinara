@@ -11,7 +11,7 @@ import type { PoolClient } from "pg";
 
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
-import { bindCallbackIngress, bindTextReplyIngress } from "./callback-ingress-binding.js";
+import { bindCallbackIngress } from "./callback-ingress-binding.js";
 import {
   resolveCurrentApprovalAuth,
   type ApprovalAuthRow,
@@ -22,8 +22,7 @@ type TelegramChatType = "group" | "private" | "supergroup";
 export interface RegisterTelegramHitlApprovalInput {
   agentTurnId?: string;
   applicationSessionId: string;
-  /** Framework-owned request source; the confirmation window applies only to human-answerable kinds. */
-  kind: "question" | "tool-approval";
+  kind: "tool-approval";
   callbackData: readonly string[];
   callbackOptions: readonly {
     callbackData: string;
@@ -53,7 +52,6 @@ export interface ClaimTelegramHitlCallbackInput {
 }
 
 export interface AuthorizeTelegramHitlReplyInput {
-  ingress?: { updateId: string; dispatchId: string };
   baseContinuationToken: string;
   telegramChatId: string;
   telegramMessageId: string;
@@ -71,8 +69,8 @@ export type TelegramHitlCallbackClaim =
       replayed?: boolean;
     }
   | { status: "expired" | "forbidden" };
-export type TelegramHitlReplyAuthorization =
-  "authorized" | "expired" | "forbidden" | "not_applicable";
+/** A reply to a bot message is ordinary unless it targets a route whose approval no longer waits. */
+export type TelegramHitlReplyAuthorization = "expired" | "not_applicable";
 
 export interface TelegramHitlApprovalRepository {
   authorizeReply(input: AuthorizeTelegramHitlReplyInput): Promise<TelegramHitlReplyAuthorization>;
@@ -91,10 +89,9 @@ export interface TelegramHitlApprovalRepository {
 }
 
 interface ApprovalRow extends ApprovalAuthRow {
-  request_kind: "question" | "tool-approval";
+  request_kind: "tool-approval";
   agent_turn_id: string | null;
   consumed_callback_query_id: string | null;
-  consumed_reply_update_id: string | null;
   id: string;
   callback_data: string[];
   callback_options: unknown;
@@ -118,7 +115,7 @@ async function lockApproval(
              a.request_kind,
             a.consumed_at,
              a.agent_session_id,
-             a.agent_turn_id,a.consumed_callback_query_id,a.consumed_reply_update_id::text,
+             a.agent_turn_id,a.consumed_callback_query_id,
             a.expected_telegram_user_id,
             a.id,
             a.prompt_text,
@@ -227,7 +224,7 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
                tool_name = EXCLUDED.tool_name,
                tool_input_hash = EXCLUDED.tool_input_hash,
                 request_kind = EXCLUDED.request_kind,
-                agent_turn_id = EXCLUDED.agent_turn_id,consumed_callback_query_id=NULL,consumed_reply_update_id=NULL,
+                agent_turn_id = EXCLUDED.agent_turn_id,consumed_callback_query_id=NULL,
               -- A replayed request re-opens the prompt, so no timeout state may survive it.
               timed_out_at = NULL,
               timeout_lease_token = NULL,
@@ -401,14 +398,6 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
         row.application_session_id,
       );
       if (!isPendingApproval(row)) {
-        if (input.ingress && row.consumed_reply_update_id === input.ingress.updateId && row.retired_at === null &&
-          row.session_agent_session_id === row.agent_session_id && routeMatches && row.expected_telegram_user_id === input.telegramUserId &&
-          await resolveCurrentApprovalAuth(client,row)) {
-          await bindTextReplyIngress(client,{ ...input.ingress,telegramUserId: input.telegramUserId,
-            chatId: input.telegramChatId,promptMessageId: input.telegramMessageId }, { sessionId: row.agent_session_id,turnId: row.agent_turn_id });
-          await client.query("COMMIT");
-          return "authorized";
-        }
         // A consumed or retired prompt is ordinary historical ancestry. Remove any stale alias in
         // the same transaction so it cannot select old task model state during canonical prepare.
         await client.query(
@@ -418,65 +407,9 @@ export const telegramHitlApprovalRepository: TelegramHitlApprovalRepository = {
         await client.query("COMMIT");
         return "not_applicable";
       }
-      if (!routeMatches) {
-        await client.query("ROLLBACK");
-        return "expired";
-      }
-      // Native Telegram text responses address freeform questions only. Text must not consume a button decision.
-      if (row.request_kind !== "question" || row.callback_data.length !== 0) {
-        await client.query("COMMIT");
-        return "not_applicable";
-      }
-      if (row.expected_telegram_user_id !== input.telegramUserId) {
-        await client.query("ROLLBACK");
-        return "forbidden";
-      }
-      if (input.ingress) {
-        if (!await resolveCurrentApprovalAuth(client,row)) { await client.query("ROLLBACK"); return "forbidden"; }
-        await bindTextReplyIngress(client,{ ...input.ingress,telegramUserId: input.telegramUserId,
-          chatId: input.telegramChatId,promptMessageId: input.telegramMessageId }, { sessionId: row.agent_session_id,turnId: row.agent_turn_id });
-      }
-      const consumed = await client.query(
-        `UPDATE telegram_hitl_approvals
-            SET consumed_at = now(),consumed_reply_update_id=$2
-          WHERE id = $1 AND consumed_at IS NULL`,
-        [row.id,input.ingress?.updateId ?? null],
-      );
-      if (consumed.rowCount !== 1) {
-        await client.query("ROLLBACK");
-        return "expired";
-      }
-      await client.query(
-        `UPDATE conversation_sessions session
-            SET pending_operation = EXISTS (
-                  SELECT 1 FROM telegram_hitl_approvals pending
-                   WHERE pending.application_session_id = session.id
-                     AND pending.agent_session_id = $2
-                     AND pending.consumed_at IS NULL
-                ),
-                pending_request_id = CASE
-                  WHEN EXISTS (
-                    SELECT 1 FROM telegram_hitl_approvals pending
-                     WHERE pending.application_session_id = session.id
-                       AND pending.agent_session_id = $2
-                       AND pending.consumed_at IS NULL
-                  ) THEN pending_request_id
-                  ELSE NULL
-                END,
-                task_state = CASE
-                  WHEN kind = 'task' AND NOT EXISTS (
-                    SELECT 1 FROM telegram_hitl_approvals pending
-                     WHERE pending.application_session_id = session.id
-                       AND pending.agent_session_id = $2
-                       AND pending.consumed_at IS NULL
-                  ) THEN 'running'::conversation_task_state
-                  ELSE task_state
-                END
-          WHERE session.id = $1`,
-        [row.application_session_id, row.agent_session_id],
-      );
-      await client.query("COMMIT");
-      return "authorized";
+      await client.query("ROLLBACK");
+      // A pending approval is decided by its buttons only: text never consumes a button decision.
+      return routeMatches ? "not_applicable" : "expired";
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;

@@ -478,7 +478,7 @@ export async function findChildTurn(client: JournalClient, parentTurnId: string,
 export async function findInputRequests(client: JournalClient, sessionId: string, requestIds: readonly string[]): Promise<Map<string, InputRequest>> {
   const rows = (await client.query<{ input_request: InputRequest }>(
     `SELECT c.input_request FROM agent_tool_calls c JOIN agent_turns t ON t.id = c.turn_id
-      WHERE t.session_id = $1 AND c.input_request->>'kind' IN ('question', 'tool-approval')
+      WHERE t.session_id = $1 AND c.input_request->>'kind' = 'tool-approval'
         AND c.input_request->>'requestId' = ANY($2::text[])`,
     [sessionId, requestIds],
   )).rows;

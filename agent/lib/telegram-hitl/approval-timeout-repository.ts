@@ -29,7 +29,6 @@ interface ClaimRow extends ApprovalAuthRow {
   id: string;
   prompt_text: string | null;
   request_id: string;
-  request_kind: "question" | "tool-approval";
   timeout_lease_token: string;
   tool_name: string | null;
 }
@@ -48,7 +47,7 @@ export const approvalTimeoutRepository: ApprovalTimeoutRepository = {
              JOIN conversation_sessions session
                ON session.id = approval.application_session_id
             WHERE approval.consumed_at IS NULL
-              AND approval.request_kind IN ('question', 'tool-approval')
+              AND approval.request_kind = 'tool-approval'
               AND approval.created_at
                     <= $1::timestamptz - ($2::bigint * interval '1 millisecond')
               AND (approval.timeout_lease_expires_at IS NULL
@@ -69,7 +68,7 @@ export const approvalTimeoutRepository: ApprovalTimeoutRepository = {
             AND session.id = approval.application_session_id
          RETURNING approval.application_session_id, approval.agent_session_id, approval.id,
                    approval.expected_telegram_user_id, approval.prompt_text, approval.request_id,
-                   approval.request_kind, approval.telegram_chat_id, approval.telegram_chat_type,
+                   approval.telegram_chat_id, approval.telegram_chat_type,
                    approval.telegram_message_id::text AS telegram_message_id,
                    approval.telegram_message_thread_id::text AS telegram_message_thread_id,
                    approval.timeout_lease_token::text AS timeout_lease_token, approval.tool_name,
@@ -199,7 +198,6 @@ function toClaim(row: ClaimRow, auth: TimedOutApprovalClaim["auth"]): TimedOutAp
     auth,
     agentSessionId: row.agent_session_id,
     id: row.id,
-    kind: row.request_kind,
     leaseToken: row.timeout_lease_token,
     promptText: requirePromptText(row),
     requestId: row.request_id,

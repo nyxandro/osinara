@@ -6,19 +6,16 @@
  * - `handleTelegramInputRequested`: production `input.requested` event handler.
  *
  * Key constructs:
- * - An approval exists only in a private chat; a family group may get a plain question, an external
- *   group no prompt at all. A refused request fails before parking or Telegram delivery.
+ * - An approval exists only in a private chat; a shared chat gets no prompt at all. A refused
+ *   request fails before parking or Telegram delivery.
  */
-import { registerTelegramFreeformPrompt, renderTelegramInputRequest } from "../../runtime/telegram/hitl.js";
+import { renderTelegramInputRequest } from "../../runtime/telegram/hitl.js";
 import type { TelegramChatType } from "../../runtime/telegram/inbound.js";
 import type { TelegramEventContext } from "../../runtime/telegram/channel-types.js";
 import type { InputRequest } from "../../runtime/hitl/types.js";
 import type { SessionContext } from "../../runtime/context.js";
 
-import {
-  localizeTelegramReplyMarkup,
-  type TelegramInputRequest,
-} from "../telegram-interface.js";
+import type { TelegramInputRequest } from "../telegram-interface.js";
 import { AppError } from "../app-error.js";
 import { memoryOperationHash } from "../memory-record.js";
 import {
@@ -97,12 +94,12 @@ function telegramInputRequest(request: InputRequest): TelegramInputRequest {
   return {
     ...request,
     action: { ...request.action, input: input as Record<string, TelegramJsonValue> },
-    options: request.options?.map((option) => ({ ...option })),
+    options: request.options.map((option) => ({ ...option })),
   };
 }
 
-function callbackData(replyMarkup: Readonly<Record<string, unknown>> | undefined): string[] {
-  const rows = replyMarkup?.inline_keyboard;
+function callbackData(replyMarkup: Readonly<Record<string, unknown>>): string[] {
+  const rows = replyMarkup.inline_keyboard;
   if (!Array.isArray(rows)) return [];
   return rows.flatMap((row) => {
     if (!Array.isArray(row)) return [];
@@ -118,8 +115,8 @@ function callbackOptions(
   request: TelegramInputRequest,
   callbacks: readonly string[],
 ): Array<{ callbackData: string; label: string; optionId: string }> {
-  const options = request.options ?? [];
-  if (callbacks.length !== options.length) {
+  const options = request.options;
+  if (callbacks.length === 0 || callbacks.length !== options.length) {
     throw new AppError(
       "AGENT_APPROVAL_MARKUP_INVALID",
       "Не удалось связать кнопки с вариантами подтверждения",
@@ -154,20 +151,13 @@ function numberedPromptChunk(chunk: string, index: number, total: number): strin
  * A refused tool approval reaches the model as a tool denial, which it explains itself.
  */
 function sharedChatInputRefusal(
-  data: InputRequestedData,
   chatType: TelegramChatType,
   ctx: Pick<SessionContext, "session">,
 ): AppError | null {
   // Authorizing an action belongs to one accountable person, so an approval exists only in a
-  // private chat. A plain question authorizes nothing and stays available to the family group,
-  // where the participants are the verified family; an external group is public and receives no
-  // prompt at all. The built-in `ask_question` is not an application tool, so descriptor denials
-  // cannot stop it and this boundary is the only one that can.
+  // private chat.
   const groupType = ctx.session.auth.current?.attributes.groupType;
   if (chatType === "private" && groupType === undefined) return null;
-  if (groupType === "family_private" && data.requests.every((request) => request.kind === "question")) {
-    return null;
-  }
 
   return new AppError(
     "AGENT_EXTERNAL_APPROVAL_FORBIDDEN",
@@ -214,19 +204,13 @@ export function createTelegramInputRequestHandler(dependencies: InputRequestDepe
     }
 
     // Policy is evaluated before semantic presentation, session parking, persistence, or approval I/O.
-    const refusal = sharedChatInputRefusal(data, chatType, ctx);
+    const refusal = sharedChatInputRefusal(chatType, ctx);
     if (refusal) throw refusal;
 
     // Resolve trusted semantic subjects before parking so presentation failures remain recoverable.
-    const localizedRequests: Array<{
-      kind: InputRequest["kind"];
-      request: TelegramInputRequest;
-    }> = [];
+    const localizedRequests: TelegramInputRequest[] = [];
     for (const request of data.requests) {
-      localizedRequests.push({
-        kind: request.kind,
-        request: await dependencies.present(telegramInputRequest(request), ctx),
-      });
+      localizedRequests.push(await dependencies.present(telegramInputRequest(request), ctx));
     }
     await dependencies.parkSession({
       applicationSessionId: appSessionId,
@@ -234,19 +218,18 @@ export function createTelegramInputRequestHandler(dependencies: InputRequestDepe
       requesterTelegramUserId: telegramUserId,
       requesterUserId: UUID_PATTERN.test(caller.principalId) ? caller.principalId : null,
     });
-    for (const { kind, request: localizedRequest } of localizedRequests) {
+    for (const localizedRequest of localizedRequests) {
       const promptChunks = splitPrompt(localizedRequest.prompt);
       const finalChunkIndex = promptChunks.length - 1;
       const rendered = renderTelegramInputRequest({
         ...localizedRequest,
-        kind,
         prompt: numberedPromptChunk(
           promptChunks[finalChunkIndex]!,
           finalChunkIndex,
           promptChunks.length,
         ),
       }, channel.state);
-      const replyMarkup = localizeTelegramReplyMarkup(rendered.replyMarkup);
+      const replyMarkup = rendered.replyMarkup;
       const callbacks = callbackData(replyMarkup);
       const options = callbackOptions(localizedRequest, callbacks);
       const replyParameters = telegramTurnReplyParameters(channel.state, ctx);
@@ -265,7 +248,6 @@ export function createTelegramInputRequestHandler(dependencies: InputRequestDepe
 
       // The actionable prompt is revealed only after both the route and approver binding are durable.
       const sentMessageId = await postTelegramMessageWithoutContinuationChange(channel, {
-        ...(callbacks.length === 0 ? { reply_markup: replyMarkup } : {}),
         ...(detailMessageIds.length > 0 || replyParameters === undefined
           ? {}
           : { reply_parameters: replyParameters }),
@@ -274,7 +256,7 @@ export function createTelegramInputRequestHandler(dependencies: InputRequestDepe
       // Exact prompt ownership is required for both interactive and scheduled callback/reply claims.
       await dependencies.registerMessageRoutes(channel, ctx, [...detailMessageIds, sentMessageId]);
       await dependencies.approvals.register({
-        kind,
+        kind: localizedRequest.kind,
         applicationSessionId: appSessionId,
         callbackData: callbacks,
         callbackOptions: options,
@@ -293,19 +275,13 @@ export function createTelegramInputRequestHandler(dependencies: InputRequestDepe
         toolInputHash: memoryOperationHash(localizedRequest.action.input),
         toolName: localizedRequest.action.toolName,
       });
-      if (rendered.freeformRequestId) {
-        registerTelegramFreeformPrompt(channel.state, {
-          messageId: sentMessageId,
-          requestId: rendered.freeformRequestId,
-        });
-      }
       const edited = await channel.telegram.request("editMessageText", {
         chat_id: chatId,
         message_id: Number(sentMessageId),
         ...(channel.state.messageThreadId === null
           ? {}
           : { message_thread_id: channel.state.messageThreadId }),
-        ...(callbacks.length > 0 ? { reply_markup: toTelegramJson(replyMarkup) } : {}),
+        reply_markup: toTelegramJson(replyMarkup),
         text: rendered.text,
       });
       if (!edited.ok) {

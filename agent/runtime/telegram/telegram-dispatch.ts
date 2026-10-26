@@ -11,11 +11,9 @@
  * - `TelegramDispatchResult`: the turn to run (for a partial answer, the turn that keeps waiting),
  *   or nothing.
  * - `continuationTokenFromState`, `turnChannel`: a conversation's address and a turn's channel.
- * - `replyInputResponse`: the answer a reply to a bot message carries, if it carries one.
  *
  * - bot senders reach the application hook, which decides; hook failures reach the caller;
  * - `message` replaces only the model-visible text, `continuationToken` the address;
- * - `replyHandling: "message"` makes a reply to a bot message an ordinary message;
  * - a button is acknowledged only after the application authorized it, with its text;
  * - `osinaraTelegramResponseSessionId` addresses an answer to an exact session;
  * - a dispatch without verified auth is refused;
@@ -40,7 +38,6 @@ import {
 import { buildTelegramHandle, type TelegramTransport } from "./handle.js";
 import {
   isTelegramHitlCallback, isTelegramSyntheticResponse, resolveTelegramInputResponses, telegramCallbackInputResponse,
-  telegramReplyInputResponse,
 } from "./hitl.js";
 import { formatTelegramContextBlock, type TelegramCallbackQuery, type TelegramMessage } from "./inbound.js";
 import { openTelegramSession, requireTelegramSession, telegramInitialState } from "./telegram-session.js";
@@ -198,17 +195,6 @@ async function respond(client: JournalClient, input: {
   return await dispatched(client, control, { sessionId, turnId: turn.id });
 }
 
-/**
- * A non-empty reply to a bot message answers the prompt that message carried, unless the
- * application marked it an ordinary message (`replyHandling`).
- */
-export function replyInputResponse(message: TelegramMessage, result: NonNullable<TelegramInboundResult>): InputResponse | undefined {
-  const text = message.text || message.caption;
-  return result.replyHandling !== "message" && message.replyToMessage?.from?.isBot === true && text.trim().length > 0
-    ? telegramReplyInputResponse({ messageId: message.replyToMessage.messageId, text })
-    : undefined;
-}
-
 async function acknowledge(ctx: TelegramContext, callbackQueryId: string, text: string): Promise<void> {
   try {
     await ctx.telegram.answerCallbackQuery({ callbackQueryId, text });
@@ -238,12 +224,7 @@ export async function dispatchTelegramMessage(
   ];
   const text = message.text || message.caption;
   const token = result.continuationToken ?? continuationTokenFromState(state);
-  const reply = replyInputResponse(message, result);
   return await inJournalTransaction(database, async (client) => {
-    if (reply !== undefined) {
-      const sessionId = await answeredSession(client, auth, token);
-      return await respond(client, { auth, context, control, responses: [reply], sessionId, token });
-    }
     const exact = auth.attributes.osinaraTelegramResponseSessionId;
     const sessionId = typeof exact === "string"
       ? await requireTelegramSession(client, exact)

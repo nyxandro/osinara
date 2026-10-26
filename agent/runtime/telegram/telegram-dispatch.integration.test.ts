@@ -4,7 +4,6 @@ import { z } from "zod";
 import { closeDatabase, database } from "../../lib/database.js";
 import type { SessionAuthContext } from "../context.js";
 import { createApplicationSession } from "../history/history.integration-fixtures.js";
-import { loadSessionHistory } from "../history/history-repository.js";
 import { newSessionId } from "../ids.js";
 import { findContinuation, loadChannelState } from "../session/continuations.js";
 import { defineTool } from "../tool.js";
@@ -21,12 +20,6 @@ const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) throw new Error("AGENT_TEST_DATABASE_UNSAFE");
 
 const RUN = { abortSignal: new AbortController().signal };
-const REPLY_TO_PROMPT = { reply_to_message: { chat: { id: 7, type: "private" }, from: { first_name: "Осинара", id: 1, is_bot: true }, message_id: 900 } };
-const askQuestion = defineTool({
-  description: "Спросить",
-  execute: async (): Promise<string> => { throw new Error("ask_question never executes"); },
-  inputSchema: z.object({ allowFreeform: z.boolean().optional(), prompt: z.string(), options: z.array(z.object({ id: z.string(), label: z.string() })).optional() }),
-});
 const change = defineTool({
   approval: () => "user-approval" as const, description: "Изменить", execute: async () => "changed", inputSchema: z.object({}),
 });
@@ -76,7 +69,7 @@ function hooks(input: {
   };
 }
 
-async function runWith(turnId: string, tools: Record<string, typeof askQuestion | typeof change>, ...steps: Parameters<typeof scriptedModel>) {
+async function runWith(turnId: string, tools: Record<string, typeof change>, ...steps: Parameters<typeof scriptedModel>) {
   const model = scriptedModel(...steps);
   const outcome = await runTurn(testRuntime({ agent: testAgent(tools), callModel: model.callModel, observer: recordingObserver().observer }), turnId, RUN);
   return { model, outcome };
@@ -170,60 +163,20 @@ async function channelState(sessionId: string) {
     expect((await database().query("SELECT 1 FROM agent_continuations")).rowCount).toBe(0);
   });
 
-  it("takes a text that names an option as the answer to the waiting question", async () => {
+  it("takes a text that names an option as the answer to the waiting approval", async () => {
     const auth = await ownerAuth();
     const channel = hooks({ message: () => ({ auth, continuationToken: "7::" }), transport: telegramApi().transport });
-    const asked = await dispatchTelegramMessage(database(), channel, message("спроси"));
+    const asked = await dispatchTelegramMessage(database(), channel, message("измени"));
     if (asked.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
-    await runWith(asked.turnId, { ask_question: askQuestion },
-      toolCalls([{ id: "call-q", input: { options: [{ id: "tea", label: "Чай" }, { id: "coffee", label: "Кофе" }], prompt: "Что?" }, name: "ask_question" }]));
+    const parked = await runWith(asked.turnId, { change }, toolCalls([{ id: "call-c", input: {}, name: "change" }]));
+    if (parked.outcome.status !== "waiting_input") throw new Error("TEST_EXPECTED_PARK");
 
-    const answered = await dispatchTelegramMessage(database(), channel, message("кофе"));
+    const answered = await dispatchTelegramMessage(database(), channel, message("approve"));
 
     if (answered.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
     const continuation = await loadTurn(database(), answered.turnId);
     expect(continuation).toMatchObject({ input: { context: [expect.stringContaining("<telegram_context>")] }, resumesTurnId: asked.turnId });
     expect(continuation.input.message).toBeUndefined();
-    const { outcome } = await runWith(continuation.id, { ask_question: askQuestion }, reply("Кофе так кофе"));
-    expect(outcome).toEqual({ status: "completed", text: "Кофе так кофе" });
-    expect((await loadSessionHistory(database(), asked.sessionId)).messages).toContainEqual({
-      role: "tool",
-      content: [{ type: "tool-result", toolCallId: "call-q", toolName: "ask_question", output: { type: "json", value: { optionId: "coffee", status: "answered" } } }],
-    });
-  });
-
-  it("takes a reply to the bot's freeform prompt as its answer, through the prompt's message", async () => {
-    const auth = await ownerAuth();
-    const channel = hooks({ message: () => ({ auth, continuationToken: "7::" }), transport: telegramApi().transport });
-    const asked = await dispatchTelegramMessage(database(), channel, message("спроси"));
-    if (asked.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
-    await runWith(asked.turnId, { ask_question: askQuestion }, toolCalls([{ id: "call-q", input: { prompt: "Как назвать?" }, name: "ask_question" }]));
-    await database().query(
-      `UPDATE agent_session_state SET channel_state = jsonb_set(channel_state::jsonb, '{pendingFreeformReplies}', '{"900":"call-q"}')::json
-        WHERE session_id = $1`,
-      [asked.sessionId],
-    );
-
-    const answer = await dispatchTelegramMessage(database(), channel, message("Барсик", REPLY_TO_PROMPT));
-
-    if (answer.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
-    expect((await loadTurn(database(), answer.turnId)).resumesTurnId).toBe(asked.turnId);
-    expect((await channelState(asked.sessionId)).pendingFreeformReplies).toEqual({});
-  });
-
-  it("starts an ordinary turn for a reply the application marked a message when it names no option", async () => {
-    const auth = await ownerAuth();
-    const channel = hooks({ message: () => ({ auth, continuationToken: "7::", replyHandling: "message" }), transport: telegramApi().transport });
-    const asked = await dispatchTelegramMessage(database(), channel, message("спроси"));
-    if (asked.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
-    await runWith(asked.turnId, { ask_question: askQuestion },
-      toolCalls([{ id: "call-q", input: { options: [{ id: "tea", label: "Чай" }], prompt: "Что?" }, name: "ask_question" }]));
-
-    const ordinary = await dispatchTelegramMessage(database(), channel, message("Мурка", REPLY_TO_PROMPT));
-
-    if (ordinary.status !== "dispatched") throw new Error("TEST_EXPECTED_DISPATCH");
-    // The new message dismisses the question it did not answer.
-    expect(await loadTurn(database(), ordinary.turnId)).toMatchObject({ input: { message: "Мурка" }, resumesTurnId: asked.turnId });
   });
 
   it("acknowledges a button the application authorized and continues the turn once; a second press does nothing", async () => {

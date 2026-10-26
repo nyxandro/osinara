@@ -1,9 +1,10 @@
 /**
- * Telegram ordinary-reply and HITL authorization boundary.
+ * Telegram reply authorization boundary.
  *
  * Exports:
  * - `TelegramReplyAuthorizationResult`: accepted routing state for the remaining inbound turn.
- * - `authorizeTelegramReply`: separates channel conversation replies from human HITL approvals.
+ * - `authorizeTelegramReply`: accepts an ordinary reply to the bot, or refuses one aimed at a
+ *   conversation whose approval no longer waits.
  */
 import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
@@ -14,13 +15,10 @@ import { telegramBaseContinuationToken } from "./telegram-reply-routing.js";
 
 export interface TelegramReplyAuthorizationResult {
   accepted: boolean;
-  replyHandling: "message" | undefined;
-  resumesPendingTask: boolean;
   verifiedReplyRoute: string | undefined;
 }
 
 export async function authorizeTelegramReply(input: {
-  ingress?: { updateId: string; dispatchId: string };
   actor: TelegramInboundActor;
   botUsername: string;
   exactReplyRoute: string | undefined;
@@ -31,10 +29,6 @@ export async function authorizeTelegramReply(input: {
   sendMessage(text: string): Promise<unknown>;
   verifiedReplyRoute: string | undefined;
 }): Promise<TelegramReplyAuthorizationResult> {
-  // The channel takes a reply to the bot as an answer to a waiting request unless told otherwise.
-  // Only a DB-authorized human reply may leave the ordinary-message path.
-  let replyHandling: "message" | undefined = "message";
-  let resumesPendingTask = false;
   let verifiedReplyRoute = input.verifiedReplyRoute;
   const replyTarget = input.message.replyToMessage;
 
@@ -52,7 +46,6 @@ export async function authorizeTelegramReply(input: {
       );
     }
     const authorization = await input.hitl.authorizeReply({
-      ...(input.ingress ? { ingress: input.ingress } : {}),
       baseContinuationToken: telegramBaseContinuationToken(
         input.message,
         verifiedReplyRoute ?? (input.replyToAgent ? input.exactReplyRoute : undefined),
@@ -61,25 +54,18 @@ export async function authorizeTelegramReply(input: {
       telegramMessageId: replyTarget.messageId,
       telegramUserId: input.actor.id,
     });
-    if (authorization === "forbidden" || authorization === "expired") {
-      const error = authorization === "forbidden"
-        ? "AGENT_APPROVAL_FORBIDDEN: Подтвердить действие может только пользователь, который его запросил."
-        : "AGENT_APPROVAL_EXPIRED: Это подтверждение уже использовано или больше не действует.";
-      if (input.message.chat.type === "private") await input.sendMessage(error);
-      return { accepted: false, replyHandling, resumesPendingTask, verifiedReplyRoute };
+    if (authorization === "expired") {
+      if (input.message.chat.type === "private") {
+        await input.sendMessage("AGENT_APPROVAL_EXPIRED: Это подтверждение уже использовано или больше не действует.");
+      }
+      return { accepted: false, verifiedReplyRoute };
     }
 
-    // DB authorization decides synthetic HITL. A verified ordinary reply keeps its conversation route.
+    // A verified ordinary reply keeps its conversation route.
     const ordinaryAgentReply = input.replyToAgent || input.message.chat.type === "private" ||
       isReplyToBot(input.message, input.botUsername);
-    if (authorization === "not_applicable" && ordinaryAgentReply) {
-      if (!input.hasResumableReplyRoute) verifiedReplyRoute = input.exactReplyRoute;
-    }
-    if (authorization === "authorized") {
-      replyHandling = undefined;
-      resumesPendingTask = true;
-    }
+    if (ordinaryAgentReply && !input.hasResumableReplyRoute) verifiedReplyRoute = input.exactReplyRoute;
   }
 
-  return { accepted: true, replyHandling, resumesPendingTask, verifiedReplyRoute };
+  return { accepted: true, verifiedReplyRoute };
 }

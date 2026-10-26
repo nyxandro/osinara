@@ -19,7 +19,7 @@ import { isServiceSkillName } from "./service-skills.js";
 
 // Mia's threshold: four working calls make a task more than a quick answer.
 export const SKILL_HINT_MIN_STEPS = 4;
-const SERVICE_TOOLS = new Set(["ask_question", "list_memories", "load_skill", "remember", "search_memories", "todo"]);
+const SERVICE_TOOLS = new Set(["list_memories", "load_skill", "remember", "search_memories", "todo"]);
 
 interface HintContext {
   readonly channel: { readonly kind?: string };
