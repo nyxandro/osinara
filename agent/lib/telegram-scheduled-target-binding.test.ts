@@ -93,7 +93,7 @@ vi.mock("./memory-review/memory-review-repository.js", () => ({
   memoryReviewRepository: { batchForTurn: vi.fn(async () => null) },
 }));
 
-vi.mock("./reply-buttons/reply-button-delivery.js", () => ({ stagedReplyButtons: vi.fn(async () => null) }));
+vi.mock("./reply-buttons/reply-button-delivery.js", () => ({ reportUndeliveredReplyButtons: vi.fn(), turnReplyButtons: vi.fn(() => null) }));
 const { telegramTurnEvents } = await import("../channels/telegram.js");
 const { AppError } = await import("./app-error.js");
 const { isScheduledSession } = await import("./agent-schedules/scheduled-session.js");

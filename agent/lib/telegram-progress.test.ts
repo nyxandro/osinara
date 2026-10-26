@@ -7,6 +7,8 @@
  * - Empty model steps remain invisible to avoid technical Telegram noise.
  * - The runtime's `message: null` after a final step is the model's deliberate silence, not noise.
  * - The model may mark a final answer as a standalone message instead of a reply.
+ * - Reply buttons leave the text of a final answer as its buttons, or as the reason they were
+ *   refused; an interim note never carries them, and the tags never reach a person.
  * - `telegramOutputWithoutMemoryDirective`: the memory-usage line leaves on every branch.
  */
 import { describe, expect, it } from "vitest";
@@ -117,6 +119,50 @@ describe("completedTelegramOutput", () => {
     expect(
       completedTelegramOutput({ finishReason: "tool-calls", message: "[[no-reply]]\nСекунду, ищу." }),
     ).toEqual({ kind: "progress", message: "Секунду, ищу." });
+  });
+
+  it("takes reply buttons out of a final answer", () => {
+    expect(completedTelegramOutput({
+      finishReason: "stop",
+      message: "Заказываем?\n\n<tg-button-row><tg-button style=\"success\">✅ Да</tg-button><tg-button>Нет</tg-button></tg-button-row>",
+    })).toEqual({
+      kind: "message",
+      message: "Заказываем?",
+      replyButtons: { error: null, rows: [[{ color: "green", text: "✅ Да" }, { text: "Нет" }]] },
+      standalone: false,
+    });
+  });
+
+  it("delivers the text of an answer whose buttons were refused, with the reason and without tags", () => {
+    const output = completedTelegramOutput({
+      finishReason: "stop",
+      message: "Открыть сайт?\n\n<tg-button-row><tg-button type=\"url\" url=\"https://example.com\">Сайт</tg-button></tg-button-row>",
+    });
+
+    expect(output).toEqual({
+      kind: "message",
+      message: "Открыть сайт?",
+      replyButtons: { error: expect.objectContaining({ code: "AGENT_REPLY_BUTTONS_INVALID" }), rows: null },
+      standalone: false,
+    });
+  });
+
+  it("keeps reply buttons out of an interim progress notice", () => {
+    expect(completedTelegramOutput({
+      finishReason: "tool-calls",
+      message: "Секунду, ищу.\n<tg-button-row><tg-button>Да</tg-button></tg-button-row>",
+    })).toEqual({
+      kind: "progress",
+      message: "Секунду, ищу.",
+      replyButtons: { error: null, rows: [[{ text: "Да" }]] },
+    });
+  });
+
+  it("does not deliver an answer made of buttons alone", () => {
+    expect(completedTelegramOutput({
+      finishReason: "stop",
+      message: "<tg-button-row><tg-button>Да</tg-button></tg-button-row>",
+    })).toBeNull();
   });
 
   it("recognizes an undelivered final step as the model's deliberate silence", () => {

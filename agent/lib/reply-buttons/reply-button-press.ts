@@ -2,15 +2,21 @@
  * A press of a reply button, turned into the addressee's own message.
  *
  * Exports:
- * - `ReplyButtonPressOutcome`: either answered on the spot, or the message the press stands for.
- * - `createReplyButtonPressHandler`: the press boundary over the repository and Telegram.
- * - `handleReplyButtonPress`: the production handler.
+ * - `ReplyButtonPressOutcome`: either nothing more to do, or the message the press stands for.
+ * - `createReplyButtonPressHandler`: the press boundary over the repository and Telegram, in its
+ *   two steps: on arrival and in the chat queue.
+ * - `acknowledgeReplyButtonPress`, `handleReplyButtonPress`: the production steps.
  * - `REPLY_BUTTON_PRESS_MESSAGE_ID_BASE`: where the message numbers of presses begin.
  *
  * Key constructs:
+ * - Telegram shows a spinner on the button until the bot answers and refuses a late answer, while
+ *   the chat queue may wait for a turn of minutes. So a press is decided, answered and captioned on
+ *   arrival, and only the message it stands for waits for its place in the queue.
  * - Only the addressee's press counts; anyone else sees a pop-up and nothing changes.
- * - A replayed press answers and settles its message again: before a crash it cannot be known
- *   whether that happened. A press on buttons already decided settles them again too.
+ * - Whoever claims the press answers it: the arrival step normally, the queue step only when the
+ *   arrival never claimed it (a crash in between). A pop-up of a refused press belongs to the
+ *   arrival alone, so a person never gets two. Settling is idempotent, so a replayed press and a
+ *   press on buttons already decided settle them again, in case an earlier edit never landed.
  * - The press becomes an ordinary inbound message from the presser and goes through the same
  *   authorization, queue, history and memory as typed text: it authorizes nothing more than the
  *   words on the button would.
@@ -33,7 +39,7 @@ import {
   replyButtonLabels,
   selectedReplyCaption,
 } from "./reply-button-contract.js";
-import { replyButtonRepository, type ReplyButtonSet } from "./reply-button-repository.js";
+import { replyButtonRepository, type ReplyButtonPressClaim, type ReplyButtonSet } from "./reply-button-repository.js";
 import { replyButtonTelegram, type ReplyButtonTelegram } from "./reply-button-telegram.js";
 
 export const REPLY_BUTTON_PRESS_MESSAGE_ID_BASE = 2 ** 40;
@@ -50,8 +56,12 @@ interface ReplyButtonPressDependencies {
   telegram: ReplyButtonTelegram;
 }
 
+/** The words of the message on one line: its HTML tags and entities are rich-message markup. */
 function quote(text: string): string {
-  const flat = text.replace(/\s+/gu, " ").trim();
+  const words = text.replace(/<\/?[a-z][^>]*>/giu, " ")
+    .replace(/&(?:lt|gt|quot|#39|apos);/gu, (entity) => ({ "&#39;": "'", "&apos;": "'", "&gt;": ">", "&lt;": "<", "&quot;": "\"" })[entity]!)
+    .replaceAll("&amp;", "&");
+  const flat = words.replace(/\s+/gu, " ").trim();
   const characters = Array.from(flat);
   return characters.length <= REPLY_BUTTON_QUOTE_MAX_CHARACTERS
     ? flat
@@ -134,10 +144,27 @@ export function createReplyButtonPressHandler(dependencies: ReplyButtonPressDepe
     }
   }
 
-  /** The caption of a decided set, for its own press or for cleaning up after a lost edit. */
-  function decidedCaption(set: ReplyButtonSet, presser: string | null): string {
+  /**
+   * The caption of a decided set. Only the addressee gets this far, so the presser is the person
+   * who chose; a group names them.
+   */
+  function decidedCaption(set: ReplyButtonSet, query: TelegramCallbackQuery): string {
     if (set.status === "dismissed" || set.selectedIndex === null) return DISMISSED_REPLY_CAPTION;
+    const presser = set.telegramChatType === "private" ? null : presserName(query);
     return selectedReplyCaption(replyButtonLabels(set.buttons)[set.selectedIndex]!, presser);
+  }
+
+  async function claim(query: TelegramCallbackQuery): Promise<ReplyButtonPressClaim | null> {
+    const parsed = query.data === undefined ? null : parseReplyButtonCallback(query.data);
+    if (parsed === null || query.message === undefined) return null;
+    return await dependencies.repository.claimPress({
+      callbackQueryId: query.id,
+      index: parsed.index,
+      pressedByTelegramUserId: query.from.id,
+      telegramChatId: query.message.chat.id,
+      telegramMessageId: query.message.messageId,
+      token: parsed.token,
+    });
   }
 
   /**
@@ -151,47 +178,50 @@ export function createReplyButtonPressHandler(dependencies: ReplyButtonPressDepe
     return await dependencies.repository.replyRouteIsOpen(telegramBaseContinuationToken(reply));
   }
 
-  return async function handleReplyButtonPress(
-    query: TelegramCallbackQuery,
-    updateId: string,
-  ): Promise<ReplyButtonPressOutcome> {
-    const parsed = query.data === undefined ? null : parseReplyButtonCallback(query.data);
-    if (parsed === null || query.message === undefined) {
-      await answer(query.id, PRESS_EXPIRED);
-      return { status: "answered" };
-    }
-    const claim = await dependencies.repository.claimPress({
-      callbackQueryId: query.id,
-      index: parsed.index,
-      pressedByTelegramUserId: query.from.id,
-      telegramChatId: query.message.chat.id,
-      telegramMessageId: query.message.messageId,
-      token: parsed.token,
-    });
-    if (claim.status === "forbidden") {
-      await answer(query.id, PRESS_NOT_FOR_YOU);
-      return { status: "answered" };
-    }
-    if (claim.status === "expired") {
-      await answer(query.id, PRESS_EXPIRED);
-      // Buttons still on screen after their decision mean an earlier edit never landed.
-      if (claim.decided !== undefined) await settle(claim.decided, decidedCaption(claim.decided, null));
-      return { status: "answered" };
-    }
-    const { set } = claim;
-    // A replay after a crash cannot tell whether the answer and the edit landed, so it repeats
-    // both; an edit that finds the message already settled is not an error.
-    await answer(query.id);
-    await settle(set, decidedCaption(set, set.telegramChatType === "private" ? null : presserName(query)));
-    return {
-      buttonMessageId: set.telegramMessageId!,
-      message: pressMessage(query, set, updateId, await asReply(query, set, updateId)),
-      status: "message",
-    };
+  return {
+    /** On arrival, ahead of the chat queue: the press is decided and the person sees it at once. */
+    async acknowledge(query: TelegramCallbackQuery, _updateId: string): Promise<void> {
+      const claimed = await claim(query);
+      if (claimed === null) {
+        await answer(query.id, PRESS_EXPIRED);
+        return;
+      }
+      if (claimed.status === "forbidden") {
+        await answer(query.id, PRESS_NOT_FOR_YOU);
+        return;
+      }
+      if (claimed.status === "expired") {
+        await answer(query.id, PRESS_EXPIRED);
+        // Buttons still on screen after their decision mean an earlier edit never landed.
+        if (claimed.decided !== undefined) await settle(claimed.decided, decidedCaption(claimed.decided, query));
+        return;
+      }
+      if (claimed.status === "claimed") await answer(query.id);
+      await settle(claimed.set, decidedCaption(claimed.set, query));
+    },
+
+    /** In the chat queue: the press continues as the addressee's message. */
+    async continueAsMessage(query: TelegramCallbackQuery, updateId: string): Promise<ReplyButtonPressOutcome> {
+      const claimed = await claim(query);
+      if (claimed === null || claimed.status === "forbidden" || claimed.status === "expired") {
+        return { status: "answered" };
+      }
+      const { set } = claimed;
+      if (claimed.status === "claimed") await answer(query.id);
+      await settle(set, decidedCaption(set, query));
+      return {
+        buttonMessageId: set.telegramMessageId!,
+        message: pressMessage(query, set, updateId, await asReply(query, set, updateId)),
+        status: "message",
+      };
+    },
   };
 }
 
-export const handleReplyButtonPress = createReplyButtonPressHandler({
+const pressHandler = createReplyButtonPressHandler({
   repository: replyButtonRepository,
   telegram: replyButtonTelegram,
 });
+
+export const acknowledgeReplyButtonPress = pressHandler.acknowledge;
+export const handleReplyButtonPress = pressHandler.continueAsMessage;

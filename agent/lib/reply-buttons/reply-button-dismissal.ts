@@ -4,12 +4,14 @@
  * Exports:
  * - `createReplyButtonDismissal`: dismissal over the repository and Telegram.
  * - `dismissReplyButtonsOnMessage`: the production dismissal.
+ * - `hasReplyButtonsToDismiss`: whether the message's author has buttons on screen in its chat.
  *
  * Key constructs:
  * - Only the addressee's own message counts. Another participant's message, the bot's next message
  *   and a reminder leave the buttons alone.
  * - Only buttons that were visible before the message was written go: a set the agent offered
- *   after it, in answer to it, stays.
+ *   after it, in answer to it, stays. So does a set whose tap came before the message and still
+ *   waits to be decided: the two can be decided out of order, and the tap was first.
  * - The recorded dismissal is the decision; editing each message is presentation, and one failed
  *   edit does not stop the others.
  */
@@ -34,10 +36,11 @@ function writtenAt(message: TelegramMessage): Date {
 }
 
 export function createReplyButtonDismissal(dependencies: ReplyButtonDismissalDependencies) {
-  return async function dismissReplyButtonsOnMessage(message: TelegramMessage): Promise<void> {
+  return async function dismissReplyButtonsOnMessage(message: TelegramMessage, updateId: string): Promise<void> {
     if (message.from === undefined || message.from.isBot) return;
     const dismissed = await dependencies.repository.dismissForAddressee({
       addresseeTelegramUserId: message.from.id,
+      afterUpdateId: updateId,
       telegramChatId: message.chat.id,
       writtenAt: writtenAt(message),
     });
@@ -53,6 +56,14 @@ export function createReplyButtonDismissal(dependencies: ReplyButtonDismissalDep
       }
     }
   };
+}
+
+export async function hasReplyButtonsToDismiss(message: TelegramMessage): Promise<boolean> {
+  if (message.from === undefined || message.from.isBot) return false;
+  return await replyButtonRepository.hasActiveForAddressee({
+    addresseeTelegramUserId: message.from.id,
+    telegramChatId: message.chat.id,
+  });
 }
 
 export const dismissReplyButtonsOnMessage = createReplyButtonDismissal({

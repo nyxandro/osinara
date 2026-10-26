@@ -2,9 +2,7 @@
  * Reply button contract tests.
  *
  * Constructs covered:
- * - The model's rows are validated with errors the model can act on: count, row width, length,
- *   one line, no markup characters, no repeated answers.
- * - The keyboard carries only the set's token and a button index, and Telegram's own style names.
+ * - A label is one short line without markup characters, counted in characters.
  * - Only callback data a set of ours could have produced is read back.
  * - The settled caption names the presser in a group and drops markup from their name.
  */
@@ -12,75 +10,45 @@ import { describe, expect, it } from "vitest";
 
 import {
   parseReplyButtonCallback,
-  parseReplyButtonRows,
-  replyButtonKeyboard,
-  replyButtonLabels,
   selectedReplyCaption,
+  validateReplyButtonLabel,
 } from "./reply-button-contract.js";
 
 const TOKEN = "AbCdEfGhIjKlMnOpQrStUv";
 
-describe("reply button rows", () => {
-  it("keeps rows, colors and trimmed texts in order", () => {
-    const rows = parseReplyButtonRows([
-      [{ color: "green", text: " ✅ Да, заказываем " }, { color: "red", text: "❌ Отмена" }],
-      [{ text: "✏️ Изменить заказ" }],
-    ]);
-
-    expect(rows).toEqual([
-      [{ color: "green", text: "✅ Да, заказываем" }, { color: "red", text: "❌ Отмена" }],
-      [{ text: "✏️ Изменить заказ" }],
-    ]);
-    expect(replyButtonLabels(rows)).toEqual(["✅ Да, заказываем", "❌ Отмена", "✏️ Изменить заказ"]);
+describe("reply button label", () => {
+  it("trims a label and counts its length in characters, so an emoji does not use up the limit", () => {
+    expect(validateReplyButtonLabel(" ✅ Да, заказываем ")).toBe("✅ Да, заказываем");
+    expect(validateReplyButtonLabel(`✅${"а".repeat(39)}`)).toBe(`✅${"а".repeat(39)}`);
   });
 
-  it.each([
-    ["no buttons", [], "от 1 до 6 кнопок"],
-    ["an empty row", [[]], "от 1 до 6 кнопок"],
-    ["seven buttons", [[{ text: "1" }, { text: "2" }, { text: "3" }], [{ text: "4" }, { text: "5" }, { text: "6" }], [{ text: "7" }]], "от 1 до 6 кнопок"],
-    ["four in a row", [[{ text: "1" }, { text: "2" }, { text: "3" }, { text: "4" }]], "В каждом ряду от 1 до 3"],
-    ["a blank text", [[{ text: "  " }]], "одна строка от 1 до 40"],
-    ["a long text", [[{ text: "я".repeat(41) }]], "одна строка от 1 до 40"],
-    ["two lines", [[{ text: "Да\nНет" }]], "одна строка от 1 до 40"],
-    ["markup", [[{ text: "*Да*" }]], "символов разметки"],
-    ["a repeated answer", [[{ text: "Да" }, { text: "да" }]], "не должны повторяться"],
-    ["an unknown color", [[{ color: "yellow", text: "Да" }]], "rows: массив рядов"],
-    ["a stray field", [[{ text: "Да", url: "https://example.com" }]], "rows: массив рядов"],
-  ])("refuses %s with an actionable error", (_case, rows, message) => {
-    expect(() => parseReplyButtonRows(rows)).toThrow(expect.objectContaining({
-      code: "AGENT_REPLY_BUTTONS_INPUT_INVALID",
-      message: expect.stringContaining(message),
-    }));
-  });
-
-  it("counts a text's length in characters, so an emoji does not use up the limit", () => {
-    expect(() => parseReplyButtonRows([[{ text: `✅${"а".repeat(39)}` }]])).not.toThrow();
-  });
-});
-
-describe("reply button keyboard", () => {
-  it("numbers the buttons across rows and maps colors to Telegram styles", () => {
-    const keyboard = replyButtonKeyboard(TOKEN, [
-      [{ color: "green", text: "Да" }, { color: "red", text: "Нет" }],
-      [{ color: "blue", text: "Позже" }, { text: "Другое" }],
-    ]);
-
-    expect(keyboard).toEqual({ inline_keyboard: [
-      [
-        { callback_data: `rb:${TOKEN}:0`, style: "success", text: "Да" },
-        { callback_data: `rb:${TOKEN}:1`, style: "danger", text: "Нет" },
-      ],
-      [
-        { callback_data: `rb:${TOKEN}:2`, style: "primary", text: "Позже" },
-        { callback_data: `rb:${TOKEN}:3`, text: "Другое" },
-      ],
-    ] });
-    // Telegram limits callback data to 64 bytes.
-    for (const row of keyboard.inline_keyboard) {
-      for (const button of row) expect(Buffer.byteLength(button.callback_data!)).toBeLessThanOrEqual(64);
+  it("keeps ordinary numbers, times and abbreviations", () => {
+    for (const label of ["⏰ Через 15 минут", "К 19:00–19:30", "30 см", "т.е. да", "Версия 2.0", "📅 2026-10-26", "💰 1 000 000 ₽", "Node.js"]) {
+      expect(validateReplyButtonLabel(label)).toBe(label);
     }
   });
 
+  it.each([
+    ["a blank text", "  ", "одна строка от 1 до 40"],
+    ["a long text", "я".repeat(41), "одна строка от 1 до 40"],
+    ["two lines", "Да\nНет", "одна строка от 1 до 40"],
+    ["markup", "*Да*", "символов разметки"],
+    ["a site", "Открыть ozon.ru", "ссылок"],
+    ["a Cyrillic site", "Открыть сайт.рф", "ссылок"],
+    ["a link", "https://example.com", "ссылок"],
+    ["a mention", "Спросить @mama", "ссылок"],
+    ["an e-mail", "a@b.ru", "ссылок"],
+    ["a phone", "Позвонить +7 999 123-45-67", "ссылок"],
+    ["a command", "/start", "ссылок"],
+  ])("refuses %s with an actionable error", (_case, label, message) => {
+    expect(() => validateReplyButtonLabel(label)).toThrow(expect.objectContaining({
+      code: "AGENT_REPLY_BUTTONS_INVALID",
+      message: expect.stringContaining(message),
+    }));
+  });
+});
+
+describe("reply button callback data", () => {
   it("reads back only data of the shape it writes", () => {
     expect(parseReplyButtonCallback(`rb:${TOKEN}:3`)).toEqual({ index: 3, token: TOKEN });
     expect(parseReplyButtonCallback(`rb:${TOKEN}:12`)).toBeNull();

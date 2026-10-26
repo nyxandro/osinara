@@ -6,15 +6,14 @@
  * - `replyButtonTelegram`: the production transport over the bot token.
  *
  * Key constructs:
- * - Settling replaces the keyboard with a caption under the exact text the buttons went out with,
- *   in the same format. When Telegram refuses the text edit, the keyboard is still removed: a
- *   choice that is already recorded must not keep offering buttons.
+ * - Settling rewrites the rich message as the exact text the buttons went out with and a caption
+ *   in their place: the buttons are part of the message, so the edit that adds the caption is the
+ *   edit that removes them.
  * - Every refusal is logged with Telegram's own description, so a failure can be diagnosed later.
  */
 import {
   answerTelegramCallbackQuery,
   callTelegramApi,
-  TELEGRAM_MESSAGE_TEXT_MAX_LENGTH,
   type TelegramApiResponse,
 } from "../../runtime/telegram/api.js";
 
@@ -24,15 +23,10 @@ import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../../config.js";
 import { AppError } from "../app-error.js";
 import type { ReplyButtonSet } from "./reply-button-repository.js";
 
-const EMPTY_KEYBOARD = { inline_keyboard: [] };
-
 export interface ReplyButtonTelegram {
   answerPress(input: { callbackQueryId: string; showAlert?: boolean; text?: string }): Promise<void>;
-  /** Removes the buttons of a delivered set and writes the caption under its text. */
-  settle(
-    set: Pick<ReplyButtonSet, "messageEntities" | "messageFormat" | "messageText" | "telegramChatId" | "telegramMessageId">,
-    caption: string,
-  ): Promise<void>;
+  /** Removes the buttons of a delivered set and writes the caption in their place. */
+  settle(set: Pick<ReplyButtonSet, "messageText" | "telegramChatId" | "telegramMessageId">, caption: string): Promise<void>;
 }
 
 function requireBotToken(): string {
@@ -67,17 +61,6 @@ async function request(method: string, body: JsonObject): Promise<TelegramApiRes
   return await callTelegramApi({ body, botToken: requireBotToken(), fetch: timedFetch, method });
 }
 
-function settledBody(set: Parameters<ReplyButtonTelegram["settle"]>[0], caption: string): JsonObject | null {
-  if (set.messageText === null) return null;
-  if (set.messageFormat === "rich") {
-    return { rich_message: { markdown: `${set.messageText}\n\n_${caption}_` } };
-  }
-  const text = `${set.messageText}\n\n${caption}`;
-  if (text.length > TELEGRAM_MESSAGE_TEXT_MAX_LENGTH) return null;
-  // The caption is appended after the original text, so the original entity offsets still hold.
-  return set.messageEntities === null ? { text } : { entities: set.messageEntities, text };
-}
-
 export const replyButtonTelegram: ReplyButtonTelegram = {
   async answerPress(input) {
     const response = await answerTelegramCallbackQuery({
@@ -95,26 +78,17 @@ export const replyButtonTelegram: ReplyButtonTelegram = {
   },
 
   async settle(set, caption) {
-    if (set.telegramMessageId === null) {
-      throw new AppError("AGENT_REPLY_BUTTONS_MESSAGE_MISSING", "Неизвестно сообщение, под которым стоят кнопки");
+    if (set.telegramMessageId === null || set.messageText === null) {
+      throw new AppError("AGENT_REPLY_BUTTONS_MESSAGE_MISSING", "Неизвестно сообщение, в котором стоят кнопки");
     }
-    const target = { chat_id: set.telegramChatId, message_id: Number(set.telegramMessageId) };
-    const body = settledBody(set, caption);
-    if (body !== null) {
-      const edited = await request("editMessageText", { ...target, ...body, reply_markup: EMPTY_KEYBOARD });
-      if (edited.ok || alreadySettled(edited)) return;
-      console.error(JSON.stringify({
-        code: "AGENT_REPLY_BUTTONS_CAPTION_FAILED",
-        ...failureDetails(edited),
-        telegramChatId: set.telegramChatId,
-        telegramMessageId: set.telegramMessageId,
-      }));
-    }
-    const cleared = await request("editMessageReplyMarkup", { ...target, reply_markup: EMPTY_KEYBOARD });
-    if (!cleared.ok && !alreadySettled(cleared)) {
-      throw new AppError("AGENT_REPLY_BUTTONS_CLEAR_FAILED", "Telegram не убрал кнопки под сообщением", {
-        details: failureDetails(cleared),
-      });
-    }
+    const edited = await request("editMessageText", {
+      chat_id: set.telegramChatId,
+      message_id: Number(set.telegramMessageId),
+      rich_message: { markdown: `${set.messageText}\n\n_${caption}_` },
+    });
+    if (edited.ok || alreadySettled(edited)) return;
+    throw new AppError("AGENT_REPLY_BUTTONS_SETTLE_FAILED", "Telegram не убрал кнопки из сообщения", {
+      details: { ...failureDetails(edited), telegramChatId: set.telegramChatId, telegramMessageId: set.telegramMessageId },
+    });
   },
 };

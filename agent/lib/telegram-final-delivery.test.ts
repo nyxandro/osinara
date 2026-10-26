@@ -28,6 +28,7 @@ const base = {
   agentSessionId: "wrun_session_1",
   agentTurnId: "turn-1",
   markdown: "Готово",
+  replyButtons: false,
 };
 
 function hash(value: unknown): string {

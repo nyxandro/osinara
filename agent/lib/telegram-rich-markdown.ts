@@ -5,12 +5,17 @@
  * - `sanitizeTelegramRichMarkdown`: preserves text-rich structure and neutralizes active content.
  * - `formatTelegramRichMessages`: produces complete blocks within Telegram's rich text limit.
  * - `hasTelegramRichDetailsBlock`: recognizes an actual supported details container outside code.
+ * - `fitsTelegramRichMessage`: whether finished markdown stays within one rich message's limits.
  *
  * Key constructs:
  * - A narrow HTML allowlist for details and inline text formatting.
  * - Canonical rewriting of tolerated tag spellings so one stray space never escapes a block.
  * - Recovery of a truncated collapsible block; other malformed allowed tags render inert.
  * - Explicit rejection of over-wide tables, excessive nesting, and indivisible long blocks.
+ * - Telegram's own `tg-` tags never pass, not even from what looks like code: an indented line or an
+ *   escaped backtick is code here but live HTML to Telegram, and a `tg-button` there could be a
+ *   link or mini-app button a page talked the model into. A zero-width space breaks such a tag
+ *   while code keeps showing the same characters.
  */
 import { AppError } from "./app-error.js";
 import {
@@ -33,6 +38,8 @@ const HTML_OPEN_TAG_PATTERN = /^<([a-z]+)((?:\s[^<>]*)?)>$/iu;
 const HTML_CLOSE_TAG_PATTERN = /^<\/([a-z]+)\s*>$/iu;
 // Telegram documents exactly one attribute for a rich collapsible block: `open`.
 const DETAILS_OPEN_ATTRIBUTE_PATTERN = /^open(?:\s*=\s*"(?:|open|true)")?$/iu;
+const TELEGRAM_TAG_START_PATTERN = /<(\/?tg-)/giu;
+const ZERO_WIDTH_SPACE = "\u200B";
 
 function placeholderMarker(value: string): string {
   for (let codePoint = PLACEHOLDER_START; codePoint <= PLACEHOLDER_END; codePoint += 1) {
@@ -333,7 +340,7 @@ function sanitizeTelegramRichMarkdownInternal(
   if (missingClosingTags.length > 0) {
     sanitized = `${sanitized.trimEnd()}\n\n${missingClosingTags.join("\n\n")}`;
   }
-  return protectedCode.restore(sanitized);
+  return protectedCode.restore(sanitized).replace(TELEGRAM_TAG_START_PATTERN, `<${ZERO_WIDTH_SPACE}$1`);
 }
 
 export function sanitizeTelegramRichMarkdown(markdown: string): string {
@@ -403,6 +410,11 @@ function splitOversizedDetailsBlock(block: string): string[] | null {
   }
   if (current) bodyChunks.push(current);
   return bodyChunks.map((part) => `${opening}\n\n${part}\n\n</details>`);
+}
+
+export function fitsTelegramRichMessage(markdown: string): boolean {
+  return characterLength(markdown) <= TELEGRAM_RICH_MESSAGE_MAX_CHARACTERS &&
+    estimateTelegramRichBlocks(markdown) <= TELEGRAM_RICH_MESSAGE_MAX_BLOCKS;
 }
 
 export function formatTelegramRichMessages(markdown: string): string[] {

@@ -5,10 +5,14 @@
  * - Reminder scope, status, recurrence, row, and public record types.
  * - `reminderOperationHash`: replay-protection fingerprint.
  * - `rowToReminder`: safe PostgreSQL projection.
+ *
+ * A reminder's buttons are shown to the model the way it writes them, as markup at the end of the
+ * content, so content it passes back unchanged keeps them.
  */
 import { createHash } from "node:crypto";
 
 import type { ReplyButtonRows } from "../reply-buttons/reply-button-contract.js";
+import { replyButtonMarkup } from "../reply-buttons/reply-button-markup.js";
 
 export type ReminderScope = "family" | "group" | "personal";
 export type ReminderStatus = "active" | "completed" | "failed" | "leased" | "paused";
@@ -21,8 +25,7 @@ export interface ReminderRecurrence {
 }
 
 export interface ReminderRecord {
-  /** Reply buttons sent with every delivery, or null for none. */
-  buttons: ReplyButtonRows | null;
+  /** The text, followed by the markup of the reply buttons sent with every delivery. */
   content: string;
   createdAt: string;
   id: string;
@@ -55,8 +58,7 @@ export interface ReminderRow {
 
 export function rowToReminder(row: ReminderRow): ReminderRecord {
   return {
-    buttons: row.reply_buttons,
-    content: row.content,
+    content: row.reply_buttons === null ? row.content : `${row.content}\n\n${replyButtonMarkup(row.reply_buttons)}`,
     createdAt: row.created_at.toISOString(),
     id: row.id,
     lastErrorCode: row.last_error_code,

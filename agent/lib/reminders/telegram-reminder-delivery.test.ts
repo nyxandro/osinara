@@ -6,8 +6,9 @@
  * - The header "⏰ Напоминание:" is bold through Telegram entities, so the reminder text itself is
  *   sent as is and needs no escaping.
  * - Provider rejection and timeout errors propagate to the durable dispatcher.
- * - A reminder with reply buttons stages them with its exact text and entities, sends the keyboard
- *   and activates the set under the confirmed message; one without buttons sends none.
+ * - A reminder with reply buttons goes out as a rich message with the buttons inside it, its text
+ *   staged first and the set activated under the confirmed message; the receipt keeps the plain
+ *   text. One without buttons goes out as before and stages nothing.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -80,7 +81,7 @@ describe("deliverTelegramReminder", () => {
     });
   });
 
-  it("sends the reminder's buttons and activates them under the confirmed message", async () => {
+  it("sends a reminder with buttons as a rich message and activates them under it", async () => {
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "telegram-bot-secret");
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       ok: true,
@@ -94,25 +95,31 @@ describe("deliverTelegramReminder", () => {
       messageThreadId: null, scope: "personal", telegramChatId: "101", telegramChatType: "private",
     };
 
-    await deliverTelegramReminder(job);
+    await expect(deliverTelegramReminder(job)).resolves.toEqual({
+      messageId: "56",
+      text: "⏰ Напоминание:\n\nСобрать документы",
+    });
 
+    const text = "**⏰ Напоминание:**\n\n<p>Собрать документы</p>";
     expect(buttons.stageForReminder).toHaveBeenCalledWith(expect.objectContaining({
       addresseeTelegramUserId: "202",
-      messageEntities: [{ length: 14, offset: 0, type: "bold" }],
-      messageText: "⏰ Напоминание:\n\nСобрать документы",
+      messageText: text,
       reminderId: job.id,
       telegramChatId: "101",
       telegramChatType: "private",
     }));
-    const body = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body));
-    expect(body.reply_markup).toEqual({ inline_keyboard: [[
-      { callback_data: `rb:${"A".repeat(22)}:0`, style: "success", text: "✅ Оплатил" },
-      { callback_data: `rb:${"A".repeat(22)}:1`, text: "⏰ Через час" },
-    ]] });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(/\/sendRichMessage$/u);
+    expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toEqual({
+      chat_id: "101",
+      rich_message: {
+        markdown: `${text}\n\n<tg-button-row><tg-button type="callback_data" data="rb:${"A".repeat(22)}:0" style="success">✅ Оплатил</tg-button>` +
+          `<tg-button type="callback_data" data="rb:${"A".repeat(22)}:1">⏰ Через час</tg-button></tg-button-row>`,
+      },
+    });
     expect(buttons.activate).toHaveBeenCalledWith("set-1", "56");
   });
 
-  it("sends no keyboard and stages nothing for a reminder without buttons", async () => {
+  it("sends an ordinary message and stages nothing for a reminder without buttons", async () => {
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "telegram-bot-secret");
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       ok: true,
@@ -123,7 +130,7 @@ describe("deliverTelegramReminder", () => {
     await deliverTelegramReminder(delayedJob);
 
     expect(buttons.stageForReminder).not.toHaveBeenCalled();
-    expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).not.toHaveProperty("reply_markup");
+    expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(/\/sendMessage$/u);
   });
 
   it("reports a Telegram refusal with the code the dispatcher stores", async () => {
