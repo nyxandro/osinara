@@ -1,6 +1,6 @@
 {
   "name": "osinara-family-agent",
-  "version": "0.52.2",
+  "version": "0.53.0",
   "private": true,
   "type": "module",
   "imports": {
@@ -33,6 +33,9 @@
     "async-sema": "3.1.1",
     "dockerode": "5.0.1",
     "file-type": "22.0.1",
+    "mdast-util-from-markdown": "2.1.0",
+    "mdast-util-gfm": "3.1.0",
+    "micromark-extension-gfm": "3.0.0",
     "pg": "8.22.0",
     "sharp": "0.35.5",
     "tar-stream": "3.2.0",
@@ -42,6 +45,7 @@
   },
   "devDependencies": {
     "@types/dockerode": "4.0.1",
+    "@types/mdast": "4.0.4",
     "@types/node": "24.10.1",
     "@types/pg": "8.20.0",
     "@types/tar-stream": "3.1.4",

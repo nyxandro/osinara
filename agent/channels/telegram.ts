@@ -211,8 +211,7 @@ export const telegramTurnEvents: TelegramTurnEvents = {
             await channel.telegram.startTyping();
             await sleep(asidePauseMilliseconds(chunk.text));
           }
-          const text = last && replyButtons !== null ? await replyButtons.withButtons(chunk) : chunk.text;
-          return chunk.format === "plain"
+          const post = async (text: string) => chunk.format === "plain"
             ? await postTelegramPlainMessageChunk(
                 text,
                 channel,
@@ -224,6 +223,7 @@ export const telegramTurnEvents: TelegramTurnEvents = {
                 channel.state,
                 ordinal === 0 ? replyParameters : undefined,
               );
+          return last && replyButtons !== null ? await replyButtons.sendLast(chunk, post) : await post(chunk.text);
         },
       });
     } catch (error) {

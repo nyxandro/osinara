@@ -5,6 +5,8 @@
  * - `startTelegramRichThinkingDraft`: displays Telegram's native ephemeral thinking block.
  * - `postTelegramRichMessage`: persists completed rich output and records group anchors.
  * - `SentTelegramMessage`: confirmed Telegram identity for each delivered rich chunk.
+ * - `isTelegramRichMessageRefusal`: a definitive refusal of the message, told apart from a failure
+ *   whose outcome is unknown.
  *
  * Key constructs:
  * - One stable non-zero draft ID per private chat/topic and turn.
@@ -107,6 +109,9 @@ function telegramRichFetch(
   return fetch(request, { ...init, signal });
 }
 
+const TELEGRAM_BAD_REQUEST_STATUS = 400;
+const TELEGRAM_DESCRIPTION_MAX_LENGTH = 200;
+
 function addStableErrorCode(error: Error, code: string): void {
   // DOMException exposes a getter-only message, so attach diagnostics without replacing the cause.
   Object.defineProperty(error, "message", {
@@ -158,11 +163,18 @@ async function requestTelegramRichApi(
     method === "sendRichMessage"
       ? "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_FAILED"
       : "AGENT_TELEGRAM_RICH_DRAFT_DELIVERY_FAILED";
+  // Telegram's own reason names what it refused. It is an error text, but it may quote a tag of
+  // the message, so only its start is kept.
+  const description = typeof response.body === "object" && response.body !== null &&
+    "description" in response.body && typeof response.body.description === "string"
+    ? response.body.description.slice(0, TELEGRAM_DESCRIPTION_MAX_LENGTH)
+    : null;
   console.error(
     JSON.stringify({
       code: rejectionCode,
       method,
       providerStatus: response.status,
+      ...(description === null ? {} : { description }),
     }),
   );
   throw new AppError(
@@ -170,7 +182,18 @@ async function requestTelegramRichApi(
     method === "sendRichMessage"
       ? "Telegram не принял форматированный ответ. Попробуйте отправить запрос ещё раз"
       : "Telegram не принял потоковое обновление ответа. Попробуйте отправить запрос ещё раз",
+    { details: { providerStatus: response.status, ...(description === null ? {} : { description }) } },
   );
+}
+
+/**
+ * Whether Telegram refused the message itself (HTTP 400): it was not delivered, so a changed
+ * message may go instead without any risk of a duplicate. A rate limit, a server error or a lost
+ * response is never such a refusal.
+ */
+export function isTelegramRichMessageRefusal(error: unknown): boolean {
+  return error instanceof AppError && error.code === "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_FAILED" &&
+    error.details?.providerStatus === TELEGRAM_BAD_REQUEST_STATUS;
 }
 
 function requireDraftSuccess(response: TelegramApiResponse): void {

@@ -18,8 +18,8 @@ const dependencies = vi.hoisted(() => ({
   postRich: vi.fn(),
   progress: vi.fn(),
   report: vi.fn(),
+  sendLast: vi.fn(),
   turnButtons: vi.fn(),
-  withButtons: vi.fn(),
 }));
 
 vi.mock("./agent-schedules/scheduled-session.js", () => ({
@@ -82,8 +82,9 @@ describe("reply buttons on the final answer", () => {
   });
 
   it("writes the buttons into the last message only and activates them under it", async () => {
-    dependencies.withButtons.mockResolvedValue(`Оформляем?\n\n${ROW}`);
-    dependencies.turnButtons.mockReturnValue({ afterDelivery: dependencies.afterDelivery, withButtons: dependencies.withButtons });
+    dependencies.sendLast.mockImplementation(async (_chunk: unknown, post: (text: string) => Promise<unknown>) =>
+      await post(`Оформляем?\n\n${ROW}`));
+    dependencies.turnButtons.mockReturnValue({ afterDelivery: dependencies.afterDelivery, sendLast: dependencies.sendLast });
 
     await complete(`Первая часть\n\nОформляем?\n\n${ROW}`);
 
@@ -98,8 +99,8 @@ describe("reply buttons on the final answer", () => {
       markdown: "Первая часть\n\nОформляем?",
       replyButtons: true,
     }));
-    expect(dependencies.withButtons).toHaveBeenCalledTimes(1);
-    expect(dependencies.withButtons).toHaveBeenCalledWith(expect.objectContaining({ format: "rich", text: "Оформляем?" }));
+    expect(dependencies.sendLast).toHaveBeenCalledTimes(1);
+    expect(dependencies.sendLast).toHaveBeenCalledWith(expect.objectContaining({ format: "rich", text: "Оформляем?" }), expect.any(Function));
     expect(dependencies.postPlain.mock.calls[0]![0]).toBe("Первая часть");
     expect(dependencies.postRich.mock.calls[0]![0]).toBe(`Оформляем?\n\n${ROW}`);
     expect(dependencies.afterDelivery).toHaveBeenCalledWith([

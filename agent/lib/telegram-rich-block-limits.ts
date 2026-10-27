@@ -6,6 +6,8 @@
  * - `estimateTelegramRichBlocks`: conservative Markdown block estimate used before delivery.
  * - `splitTelegramRichBlockByCount`: splits line-oriented lists/tables without losing table headers.
  */
+import { nextFenceState, type FenceState } from "./markdown-code-fence.js";
+
 export const TELEGRAM_RICH_MESSAGE_MAX_BLOCKS = 500;
 
 const LIST_ITEM_PATTERN = /^\s*(?:[-+*]|\d+\.)\s/u;
@@ -14,7 +16,8 @@ const TABLE_DELIMITER_PATTERN = /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?
 
 export function estimateTelegramRichBlocks(markdown: string): number {
   let blocks = 0;
-  let fencedCode = false;
+  // Every fence Markdown knows (backticks or tildes, any length) holds one block, not one per line.
+  let fence: FenceState | null = null;
   const listIndents: number[] = [];
   let table = false;
 
@@ -22,12 +25,10 @@ export function estimateTelegramRichBlocks(markdown: string): number {
   // provider rejection and affects only unusually large rich responses.
   for (const line of markdown.split("\n")) {
     const trimmed = line.trim();
-    if (/^```/u.test(trimmed)) {
-      if (!fencedCode) blocks += 1;
-      fencedCode = !fencedCode;
-      continue;
-    }
-    if (fencedCode) continue;
+    const openFence = fence;
+    fence = nextFenceState(line, fence);
+    if (openFence === null && fence !== null) blocks += 1;
+    if (openFence !== null || fence !== null) continue;
     if (!trimmed) {
       listIndents.length = 0;
       table = false;
