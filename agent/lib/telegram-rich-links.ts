@@ -9,6 +9,11 @@
  * - A person may open only http, https, mailto and tel links and anchors within the message. A
  *   `tg://` or `javascript:` address could start an action in Telegram behind a harmless caption,
  *   and the model may have copied it from a page that asked it to.
+ * - A Telegram web address (`t.me` and its twins) opens a bot, a chat or a channel just the same,
+ *   maybe with a start command. It may stay a link, but only with the address in sight: behind any
+ *   other caption it turns into the caption and the address, itself a link when it reads back
+ *   unchanged. URL readers disagree on odd host spellings, so a host counts as Telegram's when any
+ *   common reading makes it one.
  * - Media would make Telegram fetch an address the model chose; it stays a plain link to it.
  * - A refused link becomes its caption and its address in parentheses: nothing is lost, nothing
  *   opens. A refused definition is escaped, so the references to it read as plain text.
@@ -27,6 +32,11 @@ import { nodeRange, readMarkdownTree, trustedCodeRanges, walkMarkdownTree, type 
 
 const ALLOWED_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:", "tel:"]);
 const IN_MESSAGE_ANCHOR_PATTERN = /^#[\p{L}\p{N}_.:-]+$/u;
+// The domains Telegram opens inside the app; `name.t.me` is a public chat or channel.
+const TELEGRAM_LINK_DOMAINS = ["t.me", "telegram.me", "telegram.dog"];
+// An address of only these characters reads back unchanged as a link caption and destination.
+const PLAIN_ADDRESS_PATTERN = /^[A-Za-z0-9\-._~:/?#@!'*+,;=%]+$/u;
+const URL_AUTHORITY_PATTERN = /^[a-z][a-z\d+.-]*:\/\/([^/?#]*)/iu;
 // One pass settles a text; more passes only follow changes that made new links appear.
 const MAX_PASSES = 8;
 // The addresses GFM links bare: web ones (a `www.` one gets `http://`) and e-mail.
@@ -43,11 +53,49 @@ function safeAddress(url: string): boolean {
 }
 
 /**
+ * The hosts an address may lead to. WHATWG readers take `\` for `/`, RFC 3986 readers take the host
+ * after the last `@`, and how Telegram reads is not documented, so both count. A trailing dot names
+ * the same host.
+ */
+function hostsOf(url: string): string[] {
+  const hosts = URL.canParse(url) ? [new URL(url).hostname] : [];
+  const authority = URL_AUTHORITY_PATTERN.exec(url)?.[1];
+  if (authority !== undefined) hosts.push(authority.slice(authority.lastIndexOf("@") + 1).replace(/:\d*$/u, ""));
+  return hosts.map((host) => host.toLowerCase().replace(/\.+$/u, ""));
+}
+
+function telegramAddress(url: string): boolean {
+  return hostsOf(url).some((host) =>
+    TELEGRAM_LINK_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`)));
+}
+
+/** Whether a link may keep its caption: a safe address, and a Telegram one only when it is the caption. */
+function keepsCaption(caption: string, url: string): boolean {
+  if (!safeAddress(url)) return false;
+  if (!telegramAddress(url)) return true;
+  const shown = caption.trim();
+  return shown === url || shown === url.replace(/^https?:\/\//iu, "");
+}
+
+/**
  * Escapes the `!` of every media mark not escaped yet. An even run of backslashes before it
  * escapes only backslashes, so the mark is still live there.
  */
 function escapeMediaMarks(markdown: string): string {
   return markdown.replace(/(\\*)!\[/gu, (mark, slashes: string) => slashes.length % 2 === 0 ? `${slashes}\\![` : mark);
+}
+
+/**
+ * Whether the links a pattern match holds keep their captions as Markdown reads them. The pattern
+ * sees raw text, but an escape or an entity may hide the real host, and an inner bracket may start
+ * the caption Markdown shows.
+ */
+function decodedLinksKeepCaptions(link: string): boolean {
+  let kept = true;
+  walkMarkdownTree(readMarkdownTree(link), (node) => {
+    if (node.type === "link" && node.position !== undefined && !keepsCaption(captionOf(link, node), node.url)) kept = false;
+  });
+  return kept;
 }
 
 /** Inline links inside raw HTML, found by pattern: Markdown does not parse them there. */
@@ -87,7 +135,8 @@ function neutralizePatternLinks(markdown: string): string {
     const destination = markdown.slice(labelEnd + 2, cursor - 1).trim();
     const address = destination.split(/\s/u)[0] ?? "";
     result += markdown.slice(offset, labelStart);
-    result += safeAddress(address) ? markdown.slice(labelStart, cursor) : `${label} (${destination})`;
+    const link = markdown.slice(labelStart, cursor);
+    result += keepsCaption(label, address) && decodedLinksKeepCaptions(link) ? link : `${label} (${destination})`;
     offset = cursor;
   }
   return result;
@@ -118,11 +167,18 @@ function editOf(markdown: string, node: Nodes, trusted: readonly SourceRange[]):
   const range = nodeRange(node);
   const opening = markdown[range.start];
   switch (node.type) {
-    case "link":
+    case "link": {
       // An autolink starts with `<` and goes dead with every other `<` of the text; a bare
-      // address that GFM links is http, https or e-mail by its own rule.
-      if (opening !== "[" || safeAddress(node.url)) return null;
-      return { ...range, text: `${captionOf(markdown, node)} (${literal(node.url)})` };
+      // address that GFM links is http, https or e-mail by its own rule, and shows itself.
+      if (opening !== "[") return null;
+      const caption = captionOf(markdown, node);
+      if (keepsCaption(caption, node.url)) return null;
+      // A safe address that hid behind a caption stays a link, captioned with itself.
+      const address = safeAddress(node.url) && PLAIN_ADDRESS_PATTERN.test(node.url)
+        ? `[${node.url}](${node.url})`
+        : literal(node.url);
+      return { ...range, text: `${caption} (${address})` };
+    }
     case "image":
       if (opening !== "!") return null;
       return safeAddress(node.url)
@@ -131,7 +187,10 @@ function editOf(markdown: string, node: Nodes, trusted: readonly SourceRange[]):
     case "imageReference":
       return opening === "!" ? { ...range, text: `\\${markdown.slice(range.start, range.end)}` } : null;
     case "definition":
-      return safeAddress(node.url) ? null : { ...range, text: `\\${markdown.slice(range.start, range.end)}` };
+      // A reference shows its label, never the address: a Telegram one goes into sight as text.
+      return safeAddress(node.url) && !telegramAddress(node.url)
+        ? null
+        : { ...range, text: `\\${markdown.slice(range.start, range.end)}` };
     case "code":
     case "inlineCode": {
       if (trusted.some((code) => code.start === range.start && code.end === range.end)) return null;
