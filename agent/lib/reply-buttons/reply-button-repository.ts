@@ -144,6 +144,11 @@ export const replyButtonRepository = {
     );
   },
 
+  /** Telegram refused the message that carried these buttons: they never went out. */
+  async discard(id: string): Promise<void> {
+    await database().query("DELETE FROM telegram_reply_button_sets WHERE id = $1 AND status = 'staged'", [id]);
+  },
+
   /** The message is out: its buttons are offered. A press that arrived first keeps its outcome. */
   async activate(id: string, telegramMessageId: string): Promise<void> {
     await database().query(

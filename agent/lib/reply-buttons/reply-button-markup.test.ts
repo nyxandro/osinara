@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ReplyButton, ReplyButtonRows } from "./reply-button-contract.js";
 
+import { markdownCodeRanges, readMarkdownTree } from "../markdown-syntax.js";
 import { readReplyButtonMarkup, replyButtonMarkup } from "./reply-button-markup.js";
 
 const TOKEN = "AbCdEfGhIjKlMnOpQrStUv";
@@ -261,12 +262,16 @@ describe("reply button markup properties", () => {
     });
   });
 
-  it("never leaves a button tag in the text, and refuses only with its own error", () => {
+  it("never leaves a button tag outside code, and refuses only with its own error", () => {
     fc.assert(fc.property(fc.array(MARKUP_PIECE, { maxLength: 40 }), (pieces) => {
       const reading = readReplyButtonMarkup(pieces.join(""));
 
-      // A longer name such as `tg-buttonx` is another, unknown tag, not a button.
-      expect(reading.markdown).not.toMatch(/<\/?tg-button(?:-row)?(?![\w-])/u);
+      // A longer name such as `tg-buttonx` is another, unknown tag, not a button. Code, such as
+      // a line indented four spaces at the start, shows its tags as text, as Telegram does.
+      const code = markdownCodeRanges(readMarkdownTree(reading.markdown));
+      for (const tag of reading.markdown.matchAll(/<\/?tg-button(?:-row)?(?![\w-])/gu)) {
+        expect(code.some((range) => tag.index >= range.start && tag.index < range.end)).toBe(true);
+      }
       if (reading.rows === null) {
         if (reading.error !== null) expect(reading.error.code).toBe("AGENT_REPLY_BUTTONS_INVALID");
       } else {
@@ -278,6 +283,7 @@ describe("reply button markup properties", () => {
         [["<tg-but", "<tg-button>", "Да", "</tg-button>", "ton>"]],
         [["<", "<tg-button>", "Да", "</tg-button>", "tg-button>"]],
         [["<tg-button-row>", "\n", "Да", "</tg-button>"]],
+        [["\t", "<tg-button-row>", "\n", "<tg-button-row>"]],
       ],
     });
   });

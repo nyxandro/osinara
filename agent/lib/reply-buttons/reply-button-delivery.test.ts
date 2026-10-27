@@ -6,16 +6,24 @@
  *   as Telegram markup with the set's own token, and activated under the delivered message.
  * - Buttons go only to the person the turn answers, in the chat of the turn, outside external
  *   groups; refused markup and buttons in an interim note are reported, never delivered.
- * - Any failure of their bookkeeping lets the answer or the reminder go out without them.
+ * - Any failure of their bookkeeping lets the answer or the reminder go out without them, and so
+ *   does Telegram refusing the message that carries them: it goes again without the buttons, which
+ *   are discarded and never activated. Any other failure of the send is not retried.
  * - A reminder's buttons ride on a rich message that keeps its text literal.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppError } from "../app-error.js";
 
+const REFUSAL = new AppError("AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_FAILED", "Telegram не принял форматированный ответ", {
+  details: { description: "Bad Request: BUTTON_TEXT_INVALID", providerStatus: 400 },
+});
+const SENT = { chatType: "private" as const, messageId: "601" };
+
 const repository = vi.hoisted(() => ({
   activate: vi.fn(),
   activateForTurn: vi.fn(),
+  discard: vi.fn(),
   stageForReminder: vi.fn(),
   stageForTurn: vi.fn(),
 }));
@@ -55,9 +63,12 @@ describe("reply buttons on a turn's final answer", () => {
   it("records the last message, writes the buttons into it and activates them under it", async () => {
     repository.stageForTurn.mockResolvedValue(SET);
     const attachment = turnReplyButtons(TURN)!;
+    const post = vi.fn().mockResolvedValue(SENT);
 
-    await expect(attachment.withButtons(CHUNK)).resolves.toBe(`Оформляем?\n\n${MARKUP}`);
+    await expect(attachment.sendLast(CHUNK, post)).resolves.toBe(SENT);
     await attachment.afterDelivery([{ messageId: "600" }, { messageId: "601" }]);
+
+    expect(post.mock.calls).toEqual([[`Оформляем?\n\n${MARKUP}`]]);
 
     expect(repository.stageForTurn).toHaveBeenCalledWith({
       addresseeTelegramUserId: "101",
@@ -104,10 +115,55 @@ describe("reply buttons on a turn's final answer", () => {
 
   it("sends the last message without buttons when they cannot be recorded", async () => {
     repository.stageForTurn.mockRejectedValue(new Error("database busy"));
-    const attachment = turnReplyButtons(TURN)!;
+    const post = vi.fn().mockResolvedValue(SENT);
 
-    await expect(attachment.withButtons(CHUNK)).resolves.toBe("Оформляем?");
+    await turnReplyButtons(TURN)!.sendLast(CHUNK, post);
+
+    expect(post.mock.calls).toEqual([["Оформляем?"]]);
     expect(loggedCodes()).toEqual(["AGENT_REPLY_BUTTONS_STAGING_FAILED"]);
+  });
+
+  it("sends the message again without buttons when Telegram refuses it, and never activates them", async () => {
+    repository.stageForTurn.mockResolvedValue(SET);
+    const attachment = turnReplyButtons(TURN)!;
+    const post = vi.fn().mockRejectedValueOnce(REFUSAL).mockResolvedValueOnce(SENT);
+
+    await expect(attachment.sendLast(CHUNK, post)).resolves.toBe(SENT);
+    await attachment.afterDelivery([SENT]);
+
+    expect(post.mock.calls).toEqual([[`Оформляем?\n\n${MARKUP}`], ["Оформляем?"]]);
+    expect(repository.discard).toHaveBeenCalledWith("set-1");
+    expect(repository.activateForTurn).not.toHaveBeenCalled();
+    const logged = vi.mocked(console.error).mock.calls.map(([line]) => JSON.parse(String(line)));
+    expect(logged).toEqual([{ agentTurnId: "turn-1", code: "AGENT_REPLY_BUTTONS_REJECTED" }]);
+  });
+
+  it("still sends the message without buttons when discarding them fails", async () => {
+    repository.stageForTurn.mockResolvedValue(SET);
+    repository.discard.mockRejectedValue(new Error("database busy"));
+    const attachment = turnReplyButtons(TURN)!;
+    const post = vi.fn().mockRejectedValueOnce(REFUSAL).mockResolvedValueOnce(SENT);
+
+    await expect(attachment.sendLast(CHUNK, post)).resolves.toBe(SENT);
+    await attachment.afterDelivery([SENT]);
+
+    expect(repository.activateForTurn).not.toHaveBeenCalled();
+    expect(loggedCodes()).toEqual(["AGENT_REPLY_BUTTONS_REJECTED", "AGENT_REPLY_BUTTONS_DISCARD_FAILED"]);
+  });
+
+  it("does not send again after any other failure, whose outcome may be a delivered message", async () => {
+    repository.stageForTurn.mockResolvedValue(SET);
+    const ambiguous = new AppError("AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_AMBIGUOUS", "Telegram не подтвердил сообщение");
+    const limited = new AppError("AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_FAILED", "Telegram не принял форматированный ответ", {
+      details: { providerStatus: 429 },
+    });
+
+    for (const failure of [ambiguous, limited]) {
+      const post = vi.fn().mockRejectedValue(failure);
+      await expect(turnReplyButtons(TURN)!.sendLast(CHUNK, post)).rejects.toBe(failure);
+      expect(post).toHaveBeenCalledTimes(1);
+    }
+    expect(repository.discard).not.toHaveBeenCalled();
   });
 
   it("offers buttons in a family group to the member the turn answers", () => {
@@ -117,10 +173,12 @@ describe("reply buttons on a turn's final answer", () => {
   });
 
   it("sends a last message without buttons when they would not fit in it", async () => {
-    const attachment = turnReplyButtons(TURN)!;
+    const post = vi.fn().mockResolvedValue(SENT);
     const text = "я".repeat(32_700);
 
-    await expect(attachment.withButtons({ format: "rich", text })).resolves.toBe(text);
+    await turnReplyButtons(TURN)!.sendLast({ format: "rich", text }, post);
+
+    expect(post.mock.calls).toEqual([[text]]);
     expect(repository.stageForTurn).not.toHaveBeenCalled();
     expect(loggedCodes()).toEqual(["AGENT_REPLY_BUTTONS_TOO_LARGE"]);
   });
@@ -129,7 +187,7 @@ describe("reply buttons on a turn's final answer", () => {
     repository.stageForTurn.mockResolvedValue(SET);
     repository.activateForTurn.mockRejectedValue(new Error("database busy"));
     const attachment = turnReplyButtons(TURN)!;
-    await attachment.withButtons(CHUNK);
+    await attachment.sendLast(CHUNK, vi.fn().mockResolvedValue(SENT));
 
     await expect(attachment.afterDelivery([{ messageId: "600" }])).resolves.toBeUndefined();
     expect(loggedCodes()).toEqual(["AGENT_REPLY_BUTTONS_ACTIVATION_FAILED"]);

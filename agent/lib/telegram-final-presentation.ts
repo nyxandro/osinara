@@ -21,6 +21,7 @@ import {
   formatTelegramRichMessages,
   hasTelegramRichDetailsBlock,
 } from "./telegram-rich-markdown.js";
+import { openTrailingFence, readMarkdownTree } from "./markdown-syntax.js";
 import { splitTelegramAuthoredParts } from "./telegram-authored-split.js";
 import { literalRichParagraphs } from "./telegram-rich-literal.js";
 
@@ -105,7 +106,10 @@ function collapseLongAnswer(markdown: string, keepClosing: boolean): string {
   // The question reply buttons answer stays visible next to them.
   const last = rest.at(-1)?.trim();
   const closing = keepClosing && rest.length > 1 && isShortPlainBlock(last) ? last : undefined;
-  const body = (closing === undefined ? rest : rest.slice(0, -1)).join("\n\n");
+  const opened = (closing === undefined ? rest : rest.slice(0, -1)).join("\n\n");
+  // A truncated answer may end inside a code block; closed first, it cannot swallow the wrapper.
+  const fence = openTrailingFence(opened, readMarkdownTree(opened));
+  const body = fence === null ? opened : `${opened.replace(/\s+$/u, "")}\n${fence}`;
   const details = `<details><summary>${LONG_ANSWER_SUMMARY}</summary>\n\n${body}\n\n</details>`;
   return [keepLead ? first : undefined, details, closing].filter((part) => part !== undefined).join("\n\n");
 }

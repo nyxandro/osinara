@@ -8,7 +8,10 @@
  * - Model-authored media, Telegram service tags, and unsafe links are rendered inert.
  * - Final rich messages split only between complete blocks at Telegram's length limit.
  */
-import { describe, expect, it } from "vitest";
+import fc from "fast-check";
+import { describe, expect, it, vi } from "vitest";
+
+import { markdownCodeRanges, readMarkdownTree, trustedCodeRanges, walkMarkdownTree } from "./markdown-syntax.js";
 
 import {
   formatTelegramRichMessages,
@@ -45,8 +48,8 @@ describe("sanitizeTelegramRichMarkdown", () => {
 
     expect(sanitized).toContain("\\![чужое изображение]");
     expect(sanitized).toContain("&lt;img src=");
-    expect(sanitized).toContain("&lt;tg-thinking&gt;");
-    expect(sanitized).toContain("&lt;script&gt;");
+    expect(sanitized).toContain("&lt;tg-thinking>");
+    expect(sanitized).toContain("&lt;script>");
     expect(sanitized).toContain("опасная ссылка (javascript:alert(1))");
     expect(sanitized).not.toContain('<img src="');
     expect(sanitized).not.toContain("<tg-thinking>");
@@ -90,6 +93,176 @@ describe("sanitizeTelegramRichMarkdown", () => {
     expect(sanitized.replaceAll("\u200B", "")).toContain("tg-button");
   });
 
+  it.each([
+    ["an indented fence after a paragraph", "**Смотрите:**\n    ```\n    <a href=\"tg://resolve?domain=evil&start=x\">профиль</a> <img src=\"https://evil.example/p.png\"/>"],
+    ["an escaped backtick", "Смотрите: \\`<a href=\"tg://resolve?domain=evil\">профиль</a>\\`"],
+    ["a fence opened in the middle of a line", "Смотрите ```<img src=\"https://evil.example/p.png\"/>"],
+    ["a code span broken across lines", "Смотри `начало\nконец` <img src=\"https://evil.example/p.png\"> `хвост`"],
+    ["a backtick inside a link address", "[a](https://ok.example/`) <img src=\"https://evil.example/p.png\"> `"],
+    ["an unclosed fence closed by the next list item", "1. Шаг\n   ```\n   npm i\n2. <img src=\"https://evil.example/p.png\">"],
+    ["a code span a bare address runs into once `<` is escaped", "<img src=\"https://evil.example/p.png\">`<a href=\"tg://x\">профиль</a>`"],
+  ])("treats as code only what Telegram shows as code, so HTML behind %s stays inert", (_case, markdown) => {
+    const sanitized = sanitizeTelegramRichMarkdown(markdown);
+
+    expect(sanitized).not.toMatch(/<a\s|<img/u);
+    expect(sanitized).toContain("&lt;");
+  });
+
+  it.each([
+    ["a title", "[профиль](tg://resolve?domain=evil \"t\")"],
+    ["a space before the address", "[профиль]( tg://resolve?domain=evil)"],
+    ["an escaped scheme", "[профиль](tg&#58;//resolve?domain=evil)"],
+    ["the next list item after an unclosed fence", "1. Шаг\n   ```\n   npm i\n2. [профиль](tg://resolve?domain=evil)"],
+  ])("opens no unsafe link written with %s", (_case, markdown) => {
+    const sanitized = sanitizeTelegramRichMarkdown(markdown);
+
+    expect(sanitized).toContain("профиль (tg://resolve?domain=evil)");
+    expect(sanitized).not.toMatch(/\]\(\s*tg/u);
+  });
+
+  it.each([
+    ["before the summary", "<details>\n[r]: tg://evil\n<summary>Итог</summary>\n\n[профиль][r]\n\n</details>"],
+    ["without a summary", "<details>\n[r]:\ntg://evil\nтекст\n</details>\n\n[профиль][r]"],
+    ["with a label across lines", "<details><summary>Итог</summary>[r\nr]: tg://evil</details>\n\n[профиль][r\nr]"],
+  ])("breaks a link definition inside a collapsible block %s", (_case, markdown) => {
+    expect(sanitizeTelegramRichMarkdown(markdown)).not.toMatch(/(?<!\\)\[r(?:\nr)?\]:/u);
+  });
+
+  it("does not trust a fenced block that starts inside a multi-line formula", () => {
+    const sanitized = sanitizeTelegramRichMarkdown("$$\n```\n$$\n<img src=\"https://evil.example/p.png\">\n```");
+    expect(sanitized).not.toContain("<img");
+  });
+
+  it("escapes HTML in indented code instead of treating allowed tags there as markup", () => {
+    const markdown = "Пример:\n\n    <details><summary>Итог</summary>\n    текст\n    </details>\n\nДальше";
+    const sanitized = sanitizeTelegramRichMarkdown(markdown);
+
+    expect(sanitized).not.toMatch(/<\/?(?:details|summary)/u);
+    expect(sanitized.split("\n").length).toBe(markdown.split("\n").length);
+  });
+
+  it("trusts a code span when a dollar sign comes only after it", () => {
+    expect(sanitizeTelegramRichMarkdown("Команда `grep <file` стоит $5")).toBe("Команда `grep <file` стоит $5");
+    expect(sanitizeTelegramRichMarkdown("Цена $5, команда `grep <file`")).toContain("&lt;file");
+  });
+
+  it("counts a long tilde code block as one block, not one per line", () => {
+    const markdown = `~~~text\n${Array.from({ length: 900 }, (_, index) => `line ${index}`).join("\n")}\n~~~`;
+    expect(formatTelegramRichMessages(markdown)).toEqual([markdown]);
+  });
+
+  it.each(["```", "~~~"])("splits a code block longer than a message into parts that each reopen %s", (fence) => {
+    const lines = Array.from({ length: 900 }, (_, index) => `line ${index} ${"x".repeat(40)}`).join("\n");
+    const chunks = formatTelegramRichMessages(`${fence}text\n${lines}\n${fence}`);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => chunk.startsWith(`${fence}text\n`) && chunk.endsWith(`\n${fence}`))).toBe(true);
+  });
+
+  it("opens no link written in indented code, which Telegram may show as text", () => {
+    const sanitized = sanitizeTelegramRichMarkdown("    [профиль](tg://resolve?domain=evil)\n    [r]: tg://evil");
+
+    // Read as text, as Telegram might: every bracket that could open a link is escaped.
+    const asText = readMarkdownTree(sanitized.replace(/^ {4}/gmu, ""));
+    walkMarkdownTree(asText, (node) => expect(["definition", "link"]).not.toContain(node.type));
+  });
+
+  it("turns a reference to an unsafe definition into plain text", () => {
+    const sanitized = sanitizeTelegramRichMarkdown("Открой [профиль][r].\n\n[r]: tg://resolve?domain=evil");
+
+    expect(sanitized).toContain("\\[r]: tg://resolve?domain=evil");
+  });
+
+  it("leaves an autolink to a Telegram address dead and a safe one alone", () => {
+    const sanitized = sanitizeTelegramRichMarkdown("<tg://resolve?domain=evil> и [сайт](https://example.com) и www.example.com");
+
+    expect(sanitized).toContain("&lt;tg://resolve?domain=evil>");
+    expect(sanitized).toContain("[сайт](https://example.com) и www.example.com");
+  });
+
+  it("reads the inside of a collapsible block as Markdown, so no link there opens", () => {
+    const sanitized = sanitizeTelegramRichMarkdown([
+      "<details><summary>Итог</summary>[раз](tg://one)",
+      "[два",
+      "строкой](tg://two) и [три](",
+      "tg://three) и [четыре][r]",
+      "",
+      "[r]: tg://four",
+      "</details>",
+    ].join("\n"));
+
+    expect(sanitized.startsWith("<details><summary>Итог</summary>\n\n")).toBe(true);
+    expect(sanitized.endsWith("\n\n</details>")).toBe(true);
+    expect(sanitized).not.toMatch(/\]\(\s*tg:/u);
+    expect(sanitized).toContain("\\[r]: tg://four");
+  });
+
+  it("keeps a link Telegram may read inside a collapsible block's summary from opening", () => {
+    const sanitized = sanitizeTelegramRichMarkdown("<details><summary>[профиль](tg://resolve?domain=evil)</summary>\n\nТекст\n\n</details>");
+
+    expect(sanitized).toContain("<summary>профиль (tg://resolve?domain=evil)</summary>");
+    expect(sanitizeTelegramRichMarkdown("<details><summary>[проф\nиль](\ntg://evil \n\"t\")</summary>\n\nТекст\n\n</details>"))
+      .toContain("<summary>проф\nиль (tg://evil \n\"t\")</summary>");
+  });
+
+  it.each([
+    ["a bash fence", "```bash\nIFS=$'\\n'\necho $$ $& $` $'\n```\nдальше"],
+    ["inline code", "Запусти `echo $$` и `IFS=$'\\n'`, а `'[$&]'` оставь"],
+  ])("keeps the dollar signs of %s exactly as written", (_case, markdown) => {
+    expect(sanitizeTelegramRichMarkdown(markdown)).toBe(markdown);
+  });
+
+  it("keeps many dollar-quoted code spans without blowing up", () => {
+    const markdown = Array.from({ length: 12 }, () => "`IFS=$'\\n'`").join(" ");
+    expect(sanitizeTelegramRichMarkdown(markdown)).toBe(markdown);
+  });
+
+  it.each([
+    ["a list item", "1. Шаг:\n   ```bash\n   npm i", "1. Шаг:\n   ```bash\n   npm i\n   ```"],
+    ["a quotation", "> ```\n> код", "> ```\n> код\n> ```"],
+    ["the line of a bullet", "- ```js\n  const a = 1;", "- ```js\n  const a = 1;\n  ```"],
+    ["the line of a numbered item", "1. ```bash\n   npm i", "1. ```bash\n   npm i\n   ```"],
+  ])("closes a code block left open in %s where it stands", (_case, markdown, closed) => {
+    expect(sanitizeTelegramRichMarkdown(markdown)).toBe(closed);
+  });
+
+  it("closes a code block a truncated answer left open inside a collapsible block", () => {
+    expect(formatTelegramRichMessages("<details><summary>Код</summary>\n\n```js\nconst a = 1;"))
+      .toEqual(["<details><summary>Код</summary>\n\n```js\nconst a = 1;\n```\n\n</details>"]);
+  });
+
+  it.each([
+    ["nested images", `${"![".repeat(12)}x${"](https://ok.example/p.png)".repeat(12)}`],
+    ["repeated tags with a backtick in an attribute", "<b title=\"`\">x".repeat(20)],
+  ])("still sends an inert answer for %s instead of refusing it", (_case, markdown) => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const sanitized = sanitizeTelegramRichMarkdown(markdown);
+    const tree = readMarkdownTree(sanitized);
+
+    walkMarkdownTree(tree, (node) => expect(["image", "html"]).not.toContain(node.type));
+    vi.restoreAllMocks();
+  });
+
+  it("keeps media inert behind an escaped backslash inside a collapsible block's summary", () => {
+    const sanitized = sanitizeTelegramRichMarkdown("<details><summary>\\\\![x](https://evil.example/p.png)</summary>\n\nТекст\n\n</details>");
+    expect(sanitized).toContain("<summary>\\\\\\![x](https://evil.example/p.png)</summary>");
+  });
+
+  it("keeps quotations as quotations", () => {
+    expect(sanitizeTelegramRichMarkdown("> цитата\n> вторая строка\n\nа > б")).toBe("> цитата\n> вторая строка\n\nа > б");
+  });
+
+  it("keeps a fence indented inside a numbered item as code", () => {
+    const markdown = "10. Шаг:\n    ```bash\n    echo hi > file && a => b <x>\n    ```";
+    expect(sanitizeTelegramRichMarkdown(markdown)).toBe(markdown);
+  });
+
+  it("keeps a fence inside a list item as code and closes an unclosed fence at the end", () => {
+    const markdown = "1. Пример:\n   ```html\n   <b>как есть</b>\n   ```\n\nЕщё:\n```\n<i>оборвано";
+
+    expect(sanitizeTelegramRichMarkdown(markdown)).toBe(`${markdown}\n\`\`\``);
+  });
+
   it("rejects tables wider than Telegram Rich Message supports", () => {
     const row = `| ${Array.from({ length: 21 }, (_, index) => `C${index}`).join(" | ")} |`;
 
@@ -122,8 +295,8 @@ describe("sanitizeTelegramRichMarkdown", () => {
       '<details class="wide"><summary>Итог</summary>Текст</details>',
     );
 
-    expect(sanitized).toContain('&lt;details class="wide"&gt;');
-    expect(sanitized).toContain("&lt;/details&gt;");
+    expect(sanitized).toContain('&lt;details class="wide">');
+    expect(sanitized).toContain("&lt;/details>");
   });
 
   it("closes a truncated collapsible block instead of escaping the whole answer", () => {
@@ -140,7 +313,7 @@ describe("sanitizeTelegramRichMarkdown", () => {
     expect(
       formatTelegramRichMessages("<details><summary>Результат\n\nОтвет без закрытия summary"),
     ).toEqual([
-      "&lt;details&gt;&lt;summary&gt;Результат\n\nОтвет без закрытия summary",
+      "&lt;details>&lt;summary>Результат\n\nОтвет без закрытия summary",
     ]);
   });
 });
@@ -185,6 +358,39 @@ describe("formatTelegramRichMessages", () => {
     expect(chunks.at(-1)).toContain(tail);
   });
 
+  it("splits an oversized details block whose body starts right after the summary line", () => {
+    const lines = Array.from({ length: 600 }, (_, index) => `Строка ${index + 1} ${"данные ".repeat(10)}`);
+    const chunks = formatTelegramRichMessages(`<details><summary>Лог</summary>\n${lines.join("\n")}\n</details>`);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => chunk.startsWith("<details><summary>Лог</summary>"))).toBe(true);
+    expect(chunks.every((chunk) => chunk.endsWith("</details>"))).toBe(true);
+  });
+
+  it("keeps the line breaks of a real answer in the message", () => {
+    expect(formatTelegramRichMessages("**Итог:**\nМолоко — 100 ₽\nХлеб — 50 ₽\n\n- первый\n- второй"))
+      .toEqual(["**Итог:**  \nМолоко — 100 ₽  \nХлеб — 50 ₽\n\n- первый\n- второй"]);
+  });
+
+  it.each([
+    ["a tilde fence", "~~~", "~~~"],
+    ["a four-backtick fence holding a three-backtick line", "````", "````"],
+  ])("never splits %s at a blank line inside it, nor revives HTML it held", (_case, open, close) => {
+    const body = Array.from({ length: 300 }, (_, index) => `строка ${index} ${"данные ".repeat(20)}`).join("\n\n");
+    const code = `${open}\nначало\n\n\`\`\`\n\n<img src="https://evil.example/p.png">\n\n${close}`;
+    const chunks = formatTelegramRichMessages(`${body}\n\n${code}\n\n${body}`);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      const tree = readMarkdownTree(chunk);
+      const code = markdownCodeRanges(tree);
+      for (const tag of chunk.matchAll(/<img/gu)) {
+        expect(code.some((range) => tag.index >= range.start && tag.index < range.end)).toBe(true);
+      }
+    }
+    expect(chunks.some((chunk) => chunk.includes(code))).toBe(true);
+  });
+
   it("keeps every rich chunk below the provider block-count limit", () => {
     const body = Array.from({ length: 501 }, (_, index) => `- пункт ${index + 1}`).join("\n");
     const chunks = formatTelegramRichMessages(
@@ -195,5 +401,57 @@ describe("formatTelegramRichMessages", () => {
     expect(chunks.every((chunk) => chunk.startsWith("<details><summary>"))).toBe(true);
     expect(chunks.every((chunk) => chunk.endsWith("</details>"))).toBe(true);
     expect(chunks.every((chunk) => (chunk.match(/^- /gmu)?.length ?? 0) <= 498)).toBe(true);
+  });
+});
+
+// What a model can write, or copy from a page that asks it to: links, media, HTML and every
+// syntax that decides where code begins and ends.
+const RISKY_PIECE = fc.constantFrom(
+  "[", "]", "](", ")", "(", "tg://resolve?domain=evil", "https://ok.example", "javascript:alert(1)", "!",
+  "<img src=\"https://evil.example/p.png\">", "<a href=\"tg://x\">", "</a>", "<details>", "</details>",
+  "<summary>", "</summary>", "<u>", "</u>", "<tg-button>", "<tg://x>", "`", "```", "\\", " \"t\"", "[r]: ",
+  "\n", "\n\n", "    ", "1. ", "- ", "> ", "текст", " ", "$", "$$", "~~~", "````", "IFS=$'\\n'",
+  "<details><summary>Итог</summary>", "[подпись\n", "](\n", "|", "| a | b |\n|---|---|\n",
+);
+const SAFE_ADDRESS = /^(?:https?:|mailto:|tel:|#)/u;
+const ALLOWED_TAG = /^<\/?(?:details|summary|u|ins|sub|sup)(?: open)?>/u;
+
+/** No live unsafe link, no media and no unknown tag outside code Telegram is sure to show as code. */
+function expectInert(sanitized: string): void {
+  const tree = readMarkdownTree(sanitized);
+  walkMarkdownTree(tree, (node) => {
+    expect(node.type).not.toBe("image");
+    if ((node.type === "link" || node.type === "definition") && !SAFE_ADDRESS.test(node.url)) {
+      throw new Error(`live unsafe ${node.type}: ${node.url} in ${JSON.stringify(sanitized)}`);
+    }
+  });
+  // Markdown opens a tag only with `<` and a letter, `/`, `!` or `?`; anything else is text.
+  const code = trustedCodeRanges(sanitized, tree);
+  for (const tag of sanitized.matchAll(/<(?=[A-Za-z/!?])/gu)) {
+    if (code.some((range) => tag.index >= range.start && tag.index < range.end)) continue;
+    expect(ALLOWED_TAG.test(sanitized.slice(tag.index)), JSON.stringify(sanitized)).toBe(true);
+  }
+}
+
+describe("sanitizer property", () => {
+  it("leaves no live unsafe link, no media and no unknown tag outside code, in every message", () => {
+    fc.assert(fc.property(fc.array(RISKY_PIECE, { maxLength: 40 }), (pieces) => {
+      let messages: string[];
+      try {
+        messages = formatTelegramRichMessages(pieces.join(""));
+      } catch (error) {
+        // Refusing is allowed, but only with the project's own error.
+        expect(error).toMatchObject({ code: expect.stringMatching(/^AGENT_TELEGRAM_RICH_/u) });
+        return;
+      }
+      for (const message of messages) expectInert(message);
+    }), {
+      examples: [
+        [["[профиль](", "tg://resolve?domain=evil", " \"t\"", ")"]],
+        [["`", "текст", "\n", "текст", "`", " ", "<img src=\"https://evil.example/p.png\">", " ", "`"]],
+        [["1. ", "текст", "\n", "    ", "```", "\n", "2. ", "[", "x", "](", "tg://resolve?domain=evil", ")"]],
+        [["1. ", "[r]: ", "<details><summary>Итог</summary>", "```"]],
+      ],
+    });
   });
 });

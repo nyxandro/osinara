@@ -3,11 +3,17 @@
  *
  * Exports:
  * - `sanitizeTelegramRichMarkdown`: preserves text-rich structure and neutralizes active content.
- * - `formatTelegramRichMessages`: produces complete blocks within Telegram's rich text limit.
+ * - `formatTelegramRichMessages`: produces complete blocks within Telegram's rich text limit, with
+ *   the model's line breaks kept as hard breaks.
  * - `hasTelegramRichDetailsBlock`: recognizes an actual supported details container outside code.
  * - `fitsTelegramRichMessage`: whether finished markdown stays within one rich message's limits.
  *
  * Key constructs:
+ * - Code is found by a real Markdown parser (`markdown-syntax.ts`), exactly where Telegram shows it
+ *   as code, and is the only text left verbatim. Links and media are settled by
+ *   `telegram-rich-links.ts` before anything else.
+ * - Only `<` is escaped: every tag and autolink starts with it, while `>` also marks a quotation
+ *   that must stay one.
  * - A narrow HTML allowlist for details and inline text formatting.
  * - Canonical rewriting of tolerated tag spellings so one stray space never escapes a block.
  * - Recovery of a truncated collapsible block; other malformed allowed tags render inert.
@@ -18,6 +24,10 @@
  *   while code keeps showing the same characters.
  */
 import { AppError } from "./app-error.js";
+import { nextFenceState, type FenceState } from "./markdown-code-fence.js";
+import { markdownCodeRanges, openTrailingFence, readMarkdownTree, trustedCodeRanges } from "./markdown-syntax.js";
+import { keepTelegramRichLineBreaks } from "./telegram-rich-line-breaks.js";
+import { inertLinkSyntax, neutralizeTelegramRichLinks } from "./telegram-rich-links.js";
 import {
   estimateTelegramRichBlocks,
   splitTelegramRichBlockByCount,
@@ -29,7 +39,6 @@ const TELEGRAM_RICH_MESSAGE_MAX_TABLE_COLUMNS = 20;
 const TELEGRAM_RICH_MESSAGE_MAX_NESTING = 16;
 const PLACEHOLDER_START = 0xE000;
 const PLACEHOLDER_END = 0xF8FF;
-const ALLOWED_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:", "tel:"]);
 const ALLOWED_HTML_TAG_NAMES = new Set(["details", "summary", "u", "ins", "sub", "sup"]);
 const DETAILS_TAG_NAME = "details";
 // The tag name stays attached to the bracket so ordinary text like `< details>` is never revived
@@ -40,6 +49,8 @@ const HTML_CLOSE_TAG_PATTERN = /^<\/([a-z]+)\s*>$/iu;
 const DETAILS_OPEN_ATTRIBUTE_PATTERN = /^open(?:\s*=\s*"(?:|open|true)")?$/iu;
 const TELEGRAM_TAG_START_PATTERN = /<(\/?tg-)/giu;
 const ZERO_WIDTH_SPACE = "\u200B";
+// A text settles in one or two readings; more mean a change keeps opening something new.
+const MAX_SANITIZE_PASSES = 8;
 
 function placeholderMarker(value: string): string {
   for (let codePoint = PLACEHOLDER_START; codePoint <= PLACEHOLDER_END; codePoint += 1) {
@@ -131,74 +142,36 @@ function validateAllowedTags(tags: readonly string[]): string[] {
   return stack.map(() => `</${DETAILS_TAG_NAME}>`);
 }
 
-function safeMarkdownLink(rawUrl: string): boolean {
-  if (/^#[\p{L}\p{N}_.:-]+$/u.test(rawUrl)) return true;
-  if (!URL.canParse(rawUrl)) return false;
-  return ALLOWED_LINK_PROTOCOLS.has(new URL(rawUrl).protocol);
-}
-
-function neutralizeUnsafeLinks(markdown: string): string {
-  let result = "";
-  let offset = 0;
-  while (offset < markdown.length) {
-    const labelStart = markdown.indexOf("[", offset);
-    if (labelStart === -1) return result + markdown.slice(offset);
-    const labelEnd = markdown.indexOf("](", labelStart + 1);
-    if (labelEnd === -1 || markdown.slice(labelStart + 1, labelEnd).includes("\n")) {
-      result += markdown.slice(offset, labelStart + 1);
-      offset = labelStart + 1;
-      continue;
-    }
-
-    // Markdown destinations may contain balanced nested parentheses; regex-only matching leaves
-    // deeper unsafe URLs untouched, so scan the destination structurally.
-    let depth = 1;
-    let cursor = labelEnd + 2;
-    for (; cursor < markdown.length && depth > 0; cursor += 1) {
-      const character = markdown[cursor]!;
-      if (character === "\\") {
-        cursor += 1;
-        continue;
-      }
-      if (character === "\n" || /\s/u.test(character)) break;
-      if (character === "(") depth += 1;
-      if (character === ")") depth -= 1;
-    }
-    if (depth !== 0) {
-      result += markdown.slice(offset, labelStart + 1);
-      offset = labelStart + 1;
-      continue;
-    }
-
-    const matchEnd = cursor;
-    const label = markdown.slice(labelStart + 1, labelEnd);
-    const rawUrl = markdown.slice(labelEnd + 2, matchEnd - 1);
-    const match = markdown.slice(labelStart, matchEnd);
-    result += markdown.slice(offset, labelStart);
-    result += safeMarkdownLink(rawUrl) ? match : `${label} (${rawUrl})`;
-    offset = matchEnd;
-  }
-  return result;
-}
-
 function protectMarkdownCode(markdown: string): {
   protectedMarkdown: string;
   restore(value: string): string;
 } {
   const marker = placeholderMarker(markdown);
   const code: string[] = [];
-  // Complete inline spans and fenced blocks are inert Markdown content; an unfinished fence is
-  // protected to the end because model truncation must not turn code examples into active HTML.
-  const protectedMarkdown = markdown.replace(/```[\s\S]*?(?:```|$)|`[^`\n]*`/gu, (value) => {
-    const index = code.push(value) - 1;
-    return `${marker}${index}${marker}`;
-  });
+  let protectedMarkdown = "";
+  let position = 0;
+  // Only code Telegram is sure to show as code keeps its raw text, found by the parser exactly.
+  // Other code is text to Telegram, yet code to the parser: its `<` goes dead right here, so no
+  // allowed tag inside it is ever taken for markup.
+  const tree = readMarkdownTree(markdown);
+  const trusted = trustedCodeRanges(markdown, tree);
+  for (const range of markdownCodeRanges(tree)) {
+    if (range.start < position) continue;
+    const source = markdown.slice(range.start, range.end);
+    const kept = trusted.some((code) => code.start === range.start && code.end === range.end)
+      ? `${marker}${code.push(source) - 1}${marker}`
+      : source.replaceAll("<", "&lt;");
+    protectedMarkdown += `${markdown.slice(position, range.start)}${kept}`;
+    position = range.end;
+  }
+  protectedMarkdown += markdown.slice(position);
   return {
     protectedMarkdown,
     restore(value) {
       let restored = value;
+      // A function replacement: code is full of `$'`, `$$` and `$&`, which a string one expands.
       for (const [index, codeBlock] of code.entries()) {
-        restored = restored.replaceAll(`${marker}${index}${marker}`, codeBlock);
+        restored = restored.replaceAll(`${marker}${index}${marker}`, () => codeBlock);
       }
       return restored;
     },
@@ -267,7 +240,9 @@ function completeMarkdownBlocks(markdown: string): string[] {
   const blocks: string[] = [];
   const current: string[] = [];
   let detailsDepth = 0;
-  let fencedCode = false;
+  // Every fence Markdown knows (backticks or tildes, any length), so a blank line inside one is
+  // never taken for the end of a block: the next message would show that code as live text.
+  let fence: FenceState | null = null;
   let mathBlock = false;
   const flush = () => {
     if (current.length === 0) return;
@@ -278,11 +253,12 @@ function completeMarkdownBlocks(markdown: string): string[] {
   // Blank lines inside fenced code, details, and block formulas are content, not split points.
   for (const line of markdown.split("\n")) {
     const trimmed = line.trim();
+    const openFence = fence;
+    fence = nextFenceState(line, fence);
     if (current.length === 0) {
       if (!trimmed) continue;
-      fencedCode = /^```/u.test(trimmed);
       mathBlock = trimmed === "$$";
-    } else if (!fencedCode && detailsDepth === 0 && !mathBlock && !trimmed) {
+    } else if (openFence === null && fence === null && detailsDepth === 0 && !mathBlock && !trimmed) {
       flush();
       continue;
     }
@@ -292,8 +268,7 @@ function completeMarkdownBlocks(markdown: string): string[] {
     const detailsClose = line.match(/<\/details>/gu)?.length ?? 0;
     detailsDepth += detailsOpen - detailsClose;
 
-    if (fencedCode && current.length > 1 && /^```\s*$/u.test(trimmed)) {
-      fencedCode = false;
+    if (openFence !== null && fence === null && detailsDepth === 0 && !mathBlock) {
       flush();
       continue;
     }
@@ -308,10 +283,40 @@ function completeMarkdownBlocks(markdown: string): string[] {
   return blocks;
 }
 
-function sanitizeTelegramRichMarkdownInternal(
-  markdown: string,
-  preserveAllowedHtml: boolean,
-): string {
+/**
+ * A truncated answer may end inside a code block. Markdown runs it to the end anyway; closing it
+ * explicitly changes nothing on screen and lets a missing `</details>` land after the code.
+ */
+function closeOpenTrailingFence(markdown: string): string {
+  const fence = openTrailingFence(markdown, readMarkdownTree(markdown));
+  return fence === null ? markdown : `${markdown.replace(/\s+$/u, "")}\n${fence}`;
+}
+
+/**
+ * Telegram reads Markdown inside a collapsible block, while Markdown itself takes the lines after
+ * an HTML tag as raw HTML up to the next blank line, and the filter would see no link there. A
+ * blank line after the summary and before the closing tag, the way the backend writes the block
+ * itself, makes both read the inside as Markdown.
+ */
+function separateDetailsContent(text: string, marker: string, tags: readonly string[]): string {
+  let separated = text;
+  for (const [index, tag] of tags.entries()) {
+    const placeholder = `${marker}${index}${marker}`;
+    const at = separated.indexOf(placeholder);
+    if (at === -1) continue;
+    const before = separated.slice(0, at);
+    const after = separated.slice(at + placeholder.length);
+    if (tag === "</summary>" && !/^[ \t]*\n[ \t]*\n/u.test(after)) {
+      separated = `${before}${placeholder}\n\n${after.replace(/^[ \t]*\n?/u, "")}`;
+    } else if (tag === `</${DETAILS_TAG_NAME}>` && before.trim() !== "" && !/\n[ \t]*\n[ \t]*$/u.test(before)) {
+      separated = `${before.replace(/\n?[ \t]*$/u, "")}\n\n${placeholder}${after}`;
+    }
+  }
+  return separated;
+}
+
+/** One reading of the text: every tag outside code goes dead except the allowed ones. */
+function escapeLiveTags(markdown: string, preserveAllowedHtml: boolean): string {
   const protectedCode = protectMarkdownCode(markdown);
   validateTableWidths(protectedCode.protectedMarkdown);
 
@@ -326,21 +331,42 @@ function sanitizeTelegramRichMarkdownInternal(
     return `${marker}${index}${marker}`;
   });
   const missingClosingTags = validateAllowedTags(allowedTags);
+  sanitized = separateDetailsContent(sanitized, marker, allowedTags);
 
-  // Model-authored media and unsafe links stay visible as inert text instead of triggering fetches.
-  sanitized = sanitized.replace(/!\[/gu, "\\![");
-  sanitized = neutralizeUnsafeLinks(sanitized);
-  sanitized = sanitized.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  // Every other tag goes dead; a lone `>` cannot open one and may mark a quotation.
+  sanitized = sanitized.replaceAll("<", "&lt;");
 
   for (const [index, tag] of allowedTags.entries()) {
-    sanitized = sanitized.replaceAll(`${marker}${index}${marker}`, tag);
+    sanitized = sanitized.replaceAll(`${marker}${index}${marker}`, () => tag);
   }
 
   // A recovered closing tag belongs on its own block line so chunking still sees complete blocks.
   if (missingClosingTags.length > 0) {
     sanitized = `${sanitized.trimEnd()}\n\n${missingClosingTags.join("\n\n")}`;
   }
-  return protectedCode.restore(sanitized).replace(TELEGRAM_TAG_START_PATTERN, `<${ZERO_WIDTH_SPACE}$1`);
+  return protectedCode.restore(sanitized);
+}
+
+function sanitizeTelegramRichMarkdownInternal(
+  markdown: string,
+  preserveAllowedHtml: boolean,
+): string {
+  // Each step changes how the rest reads: a refused link turns into text, and an escaped `<` can
+  // let a bare web address run on into a code span and open what the span kept inert. So the
+  // steps repeat on their own result until a reading changes nothing. They only ever make text
+  // inert, never live again, so the readings settle.
+  let text = markdown;
+  for (let pass = 0; pass < MAX_SANITIZE_PASSES; pass += 1) {
+    // A step can leave a fence open at the end (a blank line moved it onto a line of its own), so
+    // each reading closes it before a missing `</details>` is added after it.
+    const next = escapeLiveTags(neutralizeTelegramRichLinks(closeOpenTrailingFence(text)), preserveAllowedHtml);
+    if (next === text) return next.replace(TELEGRAM_TAG_START_PATTERN, `<${ZERO_WIDTH_SPACE}$1`);
+    text = next;
+  }
+  // A text crafted to keep changing still goes out, all of it inert: every `<` escaped, code
+  // included, and no link syntax left.
+  console.error(JSON.stringify({ code: "AGENT_TELEGRAM_RICH_UNSETTLED" }));
+  return inertLinkSyntax(text).replaceAll("<", "&lt;");
 }
 
 export function sanitizeTelegramRichMarkdown(markdown: string): string {
@@ -370,19 +396,26 @@ function hardSplit(value: string, maxCharacters: number): string[] {
 
 function splitBodyBlock(block: string, maxCharacters: number): string[] {
   if (characterLength(block) <= maxCharacters) return [block];
-  const fenced = /^```([^\n]*)\n([\s\S]*)\n```$/u.exec(block);
-  if (!fenced) return hardSplit(block, maxCharacters);
+  const lines = block.split("\n");
+  const fence = /^ {0,3}(`{3,}|~{3,})/u.exec(lines[0]!)?.[1];
+  const closing = lines.at(-1)!.trim();
+  if (fence === undefined || lines.length < 3 || closing.length < fence.length || closing !== fence[0]!.repeat(closing.length)) {
+    return hardSplit(block, maxCharacters);
+  }
 
-  // Reopen a very large code fence in each message so every rich payload remains valid Markdown.
-  const opening = `\`\`\`${fenced[1]}`;
-  const overhead = characterLength(`${opening}\n\n\`\`\``);
+  // Reopen a very large code fence in each message, with its own opening and closing lines, so
+  // every rich payload remains valid Markdown.
+  const opening = lines[0]!;
+  const closingLine = lines.at(-1)!;
+  const overhead = characterLength(`${opening}\n\n${closingLine}`);
   const contentLimit = maxCharacters - overhead;
   if (contentLimit < 1) return [];
-  return hardSplit(fenced[2]!, contentLimit).map((part) => `${opening}\n${part}\n\`\`\``);
+  return hardSplit(lines.slice(1, -1).join("\n"), contentLimit).map((part) => `${opening}\n${part}\n${closingLine}`);
 }
 
 function splitOversizedDetailsBlock(block: string): string[] | null {
-  const match = /^(<details(?: open)?><summary>[^\n]*<\/summary>)\n+([\s\S]*)\n+<\/details>$/u.exec(block);
+  // Trailing spaces are a hard break the line-break step may leave after the frame's lines.
+  const match = /^(<details(?: open)?><summary>[^\n]*<\/summary>)[ \t]*\n+([\s\S]*?)[ \t]*\n+<\/details>$/u.exec(block);
   if (!match) return null;
   const opening = match[1]!;
   const body = match[2]!;
@@ -418,7 +451,8 @@ export function fitsTelegramRichMessage(markdown: string): boolean {
 }
 
 export function formatTelegramRichMessages(markdown: string): string[] {
-  const sanitized = sanitizeTelegramRichMarkdown(markdown).trim();
+  // The model's line breaks are part of what it wrote; Telegram would read most of them as spaces.
+  const sanitized = keepTelegramRichLineBreaks(sanitizeTelegramRichMarkdown(markdown).trim());
   if (!sanitized) return [];
   if (characterLength(sanitized) <= TELEGRAM_RICH_MESSAGE_MAX_CHARACTERS &&
     estimateTelegramRichBlocks(sanitized) <= TELEGRAM_RICH_MESSAGE_MAX_BLOCKS) return [sanitized];
@@ -427,12 +461,14 @@ export function formatTelegramRichMessages(markdown: string): string[] {
   const blocks = completeMarkdownBlocks(sanitized).flatMap((block) => {
     if (characterLength(block) <= TELEGRAM_RICH_MESSAGE_MAX_CHARACTERS &&
       estimateTelegramRichBlocks(block) <= TELEGRAM_RICH_MESSAGE_MAX_BLOCKS) return [block];
-    return splitOversizedDetailsBlock(block) ?? (
-      estimateTelegramRichBlocks(block) > TELEGRAM_RICH_MESSAGE_MAX_BLOCKS &&
-        !hasTelegramRichDetailsBlock(block)
-        ? splitTelegramRichBlockByCount(block, TELEGRAM_RICH_MESSAGE_MAX_BLOCKS)
-        : [block]
-    );
+    const details = splitOversizedDetailsBlock(block);
+    if (details !== null) return details;
+    if (estimateTelegramRichBlocks(block) > TELEGRAM_RICH_MESSAGE_MAX_BLOCKS && !hasTelegramRichDetailsBlock(block)) {
+      return splitTelegramRichBlockByCount(block, TELEGRAM_RICH_MESSAGE_MAX_BLOCKS);
+    }
+    // A single code block longer than one message is reopened in each part, like inside details;
+    // any other indivisible block stays whole and fails explicitly below.
+    return /^ {0,3}(?:`{3,}|~{3,})/u.test(block) ? splitBodyBlock(block, TELEGRAM_RICH_MESSAGE_MAX_CHARACTERS) : [block];
   });
   const chunks: string[] = [];
   let chunk = "";
@@ -454,5 +490,17 @@ export function formatTelegramRichMessages(markdown: string): string[] {
     chunk = block;
   }
   if (chunk) chunks.push(chunk);
-  return chunks;
+  // Telegram reads each message on its own. Whatever a cut changed about where code begins or
+  // ends, every message passes the filter once more, and still has to fit.
+  if (chunks.length < 2) return chunks;
+  return chunks.map((part) => {
+    const checked = sanitizeTelegramRichMarkdown(part);
+    if (!fitsTelegramRichMessage(checked)) {
+      throw new AppError(
+        "AGENT_TELEGRAM_RICH_BLOCK_TOO_LONG",
+        "Один блок ответа превышает допустимый размер или число блоков Telegram",
+      );
+    }
+    return checked;
+  });
 }

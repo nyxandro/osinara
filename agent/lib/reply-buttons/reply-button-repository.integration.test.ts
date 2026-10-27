@@ -71,6 +71,16 @@ describeWithDatabase("reply button repository", () => {
       .toEqual([{ status: "active", telegram_message_id: "50" }]);
   });
 
+  it("discards only buttons that never went out", async () => {
+    const refused = await stageTurn("turn_1", "A".repeat(22));
+    const offered = await delivered("turn_2", "51", "B".repeat(22));
+
+    await replyButtonRepository.discard(refused.id);
+    await replyButtonRepository.discard(offered.id);
+
+    expect((await database().query("SELECT id FROM telegram_reply_button_sets")).rows).toEqual([{ id: offered.id }]);
+  });
+
   it("claims a press once and finds the same claim for the same callback", async () => {
     await delivered("turn_1", "50");
 

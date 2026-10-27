@@ -177,6 +177,13 @@ describe("Telegram final presentation", () => {
       }]);
     });
 
+    it("closes a code block a long answer left open before folding it", () => {
+      const markdown = `короткий вывод\n\n${"подробность ".repeat(70).trim()}\n\n\`\`\`js\nconst a = 1;`;
+      const [chunk] = formatTelegramFinalPresentation(markdown);
+
+      expect(chunk!.text.endsWith("```js\nconst a = 1;\n```\n\n</details>")).toBe(true);
+    });
+
     it("makes only the last message rich when the answer has an aside", () => {
       expect(formatTelegramFinalPresentation(`Готово\n${TELEGRAM_ASIDE_DIRECTIVE}\nПовторить заказ?`, { replyButtons: true }))
         .toEqual([
