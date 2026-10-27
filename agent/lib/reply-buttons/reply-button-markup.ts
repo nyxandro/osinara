@@ -16,15 +16,15 @@
  * - The set is all or nothing: a half-kept set could drop the "no" and leave only the "yes".
  * - Every tag is removed from the text whether the buttons were accepted or not, so markup never
  *   reaches a person as text; the words between the tags stay. Code keeps its literal content, and
- *   code here is only what Telegram itself shows as code: a fenced block or an inline code span. An
- *   indented line continues the paragraph or list item above it, and an escaped backtick opens
- *   nothing, so a tag there would be live and is read like any other.
+ *   code here is exactly what the Markdown parser finds; a tag that only looks as if it stood in
+ *   code is read like any other. The rich-message filter trusts less code than that and makes the
+ *   button tags it leaves in the rest inert as well.
  * - The usual slips of a model are read as meant: the `data` it copied from the documentation, a
  *   row left open at the very end, buttons without a row, rows on several lines, a row wider than
  *   fits. Presentation only falls back: an unknown style leaves the button uncolored.
  */
 import { AppError } from "../app-error.js";
-import { nextFenceState, type FenceState } from "../markdown-code-fence.js";
+import { markdownCodeRanges, readMarkdownTree } from "../markdown-syntax.js";
 import {
   REPLY_BUTTON_CALLBACK_PREFIX,
   REPLY_BUTTON_STYLES,
@@ -65,8 +65,6 @@ const TOKEN_PATTERN = new RegExp([
   `<\\/?tg-button(?:-row)?(?![\\w-])[^>\\u0000\\n]*>?`,
 ].join("|"), "giu");
 const ATTRIBUTE_PATTERN = /([A-Za-z][\w-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/gu;
-// A backslash before the opening backtick escapes it, so no code span starts there.
-const INLINE_CODE_PATTERN = /(?<![\\`])(`+)(?!`)[^\n]*?(?<!`)\1(?!`)/gu;
 const NAMED_ENTITIES: Readonly<Record<string, string>> = {
   amp: "&", apos: "'", gt: ">", lt: "<", nbsp: " ", quot: "\"",
 };
@@ -80,15 +78,16 @@ function invalid(message: string): never {
   throw new AppError(INVALID_CODE, message);
 }
 
-/** The text with fenced and inline code replaced by the mask, index for index. */
+/** The text with every code range the parser finds replaced by the mask, index for index. */
 function maskCode(markdown: string): string {
-  let fence: FenceState | null = null;
-  return markdown.split("\n").map((line) => {
-    const openFence = fence;
-    fence = nextFenceState(line, fence);
-    if (openFence || fence) return CODE_MASK.repeat(line.length);
-    return line.replace(INLINE_CODE_PATTERN, (code) => CODE_MASK.repeat(code.length));
-  }).join("\n");
+  let masked = "";
+  let position = 0;
+  for (const range of markdownCodeRanges(readMarkdownTree(markdown))) {
+    if (range.start < position) continue;
+    masked += `${markdown.slice(position, range.start)}${CODE_MASK.repeat(range.end - range.start)}`;
+    position = range.end;
+  }
+  return masked + markdown.slice(position);
 }
 
 function decodeEntities(value: string): string {
@@ -186,7 +185,8 @@ function withoutSpans(markdown: string, spans: readonly (readonly [number, numbe
     }
     removedAfterBlank = removedAfterBlank || (lines.at(-1) ?? "").trim().length === 0;
   }
-  return lines.join("\n").trim();
+  // Blank lines go from both ends, but not the indent of the first line: it may make it code.
+  return lines.join("\n").replace(/^(?:[ \t]*\n)+/u, "").trimEnd();
 }
 
 export function readReplyButtonMarkup(markdown: string): ReplyButtonMarkupReading {

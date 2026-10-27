@@ -7,11 +7,15 @@
  * - Completed output is persisted with sendRichMessage and anchors group conversations.
  * - The first chunk of a group response replies to the verified triggering message.
  * - Telegram rejection and ambiguous transport failures remain fail-fast without retries.
+ * - A refusal of the message itself (HTTP 400) is told apart from every other failure and carries
+ *   Telegram's own reason for the log.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  isTelegramRichMessageRefusal,
   postTelegramRichMessage,
+  postTelegramRichMessageChunk,
   startTelegramRichThinkingDraft,
 } from "./telegram-rich-messages.js";
 
@@ -240,6 +244,29 @@ describe("postTelegramRichMessage", () => {
     );
     expect(telegramFetch).toHaveBeenCalledTimes(1);
     expect(errorLog).toHaveBeenCalledOnce();
+  });
+
+  it("tells a refusal of the message from any other failure, with Telegram's reason", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const failure = (status: number, description: string) => new Response(
+      JSON.stringify({ description, error_code: status, ok: false }),
+      { headers: { "content-type": "application/json" }, status },
+    );
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(failure(400, "Bad Request: BUTTON_TEXT_INVALID"))
+      .mockResolvedValueOnce(failure(429, "Too Many Requests: retry after 3"))
+      .mockResolvedValueOnce(failure(502, "Bad Gateway"));
+
+    const refused = await postTelegramRichMessageChunk("Ответ", telegramTarget()).catch((error: unknown) => error);
+    const limited = await postTelegramRichMessageChunk("Ответ", telegramTarget()).catch((error: unknown) => error);
+    const broken = await postTelegramRichMessageChunk("Ответ", telegramTarget()).catch((error: unknown) => error);
+
+    expect(refused).toMatchObject({
+      code: "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_FAILED",
+      details: { description: "Bad Request: BUTTON_TEXT_INVALID", providerStatus: 400 },
+    });
+    expect([refused, limited, broken].map(isTelegramRichMessageRefusal)).toEqual([true, false, false]);
+    expect(isTelegramRichMessageRefusal(new Error("Bad Request"))).toBe(false);
   });
 
   it("logs an ambiguous success envelope without exposing message content", async () => {

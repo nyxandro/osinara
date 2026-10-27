@@ -8,8 +8,9 @@
  * - The header is bold through a Telegram `entities` span rather than a parse mode, so the reminder
  *   text written by a person is sent exactly as stored and never needs escaping.
  * - A reminder with reply buttons goes out as a rich message, the only kind that carries them, with
- *   its text kept literal; the buttons are staged before the send and activated after it. The
- *   receipt keeps the plain text either way.
+ *   its text kept literal; the buttons are staged before the send and activated after it. When
+ *   Telegram refuses that message, nothing was delivered, so the reminder goes once more as an
+ *   ordinary message and its buttons are discarded. The receipt keeps the plain text either way.
  */
 import { callTelegramApi } from "../../runtime/telegram/api.js";
 import type { JsonObject } from "../../runtime/json.js";
@@ -42,6 +43,8 @@ function messageThreadId(value: string | null): number | undefined {
 }
 
 const REMINDER_HEADER = "⏰ Напоминание:";
+const TELEGRAM_BAD_REQUEST_STATUS = 400;
+const TELEGRAM_DESCRIPTION_MAX_LENGTH = 200;
 
 function formatScheduledTime(job: ClaimedReminder): string {
   return new Intl.DateTimeFormat("ru-RU", {
@@ -93,6 +96,26 @@ function reminderRequest(
   return { body: { chat_id: job.telegramChatId, entities, ...thread, text }, method: "sendMessage" };
 }
 
+/** The staged set stays staged if this fails: nobody can tap buttons that were never sent. */
+async function discardReminderButtons(buttons: { discard(): Promise<void> }, reminderId: string): Promise<void> {
+  try {
+    await buttons.discard();
+  } catch (error) {
+    console.error(JSON.stringify({
+      code: "AGENT_REMINDER_BUTTONS_DISCARD_FAILED",
+      error: error instanceof Error ? error.message : String(error),
+      reminderId,
+    }));
+  }
+}
+
+/** The start of Telegram's own reason for a refusal: an error text that may quote a tag. */
+function telegramDescription(body: unknown): { description?: string } {
+  return typeof body === "object" && body !== null && "description" in body && typeof body.description === "string"
+    ? { description: body.description.slice(0, TELEGRAM_DESCRIPTION_MAX_LENGTH) }
+    : {};
+}
+
 export async function deliverTelegramReminder(job: ClaimedReminder): Promise<ProactiveDeliveryReceipt> {
   const delayedNotice = job.delayed
     ? `Доставлено с задержкой. Изначальное время: ${formatScheduledTime(job)} (${job.timezone}).`
@@ -108,17 +131,31 @@ export async function deliverTelegramReminder(job: ClaimedReminder): Promise<Pro
     telegramChatId: job.telegramChatId,
     telegramChatType: job.telegramChatType,
   });
-  const signal = AbortSignal.timeout(TELEGRAM_API_REQUEST_TIMEOUT_MS);
-  const fetchWithTimeout: typeof fetch = (request, init) => fetch(request, { ...init, signal });
-
   let providerStatus: number | undefined;
+  // Each send has its own time: a second send after a refusal must not inherit what is left.
+  const send = async (withButtons: { markdown: string } | null) => {
+    const signal = AbortSignal.timeout(TELEGRAM_API_REQUEST_TIMEOUT_MS);
+    return await callTelegramApi({
+      ...reminderRequest(job, text, withButtons),
+      botToken: requireBotToken(),
+      fetch: (request, init) => fetch(request, { ...init, signal }),
+    });
+  };
   // Telegram has no idempotency key; the durable marker is written before this boundary call.
   try {
-    const response = await callTelegramApi({
-      ...reminderRequest(job, text, buttons),
-      botToken: requireBotToken(),
-      fetch: fetchWithTimeout,
-    });
+    let response = await send(buttons);
+    let buttonsSent = buttons !== null;
+    if (!response.ok && buttons !== null && response.status === TELEGRAM_BAD_REQUEST_STATUS) {
+      // A refusal delivered nothing, so the reminder itself still goes, as it would without buttons.
+      console.error(JSON.stringify({
+        code: "AGENT_REMINDER_BUTTONS_REJECTED",
+        ...telegramDescription(response.body),
+        reminderId: job.id,
+      }));
+      await discardReminderButtons(buttons, job.id);
+      buttonsSent = false;
+      response = await send(null);
+    }
     if (!response.ok) {
       providerStatus = response.status;
       throw new AppError("AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED", "Telegram не принял напоминание");
@@ -130,7 +167,7 @@ export async function deliverTelegramReminder(job: ClaimedReminder): Promise<Pro
         "Telegram принял напоминание, но не подтвердил идентификатор сообщения",
       );
     }
-    if (buttons !== null) await activateReminderButtons(buttons, messageId, job.id);
+    if (buttons !== null && buttonsSent) await activateReminderButtons(buttons, messageId, job.id);
     return { messageId, text };
   } catch (error) {
     console.error(JSON.stringify({

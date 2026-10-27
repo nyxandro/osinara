@@ -8,12 +8,15 @@
  * - Provider rejection and timeout errors propagate to the durable dispatcher.
  * - A reminder with reply buttons goes out as a rich message with the buttons inside it, its text
  *   staged first and the set activated under the confirmed message; the receipt keeps the plain
- *   text. One without buttons goes out as before and stages nothing.
+ *   text. One without buttons goes out as before and stages nothing. When Telegram refuses the
+ *   message with buttons, the reminder goes once more as an ordinary message and its buttons are
+ *   discarded; any other failure is not sent again.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const buttons = vi.hoisted(() => ({
   activate: vi.fn(),
+  discard: vi.fn(),
   stageForReminder: vi.fn(),
 }));
 vi.mock("../reply-buttons/reply-button-repository.js", () => ({ replyButtonRepository: buttons }));
@@ -46,6 +49,7 @@ describe("deliverTelegramReminder", () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     buttons.activate.mockReset();
+    buttons.discard.mockReset();
     buttons.stageForReminder.mockReset();
   });
 
@@ -117,6 +121,43 @@ describe("deliverTelegramReminder", () => {
       },
     });
     expect(buttons.activate).toHaveBeenCalledWith("set-1", "56");
+  });
+
+  it("sends the reminder as an ordinary message when Telegram refuses it with buttons", async () => {
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "telegram-bot-secret");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ description: "Bad Request: BUTTON_TEXT_INVALID", error_code: 400, ok: false }), { status: 400 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, result: { chat: { id: 101, type: "private" }, message_id: 58 } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const rows = [[{ text: "✅ Оплатил" }]];
+    buttons.stageForReminder.mockResolvedValue({ buttons: rows, id: "set-1", token: "A".repeat(22) });
+    const job: ClaimedReminder = {
+      ...delayedJob, buttons: rows as ClaimedReminder["buttons"], delayed: false, forumTopicId: null,
+      messageThreadId: null, scope: "personal", telegramChatId: "101", telegramChatType: "private",
+    };
+
+    await expect(deliverTelegramReminder(job)).resolves.toEqual({ messageId: "58", text: "⏰ Напоминание:\n\nСобрать документы" });
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url).split("/").at(-1))).toEqual(["sendRichMessage", "sendMessage"]);
+    expect(buttons.discard).toHaveBeenCalledWith("set-1");
+    expect(buttons.activate).not.toHaveBeenCalled();
+  });
+
+  it("does not send a reminder with buttons again after any other failure", async () => {
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "telegram-bot-secret");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 502 }));
+    vi.stubGlobal("fetch", fetchMock);
+    buttons.stageForReminder.mockResolvedValue({ buttons: [[{ text: "✅ Оплатил" }]], id: "set-1", token: "A".repeat(22) });
+    const job: ClaimedReminder = {
+      ...delayedJob, buttons: [[{ text: "✅ Оплатил" }]] as ClaimedReminder["buttons"], delayed: false,
+      forumTopicId: null, messageThreadId: null, scope: "personal", telegramChatId: "101", telegramChatType: "private",
+    };
+
+    await expect(deliverTelegramReminder(job)).rejects.toMatchObject({ code: "AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(buttons.discard).not.toHaveBeenCalled();
   });
 
   it("sends an ordinary message and stages nothing for a reminder without buttons", async () => {

@@ -15,9 +15,13 @@
  * - The exact text is recorded before that message is sent, so the caption written after a choice
  *   lands under the same words; the message number is recorded once Telegram confirmed it.
  * - Buttons are presentation of a message that matters more: when their bookkeeping fails, the
- *   answer or the reminder goes out without them and the failure is logged.
+ *   answer or the reminder goes out without them and the failure is logged. So it does when
+ *   Telegram refuses the message carrying them: a refusal means nothing was delivered, so the same
+ *   message goes once more without the buttons, which are discarded. Any other failure of the send
+ *   may hide a delivered message and is never sent again.
  */
 import { fitsTelegramRichMessage } from "../telegram-rich-markdown.js";
+import { isTelegramRichMessageRefusal, type SentTelegramMessage } from "../telegram-rich-messages.js";
 import { literalRichParagraphs } from "../telegram-rich-literal.js";
 import { newReplyButtonToken, type ReplyButtonRows } from "./reply-button-contract.js";
 import { replyButtonMarkup, type ReplyButtonMarkupReading } from "./reply-button-markup.js";
@@ -26,8 +30,11 @@ import { replyButtonRepository } from "./reply-button-repository.js";
 export interface TurnReplyButtons {
   /** Activates the buttons under the last delivered message, if they went out with it. */
   afterDelivery(sent: readonly { readonly messageId: string }[]): Promise<void>;
-  /** The last message with its buttons, or as it was when they cannot go out with it. */
-  withButtons(chunk: { readonly format: "plain" | "rich"; readonly text: string }): Promise<string>;
+  /** Sends the last message with its buttons, or without them when they cannot go out with it. */
+  sendLast(
+    chunk: { readonly format: "plain" | "rich"; readonly text: string },
+    post: (text: string) => Promise<SentTelegramMessage>,
+  ): Promise<SentTelegramMessage>;
 }
 
 type FoundReplyButtons = Pick<ReplyButtonMarkupReading, "error" | "rows">;
@@ -74,16 +81,48 @@ export function turnReplyButtons(input: {
     logFailure("AGENT_REPLY_BUTTONS_REFUSED", input.found.error, { agentTurnId: input.agentTurnId });
     return null;
   }
-  const target = buttonTarget(input.attributes, input.telegramChatId);
-  if (target === null) {
+  const verifiedTarget = buttonTarget(input.attributes, input.telegramChatId);
+  if (verifiedTarget === null) {
     console.error(JSON.stringify({ agentTurnId: input.agentTurnId, code: "AGENT_REPLY_BUTTONS_TARGET_INVALID" }));
     return null;
   }
+  const target = verifiedTarget;
   const buttons = input.found.rows;
+  let sentWithoutButtons = false;
+
+  /** The text of the last message with its buttons and their staged set, or as it was. */
+  async function withButtons(chunk: { readonly format: "plain" | "rich"; readonly text: string }) {
+    if (chunk.format !== "rich") {
+      // The presentation sends an answer with buttons rich; a plain message cannot carry them.
+      console.error(JSON.stringify({ agentTurnId: input.agentTurnId, code: "AGENT_REPLY_BUTTONS_FORMAT_INVALID" }));
+      return null;
+    }
+    // The set's token is not known yet; a fresh one has the same length, so the size is final.
+    if (!fitsTelegramRichMessage(`${chunk.text}\n\n${replyButtonMarkup(buttons, newReplyButtonToken())}`)) {
+      console.error(JSON.stringify({ agentTurnId: input.agentTurnId, code: "AGENT_REPLY_BUTTONS_TOO_LARGE" }));
+      return null;
+    }
+    try {
+      // A replay of the same turn finds its staged set again and keeps its token.
+      const set = await replyButtonRepository.stageForTurn({
+        ...target,
+        agentSessionId: input.agentSessionId,
+        agentTurnId: input.agentTurnId,
+        buttons,
+        messageText: chunk.text,
+        token: newReplyButtonToken(),
+      });
+      return { setId: set.id, text: `${chunk.text}\n\n${replyButtonMarkup(set.buttons, set.token)}` };
+    } catch (error) {
+      logFailure("AGENT_REPLY_BUTTONS_STAGING_FAILED", error, { agentTurnId: input.agentTurnId });
+      return null;
+    }
+  }
+
   return {
     async afterDelivery(sent) {
       const last = sent.at(-1);
-      if (last === undefined) return;
+      if (last === undefined || sentWithoutButtons) return;
       try {
         // By the turn, not by a set this attempt staged: a replay that finds the answer already
         // delivered sends nothing, yet the buttons of the first attempt went out with it.
@@ -94,31 +133,23 @@ export function turnReplyButtons(input: {
         logFailure("AGENT_REPLY_BUTTONS_ACTIVATION_FAILED", error, { agentTurnId: input.agentTurnId });
       }
     },
-    async withButtons(chunk) {
-      // The set's token is not known yet; a fresh one has the same length, so the size is final.
-      if (chunk.format !== "rich") {
-        // The presentation sends an answer with buttons rich; a plain message cannot carry them.
-        console.error(JSON.stringify({ agentTurnId: input.agentTurnId, code: "AGENT_REPLY_BUTTONS_FORMAT_INVALID" }));
-        return chunk.text;
-      }
-      if (!fitsTelegramRichMessage(`${chunk.text}\n\n${replyButtonMarkup(buttons, newReplyButtonToken())}`)) {
-        console.error(JSON.stringify({ agentTurnId: input.agentTurnId, code: "AGENT_REPLY_BUTTONS_TOO_LARGE" }));
-        return chunk.text;
-      }
+    async sendLast(chunk, post) {
+      const attached = await withButtons(chunk);
+      if (attached === null) return await post(chunk.text);
       try {
-        // A replay of the same turn finds its staged set again and keeps its token.
-        const set = await replyButtonRepository.stageForTurn({
-          ...target,
-          agentSessionId: input.agentSessionId,
-          agentTurnId: input.agentTurnId,
-          buttons,
-          messageText: chunk.text,
-          token: newReplyButtonToken(),
-        });
-        return `${chunk.text}\n\n${replyButtonMarkup(set.buttons, set.token)}`;
+        return await post(attached.text);
       } catch (error) {
-        logFailure("AGENT_REPLY_BUTTONS_STAGING_FAILED", error, { agentTurnId: input.agentTurnId });
-        return chunk.text;
+        if (!isTelegramRichMessageRefusal(error)) throw error;
+        // The transport has just logged Telegram's reason with the refusal.
+        console.error(JSON.stringify({ agentTurnId: input.agentTurnId, code: "AGENT_REPLY_BUTTONS_REJECTED" }));
+        sentWithoutButtons = true;
+        try {
+          await replyButtonRepository.discard(attached.setId);
+        } catch (discardError) {
+          // The set stays staged and is never activated: nobody can tap buttons that were not sent.
+          logFailure("AGENT_REPLY_BUTTONS_DISCARD_FAILED", discardError, { setId: attached.setId });
+        }
+        return await post(chunk.text);
       }
     },
   };
@@ -147,7 +178,7 @@ export async function reminderReplyButtons(input: {
   scope: "family" | "group" | "personal";
   telegramChatId: string;
   telegramChatType: string | null;
-}): Promise<{ activate(messageId: string): Promise<void>; markdown: string } | null> {
+}): Promise<{ activate(messageId: string): Promise<void>; discard(): Promise<void>; markdown: string } | null> {
   if (input.buttons === null) return null;
   const chatType = input.telegramChatType;
   if (input.scope === "group" || input.addresseeTelegramUserId === null || !isButtonChatType(chatType)) {
@@ -173,6 +204,7 @@ export async function reminderReplyButtons(input: {
   }
   return {
     activate: async (messageId) => await replyButtonRepository.activate(set.id, messageId),
+    discard: async () => await replyButtonRepository.discard(set.id),
     markdown: `${messageText}\n\n${replyButtonMarkup(set.buttons, set.token)}`,
   };
 }
