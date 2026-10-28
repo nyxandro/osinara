@@ -14,15 +14,20 @@
  * - Reply buttons exist only in a rich message, so an answer carrying them ends in one. Text that
  *   would have gone plain stays literal there, line breaks included, and the question the buttons
  *   answer is kept below a generated accordion rather than hidden inside it.
+ * - Model-authored formatting must not cost the answer: a message a rich message cannot hold (an
+ *   over-wide table, too deep nesting, one indivisible block over the size limit) goes out as the
+ *   text the model wrote, the way plain text does.
  */
 import { splitTelegramMessageText } from "../runtime/telegram/api.js";
 
+import { AppError } from "./app-error.js";
 import {
   formatTelegramRichMessages,
   hasTelegramRichDetailsBlock,
 } from "./telegram-rich-markdown.js";
 import { openTrailingFence, readMarkdownTree } from "./markdown-syntax.js";
 import { splitTelegramAuthoredParts } from "./telegram-authored-split.js";
+import { neutralizeTelegramRichLinks } from "./telegram-rich-links.js";
 import { literalRichParagraphs } from "./telegram-rich-literal.js";
 
 export type TelegramChunkPacing = "aside" | "immediate";
@@ -49,6 +54,11 @@ const LONG_ANSWER_MAX_LIST_ITEMS = 5;
 const LONG_ANSWER_MAX_PARAGRAPHS = 2;
 const LONG_ANSWER_LEAD_MAX_CHARACTERS = 240;
 const LONG_ANSWER_SUMMARY = "Полный ответ";
+const RICH_LIMIT_ERROR_CODES = new Set([
+  "AGENT_TELEGRAM_RICH_BLOCK_TOO_LONG",
+  "AGENT_TELEGRAM_RICH_NESTING_TOO_DEEP",
+  "AGENT_TELEGRAM_RICH_TABLE_TOO_WIDE",
+]);
 
 function usesSupportedRichBlockFormatting(markdown: string): boolean {
   return RICH_BLOCK_PATTERN.test(markdown) || GFM_TABLE_DELIMITER_PATTERN.test(markdown);
@@ -121,19 +131,26 @@ function formatPart(
 ): TelegramFinalPresentationChunk[] {
   // Only the opening chunk carries the pause: a provider-sized overflow is the same utterance.
   const chunkPacing = (index: number): TelegramChunkPacing => index === 0 ? pacing : "immediate";
+  // Plain text uses Telegram's ordinary 4096-character transport and never receives parse mode.
+  // A literal rich message does go through rich parsing, and whether Telegram reads Markdown inside
+  // its paragraphs is not verified, so its links pass the same filter as any rich message.
+  const writtenText = (text: string): TelegramFinalPresentationChunk[] => carriesButtons
+    ? splitTelegramMessageText(neutralizeTelegramRichLinks(text))
+      .map((part, index) => ({ format: "rich", pacing: chunkPacing(index), text: literalRichParagraphs(part) }))
+    : splitTelegramMessageText(text)
+      .map((part, index) => ({ format: "plain", pacing: chunkPacing(index), text: part }));
   const collapsed = collapseLongAnswer(markdown, carriesButtons);
 
-  // Plain text uses Telegram's ordinary 4096-character transport and never receives parse mode.
-  if (!usesSupportedRichFormatting(collapsed)) {
-    if (carriesButtons) {
-      return splitTelegramMessageText(collapsed)
-        .map((text, index) => ({ format: "rich", pacing: chunkPacing(index), text: literalRichParagraphs(text) }));
-    }
-    return splitTelegramMessageText(collapsed)
-      .map((text, index) => ({ format: "plain", pacing: chunkPacing(index), text }));
+  if (!usesSupportedRichFormatting(collapsed)) return writtenText(collapsed);
+  try {
+    return formatTelegramRichMessages(collapsed)
+      .map((text, index) => ({ format: "rich", pacing: chunkPacing(index), text }));
+  } catch (error) {
+    if (!(error instanceof AppError) || !RICH_LIMIT_ERROR_CODES.has(error.code)) throw error;
+    console.error(JSON.stringify({ code: "AGENT_TELEGRAM_RICH_FORMAT_DEGRADED", reason: error.code }));
+    // The text as written, without the accordion the backend added around it.
+    return writtenText(markdown);
   }
-  return formatTelegramRichMessages(collapsed)
-    .map((text, index) => ({ format: "rich", pacing: chunkPacing(index), text }));
 }
 
 export function formatTelegramFinalPresentation(

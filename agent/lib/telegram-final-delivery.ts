@@ -13,7 +13,6 @@ import {
 } from "./telegram-final-presentation.js";
 import type { SentTelegramMessage } from "./telegram-rich-messages.js";
 import { telegramFinalDeliveryRepository } from "./telegram-final-delivery-repository.js";
-import { formatTelegramRichMessages } from "./telegram-rich-markdown.js";
 
 function hash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -38,7 +37,6 @@ export async function deliverTelegramFinalOutput(input: {
   sendChunk(chunk: TelegramFinalPresentationChunk, ordinal: number, last: boolean): Promise<SentTelegramMessage>;
 }): Promise<SentTelegramMessage[]> {
   const chunks = formatTelegramFinalPresentation(input.markdown, { replyButtons: input.replyButtons });
-  const legacyChunks = formatTelegramRichMessages(input.markdown);
   const outputHash = hash({
     chunks: chunks.map((chunk) => hash(chunk.text)),
     deliveryIdentity: input.deliveryIdentity,
@@ -48,11 +46,6 @@ export async function deliverTelegramFinalOutput(input: {
     chunkCount: chunks.length,
     agentSessionId: input.agentSessionId,
     agentTurnId: input.agentTurnId,
-    legacyChunkCount: legacyChunks.length,
-    legacyOutputHash: hash({
-      chunks: legacyChunks.map((chunk) => hash(chunk)),
-      deliveryIdentity: input.deliveryIdentity,
-    }),
     outputHash,
   });
   if (start.status === "delivered") return start.messages;

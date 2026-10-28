@@ -1,8 +1,9 @@
 /**
- * Telegram final-delivery persisted intent compatibility tests.
+ * Telegram final-delivery persisted intent tests.
  *
  * Constructs covered:
- * - A pending pre-v0.14 hash adopts the new presentation before any provider send.
+ * - A replay whose stored output or part count differs is refused before any provider send, whether
+ *   the stored delivery is unsent or delivered.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -17,47 +18,33 @@ vi.mock("./database.js", () => ({
 
 import { telegramFinalDeliveryRepository } from "./telegram-final-delivery-repository.js";
 
-describe("Telegram final-delivery intent compatibility", () => {
+describe("Telegram final-delivery intent", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("upgrades an unsent legacy intent before claiming delivery", async () => {
-    const legacyHash = "a".repeat(64);
-    const outputHash = "b".repeat(64);
+  it.each([
+    ["an unsent intent with another output", "pending", "a".repeat(64), 2],
+    ["an unsent intent with another part count", "pending", "b".repeat(64), 1],
+    ["a delivered answer with another output", "delivered", "a".repeat(64), 2],
+  ])("refuses %s instead of adopting it", async (_case, status, outputHash, chunkCount) => {
     query.mockImplementation(async (statement: string) => {
       if (statement.includes("SELECT id, output_hash")) {
         return {
-          rows: [{
-            diagnostic_code: null,
-            expected_chunk_count: 1,
-            id: "delivery-1",
-            output_hash: legacyHash,
-            status: "pending",
-          }],
+          rows: [{ diagnostic_code: null, expected_chunk_count: 2, id: "delivery-1", output_hash: "b".repeat(64), status }],
         };
-      }
-      if (statement.includes("SET status = 'started'")) {
-        return { rows: [{ delivery_token: "token-1", id: "delivery-1" }] };
       }
       return { rowCount: 1, rows: [] };
     });
 
     await expect(telegramFinalDeliveryRepository.start({
       applicationSessionId: "00000000-0000-4000-8000-000000000001",
-      chunkCount: 2,
+      chunkCount,
       agentSessionId: "session-1",
       agentTurnId: "turn-1",
-      legacyChunkCount: 1,
-      legacyOutputHash: legacyHash,
       outputHash,
-    })).resolves.toEqual({
-      deliveryId: "delivery-1",
-      deliveryToken: "token-1",
-      status: "started",
-    });
-    expect(query).toHaveBeenCalledWith(
-      expect.stringContaining("SET output_hash = $2, expected_chunk_count = $3"),
-      ["delivery-1", outputHash, 2],
-    );
+    })).rejects.toThrowError(/AGENT_TELEGRAM_FINAL_DELIVERY_REPLAY_MISMATCH/u);
+    expect(query).not.toHaveBeenCalledWith(expect.stringMatching(/SET (?:output_hash|status)/u), expect.anything());
+    expect(query).not.toHaveBeenCalledWith(expect.stringContaining("telegram_final_delivery_chunks"), expect.anything());
+    expect(query).toHaveBeenCalledWith("ROLLBACK");
     expect(release).toHaveBeenCalledOnce();
   });
 });
