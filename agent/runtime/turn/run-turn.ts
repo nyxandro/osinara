@@ -135,12 +135,15 @@ async function sessionParent(runtime: TurnRuntime, turn: TurnRecord): Promise<Se
   }
   return {
     callId: caller.callId, rootSessionId: caller.turn.sessionId, sessionId: caller.turn.sessionId,
-    turn: { id: caller.turn.id, sequence: caller.turn.sequence },
+    turn: { id: caller.turn.id, kind: caller.turn.kind, sequence: caller.turn.sequence },
   };
 }
 
 function sessionOf(turn: TurnRecord, parent: SessionParent | undefined) {
-  return { auth: turn.auth, id: turn.sessionId, ...(parent === undefined ? {} : { parent }), turn: { id: turn.id, sequence: turn.sequence } };
+  return {
+    auth: turn.auth, id: turn.sessionId, ...(parent === undefined ? {} : { parent }),
+    turn: { id: turn.id, kind: turn.kind, sequence: turn.sequence },
+  };
 }
 
 function toolContexts(

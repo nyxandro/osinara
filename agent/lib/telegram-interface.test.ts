@@ -299,25 +299,6 @@ describe("Telegram interface localization", () => {
     expect(request.prompt).toContain("Разрешённые инструменты: пуст");
   });
 
-  it("localizes removal of a workspace Google profile", () => {
-    const request = localizeTelegramInputRequest({
-      action: {
-        callId: "call-1",
-        input: {
-          action: "disconnect",
-        },
-        kind: "tool-call" as const,
-        toolName: "manage_google_workspace_connection",
-      },
-      kind: "tool-approval" as const,
-      options: [],
-      prompt: "Approve tool call",
-      requestId: "request-google",
-    });
-
-    expect(request.prompt).toContain("отключить Google Workspace от текущей области");
-  });
-
   it("shows the owner exactly which address a network access request opens", () => {
     const request = localizeTelegramInputRequest({
       action: {

@@ -38,7 +38,7 @@ gws docs +write --document DOC_ID --text 'Hello, world!'
 - For rich formatting, use the raw batchUpdate API instead.
 
 > [!CAUTION]
-> This is a **write** command. Execute it once; `execute_google_workspace` provides the only required human approval.
+> This is a **write** command. Execute it once on the user's direct request; it runs at once, without a confirmation card.
 
 ## See Also
 

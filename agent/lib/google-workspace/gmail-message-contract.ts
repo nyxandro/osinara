@@ -2,9 +2,8 @@
 import { z } from "zod";
 
 import { AppError } from "../app-error.js";
-import { fitsApprovableGoogleWorkspaceArguments } from "./google-workspace-command-policy.js";
 
-// One approval card must stay readable in Telegram; larger selections are split into further batches.
+// A larger selection goes through consecutive calls, so one call's ID list stays small.
 export const GMAIL_MESSAGE_BATCH_MAX = 30;
 
 function isVisibleIdentifier(value: string): boolean {
@@ -16,13 +15,9 @@ function isVisibleIdentifier(value: string): boolean {
 const messageIdSchema = z.string().min(1).max(512).refine(
   isVisibleIdentifier,
   "messageId должен состоять из видимых символов без пробелов",
-).refine(
-  // The approval metadata read puts the ID into a URL path, where dot segments would change the route.
-  (value) => value !== "." && value !== "..",
-  "messageId не может быть сегментом пути",
 );
 
-const gmailMessageInputObject = z.object({
+export const gmailMessageInputSchema = z.object({
   action: z.enum(["trash", "delete", "restore", "mark_read", "mark_unread"]).describe(
     "The exact state change, the same for all messages of the batch",
   ),
@@ -38,8 +33,8 @@ const gmailMessageInputObject = z.object({
   ).describe("The exact reference to the Google profile from the Gmail read result"),
 }).strict();
 
-export type GmailMessageInput = z.infer<typeof gmailMessageInputObject>;
-export type GmailMessageAction = GmailMessageInput["action"];
+export type GmailMessageInput = z.infer<typeof gmailMessageInputSchema>;
+type GmailMessageAction = GmailMessageInput["action"];
 
 const LABEL_CHANGES: Readonly<Record<
   Exclude<GmailMessageAction, "delete">,
@@ -62,13 +57,6 @@ export function gmailMessageMutationArgv(
     : { ids: input.messageIds, ...LABEL_CHANGES[input.action] };
   return [...route, "--params", JSON.stringify({ userId: "me" }), "--json", JSON.stringify(body)];
 }
-
-// The executor re-applies the approvable-size policy after the prompt; checking it here keeps an
-// oversized batch from reaching the person as a card that can never execute.
-export const gmailMessageInputSchema = gmailMessageInputObject.refine(
-  (input) => fitsApprovableGoogleWorkspaceArguments(gmailMessageMutationArgv(input)),
-  { message: "Слишком длинные messageId для одной пачки. Разделите письма на несколько вызовов", path: ["messageIds"] },
-);
 
 export function requireGmailMessageInput(input: unknown): GmailMessageInput {
   const parsed = gmailMessageInputSchema.safeParse(input);

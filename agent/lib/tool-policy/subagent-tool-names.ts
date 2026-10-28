@@ -11,7 +11,7 @@
  * default: it could set up a daily scenario carrying a page's task, edit or delete memory, reset
  * the conversation. A list of what it may do keeps a new tool off it until someone decides
  * otherwise. Changes outside the sandbox stay with the root, which talks to the person and reads
- * the child's result first. Google Workspace stays: its changes already wait for the owner's button.
+ * the child's result first. Google Workspace stays for reading only, see `google-workspace-live-turn.ts`.
  */
 export const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set([
   "bash",

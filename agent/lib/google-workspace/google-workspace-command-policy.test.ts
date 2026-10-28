@@ -4,12 +4,15 @@
  * Constructs covered:
  * - `classifyGoogleWorkspaceCommand`: code-reviewed read/mutation classification.
  * - Unknown, auth, malformed, and flag-smuggling commands fail closed before credentialed execution.
+ * - `isGoogleWorkspaceAccessGrant`: only reviewed mutations that open data to other people.
  */
 import { describe, expect, it } from "vitest";
 
+import { GOOGLE_WORKSPACE_ACCESS_GRANT_ROUTES } from "./google-workspace-access-grant-routes.js";
 import {
   classifyGoogleWorkspaceCommand,
   classifyModelFacingGoogleWorkspaceCommand,
+  isGoogleWorkspaceAccessGrant,
 } from "./google-workspace-command-policy.js";
 
 describe("classifyGoogleWorkspaceCommand", () => {
@@ -216,7 +219,7 @@ describe("classifyGoogleWorkspaceCommand", () => {
     ])).toThrowError(/AGENT_GOOGLE_WORKSPACE_COMMAND_FORBIDDEN/u);
   });
 
-  it("applies the Telegram presentation limit only to mutations", () => {
+  it("limits the size only of a command that waits for the owner's button", () => {
     const longValue = "x".repeat(4_000);
     expect(classifyGoogleWorkspaceCommand([
       "calendar",
@@ -225,12 +228,46 @@ describe("classifyGoogleWorkspaceCommand", () => {
       "--params",
       longValue,
     ])).toBe("read");
-    expect(() => classifyGoogleWorkspaceCommand([
+    // An ordinary change runs without a card, so a long email body or event description passes.
+    expect(classifyGoogleWorkspaceCommand([
       "calendar",
       "events",
       "insert",
       "--json",
       longValue,
+    ])).toBe("mutation");
+    expect(() => classifyGoogleWorkspaceCommand([
+      "gmail",
+      "users",
+      "settings",
+      "filters",
+      "create",
+      "--json",
+      longValue,
     ])).toThrowError(/AGENT_GOOGLE_WORKSPACE_ARGUMENTS_TOO_LARGE/u);
+  });
+});
+
+describe("isGoogleWorkspaceAccessGrant", () => {
+  it("covers only reviewed mutation routes", () => {
+    for (const route of GOOGLE_WORKSPACE_ACCESS_GRANT_ROUTES) {
+      expect(isGoogleWorkspaceAccessGrant([...route.split(" "), "--json", "{}"]), route).toBe(true);
+    }
+  });
+
+  it("leaves reads, ordinary changes and revocations out", () => {
+    for (const argv of [
+      ["gmail", "users", "settings", "filters", "list", "--params", '{"userId":"me"}'],
+      ["gmail", "+send", "--to", "a@example.com", "--subject", "s", "--body", "b"],
+      ["gmail", "+forward", "--message-id", "m", "--to", "a@example.com"],
+      ["calendar", "events", "insert", "--json", "{}"],
+      ["calendar", "acl", "delete", "--params", '{"calendarId":"primary","ruleId":"r"}'],
+      ["drive", "permissions", "delete", "--params", '{"fileId":"f","permissionId":"p"}'],
+      ["drive", "revisions", "get", "--params", '{"fileId":"f","revisionId":"r"}'],
+      ["calendar", "acl", "insert", "--help"],
+      ["schema", "drive.permissions.create"],
+    ]) {
+      expect(isGoogleWorkspaceAccessGrant(argv), argv.join(" ")).toBe(false);
+    }
   });
 });

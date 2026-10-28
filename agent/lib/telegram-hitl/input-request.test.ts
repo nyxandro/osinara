@@ -26,7 +26,7 @@ describe("createTelegramInputRequestHandler", () => {
       code: "AGENT_EXTERNAL_APPROVAL_FORBIDDEN",
       groupType: "family_private",
       kind: "tool-approval",
-      signal: "a Google Workspace mutation in the family group",
+      signal: "a Google Workspace access grant in the family group",
       toolName: "execute_google_workspace",
     },
   ])("rejects a $groupType group prompt: $signal, before side effects", async ({
@@ -166,7 +166,7 @@ describe("createTelegramInputRequestHandler", () => {
 
     await expect(handler({
       requests: [{
-        action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "manage_gmail_message" },
+        action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "manage_family_invitation" },
         kind: "tool-approval",
         options: [],
         prompt: "Approve tool call",
@@ -233,7 +233,7 @@ describe("createTelegramInputRequestHandler", () => {
 
     await handler({
       requests: [{
-        action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "manage_gmail_message" },
+        action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "manage_family_invitation" },
         kind: "tool-approval",
         options: [{ id: "approve", label: "Yes", style: "primary" }],
         prompt: "Approve tool call",
@@ -292,7 +292,7 @@ describe("createTelegramInputRequestHandler", () => {
 
     await expect(handler({
       requests: [{
-        action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "manage_gmail_message" },
+        action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "manage_family_invitation" },
         kind: "tool-approval",
         options: [],
         prompt: "Approve tool call",
@@ -346,7 +346,7 @@ describe("createTelegramInputRequestHandler", () => {
 
     await expect(handler({
       requests: [{
-        action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "manage_gmail_message" },
+        action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "manage_family_invitation" },
         kind: "tool-approval",
         options: [],
         prompt: "Approve tool call",
@@ -395,7 +395,7 @@ describe("createTelegramInputRequestHandler", () => {
 
     await expect(handler({
       requests: [{
-        action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "manage_gmail_message" },
+        action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "manage_family_invitation" },
         kind: "tool-approval",
         options: [],
         prompt: "Approve tool call",
@@ -450,7 +450,7 @@ describe("createTelegramInputRequestHandler", () => {
 
     await expect(handler({
       requests: [{
-        action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "manage_gmail_message" },
+        action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "manage_family_invitation" },
         kind: "tool-approval",
         options: [],
         prompt: "Approve tool call",
