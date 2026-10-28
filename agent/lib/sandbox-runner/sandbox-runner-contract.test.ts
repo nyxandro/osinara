@@ -98,6 +98,35 @@ describe("parseCreateSandboxRequest", () => {
     })).toThrowError(/AGENT_SANDBOX_RUNNER_SCOPE_INVALID/);
   });
 
+  // Docker unpacks the seed archive at the container root, so a path must never step out of its root.
+  it.each([
+    "/workspace/../etc/cron.d/job",
+    "/workspace/./notes.md",
+    "/workspace//notes.md",
+  ])("rejects a seed path that is not canonical: %s", (path) => {
+    const seedFiles = [{ contentBase64: "c2VjcmV0", path }];
+    expect(() => parseCreateSandboxRequest({
+      access: "trusted",
+      agentSessionId: AGENT_SESSION_ID,
+      mounts: [{ mountPoint: "personal", workspaceId: PERSONAL_WORKSPACE_ID }],
+      sandboxSessionId: SANDBOX_SESSION_ID,
+      seedDigest: sandboxSeedDigest(seedFiles),
+      seedFiles,
+    })).toThrowError(/AGENT_SANDBOX_RUNNER_SCOPE_INVALID/);
+  });
+
+  it("accepts the same seed file at its canonical path", () => {
+    const seedFiles = [{ contentBase64: "c2VjcmV0", path: "/workspace/notes.md" }];
+    expect(parseCreateSandboxRequest({
+      access: "trusted",
+      agentSessionId: AGENT_SESSION_ID,
+      mounts: [{ mountPoint: "personal", workspaceId: PERSONAL_WORKSPACE_ID }],
+      sandboxSessionId: SANDBOX_SESSION_ID,
+      seedDigest: sandboxSeedDigest(seedFiles),
+      seedFiles,
+    }).seedFiles).toEqual(seedFiles);
+  });
+
   it("rejects a mismatched digest and trusted tool paths in a restricted sandbox", () => {
     const seedFiles = [{ contentBase64: "c2tpbGw=", path: "/tools/personal/skill.md" }];
     expect(() => parseCreateSandboxRequest({

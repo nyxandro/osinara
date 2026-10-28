@@ -53,11 +53,6 @@ describe("Telegram final delivery", () => {
       chunkCount: 1,
       agentSessionId: base.agentSessionId,
       agentTurnId: base.agentTurnId,
-      legacyChunkCount: 1,
-      legacyOutputHash: hash({
-        chunks: [hash(base.markdown)],
-        deliveryIdentity: base.deliveryIdentity,
-      }),
       outputHash: hash({
         chunks: [hash(base.markdown)],
         deliveryIdentity: base.deliveryIdentity,

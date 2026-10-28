@@ -20,8 +20,6 @@ export const telegramFinalDeliveryRepository = {
     chunkCount: number;
     agentSessionId: string;
     agentTurnId: string;
-    legacyChunkCount: number;
-    legacyOutputHash: string;
     outputHash: string;
   }): Promise<TelegramFinalDeliveryStart> {
     const client = await database().connect();
@@ -47,25 +45,11 @@ export const telegramFinalDeliveryRepository = {
         [input.agentSessionId, input.agentTurnId],
       );
       const delivery = current.rows[0]!;
-      const exactContract = delivery.output_hash === input.outputHash &&
-        delivery.expected_chunk_count === input.chunkCount;
-      const legacyContract = delivery.output_hash === input.legacyOutputHash &&
-        delivery.expected_chunk_count === input.legacyChunkCount;
-      if (!exactContract && !legacyContract) {
+      if (delivery.output_hash !== input.outputHash || delivery.expected_chunk_count !== input.chunkCount) {
         throw new AppError(
           "AGENT_TELEGRAM_FINAL_DELIVERY_REPLAY_MISMATCH",
           "Повтор финального ответа не совпадает с исходной доставкой Telegram",
         );
-      }
-      if (!exactContract && legacyContract && delivery.status === "pending") {
-        // An unsent pre-v0.14 intent can safely adopt the new transport presentation before claim.
-        await client.query(
-          `UPDATE telegram_final_deliveries
-           SET output_hash = $2, expected_chunk_count = $3, updated_at = now() WHERE id = $1`,
-          [delivery.id, input.outputHash, input.chunkCount],
-        );
-        delivery.output_hash = input.outputHash;
-        delivery.expected_chunk_count = input.chunkCount;
       }
       if (delivery.status === "delivered") {
         const chunks = await client.query<{

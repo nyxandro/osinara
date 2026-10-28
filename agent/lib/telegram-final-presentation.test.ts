@@ -8,8 +8,9 @@
  * - Authored asides become paced messages unless the answer is collapsed as long.
  * - An answer with reply buttons ends in a rich message, its plain text stays literal, and its
  *   closing question stays outside the generated accordion.
+ * - Formatting a rich message cannot hold goes out as written text instead of costing the answer.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { formatTelegramFinalPresentation } from "./telegram-final-presentation.js";
 import { TELEGRAM_ASIDE_DIRECTIVE } from "./telegram-authored-split.js";
@@ -150,6 +151,81 @@ describe("Telegram final presentation", () => {
     expect(formatTelegramFinalPresentation(`**Риск высокий.**\n\n${body}`)[0]!.text).toBe(
       `**Риск высокий.**\n\n<details><summary>Полный ответ</summary>\n\n${body.trim()}\n\n</details>`,
     );
+  });
+
+  describe("past the limits of a rich message", () => {
+    const wideTable = [
+      `| ${Array.from({ length: 25 }, (_, index) => `д${index + 1}`).join(" | ")} |`,
+      `| ${Array.from({ length: 25 }, () => "---").join(" | ")} |`,
+      `| ${Array.from({ length: 25 }, () => "x").join(" | ")} |`,
+    ].join("\n");
+    // An authored accordion keeps the answer from being folded, so the long block stays whole.
+    const oversizedBlock = "<details><summary>Итог</summary>\n\nКоротко.\n\n</details>\n\n" +
+      `**Важно:** ${"я".repeat(33_000)}`;
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it.each([
+      ["a table wider than Telegram allows", wideTable, "AGENT_TELEGRAM_RICH_TABLE_TOO_WIDE"],
+      ["an indivisible block over the size limit", oversizedBlock, "AGENT_TELEGRAM_RICH_BLOCK_TOO_LONG"],
+      [
+        "nesting deeper than Telegram allows",
+        `${"<details><summary>У</summary>\n\n".repeat(17)}текст${"\n\n</details>".repeat(17)}`,
+        "AGENT_TELEGRAM_RICH_NESTING_TOO_DEEP",
+      ],
+    ])("sends %s as written text", (_name, markdown, reason) => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const chunks = formatTelegramFinalPresentation(markdown);
+
+      expect(chunks.every((chunk) => chunk.format === "plain")).toBe(true);
+      expect(chunks.every((chunk) => chunk.text.length <= 4_096)).toBe(true);
+      expect(chunks.map((chunk) => chunk.text).join("").replace(/\s/gu, ""))
+        .toBe(markdown.replace(/\s/gu, ""));
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(log.mock.calls[0]![0] as string))
+        .toEqual({ code: "AGENT_TELEGRAM_RICH_FORMAT_DEGRADED", reason });
+    });
+
+    it("keeps such an answer literal in the rich message that carries reply buttons", () => {
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+      expect(formatTelegramFinalPresentation(wideTable, { replyButtons: true })).toEqual([{
+        format: "rich",
+        pacing: "immediate",
+        text: `<p>${wideTable.split("\n").join("<br>")}</p>`,
+      }]);
+    });
+
+    it("filters links there like in a rich message", () => {
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const markdown = `Посмотрите [подробнее](https://t.me/some_bot?start=x)\n\n${wideTable}`;
+      const [chunk] = formatTelegramFinalPresentation(markdown, { replyButtons: true });
+
+      expect(chunk!.format).toBe("rich");
+      expect(chunk!.text).not.toContain("[подробнее](");
+      expect(chunk!.text).toContain("подробнее (");
+    });
+
+    it("still fails on a formatting error that is not a rich limit", () => {
+      let privateUseCharacters = "";
+      for (let codePoint = 0xE000; codePoint <= 0xF8FF; codePoint += 1) {
+        privateUseCharacters += String.fromCodePoint(codePoint);
+      }
+
+      expect(() => formatTelegramFinalPresentation(`**Да**, ${privateUseCharacters}`))
+        .toThrowError("AGENT_TELEGRAM_RICH_PLACEHOLDER_UNAVAILABLE");
+    });
+
+    it("degrades only the authored message that cannot be formatted", () => {
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+      expect(formatTelegramFinalPresentation(`**Готово**\n${TELEGRAM_ASIDE_DIRECTIVE}\n${wideTable}`)).toEqual([
+        { format: "rich", pacing: "immediate", text: "**Готово**" },
+        { format: "plain", pacing: "aside", text: wideTable },
+      ]);
+    });
   });
 
   describe("with reply buttons", () => {
