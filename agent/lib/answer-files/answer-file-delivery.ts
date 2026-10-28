@@ -83,8 +83,6 @@ export interface TelegramAnswerChunk extends TelegramFinalPresentationChunk {
 }
 
 export interface TelegramAnswerPresentationOptions {
-  /** A notification stays expanded instead of collapsing under "Полный ответ". */
-  readonly keepExpanded?: boolean;
   readonly replyButtons: boolean;
 }
 
@@ -261,10 +259,8 @@ export function attachedTelegramAnswer(
   if (files === null) {
     return formatTelegramFinalPresentation(answer.markdown, options).map((chunk) => ({ ...chunk, media: [] }));
   }
-  const placeBlock = new RegExp(`^${files.marker}T\\d+E$`, "u");
   const chunks = formatTelegramFinalPresentation(answer.markdown, {
     ...options,
-    isMediaBlock: (block) => placeBlock.test(block),
     requiresRich: (part) => part.includes(files.marker),
   });
   return attachFiles(chunks, files);

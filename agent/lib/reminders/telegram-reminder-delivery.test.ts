@@ -11,7 +11,7 @@
  *   text. One without buttons goes out as before and stages nothing. When Telegram refuses the
  *   rich message, the reminder goes once more as an ordinary message with the text as written and
  *   its buttons are discarded; any other failure is not sent again.
- * - Markup and files make the reminder a rich message laid out like an answer, never collapsed. A
+ * - Markup and files make the reminder a rich message laid out like an answer, as written. A
  *   file is read with the rights of the reminder's author and goes inside the message; one that
  *   cannot go leaves a visible line; the files of a message with buttons stay with its set. Files
  *   that cannot be read at all cost the reminder nothing but their lines: it is never sent twice.
@@ -159,7 +159,7 @@ describe("deliverTelegramReminder", () => {
     expect(buttons.activate).toHaveBeenCalledWith("set-1", "56", []);
   });
 
-  it("lays out a reminder with markup like an answer under a bold header, never collapsed", async () => {
+  it("lays out a reminder with markup like an answer under a bold header, as written", async () => {
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "telegram-bot-secret");
     const fetchMock = vi.fn().mockResolvedValue(sent(60));
     vi.stubGlobal("fetch", fetchMock);

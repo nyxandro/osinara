@@ -10,8 +10,8 @@
  * Key constructs:
  * - Text without markup, files or buttons goes as an ordinary message with the header bold through
  *   an entity, so what was written is sent exactly as stored and needs no escaping.
- * - Markup or files make a rich message laid out like an answer but never collapsed: a reminder's
- *   words are the point. Buttons alone keep the text literal inside the rich message they need.
+ * - Markup or files make a rich message laid out like an answer. Buttons alone keep the text literal
+ *   inside the rich message they need.
  * - A reminder is one message: the directive that splits an answer into messages is removed, and a
  *   text within the reminder's length always fits one.
  */
@@ -36,7 +36,7 @@ export function reminderBody(content: string, delayedNotice: string | null): str
 }
 
 export function presentReminder(prepared: PreparedTelegramAnswer, options: { readonly replyButtons: boolean }): ReminderMessage {
-  const chunks = presentTelegramAnswer(prepared, { keepExpanded: true, replyButtons: options.replyButtons });
+  const chunks = presentTelegramAnswer(prepared, options);
   if (chunks.length !== 1) {
     throw new AppError("AGENT_REMINDER_PRESENTATION_INVALID", "Напоминание не уложилось в одно сообщение");
   }

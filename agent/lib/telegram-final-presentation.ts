@@ -10,24 +10,19 @@
  * Key construct:
  * - Transport selection depends on authored syntax, not message length or a hidden default.
  * - An authored aside is a separate paced message; a length-driven split never is.
- * - Every authored message passes the length policy on its own.
+ * - The answer goes out as the model laid it out: whether to hide part of a long answer in a
+ *   collapsible block is the model's decision, and nothing is collapsed for it.
  * - Reply buttons exist only in a rich message, so an answer carrying them ends in one. Text that
- *   would have gone plain stays literal there, line breaks included, and the question the buttons
- *   answer is kept below a generated accordion rather than hidden inside it.
+ *   would have gone plain stays literal there, line breaks included.
  * - Model-authored formatting must not cost the answer: a message a rich message cannot hold (an
  *   over-wide table, too deep nesting, one indivisible block over the size limit) goes out as the
  *   text the model wrote, the way plain text does.
- * - Media exist only in a rich message, so a part that carries them is rich even without markup;
- *   a media block shows a file and adds no length, so it alone never collapses an answer.
+ * - Media exist only in a rich message, so a part that carries them is rich even without markup.
  */
 import { splitTelegramMessageText } from "../runtime/telegram/api.js";
 
 import { AppError } from "./app-error.js";
-import {
-  formatTelegramRichMessages,
-  hasTelegramRichDetailsBlock,
-} from "./telegram-rich-markdown.js";
-import { openTrailingFence, readMarkdownTree } from "./markdown-syntax.js";
+import { formatTelegramRichMessages } from "./telegram-rich-markdown.js";
 import { splitTelegramAuthoredParts } from "./telegram-authored-split.js";
 import { neutralizeTelegramRichLinks } from "./telegram-rich-links.js";
 import { literalRichParagraphs } from "./telegram-rich-literal.js";
@@ -39,10 +34,6 @@ export interface TelegramFinalPresentationOptions {
   readonly replyButtons?: boolean;
   /** A part this holds true for goes rich even without markup: only a rich message carries media. */
   readonly requiresRich?: (part: string) => boolean;
-  /** A paragraph that stands for a media file: it shows a file and adds no length to the answer. */
-  readonly isMediaBlock?: (block: string) => boolean;
-  /** A notification stays expanded: its words are the point, never hidden under "Полный ответ". */
-  readonly keepExpanded?: boolean;
 }
 
 export interface TelegramFinalPresentationChunk {
@@ -56,12 +47,6 @@ const GFM_TABLE_DELIMITER_PATTERN = /(?:^|\n)\s*:?-{3,}:?\s*\|\s*:?-{3,}:?(?:\s*
 const RICH_INLINE_PATTERN = /(?:\*\*[^*\n]+\*\*|~~[^~\n]+~~|==[^=\n]+==|\|\|[^|\n]+\|\||`[^`\n]+`|\[[^\]\n]+\]\([^\s)]+\)|<(?:details(?:\s+open)?|summary|u|ins|sub|sup)>|<\/(?:details|summary|u|ins|sub|sup)>)/iu;
 const RICH_ITALIC_PATTERN = /(?:^|[^\p{L}\p{N}_])(?:\*[^*\n]+\*|_[^_\n]+_)(?=$|[^\p{L}\p{N}_])/u;
 const RICH_MATH_PATTERN = /\$(?:[\\\p{L}][^$\n]*|[^$\n]*[=+*/^_-][^$\n]*)\$(?![\p{L}\p{N}])/u;
-const LONG_ANSWER_MAX_CHARACTERS = 600;
-const LONG_ANSWER_MAX_LINES = 7;
-const LONG_ANSWER_MAX_LIST_ITEMS = 5;
-const LONG_ANSWER_MAX_PARAGRAPHS = 2;
-const LONG_ANSWER_LEAD_MAX_CHARACTERS = 240;
-const LONG_ANSWER_SUMMARY = "Полный ответ";
 const RICH_LIMIT_ERROR_CODES = new Set([
   "AGENT_TELEGRAM_RICH_BLOCK_TOO_LONG",
   "AGENT_TELEGRAM_RICH_NESTING_TOO_DEEP",
@@ -79,78 +64,10 @@ function usesSupportedRichFormatting(markdown: string): boolean {
     RICH_MATH_PATTERN.test(markdown);
 }
 
-function characterLength(value: string): number {
-  return Array.from(value).length;
-}
-
-function isLongAnswer(markdown: string): boolean {
-  const lines = markdown.split("\n");
-  const paragraphs = markdown.split(/\n\s*\n/gu).filter((part) => part.trim().length > 0);
-  const listItems = lines.filter((line) => /^\s*(?:[-+*]|\d+\.)\s/u.test(line)).length;
-  const structuredBlock = /(?:^|\n)```/u.test(markdown) ||
-    /(?:^|\n)\|[^\n]*\|\s*$/mu.test(markdown) ||
-    GFM_TABLE_DELIMITER_PATTERN.test(markdown);
-  return characterLength(markdown) > LONG_ANSWER_MAX_CHARACTERS ||
-    lines.length > LONG_ANSWER_MAX_LINES ||
-    paragraphs.length > LONG_ANSWER_MAX_PARAGRAPHS ||
-    listItems > LONG_ANSWER_MAX_LIST_ITEMS ||
-    structuredBlock;
-}
-
-function neutralizeMalformedDetails(markdown: string): string {
-  return markdown.replace(
-    /```[\s\S]*?(?:```|$)|`[^`\n]*`|<\/?(?:details|summary)(?:\s[^>]*)?>/giu,
-    (value) => value.startsWith("`")
-      ? value
-      : value.replaceAll("<", "&lt;").replaceAll(">", "&gt;"),
-  );
-}
-
-function isShortPlainBlock(block: string | undefined): block is string {
-  return block !== undefined && characterLength(block) <= LONG_ANSWER_LEAD_MAX_CHARACTERS &&
-    !usesSupportedRichBlockFormatting(block);
-}
-
-/** The text the length policy measures: a media block shows a file and adds no reading to it. */
-function measuredText(markdown: string, isMediaBlock: ((block: string) => boolean) | undefined): string {
-  if (isMediaBlock === undefined) return markdown;
-  return markdown.split(/\n\s*\n/gu).filter((block) => !isMediaBlock(block.trim())).join("\n\n");
-}
-
-function collapseLongAnswer(
-  markdown: string,
-  keepClosing: boolean,
-  isMediaBlock: ((block: string) => boolean) | undefined,
-): string {
-  if (!isLongAnswer(measuredText(markdown, isMediaBlock)) || hasTelegramRichDetailsBlock(markdown)) return markdown;
-  // Invalid details-like HTML is made inert before the valid backend wrapper is introduced.
-  const safeMarkdown = /<\/?details(?:\s[^>]*)?>/iu.test(markdown)
-    ? neutralizeMalformedDetails(markdown)
-    : markdown;
-  const blocks = safeMarkdown.split(/\n\s*\n/gu).filter((part) => part.trim().length > 0);
-  const first = blocks[0]?.trim();
-  const keepLead = blocks.length > 1 && isShortPlainBlock(first);
-  const rest = keepLead ? blocks.slice(1) : blocks;
-  // The question reply buttons answer stays visible next to them.
-  const last = rest.at(-1)?.trim();
-  const closing = keepClosing && rest.length > 1 && isShortPlainBlock(last) ? last : undefined;
-  const opened = (closing === undefined ? rest : rest.slice(0, -1)).join("\n\n");
-  // A truncated answer may end inside a code block; closed first, it cannot swallow the wrapper.
-  const fence = openTrailingFence(opened, readMarkdownTree(opened));
-  const body = fence === null ? opened : `${opened.replace(/\s+$/u, "")}\n${fence}`;
-  const details = `<details><summary>${LONG_ANSWER_SUMMARY}</summary>\n\n${body}\n\n</details>`;
-  return [keepLead ? first : undefined, details, closing].filter((part) => part !== undefined).join("\n\n");
-}
-
 function formatPart(
   markdown: string,
   pacing: TelegramChunkPacing,
-  part: {
-    readonly carriesButtons: boolean;
-    readonly carriesMedia: boolean;
-    readonly isMediaBlock: ((block: string) => boolean) | undefined;
-    readonly keepExpanded: boolean;
-  },
+  part: { readonly carriesButtons: boolean; readonly carriesMedia: boolean },
 ): TelegramFinalPresentationChunk[] {
   const { carriesButtons, carriesMedia } = part;
   // Only the opening chunk carries the pause: a provider-sized overflow is the same utterance.
@@ -163,16 +80,13 @@ function formatPart(
       .map((part, index) => ({ format: "rich", pacing: chunkPacing(index), text: literalRichParagraphs(part) }))
     : splitTelegramMessageText(text)
       .map((part, index) => ({ format: "plain", pacing: chunkPacing(index), text: part }));
-  const collapsed = part.keepExpanded ? markdown : collapseLongAnswer(markdown, carriesButtons, part.isMediaBlock);
-
-  if (!carriesMedia && !usesSupportedRichFormatting(collapsed)) return writtenText(collapsed);
+  if (!carriesMedia && !usesSupportedRichFormatting(markdown)) return writtenText(markdown);
   try {
-    return formatTelegramRichMessages(collapsed)
+    return formatTelegramRichMessages(markdown)
       .map((text, index) => ({ format: "rich", pacing: chunkPacing(index), text }));
   } catch (error) {
     if (!(error instanceof AppError) || !RICH_LIMIT_ERROR_CODES.has(error.code)) throw error;
     console.error(JSON.stringify({ code: "AGENT_TELEGRAM_RICH_FORMAT_DEGRADED", reason: error.code }));
-    // The text as written, without the accordion the backend added around it.
     return writtenText(markdown);
   }
 }
@@ -189,12 +103,8 @@ export function formatTelegramFinalPresentation(
   const part = (text: string, carriesButtons: boolean) => ({
     carriesButtons,
     carriesMedia: options.requiresRich?.(text) === true,
-    isMediaBlock: options.isMediaBlock,
-    keepExpanded: options.keepExpanded === true,
   });
 
-  // The length policy applies to each authored message on its own, so a long main answer still
-  // collapses without swallowing the asides its author separated from it.
   return [
     ...formatPart(main, "immediate", part(main, buttons && asides.length === 0)),
     ...asides.flatMap((aside, index) => formatPart(aside, "aside", part(aside, buttons && index === asides.length - 1))),

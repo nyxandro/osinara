@@ -28,7 +28,6 @@ import {
   workspaceAddress,
   type AnswerFileOutcome,
   type AnswerFileResolver,
-  type TelegramAnswerPresentationOptions,
 } from "./answer-file-delivery.js";
 import type { AnswerFileProblem, MeasuredAnswerFile, ResolvedAnswerFile } from "./answer-file-resolution.js";
 
@@ -63,12 +62,10 @@ type AnswerFileIssue =
 /**
  * What keeps the files of a text from going. `allowedScopes` names the folders of the chat the text
  * will reach when that chat is not the current one (a reminder); a file elsewhere is not measured.
- * `presentation` is how the text will be laid out, so the layout checked is the one delivered.
  */
 async function answerFileIssues(input: {
   readonly allowedScopes?: readonly WorkspaceScope[];
   readonly auth: () => WorkspaceAuthorization | null;
-  readonly presentation: TelegramAnswerPresentationOptions;
   readonly resolver: Pick<AnswerFileResolver, "measure">;
   readonly text: string;
 }): Promise<AnswerFileIssue[]> {
@@ -83,7 +80,7 @@ async function answerFileIssues(input: {
       if ("problem" in outcome) issues.push({ address: workspaceAddress(outcome.reference), kind: "file", problem: outcome.problem });
     }
     const layout = layOutPreparedAnswer(input.text, outcomes.map(laidOutEstimate), CHECK_TURN_ID);
-    if (attachedTelegramAnswer(layout, input.presentation) === null) issues.push({ kind: "unfit" });
+    if (attachedTelegramAnswer(layout, { replyButtons: false }) === null) issues.push({ kind: "unfit" });
   }
   for (const media of reading.foreign) issues.push({ address: media.address, kind: "foreign", remote: media.remote });
   if (reading.unread > 0) issues.push({ count: reading.unread, kind: "unread" });
@@ -112,7 +109,7 @@ export async function answerFilesNotice(input: {
   readonly resolver: Pick<AnswerFileResolver, "measure">;
   readonly text: string;
 }): Promise<string | undefined> {
-  const lines = new Set((await answerFileIssues({ ...input, presentation: { replyButtons: false } })).map(noticeLine));
+  const lines = new Set((await answerFileIssues(input)).map(noticeLine));
   if (lines.size === 0) return undefined;
   return [
     "Your answer was not delivered: some files in it cannot be sent.",
@@ -156,9 +153,7 @@ export async function reminderFilesError(input: {
   readonly resolver: Pick<AnswerFileResolver, "measure">;
   readonly text: string;
 }): Promise<string | undefined> {
-  // A reminder is never collapsed; its buttons need a rich message, which its files already make.
-  const issues = await answerFileIssues({ ...input, presentation: { keepExpanded: true, replyButtons: false } });
-  const lines = new Set(issues.map((issue) => reminderLine(issue, input.allowedScopes)));
+  const lines = new Set((await answerFileIssues(input)).map((issue) => reminderLine(issue, input.allowedScopes)));
   if (lines.size === 0) return undefined;
   return ["Файлы в тексте напоминания не отправятся:", ...lines, "Исправь их или убери и повтори вызов."].join("\n");
 }
