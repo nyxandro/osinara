@@ -5,11 +5,12 @@
  * - `GoogleWorkspaceCommandKind`: read-only or externally mutating operation.
  * - `classifyGoogleWorkspaceCommand`: validates an exact gws argv and fails closed when unknown.
  * - `classifyModelFacingGoogleWorkspaceCommand`: reserves structured application-owned actions.
- * - `fitsApprovableGoogleWorkspaceArguments`: whether a mutation argv can be shown before approval.
+ * - `isGoogleWorkspaceAccessGrant`: whether a command opens the user's data to other people.
  *
  * The allowlist is pinned to the installed gws 0.22.5 command tree. Command meaning is never
  * inferred from model prose, JSON bodies, flag names, or substrings in user-controlled values.
  */
+import { GOOGLE_WORKSPACE_ACCESS_GRANT_ROUTES } from "./google-workspace-access-grant-routes.js";
 import {
   googleWorkspaceArgumentsTooLarge,
   googleWorkspaceCommandForbidden as forbidden,
@@ -339,10 +340,6 @@ const HELPER_FLAGS: Readonly<Record<string, Readonly<Record<string, FlagArity>>>
   "sheets +read": { "--range": "value", "--spreadsheet": "value" },
 };
 
-export function fitsApprovableGoogleWorkspaceArguments(argv: readonly string[]): boolean {
-  return JSON.stringify(argv).length <= MAX_APPROVABLE_ARGUMENTS_LENGTH;
-}
-
 function classifyRoute(route: string): GoogleWorkspaceCommandKind {
   if (READ_ROUTE_SET.has(route)) return "read";
   if (MUTATION_ROUTE_SET.has(route)) return "mutation";
@@ -473,11 +470,17 @@ export function classifyGoogleWorkspaceCommand(
       "Добавьте --once. После timeout не повторяйте setup вслепую: сначала проверьте фактические Pub/Sub resources.",
     );
   }
-  // Telegram must be able to show every material mutation argument before approval.
-  if (reviewed.kind === "mutation" && !fitsApprovableGoogleWorkspaceArguments(argv)) {
-    throw googleWorkspaceArgumentsTooLarge();
-  }
+  // Telegram must be able to show every material argument of a command that waits for the button.
+  const approvable = !GOOGLE_WORKSPACE_ACCESS_GRANT_ROUTES.has(reviewed.route) ||
+    JSON.stringify(argv).length <= MAX_APPROVABLE_ARGUMENTS_LENGTH;
+  if (!approvable) throw googleWorkspaceArgumentsTooLarge();
   return reviewed.kind;
+}
+
+/** Whether a valid command opens the user's data to other people and waits for the owner's button. */
+export function isGoogleWorkspaceAccessGrant(argv: readonly string[]): boolean {
+  return classifyGoogleWorkspaceCommand(argv) === "mutation" &&
+    GOOGLE_WORKSPACE_ACCESS_GRANT_ROUTES.has(resolveReviewedRoute(argv).route);
 }
 
 export function classifyModelFacingGoogleWorkspaceCommand(

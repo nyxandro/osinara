@@ -46,7 +46,7 @@ gws calendar +insert --summary 'Meet' --start ... --end ... --meet
 - The --meet flag automatically adds a Google Meet link to the event.
 
 > [!CAUTION]
-> This is a **write** command. Execute it once; `execute_google_workspace` provides the only required human approval.
+> This is a **write** command. Execute it once on the user's direct request; it runs at once, without a confirmation card.
 
 ## See Also
 

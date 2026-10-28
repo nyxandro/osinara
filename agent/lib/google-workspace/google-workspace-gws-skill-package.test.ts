@@ -111,8 +111,8 @@ describe("Google Workspace gws skill packages", () => {
     expect(shared).toContain("execute_google_workspace");
     expect(shared).toContain("manage_google_workspace_connection");
     expect(shared).toContain("gws auth login");
-    expect(shared).toContain("is never a substitute for this approval");
-    expect(shared).toContain("automatic human approval");
+    expect(shared).toContain("A mutation runs at once, without a confirmation card");
+    expect(shared).toMatch(/is never a substitute\s+for that approval/u);
     expect(shared).toContain("Do not automatically retry failed `gws` mutations");
     expect(shared).toContain("Do not pass `--upload`, `--output`, `--output-dir`, `--attach`, `-a`, or `-o`");
   });
@@ -124,8 +124,8 @@ describe("Google Workspace gws skill packages", () => {
     expect(people).toContain("updateContact");
     expect(people).toContain("deleteContact");
     expect(people).toContain("batchCreateContacts");
-    expect(people).toContain("execute_google_workspace supplies mandatory human approval");
-    expect(people).toContain("Update a contact through mandatory human approval");
+    expect(people).toContain("runs at once through `execute_google_workspace`, without a confirmation card");
+    expect(people).not.toContain("mandatory human approval");
     expect(people).toContain("metadata.sources.etag");
   });
 
@@ -141,16 +141,20 @@ describe("Google Workspace gws skill packages", () => {
     expect(gmail).not.toContain('["gmail", "users", "messages", "delete"');
     expect(gmail).not.toContain('["gmail", "users", "messages", "modify"');
     expect(gmail).toMatch(/Do not combine resource and\s+method segments/u);
+    // A state change runs without a card, so a large selection goes through batch after batch.
+    expect(gmail).not.toContain("ask whether to continue");
+    expect(gmail).not.toContain("approval");
   });
 
-  it("contains no runtime generation fallback, shell pipeline, or duplicate confirmation flow", async () => {
+  it("contains no runtime generation fallback, shell pipeline, or confirmation flow for ordinary writes", async () => {
     const skills = await Promise.all(serviceSkills.map(readSkill));
     const joined = skills.join("\n");
 
     expect(joined).not.toContain("gws generate-skills");
     expect(joined).not.toMatch(/gws [^\n]+\|/u);
     expect(joined).not.toContain("confirm with the user before executing");
-    expect(joined).toContain("provides the only required human approval");
+    expect(joined).not.toContain("required human approval");
+    expect(joined).toContain("it runs at once, without a confirmation card");
   });
 
   it("keeps helper examples within route flags and Gmail watch bounded", async () => {

@@ -4,7 +4,7 @@
  * Exports:
  * - `SessionAuthContext`: one verified principal with the application's string attributes.
  * - `SessionAuth`: who acts now (`current`) and who started the turn (`initiator`).
- * - `SessionTurn`, `SessionParent`: the turn identity and, for a subagent turn, its caller.
+ * - `SessionTurn`, `SessionParent`: the turn identity and kind and, for a subagent turn, its caller.
  * - `SessionContext`: session identity plus sandbox access.
  * - `DynamicResolveContext`: what an instructions, tools or skills resolver sees before a step.
  *
@@ -13,6 +13,7 @@
 import type { ModelMessage } from "ai";
 
 import type { RuntimeSandboxSession } from "./sandbox/types.js";
+import type { TurnKind } from "./turn/turn-types.js";
 
 export interface SessionAuthContext {
   readonly attributes: Readonly<Record<string, string | readonly string[]>>;
@@ -31,6 +32,11 @@ export interface SessionAuth {
 export interface SessionTurn {
   readonly id: string;
   readonly sequence: number;
+  /**
+   * What started the turn. A continuation after a button press keeps the kind of the turn it resumes,
+   * while its auth is the presser's. The runtime always sets it; a context built by hand may omit it.
+   */
+  readonly kind?: TurnKind;
 }
 
 export interface SessionParent {

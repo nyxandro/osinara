@@ -30,12 +30,12 @@ describe("settledPromptText", () => {
 
   it("removes a per-tool consequence too", () => {
     const prompt = buildApprovalMessage({
-      actionLabel: "изменение в Google Workspace",
+      actionLabel: "открытие доступа к данным Google",
       consequence: GOOGLE_WORKSPACE_CONSEQUENCE,
       facts: ["Сервис: Gmail"],
     });
     expect(settledPromptText(prompt)).toBe(
-      "Подтверждение: изменение в Google Workspace.\n\nСервис: Gmail",
+      "Подтверждение: открытие доступа к данным Google.\n\nСервис: Gmail",
     );
   });
 
