@@ -41,6 +41,8 @@ export interface TelegramFinalPresentationOptions {
   readonly requiresRich?: (part: string) => boolean;
   /** A paragraph that stands for a media file: it shows a file and adds no length to the answer. */
   readonly isMediaBlock?: (block: string) => boolean;
+  /** A notification stays expanded: its words are the point, never hidden under "Полный ответ". */
+  readonly keepExpanded?: boolean;
 }
 
 export interface TelegramFinalPresentationChunk {
@@ -147,6 +149,7 @@ function formatPart(
     readonly carriesButtons: boolean;
     readonly carriesMedia: boolean;
     readonly isMediaBlock: ((block: string) => boolean) | undefined;
+    readonly keepExpanded: boolean;
   },
 ): TelegramFinalPresentationChunk[] {
   const { carriesButtons, carriesMedia } = part;
@@ -160,7 +163,7 @@ function formatPart(
       .map((part, index) => ({ format: "rich", pacing: chunkPacing(index), text: literalRichParagraphs(part) }))
     : splitTelegramMessageText(text)
       .map((part, index) => ({ format: "plain", pacing: chunkPacing(index), text: part }));
-  const collapsed = collapseLongAnswer(markdown, carriesButtons, part.isMediaBlock);
+  const collapsed = part.keepExpanded ? markdown : collapseLongAnswer(markdown, carriesButtons, part.isMediaBlock);
 
   if (!carriesMedia && !usesSupportedRichFormatting(collapsed)) return writtenText(collapsed);
   try {
@@ -187,6 +190,7 @@ export function formatTelegramFinalPresentation(
     carriesButtons,
     carriesMedia: options.requiresRich?.(text) === true,
     isMediaBlock: options.isMediaBlock,
+    keepExpanded: options.keepExpanded === true,
   });
 
   // The length policy applies to each authored message on its own, so a long main answer still

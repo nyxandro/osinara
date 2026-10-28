@@ -61,6 +61,13 @@ describe("Telegram final presentation", () => {
     expect(formatTelegramFinalPresentation(`${markdown}\n\nещё абзац\n\nи ещё`, options)[0]!.text).toContain("<details>");
   });
 
+  it("keeps a notification expanded however long it is", () => {
+    const markdown = "**⏰ Напоминание:**\n\nПервый абзац\n\nВторой абзац\n\nТретий абзац";
+
+    expect(formatTelegramFinalPresentation(markdown, { keepExpanded: true })).toEqual([{ format: "rich", pacing: "immediate", text: markdown }]);
+    expect(formatTelegramFinalPresentation(markdown)[0]!.text).toContain("<details>");
+  });
+
   it("recognizes a GFM table without outer pipes and collapses it", () => {
     const markdown = "Параметр | Значение\n--- | ---\nрежим | plain";
     const output = formatTelegramFinalPresentation(markdown)[0]!;

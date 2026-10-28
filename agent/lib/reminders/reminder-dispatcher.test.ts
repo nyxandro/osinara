@@ -13,6 +13,8 @@ import { createReminderDispatcher } from "./reminder-dispatcher.js";
 
 const job: ClaimedReminder = {
   addresseeTelegramUserId: "101",
+  authorRole: "owner",
+  authorUserId: "00000000-0000-4000-8000-000000000003",
   buttons: null,
   familyId: "00000000-0000-4000-8000-000000000010",
   forumTopicId: null,

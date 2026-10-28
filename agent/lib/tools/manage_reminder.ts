@@ -9,6 +9,8 @@
  * - Action-specific validators return actionable Russian AppError messages.
  * - Reply buttons are written as Telegram button markup at the end of `content`, as in an answer;
  *   the reminder keeps its text and its buttons apart, and new content brings its own buttons.
+ * - Files shown in `content` are checked when it is written, against the chat the reminder reaches:
+ *   it goes out later without the model, which could no longer fix them.
  */
 import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
@@ -18,6 +20,7 @@ import {
   REMINDER_RECURRENCE_INTERVAL_MAX,
 } from "../reminders/reminder-config.js";
 import { requireReminderAuthorization } from "../reminders/reminder-context.js";
+import { reminderWriterRights, requireReminderFiles } from "../reminders/reminder-files.js";
 import { REMINDER_RECURRENCE_UNITS, type ReminderRecurrence } from "../reminders/reminder-record.js";
 import { reminderRepository } from "../reminders/reminder-repository.js";
 import type { ReplyButtonRows } from "../reply-buttons/reply-button-contract.js";
@@ -195,6 +198,7 @@ const TOOL_DESCRIPTION = [
   "An explicit user request is enough: do it without additional confirmation. Ask only for missing or ambiguous data.",
   "content is sent as ready-made text without calling the model. Do not store in it a task to come up with or do something later; if asked to compose a message, prepare it before creating the reminder.",
   "content is read at the moment of delivery: without words like \"завтра\" and \"через час\"; the text format is in the instructions.",
+  "content is laid out like your answers: Markdown formatting goes through, and a workspace file on its own line as ![caption](/workspace/...) arrives inside the reminder. A file is checked now and read at delivery, so it must stay in place.",
   "This is not an agent schedule: if a future autonomous run of the agent with research or a report is needed, use manage_agent_schedule.",
   "Create payload: {\"action\":\"create\",\"content\":\"Позвонить врачу\",\"firstRunAt\":\"2026-08-01T10:00:00+03:00\",\"timezone\":\"Europe/Moscow\",\"scope\":\"personal\",\"recurrence\":null}.",
   "Recurrence: no repeat is recurrence=null; a repeat = {\"unit\":\"minutely\",\"interval\":5}. unit: minutely, hourly, daily, weekly, monthly, yearly; interval is an integer from 1 to 365. Minimum 1 minute. Minutes and hours are counted as a duration, other periods keep the local calendar time. A missing date moves to the last day of the month without losing the original date for the following repeats. The time is checked every minute; missed repeats are not caught up.",
@@ -214,6 +218,12 @@ export default defineTool({
     const parsed = requireManageReminderInput(input);
     const authorization = requireReminderAuthorization(ctx);
     if (parsed.action === "create") {
+      await requireReminderFiles({
+        content: parsed.values.content,
+        errorCode: INPUT_ERROR_CODE,
+        rights: () => reminderWriterRights(authorization),
+        scope: parsed.values.scope,
+      });
       return await reminderRepository.create(authorization, {
         ...parsed.values,
         operationKey: ctx.callId,
@@ -221,6 +231,14 @@ export default defineTool({
     }
     if (parsed.action === "update") {
       const { id, ...values } = parsed.values;
+      // A reminder that is not found, or a public chat's one this tool may not change, is reported
+      // by the update itself.
+      const scope = values.content === undefined ? null : await reminderRepository.scopeOf(authorization, id);
+      if (values.content !== undefined && scope !== null && scope !== "group") {
+        await requireReminderFiles({
+          content: values.content, errorCode: INPUT_ERROR_CODE, rights: () => reminderWriterRights(authorization), scope,
+        });
+      }
       return await reminderRepository.update(authorization, id, {
         ...values,
         operationKey: ctx.callId,

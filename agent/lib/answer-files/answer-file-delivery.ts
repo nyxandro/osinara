@@ -8,6 +8,10 @@
  * - `prepareAnswerFiles`: reads, resolves and lays out the files of one answer.
  * - `presentTelegramAnswer`: the delivery chunks, each rich one with the files it shows.
  * - `withRefusedFiles`: a chunk's text with a visible line in place of each file Telegram refused.
+ * - `withoutAnswerFiles`: the prepared answer as written, a visible line in place of each file, for
+ *   an ordinary message that cannot carry them.
+ * - `unreadAnswerFiles`: a text prepared with a visible line in place of each file, when its files
+ *   could not be read at all.
  *
  * Key constructs:
  * - A file becomes a marker paragraph before formatting and a `tg://<kind>?id=` media block after
@@ -78,11 +82,17 @@ export interface TelegramAnswerChunk extends TelegramFinalPresentationChunk {
   readonly media: readonly TelegramRichMediaUpload[];
 }
 
+export interface TelegramAnswerPresentationOptions {
+  /** A notification stays expanded instead of collapsing under "Полный ответ". */
+  readonly keepExpanded?: boolean;
+  readonly replyButtons: boolean;
+}
+
 const MIB = 1024 * 1024;
 // A caption is a line under a file, not a text of its own; Telegram's media captions stop at 1024.
 const CAPTION_MAX_CHARACTERS = 1_024;
 const MEDIA_LIMIT_MB = Math.floor(TELEGRAM_RICH_MESSAGE_MEDIA_MAX_BYTES / MIB);
-const UNATTACHED_REASONS: Readonly<Record<AnswerFileProblem | "format_unfit" | "over_limit" | "refused", readonly [string, string]>> = {
+const UNATTACHED_REASONS: Readonly<Record<AnswerFileProblem | "format_unfit" | "over_limit" | "read_failed" | "refused", readonly [string, string]>> = {
   forbidden: ["нет доступа к этой папке из текущего чата", "AGENT_ANSWER_FILE_FORBIDDEN"],
   format_unfit: ["ответ не поместился в оформленное сообщение", "AGENT_ANSWER_FILES_FORMAT_UNFIT"],
   invalid_path: ["путь к файлу указан неверно", "AGENT_ANSWER_FILE_PATH_INVALID"],
@@ -91,6 +101,7 @@ const UNATTACHED_REASONS: Readonly<Record<AnswerFileProblem | "format_unfit" | "
     `в одно сообщение помещается не больше ${TELEGRAM_RICH_MESSAGE_MEDIA_MAX_COUNT} файлов и ${MEDIA_LIMIT_MB} МБ вместе`,
     "AGENT_ANSWER_FILES_LIMIT_EXCEEDED",
   ],
+  read_failed: ["файл не удалось прочитать", "AGENT_ANSWER_FILE_READ_FAILED"],
   refused: ["Telegram не принял файл", "AGENT_ANSWER_FILE_REFUSED"],
   too_large: [`файл больше ${MEDIA_LIMIT_MB} МБ`, "AGENT_ANSWER_FILE_TOO_LARGE"],
 };
@@ -244,7 +255,7 @@ function attachFiles(
 /** The chunks with every file in place, or null when the answer cannot be a rich message. */
 export function attachedTelegramAnswer(
   answer: PreparedTelegramAnswer,
-  options: { readonly replyButtons: boolean },
+  options: TelegramAnswerPresentationOptions,
 ): TelegramAnswerChunk[] | null {
   const { files } = answer;
   if (files === null) {
@@ -261,16 +272,30 @@ export function attachedTelegramAnswer(
 
 export function presentTelegramAnswer(
   answer: PreparedTelegramAnswer,
-  options: { readonly replyButtons: boolean },
+  options: TelegramAnswerPresentationOptions,
 ): TelegramAnswerChunk[] {
   const attached = attachedTelegramAnswer(answer, options);
   if (attached !== null) return attached;
-  const files = answer.files!;
-  console.error(JSON.stringify({ code: "AGENT_ANSWER_FILES_FORMAT_UNFIT", files: files.places.size }));
+  console.error(JSON.stringify({ code: "AGENT_ANSWER_FILES_FORMAT_UNFIT", files: answer.files!.places.size }));
+  return formatTelegramFinalPresentation(withoutAnswerFiles(answer, "format_unfit"), options)
+    .map((chunk) => ({ ...chunk, media: [] }));
+}
+
+/** The answer as written with a visible line in place of each file it was to show. */
+export function withoutAnswerFiles(answer: PreparedTelegramAnswer, reason: "format_unfit" | "refused"): string {
+  const { files } = answer;
+  if (files === null) return answer.markdown;
   const pattern = new RegExp(`${files.marker}T(\\d+)E`, "gu");
-  const withoutFiles = answer.markdown.replace(pattern, (_marker, index: string) =>
-    unattachedLine(files.places.get(Number(index))!.upload.fileName, "format_unfit"));
-  return formatTelegramFinalPresentation(withoutFiles, options).map((chunk) => ({ ...chunk, media: [] }));
+  return answer.markdown.replace(pattern, (_marker, index: string) =>
+    unattachedLine(files.places.get(Number(index))!.upload.fileName, reason));
+}
+
+/** The text with a visible line in place of each file it shows, none of them read. */
+export function unreadAnswerFiles(markdown: string): PreparedTelegramAnswer {
+  const { files: references } = readAnswerMedia(markdown);
+  const problems = references.map((reference) => ({ code: UNATTACHED_REASONS.read_failed[1], path: workspaceAddress(reference) }));
+  const laidOut = layOutAnswerFiles(markdown, references, (reference) => unattachedLine(reference.path.split("/").at(-1)!, "read_failed"));
+  return { files: null, markdown: laidOut, problems, source: references.length === 0 ? null : markdown };
 }
 
 /**

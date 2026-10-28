@@ -9,10 +9,12 @@
  * - The public chat has exactly one scope and one timezone, so neither is a model input here. A
  *   trusted descriptor keeps its own scope field and stays untouched by this module.
  * - Every execute re-derives the verified Telegram participant and acts only in that chat.
+ * - Files shown in `content` are checked when it is written: only this chat's own folder reaches it.
  */
 import { defineTool, type ToolDefinition } from "../../runtime/tool.js";
 import { z } from "zod";
 
+import { answerWorkspaceAuthorization } from "../answer-files/telegram-answer-files.js";
 import { groupReminderRepository } from "../reminders/group-reminder-repository.js";
 import { requireGroupReminderAuthorization } from "../reminders/group-reminder-context.js";
 import {
@@ -23,6 +25,7 @@ import {
   REMINDER_LIST_MAX_LIMIT,
   REMINDER_RECURRENCE_INTERVAL_MAX,
 } from "../reminders/reminder-config.js";
+import { requireReminderFiles } from "../reminders/reminder-files.js";
 import { REMINDER_RECURRENCE_UNITS, type ReminderRecurrence } from "../reminders/reminder-record.js";
 import {
   optionalIsoDate,
@@ -146,6 +149,7 @@ const MANAGE_DESCRIPTION = [
   "A participant's explicit request is enough: do it without additional confirmation. Clarify missing or ambiguous data with an ordinary message in the chat.",
   "content is sent as ready-made text without calling the model. Do not store in it a task to come up with or do something later; if asked to compose a message, prepare it before creating the reminder.",
   "content is read at the moment of delivery: without words like \"завтра\" and \"через час\"; the text format is in the instructions.",
+  "content is laid out like your answers: Markdown formatting goes through, and a file of this chat's folder on its own line as ![caption](/workspace/group/...) arrives inside the reminder. A file is checked now and read at delivery, so it must stay in place.",
   "This is not an autonomous run of the agent: working on a schedule, searching the web and preparing reports is not possible in this chat.",
   "Reminders belong to the chat: any participant may change and delete any of them, not only their own.",
   `Limit: no more than ${GROUP_REMINDER_MAX_PER_CHAT} active reminders for the whole chat.`,
@@ -184,6 +188,12 @@ export const EXTERNAL_GROUP_REMINDER_TOOLS: Readonly<Record<string, AnyToolDefin
       const parsed = requireManageInput(input);
       const authorization = requireGroupReminderAuthorization(ctx);
       if (parsed.action === "create") {
+        await requireReminderFiles({
+          content: parsed.values.content,
+          errorCode: INPUT_ERROR_CODE,
+          rights: () => answerWorkspaceAuthorization(ctx.session),
+          scope: "group",
+        });
         return await groupReminderRepository.create(authorization, {
           ...parsed.values,
           operationKey: ctx.callId,
@@ -191,6 +201,11 @@ export const EXTERNAL_GROUP_REMINDER_TOOLS: Readonly<Record<string, AnyToolDefin
       }
       if (parsed.action === "update") {
         const { id, ...values } = parsed.values;
+        if (values.content !== undefined) {
+          await requireReminderFiles({
+            content: values.content, errorCode: INPUT_ERROR_CODE, rights: () => answerWorkspaceAuthorization(ctx.session), scope: "group",
+          });
+        }
         return await groupReminderRepository.update(authorization, id, {
           ...(values.content === undefined ? {} : { content: values.content }),
           ...(values.firstRunAt === undefined ? {} : { firstRunAt: values.firstRunAt }),

@@ -251,7 +251,14 @@ describeWithDatabase("reminder repositories", () => {
     expect(reminder.content).toBe("Оплатить интернет\n\n<tg-button-row><tg-button style=\"success\">✅ Оплатил</tg-button>" +
       "<tg-button>⏰ Через час</tg-button></tg-button-row>");
     const [claimed] = await reminderDispatchRepository.claimDue({ leaseMilliseconds: 300_000, limit: 10, now: new Date("2026-07-13T06:00:30.000Z") });
-    expect(claimed).toMatchObject({ addresseeTelegramUserId: "reminder-member", buttons, telegramChatType: "private" });
+    await expect(reminderRepository.scopeOf(auth, reminder.id)).resolves.toBe("personal");
+    await expect(reminderRepository.scopeOf({ ...auth, familyId: "00000000-0000-4000-8000-000000000099" }, reminder.id))
+      .resolves.toBeNull();
+    // Its files are read with the author's rights, so the author's current role comes with it.
+    expect(claimed).toMatchObject({
+      addresseeTelegramUserId: "reminder-member", authorRole: "member", authorUserId: fixture.memberId, buttons,
+      telegramChatType: "private",
+    });
 
     await database().query("UPDATE reminders SET status = 'active', lease_token = NULL, lease_expires_at = NULL WHERE id = $1", [reminder.id]);
     const cleared = await reminderRepository.update(auth, reminder.id, {

@@ -210,10 +210,10 @@ describe("reply buttons on a turn's final answer", () => {
 });
 
 describe("reply buttons on a reminder", () => {
+  const MESSAGE = "**⏰ Напоминание:**\n\nОплатить интернет до 20:00";
   const REMINDER = {
-    addresseeTelegramUserId: "101", buttons: ROWS, content: "Оплатить <интернет> & *ТВ*\nдо 20:00",
-    delayedNotice: null, reminderId: "reminder-1", scope: "personal" as const, telegramChatId: "101",
-    telegramChatType: "private",
+    addresseeTelegramUserId: "101", buttons: ROWS, messageText: MESSAGE, reminderId: "reminder-1",
+    scope: "personal" as const, telegramChatId: "101", telegramChatType: "private",
   };
 
   beforeEach(() => {
@@ -221,32 +221,30 @@ describe("reply buttons on a reminder", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
   });
 
-  it("stages the reminder's text and returns it as a rich message with its buttons", async () => {
+  it("stages the reminder's message and returns it as a rich message with its buttons", async () => {
     repository.stageForReminder.mockResolvedValue(SET);
 
     const buttons = await reminderReplyButtons(REMINDER);
 
-    const text = "**⏰ Напоминание:**\n\n<p>Оплатить &lt;интернет&gt; &amp; *ТВ*<br>до 20:00</p>";
     expect(repository.stageForReminder).toHaveBeenCalledWith({
       addresseeTelegramUserId: "101",
       buttons: ROWS,
-      messageText: text,
+      messageText: MESSAGE,
       reminderId: "reminder-1",
       telegramChatId: "101",
       telegramChatType: "private",
       token: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/u),
     });
-    expect(buttons?.markdown).toBe(`${text}\n\n${MARKUP}`);
+    expect(buttons?.markdown).toBe(`${MESSAGE}\n\n${MARKUP}`);
   });
 
-  it("adds the late-delivery notice as its own paragraph", async () => {
+  it("keeps the files of the message its buttons went out under", async () => {
     repository.stageForReminder.mockResolvedValue(SET);
+    const media = [{ fileId: "photo-file", id: "f0", kind: "photo" as const }];
 
-    await reminderReplyButtons({ ...REMINDER, content: "Позвонить", delayedNotice: "Доставлено с задержкой." });
+    await (await reminderReplyButtons(REMINDER))!.activate("601", media);
 
-    expect(repository.stageForReminder).toHaveBeenCalledWith(expect.objectContaining({
-      messageText: "**⏰ Напоминание:**\n\n<p>Позвонить</p>\n\n<p>Доставлено с задержкой.</p>",
-    }));
+    expect(repository.activate).toHaveBeenCalledWith(SET.id, "601", media);
   });
 
   it.each([
