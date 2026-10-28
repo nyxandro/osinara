@@ -5,6 +5,9 @@
  * - A delivered replay returns stored receipts without another native send.
  * - A started/ambiguous replay never invokes Telegram again.
  * - A crash after provider acceptance but before chunk persistence becomes terminal ambiguity.
+ * - A chunk carries its files to the sender. An answer that shows files is identified by the text
+ *   the model wrote, which a replay repeats exactly, while the files on disk may change meanwhile;
+ *   an answer without files keeps the identity it always had.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
@@ -27,7 +30,7 @@ const base = {
   deliveryIdentity: { chatId: "101" },
   agentSessionId: "wrun_session_1",
   agentTurnId: "turn-1",
-  markdown: "Готово",
+  answer: { files: null, markdown: "Готово", problems: [], source: null },
   replyButtons: false,
 };
 
@@ -54,11 +57,38 @@ describe("Telegram final delivery", () => {
       agentSessionId: base.agentSessionId,
       agentTurnId: base.agentTurnId,
       outputHash: hash({
-        chunks: [hash(base.markdown)],
+        chunks: [hash(base.answer.markdown)],
         deliveryIdentity: base.deliveryIdentity,
       }),
     });
     expect(sendChunk).not.toHaveBeenCalled();
+  });
+
+  it("hands a chunk its files and identifies the answer by the text the model wrote", async () => {
+    repository.start.mockResolvedValue({
+      deliveryId: "00000000-0000-4000-8000-000000000004",
+      deliveryToken: "00000000-0000-4000-8000-000000000005",
+      status: "started",
+    });
+    const sendChunk = vi.fn().mockResolvedValue({ chatType: "private", messageId: "503" });
+    const upload = { bytes: Buffer.from("pdf"), fileName: "a.pdf", id: "f0", kind: "document" as const, mediaType: "application/pdf", sha256: "sha-a" };
+    const answer = {
+      files: { marker: "OSINARAFILEabc", places: new Map([[0, { caption: "", upload }]]) },
+      markdown: "Отчёт\n\nOSINARAFILEabcT0E",
+      problems: [],
+      source: "Отчёт\n\n![](/workspace/personal/a.pdf)",
+    };
+
+    await deliverTelegramFinalOutput({ ...base, answer, sendChunk });
+
+    const chunk = { format: "rich", media: [upload], pacing: "immediate", text: "Отчёт\n\n![](tg://document?id=f0)" };
+    expect(sendChunk).toHaveBeenCalledWith(chunk, 0, true);
+    const chunkHash = hash({ media: ["f0:sha-a"], text: chunk.text });
+    expect(repository.start).toHaveBeenCalledWith(expect.objectContaining({
+      chunkCount: 1,
+      outputHash: hash({ answerSource: hash(answer.source), deliveryIdentity: base.deliveryIdentity }),
+    }));
+    expect(repository.confirmChunk).toHaveBeenCalledWith(expect.objectContaining({ contentHash: chunkHash }));
   });
 
   it("does not resend a delivery whose started state is crash-ambiguous", async () => {
@@ -87,7 +117,7 @@ describe("Telegram final delivery", () => {
     expect(sendChunk).toHaveBeenCalledTimes(1);
     // The only chunk is also the last one, the one that would carry reply buttons.
     expect(sendChunk).toHaveBeenCalledWith(
-      { format: "plain", pacing: "immediate", text: "Готово" },
+      { format: "plain", media: [], pacing: "immediate", text: "Готово" },
       0,
       true,
     );

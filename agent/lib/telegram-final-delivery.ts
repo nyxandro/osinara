@@ -3,19 +3,32 @@
  *
  * Exports:
  * - `deliverTelegramFinalOutput`: sends plain or rich chunks once behind the durable outbox barrier.
+ *
+ * Key construct:
+ * - An answer without files is identified by its chunks, as before files existed, so a delivery
+ *   started by an older release still matches. An answer that shows files is identified by the text
+ *   the model wrote: a replay repeats it exactly, while a file on disk may have changed or gone, and
+ *   a delivered answer must then still be recognized instead of failing the turn.
  */
 import { createHash } from "node:crypto";
 
 import { AppError } from "./app-error.js";
 import {
-  formatTelegramFinalPresentation,
-  type TelegramFinalPresentationChunk,
-} from "./telegram-final-presentation.js";
+  presentTelegramAnswer,
+  type PreparedTelegramAnswer,
+  type TelegramAnswerChunk,
+} from "./answer-files/answer-file-delivery.js";
 import type { SentTelegramMessage } from "./telegram-rich-messages.js";
 import { telegramFinalDeliveryRepository } from "./telegram-final-delivery-repository.js";
 
 function hash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function chunkHash(chunk: TelegramAnswerChunk): string {
+  return chunk.media.length === 0
+    ? hash(chunk.text)
+    : hash({ media: chunk.media.map((upload) => `${upload.id}:${upload.sha256}`), text: chunk.text });
 }
 
 function terminalDeliveryError(code: string): AppError {
@@ -30,17 +43,17 @@ export async function deliverTelegramFinalOutput(input: {
   deliveryIdentity: unknown;
   agentSessionId: string;
   agentTurnId: string;
-  markdown: string;
+  /** The answer text with its files laid out (`prepareAnswerFiles`). */
+  answer: PreparedTelegramAnswer;
   /** The answer carries reply buttons: its last message is rich, the only kind that holds them. */
   replyButtons: boolean;
   /** `last` marks the final message of the answer, the one that carries reply buttons. */
-  sendChunk(chunk: TelegramFinalPresentationChunk, ordinal: number, last: boolean): Promise<SentTelegramMessage>;
+  sendChunk(chunk: TelegramAnswerChunk, ordinal: number, last: boolean): Promise<SentTelegramMessage>;
 }): Promise<SentTelegramMessage[]> {
-  const chunks = formatTelegramFinalPresentation(input.markdown, { replyButtons: input.replyButtons });
-  const outputHash = hash({
-    chunks: chunks.map((chunk) => hash(chunk.text)),
-    deliveryIdentity: input.deliveryIdentity,
-  });
+  const chunks = presentTelegramAnswer(input.answer, { replyButtons: input.replyButtons });
+  const outputHash = input.answer.source === null
+    ? hash({ chunks: chunks.map(chunkHash), deliveryIdentity: input.deliveryIdentity })
+    : hash({ answerSource: hash(input.answer.source), deliveryIdentity: input.deliveryIdentity });
   const start = await telegramFinalDeliveryRepository.start({
     applicationSessionId: input.applicationSessionId,
     chunkCount: chunks.length,
@@ -57,7 +70,7 @@ export async function deliverTelegramFinalOutput(input: {
       const message = await input.sendChunk(chunk, ordinal, ordinal === chunks.length - 1);
       await telegramFinalDeliveryRepository.confirmChunk({
         chatType: message.chatType,
-        contentHash: hash(chunk.text),
+        contentHash: chunkHash(chunk),
         deliveryId: start.deliveryId,
         deliveryToken: start.deliveryToken,
         messageId: message.messageId,

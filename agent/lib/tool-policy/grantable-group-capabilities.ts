@@ -16,8 +16,10 @@
  */
 import { MODEL_VISION_AVAILABLE } from "../model-vision-availability.js";
 import {
+  BASELINE_EXTERNAL_GROUP_GRANTS,
   EXTERNAL_GROUP_CAPABILITY_CATALOG,
   externalGroupCapabilityRequirement,
+  isExternalGroupToolName,
   parseExternalGroupToolAllowlist,
   type ExternalGroupCapabilityRequirement,
   type ExternalGroupToolName,
@@ -62,7 +64,7 @@ export function parseServableExternalGroupToolAllowlist(
 }
 
 function isGrantableCapability(name: ExternalGroupToolName): boolean {
-  return name !== "web_fetch" && isServableExternalGroupCapability(name);
+  return !BASELINE_EXTERNAL_GROUP_GRANTS.has(name) && isServableExternalGroupCapability(name);
 }
 
 /**
@@ -102,8 +104,8 @@ export function selectGrantableExternalGroupTools(
   const effective: ExternalGroupToolName[] = [];
   const unavailable: string[] = [];
   for (const name of persisted) {
-    // Existing saved grants for page reading became baseline access, not an unavailable service.
-    if (name === "web_fetch") continue;
+    // A saved grant that became baseline access is no unavailable service either.
+    if (isExternalGroupToolName(name) && BASELINE_EXTERNAL_GROUP_GRANTS.has(name)) continue;
     if (isGrantableExternalGroupToolName(name)) effective.push(name);
     else unavailable.push(name);
   }

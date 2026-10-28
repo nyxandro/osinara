@@ -9,7 +9,8 @@
  *
  * Key constructs:
  * - Every set is staged together with the rich markdown of its message, so a settled caption is
- *   written under the same words.
+ *   written under the same words. The files of that message are kept once Telegram has them: the
+ *   caption's edit must name each of them again.
  * - A press is claimed in one statement: only the addressee, only a set still offering its buttons,
  *   only once. The same callback query repeated after a crash finds its own claim again.
  * - A set whose message went out before its number was saved (a crash in between) still accepts
@@ -20,6 +21,7 @@
  *   buttons the agent offered after it, in answer to it, stay.
  */
 import { database } from "../database.js";
+import type { SentRichMedia } from "../telegram-rich-messages.js";
 import type { ReplyButtonRows } from "./reply-button-contract.js";
 
 // Buttons live only in rich messages; the column keeps the message's format explicit.
@@ -29,6 +31,8 @@ export interface ReplyButtonSet {
   addresseeTelegramUserId: string;
   buttons: ReplyButtonRows;
   id: string;
+  /** The Telegram files the message shows; empty for a message without files. */
+  messageMedia: readonly SentRichMedia[];
   /** The rich markdown of the message without its buttons. */
   messageText: string | null;
   resolvedAt: Date | null;
@@ -49,6 +53,7 @@ interface SetRow {
   addressee_telegram_user_id: string;
   buttons: ReplyButtonRows;
   id: string;
+  message_media: SentRichMedia[] | null;
   message_text: string | null;
   resolved_at: Date | null;
   selected_index: number | null;
@@ -60,13 +65,14 @@ interface SetRow {
 }
 
 const SET_COLUMNS = `id, token, telegram_chat_id, telegram_chat_type, addressee_telegram_user_id, buttons,
-  telegram_message_id::text, message_text, selected_index, resolved_at, status`;
+  telegram_message_id::text, message_text, message_media, selected_index, resolved_at, status`;
 
 function toSet(row: SetRow): ReplyButtonSet {
   return {
     addresseeTelegramUserId: row.addressee_telegram_user_id,
     buttons: row.buttons,
     id: row.id,
+    messageMedia: row.message_media ?? [],
     messageText: row.message_text,
     resolvedAt: row.resolved_at,
     selectedIndex: row.selected_index,
@@ -134,13 +140,22 @@ export const replyButtonRepository = {
    * happens when its buttons never went out with it, and a set pressed before this already holds
    * its message number.
    */
-  async activateForTurn(agentTurnId: string, telegramMessageId: string): Promise<void> {
+  async activateForTurn(
+    agentTurnId: string,
+    telegramMessageId: string,
+    media: readonly SentRichMedia[],
+  ): Promise<void> {
+    // A press may have come first: the files still belong to its set, whatever its state. A replay
+    // knows only the stored receipt and never empties files already kept.
     await database().query(
       `UPDATE telegram_reply_button_sets
-          SET telegram_message_id = coalesce(telegram_message_id, $2::bigint),
-              status = 'active', activated_at = now()
-        WHERE agent_turn_id = $1 AND status = 'staged'`,
-      [agentTurnId, telegramMessageId],
+          SET message_media = coalesce(message_media, $3::jsonb),
+              telegram_message_id = CASE WHEN status = 'staged'
+                THEN coalesce(telegram_message_id, $2::bigint) ELSE telegram_message_id END,
+              activated_at = CASE WHEN status = 'staged' THEN now() ELSE activated_at END,
+              status = CASE WHEN status = 'staged' THEN 'active' ELSE status END
+        WHERE agent_turn_id = $1`,
+      [agentTurnId, telegramMessageId, media.length === 0 ? null : JSON.stringify(media)],
     );
   },
 

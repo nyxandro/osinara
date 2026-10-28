@@ -29,11 +29,11 @@ import {
   GROUP_MEMORY_DELTA_CONTRACT,
   MEMORY_WRITE_CONTRACT,
   PRIVATE_MEMORY_SOURCE_CONTRACT,
-  SEND_WORKSPACE_FILE_RULES,
   SPOKEN_ASIDE_RULES,
   UNTRUSTED_FILE_CONTENT_RULES,
   VOICE_MESSAGE_RULES,
   WORKSPACE_ARTIFACT_LOOKUP,
+  answerFileRules,
   memoryEditContract,
   reactionRules,
   type MemoryEditAction,
@@ -108,7 +108,7 @@ function trustedImagesAndFilesSection(imageInspection: string): string {
     "## Images and files",
     UNTRUSTED_FILE_CONTENT_RULES,
     MODEL_VISION_AVAILABLE ? imageInspection : null,
-    SEND_WORKSPACE_FILE_RULES,
+    answerFileRules("`/workspace/personal/...` or `/workspace/family/...`"),
     officeDocumentRules(MODEL_VISION_AVAILABLE),
   ].filter((part): part is string => part !== null).join("\n\n");
 }
@@ -361,7 +361,9 @@ Use only the granted skills. For agent-browser run the prepared agent-browser co
 
 ${IMAGE_INSPECTION_CONTRACT} For a photo from \`<telegram_attachment_refs>\` or the reply ancestry pass its \`attachmentId\`: the bytes are loaded only into memory, and the analysis by itself never saves a file.`
       : null,
-    capabilities.has("send_workspace_file") ? SEND_WORKSPACE_FILE_RULES : null,
+    `## Files
+
+${answerFileRules("always `/workspace/group/...`, this group's own folder")}`,
     `## Conversation history
 
 ${GROUP_TIMELINE_TRUST}`,

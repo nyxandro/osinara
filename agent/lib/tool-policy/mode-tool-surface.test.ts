@@ -230,13 +230,13 @@ describe("subagent tool surface", () => {
       "manage_external_group_schedule", "manage_family_invitation", "manage_gmail_message",
       "manage_google_workspace_connection", "manage_memory", "manage_memory_thread",
       "manage_profile_projection", "manage_telegram_group", "notification_settings",
-      "send_workspace_file", "start_new_context",
+      "start_new_context",
     ]) {
       expect(buildModeToolSurface({ environment: "private" }), `root ${name}`).toHaveProperty(name);
       expect(personal, name).not.toHaveProperty(name);
     }
     expect(family).not.toHaveProperty("manage_memory");
-    for (const name of ["manage_memory", "manage_memory_thread", "remove_group_file", "send_workspace_file"]) {
+    for (const name of ["manage_memory", "manage_memory_thread", "remove_group_file"]) {
       expect(external, name).not.toHaveProperty(name);
     }
   });
@@ -459,18 +459,30 @@ describe("external group tool surface", () => {
 
   it.each(["deleted", "retyped"])("denies a descriptor resolved before the group is %s", async () => {
     const surface = buildModeToolSurface({
-      capabilities: new Set(["send_workspace_file"]),
+      capabilities: new Set(["remove_group_file"]),
       environment: "external",
       skills: new Set<string>(),
     });
     const staleContext = {
-      session: { auth: externalAuth(["send_workspace_file"]) },
+      session: { auth: externalAuth(["remove_group_file"]) },
     } as never;
 
     // The live repository represents both a missing row and a non-external row as deny-all.
     loadCurrentExternalGroupCapabilities.mockResolvedValueOnce(new Set());
 
-    await expect(surface.send_workspace_file!.execute({}, staleContext)).rejects.toThrowError(/AGENT_GROUP_TOOL_FORBIDDEN/);
+    await expect(surface.remove_group_file!.execute({}, staleContext)).rejects.toThrowError(/AGENT_GROUP_TOOL_FORBIDDEN/);
+  });
+
+  it("gives no tool for a persisted grant that became baseline access", () => {
+    const surface = buildModeToolSurface({
+      capabilities: new Set(["send_workspace_file", "web_fetch"]),
+      environment: "external",
+      skills: new Set<string>(),
+    });
+
+    // A group file goes inside the answer that shows it; page reading is the baseline tool.
+    expect(surface).not.toHaveProperty("send_workspace_file");
+    expect(surface).toHaveProperty("web_fetch");
   });
 
   it("fails closed when execution-time policy lookup fails", async () => {
@@ -550,7 +562,7 @@ describe("external group tool surface", () => {
 
   it("exposes only group scope in external shared-tool schemas and descriptions", () => {
     const external = buildModeToolSurface({
-      capabilities: new Set(["inspect_workspace_image", "list_memories", "list_memory_threads", "remember", "send_workspace_file"]),
+      capabilities: new Set(["inspect_workspace_image", "list_memories", "list_memory_threads", "remember"]),
       environment: "external",
       skills: new Set<string>(),
     });
@@ -569,7 +581,6 @@ describe("external group tool surface", () => {
         sensitivity: "normal",
         subject: { kind: "current_author" },
       },
-      send_workspace_file: { path: "result.pdf", presentation: "document" },
     } as const;
     for (const [toolName, input] of Object.entries(inputs)) {
       const tool = external[toolName]!;

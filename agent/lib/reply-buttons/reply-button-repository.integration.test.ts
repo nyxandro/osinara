@@ -63,12 +63,29 @@ describeWithDatabase("reply button repository", () => {
   it("activates a turn's staged buttons under its last message", async () => {
     await stageTurn("turn_1");
 
-    await replyButtonRepository.activateForTurn("turn_1", "50");
-    await replyButtonRepository.activateForTurn("turn_1", "52");
-    await replyButtonRepository.activateForTurn("turn_unrelated", "51");
+    await replyButtonRepository.activateForTurn("turn_1", "50", []);
+    await replyButtonRepository.activateForTurn("turn_1", "52", []);
+    await replyButtonRepository.activateForTurn("turn_unrelated", "51", []);
 
     expect((await database().query("SELECT status, telegram_message_id::text FROM telegram_reply_button_sets")).rows)
       .toEqual([{ status: "active", telegram_message_id: "50" }]);
+  });
+
+  it("keeps the files of the message its buttons went out under, for the caption's edit", async () => {
+    await stageTurn("turn_1");
+    const media = [{ fileId: "photo-file", id: "f0", kind: "photo" as const }];
+
+    await replyButtonRepository.activateForTurn("turn_1", "50", media);
+    // A replayed delivery knows only the stored receipt, not the files: what is kept stays.
+    await replyButtonRepository.activateForTurn("turn_1", "50", []);
+
+    await expect(pressOf()).resolves.toMatchObject({ set: { messageMedia: media }, status: "claimed" });
+  });
+
+  it("reads a message without files as one with none", async () => {
+    await delivered("turn_1", "50");
+
+    await expect(pressOf()).resolves.toMatchObject({ set: { messageMedia: [] }, status: "claimed" });
   });
 
   it("discards only buttons that never went out", async () => {

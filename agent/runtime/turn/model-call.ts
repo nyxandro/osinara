@@ -16,6 +16,8 @@
  *   call up to three attempts with exponential backoff. No side effect can repeat: tools run later.
  * - An empty answer, or one whose output limit went on reasoning before any word, is reissued once
  *   with its notice appended to that request only. A call earns one reissue, whichever it was.
+ * - A final answer the application's check refuses (`checkAnswer`) is that reissue too: the model
+ *   gets its own answer and the notice, and may call tools before answering again.
  * On the Anthropic protocol every attempt carries prompt-cache breakpoints (`prompt-cache.ts`).
  *
  * The runtime owns both inactivity windows over the parts it reads, so the first window also covers
@@ -50,6 +52,11 @@ const CONTENT_PART_TYPES = new Set(["text-delta", "reasoning-delta", "tool-input
 
 export interface StepModelCall {
   readonly abortSignal: AbortSignal;
+  /**
+   * The application's check of a final answer (a step without tool calls). A returned notice sends
+   * the answer back to the model once, with that notice; `undefined` accepts it.
+   */
+  readonly checkAnswer?: (text: string) => Promise<string | undefined>;
   readonly inactivity: { readonly firstOutputMs: number; readonly gapMs: number };
   readonly messages: readonly ModelMessage[];
   readonly model: LanguageModel;
@@ -98,7 +105,7 @@ export function assistantStepText(messages: readonly ModelMessage[]): string {
   return "";
 }
 
-async function callOnce(input: StepModelCall, trailingUserNote: string | undefined): Promise<StepModelResponse> {
+async function callOnce(input: StepModelCall, trailing: readonly ModelMessage[]): Promise<StepModelResponse> {
   if (input.abortSignal.aborted) throw new TurnCancelledError({ cause: input.abortSignal.reason });
   const watchdog = new AbortController();
   let timer = setTimeout(() => watchdog.abort(new ModelInactivityError("AGENT_MODEL_FIRST_CHUNK_TIMEOUT")), input.inactivity.firstOutputMs);
@@ -113,9 +120,7 @@ async function callOnce(input: StepModelCall, trailingUserNote: string | undefin
     return normalizeModelCallError(error);
   };
   try {
-    const sent: ModelMessage[] = trailingUserNote === undefined
-      ? [...input.messages]
-      : [...input.messages, { role: "user", content: trailingUserNote }];
+    const sent: ModelMessage[] = [...input.messages, ...trailing];
     const request = usesAnthropicPromptCache(input.model)
       ? markPromptCache({ messages: sent, system: input.system, tools: input.tools })
       : { messages: sent, system: input.system, tools: input.tools };
@@ -160,10 +165,10 @@ async function callOnce(input: StepModelCall, trailingUserNote: string | undefin
   }
 }
 
-async function callWithRetries(input: StepModelCall, trailingUserNote: string | undefined, timing: ModelCallTiming) {
+async function callWithRetries(input: StepModelCall, trailing: readonly ModelMessage[], timing: ModelCallTiming) {
   for (let attempt = 1; ; attempt += 1) {
     try {
-      return await callOnce(input, trailingUserNote);
+      return await callOnce(input, trailing);
     } catch (error) {
       if (attempt === MODEL_CALL_MAX_ATTEMPTS || classifyModelCallError(error) !== "retry") throw error;
       await timing.sleep(MODEL_CALL_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1) + Math.floor(timing.random() * MODEL_CALL_RETRY_JITTER_MS));
@@ -179,12 +184,43 @@ function reissueNotice(error: unknown): string | undefined {
   return undefined;
 }
 
-export async function callStepModel(input: StepModelCall, timing: ModelCallTiming = REAL_TIMING): Promise<StepModelResponse> {
+/**
+ * A final answer the application refuses goes back to the model once, with its own text and the
+ * notice. A failed correction keeps the refused answer: it is still an answer, and the application
+ * shows the person what it could not deliver. A cancellation is never turned into an answer.
+ */
+async function checkedAnswer(input: StepModelCall, response: StepModelResponse, timing: ModelCallTiming): Promise<StepModelResponse> {
+  if (input.checkAnswer === undefined || response.toolCalls.length > 0 || response.text.trim().length === 0) return response;
+  let notice: string | undefined;
   try {
-    return await callWithRetries(input, undefined, timing);
+    notice = await input.checkAnswer(response.text);
+  } catch (error) {
+    // The model has answered; a failing check (its storage, say) must not read as a model outage.
+    throw new AppError("AGENT_ANSWER_CHECK_FAILED", "Не удалось проверить файлы ответа. Попробуйте отправить запрос ещё раз", { cause: error });
+  }
+  if (notice === undefined) return response;
+  try {
+    return await callWithRetries(input, [{ role: "assistant", content: response.text }, { role: "user", content: notice }], timing);
+  } catch (error) {
+    if (error instanceof TurnCancelledError) throw error;
+    console.error(JSON.stringify({
+      code: "AGENT_ANSWER_CHECK_CORRECTION_FAILED",
+      errorCode: error instanceof AppError ? error.code : null,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    }));
+    return response;
+  }
+}
+
+export async function callStepModel(input: StepModelCall, timing: ModelCallTiming = REAL_TIMING): Promise<StepModelResponse> {
+  let response: StepModelResponse;
+  try {
+    response = await callWithRetries(input, [], timing);
   } catch (error) {
     const notice = reissueNotice(error);
     if (notice === undefined) throw error;
-    return await callWithRetries(input, notice, timing);
+    // A call earns one reissue: an answer that already used it is not sent back again.
+    return await callWithRetries(input, [{ role: "user", content: notice }], timing);
   }
+  return await checkedAnswer(input, response, timing);
 }

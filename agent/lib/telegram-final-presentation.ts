@@ -17,6 +17,8 @@
  * - Model-authored formatting must not cost the answer: a message a rich message cannot hold (an
  *   over-wide table, too deep nesting, one indivisible block over the size limit) goes out as the
  *   text the model wrote, the way plain text does.
+ * - Media exist only in a rich message, so a part that carries them is rich even without markup;
+ *   a media block shows a file and adds no length, so it alone never collapses an answer.
  */
 import { splitTelegramMessageText } from "../runtime/telegram/api.js";
 
@@ -35,6 +37,10 @@ export type TelegramChunkPacing = "aside" | "immediate";
 export interface TelegramFinalPresentationOptions {
   /** Reply buttons go out under the last message of the answer. */
   readonly replyButtons?: boolean;
+  /** A part this holds true for goes rich even without markup: only a rich message carries media. */
+  readonly requiresRich?: (part: string) => boolean;
+  /** A paragraph that stands for a media file: it shows a file and adds no length to the answer. */
+  readonly isMediaBlock?: (block: string) => boolean;
 }
 
 export interface TelegramFinalPresentationChunk {
@@ -103,8 +109,18 @@ function isShortPlainBlock(block: string | undefined): block is string {
     !usesSupportedRichBlockFormatting(block);
 }
 
-function collapseLongAnswer(markdown: string, keepClosing: boolean): string {
-  if (!isLongAnswer(markdown) || hasTelegramRichDetailsBlock(markdown)) return markdown;
+/** The text the length policy measures: a media block shows a file and adds no reading to it. */
+function measuredText(markdown: string, isMediaBlock: ((block: string) => boolean) | undefined): string {
+  if (isMediaBlock === undefined) return markdown;
+  return markdown.split(/\n\s*\n/gu).filter((block) => !isMediaBlock(block.trim())).join("\n\n");
+}
+
+function collapseLongAnswer(
+  markdown: string,
+  keepClosing: boolean,
+  isMediaBlock: ((block: string) => boolean) | undefined,
+): string {
+  if (!isLongAnswer(measuredText(markdown, isMediaBlock)) || hasTelegramRichDetailsBlock(markdown)) return markdown;
   // Invalid details-like HTML is made inert before the valid backend wrapper is introduced.
   const safeMarkdown = /<\/?details(?:\s[^>]*)?>/iu.test(markdown)
     ? neutralizeMalformedDetails(markdown)
@@ -127,8 +143,13 @@ function collapseLongAnswer(markdown: string, keepClosing: boolean): string {
 function formatPart(
   markdown: string,
   pacing: TelegramChunkPacing,
-  carriesButtons: boolean,
+  part: {
+    readonly carriesButtons: boolean;
+    readonly carriesMedia: boolean;
+    readonly isMediaBlock: ((block: string) => boolean) | undefined;
+  },
 ): TelegramFinalPresentationChunk[] {
+  const { carriesButtons, carriesMedia } = part;
   // Only the opening chunk carries the pause: a provider-sized overflow is the same utterance.
   const chunkPacing = (index: number): TelegramChunkPacing => index === 0 ? pacing : "immediate";
   // Plain text uses Telegram's ordinary 4096-character transport and never receives parse mode.
@@ -139,9 +160,9 @@ function formatPart(
       .map((part, index) => ({ format: "rich", pacing: chunkPacing(index), text: literalRichParagraphs(part) }))
     : splitTelegramMessageText(text)
       .map((part, index) => ({ format: "plain", pacing: chunkPacing(index), text: part }));
-  const collapsed = collapseLongAnswer(markdown, carriesButtons);
+  const collapsed = collapseLongAnswer(markdown, carriesButtons, part.isMediaBlock);
 
-  if (!usesSupportedRichFormatting(collapsed)) return writtenText(collapsed);
+  if (!carriesMedia && !usesSupportedRichFormatting(collapsed)) return writtenText(collapsed);
   try {
     return formatTelegramRichMessages(collapsed)
       .map((text, index) => ({ format: "rich", pacing: chunkPacing(index), text }));
@@ -162,11 +183,16 @@ export function formatTelegramFinalPresentation(
   const { asides, main } = splitTelegramAuthoredParts(normalized);
   if (!main) return [];
   const buttons = options.replyButtons === true;
+  const part = (text: string, carriesButtons: boolean) => ({
+    carriesButtons,
+    carriesMedia: options.requiresRich?.(text) === true,
+    isMediaBlock: options.isMediaBlock,
+  });
 
   // The length policy applies to each authored message on its own, so a long main answer still
   // collapses without swallowing the asides its author separated from it.
   return [
-    ...formatPart(main, "immediate", buttons && asides.length === 0),
-    ...asides.flatMap((aside, index) => formatPart(aside, "aside", buttons && index === asides.length - 1)),
+    ...formatPart(main, "immediate", part(main, buttons && asides.length === 0)),
+    ...asides.flatMap((aside, index) => formatPart(aside, "aside", part(aside, buttons && index === asides.length - 1))),
   ];
 }

@@ -5,6 +5,8 @@
  * - A capability the runtime cannot serve is removed from the grant surface.
  * - Persisted grants stay parseable so a stale row never invalidates the surrounding policy.
  * - Status selection splits a persisted allowlist into round-trippable and inert entries.
+ * - A persisted grant that became baseline access (page reading, sending a group file) still parses
+ *   and is neither offered nor reported as unavailable.
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -20,6 +22,7 @@ import {
   selectGrantableExternalGroupTools,
 } from "./grantable-group-capabilities.js";
 import {
+  BASELINE_EXTERNAL_GROUP_GRANTS,
   EXTERNAL_GROUP_TOOL_NAMES,
   externalGroupCapabilityRequirement,
   parseExternalGroupToolAllowlist,
@@ -35,10 +38,19 @@ describe("grantable external group capabilities without an image-capable model",
   it("keeps every other catalog capability grantable", () => {
     expect([...GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES]).toEqual(
       EXTERNAL_GROUP_TOOL_NAMES.filter((name) =>
-        name !== "web_fetch" && externalGroupCapabilityRequirement(name) !== "vision"
+        !BASELINE_EXTERNAL_GROUP_GRANTS.has(name) && externalGroupCapabilityRequirement(name) !== "vision"
       ),
     );
     expect(GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES.length).toBeGreaterThan(0);
+  });
+
+  it("keeps a persisted file-sending grant parseable without offering or reporting it", () => {
+    // Every live external group holds it: an unknown name would invalidate their whole policies.
+    expect(parseExternalGroupToolAllowlist(["send_workspace_file", "remember"]))
+      .toEqual(new Set(["send_workspace_file", "remember"]));
+    expect(isGrantableExternalGroupToolName("send_workspace_file")).toBe(false);
+    expect(selectGrantableExternalGroupTools(["send_workspace_file", "remember"]))
+      .toEqual({ effective: ["remember"], unavailable: [] });
   });
 
   it("still parses a grant persisted under a model that saw images", () => {

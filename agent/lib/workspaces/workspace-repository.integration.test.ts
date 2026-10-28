@@ -141,6 +141,13 @@ describeWithDatabase("workspace repository", () => {
     expect(typeof stored.updatedAt).toBe("string");
     expect(read.bytes).toEqual(bytes);
     expect(inboxRead.bytes).toEqual(bytes);
+    // An answer measures its files before it reads any, with the same rights as a read.
+    await expect(binaries.statBinary(owner, "personal", stored.path))
+      .resolves.toMatchObject({ byteSize: bytes.byteLength, path: stored.path });
+    await expect(binaries.statBinary(owner, "personal", "inbox/10/missing.png"))
+      .rejects.toMatchObject({ code: "AGENT_WORKSPACE_FILE_NOT_FOUND" });
+    await expect(binaries.statBinary(owner, "group", stored.path))
+      .rejects.toMatchObject({ code: "AGENT_WORKSPACE_ACCESS_DENIED" });
     expect(read.file).toMatchObject({ mediaType: "image/png", path: stored.path });
     expect(inboxRead.file).toMatchObject({ mediaType: "image/png", path: stored.path });
     expect(typeof read.file.updatedAt).toBe("string");
@@ -196,7 +203,7 @@ describeWithDatabase("workspace repository", () => {
       chatId: "101",
       operationKey: "delivery-operation",
       path: "out/report.txt",
-      presentation: "document",
+      presentation: "voice",
       scope: "personal",
     });
     expect(first.status).toBe("reserved");
@@ -205,7 +212,7 @@ describeWithDatabase("workspace repository", () => {
       chatId: "101",
       operationKey: "delivery-operation",
       path: "out/report.txt",
-      presentation: "document",
+      presentation: "voice",
       scope: "personal",
     });
 
@@ -361,7 +368,7 @@ describeWithDatabase("workspace repository", () => {
       chatId: "101",
       operationKey: "shell-file-delivery",
       path: "shell/notes.txt",
-      presentation: "document",
+      presentation: "voice",
       scope: "personal",
     })).resolves.toMatchObject({
       file: { path: "shell/notes.txt" },

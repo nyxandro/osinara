@@ -26,7 +26,7 @@ const REMINDER_PURPOSE =
 
 // Native workspace file capabilities exist in every registered group, so this line is constant.
 const ALWAYS_AVAILABLE_PURPOSE =
-  "go through the available materials and conversation of this chat, make summaries, outcomes, lists and tables, and create text and Markdown files in the group's working folder";
+  "go through the available materials and conversation of this chat, make summaries, outcomes, lists and tables, create text and Markdown files in the group's working folder and send its files to the chat";
 
 // Catalog order keeps the rendered list deterministic for prompt caching.
 const CAPABILITY_PURPOSES: readonly (readonly [ExternalGroupToolName, string])[] = [
@@ -40,7 +40,6 @@ const CAPABILITY_PURPOSES: readonly (readonly [ExternalGroupToolName, string])[]
   ["manage_memory.undo", "cancel a record just made"],
   ["list_group_history", "bring up earlier conversation of this group"],
   ["inspect_workspace_image", "examine an image sent to the chat"],
-  ["send_workspace_file", "send a file from the working folder to the chat"],
   ["send_voice_message", "answer with a voice message when a participant directly asks for it"],
   ["remove_group_file", "delete a file from this group's working folder"],
 ];

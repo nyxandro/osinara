@@ -8,7 +8,9 @@
  * One step:
  * 1. Without a recorded response for this step, the agent's `stepStarted` runs, the model is
  *    called and its response and tool calls are recorded in one transaction. A recorded response
- *    is never requested again.
+ *    is never requested again. A final answer the agent's `checkFinalAnswer` refuses goes back to
+ *    the model within that call, before anything is recorded (`model-call.ts`), once per turn: an
+ *    answer the model writes after calling tools is not sent back again.
  * 2. The step's text goes to the channel once.
  * 3. Planned calls run concurrently; a call that waits for a person parks the turn.
  * 4. The turn input (on the first write), the step's messages and its tool results are appended
@@ -340,19 +342,35 @@ async function compactIfNeeded(runtime: TurnRuntime, input: {
   return messages;
 }
 
+/** Whether this turn's final answer already went back to the model; a restart may allow one more. */
+interface AnswerCheckState {
+  sentBack: boolean;
+}
+
 async function callModel(runtime: TurnRuntime, input: {
+  readonly answerCheck: AnswerCheckState;
   readonly frame: StepFrame;
   readonly messages: readonly ModelMessage[];
+  readonly parent: SessionParent | undefined;
   readonly selection: StepModelSelection;
   readonly signal: AbortSignal;
   readonly turn: TurnRecord;
 }): Promise<StepModelResponse> {
-  const { selection } = input;
+  const { selection, turn } = input;
   // While an approval waits, other turns of the session answer without tools.
-  const toolChoice = await sessionAwaitsApproval(runtime.database, input.turn.sessionId) ? "none" : undefined;
+  const toolChoice = await sessionAwaitsApproval(runtime.database, turn.sessionId) ? "none" : undefined;
+  // A structured answer is a value for the caller, never text a channel delivers.
+  const checkAnswer = turn.input.outputSchema === undefined && !input.answerCheck.sentBack
+    ? async (text: string) => {
+      const notice = await runtime.agent.checkFinalAnswer({ channel: turn.channel, session: sessionOf(turn, input.parent), text });
+      if (notice !== undefined) input.answerCheck.sentBack = true;
+      return notice;
+    }
+    : undefined;
   try {
     return await runtime.callModel({
       abortSignal: input.signal,
+      ...(checkAnswer === undefined ? {} : { checkAnswer }),
       inactivity: MODEL_INACTIVITY_TIMEOUT,
       messages: input.messages,
       model: selection.model,
@@ -374,6 +392,7 @@ function inputTokens(usage: unknown): number | undefined {
 /** Runs one step; returns the outcome when the turn ends or parks, `null` to continue. */
 async function runStep(
   runtime: TurnRuntime, turn: TurnRecord, parent: SessionParent | undefined, signal: AbortSignal,
+  answerCheck: AnswerCheckState,
 ): Promise<TurnOutcome | null> {
   const stepIndex = turn.nextStepIndex;
   const prepared = requirePrepared(turn);
@@ -393,7 +412,7 @@ async function runStep(
       turnInput = [];
     }
     await runtime.agent.stepStarted({ channel: turn.channel, session: sessionOf(turn, parent) });
-    const response = await callModel(runtime, { frame, messages, selection, signal, turn });
+    const response = await callModel(runtime, { answerCheck, frame, messages, parent, selection, signal, turn });
     const calls = await planStepCalls({
       contextFor: toolContexts(runtime, turn, parent, signal, messages), toolCalls: response.toolCalls, tools,
     });
@@ -488,8 +507,9 @@ async function driveTurn(runtime: TurnRuntime, claimed: TurnRecord, signal: Abor
   const parent = await sessionParent(runtime, claimed);
   let turn = await prepareTurn(runtime, claimed);
   if (turn.resumesTurnId !== null && !turn.historyStarted) turn = await settleParkedStep(runtime, turn, parent, signal);
+  const answerCheck: AnswerCheckState = { sentBack: false };
   for (;;) {
-    const outcome = await runStep(runtime, turn, parent, signal);
+    const outcome = await runStep(runtime, turn, parent, signal, answerCheck);
     if (outcome !== null) return outcome;
     turn = await loadTurn(runtime.database, turn.id);
   }

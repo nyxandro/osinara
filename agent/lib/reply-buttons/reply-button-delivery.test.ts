@@ -80,14 +80,22 @@ describe("reply buttons on a turn's final answer", () => {
       telegramChatType: "private",
       token: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/u),
     });
-    expect(repository.activateForTurn).toHaveBeenCalledWith("turn-1", "601");
+    expect(repository.activateForTurn).toHaveBeenCalledWith("turn-1", "601", []);
+  });
+
+  it("keeps the files of the message its buttons went out under", async () => {
+    const media = [{ fileId: "photo-file", id: "f0", kind: "photo" as const }];
+
+    await turnReplyButtons(TURN)!.afterDelivery([{ messageId: "600" }, { media, messageId: "601" }]);
+
+    expect(repository.activateForTurn).toHaveBeenCalledWith("turn-1", "601", media);
   });
 
   it("activates the buttons of an answer whose delivery a replay found already done", async () => {
     await turnReplyButtons(TURN)!.afterDelivery([{ messageId: "601" }]);
 
     expect(repository.stageForTurn).not.toHaveBeenCalled();
-    expect(repository.activateForTurn).toHaveBeenCalledWith("turn-1", "601");
+    expect(repository.activateForTurn).toHaveBeenCalledWith("turn-1", "601", []);
   });
 
   it("offers no buttons when the turn wrote none", () => {

@@ -96,7 +96,7 @@ describe("reply buttons on the final answer", () => {
       telegramChatId: "101",
     });
     expect(dependencies.deliver).toHaveBeenCalledWith(expect.objectContaining({
-      markdown: "Первая часть\n\nОформляем?",
+      answer: { files: null, markdown: "Первая часть\n\nОформляем?", problems: [], source: null },
       replyButtons: true,
     }));
     expect(dependencies.sendLast).toHaveBeenCalledTimes(1);

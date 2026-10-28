@@ -29,7 +29,7 @@ import { replyButtonRepository } from "./reply-button-repository.js";
 
 export interface TurnReplyButtons {
   /** Activates the buttons under the last delivered message, if they went out with it. */
-  afterDelivery(sent: readonly { readonly messageId: string }[]): Promise<void>;
+  afterDelivery(sent: readonly Pick<SentTelegramMessage, "media" | "messageId">[]): Promise<void>;
   /** Sends the last message with its buttons, or without them when they cannot go out with it. */
   sendLast(
     chunk: { readonly format: "plain" | "rich"; readonly text: string },
@@ -126,7 +126,8 @@ export function turnReplyButtons(input: {
       try {
         // By the turn, not by a set this attempt staged: a replay that finds the answer already
         // delivered sends nothing, yet the buttons of the first attempt went out with it.
-        await replyButtonRepository.activateForTurn(input.agentTurnId, last.messageId);
+        // The caption's later edit of that message must name its files again.
+        await replyButtonRepository.activateForTurn(input.agentTurnId, last.messageId, last.media ?? []);
       } catch (error) {
         // Unactivated buttons still accept their press; only a later message of the addressee
         // does not remove them.

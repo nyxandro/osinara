@@ -73,6 +73,12 @@ export const TELEGRAM_MAX_INBOUND_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 // A logical private message can be a Telegram media group (up to ten files).
 export const TELEGRAM_MAX_ATTACHMENTS_PER_MESSAGE = 10;
 export const TELEGRAM_MAX_OUTBOUND_DOCUMENT_BYTES = 50 * 1024 * 1024;
+// Telegram refuses a whole rich-message upload over its request limit (a 45 MiB file passed, two
+// 26 MiB files together did not), so the files of one answer share a margin below 50 MB.
+export const TELEGRAM_RICH_MESSAGE_MEDIA_MAX_BYTES = 47 * 1024 * 1024;
+export const TELEGRAM_RICH_MESSAGE_MEDIA_MAX_COUNT = 50;
+// Telegram reads the uploaded files before it answers; a cut-off upload cannot be safely resent.
+export const TELEGRAM_RICH_MEDIA_UPLOAD_TIMEOUT_MS = 180_000;
 export const TELEGRAM_VOICE_MAX_BYTES = 20 * 1024 * 1024;
 export const WORKSPACE_MAX_FILE_BYTES = 50 * 1024 * 1024;
 export const WORKSPACE_DELETION_LEASE_MS = 15 * 60 * 1_000;

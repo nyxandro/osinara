@@ -1,5 +1,5 @@
 /**
- * Exactly-once delivery of one workspace file into the current verified Telegram chat.
+ * Exactly-once delivery of one workspace voice note into the current verified Telegram chat.
  *
  * Exports:
  * - `WorkspaceFileChatDeliveryInput`: file, rendering, and timeline projection of one delivery.
@@ -7,8 +7,8 @@
  *
  * Key constructs:
  * - The durable reservation precedes Telegram; a confirmed send is never repeated for bookkeeping.
- * - The confirmed delivery is projected into the conversation history; a voice note replaces the
- *   final text reply, so in a private chat it is projected like a delivered answer.
+ * - A voice note replaces the final text reply, so it is projected into the conversation history
+ *   as its spoken text, like a delivered answer. Other files go inside the answer that shows them.
  */
 import { basename } from "node:path";
 
@@ -35,8 +35,8 @@ export interface WorkspaceFileChatDeliveryInput {
   path: string;
   presentation: WorkspaceFilePresentation;
   scope: WorkspaceScope;
-  /** Timeline text for a delivery whose content is speech rather than a readable attachment. */
-  timelineText?: string;
+  /** Timeline text: the content of a voice note is its speech, not a readable attachment. */
+  timelineText: string;
 }
 
 export async function sendWorkspaceFileToCurrentChat(
@@ -88,22 +88,9 @@ export async function sendWorkspaceFileToCurrentChat(
     }
   }
 
-  const fileName = basename(reservation.file.path);
   const projectionCompleted = await recordToolDeliveryInTimeline(ctx, timelineTarget, {
-    // The timeline stores readable attachments only; a voice note is kept as its spoken text.
-    ...(input.presentation === "voice"
-      ? {}
-      : {
-        attachment: {
-          fileName,
-          kind: input.presentation,
-          mediaType: reservation.file.mediaType,
-          size: reservation.bytes.byteLength,
-        },
-      }),
-    contentText: input.timelineText ?? (input.caption?.trim() || `Отправлен файл «${fileName}».`),
+    contentText: input.timelineText,
     failureCode: "AGENT_WORKSPACE_FILE_PROJECTION_FAILED",
-    replacesAnswer: input.presentation === "voice",
     telegramMessageId: delivery.telegramMessageId,
   });
   return {

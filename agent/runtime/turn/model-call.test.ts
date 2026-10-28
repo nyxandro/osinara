@@ -6,7 +6,7 @@ import { APICallError, InvalidToolInputError, NoSuchToolError, RetryError, tool,
 import { z } from "zod";
 import type { LanguageModelV4CallOptions, LanguageModelV4StreamPart } from "@ai-sdk/provider";
 import { MockLanguageModelV4 } from "ai/test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createConfiguredLanguageModel } from "../../lib/model-transport.js";
 import { callStepModel, EMPTY_RESPONSE_NUDGE, REASONING_EXHAUSTED_NUDGE, type StepModelCall } from "./model-call.js";
@@ -208,6 +208,73 @@ describe("step model call", () => {
     expect(provider.doStreamCalls).toHaveLength(2);
     expect(provider.doStreamCalls[1]!.prompt.at(-1)).toEqual({ role: "user", content: [{ type: "text", text: EMPTY_RESPONSE_NUDGE }] });
     expect(response.messages).toEqual([{ role: "assistant", content: [{ type: "text", text: "ответ" }] }]);
+  });
+
+  it("returns a final answer the application refuses to the model once, with its own text and the notice", async () => {
+    const provider = model(
+      async () => ({ stream: streamOf(textParts("Вот: ![](/workspace/personal/gone.jpg)")) }),
+      async () => ({ stream: streamOf(textParts("Исправленный ответ")) }),
+    );
+    const checkAnswer = async (text: string) => text.includes("gone.jpg") ? "notice: gone.jpg is missing" : undefined;
+    const checks: string[] = [];
+
+    const response = await callStepModel(call(provider, { checkAnswer: async (text) => { checks.push(text); return await checkAnswer(text); } }), NO_WAIT);
+
+    expect(response.text).toBe("Исправленный ответ");
+    expect(checks).toEqual(["Вот: ![](/workspace/personal/gone.jpg)"]);
+    expect(provider.doStreamCalls[1]!.prompt.slice(-2)).toEqual([
+      { role: "assistant", content: [{ type: "text", text: "Вот: ![](/workspace/personal/gone.jpg)" }] },
+      { role: "user", content: [{ type: "text", text: "notice: gone.jpg is missing" }] },
+    ]);
+    expect(response.messages).toEqual([{ role: "assistant", content: [{ type: "text", text: "Исправленный ответ" }] }]);
+  });
+
+  it("keeps the refused answer when its correction fails", async () => {
+    const provider = model(
+      async () => ({ stream: streamOf(textParts("Вот: ![](/workspace/personal/gone.jpg)")) }),
+      async () => ({ stream: streamOf(textParts("")) }),
+    );
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await callStepModel(call(provider, { checkAnswer: async () => "notice" }), NO_WAIT);
+
+    expect(response.text).toBe("Вот: ![](/workspace/personal/gone.jpg)");
+    expect(logged.mock.calls.map(([line]) => String(line)).join("\n")).toContain("AGENT_ANSWER_CHECK_CORRECTION_FAILED");
+    logged.mockRestore();
+  });
+
+  it("does not check a step that calls tools or an answer that already used its reissue", async () => {
+    const checkAnswer = vi.fn(async () => "notice");
+    const toolStep = model(async () => ({ stream: streamOf([
+      { type: "stream-start", warnings: [] },
+      { type: "tool-call", toolCallId: "c1", toolName: "bash", input: '{"command":"ls"}' },
+      FINISH("tool-calls"),
+    ]) }));
+    const tools = { bash: tool({ description: "bash", inputSchema: z.object({ command: z.string() }) }) };
+    await callStepModel(call(toolStep, { checkAnswer, tools }), NO_WAIT);
+
+    const reissued = model(async () => ({ stream: streamOf(textParts("")) }), async () => ({ stream: streamOf(textParts("ответ")) }));
+    expect((await callStepModel(call(reissued, { checkAnswer }), NO_WAIT)).text).toBe("ответ");
+
+    expect(checkAnswer).not.toHaveBeenCalled();
+  });
+
+  it("names a failing answer check as the application's failure, never the model's", async () => {
+    const provider = model(async () => ({ stream: streamOf(textParts("ответ")) }));
+    const outage = Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
+
+    await expect(callStepModel(call(provider, { checkAnswer: async () => { throw outage; } }), NO_WAIT))
+      .rejects.toMatchObject({ cause: outage, code: "AGENT_ANSWER_CHECK_FAILED" });
+  });
+
+  it("does not keep a refused answer when the person cancelled the turn meanwhile", async () => {
+    const controller = new AbortController();
+    const provider = model(async () => ({ stream: streamOf(textParts("ответ")) }));
+
+    await expect(callStepModel(call(provider, {
+      abortSignal: controller.signal,
+      checkAnswer: async () => { controller.abort(); return "notice"; },
+    }), NO_WAIT)).rejects.toMatchObject({ name: "TurnCancelledError" });
   });
 
   it("fails as recoverable when the reissued answer is empty again", async () => {

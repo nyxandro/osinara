@@ -5,6 +5,9 @@
  * - `startTelegramRichThinkingDraft`: displays Telegram's native ephemeral thinking block.
  * - `postTelegramRichMessage`: persists completed rich output and records group anchors.
  * - `SentTelegramMessage`: confirmed Telegram identity for each delivered rich chunk.
+ * - `TelegramRichMediaUpload`: a file uploaded with a chunk and placed by its media block.
+ * - `SentRichMedia`: the Telegram file an upload became, which a later edit must name again.
+ * - `richMediaBlockLines`: the `tg://` media blocks of a text, each on a line of its own, outside code.
  * - `isTelegramRichMessageRefusal`: a definitive refusal of the message, told apart from a failure
  *   whose outcome is unknown.
  *
@@ -13,6 +16,9 @@
  * - Telegram Bot API 10.1 `sendRichMessageDraft` and `sendRichMessage` validation.
  * - Final-delivery ambiguity diagnostics without automatic retries.
  * - First-chunk group replies anchored to a verified inbound message.
+ * - A chunk with files goes as one multipart request: Bot API 10.2 `InputRichMessage.media` names
+ *   each `tg://<kind>?id=` of the text and points at its `attach://` part. Telegram reads the files
+ *   before it answers, so the upload has its own longer timeout.
  */
 import { createHash } from "node:crypto";
 
@@ -20,8 +26,9 @@ import { callTelegramApi, type TelegramApiResponse } from "../runtime/telegram/a
 import type { TelegramChannelState, TelegramHandle } from "../runtime/telegram/channel-types.js";
 import type { TelegramChatType } from "../runtime/telegram/inbound.js";
 
-import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../config.js";
+import { TELEGRAM_API_REQUEST_TIMEOUT_MS, TELEGRAM_RICH_MEDIA_UPLOAD_TIMEOUT_MS } from "../config.js";
 import { AppError } from "./app-error.js";
+import { markdownCodeRanges, readMarkdownTree } from "./markdown-syntax.js";
 import type { TelegramReplyParameters } from "./telegram-reply.js";
 import { formatTelegramRichMessages } from "./telegram-rich-markdown.js";
 
@@ -50,7 +57,26 @@ type TelegramApiBody = NonNullable<
 
 export interface SentTelegramMessage {
   readonly chatType: TelegramChatType;
+  /** The Telegram file each uploaded media id became; set for a rich chunk sent with files. */
+  readonly media?: readonly SentRichMedia[];
   readonly messageId: string;
+}
+
+/** An uploaded file as Telegram now holds it: an edit of the message must name it again. */
+export interface SentRichMedia {
+  readonly fileId: string;
+  readonly id: string;
+  readonly kind: TelegramRichMediaUpload["kind"];
+}
+
+/** A file uploaded with a rich message and placed in it by a `tg://<kind>?id=<id>` media block. */
+export interface TelegramRichMediaUpload {
+  readonly bytes: Uint8Array;
+  readonly fileName: string;
+  readonly id: string;
+  readonly kind: "audio" | "document" | "photo" | "video";
+  readonly mediaType: string;
+  readonly sha256: string;
 }
 
 function draftId(target: TelegramRichTarget, turnId: string): number {
@@ -98,15 +124,14 @@ function numericChatId(
   );
 }
 
-function telegramRichFetch(
-  request: RequestInfo | URL,
-  init?: RequestInit,
-): Promise<Response> {
-  const timeoutSignal = AbortSignal.timeout(TELEGRAM_API_REQUEST_TIMEOUT_MS);
-  const signal = init?.signal
-    ? AbortSignal.any([init.signal, timeoutSignal])
-    : timeoutSignal;
-  return fetch(request, { ...init, signal });
+function telegramRichFetch(timeoutMs: number) {
+  return (request: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const signal = init?.signal
+      ? AbortSignal.any([init.signal, timeoutSignal])
+      : timeoutSignal;
+    return fetch(request, { ...init, signal });
+  };
 }
 
 const TELEGRAM_BAD_REQUEST_STATUS = 400;
@@ -123,7 +148,7 @@ function addStableErrorCode(error: Error, code: string): void {
 
 async function requestTelegramRichApi(
   method: "sendRichMessage" | "sendRichMessageDraft",
-  body: TelegramApiBody,
+  payload: { readonly body: TelegramApiBody } | { readonly form: FormData },
 ): Promise<TelegramApiResponse> {
   const transportCode =
     method === "sendRichMessage"
@@ -132,9 +157,9 @@ async function requestTelegramRichApi(
   let response: TelegramApiResponse;
   try {
     response = await callTelegramApi({
-      body,
+      ...payload,
       botToken: requireTelegramBotToken(),
-      fetch: telegramRichFetch,
+      fetch: telegramRichFetch("form" in payload ? TELEGRAM_RICH_MEDIA_UPLOAD_TIMEOUT_MS : TELEGRAM_API_REQUEST_TIMEOUT_MS),
       method,
     });
   } catch (error) {
@@ -249,7 +274,7 @@ function requireSentMessage(
 
 function richBody(
   target: TelegramRichTarget,
-  richMessage: Readonly<{ html: string } | { markdown: string }>,
+  richMessage: TelegramApiBody,
   privateOnly: boolean,
   replyParameters?: TelegramReplyParameters,
 ): TelegramApiBody {
@@ -277,10 +302,89 @@ export async function startTelegramRichThinkingDraft(
     );
   }
   const response = await requestTelegramRichApi("sendRichMessageDraft", {
-    ...richBody(target, { html: TELEGRAM_THINKING_HTML }, true),
-    draft_id: draftId(target, turnId),
+    body: {
+      ...richBody(target, { html: TELEGRAM_THINKING_HTML }, true),
+      draft_id: draftId(target, turnId),
+    },
   });
   requireDraftSuccess(response);
+}
+
+const MEDIA_BLOCK_KINDS: ReadonlySet<string> = new Set(["audio", "document", "photo", "video"]);
+const MEDIA_BLOCK_LINE_PATTERN = /^!\[\]\(tg:\/\/(audio|document|photo|video)\?id=([A-Za-z0-9_-]{1,64})(?: "(?:[^"\\\n]|\\.)*")?\)$/gmu;
+
+/**
+ * The `tg://` media blocks of a rich text in order, as the lines the presentation wrote. A line that
+ * looks like one inside code is the model's text, shown as code: it is no block.
+ */
+export function richMediaBlockLines(markdown: string): Array<{ id: string; kind: string; range: { end: number; start: number } }> {
+  const code = markdownCodeRanges(readMarkdownTree(markdown));
+  return [...markdown.matchAll(MEDIA_BLOCK_LINE_PATTERN)]
+    .filter((match) => !code.some((range) => match.index >= range.start && match.index < range.end))
+    .map((match) => ({ id: match[2]!, kind: match[1]!, range: { end: match.index + match[0].length, start: match.index } }));
+}
+
+/** Telegram's file of one returned media block; a photo's largest size comes last. */
+function blockFileId(block: Record<string, unknown>): string | null {
+  const file = block.type === "photo" && Array.isArray(block.photo) ? block.photo.at(-1) : block[String(block.type)];
+  const fileId = typeof file === "object" && file !== null ? (file as { file_id?: unknown }).file_id : undefined;
+  return typeof fileId === "string" && fileId.length > 0 ? fileId : null;
+}
+
+/** The returned media blocks in document order, nested ones (a collapsed answer) included. */
+function returnedMediaBlocks(value: unknown, found: Array<{ fileId: string | null; kind: string }> = []) {
+  if (Array.isArray(value)) {
+    for (const item of value) returnedMediaBlocks(item, found);
+  } else if (typeof value === "object" && value !== null) {
+    const block = value as Record<string, unknown>;
+    if (typeof block.type === "string" && MEDIA_BLOCK_KINDS.has(block.type)) {
+      found.push({ fileId: blockFileId(block), kind: block.type });
+    } else {
+      for (const nested of Object.values(block)) returnedMediaBlocks(nested, found);
+    }
+  }
+  return found;
+}
+
+/**
+ * Telegram answers with the message's blocks in the order of the text, so the n-th media block is
+ * the n-th `tg://` block written. A mismatch leaves the message without known files: the delivery
+ * stands, only a later edit of the message cannot name its files again.
+ */
+function sentMediaOf(
+  markdown: string,
+  media: readonly TelegramRichMediaUpload[],
+  response: TelegramApiResponse,
+): readonly SentRichMedia[] | undefined {
+  const uploaded = new Map(media.map((upload) => [upload.id, upload]));
+  const written = richMediaBlockLines(markdown).filter((block) => uploaded.get(block.id)?.kind === block.kind);
+  const returned = returnedMediaBlocks((response.body as { result?: { rich_message?: unknown } }).result?.rich_message);
+  const sent = new Map<string, SentRichMedia>();
+  const matches = written.length === returned.length && written.every((line, index) => {
+    const block = returned[index]!;
+    if (block.kind !== line.kind || block.fileId === null) return false;
+    if (!sent.has(line.id)) sent.set(line.id, { fileId: block.fileId, id: line.id, kind: block.kind as SentRichMedia["kind"] });
+    return true;
+  });
+  if (matches && sent.size === uploaded.size) return [...sent.values()];
+  console.error(JSON.stringify({
+    code: "AGENT_TELEGRAM_RICH_MEDIA_RECEIPT_MISMATCH",
+    returned: returned.length,
+    written: written.length,
+  }));
+  return undefined;
+}
+
+/** The JSON fields of a rich message as multipart text fields, with each file as its own part. */
+function multipartBody(body: TelegramApiBody, media: readonly TelegramRichMediaUpload[]): FormData {
+  const form = new FormData();
+  for (const [field, value] of Object.entries(body)) {
+    form.set(field, typeof value === "object" ? JSON.stringify(value) : String(value));
+  }
+  for (const upload of media) {
+    form.set(upload.id, new Blob([Buffer.from(upload.bytes)], { type: upload.mediaType }), upload.fileName);
+  }
+  return form;
 }
 
 export async function postTelegramRichMessage(
@@ -308,10 +412,15 @@ export async function postTelegramRichMessageChunk(
   target: TelegramRichTarget,
   state?: TelegramRichAnchorState,
   replyParameters?: TelegramReplyParameters,
+  media: readonly TelegramRichMediaUpload[] = [],
 ): Promise<SentTelegramMessage> {
+  const richMessage: TelegramApiBody = media.length === 0
+    ? { markdown }
+    : { markdown, media: media.map((upload) => ({ id: upload.id, media: { media: `attach://${upload.id}`, type: upload.kind } })) };
+  const body = richBody(target, richMessage, false, replyParameters);
   const response = await requestTelegramRichApi(
     "sendRichMessage",
-    richBody(target, { markdown }, false, replyParameters),
+    media.length === 0 ? { body } : { form: multipartBody(body, media) },
   );
   const sent = requireSentMessage(response);
 
@@ -323,5 +432,7 @@ export async function postTelegramRichMessageChunk(
       state.conversationId = sent.messageId;
     }
   }
-  return sent;
+  if (media.length === 0) return sent;
+  const sentMedia = sentMediaOf(markdown, media, response);
+  return sentMedia === undefined ? sent : { ...sent, media: sentMedia };
 }
