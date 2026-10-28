@@ -10,9 +10,9 @@
  * Key constructs:
  * - Tool deliveries bypass Telegram channel events, so a confirmed group delivery is projected into
  *   the group timeline here and bound to a reply route before a participant can answer it.
- * - In a private chat only a delivery that stands for the answer itself (a voice note, a GIF) is
- *   projected, exactly like the channel projects a delivered answer; a sent file is followed by the
- *   text answer that the channel projects.
+ * - A tool delivers only what stands for the answer itself (a voice note, a GIF), so in a private
+ *   chat it is projected exactly like the channel projects a delivered answer. Files go inside the
+ *   answer the channel delivers.
  * - Telegram already confirmed the side effect, so a projection failure is logged under the
  *   caller's code and reported as `false`, never thrown: an error would invite a duplicate send.
  */
@@ -24,7 +24,6 @@ import {
   applicationSessionId,
   registerTelegramMessageRoutes,
 } from "./sessions/session-context.js";
-import type { RecordTelegramAgentResponseInput } from "./telegram-agent-timeline-repository.js";
 import { telegramGroupJournalRepository } from "./telegram-group-journal-repository.js";
 import {
   requireTelegramDeliveryTarget,
@@ -73,23 +72,18 @@ export async function recordToolDeliveryInTimeline(
   ctx: ToolContext,
   target: ToolDeliveryTimelineTarget,
   input: {
-    attachment?: RecordTelegramAgentResponseInput["attachment"];
     contentText: string;
     failureCode: string;
-    /** Whether the delivery is the answer itself, so a private conversation must remember it too. */
-    replacesAnswer: boolean;
     telegramMessageId: string;
   },
 ): Promise<boolean> {
-  const privateAnswer = target.groupId === null && input.replacesAnswer && target.conversationId !== null;
-  if (target.groupId === null && !privateAnswer) return true;
+  if (target.groupId === null && target.conversationId === null) return true;
   try {
     const sessionId = applicationSessionId(ctx);
     const replyToEntryId = stringAttribute(ctx, "telegramTimelineEntryId");
     if (target.groupId !== null) {
       await telegramGroupJournalRepository.recordAgentResponse({
         applicationSessionId: sessionId,
-        ...(input.attachment === undefined ? {} : { attachment: input.attachment }),
         contentText: input.contentText,
         deliveredAt: new Date(),
         groupId: target.groupId,

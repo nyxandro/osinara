@@ -89,14 +89,14 @@ describe("group final-delivery reply binding", () => {
       allow_sending_without_reply: true,
       message_id: 42,
     });
-    expect(delivery.markdown).toBe("Код домофона 4271.");
+    expect(delivery.answer.markdown).toBe("Код домофона 4271.");
   });
 
   it("sends an answer marked as standalone without a reply and without the directive", async () => {
     const delivery = await complete("[[no-reply]]\nСоседи, домофон снова не открывает дверь.");
 
     expect(delivery.deliveryIdentity.replyParameters).toBeNull();
-    expect(delivery.markdown).toBe("Соседи, домофон снова не открывает дверь.");
+    expect(delivery.answer.markdown).toBe("Соседи, домофон снова не открывает дверь.");
     expect(dependencies.recordAgentResponse).toHaveBeenCalledWith(expect.objectContaining({
       contentText: "Соседи, домофон снова не открывает дверь.",
     }));
@@ -128,6 +128,6 @@ describe("group final-delivery reply binding", () => {
     const delivery = await complete("[[no-reply]]\nОбъявление\n[[split]]\nи ещё");
 
     expect(delivery.deliveryIdentity.replyParameters).toBeNull();
-    expect(delivery.markdown).toBe("Объявление\n[[split]]\nи ещё");
+    expect(delivery.answer.markdown).toBe("Объявление\n[[split]]\nи ещё");
   });
 });

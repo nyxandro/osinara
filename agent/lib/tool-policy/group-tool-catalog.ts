@@ -7,6 +7,7 @@
  * - `SANDBOX_FILE_CAPABILITY_CATALOG`: same-name guarded runtime capabilities for group workspaces.
  * - Derived capability-name tuples used by validation and execution policy.
  * - `ExternalGroupToolName`: validated persisted allowlist value.
+ * - `BASELINE_EXTERNAL_GROUP_GRANTS`: persisted grants that every external group now has anyway.
  * - `ExternalGroupCapabilityRequirement`, `externalGroupCapabilityRequirement`: what the active
  *   runtime must offer for a capability to work at all.
  * - `parseExternalGroupToolAllowlist`: validates the complete persisted policy atomically.
@@ -59,6 +60,16 @@ export const EXTERNAL_GROUP_TOOL_NAMES = capabilityNames(
   EXTERNAL_GROUP_CAPABILITY_CATALOG,
 );
 export type ExternalGroupToolName = (typeof EXTERNAL_GROUP_TOOL_NAMES)[number];
+
+/**
+ * Grants that became baseline access of every external group. A persisted one keeps its policy
+ * parseable and grants nothing more, so it is neither offered nor served: page reading became a
+ * baseline tool (v0.21.0), and a group file goes inside any answer that shows it (v0.54.0).
+ */
+export const BASELINE_EXTERNAL_GROUP_GRANTS: ReadonlySet<ExternalGroupToolName> = new Set<ExternalGroupToolName>([
+  "send_workspace_file",
+  "web_fetch",
+]);
 
 // Persisted validation stays runtime-agnostic on purpose: a grant made while another provider or
 // model was active must keep the surrounding policy parseable instead of invalidating every other

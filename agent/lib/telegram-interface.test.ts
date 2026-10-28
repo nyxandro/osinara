@@ -142,7 +142,7 @@ describe("Telegram interface localization", () => {
         callId: "call-1",
         input: {
           action: "create",
-          capabilityAllowlist: ["send_workspace_file"],
+          capabilityAllowlist: ["search_memories"],
           firstRunAt: "2026-10-20T09:00:00+03:00",
           historyWindowDays: 7,
           maxRuns: null,
@@ -170,7 +170,7 @@ describe("Telegram interface localization", () => {
     expect(request.prompt).toContain("Исходная просьба: Каждый понедельник присылай выжимку");
     expect(request.prompt).toContain("Число запусков: без ограничения");
     expect(request.prompt).toContain("Сценарий: Собери выжимку обсуждения за неделю и пришли HTML-файлом.");
-    expect(request.prompt).toContain("Дополнительные инструменты: send_workspace_file");
+    expect(request.prompt).toContain("Дополнительные инструменты: search_memories");
     expect(request.prompt).toContain("История группы: за 7 дн.");
     expect(request.prompt).not.toContain("manage_external_group_schedule");
   });
@@ -297,25 +297,6 @@ describe("Telegram interface localization", () => {
     });
 
     expect(request.prompt).toContain("Разрешённые инструменты: пуст");
-  });
-
-  it("localizes removal of a workspace Google profile", () => {
-    const request = localizeTelegramInputRequest({
-      action: {
-        callId: "call-1",
-        input: {
-          action: "disconnect",
-        },
-        kind: "tool-call" as const,
-        toolName: "manage_google_workspace_connection",
-      },
-      kind: "tool-approval" as const,
-      options: [],
-      prompt: "Approve tool call",
-      requestId: "request-google",
-    });
-
-    expect(request.prompt).toContain("отключить Google Workspace от текущей области");
   });
 
   it("shows the owner exactly which address a network access request opens", () => {

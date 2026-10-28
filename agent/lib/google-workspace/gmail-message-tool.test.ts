@@ -2,64 +2,65 @@
  * Structured Gmail message mutation tool tests.
  *
  * Constructs covered:
- * - Every supported message-state action requires human approval in a private chat.
- * - A group turn is refused as an ordinary tool denial, because no confirmation can be shown there.
- * - The backend, not the model, compiles one exact batch gws argv after approval.
- * - Only the published action/messageIds/profileRef contract reaches execution, bounded to one
- *   batch whose command still fits the approvable size the executor re-checks.
+ * - Every supported message-state action runs at once in a live turn, without a person's
+ *   confirmation; a scenario run is refused, since nobody is there to see it.
+ * - The backend, not the model, compiles one exact batch gws argv.
+ * - Only the published action/messageIds/profileRef contract reaches execution, bounded to one batch.
  */
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
+import { requireGmailMessageInput } from "./gmail-message-contract.js";
 import { classifyGoogleWorkspaceCommand } from "./google-workspace-command-policy.js";
 import manageGmailMessage, {
   createGmailMessageManager,
 } from "../tools/manage_gmail_message.js";
 
-const PRIVATE_TURN = {
-  session: {
-    auth: {
-      current: {
-        attributes: { telegramChatId: "101", telegramChatType: "private", telegramUserId: "101" },
-        authenticator: "telegram",
-        principalId: "user-1",
-        principalType: "user",
-      },
-    },
-  },
-} as never;
+const PRIVATE_ATTRIBUTES = { telegramChatId: "101", telegramChatType: "private", telegramUserId: "101" };
+const FAMILY_GROUP_ATTRIBUTES = {
+  groupId: "group-1", groupType: "family_private",
+  telegramChatId: "-1001", telegramChatType: "supergroup", telegramUserId: "101",
+};
+const INPUT = { action: "trash", messageIds: ["18f"], profileRef: "gws_personal" };
 
-const FAMILY_GROUP_TURN = {
-  session: {
-    auth: {
-      current: {
-        attributes: {
-          groupId: "group-1", groupType: "family_private",
-          telegramChatId: "-1001", telegramChatType: "supergroup", telegramUserId: "101",
-        },
-        authenticator: "telegram",
-        principalId: "user-1",
-        principalType: "user",
+function turnWith(attributes: Record<string, string>, kind = "conversation") {
+  return {
+    session: {
+      auth: {
+        current: { attributes, authenticator: "telegram", principalId: "user-1", principalType: "user" },
+        initiator: null,
       },
+      turn: { id: "turn-1", kind, sequence: 1 },
     },
-  },
-} as never;
+  } as never;
+}
 
-function approvalFor(input: Record<string, unknown>, turn: never = PRIVATE_TURN) {
+function approvalFor(input: Record<string, unknown>, turn: never) {
   return (manageGmailMessage as unknown as {
     approval: (context: { session: unknown; toolInput: Record<string, unknown> }) => unknown;
   }).approval({ session: (turn as { session: unknown }).session, toolInput: input });
 }
 
 describe("manage_gmail_message", () => {
-  it("denies a message mutation in a group turn instead of losing the turn to a refused prompt", () => {
-    const denial = approvalFor(
-      { action: "trash", messageIds: ["18f"], profileRef: "gws_personal" },
-      FAMILY_GROUP_TURN,
-    ) as { reason: string; type: string };
+  it("changes messages without waiting for a person's confirmation in a live turn", () => {
+    for (const attributes of [PRIVATE_ATTRIBUTES, FAMILY_GROUP_ATTRIBUTES]) {
+      expect(approvalFor(INPUT, turnWith(attributes))).toBe("not-applicable");
+    }
+  });
 
-    expect(denial.type).toBe("denied");
-    expect(denial.reason).toContain("AGENT_APPROVAL_SURFACE_UNAVAILABLE");
+  it.each([
+    ["an isolated scenario run", { scheduledRunId: "00000000-0000-4000-8000-000000000010" }],
+    ["a scenario wake-up in the conversation", { conversationScheduleRunId: "00000000-0000-4000-8000-000000000011" }],
+    ["a wake-up continued after a button press", { telegramApprovalContinuation: "true" }],
+  ])("refuses a change in %s, before and at execution", async (_name, scenario) => {
+    const turn = turnWith({ ...PRIVATE_ATTRIBUTES, ...scenario }, "scheduledRunId" in scenario ? "scheduled" : "wakeup");
+    expect(approvalFor(INPUT, turn)).toMatchObject({
+      reason: expect.stringContaining("AGENT_GOOGLE_WORKSPACE_SCENARIO_WRITE_FORBIDDEN"),
+      type: "denied",
+    });
+    await expect((manageGmailMessage as unknown as {
+      execute: (input: unknown, ctx: unknown) => Promise<unknown>;
+    }).execute(INPUT, turn)).rejects.toMatchObject({ code: "AGENT_GOOGLE_WORKSPACE_SCENARIO_WRITE_FORBIDDEN" });
   });
 
   it("publishes one bounded batch of structured message-state actions", () => {
@@ -77,10 +78,6 @@ describe("manage_gmail_message", () => {
     });
     expect(schema.properties).not.toHaveProperty("argv");
     expect(schema.properties).not.toHaveProperty("messageId");
-    for (const action of ["trash", "delete", "restore", "mark_read", "mark_unread"]) {
-      expect(approvalFor({ action, messageIds: ["message-1", "message-2"], profileRef: "profile-1" }))
-        .toBe("user-approval");
-    }
   });
 
   it.each([
@@ -110,26 +107,24 @@ describe("manage_gmail_message", () => {
       expect(argv[6]).toBe("--json");
       expect(JSON.parse(argv[7]!)).toEqual(body);
       expect(argv).toHaveLength(8);
-      // The backend-compiled command must pass the same policy the executor re-applies after approval.
+      // The backend-compiled command must pass the same policy the executor re-applies.
       expect(classifyGoogleWorkspaceCommand(argv)).toBe("mutation");
     },
   );
 
-  it("accepts a full batch of realistic Gmail IDs within the approvable command size", () => {
-    const messageIds = Array.from({ length: 30 }, (_, index) => `${"a".repeat(62)}${String(index).padStart(2, "0")}`);
+  it("accepts a full batch of long Gmail IDs: no confirmation card bounds the command size", () => {
+    const messageIds = Array.from({ length: 30 }, (_, index) => `${"m".repeat(500)}${index}`);
 
-    expect(approvalFor({ action: "delete", messageIds, profileRef: "profile-1" })).toBe("user-approval");
+    expect(requireGmailMessageInput({ action: "delete", messageIds, profileRef: "profile-1" }).messageIds)
+      .toEqual(messageIds);
   });
 
   it.each([
     ["an empty batch", []],
     ["more than 30 messages", Array.from({ length: 31 }, (_, index) => `message-${index}`)],
     ["a repeated message", ["message-1", "message-2", "message-1"]],
-    ["a path segment instead of a message ID", ["message-1", ".."]],
-    ["a current-directory segment", ["."]],
-    ["a command too long to show before approval", Array.from({ length: 30 }, (_, index) => `${"m".repeat(500)}${index}`)],
-  ])("rejects %s before metadata or execution", (_name, messageIds) => {
-    expect(() => approvalFor({ action: "trash", messageIds, profileRef: "profile-1" }))
+  ])("rejects %s before execution", (_name, messageIds) => {
+    expect(() => requireGmailMessageInput({ action: "trash", messageIds, profileRef: "profile-1" }))
       .toThrowError(/AGENT_GMAIL_MESSAGE_INPUT_INVALID/u);
   });
 
@@ -146,16 +141,16 @@ describe("manage_gmail_message", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("rejects control characters inside any messageId before metadata or execution", () => {
-    expect(() => approvalFor({
+  it("rejects control characters inside any messageId before execution", () => {
+    expect(() => requireGmailMessageInput({
       action: "trash",
       messageIds: ["message-1", "message\nid"],
       profileRef: "profile-1",
     })).toThrowError(/AGENT_GMAIL_MESSAGE_INPUT_INVALID/u);
   });
 
-  it("rejects invisible format characters before preview can hide them", () => {
-    expect(() => approvalFor({
+  it("rejects invisible format characters inside a messageId", () => {
+    expect(() => requireGmailMessageInput({
       action: "trash",
       messageIds: ["message\u200Bid"],
       profileRef: "profile-1",

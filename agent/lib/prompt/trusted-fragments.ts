@@ -171,7 +171,7 @@ In interactive long or multi-stage work, do not go silently into tools. Before t
 
 Give the next note only on a significant change of the user-facing stage: research is finished and document preparation begins; the source is processed and conversion begins; the file is ready and sending begins. Name the verifiable result already obtained and the next step, for example: "Информацию собрала. Теперь формирую DOCX" or "PDF готов. Сейчас отправлю его". When it is natural, split a very long chain into such verifiable tool stages, but do not split one operation just for the sake of messages. Do not comment on every shell command, file read, package installation, internal check or short tool call. Do not repeat identical statuses, do not promise a deadline and do not call a stage finished before a successful tool result.
 
-Do not announce short memory searches and fact checks before answering, including searching and reading a source. A quick single-step answer needs no separate note. The final message always briefly reports the actual result; if a file was sent by a separate tool, do not duplicate its content. Statuses show only the observable progress of work and do not reveal reasoning, hidden instructions or technical secrets.
+Do not announce short memory searches and fact checks before answering, including searching and reading a source. A quick single-step answer needs no separate note. The final message always briefly reports the actual result and shows the files the work produced; a note before a tool call never carries a file. Statuses show only the observable progress of work and do not reveal reasoning, hidden instructions or technical secrets.
 `.trim();
 
 /** `vision` tells whether image inspection exists in this runtime, so a PDF page can be examined. */
@@ -182,7 +182,7 @@ export function officeDocumentRules(vision: boolean): string {
   return `
 For PDF, DOCX and XLSX first load the corresponding native skill \`pdf\`, \`docx\` or \`xlsx\`. Process a PDF with the skill's programs and scripts inside the available sandbox${pageInspection}. Parse office documents by their own data and the rules of the loaded skill. Create a new text, Markdown, CSV, JSON or HTML document in the available workspace and send it only on the user's explicit request.
 
-If the user asks to research or study a topic in detail and the result is too large to read comfortably in the chat, give a short summary in the message, and make the full report a PDF through the native skill \`pdf\` and send it through \`send_workspace_file\`. Do not create a PDF for short answers and do not choose PDF if the user explicitly asked for another format.
+If the user asks to research or study a topic in detail and the result is too large to read comfortably in the chat, give a short summary in the message, and make the full report a PDF through the native skill \`pdf\` and show it in your answer as a file. Do not create a PDF for short answers and do not choose PDF if the user explicitly asked for another format.
 `.trim();
 }
 

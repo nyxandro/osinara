@@ -4,15 +4,17 @@
  * Export:
  * - `deliverTelegramProgressNotice`: sends model-authored pre-tool text at most once per step.
  *
- * Key construct:
+ * Key constructs:
  * - The notice is cosmetic and its turn is still working, so a failed send is logged and the turn
  *   continues; the durable claim happens first, so a replay never repeats a delivered notice.
+ * - It is presented exactly like a final answer: markup goes out as a rich message, plain text as an
+ *   ordinary one. Asides are not paced: the turn is still working and must not wait on a notice.
  */
-import { splitTelegramMessageText } from "../runtime/telegram/api.js";
 import type { TelegramEventContext } from "../runtime/telegram/channel-types.js";
 
 import { isAppError } from "./app-error.js";
-import { postTelegramPlainMessageChunk } from "./telegram-plain-messages.js";
+import { formatTelegramFinalPresentation } from "./telegram-final-presentation.js";
+import { postTelegramPresentationChunk } from "./telegram-presentation-post.js";
 import { telegramProgressNoticeRepository } from "./telegram-progress-notice-repository.js";
 
 export async function deliverTelegramProgressNotice(input: {
@@ -33,8 +35,8 @@ export async function deliverTelegramProgressNotice(input: {
 
   try {
     let firstMessageId: string | null = null;
-    for (const chunk of splitTelegramMessageText(input.message)) {
-      const sent = await postTelegramPlainMessageChunk(chunk, input.channel);
+    for (const chunk of formatTelegramFinalPresentation(input.message)) {
+      const sent = await postTelegramPresentationChunk(chunk, input.channel);
       firstMessageId ??= sent.messageId;
     }
     if (firstMessageId !== null) {

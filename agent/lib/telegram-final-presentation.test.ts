@@ -43,6 +43,24 @@ describe("Telegram final presentation", () => {
     }]);
   });
 
+  it("sends a part that must carry media rich even without markup, and only that part", () => {
+    const markdown = `Вот обложка\n\nMEDIA0\n${TELEGRAM_ASIDE_DIRECTIVE}\nцена $5, скидка $2`;
+
+    expect(formatTelegramFinalPresentation(markdown, { requiresRich: (part) => part.includes("MEDIA") })).toEqual([
+      { format: "rich", pacing: "immediate", text: "Вот обложка\n\nMEDIA0" },
+      { format: "plain", pacing: "aside", text: "цена $5, скидка $2" },
+    ]);
+  });
+
+  it("does not count media blocks toward a long answer", () => {
+    const markdown = "Вот фото до и после\n\nMEDIA0\n\nMEDIA1";
+    const options = { isMediaBlock: (block: string) => /^MEDIA\d$/u.test(block), requiresRich: () => true };
+
+    expect(formatTelegramFinalPresentation(markdown, options)).toEqual([{ format: "rich", pacing: "immediate", text: markdown }]);
+    expect(formatTelegramFinalPresentation(`${markdown}\n\nещё абзац`, options)[0]!.text).not.toContain("<details>");
+    expect(formatTelegramFinalPresentation(`${markdown}\n\nещё абзац\n\nи ещё`, options)[0]!.text).toContain("<details>");
+  });
+
   it("recognizes a GFM table without outer pipes and collapses it", () => {
     const markdown = "Параметр | Значение\n--- | ---\nрежим | plain";
     const output = formatTelegramFinalPresentation(markdown)[0]!;

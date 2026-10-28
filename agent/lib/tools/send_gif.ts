@@ -136,7 +136,6 @@ async function sendGif(
   const projectionCompleted = await dependencies.recordTimeline(ctx, timelineTarget, {
     contentText: timelineText(found.description, input.caption),
     failureCode: "AGENT_GIF_PROJECTION_FAILED",
-    replacesAnswer: true,
     telegramMessageId: delivery.telegramMessageId,
   });
   return {

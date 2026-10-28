@@ -4,13 +4,14 @@
  * Export:
  * - `googleWorkspaceConnectionStatus`: maps grants and native profile presence to readiness.
  * - `createGoogleWorkspaceConnectionManager`: injectable explicit management boundaries.
- * - `manage_google_workspace_connection`: connects, inspects, or disconnects native gws credentials.
+ * - `manage_google_workspace_connection`: connects, inspects, or disconnects native gws credentials;
+ *   a scenario run only inspects.
  */
 import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
 import { googleAccountRepository } from "../google-workspace/google-account-repository.js";
-import { groupApprovalDenial } from "../telegram-hitl/approval-surface.js";
+import { googleWorkspaceChangeRefusal } from "../google-workspace/google-workspace-live-turn.js";
 import type { GoogleIntegrationScope } from "../google-workspace/google-integration-contract.js";
 import { resolveGoogleWorkspaceAuthorization } from "../google-workspace/google-workspace-context.js";
 import {
@@ -161,14 +162,16 @@ const manageGoogleWorkspaceConnection = createGoogleWorkspaceConnectionManager({
 });
 
 export default defineTool({
-  approval: ({ session, toolInput }) =>
-    toolInput?.action === "disconnect"
-      ? groupApprovalDenial({ session }) ?? "user-approval"
-      : "not-applicable",
+  approval: ({ session, toolInput }) => {
+    const refusal = toolInput?.action === "status" ? null : googleWorkspaceChangeRefusal({ session });
+    return refusal ? { reason: refusal.message, type: "denied" } : "not-applicable";
+  },
   description:
-    "Manage the Google Workspace OAuth profile of the current personal/family scope. Use {\"action\":\"status\"} for connected/ready/missingScopes, {\"action\":\"connect\"} for a protected OAuth link and {\"action\":\"disconnect\"} only on an explicit request and with a person's confirmation. connect does not mean ready until OAuth is finished. Google commands run only through execute_google_workspace; COMMAND_FORBIDDEN does not mean a read-only OAuth.",
+    "Manage the Google Workspace OAuth profile of the current personal/family scope. Use {\"action\":\"status\"} for connected/ready/missingScopes, {\"action\":\"connect\"} for a protected OAuth link and {\"action\":\"disconnect\"} only on an explicit request. connect does not mean ready until OAuth is finished. Google commands run only through execute_google_workspace; COMMAND_FORBIDDEN does not mean a read-only OAuth.",
   inputSchema: connectionSchema,
   async execute(input, ctx) {
+    const refusal = input.action === "status" ? null : googleWorkspaceChangeRefusal(ctx);
+    if (refusal) throw refusal;
     const auth = await resolveGoogleWorkspaceAuthorization(ctx);
     return await manageGoogleWorkspaceConnection(input, auth);
   },

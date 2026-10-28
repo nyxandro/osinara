@@ -26,8 +26,6 @@ import { z } from "zod";
 import { AppError } from "../app-error.js";
 import { GIF_REPLIES_AVAILABLE } from "../gifs/gif-reply-availability.js";
 import { wrapModelFacingToolMap } from "../model-facing-tool.js";
-import { authorizeAgentScheduleDelivery } from "../agent-schedules/agent-schedule-delivery-authorization.js";
-import { scheduledDeliveryMetadata } from "../agent-schedules/scheduled-session.js";
 import { externalGroupLoadSkillTool } from "../group-skills/group-load-skill-tool.js";
 import { SKILL_NAME_PATTERN } from "../../runtime/skills/package-validation.js";
 import { MEMORY_LIST_DEFAULT_LIMIT, MEMORY_LIST_MAX_LIMIT, THREAD_HISTORY_PAGE_MAX_ENTRIES } from "../memory-config.js";
@@ -56,7 +54,6 @@ import searchMemories from "../tools/search_memories.js";
 import searchMemoryThreads from "../tools/search_memory_threads.js";
 import sendGif from "../tools/send_gif.js";
 import sendVoiceMessage from "../tools/send_voice_message.js";
-import sendWorkspaceFile from "../tools/send_workspace_file.js";
 import { removeGroupFileTool } from "../workspaces/remove-group-file-tool.js";
 import { controlledWebFetchTool } from "./controlled-web-fetch.js";
 import { EXTERNAL_GROUP_FILE_TOOLS } from "./external-group-file-tools.js";
@@ -67,7 +64,7 @@ import { scheduledExternalTool } from "./scheduled-external-tool.js";
 import { SUBAGENT_TOOL_NAMES } from "./subagent-tool-names.js";
 import { withTurnInterjectionSurface } from "../turn-interjection/turn-interjection-surface.js";
 import { servableExternalGroupCapabilities } from "./grantable-group-capabilities.js";
-import { isExternalGroupToolName, type ExternalGroupToolName } from "./group-tool-catalog.js";
+import { BASELINE_EXTERNAL_GROUP_GRANTS, isExternalGroupToolName, type ExternalGroupToolName } from "./group-tool-catalog.js";
 import {
   FAMILY_ONLY_TOOLS,
   PRIVATE_ONLY_TOOLS,
@@ -95,14 +92,14 @@ export type ModeToolSurfaceInput =
       skills: ReadonlySet<string>;
     };
 
+// A file of the group goes inside the answer that shows it: its persisted grant has no tool.
 type DirectExternalToolName = Exclude<
   ExternalGroupToolName,
-  `manage_memory.${string}` | `manage_memory_thread.${string}` | "web_search"
+  `manage_memory.${string}` | `manage_memory_thread.${string}` | "send_workspace_file" | "web_search"
 >;
 
 const EXTERNAL_IMAGE_PATH_MAX_LENGTH = 512;
 const EXTERNAL_MODEL_TEXT_MAX_LENGTH = 4_000;
-const EXTERNAL_FILE_CAPTION_MAX_LENGTH = 1_024;
 
 // Shared executors remain unchanged, while external descriptors expose only their executable group
 // contract. This prevents the model from planning calls that external authorization must reject.
@@ -160,22 +157,6 @@ const EXTERNAL_DIRECT_TOOL_PRESENTATION: Readonly<
       "Save one specific fact from the current message or from one verified sourceSequence of the visible delta into the current external group's memory: a fact, a preference, first-hand experience, an event, a plan or a useful link with context. Do not require special importance or a request to remember; do not save guesses.",
     inputSchema: externalRememberInputSchema,
   },
-  send_workspace_file: {
-    description:
-      "Send an existing file from the group workspace to the current Telegram chat or topic of the external group. path is always relative inside the group scope, for example reports/result.pdf; do not pass /workspace/group. The result delivered=true confirms the sending; with sideEffectStatus completed or unknown do not send again.",
-    inputSchema: z
-      .object({
-        caption: z.string().max(EXTERNAL_FILE_CAPTION_MAX_LENGTH).optional(),
-        path: z
-          .string()
-          .min(1)
-          .max(EXTERNAL_IMAGE_PATH_MAX_LENGTH)
-          .describe("A relative path inside the group workspace, for example reports/result.pdf"),
-        presentation: z.enum(["document", "photo"]),
-        scope: z.literal("group").describe("The workspace of the current external group"),
-      })
-      .strict(),
-  },
 };
 
 const EXTERNAL_DIRECT_TOOLS: Readonly<Record<DirectExternalToolName, AnyToolDefinition>> = {
@@ -191,7 +172,6 @@ const EXTERNAL_DIRECT_TOOLS: Readonly<Record<DirectExternalToolName, AnyToolDefi
   search_memories: searchMemories as unknown as AnyToolDefinition,
   search_memory_threads: searchMemoryThreads as unknown as AnyToolDefinition,
   send_voice_message: sendVoiceMessage as unknown as AnyToolDefinition,
-  send_workspace_file: sendWorkspaceFile as unknown as AnyToolDefinition,
   web_fetch: controlledWebFetchTool as unknown as AnyToolDefinition,
 };
 
@@ -209,22 +189,6 @@ async function withExternalGroupCapability<T>(
 ): Promise<T> {
   const identity = resolveExternalGroupPolicyIdentity(ctx.session.auth);
   if (!identity) throw groupToolForbidden();
-
-  // Scheduled file delivery is an owner-approved side effect, so revalidate the exact root run.
-  const scheduledDelivery = scheduledDeliveryMetadata(ctx);
-  if (capability === "send_workspace_file" && scheduledDelivery) {
-    await authorizeAgentScheduleDelivery({
-      applicationSessionId: scheduledDelivery.applicationSessionId,
-      agentSessionId: ctx.session.id,
-      familyId: scheduledDelivery.familyId,
-      groupId: scheduledDelivery.groupId,
-      messageThreadId: scheduledDelivery.messageThreadId,
-      ownerUserId: scheduledDelivery.ownerUserId,
-      runId: scheduledDelivery.runId,
-      scope: scheduledDelivery.scope,
-      telegramChatId: scheduledDelivery.telegramChatId,
-    });
-  }
 
   // Committing this final live check is the operation's authorization linearization point. The DB
   // connection is released before repositories run so concurrent tools cannot exhaust the pool by
@@ -317,8 +281,9 @@ function buildExternalToolSurface(
   }
   // Granted application capabilities are re-checked at execution against the live policy.
   for (const capability of allowed) {
-    // Page reading is now a baseline capability, including for persisted pre-matrix grants.
-    if (capability === "web_fetch") continue;
+    // A grant that became baseline access gives no tool of its own: page reading is a baseline
+    // tool, and a group file goes inside the answer that shows it.
+    if (BASELINE_EXTERNAL_GROUP_GRANTS.has(capability)) continue;
     // A scheduled prompt has no current user message that can back a new memory claim.
     if (scheduledRun && capability === "remember") continue;
     // A voice note spends ElevenLabs credits and replaces a reply, so it needs a live participant.

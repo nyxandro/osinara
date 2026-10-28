@@ -100,7 +100,7 @@ async function childTurns() {
 
     await runTurn(testRuntime({ agent, callModel: model.callModel, observer: recordingObserver().observer }), turn.id, RUN);
 
-    const caller = { callId: "call-a", rootSessionId: sessionId, sessionId, turn: { id: turn.id, sequence: turn.sequence } };
+    const caller = { callId: "call-a", rootSessionId: sessionId, sessionId, turn: { id: turn.id, kind: turn.kind, sequence: turn.sequence } };
     expect(parents).toEqual([
       { parent: undefined, seenBy: "step:telegram" },
       { parent: caller, seenBy: "step:subagent" },

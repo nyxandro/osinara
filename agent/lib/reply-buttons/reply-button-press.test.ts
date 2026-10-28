@@ -50,6 +50,7 @@ function selected(overrides: Partial<ReplyButtonSet> = {}): ReplyButtonSet {
     addresseeTelegramUserId: "101",
     buttons: [[{ color: "green", text: "✅ Да, заказываем" }, { text: "❌ Отмена" }]],
     id: "set-1",
+    messageMedia: [],
     messageText: "Корзина собрана. Итого 2 340 ₽. Оформляем?",
     resolvedAt: PRESSED_AT,
     selectedIndex: 0,

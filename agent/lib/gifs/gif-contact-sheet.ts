@@ -13,20 +13,8 @@
  * - A whole sheet becomes one image, so the vision model compares candidates in a single call.
  */
 import { AppError } from "../app-error.js";
+import { loadSharp } from "../native-image-library.js";
 import { GIF_CONTACT_SHEET_SIZE } from "./gif-reply-config.js";
-
-/**
- * The native image library loads with the first GIF reply, not with the agent: a broken native
- * build then fails one GIF instead of the whole process, and a runtime without GIF replies never
- * loads it.
- */
-async function loadSharp() {
-  const { default: sharp } = await import("sharp");
-  // Every sheet is built once, so libvips' operation cache would only hold up to 50 MB of the agent
-  // process's memory between rare GIF replies; this module is the process's only sharp user.
-  sharp.cache(false);
-  return sharp;
-}
 
 export const CONTACT_SHEET_CELL_SIZE = 256;
 export const CONTACT_SHEET_GAP = 6;

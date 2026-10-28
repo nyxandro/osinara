@@ -4,8 +4,9 @@
  * Export:
  * - `createOsinaraAgent`: the base prompt from `instructions.md`, the turn blocks in their fixed
  *   order, the tool surface and skills of the verified conversation, the primary model with
- *   NeuralDeep session routing, the step limit, the compaction threshold, and the record made
- *   before each model step (delivery of the messages shown to a running turn).
+ *   NeuralDeep session routing, the step limit, the compaction threshold, the record made
+ *   before each model step (delivery of the messages shown to a running turn), and the check of
+ *   the files a final answer shows.
  *
  * The block order is explicit here: the trust zone rules first,
  * then delegation and chat preferences, the reaction set and the previous-task note (user-role
@@ -21,6 +22,7 @@ import { presentationPreferenceInstructions } from "./instructions/presentation-
 import { previousTaskStepsInstructions } from "./instructions/previous-task-steps.js";
 import { reactionSetInstructions } from "./instructions/reaction-set.js";
 import { retrievedMemoryInstructions } from "./instructions/retrieved-memory.js";
+import { checkTelegramAnswerFiles } from "./lib/answer-files/telegram-answer-files.js";
 import { modelProviderConfig } from "./lib/model-provider-config.js";
 import { primaryModel } from "./lib/model-registry.js";
 import { isProfileCardMessage } from "./lib/prompt/profile-card.js";
@@ -39,6 +41,8 @@ export function createOsinaraAgent(): RuntimeAgent {
   const contextWindowTokens = modelProviderConfig.agent.models.primary.contextWindowTokens;
   return {
     basePrompt: composeBasePrompt({ instructions: AUTHORED_INSTRUCTIONS, toolsAvailable: true }),
+    // Files an answer shows must reach the chat; the model fixes an unsendable one before delivery.
+    checkFinalAnswer: (ctx) => checkTelegramAnswerFiles(ctx),
     compactionThresholdPercent: AGENT_COMPACTION_THRESHOLD,
     instructionResolvers: [
       conversationModeInstructions,

@@ -5,7 +5,6 @@
  * - A voice note is projected into the group timeline as its spoken text, not as a file attachment.
  * - A voice note replaces the final private reply, so it enters the private conversation timeline
  *   and receives a reply route like a channel-delivered answer.
- * - Ordinary private file deliveries keep their existing projection-free behavior.
  */
 import type { ToolContext } from "../../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -175,19 +174,5 @@ describe("sendWorkspaceFileToCurrentChat", () => {
     });
     expect(mocks.deliver).toHaveBeenCalledTimes(1);
     consoleError.mockRestore();
-  });
-
-  it("keeps an ordinary private file delivery out of the conversation timeline", async () => {
-    mocks.begin.mockResolvedValue(reservation("reports/result.pdf", "application/pdf", "personal"));
-
-    await sendWorkspaceFileToCurrentChat({
-      path: "reports/result.pdf",
-      presentation: "document",
-      scope: "personal",
-    }, context("private"));
-
-    expect(mocks.recordConversationResponse).not.toHaveBeenCalled();
-    expect(mocks.recordGroupResponse).not.toHaveBeenCalled();
-    expect(mocks.registerTelegramMessageRoutes).not.toHaveBeenCalled();
   });
 });

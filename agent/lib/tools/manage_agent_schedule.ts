@@ -412,6 +412,7 @@ const TOOL_DESCRIPTION = [
   "An explicit user request is enough: do it without additional confirmation. Ask only for missing or ambiguous data.",
   "Create payload: {\"action\":\"create\",\"executionContext\":\"isolated\",\"title\":\"Дайджест: новые модели ИИ\",\"firstRunAt\":\"2026-07-15T23:33:00+03:00\",\"timezone\":\"Europe/Moscow\",\"recurrence\":{\"kind\":\"daily\",\"interval\":1},\"scope\":\"personal\",\"scenarioPrompt\":\"What to collect, the sources, filters, the format of the final message and when not to send an empty report\",\"userRequest\":\"ежедневно в 23:33 МСК получать сводку\"}.",
   "executionContext is required in create: conversation is a wake-up in this conversation with the whole history to continue the current task, and then maxRuns is required; isolated is a separate run with an empty context for independent reports.",
+  "A scenario run only reads Google Workspace: before creating one that needs a Google change, tell the user it will only report what to do.",
   "Update passes id and only the fields that actually change; do not pass firstRunAt, timezone, scope or executionContext in update. Pause, resume, run_now and delete pass only action and id.",
   AGENT_SCHEDULE_PAUSE_NOTE,
   "To pause from the scenario itself, use schedule_id from scheduled_agent_run.",

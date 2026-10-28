@@ -81,16 +81,14 @@ To collect a batch, search once with `+triage` and an explicit query; its result
 ```
 
 A request to delete messages without the word "permanently" means `trash`; use `delete` only when
-the user explicitly asks to delete forever. When more than 30 messages match, change the first 30,
-then ask whether to continue with the next batch. When the user asks to see messages first, list
-their subjects grouped by sender, with the number of messages from each sender.
+the user explicitly asks to delete forever. When more than 30 messages match, change them in
+consecutive batches of up to 30 without stopping to ask. When the user asks to see messages first,
+list their subjects grouped by sender, with the number of messages from each sender.
 
 Do not pass message or thread `trash`, `delete`, `untrash`, `modify`, `batchDelete`, or `batchModify`
-through `execute_google_workspace`. Before the approval is requested, Osinara loads every message of the
-batch from the current verified Google profile and shows one card: the mailbox, then senders and
-subjects grouped by sender address. A single message also shows its date, short snippet and
-immutable Gmail ID. Do not repeat that list in chat before the call unless the user asked to see it
-first. `trash` is recoverable; `delete` permanently deletes the messages. For a thread, resolve its
+through `execute_google_workspace`. The change runs at once, without a confirmation card: do not ask
+for confirmation in chat and do not list the messages first unless the user asked to see them.
+`trash` is recoverable; `delete` permanently deletes the messages. For a thread, resolve its
 message IDs first and pass them as one batch. A command-forbidden result does not prove that the
 Google profile is read-only or lacks an OAuth scope; follow its correction and use the structured
 tool when directed.

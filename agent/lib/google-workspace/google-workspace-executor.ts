@@ -4,7 +4,6 @@
  * Exports:
  * - `createGoogleWorkspaceExecutor`: injectable live authorization and process boundary.
  * - `executeGoogleWorkspace`: production exact-argv executor.
- * - `withAuthorizedGoogleWorkspaceExecution`: one live profile operation for trusted metadata reads.
  */
 import type { ToolContext } from "../../runtime/tool.js";
 
@@ -24,7 +23,6 @@ import { googleWorkspaceProfileStore } from "./google-workspace-profile-store.js
 const MODEL_FACING_OUTPUT_MAX_BYTES = 256 * 1024;
 
 export interface GoogleWorkspaceExecutionProfile {
-  displayName: string;
   profileRef: string;
 }
 
@@ -70,7 +68,7 @@ interface GoogleWorkspaceExecutorDependencies {
   ): Promise<T>;
 }
 
-export async function withAuthorizedGoogleWorkspaceExecution<T>(
+async function withAuthorizedGoogleWorkspaceExecution<T>(
   auth: GoogleIntegrationAuthorization,
   operation: (
     accessToken: string,
@@ -91,13 +89,10 @@ export async function withAuthorizedGoogleWorkspaceExecution<T>(
     if (!await googleWorkspaceProfileStore.exists(auth.workspaceId)) {
       throw new AppError(
         "AGENT_GOOGLE_WORKSPACE_PROFILE_CHANGED",
-        "Профиль Google Workspace изменился во время подтверждения. Повторите запрос",
+        "Профиль Google Workspace изменился во время выполнения запроса. Повторите запрос",
       );
     }
-    return await operation(accessToken, {
-      displayName: account.displayName,
-      profileRef: account.id,
-    });
+    return await operation(accessToken, { profileRef: account.id });
   });
 }
 
@@ -110,7 +105,7 @@ export function createGoogleWorkspaceExecutor(dependencies: GoogleWorkspaceExecu
     const kind = classifyGoogleWorkspaceCommand(input.argv);
     const auth = await dependencies.resolveAuthorization(ctx);
 
-    // This DB/profile check intentionally occurs after a potentially long HITL pause.
+    // This DB/profile check runs at execution, after any wait for the owner's button.
     return await dependencies.withAuthorizedExecution(auth, async (accessToken, profile) => {
       if (
         input.expectedProfileRef !== undefined &&

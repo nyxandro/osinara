@@ -11,7 +11,6 @@ import { z } from "zod";
 
 import importTelegramAttachment from "./tools/import_telegram_attachment.js";
 import inspectWorkspaceImage from "./tools/inspect_workspace_image.js";
-import sendWorkspaceFile from "./tools/send_workspace_file.js";
 import { removeGroupFileTool } from "./workspaces/remove-group-file-tool.js";
 
 const ATTACHMENT_ID = "00000000-0000-4000-8000-000000000041";
@@ -53,12 +52,11 @@ describe("integration tool usability contracts", () => {
   it("describes workspace paths as relative to the selected scope without repeating its name", () => {
     expect(inspectWorkspaceImage.description).toContain('"path":"photos/image.png"');
     expect(inspectWorkspaceImage.description).not.toContain('"path":"personal/');
-    expect(sendWorkspaceFile.description).toMatch(/relative to the root of the chosen scope/iu);
     expect(removeGroupFileTool.description).toMatch(/relative to the root of the group scope/iu);
   });
 
   it("documents enough information to recover from each integration tool result", () => {
-    for (const tool of [inspectWorkspaceImage, importTelegramAttachment, sendWorkspaceFile]) {
+    for (const tool of [inspectWorkspaceImage, importTelegramAttachment]) {
       expect(tool.description).toMatch(/When to use:/u);
       expect(tool.description).toMatch(/When not to use:/u);
       expect(tool.description).toMatch(/Input:/u);
