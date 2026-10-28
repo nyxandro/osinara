@@ -99,20 +99,24 @@ export async function resolveTelegramBotToken(token?: TelegramBotToken): Promise
   return source;
 }
 
-/** Low-level Telegram JSON API call. */
+/** Low-level Telegram API call: a JSON body, or multipart fields when it uploads files. */
 export async function callTelegramApi(input: {
   readonly apiBaseUrl?: string;
   readonly body?: JsonObject;
   readonly botToken?: TelegramBotToken;
   readonly fetch?: TelegramFetch;
+  /** Multipart fields with the uploaded files, in place of `body`; fetch sets its own boundary. */
+  readonly form?: FormData;
   readonly method: string;
 }): Promise<TelegramApiResponse> {
+  if (input.body !== undefined && input.form !== undefined) {
+    throw new Error("AGENT_TELEGRAM_API_BODY_AMBIGUOUS: a Telegram call takes a JSON body or a form, not both");
+  }
   const apiFetch = input.fetch ?? fetch;
   const token = await resolveTelegramBotToken(input.botToken);
-  const init: RequestInit = {
-    headers: { "content-type": "application/json; charset=utf-8" },
-    method: "POST",
-  };
+  const init: RequestInit = input.form === undefined
+    ? { headers: { "content-type": "application/json; charset=utf-8" }, method: "POST" }
+    : { body: input.form, method: "POST" };
   if (input.body !== undefined) {
     init.body = JSON.stringify(parseJsonObject(input.body));
   }

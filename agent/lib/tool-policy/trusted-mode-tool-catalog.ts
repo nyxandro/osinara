@@ -43,7 +43,6 @@ import searchMemories from "../tools/search_memories.js";
 import searchMemoryThreads from "../tools/search_memory_threads.js";
 import sendGif from "../tools/send_gif.js";
 import sendVoiceMessage from "../tools/send_voice_message.js";
-import sendWorkspaceFile from "../tools/send_workspace_file.js";
 import startNewContext from "../tools/start_new_context.js";
 import { GIF_REPLIES_AVAILABLE } from "../gifs/gif-reply-availability.js";
 import { MODEL_VISION_AVAILABLE } from "../model-vision-availability.js";
@@ -82,7 +81,6 @@ export const TRUSTED_MODE_TOOLS: ToolMap = {
   // Choosing a GIF needs image input and a KLIPY key; without them the tool is not offered at all.
   ...(GIF_REPLIES_AVAILABLE ? { send_gif: sendGif as unknown as AnyToolDefinition } : {}),
   send_voice_message: sendVoiceMessage as unknown as AnyToolDefinition,
-  send_workspace_file: sendWorkspaceFile as unknown as AnyToolDefinition,
   start_new_context: startNewContext as unknown as AnyToolDefinition,
 };
 

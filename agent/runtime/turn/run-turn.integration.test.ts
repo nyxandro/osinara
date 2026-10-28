@@ -99,6 +99,51 @@ async function releaseRunner(turnId: string) {
     expect(started).toEqual([{ session: sessionId, turn: turn.id }, { session: sessionId, turn: turn.id }]);
   });
 
+  it("lets the application check a final answer with the turn it belongs to", async () => {
+    const sessionId = await newTestSession();
+    const checkFinalAnswer = vi.fn(async () => "notice");
+    const turn = await startMessageTurn(sessionId, "привет");
+    let notice: string | undefined;
+
+    await runTurn(testRuntime({
+      agent: testAgent({}, { checkFinalAnswer }),
+      callModel: async (call) => {
+        notice = await call.checkAnswer?.("Вот: ![](/workspace/personal/a.jpg)");
+        return reply("Готово.");
+      },
+      observer: recordingObserver().observer,
+    }), turn.id, RUN);
+
+    expect(notice).toBe("notice");
+    expect(checkFinalAnswer).toHaveBeenCalledWith(expect.objectContaining({
+      session: expect.objectContaining({ id: sessionId, turn: expect.objectContaining({ id: turn.id }) }),
+      text: "Вот: ![](/workspace/personal/a.jpg)",
+    }));
+  });
+
+  it("sends a final answer back to the model once per turn, even when it calls tools in between", async () => {
+    const sessionId = await newTestSession();
+    const echo = defineTool({ description: "echo", inputSchema: z.object({}), async execute() { return "ok"; } });
+    const checkFinalAnswer = vi.fn(async () => "download the picture first");
+    const turn = await startMessageTurn(sessionId, "пришли картинку");
+    const checks: Array<string | undefined> = [];
+    let calls = 0;
+
+    await runTurn(testRuntime({
+      agent: testAgent({ echo }, { checkFinalAnswer }),
+      callModel: async (call) => {
+        calls += 1;
+        checks.push(call.checkAnswer === undefined ? undefined : await call.checkAnswer("![](https://example.com/a.jpg)"));
+        return calls === 1 ? toolCalls([{ id: "call-1", input: {}, name: "echo" }]) : reply("Готово.");
+      },
+      observer: recordingObserver().observer,
+    }), turn.id, RUN);
+
+    // The second final answer is not checked again: what still cannot go is shown to the person.
+    expect(checks).toEqual(["download the picture first", undefined]);
+    expect(checkFinalAnswer).toHaveBeenCalledOnce();
+  });
+
   it("runs the step's tools once, concurrently, and continues with their results", async () => {
     const sessionId = await newTestSession();
     const executed: string[] = [];

@@ -34,8 +34,8 @@ import { stripTelegramAsideDirectives } from "../lib/telegram-authored-split.js"
 import { recordMemoryUsageDeclaration } from "../lib/memory-usage-report.js";
 import { deliverTelegramFinalOutput } from "../lib/telegram-final-delivery.js";
 import { prepareTelegramTurn } from "../lib/telegram-turn-preparation.js";
-import { postTelegramRichMessageChunk } from "../lib/telegram-rich-messages.js";
-import { postTelegramPlainMessageChunk } from "../lib/telegram-plain-messages.js";
+import { postTelegramPresentationChunk } from "../lib/telegram-presentation-post.js";
+import { prepareTelegramAnswerFiles } from "../lib/answer-files/telegram-answer-files.js";
 import { reportUndeliveredReplyButtons, turnReplyButtons } from "../lib/reply-buttons/reply-button-delivery.js";
 import { REPLY_BUTTON_MESSAGE_ATTRIBUTE } from "../lib/reply-buttons/reply-button-contract.js";
 import { dismissReplyButtonsOnMessage } from "../lib/reply-buttons/reply-button-dismissal.js";
@@ -194,6 +194,12 @@ export const telegramTurnEvents: TelegramTurnEvents = {
     });
     let sentMessages: Awaited<ReturnType<typeof deliverTelegramFinalOutput>>;
     try {
+      // Files the answer shows are read with the chat's rights and go inside its rich message.
+      const answer = await prepareTelegramAnswerFiles({
+        agentTurnId: ctx.session.turn.id,
+        markdown: isScheduledSession(ctx) ? durableText : message,
+        session: ctx.session,
+      });
       sentMessages = await deliverTelegramFinalOutput({
         applicationSessionId: sessionId,
         deliveryIdentity: {
@@ -203,7 +209,7 @@ export const telegramTurnEvents: TelegramTurnEvents = {
         },
         agentSessionId: ctx.session.id,
         agentTurnId: ctx.session.turn.id,
-        markdown: isScheduledSession(ctx) ? durableText : message,
+        answer,
         replyButtons: replyButtons !== null,
         sendChunk: async (chunk, ordinal, last) => {
           // An authored aside is a second thought, so it arrives after a visible typing pause.
@@ -211,18 +217,11 @@ export const telegramTurnEvents: TelegramTurnEvents = {
             await channel.telegram.startTyping();
             await sleep(asidePauseMilliseconds(chunk.text));
           }
-          const post = async (text: string) => chunk.format === "plain"
-            ? await postTelegramPlainMessageChunk(
-                text,
-                channel,
-                ordinal === 0 ? replyParameters : undefined,
-              )
-            : await postTelegramRichMessageChunk(
-                text,
-                channel.telegram,
-                channel.state,
-                ordinal === 0 ? replyParameters : undefined,
-              );
+          const post = async (text: string) => await postTelegramPresentationChunk(
+            { format: chunk.format, media: chunk.media, text },
+            channel,
+            ordinal === 0 ? replyParameters : undefined,
+          );
           return last && replyButtons !== null ? await replyButtons.sendLast(chunk, post) : await post(chunk.text);
         },
       });

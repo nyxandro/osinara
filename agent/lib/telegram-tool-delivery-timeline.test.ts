@@ -3,7 +3,7 @@
  *
  * Constructs covered:
  * - A group delivery is recorded in the group journal and bound to a reply route.
- * - A private delivery is recorded only when it stands for the answer itself.
+ * - A private delivery stands for the answer itself and is recorded like a delivered answer.
  * - Once Telegram has confirmed the message, no history failure is thrown, not even a missing
  *   conversation context: an error there would read as an unsent message and invite a duplicate.
  */
@@ -67,7 +67,6 @@ const PRIVATE = {
 const DELIVERY = {
   contentText: "Гифка: кот закатывает глаза",
   failureCode: "AGENT_GIF_PROJECTION_FAILED",
-  replacesAnswer: true,
   telegramMessageId: "93",
 };
 
@@ -98,11 +97,8 @@ describe("tool delivery history", () => {
     });
   });
 
-  it("records a private delivery only when it stands for the answer", async () => {
+  it("records a private delivery like a delivered answer", async () => {
     const ctx = context(PRIVATE);
-
-    await recordToolDeliveryInTimeline(ctx, toolDeliveryTimelineTarget(ctx), { ...DELIVERY, replacesAnswer: false });
-    expect(repositories.conversation).not.toHaveBeenCalled();
 
     await recordToolDeliveryInTimeline(ctx, toolDeliveryTimelineTarget(ctx), DELIVERY);
     expect(repositories.conversation).toHaveBeenCalledWith(expect.objectContaining({

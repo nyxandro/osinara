@@ -31,7 +31,7 @@ export interface LifecycleTurnEvents {
 }
 
 function turnContext(turn: TurnRecord): LifecycleTurnContext {
-  return { session: { auth: turn.auth, id: turn.sessionId, turn: { id: turn.id, sequence: turn.sequence } } };
+  return { session: { auth: turn.auth, id: turn.sessionId, turn: { id: turn.id, kind: turn.kind, sequence: turn.sequence } } };
 }
 
 export function lifecycleTurnObserver(events: LifecycleTurnEvents): TurnObserver {

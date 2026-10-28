@@ -21,9 +21,6 @@ const TOOL_ACTION_LABELS: Readonly<Record<string, string>> = {
 
 const MANAGED_ACTION_LABELS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   manage_external_group_schedule: EXTERNAL_SCHEDULE_ACTION_LABELS,
-  manage_google_workspace_connection: {
-    disconnect: "отключить Google Workspace от текущей области",
-  },
   manage_family_invitation: {
     approve: "добавить участника в семью",
     create: "создать приглашение в семейного агента",

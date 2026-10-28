@@ -106,7 +106,6 @@ describe("send_gif", () => {
     expect(deps.recordTimeline).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ groupId: null }), {
       contentText: "Гифка: робот показывает средний палец",
       failureCode: "AGENT_GIF_PROJECTION_FAILED",
-      replacesAnswer: true,
       telegramMessageId: "93",
     });
     expect(result).toMatchObject({

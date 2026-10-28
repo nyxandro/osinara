@@ -98,11 +98,9 @@ describe("model-facing tool contracts", () => {
     }
   });
 
-  it("keeps external image and delivery paths relative while native file paths stay absolute", () => {
+  it("keeps external image paths relative while native file paths stay absolute", () => {
     const external = surfaces().external;
 
-    expect(external.send_workspace_file!.description).toContain("reports/result.pdf");
-    expect(external.send_workspace_file!.description).toContain("do not pass /workspace/group");
     expect(external.inspect_workspace_image!.description).toContain("photos/image.png");
     expect(external.read_file!.description).toContain("/workspace/group");
   });

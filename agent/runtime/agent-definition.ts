@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `RuntimeAgent`: base prompt, turn instruction resolvers, per-step tools, skills, model choice,
- *   the turn limits and the call before each model step.
+ *   the turn limits, the call before each model step and the check of a final answer.
  * - `StepStartContext`: what that call sees.
  * - `StepModelSelection`: the model of one step with its provider options and context window.
  *
@@ -38,6 +38,11 @@ export interface StepStartContext {
 export interface RuntimeAgent {
   /** `composeBasePrompt` output: authored instructions plus the runtime's fixed rules. */
   readonly basePrompt: string;
+  /**
+   * Checks the text a step ends the turn with, before it is recorded or delivered. A notice sends
+   * the answer back to the model once with it; `undefined` accepts the answer.
+   */
+  checkFinalAnswer(context: StepStartContext & { readonly text: string }): Promise<string | undefined>;
   /** Share of the model's context window at which history is compacted before a step. */
   readonly compactionThresholdPercent: number;
   /** Resolvers in the order their blocks appear; they run once per turn. */

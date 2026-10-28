@@ -27,7 +27,8 @@ interface BinaryReader {
 interface DeliveryRow {
   content_sha256: string;
   file_path: string;
-  presentation: WorkspaceFilePresentation;
+  // Rows of past releases may name a document or a photo; only voice notes are delivered now.
+  presentation: string;
   requested_by: string | null;
   status: "completed" | "failed" | "started";
   telegram_chat_id: string;

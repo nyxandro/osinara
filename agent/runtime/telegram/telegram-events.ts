@@ -20,7 +20,7 @@ import { buildTelegramHandle, type TelegramTransport } from "./handle.js";
 type ObserverDatabase = JournalDatabase & Parameters<typeof loadChannelState>[0];
 
 function turnContext(turn: TurnRecord): TelegramTurnContext {
-  return { session: { auth: turn.auth, id: turn.sessionId, turn: { id: turn.id, sequence: turn.sequence } } };
+  return { session: { auth: turn.auth, id: turn.sessionId, turn: { id: turn.id, kind: turn.kind, sequence: turn.sequence } } };
 }
 
 export function telegramTurnObserver(input: {

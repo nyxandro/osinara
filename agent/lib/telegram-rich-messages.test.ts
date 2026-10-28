@@ -226,6 +226,99 @@ describe("postTelegramRichMessage", () => {
     );
   });
 
+  it("uploads the files of a chunk with it in one multipart request", async () => {
+    const telegramFetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      telegramResponse({ chat: { type: "private" }, message_id: 90 }),
+    );
+    const markdown = "Текст\n\n![](tg://photo?id=f0 \"Обложка\")\n\n![](tg://document?id=f1)";
+
+    const sent = await postTelegramRichMessageChunk(
+      markdown,
+      telegramTarget({ messageThreadId: 7 }),
+      undefined,
+      { allow_sending_without_reply: true, message_id: 5 },
+      [
+        { bytes: new Uint8Array([1, 2, 3]), fileName: "d.jpg", id: "f0", kind: "photo", mediaType: "image/jpeg", sha256: "s0" },
+        { bytes: new Uint8Array([4]), fileName: "Отчёт.pdf", id: "f1", kind: "document", mediaType: "application/pdf", sha256: "s1" },
+      ],
+    );
+
+    expect(sent).toEqual({ chatType: "private", messageId: "90" });
+    expect(String(telegramFetch.mock.calls[0]![0])).toBe("https://api.telegram.org/bottelegram-bot-secret/sendRichMessage");
+    const init = telegramFetch.mock.calls[0]![1]!;
+    expect(init.headers).toBeUndefined();
+    const form = init.body as FormData;
+    expect(form.get("chat_id")).toBe("123456789");
+    expect(form.get("message_thread_id")).toBe("7");
+    expect(JSON.parse(String(form.get("reply_parameters")))).toEqual({ allow_sending_without_reply: true, message_id: 5 });
+    expect(JSON.parse(String(form.get("rich_message")))).toEqual({
+      markdown,
+      media: [
+        { id: "f0", media: { media: "attach://f0", type: "photo" } },
+        { id: "f1", media: { media: "attach://f1", type: "document" } },
+      ],
+    });
+    const photo = form.get("f0") as File;
+    expect([photo.name, photo.type, [...new Uint8Array(await photo.arrayBuffer())]]).toEqual(["d.jpg", "image/jpeg", [1, 2, 3]]);
+    expect((form.get("f1") as File).name).toBe("Отчёт.pdf");
+  });
+
+  it("learns which Telegram file each media block of the chunk became", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(telegramResponse({
+      chat: { type: "private" },
+      message_id: 91,
+      rich_message: { blocks: [
+        { text: "Текст", type: "paragraph" },
+        { photo: [{ file_id: "photo-small" }, { file_id: "photo-large" }], type: "photo" },
+        { blocks: [{ document: { file_id: "document-1" }, type: "document" }], type: "details" },
+        { photo: [{ file_id: "photo-again" }], type: "photo" },
+      ] },
+    }));
+    const markdown = "Текст\n\n![](tg://photo?id=f0 \"Обложка\")\n\n<details><summary>Полный ответ</summary>\n\n![](tg://document?id=f1)\n\n</details>\n\n![](tg://photo?id=f0)";
+    const media = [
+      { bytes: new Uint8Array([1]), fileName: "d.jpg", id: "f0", kind: "photo" as const, mediaType: "image/jpeg", sha256: "s0" },
+      { bytes: new Uint8Array([2]), fileName: "a.pdf", id: "f1", kind: "document" as const, mediaType: "application/pdf", sha256: "s1" },
+    ];
+
+    const sent = await postTelegramRichMessageChunk(markdown, telegramTarget(), undefined, undefined, media);
+
+    expect(sent).toEqual({
+      chatType: "private",
+      media: [{ fileId: "photo-large", id: "f0", kind: "photo" }, { fileId: "document-1", id: "f1", kind: "document" }],
+      messageId: "91",
+    });
+  });
+
+  it("does not take a media-like line the model showed as code for a block", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(telegramResponse({
+      chat: { type: "private" },
+      message_id: 93,
+      rich_message: { blocks: [{ type: "pre" }, { photo: [{ file_id: "photo-1" }], type: "photo" }] },
+    }));
+
+    const sent = await postTelegramRichMessageChunk("```\n![](tg://photo?id=f0)\n```\n\n![](tg://photo?id=f0)", telegramTarget(), undefined, undefined, [
+      { bytes: new Uint8Array([1]), fileName: "d.jpg", id: "f0", kind: "photo", mediaType: "image/jpeg", sha256: "s0" },
+    ]);
+
+    expect(sent.media).toEqual([{ fileId: "photo-1", id: "f0", kind: "photo" }]);
+  });
+
+  it("keeps a sent chunk whose returned media do not match its blocks, without their files", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(telegramResponse({
+      chat: { type: "private" },
+      message_id: 92,
+      rich_message: { blocks: [{ document: { file_id: "document-1" }, type: "document" }] },
+    }));
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const sent = await postTelegramRichMessageChunk("![](tg://photo?id=f0)", telegramTarget(), undefined, undefined, [
+      { bytes: new Uint8Array([1]), fileName: "d.jpg", id: "f0", kind: "photo", mediaType: "image/jpeg", sha256: "s0" },
+    ]);
+
+    expect(sent).toEqual({ chatType: "private", messageId: "92" });
+    expect(String(errorLog.mock.calls[0]?.[0])).toContain("AGENT_TELEGRAM_RICH_MEDIA_RECEIPT_MISMATCH");
+  });
+
   it("does not retry an ambiguously failed final delivery", async () => {
     const errorLog = vi
       .spyOn(console, "error")

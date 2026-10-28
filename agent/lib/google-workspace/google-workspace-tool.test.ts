@@ -3,7 +3,8 @@
  *
  * Constructs covered:
  * - The tool exposes setup/status/removal only, never Google API command passthrough.
- * - Disconnecting a durable workspace profile requires HITL.
+ * - Connecting and disconnecting a workspace profile run without a person's confirmation in a live
+ *   turn; a scenario run only reads the status.
  * - Status reports actual native-profile readiness without changing profile state.
  */
 import { describe, expect, it, vi } from "vitest";
@@ -60,40 +61,27 @@ function managerDependencies() {
   };
 }
 
-const PRIVATE_TURN = {
-  session: {
-    auth: {
-      current: {
-        attributes: { telegramChatId: "101", telegramChatType: "private", telegramUserId: "101" },
-        authenticator: "telegram",
-        principalId: "user-1",
-        principalType: "user",
-      },
-    },
-  },
-} as never;
-
-const FAMILY_GROUP_TURN = {
-  session: {
-    auth: {
-      current: {
-        attributes: {
-          groupId: "group-1", groupType: "family_private",
-          telegramChatId: "-1001", telegramChatType: "supergroup", telegramUserId: "101",
+function turnWith(scenario: Record<string, string>, kind = "conversation") {
+  return {
+    session: {
+      auth: {
+        current: {
+          attributes: { telegramChatId: "101", telegramChatType: "private", telegramUserId: "101", ...scenario },
+          authenticator: "telegram",
+          principalId: "user-1",
+          principalType: "user",
         },
-        authenticator: "telegram",
-        principalId: "user-1",
-        principalType: "user",
+        initiator: null,
       },
+      turn: { id: "turn-1", kind, sequence: 1 },
     },
-  },
-} as never;
+  } as never;
+}
 
-function approvalFor(input: Record<string, unknown>, turn: never = PRIVATE_TURN) {
-  const approval = (manageGoogleWorkspaceConnection as unknown as {
+function approvalFor(input: Record<string, unknown>, turn: never) {
+  return (manageGoogleWorkspaceConnection as unknown as {
     approval: (context: { session: unknown; toolInput: Record<string, unknown> }) => unknown;
-  }).approval;
-  return approval({ session: (turn as { session: unknown }).session, toolInput: input });
+  }).approval({ session: (turn as { session: unknown }).session, toolInput: input });
 }
 
 describe("manage_google_workspace_connection policy", () => {
@@ -109,16 +97,25 @@ describe("manage_google_workspace_connection policy", () => {
     expect(schema.properties).not.toHaveProperty("command");
   });
 
-  it("denies a disconnect in a group turn and leaves read-only actions untouched", () => {
-    expect(approvalFor({ action: "status" }, FAMILY_GROUP_TURN)).toBe("not-applicable");
-    expect(approvalFor({ action: "disconnect" }, FAMILY_GROUP_TURN))
-      .toMatchObject({ reason: expect.stringContaining("AGENT_APPROVAL_SURFACE_UNAVAILABLE"), type: "denied" });
+  it("runs every connection action without waiting for a person's confirmation in a live turn", () => {
+    for (const action of ["connect", "disconnect", "status"]) {
+      expect(approvalFor({ action }, turnWith({}))).toBe("not-applicable");
+    }
   });
 
-  it("requires approval only to disconnect the durable profile", () => {
-    expect(approvalFor({ action: "connect" })).toBe("not-applicable");
-    expect(approvalFor({ action: "status" })).toBe("not-applicable");
-    expect(approvalFor({ action: "disconnect" })).toBe("user-approval");
+  it("lets a scenario run only read the connection status", () => {
+    for (const scenario of [
+      turnWith({ scheduledRunId: "00000000-0000-4000-8000-000000000010" }, "scheduled"),
+      turnWith({ telegramApprovalContinuation: "true" }, "wakeup"),
+    ]) {
+      expect(approvalFor({ action: "status" }, scenario)).toBe("not-applicable");
+      for (const action of ["connect", "disconnect"]) {
+        expect(approvalFor({ action }, scenario)).toMatchObject({
+          reason: expect.stringContaining("AGENT_GOOGLE_WORKSPACE_SCENARIO_WRITE_FORBIDDEN"),
+          type: "denied",
+        });
+      }
+    }
   });
 
   it("does not report incomplete grants as connected or ready", () => {

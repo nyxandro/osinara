@@ -11,6 +11,7 @@
  */
 import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { z } from "zod";
 
 const dependencies = vi.hoisted(() => ({
   create: vi.fn(),
@@ -69,7 +70,7 @@ describe("manage_external_group_schedule", () => {
   it("creates a weekly group automation with an explicit retained-history window", async () => {
     const input = {
       action: "create",
-      capabilityAllowlist: ["send_workspace_file"],
+      capabilityAllowlist: ["search_memories"],
       firstRunAt: "2026-08-17T09:00:00+03:00",
       historyWindowDays: 7,
       maxRuns: 10,
@@ -81,6 +82,9 @@ describe("manage_external_group_schedule", () => {
       userRequest: "Каждый понедельник присылай HTML-выжимку обсуждения за неделю",
     } as const;
     dependencies.create.mockResolvedValue({ id: "schedule-1", scope: "group" });
+    // A file the run shows goes out with its answer: the old file-sending grant is not offered.
+    expect((manageExternalGroupSchedule.inputSchema as z.ZodType).safeParse({ ...input, capabilityAllowlist: ["send_workspace_file"] }).success)
+      .toBe(false);
 
     expect(await approvalFor(input))
       .toBe("user-approval");
@@ -93,7 +97,7 @@ describe("manage_external_group_schedule", () => {
     expect(dependencies.create).toHaveBeenCalledWith(
       { familyId: "family-1", requestedBy: "owner-1" },
       expect.objectContaining({
-        capabilityAllowlist: ["send_workspace_file"],
+        capabilityAllowlist: ["search_memories"],
         firstRunAt: new Date("2026-08-17T06:00:00.000Z"),
         historyWindowDays: 7,
         maxRuns: 10,

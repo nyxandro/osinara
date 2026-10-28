@@ -2,7 +2,8 @@
  * External-group scheduled automation capability policy.
  *
  * Exports:
- * - `EXTERNAL_SCHEDULE_CAPABILITIES`: safe capabilities an owner may persist for an automation.
+ * - `EXTERNAL_SCHEDULE_CAPABILITIES`: safe capabilities an automation may have persisted.
+ * - `OFFERED_EXTERNAL_SCHEDULE_CAPABILITIES`: those a new or updated automation may list.
  * - `ExternalScheduleCapability`: validated persisted scheduled capability name.
  * - `parseExternalScheduleCapabilities`: complete-list validation without partial grants.
  * - `requireGrantedExternalScheduleCapabilities`: every listed capability is held by the group now.
@@ -12,6 +13,7 @@ import type { PoolClient } from "pg";
 import { AppError } from "../app-error.js";
 import { unservableCapabilityReason } from "../tool-policy/grantable-group-capabilities.js";
 import {
+  BASELINE_EXTERNAL_GROUP_GRANTS,
   EXTERNAL_GROUP_BASE_TOOLS,
   parseExternalGroupToolAllowlist,
 } from "../tool-policy/group-tool-catalog.js";
@@ -21,17 +23,26 @@ import type { MutableAgentScheduleRow } from "./agent-schedule-repository-helper
 const HISTORY_WINDOW_MAX_DAYS = 365;
 // Since v0.21.0 page reading is a baseline tool of every external group: the run surface provides
 // it without a stored grant and the group policy no longer lists it, so it needs no group grant here.
-const BASELINE_TOOL_NAMES: ReadonlySet<string> = new Set(EXTERNAL_GROUP_BASE_TOOLS.map(({ name }) => name));
+// A group file goes inside the answer that shows it (v0.54.0): an old grant for it needs none either.
+const BASELINE_TOOL_NAMES: ReadonlySet<string> = new Set([
+  ...EXTERNAL_GROUP_BASE_TOOLS.map(({ name }) => name),
+  ...BASELINE_EXTERNAL_GROUP_GRANTS,
+]);
 
-export const EXTERNAL_SCHEDULE_CAPABILITIES = [
+export const OFFERED_EXTERNAL_SCHEDULE_CAPABILITIES = [
   "inspect_workspace_image",
   "list_memories",
   "list_memory_threads",
   "read_memory_thread",
   "search_memories",
   "search_memory_threads",
-  "send_workspace_file",
   "web_fetch",
+] as const satisfies readonly ExternalGroupToolName[];
+
+// A persisted automation may still list the file-sending grant of a past release; it grants nothing.
+export const EXTERNAL_SCHEDULE_CAPABILITIES = [
+  ...OFFERED_EXTERNAL_SCHEDULE_CAPABILITIES,
+  "send_workspace_file",
 ] as const satisfies readonly ExternalGroupToolName[];
 
 export type ExternalScheduleCapability = (typeof EXTERNAL_SCHEDULE_CAPABILITIES)[number];

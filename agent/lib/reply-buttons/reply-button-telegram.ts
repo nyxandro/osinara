@@ -8,7 +8,8 @@
  * Key constructs:
  * - Settling rewrites the rich message as the exact text the buttons went out with and a caption
  *   in their place: the buttons are part of the message, so the edit that adds the caption is the
- *   edit that removes them.
+ *   edit that removes them. A message with files names each of them again by its Telegram file:
+ *   Telegram refuses an edit of such a message that does not.
  * - Every refusal is logged with Telegram's own description, so a failure can be diagnosed later.
  */
 import {
@@ -26,7 +27,7 @@ import type { ReplyButtonSet } from "./reply-button-repository.js";
 export interface ReplyButtonTelegram {
   answerPress(input: { callbackQueryId: string; showAlert?: boolean; text?: string }): Promise<void>;
   /** Removes the buttons of a delivered set and writes the caption in their place. */
-  settle(set: Pick<ReplyButtonSet, "messageText" | "telegramChatId" | "telegramMessageId">, caption: string): Promise<void>;
+  settle(set: Pick<ReplyButtonSet, "messageMedia" | "messageText" | "telegramChatId" | "telegramMessageId">, caption: string): Promise<void>;
 }
 
 function requireBotToken(): string {
@@ -84,7 +85,12 @@ export const replyButtonTelegram: ReplyButtonTelegram = {
     const edited = await request("editMessageText", {
       chat_id: set.telegramChatId,
       message_id: Number(set.telegramMessageId),
-      rich_message: { markdown: `${set.messageText}\n\n_${caption}_` },
+      rich_message: {
+        markdown: `${set.messageText}\n\n_${caption}_`,
+        ...(set.messageMedia.length === 0
+          ? {}
+          : { media: set.messageMedia.map((file) => ({ id: file.id, media: { media: file.fileId, type: file.kind } })) }),
+      },
     });
     if (edited.ok || alreadySettled(edited)) return;
     throw new AppError("AGENT_REPLY_BUTTONS_SETTLE_FAILED", "Telegram не убрал кнопки из сообщения", {

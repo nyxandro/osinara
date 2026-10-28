@@ -12,7 +12,7 @@
  * - `memoryEditContract`: `manage_memory` JSON contract limited to the allowed actions.
  * - `MEMORY_EXACT_DUPLICATE_HANDLING`: server-owned exact reinforcement guidance.
  * - `IMAGE_INSPECTION_CONTRACT`: single-source payload rule for the vision tool.
- * - `SEND_WORKSPACE_FILE_RULES`: explicit-request delivery rules for workspace files.
+ * - `answerFileRules`: how a workspace file reaches the chat inside the final answer.
  * - `VOICE_MESSAGE_RULES`: explicit-request voice replies, spoken text, closing, and text recovery.
  * - `GIF_REPLY_RULES`: when a GIF answers, how it is requested, closing, and text recovery.
  * - `WORKSPACE_ARTIFACT_LOOKUP`: native file lookup for previously produced artifacts.
@@ -215,8 +215,15 @@ export const MEMORY_EXACT_DUPLICATE_HANDLING =
 export const IMAGE_INSPECTION_CONTRACT =
   "To analyze an available image you must use `inspect_workspace_image`: the main model does not see the image automatically. Pass exactly one image source, the permitted scope and a specific question. Vision receives only the explicit question and the image bytes, not the conversation history or the caption. Do not claim anything about the content before a successful tool result. If the tool returned `AGENT_WORKSPACE_IMAGE_INPUT_INVALID`, fix the payload according to the explanation; do not invent the image's content.";
 
-export const SEND_WORKSPACE_FILE_RULES =
-  "On an explicit request to send a file, call only `send_workspace_file` with the current relative path: the tool itself reads the physical file safely. Use `photo` only for an image that should be shown as a photo, otherwise `document`. If the user asks for a caption under the image, pass it in `caption`; send a long standalone text as an ordinary message, not as a caption.";
+/** `paths` names the workspace roots of the zone, written as the agent sees them in its sandbox. */
+export function answerFileRules(paths: string): string {
+  return [
+    `To send a file from a workspace, show it in your final answer as Markdown media on a line of its own: \`![caption](/workspace/...)\` with the file's full sandbox path (${paths}). Wrap a path with spaces in angle brackets: \`![caption](</workspace/.../My file.pdf>)\`. The bracket text becomes the caption under the file; leave the brackets empty for none.`,
+    "Any file goes this way, inside the same formatted message as your text and where you place it: a picture appears as a photo, MP4 as a video, MP3 as audio, anything else as a document. Several files may go in one answer, together up to 47 MB.",
+    "Show a file when the person asked for it or when it is the requested result itself, such as a made report or a recipe with its picture. Files go only in the final answer, never in text written before a tool call.",
+    "A file from the web is never shown by its web address: download it into a workspace folder with a tool first, then show the downloaded file. If a file cannot be sent, the answer comes back to you once with the reason; fix the path or leave the file out.",
+  ].join(" ");
+}
 
 // A delivered voice note is the whole answer, so this is the one place a private chat learns the
 // empty-delivery marker: it closes a turn whose reply already reached the chat, never a silence.

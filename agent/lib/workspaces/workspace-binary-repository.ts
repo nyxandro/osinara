@@ -3,7 +3,8 @@
  *
  * Exports:
  * - `WorkspaceBinaryFile`: current metadata plus an immutable byte snapshot.
- * - `createWorkspaceBinaryRepository`: scope authorization and binary I/O over a trusted resolver.
+ * - `createWorkspaceBinaryRepository`: scope authorization and binary I/O over a trusted resolver,
+ *   and a file's size without its bytes.
  * - `workspaceBinaryRepository`: production repository rooted at `/app/workspaces`.
  */
 import { createHash } from "node:crypto";
@@ -29,6 +30,7 @@ import {
   listWorkspaceStoredFilesUnder,
   readWorkspaceFile,
   writeWorkspaceFile,
+  type WorkspaceStoredFile,
 } from "./workspace-storage.js";
 
 interface WorkspaceResolver {
@@ -125,6 +127,22 @@ export function createWorkspaceBinaryRepository(root: string, resolver: Workspac
       const safePath = validateWorkspacePath(path);
       const workspaceId = await resolveWorkspaceId(resolver, auth, scope);
       return await readCurrentBinary(root, workspaceId, scope, safePath);
+    },
+
+    /** A file's size and path under the same rights as a read, without reading its bytes. */
+    async statBinary(
+      auth: WorkspaceAuthorization,
+      scope: WorkspaceScope,
+      path: string,
+    ): Promise<WorkspaceStoredFile> {
+      const safePath = validateWorkspacePath(path);
+      const workspaceId = await resolveWorkspaceId(resolver, auth, scope);
+      try {
+        return await getWorkspaceStoredFile(root, workspaceId, safePath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        throw new AppError("AGENT_WORKSPACE_FILE_NOT_FOUND", "Файл не найден в выбранном workspace");
+      }
     },
 
     async readTelegramInboxAttachment(

@@ -15,9 +15,6 @@ import { profileProjectionPolicyRepository } from "../profile-projection-policy-
 import { requireProfileProjectionUpdate } from "../profile-projection-input.js";
 import { telegramGroupAdministrationRepository } from "../telegram-group-administration-repository.js";
 import { requireManageTelegramGroupInput } from "../tools/manage_telegram_group.js";
-import type { GmailMessagesApprovalSubject } from "../google-workspace/gmail-message-approval.js";
-import { loadGmailMessageApproval } from "../google-workspace/gmail-message-approval.js";
-import { requireGmailMessageInput } from "../google-workspace/gmail-message-contract.js";
 import {
   localizeTelegramInputRequest,
   type TelegramInputRequest,
@@ -38,7 +35,6 @@ import {
   type ExternalScheduleTarget,
 } from "./external-schedule-approval.js";
 import { externalAgentScheduleRepository } from "../agent-schedules/external-agent-schedule-repository.js";
-import { gmailApprovalOptions, gmailApprovalPrompt } from "./gmail-approval-prompt.js";
 
 interface ApprovalPresentationDependencies {
   findProfileProjectionGroup(groupRef: string, ctx: Pick<SessionContext, "session">): Promise<string | null>;
@@ -48,11 +44,6 @@ interface ApprovalPresentationDependencies {
     id: string,
     ctx: Pick<SessionContext, "session">,
   ): Promise<{ title: string; telegramChatId: string; telegramGroupTitle: string }>;
-  findGmailMessages(
-    messageIds: readonly string[],
-    profileRef: string,
-    ctx: Pick<SessionContext, "session">,
-  ): Promise<GmailMessagesApprovalSubject>;
 }
 
 export type TelegramApprovalPresenter = (
@@ -142,20 +133,12 @@ export function createTelegramApprovalPresenter(
         };
       }
     }
-    if (request.action.toolName === "manage_gmail_message") {
-      const input = requireGmailMessageInput(request.action.input);
-      const subject = await dependencies.findGmailMessages(input.messageIds, input.profileRef, ctx);
-      return {
-        ...localized,
-        options: gmailApprovalOptions(localized, input.action, input.messageIds.length),
-        prompt: gmailApprovalPrompt(input.action, input.messageIds, subject),
-      };
-    }
     if (request.action.toolName === "execute_google_workspace") {
+      // Only a command that opens the user's data to other people still asks for the button.
       return {
         ...localized,
         prompt: buildApprovalMessage({
-          actionLabel: "изменение в Google Workspace",
+          actionLabel: "открытие доступа к данным Google",
           consequence: GOOGLE_WORKSPACE_CONSEQUENCE,
           facts: googleWorkspaceFacts(request.action.input),
         }),
@@ -183,5 +166,4 @@ export const presentTelegramApproval = createTelegramApprovalPresenter({
     const owner = requirePrivateTelegramOwner(ctx);
     return await externalAgentScheduleRepository.find({ familyId: owner.familyId, requestedBy: owner.userId }, id);
   },
-  findGmailMessages: loadGmailMessageApproval,
 });
