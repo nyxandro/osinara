@@ -163,7 +163,15 @@ async function completeCallback(
     );
   })();
   return completion.then(undefined, async (error: unknown) => {
-    await dependencies.failAuthorization(claim, "AGENT_GOOGLE_OAUTH_COMPLETION_FAILED");
+    try {
+      await dependencies.failAuthorization(claim, "AGENT_GOOGLE_OAUTH_COMPLETION_FAILED");
+    } catch (recordError) {
+      // The person still needs the original reason; the lost status record is logged on its own.
+      console.error(JSON.stringify({
+        code: "AGENT_GOOGLE_OAUTH_FAILURE_RECORD_FAILED",
+        error: recordError instanceof Error ? recordError.message : String(recordError),
+      }));
+    }
     throw error;
   });
 }

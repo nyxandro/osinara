@@ -192,7 +192,7 @@ describe("Google Workspace OAuth callback", () => {
     deps.getAccountIdentity.mockRejectedValue(new Error("provider unavailable"));
     deps.failAuthorization.mockRejectedValue(new Error("database unavailable"));
     const handler = createGoogleOAuthCallbackHandler(deps);
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     const response = await handler(new Request(
       "https://agent.example/v1/google-oauth/callback?state=state-with-at-least-32-random-bytes&code=auth-code",
@@ -200,6 +200,12 @@ describe("Google Workspace OAuth callback", () => {
 
     expect(response.status).toBe(500);
     expect(await response.text()).toContain("AGENT_GOOGLE_OAUTH_CALLBACK_FAILED");
+    // Neither the original cause nor the lost status record disappears from the log.
+    const lines = log.mock.calls.map(([line]) => String(line));
+    expect(lines.some((line) => line.includes("AGENT_GOOGLE_OAUTH_FAILURE_RECORD_FAILED") &&
+      line.includes("database unavailable"))).toBe(true);
+    expect(lines.some((line) => line.includes("AGENT_GOOGLE_OAUTH_CALLBACK_FAILED") &&
+      line.includes("provider unavailable"))).toBe(true);
   });
 
   it("shows markup in an explanation as text", async () => {
