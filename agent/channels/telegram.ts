@@ -136,6 +136,7 @@ export const telegramTurnEvents: TelegramTurnEvents = {
         agentSessionId: ctx.session.id,
         agentTurnId: ctx.session.turn.id,
         message: output.message,
+        session: ctx.session,
         stepIndex: data.stepIndex,
       });
       return;
