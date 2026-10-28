@@ -5,7 +5,8 @@
  * - The durable claim precedes the send, so a replayed step never repeats a notice.
  * - A refused claim performs no Telegram call at all.
  * - A failed send is logged without failing the turn that is still producing an answer.
- * - A notice is presented like a final answer: markup goes out rich, never as raw symbols.
+ * - A notice is presented like a final answer: markup goes out rich, never as raw symbols, and a
+ *   workspace file it shows goes inside it, read with the chat's rights.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -21,6 +22,15 @@ vi.mock("./telegram-rich-messages.js", async (importOriginal) => ({
   ...await importOriginal<typeof import("./telegram-rich-messages.js")>(),
   postTelegramRichMessageChunk: sendRichChunk,
 }));
+const workspace = vi.hoisted(() => ({ authorize: vi.fn(), resolver: { load: vi.fn(), measure: vi.fn() } }));
+vi.mock("./workspaces/workspace-context.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./workspaces/workspace-context.js")>(),
+  requireWorkspaceAuthorization: workspace.authorize,
+}));
+vi.mock("./answer-files/answer-file-resolution.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./answer-files/answer-file-resolution.js")>(),
+  answerFileResolver: workspace.resolver,
+}));
 
 import { deliverTelegramProgressNotice } from "./telegram-progress-notice.js";
 
@@ -33,11 +43,32 @@ const base = {
   agentSessionId: "wrun_session_1",
   agentTurnId: "turn-1",
   message: "Приступаю: сначала соберу информацию",
+  session: { auth: { current: undefined } } as never,
   stepIndex: 0,
 };
 
 describe("Telegram progress notice", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it("sends a workspace file the notice shows inside it", async () => {
+    repository.claim.mockResolvedValue({ noticeId: "notice-4" });
+    sendRichChunk.mockResolvedValue({ chatType: "private", messageId: "703" });
+    workspace.authorize.mockReturnValue({ familyId: "family-1", role: "owner" });
+    const file = { byteSize: 5, fileName: "duchesse.jpg", path: "recipes/duchesse.jpg", scope: "personal" };
+    workspace.resolver.measure.mockResolvedValue({ file, ok: true });
+    workspace.resolver.load.mockResolvedValue({
+      file: { ...file, bytes: Buffer.from("bytes"), kind: "photo", mediaType: "image/jpeg", sha256: "sha-1" },
+      ok: true,
+    });
+
+    await deliverTelegramProgressNotice({ ...base, message: "**Дюшес**\n\n![Обложка](/workspace/personal/recipes/duchesse.jpg)" });
+
+    expect(sendRichChunk).toHaveBeenCalledTimes(1);
+    const [markdown, , , , media] = sendRichChunk.mock.calls[0]!;
+    expect(markdown).toContain("![](tg://photo?id=f0 \"Обложка\")");
+    expect(media).toEqual([expect.objectContaining({ fileName: "duchesse.jpg", id: "f0", kind: "photo" })]);
+    expect(repository.confirm).toHaveBeenCalledWith("notice-4", "703");
+  });
 
   it("sends the notice once and confirms the claim", async () => {
     repository.claim.mockResolvedValue({ noticeId: "notice-1" });
