@@ -187,6 +187,21 @@ describe("Google Workspace OAuth callback", () => {
     expect(deps.failAuthorization).not.toHaveBeenCalled();
   });
 
+  it("ends in a page even when the failure cannot be recorded", async () => {
+    const deps = dependencies();
+    deps.getAccountIdentity.mockRejectedValue(new Error("provider unavailable"));
+    deps.failAuthorization.mockRejectedValue(new Error("database unavailable"));
+    const handler = createGoogleOAuthCallbackHandler(deps);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await handler(new Request(
+      "https://agent.example/v1/google-oauth/callback?state=state-with-at-least-32-random-bytes&code=auth-code",
+    ));
+
+    expect(response.status).toBe(500);
+    expect(await response.text()).toContain("AGENT_GOOGLE_OAUTH_CALLBACK_FAILED");
+  });
+
   it("shows markup in an explanation as text", async () => {
     const deps = dependencies();
     deps.claimAuthorization.mockRejectedValue(new AppError("AGENT_GOOGLE_OAUTH_STATE_INVALID", "<b>ссылка</b> & код"));

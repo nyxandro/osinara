@@ -198,6 +198,26 @@ describe("Telegram final presentation", () => {
       }]);
     });
 
+    it("filters links there like in a rich message", () => {
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const markdown = `Посмотрите [подробнее](https://t.me/some_bot?start=x)\n\n${wideTable}`;
+      const [chunk] = formatTelegramFinalPresentation(markdown, { replyButtons: true });
+
+      expect(chunk!.format).toBe("rich");
+      expect(chunk!.text).not.toContain("[подробнее](");
+      expect(chunk!.text).toContain("подробнее (");
+    });
+
+    it("still fails on a formatting error that is not a rich limit", () => {
+      let privateUseCharacters = "";
+      for (let codePoint = 0xE000; codePoint <= 0xF8FF; codePoint += 1) {
+        privateUseCharacters += String.fromCodePoint(codePoint);
+      }
+
+      expect(() => formatTelegramFinalPresentation(`**Да**, ${privateUseCharacters}`))
+        .toThrowError("AGENT_TELEGRAM_RICH_PLACEHOLDER_UNAVAILABLE");
+    });
+
     it("degrades only the authored message that cannot be formatted", () => {
       vi.spyOn(console, "error").mockImplementation(() => undefined);
 

@@ -27,6 +27,7 @@ import {
 } from "./telegram-rich-markdown.js";
 import { openTrailingFence, readMarkdownTree } from "./markdown-syntax.js";
 import { splitTelegramAuthoredParts } from "./telegram-authored-split.js";
+import { neutralizeTelegramRichLinks } from "./telegram-rich-links.js";
 import { literalRichParagraphs } from "./telegram-rich-literal.js";
 
 export type TelegramChunkPacing = "aside" | "immediate";
@@ -131,8 +132,10 @@ function formatPart(
   // Only the opening chunk carries the pause: a provider-sized overflow is the same utterance.
   const chunkPacing = (index: number): TelegramChunkPacing => index === 0 ? pacing : "immediate";
   // Plain text uses Telegram's ordinary 4096-character transport and never receives parse mode.
+  // A literal rich message does go through rich parsing, and whether Telegram reads Markdown inside
+  // its paragraphs is not verified, so its links pass the same filter as any rich message.
   const writtenText = (text: string): TelegramFinalPresentationChunk[] => carriesButtons
-    ? splitTelegramMessageText(text)
+    ? splitTelegramMessageText(neutralizeTelegramRichLinks(text))
       .map((part, index) => ({ format: "rich", pacing: chunkPacing(index), text: literalRichParagraphs(part) }))
     : splitTelegramMessageText(text)
       .map((part, index) => ({ format: "plain", pacing: chunkPacing(index), text: part }));
