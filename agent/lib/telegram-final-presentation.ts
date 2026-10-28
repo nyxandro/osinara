@@ -11,7 +11,8 @@
  * - Transport selection depends on authored syntax, not message length or a hidden default.
  * - An authored aside is a separate paced message; a length-driven split never is.
  * - The answer goes out as the model laid it out: whether to hide part of a long answer in a
- *   collapsible block is the model's decision, and nothing is collapsed for it.
+ *   collapsible block is the model's decision, and nothing is collapsed for it. A block written
+ *   wrong (no summary, broken nesting) is shown as text: Telegram's rules for one are not verified.
  * - Reply buttons exist only in a rich message, so an answer carrying them ends in one. Text that
  *   would have gone plain stays literal there, line breaks included.
  * - Model-authored formatting must not cost the answer: a message a rich message cannot hold (an
@@ -22,7 +23,7 @@
 import { splitTelegramMessageText } from "../runtime/telegram/api.js";
 
 import { AppError } from "./app-error.js";
-import { formatTelegramRichMessages } from "./telegram-rich-markdown.js";
+import { formatTelegramRichMessages, hasTelegramRichDetailsBlock } from "./telegram-rich-markdown.js";
 import { splitTelegramAuthoredParts } from "./telegram-authored-split.js";
 import { neutralizeTelegramRichLinks } from "./telegram-rich-links.js";
 import { literalRichParagraphs } from "./telegram-rich-literal.js";
@@ -64,6 +65,15 @@ function usesSupportedRichFormatting(markdown: string): boolean {
     RICH_MATH_PATTERN.test(markdown);
 }
 
+/** Details-like tags made inert when no valid details container holds them; code keeps its own. */
+function inertMalformedDetails(markdown: string): string {
+  if (!/<\/?details(?:\s[^>]*)?>/iu.test(markdown) || hasTelegramRichDetailsBlock(markdown)) return markdown;
+  return markdown.replace(
+    /```[\s\S]*?(?:```|$)|`[^`\n]*`|<\/?(?:details|summary)(?:\s[^>]*)?>/giu,
+    (value) => value.startsWith("`") ? value : value.replaceAll("<", "&lt;").replaceAll(">", "&gt;"),
+  );
+}
+
 function formatPart(
   markdown: string,
   pacing: TelegramChunkPacing,
@@ -82,7 +92,7 @@ function formatPart(
       .map((part, index) => ({ format: "plain", pacing: chunkPacing(index), text: part }));
   if (!carriesMedia && !usesSupportedRichFormatting(markdown)) return writtenText(markdown);
   try {
-    return formatTelegramRichMessages(markdown)
+    return formatTelegramRichMessages(inertMalformedDetails(markdown))
       .map((text, index) => ({ format: "rich", pacing: chunkPacing(index), text }));
   } catch (error) {
     if (!(error instanceof AppError) || !RICH_LIMIT_ERROR_CODES.has(error.code)) throw error;

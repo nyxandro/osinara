@@ -119,14 +119,18 @@ describe("Telegram final presentation", () => {
   });
 
   it.each([
-    `<details class="wide"><summary>Разбор</summary>\n\n${"текст ".repeat(150)}\n\n</details>`,
-    `<details>\n\n${"текст ".repeat(150)}\n\n</details>`,
-    `<details><summary>Разбор\n\n${"текст ".repeat(150)}`,
-  ])("adds no accordion of its own around malformed authored details: %s", (markdown) => {
-    const output = formatTelegramFinalPresentation(markdown).map((chunk) => chunk.text).join("\n");
+    [`<details class="wide"><summary>Разбор</summary>\n\n${"текст ".repeat(150)}\n\n</details>`, "&lt;details class=\"wide\"&gt;"],
+    [`<details>\n\n${"текст ".repeat(150)}\n\n</details>`, "&lt;details&gt;"],
+    ["<details>\n\nкоротко\n\n</details>", "&lt;details&gt;"],
+    [`<details><summary>Разбор\n\n${"текст ".repeat(150)}`, "&lt;details&gt;&lt;summary&gt;Разбор"],
+  ])("shows malformed authored details as text and adds no accordion of its own: %s", (markdown, inert) => {
+    const [chunk, ...rest] = formatTelegramFinalPresentation(markdown);
 
-    expect(output).not.toContain("Полный ответ");
-    expect(output).toContain("текст текст");
+    expect(rest).toEqual([]);
+    expect(chunk!.format).toBe("rich");
+    expect(chunk!.text).toContain(inert);
+    expect(chunk!.text).not.toMatch(/<details|<summary/u);
+    expect(chunk!.text).not.toContain("Полный ответ");
   });
 
   describe("past the limits of a rich message", () => {
