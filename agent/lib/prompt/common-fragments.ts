@@ -220,8 +220,8 @@ export function answerFileRules(paths: string): string {
   return [
     `To send a file from a workspace, show it in your final answer as Markdown media on a line of its own: \`![caption](/workspace/...)\` with the file's full sandbox path (${paths}). Wrap a path with spaces in angle brackets: \`![caption](</workspace/.../My file.pdf>)\`. The bracket text becomes the caption under the file; leave the brackets empty for none.`,
     "Any file goes this way, inside the same formatted message as your text and where you place it: a picture appears as a photo, MP4 as a video, MP3 as audio, anything else as a document. Several files may go in one answer, together up to 47 MB.",
-    "Show a file when the person asked for it or when it is the requested result itself, such as a made report or a recipe with its picture. Files go only in the final answer, never in text written before a tool call.",
-    "A file from the web is never shown by its web address: download it into a workspace folder with a tool first, then show the downloaded file. If a file cannot be sent, the answer comes back to you once with the reason; fix the path or leave the file out.",
+    "Show a file when the person asked for it or when it is the requested result itself, such as a made report or a recipe with its picture. A file goes the same way in any message you write, the final answer or a note before a tool call.",
+    "A file from the web is never shown by its web address: download it into a workspace folder with a tool first, then show the downloaded file. If a file in your final answer cannot be sent, the answer comes back to you once with the reason; fix the path or leave the file out. Do not explain a missing file by guesses about Telegram: check the path with a tool.",
   ].join(" ");
 }
 
