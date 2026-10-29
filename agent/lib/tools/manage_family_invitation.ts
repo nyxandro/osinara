@@ -69,13 +69,9 @@ function requireManageFamilyInvitationInput(input: unknown) {
 }
 
 const TOOL_DESCRIPTION = [
-  "Create a one-time family invitation or approve a candidate from list_pending_family_invitations.",
-  "Available only to the owner in a private chat; both actions always require confirmation.",
-  "For action=create only action is required: {\"action\":\"create\"}; do not pass candidate fields.",
-  "For action=approve action, invitationId, candidateTelegramUserId and candidateDisplayName are required: {\"action\":\"approve\",\"invitationId\":\"<UUID from list_pending_family_invitations>\",\"candidateTelegramUserId\":\"123456789\",\"candidateDisplayName\":\"Анна\"}.",
-  "invitationId must be a UUID from list_pending_family_invitations; candidateTelegramUserId and candidateDisplayName must match the chosen candidate exactly.",
-  "Do not guess required values and do not substitute defaults: if they are missing, request list_pending_family_invitations again or ask the owner.",
-  "After an input error, fix the payload according to the error text and retry no more than once; on a repeated error stop and clarify the data.",
+  "Create a one-time family invitation or approve a candidate from list_pending_family_invitations; only the owner can use it, and both actions ask for confirmation.",
+  "Create: {\"action\":\"create\"} with no candidate fields.",
+  "Approve: {\"action\":\"approve\",\"invitationId\":\"<UUID from list_pending_family_invitations>\",\"candidateTelegramUserId\":\"123456789\",\"candidateDisplayName\":\"Анна\"}, all three copied exactly from the chosen candidate; never guess them.",
 ].join(" ");
 
 export default defineTool({

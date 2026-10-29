@@ -13,7 +13,6 @@
  */
 import type { DynamicResolveContext } from "../runtime/context.js";
 import { resolveConversationEnvironment } from "../lib/conversation-environment.js";
-import { resolveExternalGroupSkillNames } from "../lib/group-skills/group-skill-resolver.js";
 import { scheduledGroupHistoryAccess } from "../lib/agent-schedules/scheduled-group-history-context.js";
 import { isScheduledSession } from "../lib/agent-schedules/scheduled-session.js";
 import { loadCurrentExternalGroupCapabilities } from "../lib/tool-policy/external-group-live-policy.js";
@@ -76,7 +75,6 @@ export async function resolveToolSurface(ctx: DynamicResolveContext) {
       capabilities: new Set(),
       environment: "external",
       includeApplicationCore: false,
-      skills: new Set(),
     });
   }
   if (environment !== "external") {
@@ -98,7 +96,6 @@ export async function resolveToolSurface(ctx: DynamicResolveContext) {
       capabilities: new Set(),
       environment: "external",
       includeApplicationCore: false,
-      skills: new Set(),
     });
   }
 
@@ -109,7 +106,6 @@ export async function resolveToolSurface(ctx: DynamicResolveContext) {
       capabilities: new Set(),
       environment: "external",
       includeApplicationCore: false,
-      skills: new Set(),
     });
   }
 
@@ -130,24 +126,11 @@ export async function resolveToolSurface(ctx: DynamicResolveContext) {
     includeApplicationCore = false;
   }
 
-  // Skills are the turn's verified list that the group's live list still grants. Live execution
-  // still denies a skill that the owner revokes while this turn is running.
-  let skills: ReadonlySet<string> = new Set();
-  try {
-    skills = await resolveExternalGroupSkillNames(auth);
-  } catch (error) {
-    console.error(JSON.stringify({
-      code: "AGENT_GROUP_SKILL_POLICY_LOOKUP_FAILED",
-      error: error instanceof Error ? error.message : String(error),
-      groupId: identity.groupId,
-    }));
-  }
   return buildSurface({
     capabilities: new Set([...policy.allowed].filter((name) => current.has(name))),
     environment: "external",
     includeApplicationCore,
     scheduledHistory: includeApplicationCore && scheduledGroupHistoryAccess(auth) !== null,
     scheduledRun: isScheduledSession(ctx),
-    skills,
   });
 }

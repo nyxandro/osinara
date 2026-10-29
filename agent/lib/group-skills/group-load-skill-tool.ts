@@ -4,11 +4,15 @@
  * Exports:
  * - `createExternalGroupLoadSkillTool`: injectable wrapper for authorization tests.
  * - `externalGroupLoadSkillTool`: production `defineTool` wrapper over the runtime's native skill loader.
+ *
+ * A service skill is not on any group list: the turn has one only while its tool is granted, and the
+ * native loader refuses a skill the turn was not given, so it goes straight to the loader.
  */
 import { defineTool, type ToolContext, type ToolDefinition } from "../../runtime/tool.js";
 import { loadSkill } from "../../runtime/tools/defaults.js";
 
 import { AppError } from "../app-error.js";
+import { isServiceSkillName } from "../family-skills/service-skills.js";
 import { SKILL_NAME_PATTERN } from "../../runtime/skills/package-validation.js";
 import type { GroupSafeSkillName } from "./group-skill-catalog.js";
 import { groupSkillPolicyRepository } from "./group-skill-repository.js";
@@ -43,6 +47,7 @@ export function createExternalGroupLoadSkillTool(
         );
       }
 
+      if (isServiceSkillName(skill)) return await dependencies.executeNative(input, ctx);
       // Re-read after model planning so revocation wins over a stale turn-scoped descriptor; the
       // live list also drops a family skill the owner has disabled or deleted since.
       const allowed = await dependencies.loadGroupSkillAllowlist(groupId);

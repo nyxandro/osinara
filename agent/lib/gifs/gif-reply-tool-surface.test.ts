@@ -16,7 +16,7 @@ vi.mock("./gif-reply-availability.js", () => ({
 import { modeInstructions } from "../prompt/mode-instructions.js";
 import { buildModeToolSurface, buildSubagentToolSurface } from "../tool-policy/mode-tool-surface.js";
 
-const EXTERNAL = { capabilities: new Set<never>(), environment: "external", skills: new Set<string>() } as const;
+const EXTERNAL = { capabilities: new Set<never>(), environment: "external" } as const;
 
 describe("GIF replies with KLIPY configured", () => {
   it("are offered in every live conversation without a grant", () => {

@@ -11,8 +11,8 @@
  * - Every tool is emitted per mode, the runtime's built-ins included, so a tool that cannot work in
  *   the current trust zone has no descriptor at all. Trusted modes get the runtime's built-ins
  *   (agent, bash, read_file, write_file, todo, load_skill); an external group
- *   gets only its own file tools, its granted capabilities and, without a verified registration,
- *   nothing beyond answering in text.
+ *   gets only its own file tools, `load_skill`, its granted capabilities and, without a verified
+ *   registration, nothing beyond that.
  * - External groups re-check every granted capability at execution time against the live policy.
  * - Interactive private and family surfaces wrap the sandbox built-ins (plus glob and grep), so
  *   that every tool result there can carry the messages the turn's author sent meanwhile.
@@ -27,7 +27,6 @@ import { AppError } from "../app-error.js";
 import { GIF_REPLIES_AVAILABLE } from "../gifs/gif-reply-availability.js";
 import { wrapModelFacingToolMap } from "../model-facing-tool.js";
 import { externalGroupLoadSkillTool } from "../group-skills/group-load-skill-tool.js";
-import { SKILL_NAME_PATTERN } from "../../runtime/skills/package-validation.js";
 import { MEMORY_LIST_DEFAULT_LIMIT, MEMORY_LIST_MAX_LIMIT, THREAD_HISTORY_PAGE_MAX_ENTRIES } from "../memory-config.js";
 import { THREAD_REF_PATTERN } from "../memory-thread-query-repository.js";
 import { externalRememberInputSchema } from "../remember-contract.js";
@@ -88,8 +87,6 @@ export type ModeToolSurfaceInput =
       includeApplicationCore?: boolean;
       scheduledHistory?: boolean;
       scheduledRun?: boolean;
-      /** Names of the turn's granted skills; the surface needs only whether there are any. */
-      skills: ReadonlySet<string>;
     };
 
 // A file of the group goes inside the answer that shows it: its persisted grant has no tool.
@@ -255,11 +252,12 @@ function buildExternalToolSurface(
   includeApplicationCore: boolean,
   scheduledHistory: boolean,
   scheduledRun: boolean,
-  skills: ReadonlySet<string>,
 ): ToolMap {
+  // Loading a skill is always offered: which skills load is decided per call, against the group's
+  // live list and the service skills of the turn (`group-load-skill-tool.ts`).
   const surface: Record<string, AnyToolDefinition> = {
     ...EXTERNAL_GROUP_FILE_TOOLS,
-    ...(skills.size > 0 ? { load_skill: externalGroupLoadSkillTool } : {}),
+    load_skill: externalGroupLoadSkillTool,
   };
   if (includeApplicationCore) {
     surface.web_search = conversationWebSearch as AnyToolDefinition;
@@ -385,19 +383,15 @@ export function buildModeToolSurface(input: ModeToolSurfaceInput): ToolMap {
   const includeApplicationCore = input.includeApplicationCore !== false;
   const scheduledHistory = input.scheduledHistory === true;
   const scheduledRun = input.scheduledRun === true || scheduledHistory;
-  const skills: ReadonlySet<string> = [...input.skills].some((name) => !SKILL_NAME_PATTERN.test(name))
-    ? new Set()
-    : input.skills;
   const key = [
     includeApplicationCore ? "core" : "failed",
     scheduledHistory ? "history" : "ordinary",
     scheduledRun ? "scheduled" : "interactive",
     allowlistKey(allowed),
-    [...skills].sort().join(","),
   ].join("|");
   const cached = EXTERNAL_SURFACES.get(key);
   if (cached) return cached;
-  const surface = buildExternalToolSurface(allowed, includeApplicationCore, scheduledHistory, scheduledRun, skills);
+  const surface = buildExternalToolSurface(allowed, includeApplicationCore, scheduledHistory, scheduledRun);
   EXTERNAL_SURFACES.set(key, surface);
   return surface;
 }

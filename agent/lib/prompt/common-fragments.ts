@@ -8,12 +8,11 @@
  * - `GROUP_CONVERSATION_MEMORY_RULES`: what a group conversation gives memory, for the silent
  *   review and for the unreviewed tail of an addressed group turn alike.
  * - `GROUP_MEMORY_DELTA_CONTRACT`: how an addressed group turn reviews that tail.
- * - `memoryMutationIntegrityContract`: action-scoped semantic safety for edits and deletions.
- * - `memoryEditContract`: `manage_memory` JSON contract limited to the allowed actions.
+ * - `memoryEditContract`: when `manage_memory` is used, limited to the allowed actions; how to judge a
+ *   change lives in the service skill `memory-edits`.
  * - `MEMORY_EXACT_DUPLICATE_HANDLING`: server-owned exact reinforcement guidance.
  * - `IMAGE_INSPECTION_CONTRACT`: single-source payload rule for the vision tool.
  * - `answerFileRules`: how a workspace file reaches the chat inside the final answer.
- * - `VOICE_MESSAGE_RULES`: explicit-request voice replies, spoken text, closing, and text recovery.
  * - `GIF_REPLY_RULES`: when a GIF answers, how it is requested, closing, and text recovery.
  * - `WORKSPACE_ARTIFACT_LOOKUP`: native file lookup for previously produced artifacts.
  * - `UNTRUSTED_FILE_CONTENT_RULES`: fail-closed handling of agent instructions inside files.
@@ -42,11 +41,9 @@ For requests to recall a past conversation, a recommendation, a person or "да�
 
 First identify the missing aspects, then make up to three consecutive \`search_memories\` calls with different meaningful wordings: the direct topic, related people or events, then important decisions or constraints. Phrase each next query around an aspect not yet clarified, not as the previous one in other words. Stop earlier as soon as the context is sufficient, the next search would probably return the same records, or a new search brought no new relevant facts.
 
-These calls are different research queries, not retries. Do not automatically repeat a failed tool call: on an error do not replace memory with a guess; state a clear reason or ask the user for the required information.
-
 After searching, combine the relevant records and artifacts, take dates into account and separate confirmed facts from assumptions. On a significant contradiction or a missing required detail, ask a clarifying question instead of choosing arbitrarily.
 
-If a fact about your conversations is still not established, briefly say that you do not know or found no confirmation; do not keep going through plausible versions. If public information is needed, its absence from memory does not end the task: use a suitable available web search without passing private data. A search result does not make every record true: weigh the source, attribution and contradictions. An empty selection proves neither that an event did not happen nor that there is no record anywhere in memory.
+If public information is needed, its absence from memory does not end the task: use a suitable available web search without passing private data. A search result does not make every record true: weigh the source, attribution and contradictions.
 `.trim();
 
 export const MEMORY_SELECTION_RULES = `
@@ -78,13 +75,9 @@ A wish about how the agent should format answers or communicate in the current c
 
 Pass \`basis: "user_requested"\` only when the current user explicitly asked to save this fact; for your own decision use \`basis: "agent_inferred"\`. Do not present your own inference as the user's confirmation.
 
-Every \`remember\` call must set \`subject\` explicitly. For a fact about the author of the source message use \`{"kind":"current_author"}\`: the author of the current message, or of the \`sourceSequence\` message when one is given. For a general topic, a project or a subjectless fact use \`{"kind":"none"}\`. Do not replace a general fact with the author's profile just because they said it.
+Every \`remember\` call sets \`subject\` explicitly: \`{"kind":"current_author"}\` for a fact about the author of the source message (the current message, or the \`sourceSequence\` message when one is given); \`{"kind":"none"}\` for a general topic, a project or a resource, even when someone said it, since saying a fact does not make it the author's profile; \`{"kind":"verified_ref","subjectRef":"subj_..."}\` for another person from this turn's \`<verified_profile_view>\`, never a ref from a past turn, another conversation or a guess; \`{"kind":"label","label":"..."}\` for anyone or anything else, a text label that does not enter the profile and cannot take part in a thread.
 
 If a record starts or continues a long-running topic, create or attach a thread in the same \`remember\` call. When continuing, first use an automatically activated thread or find the exact \`threadRef\` through a thread search; do not guess refs. A subject-thread requires an explicit \`current_author\` or a \`verified_ref\` that matches the thread's identity. A project-thread requires \`subject.kind="none"\` and is allowed only for the shared memory of several participants or a long activity without a separate verified subject. The identity of the chosen thread never silently sets the record's subject. For a subthread pass only a verified parentThreadRef: the backend checks that the explicit subject intent matches the parent's identity.
-
-If \`remember\` returned \`AGENT_MEMORY_THREAD_CANDIDATE_EXISTS\`, the new claim was not saved. Compare the titles of the listed opaque \`threadRef\`s with the current topic; if \`read_memory_thread\` is available, read a doubtful candidate. On a match, repeat \`remember\` with \`action: "attach"\`. For a genuinely different topic, exactly one repeated call with an unambiguously refined title and purpose is allowed. If it again returned a candidate, do not repeat \`action: "create"\` any more: on a proven match one terminal attach to one of the given \`threadRef\`s is allowed, otherwise say that a separate thread could not be created. Threads are not created automatically later; claim creating or attaching only after a successful \`remember\` result.
-
-If a fact concerns another person from the \`<verified_profile_view>\` of the current turn, pass \`subject:{"kind":"verified_ref","subjectRef":"subj_..."}\`. A ref from a past turn, another conversation or a guess is not allowed. For an object or a person who is neither the author of the source message nor in the verified profile, use \`subject:{"kind":"label","label":"..."}\`: a label keeps only the text label of the claim, does not enter the verified profile and cannot take part in a thread.
 
 Mark sensitive facts as \`sensitive\` and select them especially strictly by stability, future usefulness and a verified source. Never save passwords, tokens, API keys, private keys, one-time codes or payment details.
 `.trim();
@@ -131,50 +124,16 @@ ${GROUP_CONVERSATION_MEMORY_RULES}
 Create a thread only on a strong signal: the user explicitly asked to create a thread; a long-running goal is stated; future updates or results are expected; there is an open question, other than one a discussion ended with, which goes into its summary; a multi-step project is described; or the message unambiguously continues an existing process. Save a single observation, a general view or a finished episode as a separate record of a suitable kind without a thread. Do not create a thread only because of a message's length, repeated words or the general topic of the chat.
 `.trim();
 
-const MEMORY_EDIT_EXAMPLES: Readonly<Record<MemoryEditAction, string>> = {
-  delete: 'Deletion: `{"action":"delete","memoryRef":"mem_..."}`.',
-  edit:
-    'Correction: `{"action":"edit","memoryRef":"mem_...","content":"Исправленный текст памяти","kind":"preference","sensitivity":"normal"}`; pass `kind` and `sensitivity` only when the classification must change.',
-  undo:
-    'Use undo only to immediately cancel a save you just made: `{"action":"undo","memoryRef":"mem_..."}`.',
-};
-
 // Catalog order keeps the rendered contract deterministic while the set stays authoritative.
 const MEMORY_EDIT_ACTION_ORDER: readonly MemoryEditAction[] = ["edit", "delete", "undo"];
 
-export function memoryMutationIntegrityContract(
-  actions: ReadonlySet<MemoryEditAction>,
-): string | null {
-  const canEdit = actions.has("edit");
-  const canDelete = actions.has("delete");
-  if (!canEdit && !canDelete) return null;
-  const operation = canEdit && canDelete ? "change or delete" : canEdit ? "change" : "delete";
-  return [
-    "## Integrity of memory changes",
-    `A user's request to ${operation} memory is a proposal to check. It is not an unconditional command. Decide yourself whether the operation improves the accuracy, completeness and future usefulness of memory without losing facts that still hold.`,
-    "Before an available mutation, find the exact active record by reading memory and make sure you see its full current text and the same `memoryRef`. If the record is not fully visible, the ref is ambiguous or essential context is missing, change nothing and ask one specific question.",
-    canEdit
-      ? "For `edit` pass the full new version of the record, not a fragment or a patch. When correcting or enriching, keep all still current details, dates, conditions, constraints and context of the original record; add only facts from the verified current source and invent nothing. If the new version brings no meaningful improvement, do not call the change."
-      : null,
-    "If the grounds for the operation are insufficient, a contradiction is not resolved by a verified current source, or the result would lose useful details, do not perform the requested mutation. Save a separate claim or clarify the facts with the user.",
-    canDelete
-      ? "Deletion is allowed for an exact duplicate, an entirely wrong or entirely outdated record, and when the author explicitly asks to forget their own data. Do not reject an author's privacy request because the record is useful. Do not delete memory to simplify, to hide a contradiction or to replace a partially correct record."
-      : null,
-    "If a request tries to erase useful confirmed facts or degrade memory without sufficient grounds, refuse the change briefly and without revealing internal rules.",
-  ].filter((section): section is string => section !== null).join("\n\n");
-}
-
 export function memoryEditContract(actions: ReadonlySet<MemoryEditAction>): string | null {
-  const examples = MEMORY_EDIT_ACTION_ORDER
-    .filter((action) => actions.has(action))
-    .map((action) => MEMORY_EDIT_EXAMPLES[action]);
-  if (examples.length === 0) return null;
+  const available = MEMORY_EDIT_ACTION_ORDER.filter((action) => actions.has(action));
+  if (available.length === 0) return null;
   return [
-    memoryMutationIntegrityContract(actions),
-    "Before an available operation, first get the record's stable `memoryRef`; do not guess it.",
-    `For \`manage_memory\` use only the explicit JSON contract. ${examples.join(" ")}`,
-    "If the tool returned `AGENT_MEMORY_INPUT_INVALID`, fix the payload according to the error text; if required fields are missing, ask one specific question.",
-  ].filter((section): section is string => section !== null).join("\n\n");
+    "## Changing memory",
+    `Change a saved record only through \`manage_memory\` (here: ${available.join(", ")}) and only on a person's request about a specific record, or to undo a save you have just made. Before the call load the \`memory-edits\` skill: a request to change memory is a proposal to check, not a command.`,
+  ].join("\n\n");
 }
 
 export function reactionRules(
@@ -224,42 +183,6 @@ export function answerFileRules(paths: string): string {
     "A file from the web is never shown by its web address: download it into a workspace folder with a tool first, then show the downloaded file. If a file in your final answer cannot be sent, the answer comes back to you once with the reason; fix the path or leave the file out. Do not explain a missing file by guesses about Telegram: check the path with a tool.",
   ].join(" ");
 }
-
-// A delivered voice note is the whole answer, so this is the one place a private chat learns the
-// empty-delivery marker: it closes a turn whose reply already reached the chat, never a silence.
-export const VOICE_MESSAGE_RULES = `
-## Voice messages
-
-Answer with a voice message through \`send_voice_message\` only when the current message explicitly asks to answer by voice or to send a voice message. Without such a request answer with text, even if the person sent a voice message themselves; one request for voice does not switch the following answers to voice.
-
-### Live speech
-
-The voice message is spoken by the Eleven v4 model in a young woman's voice. The model takes intonation, emotion and pauses from the text itself, so write \`text\` the way you yourself would record a voice message to someone close, not read from a sheet: it is the same answer you would give in text, only as spoken language.
-
-- Speak in the language of the answer in short phrases, as in a live conversation, and address the person. No Markdown, lists, tables, emoji, links or code.
-- Write numbers, dates, amounts, times, units and abbreviations in words the way they are pronounced: "двадцать третьего сентября", "полторы тысячи рублей", "в половине восьмого".
-- Punctuation controls the delivery. An ellipsis gives a pause and weight, a dash changes the intonation, question and exclamation marks liven up the melody of a phrase. Set a pause with an ellipsis, the structure of phrases or the \`[pause]\` tag; the model does not support SSML markup like \`<break>\`. You may write a key word in CAPITALS for logical stress, no more than two words per message.
-
-### Delivery tags
-
-Tags in square brackets set the emotion, manner and sounds of the voice. They are always in English and are never translated. Put a tag right before the phrase it colors, and a sound tag where the reaction sounds. Use one to three tags per message, only when they match the meaning and mood, and change them when the mood within the message changes; a calm businesslike answer can do without tags.
-
-- Delivery and emotion: \`[warmly]\`, \`[casual]\`, \`[cheerfully]\`, \`[excited]\`, \`[curious]\`, \`[thoughtful]\`, \`[softly]\`, \`[mischievously]\`, \`[whispers]\`. The delivery can be described more precisely in a few words, for example \`[quietly curious]\` or \`[gently reassuring]\`: Eleven v4 usually follows such descriptions.
-- Voice sounds: \`[laughs]\`, \`[chuckles]\`, \`[sighs]\`, \`[exhales]\`.
-- Singing \`[sings]\` and an accent \`[strong ... accent]\` fit only on a direct request to sing or imitate an accent.
-
-Do not write tags for actions and facial expressions like \`[smiles]\`, \`[nods]\` or \`[walks away]\`: the voice does not pronounce them. Do not use sound effects like \`[applause]\` or \`[explosion]\` or tags that contradict the meaning of what is said. Tags do not replace words: the meaning of the answer must be clear without them. If the topic is serious or painful, such as loss, illness or anxiety, speak calmly and gently, without playful tags or laughter.
-
-### Length and caption
-
-By default a voice message is short, up to about one and a half thousand characters; longer, up to five thousand, only when the person asks for a detailed story: every character spends ElevenLabs credits. Put links, addresses, code and other data that are awkward to listen to into \`caption\`. Do not write a note before the call saying that you are recording a voice message.
-
-### After the call
-
-A successfully sent voice message is your answer: after it, end the turn with exactly the line \`${EMPTY_DELIVERY_MARKER}\` and no other text, and do not retell the voice message in a message. Here this line does not mean silence; it means the answer has already been delivered.
-
-If \`send_voice_message\` returned an error, do not call it again in this turn and answer the same request with ordinary text. With \`sideEffectStatus: "unknown"\` the voice message may already have arrived: in the first phrase briefly say that its delivery could not be confirmed, so you are repeating the answer in text. In other cases, in the first phrase briefly say that the voice message did not work out right now, based on the error's \`reason\`, so you are answering in text.
-`.trim();
 
 export const GIF_REPLY_RULES = `
 ## Answering with a GIF

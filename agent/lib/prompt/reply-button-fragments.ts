@@ -3,7 +3,7 @@
  *
  * Export:
  * - `REPLY_BUTTON_RULES`: when to offer tap-to-answer buttons, how to write, word and color them
- *   in the text of the answer, what a tap means, and the buttons a reminder may carry.
+ *   in the text of the answer, what a tap means, and what a tap under a reminder asks for.
  */
 
 export const REPLY_BUTTON_RULES = `
@@ -25,5 +25,5 @@ Do not put buttons on an answer that asks nothing, on an open question that need
 
 A tap reaches you as the person's own message \`[Tapped button «…» under your message: «…»]\`. It means exactly what typing those words would: an answer, never a confirmation. Buttons stay until the person taps one or writes anything else; if they write instead, just answer their message. In a group only the person you are answering can tap.
 
-A reminder may carry the same buttons: write the markup at the end of \`content\` in \`manage_reminder\` when the reminder implies an action to report or postpone, for example «✅ Оплатил» and «⏰ Через час» for paying the internet bill. The buttons follow the content: a reminder whose new \`content\` has no markup loses them. A tap under a reminder comes to you the same way: for a postponement set a new one-time reminder with the same content, buttons included, for the moment the button names, counted from the tap, and say for what time; for a done action answer briefly.
+A reminder may carry the same buttons, for example «✅ Оплатил» and «⏰ Через час» under paying the internet bill; how to write them is in the \`schedules\` skill. A tap under a reminder comes to you the same way: for a postponement set a new one-time reminder with the same content, buttons included, for the moment the button names, counted from the tap, and say for what time; for a done action answer briefly.
 `.trim();

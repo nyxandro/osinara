@@ -31,7 +31,6 @@ import {
   PRIVATE_MEMORY_SOURCE_CONTRACT,
   SPOKEN_ASIDE_RULES,
   UNTRUSTED_FILE_CONTENT_RULES,
-  VOICE_MESSAGE_RULES,
   WORKSPACE_ARTIFACT_LOOKUP,
   answerFileRules,
   memoryEditContract,
@@ -63,8 +62,7 @@ import {
   VOICE_TRANSCRIPTION_RULES,
   officeDocumentRules,
   trustedCredentialRules,
-  REMINDER_SCENARIO_BOUNDARY,
-  trustedReminderRules,
+  trustedRouteRules,
   trustedScheduleRules,
   trustedWorkspaceRules,
 } from "./trusted-fragments.js";
@@ -116,6 +114,7 @@ function trustedImagesAndFilesSection(imageInspection: string): string {
 const PRIVATE_INSTRUCTION_SECTIONS = [
   "# Current mode: private chat",
   VERIFIED_BLOCK_NOTICE,
+  trustedRouteRules("personal"),
   `## Memory
 
 Personal and family memory are available. Personal memory can be read and written for the current user. Family memory can be read; write facts from the private chat into the family scope only when the current user directly asks to make them shared with the family.
@@ -142,8 +141,6 @@ ${VOICE_TRANSCRIPTION_RULES}`,
   trustedImagesAndFilesSection(
     `${IMAGE_INSPECTION_CONTRACT} For a record from \`<workspace_attachments>\` pass \`telegramMessageId\`, the permitted scope and the user's specific question without retyping the long \`path\`; for another image in the workspace pass the exact available \`path\`.`,
   ),
-  REMINDER_SCENARIO_BOUNDARY,
-  trustedReminderRules("personal"),
   trustedScheduleRules("personal"),
   PROACTIVE_DELIVERY_RULES,
   `## Awareness of time
@@ -152,13 +149,9 @@ ${CURRENT_TIME_TOOL_RULES}`,
   PROGRESS_UPDATE_RULES,
   `## Administration
 
-To check the settings of Telegram groups use \`manage_telegram_group\` with \`{"action":"status"}\`: this read-only call needs no confirmation and returns all of the family's registrations, message modes, tool policies and permitted skills. On the \`/status\` command or a request to show the status of groups, make this call and show the result to the user in one message. Before \`update_policy\` or \`update_skills\`, first call \`{"action":"status"}\` if the exact current policy has not yet been obtained in this conversation; do not guess the existing allowlist and do not replace it with a partial list. \`update_skills\` replaces the full list of skills of the chosen group; the change is visible from the next message without a new context.
+Telegram groups of the family and family invitations are managed only here. On the \`/status\` command or a request to show the settings of groups, call \`manage_telegram_group\` with exactly \`{"action":"status"}\` and show the result in one message. Before changing a group (permissions, skills, a new context in a group, registration, removal), an automation for an external group or invitations, load the \`group-admin\` skill and follow it.
 
-If the owner explicitly asks to start a new context in a registered group, first call \`status\` with exactly \`{"action":"status"}\` and do not fill the optional fields of other actions. Match the name to a group unambiguously; with several matches ask one clarifying question. Then copy the chosen group's \`startNewContextInput\` into the next \`manage_telegram_group\` call without reconstructing it. The operation applies to the main chat and the canonical sessions of all forum topics, starts new contexts from the next messages, but keeps the timeline, memory, files and pending tasks.
-
-Invitations and confirming participants are available only here: use \`list_pending_family_invitations\` and \`manage_family_invitation\`.
-
-Any family member manages the family's own skills here, through \`manage_skill\`, without confirmation buttons; load the service skill \`skill-manager\` first. Never install a skill with \`npx skills add\` or by copying files into \`$HOME/.agents/skills/\`. When the turn carries a notice that the previous task took many tool steps, or the person corrected you during a task that succeeded and is likely to repeat, end the answer with one sentence offering to save it as a skill; not for a one-off task, and not again after the person declined in this conversation. When a family skill you followed failed or misled you, say what broke and offer a corrected version. An external group's skills are changed only by the owner, through \`manage_telegram_group\`.`,
+Any family member manages the family's own skills here, through \`manage_skill\`, without confirmation buttons; load the service skill \`skill-manager\` first. Never install a skill with \`npx skills add\` or by copying files into \`$HOME/.agents/skills/\`. When the turn carries a notice that the previous task took many tool steps, or the person corrected you during a task that succeeded and is likely to repeat, end the answer with one sentence offering to save it as a skill; not for a one-off task, and not again after the person declined in this conversation. When a family skill you followed failed or misled you, say what broke and offer a corrected version. An external group's skills are changed only by the owner.`,
   SKILL_RULES,
   START_NEW_CONTEXT_RULES,
 ];
@@ -174,7 +167,6 @@ function privateInstructions(
     // a spontaneous afterthought.
     scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
-    scheduledRun || subagentTurn ? null : VOICE_MESSAGE_RULES,
     liveGifReplies(scheduledRun, subagentTurn) ? GIF_REPLY_RULES : null,
     scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
     // A delegated child has no notes tool; it reads the notes and leaves keeping them to the turn.
@@ -191,6 +183,7 @@ const FAMILY_SKILL_CHANGES_RULE =
 const FAMILY_INSTRUCTION_SECTIONS = [
   "# Current mode: closed family group",
   VERIFIED_BLOCK_NOTICE,
+  trustedRouteRules("family"),
   `## Memory and addressing
 
 Only family memory is available. Other memory scopes are unavailable in this chat. Save stable facts of the current author through \`remember\` under the rules below.
@@ -220,8 +213,6 @@ ${VOICE_TRANSCRIPTION_RULES}`,
   trustedImagesAndFilesSection(
     `${IMAGE_INSPECTION_CONTRACT} For an image from \`<telegram_attachment_refs>\` or the reply ancestry pass its \`attachmentId\`: the bytes are loaded only into memory, and the analysis by itself never saves a file. For an already saved file pass the exact available \`path\`.`,
   ),
-  REMINDER_SCENARIO_BOUNDARY,
-  trustedReminderRules("family"),
   trustedScheduleRules("family"),
   PROACTIVE_DELIVERY_RULES,
   `## Awareness of time
@@ -244,7 +235,6 @@ function familyInstructions(
     scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,
     scheduledRun || subagentTurn ? null : GROUP_STANDALONE_MESSAGE_RULES,
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
-    scheduledRun || subagentTurn ? null : VOICE_MESSAGE_RULES,
     liveGifReplies(scheduledRun, subagentTurn) ? GIF_REPLY_RULES : null,
     scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
     // A delegated child has no notes tool; it reads the notes and leaves keeping them to the turn.
@@ -377,7 +367,6 @@ Do not use personal or family accounts, tokens or browser authorizations. This g
     scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,
     scheduledRun || subagentTurn ? null : GROUP_STANDALONE_MESSAGE_RULES,
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
-    voiceMessages ? VOICE_MESSAGE_RULES : null,
     // GIF replies need no grant but belong to the application core of a live turn.
     includeApplicationCore && liveGifReplies(scheduledRun, subagentTurn) ? GIF_REPLY_RULES : null,
     includeApplicationCore && !scheduledRun && !subagentTurn ? chatNotesRules("external") : null,

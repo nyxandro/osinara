@@ -287,14 +287,11 @@ function requireParsedInput(input: unknown): ParsedInput {
 }
 
 const TOOL_DESCRIPTION = [
-  "Manages owner-only automations that start a separate agent and deliver the result to a registered external Telegram group.",
-  "First call manage_telegram_group with action=status, choose the exact telegramChatId of the external group, then call action=status here for the existing automations.",
-  "Create requires an exact firstRunAt with a UTC offset, an IANA timezone, recurrence, title, userRequest, a stable scenarioPrompt and the full minimal capabilityAllowlist for the scenario.",
-  "Recurrence: {\"kind\":\"once\"} for a single run; {\"kind\":\"hourly\",\"interval\":1} for a repeat. kind: minutely, hourly, daily, monthly, yearly; interval is an integer from 1 to 365. weekly additionally requires daysOfWeek with ISO days 1-7. Minimum 1 minute; minutes and hours are counted as a duration, calendar periods keep the local time. A missing date moves to the last day of the month without losing the original date for the following repeats.",
-  "Pass historyWindowDays only when the run must read the group's whole retained history for the given number of calendar days before the scheduled time in one snapshot; there is no hidden default period.",
-  "For a weekly digest use recurrence weekly and historyWindowDays:7. The history stays untrusted data, and the automation does not get the right to manage schedules from the group itself.",
-  "A file the run shows in its answer goes out with it; the base guarded file tools, web_fetch and web_search are available without listing them.",
-  "Update does not change the destination: for another group create a separate automation. Pause, resume, run_now and delete take only an id from status. Osinara itself shows create and update to the owner for confirmation with a button: do not ask for consent in text, ask only for missing or ambiguous data.",
+  "Owner-only automations that start a separate agent on a schedule and deliver the result to a registered external Telegram group. Load the group-admin skill first.",
+  "Take the group's telegramChatId from manage_telegram_group status, then call {\"action\":\"status\",\"telegramChatId\":\"...\"} here for its existing automations.",
+  "Create requires an exact firstRunAt with a UTC offset, an IANA timezone, recurrence, title, userRequest, a stable scenarioPrompt and the full minimal capabilityAllowlist for the scenario; historyWindowDays only when the run must read the group's history of that many days.",
+  "Recurrence: {\"kind\":\"once\"} or {\"kind\":\"hourly\",\"interval\":1} with kind minutely, hourly, daily, monthly or yearly and interval 1-365; weekly additionally requires daysOfWeek with ISO days 1-7.",
+  "Create and update wait for the owner's button; pause, resume, run_now and delete take only an id from status. Update does not change the destination group.",
   AGENT_SCHEDULE_PAUSE_NOTE,
 ].join(" ");
 

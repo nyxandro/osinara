@@ -145,23 +145,13 @@ function requireManageInput(input: unknown) {
 }
 
 const MANAGE_DESCRIPTION = [
-  "Create, change, pause, resume or delete a reminder of this chat: at the given time the bot itself posts its text here.",
-  "A participant's explicit request is enough: do it without additional confirmation. Clarify missing or ambiguous data with an ordinary message in the chat.",
-  "content is sent as ready-made text without calling the model. Do not store in it a task to come up with or do something later; if asked to compose a message, prepare it before creating the reminder.",
-  "content is read at the moment of delivery: without words like \"завтра\" and \"через час\"; the text format is in the instructions.",
-  "content is laid out like your answers: Markdown formatting goes through, and a file of this chat's folder on its own line as ![caption](/workspace/group/...) arrives inside the reminder. A file is checked now and read at delivery, so it must stay in place.",
-  "This is not an autonomous run of the agent: working on a schedule, searching the web and preparing reports is not possible in this chat.",
-  "Reminders belong to the chat: any participant may change and delete any of them, not only their own.",
-  `Limit: no more than ${GROUP_REMINDER_MAX_PER_CHAT} active reminders for the whole chat.`,
-  `The chat's timezone is always ${GROUP_REMINDER_TIMEZONE} and cannot be changed; name the time in Moscow time when you confirm a reminder.`,
+  "Create, change, pause, resume or delete a reminder of this chat: at the given time the bot itself posts its ready-made text here, without calling the model. Load the group-reminders skill first: it holds the text and time rules.",
+  "content is laid out like your answers: Markdown and a file of this chat's folder on its own line as ![caption](/workspace/group/...); a file is checked now and read at delivery, so it must stay in place.",
+  `Limit: no more than ${GROUP_REMINDER_MAX_PER_CHAT} active reminders for the whole chat. The chat's timezone is always ${GROUP_REMINDER_TIMEZONE}.`,
   "Create payload: {\"action\":\"create\",\"content\":\"Созвон по проекту\",\"firstRunAt\":\"2026-09-04T18:00:00+03:00\",\"recurrence\":null}.",
-  "Recurrence: no repeat is recurrence=null; for a repeat pass {\"unit\":\"minutely\",\"interval\":5}. unit: minutely, hourly, daily, weekly, monthly, yearly; interval is an integer from 1 to 365. Minimum 1 minute. Minutes and hours are counted as a duration, calendar periods keep the local time. A missing date moves to the last day of the month without losing the original date for the following repeats. The time is checked every minute; missed repeats are not caught up.",
-  "Update passes id and only the content, firstRunAt or recurrence being changed. Pause/resume/delete pass only action and id.",
-  "A delivered one-time reminder does not change: for a new time create a new one.",
-  "One call works with exactly one reminder. Carry out a request about several with separate calls without agreeing on each; report only actions that succeeded.",
-  "A person names a reminder in words, not by id: find the needed record through list_reminders and, if several match the description, ask which one.",
-  `firstRunAt is always an ISO datetime with the Moscow offset ${MOSCOW_OFFSET_SUFFIX}: another offset is rejected, so that the time confirmed to the person matches the saved one.`,
-  "The reminder goes to the general chat, not to a forum topic.",
+  "Recurrence: none is recurrence=null; a repeat is {\"unit\":\"daily\",\"interval\":1} with unit minutely, hourly, daily, weekly, monthly or yearly and interval 1-365.",
+  "Update passes id and only the changed content, firstRunAt or recurrence; pause, resume and delete pass only action and id. One call works with exactly one reminder; take its id from list_reminders.",
+  `firstRunAt is always an ISO datetime with the Moscow offset ${MOSCOW_OFFSET_SUFFIX}: another offset is rejected. A delivered one-time reminder cannot change: create a new one.`,
 ].join(" ");
 
 const LIST_DESCRIPTION = [

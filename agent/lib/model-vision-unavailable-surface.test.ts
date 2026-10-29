@@ -112,7 +112,6 @@ describe("a model without image input", () => {
     const external = buildModeToolSurface({
       capabilities: new Set(["inspect_workspace_image", "remember"]),
       environment: "external",
-      skills: new Set(),
     });
 
     expect(buildModeToolSurface({ environment: "private" })).not.toHaveProperty("inspect_workspace_image");

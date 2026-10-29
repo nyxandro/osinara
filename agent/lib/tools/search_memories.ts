@@ -35,8 +35,7 @@ export default defineTool({
   replaySafe: true,
   description: [
     "Search by words and meaning for saved facts about the participants, their experience, earlier discussions, decisions and recommendations in the available memory scopes. This is not an internet search; do not use it for external facts and ready-made material unrelated to the history of the user or the chat.",
-    "If the automatic selection is not enough for such a question, call the tool up to three times with different meaningful wordings and stop when the context is sufficient or new relevant facts are no longer found.",
-    "For a request to recall the past or give that link, first reconstruct the subject by an explicit name or description from the visible conversation; an empty automatic selection does not prove there is no record.",
+    "Put explicit names, titles or a description into query, not words like \"это\" or \"тот сервис\".",
     "For a question about a period (what happened in August, what was agreed last week) set from and to: then selection goes by the event date, and for records without one by the date they appeared. In this mode query does not take part in the selection.",
     `A period returns no more than ${MEMORY_EVENT_WINDOW_LIMIT} records, the latest by event date. If there are exactly that many, the period may not have fit entirely: narrow it and repeat.`,
     "Usually the result is an array of records. If an object with an incompleteSelection field came instead, the selection was assembled by words only and is incomplete: tell the person so rather than concluding that the fact is absent.",

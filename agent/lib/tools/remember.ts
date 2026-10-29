@@ -13,6 +13,8 @@ import {
   type MemoryScope,
 } from "../memory-context.js";
 import { memoryRepository } from "../memory-repository.js";
+import { memoryThreadCandidateRefusalResult } from "../memory-thread-candidate-refusal.js";
+import { isMemoryThreadCandidateError } from "../memory-thread-write.js";
 import { logMemoryWriteEvent } from "../memory-observability.js";
 import { bindSourceAuthorLabel } from "../memory-subject-author-label.js";
 import { resolveMemoryTurnSource } from "../memory-turn-source.js";
@@ -111,12 +113,14 @@ export default defineTool({
       // A stop for review is the product working, not a failure: answered, not thrown. Thrown, it
       // would be logged by the framework with its whole payload, and the records it names are
       // memory content — it would leave the application for the log store on every refusal.
-      // Both stops run inside the write, so the source is resolved by the time either refuses.
+      // The stops run inside the write, so the source is resolved by the time any of them refuses.
       const deferred = error instanceof MemoryNeighbourRefusal
         ? memoryNeighbourRefusalResult(error, { editAvailable: source !== null && !source.isReview })
         : error instanceof MemoryAttributeReplacementRefusal
           ? memoryAttributeReplacementRefusalResult(error)
-          : null;
+          : isMemoryThreadCandidateError(error)
+            ? memoryThreadCandidateRefusalResult(error)
+            : null;
       if (deferred !== null) {
         logMemoryWriteEvent({
           code: "AGENT_MEMORY_WRITE_DEFERRED",
