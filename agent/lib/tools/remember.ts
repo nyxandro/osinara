@@ -13,7 +13,11 @@ import {
   type MemoryScope,
 } from "../memory-context.js";
 import { memoryRepository } from "../memory-repository.js";
-import { memoryThreadCandidateRefusalResult } from "../memory-thread-candidate-refusal.js";
+import {
+  MEMORY_THREAD_RETRY_EXHAUSTED_CODE,
+  memoryThreadCandidateRefusalResult,
+  memoryThreadRetryExhaustedResult,
+} from "../memory-thread-candidate-refusal.js";
 import { isMemoryThreadCandidateError } from "../memory-thread-write.js";
 import { logMemoryWriteEvent } from "../memory-observability.js";
 import { bindSourceAuthorLabel } from "../memory-subject-author-label.js";
@@ -120,7 +124,9 @@ export default defineTool({
           ? memoryAttributeReplacementRefusalResult(error)
           : isMemoryThreadCandidateError(error)
             ? memoryThreadCandidateRefusalResult(error)
-            : null;
+            : isAppError(error) && error.code === MEMORY_THREAD_RETRY_EXHAUSTED_CODE
+              ? memoryThreadRetryExhaustedResult()
+              : null;
       if (deferred !== null) {
         logMemoryWriteEvent({
           code: "AGENT_MEMORY_WRITE_DEFERRED",

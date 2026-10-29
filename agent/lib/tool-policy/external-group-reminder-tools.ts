@@ -146,6 +146,8 @@ function requireManageInput(input: unknown) {
 
 const MANAGE_DESCRIPTION = [
   "Create, change, pause, resume or delete a reminder of this chat: at the given time the bot itself posts its ready-made text here, without calling the model. Load the group-reminders skill first: it holds the text and time rules.",
+  "content is read at the moment of delivery: no words like \"завтра\" or \"через час\", name the event time by the Moscow clock.",
+  "<current_time> is UTC and Moscow is always UTC+03:00: count \"через час\" or \"завтра утром\" from it and add three hours for Moscow time.",
   "content is laid out like your answers: Markdown and a file of this chat's folder on its own line as ![caption](/workspace/group/...); a file is checked now and read at delivery, so it must stay in place.",
   `Limit: no more than ${GROUP_REMINDER_MAX_PER_CHAT} active reminders for the whole chat. The chat's timezone is always ${GROUP_REMINDER_TIMEZONE}.`,
   "Create payload: {\"action\":\"create\",\"content\":\"Созвон по проекту\",\"firstRunAt\":\"2026-09-04T18:00:00+03:00\",\"recurrence\":null}.",

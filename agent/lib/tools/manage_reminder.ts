@@ -195,6 +195,7 @@ function requireManageReminderInput(input: unknown) {
 
 const TOOL_DESCRIPTION = [
   "Create, change, pause, resume or delete an ordinary reminder: ready-made text the bot sends at the set time without calling the model. Load the schedules skill first: it holds the text and time rules.",
+  "content is read at the moment of delivery: no words like \"завтра\" or \"через час\", name the event time by the clock.",
   "Not an agent schedule: for future work with research or a report use manage_agent_schedule.",
   "content is laid out like your answers, Markdown, reply buttons and a workspace file on its own line as ![caption](/workspace/...) included; a file is checked now and read at delivery, so it must stay in place.",
   "Create payload: {\"action\":\"create\",\"content\":\"Позвонить врачу\",\"firstRunAt\":\"2026-08-01T10:00:00+03:00\",\"timezone\":\"Europe/Moscow\",\"scope\":\"personal\",\"recurrence\":null}.",

@@ -99,7 +99,7 @@ export function trustedRouteRules(scope: TrustedScope): string {
     "## Where to go",
     [
       "- Facts about the people here, your past conversations or a saved link: the turn's memory selection first, then `search_memories`.",
-      "- A public or changeable fact, a ready-made text or a page: `web_search`, then `web_fetch` to read a source.",
+      "- A public fact you do not know or one that changes: `web_search`, then `web_fetch` to read a source.",
       "- Ready text at a time is a reminder, work at a time is a scenario, waiting for an outside event is a wake-up: load `schedules` before setting any of them.",
       "- An answer by voice, only on request: load `voice-replies`, then `send_voice_message`.",
       "- A PDF, DOCX or XLSX file: the `pdf`, `docx` or `xlsx` skill first; other files of the workspace: `glob`, `grep`, `read_file`.",

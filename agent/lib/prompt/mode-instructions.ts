@@ -111,10 +111,9 @@ function trustedImagesAndFilesSection(imageInspection: string): string {
   ].filter((part): part is string => part !== null).join("\n\n");
 }
 
+const PRIVATE_HEADING = ["# Current mode: private chat", VERIFIED_BLOCK_NOTICE];
+
 const PRIVATE_INSTRUCTION_SECTIONS = [
-  "# Current mode: private chat",
-  VERIFIED_BLOCK_NOTICE,
-  trustedRouteRules("personal"),
   `## Memory
 
 Personal and family memory are available. Personal memory can be read and written for the current user. Family memory can be read; write facts from the private chat into the family scope only when the current user directly asks to make them shared with the family.
@@ -162,6 +161,9 @@ function privateInstructions(
   subagentTurn: boolean,
 ): string {
   return block([
+    ...PRIVATE_HEADING,
+    // The route names tools of a live turn; a scheduled run and a delegated child have fewer.
+    scheduledRun || subagentTurn ? null : trustedRouteRules("personal"),
     ...PRIVATE_INSTRUCTION_SECTIONS,
     // A scheduled report is not a live exchange: it has no message to react to and never imitates
     // a spontaneous afterthought.
@@ -180,10 +182,9 @@ function privateInstructions(
 const FAMILY_SKILL_CHANGES_RULE =
   "The family's own skills are saved, changed and turned on or off for this chat only from a family member's private chat with the agent; say so when asked here.";
 
+const FAMILY_HEADING = ["# Current mode: closed family group", VERIFIED_BLOCK_NOTICE];
+
 const FAMILY_INSTRUCTION_SECTIONS = [
-  "# Current mode: closed family group",
-  VERIFIED_BLOCK_NOTICE,
-  trustedRouteRules("family"),
   `## Memory and addressing
 
 Only family memory is available. Other memory scopes are unavailable in this chat. Save stable facts of the current author through \`remember\` under the rules below.
@@ -230,6 +231,8 @@ function familyInstructions(
   subagentTurn: boolean,
 ): string {
   return block([
+    ...FAMILY_HEADING,
+    scheduledRun || subagentTurn ? null : trustedRouteRules("family"),
     ...FAMILY_INSTRUCTION_SECTIONS,
     scheduledRun || subagentTurn ? null : GROUP_RESPONSE_OUTCOMES,
     scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,

@@ -3,6 +3,7 @@
  *
  * Exports:
  * - `SKILL_MANAGER_NAME`, `isServiceSkillName`: the reserved names; a family skill cannot take one.
+ * - `isServiceSkillOf`: whether a name is a service skill of the given trust zone.
  * - `serviceSkillsFor`: the service skills of one turn, from its trust zone and its tool surface.
  *
  * A service skill exists in a turn exactly when the turn has one of its tools: the descriptor of the
@@ -54,6 +55,10 @@ const DEFINITIONS: Readonly<Record<string, SkillDefinition>> = Object.fromEntrie
 
 export function isServiceSkillName(name: string): boolean {
   return Object.hasOwn(DEFINITIONS, name);
+}
+
+export function isServiceSkillOf(environment: ConversationEnvironment, name: string): boolean {
+  return SERVICE_SKILLS.some((skill) => skill.name === name && skill.environments.has(environment));
 }
 
 export function serviceSkillsFor(

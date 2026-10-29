@@ -53,6 +53,10 @@ describe("formatTurnInterjectionBlock", () => {
 
     expect(block.startsWith(turnInterjectionBlockOpening("abc123"))).toBe(true);
     expect(block.endsWith("</messages_while_working>")).toBe(true);
+    // How to act on the messages travels inside the genuine block, not in the permanent rules.
+    expect(block).toContain("A request to stop");
+    expect(block).toContain("Do not save facts from these messages through remember");
+    expect(TURN_INTERJECTION_RULES).not.toContain("A request to stop");
     const payload = JSON.parse(block.split("\n").at(-2)!);
     expect(payload.messages.map((message: { kind: string }) => message.kind)).toEqual([
       "text", "voice", "voice_unavailable", "attachment",

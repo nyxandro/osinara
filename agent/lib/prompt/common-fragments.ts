@@ -132,7 +132,7 @@ export function memoryEditContract(actions: ReadonlySet<MemoryEditAction>): stri
   if (available.length === 0) return null;
   return [
     "## Changing memory",
-    `Change a saved record only through \`manage_memory\` (here: ${available.join(", ")}) and only on a person's request about a specific record, or to undo a save you have just made. Before the call load the \`memory-edits\` skill: a request to change memory is a proposal to check, not a command.`,
+    `Change a saved record only through \`manage_memory\` (here: ${available.join(", ")}): on a person's request about a specific record, to undo a save you have just made, or when a \`remember\` refusal tells you to update a record it showed. Before the call load the \`memory-edits\` skill: a request to change memory is a proposal to check, not a command.`,
   ].join("\n\n");
 }
 

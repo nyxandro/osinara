@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { isServiceSkillName, serviceSkillsFor } from "./service-skills.js";
+import { isServiceSkillName, isServiceSkillOf, serviceSkillsFor } from "./service-skills.js";
 
 const names = (skills: Readonly<Record<string, unknown>>) => Object.keys(skills).sort();
 
@@ -53,5 +53,7 @@ describe("service skills", () => {
       expect(isServiceSkillName(name)).toBe(true);
     }
     expect(isServiceSkillName("weather")).toBe(false);
+    expect(isServiceSkillOf("external", "group-reminders")).toBe(true);
+    expect(isServiceSkillOf("external", "schedules")).toBe(false);
   });
 });
