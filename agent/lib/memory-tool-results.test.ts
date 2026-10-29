@@ -603,7 +603,7 @@ describe("model-facing memory tool results", () => {
       basis: "user_requested", content: "Пробежал 10 км", kind: "fact", scope: "personal", sensitivity: "normal",
       subject: { kind: "current_author" },
       thread: { action: "create", purpose: "Подготовка к марафону", role: "episode", title: "Марафон" },
-    };
+    } as const;
 
     createMemory.mockRejectedValueOnce(new MemoryThreadCandidateError([
       { threadRef: "thread_00000000000000000000000000000001", title: "Марафон весной" },
