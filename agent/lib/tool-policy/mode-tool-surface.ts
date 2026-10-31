@@ -105,17 +105,23 @@ const EXTERNAL_DIRECT_TOOL_PRESENTATION: Readonly<
 > = {
   inspect_workspace_image: {
     description: [
-      "Analyze an image of the current external group from exactly one source: attachmentId, telegramMessageId or path.",
+      "Analyze an image of the current external group from exactly one source: attachmentId, avatarOfSequence, telegramMessageId or path.",
       "For path pass a relative path inside the group scope, for example photos/image.png, not /workspace/group/photos/image.png.",
-      "The result contains analysis, path and scope; the analysis does not save Telegram bytes.",
+      "For a participant's current avatar pass avatarOfSequence, not telegramMessageId: the #N of any of their messages in this group, {\"avatarOfSequence\":\"53247\",\"scope\":\"group\",\"question\":\"Есть ли на аватарке человек? Если да, опиши внешность\"}; the avatar is fetched fresh every time and never saved.",
+      "The result contains analysis, path and scope; the analysis does not save Telegram bytes. avatar=missing means the participant has no avatar or hides it from bots.",
     ].join(" "),
     inputSchema: z
       .object({
         attachmentId: z.uuid().optional(),
+        avatarOfSequence: z.string().regex(/^\d{1,18}$/u)
+          .describe("For a participant's current Telegram avatar: the #N timeline number of any of their messages, without #")
+          .optional(),
         path: z.string().min(1).max(EXTERNAL_IMAGE_PATH_MAX_LENGTH).optional(),
         question: z.string().min(1).max(EXTERNAL_MODEL_TEXT_MAX_LENGTH),
         scope: z.literal("group").describe("The scope of the current external group"),
-        telegramMessageId: z.string().regex(/^\d+$/u).optional(),
+        telegramMessageId: z.string().regex(/^\d+$/u)
+          .describe("The Telegram message_id of the current message whose own attached image to inspect; never a #N timeline number and never for an avatar")
+          .optional(),
       })
       .strict(),
   },

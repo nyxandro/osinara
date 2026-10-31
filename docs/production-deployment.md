@@ -407,6 +407,15 @@ and the PDF page route disappear, external groups take in no photos for it, and 
 rejects the grant. A grant made under an image-capable model is reported as
 `unavailableConfiguredTools` until such a model is configured again.
 
+The same `inspect_workspace_image` also shows the vision model the current Telegram avatar of a
+person who wrote in the current chat. The model names a message number of that chat; the backend
+resolves its author only inside that chat, asks `getUserProfilePhotos` for the current photo with
+the bot token, which never leaves the backend, and analyzes the bytes without writing them to the
+workspace. An absent avatar and one hidden from bots look the same and are an ordinary answer;
+channels and the agent itself have no avatar to show. The log carries `AGENT_TELEGRAM_AVATAR_INSPECTED`
+(`avatar` found or missing and the author kind, no personal data) and
+`AGENT_TELEGRAM_AVATAR_LOOKUP_FAILED` (`providerStatus` of a failed Telegram answer).
+
 Long-term memory has no separate model route. The root agent decides whether to call `remember`;
 PostgreSQL validates the current Telegram source and atomically writes optional thread state. Thread
 activation and context use local E5 embeddings plus deterministic source projections. Semantic
