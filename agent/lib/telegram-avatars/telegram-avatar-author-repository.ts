@@ -29,7 +29,8 @@ interface AuthorRow {
   telegram_user_id: string | null;
 }
 
-const MESSAGE_NUMBER_PATTERN = /^\d+$/u;
+// A timeline number is a PostgreSQL bigint; 18 digits always fit.
+const MESSAGE_NUMBER_PATTERN = /^\d{1,18}$/u;
 
 function chatOf(auth: WorkspaceAuthorization): { groupId: string; userId: null } | { groupId: null; userId: string } {
   if (auth.telegramChatType === "private" && auth.groupId === null && auth.userId !== null) {

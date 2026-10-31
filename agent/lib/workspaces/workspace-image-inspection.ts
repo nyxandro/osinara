@@ -6,7 +6,8 @@
  * - `inspectWorkspaceImage`: production server-configured protocol-native vision inspector.
  *
  * The current Telegram avatar of a chat participant is one more source; its branch lives in
- * `telegram-avatars/telegram-avatar-inspection.ts` and shares this live scope check and analysis.
+ * `telegram-avatars/telegram-avatar-inspection.ts`, which checks the chat's own scope before the same
+ * live scope check and shares the analysis.
  */
 import { VISION_MAX_FILE_BYTES } from "../../config.js";
 import { analyzeImageWithVisionModel } from "../vision-model-analysis.js";
@@ -107,16 +108,17 @@ export function createWorkspaceImageInspector(
       scope: WorkspaceScope;
     } & WorkspaceImageLocation,
   ) => {
-    // Capability changes must not bypass the same live scope authorization used by file reads.
-    await dependencies.authorizeScope(auth, input.scope);
-
     if ("avatarOfSequence" in input) {
       return await inspectTelegramAvatar({
         analyze: (analysis) => analyzeImage(dependencies, analysis),
+        authorizeScope: dependencies.authorizeScope,
         findAuthor: dependencies.findAvatarAuthor,
         source: dependencies.avatarSource,
       }, auth, input);
     }
+
+    // Capability changes must not bypass the same live scope authorization used by file reads.
+    await dependencies.authorizeScope(auth, input.scope);
 
     if ("attachmentId" in input) {
       assertAttachmentScope(auth, input.scope);

@@ -27,7 +27,8 @@ const INPUT_ERROR_CODE = "AGENT_WORKSPACE_IMAGE_INPUT_INVALID";
 const SCOPES = ["personal", "family", "group"] as const;
 const TOP_LEVEL_FIELDS = ["attachmentId", "avatarOfSequence", "path", "question", "scope", "telegramMessageId"] as const;
 const TELEGRAM_MESSAGE_ID_PATTERN = /^\d+$/u;
-const MESSAGE_NUMBER_PATTERN = /^\d+$/u;
+// A timeline number is a PostgreSQL bigint; 18 digits always fit.
+const MESSAGE_NUMBER_PATTERN = /^\d{1,18}$/u;
 
 const inspectWorkspaceImageSchema = z.object({
   attachmentId: z.uuid()
@@ -96,7 +97,7 @@ const TOOL_DESCRIPTION = [
   "When to use: answer a specific question about an image from the workspace or Telegram through the vision model.",
   "When not to use: do not pass several sources and do not use the tool for non-graphic files.",
   "Input: for the reply ancestry or <telegram_attachment_refs> pass attachmentId; for the current Telegram attachment use {\"telegramMessageId\":\"773\",\"scope\":\"personal\",\"question\":\"Что изображено?\"}; for a file use a relative path {\"path\":\"photos/image.png\",\"scope\":\"personal\",\"question\":\"Что изображено?\"}. Pass exactly one source.",
-  "For a person's current avatar pass avatarOfSequence, not telegramMessageId: the #N of any of their messages in this chat with the current chat's scope, {\"avatarOfSequence\":\"53247\",\"scope\":\"group\",\"question\":\"Есть ли на аватарке человек? Если да, опиши внешность\"}; the avatar is fetched fresh every time and never saved.",
+  "For a person's current avatar pass avatarOfSequence, not telegramMessageId: the #N of any of their messages in this chat with the scope of this chat (personal in a private chat, family in the family group), {\"avatarOfSequence\":\"53247\",\"scope\":\"personal\",\"question\":\"Есть ли на аватарке человек? Если да, опиши внешность\"}; the avatar is fetched fresh every time and never saved.",
   "Result: analysis, the actual path and scope; the analysis does not save Telegram bytes to the workspace. avatar=missing means the person has no avatar or hides it from bots.",
   "Error: fix the source or the question only if retryable=true; do not repeat a provider failure automatically.",
 ].join(" ");

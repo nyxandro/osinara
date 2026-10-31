@@ -8,6 +8,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 
+import { AppError } from "../app-error.js";
 import { createTelegramAvatarSource } from "./telegram-avatar-source.js";
 
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
@@ -115,5 +116,16 @@ describe("createTelegramAvatarSource", () => {
       width: 640,
     });
     await expect(source.download(photo)).rejects.toThrowError(/AGENT_TELEGRAM_AVATAR_RESPONSE_INVALID/);
+  });
+
+  it("reports a failed download as an avatar failure, not as a file the person should send again", async () => {
+    const source = createTelegramAvatarSource({
+      download: vi.fn().mockRejectedValue(new AppError("AGENT_ATTACHMENT_DOWNLOAD_FAILED", "Не удалось получить файл из Telegram. Отправьте его ещё раз")),
+      profilePhotos: vi.fn(),
+    });
+
+    await expect(source.download({ fileId: "file-640", fileUniqueId: "unique-2", height: 640, width: 640 })).rejects.toMatchObject({
+      contract: { code: "AGENT_TELEGRAM_AVATAR_DOWNLOAD_FAILED", retryable: false, sideEffectStatus: "not_started" },
+    });
   });
 });

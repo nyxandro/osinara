@@ -3,8 +3,9 @@
  *
  * Constructs covered:
  * - `telegramAvatarAuthorRepository.find`: a message number resolves only inside the current chat —
- *   the private chat of the user or the registered group — and names its author's Telegram id and
- *   kind; the same number in another chat is never reached.
+ *   the private chat of the user, the family group or an external group — and names its author's
+ *   Telegram id and kind; the same number in another chat, or the same group under another family,
+ *   is never reached.
  */
 import type { TelegramMessage } from "../../runtime/telegram/inbound.js";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
@@ -34,14 +35,20 @@ if (integrationTestsEnabled) {
 const describeWithDatabase = integrationTestsEnabled ? describe : describe.skip;
 const OWNER_TELEGRAM_ID = "5001";
 
-function groupMessage(input: { chatId: string; from: TelegramMessage["from"]; messageId: string }): TelegramMessage {
+function groupMessage(input: { chatId: string; from: NonNullable<TelegramMessage["from"]>; messageId: string }): TelegramMessage {
   return {
     attachments: [],
     caption: "",
     chat: { id: input.chatId, title: "Группа", type: "supergroup" },
     from: input.from,
     messageId: input.messageId,
-    raw: { date: 1_700_000_000 + Number(input.messageId) },
+    // A bot is trusted as the author only when the raw update names the same bot.
+    raw: {
+      date: 1_700_000_000 + Number(input.messageId),
+      ...(input.from.isBot
+        ? { from: { first_name: input.from.firstName, id: Number(input.from.id), is_bot: true, username: input.from.username } }
+        : {}),
+    },
     text: "сообщение",
   };
 }
@@ -61,17 +68,24 @@ async function setUp() {
   const familyId = family.rows[0]!.id;
   const ownerId = owner.rows[0]!.id;
   await database().query("INSERT INTO family_memberships (family_id, user_id, role) VALUES ($1, $2, 'owner')", [familyId, ownerId]);
-  const register = (telegramChatId: string, title: string) => telegramGroupAdministrationRepository.registerGroup({
-    familyId, messageMode: "all", requestedBy: ownerId, telegramChatId, title, toolAllowlist: [], type: "external",
-  });
-  const first = await register("-1001", "Первая группа");
-  const second = await register("-1002", "Вторая группа");
+  const register = (telegramChatId: string, title: string, type: "external" | "family_private") =>
+    telegramGroupAdministrationRepository.registerGroup({
+      familyId, messageMode: "all", requestedBy: ownerId, telegramChatId, title, toolAllowlist: [], type,
+    });
+  const first = await register("-1001", "Первая группа", "external");
+  const second = await register("-1002", "Вторая группа", "external");
+  const familyGroup = await register("-1003", "Семья", "family_private");
+  const otherFamily = await database().query<{ id: string }>("INSERT INTO families (name) VALUES ('Другая семья') RETURNING id");
   const groupAuth = (groupId: string): WorkspaceAuthorization => ({
     familyId, groupId, groupType: "external", role: "external", telegramChatType: "supergroup", userId: null,
   });
   return {
+    family: { familyId, groupId: familyGroup.groupId, groupType: "family_private", role: "owner", telegramChatType: "supergroup", userId: ownerId } as WorkspaceAuthorization,
+    familyGroupId: familyGroup.groupId,
     first: groupAuth(first.groupId),
     firstGroupId: first.groupId,
+    // The first group's id under a family that does not own it.
+    foreign: { ...groupAuth(first.groupId), familyId: otherFamily.rows[0]!.id },
     private: { familyId, groupId: null, groupType: null, role: "owner", telegramChatType: "private", userId: ownerId } as WorkspaceAuthorization,
     second: groupAuth(second.groupId),
     secondGroupId: second.groupId,
@@ -101,6 +115,9 @@ describeWithDatabase("telegramAvatarAuthorRepository", () => {
     const boris = await recordInGroup(chats.secondGroupId, groupMessage({
       chatId: "-1002", from: { firstName: "Борис", id: "303", isBot: false, username: "boris" }, messageId: "1",
     }));
+    const vera = await recordInGroup(chats.familyGroupId, groupMessage({
+      chatId: "-1003", from: { firstName: "Вера", id: "404", isBot: false, username: "vera" }, messageId: "1",
+    }));
     const privateConversation = await conversationRepository.getByChatId(OWNER_TELEGRAM_ID);
     const own = await conversationTimelineRepository.recordInbound(privateConversation.id, {
       attachments: [],
@@ -112,8 +129,8 @@ describeWithDatabase("telegramAvatarAuthorRepository", () => {
       text: "как я выгляжу?",
     });
 
-    // Every chat numbers its own messages from the start, so one number exists in all three.
-    expect(new Set([anna, boris, own.sequenceId]).size).toBe(1);
+    // Every chat numbers its own messages from the start, so one number exists in all four.
+    expect(new Set([anna, boris, vera, own.sequenceId]).size).toBe(1);
     await expect(telegramAvatarAuthorRepository.find(chats.first, anna)).resolves.toMatchObject({
       actorKind: "user", senderUsername: "anna", telegramUserId: "101",
     });
@@ -123,6 +140,10 @@ describeWithDatabase("telegramAvatarAuthorRepository", () => {
     await expect(telegramAvatarAuthorRepository.find(chats.private, own.sequenceId)).resolves.toMatchObject({
       actorKind: "user", telegramUserId: OWNER_TELEGRAM_ID,
     });
+    await expect(telegramAvatarAuthorRepository.find(chats.family, vera)).resolves.toMatchObject({
+      actorKind: "user", senderUsername: "vera", telegramUserId: "404",
+    });
+    await expect(telegramAvatarAuthorRepository.find(chats.foreign, anna)).resolves.toBeNull();
     await expect(telegramAvatarAuthorRepository.find(chats.first, bot)).resolves.toMatchObject({
       actorKind: "telegram_bot", senderUsername: "mia_bot", telegramUserId: "202",
     });

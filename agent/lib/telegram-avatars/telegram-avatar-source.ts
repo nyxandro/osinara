@@ -18,7 +18,7 @@ import { callTelegramApi, type TelegramApiResponse } from "../../runtime/telegra
 import type { TelegramAttachment } from "../../runtime/telegram/inbound.js";
 import { z } from "zod";
 
-import { AppError } from "../app-error.js";
+import { AppError, isAppError } from "../app-error.js";
 import { downloadTelegramAttachment } from "../attachments/telegram-attachment-download.js";
 import { ModelFacingError } from "../model-facing-error.js";
 
@@ -80,13 +80,22 @@ function isUserNotFound(response: TelegramApiResponse): boolean {
   return response.status === 400 && typeof description === "string" && /user not found/iu.test(description);
 }
 
-function lookupFailed(details: Record<string, unknown>): ModelFacingError {
-  console.error(JSON.stringify({ code: "AGENT_TELEGRAM_AVATAR_LOOKUP_FAILED", ...details }));
+/** The stable code of a failure for the log, never its text: it may carry a URL with the token. */
+function failureCode(error: unknown): string {
+  if (isAppError(error)) return error.code;
+  if (error instanceof Error) return /^AGENT_[A-Z_]+/u.exec(error.message)?.[0] ?? error.name;
+  return "unknown";
+}
+
+function avatarUnavailable(code: "AGENT_TELEGRAM_AVATAR_DOWNLOAD_FAILED" | "AGENT_TELEGRAM_AVATAR_LOOKUP_FAILED", details: Record<string, unknown>): ModelFacingError {
+  console.error(JSON.stringify({ code, ...details }));
   return new ModelFacingError({
     category: "dependency",
-    code: "AGENT_TELEGRAM_AVATAR_LOOKUP_FAILED",
+    code,
     correction: "Не повторяйте запрос автоматически. Скажите, что аватарку сейчас получить не удалось.",
-    reason: "Telegram не ответил на запрос фото профиля.",
+    reason: code === "AGENT_TELEGRAM_AVATAR_LOOKUP_FAILED"
+      ? "Telegram не ответил на запрос фото профиля."
+      : "Не удалось скачать фото профиля из Telegram.",
     retryable: false,
     sideEffectStatus: "not_started",
   });
@@ -95,15 +104,21 @@ function lookupFailed(details: Record<string, unknown>): ModelFacingError {
 export function createTelegramAvatarSource(adapter: TelegramAvatarSourceAdapter): TelegramAvatarSource {
   return {
     async download(photo) {
-      const bytes = await adapter.download({
-        fileId: photo.fileId,
-        fileUniqueId: photo.fileUniqueId,
-        height: photo.height,
-        kind: "photo",
-        mediaType: "image/jpeg",
-        ...(photo.size === undefined ? {} : { size: photo.size }),
-        width: photo.width,
-      });
+      let bytes: Buffer;
+      try {
+        bytes = await adapter.download({
+          fileId: photo.fileId,
+          fileUniqueId: photo.fileUniqueId,
+          height: photo.height,
+          kind: "photo",
+          mediaType: "image/jpeg",
+          ...(photo.size === undefined ? {} : { size: photo.size }),
+          width: photo.width,
+        });
+      } catch (error) {
+        // The shared downloader tells the model to ask for the file again, which is wrong for an avatar.
+        throw avatarUnavailable("AGENT_TELEGRAM_AVATAR_DOWNLOAD_FAILED", { error: failureCode(error) });
+      }
       // Telegram serves profile photos as JPEG; anything else in the body is not the photo.
       if (!isJpeg(bytes)) {
         throw new AppError("AGENT_TELEGRAM_AVATAR_RESPONSE_INVALID", "Telegram отдал вместо фото профиля что-то другое");
@@ -118,10 +133,10 @@ export function createTelegramAvatarSource(adapter: TelegramAvatarSourceAdapter)
       try {
         response = await adapter.profilePhotos(telegramUserId);
       } catch (error) {
-        throw lookupFailed({ error: error instanceof Error ? error.name : "unknown" });
+        throw avatarUnavailable("AGENT_TELEGRAM_AVATAR_LOOKUP_FAILED", { error: failureCode(error) });
       }
       if (isUserNotFound(response)) return { status: "none" };
-      if (!response.ok) throw lookupFailed({ providerStatus: response.status });
+      if (!response.ok) throw avatarUnavailable("AGENT_TELEGRAM_AVATAR_LOOKUP_FAILED", { providerStatus: response.status });
       const parsed = profilePhotosSchema.safeParse(response.body);
       if (!parsed.success) {
         throw new AppError("AGENT_TELEGRAM_AVATAR_RESPONSE_INVALID", "Telegram вернул неожиданный ответ о фото профиля");

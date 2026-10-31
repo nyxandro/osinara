@@ -113,7 +113,7 @@ const EXTERNAL_DIRECT_TOOL_PRESENTATION: Readonly<
     inputSchema: z
       .object({
         attachmentId: z.uuid().optional(),
-        avatarOfSequence: z.string().regex(/^\d+$/u)
+        avatarOfSequence: z.string().regex(/^\d{1,18}$/u)
           .describe("For a participant's current Telegram avatar: the #N timeline number of any of their messages, without #")
           .optional(),
         path: z.string().min(1).max(EXTERNAL_IMAGE_PATH_MAX_LENGTH).optional(),

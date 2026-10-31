@@ -9,11 +9,15 @@
  * - A channel, the agent itself, an unknown message number and a scope of another chat stop before
  *   Telegram is asked.
  */
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, type Mock, vi } from "vitest";
 
 import { createWorkspaceImageInspector } from "../workspaces/workspace-image-inspection.js";
 import type { WorkspaceAuthorization } from "../workspaces/workspace-repository.js";
 import type { TelegramAvatarAuthor } from "./telegram-avatar-author-repository.js";
+import type { TelegramAvatarSource } from "./telegram-avatar-source.js";
+
+type Analyze = (input: { abortSignal?: AbortSignal; bytes: Uint8Array; mediaType: string; question: string }) => Promise<string>;
+type Lookup = TelegramAvatarSource["lookup"];
 
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01]);
 const PHOTO = { fileId: "file-640", fileUniqueId: "unique-640", height: 640, size: 12, width: 640 };
@@ -41,16 +45,16 @@ const human: TelegramAvatarAuthor = {
 };
 
 function inspector(input: {
-  analyze?: ReturnType<typeof vi.fn>;
+  analyze?: Mock<Analyze>;
   author?: TelegramAvatarAuthor | null;
-  lookup?: ReturnType<typeof vi.fn>;
+  lookup?: Mock<Lookup>;
 }) {
   const calls = {
-    analyze: input.analyze ?? vi.fn().mockResolvedValue("На аватарке мужчина в очках."),
-    authorizeScope: vi.fn(async () => undefined),
+    analyze: input.analyze ?? vi.fn<Analyze>().mockResolvedValue("На аватарке мужчина в очках."),
+    authorizeScope: vi.fn<(auth: WorkspaceAuthorization, scope: string) => Promise<void>>(async () => undefined),
     download: vi.fn().mockResolvedValue(JPEG),
     findAvatarAuthor: vi.fn().mockResolvedValue(input.author === undefined ? human : input.author),
-    lookup: input.lookup ?? vi.fn().mockResolvedValue({ photo: PHOTO, status: "photo" }),
+    lookup: input.lookup ?? vi.fn<Lookup>().mockResolvedValue({ photo: PHOTO, status: "photo" }),
     readBinary: vi.fn(),
   };
   const inspect = createWorkspaceImageInspector({
@@ -99,7 +103,7 @@ describe("avatar inspection", () => {
   });
 
   it("answers that the avatar is absent or hidden instead of failing, without a vision call", async () => {
-    const { calls, inspect } = inspector({ lookup: vi.fn().mockResolvedValue({ status: "none" }) });
+    const { calls, inspect } = inspector({ lookup: vi.fn<Lookup>().mockResolvedValue({ status: "none" }) });
 
     await expect(inspect(privateChat, {
       avatarOfSequence: "12",
@@ -161,12 +165,15 @@ describe("avatar inspection", () => {
     ["the family group", { ...externalGroup, groupType: "family_private", role: "owner", userId: "user-1" }, "group"],
   ] as const)("asks for the scope of the current chat in %s", async (_name, auth, scope) => {
     const { calls, inspect } = inspector({});
+    // Live access to another chat's scope is refused; the input error with the right scope must come first.
+    calls.authorizeScope.mockRejectedValue(new Error("AGENT_WORKSPACE_ACCESS_DENIED: Нет доступа"));
 
     await expect(inspect(auth as WorkspaceAuthorization, {
       avatarOfSequence: "7",
       question: "Что на аватарке?",
       scope,
     })).rejects.toMatchObject({ contract: { code: "AGENT_TELEGRAM_AVATAR_SCOPE_INVALID", field: "scope", retryable: true } });
+    expect(calls.authorizeScope).not.toHaveBeenCalled();
     expect(calls.findAvatarAuthor).not.toHaveBeenCalled();
   });
 

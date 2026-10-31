@@ -292,5 +292,11 @@ describe("model-facing tool input hardening", () => {
       question: "Что изображено?",
       scope: "group",
     }, context)).rejects.toThrowError(/AGENT_WORKSPACE_IMAGE_INPUT_INVALID/);
+    // A timeline number is a PostgreSQL bigint: a longer one is an input error, not a database failure.
+    await expect(inspectWorkspaceImage.execute({
+      avatarOfSequence: "1".repeat(19),
+      question: "Что изображено?",
+      scope: "group",
+    }, context)).rejects.toThrowError(/AGENT_WORKSPACE_IMAGE_INPUT_INVALID/);
   });
 });

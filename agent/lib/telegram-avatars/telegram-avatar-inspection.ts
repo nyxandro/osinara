@@ -8,7 +8,9 @@
  * Key constructs:
  * - The person is named by the number of one of their messages in the current chat, the `#N` the
  *   model sees in the timeline: a number names one author exactly, a name could name two.
- * - The scope is the current chat's own; the caller has already checked live access to it.
+ * - The scope is the current chat's own and is checked before live access to it: a scope of another
+ *   chat would otherwise come back as a refused access the model must not retry, not as a slip it
+ *   can correct.
  * - The bytes live only in memory for the vision call: nothing is written to the workspace, so
  *   there is nothing to clean up, and the next look fetches the avatar again.
  * - A person without a visible avatar is an answer the agent passes on, not a failure.
@@ -23,6 +25,7 @@ import type { TelegramAvatarSource } from "./telegram-avatar-source.js";
 
 export interface TelegramAvatarInspectionDependencies {
   analyze(input: { abortSignal?: AbortSignal; bytes: Uint8Array; mediaType: string; question: string }): Promise<string>;
+  authorizeScope(auth: WorkspaceAuthorization, scope: WorkspaceScope): Promise<void>;
   findAuthor(auth: WorkspaceAuthorization, sequenceId: string): Promise<TelegramAvatarAuthor | null>;
   source: TelegramAvatarSource;
 }
@@ -54,6 +57,7 @@ export async function inspectTelegramAvatar(
       sideEffectStatus: "not_started",
     });
   }
+  await dependencies.authorizeScope(auth, scope);
   const author = await dependencies.findAuthor(auth, input.avatarOfSequence);
   if (author === null) {
     throw new ModelFacingError({
