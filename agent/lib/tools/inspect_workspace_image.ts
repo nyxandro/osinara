@@ -34,7 +34,7 @@ const inspectWorkspaceImageSchema = z.object({
     .describe("The attachment UUID from <telegram_attachment_refs> or the log; do not pass it together with path or telegramMessageId")
     .optional(),
   avatarOfSequence: z.string().regex(MESSAGE_NUMBER_PATTERN)
-    .describe("The number of any message of a person in this chat (#N in the timeline, sourceSequence of the current message) to look at their current Telegram avatar; the only source then")
+    .describe("For a person's current Telegram avatar: the #N timeline number of any of their messages, or sourceSequence of the current message, without #")
     .optional(),
   path: z.string().min(1).max(512)
     .describe("A path relative to the root of the chosen scope, for example photos/image.png; do not prepend the scope name")
@@ -44,7 +44,7 @@ const inspectWorkspaceImageSchema = z.object({
   scope: z.enum(SCOPES)
     .describe("The required scope whose root path is resolved against"),
   telegramMessageId: z.string().regex(TELEGRAM_MESSAGE_ID_PATTERN)
-    .describe("The numeric ID of the current Telegram message; do not pass it together with attachmentId or path")
+    .describe("The Telegram message_id of the current message whose own attached image to inspect; never a #N timeline number and never for an avatar")
     .optional(),
 }).passthrough();
 
@@ -96,7 +96,7 @@ const TOOL_DESCRIPTION = [
   "When to use: answer a specific question about an image from the workspace or Telegram through the vision model.",
   "When not to use: do not pass several sources and do not use the tool for non-graphic files.",
   "Input: for the reply ancestry or <telegram_attachment_refs> pass attachmentId; for the current Telegram attachment use {\"telegramMessageId\":\"773\",\"scope\":\"personal\",\"question\":\"Что изображено?\"}; for a file use a relative path {\"path\":\"photos/image.png\",\"scope\":\"personal\",\"question\":\"Что изображено?\"}. Pass exactly one source.",
-  "For the current avatar of a person in this chat pass the number of any of their messages with the current chat's scope: {\"avatarOfSequence\":\"53247\",\"scope\":\"group\",\"question\":\"Есть ли на аватарке человек? Если да, опиши внешность\"}; the avatar is fetched fresh every time and never saved.",
+  "For a person's current avatar pass avatarOfSequence, not telegramMessageId: the #N of any of their messages in this chat with the current chat's scope, {\"avatarOfSequence\":\"53247\",\"scope\":\"group\",\"question\":\"Есть ли на аватарке человек? Если да, опиши внешность\"}; the avatar is fetched fresh every time and never saved.",
   "Result: analysis, the actual path and scope; the analysis does not save Telegram bytes to the workspace. avatar=missing means the person has no avatar or hides it from bots.",
   "Error: fix the source or the question only if retryable=true; do not repeat a provider failure automatically.",
 ].join(" ");

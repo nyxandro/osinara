@@ -565,6 +565,15 @@ describe("external group tool surface", () => {
       expect(tool.description, toolName).toMatch(/group|групп/iu);
     }
 
+    // The external presentation is a separate schema: a participant's avatar must be reachable there too.
+    const image = external.inspect_workspace_image!;
+    expect((image.inputSchema as z.ZodType).safeParse({
+      avatarOfSequence: "880",
+      question: "Есть ли на аватарке человек?",
+      scope: "group",
+    }).success).toBe(true);
+    expect(image.description).toMatch(/avatarOfSequence/u);
+
     const trustedRemember = buildModeToolSurface({
       environment: "private",
     }).remember!;
