@@ -23,11 +23,14 @@ const auth = {
   userId: "user-1",
 };
 const authorizeScope = vi.fn(async () => undefined);
+// The avatar branch has its own tests in telegram-avatars/; these inspections never reach it.
+const avatarDependencies = { avatarSource: { download: vi.fn(), lookup: vi.fn() }, findAvatarAuthor: vi.fn() };
 
 describe("createWorkspaceImageInspector", () => {
   it("analyzes an authorized persisted image", async () => {
     const analyze = vi.fn().mockResolvedValue("На изображении семейный календарь.");
     const inspect = createWorkspaceImageInspector({
+      ...avatarDependencies,
       analyze,
       authorizeScope,
       readBinary: vi.fn().mockResolvedValue({
@@ -54,6 +57,7 @@ describe("createWorkspaceImageInspector", () => {
   it("rejects a document instead of sending unsupported content to the vision model", async () => {
     const analyze = vi.fn();
     const inspect = createWorkspaceImageInspector({
+      ...avatarDependencies,
       analyze,
       authorizeScope,
       readBinary: vi.fn().mockResolvedValue({
@@ -77,6 +81,7 @@ describe("createWorkspaceImageInspector", () => {
   it("rejects an image above the native provider limit before a paid call", async () => {
     const analyze = vi.fn();
     const inspect = createWorkspaceImageInspector({
+      ...avatarDependencies,
       analyze,
       authorizeScope,
       readBinary: vi.fn().mockResolvedValue({
@@ -109,6 +114,7 @@ describe("createWorkspaceImageInspector", () => {
       workspaceId: "workspace-1",
     });
     const inspect = createWorkspaceImageInspector({
+      ...avatarDependencies,
       analyze,
       authorizeScope,
       readBinary: vi.fn(),
@@ -134,6 +140,7 @@ describe("createWorkspaceImageInspector", () => {
       Buffer.from("89504e470d0a1a0a0000000d49484452", "hex"),
     );
     const inspect = createWorkspaceImageInspector({
+      ...avatarDependencies,
       analyze,
       authorizeScope,
       downloadTelegramAttachment,
@@ -182,6 +189,7 @@ describe("createWorkspaceImageInspector", () => {
     const analyze = vi.fn();
     const downloadTelegramAttachment = vi.fn();
     const inspect = createWorkspaceImageInspector({
+      ...avatarDependencies,
       analyze,
       authorizeScope,
       downloadTelegramAttachment,
@@ -210,6 +218,7 @@ describe("createWorkspaceImageInspector", () => {
     const analyze = vi.fn();
     const downloadTelegramAttachment = vi.fn();
     const inspect = createWorkspaceImageInspector({
+      ...avatarDependencies,
       analyze,
       authorizeScope,
       downloadTelegramAttachment,
@@ -239,6 +248,7 @@ describe("createWorkspaceImageInspector", () => {
   it("rejects a disguised image document before a paid vision call", async () => {
     const analyze = vi.fn();
     const inspect = createWorkspaceImageInspector({
+      ...avatarDependencies,
       analyze,
       authorizeScope,
       downloadTelegramAttachment: vi.fn().mockResolvedValue(Buffer.from("plain text")),
@@ -273,6 +283,7 @@ describe("createWorkspaceImageInspector", () => {
 
   it("normalizes a raw vision provider failure without exposing provider internals", async () => {
     const inspect = createWorkspaceImageInspector({
+      ...avatarDependencies,
       analyze: vi.fn().mockRejectedValue(new Error("upstream API key invalid")),
       authorizeScope: vi.fn(async () => undefined),
       downloadTelegramAttachment: vi.fn(),
@@ -299,6 +310,7 @@ describe("createWorkspaceImageInspector", () => {
 
   it("normalizes a vision provider failure for an opaque Telegram attachment", async () => {
     const inspect = createWorkspaceImageInspector({
+      ...avatarDependencies,
       analyze: vi.fn().mockRejectedValue(new Error("upstream API key invalid")),
       authorizeScope: vi.fn(async () => undefined),
       downloadTelegramAttachment: vi.fn().mockResolvedValue(
