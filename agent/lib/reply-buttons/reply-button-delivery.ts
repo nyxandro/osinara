@@ -21,8 +21,7 @@
  *   may hide a delivered message and is never sent again.
  */
 import { fitsTelegramRichMessage } from "../telegram-rich-markdown.js";
-import { isTelegramRichMessageRefusal, type SentTelegramMessage } from "../telegram-rich-messages.js";
-import { literalRichParagraphs } from "../telegram-rich-literal.js";
+import { isTelegramRichMessageRefusal, type SentRichMedia, type SentTelegramMessage } from "../telegram-rich-messages.js";
 import { newReplyButtonToken, type ReplyButtonRows } from "./reply-button-contract.js";
 import { replyButtonMarkup, type ReplyButtonMarkupReading } from "./reply-button-markup.js";
 import { replyButtonRepository } from "./reply-button-repository.js";
@@ -45,7 +44,6 @@ const BUTTON_CHAT_TYPES: ReadonlySet<string> = new Set<ButtonChatType>(["group",
 // The only group whose members are trusted with buttons; any other group, known or not, gets none.
 const FAMILY_GROUP_TYPE = "family_private";
 const TELEGRAM_USER_ID_PATTERN = /^[1-9][0-9]*$/u;
-const REMINDER_HEADER = "**⏰ Напоминание:**";
 
 function logFailure(code: string, error: unknown, context: Record<string, string>): void {
   console.error(JSON.stringify({ code, error: error instanceof Error ? error.message : String(error), ...context }));
@@ -166,28 +164,32 @@ export function reportUndeliveredReplyButtons(
 }
 
 /**
- * A reminder with buttons goes out as a rich message, the only kind that carries them; its text is
- * staged first so a choice can be captioned under it. A group-chat reminder never has any: buttons
- * belong to the trusted zones.
+ * A reminder with buttons goes out as a rich message, the only kind that carries them; its message
+ * text is staged first so a choice can be captioned under it, and the files of that message are kept
+ * once it is out, since the caption's edit must name them again. A group-chat reminder never has
+ * any: buttons belong to the trusted zones.
  */
 export async function reminderReplyButtons(input: {
   addresseeTelegramUserId: string | null;
   buttons: ReplyButtonRows | null;
-  content: string;
-  delayedNotice: string | null;
+  /** The rich markdown of the reminder's message without its buttons. */
+  messageText: string;
   reminderId: string;
   scope: "family" | "group" | "personal";
   telegramChatId: string;
   telegramChatType: string | null;
-}): Promise<{ activate(messageId: string): Promise<void>; discard(): Promise<void>; markdown: string } | null> {
+}): Promise<{
+  activate(messageId: string, media: readonly SentRichMedia[]): Promise<void>;
+  discard(): Promise<void>;
+  markdown: string;
+} | null> {
   if (input.buttons === null) return null;
   const chatType = input.telegramChatType;
   if (input.scope === "group" || input.addresseeTelegramUserId === null || !isButtonChatType(chatType)) {
     console.error(JSON.stringify({ code: "AGENT_REMINDER_BUTTONS_TARGET_INVALID", reminderId: input.reminderId }));
     return null;
   }
-  const paragraphs = [input.content, input.delayedNotice].filter((part) => part !== null).map(literalRichParagraphs);
-  const messageText = [REMINDER_HEADER, ...paragraphs].join("\n\n");
+  const { messageText } = input;
   let set: Awaited<ReturnType<typeof replyButtonRepository.stageForReminder>>;
   try {
     set = await replyButtonRepository.stageForReminder({
@@ -204,7 +206,7 @@ export async function reminderReplyButtons(input: {
     return null;
   }
   return {
-    activate: async (messageId) => await replyButtonRepository.activate(set.id, messageId),
+    activate: async (messageId, media) => await replyButtonRepository.activate(set.id, messageId, media),
     discard: async () => await replyButtonRepository.discard(set.id),
     markdown: `${messageText}\n\n${replyButtonMarkup(set.buttons, set.token)}`,
   };

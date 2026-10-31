@@ -26,6 +26,7 @@ vi.mock("./family-skills/family-skill-repository.js", () => ({
 }));
 
 import manageTelegramGroup from "./tools/manage_telegram_group.js";
+import { serviceSkillsFor } from "./family-skills/service-skills.js";
 import { modeInstructions } from "./prompt/mode-instructions.js";
 import { GROUP_SAFE_SKILL_NAMES } from "./group-skills/group-skill-catalog.js";
 
@@ -175,10 +176,12 @@ describe("manage_telegram_group.status", () => {
 
   it("requires status before replacing an unknown current policy", () => {
     const instructions = modeInstructions({ environment: "private" });
+    const procedure = serviceSkillsFor("private", new Set(["manage_telegram_group"]))["group-admin"]!.markdown;
 
-    expect(instructions).toContain("Before `update_policy` or `update_skills`, first call");
     expect(instructions).toContain("`{\"action\":\"status\"}`");
     expect(instructions).toContain("the `/status` command");
     expect(instructions).toContain("in one message");
+    expect(procedure).toContain("Before any other group action, call status");
+    expect(procedure).toContain("carry all other current permissions over unchanged");
   });
 });

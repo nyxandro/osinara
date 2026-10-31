@@ -7,11 +7,13 @@
  *   addresses and workspace paths Markdown did not read as media get the exact form to use.
  * - Files that need a rich message the answer cannot be are reported as a formatting problem.
  * - An answer whose files all go passes.
+ * - A reminder's files are checked when it is written, in Russian like the rest of its tool's errors,
+ *   and only from the folders of the chat the reminder will reach.
  */
 import { describe, expect, it, vi } from "vitest";
 
 import type { WorkspaceAuthorization } from "../workspaces/workspace-repository.js";
-import { answerFilesNotice } from "./answer-file-check.js";
+import { answerFilesNotice, reminderFilesError } from "./answer-file-check.js";
 import type { AnswerFileMeasure, AnswerFileProblem, ResolvedAnswerFile } from "./answer-file-resolution.js";
 
 const auth = { familyId: "family-1", role: "owner" } as WorkspaceAuthorization;
@@ -81,5 +83,38 @@ describe("answer file check", () => {
     const notice = await check(`${wide}\n\n![](/workspace/personal/a.pdf)`, { "a.pdf": document("a.pdf") }).notice;
 
     expect(notice).toContain("- The answer cannot be a formatted message");
+  });
+});
+
+describe("reminder file check", () => {
+  function reminderCheck(text: string, files: Record<string, ResolvedAnswerFile | AnswerFileProblem>, scopes: Array<"family" | "group" | "personal">) {
+    const resolver = {
+      measure: vi.fn(async (_auth: unknown, reference: { path: string }): Promise<AnswerFileMeasure> => {
+        const found = files[reference.path]!;
+        if (typeof found === "string") return { ok: false, problem: found };
+        const { byteSize, fileName, path, scope } = found;
+        return { file: { byteSize, fileName, path, scope }, ok: true };
+      }),
+    };
+    return { error: reminderFilesError({ allowedScopes: scopes, auth: () => auth, resolver, text }), resolver };
+  }
+
+  it("passes a reminder whose files all go", async () => {
+    expect(await reminderCheck("Купить\n\n![](/workspace/family/list.pdf)", { "list.pdf": document("list.pdf") }, ["family"]).error).toBeUndefined();
+  });
+
+  it("names in Russian a file the reminder cannot carry and a folder its chat cannot see", async () => {
+    const { error, resolver } = reminderCheck(
+      "![](/workspace/family/gone.pdf)\n\n![](/workspace/personal/mine.jpg)\n\n![](https://example.com/a.jpg)",
+      { "gone.pdf": "not_found" },
+      ["family"],
+    );
+
+    const text = await error;
+    expect(text).toMatch(/^Файлы в тексте напоминания не отправятся:/u);
+    expect(text).toContain("- /workspace/family/gone.pdf: файла нет в этой папке");
+    expect(text).toContain("- /workspace/personal/mine.jpg: напоминание придёт в чат, где эта папка недоступна; подходит /workspace/family/...");
+    expect(text).toContain("- https://example.com/a.jpg: картинку из интернета сначала скачай в рабочую папку");
+    expect(resolver.measure).toHaveBeenCalledTimes(1);
   });
 });

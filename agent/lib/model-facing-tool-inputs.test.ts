@@ -93,6 +93,7 @@ import manageMemory from "./tools/manage_memory.js";
 import manageReminder from "./tools/manage_reminder.js";
 import manageTelegramGroup from "./tools/manage_telegram_group.js";
 import notificationSettings from "./tools/notification_settings.js";
+import { ModelFacingError } from "./model-facing-error.js";
 
 const context = { callId: "call-1" } as ToolContext;
 
@@ -103,6 +104,13 @@ function executeInvalidToolInput(
 ) {
   // `never` is the shared safe input for this table because every case intentionally bypasses its schema.
   return tool.execute(input, toolContext);
+}
+
+/** What the model reads of a refusal: a multi-action tool answers in the model-facing contract. */
+async function refusalText(run: unknown): Promise<string> {
+  const error = await Promise.resolve(run).then(() => null, (failure: unknown) => failure);
+  if (error instanceof ModelFacingError) return `${error.contract.code}: ${error.contract.reason}`;
+  return error instanceof Error ? error.message : String(error);
 }
 
 describe("model-facing tool input hardening", () => {
@@ -144,7 +152,7 @@ describe("model-facing tool input hardening", () => {
       /AGENT_WORKSPACE_IMAGE_INPUT_INVALID: Для inspect_workspace_image передайте ровно один источник/,
     ],
   ] as const)("%s returns an actionable input error for an empty payload", async (_name, tool, message) => {
-    await expect(executeInvalidToolInput(tool, {} as never, context)).rejects.toThrowError(message);
+    expect(await refusalText(executeInvalidToolInput(tool, {} as never, context))).toMatch(message);
   });
 
   it("names the allowed values of fixed-choice fields in the schema the model reads", () => {
@@ -160,27 +168,25 @@ describe("model-facing tool input hardening", () => {
   });
 
   it("explains the exact reminder recurrence shape when interval is missing", async () => {
-    await expect(manageReminder.execute({
+    expect(await refusalText(manageReminder.execute({
       action: "create",
       content: "Позвонить врачу",
       firstRunAt: "2026-08-01T10:00:00+03:00",
       recurrence: { unit: "weekly" },
       scope: "personal",
       timezone: "Europe/Moscow",
-    } as never, context)).rejects.toThrowError(
+    } as never, context))).toMatch(
       /AGENT_REMINDER_INPUT_INVALID: Для recurrence передайте null или объект \{"unit":"weekly","interval":1\}/,
     );
     expect(toolCalls.reminderCreate).not.toHaveBeenCalled();
   });
 
   it("rejects incomplete recurrence before writing a reminder", async () => {
-    await expect(manageReminder.execute({
+    expect(await refusalText(manageReminder.execute({
       action: "update",
       id: "00000000-0000-4000-8000-000000000001",
       recurrence: {},
-    } as never, context)).rejects.toThrowError(
-      /AGENT_REMINDER_INPUT_INVALID: Поле unit обязательно.*Пример: daily/u,
-    );
+    } as never, context))).toMatch(/AGENT_REMINDER_INPUT_INVALID: Поле unit обязательно.*Пример: daily/u);
     expect(toolCalls.reminderUpdate).not.toHaveBeenCalled();
   });
 

@@ -53,7 +53,6 @@ function surfaces() {
     environment: "external" as const,
     includeApplicationCore: true,
     scheduledHistory: false,
-    skills: new Set<string>(),
   };
   return {
     external: buildModeToolSurface(externalInput),

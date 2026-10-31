@@ -4,7 +4,8 @@
  *
  * Constructs covered:
  * - A file becomes a `tg://<kind>?id=` media block with its caption, uploaded once however often
- *   it is shown; an answer with a file is rich even without other markup, also when collapsed.
+ *   it is shown; an answer with a file is rich even without other markup, also inside a block the
+ *   model collapsed.
  * - A file that cannot go leaves a line with the reason and a stable code; the rest still goes.
  * - When the answer cannot be a rich message, no file goes and every place says why.
  * - Preparing the same turn twice gives the same text, so a replay matches its first attempt.
@@ -90,17 +91,25 @@ describe("an answer with files", () => {
     expect(chunks[0]!.media.map((upload) => upload.id)).toEqual(["f0"]);
   });
 
-  it("keeps files inside a collapsed long answer", async () => {
+  it("keeps files inside a block the model collapsed", async () => {
     const steps = Array.from({ length: 8 }, (_, index) => `${index + 1}. Шаг номер ${index + 1}`).join("\n");
-    const { chunks } = await present(`![](/workspace/personal/cover.jpg)\n\n${steps}\n\n![](/workspace/personal/step.jpg)`, {
-      "cover.jpg": file("cover.jpg", "photo"),
-      "step.jpg": file("step.jpg", "photo"),
-    });
+    const { chunks } = await present(
+      `Рецепт в восемь шагов.\n\n![](/workspace/personal/cover.jpg)\n\n<details><summary>Шаги</summary>\n\n${steps}\n\n` +
+        "![](/workspace/personal/step.jpg)\n\n</details>",
+      { "cover.jpg": file("cover.jpg", "photo"), "step.jpg": file("step.jpg", "photo") },
+    );
 
     expect(chunks).toHaveLength(1);
-    expect(chunks[0]!.text).toMatch(/^!\[\]\(tg:\/\/photo\?id=f0\)\n\n<details><summary>Полный ответ<\/summary>/u);
-    expect(chunks[0]!.text).toContain("![](tg://photo?id=f1)");
+    expect(chunks[0]!.text).toMatch(/^Рецепт в восемь шагов\.\n\n!\[\]\(tg:\/\/photo\?id=f0\)\n\n<details><summary>Шаги<\/summary>/u);
+    expect(chunks[0]!.text).toContain("![](tg://photo?id=f1)\n\n</details>");
     expect(chunks[0]!.media.map((upload) => upload.id)).toEqual(["f0", "f1"]);
+  });
+
+  it("never collapses a long answer with files for the model", async () => {
+    const steps = Array.from({ length: 8 }, (_, index) => `${index + 1}. Шаг номер ${index + 1}`).join("\n");
+    const { chunks } = await present(`![](/workspace/personal/cover.jpg)\n\n${steps}`, { "cover.jpg": file("cover.jpg", "photo") });
+
+    expect(chunks[0]!.text).toBe(`![](tg://photo?id=f0)\n\n${steps}`);
   });
 
   it("leaves a line with the reason where a file cannot go and sends the rest", async () => {

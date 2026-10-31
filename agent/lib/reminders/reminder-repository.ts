@@ -289,6 +289,15 @@ export const reminderRepository = {
     };
   },
 
+  /** The scope of a reminder of this family, or null when there is none; a scope never changes. */
+  async scopeOf(auth: ReminderAuthorization, id: string): Promise<ReminderScope | null> {
+    const result = await database().query<{ scope: ReminderScope }>(
+      "SELECT scope FROM reminders WHERE id = $1 AND family_id = $2",
+      [id, auth.familyId],
+    );
+    return result.rows[0]?.scope ?? null;
+  },
+
   async update(
     auth: ReminderAuthorization,
     id: string,

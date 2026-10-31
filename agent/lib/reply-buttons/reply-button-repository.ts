@@ -164,15 +164,19 @@ export const replyButtonRepository = {
     await database().query("DELETE FROM telegram_reply_button_sets WHERE id = $1 AND status = 'staged'", [id]);
   },
 
-  /** The message is out: its buttons are offered. A press that arrived first keeps its outcome. */
-  async activate(id: string, telegramMessageId: string): Promise<void> {
+  /**
+   * The message is out: its buttons are offered. A press that arrived first keeps its outcome, and
+   * the files of the message stay with the set for the edit that answers the press.
+   */
+  async activate(id: string, telegramMessageId: string, media: readonly SentRichMedia[]): Promise<void> {
     await database().query(
       `UPDATE telegram_reply_button_sets
-          SET telegram_message_id = coalesce(telegram_message_id, $2::bigint),
+          SET message_media = coalesce(message_media, $3::jsonb),
+              telegram_message_id = coalesce(telegram_message_id, $2::bigint),
               status = CASE WHEN status = 'staged' THEN 'active' ELSE status END,
               activated_at = CASE WHEN status = 'staged' THEN now() ELSE activated_at END
         WHERE id = $1`,
-      [id, telegramMessageId],
+      [id, telegramMessageId, media.length === 0 ? null : JSON.stringify(media)],
     );
   },
 

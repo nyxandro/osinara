@@ -33,7 +33,7 @@ async function stageTurn(turnId: string, token: string = TOKEN, target = TARGET,
 
 async function delivered(turnId: string, messageId: string, token: string = TOKEN) {
   const set = await stageTurn(turnId, token);
-  await replyButtonRepository.activate(set.id, messageId);
+  await replyButtonRepository.activate(set.id, messageId, []);
   return set;
 }
 
@@ -129,14 +129,14 @@ describeWithDatabase("reply button repository", () => {
     const set = await stageTurn("turn_1");
 
     await expect(pressOf()).resolves.toMatchObject({ set: { telegramMessageId: "50" }, status: "claimed" });
-    await replyButtonRepository.activate(set.id, "50");
+    await replyButtonRepository.activate(set.id, "50", []);
     expect((await database().query("SELECT status FROM telegram_reply_button_sets")).rows).toEqual([{ status: "selected" }]);
   });
 
   it("dismisses only the addressee's buttons offered before their message", async () => {
     const before = await delivered("turn_1", "50", "A".repeat(22));
     const other = await stageTurn("turn_2", "B".repeat(22), { ...TARGET, addresseeTelegramUserId: "202" });
-    await replyButtonRepository.activate(other.id, "51");
+    await replyButtonRepository.activate(other.id, "51", []);
     const writtenAt = new Date(Date.now() + 1_000);
     const after = await stageTurn("turn_3", "C".repeat(22), TARGET, "Ещё?");
     await database().query("UPDATE telegram_reply_button_sets SET status = 'active', telegram_message_id = 52, activated_at = $2 WHERE id = $1",
@@ -217,7 +217,7 @@ describeWithDatabase("reply button repository", () => {
     await expect(replyButtonRepository.replyRouteIsOpen("101::50")).resolves.toBe(false);
   });
 
-  it("stages a reminder's buttons with its text", async () => {
+  it("stages a reminder's buttons with its text and keeps the files of its message", async () => {
     const family = await database().query<{ id: string }>("INSERT INTO families (name) VALUES ('Кнопки') RETURNING id");
     const user = await database().query<{ id: string }>(
       "INSERT INTO users (telegram_user_id, display_name) VALUES ('101', 'Владелец') RETURNING id");
@@ -231,9 +231,11 @@ describeWithDatabase("reply button repository", () => {
       ...TARGET, buttons: ROWS, messageText: "**⏰ Напоминание:**\n\n<p>Оплатить интернет</p>",
       reminderId: reminder.rows[0]!.id, token: TOKEN,
     });
-    await replyButtonRepository.activate(set.id, "70");
+    const media = [{ fileId: "photo-file", id: "f0", kind: "photo" as const }];
+    await replyButtonRepository.activate(set.id, "70", media);
 
     expect(set).toMatchObject({ messageText: "**⏰ Напоминание:**\n\n<p>Оплатить интернет</p>", status: "staged" });
-    await expect(pressOf({ telegramMessageId: "70" })).resolves.toMatchObject({ status: "claimed" });
+    await expect(pressOf({ telegramMessageId: "70" }))
+      .resolves.toMatchObject({ set: { messageMedia: media }, status: "claimed" });
   });
 });

@@ -12,8 +12,8 @@
  *
  * Tidying: in a live conversation the first sandbox use of a step removes every skill directory the
  * turn does not grant with files, whatever put it there. A schedule or a delegated task only adds:
- * they share the sandbox home with live turns of the same chat, whose skills differ (a schedule has
- * no service skill, an external group's schedule may have none), and must not pull files from under
+ * they share the sandbox home with live turns of the same chat, whose skills differ (the service
+ * skills follow each turn's tools, an external group's schedule may have none), and must not pull files from under
  * a turn running beside them.
  * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */

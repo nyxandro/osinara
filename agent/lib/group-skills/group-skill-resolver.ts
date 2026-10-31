@@ -2,12 +2,10 @@
  * The skills of one turn: the release's built-in skills plus the family's own ones this conversation has.
  *
  * Exports:
- * - `resolveConversationSkills`: a private chat gets every built-in skill, the family skills its
- *   person enabled for themselves and the service `skill-manager`; a family group gets every built-in
- *   skill and the family skills on its list; an external group gets the skills of its verified list
- *   that still exist.
- * - `resolveExternalGroupSkillNames`: just those names for an external group, from the turn's
- *   verified list and the group's live list together, for the step's tool surface.
+ * - `resolveConversationSkills`: a private chat gets every built-in skill and the family skills its
+ *   person enabled for themselves; a family group gets every built-in skill and the family skills on
+ *   its list; an external group gets the skills of its verified list that still exist. Every zone also
+ *   gets the service skills of the tools in the turn's surface (`service-skills.ts`).
  *
  * The family's skills are read from the database on every turn, so a change takes effect from the
  * next turn without a new context. A built-in skill keeps its name if a family skill with the same
@@ -18,7 +16,7 @@ import type { SkillDefinition } from "../../runtime/skills/definition.js";
 import { AppError } from "../app-error.js";
 import { resolveConversationEnvironment, type ConversationEnvironment } from "../conversation-environment.js";
 import { familySkillRepository, type FamilySkillSelection } from "../family-skills/family-skill-repository.js";
-import { SERVICE_SKILL_DEFINITIONS } from "../family-skills/service-skills.js";
+import { serviceSkillsFor } from "../family-skills/service-skills.js";
 import {
   resolveExternalGroupPolicyIdentity,
   resolveExternalGroupSkillPolicy,
@@ -51,7 +49,7 @@ async function trustedSelection(auth: SessionAuth, environment: Exclude<Conversa
 
 export async function resolveConversationSkills(
   auth: SessionAuth,
-  options: { scheduledRun?: boolean; subagent?: boolean } = {},
+  turn: { readonly toolNames: ReadonlySet<string> },
 ): Promise<Record<string, SkillDefinition>> {
   const environment = resolveConversationEnvironment(auth);
   const external = environment === "external";
@@ -66,17 +64,8 @@ export async function resolveConversationSkills(
   const family = selection === null ? {} : await familySkillRepository.loadWorking(familyId!, selection);
   const catalog: Record<string, SkillDefinition> = { ...family, ...GROUP_SAFE_SKILL_DEFINITIONS };
   const names = external ? granted : [...granted, ...Object.keys(family).filter((name) => !isGroupSafeSkillName(name))];
-  const live = options.scheduledRun !== true && options.subagent !== true;
   return {
     ...Object.fromEntries(names.flatMap((name) => catalog[name] === undefined ? [] : [[name, catalog[name]]])),
-    // Skills are changed only in a person's own conversation, never by a schedule or a delegated task.
-    ...(environment === "private" && live ? SERVICE_SKILL_DEFINITIONS : {}),
+    ...serviceSkillsFor(environment, turn.toolNames),
   };
-}
-
-export async function resolveExternalGroupSkillNames(auth: SessionAuth): Promise<ReadonlySet<string>> {
-  const identity = resolveExternalGroupPolicyIdentity(auth);
-  if (identity === null) return new Set();
-  const live = await groupSkillPolicyRepository.loadGroupSkillAllowlist(identity.groupId);
-  return new Set([...resolveExternalGroupSkillPolicy(auth)].filter((name) => live.has(name)));
 }

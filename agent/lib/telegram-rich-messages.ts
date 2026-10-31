@@ -8,6 +8,8 @@
  * - `TelegramRichMediaUpload`: a file uploaded with a chunk and placed by its media block.
  * - `SentRichMedia`: the Telegram file an upload became, which a later edit must name again.
  * - `richMediaBlockLines`: the `tg://` media blocks of a text, each on a line of its own, outside code.
+ * - `telegramRichMessageRequest`, `sentRichMediaOf`: the request of a rich message with its files and
+ *   the Telegram files they became, for a sender with its own transport (a reminder).
  * - `isTelegramRichMessageRefusal`: a definitive refusal of the message, told apart from a failure
  *   whose outcome is unknown.
  *
@@ -272,9 +274,8 @@ function requireSentMessage(
   );
 }
 
-function richBody(
+function richTargetFields(
   target: TelegramRichTarget,
-  richMessage: TelegramApiBody,
   privateOnly: boolean,
   replyParameters?: TelegramReplyParameters,
 ): TelegramApiBody {
@@ -286,8 +287,16 @@ function richBody(
     ...(replyParameters === undefined
       ? {}
       : { reply_parameters: replyParameters }),
-    rich_message: richMessage,
   };
+}
+
+function richBody(
+  target: TelegramRichTarget,
+  richMessage: TelegramApiBody,
+  privateOnly: boolean,
+  replyParameters?: TelegramReplyParameters,
+): TelegramApiBody {
+  return { ...richTargetFields(target, privateOnly, replyParameters), rich_message: richMessage };
 }
 
 export async function startTelegramRichThinkingDraft(
@@ -351,7 +360,7 @@ function returnedMediaBlocks(value: unknown, found: Array<{ fileId: string | nul
  * the n-th `tg://` block written. A mismatch leaves the message without known files: the delivery
  * stands, only a later edit of the message cannot name its files again.
  */
-function sentMediaOf(
+export function sentRichMediaOf(
   markdown: string,
   media: readonly TelegramRichMediaUpload[],
   response: TelegramApiResponse,
@@ -373,6 +382,25 @@ function sentMediaOf(
     written: written.length,
   }));
   return undefined;
+}
+
+function richMessageOf(markdown: string, media: readonly TelegramRichMediaUpload[]): TelegramApiBody {
+  return media.length === 0
+    ? { markdown }
+    : { markdown, media: media.map((upload) => ({ id: upload.id, media: { media: `attach://${upload.id}`, type: upload.kind } })) };
+}
+
+/**
+ * One rich message as Telegram takes it: a JSON body without files, multipart with them. `fields`
+ * are the message's other parameters (chat, topic, reply).
+ */
+export function telegramRichMessageRequest(
+  fields: TelegramApiBody,
+  markdown: string,
+  media: readonly TelegramRichMediaUpload[],
+): { readonly body: TelegramApiBody } | { readonly form: FormData } {
+  const body = { ...fields, rich_message: richMessageOf(markdown, media) };
+  return media.length === 0 ? { body } : { form: multipartBody(body, media) };
 }
 
 /** The JSON fields of a rich message as multipart text fields, with each file as its own part. */
@@ -414,13 +442,9 @@ export async function postTelegramRichMessageChunk(
   replyParameters?: TelegramReplyParameters,
   media: readonly TelegramRichMediaUpload[] = [],
 ): Promise<SentTelegramMessage> {
-  const richMessage: TelegramApiBody = media.length === 0
-    ? { markdown }
-    : { markdown, media: media.map((upload) => ({ id: upload.id, media: { media: `attach://${upload.id}`, type: upload.kind } })) };
-  const body = richBody(target, richMessage, false, replyParameters);
   const response = await requestTelegramRichApi(
     "sendRichMessage",
-    media.length === 0 ? { body } : { form: multipartBody(body, media) },
+    telegramRichMessageRequest(richTargetFields(target, false, replyParameters), markdown, media),
   );
   const sent = requireSentMessage(response);
 
@@ -433,6 +457,6 @@ export async function postTelegramRichMessageChunk(
     }
   }
   if (media.length === 0) return sent;
-  const sentMedia = sentMediaOf(markdown, media, response);
+  const sentMedia = sentRichMediaOf(markdown, media, response);
   return sentMedia === undefined ? sent : { ...sent, media: sentMedia };
 }

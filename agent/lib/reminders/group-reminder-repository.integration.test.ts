@@ -442,6 +442,8 @@ describeWithDatabase("group reminder repository", () => {
     });
 
     expect(claimed).toMatchObject({
+      authorRole: null,
+      authorUserId: null,
       delayed: false,
       id: reminder.id,
       messageThreadId: null,

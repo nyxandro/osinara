@@ -101,7 +101,7 @@ function canonicalAllowedTag(tag: string): string | null {
 
 /**
  * Returns the closing tags a truncated answer still needs. A collapsible block is the one container
- * the prompt asks for on every long answer, so an unclosed `<details>` is completed instead of
+ * the prompt asks for on a long answer, so an unclosed `<details>` is completed instead of
  * degrading the whole message to escaped text. Any other imbalance stays a hard error.
  */
 function validateAllowedTags(tags: readonly string[]): string[] {
@@ -295,8 +295,8 @@ function closeOpenTrailingFence(markdown: string): string {
 /**
  * Telegram reads Markdown inside a collapsible block, while Markdown itself takes the lines after
  * an HTML tag as raw HTML up to the next blank line, and the filter would see no link there. A
- * blank line after the summary and before the closing tag, the way the backend writes the block
- * itself, makes both read the inside as Markdown.
+ * blank line after the summary and before the closing tag, the way the prompt asks the model to
+ * write the block, makes both read the inside as Markdown.
  */
 function separateDetailsContent(text: string, marker: string, tags: readonly string[]): string {
   let separated = text;

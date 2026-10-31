@@ -4,10 +4,9 @@
  * Constructs covered:
  * - Conversational text stays on the plain Telegram transport.
  * - Supported formatting selects Rich Message delivery.
- * - Long output is collapsed even when the model omits the mandatory details block.
- * - Authored asides become paced messages unless the answer is collapsed as long.
- * - An answer with reply buttons ends in a rich message, its plain text stays literal, and its
- *   closing question stays outside the generated accordion.
+ * - A long answer is never collapsed for the model: hiding part of it is the model's decision.
+ * - Authored asides become paced messages.
+ * - An answer with reply buttons ends in a rich message and its plain text stays literal.
  * - Formatting a rich message cannot hold goes out as written text instead of costing the answer.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -52,36 +51,19 @@ describe("Telegram final presentation", () => {
     ]);
   });
 
-  it("does not count media blocks toward a long answer", () => {
-    const markdown = "Вот фото до и после\n\nMEDIA0\n\nMEDIA1";
-    const options = { isMediaBlock: (block: string) => /^MEDIA\d$/u.test(block), requiresRich: () => true };
-
-    expect(formatTelegramFinalPresentation(markdown, options)).toEqual([{ format: "rich", pacing: "immediate", text: markdown }]);
-    expect(formatTelegramFinalPresentation(`${markdown}\n\nещё абзац`, options)[0]!.text).not.toContain("<details>");
-    expect(formatTelegramFinalPresentation(`${markdown}\n\nещё абзац\n\nи ещё`, options)[0]!.text).toContain("<details>");
-  });
-
-  it("recognizes a GFM table without outer pipes and collapses it", () => {
+  it("recognizes a GFM table without outer pipes", () => {
     const markdown = "Параметр | Значение\n--- | ---\nрежим | plain";
-    const output = formatTelegramFinalPresentation(markdown)[0]!;
 
-    expect(output.format).toBe("rich");
-    expect(output.text).toContain("<details><summary>Полный ответ</summary>");
-    expect(output.text).toContain(markdown);
+    expect(formatTelegramFinalPresentation(markdown)).toEqual([{ format: "rich", pacing: "immediate", text: markdown }]);
   });
 
   it.each([
-    "а".repeat(601),
-    Array.from({ length: 8 }, (_, index) => `строка ${index + 1}`).join("\n"),
-    "первый абзац\n\nвторой абзац\n\nтретий абзац",
-    Array.from({ length: 6 }, (_, index) => `- пункт ${index + 1}`).join("\n"),
-  ])("collapses output after any long-answer threshold", (text) => {
-    const chunks = formatTelegramFinalPresentation(text);
-
-    expect(chunks).toHaveLength(1);
-    expect(chunks[0]).toMatchObject({ format: "rich" });
-    expect(chunks[0]!.text).toContain("<details><summary>Полный ответ</summary>");
-    expect(chunks[0]!.text).toContain("</details>");
+    ["long text", "а".repeat(1_500), "plain"],
+    ["many lines", Array.from({ length: 12 }, (_, index) => `строка ${index + 1}`).join("\n"), "plain"],
+    ["many paragraphs", Array.from({ length: 6 }, (_, index) => `абзац ${index + 1}`).join("\n\n"), "plain"],
+    ["a long list", Array.from({ length: 9 }, (_, index) => `- пункт ${index + 1}`).join("\n"), "rich"],
+  ])("sends %s as the model laid it out, never collapsed for it", (_name, text, format) => {
+    expect(formatTelegramFinalPresentation(text)).toEqual([{ format, pacing: "immediate", text }]);
   });
 
   it("delivers an authored aside as its own paced message", () => {
@@ -103,14 +85,13 @@ describe("Telegram final presentation", () => {
     ]);
   });
 
-  it("collapses a long main answer without swallowing the aside", () => {
-    const markdown = `${"подробность ".repeat(70)}\n${TELEGRAM_ASIDE_DIRECTIVE}\nвот такой расклад`;
-    const chunks = formatTelegramFinalPresentation(markdown);
+  it("keeps a long main answer whole next to its aside", () => {
+    const body = "подробность ".repeat(70).trim();
 
-    expect(chunks).toHaveLength(2);
-    expect(chunks[0]).toMatchObject({ format: "rich", pacing: "immediate" });
-    expect(chunks[0]!.text).toContain("<details><summary>Полный ответ</summary>");
-    expect(chunks[1]).toEqual({ format: "plain", pacing: "aside", text: "вот такой расклад" });
+    expect(formatTelegramFinalPresentation(`${body}\n${TELEGRAM_ASIDE_DIRECTIVE}\nвот такой расклад`)).toEqual([
+      { format: "plain", pacing: "immediate", text: body },
+      { format: "plain", pacing: "aside", text: "вот такой расклад" },
+    ]);
   });
 
   it("keeps a structured aside as its own message", () => {
@@ -122,15 +103,7 @@ describe("Telegram final presentation", () => {
     ]);
   });
 
-  it("keeps a short direct lead outside the generated accordion", () => {
-    const body = "подробность ".repeat(70);
-
-    expect(formatTelegramFinalPresentation(`короткий вывод\n\n${body}`)[0]!.text).toBe(
-      `короткий вывод\n\n<details><summary>Полный ответ</summary>\n\n${body.trim()}\n\n</details>`,
-    );
-  });
-
-  it("preserves an authored details block without wrapping it again", () => {
+  it("preserves an authored details block", () => {
     const markdown = `<details><summary>Разбор</summary>\n\n${"текст ".repeat(150)}\n\n</details>`;
 
     expect(formatTelegramFinalPresentation(markdown))
@@ -145,30 +118,19 @@ describe("Telegram final presentation", () => {
     expect(output).toContain("<details open><summary>Разбор</summary>");
   });
 
-  it("wraps a long block whose details tag has forbidden attributes", () => {
-    const markdown = `<details class="wide"><summary>Разбор</summary>\n\n${"текст ".repeat(150)}\n\n</details>`;
-
-    const output = formatTelegramFinalPresentation(markdown)[0]!.text;
-    expect(output).toContain("<details><summary>Полный ответ</summary>");
-    expect(output).toContain("&lt;details class=\"wide\"&gt;");
-  });
-
   it.each([
-    `<details>\n\n${"текст ".repeat(150)}\n\n</details>`,
-    `<details><summary>Разбор\n\n${"текст ".repeat(150)}`,
-  ])("wraps malformed authored details instead of trusting it: %s", (markdown) => {
-    const output = formatTelegramFinalPresentation(markdown)[0]!.text;
+    [`<details class="wide"><summary>Разбор</summary>\n\n${"текст ".repeat(150)}\n\n</details>`, "&lt;details class=\"wide\"&gt;"],
+    [`<details>\n\n${"текст ".repeat(150)}\n\n</details>`, "&lt;details&gt;"],
+    ["<details>\n\nкоротко\n\n</details>", "&lt;details&gt;"],
+    [`<details><summary>Разбор\n\n${"текст ".repeat(150)}`, "&lt;details&gt;&lt;summary&gt;Разбор"],
+  ])("shows malformed authored details as text and adds no accordion of its own: %s", (markdown, inert) => {
+    const [chunk, ...rest] = formatTelegramFinalPresentation(markdown);
 
-    expect(output).toContain("<details><summary>Полный ответ</summary>");
-    expect(output).toContain("&lt;details&gt;");
-  });
-
-  it("keeps a short rich warning outside the generated accordion", () => {
-    const body = "подробность ".repeat(70);
-
-    expect(formatTelegramFinalPresentation(`**Риск высокий.**\n\n${body}`)[0]!.text).toBe(
-      `**Риск высокий.**\n\n<details><summary>Полный ответ</summary>\n\n${body.trim()}\n\n</details>`,
-    );
+    expect(rest).toEqual([]);
+    expect(chunk!.format).toBe("rich");
+    expect(chunk!.text).toContain(inert);
+    expect(chunk!.text).not.toMatch(/<details|<summary/u);
+    expect(chunk!.text).not.toContain("Полный ответ");
   });
 
   describe("past the limits of a rich message", () => {
@@ -177,9 +139,7 @@ describe("Telegram final presentation", () => {
       `| ${Array.from({ length: 25 }, () => "---").join(" | ")} |`,
       `| ${Array.from({ length: 25 }, () => "x").join(" | ")} |`,
     ].join("\n");
-    // An authored accordion keeps the answer from being folded, so the long block stays whole.
-    const oversizedBlock = "<details><summary>Итог</summary>\n\nКоротко.\n\n</details>\n\n" +
-      `**Важно:** ${"я".repeat(33_000)}`;
+    const oversizedBlock = `Коротко.\n\n**Важно:** ${"я".repeat(33_000)}`;
 
     afterEach(() => {
       vi.restoreAllMocks();
@@ -258,24 +218,6 @@ describe("Telegram final presentation", () => {
       expect(formatTelegramFinalPresentation(text, { replyButtons: true })[0]!.text).toBe(
         "<p>Нашёл два варианта:<br>Пицца — 650 ₽, $5<br># Суши &lt;лучше&gt; &amp; дешевле</p>\n\n<p>Что берём?</p>",
       );
-    });
-
-    it("keeps the closing question of a long answer outside the accordion", () => {
-      const body = "подробность ".repeat(70).trim();
-      const chunks = formatTelegramFinalPresentation(`короткий вывод\n\n${body}\n\nЗаказываем?`, { replyButtons: true });
-
-      expect(chunks).toEqual([{
-        format: "rich",
-        pacing: "immediate",
-        text: `короткий вывод\n\n<details><summary>Полный ответ</summary>\n\n${body}\n\n</details>\n\nЗаказываем?`,
-      }]);
-    });
-
-    it("closes a code block a long answer left open before folding it", () => {
-      const markdown = `короткий вывод\n\n${"подробность ".repeat(70).trim()}\n\n\`\`\`js\nconst a = 1;`;
-      const [chunk] = formatTelegramFinalPresentation(markdown);
-
-      expect(chunk!.text.endsWith("```js\nconst a = 1;\n```\n\n</details>")).toBe(true);
     });
 
     it("makes only the last message rich when the answer has an aside", () => {

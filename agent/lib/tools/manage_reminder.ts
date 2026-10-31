@@ -9,6 +9,8 @@
  * - Action-specific validators return actionable Russian AppError messages.
  * - Reply buttons are written as Telegram button markup at the end of `content`, as in an answer;
  *   the reminder keeps its text and its buttons apart, and new content brings its own buttons.
+ * - Files shown in `content` are checked when it is written, against the chat the reminder reaches:
+ *   it goes out later without the model, which could no longer fix them.
  */
 import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
@@ -18,10 +20,12 @@ import {
   REMINDER_RECURRENCE_INTERVAL_MAX,
 } from "../reminders/reminder-config.js";
 import { requireReminderAuthorization } from "../reminders/reminder-context.js";
+import { reminderWriterRights, requireReminderFiles } from "../reminders/reminder-files.js";
 import { REMINDER_RECURRENCE_UNITS, type ReminderRecurrence } from "../reminders/reminder-record.js";
 import { reminderRepository } from "../reminders/reminder-repository.js";
 import type { ReplyButtonRows } from "../reply-buttons/reply-button-contract.js";
 import { readReplyButtonMarkup } from "../reply-buttons/reply-button-markup.js";
+import { withCallExamples, type CallExamples } from "../tool-call-examples.js";
 import {
   optionalIsoDate,
   optionalString,
@@ -191,21 +195,25 @@ function requireManageReminderInput(input: unknown) {
 }
 
 const TOOL_DESCRIPTION = [
-  "Create, change, pause, resume or delete an ordinary reminder with notification text.",
-  "An explicit user request is enough: do it without additional confirmation. Ask only for missing or ambiguous data.",
-  "content is sent as ready-made text without calling the model. Do not store in it a task to come up with or do something later; if asked to compose a message, prepare it before creating the reminder.",
-  "content is read at the moment of delivery: without words like \"завтра\" and \"через час\"; the text format is in the instructions.",
-  "This is not an agent schedule: if a future autonomous run of the agent with research or a report is needed, use manage_agent_schedule.",
+  "Create, change, pause, resume or delete an ordinary reminder: ready-made text the bot sends at the set time without calling the model. Load the schedules skill first: it holds the text and time rules.",
+  "content is read at the moment of delivery: no words like \"завтра\" or \"через час\", name the event time by the clock.",
+  "Not an agent schedule: for future work with research or a report use manage_agent_schedule.",
+  "content is laid out like your answers, Markdown, reply buttons and a workspace file on its own line as ![caption](/workspace/...) included; a file is checked now and read at delivery, so it must stay in place.",
   "Create payload: {\"action\":\"create\",\"content\":\"Позвонить врачу\",\"firstRunAt\":\"2026-08-01T10:00:00+03:00\",\"timezone\":\"Europe/Moscow\",\"scope\":\"personal\",\"recurrence\":null}.",
-  "Recurrence: no repeat is recurrence=null; a repeat = {\"unit\":\"minutely\",\"interval\":5}. unit: minutely, hourly, daily, weekly, monthly, yearly; interval is an integer from 1 to 365. Minimum 1 minute. Minutes and hours are counted as a duration, other periods keep the local calendar time. A missing date moves to the last day of the month without losing the original date for the following repeats. The time is checked every minute; missed repeats are not caught up.",
-  "Remove the repeat: {\"action\":\"update\",\"id\":\"<id from list_reminders>\",\"recurrence\":null}. Do not delete and re-create a reminder to change its repeat.",
-  "Update passes id and only the content, firstRunAt or recurrence being changed. Pause/resume/delete pass only action and id.",
-  "content may end with reply buttons in the button markup of the instructions; new content brings its own buttons or none.",
-  "A delivered one-time reminder does not change: for a new time create a new one.",
-  "firstRunAt is always an ISO datetime with a UTC offset, timezone is always IANA. Before update/pause/resume/delete first find the id through list_reminders.",
+  "Recurrence: none is recurrence=null; a repeat is {\"unit\":\"daily\",\"interval\":1} with unit minutely, hourly, daily, weekly, monthly or yearly and interval 1-365.",
+  "Update passes id and only the changed content, firstRunAt or recurrence (recurrence=null removes the repeat); pause, resume and delete pass only action and id. Take the id from list_reminders and do not delete and re-create a reminder to change it.",
+  "firstRunAt is an ISO datetime with a UTC offset, timezone is IANA. A delivered one-time reminder cannot change: create a new one.",
 ].join(" ");
 
-export default defineTool({
+export const MANAGE_REMINDER_CALL_EXAMPLES: CallExamples = {
+  create: { action: "create", content: "Пора позвонить врачу", firstRunAt: "2026-08-01T10:00:00+03:00", timezone: "Europe/Moscow", scope: "personal", recurrence: null },
+  update: { action: "update", id: "<id из list_reminders>", firstRunAt: "2026-08-01T11:00:00+03:00" },
+  pause: { action: "pause", id: "<id из list_reminders>" },
+  resume: { action: "resume", id: "<id из list_reminders>" },
+  delete: { action: "delete", id: "<id из list_reminders>" },
+};
+
+export default withCallExamples(defineTool({
   // Repeating it after a crash is safe: its effect is keyed on the call id.
   replaySafe: true,
   description: TOOL_DESCRIPTION,
@@ -214,6 +222,12 @@ export default defineTool({
     const parsed = requireManageReminderInput(input);
     const authorization = requireReminderAuthorization(ctx);
     if (parsed.action === "create") {
+      await requireReminderFiles({
+        content: parsed.values.content,
+        errorCode: INPUT_ERROR_CODE,
+        rights: () => reminderWriterRights(authorization),
+        scope: parsed.values.scope,
+      });
       return await reminderRepository.create(authorization, {
         ...parsed.values,
         operationKey: ctx.callId,
@@ -221,6 +235,14 @@ export default defineTool({
     }
     if (parsed.action === "update") {
       const { id, ...values } = parsed.values;
+      // A reminder that is not found, or a public chat's one this tool may not change, is reported
+      // by the update itself.
+      const scope = values.content === undefined ? null : await reminderRepository.scopeOf(authorization, id);
+      if (values.content !== undefined && scope !== null && scope !== "group") {
+        await requireReminderFiles({
+          content: values.content, errorCode: INPUT_ERROR_CODE, rights: () => reminderWriterRights(authorization), scope,
+        });
+      }
       return await reminderRepository.update(authorization, id, {
         ...values,
         operationKey: ctx.callId,
@@ -237,4 +259,4 @@ export default defineTool({
       deleted: await reminderRepository.delete(authorization, parsed.id, ctx.callId),
     };
   },
-});
+}), MANAGE_REMINDER_CALL_EXAMPLES);

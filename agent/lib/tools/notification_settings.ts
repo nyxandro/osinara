@@ -15,6 +15,7 @@ import { z } from "zod";
 import { AppError } from "../app-error.js";
 import { requireReminderAuthorization } from "../reminders/reminder-context.js";
 import { reminderRepository } from "../reminders/reminder-repository.js";
+import { withCallExamples, type CallExamples } from "../tool-call-examples.js";
 import {
   requireAction,
   requiredString,
@@ -79,17 +80,17 @@ function requireNotificationSettingsInput(input: unknown) {
 }
 
 const TOOL_DESCRIPTION = [
-  "Get or set the personal IANA timezone and quiet hours for reminders.",
-  "Save settings the user explicitly named without additional confirmation.",
-  "For action=get only action is required: {\"action\":\"get\"}; do not pass the other fields.",
-  "For action=set action, timezone, quietStart and quietEnd are required: {\"action\":\"set\",\"timezone\":\"Europe/Moscow\",\"quietStart\":\"22:00\",\"quietEnd\":\"08:00\"}.",
-  "timezone must be an explicit IANA timezone; quietStart and quietEnd must be different HH:MM values.",
-  "To turn quiet hours off, pass both required fields quietStart=null and quietEnd=null.",
-  "Do not guess the timezone or quiet hours and do not substitute defaults: if the data is missing, ask the user.",
-  "After an input error, fix the payload according to the error text and retry no more than once; on a repeated error stop and clarify the data.",
+  "Get or set the personal IANA timezone and quiet hours for reminders; save values the person explicitly named.",
+  "Get: {\"action\":\"get\"}. Set: {\"action\":\"set\",\"timezone\":\"Europe/Moscow\",\"quietStart\":\"22:00\",\"quietEnd\":\"08:00\"} with an explicit IANA timezone and two different HH:MM values; quietStart=null and quietEnd=null turn quiet hours off.",
+  "Never guess the timezone or quiet hours: ask the person.",
 ].join(" ");
 
-export default defineTool({
+export const NOTIFICATION_SETTINGS_CALL_EXAMPLES: CallExamples = {
+  get: { action: "get" },
+  set: { action: "set", timezone: "Europe/Moscow", quietStart: "22:00", quietEnd: "08:00" },
+};
+
+export default withCallExamples(defineTool({
   description: TOOL_DESCRIPTION,
   inputSchema: notificationSettingsSchema,
   async execute(input, ctx) {
@@ -107,4 +108,4 @@ export default defineTool({
 
     return await reminderRepository.configureNotifications(authorization, parsed.values);
   },
-});
+}), NOTIFICATION_SETTINGS_CALL_EXAMPLES);

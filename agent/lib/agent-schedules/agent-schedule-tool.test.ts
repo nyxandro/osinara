@@ -163,9 +163,9 @@ describe("manage_agent_schedule", () => {
   });
 
   it("returns an actionable error when the model sends an empty payload", async () => {
-    await expect(manageAgentSchedule.execute({} as never, context)).rejects.toThrowError(
-      /AGENT_SCHEDULE_INPUT_INVALID: Для manage_agent_schedule передайте action/,
-    );
+    await expect(manageAgentSchedule.execute({} as never, context)).rejects.toMatchObject({
+      contract: { code: "AGENT_SCHEDULE_INPUT_INVALID", reason: expect.stringContaining("Для manage_agent_schedule передайте action") },
+    });
     expect(createSchedule).not.toHaveBeenCalled();
   });
 
@@ -173,9 +173,12 @@ describe("manage_agent_schedule", () => {
     await expect(manageAgentSchedule.execute({
       ...validDailyCreatePayload,
       recurrence: { kind: "daily" },
-    } as never, context)).rejects.toThrowError(
-      /AGENT_SCHEDULE_INPUT_INVALID: Для daily recurrence передайте recurrence: \{"kind":"daily","interval":1\}/,
-    );
+    } as never, context)).rejects.toMatchObject({
+      contract: {
+        code: "AGENT_SCHEDULE_INPUT_INVALID",
+        reason: expect.stringContaining('Для daily recurrence передайте recurrence: {"kind":"daily","interval":1}'),
+      },
+    });
     expect(createSchedule).not.toHaveBeenCalled();
   });
 
@@ -220,21 +223,19 @@ describe("manage_agent_schedule", () => {
   it.each(["delete", "pause", "resume", "run_now"] as const)(
     "keeps action=%s id-only even for known shared sibling fields",
     async (action) => {
-      await expect(manageAgentSchedule.execute({ action, id: scheduleId, timezone: "Europe/Moscow" }, context)).rejects.toThrowError(
-        new RegExp(`AGENT_SCHEDULE_INPUT_INVALID: action=${action} содержит неизвестные поля: timezone`),
-      );
+      await expect(manageAgentSchedule.execute({ action, id: scheduleId, timezone: "Europe/Moscow" }, context)).rejects.toMatchObject({
+        contract: { code: "AGENT_SCHEDULE_INPUT_INVALID", reason: expect.stringContaining(`action=${action} содержит неизвестные поля: timezone`) },
+      });
     },
   );
 
   it("documents exact create, update, and id-only payloads without a delete/recreate workaround", () => {
     expect(manageAgentSchedule.description).toContain('Create payload: {"action":"create"');
-    expect(manageAgentSchedule.description).toContain(
-      "Update passes id and only the fields that actually change",
-    );
+    expect(manageAgentSchedule.description).toContain("Update passes id and only the fields that change");
     expect(manageAgentSchedule.description).toContain(
       "Pause, resume, run_now and delete pass only action and id",
     );
-    expect(manageAgentSchedule.description).toContain("Do not delete and re-create a schedule to change");
+    expect(manageAgentSchedule.description).toContain("keep the id instead of deleting and re-creating");
   });
 });
 

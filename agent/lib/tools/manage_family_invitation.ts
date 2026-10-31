@@ -12,9 +12,11 @@
 import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
+import { isAppError } from "../app-error.js";
 import { requirePrivateTelegramOwner } from "../family-context.js";
 import { familyRepository } from "../family-repository.js";
 import { deliverFamilyInvitation } from "../telegram-delivery.js";
+import { withCallExamples, type CallExamples } from "../tool-call-examples.js";
 import {
   requireAction,
   requiredString,
@@ -69,20 +71,28 @@ function requireManageFamilyInvitationInput(input: unknown) {
 }
 
 const TOOL_DESCRIPTION = [
-  "Create a one-time family invitation or approve a candidate from list_pending_family_invitations.",
-  "Available only to the owner in a private chat; both actions always require confirmation.",
-  "For action=create only action is required: {\"action\":\"create\"}; do not pass candidate fields.",
-  "For action=approve action, invitationId, candidateTelegramUserId and candidateDisplayName are required: {\"action\":\"approve\",\"invitationId\":\"<UUID from list_pending_family_invitations>\",\"candidateTelegramUserId\":\"123456789\",\"candidateDisplayName\":\"Анна\"}.",
-  "invitationId must be a UUID from list_pending_family_invitations; candidateTelegramUserId and candidateDisplayName must match the chosen candidate exactly.",
-  "Do not guess required values and do not substitute defaults: if they are missing, request list_pending_family_invitations again or ask the owner.",
-  "After an input error, fix the payload according to the error text and retry no more than once; on a repeated error stop and clarify the data.",
+  "Create a one-time family invitation or approve a candidate from list_pending_family_invitations; only the owner can use it, and both actions ask for confirmation.",
+  "Create: {\"action\":\"create\"} with no candidate fields.",
+  "Approve: {\"action\":\"approve\",\"invitationId\":\"<UUID from list_pending_family_invitations>\",\"candidateTelegramUserId\":\"123456789\",\"candidateDisplayName\":\"Анна\"}, all three copied exactly from the chosen candidate; never guess them.",
 ].join(" ");
 
-export default defineTool({
+export const MANAGE_FAMILY_INVITATION_CALL_EXAMPLES: CallExamples = {
+  create: { action: "create" },
+  approve: { action: "approve", invitationId: "<UUID из list_pending_family_invitations>", candidateTelegramUserId: "123456789", candidateDisplayName: "Анна" },
+};
+
+export default withCallExamples(defineTool({
   // Repeating it after a crash is safe: its effect is keyed on the call id.
   replaySafe: true,
   approval: ({ toolInput }) => {
-    requireManageFamilyInvitationInput(toolInput);
+    try {
+      requireManageFamilyInvitationInput(toolInput);
+    } catch (error) {
+      // An invalid call goes on to execution, whose own check refuses it before any change and
+      // answers with an example; thrown here, it would end the turn.
+      if (isAppError(error)) return "not-applicable";
+      throw error;
+    }
     return "user-approval";
   },
   description: TOOL_DESCRIPTION,
@@ -127,4 +137,4 @@ export default defineTool({
     }
     return { delivered: true, expiresAt: invitation.expiresAt };
   },
-});
+}), MANAGE_FAMILY_INVITATION_CALL_EXAMPLES);
