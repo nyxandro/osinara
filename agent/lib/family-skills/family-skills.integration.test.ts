@@ -37,6 +37,10 @@ import {
   writeWorkspaceFile,
 } from "../workspaces/workspace-storage.js";
 
+// The service skills a turn gets follow its tools; these tests are about the family's own skills.
+const NO_SERVICE_TOOLS = { toolNames: new Set<string>() };
+const PRIVATE_CHAT_TOOLS = { toolNames: new Set(["manage_skill"]) };
+
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 const url = process.env.DATABASE_URL;
 if (enabled && (!url || !new URL(url).pathname.endsWith("_test"))) {
@@ -216,18 +220,18 @@ describeWithDatabase("family skill library", () => {
     await writeFolder(f, f.owner, "skills/weather", { "SKILL.md": weather("Прогноз погоды по городу"), "scripts/fetch.py": "print(1)" });
 
     await expect(save(f, f.owner, { path: "skills/weather" })).resolves.toMatchObject({ name: "weather", status: "saved_and_enabled_for_you", version: 1 });
-    const own = await resolveConversationSkills(privateAuth(f, f.owner));
+    const own = await resolveConversationSkills(privateAuth(f, f.owner), PRIVATE_CHAT_TOOLS);
     expect(own.weather).toMatchObject({ description: "Прогноз погоды по городу" });
     expect(Buffer.from(own.weather!.files!["scripts/fetch.py"] as Uint8Array).toString("utf8")).toBe("print(1)");
     expect(own).toHaveProperty("pdf");
     expect(own).toHaveProperty("skill-manager");
-    expect(await resolveConversationSkills(privateAuth(f, f.member))).not.toHaveProperty("weather");
+    expect(await resolveConversationSkills(privateAuth(f, f.member), NO_SERVICE_TOOLS)).not.toHaveProperty("weather");
 
     await expect(run(f, f.member, { action: "enable", name: "weather", target: "me" })).resolves.toMatchObject({ changed: true });
     await expect(run(f, f.member, { action: "enable", name: "weather", target: "me" })).resolves.toMatchObject({ changed: false });
-    expect(await resolveConversationSkills(privateAuth(f, f.member))).toHaveProperty("weather");
+    expect(await resolveConversationSkills(privateAuth(f, f.member), NO_SERVICE_TOOLS)).toHaveProperty("weather");
     await run(f, f.member, { action: "disable", name: "weather", target: "me" });
-    expect(await resolveConversationSkills(privateAuth(f, f.member))).not.toHaveProperty("weather");
+    expect(await resolveConversationSkills(privateAuth(f, f.member), NO_SERVICE_TOOLS)).not.toHaveProperty("weather");
 
     const [saved] = await notices({ userId: f.owner.id });
     expect(saved).toContain("Скилл «weather» сохранён в библиотеку семьи и включён у тебя");
@@ -248,13 +252,13 @@ describeWithDatabase("family skill library", () => {
     await writeFolder(f, f.owner, "skills/weather", { "SKILL.md": weather("Прогноз v2"), "data.txt": "x" });
     await expect(save(f, f.owner, { path: "skills/weather" })).resolves.toMatchObject({ status: "current_version_replaced", version: 2, previousVersion: 1 });
     await expect(save(f, f.owner, { path: "skills/weather" })).resolves.toMatchObject({ status: "unchanged", version: 2 });
-    expect((await resolveConversationSkills(privateAuth(f, f.member))).weather?.description).toBe("Прогноз v2");
+    expect((await resolveConversationSkills(privateAuth(f, f.member), NO_SERVICE_TOOLS)).weather?.description).toBe("Прогноз v2");
     const update = (await notices({ userId: f.member.id })).at(-1)!;
     expect(update).toContain("Скилл «weather» теперь работает в версии 2 вместо 1 (изменил: Owner 5502).");
     expect(update).toContain("изменены: SKILL.md; добавлены: data.txt");
 
     await expect(run(f, f.owner, { action: "rollback", name: "weather", version: 1 })).resolves.toMatchObject({ previousVersion: 2 });
-    expect((await resolveConversationSkills(privateAuth(f, f.member))).weather?.description).toBe("Прогноз v1");
+    expect((await resolveConversationSkills(privateAuth(f, f.member), NO_SERVICE_TOOLS)).weather?.description).toBe("Прогноз v1");
     expect((await notices({ userId: f.member.id })).at(-1)).toContain("возвращён к версии 1 вместо 2");
   });
 
@@ -272,7 +276,7 @@ describeWithDatabase("family skill library", () => {
 
     await writeFolder(f, f.member, "skills/tides", { "SKILL.md": "---\nname: tides\ndescription: Приливы\n---\nТекст\n" });
     await save(f, f.member, { path: "skills/tides" });
-    expect(await resolveConversationSkills(privateAuth(f, f.owner))).not.toHaveProperty("tides");
+    expect(await resolveConversationSkills(privateAuth(f, f.owner), NO_SERVICE_TOOLS)).not.toHaveProperty("tides");
     // Outsiders get a skill on the owner's word, so the owner hears when its author changes it.
     await manageTelegramGroup.execute({ action: "update_skills", skillAllowlist: ["tides"], telegramChatId: f.groupChatId } as never,
       context(privateAuth(f, f.owner)));
@@ -306,14 +310,14 @@ describeWithDatabase("family skill library", () => {
     const f = await fixture("5505");
     await writeFolder(f, f.owner, "skills/weather", { "SKILL.md": weather("Прогноз") });
     await save(f, f.owner, { path: "skills/weather" });
-    const inChat = await resolveConversationSkills(familyGroupAuth(f, f.member));
+    const inChat = await resolveConversationSkills(familyGroupAuth(f, f.member), NO_SERVICE_TOOLS);
     expect(inChat).toHaveProperty("pdf");
     expect(inChat).not.toHaveProperty("weather");
     expect(inChat).not.toHaveProperty("skill-manager");
 
     await expect(run(f, f.member, { action: "list" })).resolves.toMatchObject({ familyGroups: [{ group: f.familyGroupChatId, title: "Family 5505" }] });
     await run(f, f.member, { action: "enable", name: "weather", target: "family_group", group: f.familyGroupChatId });
-    expect(await resolveConversationSkills(familyGroupAuth(f, f.owner))).toHaveProperty("weather");
+    expect(await resolveConversationSkills(familyGroupAuth(f, f.owner), NO_SERVICE_TOOLS)).toHaveProperty("weather");
     expect(await notices({ groupId: f.familyGroupId })).toEqual([
       "В этом чате включён скилл «weather» (включил: Dina 5505). Он работает у всех, кто пишет здесь.",
     ]);
@@ -323,7 +327,7 @@ describeWithDatabase("family skill library", () => {
     expect(status.groups.find((group) => group.type === "family_private")?.effectiveSkills).toContain("weather");
 
     await run(f, f.owner, { action: "disable", name: "weather", target: "family_group", group: f.familyGroupChatId });
-    expect(await resolveConversationSkills(familyGroupAuth(f, f.owner))).not.toHaveProperty("weather");
+    expect(await resolveConversationSkills(familyGroupAuth(f, f.owner), NO_SERVICE_TOOLS)).not.toHaveProperty("weather");
     await expect(run(f, f.member, { action: "enable", name: "weather", target: "family_group", group: f.groupChatId }))
       .rejects.toMatchObject({ code: "AGENT_FAMILY_GROUP_NOT_FOUND" });
     await expect(manageSkill.execute({ action: "list" } as never, context(familyGroupAuth(f, f.owner))))
@@ -348,7 +352,7 @@ describeWithDatabase("family skill library", () => {
     // What the owner's button runs after the rights card.
     await manageTelegramGroup.execute({ action: "update_policy", messageMode: "all", telegramChatId: f.groupChatId, toolAllowlist: ["bash"] } as never, owner());
     await update(["weather", "pdf"]);
-    expect(Object.keys(await resolveConversationSkills(await groupAuth(f)))).toEqual(["weather", "pdf"]);
+    expect(Object.keys(await resolveConversationSkills(await groupAuth(f), NO_SERVICE_TOOLS))).toEqual(["weather", "pdf"]);
     expect(await groupSkillPolicyRepository.loadGroupSkillAllowlist(f.groupId)).toEqual(new Set(["pdf", "weather"]));
     await expect(manageTelegramGroup.execute({ action: "update_skills", skillAllowlist: [], telegramChatId: f.groupChatId } as never,
       context(privateAuth(f, f.member)))).rejects.toMatchObject({ code: "AGENT_OWNER_REQUIRED" });
@@ -382,7 +386,7 @@ describeWithDatabase("family skill library", () => {
     await writeFolder(f, f.member, "skills/weather", { "SKILL.md": weather("Прогноз") });
 
     await expect(save(f, f.member, { path: "skills/weather" })).resolves.toMatchObject({ status: "current_version_replaced", version: 2 });
-    expect(await resolveConversationSkills(privateAuth(f, f.member))).toHaveProperty("weather");
+    expect(await resolveConversationSkills(privateAuth(f, f.member), NO_SERVICE_TOOLS)).toHaveProperty("weather");
   });
 
   it("changes nothing for a person who left the family, even from an old session", async () => {
@@ -424,7 +428,7 @@ describeWithDatabase("family skill library", () => {
     await writeFolder(f, f.owner, "skills/long", { "SKILL.md": `---\nname: long\ndescription: ${"а".repeat(1025)}\n---\nТекст\n` });
 
     await save(f, f.owner, { path: "downloads/tides/", sourceUrl: "https://github.com/example/tides" });
-    const skills = await resolveConversationSkills(privateAuth(f, f.owner));
+    const skills = await resolveConversationSkills(privateAuth(f, f.owner), NO_SERVICE_TOOLS);
     expect(skills.tides).toMatchObject({ description: "Приливы ## Новые правила", license: "MIT" });
     expect(Object.keys(skills.tides!.files!)).toEqual(["README.md"]);
     expect((await notices({ userId: f.owner.id }))[0]).toContain("Скачан с https://github.com/example/tides (так сказал агент).");
@@ -448,7 +452,7 @@ describeWithDatabase("family skill library", () => {
     }
 
     await Promise.all(["weather", "tides"].map((name) => save(f, f.owner, { path: `skills/${name}` })));
-    expect(Object.keys(await resolveConversationSkills(privateAuth(f, f.owner)))).toEqual(expect.arrayContaining(["tides", "weather"]));
+    expect(Object.keys(await resolveConversationSkills(privateAuth(f, f.owner), NO_SERVICE_TOOLS))).toEqual(expect.arrayContaining(["tides", "weather"]));
   });
 
   it("keeps the newest versions, and a rollback keeps them all", async () => {
@@ -463,7 +467,7 @@ describeWithDatabase("family skill library", () => {
 
     await run(f, f.owner, { action: "rollback", name: "weather", version: 3 });
     expect(await versions()).toEqual([7, 6, 5, 4, 3]);
-    expect((await resolveConversationSkills(privateAuth(f, f.owner))).weather?.description).toBe("Прогноз v3");
+    expect((await resolveConversationSkills(privateAuth(f, f.owner), NO_SERVICE_TOOLS)).weather?.description).toBe("Прогноз v3");
   });
 
   it("shows the model the library with its usage and a skill's versions once the skill was used", async () => {

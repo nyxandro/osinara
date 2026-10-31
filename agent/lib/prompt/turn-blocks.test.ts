@@ -20,7 +20,6 @@ import {
   createReactionSetBlockResolver,
 } from "./turn-blocks.js";
 import { EMPTY_DELIVERY_MARKER } from "../../runtime/turn/step-history.js";
-import { VOICE_MESSAGE_RULES } from "./common-fragments.js";
 import { REPLY_BUTTON_RULES } from "./reply-button-fragments.js";
 import { formatReactionSetAnnouncement } from "../telegram-reaction-announcement.js";
 import { TELEGRAM_DEFAULT_REACTIONS } from "../telegram-reaction-set.js";
@@ -112,18 +111,17 @@ describe("mode block resolution", () => {
 
     // A child answers its parent, a scheduled run has no message to stay silent on, and a private
     // chat is direct by definition: none of them may learn the silence marker. A private root
-    // learns it only as the closing of a turn whose voice note already delivered the answer.
+    // meets it only in the result of a delivered voice note, never in its mode block.
     expect(root).toContain(EMPTY_DELIVERY_MARKER);
     expect(child).not.toContain(EMPTY_DELIVERY_MARKER);
     expect(nested).not.toContain(EMPTY_DELIVERY_MARKER);
     expect(scheduled).not.toContain(EMPTY_DELIVERY_MARKER);
-    expect(personal).toContain(VOICE_MESSAGE_RULES);
-    expect(personal.replace(VOICE_MESSAGE_RULES, "")).not.toContain(EMPTY_DELIVERY_MARKER);
+    expect(personal).not.toContain(EMPTY_DELIVERY_MARKER);
     expect(scheduledPersonal).not.toContain(EMPTY_DELIVERY_MARKER);
     expect(personalChild).not.toContain(EMPTY_DELIVERY_MARKER);
   });
 
-  it("teaches voice replies only where the voice tool is emitted", async () => {
+  it("names voice replies only where the voice tool is emitted and leaves how to the skill", async () => {
     const resolve = (capabilities: ReadonlySet<ExternalGroupToolName>) => createModeBlockResolver({
       loadCapabilities: vi.fn().mockResolvedValue(capabilities),
       loadReactionPolicy: reactionPolicy,
@@ -138,9 +136,10 @@ describe("mode block resolution", () => {
     const groupRoot = await granted(context(grantedAuth));
     const groupChild = await granted({ ...context(grantedAuth), channel: { kind: "subagent" } });
 
-    expect(withoutGrant).not.toContain("send_voice_message");
-    expect(groupRoot).toContain(VOICE_MESSAGE_RULES);
+    expect(withoutGrant).not.toContain("voice message");
     expect(groupRoot).toContain("- answer with a voice message");
+    // Delivery tags and spoken style are in the voice-replies skill, loaded before the call.
+    expect(groupRoot).not.toContain("[warmly]");
     expect(groupChild).not.toContain("send_voice_message");
     expect(groupChild).not.toContain("voice message");
   });

@@ -41,6 +41,20 @@ describe("external group load_skill", () => {
     expect(executeNative).toHaveBeenCalledOnce();
   });
 
+  it("loads a service skill of the turn without the group's skill list", async () => {
+    const executeNative = vi.fn().mockResolvedValue({ loaded: true });
+    const loadGroupSkillAllowlist = vi.fn().mockResolvedValue(new Set());
+    const tool = createExternalGroupLoadSkillTool({ executeNative, loadGroupSkillAllowlist });
+
+    // The turn's catalog holds a service skill only while its tool is granted; the native loader
+    // refuses any skill the turn was not given.
+    await expect(tool.execute({ skill: "group-reminders" }, context())).resolves.toEqual({ loaded: true });
+    expect(loadGroupSkillAllowlist).not.toHaveBeenCalled();
+    // A service procedure of the family zones is not an external group's: the live list decides.
+    await expect(tool.execute({ skill: "schedules" }, context())).rejects.toThrowError(/AGENT_GROUP_SKILL_FORBIDDEN/u);
+    expect(executeNative).toHaveBeenCalledOnce();
+  });
+
   it("denies a revoked grant, an unknown skill and a malformed name before delegation", async () => {
     const executeNative = vi.fn();
     const loadGroupSkillAllowlist = vi.fn().mockResolvedValue(new Set());

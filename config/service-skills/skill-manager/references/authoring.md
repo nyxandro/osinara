@@ -6,9 +6,10 @@ A skill is worth saving only when it carries what you would not know next time: 
 
 - Folder `skills/<name>/` in the personal workspace: `SKILL.md`, and if needed `scripts/` and `references/`.
 - `name`: lowercase Latin letters, digits and hyphens; not the name of a built-in skill.
-- `description`: one line in Russian (the family reads it), up to 1024 characters — what the skill does, the phrases that should load it, direct and indirect, and when not to use it.
-- Body in Russian, under 500 lines: steps in order, each naming the tool or command; a section «Проверка» — what to check before answering; a section «Типичные ошибки» from this conversation. Long material goes to `references/<topic>.md`, linked from the step that needs it, one level deep.
-- No data of a particular person (see the rules in `SKILL.md`): write «подпись этого человека — из его личной памяти», never a name or a path.
+- The whole skill is in English: `description`, headings, steps and notes. Only ready-made text the skill must produce word for word for people, such as a document template or a fixed phrase, stays in its own language.
+- `description`: one line in English saying when to load the skill. It stands in the list of skills on every turn and serves only to pick the skill, so keep it short: a skill with one small job needs one sentence naming the request it serves. Add other phrasings or when not to use it only if the skill could be mistaken for another one. How the skill works belongs in the body, never here.
+- Body under 500 lines: steps in order, each naming the tool or command; a section "Check" — what to check before answering; a section "Common mistakes" from this conversation. Long material goes to `references/<topic>.md`, linked from the step that needs it, one level deep.
+- No data of a particular person (see the rules in `SKILL.md`): write "this person's signature, from their personal memory", never a name or a path.
 
 ## Scripts
 

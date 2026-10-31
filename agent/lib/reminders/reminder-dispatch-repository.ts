@@ -25,6 +25,10 @@ import type { ReminderRecurrenceUnit, ReminderScope } from "./reminder-record.js
 export interface ClaimedReminder {
   /** Who may tap the reminder's buttons: its author, as a Telegram user id. */
   addresseeTelegramUserId: string | null;
+  /** The author's current family role: its files are read with the author's rights. Null in a public chat. */
+  authorRole: "member" | "owner" | "recovery_owner" | null;
+  /** Null for a public chat's reminder: its author has no account here. */
+  authorUserId: string | null;
   buttons: ReplyButtonRows | null;
   content: string;
   delayed: boolean;
@@ -50,6 +54,8 @@ interface ClaimOptions {
 
 interface ClaimedRow {
   addressee_telegram_user_id: string | null;
+  author_role: ClaimedReminder["authorRole"];
+  author_user_id: string | null;
   content: string;
   delayed: boolean;
   due_at: Date;
@@ -222,13 +228,16 @@ export const reminderDispatchRepository = {
              dispatch_started_at = NULL, updated_at = $1
          FROM candidates
          WHERE reminder.id = candidates.id
-         RETURNING reminder.id, reminder.family_id, reminder.owner_user_id, reminder.group_id,
+         RETURNING reminder.id, reminder.family_id, reminder.owner_user_id, reminder.author_user_id, reminder.group_id,
                    reminder.content, reminder.scope, reminder.timezone, reminder.telegram_chat_id,
                     reminder.message_thread_id::text, reminder.forum_topic_id::text,
                     reminder.due_at, reminder.lease_token::text, reminder.reply_buttons,
                    CASE WHEN reminder.scope = 'group' THEN reminder.author_telegram_user_id
                         ELSE (SELECT author.telegram_user_id FROM users AS author WHERE author.id = reminder.author_user_id)
                    END AS addressee_telegram_user_id,
+                   (SELECT membership.role::text FROM family_memberships AS membership
+                     WHERE membership.family_id = reminder.family_id
+                       AND membership.user_id = reminder.author_user_id) AS author_role,
                    CASE WHEN reminder.scope = 'personal' THEN 'private'
                         ELSE (SELECT group_row.telegram_chat_type FROM telegram_groups AS group_row WHERE group_row.id = reminder.group_id)
                    END AS telegram_chat_type,
@@ -244,6 +253,8 @@ export const reminderDispatchRepository = {
       await client.query("COMMIT");
       return claimed.rows.map((row) => ({
         addresseeTelegramUserId: row.addressee_telegram_user_id,
+        authorRole: row.author_role,
+        authorUserId: row.author_user_id,
         buttons: row.reply_buttons,
         content: row.content,
         delayed: row.delayed,

@@ -6,6 +6,7 @@
  * - Action routing: pause and resume become one enabled flag, delete carries the tool call id.
  * - The group descriptor knows no scope or timezone field, so neither can reach the repository.
  * - A Moscow offset is required, so a UTC timestamp cannot move the reminder by three hours.
+ * - A file outside this chat's own folder is refused before anything is stored.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -151,5 +152,16 @@ describe("external group reminder tools", () => {
     await expect(listReminders.execute({ limit: 100 } as never, context))
       .resolves.toEqual({ items: [], nextCursor: null });
     expect(repository.list).toHaveBeenCalledWith(AUTH, { limit: 100 });
+  });
+
+  it("refuses a file outside this chat's folder before storing anything", async () => {
+    const content = "Созвон по проекту\n\n![](/workspace/family/plan.pdf)";
+
+    await expect(manageReminder.execute({ action: "create", content, firstRunAt: "2026-09-12T18:00:00+03:00", recurrence: null } as never, context))
+      .rejects.toMatchObject({ code: "AGENT_REMINDER_INPUT_INVALID", message: expect.stringContaining("подходит /workspace/group/...") });
+    await expect(manageReminder.execute({ action: "update", content, id: REMINDER_ID } as never, context))
+      .rejects.toMatchObject({ code: "AGENT_REMINDER_INPUT_INVALID" });
+    expect(repository.create).not.toHaveBeenCalled();
+    expect(repository.update).not.toHaveBeenCalled();
   });
 });

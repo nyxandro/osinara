@@ -119,6 +119,7 @@ describe("dynamic capability resolver", () => {
     expect(Object.keys(surface ?? {}).sort()).toEqual(
       [
         ...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES,
+        "load_skill",
         "agent",
         "list_reminders",
         "manage_behavior_preference",
@@ -158,29 +159,23 @@ describe("dynamic capability resolver", () => {
     for (const [toolName, definition] of Object.entries(surface ?? {})) expectRuntimeTool(toolName, definition);
   });
 
-  it("emits load_skill only when the external group has a current skill grant", async () => {
+  it("always emits load_skill in an external group without reading its skill list", async () => {
     const attributes = {
       familyId: "family-1",
       groupId: "group-1",
       groupType: "external",
       memoryScopes: ["group"],
-      skillAllowlist: ["behavior-preferences"],
+      skillAllowlist: [],
       telegramChatType: "supergroup",
       toolAllowlist: [],
     };
-    loadGroupSkillAllowlist.mockResolvedValue(new Set(["behavior-preferences"]));
-    expect(await resolve(attributes)).toHaveProperty("load_skill");
-    expect(loadGroupSkillAllowlist).toHaveBeenCalledWith("group-1");
-
-    // A grant revoked since the turn began, or a family skill the owner disabled, is gone.
-    loadGroupSkillAllowlist.mockResolvedValue(new Set());
-    expect(await resolve(attributes)).not.toHaveProperty("load_skill");
-
-    // A failed skill lookup closes only skills; the group's other tools stay.
     loadGroupSkillAllowlist.mockRejectedValue(new Error("database unavailable"));
-    const failed = await resolve(attributes);
-    expect(failed).not.toHaveProperty("load_skill");
-    expect(failed).toHaveProperty("web_search");
+
+    // Which skills load is decided when one is loaded; the descriptor does not depend on the list.
+    const surface = await resolve(attributes);
+    expect(surface).toHaveProperty("load_skill");
+    expect(surface).toHaveProperty("web_search");
+    expect(loadGroupSkillAllowlist).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -248,6 +243,7 @@ describe("dynamic capability resolver", () => {
     expect(Object.keys(surface ?? {}).sort()).toEqual(
       [
         ...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES,
+        "load_skill",
       ].sort(),
     );
     expect(consoleError).toHaveBeenCalledWith(
@@ -300,6 +296,7 @@ describe("dynamic capability resolver", () => {
     expect(Object.keys(surface ?? {}).sort()).toEqual(
       [
         ...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES,
+        "load_skill",
       ].sort(),
     );
     expect(consoleError).toHaveBeenCalledWith(

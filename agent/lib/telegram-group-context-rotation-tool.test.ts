@@ -23,6 +23,7 @@ vi.mock("./telegram-group-administration-repository.js", () => ({
 }));
 
 import manageTelegramGroup from "./tools/manage_telegram_group.js";
+import { serviceSkillsFor } from "./family-skills/service-skills.js";
 import { modeInstructions } from "./prompt/mode-instructions.js";
 
 function context(): ToolContext {
@@ -115,20 +116,26 @@ describe("manage_telegram_group.start_new_context", () => {
     await expect(manageTelegramGroup.execute({
       action: "start_new_context",
       telegramChatId: "Остриков пилит агентов",
-    }, context())).rejects.toThrowError(
-      /Не угадывайте ID.*\{"action":"status"\}.*\{"action":"start_new_context","telegramChatId":"-100/u,
-    );
+    }, context())).rejects.toMatchObject({
+      contract: {
+        example: { action: "start_new_context" },
+        reason: expect.stringMatching(/Не угадывайте ID.*\{"action":"status"\}.*\{"action":"start_new_context","telegramChatId":"-100/u),
+      },
+    });
     expect(requestGroupSessionRotation).not.toHaveBeenCalled();
   });
 
   it("instructs the model to resolve the registered chat before rotating it", () => {
     const instructions = modeInstructions({ environment: "private" });
+    // How to rotate a group's context is in the group-admin skill, loaded before any group change.
+    const procedure = serviceSkillsFor("private", new Set(["manage_telegram_group"]))["group-admin"]!.markdown;
 
     expect(instructions).toContain('`{"action":"status"}`');
-    expect(instructions).toContain("first call `status`");
-    expect(instructions).toContain("copy the chosen group's `startNewContextInput`");
-    expect(instructions).toContain("do not fill the optional fields of other actions");
-    expect(instructions).toContain("all forum topics");
+    expect(instructions).toContain("load the `group-admin` skill");
     expect(instructions).toContain("If the request points to another group, do not call `start_new_context`");
+    expect(procedure).toContain("Before any other group action, call status");
+    expect(procedure).toContain("copy the chosen group's `startNewContextInput`");
+    expect(procedure).toContain("all forum topics");
+    expect(manageTelegramGroup.description).toContain("fill only its fields");
   });
 });

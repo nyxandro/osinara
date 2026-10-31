@@ -22,6 +22,7 @@ import {
 } from "./memory-config.js";
 import type { MemoryAuthorization, MemoryScope } from "./memory-context.js";
 import type { CreateMemoryInput } from "./memory-record.js";
+import { MEMORY_THREAD_RETRY_EXHAUSTED_CODE } from "./memory-thread-candidate-refusal.js";
 import { MemoryThreadCandidateError, type MemoryThreadCandidate } from "./memory-thread-write.js";
 
 type AttemptStatus = "candidate" | "completed" | "pending" | "resolved";
@@ -60,7 +61,7 @@ export interface MemoryThreadCreationReservation {
 
 function retryExhausted(): AppError {
   return new AppError(
-    "AGENT_MEMORY_THREAD_RETRY_EXHAUSTED",
+    MEMORY_THREAD_RETRY_EXHAUSTED_CODE,
     "Отдельную нить не удалось создать после одной уточнённой попытки. Не повторяйте вызов для этого сообщения",
   );
 }

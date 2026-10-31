@@ -28,7 +28,7 @@ describe("GIF replies without KLIPY or image input", () => {
   it("leave no tool and no rules in any conversation", () => {
     expect(buildModeToolSurface({ environment: "private" })).not.toHaveProperty("send_gif");
     expect(buildModeToolSurface({ environment: "family" })).not.toHaveProperty("send_gif");
-    expect(buildModeToolSurface({ capabilities: new Set(), environment: "external", skills: new Set() }))
+    expect(buildModeToolSurface({ capabilities: new Set(), environment: "external" }))
       .not.toHaveProperty("send_gif");
     for (const instructions of [
       modeInstructions({ environment: "private" }),

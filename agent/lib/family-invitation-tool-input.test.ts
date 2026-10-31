@@ -43,7 +43,7 @@ vi.mock("./family-repository.js", () => ({
 }));
 vi.mock("./telegram-delivery.js", () => ({ deliverFamilyInvitation }));
 
-import manageFamilyInvitation from "./tools/manage_family_invitation.js";
+import manageFamilyInvitation, { MANAGE_FAMILY_INVITATION_CALL_EXAMPLES } from "./tools/manage_family_invitation.js";
 
 const context = { callId: "call-1" } as ToolContext;
 
@@ -78,15 +78,18 @@ describe("manage_family_invitation model input", () => {
     expect(schema.properties.action?.enum).toEqual(["create", "approve"]);
   });
 
-  it("rejects the same incomplete approval candidate before HITL and execution", async () => {
+  it("passes an incomplete approval candidate to execution, which refuses it with an example", async () => {
     const invalid = { action: "approve" };
 
-    expect(() => approvalFor(invalid)).toThrowError(
-      /AGENT_FAMILY_INVITATION_INPUT_INVALID.*candidateDisplayName/u,
-    );
-    await expect(manageFamilyInvitation.execute(invalid as never, context)).rejects.toThrowError(
-      /AGENT_FAMILY_INVITATION_INPUT_INVALID.*candidateDisplayName/u,
-    );
+    // Thrown in the approval step, the refusal would end the turn instead of reaching the model.
+    expect(approvalFor(invalid)).toBe("not-applicable");
+    await expect(manageFamilyInvitation.execute(invalid as never, context)).rejects.toMatchObject({
+      contract: {
+        code: "AGENT_FAMILY_INVITATION_INPUT_INVALID",
+        example: MANAGE_FAMILY_INVITATION_CALL_EXAMPLES.approve,
+        reason: expect.stringContaining("candidateDisplayName"),
+      },
+    });
     expect(approveInvitation).not.toHaveBeenCalled();
   });
 
@@ -135,24 +138,26 @@ describe("manage_family_invitation model input", () => {
     expect(approveInvitation).not.toHaveBeenCalled();
   });
 
-  it("rejects unpublished fields before approval", () => {
-    expect(() => approvalFor({ action: "create", familyId: "family-2" })).toThrowError(
-      /AGENT_FAMILY_INVITATION_INPUT_INVALID.*familyId/u,
-    );
+  it("refuses unpublished fields in execution, after an approval step that lets them through", async () => {
+    const invalid = { action: "create", familyId: "family-2" };
+
+    expect(approvalFor(invalid)).toBe("not-applicable");
+    await expect(manageFamilyInvitation.execute(invalid as never, context)).rejects.toMatchObject({
+      contract: { code: "AGENT_FAMILY_INVITATION_INPUT_INVALID", reason: expect.stringContaining("familyId") },
+    });
+    expect(createInvitation).not.toHaveBeenCalled();
   });
 
-  it("documents every action payload and one bounded correction without defaults", () => {
+  it("documents every action payload without defaults", () => {
     const description = manageFamilyInvitation.description;
 
     for (const fragment of [
-      "action=create",
-      "action=approve",
+      '{"action":"create"}',
+      '"action":"approve"',
       "invitationId",
       "candidateTelegramUserId",
       "candidateDisplayName",
-      "required",
-      "no more than once",
-      "Do not guess",
+      "never guess",
     ]) expect(description).toContain(fragment);
   });
 });

@@ -30,6 +30,7 @@ import { SCHEDULE_CHECK_COMMAND_MAX_LENGTH } from "../agent-schedules/agent-sche
 import { resolveCreatedScheduleCheck } from "../agent-schedules/agent-schedule-check-policy.js";
 import { scheduleCheckRepository } from "../agent-schedules/agent-schedule-check-repository.js";
 import { runScheduleCheckIn } from "../agent-schedules/agent-schedule-check-runner.js";
+import { withCallExamples, type CallExamples } from "../tool-call-examples.js";
 import { escapeUntrustedContextJson } from "../untrusted-context-json.js";
 import { AGENT_SCHEDULE_PAUSE_NOTE, agentScheduleMaxRunsField, requireAgentScheduleMaxRuns } from "../agent-schedules/agent-schedule-limits.js";
 
@@ -407,22 +408,41 @@ async function requireCheckWaiting(sandbox: Parameters<typeof runScheduleCheckIn
 }
 
 const TOOL_DESCRIPTION = [
-  "Create, change, pause, resume, run now or delete an agent schedule: at the set time the agent runs with a scenario and sends the result.",
-  "This is not a reminder with ready-made text; that is manage_reminder. Find an existing schedule through list_agent_schedules first.",
-  "An explicit user request is enough: do it without additional confirmation. Ask only for missing or ambiguous data.",
+  "Create, change, pause, resume, run now or delete an agent schedule: at the set time the agent runs with a scenario and sends the result. Load the schedules skill first: it holds the scenario, wake-up and monitor rules.",
+  "Not a reminder with ready-made text; that is manage_reminder. Take the id of an existing schedule from list_agent_schedules.",
   "Create payload: {\"action\":\"create\",\"executionContext\":\"isolated\",\"title\":\"Дайджест: новые модели ИИ\",\"firstRunAt\":\"2026-07-15T23:33:00+03:00\",\"timezone\":\"Europe/Moscow\",\"recurrence\":{\"kind\":\"daily\",\"interval\":1},\"scope\":\"personal\",\"scenarioPrompt\":\"What to collect, the sources, filters, the format of the final message and when not to send an empty report\",\"userRequest\":\"ежедневно в 23:33 МСК получать сводку\"}.",
-  "executionContext is required in create: conversation is a wake-up in this conversation with the whole history to continue the current task, and then maxRuns is required; isolated is a separate run with an empty context for independent reports.",
-  "A scenario run only reads Google Workspace: before creating one that needs a Google change, tell the user it will only report what to do.",
-  "Update passes id and only the fields that actually change; do not pass firstRunAt, timezone, scope or executionContext in update. Pause, resume, run_now and delete pass only action and id.",
+  "executionContext is required in create: isolated is a separate run with an empty context for independent reports; conversation is a wake-up that continues the current task in this conversation with its whole history, and then maxRuns is required.",
+  "A scenario run only reads Google Workspace: before creating one that needs a Google change, tell the person it will only report what to do.",
+  "Update passes id and only the fields that change, never firstRunAt, timezone, scope or executionContext; keep the id instead of deleting and re-creating. Pause, resume, run_now and delete pass only action and id.",
   AGENT_SCHEDULE_PAUSE_NOTE,
   "To pause from the scenario itself, use schedule_id from scheduled_agent_run.",
-  "Do not delete and re-create a schedule to change the time, recurrence, title, scenario or original request: use update, keeping the existing id.",
-  "Recurrence: once = {\"kind\":\"once\"}; a repeat = {\"kind\":\"hourly\",\"interval\":1}. kind: minutely, hourly, daily, monthly, yearly means every N minutes, hours, days, months, years. interval is an integer from 1 to 365; the minimum period is 1 minute. For weeks pass {\"kind\":\"weekly\",\"interval\":1,\"daysOfWeek\":[1,2,3,4,5]}, ISO 1=Monday ... 7=Sunday.",
-  "How repeats are counted is described in the scenario rules.",
-  "firstRunAt and nextRunAt are always an ISO datetime with a UTC offset. timezone is always IANA, for example Europe/Moscow. scope: personal only in a private chat, family only in a registered family group.",
+  "Recurrence: once = {\"kind\":\"once\"}; a repeat = {\"kind\":\"hourly\",\"interval\":1} with kind minutely, hourly, daily, monthly or yearly and interval 1-365; weeks = {\"kind\":\"weekly\",\"interval\":1,\"daysOfWeek\":[1,2,3,4,5]}, ISO 1=Monday ... 7=Sunday.",
+  "firstRunAt and nextRunAt are ISO datetimes with a UTC offset, timezone is IANA. scope: personal in a private chat, family in a registered family group.",
 ].join(" ");
 
-export default defineTool({
+export const MANAGE_AGENT_SCHEDULE_CALL_EXAMPLES: CallExamples = {
+  create: {
+    isolated: {
+      action: "create", executionContext: "isolated", title: "Дайджест: новые модели ИИ", firstRunAt: "2026-07-15T23:33:00+03:00",
+      timezone: "Europe/Moscow", recurrence: { kind: "daily", interval: 1 }, scope: "personal",
+      scenarioPrompt: "Собери новости о моделях ИИ за сутки из надёжных источников и пришли короткую сводку со ссылками; если новостей нет, промолчи.",
+      userRequest: "ежедневно в 23:33 МСК получать сводку",
+    },
+    conversation: {
+      action: "create", executionContext: "conversation", title: "Ждём доставку посылки", firstRunAt: "2026-07-15T12:00:00+03:00",
+      timezone: "Europe/Moscow", recurrence: { kind: "minutely", interval: 30 }, maxRuns: 12, scope: "personal",
+      scenarioPrompt: "Проверь статус посылки по ссылке из разговора; когда она доставлена, скажи об этом и останови пробуждение.",
+      userRequest: "скажи, когда привезут посылку",
+    },
+  },
+  update: { action: "update", id: "<id из list_agent_schedules>", nextRunAt: "2026-07-16T09:00:00+03:00" },
+  pause: { action: "pause", id: "<id из list_agent_schedules>" },
+  resume: { action: "resume", id: "<id из list_agent_schedules>" },
+  run_now: { action: "run_now", id: "<id из list_agent_schedules>" },
+  delete: { action: "delete", id: "<id из list_agent_schedules>" },
+};
+
+export default withCallExamples(defineTool({
   // Repeating it after a crash is safe: its effect is keyed on the call id.
   replaySafe: true,
   description: TOOL_DESCRIPTION,
@@ -469,4 +489,4 @@ export default defineTool({
       deleted: await agentScheduleRepository.delete(authorization, parsed.id, ctx.callId),
     };
   },
-});
+}), MANAGE_AGENT_SCHEDULE_CALL_EXAMPLES);

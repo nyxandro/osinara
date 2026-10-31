@@ -57,22 +57,21 @@ describe("voice message tool surface", () => {
         .not.toHaveProperty("send_voice_message");
       expect(buildSubagentToolSurface({ environment })).not.toHaveProperty("send_voice_message");
     }
-    expect(buildModeToolSurface({ capabilities: new Set(), environment: "external", skills: new Set<string>() }))
+    expect(buildModeToolSurface({ capabilities: new Set(), environment: "external" }))
       .not.toHaveProperty("send_voice_message");
-    expect(buildModeToolSurface({ capabilities: GRANTED, environment: "external", skills: new Set<string>() }))
+    expect(buildModeToolSurface({ capabilities: GRANTED, environment: "external" }))
       .toHaveProperty("send_voice_message");
     expect(buildModeToolSurface({
       capabilities: GRANTED,
       environment: "external",
       scheduledRun: true,
-      skills: new Set<string>(),
     })).not.toHaveProperty("send_voice_message");
-    expect(buildSubagentToolSurface({ capabilities: GRANTED, environment: "external", skills: new Set<string>() }))
+    expect(buildSubagentToolSurface({ capabilities: GRANTED, environment: "external" }))
       .not.toHaveProperty("send_voice_message");
   });
 
   it("denies an external call after live capability revocation", async () => {
-    const surface = buildModeToolSurface({ capabilities: GRANTED, environment: "external", skills: new Set<string>() });
+    const surface = buildModeToolSurface({ capabilities: GRANTED, environment: "external" });
     const context = { session: { auth: externalAuth() } } as never;
 
     await expect(surface.send_voice_message!.execute({ text: "Привет" }, context))
@@ -84,21 +83,21 @@ describe("voice message tool surface", () => {
   });
 
   it("does not expose a workspace scope as model input", () => {
-    const schema = buildModeToolSurface({ capabilities: GRANTED, environment: "external", skills: new Set<string>() })
+    const schema = buildModeToolSurface({ capabilities: GRANTED, environment: "external" })
       .send_voice_message!.inputSchema as z.ZodType;
 
     expect(schema.safeParse({ text: "Привет" }).success).toBe(true);
     expect(schema.safeParse({ scope: "group", text: "Привет" }).success).toBe(false);
   });
 
-  it("lets the owner grant the capability and teaches it only in interactive group turns", () => {
+  it("lets the owner grant the capability and names it only in interactive group turns", () => {
     expect(GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES).toContain("send_voice_message");
     const interactive = modeInstructions({ capabilities: GRANTED, environment: "external", includeApplicationCore: true });
     const scheduled = modeInstructions({
       capabilities: GRANTED, environment: "external", includeApplicationCore: true, scheduledRun: true,
     });
 
-    expect(interactive).toContain("`send_voice_message`");
-    expect(scheduled).not.toContain("send_voice_message");
+    expect(interactive).toContain("answer with a voice message");
+    expect(scheduled).not.toContain("voice message");
   });
 });

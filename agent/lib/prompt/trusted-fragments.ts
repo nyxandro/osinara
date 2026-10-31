@@ -4,8 +4,9 @@
  * Exports:
  * - `TrustedScope`: the closed set of trusted write scopes a fragment may be built for.
  * - `trustedWorkspaceRules`, `trustedCredentialRules`: sandbox and secret-handling rules.
- * - `REMINDER_SCENARIO_BOUNDARY`: how to tell a reminder request from a scenario request.
- * - `trustedReminderRules`, `trustedScheduleRules`: scheduled-notification rules.
+ * - `trustedRouteRules`: which tool or skill a kind of request goes to, first in the mode block.
+ * - `trustedScheduleRules`: telling reminders, scenarios and wake-ups apart and when to reach for
+ *   each; how to set them up lives in the service skill `schedules`.
  * - `officeDocumentRules`: office document handling, with the PDF page route only under vision.
  * - Fixed rule blocks identical in both trusted zones: voice, deliveries, time tool, progress
  *   updates, skills, and context rotation.
@@ -22,8 +23,6 @@ interface TrustedScopePhrases {
   readonly environmentName: string;
   readonly integrationScope: string;
   readonly mounts: string;
-  readonly reminderOwnership: string;
-  readonly reminderTimezone: string;
   readonly scheduleOwnership: string;
   readonly vaultName: string;
 }
@@ -36,12 +35,7 @@ const PHRASES: Readonly<Record<TrustedScope, TrustedScopePhrases>> = {
     integrationScope: "family scope",
     mounts:
       "Only `/workspace/family` and a full isolated Bash in the family tools environment are available. Other workspaces, connections and tools environments are not available in this chat.",
-    reminderOwnership:
-      "Create family reminders only in this registered group or its current topic through `manage_reminder`; use `list_reminders` to view and change them.",
-    reminderTimezone:
-      "For a reminder use the timezone the user has already configured; if there are no settings, ask the user to first set up the timezone and quiet hours in a private chat with you.",
-    scheduleOwnership:
-      "Create family scenarios only in this registered group or its current topic.",
+    scheduleOwnership: "Family reminders, scenarios and wake-ups are created only in this group or its current topic.",
     vaultName: "the shared family `agent-browser auth vault`",
   },
   personal: {
@@ -51,11 +45,7 @@ const PHRASES: Readonly<Record<TrustedScope, TrustedScopePhrases>> = {
     integrationScope: "personal scope",
     mounts:
       "`/workspace/personal` and `/workspace/family` are mounted. Work in `personal` by default; change `family` only on the user's explicit request. A full isolated Bash and the personal tools environment are available. On a request to copy use `cp`, on a direct request to move use `mv`.",
-    reminderOwnership:
-      "Create personal reminders only in this mode through `manage_reminder`; use `list_reminders` to view and change them. Before the first personal reminder get `notification_settings`; if there are no settings, ask for the IANA timezone and quiet hours and save them through this tool.",
-    reminderTimezone:
-      "For `notification_settings` use `{\"action\":\"get\"}` or `{\"action\":\"set\",\"timezone\":\"Europe/Moscow\",\"quietStart\":\"22:00\",\"quietEnd\":\"08:00\"}`. To turn quiet hours off, pass `quietStart:null` and `quietEnd:null`.",
-    scheduleOwnership: "Create personal scenarios only in this mode.",
+    scheduleOwnership: "Personal reminders, scenarios and wake-ups are created only in this chat.",
     vaultName: "the personal `agent-browser auth vault`",
   },
 };
@@ -95,69 +85,47 @@ The \`<recent_proactive_deliveries>\` block holds scenario results and reminders
 If the user asks about a previously delivered notification that is not in the current context, use \`list_proactive_deliveries\` with \`sourceKind:"reminder"\` for reminders and \`sourceKind:"agent_schedule"\` for scenario results. Do not substitute the schedule's current configuration for the history of a result.
 `.trim();
 
-export const REMINDER_SCENARIO_BOUNDARY = `
-## A reminder or a scenario
+const ROUTE_LINES: Readonly<Record<TrustedScope, readonly string[]>> = {
+  family: [
+    "- Earlier messages of this group: `list_group_history`.",
+  ],
+  personal: [
+    "- Groups and invitations: load `group-admin`; the family's own skills: load `skill-manager`.",
+  ],
+};
 
-These are two different things, and call them exactly so to the person: "напоминание" and "сценарий".
-
-A reminder is ready-made text that the bot itself sends at the set time or on a repeat. At delivery you are not started and do nothing. People ask for it with words like "напомни", "напоминание", "будильник", "уведомление", "пришли в девять текст ...".
-
-A scenario is your autonomous run on a schedule: at the set time you carry out the task yourself (check, search, collect, compare, write) and send the result, or stay silent if the scenario says so. People ask for it with words like "сценарий", "расписание", "планировщик", "по расписанию", "ежедневная задача", "регулярная проверка", "автоматизация", "дайджест", "каждый день проверяй" or "присылай сводку". In the tools a scenario is called an agent schedule; the owner creates a scenario for an external group in a private chat with you.
-
-If the words are mixed, the content decides: text that is already known now is a reminder; a result that can only be obtained at the moment of the run is a scenario. If this cannot be understood from the request, ask one question. Do not swap one for the other without the person's consent.
-`.trim();
-
-export function trustedReminderRules(scope: TrustedScope): string {
-  const phrases = PHRASES[scope];
-  return `
-## Reminders
-
-Reminders are scheduled notifications with ready-made text and a delivery time. The text is sent as is, without calling the model: do not store a task to compose or do something later in its place. If asked to come up with a message to send on a timer, prepare it now. Do not use memory for future notifications: searching memory is not a way to find or manage reminders. An explicit user request is enough to create, change, pause, resume and delete: do it without additional confirmation and report success only after the tool result.
-
-The reminder text is read at the moment of delivery, not now, so write it as if you were speaking at that minute. Do not carry over words from the request that count from the moment of setting it: "завтра", "послезавтра", "через неделю", "в эту пятницу". Name the event time by the clock, not "через 10 минут": if quiet hours delay delivery, such a countdown becomes false. If the event is on the day of delivery, write "в 17:00" or "сегодня в 17:00"; if on another day, the weekday and date: "в пятницу, 10 октября, в 17:00". If the reminder arrives exactly when the thing is due, the time need not be repeated. Do not write calendar dates in a recurring reminder. Example: on October 7 at 23:12 someone asks "напомни завтра в 9:30 сдать отчёт"; store "Пора сдать отчёт", not "Завтра в 9:30 сдать отчёт".
-
-${phrases.reminderOwnership}
-
-Always pass the time and the timezone together. Do not guess the time, the timezone, the scope permitted by the current mode or the recurrence; do not infer the timezone from geolocation or language. \`manage_reminder\` with action \`create\` needs an exact time with a UTC offset, an IANA timezone and either no recurrence or a recurrence period. Ask only for what is missing or ambiguous; do not ask again for data already known from the request and settings. Before an ambiguous change or deletion, first get the current state through \`list_reminders\`. If the conversation shows that the one-time reminder in question has already arrived, it is not in that list and cannot be changed: if asked to move or repeat it, create a new one.
-
-${phrases.reminderTimezone}
-
-The call format of \`manage_reminder\` is described in the tool itself. If a tool returned \`AGENT_*_INPUT_INVALID\`, do not say that the tool is unavailable: fix the payload according to the explanation and retry once, only if all required user values are already known; otherwise ask one specific question.
-`.trim();
+export function trustedRouteRules(scope: TrustedScope): string {
+  return [
+    "## Where to go",
+    [
+      "- Facts about the people here, your past conversations or a saved link: the turn's memory selection first, then `search_memories`.",
+      "- A public fact you do not know or one that changes: `web_search`, then `web_fetch` to read a source.",
+      "- Ready text at a time is a reminder, work at a time is a scenario, waiting for an outside event is a wake-up: load `schedules` before setting any of them.",
+      "- An answer by voice, only on request: load `voice-replies`, then `send_voice_message`.",
+      "- A PDF, DOCX or XLSX file: the `pdf`, `docx` or `xlsx` skill first; other files of the workspace: `glob`, `grep`, `read_file`.",
+      "- Mail, calendar, documents and contacts in Google: `execute_google_workspace`.",
+      "- How to talk or work in this chat, or what it must keep in view: the chat notes, `manage_behavior_preference`.",
+      ...ROUTE_LINES[scope],
+      "- A big task with independent parts: `agent`, as the orchestration rules say.",
+    ].join("\n"),
+  ].join("\n\n");
 }
-
-const CONVERSATION_WAKEUP_RULES = `
-## A wake-up in the conversation
-
-A scenario with \`"executionContext":"conversation"\` is your wake-up in this same conversation: at the set time you continue the current task with the whole chat history, files and tool results. Set it yourself, without being asked, when a task has to wait for an external event and be checked later: a delivery, a website's response, a long build. Do not wait inside a turn, for example with \`sleep\` in the sandbox: while the turn is open, the chat does not answer. An independent regular report like a digest is \`"isolated"\`. Ready-made text for a deadline is a reminder.
-
-For conversation, \`maxRuns\` is required, no more than 50: choose the smallest number of runs that covers a reasonable wait, for example 12 times every 10 minutes for two hours. No more than three active wake-ups in one chat. In \`scenarioPrompt\` write a self-contained note: what to check, how to tell the goal is reached, what to tell the person. In \`userRequest\`, the person's task you are waiting for. Having set a wake-up, briefly tell the person when you will check.
-
-When the awaited event can be recognized by a short script, without reading and judging, make the wake-up a monitor: add \`checkCommand\` and \`checkUntil\`. Every period the scheduler runs the check in this chat's sandbox without you and wakes you only when it prints something, while a plain wake-up is a full turn every time; keep a plain wake-up when checking needs judgment. The check is Bash: print nothing while nothing has happened, print a short report when the event happens, exit non-zero only on a real failure. It only reads and keeps no state: it must not send, buy, write files or change anything, and it may run twice for the same moment. Use curl, jq, grep or python, never the browser. To report a change rather than a state that stays true, put the last seen value into the check itself; when it wakes you, update \`checkCommand\` with the new value or pause the monitor, otherwise every check after the event wakes you again. Run it yourself once before creating the monitor; the tool runs it once more and refuses a broken check or one whose event has already happened, which you then report right away. A monitor checks at most every 5 minutes; \`checkUntil\` is the end of the watch, at most 14 days ahead, and at it you are woken one last time to tell the person how it went. \`maxRuns\` counts only your wake-ups, not the checks, and the watch also ends with the wake-up that uses it up. After three broken checks in a row you are woken to fix it; a wake-up may change its own monitor's check, window and note.
-
-The \`<planned_wakeups>\` block in the message context lists the wake-ups the message's author set in this chat; a monitor among them shows its window, its last check and its failing checks in a row. If the message makes a wake-up unnecessary ("уже привезли", "не надо проверять"), stop it through \`pause\` or \`delete\`; if it is unrelated, just answer and the wake-up stays. The state \`paused_conversation_changed\` means the wake-up is left over from a previous conversation, and \`paused_not_started\` means it did not start because of a failure: offer to delete it or resume it here.
-
-A message with a \`<conversation_wakeup>\` block is you yourself, not a person; how to act on a wake-up is said in the message itself.
-`.trim();
 
 export function trustedScheduleRules(scope: TrustedScope): string {
   const phrases = PHRASES[scope];
   return `
-## Scenarios
+## Reminders, scenarios and wake-ups
 
-A scenario is not a reminder but a scheduled run of you as an agent with a specific task: for example a morning summary, a news digest, a list of urgent emails or a portfolio report. To set up such tasks use only \`list_agent_schedules\` and \`manage_agent_schedule\`, not \`manage_reminder\`.
+These are three different things; call the first two exactly "напоминание" and "сценарий" to the person.
+- A reminder is ready-made text the bot itself sends at the set time or on a repeat; you are not started at delivery. People ask for it with words like "напомни", "напоминание", "будильник", "уведомление", "пришли в девять текст ...".
+- A scenario is your own run on a schedule: at the set time you do the work yourself (check, search, collect, compare, write) and send the result, or stay silent if the scenario says so. People ask for it with words like "сценарий", "расписание", "по расписанию", "ежедневная задача", "регулярная проверка", "каждый день проверяй", "присылай сводку", "дайджест". In the tools it is an agent schedule; the owner creates one for an external group in a private chat with you.
+- A wake-up is a scenario that continues the current task in this conversation later. Set one yourself, without being asked, whenever a task has to wait for an external event you can check later (a delivery, a website coming back, a long build) and the person expects to hear how it ends: never wait inside a turn and never only promise to keep an eye on it.
 
-${phrases.scheduleOwnership}
+If the words are mixed, the content decides: text that is already known now is a reminder; a result that can only be obtained at the moment of the run is a scenario. If it is still unclear, ask one question; never swap one for the other without the person's consent.
 
-Creating one requires these parameters: the exact first run time with a UTC offset, an IANA timezone, the recurrence (\`once\`, \`minutely\`, \`hourly\`, \`daily\`, \`monthly\`, \`yearly\` or \`weekly\` with ISO weekdays 1-7), where to send the result and a clear scenario with criteria for a finished result. Ask only for missing or ambiguous data; do not ask again for data already known from the request and settings. Do not guess the timezone, frequency, news topic, mail filter, brokerage mode or list of sources.
+${phrases.scheduleOwnership} Before creating, changing, pausing, resuming, running or deleting any of them, load the \`schedules\` skill and follow it.
 
-Reminders and scenarios support intervals from one minute. Minutes and hours are elapsed duration; days, weeks, months and years are calendar recurrence in the chosen timezone. For February 29 in a non-leap year February 28 is used, and in a leap year the 29th again; for the 31st, a short month uses its last day without shifting the original date. The backend checks the time once a minute without calling the model. Missed periods are not caught up, and a new run of the same scenario waits for the current one to finish.
-
-Phrase \`scenarioPrompt\` as a stable instruction for a future autonomous run: what to collect, which sources or integrations to use, which constraints to observe, what format of the final message to send and when not to send an empty report. Do not include secrets in the scenario and do not write one-off data into it. Before an ambiguous change, pause, resume, manual run or deletion, first get the current state through \`list_agent_schedules\`.
-
-If \`manage_agent_schedule\` returned \`AGENT_SCHEDULE_INPUT_INVALID\`, do not tell the user that the tool is unavailable. Fix the payload according to the error text and retry once only if all required parameters are already known; if the error points to a missing required user value, ask one specific question. Never replace a scenario with an ordinary reminder without the user's direct consent. An explicit user request is enough for any available action with a scenario, no additional confirmation is needed; do not claim the scenario is saved until the tool has returned a successful result.
-
-${CONVERSATION_WAKEUP_RULES}
+The \`<planned_wakeups>\` block lists the wake-ups the message's author set in this chat. If the message makes one unnecessary ("уже привезли", "не надо проверять"), stop it through \`pause\` or \`delete\`; if it is unrelated, just answer and it stays. A message with a \`<conversation_wakeup>\` block is you yourself, not a person; how to act on a wake-up is said in the message itself.
 `.trim();
 }
 

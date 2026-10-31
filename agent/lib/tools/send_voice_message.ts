@@ -289,8 +289,9 @@ export function createSendVoiceMessageTool(dependencies: SendVoiceMessageDepende
     // Repeating it after a crash is safe: its effect is keyed on the call id.
     replaySafe: true,
     description: [
-      "Only on an explicit request to answer by voice: speak text through ElevenLabs and send it as a voice message to the current chat.",
-      "Write text as live speech; pass links and data that are awkward to listen to in caption.",
+      "Only when the current message explicitly asks to answer by voice or to send a voice message: speak text through ElevenLabs and send it as a voice message to the current chat.",
+      "Without such a request answer with text, even if the person sent a voice message; one request does not switch later answers to voice.",
+      "Load the voice-replies skill before the call: text is live speech with numbers in words and no markup, and links or data go to caption.",
       "After delivered=true follow nextStep; on an error follow correction and do not repeat the call.",
     ].join(" "),
     inputSchema,

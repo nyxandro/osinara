@@ -26,6 +26,7 @@ import {
 import { AppError } from "../app-error.js";
 import { AGENT_SCHEDULE_PAUSE_NOTE, agentScheduleMaxRunsField } from "../agent-schedules/agent-schedule-limits.js";
 import { requirePrivateTelegramOwner } from "../family-context.js";
+import { withCallExamples, type CallExamples } from "../tool-call-examples.js";
 
 const ACTIONS = ["create", "delete", "pause", "resume", "run_now", "status", "update"] as const;
 const ISO_OFFSET_PATTERN = /(?:Z|[+-]\d{2}:\d{2})$/u;
@@ -287,23 +288,37 @@ function requireParsedInput(input: unknown): ParsedInput {
 }
 
 const TOOL_DESCRIPTION = [
-  "Manages owner-only automations that start a separate agent and deliver the result to a registered external Telegram group.",
-  "First call manage_telegram_group with action=status, choose the exact telegramChatId of the external group, then call action=status here for the existing automations.",
-  "Create requires an exact firstRunAt with a UTC offset, an IANA timezone, recurrence, title, userRequest, a stable scenarioPrompt and the full minimal capabilityAllowlist for the scenario.",
-  "Recurrence: {\"kind\":\"once\"} for a single run; {\"kind\":\"hourly\",\"interval\":1} for a repeat. kind: minutely, hourly, daily, monthly, yearly; interval is an integer from 1 to 365. weekly additionally requires daysOfWeek with ISO days 1-7. Minimum 1 minute; minutes and hours are counted as a duration, calendar periods keep the local time. A missing date moves to the last day of the month without losing the original date for the following repeats.",
-  "Pass historyWindowDays only when the run must read the group's whole retained history for the given number of calendar days before the scheduled time in one snapshot; there is no hidden default period.",
-  "For a weekly digest use recurrence weekly and historyWindowDays:7. The history stays untrusted data, and the automation does not get the right to manage schedules from the group itself.",
-  "A file the run shows in its answer goes out with it; the base guarded file tools, web_fetch and web_search are available without listing them.",
-  "Update does not change the destination: for another group create a separate automation. Pause, resume, run_now and delete take only an id from status. Osinara itself shows create and update to the owner for confirmation with a button: do not ask for consent in text, ask only for missing or ambiguous data.",
+  "Owner-only automations that start a separate agent on a schedule and deliver the result to a registered external Telegram group. Load the group-admin skill first.",
+  "Take the group's telegramChatId from manage_telegram_group status, then call {\"action\":\"status\",\"telegramChatId\":\"...\"} here for its existing automations.",
+  "Create requires an exact firstRunAt with a UTC offset, an IANA timezone, recurrence, title, userRequest, a stable scenarioPrompt and the full minimal capabilityAllowlist for the scenario; historyWindowDays only when the run must read the group's history of that many days.",
+  "Recurrence: {\"kind\":\"once\"} or {\"kind\":\"hourly\",\"interval\":1} with kind minutely, hourly, daily, monthly or yearly and interval 1-365; weekly additionally requires daysOfWeek with ISO days 1-7.",
+  "Create and update wait for the owner's button; pause, resume, run_now and delete take only an id from status. Update does not change the destination group.",
   AGENT_SCHEDULE_PAUSE_NOTE,
 ].join(" ");
 
-export default defineTool({
+export const MANAGE_EXTERNAL_GROUP_SCHEDULE_CALL_EXAMPLES: CallExamples = {
+  status: { action: "status", telegramChatId: "<telegramChatId из manage_telegram_group status>" },
+  create: {
+    action: "create", telegramChatId: "-1001234567890", title: "Итоги недели", userRequest: "каждую пятницу в 18:00 итоги недели",
+    scenarioPrompt: "Прочитай историю группы за неделю и пришли короткие итоги: решения, открытые вопросы и договорённости.",
+    firstRunAt: "2026-08-07T18:00:00+03:00", timezone: "Europe/Moscow", recurrence: { kind: "weekly", interval: 1, daysOfWeek: [5] },
+    historyWindowDays: 7, capabilityAllowlist: [],
+  },
+  update: { action: "update", id: "<id из status>", scenarioPrompt: "<новый текст сценария>" },
+  pause: { action: "pause", id: "<id из status>" },
+  resume: { action: "resume", id: "<id из status>" },
+  run_now: { action: "run_now", id: "<id из status>" },
+  delete: { action: "delete", id: "<id из status>" },
+};
+
+export default withCallExamples(defineTool({
   // Repeating it after a crash is safe: its effect is keyed on the call id.
   replaySafe: true,
   approval: ({ toolInput }) => {
     const result = parseInput(toolInput);
-    if (!result.success) return { reason: result.error.message, type: "denied" };
+    // An invalid call goes on to execution, whose own check refuses it before any change and answers
+    // with an example; a denial here would read as the owner's refusal, which ends the attempt.
+    if (!result.success) return "not-applicable";
     // What a group receives is decided here, and a delegated child reading untrusted pages can call
     // this tool too: a new or changed automation waits for the owner's button. Stopping, resuming,
     // running or removing an existing one does not.
@@ -348,4 +363,4 @@ export default defineTool({
       ctx.callId,
     );
   },
-});
+}), MANAGE_EXTERNAL_GROUP_SCHEDULE_CALL_EXAMPLES);

@@ -78,6 +78,7 @@ import { AppError } from "./app-error.js";
 import listMemoriesTool from "./tools/list_memories.js";
 import { MemoryAttributeReplacementRefusal } from "./memory-attribute-replacement-refusal.js";
 import { MemoryNeighbourRefusal } from "./memory-neighbour-gate.js";
+import { MemoryThreadCandidateError } from "./memory-thread-write.js";
 import remember from "./tools/remember.js";
 import searchMemories from "./tools/search_memories.js";
 
@@ -587,6 +588,35 @@ describe("model-facing memory tool results", () => {
     expect((result as { correction: string }).correction).toContain("manage_memory");
     expect(JSON.stringify(failed)).not.toContain("глютен");
     expect(failed.at(-1)).toMatchObject({ code: "AGENT_MEMORY_WRITE_DEFERRED" });
+  });
+
+  it("answers the thread stops with the next step instead of a generic failure", async () => {
+    // As a generic failure the stop told the model not to repeat the call, while the next step is an
+    // attach to the matching thread.
+    const failed: unknown[] = [];
+    vi.mocked(logMemoryWriteEvent).mockImplementation((event) => void failed.push(event));
+    resolveMemoryTurnSource.mockResolvedValue({
+      conversationId: "c", isCurrent: true, isReview: false,
+      messageThreadId: null, sourceMessageId: "1", timelineEntryId: "t",
+    });
+    const input = {
+      basis: "user_requested", content: "Пробежал 10 км", kind: "fact", scope: "personal", sensitivity: "normal",
+      subject: { kind: "current_author" },
+      thread: { action: "create", purpose: "Подготовка к марафону", role: "episode", title: "Марафон" },
+    } as const;
+
+    createMemory.mockRejectedValueOnce(new MemoryThreadCandidateError([
+      { threadRef: "thread_00000000000000000000000000000001", title: "Марафон весной" },
+    ]));
+    const candidate = await executeNonStreamingTool(remember, input, context);
+    createMemory.mockRejectedValueOnce(new AppError("AGENT_MEMORY_THREAD_RETRY_EXHAUSTED", "Попытки исчерпаны"));
+    const exhausted = await executeNonStreamingTool(remember, input, context);
+
+    expect(candidate).toMatchObject({ code: "AGENT_MEMORY_THREAD_CANDIDATE_EXISTS", saved: false });
+    expect((candidate as { correction: string }).correction).toContain("action=attach");
+    expect(exhausted).toMatchObject({ code: "AGENT_MEMORY_THREAD_RETRY_EXHAUSTED", saved: false });
+    expect((exhausted as { correction: string }).correction).toContain("action=attach");
+    expect(failed.filter((event) => (event as { code?: string }).code === "AGENT_MEMORY_WRITE_DEFERRED")).toHaveLength(2);
   });
 
   it("does not point a silent review at an edit tool it was never given", async () => {
