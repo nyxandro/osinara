@@ -24,7 +24,7 @@ vi.mock("./telegram-group-administration-repository.js", () => ({
   telegramGroupAdministrationRepository: repositories,
 }));
 
-import manageTelegramGroup from "./tools/manage_telegram_group.js";
+import manageTelegramGroup, { MANAGE_TELEGRAM_GROUP_CALL_EXAMPLES } from "./tools/manage_telegram_group.js";
 
 const caller = {
   attributes: {
@@ -87,9 +87,16 @@ describe("manage_telegram_group model input", () => {
     [{ action: "start_new_context" }, /telegramChatId/u],
     [{ action: "update_policy", telegramChatId: "-1001" }, /messageMode/u],
     [{ action: "update_skills", telegramChatId: "-1001" }, /skillAllowlist/u],
-  ])("rejects the same invalid action before HITL and execution", async (invalid, message) => {
-    expect(() => approvalFor(invalid)).toThrowError(message);
-    await expect(manageTelegramGroup.execute(invalid as never, context)).rejects.toThrowError(message);
+  ])("passes an invalid action through approval and refuses it in execution with an example", async (invalid, message) => {
+    // Thrown in the approval step, the refusal would end the turn instead of reaching the model.
+    expect(approvalFor(invalid)).toBe("not-applicable");
+    await expect(manageTelegramGroup.execute(invalid as never, context)).rejects.toMatchObject({
+      contract: {
+        code: "AGENT_TELEGRAM_GROUP_INPUT_INVALID",
+        example: MANAGE_TELEGRAM_GROUP_CALL_EXAMPLES[invalid.action],
+        reason: expect.stringMatching(message),
+      },
+    });
   });
 
   it("keeps valid status and context rotation outside HITL", () => {
@@ -100,7 +107,7 @@ describe("manage_telegram_group model input", () => {
     })).toBe("not-applicable");
   });
 
-  it("ignores only published MiniMax siblings and rejects unpublished fields before HITL", () => {
+  it("ignores only published MiniMax siblings and refuses unpublished fields in execution", async () => {
     expect(approvalFor({
       action: "remove",
       messageMode: "all",
@@ -109,11 +116,11 @@ describe("manage_telegram_group model input", () => {
       telegramChatId: "-1001234567890",
       toolAllowlist: [],
     })).toBe("user-approval");
-    expect(() => approvalFor({
-      action: "remove",
-      telegramChat: "-1001234567890",
-      telegramChatId: "-1001234567890",
-    })).toThrowError(/AGENT_TELEGRAM_GROUP_INPUT_INVALID.*telegramChat/u);
+    const unpublished = { action: "remove", telegramChat: "-1001234567890", telegramChatId: "-1001234567890" };
+    expect(approvalFor(unpublished)).toBe("not-applicable");
+    await expect(manageTelegramGroup.execute(unpublished as never, context)).rejects.toMatchObject({
+      contract: { code: "AGENT_TELEGRAM_GROUP_INPUT_INVALID", reason: expect.stringContaining("telegramChat") },
+    });
   });
 
   it("returns complete applied registration and replacement policies", async () => {
@@ -159,7 +166,6 @@ describe("manage_telegram_group model input", () => {
       '{"action":"status"}',
       "other actions only flat fields",
       "never guess telegramChatId",
-      "no more than once",
     ]) expect(manageTelegramGroup.description).toContain(fragment);
     // The model gets the enums from the JSON schema; repeating them in prose would cost twice.
     const schema = JSON.stringify(z.toJSONSchema(manageTelegramGroup.inputSchema as z.ZodType));

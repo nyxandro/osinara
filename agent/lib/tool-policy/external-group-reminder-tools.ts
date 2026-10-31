@@ -2,6 +2,7 @@
  * External-group reminder tools.
  *
  * Export:
+ * - `EXTERNAL_GROUP_REMINDER_CALL_EXAMPLES`: the example calls an input refusal of `manage_reminder` carries.
  * - `EXTERNAL_GROUP_REMINDER_TOOLS`: same-name `list_reminders` and `manage_reminder` descriptors
  *   bound to the public-chat reminder boundary.
  *
@@ -27,6 +28,7 @@ import {
 } from "../reminders/reminder-config.js";
 import { requireReminderFiles } from "../reminders/reminder-files.js";
 import { REMINDER_RECURRENCE_UNITS, type ReminderRecurrence } from "../reminders/reminder-record.js";
+import { withCallExamples, type CallExamples } from "../tool-call-examples.js";
 import {
   optionalIsoDate,
   optionalString,
@@ -162,6 +164,14 @@ const LIST_DESCRIPTION = [
   "Result: {items,nextCursor}; if nextCursor is not null, pass it unchanged for the next page.",
 ].join(" ");
 
+export const EXTERNAL_GROUP_REMINDER_CALL_EXAMPLES: CallExamples = {
+  create: { action: "create", content: "Созвон по проекту", firstRunAt: "2026-09-04T18:00:00+03:00", recurrence: null },
+  update: { action: "update", id: "<id из list_reminders>", firstRunAt: "2026-09-04T19:00:00+03:00" },
+  pause: { action: "pause", id: "<id из list_reminders>" },
+  resume: { action: "resume", id: "<id из list_reminders>" },
+  delete: { action: "delete", id: "<id из list_reminders>" },
+};
+
 export const EXTERNAL_GROUP_REMINDER_TOOLS: Readonly<Record<string, AnyToolDefinition>> = {
   list_reminders: defineTool({
     description: LIST_DESCRIPTION,
@@ -173,7 +183,7 @@ export const EXTERNAL_GROUP_REMINDER_TOOLS: Readonly<Record<string, AnyToolDefin
       return await groupReminderRepository.list(requireGroupReminderAuthorization(ctx), input);
     },
   }) as unknown as AnyToolDefinition,
-  manage_reminder: defineTool({
+  manage_reminder: withCallExamples(defineTool({
     description: MANAGE_DESCRIPTION,
     inputSchema: manageReminderSchema,
     async execute(input, ctx) {
@@ -216,5 +226,5 @@ export const EXTERNAL_GROUP_REMINDER_TOOLS: Readonly<Record<string, AnyToolDefin
         deleted: await groupReminderRepository.delete(authorization, parsed.id, ctx.callId),
       };
     },
-  }) as unknown as AnyToolDefinition,
+  }), EXTERNAL_GROUP_REMINDER_CALL_EXAMPLES) as unknown as AnyToolDefinition,
 };

@@ -136,22 +136,20 @@ describe("a model without image input", () => {
       .toEqual(new Set(["remember"]));
   });
 
-  it("removes the capability from the grant contract and explains a refused grant", () => {
-    const approval = manageTelegramGroup.approval;
-    if (typeof approval !== "function") {
-      throw new Error("AGENT_TEST_APPROVAL_CONTRACT_INVALID: manage_telegram_group approval is not callable");
-    }
+  it("removes the capability from the grant contract and explains a refused grant", async () => {
+    const refused = {
+      action: "update_policy",
+      messageMode: "owner_only",
+      telegramChatId: "-1001234567890",
+      toolAllowlist: ["remember", "inspect_workspace_image"],
+    };
 
     expect(GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES).not.toContain("inspect_workspace_image");
     expect(JSON.stringify(manageTelegramGroup.inputSchema)).not.toContain("inspect_workspace_image");
-    expect(() => approval({
-      toolInput: {
-        action: "update_policy",
-        messageMode: "owner_only",
-        telegramChatId: "-1001234567890",
-        toolAllowlist: ["remember", "inspect_workspace_image"],
-      },
-    } as never)).toThrowError(/AGENT_TELEGRAM_GROUP_INPUT_INVALID.*не видит изображения/su);
+    // The approval step lets the call through; the tool's own check refuses it with the reason.
+    await expect(manageTelegramGroup.execute(refused as never, ownerContext())).rejects.toMatchObject({
+      contract: { code: "AGENT_TELEGRAM_GROUP_INPUT_INVALID", reason: expect.stringContaining("не видит изображения") },
+    });
   });
 
   it("reports a grant persisted under a vision model as inert", async () => {

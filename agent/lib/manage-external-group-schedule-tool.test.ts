@@ -114,12 +114,9 @@ describe("manage_external_group_schedule", () => {
     expect(await approvalFor(input)).toBe("not-applicable");
   });
 
-  it("returns a structured denial for schema-invalid approval input", () => {
-    expect(approvalFor(undefined)).toEqual({
-      reason:
-        "AGENT_EXTERNAL_SCHEDULE_INPUT_INVALID: Входные данные не соответствуют схеме manage_external_group_schedule. Проверьте обязательные поля и их типы",
-      type: "denied",
-    });
+  it("lets schema-invalid input through approval to the execution check", () => {
+    // A denial here would read as the owner's refusal and end the attempt instead of a correction.
+    expect(approvalFor(undefined)).toBe("not-applicable");
   });
 
   it.each([3, null])("updates only maxRuns=%s through semantic validation", async (maxRuns) => {
@@ -143,29 +140,26 @@ describe("manage_external_group_schedule", () => {
       .rejects.toMatchObject({ code: "AGENT_EXTERNAL_SCHEDULE_INPUT_INVALID" });
   });
 
-  it("returns a structured denial for semantically incomplete approval input", () => {
-    expect(approvalFor({ action: "create" })).toEqual({
-      reason: "AGENT_EXTERNAL_SCHEDULE_INPUT_INVALID: Для action=create обязательно поле recurrence",
-      type: "denied",
-    });
+  it("lets semantically incomplete input through approval to the execution check", () => {
+    expect(approvalFor({ action: "create" })).toBe("not-applicable");
   });
 
   it.each([
     [
       "schema-invalid",
       {} as never,
-      "AGENT_EXTERNAL_SCHEDULE_INPUT_INVALID: Входные данные не соответствуют схеме manage_external_group_schedule. Проверьте обязательные поля и их типы",
+      "Входные данные не соответствуют схеме manage_external_group_schedule. Проверьте обязательные поля и их типы",
     ],
     [
       "semantic-invalid",
       { action: "create" } as never,
-      "AGENT_EXTERNAL_SCHEDULE_INPUT_INVALID: Для action=create обязательно поле recurrence",
+      "Для action=create обязательно поле recurrence",
     ],
-  ])("rejects %s execution before authorization or repository access", async (_case, input, message) => {
+  ])("rejects %s execution with an example before authorization or repository access", async (_case, input, reason) => {
     await expect(manageExternalGroupSchedule.execute(input, context)).rejects.toMatchObject({
       code: "AGENT_EXTERNAL_SCHEDULE_INPUT_INVALID",
-      message,
-      name: "AppError",
+      contract: { example: expect.any(Object), reason },
+      name: "ModelFacingError",
     });
     expect(dependencies.owner).not.toHaveBeenCalled();
     expect(dependencies.create).not.toHaveBeenCalled();

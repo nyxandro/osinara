@@ -12,9 +12,11 @@
 import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
+import { isAppError } from "../app-error.js";
 import { requirePrivateTelegramOwner } from "../family-context.js";
 import { familyRepository } from "../family-repository.js";
 import { deliverFamilyInvitation } from "../telegram-delivery.js";
+import { withCallExamples, type CallExamples } from "../tool-call-examples.js";
 import {
   requireAction,
   requiredString,
@@ -74,11 +76,23 @@ const TOOL_DESCRIPTION = [
   "Approve: {\"action\":\"approve\",\"invitationId\":\"<UUID from list_pending_family_invitations>\",\"candidateTelegramUserId\":\"123456789\",\"candidateDisplayName\":\"Анна\"}, all three copied exactly from the chosen candidate; never guess them.",
 ].join(" ");
 
-export default defineTool({
+export const MANAGE_FAMILY_INVITATION_CALL_EXAMPLES: CallExamples = {
+  create: { action: "create" },
+  approve: { action: "approve", invitationId: "<UUID из list_pending_family_invitations>", candidateTelegramUserId: "123456789", candidateDisplayName: "Анна" },
+};
+
+export default withCallExamples(defineTool({
   // Repeating it after a crash is safe: its effect is keyed on the call id.
   replaySafe: true,
   approval: ({ toolInput }) => {
-    requireManageFamilyInvitationInput(toolInput);
+    try {
+      requireManageFamilyInvitationInput(toolInput);
+    } catch (error) {
+      // An invalid call goes on to execution, whose own check refuses it before any change and
+      // answers with an example; thrown here, it would end the turn.
+      if (isAppError(error)) return "not-applicable";
+      throw error;
+    }
     return "user-approval";
   },
   description: TOOL_DESCRIPTION,
@@ -123,4 +137,4 @@ export default defineTool({
     }
     return { delivered: true, expiresAt: invitation.expiresAt };
   },
-});
+}), MANAGE_FAMILY_INVITATION_CALL_EXAMPLES);

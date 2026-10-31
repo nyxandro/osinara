@@ -15,6 +15,7 @@ import { z } from "zod";
 import { AppError } from "../app-error.js";
 import { requireReminderAuthorization } from "../reminders/reminder-context.js";
 import { reminderRepository } from "../reminders/reminder-repository.js";
+import { withCallExamples, type CallExamples } from "../tool-call-examples.js";
 import {
   requireAction,
   requiredString,
@@ -84,7 +85,12 @@ const TOOL_DESCRIPTION = [
   "Never guess the timezone or quiet hours: ask the person.",
 ].join(" ");
 
-export default defineTool({
+export const NOTIFICATION_SETTINGS_CALL_EXAMPLES: CallExamples = {
+  get: { action: "get" },
+  set: { action: "set", timezone: "Europe/Moscow", quietStart: "22:00", quietEnd: "08:00" },
+};
+
+export default withCallExamples(defineTool({
   description: TOOL_DESCRIPTION,
   inputSchema: notificationSettingsSchema,
   async execute(input, ctx) {
@@ -102,4 +108,4 @@ export default defineTool({
 
     return await reminderRepository.configureNotifications(authorization, parsed.values);
   },
-});
+}), NOTIFICATION_SETTINGS_CALL_EXAMPLES);

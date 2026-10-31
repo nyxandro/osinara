@@ -1,5 +1,5 @@
 /**
- * Skills of a turn as the runtime resolves them, service skills included.
+ * Skills of a turn as the runtime resolves them (`agent/skills/scoped.ts`), service skills included.
  *
  * Constructs covered:
  * - The service skills follow the real tool surface of each kind of turn: a live private chat, a
@@ -11,18 +11,18 @@ const loadCurrentExternalGroupCapabilities = vi.hoisted(() => vi.fn());
 const loadGroupSkillAllowlist = vi.hoisted(() => vi.fn());
 const loadWorking = vi.hoisted(() => vi.fn());
 
-vi.mock("../lib/tool-policy/external-group-live-policy.js", () => ({
+vi.mock("../tool-policy/external-group-live-policy.js", () => ({
   authorizeCurrentExternalGroupCapability: vi.fn(),
   loadCurrentExternalGroupCapabilities,
 }));
-vi.mock("../lib/group-skills/group-skill-repository.js", () => ({
+vi.mock("./group-skill-repository.js", () => ({
   groupSkillPolicyRepository: { loadGroupSkillAllowlist },
 }));
-vi.mock("../lib/family-skills/family-skill-repository.js", () => ({
+vi.mock("../family-skills/family-skill-repository.js", () => ({
   familySkillRepository: { loadWorking },
 }));
 
-import { resolveScopedSkills } from "./scoped.js";
+import { resolveScopedSkills } from "../../skills/scoped.js";
 
 const SERVICE = ["delegation", "group-admin", "group-reminders", "schedules", "skill-manager", "voice-replies"];
 

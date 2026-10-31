@@ -30,6 +30,7 @@ import { SCHEDULE_CHECK_COMMAND_MAX_LENGTH } from "../agent-schedules/agent-sche
 import { resolveCreatedScheduleCheck } from "../agent-schedules/agent-schedule-check-policy.js";
 import { scheduleCheckRepository } from "../agent-schedules/agent-schedule-check-repository.js";
 import { runScheduleCheckIn } from "../agent-schedules/agent-schedule-check-runner.js";
+import { withCallExamples, type CallExamples } from "../tool-call-examples.js";
 import { escapeUntrustedContextJson } from "../untrusted-context-json.js";
 import { AGENT_SCHEDULE_PAUSE_NOTE, agentScheduleMaxRunsField, requireAgentScheduleMaxRuns } from "../agent-schedules/agent-schedule-limits.js";
 
@@ -419,7 +420,29 @@ const TOOL_DESCRIPTION = [
   "firstRunAt and nextRunAt are ISO datetimes with a UTC offset, timezone is IANA. scope: personal in a private chat, family in a registered family group.",
 ].join(" ");
 
-export default defineTool({
+export const MANAGE_AGENT_SCHEDULE_CALL_EXAMPLES: CallExamples = {
+  create: {
+    isolated: {
+      action: "create", executionContext: "isolated", title: "Дайджест: новые модели ИИ", firstRunAt: "2026-07-15T23:33:00+03:00",
+      timezone: "Europe/Moscow", recurrence: { kind: "daily", interval: 1 }, scope: "personal",
+      scenarioPrompt: "Собери новости о моделях ИИ за сутки из надёжных источников и пришли короткую сводку со ссылками; если новостей нет, промолчи.",
+      userRequest: "ежедневно в 23:33 МСК получать сводку",
+    },
+    conversation: {
+      action: "create", executionContext: "conversation", title: "Ждём доставку посылки", firstRunAt: "2026-07-15T12:00:00+03:00",
+      timezone: "Europe/Moscow", recurrence: { kind: "minutely", interval: 30 }, maxRuns: 12, scope: "personal",
+      scenarioPrompt: "Проверь статус посылки по ссылке из разговора; когда она доставлена, скажи об этом и останови пробуждение.",
+      userRequest: "скажи, когда привезут посылку",
+    },
+  },
+  update: { action: "update", id: "<id из list_agent_schedules>", nextRunAt: "2026-07-16T09:00:00+03:00" },
+  pause: { action: "pause", id: "<id из list_agent_schedules>" },
+  resume: { action: "resume", id: "<id из list_agent_schedules>" },
+  run_now: { action: "run_now", id: "<id из list_agent_schedules>" },
+  delete: { action: "delete", id: "<id из list_agent_schedules>" },
+};
+
+export default withCallExamples(defineTool({
   // Repeating it after a crash is safe: its effect is keyed on the call id.
   replaySafe: true,
   description: TOOL_DESCRIPTION,
@@ -466,4 +489,4 @@ export default defineTool({
       deleted: await agentScheduleRepository.delete(authorization, parsed.id, ctx.callId),
     };
   },
-});
+}), MANAGE_AGENT_SCHEDULE_CALL_EXAMPLES);

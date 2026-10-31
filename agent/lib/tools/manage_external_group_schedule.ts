@@ -26,6 +26,7 @@ import {
 import { AppError } from "../app-error.js";
 import { AGENT_SCHEDULE_PAUSE_NOTE, agentScheduleMaxRunsField } from "../agent-schedules/agent-schedule-limits.js";
 import { requirePrivateTelegramOwner } from "../family-context.js";
+import { withCallExamples, type CallExamples } from "../tool-call-examples.js";
 
 const ACTIONS = ["create", "delete", "pause", "resume", "run_now", "status", "update"] as const;
 const ISO_OFFSET_PATTERN = /(?:Z|[+-]\d{2}:\d{2})$/u;
@@ -295,12 +296,29 @@ const TOOL_DESCRIPTION = [
   AGENT_SCHEDULE_PAUSE_NOTE,
 ].join(" ");
 
-export default defineTool({
+export const MANAGE_EXTERNAL_GROUP_SCHEDULE_CALL_EXAMPLES: CallExamples = {
+  status: { action: "status", telegramChatId: "<telegramChatId из manage_telegram_group status>" },
+  create: {
+    action: "create", telegramChatId: "-1001234567890", title: "Итоги недели", userRequest: "каждую пятницу в 18:00 итоги недели",
+    scenarioPrompt: "Прочитай историю группы за неделю и пришли короткие итоги: решения, открытые вопросы и договорённости.",
+    firstRunAt: "2026-08-07T18:00:00+03:00", timezone: "Europe/Moscow", recurrence: { kind: "weekly", interval: 1, daysOfWeek: [5] },
+    historyWindowDays: 7, capabilityAllowlist: [],
+  },
+  update: { action: "update", id: "<id из status>", scenarioPrompt: "<новый текст сценария>" },
+  pause: { action: "pause", id: "<id из status>" },
+  resume: { action: "resume", id: "<id из status>" },
+  run_now: { action: "run_now", id: "<id из status>" },
+  delete: { action: "delete", id: "<id из status>" },
+};
+
+export default withCallExamples(defineTool({
   // Repeating it after a crash is safe: its effect is keyed on the call id.
   replaySafe: true,
   approval: ({ toolInput }) => {
     const result = parseInput(toolInput);
-    if (!result.success) return { reason: result.error.message, type: "denied" };
+    // An invalid call goes on to execution, whose own check refuses it before any change and answers
+    // with an example; a denial here would read as the owner's refusal, which ends the attempt.
+    if (!result.success) return "not-applicable";
     // What a group receives is decided here, and a delegated child reading untrusted pages can call
     // this tool too: a new or changed automation waits for the owner's button. Stopping, resuming,
     // running or removing an existing one does not.
@@ -345,4 +363,4 @@ export default defineTool({
       ctx.callId,
     );
   },
-});
+}), MANAGE_EXTERNAL_GROUP_SCHEDULE_CALL_EXAMPLES);

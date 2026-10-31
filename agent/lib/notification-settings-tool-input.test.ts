@@ -83,19 +83,18 @@ describe("notification_settings model input", () => {
     );
   });
 
-  it("documents every payload field, constraints, and one bounded correction without defaults", () => {
+  it("documents every payload field and constraint without defaults", () => {
     const description = notificationSettings.description;
 
     for (const fragment of [
-      "action=get",
-      "action=set",
+      '{"action":"get"}',
+      '"action":"set"',
       "timezone",
       "quietStart",
       "quietEnd",
       "null",
       "HH:MM",
-      "no more than once",
-      "Do not guess",
+      "Never guess",
     ]) expect(description).toContain(fragment);
   });
 });

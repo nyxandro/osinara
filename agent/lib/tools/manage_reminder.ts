@@ -25,6 +25,7 @@ import { REMINDER_RECURRENCE_UNITS, type ReminderRecurrence } from "../reminders
 import { reminderRepository } from "../reminders/reminder-repository.js";
 import type { ReplyButtonRows } from "../reply-buttons/reply-button-contract.js";
 import { readReplyButtonMarkup } from "../reply-buttons/reply-button-markup.js";
+import { withCallExamples, type CallExamples } from "../tool-call-examples.js";
 import {
   optionalIsoDate,
   optionalString,
@@ -204,7 +205,15 @@ const TOOL_DESCRIPTION = [
   "firstRunAt is an ISO datetime with a UTC offset, timezone is IANA. A delivered one-time reminder cannot change: create a new one.",
 ].join(" ");
 
-export default defineTool({
+export const MANAGE_REMINDER_CALL_EXAMPLES: CallExamples = {
+  create: { action: "create", content: "Пора позвонить врачу", firstRunAt: "2026-08-01T10:00:00+03:00", timezone: "Europe/Moscow", scope: "personal", recurrence: null },
+  update: { action: "update", id: "<id из list_reminders>", firstRunAt: "2026-08-01T11:00:00+03:00" },
+  pause: { action: "pause", id: "<id из list_reminders>" },
+  resume: { action: "resume", id: "<id из list_reminders>" },
+  delete: { action: "delete", id: "<id из list_reminders>" },
+};
+
+export default withCallExamples(defineTool({
   // Repeating it after a crash is safe: its effect is keyed on the call id.
   replaySafe: true,
   description: TOOL_DESCRIPTION,
@@ -250,4 +259,4 @@ export default defineTool({
       deleted: await reminderRepository.delete(authorization, parsed.id, ctx.callId),
     };
   },
-});
+}), MANAGE_REMINDER_CALL_EXAMPLES);
