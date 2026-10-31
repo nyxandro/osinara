@@ -4,6 +4,9 @@
  * Exports:
  * - `createWorkspaceImageInspector`: validates and submits authorized image bytes.
  * - `inspectWorkspaceImage`: production server-configured protocol-native vision inspector.
+ *
+ * The current Telegram avatar of a chat participant is one more source; its branch lives in
+ * `telegram-avatars/telegram-avatar-inspection.ts` and shares this live scope check and analysis.
  */
 import { VISION_MAX_FILE_BYTES } from "../../config.js";
 import { analyzeImageWithVisionModel } from "../vision-model-analysis.js";
@@ -12,6 +15,12 @@ import { ModelFacingError } from "../model-facing-error.js";
 import { downloadTelegramAttachment } from "../attachments/telegram-attachment-download.js";
 import { telegramGroupAttachmentRepository } from "../attachments/telegram-group-attachment-repository.js";
 import { validateVisionImageBytes } from "../attachments/telegram-vision-attachment.js";
+import {
+  type TelegramAvatarAuthor,
+  telegramAvatarAuthorRepository,
+} from "../telegram-avatars/telegram-avatar-author-repository.js";
+import { inspectTelegramAvatar } from "../telegram-avatars/telegram-avatar-inspection.js";
+import { type TelegramAvatarSource, telegramAvatarSource } from "../telegram-avatars/telegram-avatar-source.js";
 import {
   type WorkspaceBinaryFile,
   workspaceBinaryRepository,
@@ -31,7 +40,9 @@ interface ImageAnalysisInput {
 interface WorkspaceImageInspectorDependencies {
   analyze(input: ImageAnalysisInput): Promise<string>;
   authorizeScope(auth: WorkspaceAuthorization, scope: WorkspaceScope): Promise<void>;
+  avatarSource: TelegramAvatarSource;
   downloadTelegramAttachment: typeof downloadTelegramAttachment;
+  findAvatarAuthor(auth: WorkspaceAuthorization, sequenceId: string): Promise<TelegramAvatarAuthor | null>;
   findTelegramAttachment: typeof telegramGroupAttachmentRepository.find;
   readBinary(
     auth: WorkspaceAuthorization,
@@ -47,6 +58,7 @@ interface WorkspaceImageInspectorDependencies {
 
 type WorkspaceImageLocation =
   | { attachmentId: string }
+  | { avatarOfSequence: string }
   | { path: string }
   | { telegramMessageId: string };
 
@@ -97,6 +109,14 @@ export function createWorkspaceImageInspector(
   ) => {
     // Capability changes must not bypass the same live scope authorization used by file reads.
     await dependencies.authorizeScope(auth, input.scope);
+
+    if ("avatarOfSequence" in input) {
+      return await inspectTelegramAvatar({
+        analyze: (analysis) => analyzeImage(dependencies, analysis),
+        findAuthor: dependencies.findAvatarAuthor,
+        source: dependencies.avatarSource,
+      }, auth, input);
+    }
 
     if ("attachmentId" in input) {
       assertAttachmentScope(auth, input.scope);
@@ -179,7 +199,9 @@ export function createWorkspaceImageInspector(
 export const inspectWorkspaceImage = createWorkspaceImageInspector({
   analyze: analyzeImageWithVisionModel,
   authorizeScope: workspaceBinaryRepository.authorizeScope,
+  avatarSource: telegramAvatarSource,
   downloadTelegramAttachment,
+  findAvatarAuthor: telegramAvatarAuthorRepository.find,
   findTelegramAttachment: telegramGroupAttachmentRepository.find,
   readBinary: workspaceBinaryRepository.readBinary,
   readTelegramInboxAttachment: workspaceBinaryRepository.readTelegramInboxAttachment,

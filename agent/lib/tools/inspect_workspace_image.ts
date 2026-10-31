@@ -2,7 +2,8 @@
  * Persistent workspace image inspection tool.
  *
  * Export:
- * - `inspect_workspace_image` tool over a path, Telegram inbox, or opaque journal reference.
+ * - `inspect_workspace_image` tool over a path, Telegram inbox, opaque journal reference, or the
+ *   current Telegram avatar of the author of a message in this chat.
  *
  * Key constructs:
  * - Object-shaped model schema avoids root anyOf in tool descriptors.
@@ -24,12 +25,16 @@ import {
 
 const INPUT_ERROR_CODE = "AGENT_WORKSPACE_IMAGE_INPUT_INVALID";
 const SCOPES = ["personal", "family", "group"] as const;
-const TOP_LEVEL_FIELDS = ["attachmentId", "path", "question", "scope", "telegramMessageId"] as const;
+const TOP_LEVEL_FIELDS = ["attachmentId", "avatarOfSequence", "path", "question", "scope", "telegramMessageId"] as const;
 const TELEGRAM_MESSAGE_ID_PATTERN = /^\d+$/u;
+const MESSAGE_NUMBER_PATTERN = /^\d+$/u;
 
 const inspectWorkspaceImageSchema = z.object({
   attachmentId: z.uuid()
     .describe("The attachment UUID from <telegram_attachment_refs> or the log; do not pass it together with path or telegramMessageId")
+    .optional(),
+  avatarOfSequence: z.string().regex(MESSAGE_NUMBER_PATTERN)
+    .describe("The number of any message of a person in this chat (#N in the timeline, sourceSequence of the current message) to look at their current Telegram avatar; the only source then")
     .optional(),
   path: z.string().min(1).max(512)
     .describe("A path relative to the root of the chosen scope, for example photos/image.png; do not prepend the scope name")
@@ -47,14 +52,14 @@ function requireImageInput(input: Record<string, unknown>) {
   requireOnlyFields(input, TOP_LEVEL_FIELDS, "inspect_workspace_image", INPUT_ERROR_CODE);
   const path = input.path;
   const attachmentId = input.attachmentId;
+  const avatarOfSequence = input.avatarOfSequence;
   const telegramMessageId = input.telegramMessageId;
   const hasPath = path !== undefined;
-  const hasTelegramMessageId = telegramMessageId !== undefined;
-  const sourceCount = [attachmentId, path, telegramMessageId].filter((value) => value !== undefined).length;
+  const sourceCount = [attachmentId, avatarOfSequence, path, telegramMessageId].filter((value) => value !== undefined).length;
   if (sourceCount !== 1) {
     toolInputError(
       INPUT_ERROR_CODE,
-      "Для inspect_workspace_image передайте ровно один источник: attachmentId, path или telegramMessageId",
+      "Для inspect_workspace_image передайте ровно один источник: attachmentId, avatarOfSequence, path или telegramMessageId",
     );
   }
   const common = {
@@ -66,6 +71,13 @@ function requireImageInput(input: Record<string, unknown>) {
       ...common,
       attachmentId: requiredUuid(input, "attachmentId", INPUT_ERROR_CODE, "attachmentId"),
     };
+  }
+  if (avatarOfSequence !== undefined) {
+    const sequence = requiredString(input, "avatarOfSequence", INPUT_ERROR_CODE, "53247");
+    if (!MESSAGE_NUMBER_PATTERN.test(sequence)) {
+      toolInputError(INPUT_ERROR_CODE, "avatarOfSequence должен быть номером сообщения из ленты без #, например \"53247\"");
+    }
+    return { ...common, avatarOfSequence: sequence };
   }
   if (hasPath) {
     return {
@@ -84,7 +96,8 @@ const TOOL_DESCRIPTION = [
   "When to use: answer a specific question about an image from the workspace or Telegram through the vision model.",
   "When not to use: do not pass several sources and do not use the tool for non-graphic files.",
   "Input: for the reply ancestry or <telegram_attachment_refs> pass attachmentId; for the current Telegram attachment use {\"telegramMessageId\":\"773\",\"scope\":\"personal\",\"question\":\"Что изображено?\"}; for a file use a relative path {\"path\":\"photos/image.png\",\"scope\":\"personal\",\"question\":\"Что изображено?\"}. Pass exactly one source.",
-  "Result: analysis, the actual path and scope; the analysis does not save Telegram bytes to the workspace.",
+  "For the current avatar of a person in this chat pass the number of any of their messages with the current chat's scope: {\"avatarOfSequence\":\"53247\",\"scope\":\"group\",\"question\":\"Есть ли на аватарке человек? Если да, опиши внешность\"}; the avatar is fetched fresh every time and never saved.",
+  "Result: analysis, the actual path and scope; the analysis does not save Telegram bytes to the workspace. avatar=missing means the person has no avatar or hides it from bots.",
   "Error: fix the source or the question only if retryable=true; do not repeat a provider failure automatically.",
 ].join(" ");
 

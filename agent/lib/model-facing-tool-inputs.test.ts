@@ -268,4 +268,29 @@ describe("model-facing tool input hardening", () => {
       scope: "group",
     }, context)).rejects.toThrowError(/AGENT_WORKSPACE_IMAGE_INPUT_INVALID/);
   });
+
+  it("accepts the number of a message whose author's avatar to inspect as the only image source", async () => {
+    toolCalls.inspectImage.mockResolvedValue({ analysis: "Мужчина в очках" });
+
+    await expect(inspectWorkspaceImage.execute({
+      avatarOfSequence: "53247",
+      question: "Есть ли на аватарке человек?",
+      scope: "group",
+    }, context)).resolves.toEqual({ analysis: "Мужчина в очках" });
+    expect(toolCalls.inspectImage).toHaveBeenCalledWith(
+      { familyId: "family-1", userId: "user-1" },
+      expect.objectContaining({ avatarOfSequence: "53247", question: "Есть ли на аватарке человек?", scope: "group" }),
+    );
+    await expect(inspectWorkspaceImage.execute({
+      avatarOfSequence: "53247",
+      telegramMessageId: "42",
+      question: "Что изображено?",
+      scope: "group",
+    }, context)).rejects.toThrowError(/AGENT_WORKSPACE_IMAGE_INPUT_INVALID/);
+    await expect(inspectWorkspaceImage.execute({
+      avatarOfSequence: "#53247",
+      question: "Что изображено?",
+      scope: "group",
+    }, context)).rejects.toThrowError(/AGENT_WORKSPACE_IMAGE_INPUT_INVALID/);
+  });
 });
