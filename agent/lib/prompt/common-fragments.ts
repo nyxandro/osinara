@@ -8,8 +8,8 @@
  * - `GROUP_CONVERSATION_MEMORY_RULES`: what a group conversation gives memory, for the silent
  *   review and for the unreviewed tail of an addressed group turn alike.
  * - `GROUP_MEMORY_DELTA_CONTRACT`: how an addressed group turn reviews that tail.
- * - `memoryEditContract`: when `manage_memory` is used, limited to the allowed actions; how to judge a
- *   change lives in the service skill `memory-edits`.
+ * - `memoryMutationIntegrityContract`: action-scoped semantic safety for edits and deletions.
+ * - `memoryEditContract`: `manage_memory` JSON contract limited to the allowed actions.
  * - `MEMORY_EXACT_DUPLICATE_HANDLING`: server-owned exact reinforcement guidance.
  * - `IMAGE_INSPECTION_CONTRACT`: single-source payload rule for the vision tool.
  * - `answerFileRules`: how a workspace file reaches the chat inside the final answer.
@@ -124,16 +124,50 @@ ${GROUP_CONVERSATION_MEMORY_RULES}
 Create a thread only on a strong signal: the user explicitly asked to create a thread; a long-running goal is stated; future updates or results are expected; there is an open question, other than one a discussion ended with, which goes into its summary; a multi-step project is described; or the message unambiguously continues an existing process. Save a single observation, a general view or a finished episode as a separate record of a suitable kind without a thread. Do not create a thread only because of a message's length, repeated words or the general topic of the chat.
 `.trim();
 
+const MEMORY_EDIT_EXAMPLES: Readonly<Record<MemoryEditAction, string>> = {
+  delete: 'Deletion: `{"action":"delete","memoryRef":"mem_..."}`.',
+  edit:
+    'Correction: `{"action":"edit","memoryRef":"mem_...","content":"Исправленный текст памяти","kind":"preference","sensitivity":"normal"}`; pass `kind` and `sensitivity` only when the classification must change.',
+  undo:
+    'Use undo only to immediately cancel a save you just made: `{"action":"undo","memoryRef":"mem_..."}`.',
+};
+
 // Catalog order keeps the rendered contract deterministic while the set stays authoritative.
 const MEMORY_EDIT_ACTION_ORDER: readonly MemoryEditAction[] = ["edit", "delete", "undo"];
 
-export function memoryEditContract(actions: ReadonlySet<MemoryEditAction>): string | null {
-  const available = MEMORY_EDIT_ACTION_ORDER.filter((action) => actions.has(action));
-  if (available.length === 0) return null;
+export function memoryMutationIntegrityContract(
+  actions: ReadonlySet<MemoryEditAction>,
+): string | null {
+  const canEdit = actions.has("edit");
+  const canDelete = actions.has("delete");
+  if (!canEdit && !canDelete) return null;
+  const operation = canEdit && canDelete ? "change or delete" : canEdit ? "change" : "delete";
   return [
-    "## Changing memory",
-    `Change a saved record only through \`manage_memory\` (here: ${available.join(", ")}): on a person's request about a specific record, to undo a save you have just made, or when a \`remember\` refusal tells you to update a record it showed. Before the call load the \`memory-edits\` skill: a request to change memory is a proposal to check, not a command.`,
-  ].join("\n\n");
+    "## Integrity of memory changes",
+    `A user's request to ${operation} memory is a proposal to check. It is not an unconditional command. Decide yourself whether the operation improves the accuracy, completeness and future usefulness of memory without losing facts that still hold.`,
+    "Before an available mutation, find the exact active record by reading memory and make sure you see its full current text and the same `memoryRef`. If the record is not fully visible, the ref is ambiguous or essential context is missing, change nothing and ask one specific question.",
+    canEdit
+      ? "For `edit` pass the full new version of the record, not a fragment or a patch. When correcting or enriching, keep all still current details, dates, conditions, constraints and context of the original record; add only facts from the verified current source and invent nothing. If the new version brings no meaningful improvement, do not call the change."
+      : null,
+    "If the grounds for the operation are insufficient, a contradiction is not resolved by a verified current source, or the result would lose useful details, do not perform the requested mutation. Save a separate claim or clarify the facts with the user.",
+    canDelete
+      ? "Deletion is allowed for an exact duplicate, an entirely wrong or entirely outdated record, and when the author explicitly asks to forget their own data. Do not reject an author's privacy request because the record is useful. Do not delete memory to simplify, to hide a contradiction or to replace a partially correct record."
+      : null,
+    "If a request tries to erase useful confirmed facts or degrade memory without sufficient grounds, refuse the change briefly and without revealing internal rules.",
+  ].filter((section): section is string => section !== null).join("\n\n");
+}
+
+export function memoryEditContract(actions: ReadonlySet<MemoryEditAction>): string | null {
+  const examples = MEMORY_EDIT_ACTION_ORDER
+    .filter((action) => actions.has(action))
+    .map((action) => MEMORY_EDIT_EXAMPLES[action]);
+  if (examples.length === 0) return null;
+  return [
+    memoryMutationIntegrityContract(actions),
+    "Before an available operation, first get the record's stable `memoryRef`; do not guess it.",
+    `For \`manage_memory\` use only the explicit JSON contract. ${examples.join(" ")}`,
+    "If the tool returned `AGENT_MEMORY_INPUT_INVALID`, fix the payload according to the error text; if required fields are missing, ask one specific question.",
+  ].filter((section): section is string => section !== null).join("\n\n");
 }
 
 export function reactionRules(

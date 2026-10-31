@@ -37,7 +37,6 @@ const SERVICE_SKILLS: readonly ServiceSkill[] = [
   { environments: new Set(["private", "family", "external"]), name: "voice-replies", tools: ["send_voice_message"] },
   { environments: new Set(["private"]), name: "group-admin", tools: ["manage_telegram_group", "manage_family_invitation"] },
   { environments: new Set(["private", "family", "external"]), name: "delegation", tools: ["agent"] },
-  { environments: new Set(["private", "family", "external"]), name: "memory-edits", tools: ["manage_memory"] },
 ];
 
 function loadServiceSkill(name: string): SkillDefinition {

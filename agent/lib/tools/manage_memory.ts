@@ -50,7 +50,7 @@ export function manageMemoryPresentation(actions: readonly ManageMemoryAction[])
   const mutableActions = actions.filter((action) => action !== "undo");
   return {
     description: [
-      "Manage an available long-term memory record only through the listed operations. Load the memory-edits skill first: a request to change memory is a proposal to check.",
+      "Manage an available long-term memory record only through the listed operations.",
       mutableActions.length > 0
         ? `Before ${mutableActions.join("/")} first get the memoryRef through remember, search_memories or list_memories.`
         : null,

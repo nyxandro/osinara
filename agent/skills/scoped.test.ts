@@ -24,7 +24,7 @@ vi.mock("../lib/family-skills/family-skill-repository.js", () => ({
 
 import { resolveScopedSkills } from "./scoped.js";
 
-const SERVICE = ["delegation", "group-admin", "group-reminders", "memory-edits", "schedules", "skill-manager", "voice-replies"];
+const SERVICE = ["delegation", "group-admin", "group-reminders", "schedules", "skill-manager", "voice-replies"];
 
 function turn(attributes: Record<string, unknown>, channel: "subagent" | "telegram" = "telegram") {
   const principal = {
@@ -51,7 +51,7 @@ describe("scoped skills", () => {
 
   it("gives a live private chat every procedure of its tools", async () => {
     expect(await serviceSkills(turn(PRIVATE)))
-      .toEqual(["delegation", "group-admin", "memory-edits", "schedules", "skill-manager", "voice-replies"]);
+      .toEqual(["delegation", "group-admin", "schedules", "skill-manager", "voice-replies"]);
   });
 
   it("gives a scheduled run only the procedures of the tools it keeps", async () => {
@@ -80,6 +80,6 @@ describe("scoped skills", () => {
       toolAllowlist: ["remember", "send_voice_message", "manage_memory.edit"],
     }));
 
-    expect(skills).toEqual(["delegation", "group-reminders", "memory-edits", "voice-replies"]);
+    expect(skills).toEqual(["delegation", "group-reminders", "voice-replies"]);
   });
 });

@@ -49,7 +49,7 @@ describe("service skills", () => {
   });
 
   it("reserves every service name", () => {
-    for (const name of ["skill-manager", "schedules", "group-reminders", "voice-replies", "group-admin", "delegation", "memory-edits"]) {
+    for (const name of ["skill-manager", "schedules", "group-reminders", "voice-replies", "group-admin", "delegation"]) {
       expect(isServiceSkillName(name)).toBe(true);
     }
     expect(isServiceSkillName("weather")).toBe(false);
