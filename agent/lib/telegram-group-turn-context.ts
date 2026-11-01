@@ -7,6 +7,7 @@
  * - `createTelegramGroupTurnContextPreparer`: composes timeline and session cursor repositories.
  * - `telegramGroupTurnContextPreparer`: production context preparer.
  * - `currentTelegramMessageText`: reads the addressed message back out of the durable envelope.
+ * - `currentTelegramMessageReply`: what the envelope says the message answers, for the memory search.
  */
 import {
   TELEGRAM_GROUP_JOURNAL_CONTEXT_CHARACTERS,
@@ -147,6 +148,34 @@ export function composeTelegramTurnMessage(
  * payload means the durable turn input is corrupt rather than merely unusual.
  */
 export function currentTelegramMessageText(durableMessage: string): string {
+  const text = (parseCurrentTelegramMessage(durableMessage) as { text?: unknown } | null)?.text;
+  if (typeof text !== "string") throw turnMessageError("text_missing");
+  return text;
+}
+
+function optionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+/** The replied text the envelope carries (a quoted fragment, the inline target or its snapshot) and the target's number. */
+export function currentTelegramMessageReply(durableMessage: string): {
+  replyTargetUnavailable: boolean;
+  replyText: string | null;
+  replyToSequenceId: string | null;
+  sourceSequence: string | null;
+} {
+  const envelope = parseCurrentTelegramMessage(durableMessage) as Record<string, unknown> | null;
+  const inline = envelope?.replyTo as { text?: unknown } | undefined;
+  const snapshot = envelope?.replyTargetSnapshot as { contentText?: unknown } | undefined;
+  return {
+    replyTargetUnavailable: envelope?.replyTargetUnavailable === true,
+    replyText: optionalString(envelope?.replyQuotedText) ?? optionalString(inline?.text) ?? optionalString(snapshot?.contentText),
+    replyToSequenceId: optionalString(envelope?.replyToSequenceId),
+    sourceSequence: optionalString(envelope?.sourceSequence),
+  };
+}
+
+function parseCurrentTelegramMessage(durableMessage: string): unknown {
   const opening = durableMessage.lastIndexOf(CURRENT_MESSAGE_OPEN_TAG);
   const closing = durableMessage.lastIndexOf(CURRENT_MESSAGE_CLOSE_TAG);
   if (opening < 0 || closing <= opening) throw turnMessageError("envelope_missing");
@@ -162,9 +191,7 @@ export function currentTelegramMessageText(durableMessage: string): string {
     );
   }
 
-  const text = (parsed as { text?: unknown } | null)?.text;
-  if (typeof text !== "string") throw turnMessageError("text_missing");
-  return text;
+  return parsed;
 }
 
 export function createTelegramGroupTurnContextPreparer(

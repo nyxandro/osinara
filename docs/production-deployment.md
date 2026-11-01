@@ -407,6 +407,23 @@ instead of a second GIF. It exists only when the active model config accepts ima
 groups get it without a grant; scheduled turns and subagents never receive it. KLIPY's usage terms
 require their written approval for server-side requests and for choosing among results.
 
+Every chat keeps its last 500 000 messages in `telegram_group_messages` (10 000 before 01.11.2026);
+older ones are cut by sequence number on each new message. `list_group_history` finds a message
+that holds every word of the query in any order, a word also in another Russian form, in the other
+alphabet or keyboard layout, or with a small typo in a long word; migration 144 adds the trigram and Russian text-search
+indexes it reads through. At the busiest group's pace the limit is about fourteen months, roughly
+650 MB with the indexes, and every deployment backup grows by the same amount.
+
+Since 01.11.2026 interactive root turns may also send a place and a poll on their own: `send_location`
+calls Telegram `sendVenue` (with a title and an address) or `sendLocation` (a bare point), and
+`send_poll` calls `sendPoll` with 2-12 options and Telegram's defaults for anonymity and a single
+answer unless the model sets them. Each sends one message as a reply in a group, records it in the
+conversation history like a received place or poll, and is not replay-safe: a call interrupted by a
+restart reaches the model as an unknown outcome instead of a second message. A refusal is logged as
+`AGENT_LOCATION_DELIVERY_FAILED` or `AGENT_POLL_DELIVERY_FAILED` with Telegram's description, for
+example a group that does not let the bot send polls; an unconfirmed send as `..._DELIVERY_AMBIGUOUS`.
+Every kind of chat gets both without a grant; scheduled turns and subagents never receive them.
+
 Every capability that needs image input follows the same `supportsImageInput` flag of the active
 model config: without it `inspect_workspace_image` is not offered in any mode, and its prompt
 guidance and the PDF page route disappear.

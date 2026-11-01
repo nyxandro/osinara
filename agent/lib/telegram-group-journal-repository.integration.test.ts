@@ -249,6 +249,28 @@ describeWithDatabase("Telegram group journal repositories", () => {
     ]);
   });
 
+  it("finds a message by every word in any order, by word form, by the other alphabet and by a typo", async () => {
+    const { familyId, ownerId } = await createOwnedFamily("history-search");
+    const group = await telegramGroupAdministrationRepository.registerGroup({
+      familyId, messageMode: "all", requestedBy: ownerId, telegramChatId: "-1001", title: "Группа", toolAllowlist: [], type: "external",
+    });
+    for (const [id, text] of [
+      ["1", "Скилл pohuy лежит тут: github.com/example/pohuy"],
+      ["2", "Вот ссылка на транслитерацию и инструкцию"],
+      ["3", "pohuy без второго слова"],
+    ] as const) await telegramGroupJournalRepository.record(group.groupId, message({ id, text }));
+    const found = async (query: string) => (await telegramGroupJournalRepository.search({
+      allTopics: true, anchorEntryId: null, beforeSequence: null, groupId: group.groupId, limit: 25, messageThreadId: null, query,
+    })).entries.map((entry) => entry.telegramMessageId);
+
+    expect(await found("похуй скилл")).toEqual(["1"]);
+    expect(await found("скилл pohuy")).toEqual(["1"]);
+    expect(await found("ссылку")).toEqual(["2"]);
+    expect(await found("транслитирацию")).toEqual(["2"]);
+    expect(await found("pohuy")).toEqual(["1", "3"]);
+    expect(await found("50%_скидка")).toEqual([]);
+  });
+
   it("stores an ordinary supergroup reply thread in the shared main journal", async () => {
     const { familyId, ownerId } = await createOwnedFamily("reply-thread");
     const group = await telegramGroupAdministrationRepository.registerGroup({

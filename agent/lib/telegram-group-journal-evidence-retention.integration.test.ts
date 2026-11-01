@@ -10,7 +10,14 @@
  *   that differ from their participant's user link.
  */
 import type { TelegramMessage } from "../runtime/telegram/inbound.js";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+// The production cap is 500 000 messages: filling a journal to it would outlast the test timeout,
+// and the pruning rule does not depend on the number.
+vi.mock("../config.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../config.js")>(),
+  TELEGRAM_GROUP_JOURNAL_RETENTION_MESSAGES: 200,
+}));
 
 import { TELEGRAM_GROUP_JOURNAL_RETENTION_MESSAGES } from "../config.js";
 import { closeDatabase, database } from "./database.js";

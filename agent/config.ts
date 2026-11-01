@@ -53,7 +53,9 @@ export const TELEGRAM_HITL_TIMEOUT_LEASE_MS = 15 * 60 * 1_000;
 export const TELEGRAM_HITL_TIMEOUT_SWEEP_BATCH_SIZE = 5;
 export const TELEGRAM_GROUP_JOURNAL_CONTEXT_CHARACTERS = 12_000;
 export const TELEGRAM_GROUP_JOURNAL_CONTEXT_MESSAGES = 100;
-export const TELEGRAM_GROUP_JOURNAL_RETENTION_MESSAGES = 10_000;
+// Messages kept per chat, a group or a private one: about fourteen months of the busiest group
+// (01.11.2026). History search reads them through the indexes of migration 144.
+export const TELEGRAM_GROUP_JOURNAL_RETENTION_MESSAGES = 500_000;
 export const TELEGRAM_ATTACHMENT_REFERENCE_LIST_DEFAULT_LIMIT = 50;
 export const TELEGRAM_ATTACHMENT_REFERENCE_LIST_MAX_LIMIT = 50;
 export const TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED = 1;

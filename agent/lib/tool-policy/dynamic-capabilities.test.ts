@@ -128,6 +128,8 @@ describe("dynamic capability resolver", () => {
         "manage_reminder",
         "read_profile_view",
         "remember",
+        "send_location",
+        "send_poll",
         ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name),
       ].sort(),
     );

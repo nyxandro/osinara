@@ -44,6 +44,11 @@ import {
   type MemoryTurnContext,
 } from "../memory-retrieval.js";
 import type { ModelMemory } from "../model-memory.js";
+import {
+  memoryQueryContextRepository,
+  memoryTurnQueryContext,
+  type MemoryQueryContextSource,
+} from "../memory-query-context.js";
 import { memoryShowJournal, type MemorySelectionWindow } from "../memory-show-journal.js";
 import {
   MemoryContextFailure, memoryFailureCode, recordMemoryContextIncident,
@@ -274,10 +279,13 @@ export function createMemoryBlockResolver(dependencies: {
     conversationId: string,
     memoryRefs: readonly string[],
   ) => Promise<ReadonlySet<string>>;
+  /** The conversation's journal, read for what a referring message points at (`memory-query-context.ts`). */
+  queryContext: MemoryQueryContextSource;
   retrieve: (
     auth: MemoryAuthorization,
     query: string,
     window: MemorySelectionWindow | null,
+    conversationContext: string | null,
   ) => Promise<MemoryTurnContext>;
 }) {
   return async function resolve(ctx: TurnBlockContext, turnId: string): Promise<MemoryTurnBlocks> {
@@ -300,12 +308,16 @@ export function createMemoryBlockResolver(dependencies: {
     let threadCharacters: number | null = null;
     let phase: MemoryContextPhase = "authorization";
     let causeCode: string | null = null;
+    let queryContext: "previous" | "reply" | null = null;
     try {
       const authorization = dependencies.authorize(ctx);
       phase = "query";
       const delegated = ctx.channel?.kind === "subagent" || Boolean(ctx.session.parent);
       const query = memoryRetrievalQuery(ctx.session.auth, ctx.messages, delegated);
       if (query === null) return NO_MEMORY_BLOCKS;
+      // A child's task text is its own request, not a message of the conversation.
+      const borrowed = delegated ? null : await memoryTurnQueryContext(dependencies.queryContext, ctx.session.auth, ctx.messages, query);
+      queryContext = borrowed?.kind ?? null;
       phase = "retrieval";
       // The window exists only where there is a conversation to remember inside; a scheduled run
       // has none, and then the selection behaves as it always did. A turn is identified by its
@@ -329,7 +341,7 @@ export function createMemoryBlockResolver(dependencies: {
         }
         : null;
       usageTracked = window !== null;
-      const context = await dependencies.retrieve(authorization, query, window);
+      const context = await dependencies.retrieve(authorization, query, window, borrowed?.text ?? null);
       memories = context.memories.length;
       diagnostics = context.diagnostics;
       outcome = "succeeded";
@@ -405,7 +417,7 @@ export function createMemoryBlockResolver(dependencies: {
       return { memory: MEMORY_UNAVAILABLE_BLOCK, profileCard: null };
     } finally {
       console.info(JSON.stringify({ code: "AGENT_MEMORY_RETRIEVAL_METRICS", sessionId: ctx.session.id,
-        turnId, outcome, memories, offeredMemories, droppedMemories, ...selection, memoryEvidence,
+        turnId, outcome, memories, offeredMemories, droppedMemories, queryContext, ...selection, memoryEvidence,
         usageTracked, ...diagnostics,
         profileCharacters, profileLeftOutClaims, profileWithdrawnClaims, profileMemoryRefs,
         threadRefs, threadCharacters, failurePhase: outcome === "failed" ? phase : null, causeCode,
@@ -496,6 +508,7 @@ export const resolveMemoryBlock = createMemoryBlockResolver({
   createProfile: profileViewRepository.create,
   openSelectionWindow: memoryShowJournal.openTurn,
   recordOffered: recordOfferedMemories,
+  queryContext: memoryQueryContextRepository,
   readableMemoryRefs: profileViewRepository.readableMemoryRefs,
   retrieve: retrieveMemoryTurnContext,
 });

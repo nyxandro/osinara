@@ -6,6 +6,7 @@
  * - «Вчера» is read on the person's own calendar, on the group's in a group.
  * - A question that names no day reads no settings and no period.
  * - Small talk runs no search at all.
+ * - A referring message's own finds and the finds with what it points at take turns, each once.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -54,6 +55,36 @@ function searchFinds(...ids: string[]) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("selectMemoriesAutomatically", () => {
+  // Production, 01.11.2026: the borrowed reply alone found pohuy for «эти скилы» but pushed out the
+  // T-Investments record «это мсипишка инвестиций?» found by its own words.
+  it("keeps the message's own finds when the search with what it points at fails", async () => {
+    const search = searchFinds("own-1");
+    const own = await memoryRetrievalRepository.searchAuthorized(privateAuth, "", [], 8, null);
+    search.mockResolvedValueOnce(own).mockRejectedValueOnce(new Error("statement timeout"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const selection = await selectMemoriesAutomatically(privateAuth, "а это что?", {
+      conversationContext: "сообщение про скилл", now: new Date("2026-11-01T10:00:00Z"), window: null,
+    });
+
+    expect(selection.selected.map((one) => one.memory.id)).toEqual(["own-1"]);
+    expect(error.mock.calls.map((call) => JSON.parse(String(call[0])))).toContainEqual(
+      expect.objectContaining({ code: "AGENT_MEMORY_QUERY_CONTEXT_SEARCH_FAILED" }));
+  });
+
+  it("takes turns between the message's own finds and the finds with what it points at", async () => {
+    const search = searchFinds("own-1", "own-2", "own-3");
+    const borrowedFinds = await memoryRetrievalRepository.searchAuthorized(privateAuth, "", [], 8, null);
+    search.mockResolvedValueOnce({ ...borrowedFinds, results: borrowedFinds.results.slice(0, 2) })
+      .mockResolvedValueOnce({ ...borrowedFinds, results: [borrowedFinds.results[1]!, { ...borrowedFinds.results[0]!, memory: item("borrowed-1") }] });
+
+    const selection = await selectMemoriesAutomatically(privateAuth, "а это что?", {
+      conversationContext: "сообщение про скилл", limit: 3, now: new Date("2026-11-01T10:00:00Z"), window: null,
+    });
+
+    expect(selection.selected.map((one) => one.memory.id)).toEqual(["own-1", "own-2", "borrowed-1"]);
+  });
+
   it("puts the day a question names first, the records found by topic too ahead of the rest", async () => {
     searchFinds("topic-only", "topic-and-day");
     const window = vi.spyOn(memoryEventWindowRepository, "search")

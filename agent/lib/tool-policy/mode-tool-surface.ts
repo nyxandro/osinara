@@ -53,6 +53,8 @@ import readProfileView from "../tools/read_profile_view.js";
 import searchMemories from "../tools/search_memories.js";
 import searchMemoryThreads from "../tools/search_memory_threads.js";
 import sendGif from "../tools/send_gif.js";
+import sendLocation from "../tools/send_location.js";
+import sendPoll from "../tools/send_poll.js";
 import sendVoiceMessage from "../tools/send_voice_message.js";
 import { removeGroupFileTool } from "../workspaces/remove-group-file-tool.js";
 import { controlledWebFetchTool } from "./controlled-web-fetch.js";
@@ -286,6 +288,9 @@ function buildExternalToolSurface(
       surface.manage_behavior_preference = manageBehaviorPreference as unknown as AnyToolDefinition;
       // A GIF answers a live participant, so it needs no grant but never runs in a background run.
       if (GIF_REPLIES_AVAILABLE) surface.send_gif = sendGif as unknown as AnyToolDefinition;
+      // A place or a poll answers a live participant too, and needs no grant either.
+      surface.send_location = sendLocation as unknown as AnyToolDefinition;
+      surface.send_poll = sendPoll as unknown as AnyToolDefinition;
       // Reminders need no grant: the caps are enforced per Telegram author and per chat, and a
       // background run has no participant who could own a new one.
       Object.assign(surface, EXTERNAL_GROUP_REMINDER_TOOLS);
@@ -376,6 +381,8 @@ const TRUSTED_SCHEDULED_SURFACES: Readonly<Record<"family" | "private", ToolMap>
       manage_skill: _manageSkill,
       remember: _remember,
       send_gif: _sendGif,
+      send_location: _sendLocation,
+      send_poll: _sendPoll,
       send_voice_message: _sendVoiceMessage,
       ...readOnlyPromptSurface
     } = surface;
