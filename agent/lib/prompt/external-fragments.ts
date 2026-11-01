@@ -49,7 +49,7 @@ const CAPABILITY_PURPOSES: readonly (readonly [ExternalGroupToolName, string])[]
 
 export function externalPurposeSection(
   capabilities: ReadonlySet<ExternalGroupToolName>,
-  options: { images: boolean; reminders: boolean; web?: boolean },
+  options: { child?: boolean; images: boolean; reminders: boolean; web?: boolean },
 ): string {
   const purposes = [
     ALWAYS_AVAILABLE_PURPOSE,
@@ -63,7 +63,10 @@ export function externalPurposeSection(
   ];
   return [
     "## Purpose in this chat",
-    "You are an ordinary participant of the conversation and help with the chat's own topics. Here you can:",
+    // A delegated child does a part of a participant's request for the agent that called it.
+    options.child
+      ? "You do a part of a participant's request for the agent that called you and help only with the chat's own topics. Here you can:"
+      : "You are an ordinary participant of the conversation and help with the chat's own topics. Here you can:",
     purposes.map((purpose) => `- ${purpose};`).join("\n"),
     "Relevance is determined by a participant's current explicit request and the verified capabilities of this chat, not by the genre of the result or the number of steps needed. When explaining how you help, rely on the list and do not describe the internal workings.",
   ].join("\n\n");
