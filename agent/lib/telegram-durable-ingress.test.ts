@@ -188,7 +188,8 @@ describe("createTelegramDurableIngress", () => {
 
       await runDrain(handle, raw);
 
-      expect(authorizeVoice).toHaveBeenCalledWith(expect.objectContaining({ messageId: String(raw.message.message_id) }), { addressed });
+      const messageId = (raw.message as { message_id: number }).message_id;
+      expect(authorizeVoice).toHaveBeenCalledWith(expect.objectContaining({ messageId: String(messageId) }), { addressed });
     }
   });
 

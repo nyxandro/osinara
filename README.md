@@ -141,7 +141,7 @@ Osinara — self-hosted агент, который живёт в Telegram и р�
 | --- | --- | --- | --- |
 | Личный чат | `personal` и `family` | `/workspace/personal`, `/workspace/family` | Полный trusted sandbox и personal tools environment; по явной просьбе root-agent отвечает голосовым через ElevenLabs. |
 | Семейная группа | Только `family` | `/workspace/family` | Trusted sandbox и family tools environment; по явной просьбе root-agent отвечает голосовым через ElevenLabs. |
-| Внешняя группа | Только `group` | `/workspace/group` | Без Bash, произвольного сетевого доступа и persistent credentials; `web_fetch` и `send_voice_message` доступны только через отдельные owner grants; безопасные file tools и настраиваемый импорт UTF-8 TXT/MD/JSON/CSV/TSV/HTML/XML/YAML/YML из Telegram. |
+| Внешняя группа | Только `group` | `/workspace/group` | Без Bash, произвольного сетевого доступа и persistent credentials; `web_fetch` и `send_voice_message` доступны только через отдельные owner grants; безопасные file tools и импорт присланного в Telegram файла любого формата в папку группы. |
 | Native child | Та же проверенная identity и scopes, что у parent turn | Тот же разрешённый workspace и sandbox | Тот же trust-zone surface, кроме root-owned `remember` и `send_voice_message`; отдельные history и state. |
 
 ---

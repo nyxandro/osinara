@@ -241,11 +241,7 @@ describe("createTelegramWorkspaceAttachmentImporter", () => {
   });
 
   it("keeps any file an external group imports, typed by its bytes rather than its name", async () => {
-    const writeBinary = vi.fn(async (_auth: unknown, input: { mediaType: string; path: string }) => ({
-      mediaType: input.mediaType,
-      path: input.path,
-      scope: "group" as const,
-    }));
+    const writeBinary = vi.fn().mockImplementation(async (_auth, file) => ({ ...file, scope: "group" }));
     const groupAuth = {
       ...auth,
       groupId: "00000000-0000-4000-8000-000000000456",
