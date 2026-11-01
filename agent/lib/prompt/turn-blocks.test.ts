@@ -345,7 +345,7 @@ describe("memory block resolution", () => {
     });
     const groupTurn = auth({ ...externalAuth.current!.attributes, telegramConversationId: "conversation-1", telegramTimelineSequence: "59975" });
     const envelope = `<current_telegram_message>\n${JSON.stringify({
-      replyToSequenceId: "59699", senderDisplayName: "Anton V", sourceSequence: "59976", text: "Кинь ссылку на эти скилы", triggeredBy: "reply_to_agent",
+      replyToSequenceId: "59699", senderDisplayName: "Олег", sourceSequence: "59976", text: "Кинь ссылку на эти скилы", triggeredBy: "reply_to_agent",
     })}\n</current_telegram_message>`;
     const messages = [{ content: envelope, role: "user" }] as ModelMessage[];
 

@@ -8,7 +8,8 @@
  *   system prompt and tool definitions.
  * - `providerCountStatus`: whether that count is trusted, absent or too small to be one.
  * - `compactMessages`: caps old tool results if that leaves real room under the estimate alone;
- *   otherwise one summary call replaces the older part with a checkpoint and keeps the recent tail.
+ *   otherwise a summary call replaces the older part with a checkpoint and keeps the recent tail;
+ *   a summary cut at the model's output limit is asked once more, shorter, in the same compaction.
  * - `capToolResults`: the capping step on its own.
  * - `todoCompactionMessage`: the open task list, re-added after a compaction.
  * - `summarizeWithModel`, `CompactionSummaryRequest`: the summary call on the step's model.
@@ -279,6 +280,21 @@ function splitMessages(messages: readonly ModelMessage[], keep: number) {
   return { older: messages.slice(0, split), recent: messages.slice(split) };
 }
 
+/** Whether the summary was cut at the output limit, also when the SDK's own retries wrapped it. */
+function cutAtOutputLimit(error: unknown): boolean {
+  const pending: unknown[] = [error];
+  const seen = new Set<unknown>();
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+    const { cause, code, lastError } = current as { cause?: unknown; code?: unknown; lastError?: unknown };
+    if (code === SUMMARY_OUTPUT_TRUNCATED_CODE) return true;
+    pending.push(cause, lastError);
+  }
+  return false;
+}
+
 /**
  * The summary of the older part. One cut at the model's output limit was too long, not too large to
  * read, so it is asked again at once with the brief limit instead of failing the person's message;
@@ -293,8 +309,7 @@ async function summarizeOlder(
   try {
     return await summarize(request(limit));
   } catch (error) {
-    const cut = error instanceof AppError && error.code === SUMMARY_OUTPUT_TRUNCATED_CODE;
-    if (!cut || limit === COMPACTION_BRIEF_SUMMARY_WORD_LIMIT) throw error;
+    if (!cutAtOutputLimit(error) || limit === COMPACTION_BRIEF_SUMMARY_WORD_LIMIT) throw error;
     console.warn(JSON.stringify({ code: "AGENT_COMPACTION_SUMMARY_TOO_LONG", summaryWordLimit: limit }));
     return await summarize(request(COMPACTION_BRIEF_SUMMARY_WORD_LIMIT));
   }

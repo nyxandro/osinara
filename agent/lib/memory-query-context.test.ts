@@ -5,15 +5,16 @@
  * - A referring reply borrows the message it answers: from the envelope when it carries the text,
  *   otherwise from the conversation's journal.
  * - A short or referring message that answers nothing borrows the few messages before it.
- * - A self-contained message and small talk borrow nothing and read no journal.
+ * - A self-contained or long message, small talk and a sticker borrow nothing and read no journal.
+ * - A failed read of the journal costs the turn only the borrowed words.
  * - Every borrowed line is bounded.
  */
 import { describe, expect, it, vi } from "vitest";
 
-import { memoryQueryConversationContext } from "./memory-query-context.js";
+import { memoryQueryConversationContext, memoryTurnQueryContext } from "./memory-query-context.js";
 
 // Production, 01.11.2026: the request answered the agent's own list of skills that named pohuy.
-const REPLIED = "перепроверила всю ленту, прямого «Осинара, используй pohuy» от Пуха нигде нет";
+const REPLIED = "перепроверила всю ленту, прямого «Осинара, используй pohuy» в чате нигде нет";
 
 function source(overrides: Partial<{ previous: string[]; replyText: string | null }> = {}) {
   return {
@@ -23,6 +24,21 @@ function source(overrides: Partial<{ previous: string[]; replyText: string | nul
 }
 
 const CONVERSATION = { conversationId: "conversation-1", sourceSequence: "59976" };
+
+describe("memoryTurnQueryContext", () => {
+  it("costs the turn only the borrowed words when the journal cannot be read", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const journal = { previous: vi.fn(), replyTarget: vi.fn().mockRejectedValue(new Error("connection terminated")) };
+    const auth = { current: { attributes: { telegramConversationId: "conversation-1", telegramTimelineSequence: "59975" },
+      authenticator: "telegram", principalId: "user-1", principalType: "user" }, initiator: null } as never;
+    const envelope = `<current_telegram_message>\n${JSON.stringify({ replyToSequenceId: "59699", sourceSequence: "59976", text: "а это что?" })}\n</current_telegram_message>`;
+
+    await expect(memoryTurnQueryContext(journal, auth, [{ content: envelope, role: "user" }], "а это что?")).resolves.toBeNull();
+    expect(error.mock.calls.map((call) => JSON.parse(String(call[0])))).toContainEqual(
+      expect.objectContaining({ code: "AGENT_MEMORY_QUERY_CONTEXT_FAILED" }));
+    error.mockRestore();
+  });
+});
 
 describe("memoryQueryConversationContext", () => {
   it("borrows the message a referring reply answers, from the journal", async () => {
@@ -61,12 +77,15 @@ describe("memoryQueryConversationContext", () => {
 
   it.each([
     ["a self-contained question", "посоветуй хороший VPS в Европе дешевле десяти евро в месяц с почасовой оплатой"],
+    ["a long message with a passing «это»", "Напомни мне завтра в девять утра записаться к стоматологу на чистку, это важно"],
+    ["a short message that neither replies nor refers", "IT-отдел просит доступ"],
     ["small talk", "ахаха"],
+    ["a sticker", "[стикер 😂]"],
   ])("borrows nothing for %s", async (_name, text) => {
     const journal = source();
 
     await expect(memoryQueryConversationContext(journal, {
-      ...CONVERSATION, replyText: null, replyToSequenceId: "59699", text,
+      ...CONVERSATION, replyText: null, replyToSequenceId: null, text,
     })).resolves.toBeNull();
     expect(journal.replyTarget).not.toHaveBeenCalled();
     expect(journal.previous).not.toHaveBeenCalled();

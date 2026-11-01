@@ -377,6 +377,14 @@ describe("history compaction", () => {
     expect(summarize.mock.calls[1]![0].prompt).toContain(`${COMPACTION_BRIEF_SUMMARY_WORD_LIMIT} words`);
     expect(compacted[1]).toEqual({ content: "сводка", role: "assistant" });
 
+    // The SDK may end its own retries in an error that keeps the cut answer as its last attempt.
+    const wrapped = Object.assign(new AppError("AGENT_MODEL_CALL_FAILED", "Не удалось получить ответ модели"), {
+      cause: Object.assign(new Error("Failed after 2 attempts"), { lastError: truncated }),
+    });
+    const afterRetries = vi.fn<Summarize>().mockRejectedValueOnce(wrapped).mockResolvedValueOnce("сводка");
+    await compactMessages(messages, { recentWindowSize: 2, threshold: 40_000 }, afterRetries, UNMEASURED, 0);
+    expect(afterRetries).toHaveBeenCalledTimes(2);
+
     // A second cut summary, or a refusal of another kind, is not asked again in the turn.
     const twice = vi.fn<Summarize>().mockRejectedValue(truncated);
     await expect(compactMessages(messages, { recentWindowSize: 2, threshold: 40_000 }, twice, UNMEASURED, 0)).rejects.toBe(truncated);

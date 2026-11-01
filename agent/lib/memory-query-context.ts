@@ -10,9 +10,12 @@
  * Key constructs:
  * - Production, 01.11.2026: «Кинь ссылку на эти скилы» named nothing, and the search by it brought
  *   eight unrelated records; the message it answered named the skill.
- * - Only a message that refers elsewhere borrows: a word like «эти», «его», «там», or a few words in
- *   all. A reply borrows its target alone: in a busy group the messages just before are usually
- *   another thread, as they were that morning.
+ * - Only a short message that refers elsewhere borrows: a reply, or a word like «эти», «его», «там»,
+ *   in a few words. A longer message carries its own words, and borrowing on every «это» would cost
+ *   a second search on most turns. A reply borrows its target alone: in a busy group the messages
+ *   just before are usually another thread, as they were that morning; without a reply the messages
+ *   just before come from the same topic.
+ * - A failed read of the journal costs the turn only the borrowed words, never its memory.
  * - The borrowed text is searched with and never gates: small talk and a named date stay decided by
  *   the person's own words (`memory-automatic-selection.ts`).
  */
@@ -20,16 +23,19 @@ import type { ModelMessage } from "ai";
 
 import type { SessionAuth } from "../runtime/context.js";
 import { database } from "./database.js";
+import { prepareMemoryQuery } from "./memory-query-preparation.js";
 import { latestUserText } from "./memory-retrieval.js";
 import { isSmallTalkMessage } from "./memory-small-talk.js";
+import { isTelegramMediaPlaceholderOnly } from "./telegram-content/telegram-content-description.js";
 import { currentTelegramMessageReply } from "./telegram-group-turn-context.js";
+import { CAPTIONLESS_ATTACHMENT_MODEL_TEXT } from "./telegram-model-placeholders.js";
 
-const SHORT_MESSAGE_WORDS = 6;
+const SHORT_MESSAGE_WORDS = 8;
 const PREVIOUS_MESSAGES = 3;
 const BORROWED_LINE_MAX_CHARACTERS = 400;
 // Pronouns and demonstratives that point at something said elsewhere.
 const REFERRING_WORD_PATTERN =
-  /(?<![\p{L}\p{N}])(?:эт(?:от|а|о|и|ого|ой|им|их|ому|у|ими)|т(?:от|а|е|ого|ой|ем|ех|ому|у|еми)|так(?:ой|ая|ое|ие|их|ую|им)|он[аои]?|е(?:го|ё)|ее|их|н(?:его|её|ее|их|им|ей|ему|ими|ём|ем)|там|туда|оттуда|тогда|it|this|that|these|those|them)(?![\p{L}\p{N}])/iu;
+  /(?<![\p{L}\p{N}])(?:эт(?:от|а|о|и|ого|ой|им|их|ому|у|ими)|т(?:от|а|е|ого|ой|ем|ех|ому|у|еми)|так(?:ой|ая|ое|ие|их|ую|им)|он[аои]?|е(?:го|ё)|ее|их|н(?:его|её|ее|их|им|ей|ему|ими|ём|ем)|там|туда|оттуда|тогда)(?![\p{L}\p{N}])/iu;
 
 export interface MemoryQueryContextSource {
   previous(input: { before: string; conversationId: string; limit: number }): Promise<string[]>;
@@ -38,10 +44,15 @@ export interface MemoryQueryContextSource {
 
 export const memoryQueryContextRepository: MemoryQueryContextSource = {
   async previous(input) {
+    // Only the current message's own topic: a forum group keeps several conversations at once.
     const result = await database().query<{ content_text: string }>(
-      `SELECT content_text FROM telegram_group_messages
-       WHERE conversation_id = $1 AND sequence_id < $2 AND content_text IS NOT NULL
-       ORDER BY sequence_id DESC LIMIT $3`,
+      `SELECT message.content_text FROM telegram_group_messages AS message
+       WHERE message.conversation_id = $1 AND message.sequence_id < $2 AND message.content_text IS NOT NULL
+         AND message.message_thread_id IS NOT DISTINCT FROM (
+           SELECT current.message_thread_id FROM telegram_group_messages AS current
+           WHERE current.conversation_id = $1 AND current.sequence_id = $2
+         )
+       ORDER BY message.sequence_id DESC LIMIT $3`,
       [input.conversationId, input.before, input.limit],
     );
     return result.rows.map((row) => row.content_text);
@@ -55,9 +66,15 @@ export const memoryQueryContextRepository: MemoryQueryContextSource = {
   },
 };
 
-function refersElsewhere(text: string): boolean {
+function refersElsewhere(text: string, replies: boolean): boolean {
   const words = text.split(/\s+/u).filter(Boolean);
-  return words.length <= SHORT_MESSAGE_WORDS || REFERRING_WORD_PATTERN.test(text);
+  return words.length <= SHORT_MESSAGE_WORDS && (replies || REFERRING_WORD_PATTERN.test(text));
+}
+
+// The same words the selection itself stays silent on (`memory-automatic-selection.ts`).
+function asksMemoryNothing(text: string): boolean {
+  const prepared = prepareMemoryQuery(text);
+  return isSmallTalkMessage(prepared) || prepared === CAPTIONLESS_ATTACHMENT_MODEL_TEXT || isTelegramMediaPlaceholderOnly(prepared);
 }
 
 function bounded(text: string): string {
@@ -76,8 +93,9 @@ export async function memoryQueryConversationContext(
     text: string;
   },
 ): Promise<{ kind: "previous" | "reply"; text: string } | null> {
-  if (input.conversationId === null || isSmallTalkMessage(input.text) || !refersElsewhere(input.text)) return null;
-  if (input.replyText !== null || input.replyToSequenceId !== null) {
+  const replies = input.replyText !== null || input.replyToSequenceId !== null;
+  if (input.conversationId === null || asksMemoryNothing(input.text) || !refersElsewhere(input.text, replies)) return null;
+  if (replies) {
     const replied = input.replyText ??
       await source.replyTarget({ conversationId: input.conversationId, sequenceId: input.replyToSequenceId! });
     const text = replied === null ? "" : bounded(replied);
@@ -107,9 +125,17 @@ export async function memoryTurnQueryContext(
   if (typeof conversationId !== "string" || typeof attributes?.telegramTimelineSequence !== "string" || envelope === null) {
     return null;
   }
-  return await memoryQueryConversationContext(source, {
-    conversationId,
-    ...currentTelegramMessageReply(envelope),
-    text: query,
-  });
+  try {
+    return await memoryQueryConversationContext(source, {
+      conversationId,
+      ...currentTelegramMessageReply(envelope),
+      text: query,
+    });
+  } catch (error) {
+    console.error(JSON.stringify({
+      code: "AGENT_MEMORY_QUERY_CONTEXT_FAILED",
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    return null;
+  }
 }
