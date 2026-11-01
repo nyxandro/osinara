@@ -8,6 +8,8 @@
  */
 import type { SessionContext } from "../../runtime/context.js";
 
+import { apiKeyGrantPrompt } from "../api-keys/api-key-approval.js";
+import { apiKeyRepository, type ApiKeySettings } from "../api-keys/api-key-repository.js";
 import { AppError } from "../app-error.js";
 import { requirePrivateTelegramOwner } from "../family-context.js";
 import { requireMemoryAuthorization } from "../memory-context.js";
@@ -37,6 +39,7 @@ import {
 import { externalAgentScheduleRepository } from "../agent-schedules/external-agent-schedule-repository.js";
 
 interface ApprovalPresentationDependencies {
+  findApiKey(name: string, ctx: Pick<SessionContext, "session">): Promise<(ApiKeySettings & { name: string }) | null>;
   findProfileProjectionGroup(groupRef: string, ctx: Pick<SessionContext, "session">): Promise<string | null>;
   findGroupTitle(telegramChatId: string, ctx: Pick<SessionContext, "session">): Promise<string | null>;
   /** The owner's automation an update targets; fails when it is not one of theirs. */
@@ -133,6 +136,19 @@ export function createTelegramApprovalPresenter(
         };
       }
     }
+    if (request.action.toolName === "manage_api_keys" && request.action.input.action === "grant") {
+      // The approval policy denied any invalid input already; a personal grant has no card.
+      const input = request.action.input;
+      return {
+        ...localized,
+        prompt: await apiKeyGrantPrompt({
+          findGroupTitle: (telegramChatId) => dependencies.findGroupTitle(telegramChatId, ctx),
+          key: await dependencies.findApiKey(String(input.name), ctx),
+          target: input.target,
+          telegramChatId: input.telegramChatId,
+        }),
+      };
+    }
     if (request.action.toolName === "execute_google_workspace") {
       // Only a command that opens the user's data to other people still asks for the button.
       return {
@@ -149,6 +165,10 @@ export function createTelegramApprovalPresenter(
 }
 
 export const presentTelegramApproval = createTelegramApprovalPresenter({
+  async findApiKey(name, ctx) {
+    const owner = requirePrivateTelegramOwner(ctx);
+    return await apiKeyRepository.find({ familyId: owner.familyId, name });
+  },
   async findProfileProjectionGroup(groupRef, ctx) {
     requirePrivateTelegramOwner(ctx);
     const policies = await profileProjectionPolicyRepository.list(requireMemoryAuthorization(ctx));

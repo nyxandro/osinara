@@ -7,8 +7,8 @@
  * - `RuntimeRoute`, `RouteContext`: a route and what its handler may do after answering.
  * - `HEALTH_ROUTE`: `/v1/health`, the address Docker, Nginx and the deploy controller probe.
  *
- * The addresses: `/v1/telegram`, the internal `/v1/telegram-drain`, `/v1/google-oauth/callback`
- * and the health check.
+ * The addresses: `/v1/telegram`, the internal `/v1/telegram-drain`, `/v1/google-oauth/callback`,
+ * the internal `/v1/sandbox-api-key-usage` and the health check.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Readable } from "node:stream";

@@ -1,5 +1,11 @@
-/** Each external group shares a network only with its proxy, never with trusted or other-group compute. */
+/**
+ * Each external group shares a network only with its proxy, never with trusted or other-group compute.
+ * The proxy joins it under a second alias named after the group's workspace: Docker DNS answers it
+ * with the proxy's own address on this network, which is how the API key gateway tells groups apart.
+ */
 import type Docker from "dockerode";
+
+import { groupEgressProxyAlias } from "../../agent/lib/api-keys/api-key-contract.js";
 
 const GROUP_NETWORK_LABEL = "dev.osinara.group-egress.workspace";
 const PROJECT_LABEL = "dev.osinara.group-egress.project";
@@ -34,7 +40,9 @@ export async function ensureGroupNetwork(docker: Docker, project: string, worksp
   if (proxies.length !== 1) throw new Error("AGENT_SANDBOX_GROUP_PROXY_MISSING: Expected one running egress proxy");
   const proxy = proxies[0]!;
   if (!info.Containers?.[proxy.Id]) {
-    await network.connect({ Container: proxy.Id, EndpointConfig: { Aliases: ["sandbox-egress-proxy"] } });
+    await network.connect({ Container: proxy.Id, EndpointConfig: {
+      Aliases: ["sandbox-egress-proxy", groupEgressProxyAlias(workspaceId)],
+    } });
   }
   return name;
 }

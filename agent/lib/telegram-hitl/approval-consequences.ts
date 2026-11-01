@@ -2,7 +2,8 @@
  * Consequence wording shared by approval composition and settlement.
  *
  * Exports:
- * - `DEFAULT_CONSEQUENCE`, `GOOGLE_WORKSPACE_CONSEQUENCE`, and the group policy sentences.
+ * - `DEFAULT_CONSEQUENCE`, `GOOGLE_WORKSPACE_CONSEQUENCE`, the group policy sentences and the API
+ *   key grant sentence.
  * - `allApprovalConsequences`: every sentence a settled prompt may need stripped.
  *
  * Key constructs:
@@ -25,6 +26,9 @@ export const GROUP_TOOLS_BASH_CONSEQUENCE =
 export const GROUP_TOOLS_NO_BASH_CONSEQUENCE =
   "Права группы будут заменены указанным списком. Bash и все скиллы, которым он нужен, будут отключены. Текущие процессы группы будут остановлены, её файлы сохранятся.";
 
+export const API_KEY_GRANT_CONSEQUENCE =
+  "Скрипты там смогут вызывать сервис этого ключа, но само значение ключа никто не увидит. Каждый вызов учитывается. Отозвать доступ можно в любой момент.";
+
 export function allApprovalConsequences(): string[] {
   return [
     DEFAULT_CONSEQUENCE,
@@ -32,5 +36,6 @@ export function allApprovalConsequences(): string[] {
     PROFILE_PROJECTION_DISABLE_CONSEQUENCE,
     GOOGLE_WORKSPACE_CONSEQUENCE,
     GROUP_TOOLS_BASH_CONSEQUENCE, GROUP_TOOLS_NO_BASH_CONSEQUENCE,
+    API_KEY_GRANT_CONSEQUENCE,
   ];
 }

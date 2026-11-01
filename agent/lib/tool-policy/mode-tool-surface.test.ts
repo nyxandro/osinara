@@ -144,6 +144,10 @@ describe("trusted mode tool surfaces", () => {
     expect(names({ environment: "private", scheduledRun: true })).not.toContain("manage_network_access");
     expect(Object.keys(buildSubagentToolSurface({ environment: "private" }))).not.toContain("manage_network_access");
     expect(names({ environment: "family" })).not.toContain("manage_network_access");
+    expect(names({ environment: "private" })).toContain("manage_api_keys");
+    expect(names({ environment: "private", scheduledRun: true })).not.toContain("manage_api_keys");
+    expect(Object.keys(buildSubagentToolSurface({ environment: "private" }))).not.toContain("manage_api_keys");
+    expect(names({ environment: "family" })).not.toContain("manage_api_keys");
   });
 
   it("never exposes another zone's tools", () => {

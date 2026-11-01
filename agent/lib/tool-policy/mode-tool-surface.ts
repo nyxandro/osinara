@@ -374,8 +374,9 @@ const TRUSTED_SCHEDULED_SURFACES: Readonly<Record<"family" | "private", ToolMap>
   Object.entries(TRUSTED_APPLICATION_SURFACES).map(([environment, surface]) => {
     // A scheduled turn can read chat instructions but has no user source for prompt or memory writes.
     // Family skills are managed only in a conversation with the owner, and nobody is there to confirm
-    // network access.
+    // network access or to send a requested API key.
     const {
+      manage_api_keys: _manageApiKeys,
       manage_behavior_preference: _manageBehaviorPreference,
       manage_network_access: _manageNetworkAccess,
       manage_skill: _manageSkill,

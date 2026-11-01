@@ -36,6 +36,7 @@ const SERVICE_SKILLS: readonly ServiceSkill[] = [
   { environments: new Set(["external"]), name: "group-reminders", tools: ["manage_reminder"] },
   { environments: new Set(["private", "family", "external"]), name: "voice-replies", tools: ["send_voice_message"] },
   { environments: new Set(["private"]), name: "group-admin", tools: ["manage_telegram_group", "manage_family_invitation"] },
+  { environments: new Set(["private"]), name: "api-keys", tools: ["manage_api_keys"] },
   { environments: new Set(["private", "family", "external"]), name: "delegation", tools: ["agent"] },
 ];
 

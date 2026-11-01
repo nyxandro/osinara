@@ -9,6 +9,7 @@
  * - A reply-button press continues as the addressee's own message; the addressee's written message
  *   first removes the buttons they did not tap.
  * - A chat queue with no waiting update may run one due wake-up of its own conversation.
+ * - The owner's awaited API key is taken out before storage and never becomes a queued update.
  *
  * One update runs to the end of its turn before the next update of its chat starts. The update
  * and its turn are bound in the transaction that creates the turn; after a restart a bound update
@@ -76,6 +77,8 @@ export interface DurableIngressDependencies {
   reportFailure: typeof recordOperationalIncident;
   acceptMedia(message: Pick<TelegramMessage, "chat">, updateId: string): Promise<boolean>;
   authorizeVoice(message: Pick<TelegramMessage, "chat" | "from">, options: { readonly addressed: boolean }): Promise<boolean>;
+  /** Consumes the owner's awaited API key before storage, so it never reaches the queue or the model. */
+  captureApiKey(update: TelegramUpdate, updateId: string, waitUntil: RouteContext["waitUntil"]): Promise<boolean>;
   botUsername: string;
   /** The runtime's Telegram dispatch: the update's turn, created with the update's binding. */
   dispatch(update: TelegramUpdate, control: TelegramDispatchControl): Promise<TelegramDispatchResult>;
@@ -478,6 +481,9 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
     context: RouteContext & { readonly raw: JsonObject; readonly update: TelegramUpdate },
   ): Promise<Response> {
     const incomingUpdateId = updateId(context.raw);
+    if (await dependencies.captureApiKey(context.update, incomingUpdateId, (work) => context.waitUntil(work))) {
+      return new Response("ok");
+    }
     // Media of a channel or an unregistered chat is acknowledged before durable storage, download,
     // transcription or dispatch; a registered group and a private chat take in everything.
     if (

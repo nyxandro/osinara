@@ -13,6 +13,7 @@
  *   container identity and mounts; compute itself is disposable, workspaces live on volumes.
  * - Skills arrive through `syncSkills` only: a skill's package when the model loads it, and the
  *   list of the turn's skills to tidy the skill root. There are no build-time seed templates.
+ * - Every command gets the API key variables of the session's workspaces, read when it starts.
  */
 import { posix } from "node:path";
 
@@ -68,18 +69,23 @@ function buildSession(input: {
   access: () => SandboxAccess | null;
   client: SandboxRunnerClient;
   ensure: (requiredCapability?: "bash") => Promise<{ sessionId: string; instanceId: string }>;
+  environment: () => Promise<Readonly<Record<string, string>>>;
   id: () => string;
   stop: () => Promise<void>;
   syncSkills: (packages: readonly SandboxSkillPackage[], keep: readonly string[] | null) => Promise<void>;
 }): RuntimeSandboxSession {
+  // Read for every command, so a key granted or revoked a moment ago applies to the next one.
+  const commandEnvironment = async (env: Record<string, string> | undefined) => ({ ...await input.environment(), ...env });
+
   async function spawn(options: GroupSandboxCommandOptions): Promise<Experimental_SandboxProcess> {
+    const environment = await commandEnvironment(options.env);
     const { sessionId, instanceId } = await input.ensure(options.requiredGroupCapability);
     const controller = new AbortController();
     let killed = false;
     const completion = input.client.run(sessionId, {
       command: options.command,
       expectedInstanceId: instanceId,
-      environment: options.env,
+      environment,
       workingDirectory: options.workingDirectory,
     }, controller.signal).catch((error: unknown) => {
       if (killed) return { exitCode: 137, processId: "killed", stderr: "", stdout: "" };
@@ -117,11 +123,12 @@ function buildSession(input: {
     },
     resolvePath: resolveSandboxPath,
     async run(options: GroupSandboxCommandOptions) {
+      const environment = await commandEnvironment(options.env);
       const { sessionId, instanceId } = await input.ensure(options.requiredGroupCapability);
       const result = await input.client.run(sessionId, {
         command: options.command,
         expectedInstanceId: instanceId,
-        environment: options.env,
+        environment,
         workingDirectory: options.workingDirectory,
       }, options.abortSignal);
       return { exitCode: result.exitCode, stderr: result.stderr, stdout: result.stdout };
@@ -195,6 +202,8 @@ function requireSameMounts(restored: StoredSandboxMetadata, use: WorkspaceSandbo
 
 export function openRunnerSandbox(input: {
   readonly baseUrl?: string;
+  /** Variables added to every command: the API keys granted to the session's workspaces. */
+  readonly environment: () => Promise<Readonly<Record<string, string>>>;
   /** The agent session id; the runner records it with the container. */
   readonly sessionId: string;
   readonly stored: Record<string, unknown> | null;
@@ -241,6 +250,7 @@ export function openRunnerSandbox(input: {
     access: () => request?.access ?? null,
     client,
     ensure: ensureRunner,
+    environment: input.environment,
     id: () => use.sandboxSessionId,
     // The runner operation is idempotent; a session without compute has nothing to stop.
     stop: async () => { if (request !== null) await client.stop(request.sandboxSessionId); },

@@ -113,6 +113,10 @@ services:
       target: sandbox-egress-proxy
     cap_drop:
       - ALL
+    environment:
+      # The API key gateway reports usage to the agent and reads key values with the integration key.
+      AGENT_INTERNAL_BASE_URL: http://agent:3000
+      INTEGRATION_TOKEN_ENCRYPTION_KEY: ${INTEGRATION_TOKEN_ENCRYPTION_KEY-}
     healthcheck:
       test: ["CMD", "node", "-e", "require('node:net').connect(3128,'127.0.0.1').on('connect',function(){this.destroy();process.exit(0)}).on('error',()=>process.exit(1))"]
       interval: 5s
