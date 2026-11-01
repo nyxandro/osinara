@@ -20,6 +20,9 @@ const TOOL_ACTION_LABELS: Readonly<Record<string, string>> = {
 };
 
 const MANAGED_ACTION_LABELS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  manage_api_keys: {
+    grant: "выдать ключ API. Скрипты получателя смогут вызывать сервис ключа, само значение никто не увидит",
+  },
   manage_external_group_schedule: EXTERNAL_SCHEDULE_ACTION_LABELS,
   manage_family_invitation: {
     approve: "добавить участника в семью",
@@ -145,6 +148,12 @@ function approvalParameterLines(toolName: string, input: Record<string, unknown>
         ...line("Устройство", "purpose"),
       ];
     }
+    case "manage_api_keys":
+      return [
+        ...line("Ключ", "name"),
+        ...line("Кому", "target"),
+        ...line("Telegram chat ID", "telegramChatId"),
+      ];
     case "remove_group_file":
       return line("Путь", "path");
     case "manage_external_group_schedule":

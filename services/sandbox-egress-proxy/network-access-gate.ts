@@ -6,6 +6,7 @@
  * - `NetworkAccessGate`: authorizes one connection to an IP address and port.
  * - `createNetworkAccessGate`: the gate over the grant file the agent publishes.
  * - `proxyAttachedSubnets`: the networks this proxy container is attached to, in CIDR notation.
+ * - `withoutIpv4MappedPrefix`: a socket address as the plain IPv4 the proxy compares.
  *
  * Security invariants:
  * - Only a request that arrived on the trusted sandbox network qualifies; external-group sandboxes
@@ -48,7 +49,7 @@ export interface NetworkAccessGateOptions {
   trustedLocalAddress: string;
 }
 
-function withoutIpv4MappedPrefix(address: string | undefined): string | undefined {
+export function withoutIpv4MappedPrefix(address: string | undefined): string | undefined {
   return address?.toLowerCase().startsWith("::ffff:") ? address.slice("::ffff:".length) : address;
 }
 

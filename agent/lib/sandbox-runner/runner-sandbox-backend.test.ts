@@ -8,6 +8,7 @@
  * - Automatic trusted/restricted classification from workspace scopes.
  * - Disabled internal sessions persist no mounts and cannot start sandbox compute.
  * - Shell and file delegation; stop reaches reattachable compute.
+ * - Every command gets the API key variables of the session's workspaces as they are at that moment.
  */
 import type { AddressInfo } from "node:net";
 
@@ -82,11 +83,45 @@ afterEach(async () => {
 const PERSONAL = [{ mountPoint: "personal" as const, workspaceId: WORKSPACE_ID }];
 const GROUP = [{ mountPoint: "group" as const, workspaceId: WORKSPACE_ID }];
 
-async function open(engine: SandboxEngine, mounts: Array<{ mountPoint: "family" | "group" | "personal"; workspaceId: string }>, stored: Record<string, unknown> | null = null) {
-  return openRunnerSandbox({ baseUrl: await runnerUrl(engine), sessionId: SESSION_ID, stored, use: { mounts, sandboxSessionId: SANDBOX_SESSION_ID } });
+async function open(
+  engine: SandboxEngine,
+  mounts: Array<{ mountPoint: "family" | "group" | "personal"; workspaceId: string }>,
+  stored: Record<string, unknown> | null = null,
+  environment: () => Promise<Readonly<Record<string, string>>> = async () => ({}),
+) {
+  return openRunnerSandbox({
+    baseUrl: await runnerUrl(engine), environment, sessionId: SESSION_ID, stored,
+    use: { mounts, sandboxSessionId: SANDBOX_SESSION_ID },
+  });
 }
 
 describe("session sandbox on the runner", () => {
+  it.each(["run", "spawn"] as const)("gives every %s the API keys of the session, read anew each time", async (method) => {
+    const engine = fakeEngine();
+    const environment = vi.fn()
+      .mockResolvedValueOnce({ NEURALDEEP_API_KEY: "osk_first", NEURALDEEP_BASE_URL: "http://sandbox-egress-proxy:3129/neuraldeep" })
+      .mockResolvedValueOnce({});
+    const { session } = await open(engine, PERSONAL, null, environment);
+
+    for (const command of ["first", "second"]) {
+      if (method === "run") await session.run({ command, env: { LANG: "C" } });
+      else await (await session.spawn({ command, env: { LANG: "C" } })).wait();
+    }
+
+    expect(vi.mocked(engine.runProcess).mock.calls.map(([, request]) => request.environment)).toEqual([
+      { LANG: "C", NEURALDEEP_API_KEY: "osk_first", NEURALDEEP_BASE_URL: "http://sandbox-egress-proxy:3129/neuraldeep" },
+      { LANG: "C" },
+    ]);
+  });
+
+  it("runs nothing when the session's API keys cannot be read", async () => {
+    const engine = fakeEngine();
+    const { session } = await open(engine, PERSONAL, null, async () => { throw new Error("AGENT_DATABASE_UNAVAILABLE"); });
+
+    await expect(session.run({ command: "true" })).rejects.toThrow("AGENT_DATABASE_UNAVAILABLE");
+    expect(engine.runProcess).not.toHaveBeenCalled();
+  });
+
   it("rechecks the live group skill list before materializing a previously granted package", async () => {
     const engine = fakeEngine();
     const { session } = await open(engine, GROUP);

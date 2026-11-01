@@ -32,6 +32,7 @@ const EXPECTED_TOOL_MODULES = [
   "list_reminders.ts",
   "list_telegram_attachments.ts",
   "manage_agent_schedule.ts",
+  "manage_api_keys.ts",
   "manage_behavior_preference.ts",
   "manage_external_group_schedule.ts",
   "manage_family_invitation.ts",

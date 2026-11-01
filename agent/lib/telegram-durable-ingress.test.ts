@@ -74,6 +74,7 @@ function ingress(
     reportFailure: vi.fn(),
     acceptMedia: vi.fn().mockResolvedValue(true),
     authorizeVoice: vi.fn().mockResolvedValue(true),
+    captureApiKey: vi.fn().mockResolvedValue(false),
     botUsername: "osinara_bot",
     dispatch: vi.fn().mockResolvedValue(DISPATCHED),
     dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false),
@@ -484,6 +485,27 @@ describe("createTelegramDurableIngress", () => {
     expect(acceptMedia).toHaveBeenCalledWith(update.message, "1001");
     expect(storage.value.enqueue).not.toHaveBeenCalled();
     expect(dependencies.transcribeVoice).not.toHaveBeenCalled();
+    expect(dependencies.dispatch).not.toHaveBeenCalled();
+    expect(dependencies.replyButtonsOnArrival).not.toHaveBeenCalled();
+    expect(background).toBeUndefined();
+  });
+
+  it("stores nothing and dispatches nothing for a message the API key intake consumed", async () => {
+    const storage = repository();
+    storage.value.claimNext.mockReset().mockResolvedValue(null);
+    const captureApiKey = vi.fn().mockResolvedValue(true);
+    const { dependencies, handle } = ingress(storage, { captureApiKey });
+    const raw = {
+      message: { chat: { id: 101, type: "private" }, date: 1_700_000_000, from: { first_name: "Owner", id: 101, is_bot: false },
+        message_id: 80, text: "sk-live-1234567890abcdefghij" },
+      update_id: 1003,
+    };
+
+    const { background, response, update } = await deliver(handle, raw);
+
+    expect(response.status).toBe(200);
+    expect(captureApiKey).toHaveBeenCalledWith(update, "1003", expect.any(Function));
+    expect(storage.value.enqueue).not.toHaveBeenCalled();
     expect(dependencies.dispatch).not.toHaveBeenCalled();
     expect(dependencies.replyButtonsOnArrival).not.toHaveBeenCalled();
     expect(background).toBeUndefined();

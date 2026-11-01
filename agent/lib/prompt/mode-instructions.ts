@@ -18,6 +18,7 @@ import { MODEL_VISION_AVAILABLE } from "../model-vision-availability.js";
 import { externalGroupCapabilityInstructions } from "../tool-policy/external-group-capability-instructions.js";
 import type { ExternalGroupToolName } from "../tool-policy/group-tool-catalog.js";
 import { TURN_INTERJECTION_RULES } from "../turn-interjection/turn-interjection-block.js";
+import { SANDBOX_API_KEY_USAGE } from "./api-key-fragments.js";
 import { chatNotesRules } from "./chat-notes-fragments.js";
 import { SUBAGENT_TURN_RULES } from "./delegation-fragments.js";
 import { REPLY_BUTTON_RULES } from "./reply-button-fragments.js";
@@ -439,7 +440,9 @@ ${GROUP_TIMELINE_TRUST}`,
     web.length > 0 ? web : null,
     `## Credentials
 
-Do not use personal or family accounts, tokens or browser authorizations. This group's browser has its own isolated state. Do not ask to post secrets in the shared chat; if a required connection is not set up for the group, say so instead of trying to use someone else's.`,
+Do not use personal or family accounts, tokens or browser authorizations. This group's browser has its own isolated state. Do not ask to post secrets in the shared chat; if a required connection is not set up for the group, say so instead of trying to use someone else's.${capabilities.has("bash") ? `
+
+API keys the owner granted to this group are the one exception. ${SANDBOX_API_KEY_USAGE} If a skill needs a key this group does not have, say that the owner can store it and grant it to the group from their private chat with you.` : ""}`,
     EXTERNAL_GROUP_MODEL_POLICY,
     scheduledRun || subagentTurn ? null : GROUP_RESPONSE_OUTCOMES,
     scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,

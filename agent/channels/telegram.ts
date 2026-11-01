@@ -78,6 +78,7 @@ import {
 } from "../lib/conversation-wakeups/conversation-wakeup-events.js";
 import { transcribeTelegramVoice } from "../lib/groq-voice-transcription.js";
 import { telegramIngressRepository } from "../lib/telegram-ingress-repository.js";
+import { captureApiKeyMessage } from "../lib/api-keys/api-key-intake.js";
 import { createTelegramVoiceAuthorizer } from "../lib/telegram-voice-authorization.js";
 import { telegramRepository } from "../lib/telegram-repository.js";
 import { handleSoftwareUpdateCallback } from "../lib/software-updates/callback.js";
@@ -475,6 +476,7 @@ export function createTelegramIngress(runtime: Pick<DurableIngressDependencies, 
     },
     authorizeVoice: authorizeTelegramVoice,
     botUsername: requiredBotUsername(),
+    captureApiKey: captureApiKeyMessage,
     dismissReplyButtons: dismissReplyButtonsOnMessage,
     handleReplyButtonPress,
     replyButtonsOnArrival,

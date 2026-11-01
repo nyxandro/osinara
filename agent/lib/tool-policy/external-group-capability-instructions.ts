@@ -24,7 +24,7 @@ export function externalGroupCapabilityInstructions(options: ExternalGroupCapabi
       ? ["", "The main agent may delegate a complex part as a subtask; the child agent gets the same data boundaries and permissions, but does not delegate again and does not save long-term memory."]
       : []),
     "",
-    "A permitted skill does not grant anyone else's authorization. If it needs an external connection that is not available here, say so; personal and family connections are not passed to the group.",
+    "A permitted skill does not grant anyone else's authorization. If it needs an external connection that is not available here, say so; personal and family connections are not passed to the group, except API keys the owner granted to it (see Credentials).",
     "</external_group_capabilities>",
   ].join("\n");
 }
