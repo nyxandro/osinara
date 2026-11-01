@@ -17,7 +17,7 @@
  * - Proxy credentials and hop-by-hop headers are never forwarded.
  * - Logs name the destination host, never a full URL: it may carry credentials or tokens.
  */
-import { createServer, request as httpRequest, type IncomingHttpHeaders } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { connect, type Socket } from "node:net";
 
 import {
@@ -25,6 +25,7 @@ import {
   SANDBOX_EGRESS_UPSTREAM_CLOSED_CODE,
   writeEgressLog,
 } from "./egress-log.js";
+import { filteredHeaders } from "./http-headers.js";
 import { createGrantedConnectionRegistry } from "./granted-connection-registry.js";
 import { NetworkAccessRefusal, type NetworkAccessGate } from "./network-access-gate.js";
 import { resolvePublicInternetAddress } from "./public-dns-resolver.js";
@@ -35,16 +36,6 @@ const IP_LITERAL_HOST = /^[0-9.]+$/u;
 const CONNECT_TIMEOUT_MS = 15_000;
 // How a client closing its side of the connection surfaces on the proxy socket.
 const CLIENT_CLOSED_ERROR_CODES = new Set(["ECONNRESET", "EPIPE"]);
-const HOP_BY_HOP_HEADERS = new Set([
-  "connection",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailer",
-  "transfer-encoding",
-  "upgrade",
-]);
 
 interface ResolvedTarget {
   address: string;
@@ -128,12 +119,6 @@ function refusalBody(error: unknown): string {
   return error instanceof NetworkAccessRefusal
     ? `${error.code}: ${error.clientMessage}\n`
     : "AGENT_SANDBOX_EGRESS_FORBIDDEN: Destination is not allowed\n";
-}
-
-function filteredHeaders(headers: IncomingHttpHeaders): IncomingHttpHeaders {
-  return Object.fromEntries(
-    Object.entries(headers).filter(([name]) => !HOP_BY_HOP_HEADERS.has(name.toLowerCase())),
-  );
 }
 
 function errorMessage(error: unknown): string {

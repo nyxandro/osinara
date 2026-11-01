@@ -81,7 +81,10 @@ describe("external group network isolation", () => {
       await expect(engine.createSession(request)).resolves.toMatchObject({ created: false, instanceId: "f".repeat(64) });
       expect(createContainer).not.toHaveBeenCalled();
       expect(existing.start).toHaveBeenCalledTimes(running ? 0 : 1);
-      expect(network.connect).toHaveBeenCalledWith({ Container: "new-proxy", EndpointConfig: { Aliases: ["sandbox-egress-proxy"] } });
+      // The second alias is how the API key gateway learns which group a request came from.
+      expect(network.connect).toHaveBeenCalledWith({ Container: "new-proxy", EndpointConfig: {
+        Aliases: ["sandbox-egress-proxy", "sandbox-group-egress-proxy-workspace"],
+      } });
     } finally {
       await rm(root, { force: true, recursive: true });
     }

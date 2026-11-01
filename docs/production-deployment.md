@@ -72,6 +72,15 @@ the Docker socket. The agent has no Docker socket and reaches the runner only ov
 control network. Every service uses bounded Docker `json-file` logging (`20m` by `5` files), and
 the deployment validator rejects releases that remove this bound.
 
+The sandbox egress proxy also serves the API key gateway on port 3129. It is never published; it
+listens on every network of the proxy but serves a grant only to a request that arrives on that
+grant's own sandbox network. It reads encrypted key values from the `network-access` volume and
+decrypts them with the same `INTEGRATION_TOKEN_ENCRYPTION_KEY` the agent uses, then reports each use
+to the agent's internal route `/v1/sandbox-api-key-usage` over the app network. Without that key the
+gateway refuses every request with `AGENT_SANDBOX_API_KEY_GATEWAY_UNAVAILABLE` while all other
+sandbox egress keeps working; the agent refuses to request a key with
+`AGENT_API_KEY_STORAGE_UNCONFIGURED`.
+
 Fresh installation additionally creates `osinara-production-edge-frontend`. Only the application
 `edge` service and the TLS proxy join this frontend network. The proxy never joins
 `osinara-production-app-network`, so TLS termination cannot directly address PostgreSQL, the agent,
@@ -550,7 +559,7 @@ artifact. A current-owned durable volume missing from the candidate is forbidden
 current-owned volume or a pre-existing candidate-only volume fails closed, so deploy never creates
 an empty replacement for active data or silently reuses bytes of unknown provenance. The
 reconstructible embedding model volume is omitted, and so is `network-access`: the agent rewrites
-its grant file from the database on every start.
+its grant files (network access and API keys) from the database on every start.
 Candidate release files remain in a unique temporary directory and become `releases/vVERSION` only
 after health succeeds.
 

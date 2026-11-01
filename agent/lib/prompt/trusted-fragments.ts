@@ -14,11 +14,12 @@
  * Every scope-dependent phrase comes from a fixed table keyed by the closed union, so the two
  * trusted zones share one source of truth instead of two drifting profile literals.
  */
-
+import { SANDBOX_API_KEY_USAGE } from "./api-key-fragments.js";
 
 export type TrustedScope = "family" | "personal";
 
 interface TrustedScopePhrases {
+  readonly apiKeyIntake: string;
   readonly credentialIntake: string;
   readonly environmentName: string;
   readonly integrationScope: string;
@@ -29,6 +30,8 @@ interface TrustedScopePhrases {
 
 const PHRASES: Readonly<Record<TrustedScope, TrustedScopePhrases>> = {
   family: {
+    apiKeyIntake:
+      "An API key of an HTTP service is never posted here: the owner stores it in their private chat with you, where you never see it either, and can grant it to the family.",
     credentialIntake:
       "You may accept logins, passwords, tokens, cookies and one-time codes for family automation. The message and the data passed are visible to the group's participants, and the shared vault and browser session are common to the family.",
     environmentName: "the permanent family environment",
@@ -39,6 +42,8 @@ const PHRASES: Readonly<Record<TrustedScope, TrustedScopePhrases>> = {
     vaultName: "the shared family `agent-browser auth vault`",
   },
   personal: {
+    apiKeyIntake:
+      "An API key of an HTTP service that takes it in a request header is never accepted in the chat: the owner stores it with `manage_api_keys` (load the `api-keys` skill), the application asks for it itself and you never see it. If someone pastes such a key anyway, do not repeat or save it and suggest replacing it at the service.",
     credentialIntake:
       "You may accept logins, passwords, tokens, cookies and one-time codes from the current authorized user when they are needed for their request.",
     environmentName: "the permanent personal environment",
@@ -70,6 +75,8 @@ export function trustedCredentialRules(scope: TrustedScope): string {
 
 ${phrases.credentialIntake} Use them only for the stated service and task, to the minimum extent. Do not repeat secrets in answers and statuses, do not copy them into commands, files, screenshots and logs without need, do not pass them to unrelated services and do not save them in long-term memory. The fact that they were passed does not permit actions beyond the request and does not lift the mandatory confirmation of external changes.
 
+${phrases.apiKeyIntake} ${SANDBOX_API_KEY_USAGE}
+
 Prefer a credential vault, secure input or stdin, but their absence alone is no reason to refuse automation. For browser automation save a non-one-time login and password in ${phrases.vaultName} through \`--password-stdin\`; do not save one-time codes. The cookies and localStorage of the permanent browser session are kept in \`$HOME\` and restored after the browser is closed, a new context or a sandbox re-creation. When authorization has expired, reuse the vault without asking for the saved password again. Save an integration token outside the browser only on an explicit request and when the loaded dynamic skill permits ${phrases.integrationScope}; use only its \`$HOME\` with \`0600\` permissions, do not print the value and do not write it to logs.
 
 \`agent-browser\` uses the permanent session \`AGENT_BROWSER_SESSION=osinara\`. After \`open\`, separate Bash calls of \`snapshot\`, \`fill\`, \`click\`, \`screenshot\` and others continue the same tab with the same cookies and authorization; \`batch\` is not needed for that. Do not call \`close\` or \`close --all\` before the end of the browser task, and do not consider the session lost without checking \`agent-browser session info --json\`.
@@ -91,6 +98,7 @@ const ROUTE_LINES: Readonly<Record<TrustedScope, readonly string[]>> = {
   ],
   personal: [
     "- Groups and invitations: load `group-admin`; the family's own skills: load `skill-manager`.",
+    "- An API key a skill or script needs, or giving one to the family or a group: load `api-keys`.",
   ],
 };
 

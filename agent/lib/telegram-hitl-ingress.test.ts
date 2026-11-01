@@ -31,7 +31,7 @@ function fixture(count: number) {
   const runTurn = vi.fn().mockResolvedValue({ status: "completed", text: "готово" });
   const handler = createTelegramDurableIngress({
     reportFailure: vi.fn(),
-    acceptMedia: vi.fn(), authorizeVoice: vi.fn(), botUsername: "osinara_bot", dispatch,
+    acceptMedia: vi.fn(), authorizeVoice: vi.fn(), captureApiKey: vi.fn(async () => false), botUsername: "osinara_bot", dispatch,
     dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), replyButtonsOnArrival: vi.fn(async () => undefined), handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), leaseMilliseconds: 1_000,
     repository, runTurn, transcribeVoice: vi.fn(),
   });

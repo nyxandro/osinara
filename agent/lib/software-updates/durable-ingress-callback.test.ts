@@ -58,6 +58,7 @@ describe("software update callback durable ingress", () => {
       reportFailure: vi.fn(),
       acceptMedia: vi.fn(),
       authorizeVoice: vi.fn(),
+      captureApiKey: vi.fn(async () => false),
       botUsername: "osinara_bot",
       dispatch,
       dismissReplyButtons: vi.fn(async () => undefined),

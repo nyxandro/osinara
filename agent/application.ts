@@ -9,14 +9,14 @@
  *
  * Start, in order:
  * 1. The runner lock: one agent process per database; a second one stops here with
- *    `AGENT_RUNTIME_ALREADY_RUNNING`. Then the owner-approved network access grants are published
- *    again from the database for the sandbox egress proxy.
+ *    `AGENT_RUNTIME_ALREADY_RUNNING`. Then the owner-approved network access grants and the
+ *    granted sandbox API keys are published again from the database for the sandbox egress proxy.
  * 2. The runtime: Osinara's agent, the model call, sandboxes, compaction, and an observer per
  *    channel (Telegram delivers, the memory review only records how its turn ended).
  * 3. Recovery: turns an earlier process left running continue from the journal, and what it left
  *    unreported (a card not shown, an end not reported) is reported.
  * 4. The HTTP server: the Telegram webhook, the internal drain the ingress worker calls, the Google
- *    OAuth callback and the health check.
+ *    OAuth callback, the internal API key usage route the egress proxy calls and the health check.
  * 5. The minute scheduler: reminders and approval timeouts, scheduled runs, memory review, the
  *    software update check, and recovery again for turns whose start a deploy held back.
  */
@@ -32,6 +32,8 @@ import { conversationWakeupRepository } from "./lib/conversation-wakeups/convers
 import { createConversationWakeupTurn } from "./lib/conversation-wakeups/conversation-wakeup-turn-start.js";
 import { database, openDedicatedConnection } from "./lib/database.js";
 import { networkAccessPublisher } from "./lib/network-access/network-access-projection.js";
+import { apiKeyPublisher } from "./lib/api-keys/api-key-projection.js";
+import { apiKeyUsageRoute } from "./lib/api-keys/api-key-usage-route.js";
 import { withRuntimeAdmission } from "./lib/runtime-maintenance.js";
 import { createApprovalTimeoutResolver } from "./lib/telegram-hitl/approval-timeout.js";
 import { finalizeTimedOutPrompt } from "./lib/telegram-hitl/approval-timeout-prompt.js";
@@ -110,6 +112,7 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
   // The sandbox egress proxy reads only the published grant file; rebuild it from the database
   // before any turn can run, which also repairs a publication lost to a crash.
   await networkAccessPublisher.publish();
+  await apiKeyPublisher.publish();
   const telegram = createTelegramChannel({
     botToken: options.botToken,
     botUsername: options.botUsername,
@@ -175,6 +178,7 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
         webhookSecretToken: options.webhookSecretToken,
       }),
       ...googleOAuthRoutes(),
+      apiKeyUsageRoute,
     ],
   });
   const scheduler = startScheduler({

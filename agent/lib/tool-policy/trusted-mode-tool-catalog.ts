@@ -30,6 +30,7 @@ import manageGoogleWorkspaceConnection from "../tools/manage_google_workspace_co
 import manageGmailMessage from "../tools/manage_gmail_message.js";
 import manageMemory from "../tools/manage_memory.js";
 import manageMemoryThread from "../tools/manage_memory_thread.js";
+import manageApiKeys from "../tools/manage_api_keys.js";
 import manageNetworkAccess from "../tools/manage_network_access.js";
 import manageProfileProjection from "../tools/manage_profile_projection.js";
 import manageReminder from "../tools/manage_reminder.js";
@@ -93,6 +94,7 @@ export const PRIVATE_ONLY_TOOLS: ToolMap = {
   export_memory: exportMemory as unknown as AnyToolDefinition,
   get_memory_source: getMemorySource as unknown as AnyToolDefinition,
   list_pending_family_invitations: listPendingFamilyInvitations as unknown as AnyToolDefinition,
+  manage_api_keys: manageApiKeys as unknown as AnyToolDefinition,
   manage_external_group_schedule: manageExternalGroupSchedule as unknown as AnyToolDefinition,
   manage_family_invitation: manageFamilyInvitation as unknown as AnyToolDefinition,
   manage_network_access: manageNetworkAccess as unknown as AnyToolDefinition,
