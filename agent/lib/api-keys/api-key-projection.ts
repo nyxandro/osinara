@@ -6,7 +6,7 @@
  * - `apiKeyPublisher`: the agent's publisher over the database and the shared volume.
  *
  * The file sits next to the network access grants and carries each value as stored: encrypted.
- * Only the proxy, which holds the integration key, can read a value from it.
+ * Only the proxy, which holds the API key encryption key, can read a value from it.
  */
 import { resolve } from "node:path";
 

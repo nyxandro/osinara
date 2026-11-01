@@ -4,8 +4,8 @@
  * Constructs:
  * - Finds the proxy's own address on the trusted sandbox network before accepting connections.
  * - Starts the forward proxy on the fixed internal port with the owner-approved access gate.
- * - Starts the API key gateway on its own port. Without the integration key the gateway refuses
- *   every request with its code, while the forward proxy keeps serving all other traffic.
+ * - Starts the API key gateway on its own port. Without a valid API key encryption key the gateway
+ *   refuses every request with its code, while the forward proxy keeps serving all other traffic.
  */
 import { lookup } from "node:dns/promises";
 import { readFile } from "node:fs/promises";
@@ -18,16 +18,15 @@ import {
   parseApiKeyProjection,
 } from "../../agent/lib/api-keys/api-key-contract.js";
 import {
-  apiKeyUsageToken,
   decryptApiKeyValue,
-  INTEGRATION_KEY_ENVIRONMENT_NAME,
+  API_KEY_ENCRYPTION_KEY_ENVIRONMENT_NAME,
 } from "../../agent/lib/api-keys/api-key-crypto.js";
 import {
   NETWORK_ACCESS_DIRECTORY_NAME,
   NETWORK_ACCESS_PROJECTION_FILE_NAME,
 } from "../../agent/lib/network-access/network-access-contract.js";
 import { createApiKeyGateway } from "./api-key-gateway.js";
-import { createAgentUsageSender, createApiKeyUsageReporter } from "./api-key-usage-reporter.js";
+import { agentUsageSenderFor, createApiKeyUsageReporter } from "./api-key-usage-reporter.js";
 import { createNetworkAccessGate, proxyAttachedSubnets } from "./network-access-gate.js";
 import { resolvePublicInternetAddress } from "./public-dns-resolver.js";
 import { createSandboxEgressProxy } from "./server.js";
@@ -70,25 +69,18 @@ server.listen(PROXY_PORT, "0.0.0.0", () => {
   console.log("Sandbox egress proxy ready", { port: PROXY_PORT });
 });
 
-const integrationKey = process.env[INTEGRATION_KEY_ENVIRONMENT_NAME];
-if (!integrationKey) {
-  console.warn(JSON.stringify({
-    code: "AGENT_SANDBOX_API_KEY_GATEWAY_UNCONFIGURED",
-    message: `${INTEGRATION_KEY_ENVIRONMENT_NAME} is not set; every API key request is refused`,
-  }));
-}
-// Without the integration key nothing is decrypted, so no use can happen and nothing is reported.
+const encryptionKey = process.env[API_KEY_ENCRYPTION_KEY_ENVIRONMENT_NAME];
+// Without a valid key nothing is decrypted, so no use can happen and nothing is reported.
+const sender = agentUsageSenderFor({ agentBaseUrl, encryptionKey });
 const usage = createApiKeyUsageReporter({
   maxBuffered: USAGE_MAX_BUFFERED,
   now: () => new Date(),
-  send: integrationKey
-    ? createAgentUsageSender({ agentBaseUrl, token: apiKeyUsageToken(integrationKey) })
-    : async () => undefined,
+  send: sender ?? (async () => undefined),
 });
 usage.start(USAGE_FLUSH_MILLISECONDS);
 const apiKeyProjectionPath = resolve(NETWORK_ACCESS_DIRECTORY_NAME, API_KEY_PROJECTION_FILE_NAME);
 const gateway = createApiKeyGateway({
-  decrypt: (value) => decryptApiKeyValue(value, integrationKey),
+  decrypt: (value) => decryptApiKeyValue(value, encryptionKey),
   loadGrants: async () => parseApiKeyProjection(await readFile(apiKeyProjectionPath, "utf8")),
   networkAddress: (network) => network.kind === "trusted"
     ? Promise.resolve(trustedLocalAddress)

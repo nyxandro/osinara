@@ -26,7 +26,7 @@ import {
   normalizeUpstreamBaseUrl,
   type ApiKeyAuthScheme,
 } from "../api-keys/api-key-contract.js";
-import { INTEGRATION_KEY_ENVIRONMENT_NAME, requireIntegrationKey } from "../api-keys/api-key-crypto.js";
+import { API_KEY_ENCRYPTION_KEY_ENVIRONMENT_NAME, requireApiKeyEncryptionKey } from "../api-keys/api-key-crypto.js";
 import { API_KEY_INTAKE_GUARD_HOURS, API_KEY_INTAKE_MINUTES } from "../api-keys/api-key-intake.js";
 import { apiKeyPublisher } from "../api-keys/api-key-projection.js";
 import { apiKeyRepository, type ApiKeySummary, type ApiKeyTarget } from "../api-keys/api-key-repository.js";
@@ -128,11 +128,11 @@ function parseApiKeysInput(raw: unknown): ApiKeysInput {
 
 function requireStorage(): void {
   try {
-    requireIntegrationKey(process.env[INTEGRATION_KEY_ENVIRONMENT_NAME]);
+    requireApiKeyEncryptionKey(process.env[API_KEY_ENCRYPTION_KEY_ENVIRONMENT_NAME]);
   } catch (error) {
     throw new AppError(
       "AGENT_API_KEY_STORAGE_UNCONFIGURED",
-      "Хранилище ключей на сервере не настроено: нет ключа шифрования интеграций. Его должен задать администратор сервера",
+      "Хранилище ключей на сервере не настроено: нет ключа шифрования ключей API. Его должен задать администратор сервера",
       { cause: error },
     );
   }

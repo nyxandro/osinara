@@ -7,11 +7,15 @@
  *   count a resent batch once; a batch never exceeds the contract's size.
  * - Past the buffer bound the oldest uses are dropped and the drop is logged, not hidden.
  * - A batch the agent refuses as malformed is dropped and logged instead of blocking every later one.
+ * - A missing or malformed encryption key leaves the proxy running: there is no sender, and the
+ *   reason is logged with its code instead of stopping the egress of every sandbox.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { API_KEY_USAGE_BATCH_MAX, type ApiKeyUsageEvent } from "../../agent/lib/api-keys/api-key-contract.js";
-import { ApiKeyUsageRejected, createApiKeyUsageReporter } from "./api-key-usage-reporter.js";
+import { randomBytes } from "node:crypto";
+
+import { ApiKeyUsageRejected, agentUsageSenderFor, createApiKeyUsageReporter } from "./api-key-usage-reporter.js";
 
 const GRANT = "5f0c6c1e-8a51-4f53-9a43-58b8d5b7c0aa";
 
@@ -93,5 +97,16 @@ describe("API key usage reporter", () => {
 
     expect(send.mock.calls[0]![0].map((event) => event.status)).toEqual([201, 202]);
     expect(error).toHaveBeenCalledWith(expect.stringContaining("AGENT_SANDBOX_API_KEY_USAGE_DROPPED"));
+  });
+
+  it.each([undefined, "", "not-a-key"])("has no sender for the encryption key %j and says why", (key) => {
+    expect(agentUsageSenderFor({ agentBaseUrl: "http://agent:3000", encryptionKey: key })).toBeNull();
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("AGENT_SANDBOX_API_KEY_GATEWAY_UNCONFIGURED"));
+  });
+
+  it("has a sender for a valid encryption key", () => {
+    expect(agentUsageSenderFor({ agentBaseUrl: "http://agent:3000", encryptionKey: randomBytes(32).toString("base64") }))
+      .toBeTypeOf("function");
+    expect(error).not.toHaveBeenCalled();
   });
 });

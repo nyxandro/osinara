@@ -44,6 +44,7 @@ function input(overrides: Partial<InstallationExecutionInput> = {}): Installatio
     internalSecrets: {
       invitationSigningSecret: "invitation_secret_abcdefghijklmnopqrstuvwxyz",
       postgresPassword: "postgres_secret_abcdefghijklmnopqrstuvwxyz",
+      sandboxApiKeyEncryptionKey: "sandbox_api_key_secret_abcdefghijklmnopqrstuv",
       telegramWebhookSecretToken: "webhook_secret_abcdefghijklmnopqrstuvwxyz",
     },
     model,
@@ -117,6 +118,7 @@ describe("createHostInstallationExecutor", () => {
     expect(environment).toContain("PUBLIC_BASE_URL='https://8-8-8-8.sslip.io'\n");
     // The deployment controller reads the profile from the same EnvironmentFile as systemd passes it.
     expect(environment).toContain("OSINARA_DEPLOYMENT_PROFILE='installation'\n");
+    expect(environment).toContain("SANDBOX_API_KEY_ENCRYPTION_KEY='sandbox_api_key_secret_abcdefghijklmnopqrstuv'\n");
     expect(environment).not.toContain("WORKFLOW_");
     expect(environment).not.toContain("CLI_PROXY_API_KEY");
     expect(environment).not.toContain("MODEL_UPSTREAM_API_KEY");

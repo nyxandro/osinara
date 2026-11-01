@@ -63,7 +63,7 @@ async function execute(input: Record<string, unknown>) {
 describe("manage_api_keys", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    vi.stubEnv("INTEGRATION_TOKEN_ENCRYPTION_KEY", randomBytes(32).toString("base64"));
+    vi.stubEnv("SANDBOX_API_KEY_ENCRYPTION_KEY", randomBytes(32).toString("base64"));
     mocks.requirePrivateTelegramOwner.mockReturnValue(OWNER);
     mocks.publish.mockResolvedValue(undefined);
     mocks.sendMessage.mockResolvedValue(undefined);
@@ -159,8 +159,8 @@ describe("manage_api_keys", () => {
     expect(mocks.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("requests nothing when the server has no integration key", async () => {
-    vi.stubEnv("INTEGRATION_TOKEN_ENCRYPTION_KEY", "");
+  it("requests nothing when the server has no API key encryption key", async () => {
+    vi.stubEnv("SANDBOX_API_KEY_ENCRYPTION_KEY", "");
 
     await expect(execute(request)).rejects.toMatchObject({ code: "AGENT_API_KEY_STORAGE_UNCONFIGURED" });
     expect(mocks.openIntake).not.toHaveBeenCalled();
