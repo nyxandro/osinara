@@ -12,8 +12,6 @@ import type {
   TelegramGroupHistorySearchInput,
   TelegramGroupJournalRepository,
 } from "./telegram-group-journal-repository.js";
-import { visibleTelegramTimelineEntry } from "./telegram-attachment-reference-access.js";
-import type { loadCurrentExternalGroupCapabilities } from "./tool-policy/external-group-live-policy.js";
 
 const DEFAULT_HISTORY_LIMIT = 25;
 
@@ -78,7 +76,6 @@ export async function searchTelegramGroupHistory(
   repository: Pick<TelegramGroupJournalRepository, "search">,
   input: GroupHistoryToolInput,
   ctx: Pick<ToolContext, "session">,
-  loadExternalCapabilities: typeof loadCurrentExternalGroupCapabilities,
 ) {
   const authorization = requireTelegramGroupHistoryAuthorization(ctx);
   const query: TelegramGroupHistorySearchInput = {
@@ -95,23 +92,13 @@ export async function searchTelegramGroupHistory(
     sequenceTo: input.sequenceTo ?? null,
     to: optionalDate(input.to),
   };
-  const attachmentReferenceAccess = authorization.groupType === "family_private"
-    ? "all" as const
-    : await loadExternalCapabilities({
-      familyId: authorization.familyId,
-      groupId: authorization.groupId,
-    }).then((capabilities) => ({
-      images: capabilities.has("inspect_workspace_image"),
-      readableText: capabilities.has("import_telegram_attachment"),
-    }));
   const result = await repository.search(query);
   // Transport and database identifiers stay behind the tool boundary; sequence IDs are the only
   // model-visible addressing scheme.
   return {
     entries: result.entries.map((entry) => {
-      const visibleEntry = visibleTelegramTimelineEntry(entry, attachmentReferenceAccess);
       return {
-        ...(visibleEntry.attachment === undefined ? {} : { attachment: visibleEntry.attachment }),
+        ...(entry.attachment === undefined ? {} : { attachment: entry.attachment }),
         actor: entry.actorKind === "agent_self"
           ? "[agent:self]"
           : entry.actorKind === "telegram_bot" ? "[telegram:bot]" : "[user]",

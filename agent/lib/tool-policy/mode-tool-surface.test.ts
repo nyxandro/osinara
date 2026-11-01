@@ -15,6 +15,7 @@ import { z } from "zod";
 
 const loadCurrentExternalGroupCapabilities = vi.hoisted(() => vi.fn());
 const authorizeCurrentExternalGroupCapability = vi.hoisted(() => vi.fn());
+const materializeTelegramAttachment = vi.hoisted(() => vi.fn());
 
 // These cases exercise image inspection, so they state a vision model rather than inheriting the
 // checked-in provider config.
@@ -26,6 +27,8 @@ vi.mock("./external-group-live-policy.js", () => ({
   loadCurrentExternalGroupCapabilities,
   authorizeCurrentExternalGroupCapability,
 }));
+
+vi.mock("../attachments/telegram-attachment-materializer.js", () => ({ materializeTelegramAttachment }));
 
 import { FAMILY_ONLY_TOOL_NAMES, PRIVATE_ONLY_TOOL_NAMES, TRUSTED_MODE_TOOL_NAMES, buildModeToolSurface, buildSubagentToolSurface } from "./mode-tool-surface.js";
 import { agentTool } from "../../runtime/tools/delegate.js";
@@ -264,7 +267,7 @@ describe("external group tool surface", () => {
 
   it("emits only guarded baseline tools without a grant", () => {
     expect(names({ capabilities: new Set(), environment: "external" })).toEqual(
-      [...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent", "list_reminders", "load_skill", "manage_behavior_preference", "manage_reminder", "read_profile_view"].sort(),
+      [...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent", "import_telegram_attachment", "inspect_workspace_image", "list_reminders", "load_skill", "manage_behavior_preference", "manage_reminder", "read_profile_view"].sort(),
     );
   });
 
@@ -368,14 +371,13 @@ describe("external group tool surface", () => {
     ).toContain("remove_group_file");
   });
 
-  it("surfaces Telegram text attachment import only when explicitly allowed", () => {
-    expect(names({ capabilities: new Set(), environment: "external" })).not.toContain("import_telegram_attachment");
-    expect(
-      names({
-        capabilities: new Set(["import_telegram_attachment"]),
-        environment: "external",
-      }),
-    ).toContain("import_telegram_attachment");
+  it("gives every external group images and attachments without a grant", () => {
+    for (const capabilities of [new Set<ExternalGroupToolName>(), new Set<ExternalGroupToolName>(["inspect_workspace_image", "import_telegram_attachment"])]) {
+      expect(names({ capabilities, environment: "external" })).toEqual(expect.arrayContaining(["import_telegram_attachment", "inspect_workspace_image"]));
+    }
+    // A channel-authored turn keeps its text-only surface.
+    expect(names({ capabilities: new Set(), environment: "external", includeApplicationCore: false }))
+      .not.toContain("import_telegram_attachment");
   });
 
   it("keeps external tool descriptions free of artificial punctuation", () => {
@@ -390,27 +392,24 @@ describe("external group tool surface", () => {
     expect(descriptions).not.toMatch(/[—–«»]/u);
   });
 
-  it("denies Telegram attachment import after its external capability is revoked", async () => {
-    const surface = buildModeToolSurface({
-      capabilities: new Set(["import_telegram_attachment"]),
-      environment: "external",
-    });
-    const staleContext = {
-      session: { auth: externalAuth(["import_telegram_attachment"]) },
-    } as never;
+  it("imports an attachment without consulting the group's grants", async () => {
+    const surface = buildModeToolSurface({ capabilities: new Set(), environment: "external" });
 
-    await expect(
-      surface.import_telegram_attachment!.execute(
-        {
-          attachmentId: "00000000-0000-4000-8000-000000000099",
-        },
-        staleContext,
-      ),
-    ).rejects.toThrowError(/AGENT_GROUP_TOOL_FORBIDDEN/u);
-    expect(loadCurrentExternalGroupCapabilities).toHaveBeenCalledWith({
-      familyId: "family-1",
-      groupId: "group-1",
-    });
+    materializeTelegramAttachment.mockResolvedValueOnce({ mediaType: "text/plain", path: "inbox/42/notes.txt", scope: "group", telegramMessageId: "42" });
+
+    const auth = externalAuth([]);
+    const groupAuth = { ...auth, current: { ...auth.current!, attributes: { ...auth.current!.attributes, telegramChatType: "supergroup" } } };
+
+    // The import itself authorizes the group scope and the reference live; a grant is not asked for.
+    await expect(surface.import_telegram_attachment!.execute(
+      { attachmentId: "00000000-0000-4000-8000-000000000099" },
+      { session: { auth: groupAuth } } as never,
+    )).resolves.toMatchObject({ path: "/workspace/group/inbox/42/notes.txt" });
+    expect(materializeTelegramAttachment).toHaveBeenCalledWith(
+      expect.objectContaining({ groupId: "group-1", groupType: "external" }),
+      "00000000-0000-4000-8000-000000000099",
+    );
+    expect(loadCurrentExternalGroupCapabilities).not.toHaveBeenCalled();
   });
 
   it("offers Bash to an external group only with its grant", () => {
@@ -531,7 +530,7 @@ describe("external group tool surface", () => {
         capabilities: new Set(["unknown_tool"] as unknown as ExternalGroupToolName[]),
         environment: "external",
       }),
-    ).toEqual([...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent", "list_reminders", "load_skill", "manage_behavior_preference", "manage_reminder", "read_profile_view"].sort());
+    ).toEqual([...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent", "import_telegram_attachment", "inspect_workspace_image", "list_reminders", "load_skill", "manage_behavior_preference", "manage_reminder", "read_profile_view"].sort());
   });
 
   it("exposes only group scope in external shared-tool schemas and descriptions", () => {

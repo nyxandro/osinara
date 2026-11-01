@@ -49,7 +49,6 @@ function dependencies(cursor: string | null) {
 
 const input = {
   applicationSessionId: "session-1",
-  attachmentReferenceAccess: "all" as const,
   currentEntryId: "00000000-0000-4000-8000-000000000100",
   currentSenderDisplayName: "Пух",
   currentSenderUsername: "nyxandro",
@@ -375,96 +374,18 @@ describe("Telegram group turn context", () => {
     expect(result.durableMessage).not.toContain("<untrusted_telegram_group_timeline>");
   });
 
-  it("hides historical attachment references when no current capability admits them", async () => {
-    const deps = dependencies(null);
-    deps.journal.listRecent.mockResolvedValue([{
-      ...entry("99", "Фото"),
-      attachment: {
-        attachmentId: "00000000-0000-4000-8000-000000000099",
-        kind: "photo",
-        mediaType: "image/jpeg",
-      },
-    }]);
-    const prepare = createTelegramGroupTurnContextPreparer(deps);
-
-    const result = await prepare({ ...input, attachmentReferenceAccess: "none" });
-
-    expect(result.durableMessage).toContain("Фото");
-    expect(result.durableMessage).not.toContain("attachmentId");
-  });
-
-  it("shows only readable text references to an external group with text import", async () => {
+  it("shows historical attachment references of every kind: no grant decides what a group sees", async () => {
     const deps = dependencies(null);
     deps.journal.listRecent.mockResolvedValue([
-      {
-        ...entry("97", "Текст"),
-        attachment: {
-          attachmentId: "00000000-0000-4000-8000-000000000097",
-          fileName: "notes.md",
-          kind: "document",
-          mediaType: "text/markdown",
-        },
-      },
-      {
-        ...entry("98", "PDF"),
-        attachment: {
-          attachmentId: "00000000-0000-4000-8000-000000000098",
-          fileName: "report.pdf",
-          kind: "document",
-          mediaType: "application/pdf",
-        },
-      },
-      {
-        ...entry("99", "Фото"),
-        attachment: {
-          attachmentId: "00000000-0000-4000-8000-000000000099",
-          kind: "photo",
-          mediaType: "image/jpeg",
-        },
-      },
+      { ...entry("97", "Текст"), attachment: { attachmentId: "00000000-0000-4000-8000-000000000097", fileName: "notes.md", kind: "document", mediaType: "text/markdown" } },
+      { ...entry("98", "PDF"), attachment: { attachmentId: "00000000-0000-4000-8000-000000000098", fileName: "report.pdf", kind: "document", mediaType: "application/pdf" } },
+      { ...entry("99", "Фото"), attachment: { attachmentId: "00000000-0000-4000-8000-000000000099", kind: "photo", mediaType: "image/jpeg" } },
     ]);
     const prepare = createTelegramGroupTurnContextPreparer(deps);
 
-    const result = await prepare({
-      ...input,
-      attachmentReferenceAccess: { images: false, readableText: true },
-    });
+    const result = await prepare(input);
 
-    expect(result.durableMessage).toContain("00000000-0000-4000-8000-000000000097");
-    expect(result.durableMessage).not.toContain("00000000-0000-4000-8000-000000000098");
-    expect(result.durableMessage).not.toContain("00000000-0000-4000-8000-000000000099");
-  });
-
-  it("shows only image references to an external group with image inspection", async () => {
-    const deps = dependencies(null);
-    deps.journal.listRecent.mockResolvedValue([
-      {
-        ...entry("98", "Текст"),
-        attachment: {
-          attachmentId: "00000000-0000-4000-8000-000000000098",
-          fileName: "notes.txt",
-          kind: "document",
-          mediaType: "text/plain",
-        },
-      },
-      {
-        ...entry("99", "Фото"),
-        attachment: {
-          attachmentId: "00000000-0000-4000-8000-000000000099",
-          kind: "photo",
-          mediaType: "image/jpeg",
-        },
-      },
-    ]);
-    const prepare = createTelegramGroupTurnContextPreparer(deps);
-
-    const result = await prepare({
-      ...input,
-      attachmentReferenceAccess: { images: true, readableText: false },
-    });
-
-    expect(result.durableMessage).not.toContain("00000000-0000-4000-8000-000000000098");
-    expect(result.durableMessage).toContain("00000000-0000-4000-8000-000000000099");
+    for (const id of ["97", "98", "99"]) expect(result.durableMessage).toContain(`00000000-0000-4000-8000-0000000000${id}`);
   });
 
   it("marks a bounded incremental gap for explicit history retrieval", async () => {

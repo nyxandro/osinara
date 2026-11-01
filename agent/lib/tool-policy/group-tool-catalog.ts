@@ -8,18 +8,10 @@
  * - Derived capability-name tuples used by validation and execution policy.
  * - `ExternalGroupToolName`: validated persisted allowlist value.
  * - `BASELINE_EXTERNAL_GROUP_GRANTS`: persisted grants that every external group now has anyway.
- * - `ExternalGroupCapabilityRequirement`, `externalGroupCapabilityRequirement`: what the active
- *   runtime must offer for a capability to work at all.
  * - `parseExternalGroupToolAllowlist`: validates the complete persisted policy atomically.
  */
-/** A runtime property a capability depends on: image inspection works only with a model that accepts images. */
-export type ExternalGroupCapabilityRequirement = "vision";
-
 interface ExternalGroupCapability<Name extends string = string> {
   readonly name: Name;
-  // Set when the capability works only with a specific runtime, so the owner-facing grant surface
-  // can drop it while persisted validation still recognizes a grant made under a previous runtime.
-  readonly requires?: ExternalGroupCapabilityRequirement;
 }
 
 function capabilityNames<const Catalog extends readonly ExternalGroupCapability[]>(
@@ -34,10 +26,7 @@ function capabilityNames<const Catalog extends readonly ExternalGroupCapability[
 export const EXTERNAL_GROUP_CAPABILITY_CATALOG = [
   { name: "bash" },
   { name: "import_telegram_attachment" },
-  {
-    name: "inspect_workspace_image",
-    requires: "vision",
-  },
+  { name: "inspect_workspace_image" },
   { name: "list_memories" },
   { name: "list_memory_threads" },
   { name: "list_group_history" },
@@ -64,26 +53,15 @@ export type ExternalGroupToolName = (typeof EXTERNAL_GROUP_TOOL_NAMES)[number];
 /**
  * Grants that became baseline access of every external group. A persisted one keeps its policy
  * parseable and grants nothing more, so it is neither offered nor served: page reading became a
- * baseline tool (v0.21.0), and a group file goes inside any answer that shows it (v0.54.0).
+ * baseline tool (v0.21.0), a group file goes inside any answer that shows it (v0.54.0), and since
+ * 01.11.2026 the agent sees whatever participants send: images and attachments need no grant.
  */
 export const BASELINE_EXTERNAL_GROUP_GRANTS: ReadonlySet<ExternalGroupToolName> = new Set<ExternalGroupToolName>([
+  "import_telegram_attachment",
+  "inspect_workspace_image",
   "send_workspace_file",
   "web_fetch",
 ]);
-
-// Persisted validation stays runtime-agnostic on purpose: a grant made while another provider or
-// model was active must keep the surrounding policy parseable instead of invalidating every other
-// capability.
-const CAPABILITY_REQUIREMENTS: ReadonlyMap<string, ExternalGroupCapabilityRequirement> = new Map(
-  (EXTERNAL_GROUP_CAPABILITY_CATALOG as readonly ExternalGroupCapability[])
-    .flatMap(({ name, requires }) => requires === undefined ? [] : [[name, requires] as const]),
-);
-
-export function externalGroupCapabilityRequirement(
-  value: string,
-): ExternalGroupCapabilityRequirement | null {
-  return CAPABILITY_REQUIREMENTS.get(value) ?? null;
-}
 
 // Same-name wrappers preserve the native tools' contracts while adding live authorization and exact
 // group-root confinement. They remain baseline capabilities and need no persisted grant.

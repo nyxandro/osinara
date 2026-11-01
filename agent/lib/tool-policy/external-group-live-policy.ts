@@ -2,16 +2,11 @@
  * Current external-group capability policy.
  *
  * Export:
- * - `loadCurrentExternalGroupCapabilities`: reads and validates the current PostgreSQL allowlist and
- *   keeps only what the active runtime can serve.
+ * - `loadCurrentExternalGroupCapabilities`: reads and validates the current PostgreSQL allowlist.
  * - `authorizeCurrentExternalGroupCapability`: records the execution-time authorization boundary.
  */
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
-import {
-  isServableExternalGroupCapability,
-  servableExternalGroupCapabilities,
-} from "./grantable-group-capabilities.js";
 import {
   parseExternalGroupToolAllowlist,
   type ExternalGroupToolName,
@@ -44,7 +39,7 @@ export async function loadCurrentExternalGroupCapabilities(input: {
     );
   }
 
-  return servableExternalGroupCapabilities(allowed);
+  return allowed;
 }
 
 export async function authorizeCurrentExternalGroupCapability(
@@ -62,7 +57,7 @@ export async function authorizeCurrentExternalGroupCapability(
       [input.groupId, input.familyId],
     );
     const allowed = parseExternalGroupToolAllowlist(result.rows[0]?.tool_allowlist);
-    if (!allowed?.has(capability) || !isServableExternalGroupCapability(capability)) {
+    if (!allowed?.has(capability)) {
       throw new AppError(
         "AGENT_GROUP_TOOL_FORBIDDEN",
         "Этот инструмент не разрешён в текущей внешней группе. Обратитесь к владельцу агента",

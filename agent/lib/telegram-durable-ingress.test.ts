@@ -169,6 +169,102 @@ describe("createTelegramDurableIngress", () => {
     expect(storage.value.complete).toHaveBeenCalledWith("1001", storage.claim.leaseToken, "wrun_session");
   });
 
+  it("tells voice authorization whether a voice addresses the agent, so a group decides by it", async () => {
+    const groupVoice = {
+      message: {
+        chat: { id: -1001, title: "Группа", type: "supergroup" },
+        date: 1_700_000_000,
+        from: { first_name: "Анна", id: 101, is_bot: false },
+        message_id: 78,
+        voice: { duration: 3, file_id: "voice-file-1", file_size: 512, mime_type: "audio/ogg" },
+      },
+      update_id: 1001,
+    };
+    for (const [raw, addressed] of [[voicePayload(), true], [groupVoice, false]] as const) {
+      const storage = repository();
+      storage.claim.payload = raw;
+      const authorizeVoice = vi.fn().mockResolvedValue(false);
+      const { handle } = ingress(storage, { authorizeVoice });
+
+      await runDrain(handle, raw);
+
+      const messageId = (raw.message as { message_id: number }).message_id;
+      expect(authorizeVoice).toHaveBeenCalledWith(expect.objectContaining({ messageId: String(messageId) }), { addressed });
+    }
+  });
+
+  it("keeps an overheard group voice and a silent video note in the conversation when their words cannot be read", async () => {
+    const groupVoice = {
+      message: {
+        chat: { id: -1001, title: "Семья", type: "supergroup" },
+        date: 1_700_000_000,
+        from: { first_name: "Анна", id: 101, is_bot: false },
+        message_id: 80,
+        voice: { duration: 5, file_id: "voice-file-1", file_size: 512, mime_type: "audio/ogg" },
+      },
+      update_id: 1004,
+    };
+    const videoNote = {
+      message: {
+        chat: { id: 101, type: "private" },
+        date: 1_700_000_000,
+        from: { first_name: "Анна", id: 101, is_bot: false },
+        message_id: 81,
+        video_note: { duration: 20, file_id: "note-file-1", file_size: 4_096, file_unique_id: "n1", length: 240 },
+      },
+      update_id: 1005,
+    };
+    for (const [raw, transcribeVoice] of [
+      [groupVoice, vi.fn().mockRejectedValue(new Error("provider rate limit"))],
+      [videoNote, vi.fn().mockResolvedValue("  ")],
+    ] as const) {
+      const storage = repository();
+      storage.claim.payload = raw;
+      const { dependencies, handle } = ingress(storage, { transcribeVoice });
+
+      await runDrain(handle, raw);
+
+      expect(transcribeVoice).toHaveBeenCalledTimes(1);
+      expect(storage.value.saveVoiceTranscript).not.toHaveBeenCalled();
+      expect(storage.value.fail).not.toHaveBeenCalled();
+      expect(dependencies.reportFailure).not.toHaveBeenCalled();
+      const [update] = vi.mocked(dependencies.dispatch).mock.calls[0]!;
+      expect(update).toMatchObject({ message: { messageId: String(raw.message.message_id), text: "" } });
+    }
+  });
+
+  it("fails a voice addressed to the agent whose words cannot be read, so the person learns it", async () => {
+    const storage = repository();
+    const { dependencies, handle } = ingress(storage, { transcribeVoice: vi.fn().mockResolvedValue("") });
+
+    await runDrain(handle, voicePayload());
+
+    expect(dependencies.dispatch).not.toHaveBeenCalled();
+    expect(storage.value.fail).toHaveBeenCalledWith("1001", storage.claim.leaseToken,
+      expect.objectContaining({ code: "AGENT_VOICE_TRANSCRIPT_EMPTY" }), undefined);
+  });
+
+  it("stores a video note for transcription like a voice note", async () => {
+    const storage = repository();
+    const { handle } = ingress(storage);
+    const videoNote = {
+      message: {
+        chat: { id: 101, type: "private" },
+        date: 1_700_000_000,
+        from: { first_name: "Анна", id: 101, is_bot: false },
+        message_id: 79,
+        video_note: { duration: 20, file_id: "note-file-1", file_size: 4_096, file_unique_id: "n1", length: 240 },
+      },
+      update_id: 1003,
+    };
+
+    await deliver(handle, videoNote);
+
+    expect(storage.value.enqueue).toHaveBeenCalledWith(expect.objectContaining({
+      voice: { fileId: "note-file-1", fileSize: 4_096, mimeType: "video/mp4" },
+    }));
+  });
+
   it("lets the turn of a restarted update finish without dispatching the update again", async () => {
     const storage = repository();
     storage.value.claimNext = vi.fn()
@@ -385,7 +481,7 @@ describe("createTelegramDurableIngress", () => {
 
     expect(response.status).toBe(200);
     if (update.kind !== "message") throw new Error("TEST_EXPECTED_MESSAGE");
-    expect(acceptMedia).toHaveBeenCalledWith(update.message, "1001", "unsupported_media");
+    expect(acceptMedia).toHaveBeenCalledWith(update.message, "1001");
     expect(storage.value.enqueue).not.toHaveBeenCalled();
     expect(dependencies.transcribeVoice).not.toHaveBeenCalled();
     expect(dependencies.dispatch).not.toHaveBeenCalled();

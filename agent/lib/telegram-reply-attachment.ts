@@ -7,7 +7,6 @@
 import { parseTelegramUpdate, type TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import type { RegisteredGroup } from "./family-access.js";
-import { classifyTelegramInboundMedia } from "./telegram-message-policy.js";
 
 export function telegramReplyAttachmentTarget(
   message: TelegramMessage,
@@ -28,11 +27,6 @@ export function telegramReplyAttachmentTarget(
     target.messageThreadId !== message.messageThreadId ||
     target.attachments.length !== 1
   ) return null;
-
-  if (group.type === "family_private") return target;
-  const mediaKind = classifyTelegramInboundMedia(target);
-  return mediaKind === "native_photo" || mediaKind === "image_document_candidate" ||
-    mediaKind === "text_document_candidate"
-    ? target
-    : null;
+  // Every registered group sees whatever its participants sent, the reply target included.
+  return target;
 }

@@ -4,7 +4,7 @@
  * Constructs covered:
  * - `requireTelegramGroupHistoryAuthorization`: derives group identity only from verified auth.
  * - `searchTelegramGroupHistory`: forwards bounded filters without accepting a model scope.
- * - External history exposes attachment references only for current live media capabilities.
+ * - Group history shows attachment references of every kind: no grant decides what a group sees.
  * - Date filters fail fast even when this boundary is called without the model schema.
  * - The tool schema and every group mode teach exact, sequential history retrieval.
  */
@@ -91,7 +91,7 @@ describe("Telegram group history", () => {
       familyId: "family-1",
       groupId: "group-1",
       groupType: "external",
-    }), vi.fn().mockResolvedValue(new Set(["list_group_history"])));
+    }));
 
     expect(repository.search).toHaveBeenCalledWith(expect.objectContaining({
       allTopics: true,
@@ -102,83 +102,7 @@ describe("Telegram group history", () => {
     }));
   });
 
-  it("removes external attachment metadata when current live media grants are absent", async () => {
-    const repository = {
-      search: vi.fn().mockResolvedValue({
-        entries: [
-          {
-            actorId: "user-1",
-            actorKind: "user",
-            attachment: {
-              attachmentId: "attachment-1",
-              fileName: "notes.md",
-              kind: "document",
-              mediaType: "text/markdown",
-            },
-            contentText: "Документ",
-            messageKind: "document",
-            messageThreadId: null,
-            replyToSequenceId: null,
-            senderDisplayName: "Участник",
-            senderUsername: "member",
-            sentAt: "2026-08-09T10:00:00.000Z",
-            sequenceId: "10",
-          },
-        ],
-        nextBeforeSequence: null,
-      }),
-    };
-    const loadCapabilities = vi.fn().mockResolvedValue(new Set(["list_group_history"]));
-
-    const result = await searchTelegramGroupHistory(
-      repository,
-      {},
-      context({ familyId: "family-1", groupId: "group-1", groupType: "external" }),
-      loadCapabilities,
-    );
-
-    expect(result.entries[0]).not.toHaveProperty("attachment");
-    expect(loadCapabilities).toHaveBeenCalledWith({ familyId: "family-1", groupId: "group-1" });
-  });
-
-  it("keeps family attachment metadata without consulting the external policy", async () => {
-    const repository = {
-      search: vi.fn().mockResolvedValue({
-        entries: [{
-          actorId: "user-1",
-          actorKind: "user",
-          attachment: {
-            attachmentId: "attachment-1",
-            fileName: "archive.zip",
-            kind: "document",
-            mediaType: "application/zip",
-          },
-          contentText: null,
-          messageKind: "document",
-          messageThreadId: null,
-          replyToSequenceId: null,
-          senderDisplayName: "Участник",
-          senderUsername: "member",
-          sentAt: "2026-08-09T10:00:00.000Z",
-          sequenceId: "10",
-        }],
-        nextBeforeSequence: null,
-      }),
-    };
-    const loadCapabilities = vi.fn();
-
-    const result = await searchTelegramGroupHistory(
-      repository,
-      {},
-      context({ groupId: "group-1", groupType: "family_private" }),
-      loadCapabilities,
-    );
-
-    expect(result.entries[0]).toHaveProperty("attachment.attachmentId", "attachment-1");
-    expect(loadCapabilities).not.toHaveBeenCalled();
-  });
-
-  it("keeps only attachment classes allowed by the current external policy", async () => {
+  it("keeps attachment metadata of every kind in an external group and in the family group", async () => {
     const baseEntry = {
       actorId: "user-1",
       actorKind: "user" as const,
@@ -193,56 +117,36 @@ describe("Telegram group history", () => {
     const repository = {
       search: vi.fn().mockResolvedValue({
         entries: [
-          {
-            ...baseEntry,
-            attachment: {
-              attachmentId: "attachment-text",
-              fileName: "notes.md",
-              kind: "document",
-              mediaType: "text/markdown",
-            },
-            sequenceId: "10",
-          },
-          {
-            ...baseEntry,
-            attachment: {
-              attachmentId: "attachment-photo",
-              fileName: "photo.jpg",
-              kind: "photo",
-              mediaType: "image/jpeg",
-            },
-            messageKind: "photo",
-            sequenceId: "11",
-          },
+          { ...baseEntry, attachment: { attachmentId: "attachment-text", fileName: "notes.md", kind: "document", mediaType: "text/markdown" }, sequenceId: "10" },
+          { ...baseEntry, attachment: { attachmentId: "attachment-photo", fileName: "photo.jpg", kind: "photo", mediaType: "image/jpeg" }, messageKind: "photo", sequenceId: "11" },
+          { ...baseEntry, attachment: { attachmentId: "attachment-zip", fileName: "archive.zip", kind: "document", mediaType: "application/zip" }, sequenceId: "12" },
         ],
         nextBeforeSequence: null,
       }),
     };
 
-    const result = await searchTelegramGroupHistory(
-      repository,
-      {},
-      context({ familyId: "family-1", groupId: "group-1", groupType: "external" }),
-      vi.fn().mockResolvedValue(new Set(["import_telegram_attachment", "list_group_history"])),
-    );
+    for (const groupType of ["external", "family_private"] as const) {
+      const result = await searchTelegramGroupHistory(
+        repository,
+        {},
+        context({ familyId: "family-1", groupId: "group-1", groupType }),
+      );
 
-    expect(result.entries[0]).toHaveProperty("attachment.attachmentId", "attachment-text");
-    expect(result.entries[1]).not.toHaveProperty("attachment");
+      expect(result.entries.map((entry) => entry.attachment?.attachmentId), groupType)
+        .toEqual(["attachment-text", "attachment-photo", "attachment-zip"]);
+    }
   });
 
   it("rejects an invalid date before querying the repository", async () => {
     const repository = { search: vi.fn() };
-    const loadCapabilities = vi.fn();
 
     await expect(searchTelegramGroupHistory(
       repository,
       { from: "not-a-date" },
       context({ familyId: "family-1", groupId: "group-1", groupType: "external" }),
-      loadCapabilities,
     )).rejects.toMatchObject({
       code: "AGENT_GROUP_HISTORY_DATE_INVALID",
     });
-    expect(loadCapabilities).not.toHaveBeenCalled();
     expect(repository.search).not.toHaveBeenCalled();
   });
 });

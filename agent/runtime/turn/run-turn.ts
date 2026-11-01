@@ -50,7 +50,8 @@ import {
 } from "./journal-repository.js";
 import { estimateFrameTokens } from "./compaction-estimate.js";
 import {
-  compactionSettings, compactMessages, shouldCompact, todoCompactionMessage, type CompactionSummaryRequest, type PromptMeasurement,
+  compactionSettings, compactMessages, providerCountStatus, shouldCompact, todoCompactionMessage, type CompactionSummaryRequest,
+  type PromptMeasurement,
 } from "./compaction.js";
 import { assistantStepText, MODEL_INACTIVITY_TIMEOUT, type StepModelCall, type StepModelResponse } from "./model-call.js";
 import { isRequestRefusal, modelCallFailure, normalizeModelCallError } from "./model-errors.js";
@@ -290,6 +291,12 @@ async function compactIfNeeded(runtime: TurnRuntime, input: {
     ...compactionSettings(input.selection.contextWindowTokens, runtime.agent.compactionThresholdPercent),
     restatedAfterCompaction: runtime.agent.restatedAfterCompaction,
   };
+  if (providerCountStatus(input.messages, input.measurement) === "ignored") {
+    console.warn(JSON.stringify({
+      code: "AGENT_COMPACTION_PROVIDER_COUNT_IGNORED", inputTokens: input.measurement.counters.inputTokens,
+      promptMessageCount: input.measurement.counters.promptMessageCount, sessionId: input.turn.sessionId, turnId: input.turn.id,
+    }));
+  }
   if (!shouldCompact(input.messages, settings, input.measurement)) return null;
   let compacted: ModelMessage[];
   // Set when the summary call itself failed for good: not an outage, not a cancelled turn.

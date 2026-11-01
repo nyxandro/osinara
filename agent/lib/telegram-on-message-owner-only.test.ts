@@ -2,7 +2,8 @@
  * Telegram external-group owner-only dispatch tests.
  *
  * Constructs covered:
- * - Passive messages from every participant remain in the isolated group timeline.
+ * - Passive messages from every participant remain in the isolated group timeline, media with its
+ *   attachment reference and memory review.
  * - Only the current Osinara family owner may start a model turn in owner-only mode.
  * - Telegram administrators and ordinary family members receive no implicit dispatch authority.
  */
@@ -43,6 +44,23 @@ describe("Telegram owner-only external group dispatch", () => {
       expect.objectContaining({ id: "telegram-101", kind: "telegram_user" }),
     );
     expect(repository.telegram.findIdentity).not.toHaveBeenCalled();
+    expect(repository.session.prepareTurn).not.toHaveBeenCalled();
+  });
+
+  it("keeps a participant's passive sticker with its preview and memory review, without a turn", async () => {
+    const repository = repositories();
+    repository.telegram.findGroup.mockResolvedValue(ownerOnlyGroup());
+    const handler = createTelegramMessageHandler(repository);
+    const message = {
+      ...groupMessage(""),
+      attachments: [{ fileId: "preview-1", fileName: "preview.jpg", kind: "photo" as const, mediaType: "image/jpeg" }],
+      raw: { date: 1_700_000_000, sticker: { emoji: "😂", file_id: "sticker-1", file_unique_id: "s1", height: 1, is_animated: true, is_video: false, type: "regular", width: 1 } },
+    };
+
+    await expect(handler(telegramContext().context, message)).resolves.toBeNull();
+
+    expect(repository.attachmentReferences.record).toHaveBeenCalledWith("group-1", message);
+    expect(repository.memoryReview.observePassiveMessage).toHaveBeenCalledTimes(1);
     expect(repository.session.prepareTurn).not.toHaveBeenCalled();
   });
 

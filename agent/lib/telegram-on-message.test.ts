@@ -10,7 +10,7 @@
  * - Journal deduplication prevents repeated model turns for Telegram retries.
  * - Authorized attachments persist before dispatch and enter trusted path context.
  * - Captionless photos retain a model-visible trusted workspace reference.
- * - External groups drop all inbound media before persistence, journaling, or model dispatch.
+ * - A lone place starts a private turn with its description; a lone location is journaled in a group.
  * - Group name mentions start a turn and project the verified dynamic skill allowlist.
  * - Foreign replies to pending HITL prompts stop before turn dispatch.
  * - Forum replies inherit routing from the referenced bot message, not a newly assigned thread.
@@ -271,12 +271,10 @@ describe("createTelegramMessageHandler", () => {
     expect(result?.context?.join("\n")).not.toContain("telegram-photo-1");
   });
 
-  it.each([
-    ["external", false],
-    ["family_private", true],
-  ] as const)(
-    "%s group %s an addressed inbound document",
-    async (groupType, shouldPersist) => {
+  // Seeing what participants send is no grant: an external group takes in a PDF like the family group.
+  it.each(["external", "family_private"] as const)(
+    "%s group records an addressed inbound document as a lazy reference",
+    async (groupType) => {
       const repository = repositories();
       repository.telegram.findGroup.mockResolvedValue({
         familyId: "family-1",
@@ -307,14 +305,14 @@ describe("createTelegramMessageHandler", () => {
       const result = await handler(telegramContext().context, message);
 
       expect(repository.attachments.persist).not.toHaveBeenCalled();
-      expect(repository.attachmentReferences.record).toHaveBeenCalledTimes(shouldPersist ? 1 : 0);
-      expect(repository.journal.record).toHaveBeenCalledTimes(shouldPersist ? 1 : 0);
-      expect(repository.session.prepareTurn).toHaveBeenCalledTimes(shouldPersist ? 1 : 0);
-      expect(result === null).toBe(!shouldPersist);
+      expect(repository.attachmentReferences.record).toHaveBeenCalledOnce();
+      expect(repository.journal.record).toHaveBeenCalledOnce();
+      expect(repository.session.prepareTurn).toHaveBeenCalledOnce();
+      expect(result).not.toBeNull();
     },
   );
 
-  it("records an allowlisted external text document as a lazy readable attachment", async () => {
+  it("records an external text document as a lazy readable attachment", async () => {
     const repository = repositories();
     repository.telegram.findGroup.mockResolvedValue({
       familyId: "family-1",
@@ -360,6 +358,46 @@ describe("createTelegramMessageHandler", () => {
     expect(repository.attachments.persist).not.toHaveBeenCalled();
     expect(result?.context?.join("\n")).toContain("00000000-0000-4000-8000-000000000099");
     expect(repository.session.prepareTurn).toHaveBeenCalledOnce();
+  });
+
+  it("starts a private turn for a lone place and shows the model what was shared", async () => {
+    const repository = repositories();
+    repository.telegram.findIdentity.mockResolvedValue({ familyId: "family-1", role: "owner", userId: "user-1" });
+    const message: TelegramMessage = {
+      ...privateMessage(""),
+      raw: { date: 1_700_000_000, venue: { address: "Ленина Ул., д. 12", location: { latitude: 52.42, longitude: 37.6 }, title: "Чашка" } },
+    };
+
+    const result = await createTelegramMessageHandler(repository)(telegramContext().context, message);
+
+    expect(result).not.toBeNull();
+    expect(repository.session.prepareTurn).toHaveBeenCalledOnce();
+    expect(repository.groupContext.prepare).toHaveBeenCalledWith(expect.objectContaining({
+      messageText: "📍 Место «Чашка», Ленина Ул., д. 12 — 52.42, 37.6",
+    }));
+  });
+
+  it("journals a lone location in the family group for memory review without waking the agent", async () => {
+    const repository = repositories();
+    repository.telegram.findGroup.mockResolvedValue({
+      familyId: "family-1",
+      groupId: "group-1",
+      messageMode: "addressed_only",
+      skillAllowlist: [],
+      telegramChatId: "group-101",
+      toolAllowlist: [],
+      type: "family_private",
+    });
+    const message: TelegramMessage = {
+      ...groupMessage(""),
+      raw: { date: 1_700_000_000, location: { latitude: 55.75, longitude: 37.61 } },
+    };
+
+    await expect(createTelegramMessageHandler(repository)(telegramContext().context, message)).resolves.toBeNull();
+
+    expect(repository.journal.record).toHaveBeenCalledWith("group-1", message, expect.objectContaining({ kind: "telegram_user" }));
+    expect(repository.memoryReview.observePassiveMessage).toHaveBeenCalledTimes(1);
+    expect(repository.session.prepareTurn).not.toHaveBeenCalled();
   });
 
   it("records an authorized unaddressed family attachment without downloading or dispatching", async () => {

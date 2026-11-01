@@ -7,6 +7,7 @@
  * - `telegramReplyTargetProjection`: verifies the target once, then projects its untrusted content.
  */
 import type { TelegramMessage } from "../runtime/telegram/inbound.js";
+import { telegramMessageDisplay } from "./telegram-content/telegram-content-description.js";
 
 export interface TelegramReplyTargetSnapshot {
   contentText: string;
@@ -102,9 +103,11 @@ function verifiedRawTarget(message: TelegramReplyMessage): JsonRecord | null {
 }
 
 function targetSnapshot(rawTarget: JsonRecord): TelegramReplyTargetSnapshot | null {
-  const contentText = [nonEmptyText(rawTarget.text), nonEmptyText(rawTarget.caption)]
+  // A reply to a place, a sticker or a forwarded post shows what that message was, not nothing.
+  const words = [nonEmptyText(rawTarget.text), nonEmptyText(rawTarget.caption)]
     .filter((part): part is string => part !== null)
     .join("\n");
+  const contentText = telegramMessageDisplay(rawTarget, words);
   if (!contentText) return null;
 
   return { contentText, ...senderProjection(rawTarget) };

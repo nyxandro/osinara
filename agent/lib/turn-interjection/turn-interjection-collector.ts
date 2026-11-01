@@ -22,10 +22,11 @@ import type { ToolContext } from "../../runtime/tool.js";
 import { AppError } from "../app-error.js";
 import type { TelegramVoiceFile } from "../groq-voice-transcription.js";
 import { groupCanonicalContinuationToken } from "../sessions/group-canonical-token.js";
-import { telegramForumTopicId, telegramInboundText } from "../telegram-group-message-storage.js";
+import { telegramDisplayText, telegramForumTopicId, telegramInboundText } from "../telegram-group-message-storage.js";
 import {
-  classifyTelegramInboundMedia,
+  hasTelegramInboundMedia,
   isMessageAddressedToBot,
+  isSpokenTelegramMessage,
   isTelegramSlashCommand,
 } from "../telegram-message-policy.js";
 import { telegramBaseContinuationToken } from "../telegram-reply-routing.js";
@@ -50,7 +51,7 @@ import { resolveTurnInterjectionScope, type TurnInterjectionScope } from "./turn
 import type { TurnInterjection } from "./turn-interjection-tool.js";
 
 export interface TurnInterjectionCollectorDependencies {
-  authorizeVoice(message: Pick<TelegramMessage, "chat" | "from">): Promise<boolean>;
+  authorizeVoice(message: Pick<TelegramMessage, "chat" | "from">, options: { readonly addressed: boolean }): Promise<boolean>;
   /** Required only for group chats, where addressing depends on the bot's username. */
   botUsername: string | undefined;
   repository: Pick<
@@ -151,14 +152,15 @@ async function plan(candidate: TurnInterjectionCandidate, collection: Collection
   const message = update.message;
   // The SQL filter already selected the sender; the parsed identity must agree with it.
   if (message.from?.id !== collection.scope.telegramUserId || message.from.isBot) return null;
-  const isVoice = Object.hasOwn(message.raw, "voice");
+  const isVoice = isSpokenTelegramMessage(message);
   const text = isVoice ? message.caption : telegramInboundText(message);
   if (!isVoice && isTelegramSlashCommand(text)) return null;
   if (!addressed(message, text, collection) || !await landsInThisConversation(message, collection)) return null;
 
   if (isVoice) {
     const usable = candidate.voice !== null &&
-      (candidate.voiceTranscript !== null || await collection.dependencies.authorizeVoice(message));
+      // Only an addressed message reaches this point, in a group as in a private chat.
+      (candidate.voiceTranscript !== null || await collection.dependencies.authorizeVoice(message, { addressed: true }));
     if (!usable) {
       return {
         contentKind: "notice",
@@ -180,7 +182,7 @@ async function plan(candidate: TurnInterjectionCandidate, collection: Collection
     };
   }
 
-  if (classifyTelegramInboundMedia(message) !== "none") {
+  if (hasTelegramInboundMedia(message)) {
     return {
       contentKind: "notice",
       entry: {
@@ -193,8 +195,10 @@ async function plan(candidate: TurnInterjectionCandidate, collection: Collection
       updateId: candidate.updateId,
     };
   }
-  if (!text) return null;
-  return { contentKind: "text", entry: { kind: "text", sentAt: sentAt(message), ...bounded(text) }, updateId: candidate.updateId };
+  // A place, a contact or a poll has no words of its own: the model reads its description.
+  const shown = telegramDisplayText(message);
+  if (!shown) return null;
+  return { contentKind: "text", entry: { kind: "text", sentAt: sentAt(message), ...bounded(shown) }, updateId: candidate.updateId };
 }
 
 async function unavailableVoice(

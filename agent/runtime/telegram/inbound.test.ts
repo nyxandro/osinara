@@ -113,6 +113,39 @@ describe("parseTelegramUpdate", () => {
     expect(update.message.replyToMessage?.messageThreadId).toBeUndefined();
   });
 
+  // A sticker, a GIF, a video, a video note or a song cover reaches vision through a still: the
+  // message keeps exactly one attachment, so the still stands in for the file.
+  it.each([
+    ["a static sticker as its own WEBP", { sticker: { emoji: "😂", file_id: "sticker-file", file_unique_id: "s1", height: 512, is_animated: false, is_video: false, thumbnail: { file_id: "sticker-thumb", file_unique_id: "t1", height: 128, width: 128 }, type: "regular", width: 512 } },
+      { fileId: "sticker-file", fileName: "sticker.webp", fileUniqueId: "s1", height: 512, kind: "photo", mediaType: "image/webp", width: 512 }],
+    ["an animated sticker as its preview", { sticker: { file_id: "tgs-file", file_unique_id: "s2", height: 512, is_animated: true, is_video: false, thumbnail: { file_id: "tgs-thumb", file_unique_id: "t2", height: 128, width: 128 }, type: "regular", width: 512 } },
+      { fileId: "tgs-thumb", fileName: "preview.jpg", fileUniqueId: "t2", height: 128, kind: "photo", mediaType: "image/jpeg", width: 128 }],
+    ["a GIF as its preview instead of the MP4 document", {
+      animation: { duration: 3, file_id: "gif-file", file_unique_id: "g1", height: 240, thumbnail: { file_id: "gif-thumb", file_unique_id: "t3", file_size: 900, height: 90, width: 160 }, width: 320 },
+      document: { file_id: "gif-file", file_unique_id: "g1", mime_type: "video/mp4" },
+    }, { fileId: "gif-thumb", fileName: "preview.jpg", fileUniqueId: "t3", height: 90, kind: "photo", mediaType: "image/jpeg", size: 900, width: 160 }],
+    ["a video note as its preview", { video_note: { duration: 20, file_id: "note-file", file_unique_id: "n1", length: 240, thumbnail: { file_id: "note-thumb", file_unique_id: "t4", height: 240, width: 240 } } },
+      { fileId: "note-thumb", fileName: "preview.jpg", fileUniqueId: "t4", height: 240, kind: "photo", mediaType: "image/jpeg", width: 240 }],
+    ["a song by its cover", { audio: { duration: 200, file_id: "song-file", file_unique_id: "a1", thumbnail: { file_id: "cover", file_unique_id: "t5", height: 300, width: 300 } } },
+      { fileId: "cover", fileName: "preview.jpg", fileUniqueId: "t5", height: 300, kind: "photo", mediaType: "image/jpeg", width: 300 }],
+  ])("shows %s", (_name, content, attachment) => {
+    const update = parseTelegramUpdate({
+      message: { chat: { id: 101, type: "private" }, date: 1, from: { first_name: "Анна", id: 101, is_bot: false }, message_id: 7, ...content },
+      update_id: 1,
+    });
+
+    expect(update?.kind === "message" ? update.message.attachments : null).toEqual([attachment]);
+  });
+
+  it("gives a video without a preview no attachment", () => {
+    const update = parseTelegramUpdate({
+      message: { chat: { id: 101, type: "private" }, date: 1, message_id: 8, video: { duration: 5, file_id: "v", file_unique_id: "v1", height: 1, width: 1 } },
+      update_id: 2,
+    });
+
+    expect(update?.kind === "message" ? update.message.attachments : null).toEqual([]);
+  });
+
   it("returns null for unsupported or incomplete updates", () => {
     expect(parseTelegramUpdate({ edited_message: {} })).toBeNull();
     expect(parseTelegramUpdate({ message: { message_id: 1 } })).toBeNull();

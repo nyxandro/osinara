@@ -1,11 +1,11 @@
 /**
- * External Telegram native-photo authorization tests.
+ * External Telegram native-photo intake tests.
  *
  * Constructs covered:
- * - Live `inspect_workspace_image` policy gates external native photos at `onMessage`.
- * - Authorized native photos and image documents become lazy journal references.
- * - Addressed images never pollute the isolated group workspace.
- * - Revoked, mixed, malformed, and non-image documents fail closed.
+ * - An external group takes in every photo, image document and reply image without any grant, and
+ *   whatever its stored grant list says: seeing what participants send is baseline access.
+ * - Photos become lazy journal references; addressed images never pollute the group workspace.
+ * - A reply target bound to another chat is still never captured.
  */
 import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { describe, expect, it, vi } from "vitest";
@@ -54,7 +54,7 @@ function allowExternalPhoto(repository: ReturnType<typeof repositories>): void {
     messageMode: "addressed_only",
     skillAllowlist: [],
     telegramChatId: "group-101",
-    toolAllowlist: ["inspect_workspace_image"],
+    toolAllowlist: [],
     type: "external",
   });
 }
@@ -127,7 +127,7 @@ describe("external Telegram native photos", () => {
     expect(repository.attachmentReferences.captureReplyTarget).not.toHaveBeenCalled();
   });
 
-  it("does not expose a reply attachment after external vision capability revocation", async () => {
+  it("captures a reply image in a group without any grant", async () => {
     const repository = repositories();
     repository.telegram.findGroup.mockResolvedValue({
       familyId: "family-1",
@@ -159,10 +159,7 @@ describe("external Telegram native photos", () => {
 
     await createTelegramMessageHandler(repository)(telegramContext().context, message);
 
-    expect(repository.attachmentReferences.captureReplyTarget).not.toHaveBeenCalled();
-    expect(repository.groupContext.prepare).toHaveBeenCalledWith(expect.objectContaining({
-      attachmentReferenceAccess: { images: false, readableText: false },
-    }));
+    expect(repository.attachmentReferences.captureReplyTarget).toHaveBeenCalledOnce();
   });
 
   it("records an addressed photo as a lazy reference without workspace persistence", async () => {
@@ -181,10 +178,7 @@ describe("external Telegram native photos", () => {
 
     expect(repository.attachmentReferences.record).toHaveBeenCalledWith("group-1", message);
     expect(repository.attachments.persist).not.toHaveBeenCalled();
-    expect(result?.auth?.attributes).toMatchObject({
-      groupId: "group-1",
-      toolAllowlist: ["inspect_workspace_image"],
-    });
+    expect(result?.auth?.attributes).toMatchObject({ groupId: "group-1", toolAllowlist: [] });
     expect(result?.context?.join("\n")).toContain('"telegramMessageId":"42"');
     expect(result?.context?.join("\n")).toContain("<telegram_attachment_refs>");
   });
@@ -238,50 +232,32 @@ describe("external Telegram native photos", () => {
     expect(repository.session.prepareTurn).not.toHaveBeenCalled();
   });
 
-  it("rejects a queued photo when live capability policy was revoked before drain", async () => {
-    const repository = repositories();
-    repository.telegram.findGroup.mockResolvedValue({
-      familyId: "family-1",
-      groupId: "group-1",
-      messageMode: "addressed_only",
-      skillAllowlist: [],
-      telegramChatId: "group-101",
-      toolAllowlist: [],
-      type: "external",
-    });
+  it("takes in an addressed photo whatever the group's stored grant list says", async () => {
+    for (const toolAllowlist of [[], ["inspect_workspace_image", "unknown_tool"]]) {
+      const repository = repositories();
+      repository.telegram.findGroup.mockResolvedValue({
+        familyId: "family-1",
+        groupId: "group-1",
+        messageMode: "addressed_only",
+        skillAllowlist: [],
+        telegramChatId: "group-101",
+        toolAllowlist,
+        type: "external",
+      });
 
-    await expect(createTelegramMessageHandler(repository)(
-      telegramContext().context,
-      externalPhoto(`@${BOT_USERNAME} что изображено?`),
-    )).resolves.toBeNull();
+      await createTelegramMessageHandler(repository)(
+        telegramContext().context,
+        externalPhoto(`@${BOT_USERNAME} что изображено?`),
+      );
 
-    expect(repository.journal.record).not.toHaveBeenCalled();
-    expect(repository.attachments.persist).not.toHaveBeenCalled();
-    expect(repository.session.prepareTurn).not.toHaveBeenCalled();
+      expect(repository.journal.record, JSON.stringify(toolAllowlist)).toHaveBeenCalledOnce();
+      expect(repository.attachmentReferences.record).toHaveBeenCalledOnce();
+      expect(repository.attachments.persist).not.toHaveBeenCalled();
+      expect(repository.session.prepareTurn).toHaveBeenCalledOnce();
+    }
   });
 
-  it("rejects a photo when the persisted external allowlist is partly malformed", async () => {
-    const repository = repositories();
-    repository.telegram.findGroup.mockResolvedValue({
-      familyId: "family-1",
-      groupId: "group-1",
-      messageMode: "addressed_only",
-      skillAllowlist: [],
-      telegramChatId: "group-101",
-      toolAllowlist: ["inspect_workspace_image", "unknown_tool"],
-      type: "external",
-    });
-
-    await expect(createTelegramMessageHandler(repository)(
-      telegramContext().context,
-      externalPhoto(`@${BOT_USERNAME} что изображено?`),
-    )).resolves.toBeNull();
-
-    expect(repository.journal.record).not.toHaveBeenCalled();
-    expect(repository.attachments.persist).not.toHaveBeenCalled();
-  });
-
-  it("accepts an image document candidate and rejects mixed media", async () => {
+  it("takes in an image document and a photo that comes with other media", async () => {
     const repository = repositories();
     allowExternalPhoto(repository);
     const imageDocument: TelegramMessage = {
@@ -304,9 +280,10 @@ describe("external Telegram native photos", () => {
 
     const handler = createTelegramMessageHandler(repository);
     await expect(handler(telegramContext().context, imageDocument)).resolves.not.toBeNull();
-    await expect(handler(telegramContext().context, mixed)).resolves.toBeNull();
+    await expect(handler(telegramContext().context, mixed)).resolves.not.toBeNull();
 
     expect(repository.attachmentReferences.record).toHaveBeenCalledWith("group-1", imageDocument);
+    expect(repository.attachmentReferences.record).toHaveBeenCalledWith("group-1", mixed);
     expect(repository.attachments.persist).not.toHaveBeenCalled();
   });
 });

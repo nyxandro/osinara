@@ -38,10 +38,10 @@ const AGENT_TOOL_INPUT_SCHEMA = {
 
 export const agentTool: ToolDefinition<{ readonly message: string; readonly outputSchema?: JsonObject }, unknown> = defineTool({
   description: [
-    "Delegate a focused subtask to a fresh copy of yourself.",
-    "Use it to isolate complex work or split a large task into independent pieces.",
-    "Issue multiple `agent` calls in one response to run a small fixed set in parallel.",
-    "Each child has fresh history and state but shares your tools and sandbox, so include essential context in `message` and give parallel writers non-overlapping scopes.",
+    "Delegate a focused multi-step subtask to a fresh copy of yourself; its tool output stays in its own context and only its result comes back.",
+    "The child has your sandbox, files, web, skills and read access, but no memory writes, settings, schedules, changes in connected services or messages to the chat: those stay with you.",
+    "Issue several `agent` calls in one response only for independent parts, with non-overlapping output paths.",
+    "The child does not see this conversation: put everything it needs in `message`.",
   ].join(" "),
   async execute(): Promise<unknown> {
     throw new Error("AGENT_DELEGATION_EXECUTED: the runtime runs an agent call as a child turn");

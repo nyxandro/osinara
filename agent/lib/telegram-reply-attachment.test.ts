@@ -2,7 +2,8 @@
  * Verified Telegram reply attachment extraction tests.
  *
  * Constructs covered:
- * - External replies expose supported text-document candidates without accepting binary documents.
+ * - An external group's reply exposes any attachment of its own chat, a binary document included:
+ *   no grant decides what a group sees.
  * - Exact chat binding prevents a nested reply payload from selecting another group's attachment.
  */
 import type { TelegramMessage } from "../runtime/telegram/inbound.js";
@@ -59,8 +60,8 @@ describe("telegramReplyAttachmentTarget", () => {
     });
   });
 
-  it("rejects an unsupported binary-document candidate", () => {
-    expect(telegramReplyAttachmentTarget(currentReply("report.pdf"), group)).toBeNull();
+  it("exposes a binary document of the same chat as well", () => {
+    expect(telegramReplyAttachmentTarget(currentReply("report.pdf"), group)?.attachments[0]?.fileName).toBe("report.pdf");
   });
 
   it("rejects a nested reply attachment from another chat", () => {

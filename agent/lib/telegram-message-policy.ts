@@ -2,8 +2,6 @@
  * Telegram inbound dispatch policy.
  *
  * Exports:
- * - `TelegramInboundMediaKind`: strict none/photo/readable-text/unsupported-media decision.
- * - `classifyTelegramInboundMedia`: fail-closed classifier over raw and parsed media.
  * - `hasTelegramInboundMedia`: identifies file-bearing updates without downloading their bytes.
  * - `isMessageAddressedToBot`: preserves private, mention, and reply behavior.
  * - `telegramGroupTurnTrigger`: names the technical signal that woke the agent in a group.
@@ -14,8 +12,6 @@
 import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import { isAgentNameMentioned } from "./agent-name.js";
-import { isTelegramImageDocumentCandidate } from "./attachments/telegram-vision-attachment.js";
-import { isReadableTextDocumentCandidate } from "./attachments/attachment-policy.js";
 
 interface TelegramDispatchMessage {
   chat: {
@@ -67,13 +63,6 @@ const TELEGRAM_CONDITIONAL_MEDIA_FIELDS = [
   "users_shared",
 ] as const;
 
-export type TelegramInboundMediaKind =
-  | "image_document_candidate"
-  | "native_photo"
-  | "none"
-  | "text_document_candidate"
-  | "unsupported_media";
-
 function containsTelegramFileReference(value: unknown): boolean {
   // Conditional structures can be text-only, so search only their own subtree for actual files.
   const pending = [value];
@@ -93,63 +82,14 @@ function containsTelegramFileReference(value: unknown): boolean {
   return false;
 }
 
-export function classifyTelegramInboundMedia(
+export function hasTelegramInboundMedia(
   message: Pick<TelegramMessage, "attachments" | "raw">,
-): TelegramInboundMediaKind {
-  const hasRawMedia = TELEGRAM_INBOUND_MEDIA_FIELDS.some(
+): boolean {
+  return message.attachments.length > 0 || TELEGRAM_INBOUND_MEDIA_FIELDS.some(
     (field) => Object.hasOwn(message.raw, field),
   ) || TELEGRAM_CONDITIONAL_MEDIA_FIELDS.some(
     (field) => Object.hasOwn(message.raw, field) && containsTelegramFileReference(message.raw[field]),
   );
-  if (message.attachments.length === 0 && !hasRawMedia) return "none";
-
-  // The normalized attachment and raw Telegram shape must agree exactly. Documents remain only
-  // candidates until downloaded magic bytes establish their authoritative image MIME.
-  const rawPhoto = message.raw.photo;
-  const hasOtherRawMedia = TELEGRAM_INBOUND_MEDIA_FIELDS.some(
-    (field) => field !== "photo" && field !== "document" && Object.hasOwn(message.raw, field),
-  ) || TELEGRAM_CONDITIONAL_MEDIA_FIELDS.some(
-    (field) => Object.hasOwn(message.raw, field) && containsTelegramFileReference(message.raw[field]),
-  );
-  if (!hasOtherRawMedia && !Object.hasOwn(message.raw, "document") &&
-    Array.isArray(rawPhoto) && rawPhoto.length > 0 &&
-    message.attachments.length === 1 && message.attachments[0]?.kind === "photo") {
-    const rawFileIds = new Set<string>();
-    for (const size of rawPhoto) {
-      if (!size || typeof size !== "object" || Array.isArray(size)) return "unsupported_media";
-      const fileId = (size as Record<string, unknown>).file_id;
-      if (typeof fileId !== "string" || fileId.length === 0) return "unsupported_media";
-      rawFileIds.add(fileId);
-    }
-    return rawFileIds.has(message.attachments[0].fileId) ? "native_photo" : "unsupported_media";
-  }
-
-  const rawDocument = message.raw.document;
-  const attachment = message.attachments[0];
-  if (!hasOtherRawMedia && !Object.hasOwn(message.raw, "photo") &&
-    rawDocument && typeof rawDocument === "object" && !Array.isArray(rawDocument) &&
-    message.attachments.length === 1 && attachment?.kind === "document") {
-    const raw = rawDocument as Record<string, unknown>;
-    const exactFile = raw.file_id === attachment.fileId;
-    const exactMime = raw.mime_type === undefined || raw.mime_type === attachment.mediaType;
-    const exactName = raw.file_name === undefined || raw.file_name === attachment.fileName;
-    const candidate = {
-      ...attachment,
-      ...(typeof raw.file_name === "string" ? { fileName: raw.file_name } : { fileName: undefined }),
-      ...(typeof raw.mime_type === "string" ? { mediaType: raw.mime_type } : { mediaType: undefined }),
-    };
-    if (!exactFile || !exactMime || !exactName) return "unsupported_media";
-    if (isTelegramImageDocumentCandidate(candidate)) return "image_document_candidate";
-    if (isReadableTextDocumentCandidate(candidate)) return "text_document_candidate";
-    return "unsupported_media";
-  }
-  return "unsupported_media";
-}
-
-export function hasTelegramInboundMedia(
-  message: Pick<TelegramMessage, "attachments" | "raw">,
-): boolean {
-  return classifyTelegramInboundMedia(message) !== "none";
 }
 
 export function isReplyToBot(
@@ -189,6 +129,14 @@ export function replyToAgentTrigger(
   current: TelegramGroupTurnTrigger | null,
 ): TelegramGroupTurnTrigger {
   return current === "mention" ? "mention" : "reply_to_agent";
+}
+
+/**
+ * A voice note or a video note: its words arrive as a transcript, so routing reads only its caption,
+ * and it neither joins a private burst nor counts as a command.
+ */
+export function isSpokenTelegramMessage(message: Pick<TelegramMessage, "raw">): boolean {
+  return Object.hasOwn(message.raw, "voice") || Object.hasOwn(message.raw, "video_note");
 }
 
 export function isMessageAddressedToBot(

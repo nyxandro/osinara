@@ -11,7 +11,6 @@
 import type { PoolClient } from "pg";
 
 import { AppError } from "../app-error.js";
-import { unservableCapabilityReason } from "../tool-policy/grantable-group-capabilities.js";
 import {
   BASELINE_EXTERNAL_GROUP_GRANTS,
   EXTERNAL_GROUP_BASE_TOOLS,
@@ -30,7 +29,6 @@ const BASELINE_TOOL_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 export const OFFERED_EXTERNAL_SCHEDULE_CAPABILITIES = [
-  "inspect_workspace_image",
   "list_memories",
   "list_memory_threads",
   "read_memory_thread",
@@ -39,9 +37,11 @@ export const OFFERED_EXTERNAL_SCHEDULE_CAPABILITIES = [
   "web_fetch",
 ] as const satisfies readonly ExternalGroupToolName[];
 
-// A persisted automation may still list the file-sending grant of a past release; it grants nothing.
+// A persisted automation may still list grants of past releases that are now baseline, file sending
+// (v0.54.0) and image inspection (01.11.2026); they grant nothing.
 export const EXTERNAL_SCHEDULE_CAPABILITIES = [
   ...OFFERED_EXTERNAL_SCHEDULE_CAPABILITIES,
+  "inspect_workspace_image",
   "send_workspace_file",
 ] as const satisfies readonly ExternalGroupToolName[];
 
@@ -70,14 +70,6 @@ export function requireGrantedExternalScheduleCapabilities(
   group: ReadonlySet<ExternalGroupToolName>,
 ): ExternalScheduleCapability[] {
   for (const capability of scheduled) {
-    // A grant kept from another runtime would be silently absent from every run of the automation.
-    const unavailable = unservableCapabilityReason(capability);
-    if (unavailable !== null) {
-      throw new AppError(
-        "AGENT_EXTERNAL_SCHEDULE_CAPABILITY_UNAVAILABLE",
-        `Capability ${capability} сейчас недоступна: ${unavailable}`,
-      );
-    }
     if (!BASELINE_TOOL_NAMES.has(capability) && !group.has(capability)) {
       throw new AppError(
         "AGENT_EXTERNAL_SCHEDULE_CAPABILITY_NOT_GRANTED",
