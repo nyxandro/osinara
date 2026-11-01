@@ -22,7 +22,7 @@ import type { ToolContext } from "../../runtime/tool.js";
 import { AppError } from "../app-error.js";
 import type { TelegramVoiceFile } from "../groq-voice-transcription.js";
 import { groupCanonicalContinuationToken } from "../sessions/group-canonical-token.js";
-import { telegramForumTopicId, telegramInboundText } from "../telegram-group-message-storage.js";
+import { telegramDisplayText, telegramForumTopicId, telegramInboundText } from "../telegram-group-message-storage.js";
 import {
   classifyTelegramInboundMedia,
   isMessageAddressedToBot,
@@ -193,8 +193,10 @@ async function plan(candidate: TurnInterjectionCandidate, collection: Collection
       updateId: candidate.updateId,
     };
   }
-  if (!text) return null;
-  return { contentKind: "text", entry: { kind: "text", sentAt: sentAt(message), ...bounded(text) }, updateId: candidate.updateId };
+  // A place, a contact or a poll has no words of its own: the model reads its description.
+  const shown = telegramDisplayText(message);
+  if (!shown) return null;
+  return { contentKind: "text", entry: { kind: "text", sentAt: sentAt(message), ...bounded(shown) }, updateId: candidate.updateId };
 }
 
 async function unavailableVoice(

@@ -31,7 +31,7 @@ import {
   type TelegramGroupTurnTrigger,
   telegramGroupTurnTrigger,
 } from "./telegram-message-policy.js";
-import { telegramForumTopicId, telegramInboundText } from "./telegram-group-message-storage.js";
+import { telegramDisplayText, telegramForumTopicId, telegramInboundText } from "./telegram-group-message-storage.js";
 import { deliverPendingMemoryThreadNotice } from "./telegram-memory-thread-notice.js";
 import { verifiedTelegramProfileSignals } from "./telegram-profile-subjects.js";
 import { sameTelegramGroupPolicy } from "./telegram-group-policy-snapshot.js";
@@ -85,8 +85,10 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
     if (!botUsername) {
       throw new Error("AGENT_TELEGRAM_CONFIG_MISSING: Не задано имя Telegram-бота");
     }
-    const dispatchText = telegramInboundText(message);
-    const routingText = Object.hasOwn(message.raw, "voice") ? message.caption : dispatchText;
+    // The model reads the description of non-text content and a forward note; routing reads only
+    // what the person wrote, so neither a forwarded command nor a description addresses the bot.
+    const dispatchText = telegramDisplayText(message);
+    const routingText = Object.hasOwn(message.raw, "voice") ? message.caption : telegramInboundText(message);
     let groupTurnTrigger = telegramGroupTurnTrigger({ ...message, text: routingText }, botUsername);
     let addressed = message.chat.type === "private" || groupTurnTrigger !== null;
     const unsupportedGroupSlashCommand = message.chat.type !== "private" &&

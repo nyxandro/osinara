@@ -3,7 +3,9 @@
  *
  * Exports:
  * - Message field normalizers for trusted PostgreSQL writes.
- * - `telegramInboundText`: readable text of a message, including native rich formatting.
+ * - `telegramInboundText`: what the person wrote, including native rich formatting; routing reads it.
+ * - `telegramDisplayText`: what the model and the journal read — a forward note, the description of
+ *   non-text content (`telegram-content/telegram-content-description.ts`), then the person's words.
  * - `telegramForumTopicId`: verified forum topic isolation separate from reply routing.
  * - `lockTelegramGroupJournal` and `pruneTelegramGroupJournal` transaction helpers.
  */
@@ -12,6 +14,10 @@ import type { PoolClient } from "pg";
 
 import { TELEGRAM_GROUP_JOURNAL_RETENTION_MESSAGES } from "../config.js";
 import { memoryContentRejectionCode } from "./memory-content-policy.js";
+import {
+  telegramContentDescription,
+  telegramMessageContextNote,
+} from "./telegram-content/telegram-content-description.js";
 import { telegramRichMessageText } from "./telegram-rich-inbound.js";
 
 const POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807n;
@@ -81,6 +87,14 @@ export function telegramMessageKind(message: TelegramMessage): string {
     "poll",
     "dice",
     "game",
+    "checklist",
+    "story",
+    "paid_media",
+    "gift",
+    "unique_gift",
+    "giveaway",
+    "invoice",
+    "live_photo",
   ]) {
     if (message.raw[kind] !== undefined) return kind;
   }
@@ -103,8 +117,18 @@ export function telegramInboundText(
     .trim();
 }
 
+export function telegramDisplayText(
+  message: Pick<TelegramMessage, "caption" | "raw" | "text">,
+): string {
+  return [
+    telegramMessageContextNote(message.raw),
+    telegramContentDescription(message.raw),
+    telegramInboundText(message),
+  ].filter(Boolean).join("\n");
+}
+
 export function telegramMessageContent(message: TelegramMessage): string | null {
-  const content = telegramInboundText(message);
+  const content = telegramDisplayText(message);
   if (!content || memoryContentRejectionCode(content)) return null;
   return content;
 }

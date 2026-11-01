@@ -47,6 +47,7 @@ import {
 import { telegramIngressControl } from "./telegram-ingress-dispatch.js";
 import { combineTelegramMediaGroup } from "./telegram-media-group.js";
 import { CAPTIONLESS_ATTACHMENT_MODEL_TEXT } from "./telegram-model-placeholders.js";
+import { telegramContentDescription } from "./telegram-content/telegram-content-description.js";
 import { combineTelegramBurst } from "./telegram-private-burst-message.js";
 import { recordOperationalIncident } from "./operational-incidents/owner-alerts.js";
 import { isReplyButtonCallback } from "./reply-buttons/reply-button-contract.js";
@@ -154,7 +155,9 @@ function withCaptionlessAttachmentText(update: TelegramUpdate): TelegramUpdate {
     update.kind !== "message" ||
     update.message.attachments.length === 0 ||
     update.message.text.trim() ||
-    update.message.caption.trim()
+    update.message.caption.trim() ||
+    // A GIF, a video or audio arrives with its own description; the placeholder would only repeat it.
+    telegramContentDescription(update.message.raw) !== null
   ) {
     return update;
   }

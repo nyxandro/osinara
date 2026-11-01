@@ -101,6 +101,18 @@ describe("retrieveMemoryTurnContext", () => {
     expect(context.diagnostics.abstained).toBe(true);
   });
 
+  it.each(["[стикер 😂 из набора «Cats»]", "[GIF 0:03]", "[видео 0:15]"])(
+    "does not search memory with the media placeholder %s",
+    async (placeholder) => {
+      const searchSpy = vi.spyOn(memoryRetrievalRepository, "searchAuthorized");
+
+      const context = await retrieveMemoryTurnContext(auth, placeholder);
+
+      expect(searchSpy).not.toHaveBeenCalled();
+      expect(context.diagnostics.abstained).toBe(true);
+    },
+  );
+
   it("searches as before once the message holds a word outside small talk", async () => {
     search({ russianMatched: 3, russianTopRank: 0.1 });
     vi.spyOn(memoryThreadBriefRepository, "activate").mockResolvedValue({ threads: [], totalCharacters: 0 });

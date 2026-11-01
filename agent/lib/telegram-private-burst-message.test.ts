@@ -54,13 +54,20 @@ describe("selectTelegramBurstMembers", () => {
     ["an album", { ...photo, media_group_id: "album-1" }],
     ["a command", { text: "/help" }],
     ["a reply to the bot", { reply_to_message: { chat: { id: 101, type: "private" }, date: 1, from: { first_name: "Osinara", id: 900, is_bot: true }, message_id: 1, text: "Подтвердить?" }, text: "да" }],
-    ["a lone sticker", { sticker: { file_id: "sticker-1", file_unique_id: "s1", height: 1, is_animated: false, is_video: false, type: "regular", width: 1 } }],
   ])("stops at %s", (_label, fields) => {
     const head = candidate(message({ text: "смотри" }));
     const stop = candidate(message(fields));
     const after = candidate(message({ text: "и ещё" }));
 
     expect(selectTelegramBurstMembers(head, [stop, after], LIMITS)).toEqual([]);
+  });
+
+  it("joins a sticker and a place by their descriptions", () => {
+    const head = candidate(message({ text: "смотри" }));
+    const sticker = candidate(message({ sticker: { emoji: "😂", file_id: "sticker-1", file_unique_id: "s1", height: 1, is_animated: false, is_video: false, type: "regular", width: 1 } }));
+    const place = candidate(message({ venue: { address: "Ленина ул., 12", location: { latitude: 1, longitude: 2 }, title: "Чашка" } }));
+
+    expect(selectTelegramBurstMembers(head, [sticker, place], LIMITS)).toEqual([sticker.updateId, place.updateId]);
   });
 
   it("stops at a message a running turn already saw, and a seen head leads nothing", () => {
