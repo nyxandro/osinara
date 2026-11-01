@@ -4,7 +4,8 @@
  * Constructs covered:
  * - `modeInstructions` with `subagentTurn`: a child is told it works for the calling agent and gets
  *   none of the rules for what it cannot do — saving or editing memory, reminders and scenarios,
- *   administration, progress notes to the person, joining the group's conversation.
+ *   administration, progress notes to the person, joining the group's conversation, showing a file
+ *   to the chat, delegating further.
  * - The live turn of the same chat keeps all of them and gets no child rules.
  */
 import { describe, expect, it } from "vitest";
@@ -48,6 +49,10 @@ const CHILD_CANNOT = [
   ["family reminders and scenarios", trustedScheduleRules("family")],
   ["group reminders", GROUP_REMINDER_RULES],
   ["administration", "## Administration"],
+  ["writing personal memory", "can be read and written"],
+  ["exporting memory", "export_memory"],
+  ["showing a file to the chat", "To send a file from a workspace"],
+  ["taking part in the conversation", "You are an ordinary participant of the conversation"],
 ] as const;
 
 describe("delegated child mode block", () => {
@@ -56,6 +61,13 @@ describe("delegated child mode block", () => {
 
     expect(child).toContain(SUBAGENT_TURN_RULES);
     for (const [what, text] of CHILD_CANNOT) expect(child, what).not.toContain(text);
+  });
+
+  it("never tells a child of a scheduled group run how to delegate further", () => {
+    const run = { capabilities: LIVE_GROUP_GRANTS, environment: "external", scheduledHistory: true, scheduledRun: true } as const;
+
+    expect(modeInstructions(run)).toContain("When delegating");
+    expect(modeInstructions({ ...run, subagentTurn: true })).not.toContain("When delegating");
   });
 
   it.each(CHATS)("in %s keeps the live turn's rules and gives it no child rules", (_name, input) => {
