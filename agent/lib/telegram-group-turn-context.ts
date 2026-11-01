@@ -17,10 +17,6 @@ import { conversationTimelineRepository } from "./conversation-timeline-reposito
 import { escapeUntrustedContextJson } from "./untrusted-context-json.js";
 import { groupTimelineCursorRepository } from "./sessions/group-timeline-cursor-repository.js";
 import {
-  type TelegramAttachmentReferenceAccess,
-  visibleTelegramTimelineEntry,
-} from "./telegram-attachment-reference-access.js";
-import {
   selectTelegramGroupJournalContext,
   type TelegramGroupJournalEntry,
   type TelegramTimelineOmission,
@@ -34,7 +30,6 @@ import type { TelegramReplyTargetSnapshot } from "./telegram-reply-target-snapsh
 
 interface PrepareTelegramGroupTurnContextInput {
   applicationSessionId: string;
-  attachmentReferenceAccess: TelegramAttachmentReferenceAccess;
   currentEntryId: string;
   currentSenderDisplayName: string;
   currentSenderUsername: string | null;
@@ -228,10 +223,6 @@ export function createTelegramGroupTurnContextPreparer(
             limit: TELEGRAM_GROUP_JOURNAL_CONTEXT_MESSAGES - CURRENT_TIMELINE_ENTRY_COUNT,
             messageThreadId: input.messageThreadId,
           });
-    // Current capabilities filter each historical reference by its exact admitted media class.
-    const visibleEntries = page.entries.map((entry) =>
-      visibleTelegramTimelineEntry(entry, input.attachmentReferenceAccess)
-    );
     const currentMessageEnvelope = currentTelegramMessageEnvelope(input);
     const currentMessageCharacters = currentMessageEnvelope.length;
     const timelineCharacterBudget = TELEGRAM_GROUP_JOURNAL_CONTEXT_CHARACTERS -
@@ -243,7 +234,7 @@ export function createTelegramGroupTurnContextPreparer(
       );
     }
     let selected = selectTelegramGroupJournalContext(
-      visibleEntries,
+      page.entries,
       timelineCharacterBudget,
       page.omittedBeforeSequence,
       input.replyToSequenceId,
@@ -258,7 +249,7 @@ export function createTelegramGroupTurnContextPreparer(
       const inlineBudget = TELEGRAM_GROUP_JOURNAL_CONTEXT_CHARACTERS - inlineEnvelope.length - 2;
       if (inlineBudget > 0) {
         const withInlineReply = selectTelegramGroupJournalContext(
-          visibleEntries, inlineBudget, page.omittedBeforeSequence, input.replyToSequenceId,
+          page.entries, inlineBudget, page.omittedBeforeSequence, input.replyToSequenceId,
           TELEGRAM_GROUP_JOURNAL_CONTEXT_MESSAGES - CURRENT_TIMELINE_ENTRY_COUNT,
         );
         // The inline copy is presentation only. Never lose an otherwise readable long reply or

@@ -41,7 +41,6 @@ function preparer(entries: TelegramGroupJournalEntry[]) {
 
 const input = {
   applicationSessionId: "session-1",
-  attachmentReferenceAccess: "all" as const,
   currentEntryId: "00000000-0000-4000-8000-000000000100",
   currentSenderDisplayName: "Пух",
   currentSenderUsername: "nyxandro",

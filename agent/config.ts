@@ -11,7 +11,10 @@
  */
 import { z } from "zod";
 
-export const AGENT_COMPACTION_THRESHOLD = 0.75;
+// Half the model's window. Counted by the provider since 01.11.2026, a history now reaches it for real;
+// past it every turn that misses the provider's cache reads the whole history again (about 14 s at 165 000
+// tokens on qwen3.8-flash-next-ru, a minute and more on the earlier qwen3.8-27b).
+export const AGENT_COMPACTION_THRESHOLD = 0.5;
 // The model may perform substantial tool work, but one turn must never consume unbounded calls.
 export const AGENT_MAX_MODEL_STEPS_PER_TURN = 100;
 export const GROQ_TRANSCRIPTION_TIMEOUT_MS = 60_000;

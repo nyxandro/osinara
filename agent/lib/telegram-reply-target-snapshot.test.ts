@@ -71,6 +71,22 @@ describe("telegramReplyTargetProjection", () => {
     });
   });
 
+  it("shows a place the person replied to by its description, not as nothing", () => {
+    const message = productionReply();
+    const rawTarget = message.raw.reply_to_message as Record<string, unknown>;
+    const { text: _text, ...withoutText } = rawTarget;
+    const reply = {
+      ...message,
+      raw: {
+        ...message.raw,
+        quote: undefined,
+        reply_to_message: { ...withoutText, venue: { address: "Ленина ул., 12", location: { latitude: 1, longitude: 2 }, title: "Чашка" } },
+      },
+    };
+
+    expect(telegramReplyTargetProjection(reply).snapshot?.contentText).toBe("📍 Место «Чашка», Ленина ул., 12 — 1, 2");
+  });
+
   it("reports no fragment for a whole-message reply", () => {
     const message = productionReply();
     const { quote: _quote, ...raw } = message.raw;

@@ -366,6 +366,12 @@ protocol-native transport, explicit output and context limits, and a discriminat
 capability. A supported vision route requires its own model ID and output limit; an unsupported route
 cannot construct a fake vision model.
 
+The context limit drives history compaction: a conversation compacts when its request reaches half
+the window (`AGENT_COMPACTION_THRESHOLD`). The system prompt and tool definitions alone take about
+35-40 thousand estimated tokens, so a model with a window under about 100 thousand tokens leaves
+almost no room under that half: it would compact on nearly every step or fail with
+`AGENT_COMPACTION_OUTPUT_TOO_LARGE`. Choose models with a window of at least 128 thousand tokens.
+
 Every provider base URL must use HTTPS: the agent talks to the selected provider directly. The
 CLIProxyAPI subscription gateway, its `codex-subscription` provider and the `generate_image` tool
 with its `imagegen` skill left the project on 2026-10-26.
@@ -402,10 +408,17 @@ groups get it without a grant; scheduled turns and subagents never receive it. K
 require their written approval for server-side requests and for choosing among results.
 
 Every capability that needs image input follows the same `supportsImageInput` flag of the active
-model config: without it `inspect_workspace_image` is not offered in any mode, its prompt guidance
-and the PDF page route disappear, external groups take in no photos for it, and `manage_telegram_group`
-rejects the grant. A grant made under an image-capable model is reported as
-`unavailableConfiguredTools` until such a model is configured again.
+model config: without it `inspect_workspace_image` is not offered in any mode, and its prompt
+guidance and the PDF page route disappear.
+
+What participants send is no grant. Since 01.11.2026 every registered group, an external one included,
+takes in every medium and offers `inspect_workspace_image` (with an image-capable model) and
+`import_telegram_attachment` without a grant; only a channel and an unregistered chat are still
+acknowledged and dropped (`telegram_ingress_ignored_updates`, reason `external_media`). Earlier
+releases granted both per external group: such a persisted grant still parses, grants nothing more
+and is neither offered nor reported by `manage_telegram_group`. The import keeps a file of any format
+in the group's own `/workspace/group` folder, typed by its bytes; before 01.11.2026 an external group
+could import only UTF-8 text files.
 
 The same `inspect_workspace_image` also shows the vision model the current Telegram avatar of a
 person who wrote in the current chat. The model names a message number of that chat; the backend

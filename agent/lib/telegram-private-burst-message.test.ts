@@ -8,6 +8,8 @@
  *   character and attachment limits; a head that cannot lead a burst takes none.
  * - The burst reads as one message: the head's identity, every part's text in order, and every
  *   part's files with their own Telegram message.
+ * - The head's forward note and description are read once, and a forward's quote ends where the
+ *   sender's own next message begins.
  */
 import { describe, expect, it } from "vitest";
 
@@ -16,6 +18,7 @@ import {
   selectTelegramBurstMembers,
   type TelegramBurstCandidate,
 } from "./telegram-private-burst-message.js";
+import { telegramDisplayText } from "./telegram-group-message-storage.js";
 
 const LIMITS = { maxCharacters: 6_000, maxMessages: 10 };
 let nextId = 1000;
@@ -54,13 +57,20 @@ describe("selectTelegramBurstMembers", () => {
     ["an album", { ...photo, media_group_id: "album-1" }],
     ["a command", { text: "/help" }],
     ["a reply to the bot", { reply_to_message: { chat: { id: 101, type: "private" }, date: 1, from: { first_name: "Osinara", id: 900, is_bot: true }, message_id: 1, text: "Подтвердить?" }, text: "да" }],
-    ["a lone sticker", { sticker: { file_id: "sticker-1", file_unique_id: "s1", height: 1, is_animated: false, is_video: false, type: "regular", width: 1 } }],
   ])("stops at %s", (_label, fields) => {
     const head = candidate(message({ text: "смотри" }));
     const stop = candidate(message(fields));
     const after = candidate(message({ text: "и ещё" }));
 
     expect(selectTelegramBurstMembers(head, [stop, after], LIMITS)).toEqual([]);
+  });
+
+  it("joins a sticker and a place by their descriptions", () => {
+    const head = candidate(message({ text: "смотри" }));
+    const sticker = candidate(message({ sticker: { emoji: "😂", file_id: "sticker-1", file_unique_id: "s1", height: 1, is_animated: false, is_video: false, type: "regular", width: 1 } }));
+    const place = candidate(message({ venue: { address: "Ленина ул., 12", location: { latitude: 1, longitude: 2 }, title: "Чашка" } }));
+
+    expect(selectTelegramBurstMembers(head, [sticker, place], LIMITS)).toEqual([sticker.updateId, place.updateId]);
   });
 
   it("stops at a message a running turn already saw, and a seen head leads nothing", () => {
@@ -108,5 +118,24 @@ describe("combineTelegramBurst", () => {
     expect(update.message.attachments).toEqual([
       expect.objectContaining({ telegramMessageId: String((withPhoto.message as { message_id: number }).message_id) }),
     ]);
+  });
+
+  it("describes a forwarded or sticker head once, and keeps the sender's own words outside the quote", () => {
+    const forwarded = message({
+      forward_origin: { date: 1_793_000_000, sender_user: { first_name: "Иван", id: 7, is_bot: false }, type: "user" },
+      text: "Встреча в пятницу",
+    });
+    const sticker = message({ sticker: { emoji: "😂", file_id: "sticker-1", file_unique_id: "s1", height: 1, is_animated: true, is_video: false, type: "regular", width: 1 } });
+    const own = message({ text: "я завтра улетаю в Сочи" });
+
+    for (const [head, expected] of [
+      [forwarded, "↪ Переслано от Иван, 2026-10-26\n> Встреча в пятницу\n\nя завтра улетаю в Сочи"],
+      [sticker, "[стикер 😂]\n\nя завтра улетаю в Сочи"],
+    ] as const) {
+      const update = combineTelegramBurst([head, own]);
+      if (update.kind !== "message") throw new Error("AGENT_TEST_BURST_KIND: burst is not a message");
+
+      expect(telegramDisplayText(update.message)).toBe(expected);
+    }
   });
 });

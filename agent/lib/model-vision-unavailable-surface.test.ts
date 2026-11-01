@@ -2,10 +2,13 @@
  * Image-capability gating for a model without image input.
  *
  * Constructs covered:
- * - Trusted modes omit image inspection rather than exposing a guaranteed refusal.
- * - An external grant persisted under a vision model yields no descriptor, prompt guidance, photo
- *   intake or execution right, and the owner-facing grant contract drops the capability.
+ * - No conversation surface offers image inspection, an external group included: seeing images is
+ *   baseline access there, and without a model that sees images there is nothing to offer.
  * - Prompt guidance never names the absent tool, including the PDF page route and the import result.
+ * - An external photo is still taken in: what participants send reaches the agent whatever the
+ *   model, and the file can still be imported and processed otherwise.
+ * - A grant persisted under the former per-group image right parses and is neither offered nor
+ *   reported as something to fix.
  */
 import type { ToolContext } from "../runtime/tool.js";
 import { describe, expect, it, vi } from "vitest";
@@ -53,14 +56,7 @@ import {
   telegramContext,
 } from "./telegram-on-message.test-fixtures.js";
 import { createTelegramMessageHandler } from "./telegram-on-message.js";
-import {
-  GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES,
-  servableExternalGroupCapabilities,
-} from "./tool-policy/grantable-group-capabilities.js";
-import {
-  authorizeCurrentExternalGroupCapability,
-  loadCurrentExternalGroupCapabilities,
-} from "./tool-policy/external-group-live-policy.js";
+import { GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES } from "./tool-policy/grantable-group-capabilities.js";
 import { buildModeToolSurface } from "./tool-policy/mode-tool-surface.js";
 import importTelegramAttachment from "./tools/import_telegram_attachment.js";
 import manageTelegramGroup from "./tools/manage_telegram_group.js";
@@ -118,25 +114,22 @@ describe("a model without image input", () => {
     expect(buildModeToolSurface({ environment: "family" })).not.toHaveProperty("inspect_workspace_image");
     expect(external).not.toHaveProperty("inspect_workspace_image");
     expect(external).toHaveProperty("remember");
+    // Attachments stay baseline access: a file can be imported and processed without vision.
+    expect(buildModeToolSurface({ capabilities: new Set(), environment: "external" })).toHaveProperty("import_telegram_attachment");
   });
 
   it("drops image guidance from every mode prompt", () => {
     for (const instructions of [
       modeInstructions({ environment: "private" }),
       modeInstructions({ environment: "family" }),
-      modeInstructions({ capabilities: new Set(["inspect_workspace_image"]), environment: "external" }),
+      modeInstructions({ capabilities: new Set(), environment: "external" }),
     ]) {
       expect(instructions).not.toContain("inspect_workspace_image");
     }
     expect(importTelegramAttachment.description).not.toContain("inspect_workspace_image");
   });
 
-  it("keeps a persisted image grant from widening the effective capability set", () => {
-    expect(servableExternalGroupCapabilities(new Set(["inspect_workspace_image", "remember"])))
-      .toEqual(new Set(["remember"]));
-  });
-
-  it("removes the capability from the grant contract and explains a refused grant", async () => {
+  it("offers no image grant and refuses one sent anyway", async () => {
     const refused = {
       action: "update_policy",
       messageMode: "owner_only",
@@ -146,26 +139,23 @@ describe("a model without image input", () => {
 
     expect(GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES).not.toContain("inspect_workspace_image");
     expect(JSON.stringify(manageTelegramGroup.inputSchema)).not.toContain("inspect_workspace_image");
-    // The approval step lets the call through; the tool's own check refuses it with the reason.
     await expect(manageTelegramGroup.execute(refused as never, ownerContext())).rejects.toMatchObject({
-      contract: { code: "AGENT_TELEGRAM_GROUP_INPUT_INVALID", reason: expect.stringContaining("не видит изображения") },
+      contract: { code: "AGENT_TELEGRAM_GROUP_INPUT_INVALID" },
     });
   });
 
-  it("reports a grant persisted under a vision model as inert", async () => {
+  it("neither offers nor reports a persisted image grant", async () => {
     const status = await manageTelegramGroup.execute(
       { action: "status" },
       ownerContext(),
     ) as { groups: Array<Record<string, unknown>> };
 
     // The model round-trips `toolAllowlist` into update_policy, so it must stay grantable.
-    expect(status.groups[0]).toMatchObject({
-      toolAllowlist: ["remember"],
-      unavailableConfiguredTools: ["inspect_workspace_image"],
-    });
+    expect(status.groups[0]).toMatchObject({ toolAllowlist: ["remember"] });
+    expect(status.groups[0]).not.toHaveProperty("unavailableConfiguredTools");
   });
 
-  it("does not take in an external photo that nothing could examine", async () => {
+  it("takes in an external photo and records it with its attachment", async () => {
     const repository = repositories();
     repository.telegram.findGroup.mockResolvedValue({
       familyId: "family-1",
@@ -173,36 +163,19 @@ describe("a model without image input", () => {
       messageMode: "addressed_only",
       skillAllowlist: [],
       telegramChatId: "group-101",
-      toolAllowlist: ["inspect_workspace_image"],
+      toolAllowlist: [],
       type: "external",
     });
 
-    await expect(createTelegramMessageHandler(repository)(
-      telegramContext().context,
-      addressedExternalPhoto(),
-    )).resolves.toBeNull();
+    await createTelegramMessageHandler(repository)(telegramContext().context, addressedExternalPhoto());
 
-    expect(repository.journal.record).not.toHaveBeenCalled();
-    expect(repository.session.prepareTurn).not.toHaveBeenCalled();
+    expect(repository.journal.record).toHaveBeenCalledOnce();
+    expect(repository.session.prepareTurn).toHaveBeenCalledOnce();
   });
 
-  it("gives a persisted image grant no live capability and no execution right", async () => {
-    databaseQuery.mockImplementation(async (sql: string) => sql.includes("tool_allowlist")
-      ? { rows: [{ tool_allowlist: ["inspect_workspace_image", "remember"] }] }
-      : { rows: [] });
-    const identity = { familyId: "family-1", groupId: "group-1" };
-
-    await expect(loadCurrentExternalGroupCapabilities(identity)).resolves.toEqual(new Set(["remember"]));
-    await expect(authorizeCurrentExternalGroupCapability(identity, "inspect_workspace_image"))
-      .rejects.toMatchObject({ code: "AGENT_GROUP_TOOL_FORBIDDEN" });
-    await expect(authorizeCurrentExternalGroupCapability(identity, "remember")).resolves.toBeUndefined();
-  });
-
-  it("refuses to put image inspection into a scheduled automation and says why", () => {
-    expect(() => requireGrantedExternalScheduleCapabilities(
-      new Set(["inspect_workspace_image"]),
-      new Set(["inspect_workspace_image"]),
-    )).toThrowError(/AGENT_EXTERNAL_SCHEDULE_CAPABILITY_UNAVAILABLE.*не видит изображения/su);
+  it("lets a scheduled automation keep image inspection without a group grant", () => {
+    expect(requireGrantedExternalScheduleCapabilities(new Set(["inspect_workspace_image"]), new Set()))
+      .toEqual(["inspect_workspace_image"]);
     expect(requireGrantedExternalScheduleCapabilities(new Set(["search_memories"]), new Set(["search_memories"])))
       .toEqual(["search_memories"]);
   });

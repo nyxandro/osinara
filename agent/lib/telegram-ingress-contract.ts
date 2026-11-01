@@ -8,7 +8,6 @@
  * - Validation helpers: fail-fast checks for update ids, leases, failures, and enqueue payloads.
  */
 import { AppError } from "./app-error.js";
-import type { TelegramInboundMediaKind } from "./telegram-message-policy.js";
 
 const POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807n;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -74,7 +73,6 @@ export interface TelegramIngressRepository {
   acceptMedia(input: {
     chatId: string;
     chatType: "channel" | "group" | "private" | "supergroup";
-    mediaKind: Exclude<TelegramInboundMediaKind, "none">;
     updateId: string;
   }): Promise<boolean>;
   beginVoiceTranscription(updateId: string, leaseToken: string): Promise<"completed" | "started">;

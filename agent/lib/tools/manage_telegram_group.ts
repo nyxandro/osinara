@@ -27,17 +27,16 @@ import {
   TELEGRAM_GROUP_TITLE_CONTROL_PATTERN,
   TOOL_ALLOWLIST_MAX_SIZE,
 } from "../telegram-group-registration.js";
+import { MODEL_VISION_AVAILABLE } from "../model-vision-availability.js";
 import { withCallExamples, type CallExamples } from "../tool-call-examples.js";
 import {
   GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES,
   isGrantableExternalGroupToolName,
   selectGrantableExternalGroupTools,
-  unservableCapabilityReason,
 } from "../tool-policy/grantable-group-capabilities.js";
 import {
   ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES,
   EXTERNAL_GROUP_BASE_TOOLS,
-  isExternalGroupToolName,
 } from "../tool-policy/group-tool-catalog.js";
 import {
   requireAction,
@@ -131,15 +130,6 @@ function requireExternalToolAllowlist(raw: unknown, policyLabel: string): string
     toolInputError(INPUT_ERROR_CODE, `toolAllowlist должен содержать не больше ${TOOL_ALLOWLIST_MAX_SIZE} tools`);
   }
   const names = raw.map((name) => {
-    // A catalog capability that the active runtime cannot serve gets its own diagnosis, so the
-    // owner learns the grant is impossible instead of reading it as a malformed payload.
-    const reason = typeof name === "string" && isExternalGroupToolName(name) ? unservableCapabilityReason(name) : null;
-    if (typeof name === "string" && reason !== null) {
-      toolInputError(
-        INPUT_ERROR_CODE,
-        `Capability ${name} недоступна: ${reason}. Выдать это право нельзя; передайте toolAllowlist без него`,
-      );
-    }
     if (typeof name !== "string" || !isGrantableExternalGroupToolName(name)) {
       toolInputError(
         INPUT_ERROR_CODE,
@@ -335,23 +325,26 @@ export default withCallExamples(defineTool({
             };
           }
           const builtInWorkspaceTools = [...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES];
-          // A grant persisted under a previous model provider stays in PostgreSQL but is inert, so
-          // status reports the round-trippable allowlist and names the dead grants separately.
+          // A grant that became baseline access or an unknown name stays in PostgreSQL but is inert, so
+          // status reports the round-trippable allowlist and names unknown entries separately.
           const { effective, unavailable } = selectGrantableExternalGroupTools(group.toolAllowlist);
+          // What every external group sees without a grant; images need a model that sees them.
+          const contentTools = MODEL_VISION_AVAILABLE
+            ? ["import_telegram_attachment", "inspect_workspace_image"]
+            : ["import_telegram_attachment"];
           // A name no skill answers to any more (removed from the release) stays in the list but is inert.
           const inactiveSkills = group.skillAllowlist.filter((name) => !skillNames.includes(name));
           return {
             ...group,
             builtInWorkspaceTools,
-            alwaysAvailableTools: [...builtInWorkspaceTools, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent"],
-            effectiveConfiguredTools: [...new Set([...builtInWorkspaceTools, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent", ...effective])],
+            alwaysAvailableTools: [...builtInWorkspaceTools, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), ...contentTools, "agent"],
+            effectiveConfiguredTools: [...new Set([...builtInWorkspaceTools, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), ...contentTools, "agent", ...effective])],
             effectiveSkills: group.skillAllowlist.filter((name) => skillNames.includes(name)),
             ...(inactiveSkills.length === 0 ? {} : { inactiveConfiguredSkills: inactiveSkills }),
             policySummary: unavailable.length === 0
               ? "Базовые workspace tools плюс полный настроенный allowlist внешней группы."
               : "Базовые workspace tools плюс действующий allowlist внешней группы; " +
-                "перечисленные unavailableConfiguredTools сейчас не действуют и не могут быть " +
-                "выданы заново в текущей конфигурации агента.",
+                "перечисленные unavailableConfiguredTools не распознаны и не действуют.",
             startNewContextInput: {
               action: "start_new_context" as const,
               telegramChatId: group.telegramChatId,

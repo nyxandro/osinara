@@ -4,13 +4,11 @@
  * Constructs covered:
  * - `isMessageAddressedToBot`: ignores slash commands and accepts name stems with any suffix.
  * - `telegramGroupTurnTrigger`: names the technical signal that woke the agent in a group.
- * - `classifyTelegramInboundMedia`: recognizes one native photo or allowlisted document candidate.
  * - `hasTelegramInboundMedia`: detects every file-bearing Telegram message kind without download.
  */
 import { describe, expect, it } from "vitest";
 
 import {
-  classifyTelegramInboundMedia,
   hasTelegramInboundMedia,
   isMessageAddressedToBot,
   telegramGroupTurnTrigger,
@@ -261,137 +259,4 @@ describe("hasTelegramInboundMedia", () => {
       })).toBe(false);
     },
   );
-});
-
-describe("classifyTelegramInboundMedia", () => {
-  const nativePhoto = {
-    attachments: [{
-      fileId: "telegram-photo-1",
-      fileUniqueId: "telegram-photo-unique-1",
-      kind: "photo" as const,
-      mediaType: "image/jpeg",
-    }],
-    raw: {
-      photo: [{
-        file_id: "telegram-photo-1",
-        file_unique_id: "telegram-photo-unique-1",
-        height: 640,
-        width: 640,
-      }],
-    },
-  };
-
-  it("classifies text, one native photo, and unsupported media explicitly", () => {
-    expect(classifyTelegramInboundMedia({ attachments: [], raw: { text: "текст" } })).toBe("none");
-    expect(classifyTelegramInboundMedia(nativePhoto)).toBe("native_photo");
-    expect(classifyTelegramInboundMedia({
-      attachments: [{ fileId: "image-document", kind: "document", mediaType: "image/jpeg" }],
-      raw: { document: { file_id: "image-document", mime_type: "image/jpeg" } },
-    })).toBe("image_document_candidate");
-  });
-
-  it.each([
-    ["image/png", "scan.bin"],
-    ["application/octet-stream", "scan.webp"],
-  ])("accepts a single image document candidate declared as %s named %s", (mediaType, fileName) => {
-    const message = {
-      attachments: [{ fileId: "image-document", fileName, kind: "document" as const, mediaType }],
-      raw: {
-        document: {
-          file_id: "image-document",
-          file_name: fileName,
-          mime_type: mediaType,
-        },
-      },
-    };
-
-    expect(classifyTelegramInboundMedia(message)).toBe("image_document_candidate");
-  });
-
-  it("rejects a document without an image declaration or recognized static image extension", () => {
-    expect(classifyTelegramInboundMedia({
-      attachments: [{
-        fileId: "document",
-        fileName: "report.pdf",
-        kind: "document",
-        mediaType: "application/pdf",
-      }],
-      raw: { document: { file_id: "document", file_name: "report.pdf", mime_type: "application/pdf" } },
-    })).toBe("unsupported_media");
-  });
-
-  it.each([
-    ["text/plain", "notes.txt"],
-    ["text/markdown", "README.md"],
-    ["application/json", "payload.json"],
-    ["text/csv", "report.csv"],
-    ["text/tab-separated-values", "report.tsv"],
-    ["text/html", "PAGE.HTML"],
-    ["application/xml", "feed.Xml"],
-    ["application/yaml", "settings.YAML"],
-    ["application/yaml", "config.yml"],
-  ])("classifies a supported text document declared as %s named %s", (mediaType, fileName) => {
-    expect(classifyTelegramInboundMedia({
-      attachments: [{ fileId: "text-document", fileName, kind: "document", mediaType }],
-      raw: {
-        document: {
-          file_id: "text-document",
-          file_name: fileName,
-          mime_type: mediaType,
-        },
-      },
-    })).toBe("text_document_candidate");
-  });
-
-  it("treats Telegram's spreadsheet declaration as metadata for a CSV candidate", () => {
-    expect(classifyTelegramInboundMedia({
-      attachments: [{
-        fileId: "csv-document",
-        fileName: "report.csv",
-        kind: "document",
-        mediaType: "application/vnd.ms-excel",
-      }],
-      raw: {
-        document: {
-          file_id: "csv-document",
-          file_name: "report.csv",
-          mime_type: "application/vnd.ms-excel",
-        },
-      },
-    })).toBe("text_document_candidate");
-  });
-
-  it.each(["report.pdf", "document.docx", "archive.zip"])(
-    "does not classify unsupported document %s as readable text",
-    (fileName) => {
-      expect(classifyTelegramInboundMedia({
-        attachments: [{
-          fileId: "unsupported-document",
-          fileName,
-          kind: "document",
-          mediaType: "application/octet-stream",
-        }],
-        raw: {
-          document: {
-            file_id: "unsupported-document",
-            file_name: fileName,
-            mime_type: "application/octet-stream",
-          },
-        },
-      })).toBe("unsupported_media");
-    },
-  );
-
-  it.each([
-    { ...nativePhoto, attachments: [] },
-    { ...nativePhoto, raw: { photo: [] } },
-    { ...nativePhoto, raw: { photo: "malformed" } },
-    { ...nativePhoto, raw: { document: { file_id: "mixed" }, ...nativePhoto.raw } },
-    {
-      ...nativePhoto,
-      attachments: [...nativePhoto.attachments, { fileId: "second", kind: "photo" as const }],
-    },
-  ])("fails closed for mixed or malformed native-photo metadata", (message) => {
-    expect(classifyTelegramInboundMedia(message)).toBe("unsupported_media");
-  });
 });

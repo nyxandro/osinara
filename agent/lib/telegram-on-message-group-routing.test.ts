@@ -222,7 +222,6 @@ describe("createTelegramMessageHandler group routing", () => {
       currentSenderUsername: "anna",
       currentSequence: "1",
       groupId: "group-1",
-      attachmentReferenceAccess: { images: false, readableText: false },
       messageText: `@${BOT_USERNAME} подведи итог`,
       messageThreadId: "42",
       replyTargetUnavailable: false,

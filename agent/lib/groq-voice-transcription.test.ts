@@ -95,6 +95,21 @@ describe("createTelegramVoiceTranscriber", () => {
     expect(adapter.transcribe).not.toHaveBeenCalled();
   });
 
+  it("passes a video note's MP4 to Groq and refuses an MP4 claim over other bytes", async () => {
+    // An ISO base media file opens with a box size and the `ftyp` box; the AI SDK names it audio/mp4.
+    const mp4 = Buffer.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
+    const adapter = dependencies();
+    adapter.downloadFile.mockResolvedValueOnce(new Response(mp4));
+    const transcribeVoice = createTelegramVoiceTranscriber(adapter);
+
+    await expect(transcribeVoice({ fileId: "note-1", fileSize: mp4.byteLength, mimeType: "video/mp4" })).resolves.toBe("Распознанный текст");
+    expect(adapter.transcribe).toHaveBeenCalledWith(new Uint8Array(mp4), undefined);
+
+    adapter.downloadFile.mockResolvedValueOnce(new Response(Buffer.from("OggS-not-mp4")));
+    await expect(transcribeVoice({ fileId: "note-2", fileSize: 12, mimeType: "video/mp4" }))
+      .rejects.toThrowError(/AGENT_VOICE_CONTENT_INVALID/);
+  });
+
   it("stops reading when the actual response exceeds the configured limit", async () => {
     const adapter = dependencies();
     adapter.maxBytes = 8;

@@ -29,6 +29,10 @@ import manageTelegramGroup from "./tools/manage_telegram_group.js";
 import { serviceSkillsFor } from "./family-skills/service-skills.js";
 import { modeInstructions } from "./prompt/mode-instructions.js";
 import { GROUP_SAFE_SKILL_NAMES } from "./group-skills/group-skill-catalog.js";
+import { MODEL_VISION_AVAILABLE } from "./model-vision-availability.js";
+
+// What every external group sees without a grant; images follow the active model.
+const CONTENT_TOOLS = MODEL_VISION_AVAILABLE ? ["import_telegram_attachment", "inspect_workspace_image"] : ["import_telegram_attachment"];
 
 function context(): ToolContext {
   const caller = {
@@ -93,8 +97,8 @@ describe("manage_telegram_group.status", () => {
       groups: [
         expect.objectContaining({
           builtInWorkspaceTools: ["glob", "grep", "read_file", "write_file"],
-          alwaysAvailableTools: ["glob", "grep", "read_file", "write_file", "web_search", "web_fetch", "get_current_time", "todo", "agent"],
-          effectiveConfiguredTools: ["glob", "grep", "read_file", "write_file", "web_search", "web_fetch", "get_current_time", "todo", "agent", "search_memories"],
+          alwaysAvailableTools: ["glob", "grep", "read_file", "write_file", "web_search", "web_fetch", "get_current_time", "todo", ...CONTENT_TOOLS, "agent"],
+          effectiveConfiguredTools: ["glob", "grep", "read_file", "write_file", "web_search", "web_fetch", "get_current_time", "todo", ...CONTENT_TOOLS, "agent", "search_memories"],
           effectiveSkills: ["behavior-preferences"],
           policySummary: "Базовые workspace tools плюс полный настроенный allowlist внешней группы.",
           toolAccessMode: "external_allowlist",

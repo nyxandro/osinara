@@ -24,8 +24,9 @@ import { TELEGRAM_MAX_ATTACHMENTS_PER_MESSAGE } from "../config.js";
 import { AppError } from "./app-error.js";
 import type { TelegramWorkspaceAttachment } from "./attachments/telegram-workspace-attachments.js";
 import type { TelegramPrivateBurstPolicy } from "./telegram-ingress-contract.js";
-import { telegramInboundText } from "./telegram-group-message-storage.js";
-import { isTelegramSlashCommand } from "./telegram-message-policy.js";
+import { TELEGRAM_DESCRIBED_FIELDS } from "./telegram-content/telegram-content-description.js";
+import { telegramDisplayText, telegramInboundText } from "./telegram-group-message-storage.js";
+import { isSpokenTelegramMessage, isTelegramSlashCommand } from "./telegram-message-policy.js";
 import { escapeUntrustedContextJson } from "./untrusted-context-json.js";
 
 export interface TelegramBurstCandidate {
@@ -43,16 +44,16 @@ function burstMessage(candidate: TelegramBurstCandidate): TelegramMessage | null
   if (update?.kind !== "message") return null;
   const message = update.message;
   const raw = message.raw;
-  if (message.chat.type !== "private" || Object.hasOwn(raw, "voice") || raw.media_group_id !== undefined) return null;
+  if (message.chat.type !== "private" || isSpokenTelegramMessage(message) || raw.media_group_id !== undefined) return null;
   if (message.replyToMessage?.from?.isBot === true) return null;
-  const text = telegramInboundText(message);
-  if (!text && message.attachments.length === 0) return null;
-  if (isTelegramSlashCommand(text)) return null;
+  // A place, a sticker or a poll joins a burst like a line of text; a command still stands alone.
+  if (!telegramDisplayText(message) && message.attachments.length === 0) return null;
+  if (isTelegramSlashCommand(telegramInboundText(message))) return null;
   return message;
 }
 
 function partText(message: TelegramMessage): string {
-  return telegramInboundText(message);
+  return telegramDisplayText(message);
 }
 
 export function selectTelegramBurstMembers(
@@ -97,8 +98,10 @@ export function combineTelegramBurst(payloads: readonly Record<string, unknown>[
     throw new AppError("AGENT_TELEGRAM_BURST_INVALID", "Не удалось собрать несколько сообщений подряд в одно. Отправьте их ещё раз");
   }
   // The head stays the real anchor: its id, chat, sender and reply target, never invented metadata.
-  // Its rich text is already a part of the combined text and must not be read a second time.
-  const { rich_message: _richMessage, ...raw } = head.raw;
+  // Its rich text, forward note and description are already a part of the combined text and must
+  // not be read a second time.
+  const raw = Object.fromEntries(Object.entries(head.raw)
+    .filter(([field]) => field !== "rich_message" && !TELEGRAM_DESCRIBED_FIELDS.includes(field)));
   return {
     kind: "message",
     message: {

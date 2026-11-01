@@ -198,7 +198,39 @@ function parseTelegramUser(value: unknown): TelegramUser | undefined {
   };
 }
 
+/**
+ * A sticker, a GIF, a video, a video note or a song cover reaches vision through a still: a static
+ * sticker is a WEBP picture itself, the rest come with a JPEG preview. The still stands in for the
+ * file, so the message keeps the single attachment a group journal entry holds.
+ */
+const PREVIEWED_MEDIA_FIELDS = ["sticker", "animation", "video", "video_note", "audio"] as const;
+
+function parseMediaPreview(value: Record<string, unknown>): TelegramAttachment | null {
+  for (const field of PREVIEWED_MEDIA_FIELDS) {
+    const media = value[field];
+    if (!isObject(media)) continue;
+    const staticSticker = field === "sticker" && media.is_animated === false && media.is_video === false;
+    const still = staticSticker ? media : media.thumbnail;
+    if (!isObject(still) || typeof still.file_id !== "string" || still.file_id.length === 0) return null;
+    return {
+      fileId: still.file_id,
+      fileName: staticSticker ? "sticker.webp" : "preview.jpg",
+      fileUniqueId: typeof still.file_unique_id === "string" ? still.file_unique_id : undefined,
+      height: typeof still.height === "number" ? still.height : undefined,
+      kind: "photo",
+      mediaType: staticSticker ? "image/webp" : "image/jpeg",
+      size: typeof still.file_size === "number" ? still.file_size : undefined,
+      width: typeof still.width === "number" ? still.width : undefined,
+    };
+  }
+  return null;
+}
+
 function parseAttachments(value: Record<string, unknown>): TelegramAttachment[] {
+  if (PREVIEWED_MEDIA_FIELDS.some((field) => isObject(value[field]))) {
+    const preview = parseMediaPreview(value);
+    return preview === null ? [] : [preview];
+  }
   const attachments: TelegramAttachment[] = [];
 
   const photo = parseLargestPhoto(value.photo);

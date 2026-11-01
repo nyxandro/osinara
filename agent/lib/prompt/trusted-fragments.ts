@@ -106,7 +106,7 @@ export function trustedRouteRules(scope: TrustedScope): string {
       "- Mail, calendar, documents and contacts in Google: `execute_google_workspace`.",
       "- How to talk or work in this chat, or what it must keep in view: the chat notes, `manage_behavior_preference`.",
       ...ROUTE_LINES[scope],
-      "- A big task with independent parts: `agent`, as the orchestration rules say.",
+      "- Work of several tool steps (research, several pages, a site or service to try, files to generate or convert): `agent`, as the delegation rules say.",
     ].join("\n"),
   ].join("\n\n");
 }
