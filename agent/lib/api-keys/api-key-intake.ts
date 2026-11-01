@@ -136,7 +136,8 @@ export function createApiKeyIntake(dependencies: ApiKeyIntakeDependencies) {
         updateId,
         value: dependencies.encrypt(text.value),
       });
-      console.info(JSON.stringify({ code: stored ? "AGENT_API_KEY_VALUE_STORED" : "AGENT_API_KEY_INTAKE_CLOSED", name: intake.name }));
+      if (stored) console.info(JSON.stringify({ code: "AGENT_API_KEY_VALUE_STORED", name: intake.name }));
+      else console.info(JSON.stringify({ code: "AGENT_API_KEY_INTAKE_CLOSED", name: intake.name }));
       waitUntil(stored
         ? confirmStored(chatId, message.messageId, intake.name)
         : withhold(chatId, message.messageId, endedNotice(intake.name)));
