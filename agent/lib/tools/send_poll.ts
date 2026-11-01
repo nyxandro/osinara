@@ -137,7 +137,7 @@ export function createSendPollTool(dependencies: SendPollDependencies): AnyToolD
     description: [
       "Start a native Telegram poll in the current chat.",
       "Use it when someone asks for a poll or a vote; write the question and short distinct options.",
-      "After the result follow nextStep; on an error follow correction and do not repeat the call.",
+      "After the result follow nextStep; on an error follow correction.",
     ].join(" "),
     inputSchema,
     async execute(rawInput, ctx) {

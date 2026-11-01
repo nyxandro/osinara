@@ -4,7 +4,8 @@
  * Constructs covered:
  * - `sendTelegramNativeMessage`: the method body goes with the chat, topic and group reply; the
  *   confirmed message id comes back.
- * - A refusal is definitive; a lost connection or an answer without a message id is ambiguous.
+ * - A refusal is definitive; a lost connection, a server error or an answer without a message id
+ *   is ambiguous.
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -60,6 +61,8 @@ describe("sendTelegramNativeMessage", () => {
     await expect(send(telegram(json({ description: "Bad Request: not enough rights", ok: false }, 400))))
       .rejects.toMatchObject({ code: CODES.failed });
     await expect(send(telegram(new TypeError("fetch failed")))).rejects.toMatchObject({ code: CODES.ambiguous });
+    // A server error of Telegram's front says nothing about whether the message was already posted.
+    await expect(send(telegram(json({ description: "Bad Gateway", ok: false }, 502)))).rejects.toMatchObject({ code: CODES.ambiguous });
     await expect(send(telegram(json({ ok: true, result: {} })))).rejects.toBeInstanceOf(AppError);
     await expect(send(telegram(json({ ok: true, result: {} })))).rejects.toMatchObject({ code: CODES.ambiguous });
   });

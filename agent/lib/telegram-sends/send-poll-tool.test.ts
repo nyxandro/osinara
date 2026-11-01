@@ -5,11 +5,13 @@
  * - The question and each option go as Telegram's poll fields; anonymity and several answers
  *   follow the call, Telegram's defaults otherwise; in a group the poll answers the request.
  * - The sent poll enters the history as the same line the agent reads for a poll it receives.
- * - Too few, too many or repeated options stop before anything is sent.
+ * - Too few, too many or repeated options stop before anything is sent; an unconfirmed poll is
+ *   reported as possibly delivered, a refused one as not sent; a private chat gets no reply.
  */
 import type { ToolContext } from "../../runtime/tool.js";
 import { describe, expect, it, vi } from "vitest";
 
+import { AppError } from "../app-error.js";
 import { createSendPollTool } from "../tools/send_poll.js";
 
 const EXTERNAL_GROUP = {
@@ -48,7 +50,32 @@ async function execute(deps: ReturnType<typeof dependencies>, input: unknown) {
   return await createSendPollTool(deps as never).execute(input as never, context(EXTERNAL_GROUP)) as Record<string, unknown>;
 }
 
+const PRIVATE = { telegramChatId: "101", telegramChatType: "private" };
+
 describe("send_poll", () => {
+  it("starts a poll in a private chat without replying to anything", async () => {
+    const deps = dependencies();
+
+    await createSendPollTool(deps as never).execute({ options: ["да", "нет"], question: "Едем?" } as never, context(PRIVATE));
+
+    expect(deps.send.mock.calls[0]![0].target).toEqual({ chatId: "101" });
+  });
+
+  it("reports an unconfirmed poll as possibly delivered and a refused one as not sent", async () => {
+    const unconfirmed = dependencies();
+    unconfirmed.send.mockRejectedValue(new AppError("AGENT_POLL_DELIVERY_AMBIGUOUS", "Не удалось подтвердить"));
+    await expect(execute(unconfirmed, { options: ["да", "нет"], question: "Едем?" })).rejects.toMatchObject({
+      contract: { code: "AGENT_POLL_DELIVERY_AMBIGUOUS", retryable: false, sideEffectStatus: "unknown" },
+    });
+
+    const refused = dependencies();
+    refused.send.mockRejectedValue(new AppError("AGENT_POLL_DELIVERY_FAILED", "Telegram не принял опрос"));
+    await expect(execute(refused, { options: ["да", "нет"], question: "Едем?" })).rejects.toMatchObject({
+      contract: { code: "AGENT_POLL_DELIVERY_FAILED", retryable: false, sideEffectStatus: "not_started" },
+    });
+    expect(refused.recordTimeline).not.toHaveBeenCalled();
+  });
+
   it("starts an open multiple-answer poll as a reply and records it like a received poll", async () => {
     const deps = dependencies();
 

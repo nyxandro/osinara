@@ -121,7 +121,7 @@ export function createSendLocationTool(dependencies: SendLocationDependencies): 
       "Send a point on the map to the current chat; with title and address it becomes a place card that opens in maps.",
       "Use it when someone asks where something is, where to meet or to send a location, and when a place is the answer.",
       "Take coordinates only from a location shared in the conversation or from a source you read; never estimate them.",
-      "After the result follow nextStep; on an error follow correction and do not repeat the call.",
+      "After the result follow nextStep; on an error follow correction.",
     ].join(" "),
     inputSchema,
     async execute(rawInput, ctx) {

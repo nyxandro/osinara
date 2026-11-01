@@ -9,9 +9,9 @@
  *   message answers like a text answer does.
  *
  * Key construct:
- * - A refusal from Telegram is definitive. A lost connection or an answer without a message id
- *   leaves open whether the chat already shows the message, so it is reported as ambiguous and
- *   never repeated automatically.
+ * - A refusal from Telegram is definitive. A lost connection, a server error or an answer without a
+ *   message id leaves open whether the chat already shows the message, so it is reported as
+ *   ambiguous and never repeated automatically.
  */
 import type { ToolContext } from "../../runtime/tool.js";
 import type { JsonObject } from "../../runtime/json.js";
@@ -81,6 +81,11 @@ export async function sendTelegramNativeMessage(
       errorName: error instanceof Error ? error.name : "UnknownError",
       method: input.method,
     }));
+    throw new AppError(codes.ambiguous, codes.ambiguousMessage);
+  }
+  // A 5xx comes from Telegram's front and says nothing about whether the message was posted.
+  if (!response.ok && response.status >= 500) {
+    console.error(JSON.stringify({ code: codes.ambiguous, method: input.method, providerStatus: response.status }));
     throw new AppError(codes.ambiguous, codes.ambiguousMessage);
   }
   if (!response.ok) {

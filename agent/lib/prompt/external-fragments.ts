@@ -32,6 +32,7 @@ const ALWAYS_AVAILABLE_PURPOSE =
 // Whatever participants send is open to every group, so these lines follow only the runtime.
 const ATTACHMENT_PURPOSE = "open the files participants send to this chat and work with them";
 const IMAGE_PURPOSE = "examine the images participants send to this chat and their avatars";
+const SEND_PURPOSE = "send a place on the map and start a poll when asked";
 
 // Catalog order keeps the rendered list deterministic for prompt caching.
 const CAPABILITY_PURPOSES: readonly (readonly [ExternalGroupToolName, string])[] = [
@@ -49,13 +50,14 @@ const CAPABILITY_PURPOSES: readonly (readonly [ExternalGroupToolName, string])[]
 
 export function externalPurposeSection(
   capabilities: ReadonlySet<ExternalGroupToolName>,
-  options: { child?: boolean; images: boolean; reminders: boolean; web?: boolean },
+  options: { child?: boolean; images: boolean; reminders: boolean; sends?: boolean; web?: boolean },
 ): string {
   const purposes = [
     ALWAYS_AVAILABLE_PURPOSE,
     ...(options.web ? ["search the internet for public facts and ready-made material, check sources and read pages by links"] : []),
     ...(options.web ? [ATTACHMENT_PURPOSE] : []),
     ...(options.images ? [IMAGE_PURPOSE] : []),
+    ...(options.sends ? [SEND_PURPOSE] : []),
     ...(options.reminders ? [REMINDER_PURPOSE] : []),
     ...CAPABILITY_PURPOSES
       .filter(([capability]) => capabilities.has(capability))

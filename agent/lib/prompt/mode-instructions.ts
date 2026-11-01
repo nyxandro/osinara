@@ -373,7 +373,9 @@ function externalInstructions(
     subagentTurn ? SUBAGENT_TURN_RULES : null,
     // Scope and effort limits come before the mechanics: the model should decide whether a request
     // belongs here at all before it starts reasoning about which capability could satisfy it.
-    externalPurposeSection(surfaceCapabilities, { child: subagentTurn, images, reminders, web: includeApplicationCore }),
+    externalPurposeSection(surfaceCapabilities, {
+      child: subagentTurn, images, reminders, sends: includeApplicationCore && !scheduledRun && !subagentTurn, web: includeApplicationCore,
+    }),
     EXTERNAL_TASK_BOUNDARIES,
     EXTERNAL_PEOPLE_RULES,
     externalMemorySection(capabilities, subagentTurn),
