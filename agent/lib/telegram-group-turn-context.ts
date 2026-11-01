@@ -159,6 +159,7 @@ function optionalString(value: unknown): string | null {
 
 /** The replied text the envelope carries (a quoted fragment, the inline target or its snapshot) and the target's number. */
 export function currentTelegramMessageReply(durableMessage: string): {
+  replyTargetUnavailable: boolean;
   replyText: string | null;
   replyToSequenceId: string | null;
   sourceSequence: string | null;
@@ -167,6 +168,7 @@ export function currentTelegramMessageReply(durableMessage: string): {
   const inline = envelope?.replyTo as { text?: unknown } | undefined;
   const snapshot = envelope?.replyTargetSnapshot as { contentText?: unknown } | undefined;
   return {
+    replyTargetUnavailable: envelope?.replyTargetUnavailable === true,
     replyText: optionalString(envelope?.replyQuotedText) ?? optionalString(inline?.text) ?? optionalString(snapshot?.contentText),
     replyToSequenceId: optionalString(envelope?.replyToSequenceId),
     sourceSequence: optionalString(envelope?.sourceSequence),

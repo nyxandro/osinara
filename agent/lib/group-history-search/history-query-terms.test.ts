@@ -34,14 +34,19 @@ describe("transliterateWord", () => {
 
 describe("historyQueryTerms", () => {
   it("asks for every word in any order, each in both alphabets", () => {
-    expect(historyQueryTerms("Похуй, скилл!")).toEqual([
-      { variants: ["похуй", "pohuy"] },
-      { variants: ["скилл", "skill"] },
+    expect(historyQueryTerms("Похуй, скилл!").map((term) => term.variants.slice(0, 2))).toEqual([
+      ["похуй", "pohuy"],
+      ["скилл", "skill"],
     ]);
   });
 
+  it("reads a word typed in the wrong keyboard layout as well", () => {
+    expect(historyQueryTerms("ghbdtn")[0]!.variants).toContain("привет");
+    expect(historyQueryTerms("руддщ")[0]!.variants).toContain("hello");
+  });
+
   it("finds «е» for a typed «ё»", () => {
-    expect(historyQueryTerms("ещё")).toEqual([{ variants: ["ещё", "еще", "esche"] }]);
+    expect(historyQueryTerms("ещё")[0]!.variants).toEqual(expect.arrayContaining(["ещё", "еще", "esche"]));
   });
 
   it("drops short words beside longer ones, keeps them when nothing else is asked, and repeats nothing", () => {

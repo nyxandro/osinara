@@ -19,7 +19,7 @@ export default defineTool({
   description: [
     "Reads the saved history of the whole current verified Telegram group, including other forum topics; the group ID and scope come from the authorization and are not passed.",
     "The result contains records in chronological order and nextBeforeSequence for the next page; without filters the latest messages are returned.",
-    "query finds messages that hold every word of it, in any order: a word also matches in another form, in the other alphabet (похуй and pohuy) or with a small typo in a long word. It is not a semantic search and finds no synonyms: use names and distinctive words, up to eight.",
+    "query finds messages that hold every word of it, in any order: a word also matches in another form, in the other alphabet (похуй and pohuy) or keyboard layout, or with a small typo in a long word. It is not a semantic search and finds no synonyms: use names and distinctive words, up to eight.",
     "participant requires an exact username without @; sequenceFrom and sequenceTo are inclusive, beforeSequence is exclusive, from and to are inclusive.",
     "limit from 1 to 100 applies after all filters; filters set together are combined with AND.",
     "Make only one call per model step, wait for and check its result before the next call: several parallel checks cannot be matched by the order of answers.",
@@ -39,7 +39,7 @@ export default defineTool({
       "The participant's exact username without the @ sign. Does not include the agent's answers or similar names and does no fuzzy search.",
     ).optional(),
     query: z.string().trim().min(1).max(500).describe(
-      "Words that every returned message holds, in any order, up to eight; a word also matches in another form, in the other alphabet or with a small typo in a long word. Finds no synonyms and nothing by meaning.",
+      "Words that every returned message holds, in any order, up to eight; a word also matches in another form, in the other alphabet or keyboard layout, or with a small typo in a long word. Words of one or two letters count only when the query has no longer word. Finds no synonyms and nothing by meaning.",
     ).optional(),
     sequenceFrom: POSITIVE_BIGINT.describe(
       "The lower bound of the model-visible sequence, inclusive; for example 310 includes #310.",

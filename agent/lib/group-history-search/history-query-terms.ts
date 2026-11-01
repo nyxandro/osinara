@@ -3,13 +3,15 @@
  *
  * Exports:
  * - `transliterateWord`: a word's spelling in the other alphabet, the way people type names and slang.
+ * - `switchKeyboardLayout`: the word a person meant when they typed it in the other keyboard layout.
  * - `historyQueryTerms`: the words of a query, each with its spellings.
  * - `historyTextClause`: the condition a message meets when it holds every word of the query.
  *
  * Key constructs:
  * - A message matches when it holds every word, in any order. A word counts as held when its text
  *   occurs in the message, when a Russian form of it does («ссылку» finds «ссылка»), when its
- *   spelling in the other alphabet occurs («похуй» finds «pohuy»), or, for a word of six letters or
+ *   spelling in the other alphabet occurs («похуй» finds «pohuy»), when it was typed in the other
+ *   keyboard layout («ghbdtn» finds «привет»), or, for a word of six letters or
  *   more, when the message holds a close word (a small typo, pg_trgm `<%`). Numbers never match
  *   loosely: «123456» must not find «123457».
  * - Words of one or two letters only narrow a query that has nothing longer: «на», «и» occur in
@@ -35,6 +37,9 @@ const LATIN_TO_CYRILLIC: readonly (readonly [string, string])[] = [
   ["s", "с"], ["t", "т"], ["u", "у"], ["v", "в"], ["w", "в"], ["x", "кс"], ["z", "з"],
 ];
 const LATIN_VOWELS = new Set(["a", "e", "i", "o", "u"]);
+// The same keys of the QWERTY and ЙЦУКЕН layouts, letters only.
+const QWERTY = "qwertyuiop[]asdfghjkl;'zxcvbnm,.`";
+const JCUKEN = "йцукенгшщзхъфывапролджэячсмитьбюё";
 
 function latinToCyrillic(word: string): string {
   let spelled = "";
@@ -52,6 +57,15 @@ function latinToCyrillic(word: string): string {
   return spelled;
 }
 
+export function switchKeyboardLayout(word: string): string | null {
+  const from = /^[а-яё]+$/u.test(word) ? JCUKEN : /^[a-z]+$/u.test(word) ? QWERTY : null;
+  if (from === null) return null;
+  const to = from === JCUKEN ? QWERTY : JCUKEN;
+  const switched = [...word].map((key) => to[from.indexOf(key)] ?? "").join("");
+  // A Cyrillic key on a punctuation key of QWERTY makes no word to look for.
+  return /^[\p{L}]+$/u.test(switched) ? switched : null;
+}
+
 export function transliterateWord(word: string): string | null {
   if (/^[а-яё]+$/u.test(word)) return [...word].map((letter) => CYRILLIC_TO_LATIN[letter]).join("");
   if (/^[a-z]+$/u.test(word)) return latinToCyrillic(word);
@@ -59,7 +73,7 @@ export function transliterateWord(word: string): string | null {
 }
 
 export interface HistoryQueryTerm {
-  /** The word as typed, its «е» spelling when it has «ё», then its spelling in the other alphabet. */
+  /** The word as typed, its «е» spelling, its spelling in the other alphabet and in the other layout. */
   variants: string[];
 }
 
@@ -70,7 +84,8 @@ export function historyQueryTerms(query: string): HistoryQueryTerm[] {
     const spelled = transliterateWord(word);
     // People rarely type «ё»: «ещё» must find «еще».
     const plain = word.replaceAll("ё", "е");
-    return { variants: [...new Set([word, plain, ...(spelled ? [spelled] : [])])] };
+    const switched = switchKeyboardLayout(word);
+    return { variants: [...new Set([word, plain, ...(spelled ? [spelled] : []), ...(switched ? [switched] : [])])] };
   });
 }
 

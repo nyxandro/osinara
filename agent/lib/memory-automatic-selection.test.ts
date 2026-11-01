@@ -57,6 +57,21 @@ afterEach(() => vi.restoreAllMocks());
 describe("selectMemoriesAutomatically", () => {
   // Production, 01.11.2026: the borrowed reply alone found pohuy for «эти скилы» but pushed out the
   // T-Investments record «это мсипишка инвестиций?» found by its own words.
+  it("keeps the message's own finds when the search with what it points at fails", async () => {
+    const search = searchFinds("own-1");
+    const own = await memoryRetrievalRepository.searchAuthorized(privateAuth, "", [], 8, null);
+    search.mockResolvedValueOnce(own).mockRejectedValueOnce(new Error("statement timeout"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const selection = await selectMemoriesAutomatically(privateAuth, "а это что?", {
+      conversationContext: "сообщение про скилл", now: new Date("2026-11-01T10:00:00Z"), window: null,
+    });
+
+    expect(selection.selected.map((one) => one.memory.id)).toEqual(["own-1"]);
+    expect(error.mock.calls.map((call) => JSON.parse(String(call[0])))).toContainEqual(
+      expect.objectContaining({ code: "AGENT_MEMORY_QUERY_CONTEXT_SEARCH_FAILED" }));
+  });
+
   it("takes turns between the message's own finds and the finds with what it points at", async () => {
     const search = searchFinds("own-1", "own-2", "own-3");
     const borrowedFinds = await memoryRetrievalRepository.searchAuthorized(privateAuth, "", [], 8, null);

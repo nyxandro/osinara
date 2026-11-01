@@ -86,6 +86,8 @@ export async function memoryQueryConversationContext(
   source: MemoryQueryContextSource,
   input: {
     conversationId: string | null;
+    /** The message replies to a target the journal no longer holds. */
+    replyTargetUnavailable?: boolean;
     /** The replied text the turn's envelope already carries: a quoted fragment or the target itself. */
     replyText: string | null;
     replyToSequenceId: string | null;
@@ -93,9 +95,11 @@ export async function memoryQueryConversationContext(
     text: string;
   },
 ): Promise<{ kind: "previous" | "reply"; text: string } | null> {
-  const replies = input.replyText !== null || input.replyToSequenceId !== null;
+  const replies = input.replyText !== null || input.replyToSequenceId !== null || input.replyTargetUnavailable === true;
   if (input.conversationId === null || asksMemoryNothing(input.text) || !refersElsewhere(input.text, replies)) return null;
   if (replies) {
+    // A reply to a target no longer at hand borrows nothing: the messages just before are another thread.
+    if (input.replyText === null && input.replyToSequenceId === null) return null;
     const replied = input.replyText ??
       await source.replyTarget({ conversationId: input.conversationId, sequenceId: input.replyToSequenceId! });
     const text = replied === null ? "" : bounded(replied);

@@ -184,7 +184,14 @@ export async function selectMemoriesAutomatically(
   // A referring message is also searched together with what it points at, and the two lists take
   // turns: its own specific words keep their finds, and the borrowed words add what they name.
   const borrowed = options.conversationContext
-    ? await searchMemories(auth, `${prepared}\n${options.conversationContext}`, limit, options.window)
+    ? await searchMemories(auth, `${prepared}\n${options.conversationContext}`, limit, options.window).catch((error: unknown) => {
+      // The person's own finds are already in hand; the borrowed search only adds to them.
+      console.error(JSON.stringify({
+        code: "AGENT_MEMORY_QUERY_CONTEXT_SEARCH_FAILED",
+        error: error instanceof Error ? error.message : String(error),
+      }));
+      return null;
+    })
     : null;
   const { embeddings, retrieval } = own;
   const searched = borrowed === null ? own.selected : alternate(own.selected, borrowed.selected, limit);

@@ -410,7 +410,7 @@ require their written approval for server-side requests and for choosing among r
 Every chat keeps its last 500 000 messages in `telegram_group_messages` (10 000 before 01.11.2026);
 older ones are cut by sequence number on each new message. `list_group_history` finds a message
 that holds every word of the query in any order, a word also in another Russian form, in the other
-alphabet or with a small typo in a long word; migration 144 adds the trigram and Russian text-search
+alphabet or keyboard layout, or with a small typo in a long word; migration 144 adds the trigram and Russian text-search
 indexes it reads through. At the busiest group's pace the limit is about fourteen months, roughly
 650 MB with the indexes, and every deployment backup grows by the same amount.
 

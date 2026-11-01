@@ -91,6 +91,15 @@ describe("memoryQueryConversationContext", () => {
     expect(journal.previous).not.toHaveBeenCalled();
   });
 
+  it("borrows nothing when the message replies to a target no longer at hand", async () => {
+    const journal = source();
+
+    await expect(memoryQueryConversationContext(journal, {
+      ...CONVERSATION, replyTargetUnavailable: true, replyText: null, replyToSequenceId: null, text: "а это что?",
+    })).resolves.toBeNull();
+    expect(journal.previous).not.toHaveBeenCalled();
+  });
+
   it("bounds every borrowed line and borrows nothing outside a conversation", async () => {
     const journal = source({ replyText: "я".repeat(5_000) });
 
