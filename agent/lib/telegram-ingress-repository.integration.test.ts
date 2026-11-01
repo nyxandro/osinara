@@ -210,6 +210,11 @@ describeWithDatabase("telegramIngressRepository", () => {
 
     const repository = repositories();
     repository.telegram.findGroup.mockImplementation(telegramRepository.findGroup);
+    // The group's conversation belongs to the family the group was registered in.
+    repository.conversations.getByGroupId.mockResolvedValue({
+      ...await repository.conversations.getByGroupId("group-1"),
+      familyId: family.rows[0]!.id,
+    });
     const message: TelegramMessage = {
       ...groupMessage(`@${BOT_USERNAME} что изображено?`),
       attachments: [{ fileId: "photo-file", fileUniqueId: "photo-id", kind: "photo" }],
