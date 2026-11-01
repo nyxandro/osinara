@@ -22,6 +22,7 @@ import { chatNotesRules } from "./chat-notes-fragments.js";
 import { SUBAGENT_TURN_RULES } from "./delegation-fragments.js";
 import { REPLY_BUTTON_RULES } from "./reply-button-fragments.js";
 import { telegramContentRules } from "./telegram-content-fragments.js";
+import { PLACE_AND_POLL_RULES } from "./telegram-send-fragments.js";
 
 import {
   CURRENT_MESSAGE_REPLY_CONTRACT,
@@ -218,6 +219,7 @@ function privateInstructions(
     scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
     liveGifReplies(scheduledRun, subagentTurn) ? GIF_REPLY_RULES : null,
+    scheduledRun || subagentTurn ? null : PLACE_AND_POLL_RULES,
     scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
     // A delegated child has no notes tool; it reads the notes and leaves keeping them to the turn.
     scheduledRun || subagentTurn ? null : chatNotesRules("private"),
@@ -294,6 +296,7 @@ function familyInstructions(
     scheduledRun || subagentTurn ? null : GROUP_STANDALONE_MESSAGE_RULES,
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
     liveGifReplies(scheduledRun, subagentTurn) ? GIF_REPLY_RULES : null,
+    scheduledRun || subagentTurn ? null : PLACE_AND_POLL_RULES,
     scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
     // A delegated child has no notes tool; it reads the notes and leaves keeping them to the turn.
     scheduledRun || subagentTurn ? null : chatNotesRules("family"),
@@ -442,6 +445,7 @@ Do not use personal or family accounts, tokens or browser authorizations. This g
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
     // GIF replies need no grant but belong to the application core of a live turn.
     includeApplicationCore && liveGifReplies(scheduledRun, subagentTurn) ? GIF_REPLY_RULES : null,
+    includeApplicationCore && !scheduledRun && !subagentTurn ? PLACE_AND_POLL_RULES : null,
     includeApplicationCore && !scheduledRun && !subagentTurn ? chatNotesRules("external") : null,
     reminders ? GROUP_REMINDER_RULES : null,
     reminders ? GROUP_SCENARIO_RULES : null,
