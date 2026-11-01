@@ -6,6 +6,7 @@
  * - `shouldCompact`, `PromptMeasurement`: the provider's last count of this history plus the estimate
  *   of what came after it, or, before the provider has counted it, the estimated messages plus the
  *   system prompt and tool definitions.
+ * - `providerCountStatus`: whether that count is trusted, absent or too small to be one.
  * - `compactMessages`: caps old tool results if that leaves real room under the estimate alone;
  *   otherwise one summary call replaces the older part with a checkpoint and keeps the recent tail.
  * - `capToolResults`: the capping step on its own.
@@ -90,6 +91,10 @@ const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
  * each followed by a summary one to eleven steps later.
  */
 const CAP_MIN_FREE_SHARE = 0.2;
+// The tested range of provider counts is 50-150% of the estimate. A smaller one is no count: an
+// OpenAI-compatible adapter reports a missing prompt_tokens as 0 (`@ai-sdk/openai-compatible`), and
+// trusting it would keep the history from ever compacting until the provider refused it.
+const PROVIDER_COUNT_MIN_SHARE = 0.5;
 const CAPPED_RESULT_ANNOTATION =
   "[Truncated: tool result reduced during context compaction. Re-run the tool if you need the full output.]";
 
@@ -121,19 +126,39 @@ export interface PromptMeasurement {
  * 196 000 threshold (31.10.2026). Before that count, the frame stands beside the estimate.
  */
 function decisionBudget(messages: readonly ModelMessage[], settings: CompactionSettings, measurement: PromptMeasurement): number {
-  const { counters, frameTokens } = measurement;
+  const count = trustedProviderCount(messages, measurement);
+  const besides = count === null ? measurement.frameTokens : count.prior - count.prefixTokens;
+  return settings.threshold - besides - COMPACTION_PROMPT_OVERHEAD_TOKENS;
+}
+
+/** The provider's count of a prefix of these messages and that prefix's estimate, or null when none covers them. */
+function coveringProviderCount(messages: readonly ModelMessage[], counters: CompactionCounters) {
   const prior = counters.inputTokens;
   const priorCount = counters.promptMessageCount;
-  const measured = prior !== null && priorCount !== null && Number.isInteger(priorCount) && priorCount >= 0 && priorCount <= messages.length;
-  const besides = measured ? prior - estimateTokens(messages.slice(0, priorCount)) : frameTokens;
-  return settings.threshold - besides - COMPACTION_PROMPT_OVERHEAD_TOKENS;
+  if (prior === null || priorCount === null || !Number.isInteger(priorCount) || priorCount < 0 || priorCount > messages.length) return null;
+  return { prior, prefixTokens: estimateTokens(messages.slice(0, priorCount)) };
+}
+
+function trustedProviderCount(messages: readonly ModelMessage[], measurement: PromptMeasurement) {
+  const count = coveringProviderCount(messages, measurement.counters);
+  if (count === null || count.prior < PROVIDER_COUNT_MIN_SHARE * (count.prefixTokens + measurement.frameTokens)) return null;
+  return count;
+}
+
+/**
+ * Whether a decision may lean on the provider's count: `absent` when none covers these messages,
+ * `ignored` when it is too small to be one, which the turn logs, and `trusted` otherwise.
+ */
+export function providerCountStatus(messages: readonly ModelMessage[], measurement: PromptMeasurement): "absent" | "ignored" | "trusted" {
+  if (coveringProviderCount(messages, measurement.counters) === null) return "absent";
+  return trustedProviderCount(messages, measurement) === null ? "ignored" : "trusted";
 }
 
 /**
  * What a replacement must fit. The step after a compaction has no provider count yet and decides by
  * the estimate with the frame, so the replacement fits that ruler too, and the stricter of the two
- * when the provider counted more than the estimate: then neither the next step nor the one after
- * the next count asks again.
+ * when the provider counted more than the estimate, so that the next count does not ask again
+ * either while the provider keeps counting near the ratio it counted before.
  */
 function replacementBudget(messages: readonly ModelMessage[], settings: CompactionSettings, measurement: PromptMeasurement): number {
   return Math.min(
@@ -262,8 +287,11 @@ export async function compactMessages(
   summaryRefusals: number,
 ): Promise<ModelMessage[]> {
   const budget = replacementBudget(messages, settings, measurement);
+  // The kept tail leaves the next steps the same room a cap must leave, or a summary would be
+  // followed by another one as soon as the next tool result arrived.
+  const roomAfter = Math.floor(settings.threshold * CAP_MIN_FREE_SHARE);
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
-  const { older, recent } = splitMessages(conversation, selectRecentWindowSize(conversation, settings, budget));
+  const { older, recent } = splitMessages(conversation, selectRecentWindowSize(conversation, settings, budget - roomAfter));
   if (older.length === 0 && previousCheckpoint === undefined) return keepNonToolResultMessages(recent);
 
   const checkpointHead: ModelMessage[] = previousCheckpoint === undefined ? [] : [
@@ -272,7 +300,7 @@ export async function compactMessages(
   ];
   const capped = withResumptionGuard([...checkpointHead, ...capToolResults(older), ...recent], conversation);
   // A cap stands in for the summary only when it leaves real room; a near no-op goes on to the summary.
-  if (fits(capped, budget - Math.floor(settings.threshold * CAP_MIN_FREE_SHARE))) return capped;
+  if (fits(capped, budget - roomAfter)) return capped;
 
   /** The summary and the recent messages, verbatim or without tool results; `fitted` null when neither fits. */
   const withSummary = (summary: string): { fitted: ModelMessage[] | null; smallest: ModelMessage[] } => {

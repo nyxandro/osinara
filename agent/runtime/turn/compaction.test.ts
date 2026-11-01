@@ -6,7 +6,8 @@ import { AppError } from "../../lib/app-error.js";
 import type { CompactionCounters } from "../history/history-repository.js";
 import { estimateTokens } from "./compaction-estimate.js";
 import {
-  capToolResults, compactionSettings, compactMessages, shouldCompact, todoCompactionMessage, type PromptMeasurement, type Summarize,
+  capToolResults, compactionSettings, compactMessages, providerCountStatus, shouldCompact, todoCompactionMessage, type PromptMeasurement,
+  type Summarize,
 } from "./compaction.js";
 
 const NO_COUNTERS = { inputTokens: null, promptMessageCount: null };
@@ -123,6 +124,50 @@ describe("history compaction", () => {
     // What came after the measured request is still estimated and pushes it over.
     const grown = [...messages.slice(0, -1), ...Array.from({ length: 30 }, (_, index) => exchange(100 + index, 300)).flat(), CURRENT];
     expect(shouldCompact(grown, settings, { counters: providerCount(grown, counted, 0, 60), frameTokens: 0 })).toBe(true);
+  });
+
+  // An OpenAI-compatible adapter reports a missing prompt_tokens as 0: trusting it, the history would
+  // never compact and would grow until the provider refused every message of the chat.
+  it("treats a provider count under half the estimate of what it counted as no count at all", () => {
+    const settings = { recentWindowSize: 10, threshold: 10_000 };
+    const messages = [...Array.from({ length: 60 }, (_, index) => exchange(index, 300)).flat(), CURRENT];
+    const counted = messages.length - 1;
+
+    for (const percent of [0, 10, 49]) {
+      const measurement = { counters: providerCount(messages, counted, 500, percent), frameTokens: 500 };
+      expect(providerCountStatus(messages, measurement)).toBe("ignored");
+      expect(shouldCompact(messages, settings, measurement)).toBe(true);
+    }
+    expect(providerCountStatus(messages, { counters: providerCount(messages, counted, 500, 60), frameTokens: 500 })).toBe("trusted");
+    expect(providerCountStatus(messages, { counters: NO_COUNTERS, frameTokens: 500 })).toBe("absent");
+  });
+
+  it("decides on an untrusted provider count exactly as on no count", () => {
+    fc.assert(fc.property(promptArbitrary, fc.integer({ max: 49, min: 0 }), ({ measurement, messages, settings }, percent) => {
+      fc.pre(messages.length > 0);
+      const counters = providerCount(messages, messages.length, measurement.frameTokens, percent);
+      fc.pre(counters.inputTokens! < (estimateTokens(messages) + measurement.frameTokens) / 2);
+      expect(shouldCompact(messages, settings, { counters, frameTokens: measurement.frameTokens }))
+        .toBe(shouldCompact(messages, settings, { counters: NO_COUNTERS, frameTokens: measurement.frameTokens }));
+    }));
+  });
+
+  // Before, the kept tail filled the whole budget: with large tool results in it, the next step's
+  // result asked for a compaction again, a summary call and a cold cache every step or two.
+  it("keeps a fifth of the threshold free after a summary, so the next tool result does not compact again", async () => {
+    const settings = { recentWindowSize: 10, threshold: 40_000 };
+    const messages = [
+      ...Array.from({ length: 20 }, (_, index) => exchange(index, 300)).flat(),
+      ...Array.from({ length: 8 }, (_, index) => toolExchange(100 + index, 36_000)).flat(),
+      CURRENT,
+    ];
+    expect(shouldCompact(messages, settings, UNMEASURED)).toBe(true);
+
+    const compacted = await compactMessages(messages, settings, async () => "сводка", UNMEASURED, 0);
+    // A result of 15% of the threshold, like one page of `web_fetch` on a smaller window.
+    const nextStep = [...compacted, ...toolExchange(200, 24_000)];
+
+    expect(compactsAgain(nextStep, settings, 0)).toBe(false);
   });
 
   it("measures Russian text by its UTF-8 size, as the provider counts it, not by its letters", () => {
