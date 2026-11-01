@@ -19,11 +19,17 @@ import { voiceTranscriptionModel } from "./model-registry.js";
 
 const OGG_SIGNATURE = new Uint8Array([0x4f, 0x67, 0x67, 0x53]);
 const OPUS_HEAD_SIGNATURE = new TextEncoder().encode("OpusHead");
+// An ISO base media file opens with a four-byte box size and the `ftyp` box.
+const MP4_FTYP_SIGNATURE = new TextEncoder().encode("ftyp");
+const MP4_FTYP_OFFSET = 4;
+// A video note is an MP4 with its speech in the audio track; Groq takes it like a voice note.
+const VIDEO_NOTE_MEDIA_TYPE = "video/mp4";
 const SUPPORTED_VOICE_MEDIA_TYPES = new Set([
   "application/ogg",
   "audio/ogg",
   "audio/opus",
   "audio/x-opus+ogg",
+  VIDEO_NOTE_MEDIA_TYPE,
 ]);
 
 export interface TelegramVoiceFile {
@@ -122,10 +128,13 @@ export function createTelegramVoiceTranscriber(dependencies: TelegramVoiceTransc
       );
     }
 
-    // Telegram voice notes must contain Ogg pages with an Opus identification header.
+    // A voice note must contain Ogg pages with an Opus identification header, a video note an MP4 box.
     const audio = await readLimitedBody(response, dependencies.maxBytes);
     voice.signal?.throwIfAborted();
-    if (!startsWith(audio, OGG_SIGNATURE) || !includesSignature(audio, OPUS_HEAD_SIGNATURE)) {
+    const valid = voice.mimeType?.toLowerCase() === VIDEO_NOTE_MEDIA_TYPE
+      ? startsWith(audio.subarray(MP4_FTYP_OFFSET), MP4_FTYP_SIGNATURE)
+      : startsWith(audio, OGG_SIGNATURE) && includesSignature(audio, OPUS_HEAD_SIGNATURE);
+    if (!valid) {
       throw new AppError(
         "AGENT_VOICE_CONTENT_INVALID",
         "Telegram передал повреждённое голосовое сообщение. Запишите и отправьте его заново",

@@ -191,6 +191,14 @@ export function replyToAgentTrigger(
   return current === "mention" ? "mention" : "reply_to_agent";
 }
 
+/**
+ * A voice note or a video note: its words arrive as a transcript, so routing reads only its caption,
+ * and it neither joins a private burst nor counts as a command.
+ */
+export function isSpokenTelegramMessage(message: Pick<TelegramMessage, "raw">): boolean {
+  return Object.hasOwn(message.raw, "voice") || Object.hasOwn(message.raw, "video_note");
+}
+
 export function isMessageAddressedToBot(
   message: TelegramDispatchMessage,
   botUsername: string,

@@ -55,23 +55,27 @@ import type { ReplyButtonPressOutcome } from "./reply-buttons/reply-button-press
 import { isDatabaseUnavailable, waitForApplicationDatabase } from "./database-recovery.js";
 
 const telegramUpdateIdSchema = z.union([z.number().int().nonnegative().safe(), z.string().regex(/^\d+$/)]);
+const telegramSpokenFileSchema = z.object({
+  file_id: z.string().min(1),
+  file_size: z.number().int().positive().optional(),
+  mime_type: z.string().min(1).optional(),
+});
+// A video note carries speech like a voice note and goes the same way; Telegram names no MIME type for it.
 const telegramVoiceSchema = z.object({
   message: z
     .object({
-      voice: z.object({
-        file_id: z.string().min(1),
-        file_size: z.number().int().positive().optional(),
-        mime_type: z.string().min(1).optional(),
-      }),
+      video_note: telegramSpokenFileSchema.optional(),
+      voice: telegramSpokenFileSchema.optional(),
     })
     .passthrough(),
   update_id: telegramUpdateIdSchema,
 });
+const VIDEO_NOTE_MEDIA_TYPE = "video/mp4";
 
 export interface DurableIngressDependencies {
   reportFailure: typeof recordOperationalIncident;
   acceptMedia(message: Pick<TelegramMessage, "chat">, updateId: string): Promise<boolean>;
-  authorizeVoice(message: Pick<TelegramMessage, "chat" | "from">): Promise<boolean>;
+  authorizeVoice(message: Pick<TelegramMessage, "chat" | "from">, options: { readonly addressed: boolean }): Promise<boolean>;
   botUsername: string;
   /** The runtime's Telegram dispatch: the update's turn, created with the update's binding. */
   dispatch(update: TelegramUpdate, control: TelegramDispatchControl): Promise<TelegramDispatchResult>;
@@ -137,15 +141,18 @@ function queueKey(update: TelegramUpdate): string {
 function voiceMetadata(raw: Record<string, unknown>) {
   const parsed = telegramVoiceSchema.safeParse(raw);
   if (!parsed.success) return undefined;
-  const voice = parsed.data.message.voice;
+  const { video_note: videoNote, voice } = parsed.data.message;
+  const spoken = voice ?? videoNote;
+  if (spoken === undefined) return undefined;
+  const mimeType = voice ? voice.mime_type : VIDEO_NOTE_MEDIA_TYPE;
   return {
-    fileId: voice.file_id,
-    ...(voice.file_size === undefined ? {} : { fileSize: voice.file_size }),
-    ...(voice.mime_type === undefined ? {} : { mimeType: voice.mime_type }),
+    fileId: spoken.file_id,
+    ...(spoken.file_size === undefined ? {} : { fileSize: spoken.file_size }),
+    ...(mimeType === undefined ? {} : { mimeType }),
   };
 }
 
-function shouldTranscribeVoice(message: TelegramMessage, botUsername: string): boolean {
+function voiceAddressesBot(message: TelegramMessage, botUsername: string): boolean {
   const dispatchText = [message.text, message.caption].filter(Boolean).join("\n");
   return isMessageAddressedToBot({ ...message, text: dispatchText }, botUsername);
 }
@@ -229,8 +236,11 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
     update: TelegramUpdate,
     signal: AbortSignal,
   ): Promise<TelegramUpdate> {
-    if (!claim.voice || update.kind !== "message" || !shouldTranscribeVoice(update.message, dependencies.botUsername)) return update;
-    const authorized = await dependencies.authorizeVoice(update.message);
+    if (!claim.voice || update.kind !== "message") return update;
+    // Whether this voice is transcribed depends on where it was said; see `telegram-voice-authorization.ts`.
+    const authorized = await dependencies.authorizeVoice(update.message, {
+      addressed: voiceAddressesBot(update.message, dependencies.botUsername),
+    });
     signal.throwIfAborted();
     if (!authorized) return update;
     if (!claim.transcript) {

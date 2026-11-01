@@ -26,6 +26,7 @@ import { CONVERSATION_TIMELINE_SELECTION_MAX_ENTRIES } from "./memory-config.js"
 import { handleTelegramEnrollmentBoundary } from "./telegram-enrollment-boundary.js";
 import { groupCanonicalContinuationToken } from "./sessions/group-canonical-token.js";
 import {
+  isSpokenTelegramMessage,
   isTelegramSlashCommand,
   replyToAgentTrigger,
   type TelegramGroupTurnTrigger,
@@ -88,7 +89,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
     // The model reads the description of non-text content and a forward note; routing reads only
     // what the person wrote, so neither a forwarded command nor a description addresses the bot.
     const dispatchText = telegramDisplayText(message);
-    const routingText = Object.hasOwn(message.raw, "voice") ? message.caption : telegramInboundText(message);
+    const routingText = isSpokenTelegramMessage(message) ? message.caption : telegramInboundText(message);
     let groupTurnTrigger = telegramGroupTurnTrigger({ ...message, text: routingText }, botUsername);
     let addressed = message.chat.type === "private" || groupTurnTrigger !== null;
     const unsupportedGroupSlashCommand = message.chat.type !== "private" &&
@@ -97,7 +98,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
     let exactReplyRoute: string | undefined;
     let hasResumableReplyRoute = false;
 
-    const invitationCode = Object.hasOwn(message.raw, "voice")
+    const invitationCode = isSpokenTelegramMessage(message)
       ? null
       : parseInvitationStartCommand(message.text, botUsername);
     if (invitationCode && message.chat.type !== "private") {

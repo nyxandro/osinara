@@ -25,7 +25,7 @@ import { AppError } from "./app-error.js";
 import type { TelegramWorkspaceAttachment } from "./attachments/telegram-workspace-attachments.js";
 import type { TelegramPrivateBurstPolicy } from "./telegram-ingress-contract.js";
 import { telegramDisplayText, telegramInboundText } from "./telegram-group-message-storage.js";
-import { isTelegramSlashCommand } from "./telegram-message-policy.js";
+import { isSpokenTelegramMessage, isTelegramSlashCommand } from "./telegram-message-policy.js";
 import { escapeUntrustedContextJson } from "./untrusted-context-json.js";
 
 export interface TelegramBurstCandidate {
@@ -43,7 +43,7 @@ function burstMessage(candidate: TelegramBurstCandidate): TelegramMessage | null
   if (update?.kind !== "message") return null;
   const message = update.message;
   const raw = message.raw;
-  if (message.chat.type !== "private" || Object.hasOwn(raw, "voice") || raw.media_group_id !== undefined) return null;
+  if (message.chat.type !== "private" || isSpokenTelegramMessage(message) || raw.media_group_id !== undefined) return null;
   if (message.replyToMessage?.from?.isBot === true) return null;
   // A place, a sticker or a poll joins a burst like a line of text; a command still stands alone.
   if (!telegramDisplayText(message) && message.attachments.length === 0) return null;
