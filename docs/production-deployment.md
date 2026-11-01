@@ -407,6 +407,13 @@ instead of a second GIF. It exists only when the active model config accepts ima
 groups get it without a grant; scheduled turns and subagents never receive it. KLIPY's usage terms
 require their written approval for server-side requests and for choosing among results.
 
+Every chat keeps its last 500 000 messages in `telegram_group_messages` (10 000 before 01.11.2026);
+older ones are cut by sequence number on each new message. `list_group_history` finds a message
+that holds every word of the query in any order, a word also in another Russian form, in the other
+alphabet or with a small typo in a long word; migration 144 adds the trigram and Russian text-search
+indexes it reads through. At the busiest group's pace the limit is about fourteen months, roughly
+650 MB with the indexes, and every deployment backup grows by the same amount.
+
 Since 01.11.2026 interactive root turns may also send a place and a poll on their own: `send_location`
 calls Telegram `sendVenue` (with a title and an address) or `sendLocation` (a bare point), and
 `send_poll` calls `sendPoll` with 2-12 options and Telegram's defaults for anonymity and a single

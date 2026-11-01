@@ -41,7 +41,7 @@ describe("Telegram group history", () => {
     expect(description).toContain("combined with AND");
     expect(description).toContain("one call per model step");
     expect(description).toContain('{"beforeSequence":"320","limit":3}');
-    expect(schema.properties?.query?.description).toContain("literal substring");
+    expect(schema.properties?.query?.description).toContain("in any order");
     expect(schema.properties?.participant?.description).toContain("exact username");
     expect(schema.properties?.beforeSequence?.description).toContain("strictly less");
     expect(schema.properties?.sequenceFrom?.description).toContain("inclusive");
