@@ -40,6 +40,10 @@ describe("historyQueryTerms", () => {
     ]);
   });
 
+  it("finds «е» for a typed «ё»", () => {
+    expect(historyQueryTerms("ещё")).toEqual([{ variants: ["ещё", "еще", "esche"] }]);
+  });
+
   it("drops short words beside longer ones, keeps them when nothing else is asked, and repeats nothing", () => {
     expect(historyQueryTerms("ссылка на pohuy и pohuy").map((term) => term.variants[0])).toEqual(["ссылка", "pohuy"]);
     expect(historyQueryTerms("ок да").map((term) => term.variants[0])).toEqual(["ок", "да"]);
@@ -59,8 +63,15 @@ describe("historyTextClause", () => {
       " AND (message.content_text ILIKE $11" +
       " OR to_tsvector('russian', coalesce(message.content_text, '')) @@ plainto_tsquery('russian', $12)" +
       " OR $13 <% message.content_text)" +
-      " AND (message.content_text ILIKE $14 OR $15 <% message.content_text)",
+      " AND (message.content_text ILIKE $14)",
     );
-    expect(parameters).toEqual(["%ссылку%", "ссылку", "ссылку", "%50\\%\\_off%", "50%_off"]);
+    expect(parameters).toEqual(["%ссылку%", "ссылку", "ссылку", "%50\\%\\_off%"]);
+  });
+
+  it("matches numbers and short words only as typed, never loosely", () => {
+    const { clause } = historyTextClause(historyQueryTerms("123456 похуй"), 1);
+
+    expect(clause).not.toContain("$1 <%");
+    expect(clause.match(/<%/gu)).toBeNull();
   });
 });

@@ -9,3 +9,13 @@ CREATE INDEX telegram_group_messages_content_trigram
 
 CREATE INDEX telegram_group_messages_content_russian
   ON telegram_group_messages USING gin (to_tsvector('russian', coalesce(content_text, '')));
+
+-- Удаление сообщения обнуляет ссылки ответов на него (ON DELETE SET NULL), и без этого индекса
+-- каждое удаление перебирало бы всю таблицу: при 500 000 сообщений на чат это каждое новое
+-- сообщение заполненного чата и часы на удаление группы.
+CREATE INDEX telegram_group_messages_reply_to_entry
+  ON telegram_group_messages (reply_to_entry_id) WHERE reply_to_entry_id IS NOT NULL;
+
+-- История группы за период (сценарии по расписанию) читается по времени отправки.
+CREATE INDEX telegram_group_messages_group_sent_at
+  ON telegram_group_messages (group_id, sent_at);

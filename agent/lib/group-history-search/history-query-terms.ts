@@ -9,16 +9,17 @@
  * Key constructs:
  * - A message matches when it holds every word, in any order. A word counts as held when its text
  *   occurs in the message, when a Russian form of it does («ссылку» finds «ссылка»), when its
- *   spelling in the other alphabet occurs («похуй» finds «pohuy»), or, for a word of five letters
- *   or more, when the message holds a close word (a small typo, pg_trgm `<%`).
+ *   spelling in the other alphabet occurs («похуй» finds «pohuy»), or, for a word of six letters or
+ *   more, when the message holds a close word (a small typo, pg_trgm `<%`). Numbers never match
+ *   loosely: «123456» must not find «123457».
  * - Words of one or two letters only narrow a query that has nothing longer: «на», «и» occur in
  *   almost every message.
  * - The words reach SQL only as parameters; the LIKE wildcards in them are escaped.
  */
 const MAX_TERMS = 8;
 const SHORT_WORD_LENGTH = 3;
-// pg_trgm's word similarity is too loose for short words: «скилл» would match «силл».
-const FUZZY_MIN_LENGTH = 5;
+// pg_trgm's word similarity is too loose for short words: «похуй» would match «похуже».
+const FUZZY_MIN_LENGTH = 6;
 
 const CYRILLIC_TO_LATIN: Readonly<Record<string, string>> = {
   а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z", и: "i", й: "y", к: "k", л: "l",
@@ -58,7 +59,7 @@ export function transliterateWord(word: string): string | null {
 }
 
 export interface HistoryQueryTerm {
-  /** The word as typed, then its spelling in the other alphabet when it has one. */
+  /** The word as typed, its «е» spelling when it has «ё», then its spelling in the other alphabet. */
   variants: string[];
 }
 
@@ -67,7 +68,9 @@ export function historyQueryTerms(query: string): HistoryQueryTerm[] {
   const long = words.filter((word) => word.length >= SHORT_WORD_LENGTH);
   return (long.length > 0 ? long : words).slice(0, MAX_TERMS).map((word) => {
     const spelled = transliterateWord(word);
-    return { variants: spelled === null || spelled === word || spelled === "" ? [word] : [word, spelled] };
+    // People rarely type «ё»: «ещё» must find «еще».
+    const plain = word.replaceAll("ё", "е");
+    return { variants: [...new Set([word, plain, ...(spelled ? [spelled] : [])])] };
   });
 }
 
@@ -93,7 +96,7 @@ export function historyTextClause(
       if (/^[а-яё]+$/u.test(variant) && variant.length >= SHORT_WORD_LENGTH) {
         predicates.push(`to_tsvector('russian', coalesce(message.content_text, '')) @@ plainto_tsquery('russian', ${next(variant)})`);
       }
-      if (variant.length >= FUZZY_MIN_LENGTH) predicates.push(`${next(variant)} <% message.content_text`);
+      if (/^\p{L}+$/u.test(variant) && variant.length >= FUZZY_MIN_LENGTH) predicates.push(`${next(variant)} <% message.content_text`);
     }
     return ` AND (${predicates.join(" OR ")})`;
   });
