@@ -5,6 +5,8 @@
  * - `COMPACTION_CHECKPOINT_MARKER`, `COMPACTION_RESUMPTION_MESSAGE`, `TODO_COMPACTION_PRESERVATION_LABEL`:
  *   the texts compaction writes into history. Stored histories already carry them.
  * - `createCompactionPrompt`, `COMPACTION_PROMPT_ENVELOPE`: the summarization request.
+ * - `COMPACTION_SUMMARY_WORD_LIMIT`, `COMPACTION_BRIEF_SUMMARY_WORD_LIMIT`: how long a summary may be,
+ *   ordinarily and after a summary was refused or ran past the model's output limit.
  * - `stubContentOutputFileParts`, `TRANSCRIPT_PAYLOAD_LIMIT`: payload limits shared with compaction.
  *
  * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
@@ -47,6 +49,15 @@ Large tool outputs are the main thing to compress: reduce each to the findings t
 // rendered transcript exceeds the caller's token budget.
 const DEGRADED_TEXT_LIMIT = 2_000;
 
+/**
+ * Each summary updates the previous one, so without a limit it only grows: on production a group's
+ * checkpoint reached 40 000 characters over 60 compactions, and rewritten with the newer part it ran
+ * past the model's 16 384-token output limit (01.11.2026). The limit makes the model shorten the
+ * oldest and finished parts instead.
+ */
+export const COMPACTION_SUMMARY_WORD_LIMIT = 1_500;
+export const COMPACTION_BRIEF_SUMMARY_WORD_LIMIT = 600;
+
 interface CompactionTranscriptEntry {
   readonly content: string;
   readonly role: ModelMessage["role"];
@@ -59,7 +70,7 @@ export interface CompactionPrompt {
 
 /** Static prompt text added around checkpoint and conversation content. */
 export const COMPACTION_PROMPT_ENVELOPE = {
-  prompt: formatCompactionPrompt({ previousCheckpoint: "", transcript: "" }),
+  prompt: formatCompactionPrompt({ previousCheckpoint: "", summaryWordLimit: COMPACTION_SUMMARY_WORD_LIMIT, transcript: "" }),
   system: COMPACTION_SYSTEM_PROMPT,
 } satisfies CompactionPrompt;
 
@@ -80,6 +91,7 @@ export function createCompactionPrompt(input: {
    * oldest messages give up, with a line saying how many. Otherwise it is soft, and capping is all.
    */
   readonly strictBudget?: boolean;
+  readonly summaryWordLimit: number;
   readonly transcriptBudgetTokens?: number;
 }): CompactionPrompt {
   const entries = input.messages.map((message) => ({
@@ -95,6 +107,7 @@ export function createCompactionPrompt(input: {
   return {
     prompt: formatCompactionPrompt({
       previousCheckpoint: input.previousCheckpoint?.trim() ?? "(none)",
+      summaryWordLimit: input.summaryWordLimit,
       transcript: formatCompactionTranscript(entries),
     }),
     system: COMPACTION_SYSTEM_PROMPT,
@@ -121,8 +134,10 @@ function degradeOversizedTranscript(
     return;
   }
 
+  // Only the prompt's size is measured here; the limit's own digits change it by nothing.
   const fullPrompt = formatCompactionPrompt({
     previousCheckpoint: input.previousCheckpoint?.trim() ?? "(none)",
+    summaryWordLimit: COMPACTION_SUMMARY_WORD_LIMIT,
     transcript: formatCompactionTranscript(entries),
   });
   let excessTokens = estimateTokens(fullPrompt) - budget;
@@ -152,6 +167,7 @@ function dropOldestOverBudget(
 ): void {
   let excessTokens = estimateTokens(formatCompactionPrompt({
     previousCheckpoint: previousCheckpoint?.trim() ?? "(none)",
+    summaryWordLimit: COMPACTION_SUMMARY_WORD_LIMIT,
     transcript: formatCompactionTranscript(entries),
   })) - budget;
   let dropped = 0;
@@ -169,6 +185,7 @@ function dropOldestOverBudget(
 
 function formatCompactionPrompt(input: {
   readonly previousCheckpoint: string;
+  readonly summaryWordLimit: number;
   readonly transcript: string;
 }): string {
   return `<previous-checkpoint>
@@ -180,7 +197,9 @@ Conversation transcript:
 ${input.transcript}
 </conversation>
 
-${COMPACTION_CHECKPOINT_PROMPT}`;
+${COMPACTION_CHECKPOINT_PROMPT}
+
+Keep the whole summary under ${input.summaryWordLimit} words. When the previous checkpoint and the newer information do not fit, shorten the oldest and finished parts of the checkpoint first: keep decisions, open work, preferences and exact identifiers, and drop narration and repeated detail.`;
 }
 
 function formatCompactionTranscript(messages: readonly CompactionTranscriptEntry[]): string {

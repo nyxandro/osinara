@@ -26,11 +26,13 @@ import { AppError } from "../../lib/app-error.js";
 import type { CompactionCounters } from "../history/history-repository.js";
 import { estimateTokens } from "./compaction-estimate.js";
 import {
+  COMPACTION_BRIEF_SUMMARY_WORD_LIMIT,
   COMPACTION_CHECKPOINT_MARKER,
   COMPACTION_PROMPT_ENVELOPE,
   COMPACTION_RESUMPTION_MESSAGE,
   createCompactionPrompt,
   stubContentOutputFileParts,
+  COMPACTION_SUMMARY_WORD_LIMIT,
   TODO_COMPACTION_PRESERVATION_LABEL,
   TRANSCRIPT_PAYLOAD_LIMIT,
   type CompactionPrompt,
@@ -95,6 +97,8 @@ const CAP_MIN_FREE_SHARE = 0.2;
 // OpenAI-compatible adapter reports a missing prompt_tokens as 0 (`@ai-sdk/openai-compatible`), and
 // trusting it would keep the history from ever compacting until the provider refused it.
 const PROVIDER_COUNT_MIN_SHARE = 0.5;
+// The code the model transport gives an answer cut at the output limit (`model-transport.ts`).
+const SUMMARY_OUTPUT_TRUNCATED_CODE = "AGENT_MODEL_OUTPUT_TRUNCATED";
 const CAPPED_RESULT_ANNOTATION =
   "[Truncated: tool result reduced during context compaction. Re-run the tool if you need the full output.]";
 
@@ -276,6 +280,27 @@ function splitMessages(messages: readonly ModelMessage[], keep: number) {
 }
 
 /**
+ * The summary of the older part. One cut at the model's output limit was too long, not too large to
+ * read, so it is asked again at once with the brief limit instead of failing the person's message;
+ * a second cut summary, or a refusal of another kind, goes to the caller as before.
+ */
+async function summarizeOlder(
+  summarize: Summarize,
+  request: (summaryWordLimit: number) => CompactionPrompt,
+  summaryRefusals: number,
+): Promise<string> {
+  const limit = summaryRefusals > 0 ? COMPACTION_BRIEF_SUMMARY_WORD_LIMIT : COMPACTION_SUMMARY_WORD_LIMIT;
+  try {
+    return await summarize(request(limit));
+  } catch (error) {
+    const cut = error instanceof AppError && error.code === SUMMARY_OUTPUT_TRUNCATED_CODE;
+    if (!cut || limit === COMPACTION_BRIEF_SUMMARY_WORD_LIMIT) throw error;
+    console.warn(JSON.stringify({ code: "AGENT_COMPACTION_SUMMARY_TOO_LONG", summaryWordLimit: limit }));
+    return await summarize(request(COMPACTION_BRIEF_SUMMARY_WORD_LIMIT));
+  }
+}
+
+/**
  * `measurement` is the one `shouldCompact` decided with. `summaryRefusals` counts the summary
  * requests of this session the model refused in a row since its last compaction.
  */
@@ -321,11 +346,11 @@ export async function compactMessages(
       ...(previousCheckpoint === undefined ? [] : [`${previousCheckpoint}\n\n${COMPACTION_SUMMARY_DROPPED_AFTER_CHECKPOINT}`]),
       COMPACTION_SUMMARY_DROPPED_CHECKPOINT,
     ]
-    : [await summarize(createCompactionPrompt({
+    : [await summarizeOlder(summarize, (summaryWordLimit) => createCompactionPrompt({
       messages: older.filter((message) => settings.restatedAfterCompaction?.(message) !== true),
-      previousCheckpoint, strictBudget: summaryRefusals > 0,
+      previousCheckpoint, strictBudget: summaryRefusals > 0, summaryWordLimit,
       transcriptBudgetTokens: Math.max(1, Math.floor(settings.threshold / 2 ** summaryRefusals)),
-    }))];
+    }), summaryRefusals)];
   let smallest: ModelMessage[] = [];
   for (const summary of candidates) {
     const assembled = withSummary(summary);

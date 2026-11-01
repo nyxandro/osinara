@@ -9,6 +9,7 @@ import {
   capToolResults, compactionSettings, compactMessages, providerCountStatus, shouldCompact, todoCompactionMessage, type PromptMeasurement,
   type Summarize,
 } from "./compaction.js";
+import { COMPACTION_BRIEF_SUMMARY_WORD_LIMIT, COMPACTION_SUMMARY_WORD_LIMIT } from "./compaction-prompt.js";
 
 const NO_COUNTERS = { inputTokens: null, promptMessageCount: null };
 const UNMEASURED: PromptMeasurement = { counters: NO_COUNTERS, frameTokens: 0 };
@@ -348,6 +349,42 @@ describe("history compaction", () => {
     const third = await promptTokens(2);
     expect(second).toBeLessThan(first);
     expect(third).toBeLessThan(second);
+  });
+
+  // Production, 01.11.2026: a group's checkpoint had grown to 40 000 characters over 60 compactions;
+  // rewritten with the newer part, the summary ran past the model's 16 384-token output limit twice,
+  // and each cut summary failed a person's message.
+  it("asks for a summary within a word limit, and for a shorter one after a refusal", async () => {
+    const messages = [...Array.from({ length: 40 }, (_, index) => exchange(index, 2_000)).flat(), CURRENT];
+    const promptOf = async (refusals: number) => {
+      const summarize = vi.fn<Summarize>(async () => "сводка");
+      await compactMessages(messages, { recentWindowSize: 2, threshold: 40_000 }, summarize, UNMEASURED, refusals);
+      return summarize.mock.calls[0]![0].prompt;
+    };
+
+    expect(await promptOf(0)).toContain(`${COMPACTION_SUMMARY_WORD_LIMIT} words`);
+    expect(await promptOf(1)).toContain(`${COMPACTION_BRIEF_SUMMARY_WORD_LIMIT} words`);
+  });
+
+  it("asks once more for a shorter summary in the same turn when the first ran past the output limit", async () => {
+    const messages = [...Array.from({ length: 40 }, (_, index) => exchange(index, 2_000)).flat(), CURRENT];
+    const truncated = new AppError("AGENT_MODEL_OUTPUT_TRUNCATED", "Модель оборвала ответ из-за ограничения длины");
+    const summarize = vi.fn<Summarize>().mockRejectedValueOnce(truncated).mockResolvedValueOnce("сводка");
+
+    const compacted = await compactMessages(messages, { recentWindowSize: 2, threshold: 40_000 }, summarize, UNMEASURED, 0);
+
+    expect(summarize).toHaveBeenCalledTimes(2);
+    expect(summarize.mock.calls[1]![0].prompt).toContain(`${COMPACTION_BRIEF_SUMMARY_WORD_LIMIT} words`);
+    expect(compacted[1]).toEqual({ content: "сводка", role: "assistant" });
+
+    // A second cut summary, or a refusal of another kind, is not asked again in the turn.
+    const twice = vi.fn<Summarize>().mockRejectedValue(truncated);
+    await expect(compactMessages(messages, { recentWindowSize: 2, threshold: 40_000 }, twice, UNMEASURED, 0)).rejects.toBe(truncated);
+    expect(twice).toHaveBeenCalledTimes(2);
+    const overflow = new AppError("AGENT_MODEL_CONTEXT_OVERFLOW", "Запрос не помещается в окно модели");
+    const refused = vi.fn<Summarize>().mockRejectedValue(overflow);
+    await expect(compactMessages(messages, { recentWindowSize: 2, threshold: 40_000 }, refused, UNMEASURED, 0)).rejects.toBe(overflow);
+    expect(refused).toHaveBeenCalledTimes(1);
   });
 
   it("drops the older part with a notice, without asking again, after the model refused it four times", async () => {
