@@ -3,9 +3,10 @@
  *
  * Exports:
  * - `compactionSettings`: the threshold (a share of the window) and the recent tail size.
- * - `shouldCompact`, `PromptMeasurement`: the estimated messages plus the system prompt and tool
- *   definitions, or plus what the provider's last count of this history showed beyond its estimate.
- * - `compactMessages`: caps old tool results if that fits the budget `shouldCompact` measured;
+ * - `shouldCompact`, `PromptMeasurement`: the provider's last count of this history plus the estimate
+ *   of what came after it, or, before the provider has counted it, the estimated messages plus the
+ *   system prompt and tool definitions.
+ * - `compactMessages`: caps old tool results if that leaves real room under the estimate alone;
  *   otherwise one summary call replaces the older part with a checkpoint and keeps the recent tail.
  * - `capToolResults`: the capping step on its own.
  * - `todoCompactionMessage`: the open task list, re-added after a compaction.
@@ -82,6 +83,13 @@ const COMPACTION_SUMMARY_DROPPED_CHECKPOINT =
 const COMPACTION_SUMMARY_DROPPED_AFTER_CHECKPOINT =
   "The part of this conversation between the summary above and the messages that follow could not be summarized: the model refused the summary request several times, so it was dropped. The summary above still holds; nothing from the dropped part is available. If the person refers to it, say so and ask them to repeat what matters.";
 const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
+/**
+ * The share of the threshold a cap of old tool results must leave free to stand in for a summary.
+ * A cap that only just fits breaks the provider's cache like any rewrite, and the next few steps
+ * push the history over again: on production 17 of 26 compactions in 21–31.10.2026 were such caps,
+ * each followed by a summary one to eleven steps later.
+ */
+const CAP_MIN_FREE_SHARE = 0.2;
 const CAPPED_RESULT_ANNOTATION =
   "[Truncated: tool result reduced during context compaction. Re-run the tool if you need the full output.]";
 
@@ -106,23 +114,36 @@ export interface PromptMeasurement {
 }
 
 /**
- * The estimated size the messages of a request may reach. Besides them a request carries its frame
- * or, once the provider has measured this history, what its count showed beyond the estimate of the
- * measured messages; never less than the frame, so an estimate that counts high makes no room.
- * Every decision of one compaction takes this budget: a replacement is judged by the ruler that
- * asked for it, and the next step, measured or not, does not ask again.
+ * The estimated size the messages of a request may reach before the decision to compact. Once the
+ * provider has counted this history, its count stands for the measured messages, frame included,
+ * and only what came after is estimated: the estimate counts stored reasoning a provider may never
+ * receive, and on production it ran 60% over the count, so a private chat compacted at 141 000 of a
+ * 196 000 threshold (31.10.2026). Before that count, the frame stands beside the estimate.
  */
-function messageBudget(messages: readonly ModelMessage[], settings: CompactionSettings, measurement: PromptMeasurement): number {
+function decisionBudget(messages: readonly ModelMessage[], settings: CompactionSettings, measurement: PromptMeasurement): number {
   const { counters, frameTokens } = measurement;
   const prior = counters.inputTokens;
   const priorCount = counters.promptMessageCount;
   const measured = prior !== null && priorCount !== null && Number.isInteger(priorCount) && priorCount >= 0 && priorCount <= messages.length;
-  const besides = measured ? Math.max(frameTokens, prior - estimateTokens(messages.slice(0, priorCount))) : frameTokens;
+  const besides = measured ? prior - estimateTokens(messages.slice(0, priorCount)) : frameTokens;
   return settings.threshold - besides - COMPACTION_PROMPT_OVERHEAD_TOKENS;
 }
 
+/**
+ * What a replacement must fit. The step after a compaction has no provider count yet and decides by
+ * the estimate with the frame, so the replacement fits that ruler too, and the stricter of the two
+ * when the provider counted more than the estimate: then neither the next step nor the one after
+ * the next count asks again.
+ */
+function replacementBudget(messages: readonly ModelMessage[], settings: CompactionSettings, measurement: PromptMeasurement): number {
+  return Math.min(
+    decisionBudget(messages, settings, measurement),
+    settings.threshold - measurement.frameTokens - COMPACTION_PROMPT_OVERHEAD_TOKENS,
+  );
+}
+
 export function shouldCompact(messages: readonly ModelMessage[], settings: CompactionSettings, measurement: PromptMeasurement): boolean {
-  return messages.length > 0 && !fits(messages, messageBudget(messages, settings, measurement));
+  return messages.length > 0 && !fits(messages, decisionBudget(messages, settings, measurement));
 }
 
 function fits(messages: readonly ModelMessage[], budget: number): boolean {
@@ -240,7 +261,7 @@ export async function compactMessages(
   measurement: PromptMeasurement,
   summaryRefusals: number,
 ): Promise<ModelMessage[]> {
-  const budget = messageBudget(messages, settings, measurement);
+  const budget = replacementBudget(messages, settings, measurement);
   const { conversation, previousCheckpoint } = extractPreviousCheckpoint(messages);
   const { older, recent } = splitMessages(conversation, selectRecentWindowSize(conversation, settings, budget));
   if (older.length === 0 && previousCheckpoint === undefined) return keepNonToolResultMessages(recent);
@@ -250,8 +271,8 @@ export async function compactMessages(
     { content: previousCheckpoint, role: "assistant" },
   ];
   const capped = withResumptionGuard([...checkpointHead, ...capToolResults(older), ...recent], conversation);
-  // A near no-op cap stays over the budget that asked for compaction and goes on to the summary.
-  if (fits(capped, budget)) return capped;
+  // A cap stands in for the summary only when it leaves real room; a near no-op goes on to the summary.
+  if (fits(capped, budget - Math.floor(settings.threshold * CAP_MIN_FREE_SHARE))) return capped;
 
   /** The summary and the recent messages, verbatim or without tool results; `fitted` null when neither fits. */
   const withSummary = (summary: string): { fitted: ModelMessage[] | null; smallest: ModelMessage[] } => {

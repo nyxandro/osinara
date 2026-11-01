@@ -71,10 +71,11 @@ const conversationArbitrary = fc.record({
 ]);
 
 // In proportions a deployment has: the frame up to 30% of the threshold, a summary up to 20%. The
-// provider counts between 80% and 150% of the estimate, as tokenizers and stored reasoning differ.
+// provider counts between 50% and 150% of the estimate: tokenizers differ, and the stored reasoning
+// the estimate counts never reaches a provider that drops it (production, 31.10.2026: 60%).
 const promptArbitrary = conversationArbitrary.chain((messages) => fc.integer({ max: 30_000, min: 1_000 }).chain((threshold) => fc.record({
   measurement: fc.integer({ max: 30, min: 0 }).map((percent) => Math.floor(threshold * percent / 100)).chain((frameTokens) => fc.option(
-    fc.record({ count: fc.integer({ max: messages.length, min: 0 }), percent: fc.integer({ max: 150, min: 80 }) })
+    fc.record({ count: fc.integer({ max: messages.length, min: 0 }), percent: fc.integer({ max: 150, min: 50 }) })
       .map(({ count, percent }) => providerCount(messages, count, frameTokens, percent)),
     // Every replacement leaves the history unmeasured until the next model call: half the cases.
     { freq: 1, nil: NO_COUNTERS },
@@ -108,6 +109,20 @@ describe("history compaction", () => {
     expect(shouldCompact(messages, settings, UNMEASURED)).toBe(false);
     expect(shouldCompact(messages, settings, { counters: { inputTokens: 7_400, promptMessageCount: 1 }, frameTokens: 0 })).toBe(true);
     expect(shouldCompact(messages, settings, { counters: { inputTokens: 7_400, promptMessageCount: 5 }, frameTokens: 0 })).toBe(false);
+  });
+
+  // Production, 31.10.2026: the estimate counted stored reasoning the provider never receives and ran
+  // 60% over its count, so a private chat compacted at 141 000 of a 196 000 threshold.
+  it("does not compact while the provider counts the history under the threshold, though the estimate is over it", () => {
+    const settings = { recentWindowSize: 10, threshold: 10_000 };
+    const messages = [...Array.from({ length: 60 }, (_, index) => exchange(index, 300)).flat(), CURRENT];
+    const counted = messages.length - 1;
+    expect(shouldCompact(messages, settings, UNMEASURED)).toBe(true);
+
+    expect(shouldCompact(messages, settings, { counters: providerCount(messages, counted, 0, 60), frameTokens: 0 })).toBe(false);
+    // What came after the measured request is still estimated and pushes it over.
+    const grown = [...messages.slice(0, -1), ...Array.from({ length: 30 }, (_, index) => exchange(100 + index, 300)).flat(), CURRENT];
+    expect(shouldCompact(grown, settings, { counters: providerCount(grown, counted, 0, 60), frameTokens: 0 })).toBe(true);
   });
 
   it("measures Russian text by its UTF-8 size, as the provider counts it, not by its letters", () => {
@@ -211,6 +226,26 @@ describe("history compaction", () => {
     expect(compacted[3]).toMatchObject({ role: "tool", content: [{ output: { type: "text", value: expect.stringMatching(/^\[Truncated: /) } }] });
     expect(compacted.slice(-10)).toEqual(messages.slice(-10));
     expect(compacted).toHaveLength(messages.length);
+  });
+
+  // Production, 21–31.10.2026: 17 of 26 compactions only capped old tool results, freed almost nothing
+  // and broke the provider's cache; a summary followed one to eleven steps later.
+  it("summarizes instead of capping when the cap would leave almost no room", async () => {
+    const summarize = vi.fn<Summarize>(async () => "сводка");
+    const settings = { recentWindowSize: 4, threshold: 6_700 };
+    // Over the threshold by a little; the one large result is the only thing a cap can cut, and
+    // cutting it brings the history just under the threshold, where the next steps push it over again.
+    const messages = [...exchange(0, 450), ...toolExchange(99, 3_200), ...Array.from({ length: 21 }, (_, index) => exchange(index + 1, 450)).flat(), CURRENT];
+    expect(shouldCompact(messages, settings, UNMEASURED)).toBe(true);
+    expect(estimateTokens(capToolResults(messages))).toBeLessThan(settings.threshold);
+
+    const compacted = await compactMessages(messages, settings, summarize, UNMEASURED, 0);
+
+    expect(summarize).toHaveBeenCalledTimes(1);
+    expect(compacted.slice(0, 2)).toEqual([
+      { role: "user", content: "Summary of our conversation so far:" },
+      { role: "assistant", content: "сводка" },
+    ]);
   });
 
   it("replaces the older part with one checkpoint and keeps the recent tail verbatim", async () => {
