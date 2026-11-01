@@ -240,8 +240,12 @@ describe("createTelegramWorkspaceAttachmentImporter", () => {
     }));
   });
 
-  it("rejects binary bytes disguised as external text before persistence", async () => {
-    const writeBinary = vi.fn();
+  it("keeps any file an external group imports, typed by its bytes rather than its name", async () => {
+    const writeBinary = vi.fn(async (_auth: unknown, input: { mediaType: string; path: string }) => ({
+      mediaType: input.mediaType,
+      path: input.path,
+      scope: "group" as const,
+    }));
     const groupAuth = {
       ...auth,
       groupId: "00000000-0000-4000-8000-000000000456",
@@ -251,22 +255,22 @@ describe("createTelegramWorkspaceAttachmentImporter", () => {
       userId: null,
     };
     const importer = createTelegramWorkspaceAttachmentImporter({
-      download: vi.fn().mockResolvedValue(Buffer.from([0x00, 0xff, 0x01])),
+      download: vi.fn()
+        .mockResolvedValueOnce(Buffer.from("%PDF-1.7\n%âãÏÓ\n1 0 obj\n", "latin1"))
+        .mockResolvedValueOnce(Buffer.from([0x00, 0xff, 0x01])),
       writeBinary,
     });
 
-    await expect(importer.persist({
-      attachments: [{
-        fileId: "binary-file",
-        fileName: "notes.txt",
-        kind: "document",
-        mediaType: "text/plain",
-      }],
-      auth: groupAuth,
-      chatId: "-100456",
-      messageId: "46",
-      scope: "group",
-    })).rejects.toThrowError(/AGENT_ATTACHMENT_TEXT_REQUIRED/u);
-    expect(writeBinary).not.toHaveBeenCalled();
+    for (const [fileName, mediaType] of [["contract.pdf", "application/pdf"], ["notes.txt", "application/octet-stream"]]) {
+      await importer.persist({
+        attachments: [{ fileId: `file-${fileName}`, fileName, kind: "document", mediaType: "text/plain" }],
+        auth: groupAuth,
+        chatId: "-100456",
+        messageId: fileName === "contract.pdf" ? "46" : "47",
+        scope: "group",
+      });
+
+      expect(writeBinary).toHaveBeenLastCalledWith(groupAuth, expect.objectContaining({ mediaType, scope: "group" }));
+    }
   });
 });

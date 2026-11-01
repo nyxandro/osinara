@@ -127,7 +127,7 @@ const EXTERNAL_DIRECT_TOOL_PRESENTATION: Readonly<
   },
   import_telegram_attachment: {
     description:
-      "Download a permitted UTF-8 TXT, Markdown, JSON, CSV, TSV, HTML, XML or YAML file from a message of the current external group into /workspace/group; after the import read the returned path through read_file.",
+      "Download one file of any format from a message of the current external group into /workspace/group. The result gives its path and mediaType: read a text file through read_file, and work with any other format only through the tools of this turn.",
     inputSchema: z
       .object({
         attachmentId: z.uuid().describe("An opaque attachmentId from the current message or the group history"),

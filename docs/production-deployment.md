@@ -410,7 +410,9 @@ takes in every medium and offers `inspect_workspace_image` (with an image-capabl
 `import_telegram_attachment` without a grant; only a channel and an unregistered chat are still
 acknowledged and dropped (`telegram_ingress_ignored_updates`, reason `external_media`). Earlier
 releases granted both per external group: such a persisted grant still parses, grants nothing more
-and is neither offered nor reported by `manage_telegram_group`.
+and is neither offered nor reported by `manage_telegram_group`. The import keeps a file of any format
+in the group's own `/workspace/group` folder, typed by its bytes; before 01.11.2026 an external group
+could import only UTF-8 text files.
 
 The same `inspect_workspace_image` also shows the vision model the current Telegram avatar of a
 person who wrote in the current chat. The model names a message number of that chat; the backend

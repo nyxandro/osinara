@@ -30,7 +30,7 @@ const ALWAYS_AVAILABLE_PURPOSE =
   "go through the available materials and conversation of this chat, make summaries, outcomes, lists and tables, create text and Markdown files in the group's working folder and send its files to the chat";
 
 // Whatever participants send is open to every group, so these lines follow only the runtime.
-const ATTACHMENT_PURPOSE = "read the text files participants send to this chat";
+const ATTACHMENT_PURPOSE = "open the files participants send to this chat and work with them";
 const IMAGE_PURPOSE = "examine the images participants send to this chat and their avatars";
 
 // Catalog order keeps the rendered list deterministic for prompt caching.

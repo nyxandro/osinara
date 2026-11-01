@@ -14,10 +14,7 @@ import type {
   WorkspaceFileRecord,
   WorkspaceScope,
 } from "../workspaces/workspace-repository.js";
-import {
-  validateAttachmentContent,
-  validateReadableTextAttachmentContent,
-} from "./attachment-policy.js";
+import { validateAttachmentContent } from "./attachment-policy.js";
 import { telegramInboxDirectory } from "./telegram-inbox-path.js";
 
 interface AttachmentImporterDependencies {
@@ -121,11 +118,9 @@ export function createTelegramWorkspaceAttachmentImporter(
         const sourceId = sourceIds[index]!;
         const inboxDirectory = telegramInboxDirectory(input.auth, input.scope, sourceId);
         const bytes = await dependencies.download(attachment);
-        // Restricted groups persist only files the text-only `read_file` can consume.
-        const validator = input.scope === "group"
-          ? validateReadableTextAttachmentContent
-          : validateAttachmentContent;
-        const validated = await validator({
+        // Every scope keeps any file, typed by its bytes; an external group's copy stays in its own
+        // isolated workspace (since 01.11.2026, text files only before).
+        const validated = await validateAttachmentContent({
           bytes,
           ...(attachment.mediaType ? { declaredMediaType: attachment.mediaType } : {}),
           fileName: defaultAttachmentName(attachment, index),
