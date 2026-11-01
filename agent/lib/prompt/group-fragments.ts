@@ -33,7 +33,7 @@ An action that requires confirmation cannot be carried out in a shared chat: a c
 `.trim();
 
 export const GROUP_HISTORY_PROTOCOL = `
-Use \`list_group_history\` if the user refers to an earlier message that is not in the automatic recent timeline. A sequence like \`#42\` refers only to the current verified group; do not ask for or try to choose a group ID yourself.
+Use \`list_group_history\` if the user refers to an earlier message that is not in the automatic recent timeline. It keeps only the latest messages of the group; for anything shared earlier search memory as well. A sequence like \`#42\` refers only to the current verified group; do not ask for or try to choose a group ID yourself.
 
 Do not call \`list_group_history\` several times in parallel in one model step. Call it sequentially: wait for the result of the current call, match it only to the filters actually passed in that call and only then decide whether the next request is needed. Do not match parallel answers by position and do not attribute a result to another set of filters.
 

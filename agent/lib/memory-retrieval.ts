@@ -207,13 +207,19 @@ export async function retrieveMemoryTurnContext(
   query: string,
   /** Absent for a turn with no conversation of its own: nothing to remember showing into. */
   window: MemorySelectionWindow | null = null,
+  /** What a referring message borrows from its conversation (`memory-query-context.ts`). */
+  conversationContext: string | null = null,
 ): Promise<MemoryTurnContext> {
   // One cleaned text for both: the word branches and the vector see the same question.
   const prepared = prepareMemoryQuery(query);
   // Not `embedding`: that step no longer fails the turn, it degrades and says so in the log.
   let phase: MemoryContextPhase = "search";
   try {
-    const selection = await selectMemoriesAutomatically(auth, prepared, { now: new Date(), window });
+    const selection = await selectMemoriesAutomatically(auth, prepared, {
+      conversationContext: conversationContext === null ? null : prepareMemoryQuery(conversationContext),
+      now: new Date(),
+      window,
+    });
     const memories: ModelMemory[] = [
       ...selection.selected.map((selected) => toModelMemory(selected.memory, selected.sourceEvidence)),
     ];

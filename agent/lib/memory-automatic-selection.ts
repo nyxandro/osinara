@@ -123,11 +123,52 @@ function mergeDateWindow(
   ].slice(0, limit);
 }
 
+async function searchMemories(
+  auth: MemoryAuthorization,
+  words: string,
+  limit: number,
+  window: MemorySelectionWindow | null,
+) {
+  // Slang read in plain words too (memory-query-aliases.ts); in a group «ты» is the assistant, and
+  // its records carry its name (memory-persona-query.ts).
+  const withAliases = withQueryAliases(words);
+  const searchText = auth.groupId === null ? withAliases : withAssistantName(withAliases);
+  const embeddings = await embedQueryOrDegrade(searchText);
+  const retrieval = await memoryRetrievalRepository.searchAuthorized(auth, searchText, embeddings, limit, window);
+  const selected = retrieval.results.map((result): SelectedMemory => ({
+    evidence: result.evidence,
+    memory: result.memory,
+    score: result.score,
+    ...(result.sourceEvidence === undefined ? {} : { sourceEvidence: result.sourceEvidence }),
+  }));
+  return { embeddings, retrieval, selected };
+}
+
+/** Takes the two lists in turns, first the message's own, each record once, up to the limit. */
+function alternate(own: readonly SelectedMemory[], borrowed: readonly SelectedMemory[], limit: number): SelectedMemory[] {
+  const merged: SelectedMemory[] = [];
+  const seen = new Set<string>();
+  for (let index = 0; merged.length < limit && (index < own.length || index < borrowed.length); index += 1) {
+    for (const candidate of [own[index], borrowed[index]]) {
+      if (candidate === undefined || seen.has(candidate.memory.id) || merged.length >= limit) continue;
+      seen.add(candidate.memory.id);
+      merged.push(candidate);
+    }
+  }
+  return merged;
+}
+
 export async function selectMemoriesAutomatically(
   auth: MemoryAuthorization,
   /** The text after `prepareMemoryQuery`. */
   prepared: string,
-  options: { limit?: number; now: Date; window: MemorySelectionWindow | null },
+  options: {
+    /** What a referring message borrows from its conversation (`memory-query-context.ts`): searched with, never a gate. */
+    conversationContext?: string | null;
+    limit?: number;
+    now: Date;
+    window: MemorySelectionWindow | null;
+  },
 ): Promise<AutomaticMemorySelection> {
   // A file sent without a caption, a sticker or a GIF reaches the model as a placeholder: no word of
   // it is the person's.
@@ -139,20 +180,14 @@ export async function selectMemoriesAutomatically(
     };
   }
   const limit = options.limit ?? MEMORY_TURN_SELECTION_LIMIT;
-  // Slang read in plain words too (memory-query-aliases.ts); in a group «ты» is the assistant, and
-  // its records carry its name (memory-persona-query.ts).
-  const withAliases = withQueryAliases(prepared);
-  const searchText = auth.groupId === null ? withAliases : withAssistantName(withAliases);
-  const embeddings = await embedQueryOrDegrade(searchText);
-  const retrieval = await memoryRetrievalRepository.searchAuthorized(
-    auth, searchText, embeddings, limit, options.window,
-  );
-  const searched = retrieval.results.map((result): SelectedMemory => ({
-    evidence: result.evidence,
-    memory: result.memory,
-    score: result.score,
-    ...(result.sourceEvidence === undefined ? {} : { sourceEvidence: result.sourceEvidence }),
-  }));
+  const own = await searchMemories(auth, prepared, limit, options.window);
+  // A referring message is also searched together with what it points at, and the two lists take
+  // turns: its own specific words keep their finds, and the borrowed words add what they name.
+  const borrowed = options.conversationContext
+    ? await searchMemories(auth, `${prepared}\n${options.conversationContext}`, limit, options.window)
+    : null;
+  const { embeddings, retrieval } = own;
+  const searched = borrowed === null ? own.selected : alternate(own.selected, borrowed.selected, limit);
   // Whether a date is named does not depend on the timezone, only which days it names does: the
   // person's settings are read only for a question that names one.
   let dateWindow: AutomaticMemorySelection["dateWindow"] = null;

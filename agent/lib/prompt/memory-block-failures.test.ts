@@ -4,6 +4,9 @@ import { createMemoryBlockResolver, type TurnBlockContext } from "./turn-blocks.
 import type { MemoryAuthorization } from "../memory-context.js";
 import { TURN_MEMORY_OPEN_TAG } from "./turn-memory-context.js";
 
+// No message here refers elsewhere, so the journal is never read.
+const NO_QUERY_CONTEXT = { previous: async () => [], replyTarget: async () => null };
+
 const allStillReadable = async (_auth: unknown, _conversationId: string, refs: readonly string[]) =>
   new Set(refs);
 const authorization: MemoryAuthorization = {
@@ -28,8 +31,8 @@ describe("memory failure ownership", () => {
     if (phase === "retrieval") retrieve.mockRejectedValue(error);
     const resolve = createMemoryBlockResolver({
       authorize: () => { if (phase === "authorization") throw error; return authorization; },
-      openSelectionWindow: async () => 1, recordOffered, retrieve, createProfile, readableMemoryRefs: allStillReadable,
-      reportFailure,
+      openSelectionWindow: async () => 1, queryContext: NO_QUERY_CONTEXT, recordOffered, retrieve, createProfile,
+      readableMemoryRefs: allStillReadable, reportFailure,
     });
     const ctx = phase !== "profile" ? context : { ...context, session: { ...context.session, auth: {
       ...context.session.auth, current: { ...context.session.auth.current!, attributes: {
@@ -57,14 +60,14 @@ describe("memory failure ownership", () => {
     };
     const { memory: retrieved } = await createMemoryBlockResolver({
       ...shared,
-      retrieve: vi.fn().mockResolvedValue({
+      queryContext: NO_QUERY_CONTEXT, retrieve: vi.fn().mockResolvedValue({
         diagnostics: { semanticBranchAvailable: true }, memories: [], rankingByMemoryRef: new Map(),
         threads: { threads: [], totalCharacters: 0 },
       }),
     })(context, "turn_0");
     const { memory: notice } = await createMemoryBlockResolver({
       ...shared,
-      retrieve: vi.fn().mockRejectedValue(new Error("embedding service down")),
+      queryContext: NO_QUERY_CONTEXT, retrieve: vi.fn().mockRejectedValue(new Error("embedding service down")),
     })(context, "turn_0");
 
     expect(retrieved).toContain(TURN_MEMORY_OPEN_TAG);
@@ -77,7 +80,7 @@ describe("memory failure ownership", () => {
     try {
       const resolve = createMemoryBlockResolver({ authorize: () => authorization,
         openSelectionWindow: async () => 1, recordOffered: vi.fn(), readableMemoryRefs: allStillReadable,
-        retrieve: vi.fn().mockRejectedValue(new Error("unavailable")), createProfile: vi.fn(),
+        queryContext: NO_QUERY_CONTEXT, retrieve: vi.fn().mockRejectedValue(new Error("unavailable")), createProfile: vi.fn(),
         reportFailure: vi.fn().mockRejectedValue(new Error("incident DB down")),
       });
       expect((await resolve(context, "turn_0")).memory).toContain("AGENT_MEMORY_UNAVAILABLE");

@@ -5,6 +5,7 @@
  * - A message that asks memory nothing is not searched and offers no records, saying so in diagnostics.
  * - A message with any word outside small talk is searched as before.
  * - A file sent without a caption is not searched: the placeholder text is not the person's words.
+ * - Borrowed conversation is searched with, but never makes small talk searchable.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -74,6 +75,25 @@ function search(overrides: Partial<MemoryRetrievalBranchDiagnostics>) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("retrieveMemoryTurnContext", () => {
+  it("searches with the borrowed conversation, while the person's own words decide silence and dates", async () => {
+    search({ russianMatched: 3, russianTopRank: 0.1 });
+    vi.spyOn(memoryThreadBriefRepository, "activate").mockResolvedValue({ threads: [], totalCharacters: 0 });
+
+    await retrieveMemoryTurnContext(auth, "Кинь ссылку на эти скилы", null, "вчера обсуждали скилл pohuy");
+
+    // Searched by the person's own words and once more with what they point at.
+    const searchTexts = vi.mocked(memoryRetrievalRepository.searchAuthorized).mock.calls.map((call) => call[1]);
+    expect(searchTexts).toHaveLength(2);
+    expect(searchTexts[0]).not.toContain("скилл pohuy");
+    expect(searchTexts[1]).toContain("Кинь ссылку на эти скилы");
+    expect(searchTexts[1]).toContain("скилл pohuy");
+
+    vi.mocked(memoryRetrievalRepository.searchAuthorized).mockClear();
+    const silent = await retrieveMemoryTurnContext(auth, "ахаха", null, "вчера обсуждали скилл pohuy");
+    expect(silent.diagnostics.abstained).toBe(true);
+    expect(memoryRetrievalRepository.searchAuthorized).not.toHaveBeenCalled();
+  });
+
   it("does not search memory for a message that asks it nothing", async () => {
     const searchSpy = vi.spyOn(memoryRetrievalRepository, "searchAuthorized");
     const activate = vi.spyOn(memoryThreadBriefRepository, "activate");
