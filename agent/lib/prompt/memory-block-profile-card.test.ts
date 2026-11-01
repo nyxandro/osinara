@@ -17,6 +17,9 @@ import type { ProfileView } from "../profile-view.js";
 import { formatProfileCard, profilePersonKey } from "./profile-card.js";
 import { createMemoryBlockResolver } from "./turn-blocks.js";
 
+// No message here refers elsewhere, so the journal is never read.
+const NO_QUERY_CONTEXT = { previous: async () => [], replyTarget: async () => null };
+
 const TEST_TURN_ID = "turn-1";
 const TURN_ORDINAL = 30;
 const VIEW_REF = "view_11111111111111111111111111111111";
@@ -102,7 +105,7 @@ function resolverWith(input: {
   const reportFailure = vi.fn().mockResolvedValue(undefined);
   const resolve = createMemoryBlockResolver({ reportFailure, authorize: () => authorization,
     createProfile, openSelectionWindow: async () => TURN_ORDINAL, readableMemoryRefs, recordOffered: vi.fn(),
-    retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true }, memories: [],
+    queryContext: NO_QUERY_CONTEXT, retrieve: vi.fn().mockResolvedValue({ diagnostics: { semanticBranchAvailable: true }, memories: [],
       offered: { claimIdByMemoryRef: new Map() },
       rankingByMemoryRef: new Map(), threads: { threads: [], totalCharacters: 0 } }),
   });

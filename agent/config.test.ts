@@ -52,8 +52,8 @@ describe("requireRuntimeEnvironment", () => {
 });
 
 describe("Telegram timeline limits", () => {
-  it("retains ten thousand messages and admits one hundred per turn context", () => {
-    expect(TELEGRAM_GROUP_JOURNAL_RETENTION_MESSAGES).toBe(10_000);
+  it("retains five hundred thousand messages and admits one hundred per turn context", () => {
+    expect(TELEGRAM_GROUP_JOURNAL_RETENTION_MESSAGES).toBe(500_000);
     expect(TELEGRAM_GROUP_JOURNAL_CONTEXT_MESSAGES).toBe(100);
   });
 });

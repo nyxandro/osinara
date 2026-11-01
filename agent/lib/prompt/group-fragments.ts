@@ -33,11 +33,11 @@ An action that requires confirmation cannot be carried out in a shared chat: a c
 `.trim();
 
 export const GROUP_HISTORY_PROTOCOL = `
-Use \`list_group_history\` if the user refers to an earlier message that is not in the automatic recent timeline. A sequence like \`#42\` refers only to the current verified group; do not ask for or try to choose a group ID yourself.
+Use \`list_group_history\` if the user refers to an earlier message that is not in the automatic recent timeline. It keeps only the latest messages of the group: what was shared earlier may be only in memory. A sequence like \`#42\` refers only to the current verified group; do not ask for or try to choose a group ID yourself.
 
 Do not call \`list_group_history\` several times in parallel in one model step. Call it sequentially: wait for the result of the current call, match it only to the filters actually passed in that call and only then decide whether the next request is needed. Do not match parallel answers by position and do not attribute a result to another set of filters.
 
-History filters are exact and are combined with AND when used together. \`query\` sets a case-insensitive literal substring, not a semantic or fuzzy search. \`participant\` sets an exact username without \`@\`. \`sequenceFrom\` and \`sequenceTo\` include both bounds, \`beforeSequence\` returns only smaller sequences, \`from\` and \`to\` include both time bounds. \`limit\` picks the most recent matching records after filtering; load the next page through \`{"beforeSequence":"<nextBeforeSequence>","limit":25}\` only when \`nextBeforeSequence\` is not null.
+History filters are combined with AND when used together. \`query\` finds messages that hold every word of it in any order, a word also in another form, in the other alphabet or with a small typo in a long word; it is not a semantic search, so use names and distinctive words. \`participant\` sets an exact username without \`@\`. \`sequenceFrom\` and \`sequenceTo\` include both bounds, \`beforeSequence\` returns only smaller sequences, \`from\` and \`to\` include both time bounds. \`limit\` picks the most recent matching records after filtering; load the next page through \`{"beforeSequence":"<nextBeforeSequence>","limit":25}\` only when \`nextBeforeSequence\` is not null.
 
 Examples: the last three: \`{"limit":3}\`; literal text: \`{"query":"кондиционер","limit":20}\`; a participant: \`{"participant":"nyxandro","limit":20}\`; an exact range: \`{"sequenceFrom":"310","sequenceTo":"315"}\`; time: \`{"from":"2026-07-31T16:00:00Z","to":"2026-07-31T18:00:00Z"}\`.
 `.trim();

@@ -135,11 +135,13 @@ async function nextSequence(client: PoolClient, conversationId: string): Promise
 }
 
 async function prune(client: PoolClient, conversationId: string): Promise<void> {
+  // A conversation's sequence has no gaps, so the cut below the newest number keeps exactly the
+  // retained count; an OFFSET over the retained rows would walk all of them on every message.
   await client.query(
-     `DELETE FROM telegram_group_messages WHERE id IN (
-       SELECT id FROM telegram_group_messages WHERE conversation_id = $1
-       ORDER BY sequence_id DESC OFFSET $2
-        ) AND NOT EXISTS (
+     `DELETE FROM telegram_group_messages
+      WHERE conversation_id = $1
+        AND sequence_id <= (SELECT max(sequence_id) FROM telegram_group_messages WHERE conversation_id = $1) - $2
+        AND NOT EXISTS (
           SELECT 1 FROM memory_review_batch_sources AS source
           WHERE source.timeline_entry_id = telegram_group_messages.id
         ) AND NOT EXISTS (

@@ -9,6 +9,7 @@
 import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import { TELEGRAM_GROUP_JOURNAL_CONTEXT_MESSAGES } from "../config.js";
+import { historyQueryTerms, historyTextClause } from "./group-history-search/history-query-terms.js";
 import { database } from "./database.js";
 import {
   nextTelegramGroupSequence,
@@ -198,6 +199,20 @@ async function listRows(input: ListRecentInput): Promise<TelegramGroupJournalEnt
   return result.rows.map(project);
 }
 
+/**
+ * The text condition of a history search (`group-history-search/history-query-terms.ts`). A query
+ * with no letter or digit in it, such as «?», is still looked up as it was typed.
+ */
+function historyQueryText(query: string | null, firstParameter: number): { clause: string; parameters: string[] } {
+  if (query === null) return { clause: "", parameters: [] };
+  const terms = historyQueryTerms(query);
+  if (terms.length > 0) return historyTextClause(terms, firstParameter);
+  return {
+    clause: ` AND position(lower($${firstParameter}) in lower(coalesce(message.content_text, ''))) > 0`,
+    parameters: [query],
+  };
+}
+
 export const telegramGroupJournalRepository: TelegramGroupJournalRepository = {
   async listIncremental(input) {
     validateList({
@@ -367,22 +382,22 @@ export const telegramGroupJournalRepository: TelegramGroupJournalRepository = {
     for (const value of [input.sequenceFrom, input.sequenceTo]) {
       if (value) requireTelegramPositiveBigint(value, "sequence_range");
     }
+    const text = historyQueryText(input.query ?? null, 11);
     const result = await database().query<TimelineRow>(
       `SELECT ${TIMELINE_COLUMNS}
        FROM telegram_group_messages message
        WHERE message.group_id = $1
-          AND ($11::boolean OR message.message_thread_id IS NOT DISTINCT FROM $2::bigint)
+          AND ($10::boolean OR message.message_thread_id IS NOT DISTINCT FROM $2::bigint)
          AND ($3::bigint IS NULL OR message.sequence_id < $3)
          AND ($4::bigint IS NULL OR message.sequence_id >= $4)
          AND ($5::bigint IS NULL OR message.sequence_id <= $5)
          AND ($6::timestamptz IS NULL OR message.sent_at >= $6)
          AND ($7::timestamptz IS NULL OR message.sent_at <= $7)
-         AND ($8::text IS NULL OR message.actor_id = $8 OR message.sender_username = $8)
-         AND ($9::text IS NULL OR position(lower($9) in lower(coalesce(message.content_text, ''))) > 0)
-       ORDER BY message.sequence_id DESC LIMIT $10`,
+         AND ($8::text IS NULL OR message.actor_id = $8 OR message.sender_username = $8)${text.clause}
+       ORDER BY message.sequence_id DESC LIMIT $9`,
       [input.groupId, input.messageThreadId, input.beforeSequence, input.sequenceFrom,
-        input.sequenceTo, input.from, input.to, input.participant, input.query, input.limit + 1,
-        input.allTopics === true],
+        input.sequenceTo, input.from, input.to, input.participant, input.limit + 1,
+        input.allTopics === true, ...text.parameters],
     );
     const hasMore = result.rows.length > input.limit;
     const page = result.rows.slice(0, input.limit).reverse().map(project);

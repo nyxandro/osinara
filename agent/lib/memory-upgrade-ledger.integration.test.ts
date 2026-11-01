@@ -175,6 +175,7 @@ const POST_V0101_MIGRATIONS = [
   "141_reply_buttons.sql",
   "142_retire_pending_questions.sql",
   "143_reply_button_message_media.sql",
+  "144_group_history_search.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [

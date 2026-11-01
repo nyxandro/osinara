@@ -65,12 +65,14 @@ describe("step tool order", () => {
 // written in a reminder's `content` changed `manage_reminder`. On 28.10.2026 Google Workspace changes
 // stopped waiting for the owner's button, except those that open data to others, and scenario runs
 // started only reading Google. On 29–31.10.2026 rare procedures moved into service skills: these
-// descriptions say which skill to load, keep the call contract and drop rules stated elsewhere.
+// descriptions say which skill to load, keep the call contract and drop rules stated elsewhere. On
+// 01.11.2026 the agent learnt to send a place and a poll.
 const CHANGED_AFTER_RECORDING = new Set([
   "execute_google_workspace", "export_memory", "manage_agent_schedule", "manage_behavior_preference",
   "manage_external_group_schedule", "manage_family_invitation", "manage_gmail_message",
   "manage_google_workspace_connection", "manage_network_access", "manage_profile_projection", "manage_reminder",
-  "manage_skill", "manage_telegram_group", "notification_settings", "search_memories", "send_voice_message", "web_search",
+  "manage_skill", "manage_telegram_group", "notification_settings", "search_memories", "send_location", "send_poll",
+  "send_voice_message", "web_search",
 ]);
 // The built-in `ask_question` left on 26.10.2026: buttons under the answer replaced it.
 const REMOVED_AFTER_RECORDING = new Set(["ask_question"]);

@@ -303,6 +303,8 @@ async function compactIfNeeded(runtime: TurnRuntime, input: {
   const summary: { refusal: AppError | null } = { refusal: null };
   try {
     compacted = await compactMessages(input.messages, settings, async (request) => {
+      // A compaction may ask twice (`compaction.ts`); only the last call's failure decides.
+      summary.refusal = null;
       try {
         return await runtime.summarize({
           ...request, abortSignal: input.signal, model: input.selection.model, providerOptions: input.selection.providerOptions,
