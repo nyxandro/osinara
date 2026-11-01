@@ -93,6 +93,7 @@ export interface ReleaseAssets {
 export interface InternalSecrets {
   invitationSigningSecret: string;
   postgresPassword: string;
+  sandboxApiKeyEncryptionKey: string;
   telegramWebhookSecretToken: string;
 }
 

@@ -285,6 +285,20 @@ describe("Docker Compose runtime wiring", () => {
     expect(compose).toContain("  sandbox-egress:\n    internal: true\n");
   });
 
+  it.each(["compose.yaml", "compose.production.yaml"])(
+    "gives the egress proxy in %s the API key encryption key and never the integration key",
+    (file) => {
+      const compose = readFileSync(new URL(file, projectRoot), "utf8");
+      const start = compose.indexOf("\n  sandbox-egress-proxy:\n");
+      const rest = compose.slice(start + 1);
+      const proxy = rest.slice(0, rest.search(/\n {2}[a-z][a-z0-9-]*:\n/u));
+
+      // The proxy faces sandbox traffic: a compromise there must not open the Google tokens.
+      expect(proxy).toContain("SANDBOX_API_KEY_ENCRYPTION_KEY");
+      expect(proxy).not.toContain("INTEGRATION_TOKEN_ENCRYPTION_KEY");
+    },
+  );
+
   it("ships native skill package assets in the production runtime", () => {
     const dockerfile = readFileSync(new URL("Dockerfile", projectRoot), "utf8");
 
