@@ -24,6 +24,7 @@ import { TELEGRAM_MAX_ATTACHMENTS_PER_MESSAGE } from "../config.js";
 import { AppError } from "./app-error.js";
 import type { TelegramWorkspaceAttachment } from "./attachments/telegram-workspace-attachments.js";
 import type { TelegramPrivateBurstPolicy } from "./telegram-ingress-contract.js";
+import { TELEGRAM_DESCRIBED_FIELDS } from "./telegram-content/telegram-content-description.js";
 import { telegramDisplayText, telegramInboundText } from "./telegram-group-message-storage.js";
 import { isSpokenTelegramMessage, isTelegramSlashCommand } from "./telegram-message-policy.js";
 import { escapeUntrustedContextJson } from "./untrusted-context-json.js";
@@ -97,8 +98,10 @@ export function combineTelegramBurst(payloads: readonly Record<string, unknown>[
     throw new AppError("AGENT_TELEGRAM_BURST_INVALID", "Не удалось собрать несколько сообщений подряд в одно. Отправьте их ещё раз");
   }
   // The head stays the real anchor: its id, chat, sender and reply target, never invented metadata.
-  // Its rich text is already a part of the combined text and must not be read a second time.
-  const { rich_message: _richMessage, ...raw } = head.raw;
+  // Its rich text, forward note and description are already a part of the combined text and must
+  // not be read a second time.
+  const raw = Object.fromEntries(Object.entries(head.raw)
+    .filter(([field]) => field !== "rich_message" && !TELEGRAM_DESCRIBED_FIELDS.includes(field)));
   return {
     kind: "message",
     message: {

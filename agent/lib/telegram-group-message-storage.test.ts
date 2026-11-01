@@ -74,7 +74,7 @@ describe("what the model and the journal read for a message", () => {
     expect(telegramInboundText(venue)).toBe("");
   });
 
-  it("puts the forward note first and the person's own words after the description", () => {
+  it("puts the forward note first and quotes the forwarded description and caption", () => {
     const forwardedVideo = {
       ...message({}),
       caption: "смотри что нашёл",
@@ -86,7 +86,7 @@ describe("what the model and the journal read for a message", () => {
       text: "",
     };
 
-    expect(telegramDisplayText(forwardedVideo)).toBe("↪ Переслано из канала «Новости», 2026-10-26\n[видео 0:15]\nсмотри что нашёл");
+    expect(telegramDisplayText(forwardedVideo)).toBe("↪ Переслано из канала «Новости», 2026-10-26\n> [видео 0:15]\n> смотри что нашёл");
     // Routing reads only what the person wrote: a forwarded command or a note never addresses the bot.
     expect(telegramInboundText(forwardedVideo)).toBe("смотри что нашёл");
   });

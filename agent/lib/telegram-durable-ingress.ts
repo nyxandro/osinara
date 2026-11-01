@@ -38,10 +38,10 @@ import {
   TELEGRAM_INGRESS_MESSAGE_CONCURRENCY,
 } from "../config.js";
 import { AppError, isAppError } from "./app-error.js";
-import { type TelegramIngressRepository, type TelegramPrivateBurstPolicy } from "./telegram-ingress-contract.js";
+import { type TelegramIngressRepository, type TelegramIngressVoice, type TelegramPrivateBurstPolicy } from "./telegram-ingress-contract.js";
 import { waitForHeldPrivateChat } from "./telegram-private-burst.js";
 import {
-  classifyTelegramInboundMedia,
+  hasTelegramInboundMedia,
   isMessageAddressedToBot,
 } from "./telegram-message-policy.js";
 import { telegramIngressControl } from "./telegram-ingress-dispatch.js";
@@ -230,6 +230,21 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
     }
   }
 
+  async function readVoiceTranscript(
+    voice: TelegramIngressVoice,
+    signal: AbortSignal,
+  ): Promise<string> {
+    const transcript = (await dependencies.transcribeVoice({ ...voice, signal })).trim();
+    signal.throwIfAborted();
+    if (!transcript) {
+      throw new AppError(
+        "AGENT_VOICE_TRANSCRIPT_EMPTY",
+        "В голосовом сообщении не удалось распознать речь. Запишите его ещё раз",
+      );
+    }
+    return transcript;
+  }
+
   /** Voice is transcribed once per update; the transcript is stored before any dispatch. */
   async function withVoiceTranscript(
     claim: NonNullable<Awaited<ReturnType<TelegramIngressRepository["claimNext"]>>>,
@@ -237,24 +252,29 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
     signal: AbortSignal,
   ): Promise<TelegramUpdate> {
     if (!claim.voice || update.kind !== "message") return update;
+    const addressed = voiceAddressesBot(update.message, dependencies.botUsername);
     // Whether this voice is transcribed depends on where it was said; see `telegram-voice-authorization.ts`.
-    const authorized = await dependencies.authorizeVoice(update.message, {
-      addressed: voiceAddressesBot(update.message, dependencies.botUsername),
-    });
+    const authorized = await dependencies.authorizeVoice(update.message, { addressed });
     signal.throwIfAborted();
     if (!authorized) return update;
     if (!claim.transcript) {
       await dependencies.repository.beginVoiceTranscription(claim.updateId, claim.leaseToken);
       signal.throwIfAborted();
     }
-    const transcript = claim.transcript ??
-      (await dependencies.transcribeVoice({ ...claim.voice, signal })).trim();
-    signal.throwIfAborted();
-    if (!transcript) {
-      throw new AppError(
-        "AGENT_VOICE_TRANSCRIPT_EMPTY",
-        "В голосовом сообщении не удалось распознать речь. Запишите его ещё раз",
-      );
+    let transcript: string;
+    try {
+      transcript = claim.transcript ?? await readVoiceTranscript(claim.voice, signal);
+    } catch (error) {
+      // A voice note spoken to the agent needs its words, and the person must learn they were lost.
+      // A video note, often silent, and a voice the agent only overheard stay in the conversation as
+      // their placeholder line: a silent clip or a provider failure must not drop the message.
+      if (signal.aborted || (addressed && Object.hasOwn(update.message.raw, "voice"))) throw error;
+      console.warn(JSON.stringify({
+        code: "AGENT_VOICE_TRANSCRIPT_SKIPPED",
+        cause: isAppError(error) ? error.code : error instanceof Error ? error.message : String(error),
+        updateId: claim.updateId,
+      }));
+      return update;
     }
     if (!claim.transcript) {
       await dependencies.repository.saveVoiceTranscript(claim.updateId, claim.leaseToken, transcript);
@@ -458,14 +478,11 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
     context: RouteContext & { readonly raw: JsonObject; readonly update: TelegramUpdate },
   ): Promise<Response> {
     const incomingUpdateId = updateId(context.raw);
-    const mediaKind = context.update.kind === "message"
-      ? classifyTelegramInboundMedia(context.update.message)
-      : "none";
     // Media of a channel or an unregistered chat is acknowledged before durable storage, download,
     // transcription or dispatch; a registered group and a private chat take in everything.
     if (
       context.update.kind === "message" &&
-      mediaKind !== "none" &&
+      hasTelegramInboundMedia(context.update.message) &&
       !await dependencies.acceptMedia(context.update.message, incomingUpdateId)
     ) {
       return new Response("ok");

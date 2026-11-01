@@ -82,9 +82,12 @@ describe("manage_external_group_schedule", () => {
       userRequest: "Каждый понедельник присылай HTML-выжимку обсуждения за неделю",
     } as const;
     dependencies.create.mockResolvedValue({ id: "schedule-1", scope: "group" });
-    // A file the run shows goes out with its answer: the old file-sending grant is not offered.
-    expect((manageExternalGroupSchedule.inputSchema as z.ZodType).safeParse({ ...input, capabilityAllowlist: ["send_workspace_file"] }).success)
-      .toBe(false);
+    // A file the run shows goes out with its answer, and images are open to every run: neither old
+    // grant is offered.
+    for (const capability of ["send_workspace_file", "inspect_workspace_image"]) {
+      expect((manageExternalGroupSchedule.inputSchema as z.ZodType).safeParse({ ...input, capabilityAllowlist: [capability] }).success)
+        .toBe(false);
+    }
 
     expect(await approvalFor(input))
       .toBe("user-approval");

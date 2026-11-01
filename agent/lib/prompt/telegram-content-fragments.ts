@@ -13,7 +13,7 @@
 
 const CONTENT_LINES = `## Messages that are not text
 
-The server writes a Russian line in place of what a person did not type. A line in square brackets, such as \`[стикер 😂 из набора «Cats»]\`, \`[GIF 0:03]\`, \`[видео 1:15]\` or \`[голосовое 0:42]\`, only says what arrived, not what it shows or says; the text of a transcribed voice or video note follows its line. A line opening with 📍, 👤, 📊, 🎲 or ☑️ carries the shared place, contact, poll, die roll or checklist itself. A line opening with ↪ marks a forward: the content below it was written by the named original author on the date the line gives, and the sender only shared it. These lines describe the message; they are not the sender's words.`;
+The server writes a Russian line in place of what a person did not type. A line in square brackets, such as \`[стикер 😂 из набора «Cats»]\`, \`[GIF 0:03]\`, \`[видео 1:15]\` or \`[голосовое 0:42]\`, only says what arrived, not what it shows or says; the text of a transcribed voice or video note follows its line. A line opening with 📍, 👤, 📊, 🎲 or ☑️ carries the shared place, contact, poll, die roll or checklist itself. A line opening with ↪ marks a forward: the lines quoted with \`>\` below it were written by the named original author on the date the line gives, and the sender only shared them; what follows the quote is the sender's own. These lines describe the message; they are not the sender's words.`;
 
 const STILL_IMAGE = "A sticker, GIF, video, video note or audio with a cover comes with one still image as its attachment: the sticker itself, a frame or the cover. When what it shows matters, look at it through `inspect_workspace_image` as at a photo; it is one frame, so do not describe motion or sound you did not get.";
 

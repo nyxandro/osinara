@@ -15,6 +15,7 @@ import { z } from "zod";
 
 const loadCurrentExternalGroupCapabilities = vi.hoisted(() => vi.fn());
 const authorizeCurrentExternalGroupCapability = vi.hoisted(() => vi.fn());
+const materializeTelegramAttachment = vi.hoisted(() => vi.fn());
 
 // These cases exercise image inspection, so they state a vision model rather than inheriting the
 // checked-in provider config.
@@ -26,6 +27,8 @@ vi.mock("./external-group-live-policy.js", () => ({
   loadCurrentExternalGroupCapabilities,
   authorizeCurrentExternalGroupCapability,
 }));
+
+vi.mock("../attachments/telegram-attachment-materializer.js", () => ({ materializeTelegramAttachment }));
 
 import { FAMILY_ONLY_TOOL_NAMES, PRIVATE_ONLY_TOOL_NAMES, TRUSTED_MODE_TOOL_NAMES, buildModeToolSurface, buildSubagentToolSurface } from "./mode-tool-surface.js";
 import { agentTool } from "../../runtime/tools/delegate.js";
@@ -392,11 +395,20 @@ describe("external group tool surface", () => {
   it("imports an attachment without consulting the group's grants", async () => {
     const surface = buildModeToolSurface({ capabilities: new Set(), environment: "external" });
 
+    materializeTelegramAttachment.mockResolvedValueOnce({ mediaType: "text/plain", path: "inbox/42/notes.txt", scope: "group", telegramMessageId: "42" });
+
+    const auth = externalAuth([]);
+    const groupAuth = { ...auth, current: { ...auth.current!, attributes: { ...auth.current!.attributes, telegramChatType: "supergroup" } } };
+
     // The import itself authorizes the group scope and the reference live; a grant is not asked for.
-    await surface.import_telegram_attachment!.execute(
+    await expect(surface.import_telegram_attachment!.execute(
       { attachmentId: "00000000-0000-4000-8000-000000000099" },
-      { session: { auth: externalAuth([]) } } as never,
-    ).catch(() => undefined);
+      { session: { auth: groupAuth } } as never,
+    )).resolves.toMatchObject({ path: "/workspace/group/inbox/42/notes.txt" });
+    expect(materializeTelegramAttachment).toHaveBeenCalledWith(
+      expect.objectContaining({ groupId: "group-1", groupType: "external" }),
+      "00000000-0000-4000-8000-000000000099",
+    );
     expect(loadCurrentExternalGroupCapabilities).not.toHaveBeenCalled();
   });
 

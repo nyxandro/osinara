@@ -6,6 +6,7 @@
  *   poll, a die, a checklist, a sticker, a GIF, a video, a video note, a voice note, audio, a story
  *   and the rare kinds — with what Telegram sent and never a file identifier.
  * - `telegramMessageContextNote`: who a message was forwarded from, a reply to another chat or to a story.
+ * - `telegramMessageDisplay`: a forward's content is quoted; other notes and the sender's words are not.
  * - `isTelegramMediaPlaceholderOnly`: a message that is only a media placeholder carries no words.
  * - Property: every valid content message is described in full, on one line, without a file identifier.
  */
@@ -16,6 +17,7 @@ import {
   isTelegramMediaPlaceholderOnly,
   telegramContentDescription,
   telegramMessageContextNote,
+  telegramMessageDisplay,
 } from "./telegram-content-description.js";
 
 // The message from production, 31.10.2026: the agent answered that an empty message had arrived.
@@ -147,6 +149,24 @@ describe("telegramMessageContextNote", () => {
 
   it("says nothing for an ordinary message", () => {
     expect(telegramMessageContextNote({ text: "привет" })).toBeNull();
+  });
+});
+
+describe("telegramMessageDisplay", () => {
+  const forward = { date: 1_793_000_000, sender_user: { first_name: "Иван", id: 1, is_bot: false }, type: "user" };
+
+  it("quotes every line a forward carries, so words written after it stay the sender's", () => {
+    expect(telegramMessageDisplay({ forward_origin: forward }, "Встреча в пятницу\nв 15:00"))
+      .toBe("↪ Переслано от Иван, 2026-10-26\n> Встреча в пятницу\n> в 15:00");
+    expect(telegramMessageDisplay({ forward_origin: forward, ...VENUE_31_10 }, null))
+      .toBe("↪ Переслано от Иван, 2026-10-26\n> 📍 Место «Чашка», Ленина Ул., д. 12 (food/coffeeshop) — 52.424577, 37.608176");
+  });
+
+  it("leaves the sender's own words of a reply to another chat unquoted", () => {
+    expect(telegramMessageDisplay({ reply_to_story: { chat: { id: 1, type: "private" }, id: 3 } }, "класс"))
+      .toBe("↩ Ответ на историю\nкласс");
+    expect(telegramMessageDisplay({ sticker: { emoji: "😂" } }, null)).toBe("[стикер 😂]");
+    expect(telegramMessageDisplay({}, "привет")).toBe("привет");
   });
 });
 

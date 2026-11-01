@@ -198,7 +198,9 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
 
     // Owner-only external groups retain everyone's timeline but dispatch solely for the current
     // persisted Osinara owner; Telegram administrator status never grants application authority.
+    // A passive message never dispatches, so its media goes on to be kept like anyone's.
     if (
+      addressed &&
       group?.messageMode === "owner_only" &&
       (
         identity?.familyId !== group.familyId ||

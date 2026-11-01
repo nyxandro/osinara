@@ -29,7 +29,6 @@ const BASELINE_TOOL_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 export const OFFERED_EXTERNAL_SCHEDULE_CAPABILITIES = [
-  "inspect_workspace_image",
   "list_memories",
   "list_memory_threads",
   "read_memory_thread",
@@ -38,9 +37,11 @@ export const OFFERED_EXTERNAL_SCHEDULE_CAPABILITIES = [
   "web_fetch",
 ] as const satisfies readonly ExternalGroupToolName[];
 
-// A persisted automation may still list the file-sending grant of a past release; it grants nothing.
+// A persisted automation may still list grants of past releases that are now baseline, file sending
+// (v0.54.0) and image inspection (01.11.2026); they grant nothing.
 export const EXTERNAL_SCHEDULE_CAPABILITIES = [
   ...OFFERED_EXTERNAL_SCHEDULE_CAPABILITIES,
+  "inspect_workspace_image",
   "send_workspace_file",
 ] as const satisfies readonly ExternalGroupToolName[];
 

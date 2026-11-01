@@ -8,6 +8,9 @@
  *   which reach the model by their own route.
  * - `telegramMessageContextNote`: who a message was forwarded from, a reply to another chat or to a
  *   story, or `null`.
+ * - `telegramMessageDisplay`: the note, the description and the words of one message, as the model
+ *   reads them.
+ * - `TELEGRAM_DESCRIBED_FIELDS`: the message fields the note and the description are read from.
  * - `isTelegramMediaPlaceholderOnly`: whether a text is nothing but media placeholders.
  *
  * Key constructs:
@@ -17,6 +20,8 @@
  *   a contact or a poll carries its content and gets a marker instead.
  * - Every field a participant typed is folded to one line and bounded, and no file identifier is
  *   ever printed: the description is data for the model, never a handle on the file.
+ * - A forward's content is quoted line by line: in a private burst the sender's own next message
+ *   follows it in the same text, and the quote is where the original author's words end.
  */
 
 const FIELD_MAX_LENGTH = 200;
@@ -172,6 +177,13 @@ const DESCRIBERS: readonly (readonly [string, (raw: Raw) => string])[] = [
   ["live_photo", () => "[живое фото]"],
 ];
 
+const CONTEXT_FIELDS = ["forward_origin", "external_reply", "reply_to_story"] as const;
+
+export const TELEGRAM_DESCRIBED_FIELDS: readonly string[] = [
+  ...DESCRIBERS.map(([field]) => field),
+  ...CONTEXT_FIELDS,
+];
+
 export function telegramContentDescription(raw: Raw): string | null {
   for (const [field, describe] of DESCRIBERS) {
     const value = record(raw[field]);
@@ -215,6 +227,14 @@ export function telegramMessageContextNote(raw: Raw): string | null {
   }
   if (record(raw.reply_to_story) !== null) return "↩ Ответ на историю";
   return null;
+}
+
+export function telegramMessageDisplay(raw: Raw, words: string | null): string {
+  const note = telegramMessageContextNote(raw);
+  const body = [telegramContentDescription(raw), words].filter(Boolean).join("\n");
+  if (note === null || !body) return note ?? body;
+  if (record(raw.forward_origin) === null) return `${note}\n${body}`;
+  return `${note}\n${body.split("\n").map((line) => `> ${line}`).join("\n")}`;
 }
 
 export function isTelegramMediaPlaceholderOnly(value: string): boolean {

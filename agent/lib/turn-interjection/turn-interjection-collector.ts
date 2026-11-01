@@ -24,7 +24,7 @@ import type { TelegramVoiceFile } from "../groq-voice-transcription.js";
 import { groupCanonicalContinuationToken } from "../sessions/group-canonical-token.js";
 import { telegramDisplayText, telegramForumTopicId, telegramInboundText } from "../telegram-group-message-storage.js";
 import {
-  classifyTelegramInboundMedia,
+  hasTelegramInboundMedia,
   isMessageAddressedToBot,
   isSpokenTelegramMessage,
   isTelegramSlashCommand,
@@ -182,7 +182,7 @@ async function plan(candidate: TurnInterjectionCandidate, collection: Collection
     };
   }
 
-  if (classifyTelegramInboundMedia(message) !== "none") {
+  if (hasTelegramInboundMedia(message)) {
     return {
       contentKind: "notice",
       entry: {
