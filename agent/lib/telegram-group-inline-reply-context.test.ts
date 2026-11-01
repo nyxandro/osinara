@@ -7,7 +7,6 @@ import { createTelegramGroupTurnContextPreparer, currentTelegramMessageText } fr
 
 const input = {
   applicationSessionId: "session-1",
-  attachmentReferenceAccess: "all" as const,
   currentEntryId: "entry-100",
   currentSenderDisplayName: "Максим Функ",
   currentSenderUsername: "WangW19",

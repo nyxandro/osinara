@@ -25,6 +25,7 @@ import { z } from "zod";
 
 import { AppError } from "../app-error.js";
 import { GIF_REPLIES_AVAILABLE } from "../gifs/gif-reply-availability.js";
+import { MODEL_VISION_AVAILABLE } from "../model-vision-availability.js";
 import { wrapModelFacingToolMap } from "../model-facing-tool.js";
 import { externalGroupLoadSkillTool } from "../group-skills/group-load-skill-tool.js";
 import { MEMORY_LIST_DEFAULT_LIMIT, MEMORY_LIST_MAX_LIMIT, THREAD_HISTORY_PAGE_MAX_ENTRIES } from "../memory-config.js";
@@ -62,7 +63,6 @@ import { EXTERNAL_GROUP_REMINDER_TOOLS } from "./external-group-reminder-tools.j
 import { scheduledExternalTool } from "./scheduled-external-tool.js";
 import { SUBAGENT_TOOL_NAMES } from "./subagent-tool-names.js";
 import { withTurnInterjectionSurface } from "../turn-interjection/turn-interjection-surface.js";
-import { servableExternalGroupCapabilities } from "./grantable-group-capabilities.js";
 import { BASELINE_EXTERNAL_GROUP_GRANTS, isExternalGroupToolName, type ExternalGroupToolName } from "./group-tool-catalog.js";
 import {
   FAMILY_ONLY_TOOLS,
@@ -210,6 +210,14 @@ function allowedDirectTool(capability: DirectExternalToolName, definition: AnyTo
   });
 }
 
+/**
+ * A baseline tool in its group presentation. It needs no grant check: each one authorizes the group
+ * scope and the referenced message live by itself.
+ */
+function externalContentTool(capability: "import_telegram_attachment" | "inspect_workspace_image"): AnyToolDefinition {
+  return defineTool({ ...EXTERNAL_DIRECT_TOOLS[capability], ...EXTERNAL_DIRECT_TOOL_PRESENTATION[capability] });
+}
+
 function allowedMemoryTool(actions: readonly ManageMemoryAction[]): AnyToolDefinition {
   const definition = manageMemory as unknown as AnyToolDefinition;
   return defineTool({
@@ -271,6 +279,9 @@ function buildExternalToolSurface(
     surface.get_current_time = getCurrentTime as AnyToolDefinition;
     surface.todo = todo as AnyToolDefinition;
     surface.read_profile_view = readProfileView as unknown as AnyToolDefinition;
+    // What participants send is visible in every group: no grant, only a model that sees images.
+    surface.import_telegram_attachment = externalContentTool("import_telegram_attachment");
+    if (MODEL_VISION_AVAILABLE) surface.inspect_workspace_image = externalContentTool("inspect_workspace_image");
     if (!scheduledRun) {
       surface.manage_behavior_preference = manageBehaviorPreference as unknown as AnyToolDefinition;
       // A GIF answers a live participant, so it needs no grant but never runs in a background run.
@@ -382,10 +393,9 @@ export function buildModeToolSurface(input: ModeToolSurfaceInput): ToolMap {
   }
 
   // A malformed allowlist value means the trusted snapshot is corrupt, so deny every capability.
-  // A grant the active runtime cannot serve gives no descriptor.
   const allowed = [...input.capabilities].some((name) => !isExternalGroupToolName(name))
     ? new Set<ExternalGroupToolName>()
-    : servableExternalGroupCapabilities(input.capabilities);
+    : input.capabilities;
   const includeApplicationCore = input.includeApplicationCore !== false;
   const scheduledHistory = input.scheduledHistory === true;
   const scheduledRun = input.scheduledRun === true || scheduledHistory;

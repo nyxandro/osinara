@@ -121,6 +121,8 @@ describe("dynamic capability resolver", () => {
         ...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES,
         "load_skill",
         "agent",
+        // Attachments are baseline access; image inspection needs a model that sees images.
+        "import_telegram_attachment",
         "list_reminders",
         "manage_behavior_preference",
         "manage_reminder",

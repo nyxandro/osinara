@@ -1,20 +1,15 @@
 /**
- * External group grant-surface tests for a runtime whose model does not see images.
+ * External group grant-surface tests.
  *
  * Constructs covered:
- * - A capability the runtime cannot serve is removed from the grant surface.
+ * - Seeing what participants send is no grant: images and attachments are baseline access of every
+ *   external group, so the owner is offered neither, whatever model is active.
  * - Persisted grants stay parseable so a stale row never invalidates the surrounding policy.
  * - Status selection splits a persisted allowlist into round-trippable and inert entries.
- * - A persisted grant that became baseline access (page reading, sending a group file) still parses
- *   and is neither offered nor reported as unavailable.
+ * - A persisted grant that became baseline access (page reading, sending a group file, images,
+ *   attachments) still parses and is neither offered nor reported as unavailable.
  */
-import { describe, expect, it, vi } from "vitest";
-
-// The premise is stated rather than inherited from the checked-in provider config, so switching the
-// repository default cannot silently turn this suite into an assertion about the opposite runtime.
-vi.mock("../model-vision-availability.js", () => ({
-  MODEL_VISION_AVAILABLE: false,
-}));
+import { describe, expect, it } from "vitest";
 
 import {
   GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES,
@@ -24,50 +19,33 @@ import {
 import {
   BASELINE_EXTERNAL_GROUP_GRANTS,
   EXTERNAL_GROUP_TOOL_NAMES,
-  externalGroupCapabilityRequirement,
   parseExternalGroupToolAllowlist,
 } from "./group-tool-catalog.js";
 
-describe("grantable external group capabilities without an image-capable model", () => {
-  it("removes image inspection from the grant surface", () => {
-    expect(GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES).not.toContain("inspect_workspace_image");
-    expect(isGrantableExternalGroupToolName("inspect_workspace_image")).toBe(false);
+describe("grantable external group capabilities", () => {
+  it("offers no grant for seeing images and attachments: every group has both", () => {
+    for (const name of ["inspect_workspace_image", "import_telegram_attachment"] as const) {
+      expect(BASELINE_EXTERNAL_GROUP_GRANTS.has(name), name).toBe(true);
+      expect(GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES, name).not.toContain(name);
+      expect(isGrantableExternalGroupToolName(name), name).toBe(false);
+    }
     expect(isGrantableExternalGroupToolName("search_memories")).toBe(true);
   });
 
-  it("keeps every other catalog capability grantable", () => {
+  it("offers every catalog capability that is not baseline access", () => {
     expect([...GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES]).toEqual(
-      EXTERNAL_GROUP_TOOL_NAMES.filter((name) =>
-        !BASELINE_EXTERNAL_GROUP_GRANTS.has(name) && externalGroupCapabilityRequirement(name) !== "vision"
-      ),
+      EXTERNAL_GROUP_TOOL_NAMES.filter((name) => !BASELINE_EXTERNAL_GROUP_GRANTS.has(name)),
     );
     expect(GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES.length).toBeGreaterThan(0);
   });
 
-  it("keeps a persisted file-sending grant parseable without offering or reporting it", () => {
-    // Every live external group holds it: an unknown name would invalidate their whole policies.
-    expect(parseExternalGroupToolAllowlist(["send_workspace_file", "remember"]))
-      .toEqual(new Set(["send_workspace_file", "remember"]));
+  it("keeps persisted baseline grants parseable without offering or reporting them", () => {
+    // Live external groups hold them: an unknown name would invalidate their whole policies.
+    const persisted = ["send_workspace_file", "inspect_workspace_image", "import_telegram_attachment", "remember"];
+    expect(parseExternalGroupToolAllowlist(persisted)).toEqual(new Set(persisted));
     expect(isGrantableExternalGroupToolName("send_workspace_file")).toBe(false);
-    expect(selectGrantableExternalGroupTools(["send_workspace_file", "remember"]))
+    expect(selectGrantableExternalGroupTools([...persisted, "web_fetch"]))
       .toEqual({ effective: ["remember"], unavailable: [] });
-  });
-
-  it("still parses a grant persisted under a model that saw images", () => {
-    // Dropping the whole policy would silently revoke unrelated capabilities of a live group.
-    expect(parseExternalGroupToolAllowlist(["inspect_workspace_image", "remember"]))
-      .toEqual(new Set(["inspect_workspace_image", "remember"]));
-  });
-
-  it("splits a persisted allowlist into effective and inert grants", () => {
-    expect(selectGrantableExternalGroupTools(["remember", "inspect_workspace_image", "web_fetch"])).toEqual({
-      effective: ["remember"],
-      unavailable: ["inspect_workspace_image"],
-    });
-    expect(selectGrantableExternalGroupTools(["remember"])).toEqual({
-      effective: ["remember"],
-      unavailable: [],
-    });
   });
 
   it("reports an unrecognized persisted name instead of trimming it away", () => {

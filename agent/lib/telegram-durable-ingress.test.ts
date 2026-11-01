@@ -385,7 +385,7 @@ describe("createTelegramDurableIngress", () => {
 
     expect(response.status).toBe(200);
     if (update.kind !== "message") throw new Error("TEST_EXPECTED_MESSAGE");
-    expect(acceptMedia).toHaveBeenCalledWith(update.message, "1001", "unsupported_media");
+    expect(acceptMedia).toHaveBeenCalledWith(update.message, "1001");
     expect(storage.value.enqueue).not.toHaveBeenCalled();
     expect(dependencies.transcribeVoice).not.toHaveBeenCalled();
     expect(dependencies.dispatch).not.toHaveBeenCalled();

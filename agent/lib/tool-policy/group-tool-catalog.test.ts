@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES,
+  BASELINE_EXTERNAL_GROUP_GRANTS,
   EXTERNAL_GROUP_CAPABILITY_CATALOG,
   EXTERNAL_GROUP_TOOL_NAMES,
   EXTERNAL_GROUP_BASE_TOOLS,
@@ -29,8 +30,12 @@ describe("external group tool catalog", () => {
     expect(EXTERNAL_GROUP_TOOL_NAMES).not.toContain("inspect_workspace_pdf");
   });
 
-  it("offers explicit Telegram attachment import as its own grant", () => {
-    expect(EXTERNAL_GROUP_TOOL_NAMES).toContain("import_telegram_attachment");
+  it("still parses the former image and attachment grants as baseline access", () => {
+    // Groups registered before 01.11.2026 hold them; an unknown name would invalidate their policies.
+    for (const name of ["import_telegram_attachment", "inspect_workspace_image"] as const) {
+      expect(EXTERNAL_GROUP_TOOL_NAMES).toContain(name);
+      expect(BASELINE_EXTERNAL_GROUP_GRANTS.has(name)).toBe(true);
+    }
   });
 
   it("names every persisted and always-available capability exactly once", () => {

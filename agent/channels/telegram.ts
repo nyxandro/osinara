@@ -466,11 +466,10 @@ const authorizeTelegramVoice = createTelegramVoiceAuthorizer(telegramRepository)
 export function createTelegramIngress(runtime: Pick<DurableIngressDependencies, "dispatch" | "processConversationWakeup" | "runTurn">) {
   return createTelegramDurableIngress({
     ...runtime,
-    acceptMedia(message, incomingUpdateId, mediaKind) {
+    acceptMedia(message, incomingUpdateId) {
       return telegramIngressRepository.acceptMedia({
         chatId: message.chat.id,
         chatType: message.chat.type,
-        mediaKind,
         updateId: incomingUpdateId,
       });
     },

@@ -8,7 +8,6 @@ import type { PoolClient } from "pg";
 
 import { TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED } from "../config.js";
 import { AppError } from "./app-error.js";
-import { parseServableExternalGroupToolAllowlist } from "./tool-policy/grantable-group-capabilities.js";
 import { database } from "./database.js";
 import {
   requireFailure,
@@ -109,32 +108,15 @@ export const telegramIngressRepository: TelegramIngressRepository = {
         "SELECT pg_advisory_xact_lock(hashtextextended($1, $2))",
         [input.chatId, TELEGRAM_GROUP_TRUST_LOCK_HASH_SEED],
       );
-      const group = await client.query<{ tool_allowlist: string[]; type: string }>(
-        `SELECT type::text, tool_allowlist
+      const group = await client.query<{ type: string }>(
+        `SELECT type::text
          FROM telegram_groups
          WHERE telegram_chat_id = $1
          FOR SHARE`,
         [input.chatId],
       );
-      const policy = group.rows[0];
-      const externalAllowlist = parseServableExternalGroupToolAllowlist(policy?.tool_allowlist);
-      if (policy?.type === "family_private") {
-        await client.query("COMMIT");
-        return true;
-      }
-      if (
-        policy?.type === "external" &&
-        input.mediaKind === "text_document_candidate" &&
-        externalAllowlist?.has("import_telegram_attachment") === true
-      ) {
-        await client.query("COMMIT");
-        return true;
-      }
-      if (
-        policy?.type === "external" &&
-          (input.mediaKind === "native_photo" || input.mediaKind === "image_document_candidate") &&
-        externalAllowlist?.has("inspect_workspace_image") === true
-      ) {
+      // A registered group takes in whatever its participants send; no grant decides what it sees.
+      if (group.rows[0]?.type === "family_private" || group.rows[0]?.type === "external") {
         await client.query("COMMIT");
         return true;
       }

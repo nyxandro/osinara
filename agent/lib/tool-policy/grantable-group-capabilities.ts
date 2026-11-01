@@ -2,81 +2,31 @@
  * Owner-facing grant surface for external Telegram group capabilities.
  *
  * Exports:
- * - `isServableExternalGroupCapability`, `servableExternalGroupCapabilities`,
- *   `parseServableExternalGroupToolAllowlist`: what the active runtime can actually serve out of a
- *   persisted grant.
- * - `unservableCapabilityReason`: the owner-facing reason a capability cannot work right now.
- * - `GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES`: capabilities the owner can actually grant right now.
+ * - `GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES`: capabilities the owner can actually grant.
  * - `isGrantableExternalGroupToolName`: exact guard for model-provided allowlist items.
  * - `selectGrantableExternalGroupTools`: splits a persisted allowlist into effective and inert.
  *
  * Key constructs:
- * - Runtime-coupled capabilities disappear from the grant contract instead of being granted inert.
+ * - Baseline access is never offered as a grant; a persisted one stays parseable and inert.
  * - Persisted parsing stays in `group-tool-catalog.ts` so a stale grant never corrupts a policy.
  */
-import { MODEL_VISION_AVAILABLE } from "../model-vision-availability.js";
 import {
   BASELINE_EXTERNAL_GROUP_GRANTS,
   EXTERNAL_GROUP_CAPABILITY_CATALOG,
-  externalGroupCapabilityRequirement,
   isExternalGroupToolName,
-  parseExternalGroupToolAllowlist,
-  type ExternalGroupCapabilityRequirement,
   type ExternalGroupToolName,
 } from "./group-tool-catalog.js";
 
-// The flag comes from the validated runtime config, which cannot change without a process restart.
-const REQUIREMENT_SATISFIED: Readonly<Record<ExternalGroupCapabilityRequirement, boolean>> = {
-  vision: MODEL_VISION_AVAILABLE,
-};
-
-export function isServableExternalGroupCapability(name: ExternalGroupToolName): boolean {
-  const requirement = externalGroupCapabilityRequirement(name);
-  return requirement === null || REQUIREMENT_SATISFIED[requirement];
-}
-
-const UNSERVABLE_REASONS: Readonly<Record<ExternalGroupCapabilityRequirement, string>> = {
-  vision: "подключённая модель агента не видит изображения",
-};
-
-/** Why a catalog capability cannot work in this runtime, or `null` when it can. */
-export function unservableCapabilityReason(name: ExternalGroupToolName): string | null {
-  const requirement = externalGroupCapabilityRequirement(name);
-  return requirement === null || REQUIREMENT_SATISFIED[requirement] ? null : UNSERVABLE_REASONS[requirement];
-}
-
 /**
- * A grant persisted under a runtime that could serve it stays in PostgreSQL, but it must give the
- * current turn no descriptor, guidance, intake or execution right.
- */
-export function servableExternalGroupCapabilities(
-  allowed: ReadonlySet<ExternalGroupToolName>,
-): ReadonlySet<ExternalGroupToolName> {
-  return new Set([...allowed].filter(isServableExternalGroupCapability));
-}
-
-/** A persisted allowlist as the current runtime can serve it; `null` still marks a corrupt policy. */
-export function parseServableExternalGroupToolAllowlist(
-  value: unknown,
-): ReadonlySet<ExternalGroupToolName> | null {
-  const allowed = parseExternalGroupToolAllowlist(value);
-  return allowed === null ? null : servableExternalGroupCapabilities(allowed);
-}
-
-function isGrantableCapability(name: ExternalGroupToolName): boolean {
-  return !BASELINE_EXTERNAL_GROUP_GRANTS.has(name) && isServableExternalGroupCapability(name);
-}
-
-/**
- * Non-empty tuple shape keeps the derived list usable as a Zod enum while the runtime filter keeps
- * the model contract honest: a capability absent here has no descriptor the owner could target.
+ * Non-empty tuple shape keeps the derived list usable as a Zod enum while the filter keeps the model
+ * contract honest: a capability absent here has no descriptor the owner could target.
  */
 export const GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES: readonly [
   ExternalGroupToolName,
   ...ExternalGroupToolName[],
 ] = EXTERNAL_GROUP_CAPABILITY_CATALOG
   .map(({ name }) => name)
-  .filter(isGrantableCapability) as [ExternalGroupToolName, ...ExternalGroupToolName[]];
+  .filter((name) => !BASELINE_EXTERNAL_GROUP_GRANTS.has(name)) as [ExternalGroupToolName, ...ExternalGroupToolName[]];
 
 export function isGrantableExternalGroupToolName(
   value: string,
@@ -85,16 +35,14 @@ export function isGrantableExternalGroupToolName(
 }
 
 export interface GrantableExternalGroupToolSelection {
-  /** Persisted grants that the current runtime can still honour and the owner can re-submit. */
+  /** Persisted grants the owner can re-submit. */
   readonly effective: readonly ExternalGroupToolName[];
-  /** Persisted entries that grant nothing now: runtime-gated capabilities and unknown names. */
+  /** Persisted entries that grant nothing: unknown names. */
   readonly unavailable: readonly string[];
 }
 
 /**
- * A grant persisted under a previous runtime stays in PostgreSQL but must never be presented as an
- * active right, otherwise the owner-facing status would invite a policy update that fails closed.
- * An unrecognized persisted name is reported too rather than hidden: `parseExternalGroupToolAllowlist`
+ * An unrecognized persisted name is reported rather than hidden: `parseExternalGroupToolAllowlist`
  * treats it as corruption of the whole policy, so a silently trimmed status would look healthy while
  * the group is actually denied every capability.
  */

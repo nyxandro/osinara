@@ -29,9 +29,12 @@ const REMINDER_PURPOSE =
 const ALWAYS_AVAILABLE_PURPOSE =
   "go through the available materials and conversation of this chat, make summaries, outcomes, lists and tables, create text and Markdown files in the group's working folder and send its files to the chat";
 
+// Whatever participants send is open to every group, so these lines follow only the runtime.
+const ATTACHMENT_PURPOSE = "open the files participants send to this chat and work with them";
+const IMAGE_PURPOSE = "examine the images participants send to this chat and their avatars";
+
 // Catalog order keeps the rendered list deterministic for prompt caching.
 const CAPABILITY_PURPOSES: readonly (readonly [ExternalGroupToolName, string])[] = [
-  ["import_telegram_attachment", "read text files from this chat's messages"],
   ["bash", "run commands and prepare files in this group's separate environment"],
   ["search_memories", "recall and find what has already been discussed in this group"],
   ["list_memories", "list what is saved in this group's memory"],
@@ -40,18 +43,19 @@ const CAPABILITY_PURPOSES: readonly (readonly [ExternalGroupToolName, string])[]
   ["manage_memory.delete", "delete a previously saved record"],
   ["manage_memory.undo", "cancel a record just made"],
   ["list_group_history", "bring up earlier conversation of this group"],
-  ["inspect_workspace_image", "examine an image sent to the chat"],
   ["send_voice_message", "answer with a voice message when a participant directly asks for it"],
   ["remove_group_file", "delete a file from this group's working folder"],
 ];
 
 export function externalPurposeSection(
   capabilities: ReadonlySet<ExternalGroupToolName>,
-  options: { reminders: boolean; web?: boolean },
+  options: { images: boolean; reminders: boolean; web?: boolean },
 ): string {
   const purposes = [
     ALWAYS_AVAILABLE_PURPOSE,
     ...(options.web ? ["search the internet for public facts and ready-made material, check sources and read pages by links"] : []),
+    ...(options.web ? [ATTACHMENT_PURPOSE] : []),
+    ...(options.images ? [IMAGE_PURPOSE] : []),
     ...(options.reminders ? [REMINDER_PURPOSE] : []),
     ...CAPABILITY_PURPOSES
       .filter(([capability]) => capabilities.has(capability))

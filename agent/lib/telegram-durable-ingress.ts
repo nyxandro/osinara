@@ -43,7 +43,6 @@ import { waitForHeldPrivateChat } from "./telegram-private-burst.js";
 import {
   classifyTelegramInboundMedia,
   isMessageAddressedToBot,
-  type TelegramInboundMediaKind,
 } from "./telegram-message-policy.js";
 import { telegramIngressControl } from "./telegram-ingress-dispatch.js";
 import { combineTelegramMediaGroup } from "./telegram-media-group.js";
@@ -70,11 +69,7 @@ const telegramVoiceSchema = z.object({
 
 export interface DurableIngressDependencies {
   reportFailure: typeof recordOperationalIncident;
-  acceptMedia(
-    message: Pick<TelegramMessage, "chat">,
-    updateId: string,
-    mediaKind: Exclude<TelegramInboundMediaKind, "none">,
-  ): Promise<boolean>;
+  acceptMedia(message: Pick<TelegramMessage, "chat">, updateId: string): Promise<boolean>;
   authorizeVoice(message: Pick<TelegramMessage, "chat" | "from">): Promise<boolean>;
   botUsername: string;
   /** The runtime's Telegram dispatch: the update's turn, created with the update's binding. */
@@ -453,11 +448,12 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
     const mediaKind = context.update.kind === "message"
       ? classifyTelegramInboundMedia(context.update.message)
       : "none";
-    // External media is acknowledged before durable storage, download, transcription, or dispatch.
+    // Media of a channel or an unregistered chat is acknowledged before durable storage, download,
+    // transcription or dispatch; a registered group and a private chat take in everything.
     if (
       context.update.kind === "message" &&
       mediaKind !== "none" &&
-      !await dependencies.acceptMedia(context.update.message, incomingUpdateId, mediaKind)
+      !await dependencies.acceptMedia(context.update.message, incomingUpdateId)
     ) {
       return new Response("ok");
     }

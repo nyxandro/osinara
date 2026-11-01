@@ -271,12 +271,10 @@ describe("createTelegramMessageHandler", () => {
     expect(result?.context?.join("\n")).not.toContain("telegram-photo-1");
   });
 
-  it.each([
-    ["external", false],
-    ["family_private", true],
-  ] as const)(
-    "%s group %s an addressed inbound document",
-    async (groupType, shouldPersist) => {
+  // Seeing what participants send is no grant: an external group takes in a PDF like the family group.
+  it.each(["external", "family_private"] as const)(
+    "%s group records an addressed inbound document as a lazy reference",
+    async (groupType) => {
       const repository = repositories();
       repository.telegram.findGroup.mockResolvedValue({
         familyId: "family-1",
@@ -307,14 +305,14 @@ describe("createTelegramMessageHandler", () => {
       const result = await handler(telegramContext().context, message);
 
       expect(repository.attachments.persist).not.toHaveBeenCalled();
-      expect(repository.attachmentReferences.record).toHaveBeenCalledTimes(shouldPersist ? 1 : 0);
-      expect(repository.journal.record).toHaveBeenCalledTimes(shouldPersist ? 1 : 0);
-      expect(repository.session.prepareTurn).toHaveBeenCalledTimes(shouldPersist ? 1 : 0);
-      expect(result === null).toBe(!shouldPersist);
+      expect(repository.attachmentReferences.record).toHaveBeenCalledOnce();
+      expect(repository.journal.record).toHaveBeenCalledOnce();
+      expect(repository.session.prepareTurn).toHaveBeenCalledOnce();
+      expect(result).not.toBeNull();
     },
   );
 
-  it("records an allowlisted external text document as a lazy readable attachment", async () => {
+  it("records an external text document as a lazy readable attachment", async () => {
     const repository = repositories();
     repository.telegram.findGroup.mockResolvedValue({
       familyId: "family-1",
