@@ -4,7 +4,7 @@
  * Constructs covered:
  * - Only the proxy's token is accepted; any other caller is refused before the body is read.
  * - A valid batch is recorded as reported; a malformed one is refused with its code.
- * - Without the integration key the route says it is not configured instead of guessing.
+ * - Without the encryption key the route says it is not configured instead of guessing.
  */
 import { randomBytes } from "node:crypto";
 
@@ -34,7 +34,7 @@ function post(body: unknown, token?: string): Request {
 describe("API key usage route", () => {
   it("records a batch the proxy reports", async () => {
     const record = vi.fn().mockResolvedValue(1);
-    const route = createApiKeyUsageRoute({ integrationKey: () => KEY, record });
+    const route = createApiKeyUsageRoute({ encryptionKey: () => KEY, record });
 
     const response = await route.handle(post({ events: [EVENT] }, apiKeyUsageToken(KEY)), CONTEXT);
 
@@ -48,7 +48,7 @@ describe("API key usage route", () => {
     "refuses a caller with token %j",
     async (token) => {
       const record = vi.fn();
-      const route = createApiKeyUsageRoute({ integrationKey: () => KEY, record });
+      const route = createApiKeyUsageRoute({ encryptionKey: () => KEY, record });
 
       const response = await route.handle(post({ events: [EVENT] }, token), CONTEXT);
 
@@ -59,7 +59,7 @@ describe("API key usage route", () => {
 
   it("refuses a malformed batch with its code", async () => {
     const record = vi.fn();
-    const route = createApiKeyUsageRoute({ integrationKey: () => KEY, record });
+    const route = createApiKeyUsageRoute({ encryptionKey: () => KEY, record });
 
     const response = await route.handle(post({ events: [{ ...EVENT, id: "not-a-uuid" }] }, apiKeyUsageToken(KEY)), CONTEXT);
 
@@ -68,10 +68,10 @@ describe("API key usage route", () => {
     expect(record).not.toHaveBeenCalled();
   });
 
-  it("says it is not configured when the integration key is absent", async () => {
+  it("says it is not configured when the encryption key is absent", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const record = vi.fn();
-    const route = createApiKeyUsageRoute({ integrationKey: () => undefined, record });
+    const route = createApiKeyUsageRoute({ encryptionKey: () => undefined, record });
 
     const response = await route.handle(post({ events: [EVENT] }, "anything"), CONTEXT);
 

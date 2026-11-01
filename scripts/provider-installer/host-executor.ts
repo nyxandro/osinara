@@ -96,6 +96,7 @@ function buildEnvironment(input: InstallationExecutionInput): Buffer {
     ["OSINARA_DEPLOYMENT_PROFILE", DEPLOYMENT_PROFILE],
     ["POSTGRES_PASSWORD", input.internalSecrets.postgresPassword],
     ["PUBLIC_BASE_URL", `https://${input.hostname}`],
+    ["SANDBOX_API_KEY_ENCRYPTION_KEY", input.internalSecrets.sandboxApiKeyEncryptionKey],
     ["TELEGRAM_BOT_TOKEN", input.telegramBotToken],
     ["TELEGRAM_BOT_USERNAME", input.telegramBotUsername],
     ["TELEGRAM_WEBHOOK_SECRET_TOKEN", input.internalSecrets.telegramWebhookSecretToken],

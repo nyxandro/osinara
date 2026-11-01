@@ -56,6 +56,8 @@ export function generateInternalSecrets(
   const secrets: InternalSecrets = {
     invitationSigningSecret: generate("invitation-signing-secret"),
     postgresPassword: generate("postgres-password"),
+    // 32 random bytes in base64url, the form the API key encryption accepts as the key itself.
+    sandboxApiKeyEncryptionKey: generate("sandbox-api-key-encryption-key"),
     telegramWebhookSecretToken: generate("telegram-webhook-secret-token"),
   };
   const values = Object.values(secrets);

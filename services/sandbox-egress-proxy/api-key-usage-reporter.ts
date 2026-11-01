@@ -5,6 +5,8 @@
  * - `ApiKeyUsageRejected`: the agent refused a batch as malformed; sending it again cannot help.
  * - `createApiKeyUsageReporter`: buffers uses in memory and delivers them in batches.
  * - `createAgentUsageSender`: delivers one batch to the agent's internal usage route.
+ * - `agentUsageSenderFor`: that sender, or null with the reason logged when the encryption key is
+ *   missing or malformed; the proxy keeps serving all other egress either way.
  *
  * The proxy has no database. Each use gets its id when it happens, and a batch whose delivery
  * failed is sent again under the same ids, so the agent counts it once. A restart of the proxy
@@ -17,6 +19,7 @@ import {
   API_KEY_USAGE_ROUTE,
   type ApiKeyUsageEvent,
 } from "../../agent/lib/api-keys/api-key-contract.js";
+import { apiKeyUsageToken } from "../../agent/lib/api-keys/api-key-crypto.js";
 
 const SEND_TIMEOUT_MS = 10_000;
 const HTTP_BAD_REQUEST = 400;
@@ -116,4 +119,22 @@ export function createAgentUsageSender(input: {
       throw new Error(`AGENT_SANDBOX_API_KEY_USAGE_HTTP_FAILED: agent answered HTTP ${response.status}`);
     }
   };
+}
+
+export function agentUsageSenderFor(input: {
+  readonly agentBaseUrl: string;
+  readonly encryptionKey: string | undefined;
+}): ((events: ApiKeyUsageEvent[]) => Promise<void>) | null {
+  let token: string;
+  try {
+    token = apiKeyUsageToken(input.encryptionKey);
+  } catch (error) {
+    // A bad key must not stop the egress of every sandbox: the gateway refuses with its own code.
+    console.error(JSON.stringify({
+      code: "AGENT_SANDBOX_API_KEY_GATEWAY_UNCONFIGURED",
+      errorMessage: error instanceof Error ? error.message : String(error),
+    }));
+    return null;
+  }
+  return createAgentUsageSender({ agentBaseUrl: input.agentBaseUrl, token });
 }

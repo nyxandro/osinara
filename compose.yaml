@@ -37,6 +37,7 @@ services:
       MEMORY_EMBEDDING_BASE_URL: http://memory-embedding:80
       MODEL_API_KEY: ${MODEL_API_KEY:?MODEL_API_KEY is required}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL-}
+      SANDBOX_API_KEY_ENCRYPTION_KEY: ${SANDBOX_API_KEY_ENCRYPTION_KEY-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN is required}
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:?TELEGRAM_BOT_USERNAME is required}
       TELEGRAM_WEBHOOK_SECRET_TOKEN: ${TELEGRAM_WEBHOOK_SECRET_TOKEN:?TELEGRAM_WEBHOOK_SECRET_TOKEN is required}
@@ -114,9 +115,10 @@ services:
     cap_drop:
       - ALL
     environment:
-      # The API key gateway reports usage to the agent and reads key values with the integration key.
+      # The API key gateway reports usage to the agent and decrypts key values with their own key;
+      # the integration key that protects the Google tokens never reaches this container.
       AGENT_INTERNAL_BASE_URL: http://agent:3000
-      INTEGRATION_TOKEN_ENCRYPTION_KEY: ${INTEGRATION_TOKEN_ENCRYPTION_KEY-}
+      SANDBOX_API_KEY_ENCRYPTION_KEY: ${SANDBOX_API_KEY_ENCRYPTION_KEY-}
     healthcheck:
       test: ["CMD", "node", "-e", "require('node:net').connect(3128,'127.0.0.1').on('connect',function(){this.destroy();process.exit(0)}).on('error',()=>process.exit(1))"]
       interval: 5s

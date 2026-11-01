@@ -15,7 +15,7 @@
  */
 import type { TelegramUpdate } from "../../runtime/telegram/inbound.js";
 import type { ApiKeyEncryptedValue } from "./api-key-contract.js";
-import { encryptApiKeyValue, INTEGRATION_KEY_ENVIRONMENT_NAME } from "./api-key-crypto.js";
+import { encryptApiKeyValue, API_KEY_ENCRYPTION_KEY_ENVIRONMENT_NAME } from "./api-key-crypto.js";
 import { classifyApiKeyMessage } from "./api-key-message.js";
 import { apiKeyPublisher } from "./api-key-projection.js";
 import { apiKeyRepository } from "./api-key-repository.js";
@@ -156,7 +156,7 @@ export function createApiKeyIntake(dependencies: ApiKeyIntakeDependencies) {
 
 export const captureApiKeyMessage = createApiKeyIntake({
   cancel: (input) => apiKeyRepository.cancelIntake(input),
-  encrypt: (value) => encryptApiKeyValue(value, process.env[INTEGRATION_KEY_ENVIRONMENT_NAME]),
+  encrypt: (value) => encryptApiKeyValue(value, process.env[API_KEY_ENCRYPTION_KEY_ENVIRONMENT_NAME]),
   find: (input) => apiKeyRepository.findIntake(input),
   publish: () => apiKeyPublisher.publish(),
   store: (input) => apiKeyRepository.storeValue(input),
