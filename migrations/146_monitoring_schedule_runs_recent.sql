@@ -5,11 +5,14 @@
 -- recent — запуски этого статуса, перешедшие в него за последний час. Считается по updated_at: его
 -- ставит каждый переход статуса, а completed_at — не каждый (неясный исход по истёкшей аренде его не
 -- ставит). Ход сценария может идти двадцать минут, поэтому время создания запуска не подходит.
--- Колонка добавлена в конец: прежние столбцы и выдача сборщику не меняются, права на представление
--- сохраняются.
+-- Окно recent не зависит от суточного: запуск, созданный раньше суток назад и признанный неудачным
+-- только сейчас (планировщик стоял дольше суток), тоже новый сбой. total по-прежнему считает запуски,
+-- созданные за сутки. Колонка добавлена в конец: прежние столбцы и выдача сборщику не меняются, права
+-- на представление сохраняются.
 CREATE OR REPLACE VIEW monitoring_agent_schedule_runs AS
-  SELECT status::text AS status, count(*) AS total,
+  SELECT status::text AS status,
+         count(*) FILTER (WHERE created_at > now() - interval '24 hours') AS total,
          count(*) FILTER (WHERE updated_at > now() - interval '1 hour') AS recent
   FROM agent_schedule_runs
-  WHERE created_at > now() - interval '24 hours'
+  WHERE created_at > now() - interval '24 hours' OR updated_at > now() - interval '1 hour'
   GROUP BY status;

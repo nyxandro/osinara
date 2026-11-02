@@ -506,16 +506,20 @@ describeWithDatabase("agent schedule repositories", () => {
               ($1, $2, now() - interval '90 minutes', 'failed', gen_random_uuid(), now() - interval '10 minutes',
                'AGENT_MODEL_TEMPORARILY_UNAVAILABLE', now() - interval '90 minutes', now() - interval '10 minutes'),
               ($1, $2, now() - interval '3 hours', 'ambiguous', gen_random_uuid(), NULL,
-               'AGENT_SCHEDULE_DELIVERY_AMBIGUOUS', now() - interval '3 hours', now() - interval '5 minutes')`,
+               'AGENT_SCHEDULE_DELIVERY_AMBIGUOUS', now() - interval '3 hours', now() - interval '5 minutes'),
+              ($1, $2, now() - interval '30 hours', 'failed', gen_random_uuid(), now() - interval '2 minutes',
+               'AGENT_SCHEDULE_ATTEMPTS_EXHAUSTED', now() - interval '30 hours', now() - interval '2 minutes')`,
       [schedule.id, fixture.familyId],
     );
 
+    // The last run was created more than a day ago and failed only now, after a long stall: it is a
+    // new failure for the last-hour window, though the daily window no longer counts it.
     await expect(database().query(
       `SELECT status, total::integer, recent::integer FROM monitoring_agent_schedule_runs
         WHERE status IN ('ambiguous', 'failed') ORDER BY status`,
     )).resolves.toMatchObject({ rows: [
       { recent: 1, status: "ambiguous", total: 1 },
-      { recent: 1, status: "failed", total: 2 },
+      { recent: 2, status: "failed", total: 2 },
     ] });
   });
 

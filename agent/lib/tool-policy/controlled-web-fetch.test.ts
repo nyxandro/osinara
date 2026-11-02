@@ -298,6 +298,17 @@ describe("controlled external-group web fetch", () => {
     });
   });
 
+  it("keeps a site's own 404 on an HTTPS address a site's answer, whatever its status text", async () => {
+    // Through a tunnel the answer comes from the site itself, never from the proxy.
+    const fetch = vi.fn(async () => response("not here", { status: 404, statusText: "Host Not Found" }));
+    const execute = createControlledWebFetch({ dispatcher: {} as never, fetch });
+
+    await expect(execute({ url: "https://news.example.com/missing" })).rejects.toMatchObject({
+      code: "AGENT_WEB_FETCH_RESPONSE_FAILED",
+      details: { origin: "https://news.example.com", status: 404 },
+    });
+  });
+
   it("reads a long page on from where the previous portion ended, letters and emoji intact", async () => {
     const page = "Привет, мир 😀 ".repeat(4_900);
     const fetch = vi.fn(async () => response(page));

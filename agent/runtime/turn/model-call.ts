@@ -9,6 +9,7 @@
  * - `EMPTY_RESPONSE_NUDGE`, `REASONING_EXHAUSTED_NUDGE`: the wire-only notices of the one reissue
  *   after an empty answer or after an output limit spent on reasoning alone.
  * - `assistantStepText`: the visible text of a step's response.
+ * - `createModelOutageWait`: the outage wait a summary call shares with the step's call.
  *
  * Recovery, in order:
  * - AI SDK's own transport retries cover a request that never got a response (its default, 2).
@@ -27,6 +28,8 @@
  * tools execute.
  * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
+import { setTimeout as delay } from "node:timers/promises";
+
 import { NoOutputGeneratedError, streamText, type LanguageModel, type ModelMessage, type ToolSet } from "ai";
 import type { SharedV4ProviderOptions } from "@ai-sdk/provider";
 
@@ -96,14 +99,43 @@ export interface StepModelResponse {
 export interface ModelCallTiming {
   readonly now: () => number;
   readonly random: () => number;
-  readonly sleep: (milliseconds: number) => Promise<void>;
+  /** Rejects early once `signal` aborts. */
+  readonly sleep: (milliseconds: number, signal: AbortSignal) => Promise<void>;
 }
 
 const REAL_TIMING: ModelCallTiming = {
   now: Date.now,
   random: Math.random,
-  sleep: (milliseconds) => new Promise((done) => setTimeout(done, milliseconds)),
+  sleep: (milliseconds, signal) => delay(milliseconds, undefined, { signal }),
 };
+
+async function pauseOrCancel(timing: ModelCallTiming, milliseconds: number, signal: AbortSignal): Promise<void> {
+  try {
+    await timing.sleep(milliseconds, signal);
+  } catch (error) {
+    if (signal.aborted) throw new TurnCancelledError({ cause: signal.reason });
+    throw error;
+  }
+}
+
+/**
+ * The outage wait of one model call: once AI SDK's own retries run out on a refusing provider, it
+ * pauses and answers true to try again, until the outage has lasted its budget. Any other failure
+ * answers false at once; a cancellation ends a pause with `TurnCancelledError`.
+ */
+export function createModelOutageWait(signal: AbortSignal, timing: ModelCallTiming = REAL_TIMING) {
+  let startedAt: number | undefined;
+  let pauses = 0;
+  return async (error: unknown): Promise<boolean> => {
+    if (!isModelTransportExhausted(error)) return false;
+    startedAt ??= timing.now();
+    const pause = MODEL_OUTAGE_PAUSES_MS[Math.min(pauses, MODEL_OUTAGE_PAUSES_MS.length - 1)]!;
+    if (timing.now() - startedAt + pause > MODEL_OUTAGE_BUDGET_MS) return false;
+    pauses += 1;
+    await pauseOrCancel(timing, pause, signal);
+    return true;
+  };
+}
 
 /** The step's visible text: the last assistant message that has any. */
 export function assistantStepText(messages: readonly ModelMessage[]): string {
@@ -178,21 +210,15 @@ async function callOnce(input: StepModelCall, trailing: readonly ModelMessage[])
 }
 
 async function callWithRetries(input: StepModelCall, trailing: readonly ModelMessage[], timing: ModelCallTiming) {
-  let outageStartedAt: number | undefined;
-  let outagePauses = 0;
+  const waitOutage = createModelOutageWait(input.abortSignal, timing);
   for (let attempt = 1; ; ) {
     try {
       return await callOnce(input, trailing);
     } catch (error) {
-      if (isModelTransportExhausted(error)) {
-        outageStartedAt ??= timing.now();
-        const pause = MODEL_OUTAGE_PAUSES_MS[Math.min(outagePauses, MODEL_OUTAGE_PAUSES_MS.length - 1)]!;
-        if (timing.now() - outageStartedAt + pause > MODEL_OUTAGE_BUDGET_MS) throw error;
-        outagePauses += 1;
-        await timing.sleep(pause);
-      } else {
+      if (!await waitOutage(error)) {
         if (attempt === MODEL_CALL_MAX_ATTEMPTS || classifyModelCallError(error) !== "retry") throw error;
-        await timing.sleep(MODEL_CALL_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1) + Math.floor(timing.random() * MODEL_CALL_RETRY_JITTER_MS));
+        const backoff = MODEL_CALL_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1) + Math.floor(timing.random() * MODEL_CALL_RETRY_JITTER_MS);
+        await pauseOrCancel(timing, backoff, input.abortSignal);
         attempt += 1;
       }
       if (input.abortSignal.aborted) throw new TurnCancelledError({ cause: input.abortSignal.reason });

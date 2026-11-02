@@ -26,6 +26,8 @@ import type { SharedV4ProviderOptions } from "@ai-sdk/provider";
 import { AppError } from "../../lib/app-error.js";
 import type { CompactionCounters } from "../history/history-repository.js";
 import { estimateTokens } from "./compaction-estimate.js";
+import { createModelOutageWait, type ModelCallTiming } from "./model-call.js";
+import { normalizeModelCallError } from "./model-errors.js";
 import {
   COMPACTION_BRIEF_SUMMARY_WORD_LIMIT,
   COMPACTION_CHECKPOINT_MARKER,
@@ -58,24 +60,24 @@ export interface CompactionSummaryRequest extends CompactionPrompt {
   readonly providerOptions: SharedV4ProviderOptions | undefined;
 }
 
-/**
- * AI SDK waits 2, 4, 8, 16, 32 and 64 s between attempts, or the provider's Retry-After: about two
- * minutes, like a turn's step (#417). A summary call runs under no inactivity window of its own.
- */
-const COMPACTION_TRANSPORT_MAX_RETRIES = 6;
-
-/** The step's own model and provider options, deterministic. */
-export async function summarizeWithModel(request: CompactionSummaryRequest): Promise<string> {
-  const result = await generateText({
-    abortSignal: request.abortSignal,
-    instructions: request.system,
-    maxRetries: COMPACTION_TRANSPORT_MAX_RETRIES,
-    model: request.model,
-    prompt: request.prompt,
-    providerOptions: request.providerOptions,
-    temperature: 0,
-  });
-  return result.text;
+/** The step's own model and provider options, deterministic; a provider outage is waited out like a step's (#417). */
+export async function summarizeWithModel(request: CompactionSummaryRequest, timing?: ModelCallTiming): Promise<string> {
+  const waitOutage = createModelOutageWait(request.abortSignal, timing);
+  for (;;) {
+    try {
+      const result = await generateText({
+        abortSignal: request.abortSignal,
+        instructions: request.system,
+        model: request.model,
+        prompt: request.prompt,
+        providerOptions: request.providerOptions,
+        temperature: 0,
+      });
+      return result.text;
+    } catch (error) {
+      if (!await waitOutage(normalizeModelCallError(error))) throw error;
+    }
+  }
 }
 
 const COMPACTION_RECENT_WINDOW_SIZE = 10;

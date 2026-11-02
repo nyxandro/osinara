@@ -1,4 +1,5 @@
-import type { ModelMessage } from "ai";
+import { APICallError, type ModelMessage } from "ai";
+import { MockLanguageModelV4 } from "ai/test";
 import fc from "fast-check";
 import { describe, expect, it, vi } from "vitest";
 
@@ -6,7 +7,8 @@ import { AppError } from "../../lib/app-error.js";
 import type { CompactionCounters } from "../history/history-repository.js";
 import { estimateTokens } from "./compaction-estimate.js";
 import {
-  capToolResults, compactionSettings, compactMessages, providerCountStatus, shouldCompact, todoCompactionMessage, type PromptMeasurement,
+  capToolResults, compactionSettings, compactMessages, providerCountStatus, shouldCompact, summarizeWithModel, todoCompactionMessage,
+  type PromptMeasurement,
   type Summarize,
 } from "./compaction.js";
 import { COMPACTION_BRIEF_SUMMARY_WORD_LIMIT, COMPACTION_SUMMARY_WORD_LIMIT } from "./compaction-prompt.js";
@@ -466,5 +468,42 @@ describe("history compaction", () => {
     ].join("\n") });
     expect(todoCompactionMessage({ items: [{ content: "готово", priority: "low", status: "completed" }] })).toBeUndefined();
     expect(todoCompactionMessage(null)).toBeUndefined();
+  });
+});
+
+describe("summary call", () => {
+  it("waits out a provider outage past AI SDK's own retries within the same two-minute budget", async () => {
+    let calls = 0;
+    const model = new MockLanguageModelV4({
+      doGenerate: async () => {
+        calls += 1;
+        // AI SDK repeats a call twice; a Retry-After of zero skips its pauses.
+        if (calls <= 3) {
+          throw new APICallError({
+            message: "unavailable", url: "u", requestBodyValues: {}, statusCode: 503, isRetryable: true,
+            responseHeaders: { "retry-after-ms": "0" },
+          });
+        }
+        return {
+          content: [{ type: "text", text: "Сводка" }],
+          finishReason: { raw: undefined, unified: "stop" },
+          usage: { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 2, text: 2, reasoning: 0 } },
+          warnings: [],
+        };
+      },
+    });
+    let clock = 0;
+    const pauses: number[] = [];
+    const timing = {
+      now: () => clock,
+      random: () => 0,
+      sleep: async (milliseconds: number) => { pauses.push(milliseconds); clock += milliseconds; },
+    };
+
+    await expect(summarizeWithModel({
+      abortSignal: new AbortController().signal, model, prompt: "История", providerOptions: undefined, system: "Перескажи",
+    } as never, timing)).resolves.toBe("Сводка");
+    expect(calls).toBe(4);
+    expect(pauses).toEqual([10_000]);
   });
 });

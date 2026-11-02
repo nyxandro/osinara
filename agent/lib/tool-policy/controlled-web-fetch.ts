@@ -310,8 +310,10 @@ export function createControlledWebFetch(dependencies: ControlledWebFetchDepende
         }
         if (!response.ok) {
           await response.body?.cancel();
-          // On a plain HTTP address the proxy answers itself, with the status its tunnel refusal has.
-          if (response.status === 404 && response.statusText === EGRESS_HOST_NOT_FOUND_STATUS_TEXT) {
+          // On a plain HTTP address the proxy answers itself, with the status its tunnel refusal has;
+          // through an HTTPS tunnel the answer is the site's own, whatever its status text says.
+          if (currentUrl.protocol === "http:" && response.status === 404 &&
+            response.statusText === EGRESS_HOST_NOT_FOUND_STATUS_TEXT) {
             throw hostNotFound(currentUrl);
           }
           // The status tells a blocked site from an invented address or an outage; the path and

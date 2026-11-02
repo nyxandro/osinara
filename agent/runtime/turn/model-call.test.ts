@@ -380,6 +380,24 @@ describe("step model call", () => {
     expect(pauses).toEqual([10_000, 20_000, 40_000, 40_000]);
   });
 
+  it("ends an outage pause at once when the turn is cancelled", async () => {
+    const lastError = new APICallError({ message: "unavailable", url: "u", requestBodyValues: {}, statusCode: 503, isRetryable: true });
+    const provider = model(async () => { throw new RetryError({ message: "retries exhausted", reason: "maxRetriesExceeded", errors: [lastError] }); });
+    const turn = new AbortController();
+    // A pause that only a cancellation ends: the turn is stopped while it waits for the hub.
+    const timing = {
+      now: () => clock,
+      random: () => 0,
+      sleep: (_milliseconds: number, signal: AbortSignal) => new Promise<void>((_done, fail) => {
+        signal.addEventListener("abort", () => fail(signal.reason), { once: true });
+        turn.abort(new Error("stopped"));
+      }),
+    };
+
+    await expect(callStepModel(call(provider, { abortSignal: turn.signal }), timing)).rejects.toMatchObject({ name: "TurnCancelledError" });
+    expect(provider.doStreamCalls).toHaveLength(1);
+  });
+
   it("does not retry a rejected request", async () => {
     const provider = model(async () => { throw new APICallError({ message: "bad request", url: "u", requestBodyValues: {}, statusCode: 400, isRetryable: false }); });
 
