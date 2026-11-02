@@ -51,6 +51,7 @@ export function createReplyButtonDismissal(dependencies: ReplyButtonDismissalDep
         console.error(JSON.stringify({
           code: "AGENT_REPLY_BUTTONS_SETTLE_FAILED",
           error: error instanceof Error ? error.message : String(error),
+          ...(error instanceof AppError && error.details !== undefined ? { details: error.details } : {}),
           setId: set.id,
         }));
       }

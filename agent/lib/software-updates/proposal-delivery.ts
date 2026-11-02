@@ -46,7 +46,6 @@ function proposalText(input: DeliverSoftwareUpdateProposalInput): string {
   return [
     `Доступно обновление Osinara до версии ${input.release.version}.`,
     `Описание релиза: ${input.release.releaseUrl}`,
-    "Установить его, когда системный контроллер обновлений будет готов?",
   ].join("\n\n");
 }
 

@@ -10,6 +10,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { parseTelegramUpdate, type TelegramMessage } from "../../runtime/telegram/inbound.js";
+import { AppError } from "../app-error.js";
 import { createReplyButtonDismissal } from "./reply-button-dismissal.js";
 
 function message(from: Record<string, unknown> | null): TelegramMessage {
@@ -67,6 +68,23 @@ describe("reply button dismissal", () => {
     await dismiss(message({ first_name: "Андрей", id: 101, is_bot: false }), "7002");
 
     expect(telegram.settle).toHaveBeenCalledTimes(2);
+    vi.restoreAllMocks();
+  });
+
+  it("logs Telegram's own reason for a refused edit", async () => {
+    const { dismiss, telegram } = dismissal([{ id: "set-1" }]);
+    telegram.settle.mockRejectedValueOnce(new AppError("AGENT_REPLY_BUTTONS_SETTLE_FAILED", "Telegram не убрал кнопки", {
+      details: { description: "Bad Request: message to edit not found", status: 400 },
+    }));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await dismiss(message({ first_name: "Андрей", id: 101, is_bot: false }), "7002");
+
+    expect(JSON.parse(String(logged.mock.calls[0]?.[0]))).toMatchObject({
+      code: "AGENT_REPLY_BUTTONS_SETTLE_FAILED",
+      details: { description: "Bad Request: message to edit not found", status: 400 },
+      setId: "set-1",
+    });
     vi.restoreAllMocks();
   });
 });

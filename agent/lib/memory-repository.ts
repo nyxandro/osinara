@@ -11,7 +11,7 @@ import { releaseMemoryAttributeSlot } from "./memory-attribute-slot.js";
 import { database } from "./database.js";
 import { createMemoryClaim } from "./memory-claim-writer.js";
 import { insertClaimEvidence } from "./claim-evidence-writer.js";
-import { prepareExplicitClaimEvidence } from "./memory-explicit-claim-evidence.js";
+import { prepareExplicitClaimEvidence, requireCorrectionInRecordScope } from "./memory-explicit-claim-evidence.js";
 import type { MemoryAuthorization, MemoryScope } from "./memory-context.js";
 import { memoryListRepository } from "./memory-list-repository.js";
 import {
@@ -401,6 +401,7 @@ export const memoryRepository = {
         throw new AppError("AGENT_MEMORY_NOT_FOUND", "Запись памяти не найдена");
       }
       await requireMutationAccess(client, auth, memory);
+      await requireCorrectionInRecordScope(client, auth, { conversationId: input.source.conversationId, recordScope: memory.scope });
       const correctionKind = input.kind ?? memory.kind;
       const correctionSensitivity = input.sensitivity ?? memory.sensitivity;
       const explicitPrepared = await prepareExplicitClaimEvidence(client, auth, {

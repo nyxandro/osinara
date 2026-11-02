@@ -3,7 +3,8 @@
  *
  * Exports:
  * - `ReminderCreateInput` and `ReminderUpdateInput`: validated domain mutation inputs.
- * - `reminderRepository`: notification settings plus replay-safe create/list/update/delete.
+ * - `reminderRepository`: notification settings plus replay-safe create/list/update/delete, and
+ *   whether a call's effect is already recorded.
  *
  * Key construct:
  * - The list holds only what is still ahead, soonest first: delivered reminders are found through
@@ -287,6 +288,15 @@ export const reminderRepository = {
       items: rows.map(rowToReminder),
       nextCursor: hasNext && last ? encodeDateUuidCursor(last.due_at, last.id, binding) : null,
     };
+  },
+
+  /** Whether a call already left its effect under this key, so its replay is answered from that record. */
+  async operationRecorded(auth: ReminderAuthorization, operationKey: string): Promise<boolean> {
+    const result = await database().query(
+      "SELECT 1 FROM reminder_operations WHERE family_id = $1 AND operation_key = $2",
+      [auth.familyId, operationKey],
+    );
+    return result.rows.length > 0;
   },
 
   /** The scope of a reminder of this family, or null when there is none; a scope never changes. */

@@ -6,10 +6,14 @@
  *   scope asked for, on update by the scope the reminder already has.
  * - An update that leaves the content alone checks no file and does not look up the scope.
  * - A public chat's reminder is not checked here: the update itself refuses to change it.
+ * - A replay of a call whose effect is already recorded is answered by the repository without
+ *   checking the files again: they may have moved since the first run.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const repository = vi.hoisted(() => ({ create: vi.fn(), delete: vi.fn(), scopeOf: vi.fn(), update: vi.fn() }));
+const repository = vi.hoisted(() => ({
+  create: vi.fn(), delete: vi.fn(), operationRecorded: vi.fn(), scopeOf: vi.fn(), update: vi.fn(),
+}));
 vi.mock("./reminder-repository.js", () => ({ reminderRepository: repository }));
 vi.mock("./reminder-context.js", () => ({ requireReminderAuthorization: vi.fn(() => ({ familyId: "family-1" })) }));
 
@@ -23,6 +27,7 @@ describe("manage_reminder files", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     repository.create.mockResolvedValue({ id: ID });
+    repository.operationRecorded.mockResolvedValue(false);
     repository.update.mockResolvedValue({ id: ID });
   });
 
@@ -58,6 +63,21 @@ describe("manage_reminder files", () => {
     await manageReminder.execute({ action: "update", firstRunAt: "2026-11-06T10:00:00+03:00", id: ID } as never, CONTEXT);
 
     expect(repository.scopeOf).not.toHaveBeenCalled();
+    expect(repository.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers a replay from the recorded operation without checking files again", async () => {
+    repository.operationRecorded.mockResolvedValue(true);
+    repository.scopeOf.mockResolvedValue("family");
+
+    await expect(manageReminder.execute({
+      action: "create", content: PERSONAL_FILE, firstRunAt: "2026-11-05T10:00:00+03:00",
+      recurrence: null, scope: "family", timezone: "Europe/Moscow",
+    } as never, CONTEXT)).resolves.toEqual({ id: ID });
+    await expect(manageReminder.execute({ action: "update", content: PERSONAL_FILE, id: ID } as never, CONTEXT))
+      .resolves.toEqual({ id: ID });
+    expect(repository.operationRecorded).toHaveBeenCalledWith({ familyId: "family-1" }, "call-1");
+    expect(repository.create).toHaveBeenCalledTimes(1);
     expect(repository.update).toHaveBeenCalledTimes(1);
   });
 });

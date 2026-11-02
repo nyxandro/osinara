@@ -5,10 +5,13 @@
  * - Public answers are selected even when the host DNS also returns VPN fake-IP addresses.
  * - Private, reserved, and fake-IP-only answers remain blocked by the SSRF policy.
  * - IPv4 DNS failure never falls through to an unusable public AAAA answer.
+ * - A name public DNS knows no IPv4 address for is told apart from a resolver that did not answer,
+ *   and a failed resolution carries the resolver's own code.
  */
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  EgressHostNotFound,
   resolvePublicInternetAddress,
   type PublicDnsClient,
 } from "./public-dns-resolver.js";
@@ -48,6 +51,22 @@ describe("resolvePublicInternetAddress", () => {
       cause: dnsError,
       message: expect.stringContaining("AGENT_SANDBOX_EGRESS_IPV4_RESOLUTION_FAILED"),
     });
+    await expect(resolution).rejects.toThrow("(ETIMEOUT)");
     expect(client.resolve6).not.toHaveBeenCalled();
+  });
+
+  it.each(["ENOTFOUND", "ENODATA"])("reports a name public DNS answers %s for as not found", async (code) => {
+    const dnsError = Object.assign(new Error(`queryA ${code} fivpost.ru`), { code });
+    const client = { resolve4: vi.fn(async () => Promise.reject(dnsError)) };
+
+    const resolution = resolvePublicInternetAddress("fivpost.ru", client);
+
+    await expect(resolution).rejects.toBeInstanceOf(EgressHostNotFound);
+    await expect(resolution).rejects.toMatchObject({
+      cause: dnsError,
+      code: "AGENT_SANDBOX_EGRESS_HOST_NOT_FOUND",
+      dnsCode: code,
+      hostname: "fivpost.ru",
+    });
   });
 });

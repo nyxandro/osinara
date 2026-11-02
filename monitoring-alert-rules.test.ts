@@ -354,6 +354,17 @@ describe("osinara state alert rules", () => {
     expect(block).toMatch(/severity: warning/u);
   });
 
+  it("tells a new scenario failure apart from yesterday's by a last-hour window", () => {
+    const [block] = alertBlocks("OsinaraScheduleRunFailedRecently", stateRules);
+    expect(block, "no rule tells a new scenario failure from one still in the daily window").toBeDefined();
+    const expression = ruleField(block!, "expr") ?? "";
+
+    // A daily scenario failing again leaves the daily rule lit with the same number (#388).
+    expect(expression).toContain("osinara_agent_schedule_runs_1h");
+    expect(expression).toContain('status=~"failed|ambiguous"');
+    expect(block).toMatch(/severity: warning/u);
+  });
+
   it("reads only metrics the exporter publishes", () => {
     const published = new Set(
       [...exporter.matchAll(/^ *- metric_name: (osinara_[a-z0-9_]+)$/gmu)].map((match) => match[1]!),

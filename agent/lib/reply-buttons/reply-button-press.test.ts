@@ -18,6 +18,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { parseTelegramUpdate, type TelegramCallbackQuery } from "../../runtime/telegram/inbound.js";
+import { AppError } from "../app-error.js";
 import { createReplyButtonPressHandler, REPLY_BUTTON_PRESS_MESSAGE_ID_BASE } from "./reply-button-press.js";
 import type { ReplyButtonSet } from "./reply-button-repository.js";
 
@@ -151,6 +152,33 @@ describe("reply button press on arrival", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     await expect(acknowledge(press(), "7001")).resolves.toBeUndefined();
+    vi.restoreAllMocks();
+  });
+
+  it("logs Telegram's own reason for a refused answer and caption", async () => {
+    const { acknowledge, telegram } = handler({ set: selected(), status: "claimed" });
+    telegram.answerPress.mockRejectedValue(new AppError("AGENT_REPLY_BUTTON_ANSWER_FAILED", "Telegram не принял ответ", {
+      details: { description: "Bad Request: query is too old", status: 400 },
+    }));
+    telegram.settle.mockRejectedValue(new AppError("AGENT_REPLY_BUTTONS_SETTLE_FAILED", "Telegram не убрал кнопки", {
+      details: { description: "Bad Request: message to edit not found", status: 400, telegramMessageId: "50" },
+    }));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await acknowledge(press(), "7001");
+
+    const records = logged.mock.calls.map(([line]) => JSON.parse(String(line)));
+    expect(records).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "AGENT_REPLY_BUTTON_ANSWER_FAILED",
+        details: { description: "Bad Request: query is too old", status: 400 },
+      }),
+      expect.objectContaining({
+        code: "AGENT_REPLY_BUTTONS_SETTLE_FAILED",
+        details: { description: "Bad Request: message to edit not found", status: 400, telegramMessageId: "50" },
+        setId: "set-1",
+      }),
+    ]));
     vi.restoreAllMocks();
   });
 });

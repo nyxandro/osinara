@@ -50,11 +50,13 @@ export const agentTool: ToolDefinition<{ readonly message: string; readonly outp
   runtimeAction: "subagent",
 });
 
-export function formatSubagentMessage(message: string): string {
+export function formatSubagentMessage(message: string, options: { readonly structured: boolean }): string {
   return [
     `You are the subagent "${AGENT_TOOL_NAME}".`,
     "",
-    "The caller delegated the following task to you. Complete it and return the final result directly.",
+    options.structured
+      ? `The caller delegated the following task to you. Complete it and submit the final result by calling \`${FINAL_OUTPUT_TOOL_NAME}\` exactly once.`
+      : "The caller delegated the following task to you. Complete it and return the final result directly.",
     "",
     "Caller message:",
     message,

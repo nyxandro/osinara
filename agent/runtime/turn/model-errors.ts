@@ -5,6 +5,7 @@
  * - `EmptyModelResponseError`, `ModelInactivityError`, `TurnCancelledError`: the runtime's own
  *   model-call failures.
  * - `normalizeModelCallError`: maps an AI SDK failure onto them, keeping the original as cause.
+ * - `isModelTransportExhausted`: whether AI SDK's own retries ran out on a refusing provider.
  * - `classifyModelCallError`: `retry` (repeat this call now), `recoverable` (the turn fails, a
  *   person may retry) or `terminal` (the turn fails, repeating cannot help).
  * - `modelCallFailure`: the coded error a turn fails with after its model call gave up; a request
@@ -67,6 +68,11 @@ function isTransportRetriesExhausted(error: Error): boolean {
   if (error.name !== "AI_RetryError" || !("reason" in error) || error.reason !== "maxRetriesExceeded") return false;
   const last = "lastError" in error ? error.lastError : undefined;
   return typeof last === "object" && last !== null && "isRetryable" in last && last.isRetryable === true;
+}
+
+/** AI SDK gave up on a provider that kept refusing: an outage the turn may wait out, not repeat at once. */
+export function isModelTransportExhausted(error: unknown): boolean {
+  return error instanceof Error && error.name === TRANSPORT_EXHAUSTED;
 }
 
 export function normalizeModelCallError(error: unknown): unknown {

@@ -63,6 +63,7 @@ vi.mock("./reminders/reminder-repository.js", () => ({
     create: toolCalls.reminderCreate,
     delete: vi.fn(),
     getNotificationSettings: vi.fn(),
+    operationRecorded: vi.fn().mockResolvedValue(false),
     update: toolCalls.reminderUpdate,
   },
 }));

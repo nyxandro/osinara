@@ -67,7 +67,11 @@ async function startChild(runtime: TurnRuntime, input: {
       auth: input.parent.auth,
       channel: { kind: "subagent" },
       id: newTurnId(),
-      input: { context: [], message: formatSubagentMessage(message), ...(outputSchema === undefined ? {} : { outputSchema }) },
+      input: {
+        context: [],
+        message: formatSubagentMessage(message, { structured: outputSchema !== undefined }),
+        ...(outputSchema === undefined ? {} : { outputSchema }),
+      },
       kind: "subagent",
       parent: { callId: input.call.callId, turnId: input.journalTurnId },
       resumesTurnId: null,
