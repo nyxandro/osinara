@@ -147,6 +147,45 @@ async function childTurns() {
     expect(model.requests.at(-1)!.messages.at(-1)).toMatchObject({ content: [{ output: { type: "json", value: { total: 42 } }, toolCallId: "call-a" }] });
   });
 
+  it("reminds a child that answered in prose to submit through final_output instead of discarding its work", async () => {
+    const sessionId = await newTestSession();
+    const schema = { type: "object", properties: { total: { type: "number" } }, required: ["total"] };
+    const model = routedModel((call, task) => {
+      if (task !== null) {
+        const reminded = call.messages.length > 1 && call.messages.at(-1)?.role === "user";
+        return reminded ? toolCalls([{ id: "call-f", input: { total: 42 }, name: "final_output" }]) : reply("Итого 42");
+      }
+      return hasResult(call) ? reply("42") : delegateTo({ id: "call-a", message: "сумма", outputSchema: schema });
+    });
+    const turn = await startMessageTurn(sessionId, "посчитай");
+
+    await runTurn(testRuntime({ agent: testAgent({ agent: agentTool }), callModel: model.callModel, observer: recordingObserver().observer }), turn.id, RUN);
+
+    const childRequests = model.requests.filter((request) => request.task !== null);
+    expect(childRequests).toHaveLength(2);
+    expect(childRequests[1]!.messages.at(-2)).toMatchObject({ role: "assistant", content: [{ text: "Итого 42", type: "text" }] });
+    expect(model.requests.at(-1)!.messages.at(-1)).toMatchObject({ content: [{ output: { type: "json", value: { total: 42 } }, toolCallId: "call-a" }] });
+  });
+
+  it("fails a child that answers in prose again right after the reminder", async () => {
+    const sessionId = await newTestSession();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const schema = { type: "object", properties: { total: { type: "number" } }, required: ["total"] };
+    const model = routedModel((call, task) => {
+      if (task !== null) return reply("Итого 42");
+      return hasResult(call) ? reply("Не вышло.") : delegateTo({ id: "call-a", message: "сумма", outputSchema: schema });
+    });
+    const turn = await startMessageTurn(sessionId, "посчитай");
+
+    await runTurn(testRuntime({ agent: testAgent({ agent: agentTool }), callModel: model.callModel, observer: recordingObserver().observer }), turn.id, RUN);
+
+    expect(model.requests.filter((request) => request.task !== null)).toHaveLength(2);
+    expect(model.requests.at(-1)!.messages.at(-1)).toMatchObject({ content: [{
+      output: { type: "error-text", value: expect.stringMatching(/^AGENT_SUBAGENT_OUTPUT_SCHEMA_NOT_FULFILLED: /) },
+    }] });
+    vi.restoreAllMocks();
+  });
+
   it("reports a failed child to the parent model instead of failing the parent", async () => {
     const sessionId = await newTestSession();
     vi.spyOn(console, "error").mockImplementation(() => {});
