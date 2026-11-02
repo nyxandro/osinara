@@ -102,6 +102,19 @@ groups:
           description: 'Автономный сценарий не дошёл до семьи или его доставка не подтверждена: человек не получил то, что ждал по расписанию.'
           runbook: 'В agent_schedule_runs со status failed или ambiguous за сутки посмотреть error_code и schedule_id; затем строки агента в момент scheduled_for.'
 
+      # The daily rule above stays lit with the same number when a daily scenario fails again the
+      # next day: yesterday's run leaves the window as today's is created (#388). This one counts
+      # runs that became failed or ambiguous in the last hour, so a new one is a new episode.
+      - alert: OsinaraScheduleRunFailedRecently
+        expr: sum(osinara_agent_schedule_runs_1h{status=~"failed|ambiguous"}) > 0
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Сценарий по расписанию не выполнен за последний час: {{ $value }}'
+          description: 'Новый сбой сценария. Суточная тревога OsinaraScheduleRunFailed может гореть ещё по прошлому сбою и не показать этот.'
+          runbook: 'В agent_schedule_runs со status failed или ambiguous и updated_at за последний час посмотреть error_code и schedule_id; затем строки агента в момент scheduled_for.'
+
       - alert: OsinaraIncidentsPendingStuck
         expr: osinara_operational_incidents{status="pending"} > 0
         for: 15m

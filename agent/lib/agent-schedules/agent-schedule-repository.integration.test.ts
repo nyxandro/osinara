@@ -489,6 +489,36 @@ describeWithDatabase("agent schedule repositories", () => {
     ]);
   });
 
+  it("counts a scenario failure that ended in the last hour apart from the daily window", async () => {
+    const fixture = await createFixture();
+    const schedule = await agentScheduleRepository.create(privateAuth(fixture, "owner"), { executionContext: "isolated",
+      firstRunAt: new Date(Date.now() + 86_400_000), operationKey: "monitoring-window", recurrence: { kind: "once" },
+      scenarioPrompt: "Проверь новости", scope: "personal", timezone: "Europe/Moscow", title: "Проверка", userRequest: "Проверь новости",
+    });
+    // Yesterday's failure still lights the daily rule; today's, started 90 minutes ago and ended
+    // 10 minutes ago, is the one a new alert has to tell apart (#388). An expired lease marks a run
+    // ambiguous without an end time, here after a three-hour stall.
+    await database().query(
+      `INSERT INTO agent_schedule_runs
+         (schedule_id, family_id, scheduled_for, status, lease_token, completed_at, error_code, created_at, updated_at)
+       VALUES ($1, $2, now() - interval '20 hours', 'failed', gen_random_uuid(), now() - interval '19 hours',
+               'AGENT_MODEL_CALL_FAILED', now() - interval '20 hours', now() - interval '19 hours'),
+              ($1, $2, now() - interval '90 minutes', 'failed', gen_random_uuid(), now() - interval '10 minutes',
+               'AGENT_MODEL_TEMPORARILY_UNAVAILABLE', now() - interval '90 minutes', now() - interval '10 minutes'),
+              ($1, $2, now() - interval '3 hours', 'ambiguous', gen_random_uuid(), NULL,
+               'AGENT_SCHEDULE_DELIVERY_AMBIGUOUS', now() - interval '3 hours', now() - interval '5 minutes')`,
+      [schedule.id, fixture.familyId],
+    );
+
+    await expect(database().query(
+      `SELECT status, total::integer, recent::integer FROM monitoring_agent_schedule_runs
+        WHERE status IN ('ambiguous', 'failed') ORDER BY status`,
+    )).resolves.toMatchObject({ rows: [
+      { recent: 1, status: "ambiguous", total: 1 },
+      { recent: 1, status: "failed", total: 2 },
+    ] });
+  });
+
   it("paginates more than 100 active schedules without duplicates or skipped timestamp ties", async () => {
     const fixture = await createFixture();
     const auth = privateAuth(fixture, "member");
