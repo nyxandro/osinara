@@ -11,7 +11,9 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const repository = vi.hoisted(() => ({ create: vi.fn(), delete: vi.fn(), scopeOf: vi.fn(), update: vi.fn() }));
+const repository = vi.hoisted(() => ({
+  create: vi.fn(), delete: vi.fn(), operationRecorded: vi.fn(), scopeOf: vi.fn(), update: vi.fn(),
+}));
 vi.mock("./reminder-repository.js", () => ({ reminderRepository: repository }));
 vi.mock("./reminder-context.js", () => ({ requireReminderAuthorization: vi.fn(() => ({ familyId: "family-1" })) }));
 
@@ -35,6 +37,7 @@ describe("manage_reminder buttons", () => {
     repository.create.mockReset().mockResolvedValue({ id: ID });
     repository.update.mockReset().mockResolvedValue({ id: ID });
     repository.scopeOf.mockReset().mockResolvedValue("personal");
+    repository.operationRecorded.mockReset().mockResolvedValue(false);
   });
 
   it("creates a reminder carrying the buttons written at the end of its content", async () => {
