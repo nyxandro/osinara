@@ -5,7 +5,9 @@
  * - The tool exposes setup/status/removal only, never Google API command passthrough.
  * - Connecting and disconnecting a workspace profile run without a person's confirmation in a live
  *   turn; a scenario run only reads the status.
- * - Status reports actual native-profile readiness without changing profile state.
+ * - Status reports actual native-profile readiness and the reminders' calendar without changing state.
+ * - Connect gives a new consent link when Google no longer honors the stored grant.
+ * - Disconnect removes the reminders' calendar first and always finishes the mirror's part.
  */
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -38,6 +40,13 @@ function managerDependencies() {
     status: "active" as const,
   };
   return {
+    accessTokenAlive: vi.fn().mockResolvedValue(true),
+    calendarMirror: {
+      finishDisconnect: vi.fn(async () => undefined),
+      removeBeforeDisconnect: vi.fn().mockResolvedValue("removed"),
+      restore: vi.fn().mockResolvedValue({ calendar: "Осинара — напоминания", state: "catching_up" }),
+      status: vi.fn().mockResolvedValue({ calendar: "Осинара — напоминания", state: "active" }),
+    },
     disconnect: vi.fn(async (_auth, removeProfile: () => Promise<void>) => {
       await removeProfile();
       return true;
@@ -92,13 +101,13 @@ describe("manage_google_workspace_connection policy", () => {
 
     expect(schema.type).toBe("object");
     expect(schema.properties).toMatchObject({
-      action: { enum: ["connect", "disconnect", "status"], type: "string" },
+      action: { enum: ["connect", "disconnect", "status", "restore_reminders_calendar"], type: "string" },
     });
     expect(schema.properties).not.toHaveProperty("command");
   });
 
   it("runs every connection action without waiting for a person's confirmation in a live turn", () => {
-    for (const action of ["connect", "disconnect", "status"]) {
+    for (const action of ["connect", "disconnect", "status", "restore_reminders_calendar"]) {
       expect(approvalFor({ action }, turnWith({}))).toBe("not-applicable");
     }
   });
@@ -109,7 +118,7 @@ describe("manage_google_workspace_connection policy", () => {
       turnWith({ telegramApprovalContinuation: "true" }, "wakeup"),
     ]) {
       expect(approvalFor({ action: "status" }, scenario)).toBe("not-applicable");
-      for (const action of ["connect", "disconnect"]) {
+      for (const action of ["connect", "disconnect", "restore_reminders_calendar"]) {
         expect(approvalFor({ action }, scenario)).toMatchObject({
           reason: expect.stringContaining("AGENT_GOOGLE_WORKSPACE_SCENARIO_WRITE_FORBIDDEN"),
           type: "denied",
@@ -215,11 +224,59 @@ describe("manage_google_workspace_connection policy", () => {
     const manage = createGoogleWorkspaceConnectionManager(deps as never);
 
     await expect(manage({ action: "disconnect" }, auth)).resolves.toEqual({
+      calendarCleanup: "removed",
       disconnected: true,
       ready: false,
       scope: "personal",
     });
     expect(deps.getConfig).not.toHaveBeenCalled();
     expect(deps.removeProfile).toHaveBeenCalledWith(auth.workspaceId);
+    expect(deps.calendarMirror.removeBeforeDisconnect.mock.invocationCallOrder[0])
+      .toBeLessThan(deps.disconnect.mock.invocationCallOrder[0]!);
+    expect(deps.calendarMirror.finishDisconnect).toHaveBeenCalledWith(auth.workspaceId);
+  });
+
+  it("finishes the mirror's part of a disconnect that failed", async () => {
+    const deps = managerDependencies();
+    deps.disconnect.mockRejectedValueOnce(new Error("database down"));
+    const manage = createGoogleWorkspaceConnectionManager(deps as never);
+
+    await expect(manage({ action: "disconnect" }, auth)).rejects.toThrow("database down");
+    expect(deps.calendarMirror.finishDisconnect).toHaveBeenCalledWith(auth.workspaceId);
+  });
+
+  it("gives a new consent link when Google no longer honors the stored grant", async () => {
+    const deps = managerDependencies();
+    deps.accessTokenAlive.mockResolvedValue(false);
+    deps.startAuthorization.mockResolvedValue({ authorizationSent: true });
+    const manage = createGoogleWorkspaceConnectionManager(deps as never);
+
+    await expect(manage({ action: "connect" }, auth)).resolves.toEqual({ authorizationSent: true, ready: false });
+    expect(deps.accessTokenAlive).toHaveBeenCalledWith(expect.objectContaining({ clientId: "client-id" }), "refresh-token");
+    expect(deps.removeProfile).toHaveBeenCalledWith(auth.workspaceId);
+    expect(deps.startAuthorization).toHaveBeenCalledWith(auth);
+  });
+
+  it("reports the reminders' calendar in the status", async () => {
+    const deps = managerDependencies();
+    const manage = createGoogleWorkspaceConnectionManager(deps as never);
+
+    await expect(manage({ action: "status" }, auth)).resolves.toMatchObject({
+      calendarMirror: { calendar: "Осинара — напоминания", state: "active" },
+      connected: true,
+    });
+    expect(deps.calendarMirror.status).toHaveBeenCalledWith(auth.workspaceId);
+  });
+
+  it("brings back the reminders' calendar on request", async () => {
+    const deps = managerDependencies();
+    const manage = createGoogleWorkspaceConnectionManager(deps as never);
+
+    await expect(manage({ action: "restore_reminders_calendar" }, auth)).resolves.toEqual({
+      calendarMirror: { calendar: "Осинара — напоминания", state: "catching_up" },
+      scope: "personal",
+    });
+    expect(deps.calendarMirror.restore).toHaveBeenCalledWith(auth);
+    expect(deps.getConfig).not.toHaveBeenCalled();
   });
 });

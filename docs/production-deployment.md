@@ -437,6 +437,22 @@ restart reaches the model as an unknown outcome instead of a second message. A r
 example a group that does not let the bot send polls; an unconfirmed send as `..._DELIVERY_AMBIGUOUS`.
 Every kind of chat gets both without a grant; scheduled turns and subagents never receive them.
 
+Since v0.61.0 each connected Google profile keeps the reminders in a calendar of its own («Осинара —
+напоминания», for the family «Осинара — семейные напоминания»), both ways: the minute schedule
+`calendar-mirror` of the agent process takes a person's edits from that calendar by sync token and
+writes the reminders back (`docs/plans/reminders-google-calendar.md`). It calls the Calendar API
+directly over HTTPS with the access token of the existing Google connection: no new secret or scope.
+The `gws` CLI starts a one-shot container per command and stays the model's path only. Every Google
+call takes the profile's advisory lock without waiting, so a person's own Google command waits at most
+one call behind it. State lives in `calendar_mirror_profiles` and `calendar_mirror_copies` (migration
+147); a profile is created with every Google connection and needs no setting. Log codes:
+`AGENT_CALENDAR_MIRROR_RECONCILED` (a cycle that changed something), `..._PROVIDER_UNAVAILABLE`
+(temporary Google failure, backoff up to an hour), `..._ACCESS_LOST`, `..._CALENDAR_DELETED`,
+`..._CALENDAR_REFUSED` (the mirror stops and tells the person once), `..._EVENT_REJECTED`,
+`..._RUN_RESTORE_FAILED`, `..._CLEANUP_FAILED`, `..._NOTICE_FAILED`, `..._CYCLE_FAILED`. Google finishes
+deleting a calendar over 10-20 minutes and reports all its events as deleted at once: the mirror reads
+such a mass deletion as the calendar deleted and deletes no reminder for it.
+
 Every capability that needs image input follows the same `supportsImageInput` flag of the active
 model config: without it `inspect_workspace_image` is not offered in any mode, and its prompt
 guidance and the PDF page route disappear.

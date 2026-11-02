@@ -7,6 +7,7 @@
  */
 import { GOOGLE_WORKSPACE_PROFILE_LOCK_HASH_SEED } from "../../config.js";
 import { AppError } from "../app-error.js";
+import { calendarMirrorRepository } from "../calendar-mirror/calendar-mirror-repository.js";
 import { database } from "../database.js";
 import { assertGoogleWorkspaceAccess } from "./google-integration-access.js";
 import type {
@@ -314,6 +315,12 @@ export const googleIntegrationRepository = {
          WHERE id = $1`,
         [claim.authorizationId],
       );
+      // The reminders' Google Calendar follows the connection: no setting, it starts with it.
+      await calendarMirrorRepository.applyConnection(client, {
+        externalAccountId: input.externalAccountId,
+        integrationAccountId: stored.id,
+        workspaceId: claim.workspaceId,
+      });
       await client.query(
         `INSERT INTO audit_events (family_id, actor_user_id, event_type, subject_id, metadata)
          VALUES ($1, $2, 'integration.connected', $3,

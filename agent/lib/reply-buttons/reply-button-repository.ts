@@ -116,11 +116,14 @@ export const replyButtonRepository = {
     return toSet(result.rows[0]!);
   },
 
-  /** A reminder's buttons for one delivery: its text is known before the message is sent. */
+  /**
+   * A reminder's buttons for one delivery: its text is known before the message is sent. A service
+   * notice of the bot (the Google Calendar mirror) goes the same way without a reminder.
+   */
   async stageForReminder(input: ReplyButtonTarget & {
     buttons: ReplyButtonRows;
     messageText: string;
-    reminderId: string;
+    reminderId: string | null;
     token: string;
   }): Promise<ReplyButtonSet> {
     const result = await database().query<SetRow>(

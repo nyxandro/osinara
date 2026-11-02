@@ -18,7 +18,8 @@
  * 4. The HTTP server: the Telegram webhook, the internal drain the ingress worker calls, the Google
  *    OAuth callback, the internal API key usage route the egress proxy calls and the health check.
  * 5. The minute scheduler: reminders and approval timeouts, scheduled runs, memory review, the
- *    software update check, and recovery again for turns whose start a deploy held back.
+ *    software update check, the reminders' Google Calendar, and recovery again for turns whose
+ *    start a deploy held back.
  */
 import { createTelegramIngress, telegramChannelHooks, telegramTurnEvents } from "./channels/telegram.js";
 import { googleOAuthRoutes } from "./channels/google-oauth.js";
@@ -51,6 +52,7 @@ import { callStepModel } from "./runtime/turn/model-call.js";
 import { routeTurnObservers } from "./runtime/turn/observer-routing.js";
 import { createSessionSandboxes } from "./sandbox.js";
 import { agentScheduleCheckDispatchSchedule } from "./schedules/agent-schedule-check-dispatch.js";
+import { calendarMirrorDispatchSchedule } from "./schedules/calendar-mirror-dispatch.js";
 import { agentScheduleDispatchSchedule } from "./schedules/agent-schedule-dispatch.js";
 import { memoryReviewDispatchSchedule } from "./schedules/memory-review-dispatch.js";
 import { reminderDispatchSchedule } from "./schedules/reminder-dispatch.js";
@@ -194,6 +196,7 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
       agentScheduleCheckDispatchSchedule(createScheduleCheckRunner({ openSandbox: sessionSandboxes })),
       memoryReviewDispatchSchedule(createMemoryReviewStart({ database: db, dispatcher })),
       softwareUpdateCheckSchedule(),
+      calendarMirrorDispatchSchedule(),
       { cron: "* * * * *", name: "turn-recovery", run: ({ waitUntil }) => waitUntil(dispatcher.recover()) },
     ],
   });
