@@ -4,12 +4,22 @@
  * Export:
  * - `googleWorkspaceConnectionStatus`: maps grants and native profile presence to readiness.
  * - `createGoogleWorkspaceConnectionManager`: injectable explicit management boundaries.
- * - `manage_google_workspace_connection`: connects, inspects, or disconnects native gws credentials;
- *   a scenario run only inspects.
+ * - `manage_google_workspace_connection`: connects, inspects, or disconnects native gws credentials,
+ *   and brings back the reminders' Google Calendar a person deleted; a scenario run only inspects.
+ *
+ * A connection whose stored grant Google no longer honors is not «connected»: connect checks the
+ * token and starts a new consent instead of answering that everything is ready.
  */
 import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
+import {
+  calendarMirrorStatus,
+  finishDisconnect,
+  removeCalendarBeforeDisconnect,
+  restoreRemindersCalendar,
+} from "../calendar-mirror/calendar-mirror-connection.js";
+import { isAppError } from "../app-error.js";
 import { googleAccountRepository } from "../google-workspace/google-account-repository.js";
 import { googleWorkspaceChangeRefusal } from "../google-workspace/google-workspace-live-turn.js";
 import type { GoogleIntegrationScope } from "../google-workspace/google-integration-contract.js";
@@ -19,11 +29,12 @@ import {
   requireGoogleOAuthEnvironment,
 } from "../google-workspace/google-workspace-config.js";
 import { googleIntegrationRepository } from "../google-workspace/google-integration-repository.js";
+import { refreshGoogleAccessToken } from "../google-workspace/google-oauth-client.js";
 import { startGoogleWorkspaceAuthorization } from "../google-workspace/google-oauth-service.js";
 import { googleWorkspaceProfileStore } from "../google-workspace/google-workspace-profile-store.js";
 
 const connectionSchema = z.object({
-  action: z.enum(["connect", "disconnect", "status"]),
+  action: z.enum(["connect", "disconnect", "status", "restore_reminders_calendar"]),
 }).strict();
 
 interface GoogleWorkspaceConnectionStatusAccount {
@@ -80,6 +91,14 @@ export function googleWorkspaceConnectionStatus(
 }
 
 interface GoogleWorkspaceConnectionManagerDependencies {
+  /** False when Google refuses the stored grant: it expired or was revoked. */
+  accessTokenAlive(config: ReturnType<typeof requireGoogleOAuthEnvironment>, refreshToken: string): Promise<boolean>;
+  calendarMirror: {
+    finishDisconnect: typeof finishDisconnect;
+    removeBeforeDisconnect: typeof removeCalendarBeforeDisconnect;
+    restore: typeof restoreRemindersCalendar;
+    status: typeof calendarMirrorStatus;
+  };
   disconnect: typeof googleIntegrationRepository.disconnect;
   getConfig: typeof requireGoogleOAuthEnvironment;
   profileExists: typeof googleWorkspaceProfileStore.exists;
@@ -97,14 +116,24 @@ export function createGoogleWorkspaceConnectionManager(
     auth: Awaited<ReturnType<typeof resolveGoogleWorkspaceAuthorization>>,
   ) {
     if (input.action === "disconnect") {
-      return {
-        disconnected: await dependencies.disconnect(
-          auth,
-          async () => await dependencies.removeProfile(auth.workspaceId),
-        ),
-        ready: false,
-        scope: auth.scope,
-      };
+      // The reminders' calendar leaves Google first: after the disconnect there is no token for it.
+      const calendarCleanup = await dependencies.calendarMirror.removeBeforeDisconnect(auth);
+      try {
+        return {
+          calendarCleanup,
+          disconnected: await dependencies.disconnect(
+            auth,
+            async () => await dependencies.removeProfile(auth.workspaceId),
+          ),
+          ready: false,
+          scope: auth.scope,
+        };
+      } finally {
+        await dependencies.calendarMirror.finishDisconnect(auth.workspaceId);
+      }
+    }
+    if (input.action === "restore_reminders_calendar") {
+      return { calendarMirror: await dependencies.calendarMirror.restore(auth), scope: auth.scope };
     }
 
     // Status and connect need the exact provider secrets to decrypt or materialize credentials.
@@ -116,10 +145,15 @@ export function createGoogleWorkspaceConnectionManager(
       async (account) => {
         const profileExists = await dependencies.profileExists(auth.workspaceId);
         const status = googleWorkspaceConnectionStatus(account, auth.scope, profileExists);
-        if (input.action === "status") return status;
+        if (input.action === "status") {
+          return { ...status, calendarMirror: await dependencies.calendarMirror.status(auth.workspaceId) };
+        }
 
-        // Connect is an explicit management boundary for both migrations and OAuth replacement.
-        if (account && !status.reconnectRequired) {
+        // Connect is an explicit management boundary for both migrations and OAuth replacement. A
+        // grant Google refuses needs new consent, not an answer that the account is connected.
+        const alive = account !== null && !status.reconnectRequired &&
+          await dependencies.accessTokenAlive(config, account.refreshToken);
+        if (account && alive) {
           if (!profileExists) {
             await dependencies.writeProfile(auth.workspaceId, {
               client_id: config.clientId,
@@ -151,7 +185,27 @@ export function createGoogleWorkspaceConnectionManager(
   };
 }
 
+async function accessTokenAlive(
+  config: ReturnType<typeof requireGoogleOAuthEnvironment>,
+  refreshToken: string,
+): Promise<boolean> {
+  try {
+    await refreshGoogleAccessToken(config, refreshToken);
+    return true;
+  } catch (error) {
+    if (isAppError(error) && error.code === "AGENT_GOOGLE_AUTH_EXPIRED") return false;
+    throw error;
+  }
+}
+
 const manageGoogleWorkspaceConnection = createGoogleWorkspaceConnectionManager({
+  accessTokenAlive,
+  calendarMirror: {
+    finishDisconnect,
+    removeBeforeDisconnect: removeCalendarBeforeDisconnect,
+    restore: restoreRemindersCalendar,
+    status: calendarMirrorStatus,
+  },
   disconnect: googleIntegrationRepository.disconnect,
   getConfig: requireGoogleOAuthEnvironment,
   profileExists: googleWorkspaceProfileStore.exists,
@@ -167,7 +221,7 @@ export default defineTool({
     return refusal ? { reason: refusal.message, type: "denied" } : "not-applicable";
   },
   description:
-    "Manage the Google Workspace OAuth profile of the current personal/family scope. Use {\"action\":\"status\"} for connected/ready/missingScopes, {\"action\":\"connect\"} for a protected OAuth link and {\"action\":\"disconnect\"} only on an explicit request. connect does not mean ready until OAuth is finished. Google commands run only through execute_google_workspace; COMMAND_FORBIDDEN does not mean a read-only OAuth.",
+    "Manage the Google Workspace OAuth profile of the current personal/family scope. Use {\"action\":\"status\"} for connected/ready/missingScopes and the reminders' calendar (calendarMirror), {\"action\":\"connect\"} for a protected OAuth link (also when access expired), {\"action\":\"disconnect\"} only on an explicit request (it also removes the reminders' calendar; calendarCleanup says how it went) and {\"action\":\"restore_reminders_calendar\"} when the person asks to bring back the reminders' calendar they deleted in Google. connect does not mean ready until OAuth is finished. Google commands run only through execute_google_workspace; COMMAND_FORBIDDEN does not mean a read-only OAuth.",
   inputSchema: connectionSchema,
   async execute(input, ctx) {
     const refusal = input.action === "status" ? null : googleWorkspaceChangeRefusal(ctx);

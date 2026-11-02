@@ -4,10 +4,16 @@
  * Exports:
  * - `createGoogleWorkspaceExecutor`: injectable live authorization and process boundary.
  * - `executeGoogleWorkspace`: production exact-argv executor.
+ *
+ * The reminders' calendar-copy (`calendar-mirror`) is kept by the bot: a change the model made there
+ * would reach the reminder only a minute later and bypass the reminder tool's checks, so changing it
+ * is refused and the model is pointed at manage_reminder. Reading it stays allowed.
  */
 import type { ToolContext } from "../../runtime/tool.js";
 
 import { AppError } from "../app-error.js";
+import { calendarMirrorRepository } from "../calendar-mirror/calendar-mirror-repository.js";
+import { ModelFacingError } from "../model-facing-error.js";
 import { withGoogleWorkspaceExecutionAccount } from "./google-execution-authorization.js";
 import { classifyGoogleWorkspaceCommand } from "./google-workspace-command-policy.js";
 import { runGoogleWorkspaceCommand } from "./google-workspace-command-runner.js";
@@ -50,7 +56,57 @@ function modelFacingOutput(
   );
 }
 
+/** Calendar sections whose changes act on events or the calendar itself, not on sharing or settings. */
+const MIRROR_GUARDED_SECTIONS = new Set(["+insert", "calendars", "events"]);
+
+/**
+ * Calendars a calendar change names: `--calendar`, and `calendarId`/`destination` in `--params`,
+ * each as a separate value or joined as `--flag=value` (the policy accepts both forms).
+ */
+export function calendarChangeTargets(argv: readonly string[]): string[] {
+  if (argv[0] !== "calendar" || !MIRROR_GUARDED_SECTIONS.has(argv[1] ?? "")) return [];
+  const flags: Array<[string, string]> = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const element = argv[index]!;
+    const joined = /^(--calendar|--params)=(.*)$/su.exec(element);
+    if (joined) flags.push([joined[1]!, joined[2]!]);
+    else if ((element === "--calendar" || element === "--params") && index + 1 < argv.length) flags.push([element, argv[index + 1]!]);
+  }
+  const targets: string[] = [];
+  for (const [flag, value] of flags) {
+    if (flag === "--calendar") {
+      targets.push(value);
+      continue;
+    }
+    let params: unknown;
+    try {
+      params = JSON.parse(value);
+    } catch {
+      // gws itself refuses malformed parameters; there is no calendar to protect in them.
+      continue;
+    }
+    for (const key of ["calendarId", "destination"]) {
+      const target = (params as Record<string, unknown> | null)?.[key];
+      if (typeof target === "string") targets.push(target);
+    }
+  }
+  return targets;
+}
+
+function mirrorCalendarReadOnly(): ModelFacingError {
+  return new ModelFacingError({
+    category: "input",
+    code: "AGENT_GOOGLE_CALENDAR_MIRROR_READ_ONLY",
+    correction: "Чтобы изменить или удалить напоминание, вызови manage_reminder. Календарь-копию бот обновит сам за минуту.",
+    reason: "Календарь-копию напоминаний ведёт сам бот: события в нём не меняются напрямую.",
+    retryable: false,
+    sideEffectStatus: "not_started",
+  });
+}
+
 interface GoogleWorkspaceExecutorDependencies {
+  /** Whether any of these calendars is a reminders' calendar-copy of any profile. */
+  isMirrorCalendar(calendarIds: readonly string[]): Promise<boolean>;
   resolveAuthorization(ctx: ToolContext): Promise<GoogleIntegrationAuthorization>;
   run(
     argv: readonly string[],
@@ -103,6 +159,10 @@ export function createGoogleWorkspaceExecutor(dependencies: GoogleWorkspaceExecu
   ) {
     // Classification is repeated inside execute so direct/replayed calls cannot bypass policy.
     const kind = classifyGoogleWorkspaceCommand(input.argv);
+    if (kind === "mutation") {
+      const targets = calendarChangeTargets(input.argv);
+      if (targets.length > 0 && await dependencies.isMirrorCalendar(targets)) throw mirrorCalendarReadOnly();
+    }
     const auth = await dependencies.resolveAuthorization(ctx);
 
     // This DB/profile check runs at execution, after any wait for the owner's button.
@@ -128,6 +188,7 @@ export function createGoogleWorkspaceExecutor(dependencies: GoogleWorkspaceExecu
 }
 
 export const executeGoogleWorkspace = createGoogleWorkspaceExecutor({
+  isMirrorCalendar: (calendarIds) => calendarMirrorRepository.isMirrorCalendar(calendarIds),
   resolveAuthorization: resolveGoogleWorkspaceAuthorization,
   run: (argv, kind, auth, accessToken, ctx) =>
     runGoogleWorkspaceCommand(argv, kind, auth, accessToken, ctx),

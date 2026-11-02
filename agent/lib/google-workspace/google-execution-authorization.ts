@@ -1,9 +1,11 @@
 /**
  * Transactional Google Workspace execution authorization.
  *
- * Export:
+ * Exports:
  * - `withGoogleWorkspaceExecutionAccount`: holds membership, workspace, account, and credential
- *   read locks through the caller's credentialed side effect.
+ *   read locks through the caller's credentialed side effect, waiting for the profile.
+ * - `tryWithGoogleWorkspaceExecutionAccount`: the same without waiting: a profile already in use
+ *   (by the model) answers `busy`, so background work never queues ahead of a person.
  */
 import { database } from "../database.js";
 import { GOOGLE_WORKSPACE_PROFILE_LOCK_HASH_SEED } from "../../config.js";
@@ -38,20 +40,31 @@ function decryptedAccount(row: CredentialRow, encryptionKey: string): DecryptedG
   };
 }
 
-export async function withGoogleWorkspaceExecutionAccount<T>(
+const BUSY = Symbol("google-workspace-profile-busy");
+
+async function runWithProfileAccount<T>(
   auth: GoogleIntegrationAuthorization,
   encryptionKey: string,
   operation: (account: DecryptedGoogleAccount | null) => Promise<T>,
-): Promise<T> {
+  wait: boolean,
+): Promise<T | typeof BUSY> {
   const client = await database().connect();
   let profileLocked = false;
   try {
     // One connection owns both the profile advisory lock and row-level authorization locks. This
     // avoids nested pool acquisition while the credentialed command is running.
-    await client.query(
-      "SELECT pg_advisory_lock(hashtextextended($1, $2))",
-      [auth.workspaceId, GOOGLE_WORKSPACE_PROFILE_LOCK_HASH_SEED],
-    );
+    if (wait) {
+      await client.query(
+        "SELECT pg_advisory_lock(hashtextextended($1, $2))",
+        [auth.workspaceId, GOOGLE_WORKSPACE_PROFILE_LOCK_HASH_SEED],
+      );
+    } else {
+      const attempt = await client.query<{ locked: boolean }>(
+        "SELECT pg_try_advisory_lock(hashtextextended($1, $2)) AS locked",
+        [auth.workspaceId, GOOGLE_WORKSPACE_PROFILE_LOCK_HASH_SEED],
+      );
+      if (!attempt.rows[0]!.locked) return BUSY;
+    }
     profileLocked = true;
     await client.query("BEGIN");
     await assertGoogleWorkspaceAccess(client, auth, false);
@@ -74,7 +87,7 @@ export async function withGoogleWorkspaceExecutionAccount<T>(
     await client.query("COMMIT");
     return value;
   } catch (error) {
-    await client.query("ROLLBACK");
+    if (profileLocked) await client.query("ROLLBACK");
     throw error;
   } finally {
     try {
@@ -88,4 +101,21 @@ export async function withGoogleWorkspaceExecutionAccount<T>(
       client.release();
     }
   }
+}
+
+export async function withGoogleWorkspaceExecutionAccount<T>(
+  auth: GoogleIntegrationAuthorization,
+  encryptionKey: string,
+  operation: (account: DecryptedGoogleAccount | null) => Promise<T>,
+): Promise<T> {
+  return await runWithProfileAccount(auth, encryptionKey, operation, true) as T;
+}
+
+export async function tryWithGoogleWorkspaceExecutionAccount<T>(
+  auth: GoogleIntegrationAuthorization,
+  encryptionKey: string,
+  operation: (account: DecryptedGoogleAccount | null) => Promise<T>,
+): Promise<{ busy: true } | { busy: false; value: T }> {
+  const result = await runWithProfileAccount(auth, encryptionKey, operation, false);
+  return result === BUSY ? { busy: true } : { busy: false, value: result as T };
 }

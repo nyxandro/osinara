@@ -10,6 +10,7 @@
  */
 import type { GoogleAccountIdentity } from "./google-account-client.js";
 import { getGoogleAccountIdentity } from "./google-account-client.js";
+import { calendarMirrorCalendarName } from "../calendar-mirror/calendar-mirror-config.js";
 import { AppError, isAppError } from "../app-error.js";
 import {
   missingGoogleWorkspaceScopes,
@@ -159,7 +160,8 @@ async function completeCallback(
     return htmlResponse(
       200,
       "Google Workspace подключён",
-      "Аккаунт безопасно связан с выбранной областью Osinara.",
+      "Аккаунт безопасно связан с выбранной областью Osinara. Напоминания из чата будут появляться " +
+        `в Google Календаре, в отдельном календаре «${calendarMirrorCalendarName(claim.scope)}». Их можно менять прямо там.`,
     );
   })();
   return completion.then(undefined, async (error: unknown) => {

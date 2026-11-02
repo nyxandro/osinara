@@ -11,10 +11,13 @@
  *   the reminder keeps its text and its buttons apart, and new content brings its own buttons.
  * - Files shown in `content` are checked when it is written, against the chat the reminder reaches:
  *   it goes out later without the model, which could no longer fix them.
+ * - A written reminder reports `calendarCopy`: whether it appears in the person's Google Calendar by
+ *   itself, or why not, so the model never creates a second event for it.
  */
 import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
+import { calendarCopyOutlook } from "../calendar-mirror/calendar-mirror-outlook.js";
 import {
   REMINDER_CONTENT_MAX_LENGTH,
   REMINDER_RECURRENCE_INTERVAL_MAX,
@@ -198,6 +201,7 @@ const TOOL_DESCRIPTION = [
   "Create, change, pause, resume or delete an ordinary reminder: ready-made text the bot sends at the set time without calling the model. Load the schedules skill first: it holds the text and time rules.",
   "content is read at the moment of delivery: no words like \"завтра\" or \"через час\", name the event time by the clock.",
   "Not an agent schedule: for future work with research or a report use manage_agent_schedule.",
+  "The result's calendarCopy says whether the reminder appears in the person's Google Calendar by itself (will_appear) or why not; never create a separate calendar event for a reminder.",
   "content is laid out like your answers, Markdown, reply buttons and a workspace file on its own line as ![caption](/workspace/...) included; a file is checked now and read at delivery, so it must stay in place.",
   "Create payload: {\"action\":\"create\",\"content\":\"Позвонить врачу\",\"firstRunAt\":\"2026-08-01T10:00:00+03:00\",\"timezone\":\"Europe/Moscow\",\"scope\":\"personal\",\"recurrence\":null}.",
   "Recurrence: none is recurrence=null; a repeat is {\"unit\":\"daily\",\"interval\":1} with unit minutely, hourly, daily, weekly, monthly or yearly and interval 1-365.",
@@ -234,10 +238,11 @@ export default withCallExamples(defineTool({
           scope: parsed.values.scope,
         });
       }
-      return await reminderRepository.create(authorization, {
+      const created = await reminderRepository.create(authorization, {
         ...parsed.values,
         operationKey: ctx.callId,
       });
+      return { ...created, calendarCopy: await calendarCopyOutlook(authorization, created) };
     }
     if (parsed.action === "update") {
       const { id, ...values } = parsed.values;
@@ -249,16 +254,18 @@ export default withCallExamples(defineTool({
           content: values.content, errorCode: INPUT_ERROR_CODE, rights: () => reminderWriterRights(authorization), scope,
         });
       }
-      return await reminderRepository.update(authorization, id, {
+      const updated = await reminderRepository.update(authorization, id, {
         ...values,
         operationKey: ctx.callId,
       });
+      return { ...updated, calendarCopy: await calendarCopyOutlook(authorization, updated) };
     }
     if (parsed.action === "pause" || parsed.action === "resume") {
-      return await reminderRepository.update(authorization, parsed.id, {
+      const switched = await reminderRepository.update(authorization, parsed.id, {
         enabled: parsed.action === "resume",
         operationKey: ctx.callId,
       });
+      return { ...switched, calendarCopy: await calendarCopyOutlook(authorization, switched) };
     }
 
     return {
