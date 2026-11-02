@@ -58,11 +58,18 @@ export interface CompactionSummaryRequest extends CompactionPrompt {
   readonly providerOptions: SharedV4ProviderOptions | undefined;
 }
 
+/**
+ * AI SDK waits 2, 4, 8, 16, 32 and 64 s between attempts, or the provider's Retry-After: about two
+ * minutes, like a turn's step (#417). A summary call runs under no inactivity window of its own.
+ */
+const COMPACTION_TRANSPORT_MAX_RETRIES = 6;
+
 /** The step's own model and provider options, deterministic. */
 export async function summarizeWithModel(request: CompactionSummaryRequest): Promise<string> {
   const result = await generateText({
     abortSignal: request.abortSignal,
     instructions: request.system,
+    maxRetries: COMPACTION_TRANSPORT_MAX_RETRIES,
     model: request.model,
     prompt: request.prompt,
     providerOptions: request.providerOptions,

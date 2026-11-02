@@ -12,6 +12,8 @@
  *
  * Recovery, in order:
  * - AI SDK's own transport retries cover a request that never got a response (its default, 2).
+ * - A provider still refusing after them is an outage: the call is repeated with growing pauses for
+ *   about two minutes since the first such refusal, each repeat with its own inactivity windows.
  * - A `retry`-class failure — a stream broken after it started, an inactivity window — repeats the
  *   call up to three attempts with exponential backoff. No side effect can repeat: tools run later.
  * - An empty answer, or one whose output limit went on reasoning before any word, is reissued once
@@ -32,6 +34,7 @@ import { AppError } from "../../lib/app-error.js";
 import {
   classifyModelCallError,
   EmptyModelResponseError,
+  isModelTransportExhausted,
   ModelInactivityError,
   normalizeModelCallError,
   TurnCancelledError,
@@ -45,6 +48,13 @@ export const REASONING_EXHAUSTED_NUDGE =
   "Your previous reply spent its whole output limit on reasoning and was not delivered. Keep your reasoning short this time: answer or call the next tool right away; do not mention this notice.";
 
 const MODEL_CALL_MAX_ATTEMPTS = 3;
+/**
+ * The model hub's short outages ran 30 s to 2 min and outlasted AI SDK's own retries (~6 s), failing
+ * whole turns (#417). A call has no side effect, tools run after it, so it waits the outage out.
+ * The budget is time, not attempts: a refusal that itself takes a minute must not stretch the wait.
+ */
+const MODEL_OUTAGE_BUDGET_MS = 2 * 60 * 1000;
+const MODEL_OUTAGE_PAUSES_MS = [10_000, 20_000, 40_000] as const;
 const MODEL_CALL_RETRY_BASE_DELAY_MS = 500;
 const MODEL_CALL_RETRY_JITTER_MS = 250;
 // Output that proves the model is generating; metadata and empty deltas do not.
@@ -84,11 +94,13 @@ export interface StepModelResponse {
 }
 
 export interface ModelCallTiming {
+  readonly now: () => number;
   readonly random: () => number;
   readonly sleep: (milliseconds: number) => Promise<void>;
 }
 
 const REAL_TIMING: ModelCallTiming = {
+  now: Date.now,
   random: Math.random,
   sleep: (milliseconds) => new Promise((done) => setTimeout(done, milliseconds)),
 };
@@ -166,12 +178,23 @@ async function callOnce(input: StepModelCall, trailing: readonly ModelMessage[])
 }
 
 async function callWithRetries(input: StepModelCall, trailing: readonly ModelMessage[], timing: ModelCallTiming) {
-  for (let attempt = 1; ; attempt += 1) {
+  let outageStartedAt: number | undefined;
+  let outagePauses = 0;
+  for (let attempt = 1; ; ) {
     try {
       return await callOnce(input, trailing);
     } catch (error) {
-      if (attempt === MODEL_CALL_MAX_ATTEMPTS || classifyModelCallError(error) !== "retry") throw error;
-      await timing.sleep(MODEL_CALL_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1) + Math.floor(timing.random() * MODEL_CALL_RETRY_JITTER_MS));
+      if (isModelTransportExhausted(error)) {
+        outageStartedAt ??= timing.now();
+        const pause = MODEL_OUTAGE_PAUSES_MS[Math.min(outagePauses, MODEL_OUTAGE_PAUSES_MS.length - 1)]!;
+        if (timing.now() - outageStartedAt + pause > MODEL_OUTAGE_BUDGET_MS) throw error;
+        outagePauses += 1;
+        await timing.sleep(pause);
+      } else {
+        if (attempt === MODEL_CALL_MAX_ATTEMPTS || classifyModelCallError(error) !== "retry") throw error;
+        await timing.sleep(MODEL_CALL_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1) + Math.floor(timing.random() * MODEL_CALL_RETRY_JITTER_MS));
+        attempt += 1;
+      }
       if (input.abortSignal.aborted) throw new TurnCancelledError({ cause: input.abortSignal.reason });
     }
   }
