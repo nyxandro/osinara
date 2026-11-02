@@ -1,8 +1,10 @@
 /**
  * Explicit Telegram-source preparation for the single memory claim writer.
  *
- * Export:
+ * Exports:
  * - `prepareExplicitClaimEvidence`: resolves current message, author, scope, and optional subject ref.
+ * - `requireCorrectionInRecordScope`: refuses a correction from a chat of another scope, naming the
+ *   chat where the record is corrected.
  */
 import type { PoolClient } from "pg";
 
@@ -10,7 +12,7 @@ import { AppError } from "./app-error.js";
 import type { PreparedClaimEvidence } from "./claim-evidence-writer.js";
 import { MEMORY_EVIDENCE_SNIPPET_MAX_CHARACTERS } from "./memory-config.js";
 import { requireAllowedMemoryContent } from "./memory-content-policy.js";
-import type { MemoryAuthorization } from "./memory-context.js";
+import type { MemoryAuthorization, MemoryScope } from "./memory-context.js";
 import type { CreateMemoryInput } from "./memory-record.js";
 import { normalizeMemoryClaimContent } from "./memory-record.js";
 
@@ -40,6 +42,32 @@ function evidenceSnippet(content: string): string {
     );
   }
   return bounded;
+}
+
+const CORRECTION_PLACE: Readonly<Record<MemoryScope, string>> = {
+  family: "Это семейная запись: исправить её можно только в семейном чате",
+  group: "Это запись группы: исправить её можно только в чате этой группы",
+  personal: "Это личная запись: исправить её можно только в личном чате с ассистентом",
+};
+
+/**
+ * A correction is evidenced by the current message, which may only back a record of its own chat's
+ * scope: a personal message must not become evidence the whole family sees. The generic source
+ * refusal told neither the model nor the person why, so the record's chat is named instead.
+ */
+export async function requireCorrectionInRecordScope(
+  client: PoolClient,
+  auth: MemoryAuthorization,
+  input: { conversationId: string; recordScope: MemoryScope },
+): Promise<void> {
+  const result = await client.query<{ scope: MemoryScope }>(
+    "SELECT scope FROM application_conversations WHERE id = $1 AND family_id = $2",
+    [input.conversationId, auth.familyId],
+  );
+  const chatScope = result.rows[0]?.scope;
+  // An unknown conversation is left to the source check, which refuses it on its own terms.
+  if (chatScope === undefined || chatScope === input.recordScope) return;
+  throw new AppError("AGENT_MEMORY_CORRECTION_SCOPE_DENIED", CORRECTION_PLACE[input.recordScope]);
 }
 
 export async function prepareExplicitClaimEvidence(

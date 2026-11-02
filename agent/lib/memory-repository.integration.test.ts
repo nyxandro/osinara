@@ -127,6 +127,29 @@ describeWithDatabase("memoryRepository", () => {
       memoryRepository.deleteByRef(family.owner, record.memoryRef, "revoked-owner-delete"),
     ).rejects.toThrowError(/AGENT_MEMORY_MUTATION_DENIED/);
   });
+  it("refuses a correction from a chat of another scope, naming where the record is corrected", async () => {
+    const family = await createFamily("family-from-personal");
+    const record = await memoryRepository.create(
+      family.member,
+      createInput("family", "family-scope-create", "Отпуск запланирован на август"),
+    );
+
+    // The source message is written in a personal chat: it may not become evidence of a record the
+    // whole family sees, so the refusal says where the correction belongs and nothing changes.
+    await expect(memoryRepository.updateByRef(family.owner, {
+      content: "Отпуск запланирован на сентябрь",
+      memoryRef: record.memoryRef,
+      operationKey: "family-from-personal-update",
+      source: await correctionSource(family.owner, "personal"),
+    })).rejects.toMatchObject({
+      code: "AGENT_MEMORY_CORRECTION_SCOPE_DENIED",
+      message: expect.stringContaining("Это семейная запись: исправить её можно только в семейном чате"),
+    });
+    await expect(database().query(
+      "SELECT claim_status::text FROM memory_items WHERE id = $1",
+      [record.id],
+    )).resolves.toMatchObject({ rows: [{ claim_status: "active" }] });
+  });
   it("retains a family record without external identity after its author is deleted", async () => {
     const family = await createFamily("former-author");
     const record = await memoryRepository.create(
