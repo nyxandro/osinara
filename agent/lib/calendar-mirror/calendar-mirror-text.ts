@@ -80,13 +80,21 @@ export function titleFromSummary(summary: string | undefined): string {
   return text;
 }
 
-/** The reminder text with its first line replaced by a title renamed in Google. */
+/**
+ * The reminder text with a title renamed in Google. The first line is replaced only when it is the
+ * line the calendar showed; a first line it does not show (a file, a directive) stays, and the new
+ * title goes above it.
+ */
 export function contentWithTitle(content: string, title: string): string {
   const lines = content.split("\n");
   const first = lines.findIndex((line) => line.trim() !== "");
   if (first === -1) return title;
-  lines[first] = title;
-  return lines.join("\n").slice(0, REMINDER_CONTENT_MAX_LENGTH);
+  const shownFirst = reminderPlainText(content).split("\n")[0] ?? "";
+  if (reminderPlainText(lines[first]!) === shownFirst && !/!\[[^\]]*\]\(/u.test(lines[first]!)) {
+    lines[first] = title;
+    return lines.join("\n").slice(0, REMINDER_CONTENT_MAX_LENGTH);
+  }
+  return `${title}\n${content}`.slice(0, REMINDER_CONTENT_MAX_LENGTH);
 }
 
 /**

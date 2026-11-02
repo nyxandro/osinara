@@ -102,6 +102,34 @@ function messageIdOf(answer: TelegramAnswer): string | null {
   return typeof result?.message_id === "number" ? String(result.message_id) : null;
 }
 
+/**
+ * The button is presentation of a message that matters more: when it cannot be prepared, the words
+ * go out without it and the failure is logged, as with a reminder's buttons.
+ */
+async function stageRestoreButton(
+  dependencies: NoticeDependencies,
+  recipient: NoticeRecipient,
+  chatType: Exclude<NoticeRecipient["chatType"], null>,
+  text: string,
+): Promise<{ id: string; markdown: string } | null> {
+  try {
+    return await dependencies.buttons.stage({
+      addresseeTelegramUserId: recipient.addresseeTelegramUserId,
+      buttons: RESTORE_BUTTONS,
+      messageText: text,
+      telegramChatId: recipient.chatId,
+      telegramChatType: chatType,
+    });
+  } catch (error) {
+    console.error(JSON.stringify({
+      code: "AGENT_CALENDAR_MIRROR_NOTICE_BUTTON_FAILED",
+      error: error instanceof Error ? error.message : String(error),
+      groupId: recipient.groupId,
+    }));
+    return null;
+  }
+}
+
 async function deliver(
   dependencies: NoticeDependencies,
   recipient: NoticeRecipient,
@@ -113,21 +141,18 @@ async function deliver(
   if (offerRestore && recipient.chatType === null) {
     console.error(JSON.stringify({ code: "AGENT_CALENDAR_MIRROR_NOTICE_BUTTON_UNAVAILABLE", groupId: recipient.groupId }));
   }
-  if (offerRestore && recipient.chatType !== null) {
-    const staged = await dependencies.buttons.stage({
-      addresseeTelegramUserId: recipient.addresseeTelegramUserId,
-      buttons: RESTORE_BUTTONS,
-      messageText: text,
-      telegramChatId: recipient.chatId,
-      telegramChatType: recipient.chatType,
-    });
+  const staged = offerRestore && recipient.chatType !== null
+    ? await stageRestoreButton(dependencies, recipient, recipient.chatType, text)
+    : null;
+  if (staged !== null) {
     const rich = telegramRichMessageRequest({ chat_id: recipient.chatId }, staged.markdown, []);
     answer = await dependencies.send("sendRichMessage", (rich as { body: JsonObject }).body);
-    if (!answer.ok && answer.status === TELEGRAM_BAD_REQUEST_STATUS) {
-      // A refusal delivered nothing: the words still go, without the button.
+    if (!answer.ok) {
+      // A refusal delivered nothing: the prepared button goes away.
       await dependencies.buttons.discard(staged.id);
-      answer = await plain();
-    } else if (answer.ok) {
+      // A message Telegram cannot take as it is still goes out as words, without the button.
+      if (answer.status === TELEGRAM_BAD_REQUEST_STATUS) answer = await plain();
+    } else {
       const messageId = messageIdOf(answer);
       if (messageId !== null) await dependencies.buttons.activate(staged.id, messageId);
     }

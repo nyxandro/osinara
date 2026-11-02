@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 import type { MirrorCopyRow, MirrorReminderSource } from "./calendar-mirror-contract.js";
 import { CALENDAR_MIRROR_COPY_FOOTER } from "./calendar-mirror-config.js";
 import { mirrorEventId, projectReminderCopy } from "./calendar-mirror-projection.js";
-import { copyTitle } from "./calendar-mirror-text.js";
+import { contentWithTitle, copyTitle } from "./calendar-mirror-text.js";
 
 function reminder(overrides: Partial<MirrorReminderSource> = {}): MirrorReminderSource {
   return {
@@ -174,5 +174,17 @@ describe("copyTitle", () => {
       expect(text).not.toMatch(/[\r\n]/u);
       expect([...text].length).toBeLessThanOrEqual(100);
     }));
+  });
+});
+
+describe("contentWithTitle", () => {
+  it("replaces the first line when it is the title the calendar shows", () => {
+    expect(contentWithTitle("**Оплатить** интернет\nСчёт в почте", "Оплатить интернет до 10-го"))
+      .toBe("Оплатить интернет до 10-го\nСчёт в почте");
+  });
+
+  it("keeps a first line the title does not show, such as a file", () => {
+    expect(contentWithTitle("![Квитанция](/workspace/bill.pdf)\nОплатить", "Оплатить свет"))
+      .toBe("Оплатить свет\n![Квитанция](/workspace/bill.pdf)\nОплатить");
   });
 });

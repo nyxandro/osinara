@@ -17,7 +17,7 @@ import { createCalendarMirrorNotices, type NoticeDependencies } from "./calendar
 const NOW = new Date("2027-02-03T09:00:00Z");
 const FAMILY: CalendarMirrorProfile = { ...PROFILE, ownerUserId: null, scope: "family", workspaceId: "workspace-family" };
 
-function setup(options: { refuseRich?: boolean; sendFails?: boolean } = {}) {
+function setup(options: { refuseRich?: boolean; richStatus?: number; sendFails?: boolean; stageFails?: boolean } = {}) {
   const sent: Array<{ body: Record<string, unknown>; method: string }> = [];
   const recorded: unknown[] = [];
   const staged: unknown[] = [];
@@ -38,7 +38,7 @@ function setup(options: { refuseRich?: boolean; sendFails?: boolean } = {}) {
     async send(method, body) {
       sent.push({ body, method });
       if (options.sendFails) throw new Error("network down");
-      if (options.refuseRich && method === "sendRichMessage") return { body: { description: "Bad Request" }, ok: false, status: 400 };
+      if (options.refuseRich && method === "sendRichMessage") return { body: { description: "Bad Request" }, ok: false, status: options.richStatus ?? 400 };
       return { body: { result: { message_id: 500 + sent.length } }, ok: true, status: 200 };
     },
     buttons: {
@@ -49,6 +49,7 @@ function setup(options: { refuseRich?: boolean; sendFails?: boolean } = {}) {
         discarded.push(id);
       },
       async stage(input) {
+        if (options.stageFails) throw new Error("database down");
         staged.push(input);
         return { id: "set-1", markdown: `${input.messageText}\n\n<tg-button-row>…</tg-button-row>` };
       },
@@ -125,6 +126,24 @@ describe("calendar mirror notices", () => {
     expect(run.discarded).toEqual(["set-1"]);
     expect(String(run.sent[1]!.body.text)).toContain("напишите мне «верни календарь»");
     expect(run.recorded).toHaveLength(1);
+  });
+
+  it("sends the words without the button when the button cannot be prepared", async () => {
+    const run = setup({ stageFails: true });
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await run.notices.send(PROFILE, { kind: "calendar_deleted" }, NOW);
+    error.mockRestore();
+    expect(run.sent.map((message) => message.method)).toEqual(["sendMessage"]);
+    expect(run.recorded).toHaveLength(1);
+  });
+
+  it("drops the prepared button when Telegram refuses the message for another reason", async () => {
+    const run = setup({ refuseRich: true, richStatus: 429 });
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await run.notices.send(PROFILE, { kind: "calendar_deleted" }, NOW);
+    error.mockRestore();
+    expect(run.discarded).toEqual(["set-1"]);
+    expect(run.recorded).toEqual([]);
   });
 
   it("logs a failed delivery and does not retry it", async () => {
