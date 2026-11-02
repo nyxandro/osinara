@@ -199,6 +199,50 @@ describeWithDatabase("behaviorPreferenceRepository", () => {
     );
   });
 
+  it("lets a post on behalf of a channel read its external group's notes, and nothing else", async () => {
+    const fixture = await createFixture("channel");
+    const participant = await source(fixture.externalConversationId, fixture.externalTelegramUserId);
+    await behaviorPreferenceRepository.mutate(participant, {
+      action: "replace",
+      content: "Отвечай коротко.",
+      expectedRevision: 0,
+    });
+    const channelPost = async (conversationId: string) => {
+      const conversation = await database().query<{ sequence_id: string; telegram_group_id: string | null }>(
+        `UPDATE application_conversations SET next_timeline_sequence = next_timeline_sequence + 1
+         WHERE id = $1 RETURNING next_timeline_sequence::text AS sequence_id, telegram_group_id`,
+        [conversationId],
+      );
+      const current = conversation.rows[0]!;
+      const entry = await database().query<{ id: string }>(
+        `INSERT INTO telegram_group_messages
+           (conversation_id, group_id, telegram_message_id, sequence_id, actor_kind, actor_id,
+            telegram_sender_chat_id, sender_display_name, sender_is_bot, message_kind, content_text, sent_at)
+         VALUES ($1, $2, $3, $3, 'telegram_channel', 'telegram-channel:-100999', '-100999', 'Канал', false,
+                 'text', 'Пост канала', now()) RETURNING id`,
+        [conversationId, current.telegram_group_id, current.sequence_id],
+      );
+      return {
+        conversationId,
+        kind: "channel" as const,
+        sourceSequence: current.sequence_id,
+        telegramSenderChatId: "-100999",
+        timelineEntryId: entry.rows[0]!.id,
+      };
+    };
+    const post = await channelPost(fixture.externalConversationId);
+
+    await expect(behaviorPreferenceRepository.get(post)).resolves.toMatchObject({ content: "Отвечай коротко.", revision: 1 });
+    await expect(behaviorPreferenceRepository.get({ ...post, telegramSenderChatId: "-100111" }))
+      .rejects.toThrowError(/AGENT_BEHAVIOR_PREFERENCE_ACCESS_DENIED/u);
+    // A channel post in the family group gives no family identity: the family's notes stay closed.
+    await expect(behaviorPreferenceRepository.get(await channelPost(fixture.familyConversationId)))
+      .rejects.toThrowError(/AGENT_BEHAVIOR_PREFERENCE_ACCESS_DENIED/u);
+    // The group must still be registered as external, not merely exist.
+    await database().query("UPDATE telegram_groups SET type = 'family_private' WHERE id = $1", [fixture.externalGroupId]);
+    await expect(behaviorPreferenceRepository.get(post)).rejects.toThrowError(/AGENT_BEHAVIOR_PREFERENCE_ACCESS_DENIED/u);
+  });
+
   it("rejects a source actor or sequence substituted into another private chat", async () => {
     const fixture = await createFixture("source-substitution");
     const wrongActor = await source(

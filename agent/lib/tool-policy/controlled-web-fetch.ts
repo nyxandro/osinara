@@ -81,6 +81,28 @@ interface ExecuteOptions {
 
 const controlledWebFetchDispatcher = new ProxyAgent(CONTROLLED_WEB_FETCH_PROXY_URL);
 
+// undici 8 keeps only the status of a refused tunnel, under fetch's own "fetch failed"; the egress
+// proxy answers 404 to a name public DNS does not know (services/sandbox-egress-proxy/server.ts).
+const EGRESS_HOST_NOT_FOUND_TUNNEL = /^Proxy response \(404\) !== 200 when HTTP Tunneling$/u;
+const EGRESS_HOST_NOT_FOUND_STATUS_TEXT = "Host Not Found";
+
+// A mistyped or retired address, not an outage: "try later" made the model repeat it (#436). A name
+// with only an IPv6 address lands here too, and this deployment has no IPv6 route to it.
+function hostNotFound(url: URL): AppError {
+  return new AppError(
+    "AGENT_WEB_FETCH_HOST_NOT_FOUND",
+    "Адрес недоступен: у этого домена нет IPv4-адреса в публичном DNS, такого домена нет или он не работает. Проверьте написание адреса",
+    { details: { origin: url.origin }, isExpectedRefusal: true },
+  );
+}
+
+function isEgressHostNotFound(error: unknown): boolean {
+  for (let current: unknown = error, depth = 0; current instanceof Error && depth < 5; current = current.cause, depth += 1) {
+    if (EGRESS_HOST_NOT_FOUND_TUNNEL.test(current.message)) return true;
+  }
+  return false;
+}
+
 function parseInput(input: unknown): ControlledWebFetchInput {
   const parsed = CONTROLLED_WEB_FETCH_INPUT_SCHEMA.safeParse(input);
   if (!parsed.success) {
@@ -288,6 +310,12 @@ export function createControlledWebFetch(dependencies: ControlledWebFetchDepende
         }
         if (!response.ok) {
           await response.body?.cancel();
+          // On a plain HTTP address the proxy answers itself, with the status its tunnel refusal has;
+          // through an HTTPS tunnel the answer is the site's own, whatever its status text says.
+          if (currentUrl.protocol === "http:" && response.status === 404 &&
+            response.statusText === EGRESS_HOST_NOT_FOUND_STATUS_TEXT) {
+            throw hostNotFound(currentUrl);
+          }
           // The status tells a blocked site from an invented address or an outage; the path and
           // query may carry tokens, so only the origin reaches the log. A site's answer is not an
           // application failure, so the tool boundary records it without a stack.
@@ -324,6 +352,7 @@ export function createControlledWebFetch(dependencies: ControlledWebFetchDepende
             : "Страница не загрузилась за отведённое время. Попробуйте другой источник",
         );
       }
+      if (isEgressHostNotFound(error)) throw hostNotFound(currentUrl);
       console.error("Controlled web fetch failed", {
         code: "AGENT_WEB_FETCH_REQUEST_FAILED",
         error,

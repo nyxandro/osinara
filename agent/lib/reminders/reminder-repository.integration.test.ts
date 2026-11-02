@@ -178,6 +178,20 @@ describeWithDatabase("reminder repositories", () => {
 
     expect(first.recurrence).toBeNull();
     expect(replay).toEqual(first);
+    // The tool asks this before checking files again: a replay is answered from the record, and a
+    // different call under a recorded key is refused, so skipping the file check lets nothing new in.
+    await expect(reminderRepository.operationRecorded(auth, "recurrence-removed")).resolves.toBe(true);
+    await expect(reminderRepository.operationRecorded(auth, "never-called")).resolves.toBe(false);
+    await expect(reminderRepository.update(auth, reminder.id, { content: "Другой текст", operationKey: "recurrence-removed" }))
+      .rejects.toThrowError(/AGENT_REMINDER_OPERATION_CONFLICT/);
+    await expect(reminderRepository.create(auth, {
+      content: "Другой текст",
+      firstRunAt: new Date("2026-08-18T07:00:00.000Z"),
+      operationKey: "recurrence-created",
+      recurrence: { interval: 1, unit: "daily" },
+      scope: "personal",
+      timezone: "Europe/Moscow",
+    })).rejects.toThrowError(/AGENT_REMINDER_OPERATION_CONFLICT/);
     const audits = await database().query<{ count: string }>(
       `SELECT count(*)::text AS count FROM audit_events
         WHERE event_type = 'reminder.updated' AND subject_id = $1`,

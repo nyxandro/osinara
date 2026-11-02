@@ -10,6 +10,8 @@
  * - A client closing its CONNECT socket is a routine record, any other client socket error is not.
  * - An upstream error on an established tunnel is routine; one before establishment is a failure.
  * - A rejected CONNECT target is a failure record carrying the rejection reason, not credentials.
+ * - A host name that does not exist is a routine record, and the sandbox is told so: a mistyped
+ *   address is the model's mistake, not a failure of the egress path.
  * - The plain HTTP path logs the destination host, never the URL with its credentials.
  */
 import { EventEmitter } from "node:events";
@@ -29,12 +31,17 @@ vi.mock("node:http", async (importOriginal) => ({
   ...await importOriginal<typeof import("node:http")>(),
   request: network.request,
 }));
-vi.mock("./public-dns-resolver.js", () => ({
-  resolvePublicInternetAddress: vi.fn(async () => ({ address: "93.184.216.34", family: 4 })),
+const resolver = vi.hoisted(() => ({
+  resolvePublicInternetAddress: vi.fn(async (_hostname: string) => ({ address: "93.184.216.34", family: 4 as const })),
+}));
+vi.mock("./public-dns-resolver.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./public-dns-resolver.js")>(),
+  resolvePublicInternetAddress: resolver.resolvePublicInternetAddress,
 }));
 
 const { createSandboxEgressProxy } = await import("./server.js");
 const { SANDBOX_EGRESS_ROUTINE_CODES } = await import("./egress-log.js");
+const { EgressHostNotFound } = await import("./public-dns-resolver.js");
 
 // These cases use host names only, which never reach the network access gate.
 const hostNamesOnly = {
@@ -186,6 +193,42 @@ describe("sandbox egress proxy log records", () => {
     server.removeAllListeners();
   });
 
+  it("records a host name that does not exist as routine and tells the sandbox why", async () => {
+    resolver.resolvePublicInternetAddress.mockRejectedValueOnce(new EgressHostNotFound("fivpost.ru", "ENOTFOUND"));
+    const { client, server } = await openTunnel("fivpost.ru:443");
+    const answer: string[] = [];
+    client.on("data", (chunk: Buffer) => answer.push(chunk.toString()));
+    await settle();
+
+    expect(loggedRecords()).toEqual([{
+      code: "AGENT_SANDBOX_EGRESS_HOST_NOT_FOUND",
+      dnsCode: "ENOTFOUND",
+      phase: "resolution",
+      target: "fivpost.ru:443",
+    }]);
+    expect(lines[0]!.stream).toBe("info");
+    expect(SANDBOX_EGRESS_ROUTINE_CODES).toContain("AGENT_SANDBOX_EGRESS_HOST_NOT_FOUND");
+    expect(answer.join("")).toMatch(/^HTTP\/1\.1 404 Host Not Found\r\n/u);
+    expect(answer.join("")).toContain("AGENT_SANDBOX_EGRESS_HOST_NOT_FOUND: fivpost.ru has no IPv4 address in public DNS");
+    server.removeAllListeners();
+  });
+
+  it("records a host name that does not exist on the plain HTTP path as routine", async () => {
+    resolver.resolvePublicInternetAddress.mockRejectedValueOnce(new EgressHostNotFound("5post.ru", "ENODATA"));
+    const server = createSandboxEgressProxy({ grantRecheckMilliseconds: 60_000, networkAccess: hostNamesOnly });
+    const incoming = { headers: {}, method: "GET", socket: {}, url: "http://5post.ru/tracking" };
+    const outgoing = { end: vi.fn(), headersSent: false, writeHead: vi.fn() };
+
+    server.emit("request", incoming as unknown as IncomingMessage, outgoing as unknown as ServerResponse);
+    await settle();
+
+    expect(loggedRecords()).toEqual([{ code: "AGENT_SANDBOX_EGRESS_HOST_NOT_FOUND", dnsCode: "ENODATA", host: "5post.ru" }]);
+    expect(lines[0]!.stream).toBe("info");
+    expect(outgoing.writeHead).toHaveBeenCalledWith(404, "Host Not Found");
+    expect(outgoing.end).toHaveBeenCalledWith(expect.stringContaining("5post.ru has no IPv4 address in public DNS"));
+    server.removeAllListeners();
+  });
+
   it("logs a rejected CONNECT target without the credentials a client put into it", async () => {
     const { server } = await openTunnel("user:t0ken@mtalk.google.com:5228");
 
@@ -212,7 +255,7 @@ describe("sandbox egress proxy log records", () => {
       host: "example.com",
     }]);
     expect(lines[0]!.text).not.toMatch(/s3cret|t0ken|user/u);
-    expect(outgoing.writeHead).toHaveBeenCalledWith(403);
+    expect(outgoing.writeHead).toHaveBeenCalledWith(403, "Forbidden");
     server.removeAllListeners();
   });
 

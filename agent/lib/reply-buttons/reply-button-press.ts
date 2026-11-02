@@ -127,6 +127,7 @@ export function createReplyButtonPressHandler(dependencies: ReplyButtonPressDepe
         callbackQueryId,
         code: "AGENT_REPLY_BUTTON_ANSWER_FAILED",
         error: error instanceof Error ? error.message : String(error),
+        ...(error instanceof AppError && error.details !== undefined ? { details: error.details } : {}),
       }));
     }
   }
@@ -139,6 +140,7 @@ export function createReplyButtonPressHandler(dependencies: ReplyButtonPressDepe
       console.error(JSON.stringify({
         code: "AGENT_REPLY_BUTTONS_SETTLE_FAILED",
         error: error instanceof Error ? error.message : String(error),
+        ...(error instanceof AppError && error.details !== undefined ? { details: error.details } : {}),
         setId: set.id,
       }));
     }

@@ -221,13 +221,19 @@ export default withCallExamples(defineTool({
   async execute(input, ctx) {
     const parsed = requireManageReminderInput(input);
     const authorization = requireReminderAuthorization(ctx);
+    // A replay after a crash is answered from its recorded effect: the files it named may have moved
+    // since, and refusing them now would read as "not created".
+    const namesFiles = parsed.action === "create" || (parsed.action === "update" && parsed.values.content !== undefined);
+    const replayed = namesFiles && await reminderRepository.operationRecorded(authorization, ctx.callId);
     if (parsed.action === "create") {
-      await requireReminderFiles({
-        content: parsed.values.content,
-        errorCode: INPUT_ERROR_CODE,
-        rights: () => reminderWriterRights(authorization),
-        scope: parsed.values.scope,
-      });
+      if (!replayed) {
+        await requireReminderFiles({
+          content: parsed.values.content,
+          errorCode: INPUT_ERROR_CODE,
+          rights: () => reminderWriterRights(authorization),
+          scope: parsed.values.scope,
+        });
+      }
       return await reminderRepository.create(authorization, {
         ...parsed.values,
         operationKey: ctx.callId,
@@ -237,7 +243,7 @@ export default withCallExamples(defineTool({
       const { id, ...values } = parsed.values;
       // A reminder that is not found, or a public chat's one this tool may not change, is reported
       // by the update itself.
-      const scope = values.content === undefined ? null : await reminderRepository.scopeOf(authorization, id);
+      const scope = !namesFiles || replayed ? null : await reminderRepository.scopeOf(authorization, id);
       if (values.content !== undefined && scope !== null && scope !== "group") {
         await requireReminderFiles({
           content: values.content, errorCode: INPUT_ERROR_CODE, rights: () => reminderWriterRights(authorization), scope,

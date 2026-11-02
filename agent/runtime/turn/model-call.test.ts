@@ -14,7 +14,14 @@ import { callStepModel, EMPTY_RESPONSE_NUDGE, REASONING_EXHAUSTED_NUDGE, type St
 const USAGE = { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 2, text: 2, reasoning: 0 } };
 const FINISH = (unified: "stop" | "tool-calls"): LanguageModelV4StreamPart => ({ type: "finish", finishReason: { raw: undefined, unified }, usage: USAGE });
 const FAST = { firstOutputMs: 60, gapMs: 60 };
-const NO_WAIT = { sleep: async () => {}, random: () => 0 };
+// Pauses take no real time, but the clock moves by them: the outage budget is measured on it.
+let clock = 0;
+const pauses: number[] = [];
+const NO_WAIT = {
+  now: () => clock,
+  random: () => 0,
+  sleep: async (milliseconds: number) => { pauses.push(milliseconds); clock += milliseconds; },
+};
 
 type Script = (options: LanguageModelV4CallOptions) => Promise<{ stream: ReadableStream<LanguageModelV4StreamPart> }>;
 
@@ -350,6 +357,47 @@ describe("step model call", () => {
     expect((await callStepModel(call(provider), NO_WAIT)).text).toBe("ответ");
   });
 
+  it("waits out a provider outage past AI SDK's own retries for about two minutes, and gives up after it", async () => {
+    // AI SDK repeats each call twice (a Retry-After of zero skips its pauses); the outage the
+    // model hub had lasted longer than that and failed whole turns (#417).
+    const outage = async (): Promise<never> => {
+      throw new APICallError({
+        message: "unavailable", url: "u", requestBodyValues: {}, statusCode: 503, isRetryable: true,
+        responseHeaders: { "retry-after-ms": "0" },
+      });
+    };
+    const recovering = model(outage, outage, outage, outage, outage, outage, async () => ({ stream: streamOf(textParts("ответ")) }));
+
+    pauses.length = 0;
+    expect((await callStepModel(call(recovering), NO_WAIT)).text).toBe("ответ");
+    expect(recovering.doStreamCalls).toHaveLength(7);
+    expect(pauses).toEqual([10_000, 20_000]);
+
+    const down = model(outage);
+    pauses.length = 0;
+    await expect(callStepModel(call(down), NO_WAIT)).rejects.toMatchObject({ code: "AGENT_MODEL_TEMPORARILY_UNAVAILABLE" });
+    expect(down.doStreamCalls).toHaveLength(15);
+    expect(pauses).toEqual([10_000, 20_000, 40_000, 40_000]);
+  });
+
+  it("ends an outage pause at once when the turn is cancelled", async () => {
+    const lastError = new APICallError({ message: "unavailable", url: "u", requestBodyValues: {}, statusCode: 503, isRetryable: true });
+    const provider = model(async () => { throw new RetryError({ message: "retries exhausted", reason: "maxRetriesExceeded", errors: [lastError] }); });
+    const turn = new AbortController();
+    // A pause that only a cancellation ends: the turn is stopped while it waits for the hub.
+    const timing = {
+      now: () => clock,
+      random: () => 0,
+      sleep: (_milliseconds: number, signal: AbortSignal) => new Promise<void>((_done, fail) => {
+        signal.addEventListener("abort", () => fail(signal.reason), { once: true });
+        turn.abort(new Error("stopped"));
+      }),
+    };
+
+    await expect(callStepModel(call(provider, { abortSignal: turn.signal }), timing)).rejects.toMatchObject({ name: "TurnCancelledError" });
+    expect(provider.doStreamCalls).toHaveLength(1);
+  });
+
   it("does not retry a rejected request", async () => {
     const provider = model(async () => { throw new APICallError({ message: "bad request", url: "u", requestBodyValues: {}, statusCode: 400, isRetryable: false }); });
 
@@ -357,11 +405,18 @@ describe("step model call", () => {
     expect(provider.doStreamCalls).toHaveLength(1);
   });
 
-  it("does not multiply AI SDK's exhausted transport retries", async () => {
+  it("bounds the outage wait by time, whatever each refused call took", async () => {
     const lastError = new APICallError({ message: "unavailable", url: "u", requestBodyValues: {}, statusCode: 503, isRetryable: true });
-    const provider = model(async () => { throw new RetryError({ message: "retries exhausted", reason: "maxRetriesExceeded", errors: [lastError] }); });
+    // Each call is refused only after a minute, like a gateway timing out in front of the hub: the
+    // wait ends once the outage outlasts its budget instead of repeating the slow call five times.
+    const provider = model(async () => {
+      clock += 60_000;
+      throw new RetryError({ message: "retries exhausted", reason: "maxRetriesExceeded", errors: [lastError] });
+    });
 
+    pauses.length = 0;
     await expect(callStepModel(call(provider), NO_WAIT)).rejects.toMatchObject({ code: "AGENT_MODEL_TEMPORARILY_UNAVAILABLE" });
-    expect(provider.doStreamCalls).toHaveLength(1);
+    expect(provider.doStreamCalls).toHaveLength(3);
+    expect(pauses).toEqual([10_000, 20_000]);
   });
 });

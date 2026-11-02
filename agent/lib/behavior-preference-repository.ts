@@ -19,6 +19,7 @@ import type {
   BehaviorPreferenceAuthorization,
   BehaviorPreferenceReadAuthorization,
   BehaviorPreferenceBoundChatReadAuthorization,
+  BehaviorPreferenceChannelReadAuthorization,
 } from "./behavior-preference-context.js";
 import {
   type ChatOperationalPrompt,
@@ -100,6 +101,40 @@ async function requireBoundChatReadBoundary(
     }
   }
   return row.id;
+}
+
+/**
+ * A channel post proves itself through its own timeline column, and only in a registered external
+ * group: a channel holds no family identity, so no family or personal notes open to it.
+ */
+async function requireChannelReadBoundary(
+  client: PoolClient,
+  auth: BehaviorPreferenceChannelReadAuthorization,
+): Promise<string> {
+  const source = await client.query<{ family_id: string; telegram_group_id: string }>(
+    `SELECT conversation.family_id, conversation.telegram_group_id
+     FROM application_conversations AS conversation
+     JOIN telegram_group_messages AS source
+       ON source.id = $2
+      AND source.conversation_id = conversation.id
+      AND source.sequence_id = $3::bigint
+      AND source.actor_kind = 'telegram_channel'
+      AND source.telegram_sender_chat_id = $4
+     WHERE conversation.id = $1 AND conversation.scope = 'group'`,
+    [auth.conversationId, auth.timelineEntryId, auth.sourceSequence, auth.telegramSenderChatId],
+  );
+  const row = source.rows[0];
+  const group = row === undefined ? null : await client.query(
+    "SELECT 1 FROM telegram_groups WHERE id = $1 AND family_id = $2 AND type = 'external' FOR SHARE",
+    [row.telegram_group_id, row.family_id],
+  );
+  if (group?.rowCount !== 1) {
+    throw new AppError(
+      "AGENT_BEHAVIOR_PREFERENCE_ACCESS_DENIED",
+      "Не удалось подтвердить доступ к оперативным инструкциям этого чата",
+    );
+  }
+  return auth.conversationId;
 }
 
 async function requireLiveBoundary(
@@ -197,9 +232,11 @@ export const behaviorPreferenceRepository = {
     const client = await database().connect();
     try {
       await client.query("BEGIN");
-      const conversationId = "kind" in auth
-        ? await requireBoundChatReadBoundary(client, auth)
-        : (await requireLiveBoundary(client, auth), auth.conversationId);
+      const conversationId = !("kind" in auth)
+        ? (await requireLiveBoundary(client, auth), auth.conversationId)
+        : auth.kind === "channel"
+          ? await requireChannelReadBoundary(client, auth)
+          : await requireBoundChatReadBoundary(client, auth);
       const row = await currentPrompt(client, conversationId);
       await client.query("COMMIT");
       return project(row);

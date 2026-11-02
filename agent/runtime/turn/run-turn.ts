@@ -106,6 +106,9 @@ function outputSchemaNotFulfilled(): AppError {
   return new AppError("AGENT_SUBAGENT_OUTPUT_SCHEMA_NOT_FULFILLED", "The agent could not produce a result matching the requested schema.");
 }
 
+// Model-facing: the child answered in prose; its research is in its history, only the form is wrong.
+const OUTPUT_SCHEMA_REMINDER = `You answered in prose. Submit your final result by calling \`${FINAL_OUTPUT_TOOL_NAME}\` exactly once, with the fields of the requested structure, built from what you already found; do not start over.`;
+
 function stepLimitExceeded(): AppError {
   return new AppError(
     "AGENT_TURN_MODEL_STEP_LIMIT_EXCEEDED",
@@ -465,7 +468,19 @@ async function runStep(
     return { status: "completed", text: answer };
   }
   if (recorded.calls.length === 0) {
-    if (turn.input.outputSchema !== undefined) throw outputSchemaNotFulfilled();
+    if (turn.input.outputSchema !== undefined) {
+      // One reminder per child: each further step resends the child's whole context.
+      if (messages.some((message) => message.role === "user" && message.content === OUTPUT_SCHEMA_REMINDER)) {
+        throw outputSchemaNotFulfilled();
+      }
+      await inJournalTransaction(runtime.database, async (client) => {
+        const stepMessages = stepHistoryMessages({ calls: [], response: step.response });
+        const reminder: ModelMessage = { role: "user", content: OUTPUT_SCHEMA_REMINDER };
+        await appendSessionHistory(client, { messages: [...turnInput, ...stepMessages, reminder], sessionId: turn.sessionId, turnId: turn.id });
+        await completeStep(client, turn.id, stepIndex);
+      });
+      return null;
+    }
     const text = assistantStepText(step.response);
     const silent = isEmptyDelivery({ finishReason: step.finishReason, text, toolCallCount: 0 });
     const finalText = silent ? null : text;

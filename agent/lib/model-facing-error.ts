@@ -44,6 +44,8 @@ const NOT_FOUND_CORRECTIONS: Readonly<Record<string, string>> = {
     "Вызовите list_reminders и повторите действие только с актуальным id; если запись уже удалена, прекратите mutation.",
   AGENT_SCHEDULE_NOT_FOUND:
     "Вызовите list_agent_schedules и повторите действие только с актуальным id; если запись уже удалена, прекратите mutation.",
+  AGENT_WEB_FETCH_HOST_NOT_FOUND:
+    "Проверьте написание адреса или найдите правильный через web_search; тот же адрес не повторяйте ни здесь, ни через bash.",
   AGENT_WORKSPACE_FILE_NOT_FOUND:
     "Найдите файл в нужном workspace через glob, а где его нет — через ls в bash, и повторите действие с существующим путём из результата.",
 };

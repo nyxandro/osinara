@@ -3,9 +3,10 @@
  *
  * Exports:
  * - `BehaviorPreferenceAuthorization`: exact conversation, actor, source, and sequence.
- * - `BehaviorPreferenceReadAuthorization`: interactive source or server-authored scheduled target.
+ * - `BehaviorPreferenceReadAuthorization`: interactive source, server-authored scheduled target, or a
+ *   channel post's source.
  * - `requireBehaviorPreferenceAuthorization`: projects trusted Telegram auth or fails closed.
- * - `requireBehaviorPreferenceReadAuthorization`: also admits read-only scheduled and wake-up auth.
+ * - `requireBehaviorPreferenceReadAuthorization`: also admits read-only scheduled, wake-up and channel auth.
  */
 import type { SessionContext } from "../runtime/context.js";
 import type { DynamicResolveContext } from "../runtime/context.js";
@@ -13,6 +14,7 @@ import type { DynamicResolveContext } from "../runtime/context.js";
 import { scheduledDeliveryMetadata } from "./agent-schedules/scheduled-session.js";
 import { AppError } from "./app-error.js";
 import { resolveSessionCaller } from "./session-auth.js";
+import { resolveTelegramSessionActor } from "./telegram-session-actor.js";
 import { conversationWakeupRunId } from "./conversation-wakeups/conversation-wakeup-turn.js";
 
 export interface BehaviorPreferenceAuthorization {
@@ -31,9 +33,19 @@ export interface BehaviorPreferenceBoundChatReadAuthorization {
   telegramChatId: string;
 }
 
+/** A post on behalf of a channel: no Telegram user, so it reads its external group's notes only. */
+export interface BehaviorPreferenceChannelReadAuthorization {
+  conversationId: string;
+  kind: "channel";
+  sourceSequence: string;
+  telegramSenderChatId: string;
+  timelineEntryId: string;
+}
+
 export type BehaviorPreferenceReadAuthorization =
   | BehaviorPreferenceAuthorization
-  | BehaviorPreferenceBoundChatReadAuthorization;
+  | BehaviorPreferenceBoundChatReadAuthorization
+  | BehaviorPreferenceChannelReadAuthorization;
 
 type PreferenceContext =
   | Pick<DynamicResolveContext, "session">
@@ -51,6 +63,13 @@ export function requireBehaviorPreferenceAuthorization(
 ): BehaviorPreferenceAuthorization {
   const caller = resolveSessionCaller(ctx);
   const attributes = caller?.attributes;
+  // Said plainly: the generic refusal asks to send the request again, which a channel never can.
+  if (attributes?.telegramActorKind === "telegram_channel") {
+    throw new AppError(
+      "AGENT_BEHAVIOR_PREFERENCE_CHANNEL_FORBIDDEN",
+      "Сообщение от имени канала не может менять заметки чата: это может сделать участник от своего имени",
+    );
+  }
   const conversationId = attributes?.telegramConversationId;
   const sourceSequence = attributes?.telegramTimelineSequence;
   const telegramUserId = attributes?.telegramUserId;
@@ -138,6 +157,25 @@ export function requireBehaviorPreferenceReadAuthorization(
       kind: "scheduled",
       scope: scheduled.scope,
       telegramChatId: scheduled.telegramChatId,
+    };
+  }
+  // The notes belong to the chat, not to the author, and the group's memory is already read here.
+  if (attrs?.telegramActorKind === "telegram_channel") {
+    const actor = resolveTelegramSessionActor(ctx.session.auth);
+    const sequence = attrs.telegramTimelineSequence;
+    if (
+      actor?.kind !== "telegram_channel" || attrs.groupType !== "external" ||
+      typeof attrs.telegramConversationId !== "string" || typeof attrs.telegramTimelineEntryId !== "string" ||
+      typeof sequence !== "string" || !/^\d+$/u.test(sequence)
+    ) {
+      throw contextError();
+    }
+    return {
+      conversationId: attrs.telegramConversationId,
+      kind: "channel",
+      sourceSequence: sequence,
+      telegramSenderChatId: actor.id,
+      timelineEntryId: attrs.telegramTimelineEntryId,
     };
   }
   return requireBehaviorPreferenceAuthorization(ctx);

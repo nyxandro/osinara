@@ -172,3 +172,11 @@ collectors:
         key_labels: [status]
         values: [total]
         query: SELECT status, total FROM monitoring_agent_schedule_runs
+
+      # A new failure, told apart from one still in the daily window (#388).
+      - metric_name: osinara_agent_schedule_runs_1h
+        type: gauge
+        help: 'Scheduled agent runs that changed to their status in the last hour, by status.'
+        key_labels: [status]
+        values: [recent]
+        query: SELECT status, recent FROM monitoring_agent_schedule_runs
