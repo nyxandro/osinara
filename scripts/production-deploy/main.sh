@@ -132,7 +132,7 @@ remove_stale_work_dirs() {
 }
 
 send_success_notification() {
-  local message="Обновление Osinara v${REQUESTED_VERSION} успешно установлено. Код: DEPLOY_RELEASE_SUCCEEDED"
+  local message="✅ Обновление Osinara v${REQUESTED_VERSION} успешно установлено."
   if ! send_telegram_notification "$message"; then
     # Deployment is already terminally successful; Telegram ambiguity must not rewrite that fact.
     log_event "DEPLOY_SUCCESS_NOTIFICATION_FAILED" \
