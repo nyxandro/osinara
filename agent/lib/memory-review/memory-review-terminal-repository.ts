@@ -4,7 +4,7 @@
  * Exports:
  * - `memoryReviewTerminalRepository`: replay-safe completion/failure and release of sources whose turn never started.
  * - `resolveAbandonedReviewBatch`: the one terminal decision for a turn that never reports.
- * - `terminalizeAbandonedReviewTurns`: last-resort time bound for a turn that went silent.
+ * - `terminalizeAbandonedReviewTurns`: last-resort time bound for a turn that ended without reporting.
  * - `advanceCompletedChain`: shared cursor advancement for terminal and operator decisions.
  */
 import type { PoolClient } from "pg";
@@ -175,6 +175,10 @@ export async function resolveAbandonedReviewBatch(
  * A turn parked for a human answer is alive and is left alone: its application session carries the
  * pending flag until the answer or the timeout arrives. A session removed by retention nulls the
  * batch's reference to it, and such a batch has nothing left to wait for at all.
+ *
+ * So is a turn the journal still runs, however long: a turn with a helper may work past the time
+ * bound, and a restart resumes it rather than losing it. Releasing its batch would drop the source
+ * binding its later memory writes need. The bound is for a turn that ended without reporting.
  */
 export async function terminalizeAbandonedReviewTurns(
   client: PoolClient,
@@ -193,7 +197,9 @@ export async function terminalizeAbandonedReviewTurns(
             batch.agent_turn_id, batch.from_sequence::text, batch.through_sequence::text
        FROM memory_review_batches AS batch
        LEFT JOIN conversation_sessions AS session ON session.id = batch.application_session_id
+       LEFT JOIN agent_turns AS turn ON turn.id = batch.agent_turn_id
        WHERE batch.status = 'running' AND batch.agent_session_id IS NOT NULL
+        AND (turn.id IS NULL OR turn.status <> 'running')
          AND NOT (batch.batch_kind='background' AND batch.recovery_protocol=1)
         AND batch.started_at <= $1::timestamptz - $2::double precision * interval '1 millisecond'
         AND (session.id IS NULL OR session.retired_at IS NOT NULL

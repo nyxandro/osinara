@@ -4,10 +4,13 @@
  * Constructs covered:
  * - The durable turn binding survives a pause for a human answer and closes the batch afterwards.
  * - A turn that never reports back is released, skipped, or counted strictly by provenance.
- * - A live turn, parked or merely slow, is never touched by the watchdog.
+ * - A live turn, parked or merely slow, is never touched by the watchdog, however long it runs: a
+ *   turn the journal still runs will report back by itself.
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
+import { createSessionHistory } from "../../runtime/history/history-repository.js";
+import { newSessionId, newTurnId } from "../../runtime/ids.js";
 import { closeDatabase, database } from "../database.js";
 import { createMainAgentMemoryFixture } from "../memory-agent-write.integration-fixtures.js";
 import { memoryTurnSourceRepository } from "../memory-turn-source-repository.js";
@@ -366,6 +369,72 @@ describeWithDatabase("abandoned memory review turns", () => {
       "SELECT status::text FROM memory_review_batches WHERE id = $1",
       [batch!.batchId],
     )).resolves.toMatchObject({ rows: [{ status: "running" }] });
+  });
+
+  /** A batch started 90 minutes before the watchdog runs, bound to a journal turn in `status`. */
+  async function overdueBatchOfJournalTurn(status: "completed" | "running") {
+    const fixture = await createMainAgentMemoryFixture();
+    const session = await insertReviewSession(fixture.familyId, fixture.groupId, `review-${status}`);
+    const source = await insertReviewUserMessage({
+      conversationId: fixture.conversationId,
+      groupId: fixture.groupId,
+      sequence: 2,
+    });
+    const batch = await memoryReviewRepository.prepareInteractiveTurn({
+      applicationSessionId: session,
+      groupId: fixture.groupId,
+      timelineEntryId: source.id,
+    });
+    const agentSessionId = newSessionId();
+    const agentTurnId = newTurnId();
+    await createSessionHistory(database(), {
+      applicationSessionId: session, channelState: null,
+      compaction: { inputTokens: null, promptMessageCount: null }, history: [], initiatorAuth: null, parentSessionId: null,
+      sandbox: null, sessionId: agentSessionId, source: "runtime", todo: null,
+    });
+    await database().query(
+      `INSERT INTO agent_turns (id, session_id, sequence, kind, status, auth, channel, input, completed_at)
+       VALUES ($1, $2, 0, 'conversation', $3, '{}', '{"kind":"telegram"}', '{"context":[]}',
+               CASE WHEN $3 = 'completed' THEN now() END)`,
+      [agentTurnId, agentSessionId, status],
+    );
+    await memoryReviewRepository.bindAgentTurn({
+      applicationSessionId: session,
+      batchId: batch!.batchId,
+      agentSessionId,
+      agentTurnId,
+    });
+    await database().query(
+      "UPDATE memory_review_batches SET started_at = '2026-08-12T09:00:00.000Z' WHERE id = $1",
+      [batch!.batchId],
+    );
+    await memoryReviewDispatchRepository.claimPending({
+      leaseMilliseconds: 60_000,
+      limit: 10,
+      now: new Date("2026-08-12T10:30:00.000Z"),
+    });
+    return batch!.batchId;
+  }
+
+  it("leaves a batch alone past the abandon timeout while the journal still runs its turn", async () => {
+    // Ход с помощником работает полтора часа и всё это время жив: его пакет ждёт его собственного
+    // завершения, иначе запись памяти после 60-й минуты лишится источника.
+    const batchId = await overdueBatchOfJournalTurn("running");
+
+    await expect(database().query(
+      "SELECT status::text FROM memory_review_batches WHERE id = $1",
+      [batchId],
+    )).resolves.toMatchObject({ rows: [{ status: "running" }] });
+  });
+
+  it("releases an overdue batch whose journal turn ended without reporting", async () => {
+    // Ход закончился, а событие о его завершении потерялось: пакет больше нечего ждать.
+    const batchId = await overdueBatchOfJournalTurn("completed");
+
+    await expect(database().query(
+      "SELECT count(*)::integer AS batches FROM memory_review_batches WHERE id = $1",
+      [batchId],
+    )).resolves.toMatchObject({ rows: [{ batches: 0 }] });
   });
 
   it("releases a background batch that died before binding its turn", async () => {
