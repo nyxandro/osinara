@@ -7,11 +7,15 @@
  * - `controlledWebFetchTool`: custom `web_fetch` definition with the built-in input contract.
  * - A page longer than one portion is read on by `offset`: every portion starts where the previous
  *   one ended, and all of them together are the whole page text.
+ * - A name the egress proxy found no address for is told to the model as a mistyped address, not as
+ *   an outage to try again later.
  */
 import { Buffer } from "node:buffer";
+import { createServer } from "node:net";
+import type { AddressInfo } from "node:net";
 
 import fc from "fast-check";
-import { ProxyAgent, type RequestInit, type Response } from "undici";
+import { fetch as undiciFetch, ProxyAgent, type RequestInit, type Response } from "undici";
 import { describe, expect, it, vi } from "vitest";
 
 import { AppError } from "../app-error.js";
@@ -255,6 +259,43 @@ describe("controlled external-group web fetch", () => {
       "AGENT_WEB_FETCH_REQUEST_FAILED: Не удалось загрузить страницу через защищённый шлюз. Попробуйте позже",
     );
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("tells the model an address does not exist when the egress proxy found no host for it", async () => {
+    // The proxy's own answer to a CONNECT for a name public DNS does not know; undici keeps only the
+    // status of a refused tunnel, so the real ProxyAgent is used here.
+    const proxy = createServer((socket) => {
+      socket.once("data", () => socket.end("HTTP/1.1 404 Host Not Found\r\nConnection: close\r\n\r\n"));
+    });
+    await new Promise<void>((done) => proxy.listen(0, "127.0.0.1", done));
+    const dispatcher = new ProxyAgent(`http://127.0.0.1:${(proxy.address() as AddressInfo).port}`);
+    const execute = createControlledWebFetch({ dispatcher, fetch: undiciFetch });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const failure = await execute({ url: "https://fivpost.ru/tracking" }).catch((error: unknown) => error);
+
+      expect(failure).toMatchObject({
+        code: "AGENT_WEB_FETCH_HOST_NOT_FOUND",
+        details: { origin: "https://fivpost.ru" },
+        isExpectedRefusal: true,
+      });
+      expect((failure as AppError).message).toContain("нет IPv4-адреса в публичном DNS");
+      expect(console.error).not.toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+      await dispatcher.close();
+      await new Promise((done) => proxy.close(done));
+    }
+  });
+
+  it("tells the same on a plain HTTP address, where the proxy itself answers instead of a site", async () => {
+    const fetch = vi.fn(async () => response("AGENT_SANDBOX_EGRESS_HOST_NOT_FOUND", { status: 404, statusText: "Host Not Found" }));
+    const execute = createControlledWebFetch({ dispatcher: {} as never, fetch });
+
+    await expect(execute({ url: "http://5post.ru/tracking" })).rejects.toMatchObject({
+      code: "AGENT_WEB_FETCH_HOST_NOT_FOUND",
+      details: { origin: "http://5post.ru" },
+    });
   });
 
   it("reads a long page on from where the previous portion ended, letters and emoji intact", async () => {

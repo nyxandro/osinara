@@ -28,7 +28,7 @@ import {
 import { filteredHeaders } from "./http-headers.js";
 import { createGrantedConnectionRegistry } from "./granted-connection-registry.js";
 import { NetworkAccessRefusal, type NetworkAccessGate } from "./network-access-gate.js";
-import { resolvePublicInternetAddress } from "./public-dns-resolver.js";
+import { EgressHostNotFound, resolvePublicInternetAddress } from "./public-dns-resolver.js";
 
 const ALLOWED_PORTS = new Set([80, 443]);
 const MAX_PORT = 65_535;
@@ -114,11 +114,18 @@ async function resolveTarget(
   return { ...publicAddress, granted: false, hostname, port };
 }
 
-// The sandbox sees why an IP destination was refused; every other refusal stays generic.
+// The sandbox sees why an IP destination was refused and that a name does not exist, which is
+// public knowledge and stops a retry of a mistyped address; every other refusal stays generic.
 function refusalBody(error: unknown): string {
-  return error instanceof NetworkAccessRefusal
-    ? `${error.code}: ${error.clientMessage}\n`
-    : "AGENT_SANDBOX_EGRESS_FORBIDDEN: Destination is not allowed\n";
+  if (error instanceof NetworkAccessRefusal) return `${error.code}: ${error.clientMessage}\n`;
+  if (error instanceof EgressHostNotFound) return `${error.message}; check the spelling of the address\n`;
+  return "AGENT_SANDBOX_EGRESS_FORBIDDEN: Destination is not allowed\n";
+}
+
+// Clients hide the body of a refused CONNECT and undici keeps only its status code, so a name that
+// does not resolve gets a status of its own: web_fetch tells the model the address does not exist.
+function refusalStatus(error: unknown): { readonly code: number; readonly text: string } {
+  return error instanceof EgressHostNotFound ? { code: 404, text: "Host Not Found" } : { code: 403, text: "Forbidden" };
 }
 
 function errorMessage(error: unknown): string {
@@ -212,12 +219,11 @@ export function createSandboxEgressProxy({ grantRecheckMilliseconds, networkAcce
       }
       incoming.pipe(upstream);
     })().catch((error: unknown) => {
-      writeEgressLog({
-        code: "AGENT_SANDBOX_EGRESS_HTTP_REJECTED",
-        errorMessage: errorMessage(error),
-        host: urlHost(incoming.url),
-      });
-      if (!outgoing.headersSent) outgoing.writeHead(403);
+      writeEgressLog(error instanceof EgressHostNotFound
+        ? { code: error.code, dnsCode: error.dnsCode, host: urlHost(incoming.url) }
+        : { code: "AGENT_SANDBOX_EGRESS_HTTP_REJECTED", errorMessage: errorMessage(error), host: urlHost(incoming.url) });
+      const status = refusalStatus(error);
+      if (!outgoing.headersSent) outgoing.writeHead(status.code, status.text);
       outgoing.end(refusalBody(error));
     });
   });
@@ -274,13 +280,12 @@ export function createSandboxEgressProxy({ grantRecheckMilliseconds, networkAcce
         rejectSocket(clientSocket, 502, "Bad Gateway");
       });
     })().catch((error: unknown) => {
-      writeEgressLog({
-        code: "AGENT_SANDBOX_EGRESS_CONNECT_REJECTED",
-        errorMessage: errorMessage(error),
-        phase,
-        target: connectTargetForLog(request.url),
-      });
-      rejectSocket(clientSocket, 403, "Forbidden", refusalBody(error));
+      const target = connectTargetForLog(request.url);
+      writeEgressLog(error instanceof EgressHostNotFound
+        ? { code: error.code, dnsCode: error.dnsCode, phase, target }
+        : { code: "AGENT_SANDBOX_EGRESS_CONNECT_REJECTED", errorMessage: errorMessage(error), phase, target });
+      const status = refusalStatus(error);
+      rejectSocket(clientSocket, status.code, status.text, refusalBody(error));
     });
   });
 
