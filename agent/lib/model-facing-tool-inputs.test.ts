@@ -50,6 +50,7 @@ vi.mock("./memory-context.js", () => ({
 vi.mock("./memory-repository.js", () => ({
   memoryRepository: { delete: toolCalls.deleteMemory, update: toolCalls.updateMemory },
 }));
+vi.mock("./calendar-mirror/calendar-mirror-outlook.js", () => ({ calendarCopyOutlook: vi.fn(async () => "no_google") }));
 vi.mock("./reminders/reminder-context.js", () => ({
   requireReminderAuthorization: vi.fn(() => ({
     familyId: "family-1",
@@ -221,7 +222,7 @@ describe("model-facing tool input hardening", () => {
       recurrence: null,
       scope: "personal",
       timezone: "Europe/Moscow",
-    }, context)).resolves.toEqual({ recurrence: null });
+    }, context)).resolves.toEqual({ calendarCopy: "no_google", recurrence: null });
 
     expect(toolCalls.reminderUpdate).toHaveBeenCalledWith(
       expect.anything(),

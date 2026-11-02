@@ -15,6 +15,7 @@ const repository = vi.hoisted(() => ({
   create: vi.fn(), delete: vi.fn(), operationRecorded: vi.fn(), scopeOf: vi.fn(), update: vi.fn(),
 }));
 vi.mock("./reminder-repository.js", () => ({ reminderRepository: repository }));
+vi.mock("../calendar-mirror/calendar-mirror-outlook.js", () => ({ calendarCopyOutlook: vi.fn(async () => "no_google") }));
 vi.mock("./reminder-context.js", () => ({ requireReminderAuthorization: vi.fn(() => ({ familyId: "family-1" })) }));
 
 const { default: manageReminder } = await import("../tools/manage_reminder.js");
@@ -73,9 +74,9 @@ describe("manage_reminder files", () => {
     await expect(manageReminder.execute({
       action: "create", content: PERSONAL_FILE, firstRunAt: "2026-11-05T10:00:00+03:00",
       recurrence: null, scope: "family", timezone: "Europe/Moscow",
-    } as never, CONTEXT)).resolves.toEqual({ id: ID });
+    } as never, CONTEXT)).resolves.toEqual({ calendarCopy: "no_google", id: ID });
     await expect(manageReminder.execute({ action: "update", content: PERSONAL_FILE, id: ID } as never, CONTEXT))
-      .resolves.toEqual({ id: ID });
+      .resolves.toEqual({ calendarCopy: "no_google", id: ID });
     expect(repository.operationRecorded).toHaveBeenCalledWith({ familyId: "family-1" }, "call-1");
     expect(repository.create).toHaveBeenCalledTimes(1);
     expect(repository.update).toHaveBeenCalledTimes(1);

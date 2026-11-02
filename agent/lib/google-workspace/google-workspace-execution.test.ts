@@ -7,6 +7,7 @@
  * - A delegated child and a scenario run (isolated or a wake-up in the conversation) only read.
  * - Execution rechecks current access/profile and preserves scope isolation.
  * - Exact argv transport treats shell metacharacters as ordinary data.
+ * - The reminders' calendar-copy is kept by the bot: the model may read it but not change it.
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -82,6 +83,7 @@ async function executeRaw(input: { argv: string[] }, turn: unknown = PRIVATE_TUR
 function dependencies(auth: GoogleIntegrationAuthorization = personalAuth) {
   const profile = { displayName: "owner@example.com", profileRef: "profile-1" };
   return {
+    isMirrorCalendar: vi.fn().mockResolvedValue(false),
     resolveAuthorization: vi.fn().mockResolvedValue(auth),
     run: vi.fn().mockResolvedValue({ exitCode: 0, stderr: "", stdout: "{}" }),
     withAuthorizedExecution: vi.fn(async <T>(
@@ -317,5 +319,34 @@ describe("createGoogleWorkspaceExecutor", () => {
       expectedProfileRef: "old-profile",
     }, {} as never)).rejects.toThrowError(/AGENT_GOOGLE_WORKSPACE_PROFILE_CHANGED/u);
     expect(deps.run).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [["calendar", "events", "patch", "--params", '{"calendarId":"mirror@group.calendar.google.com","eventId":"osr1"}', "--json", "{}"], "mirror@group.calendar.google.com"],
+    [["calendar", "+insert", "--calendar", "mirror@group.calendar.google.com", "--summary", "x", "--start", "a", "--end", "b"], "mirror@group.calendar.google.com"],
+    [["calendar", "events", "move", "--params", '{"calendarId":"primary","eventId":"e1","destination":"mirror@group.calendar.google.com"}'], "mirror@group.calendar.google.com"],
+    [["calendar", "events", "delete", '--params={"calendarId":"mirror@group.calendar.google.com","eventId":"osr1"}'], "mirror@group.calendar.google.com"],
+    [["calendar", "+insert", "--calendar=mirror@group.calendar.google.com", "--summary", "x", "--start", "a", "--end", "b"], "mirror@group.calendar.google.com"],
+  ])("keeps the model from changing the reminders' calendar-copy: %j", async (argv, mirror) => {
+    const deps = dependencies();
+    deps.isMirrorCalendar.mockResolvedValue(true);
+    const execute = createGoogleWorkspaceExecutor(deps as never);
+
+    await expect(execute({ argv }, {} as never)).rejects.toMatchObject({
+      code: "AGENT_GOOGLE_CALENDAR_MIRROR_READ_ONLY",
+    });
+    expect(deps.isMirrorCalendar).toHaveBeenCalledWith(expect.arrayContaining([mirror]));
+    expect(deps.run).not.toHaveBeenCalled();
+  });
+
+  it("lets the model read the calendar-copy and change its other calendars", async () => {
+    const deps = dependencies();
+    const execute = createGoogleWorkspaceExecutor(deps as never);
+
+    await execute({ argv: ["calendar", "events", "list", "--params", '{"calendarId":"mirror@group.calendar.google.com"}'] }, {} as never);
+    expect(deps.isMirrorCalendar).not.toHaveBeenCalled();
+    await execute({ argv: ["calendar", "events", "insert", "--params", '{"calendarId":"primary"}', "--json", "{}"] }, {} as never);
+    expect(deps.isMirrorCalendar).toHaveBeenCalledWith(["primary"]);
+    expect(deps.run).toHaveBeenCalledTimes(2);
   });
 });

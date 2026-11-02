@@ -15,6 +15,7 @@ const repository = vi.hoisted(() => ({
   create: vi.fn(), delete: vi.fn(), operationRecorded: vi.fn(), scopeOf: vi.fn(), update: vi.fn(),
 }));
 vi.mock("./reminder-repository.js", () => ({ reminderRepository: repository }));
+vi.mock("../calendar-mirror/calendar-mirror-outlook.js", () => ({ calendarCopyOutlook: vi.fn(async () => "no_google") }));
 vi.mock("./reminder-context.js", () => ({ requireReminderAuthorization: vi.fn(() => ({ familyId: "family-1" })) }));
 
 const { default: manageReminder } = await import("../tools/manage_reminder.js");
