@@ -4,6 +4,7 @@
  * Constructs covered:
  * - Exact conversation, timeline source, actor, and sequence extraction.
  * - Rejection of incomplete or non-Telegram runtime identity.
+ * - A post on behalf of a channel in an external group reads its chat's notes and changes nothing.
  */
 import type { ToolContext } from "../runtime/tool.js";
 import { describe, expect, it } from "vitest";
@@ -131,5 +132,48 @@ describe("requireBehaviorPreferenceAuthorization", () => {
     expect(() => requireBehaviorPreferenceReadAuthorization(
       context(validAttributes, "telegram", scheduledAttributes),
     )).toThrowError(/AGENT_BEHAVIOR_PREFERENCE_CONTEXT_INVALID/u);
+  });
+
+  it("reads an external group's notes for a post on behalf of a channel, never changing them", () => {
+    const channel = (attributes: Record<string, unknown>, principalId = "telegram-channel:-100999") => ({
+      session: {
+        auth: {
+          current: {
+            attributes: {
+              groupId: "group-1",
+              groupType: "external",
+              telegramActorId: "-100999",
+              telegramActorKind: "telegram_channel",
+              telegramConversationId: "conversation-1",
+              telegramTimelineEntryId: "entry-1",
+              telegramTimelineSequence: "42",
+              ...attributes,
+            },
+            authenticator: "telegram",
+            principalId,
+            principalType: "service",
+          },
+        },
+        id: "session-1",
+        turn: { id: "turn-1" },
+      },
+    }) as unknown as ToolContext;
+
+    expect(requireBehaviorPreferenceReadAuthorization(channel({}))).toEqual({
+      conversationId: "conversation-1",
+      kind: "channel",
+      sourceSequence: "42",
+      telegramSenderChatId: "-100999",
+      timelineEntryId: "entry-1",
+    });
+    expect(() => requireBehaviorPreferenceAuthorization(channel({}))).toThrow("AGENT_BEHAVIOR_PREFERENCE_CHANNEL_FORBIDDEN");
+    // Only a verified channel identity in an external group reads this way.
+    for (const candidate of [
+      channel({}, "telegram-channel:-100111"),
+      channel({ groupType: "family_private" }),
+      channel({ telegramTimelineSequence: "x" }),
+    ]) {
+      expect(() => requireBehaviorPreferenceReadAuthorization(candidate)).toThrow("AGENT_BEHAVIOR_PREFERENCE_CONTEXT_INVALID");
+    }
   });
 });
