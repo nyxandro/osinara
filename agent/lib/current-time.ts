@@ -12,11 +12,19 @@ export interface CurrentTimeResult {
   capturedAtUtc: string;
   localDate: string | null;
   localTime: string | null;
+  /** Only without a timezone: says the UTC date is not the person's own. */
+  note?: string;
   timezone: string | null;
   timezoneSource: "explicit" | "not_configured" | "user_settings" | "group_config";
+  /** Only without a timezone: the UTC calendar date, so the weekday is never counted by hand (#451). */
+  utcDate?: string;
   utcOffset: string | null;
+  utcWeekday?: string;
   weekday: string | null;
 }
+
+const UNKNOWN_TIMEZONE_NOTE =
+  "The person's timezone is unknown: utcDate and utcWeekday are for UTC, and the local date may differ near midnight.";
 
 const CURRENT_TIME_TIMEZONE_ERROR_CODE = "AGENT_CURRENT_TIME_TIMEZONE_INVALID";
 const UTC_TIMEZONE = "UTC";
@@ -80,15 +88,21 @@ export function resolveCurrentTime(
   timezone: string | null,
   timezoneSource: CurrentTimeResult["timezoneSource"],
 ): CurrentTimeResult {
-  // UTC remains useful without pretending that it is the user's local timezone.
+  // UTC remains useful without pretending that it is the user's local timezone. The model counted
+  // the weekday from the bare UTC instant by hand and named Monday Sunday (#451), so the UTC date and
+  // weekday are given ready, marked as UTC.
   if (timezone === null) {
+    const utc = new Intl.DateTimeFormat("ru-RU", { ...LOCAL_TIME_FORMAT_OPTIONS, timeZone: UTC_TIMEZONE }).formatToParts(currentTime);
     return {
       capturedAtUtc: currentTime.toISOString(),
       localDate: null,
       localTime: null,
+      note: UNKNOWN_TIMEZONE_NOTE,
       timezone: null,
       timezoneSource,
+      utcDate: `${part(utc, "year")}-${part(utc, "month")}-${part(utc, "day")}`,
       utcOffset: null,
+      utcWeekday: part(utc, "weekday"),
       weekday: null,
     };
   }

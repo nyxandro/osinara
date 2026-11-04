@@ -54,6 +54,10 @@ function endedNotice(name: string): string {
   return `Ожидание ключа «${name}» уже закончилось, поэтому сообщение я удалил, не сохранил и агенту не передал. Если нужно сохранить ключ, попросите агента запросить его заново.`;
 }
 
+// Within the guard nothing tells which service a key-like message is for, so no key is named.
+const GUARDED_NOTICE =
+  "Сообщение похоже на ключ, поэтому я удалил его и агенту не передал: ключи принимаются только в ответ на запрос. Чтобы сохранить ключ, попросите агента запросить его и пришлите ключ следующим сообщением.";
+
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -125,7 +129,7 @@ export function createApiKeyIntake(dependencies: ApiKeyIntakeDependencies) {
     if (intake.kind === "guarded") {
       if (text.kind === "ordinary") return false;
       console.info(JSON.stringify({ code: "AGENT_API_KEY_LATE_MESSAGE_WITHHELD", name: intake.name }));
-      waitUntil(withhold(chatId, message.messageId, endedNotice(intake.name)));
+      waitUntil(withhold(chatId, message.messageId, GUARDED_NOTICE));
       return true;
     }
     if (text.kind === "key") {
