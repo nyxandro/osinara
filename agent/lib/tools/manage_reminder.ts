@@ -66,6 +66,10 @@ const TOP_LEVEL_FIELDS = [
 const TIME_FIELDS = ["firstRunAt", "localFirstRun", "firstRunInMinutes"] as const;
 const AWAITING_NEXT_STEP =
   "Not set yet: the person's timezone is unknown. Ask where they are now with the buttons «Да, {suggestedLabel}» and «Другой пояс»; once notification_settings saves their zone, this reminder is set by itself at the clock time they named. Do not say it is set.";
+// A zone is saved only in the person's private chat, so a question asked in the group could not be
+// answered there: measured 2026-11-04, the generic step above drew zone buttons into the group 4 times of 5.
+const AWAITING_NEXT_STEP_IN_GROUP =
+  "Not set yet: the author's timezone is unknown, and it can be saved only in their private chat with you. Ask them to write to you privately where they are now; the bot also writes there within a minute. Do not ask for the zone here and do not show zone buttons here. Once the zone is saved, this reminder is set by itself and goes to this group. Do not say it is set.";
 
 const recurrenceSchema = z.object({
   interval: z.number().int().min(1).max(REMINDER_RECURRENCE_INTERVAL_MAX),
@@ -285,7 +289,10 @@ export default withCallExamples(defineTool({
       }
       const outcome = await createReminderOrWait(authorization, { ...parsed.values, operationKey: ctx.callId });
       if (outcome.kind === "awaiting") {
-        return { ...outcome.awaiting, nextStep: AWAITING_NEXT_STEP.replace("{suggestedLabel}", outcome.awaiting.suggestedLabel) };
+        const nextStep = authorization.telegramChatType === "private"
+          ? AWAITING_NEXT_STEP.replace("{suggestedLabel}", outcome.awaiting.suggestedLabel)
+          : AWAITING_NEXT_STEP_IN_GROUP;
+        return { ...outcome.awaiting, nextStep };
       }
       return { ...outcome.reminder, calendarCopy: await calendarCopyOutlook(authorization, outcome.reminder) };
     }
