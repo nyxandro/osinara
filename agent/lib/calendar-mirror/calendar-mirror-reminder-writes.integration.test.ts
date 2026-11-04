@@ -64,7 +64,7 @@ async function createFixture(): Promise<Fixture> {
     await database().query("INSERT INTO calendar_mirror_profiles (workspace_id) VALUES ($1)", [workspaceId]);
   }
   await database().query(
-    "INSERT INTO user_notification_settings (user_id, timezone) VALUES ($1, 'Europe/Moscow')",
+    "INSERT INTO user_notification_settings (user_id, timezone, timezone_source, timezone_set_at) VALUES ($1, 'Europe/Moscow', 'person', now())",
     [ownerId],
   );
   return {

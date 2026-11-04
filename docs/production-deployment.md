@@ -471,7 +471,18 @@ while text is written. Groups, scheduled runs and wake-ups keep the "typing" of 
 Since v0.62.0 the agent sees a GIF by the middle frame of the file itself, not by the preview Telegram
 attaches only to some GIFs. The app image carries its own FFmpeg 9.0.2 build (stage `media-tools`: MP4
 with H.264 and GIF in, JPEG out, file descriptors only, no network protocols), run as `nobody` with
-only `PATH` in its environment. Migration 148 adds the attachment kind `animation`. Log codes:
+only `PATH` in its environment, inside `media-sandbox` (`services/media-sandbox/media-sandbox.c`, a
+static helper built in the same stage): no_new_privs and no core dumps, then Landlock leaves the
+tool no file but its own program and the system libraries and no TCP, and a seccomp filter refuses
+every socket, io_uring, socket ioctls, any process of its own (threads still run) and the namespace,
+mount, keyring, bpf, perf and ptrace calls Docker's profile already refuses. A decoder taken over by
+a crafted file reads no family's files, reaches none of the container's networks and leaves nothing
+running. Its input and output stay usable as already open descriptors. The helper reports its own
+failure on descriptor 4, closed before the tool starts, so the tool cannot pass a failure of its own
+for the sandbox's. A kernel without Landlock (or a seccomp profile that hides it) makes the helper
+refuse to run the tool: `AGENT_MEDIA_TOOL_SANDBOX_UNAVAILABLE`, and the message with the GIF fails
+instead of the tool running unrestricted. The sandbox is used whenever the agent runs as root or
+with `NODE_ENV=production`; only a development machine runs the tool directly. Migration 148 adds the attachment kind `animation`. Log codes:
 `AGENT_MEDIA_TOOL_MISSING` (the binary is absent, for example `npm run dev` on a host without ffmpeg
 6.1 or newer), `AGENT_MEDIA_TOOL_FAILED`, `AGENT_MEDIA_TOOL_TIMEOUT`, `AGENT_MEDIA_TOOL_OUTPUT_TOO_LARGE`,
 `AGENT_ANIMATION_STILL_FAILED`, `AGENT_ANIMATION_FORMAT_UNSUPPORTED`; without a frame the message still
@@ -492,6 +503,20 @@ one call behind it. State lives in `calendar_mirror_profiles` and `calendar_mirr
 `..._RUN_RESTORE_FAILED`, `..._CLEANUP_FAILED`, `..._NOTICE_FAILED`, `..._CYCLE_FAILED`. Google finishes
 deleting a calendar over 10-20 minutes and reports all its events as deleted at once: the mirror reads
 such a mass deletion as the calendar deleted and deletes no reminder for it.
+
+Since v0.63.0 a reminder named by the clock while the person's timezone is unknown waits instead of
+failing (`docs/plans/reminder-timezone.md`, #451). The wait lives in `reminder_timezone_waits` (migration
+149) with the clock time the person named; saving the zone through `notification_settings` sets every
+wait of that person in the same transaction. `user_notification_settings.timezone_source` says whether
+the person named the zone or the agent read it from a clear sign (`timezone_basis`); the agent may set a
+zone only where none exists, and a person's correction of an agent-set zone moves their own reminders
+created since, keeping the clock time. Until a zone arrives the minute schedule `reminder-dispatch` asks
+the person in their private chat at most twice (about three hours later outside 22:00-08:00, and at
+09:00 on the reminder's day, both in the family's or the product zone), then ends the wait without a
+guessed delivery. Log codes: `AGENT_REMINDER_AWAITING_TIMEZONE`, `..._AWAITING_ACTIVATED`,
+`..._AWAITING_MISSED`, `..._AWAITING_EXPIRED` (with `followupPressed`), `..._TIMEZONE_FOLLOWUP_SENT`,
+`AGENT_NOTIFICATION_TIMEZONE_INFERRED`, `..._CORRECTED` (informational); `AGENT_REMINDER_TIMEZONE_FOLLOWUP_FAILED`
+counts as an error. A countdown (`firstRunInMinutes`) needs no zone and is stored in UTC.
 
 Every capability that needs image input follows the same `supportsImageInput` flag of the active
 model config: without it `inspect_workspace_image` is not offered in any mode, and its prompt

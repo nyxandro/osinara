@@ -128,6 +128,8 @@ describe("API key intake", () => {
     },
   );
 
+  // The guard cannot tell which service a key belongs to: the owner may be sending a key of another
+  // service, so the notice must not attribute it to the key whose request opened the guard.
   it.each([KEY, `вот ключ: ${KEY}`])("withholds %j sent within the guard after the wait", async (text) => {
     const { dependencies, run } = setup(GUARDED);
 
@@ -135,7 +137,10 @@ describe("API key intake", () => {
 
     expect(dependencies.store).not.toHaveBeenCalled();
     expect(dependencies.telegram.deleteMessage).toHaveBeenCalledWith("101", "55");
-    expect(dependencies.telegram.sendMessage.mock.calls[0]![1]).toContain("уже закончилось");
+    const notice = dependencies.telegram.sendMessage.mock.calls[0]![1] as string;
+    expect(notice).not.toContain(GUARDED.name);
+    expect(notice).toContain("агенту не передал");
+    expect(notice).toContain("попросите агента запросить");
   });
 
   it("lets an ordinary message through within the guard, silently", async () => {

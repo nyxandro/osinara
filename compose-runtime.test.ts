@@ -320,14 +320,15 @@ describe("Docker Compose runtime wiring", () => {
 
   // The agent cuts a GIF's middle frame with these tools (`agent/lib/attachments/animation-still.ts`),
   // and the tests cut real files with the same build.
-  it("ships the image's own FFmpeg build and its license in the agent runtime and the test image", () => {
+  it("ships the image's own FFmpeg build, its sandbox and its license in the agent runtime and the test image", () => {
     const dockerfile = readFileSync(new URL("Dockerfile", projectRoot), "utf8");
     const stage = (name: string) => {
       const start = dockerfile.indexOf(` AS ${name}\n`);
       const end = dockerfile.indexOf("\nFROM ", start);
       return dockerfile.slice(start, end === -1 ? undefined : end);
     };
-    const tools = "COPY --from=media-tools /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/";
+    // media-sandbox (services/media-sandbox/) runs every tool under Landlock and seccomp.
+    const tools = "COPY --from=media-tools /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /opt/ffmpeg/bin/media-sandbox /usr/local/bin/";
 
     expect(stage("runtime")).toContain(tools);
     expect(stage("runtime")).toContain(
@@ -336,6 +337,8 @@ describe("Docker Compose runtime wiring", () => {
     expect(stage("test")).toContain(tools);
     expect(stage("media-tools")).toContain("sha256sum --check -");
     expect(stage("media-tools")).not.toContain("--enable-gpl");
+    expect(stage("media-tools")).toContain("COPY services/media-sandbox/media-sandbox.c /tmp/media-sandbox.c");
+    expect(stage("media-tools")).toContain("-static -Wall -Wextra -Werror -o /opt/ffmpeg/bin/media-sandbox /tmp/media-sandbox.c");
   });
 
   it("builds every Node application service from the runtime stage", () => {

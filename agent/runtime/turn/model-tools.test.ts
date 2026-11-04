@@ -67,9 +67,11 @@ describe("step tool order", () => {
 // started only reading Google. On 29–31.10.2026 rare procedures moved into service skills: these
 // descriptions say which skill to load, keep the call contract and drop rules stated elsewhere. On
 // 01.11.2026 the agent learnt to send a place and a poll, and the owner got `manage_api_keys` for
-// API keys that skills in sandboxes use without seeing them. On 04.11.2026 it learnt to send a contact card.
+// API keys that skills in sandboxes use without seeing them. On 04.11.2026 it learnt to send a contact card,
+// and a reminder learnt to wait for the person's timezone (#451): `get_current_time` gives the UTC date
+// without a zone and `list_reminders` lists the waiting ones.
 const CHANGED_AFTER_RECORDING = new Set([
-  "execute_google_workspace", "export_memory", "manage_agent_schedule", "manage_api_keys", "manage_behavior_preference",
+  "execute_google_workspace", "export_memory", "get_current_time", "list_reminders", "manage_agent_schedule", "manage_api_keys", "manage_behavior_preference",
   "manage_external_group_schedule", "manage_family_invitation", "manage_gmail_message",
   "manage_google_workspace_connection", "manage_network_access", "manage_profile_projection", "manage_reminder",
   "manage_skill", "manage_telegram_group", "notification_settings", "search_memories", "send_contact", "send_location", "send_poll",

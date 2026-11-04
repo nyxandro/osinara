@@ -14,7 +14,7 @@ import { GROUP_REMINDER_TIMEZONE } from "../reminders/reminder-config.js";
 
 const TOOL_DESCRIPTION = [
   "Get the exact current date and time from the system clock.",
-  "Without timezone it uses the current user's configured IANA timezone; if none is configured, it returns only UTC.",
+  "Without timezone it uses the current user's configured IANA timezone; if none is configured, it returns UTC with utcDate and utcWeekday marked as UTC, never the person's local date.",
   "In an external group without timezone it uses the group's shared timezone, not a participant's personal settings.",
   "For the time in another timezone pass timezone, for example {\"timezone\":\"Asia/Tokyo\"}.",
   "Use it to check the current time, date, weekday, timezone or after a long operation; do not guess these values.",

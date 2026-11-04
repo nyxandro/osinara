@@ -27,7 +27,7 @@ async function fixture(timezone: string) {
     messageThreadId: null, telegramChatId: "recurrence-owner", telegramChatType: "private" as const,
     telegramUserId: "recurrence-owner",
   };
-  await reminderRepository.configureNotifications(auth, { quietEnd: null, quietStart: null, timezone });
+  await reminderRepository.configureNotifications(auth, { basis: null, source: "person", quietEnd: null, quietStart: null, timezone });
   return auth;
 }
 
