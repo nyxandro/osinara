@@ -26,6 +26,18 @@ describe("answer file check scope", () => {
     expect(resolve).not.toHaveBeenCalled();
   });
 
+  it("sends an answer with a wrong Telegram tag back to the model, before any file is looked at", async () => {
+    const notice = await checkTelegramAnswerFiles({
+      channel: { kind: "telegram" },
+      session: session as never,
+      text: "Созвон <tg-time at=\"2026-11-07T19:00\" format=\"wt\">суббота</tg-time>.",
+    });
+
+    expect(notice).toContain("some Telegram tags in it are wrong");
+    expect(notice).toContain("with its offset");
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
   it("does not check the answer of a turn that answers no Telegram chat", async () => {
     expect(await checkTelegramAnswerFiles({ channel: { kind: "subagent" }, session: session as never, text })).toBeUndefined();
     expect(resolve).not.toHaveBeenCalled();

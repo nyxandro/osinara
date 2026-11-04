@@ -33,6 +33,7 @@ import {
   TELEGRAM_RICH_MESSAGE_MEDIA_MAX_BYTES,
   TELEGRAM_RICH_MESSAGE_MEDIA_MAX_COUNT,
 } from "../../config.js";
+import { separateTelegramRichContainers } from "../telegram-rich-tags.js";
 import type { WorkspaceAuthorization } from "../workspaces/workspace-repository.js";
 import {
   formatTelegramFinalPresentation,
@@ -174,10 +175,12 @@ export async function prepareAnswerFiles(input: {
   readonly resolver: AnswerFileResolver;
   readonly turnId: string;
 }): Promise<PreparedTelegramAnswer> {
-  const { files: references } = readAnswerMedia(input.markdown);
-  if (references.length === 0) return { files: null, markdown: input.markdown, problems: [], source: null };
+  // A gallery's files read as files only when its tags stand on lines of their own.
+  const markdown = separateTelegramRichContainers(input.markdown);
+  const { files: references } = readAnswerMedia(markdown);
+  if (references.length === 0) return { files: null, markdown, problems: [], source: null };
   const outcomes = await examineAnswerFiles(references, input.auth(), input.resolver);
-  return layOutPreparedAnswer(input.markdown, outcomes, input.turnId);
+  return layOutPreparedAnswer(markdown, outcomes, input.turnId);
 }
 
 /** The answer with a marker on every file that goes and a visible line on every one that cannot. */

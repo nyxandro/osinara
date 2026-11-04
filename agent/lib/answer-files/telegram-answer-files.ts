@@ -4,7 +4,8 @@
  * Exports:
  * - `answerWorkspaceAuthorization`: workspace rights from the verified session, or null where the
  *   chat has no workspace at all.
- * - `checkTelegramAnswerFiles`: the runtime's pre-delivery check of a final answer.
+ * - `checkTelegramAnswerFiles`: the runtime's pre-delivery check of a final answer: its Telegram
+ *   tags, then its files.
  * - `prepareTelegramAnswerFiles`: the answer laid out for delivery, files that cannot go logged.
  *
  * Key construct:
@@ -15,6 +16,7 @@ import type { SessionAuth } from "../../runtime/context.js";
 import type { StepStartContext } from "../../runtime/agent-definition.js";
 
 import { isAppError } from "../app-error.js";
+import { telegramRichTagsNotice } from "../telegram-rich-tags.js";
 import { requireWorkspaceAuthorization } from "../workspaces/workspace-context.js";
 import type { WorkspaceAuthorization } from "../workspaces/workspace-repository.js";
 import { answerFilesNotice } from "./answer-file-check.js";
@@ -34,6 +36,9 @@ export async function checkTelegramAnswerFiles(
   context: StepStartContext & { readonly text: string },
 ): Promise<string | undefined> {
   if (context.channel.kind !== "telegram" || context.session.parent !== undefined) return undefined;
+  // Telegram refuses a whole message over one wrong tag; the model fixes it like a missing file.
+  const tags = telegramRichTagsNotice(context.text);
+  if (tags !== undefined) return tags;
   return await answerFilesNotice({
     auth: () => answerWorkspaceAuthorization(context.session),
     resolver: answerFileResolver,

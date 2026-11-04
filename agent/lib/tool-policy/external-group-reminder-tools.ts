@@ -26,7 +26,7 @@ import {
   REMINDER_LIST_MAX_LIMIT,
   REMINDER_RECURRENCE_INTERVAL_MAX,
 } from "../reminders/reminder-config.js";
-import { requireReminderFiles } from "../reminders/reminder-files.js";
+import { requireReminderContent } from "../reminders/reminder-files.js";
 import { REMINDER_RECURRENCE_UNITS, type ReminderRecurrence } from "../reminders/reminder-record.js";
 import { withCallExamples, type CallExamples } from "../tool-call-examples.js";
 import {
@@ -190,7 +190,7 @@ export const EXTERNAL_GROUP_REMINDER_TOOLS: Readonly<Record<string, AnyToolDefin
       const parsed = requireManageInput(input);
       const authorization = requireGroupReminderAuthorization(ctx);
       if (parsed.action === "create") {
-        await requireReminderFiles({
+        await requireReminderContent({
           content: parsed.values.content,
           errorCode: INPUT_ERROR_CODE,
           rights: () => answerWorkspaceAuthorization(ctx.session),
@@ -204,7 +204,7 @@ export const EXTERNAL_GROUP_REMINDER_TOOLS: Readonly<Record<string, AnyToolDefin
       if (parsed.action === "update") {
         const { id, ...values } = parsed.values;
         if (values.content !== undefined) {
-          await requireReminderFiles({
+          await requireReminderContent({
             content: values.content, errorCode: INPUT_ERROR_CODE, rights: () => answerWorkspaceAuthorization(ctx.session), scope: "group",
           });
         }

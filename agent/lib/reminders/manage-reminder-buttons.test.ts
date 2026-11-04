@@ -68,11 +68,11 @@ describe("manage_reminder buttons", () => {
   });
 
   it("refuses refused markup with the reason and an example before storing anything", async () => {
-    const content = "Оплатить интернет\n\n<tg-button-row><tg-button type=\"url\" url=\"https://pay.example\">Оплатить</tg-button></tg-button-row>";
+    const content = "Оплатить интернет\n\n<tg-button-row><tg-button type=\"web_app\" url=\"https://pay.example\">Оплатить</tg-button></tg-button-row>";
 
     await expect(manageReminder.execute({ ...CREATE, content } as never, CONTEXT)).rejects.toMatchObject({
       code: "AGENT_REMINDER_INPUT_INVALID",
-      message: expect.stringMatching(/только ответом[\s\S]*<tg-button-row>/u),
+      message: expect.stringMatching(/не поддерживается[\s\S]*<tg-button-row>/u),
     });
     expect(repository.create).not.toHaveBeenCalled();
   });

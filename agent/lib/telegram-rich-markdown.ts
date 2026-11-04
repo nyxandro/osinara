@@ -21,12 +21,19 @@
  * - Telegram's own `tg-` tags never pass, not even from what looks like code: an indented line or an
  *   escaped backtick is code here but live HTML to Telegram, and a `tg-button` there could be a
  *   link or mini-app button a page talked the model into. A zero-width space breaks such a tag
- *   while code keeps showing the same characters.
+ *   while code keeps showing the same characters. The exceptions are a moment, a map, a collage
+ *   and a slideshow outside code, in the one form `telegram-rich-tags.ts` checks and writes.
  */
 import { AppError } from "./app-error.js";
 import { nextFenceState, type FenceState } from "./markdown-code-fence.js";
 import { markdownCodeRanges, openTrailingFence, readMarkdownTree, trustedCodeRanges } from "./markdown-syntax.js";
 import { keepTelegramRichLineBreaks } from "./telegram-rich-line-breaks.js";
+import {
+  canonicalTelegramRichTag,
+  isCanonicalTelegramRichMoment,
+  isSelfClosingTelegramRichTag,
+  separateTelegramRichContainers,
+} from "./telegram-rich-tags.js";
 import { inertLinkSyntax, neutralizeTelegramRichLinks } from "./telegram-rich-links.js";
 import {
   estimateTelegramRichBlocks,
@@ -48,6 +55,8 @@ const HTML_CLOSE_TAG_PATTERN = /^<\/([a-z]+)\s*>$/iu;
 // Telegram documents exactly one attribute for a rich collapsible block: `open`.
 const DETAILS_OPEN_ATTRIBUTE_PATTERN = /^open(?:\s*=\s*"(?:|open|true)")?$/iu;
 const TELEGRAM_TAG_START_PATTERN = /<(\/?tg-)/giu;
+const TELEGRAM_CONTAINER_OPEN_PATTERN = /<tg-(?:collage|slideshow)>/gu;
+const TELEGRAM_CONTAINER_CLOSE_PATTERN = /<\/tg-(?:collage|slideshow)>/gu;
 const ZERO_WIDTH_SPACE = "\u200B";
 // A text settles in one or two readings; more mean a change keeps opening something new.
 const MAX_SANITIZE_PASSES = 8;
@@ -64,7 +73,7 @@ function placeholderMarker(value: string): string {
 }
 
 function htmlTagName(tag: string): { closing: boolean; name: string } {
-  const match = /^<(\/)?([a-z]+)/u.exec(tag);
+  const match = /^<(\/)?([a-z][a-z-]*)/u.exec(tag);
   if (!match) {
     throw new AppError(
       "AGENT_TELEGRAM_RICH_HTML_INVALID",
@@ -80,6 +89,10 @@ function htmlTagName(tag: string): { closing: boolean; name: string } {
  * an unexpected attribute stays raw text and is escaped like any other model-authored HTML.
  */
 function canonicalAllowedTag(tag: string): string | null {
+  const telegram = canonicalTelegramRichTag(tag);
+  if (telegram !== null) return telegram;
+  // Each pass reads the previous one's output, where a moment already carries its Unix time.
+  if (isCanonicalTelegramRichMoment(tag)) return tag;
   const closing = HTML_CLOSE_TAG_PATTERN.exec(tag);
   if (closing) {
     const name = closing[1]!.toLowerCase();
@@ -110,6 +123,7 @@ function validateAllowedTags(tags: readonly string[]): string[] {
 
   // Allowed tags must remain structurally balanced so Telegram never receives a partial block.
   for (const tag of tags) {
+    if (isSelfClosingTelegramRichTag(tag)) continue;
     const { closing, name } = htmlTagName(tag);
     if (!closing) {
       stack.push(name);
@@ -240,6 +254,8 @@ function completeMarkdownBlocks(markdown: string): string[] {
   const blocks: string[] = [];
   const current: string[] = [];
   let detailsDepth = 0;
+  // A collage or a slideshow is one block to Telegram, so its blank lines never split it either.
+  let galleryDepth = 0;
   // Every fence Markdown knows (backticks or tildes, any length), so a blank line inside one is
   // never taken for the end of a block: the next message would show that code as live text.
   let fence: FenceState | null = null;
@@ -258,7 +274,7 @@ function completeMarkdownBlocks(markdown: string): string[] {
     if (current.length === 0) {
       if (!trimmed) continue;
       mathBlock = trimmed === "$$";
-    } else if (openFence === null && fence === null && detailsDepth === 0 && !mathBlock && !trimmed) {
+    } else if (openFence === null && fence === null && detailsDepth === 0 && galleryDepth === 0 && !mathBlock && !trimmed) {
       flush();
       continue;
     }
@@ -267,8 +283,11 @@ function completeMarkdownBlocks(markdown: string): string[] {
     const detailsOpen = line.match(/<details(?: open)?>/gu)?.length ?? 0;
     const detailsClose = line.match(/<\/details>/gu)?.length ?? 0;
     detailsDepth += detailsOpen - detailsClose;
+    const galleryOpen = fence === null ? line.match(TELEGRAM_CONTAINER_OPEN_PATTERN)?.length ?? 0 : 0;
+    const galleryClose = fence === null ? line.match(TELEGRAM_CONTAINER_CLOSE_PATTERN)?.length ?? 0 : 0;
+    galleryDepth = Math.max(0, galleryDepth + galleryOpen - galleryClose);
 
-    if (openFence !== null && fence === null && detailsDepth === 0 && !mathBlock) {
+    if (openFence !== null && fence === null && detailsDepth === 0 && galleryDepth === 0 && !mathBlock) {
       flush();
       continue;
     }
@@ -277,7 +296,9 @@ function completeMarkdownBlocks(markdown: string): string[] {
       flush();
       continue;
     }
-    if ((detailsOpen > 0 || detailsClose > 0) && detailsDepth === 0) flush();
+    if ((detailsOpen > 0 || detailsClose > 0 || galleryOpen > 0 || galleryClose > 0) && detailsDepth === 0 && galleryDepth === 0) {
+      flush();
+    }
   }
   flush();
   return blocks;
@@ -347,6 +368,16 @@ function escapeLiveTags(markdown: string, preserveAllowedHtml: boolean): string 
   return protectedCode.restore(sanitized);
 }
 
+/**
+ * Outside code every `<` but those of the allowed tags is already escaped, so the only Telegram
+ * tags left there are the allowed ones; in code the reader sees a tag that must never come alive.
+ */
+function breakTelegramTagsInCode(markdown: string): string {
+  const code = markdownCodeRanges(readMarkdownTree(markdown));
+  return markdown.replace(TELEGRAM_TAG_START_PATTERN, (tag, start: string, index: number) =>
+    code.some((range) => index >= range.start && index < range.end) ? `<${ZERO_WIDTH_SPACE}${start}` : tag);
+}
+
 function sanitizeTelegramRichMarkdownInternal(
   markdown: string,
   preserveAllowedHtml: boolean,
@@ -360,7 +391,7 @@ function sanitizeTelegramRichMarkdownInternal(
     // A step can leave a fence open at the end (a blank line moved it onto a line of its own), so
     // each reading closes it before a missing `</details>` is added after it.
     const next = escapeLiveTags(neutralizeTelegramRichLinks(closeOpenTrailingFence(text)), preserveAllowedHtml);
-    if (next === text) return next.replace(TELEGRAM_TAG_START_PATTERN, `<${ZERO_WIDTH_SPACE}$1`);
+    if (next === text) return breakTelegramTagsInCode(next);
     text = next;
   }
   // A text crafted to keep changing still goes out, all of it inert: every `<` escaped, code
@@ -452,7 +483,8 @@ export function fitsTelegramRichMessage(markdown: string): boolean {
 
 export function formatTelegramRichMessages(markdown: string): string[] {
   // The model's line breaks are part of what it wrote; Telegram would read most of them as spaces.
-  const sanitized = keepTelegramRichLineBreaks(sanitizeTelegramRichMarkdown(markdown).trim());
+  // A gallery's tags go on lines of their own first, so Markdown reads its inside as Markdown.
+  const sanitized = keepTelegramRichLineBreaks(sanitizeTelegramRichMarkdown(separateTelegramRichContainers(markdown)).trim());
   if (!sanitized) return [];
   if (characterLength(sanitized) <= TELEGRAM_RICH_MESSAGE_MAX_CHARACTERS &&
     estimateTelegramRichBlocks(sanitized) <= TELEGRAM_RICH_MESSAGE_MAX_BLOCKS) return [sanitized];

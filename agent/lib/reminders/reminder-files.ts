@@ -2,8 +2,8 @@
  * Workspace files shown inside a reminder's text.
  *
  * Exports:
- * - `requireReminderFiles`: refuses a reminder text whose files will not reach its chat, for the
- *   tool that writes it.
+ * - `requireReminderContent`: refuses a reminder text whose Telegram tags Telegram would refuse or
+ *   whose files will not reach its chat, for the tool that writes it.
  * - `reminderWriterRights`: the rights a family member writing a reminder has to their own folders.
  * - `reminderWorkspaceAuthorization`: the rights a reminder's files are read with when it goes out.
  * - `prepareReminderFiles`: the reminder's text with its files read and laid out for delivery.
@@ -26,6 +26,7 @@ import {
 } from "../answer-files/answer-file-delivery.js";
 import { answerFileResolver } from "../answer-files/answer-file-resolution.js";
 import { AppError, isAppError } from "../app-error.js";
+import { telegramRichTagsNotice } from "../telegram-rich-tags.js";
 import { toolInputError } from "../tool-input-validation.js";
 import type { WorkspaceScope } from "../workspaces/workspace-file-record.js";
 import type { WorkspaceAuthorization } from "../workspaces/workspace-repository.js";
@@ -42,13 +43,16 @@ const REMINDER_FILE_SCOPES: Readonly<Record<ReminderScope, readonly WorkspaceSco
 };
 const GROUP_CHAT_TYPES: ReadonlySet<string> = new Set(["group", "supergroup"]);
 
-export async function requireReminderFiles(input: {
+export async function requireReminderContent(input: {
   readonly content: string;
   readonly errorCode: string;
   /** The writer's rights; the reminder's scope limits which of their folders it may show. */
   readonly rights: () => WorkspaceAuthorization | null;
   readonly scope: ReminderScope;
 }): Promise<void> {
+  // A reminder goes out without the model: a tag Telegram refuses would cost its whole message.
+  const tags = telegramRichTagsNotice(input.content);
+  if (tags !== undefined) toolInputError(input.errorCode, tags);
   const error = await reminderFilesError({
     allowedScopes: REMINDER_FILE_SCOPES[input.scope],
     auth: input.rights,
