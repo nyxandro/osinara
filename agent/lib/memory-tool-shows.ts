@@ -2,7 +2,7 @@
  * Writing down the records a memory tool put in front of the model.
  *
  * Export:
- * - `recordToolShows`: journals what `search_memories` or `list_memories` returned to this turn.
+ * - `recordToolShows`: journals what `search_memories` or the list of `manage_memory` returned to this turn.
  *
  * The model names records it used, and the usage counter accepts only records the journal says it
  * was shown (#339). A record found by a deliberate search used to be refused there, and the

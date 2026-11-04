@@ -37,13 +37,13 @@ interface NormalizeModelFacingErrorContext {
 
 const NOT_FOUND_CORRECTIONS: Readonly<Record<string, string>> = {
   AGENT_MEMORY_NOT_FOUND:
-    "Вызовите list_memories или search_memories и повторите действие только с актуальным memoryRef.",
+    "Найдите запись через search_memories или manage_memory с action=list и повторите действие только с актуальным memoryRef.",
   AGENT_MEMORY_THREAD_NOT_FOUND:
-    "Вызовите list_memory_threads или search_memory_threads и повторите действие только с актуальным threadRef.",
+    "Найдите нить через manage_memory_thread с action=list или action=search и повторите действие только с актуальным threadRef.",
   AGENT_REMINDER_NOT_FOUND:
-    "Вызовите list_reminders и повторите действие только с актуальным id; если запись уже удалена, прекратите mutation.",
+    "Вызовите manage_reminder с action=list и повторите действие только с актуальным id; если запись уже удалена, прекратите mutation.",
   AGENT_SCHEDULE_NOT_FOUND:
-    "Вызовите list_agent_schedules и повторите действие только с актуальным id; если запись уже удалена, прекратите mutation.",
+    "Вызовите manage_agent_schedule с action=list и повторите действие только с актуальным id; если запись уже удалена, прекратите mutation.",
   AGENT_WEB_FETCH_HOST_NOT_FOUND:
     "Проверьте написание адреса или найдите правильный через web_search; тот же адрес не повторяйте ни здесь, ни через bash.",
   AGENT_WORKSPACE_FILE_NOT_FOUND:
@@ -89,9 +89,10 @@ const EXPECTED_REFUSAL_CATEGORIES: ReadonlySet<ModelFacingErrorCategory> = new S
 export class ModelFacingError extends AppError {
   readonly contract: Readonly<ModelFacingErrorContract>;
 
-  constructor(contract: ModelFacingErrorContract, options?: { readonly isExpectedRefusal?: boolean }) {
+  constructor(contract: ModelFacingErrorContract, options?: { readonly cause?: unknown; readonly isExpectedRefusal?: boolean }) {
     // JSON keeps the correction contract machine-readable inside the tool-error text the model reads.
     super(contract.code, JSON.stringify(contract), {
+      ...(options?.cause === undefined ? {} : { cause: options.cause }),
       isExpectedRefusal: EXPECTED_REFUSAL_CATEGORIES.has(contract.category) || options?.isExpectedRefusal === true,
     });
     this.name = "ModelFacingError";

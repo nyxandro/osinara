@@ -110,7 +110,7 @@ describe("a model without image input", () => {
       environment: "external",
     });
 
-    expect(buildModeToolSurface({ environment: "private" })).not.toHaveProperty("inspect_workspace_image");
+    expect(buildModeToolSurface({ environment: "private", owner: true })).not.toHaveProperty("inspect_workspace_image");
     expect(buildModeToolSurface({ environment: "family" })).not.toHaveProperty("inspect_workspace_image");
     expect(external).not.toHaveProperty("inspect_workspace_image");
     expect(external).toHaveProperty("remember");
@@ -120,7 +120,7 @@ describe("a model without image input", () => {
 
   it("drops image guidance from every mode prompt", () => {
     for (const instructions of [
-      modeInstructions({ environment: "private" }),
+      modeInstructions({ environment: "private", owner: true }),
       modeInstructions({ environment: "family" }),
       modeInstructions({ capabilities: new Set(), environment: "external" }),
     ]) {

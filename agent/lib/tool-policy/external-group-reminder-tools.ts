@@ -3,8 +3,8 @@
  *
  * Export:
  * - `EXTERNAL_GROUP_REMINDER_CALL_EXAMPLES`: the example calls an input refusal of `manage_reminder` carries.
- * - `EXTERNAL_GROUP_REMINDER_TOOLS`: same-name `list_reminders` and `manage_reminder` descriptors
- *   bound to the public-chat reminder boundary.
+ * - `EXTERNAL_GROUP_REMINDER_TOOLS`: a same-name `manage_reminder` descriptor bound to the public-chat
+ *   reminder boundary; its list action replaces the separate list tool (#457).
  *
  * Key constructs:
  * - The public chat has exactly one scope and one timezone, so neither is a model input here. A
@@ -33,6 +33,7 @@ import { withCallExamples, type CallExamples } from "../tool-call-examples.js";
 import {
   optionalIsoDate,
   optionalString,
+  pageInput,
   requireAction,
   requiredEnum,
   requiredIsoDate,
@@ -46,8 +47,8 @@ import {
 type AnyToolDefinition = ToolDefinition<any, any>;
 
 const INPUT_ERROR_CODE = "AGENT_REMINDER_INPUT_INVALID";
-const TOOL_ACTIONS = ["create", "update", "pause", "resume", "delete"] as const;
-const TOP_LEVEL_FIELDS = ["action", "content", "firstRunAt", "id", "recurrence"] as const;
+const TOOL_ACTIONS = ["list", "create", "update", "pause", "resume", "delete"] as const;
+const TOP_LEVEL_FIELDS = ["action", "content", "cursor", "firstRunAt", "id", "limit", "recurrence"] as const;
 // The chat has one timezone, so the wall clock reported to the human and the instant that is stored
 // must be the same reading. A UTC timestamp would silently move the reminder by three hours.
 const MOSCOW_OFFSET_SUFFIX = "+03:00";
@@ -83,8 +84,10 @@ const recurrenceSchema = z.object({
 const manageReminderSchema = z.object({
   action: z.enum(TOOL_ACTIONS),
   content: z.string().optional(),
+  cursor: z.string().min(1).optional(),
   firstRunAt: z.string().optional(),
   id: z.string().optional(),
+  limit: z.number().int().min(1).max(REMINDER_LIST_MAX_LIMIT).optional(),
   recurrence: z.union([recurrenceSchema, z.null()]).optional(),
 }).strict();
 
@@ -113,7 +116,7 @@ function requireRecurrence(raw: unknown): ReminderRecurrence | null {
 }
 
 function requireReminderId(input: Record<string, unknown>): string {
-  return requiredUuid(input, "id", INPUT_ERROR_CODE, "напоминание из list_reminders");
+  return requiredUuid(input, "id", INPUT_ERROR_CODE, "напоминание из manage_reminder с action=list");
 }
 
 function requireCreateInput(input: Record<string, unknown>) {
@@ -150,59 +153,55 @@ function requireIdOnlyInput(input: Record<string, unknown>, action: string): str
   return requireReminderId(input);
 }
 
+function requireListInput(input: Record<string, unknown>) {
+  requireOnlyFields(input, ["action", "cursor", "limit"], "action=list", INPUT_ERROR_CODE);
+  return pageInput(input, INPUT_ERROR_CODE, {
+    defaultLimit: REMINDER_LIST_DEFAULT_LIMIT,
+    maxLimit: REMINDER_LIST_MAX_LIMIT,
+  });
+}
+
 function requireManageInput(input: unknown) {
   const payload = requireInputRecord(input, "manage_reminder", INPUT_ERROR_CODE);
   requireOnlyFields(payload, TOP_LEVEL_FIELDS, "manage_reminder", INPUT_ERROR_CODE);
   const action = requireAction(payload, "manage_reminder", TOOL_ACTIONS, INPUT_ERROR_CODE);
 
+  if (action === "list") return { action, page: requireListInput(payload) } as const;
   if (action === "create") return { action, values: requireCreateInput(payload) } as const;
   if (action === "update") return { action, values: requireUpdateInput(payload) } as const;
   return { action, id: requireIdOnlyInput(payload, action) } as const;
 }
 
 const MANAGE_DESCRIPTION = [
-  "Create, change, pause, resume or delete a reminder of this chat: at the given time the bot itself posts its ready-made text here, without calling the model. Load the group-reminders skill first: it holds the text and time rules.",
+  "List, create, change, pause, resume or delete a reminder of this chat: at the given time the bot itself posts its ready-made text here, without calling the model. Load the group-reminders skill before a change: it holds the text and time rules.",
+  "List shows the active reminders of this chat page by page, nearest first, paused ones included and delivered ones not: {\"action\":\"list\"}. Any participant sees them. Use it before a change or deletion to find the record's id by the name the person said. The result is {items,nextCursor}; a not-null nextCursor goes back unchanged as cursor for the next page.",
   "content is read at the moment of delivery: no words like \"завтра\" or \"через час\", name the event time by the Moscow clock.",
   "<current_time> is UTC and Moscow is always UTC+03:00: count \"через час\" or \"завтра утром\" from it and add three hours for Moscow time.",
   "content is laid out like your answers: Markdown and a file of this chat's folder on its own line as ![caption](/workspace/group/...); a file is checked now and read at delivery, so it must stay in place. A group reminder carries no buttons: write a link or a text to copy into content itself.",
   `Limit: no more than ${GROUP_REMINDER_MAX_PER_CHAT} active reminders for the whole chat. The chat's timezone is always ${GROUP_REMINDER_TIMEZONE}.`,
   "Create payload: {\"action\":\"create\",\"content\":\"Созвон по проекту\",\"firstRunAt\":\"2026-09-04T18:00:00+03:00\",\"recurrence\":null}.",
   "Recurrence: none is recurrence=null; a repeat is {\"unit\":\"daily\",\"interval\":1} with unit minutely, hourly, daily, weekly, monthly or yearly and interval 1-365.",
-  "Update passes id and only the changed content, firstRunAt or recurrence; pause, resume and delete pass only action and id. One call works with exactly one reminder; take its id from list_reminders.",
+  "Update passes id and only the changed content, firstRunAt or recurrence; pause, resume and delete pass only action and id. One call works with exactly one reminder; take its id from the list.",
   `firstRunAt is always an ISO datetime with the Moscow offset ${MOSCOW_OFFSET_SUFFIX}: another offset is rejected. A delivered one-time reminder cannot change: create a new one.`,
 ].join(" ");
 
-const LIST_DESCRIPTION = [
-  "List the active reminders of this chat page by page, nearest first: any participant sees them, including paused ones. Already delivered ones are not shown here.",
-  "Use it before a change or deletion to find the record's id by the name the person said.",
-  "Result: {items,nextCursor}; if nextCursor is not null, pass it unchanged for the next page.",
-].join(" ");
-
 export const EXTERNAL_GROUP_REMINDER_CALL_EXAMPLES: CallExamples = {
+  list: { action: "list" },
   create: { action: "create", content: "Созвон по проекту", firstRunAt: "2026-09-04T18:00:00+03:00", recurrence: null },
-  update: { action: "update", id: "<id из list_reminders>", firstRunAt: "2026-09-04T19:00:00+03:00" },
-  pause: { action: "pause", id: "<id из list_reminders>" },
-  resume: { action: "resume", id: "<id из list_reminders>" },
-  delete: { action: "delete", id: "<id из list_reminders>" },
+  update: { action: "update", id: "<id из списка action=list>", firstRunAt: "2026-09-04T19:00:00+03:00" },
+  pause: { action: "pause", id: "<id из списка action=list>" },
+  resume: { action: "resume", id: "<id из списка action=list>" },
+  delete: { action: "delete", id: "<id из списка action=list>" },
 };
 
 export const EXTERNAL_GROUP_REMINDER_TOOLS: Readonly<Record<string, AnyToolDefinition>> = {
-  list_reminders: defineTool({
-    description: LIST_DESCRIPTION,
-    inputSchema: z.object({
-      cursor: z.string().min(1).optional(),
-      limit: z.number().int().min(1).max(REMINDER_LIST_MAX_LIMIT).default(REMINDER_LIST_DEFAULT_LIMIT),
-    }).strict(),
-    async execute(input, ctx) {
-      return await groupReminderRepository.list(requireGroupReminderAuthorization(ctx), input);
-    },
-  }) as unknown as AnyToolDefinition,
   manage_reminder: withCallExamples(defineTool({
     description: MANAGE_DESCRIPTION,
     inputSchema: manageReminderSchema,
     async execute(input, ctx) {
       const parsed = requireManageInput(input);
       const authorization = requireGroupReminderAuthorization(ctx);
+      if (parsed.action === "list") return await groupReminderRepository.list(authorization, parsed.page);
       if ((parsed.action === "create" || parsed.action === "update") && parsed.values.content !== undefined) {
         refuseReminderButtons(parsed.values.content);
       }

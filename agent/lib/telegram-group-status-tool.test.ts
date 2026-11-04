@@ -179,10 +179,11 @@ describe("manage_telegram_group.status", () => {
   });
 
   it("requires status before replacing an unknown current policy", () => {
-    const instructions = modeInstructions({ environment: "private" });
-    const procedure = serviceSkillsFor("private", new Set(["manage_telegram_group"]))["group-admin"]!.markdown;
+    const instructions = modeInstructions({ environment: "private", owner: true });
+    const procedure = serviceSkillsFor("private", new Set(["owner_settings"]))["group-admin"]!.markdown;
 
-    expect(instructions).toContain("`{\"action\":\"status\"}`");
+    // The groups are a section of the owner's settings door (#459).
+    expect(instructions).toContain("`{\"section\":\"groups\",\"call\":{\"action\":\"status\"}}`");
     expect(instructions).toContain("the `/status` command");
     expect(instructions).toContain("in one message");
     expect(procedure).toContain("Before any other group action, call status");

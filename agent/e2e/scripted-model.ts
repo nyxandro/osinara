@@ -10,7 +10,7 @@
  * - `m`: the message must have woken the agent by an @mention; `x`: by its name in the text, and
  *   the answer is the empty-delivery marker (silence);
  * - `f`: the provider fails;
- * - `p`: one `manage_profile_projection` call that needs the owner's button;
+ * - `p`: one call of the owner's `group_profiles` settings through `owner_settings` that needs the owner's button;
  * - `s`: `load_skill` of `behavior-preferences`; `d`: delegate to a subagent, which answers `child-<marker>`;
  * - every other turn runs one `bash` command; `k` makes it never finish (the process is killed
  *   under it), `h` makes it wait until the test releases the marker;
@@ -88,13 +88,16 @@ async function rootStep(db: Pick<Pool, "query">, marker: string, user: string, r
     return { text: EMPTY_DELIVERY_MARKER };
   }
   if (flags.includes("f")) throw new Error("TEST_MODEL_FAILURE");
-  if (flags.includes("p") && !has("manage_profile_projection")) {
+  if (flags.includes("p") && !has("owner_settings")) {
     const policy = (await db.query<{ group_ref: string }>(
       `SELECT p.group_ref FROM external_profile_projection_policies p JOIN telegram_groups g ON g.id = p.group_id
         WHERE g.telegram_chat_id = $1`, [String(E2E_EXTERNAL_CHAT_ID)],
     )).rows[0];
     if (!policy) throw new Error("TEST_PROFILE_PROJECTION_GROUP_MISSING");
-    return { toolCall: { input: { action: "update", enabled: true, groupRef: policy.group_ref }, name: "manage_profile_projection" } };
+    return { toolCall: {
+      input: { call: { action: "update", enabled: true, groupRef: policy.group_ref }, section: "group_profiles" },
+      name: "owner_settings",
+    } };
   }
   if (results.some((result) => result.output.type === "error-text" && !resultText(result).includes("AGENT_TOOL_OUTCOME_UNKNOWN"))) {
     throw new Error(`TEST_TOOL_FAILED: ${JSON.stringify(results.at(-1))}`);

@@ -34,7 +34,7 @@ vi.mock("./memory-repository.js", () => ({
     updateByRef: updateMemoryByRef,
   },
 }));
-import manageMemory from "./tools/manage_memory.js";
+import manageMemory, { manageMemoryPresentation } from "./tools/manage_memory.js";
 
 const MEMORY_REF = "mem_0123456789abcdef0123456789abcdef";
 const context = {
@@ -95,7 +95,7 @@ describe("manage_memory", () => {
     };
 
     expect(schema.required).toContain("action");
-    expect(schema.properties?.action).toMatchObject({ enum: ["edit", "delete", "undo"] });
+    expect(schema.properties?.action).toMatchObject({ enum: ["list", "edit", "delete", "undo"] });
   });
 
   it("tells the model that edit is a complete integrity-preserving replacement", () => {
@@ -104,10 +104,16 @@ describe("manage_memory", () => {
     expect(manageMemory.description).toContain("Do not perform an unjustified mutation");
   });
 
-  it("rejects malformed edit before showing private approval", async () => {
-    await expect(approvalFor({ action: "edit", memoryRef: MEMORY_REF })).rejects.toThrowError(
-      /AGENT_MEMORY_INPUT_INVALID: Поле content обязательно/u,
-    );
+  it("names in a view's descriptor only the actions it has", () => {
+    expect(manageMemoryPresentation(["edit"]).description).not.toMatch(/\blist\b/iu);
+    expect(manageMemoryPresentation(["list"]).description).not.toMatch(/\bchange\b|\bedit\b/iu);
+  });
+
+  it("refuses a malformed edit in execution, after an approval step that lets it through", async () => {
+    // Thrown in the approval step, the refusal would end the turn instead of reaching the model.
+    await expect(approvalFor({ action: "edit", memoryRef: MEMORY_REF })).resolves.toBe("not-applicable");
+    await expect(manageMemory.execute({ action: "edit", memoryRef: MEMORY_REF } as never, {} as ToolContext))
+      .rejects.toThrowError(/AGENT_MEMORY_INPUT_INVALID: Поле content обязательно/u);
     expect(canUndoMemory).not.toHaveBeenCalled();
   });
 

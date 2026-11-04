@@ -74,7 +74,8 @@ import {
 
 export type ModeInstructionsInput =
   | { environment: "family"; reactions?: readonly string[] | null; scheduledRun?: boolean; subagentTurn?: boolean }
-  | { environment: "private"; reactions?: readonly string[] | null; scheduledRun?: boolean; subagentTurn?: boolean }
+  // `owner`: the verified caller is the family's owner; another member's chat gets none of the owner's administration.
+  | { environment: "private"; owner: boolean; reactions?: readonly string[] | null; scheduledRun?: boolean; subagentTurn?: boolean }
   | {
       capabilities: ReadonlySet<ExternalGroupToolName>;
       channelAuthored?: boolean;
@@ -125,11 +126,22 @@ const TRUSTED_ANSWER_FILE_RULES = answerFileRules("`/workspace/personal/...` or 
 
 const PRIVATE_HEADING = ["# Current mode: private chat", VERIFIED_BLOCK_NOTICE];
 
+// Any family member keeps the family's own skills in their own private chat.
+const FAMILY_SKILL_ADMINISTRATION = `Any family member manages the family's own skills here, through \`manage_skill\`, without confirmation buttons; load the service skill \`skill-manager\` first. Never install a skill with \`npx skills add\` or by copying files into \`$HOME/.agents/skills/\`. When the turn carries a notice that the previous task took many tool steps, or the person corrected you during a task that succeeded and is likely to repeat, end the answer with one sentence offering to save it as a skill; not for a one-off task, and not again after the person declined in this conversation. When a family skill you followed failed or misled you, say what broke and offer a corrected version. An external group's skills are changed only by the owner.`;
+
+// The owner's administration: its tools exist only in the owner's own private chat.
 const PRIVATE_ADMINISTRATION_RULES = `## Administration
 
-Telegram groups of the family and family invitations are managed only here. On the \`/status\` command or a request to show the settings of groups, call \`manage_telegram_group\` with exactly \`{"action":"status"}\` and show the result in one message. Before changing a group (permissions, skills, a new context in a group, registration, removal), an automation for an external group or invitations, load the \`group-admin\` skill and follow it.
+Telegram groups of the family and family invitations are managed only here. On the \`/status\` command or a request to show the settings of groups, call \`owner_settings\` with exactly \`{"section":"groups","call":{"action":"status"}}\` and show the result in one message. Before changing a group (permissions, skills, a new context in a group, registration, removal), an automation for an external group or invitations, load the \`group-admin\` skill and follow it.
 
-Any family member manages the family's own skills here, through \`manage_skill\`, without confirmation buttons; load the service skill \`skill-manager\` first. Never install a skill with \`npx skills add\` or by copying files into \`$HOME/.agents/skills/\`. When the turn carries a notice that the previous task took many tool steps, or the person corrected you during a task that succeeded and is likely to repeat, end the answer with one sentence offering to save it as a skill; not for a one-off task, and not again after the person declined in this conversation. When a family skill you followed failed or misled you, say what broke and offer a corrected version. An external group's skills are changed only by the owner.`;
+${FAMILY_SKILL_ADMINISTRATION}`;
+
+// Another member's private chat has none of the owner's tools, so it is told only where they are.
+const MEMBER_ADMINISTRATION_RULES = `## Administration
+
+The family's Telegram groups, invitations and the owner's settings are managed by the owner in their own private chat; say so when asked, and do not promise to change them from here.
+
+${FAMILY_SKILL_ADMINISTRATION}`;
 
 const PRIVATE_MEMORY = `## Memory
 
@@ -194,6 +206,7 @@ const CHILD_OMITTED_SECTIONS: ReadonlySet<string> = new Set([
   // Its observer is silent: a note meant for the person would reach nobody.
   PROGRESS_UPDATE_RULES,
   PRIVATE_ADMINISTRATION_RULES,
+  MEMBER_ADMINISTRATION_RULES,
   START_NEW_CONTEXT_RULES,
   FAMILY_SKILL_CHANGES_RULE,
   TRUSTED_ANSWER_FILE_RULES,
@@ -207,14 +220,18 @@ function privateInstructions(
   scheduledRun: boolean,
   reactions: readonly string[] | null,
   subagentTurn: boolean,
+  owner: boolean,
 ): string {
+  const sections = owner
+    ? PRIVATE_INSTRUCTION_SECTIONS
+    : PRIVATE_INSTRUCTION_SECTIONS.map((section) => section === PRIVATE_ADMINISTRATION_RULES ? MEMBER_ADMINISTRATION_RULES : section);
   return block([
     ...PRIVATE_HEADING,
     subagentTurn ? SUBAGENT_TURN_RULES : null,
     // The route names tools of a live turn; a scheduled run and a delegated child have fewer.
-    scheduledRun || subagentTurn ? null : trustedRouteRules("personal"),
+    scheduledRun || subagentTurn ? null : trustedRouteRules({ owner, scope: "personal" }),
     subagentTurn ? PRIVATE_CHILD_MEMORY : PRIVATE_MEMORY,
-    ...sectionsFor(PRIVATE_INSTRUCTION_SECTIONS, subagentTurn),
+    ...sectionsFor(sections, subagentTurn),
     // A scheduled report is not a live exchange: it has no message to react to and never imitates
     // a spontaneous afterthought.
     scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,
@@ -290,7 +307,7 @@ function familyInstructions(
   return block([
     ...FAMILY_HEADING,
     subagentTurn ? SUBAGENT_TURN_RULES : null,
-    scheduledRun || subagentTurn ? null : trustedRouteRules("family"),
+    scheduledRun || subagentTurn ? null : trustedRouteRules({ scope: "family" }),
     subagentTurn ? FAMILY_CHILD_MEMORY : FAMILY_MEMORY_AND_ADDRESSING,
     ...sectionsFor(FAMILY_INSTRUCTION_SECTIONS, subagentTurn),
     scheduledRun || subagentTurn ? null : GROUP_RESPONSE_OUTCOMES,
@@ -468,7 +485,7 @@ export function modeInstructions(input: ModeInstructionsInput): string {
   const reactions = input.reactions ?? null;
   const scheduledRun = input.scheduledRun ?? false;
   const subagentTurn = input.subagentTurn ?? false;
-  if (input.environment === "private") return privateInstructions(scheduledRun, reactions, subagentTurn);
+  if (input.environment === "private") return privateInstructions(scheduledRun, reactions, subagentTurn, input.owner);
   if (input.environment === "family") return familyInstructions(scheduledRun, reactions, subagentTurn);
   return externalInstructions(
     input.capabilities,

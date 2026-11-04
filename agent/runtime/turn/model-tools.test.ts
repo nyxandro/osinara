@@ -67,20 +67,27 @@ describe("step tool order", () => {
 // started only reading Google. On 29–31.10.2026 rare procedures moved into service skills: these
 // descriptions say which skill to load, keep the call contract and drop rules stated elsewhere. On
 // 01.11.2026 the agent learnt to send a place and a poll, and the owner got `manage_api_keys` for
-// API keys that skills in sandboxes use without seeing them. On 04.11.2026 it learnt to send a contact card.
+// API keys that skills in sandboxes use without seeing them. On 04.11.2026 it learnt to send a contact card,
+// and a list of reminders, schedules, invitations, memory records or threads became an action of the tool
+// that changes the same object (#457); the owner's six administration tools became one door (#459).
 const CHANGED_AFTER_RECORDING = new Set([
-  "execute_google_workspace", "export_memory", "manage_agent_schedule", "manage_api_keys", "manage_behavior_preference",
-  "manage_external_group_schedule", "manage_family_invitation", "manage_gmail_message",
-  "manage_google_workspace_connection", "manage_network_access", "manage_profile_projection", "manage_reminder",
-  "manage_skill", "manage_telegram_group", "notification_settings", "search_memories", "send_contact", "send_location", "send_poll",
-  "send_voice_message", "web_search",
+  "execute_google_workspace", "export_memory", "manage_agent_schedule", "manage_behavior_preference",
+  "manage_gmail_message", "manage_google_workspace_connection", "manage_memory", "manage_memory_thread",
+  "manage_reminder", "remember", "manage_skill", "notification_settings", "owner_settings", "search_memories",
+  "send_contact", "send_location", "send_poll", "send_voice_message", "web_search",
 ]);
-// The built-in `ask_question` left on 26.10.2026: buttons under the answer replaced it.
-const REMOVED_AFTER_RECORDING = new Set(["ask_question"]);
+// The built-in `ask_question` left on 26.10.2026: buttons under the answer replaced it. The separate list
+// tools left on 04.11.2026 (#457): each list is an action of the tool that changes the same object. The
+// owner's administration tools left the same day for one door to them, `owner_settings` (#459).
+const REMOVED_AFTER_RECORDING = new Set([
+  "ask_question", "list_agent_schedules", "list_memories", "list_memory_threads", "list_pending_family_invitations",
+  "list_reminders", "read_memory_thread", "search_memory_threads", "manage_api_keys", "manage_external_group_schedule",
+  "manage_family_invitation", "manage_network_access", "manage_profile_projection", "manage_telegram_group",
+]);
 
 describe("model-facing tool definitions", () => {
   it("reach the model exactly as the reference requests carry the application tools of a private chat", async () => {
-    const surface = buildModeToolSurface({ environment: "private", scheduledRun: false }) as Record<string, ToolDefinition>;
+    const surface = buildModeToolSurface({ environment: "private", owner: true, scheduledRun: false }) as Record<string, ToolDefinition>;
     const recorded = new Map((await recordedTools("private-first")).map((tool) => [tool.name, tool]));
     // Built-in tools move into the runtime in stage 4; their definitions are compared there.
     const application = Object.fromEntries(Object.entries(surface).filter(([name]) =>
@@ -88,7 +95,9 @@ describe("model-facing tool definitions", () => {
 
     const sent = await providerTools(toModelToolSet(orderStepTools(application)));
 
-    expect(sent.length).toBeGreaterThan(30);
+    // A sanity floor, not a count: #457 folded seven list tools into the tools they belong to, and #459
+    // six administration tools into one door.
+    expect(sent.length).toBeGreaterThan(20);
     expect(sent.map((tool) => tool.name)).toEqual(expect.arrayContaining([...CHANGED_AFTER_RECORDING]));
     for (const tool of sent.filter((candidate) => !CHANGED_AFTER_RECORDING.has(candidate.name))) {
       expect(JSON.stringify(tool), tool.name).toBe(JSON.stringify(recorded.get(tool.name)));

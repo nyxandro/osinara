@@ -7,7 +7,10 @@
  * - Granted capabilities re-check the live policy at execution and stay action-level for memory.
  * - HITL approval configuration survives dynamic emission.
  * - Native subagents stay unavailable externally and cannot make root-owned durable-memory decisions.
- * - A subagent gets an explicit list of research and sandbox tools, never the root's administration.
+ * - A subagent gets an explicit list of research and sandbox tools, never the root's administration;
+ *   a tool it may only read from comes with its reading actions alone (#457).
+ * - A list is an action of the tool that changes the same object; an external group gets each
+ *   memory action by its own stored right.
  */
 import type { SessionAuth } from "../../runtime/context.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -30,16 +33,19 @@ vi.mock("./external-group-live-policy.js", () => ({
 
 vi.mock("../attachments/telegram-attachment-materializer.js", () => ({ materializeTelegramAttachment }));
 
-import { FAMILY_ONLY_TOOL_NAMES, PRIVATE_ONLY_TOOL_NAMES, TRUSTED_MODE_TOOL_NAMES, buildModeToolSurface, buildSubagentToolSurface } from "./mode-tool-surface.js";
+import { FAMILY_ONLY_TOOL_NAMES, OWNER_ONLY_TOOL_NAMES, PRIVATE_ONLY_TOOL_NAMES, TRUSTED_MODE_TOOL_NAMES, buildModeToolSurface, buildSubagentToolSurface } from "./mode-tool-surface.js";
 import { agentTool } from "../../runtime/tools/delegate.js";
 import { bash as nativeBash, glob as nativeGlob, grep as nativeGrep, readFile as nativeReadFile, writeFile as nativeWriteFile } from "../../runtime/tools/defaults.js";
 import { TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES } from "../turn-interjection/turn-interjection-surface.js";
-import { SUBAGENT_TOOL_NAMES } from "./subagent-tool-names.js";
+import { SUBAGENT_TOOL_ACTIONS, SUBAGENT_TOOL_NAMES } from "./subagent-tool-names.js";
 import { ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, EXTERNAL_GROUP_BASE_TOOLS, EXTERNAL_GROUP_TOOL_NAMES, type ExternalGroupToolName } from "./group-tool-catalog.js";
 
 function names(input: Parameters<typeof buildModeToolSurface>[0]): string[] {
   return Object.keys(buildModeToolSurface(input)).sort();
 }
+
+// The trusted chats as the owner sees them; a member's private chat is covered by its own case.
+const TRUSTED_CHATS = [{ environment: "private", owner: true }, { environment: "family" }] as const;
 
 // Built-ins every trusted turn has that the interjection surface does not wrap.
 const UNWRAPPED_BUILT_IN_NAMES = ["agent", "load_skill", "todo"];
@@ -64,14 +70,18 @@ function externalAuth(toolAllowlist: readonly string[]): SessionAuth {
 
 describe("trusted mode tool surfaces", () => {
   it("gives a private chat the shared tools plus owner administration only", () => {
-    expect(names({ environment: "private" })).toEqual(
-      [...TRUSTED_MODE_TOOL_NAMES, ...PRIVATE_ONLY_TOOL_NAMES, ...TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES, ...UNWRAPPED_BUILT_IN_NAMES].sort(),
+    expect(names({ environment: "private", owner: true })).toEqual(
+      [...TRUSTED_MODE_TOOL_NAMES, ...PRIVATE_ONLY_TOOL_NAMES, ...OWNER_ONLY_TOOL_NAMES, ...TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES, ...UNWRAPPED_BUILT_IN_NAMES].sort(),
     );
-    expect(names({ environment: "private" })).toContain("manage_external_group_schedule");
+    // The owner's administration is one door to its sections (#459), not six tools.
+    expect(names({ environment: "private", owner: true })).toContain("owner_settings");
+    for (const name of ["manage_external_group_schedule", "manage_telegram_group", "manage_api_keys"]) {
+      expect(names({ environment: "private", owner: true }), name).not.toContain(name);
+    }
   });
 
   it("exposes R3 profile policy and provenance only in the intended trust zones", () => {
-    const privateNames = names({ environment: "private" });
+    const privateNames = names({ environment: "private", owner: true });
     const familyNames = names({ environment: "family" });
     const externalNames = names({
       capabilities: new Set(),
@@ -79,9 +89,9 @@ describe("trusted mode tool surfaces", () => {
     });
 
     expect(privateNames).toEqual(
-      expect.arrayContaining(["get_memory_source", "list_memory_threads", "manage_memory_thread", "manage_profile_projection", "read_memory_thread", "read_profile_view", "search_memory_threads"]),
+      expect.arrayContaining(["get_memory_source", "manage_memory_thread", "owner_settings", "read_profile_view"]),
     );
-    expect(familyNames).toEqual(expect.arrayContaining(["list_memory_threads", "manage_memory_thread", "read_memory_thread", "read_profile_view", "search_memory_threads"]));
+    expect(familyNames).toEqual(expect.arrayContaining(["manage_memory_thread", "read_profile_view"]));
     expect(familyNames).not.toContain("get_memory_source");
     expect(externalNames).toEqual(expect.arrayContaining(["read_profile_view"]));
   });
@@ -112,16 +122,16 @@ describe("trusted mode tool surfaces", () => {
 
   it("sends a place or a poll only from a live turn, in every kind of chat", () => {
     const live = [
-      names({ environment: "private" }),
+      names({ environment: "private", owner: true }),
       names({ environment: "family" }),
       names({ capabilities: new Set(), environment: "external" }),
     ];
     const background = [
-      names({ environment: "private", scheduledRun: true }),
+      names({ environment: "private", owner: true, scheduledRun: true }),
       names({ environment: "family", scheduledRun: true }),
       names({ capabilities: new Set(), environment: "external", scheduledRun: true } as never),
       names({ capabilities: new Set(), environment: "external", includeApplicationCore: false }),
-      Object.keys(buildSubagentToolSurface({ environment: "private" })),
+      Object.keys(buildSubagentToolSurface({ environment: "private", owner: true })),
     ];
 
     for (const surface of live) expect(surface).toEqual(expect.arrayContaining(["send_contact", "send_location", "send_poll"]));
@@ -133,40 +143,59 @@ describe("trusted mode tool surfaces", () => {
   });
 
   it("manages family skills only in an interactive turn of the private chat", () => {
-    expect(names({ environment: "private" })).toContain("manage_skill");
-    expect(names({ environment: "private", scheduledRun: true })).not.toContain("manage_skill");
-    expect(Object.keys(buildSubagentToolSurface({ environment: "private" }))).not.toContain("manage_skill");
+    expect(names({ environment: "private", owner: true })).toContain("manage_skill");
+    expect(names({ environment: "private", owner: true, scheduledRun: true })).not.toContain("manage_skill");
+    expect(Object.keys(buildSubagentToolSurface({ environment: "private", owner: true }))).not.toContain("manage_skill");
     expect(names({ environment: "family" })).not.toContain("manage_skill");
   });
 
-  it("requests network access only in an interactive turn of the private chat", () => {
+  it("requests network access and API keys only in an interactive turn of the owner's private chat", () => {
     // A scheduled turn has nobody to confirm, a delegated task reads untrusted pages.
-    expect(names({ environment: "private" })).toContain("manage_network_access");
-    expect(names({ environment: "private", scheduledRun: true })).not.toContain("manage_network_access");
-    expect(Object.keys(buildSubagentToolSurface({ environment: "private" }))).not.toContain("manage_network_access");
-    expect(names({ environment: "family" })).not.toContain("manage_network_access");
-    expect(names({ environment: "private" })).toContain("manage_api_keys");
-    expect(names({ environment: "private", scheduledRun: true })).not.toContain("manage_api_keys");
-    expect(Object.keys(buildSubagentToolSurface({ environment: "private" }))).not.toContain("manage_api_keys");
-    expect(names({ environment: "family" })).not.toContain("manage_api_keys");
+    const sections = (surface: Record<string, { inputSchema: unknown }>) => {
+      const door = surface.owner_settings;
+      if (door === undefined) return [];
+      return (door.inputSchema as { properties: { section: { enum: string[] } } }).properties.section.enum;
+    };
+    expect(sections(buildModeToolSurface({ environment: "private", owner: true }))).toEqual(
+      ["groups", "group_schedules", "invitations", "group_profiles", "network", "api_keys"],
+    );
+    expect(sections(buildModeToolSurface({ environment: "private", owner: true, scheduledRun: true }))).toEqual(
+      ["groups", "group_schedules", "invitations", "group_profiles"],
+    );
+    expect(buildSubagentToolSurface({ environment: "private", owner: true })).not.toHaveProperty("owner_settings");
+    expect(names({ environment: "family" })).not.toContain("owner_settings");
   });
 
   it("never exposes another zone's tools", () => {
-    const privateNames = names({ environment: "private" });
+    const privateNames = names({ environment: "private", owner: true });
     const familyNames = names({ environment: "family" });
 
     for (const familyOnly of FAMILY_ONLY_TOOL_NAMES) {
       expect(privateNames, `private must not expose ${familyOnly}`).not.toContain(familyOnly);
     }
-    for (const privateOnly of PRIVATE_ONLY_TOOL_NAMES) {
+    for (const privateOnly of [...PRIVATE_ONLY_TOOL_NAMES, ...OWNER_ONLY_TOOL_NAMES]) {
       expect(familyNames, `family must not expose ${privateOnly}`).not.toContain(privateOnly);
     }
   });
 
+  it("gives another family member's private chat no owner administration, interactive or scheduled", () => {
+    for (const scheduledRun of [false, true]) {
+      const member = names({ environment: "private", owner: false, scheduledRun });
+      for (const name of OWNER_ONLY_TOOL_NAMES) expect(member, `${name} scheduled=${scheduledRun}`).not.toContain(name);
+    }
+    expect(names({ environment: "private", owner: false })).toEqual(
+      [...TRUSTED_MODE_TOOL_NAMES, ...PRIVATE_ONLY_TOOL_NAMES, ...TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES, ...UNWRAPPED_BUILT_IN_NAMES].sort(),
+    );
+    // The owner's tool set reaches the model in the same order as before the split.
+    const owner = Object.keys(buildModeToolSurface({ environment: "private", owner: true }));
+    const adminOrder = owner.filter((name) => [...PRIVATE_ONLY_TOOL_NAMES, ...OWNER_ONLY_TOOL_NAMES].includes(name));
+    expect(adminOrder).toEqual([...adminOrder].sort());
+  });
+
   it("gives trusted zones the always-registered built-ins, and external groups no Bash", () => {
-    for (const environment of ["private", "family"] as const) {
+    for (const chat of TRUSTED_CHATS) {
       for (const scheduledRun of [false, true]) {
-        expect(names({ environment, scheduledRun }), `${environment} scheduled=${scheduledRun}`).toEqual(expect.arrayContaining([
+        expect(names({ ...chat, scheduledRun }), `${chat.environment} scheduled=${scheduledRun}`).toEqual(expect.arrayContaining([
           "bash", "load_skill", "read_file", "todo", "write_file",
         ]));
       }
@@ -177,40 +206,41 @@ describe("trusted mode tool surfaces", () => {
 
   it("re-emits native sandbox tools unchanged in interactive trusted zones only", () => {
     const native = { bash: nativeBash, glob: nativeGlob, grep: nativeGrep, read_file: nativeReadFile, write_file: nativeWriteFile };
-    for (const environment of ["private", "family"] as const) {
-      const surface = buildModeToolSurface({ environment });
+    for (const chat of TRUSTED_CHATS) {
+      const environment = chat.environment;
+      const surface = buildModeToolSurface(chat);
       for (const [name, definition] of Object.entries(native)) {
         expect(surface[name]?.description, `${environment}.${name}`).toBe(definition.description);
         expect(surface[name]?.inputSchema, `${environment}.${name}`).toBe(definition.inputSchema);
       }
       // A scheduled turn keeps the plain built-ins, as the runtime registers them, and no opt-in search tools.
-      const scheduled = buildModeToolSurface({ environment, scheduledRun: true });
+      const scheduled = buildModeToolSurface({ ...chat, scheduledRun: true });
       for (const name of ["bash", "read_file", "write_file"] as const) expect(scheduled[name], `${environment}.${name}`).toBe(native[name]);
       for (const name of ["glob", "grep"]) expect(scheduled).not.toHaveProperty(name);
     }
   });
 
   it("keeps HITL approval configuration after dynamic emission", () => {
-    const surface = buildModeToolSurface({ environment: "private" });
+    const surface = buildModeToolSurface({ environment: "private", owner: true });
 
-    for (const toolName of ["execute_google_workspace", "manage_family_invitation"]) {
+    for (const toolName of ["execute_google_workspace", "owner_settings"]) {
       expect((surface[toolName] as unknown as { approval?: unknown }).approval, `${toolName} must keep its approval policy`).toBeDefined();
     }
   });
 
   it("keeps root-owned durable writes off subagents", () => {
-    expect(buildModeToolSurface({ environment: "private" })).toHaveProperty("remember");
-    expect(buildSubagentToolSurface({ environment: "private" })).not.toHaveProperty("remember");
-    expect(buildModeToolSurface({ environment: "private" })).toHaveProperty("manage_behavior_preference");
-    expect(buildSubagentToolSurface({ environment: "private" })).not.toHaveProperty("manage_behavior_preference");
+    expect(buildModeToolSurface({ environment: "private", owner: true })).toHaveProperty("remember");
+    expect(buildSubagentToolSurface({ environment: "private", owner: true })).not.toHaveProperty("remember");
+    expect(buildModeToolSurface({ environment: "private", owner: true })).toHaveProperty("manage_behavior_preference");
+    expect(buildSubagentToolSurface({ environment: "private", owner: true })).not.toHaveProperty("manage_behavior_preference");
     expect(
       buildSubagentToolSurface({
         capabilities: new Set(["remember"]),
         environment: "external",
       }),
     ).not.toHaveProperty("remember");
-    expect(buildModeToolSurface({ environment: "private", scheduledRun: true })).not.toHaveProperty("manage_behavior_preference");
-    expect(buildModeToolSurface({ environment: "private", scheduledRun: true })).not.toHaveProperty("remember");
+    expect(buildModeToolSurface({ environment: "private", owner: true, scheduledRun: true })).not.toHaveProperty("manage_behavior_preference");
+    expect(buildModeToolSurface({ environment: "private", owner: true, scheduledRun: true })).not.toHaveProperty("remember");
     expect(
       buildModeToolSurface({
         capabilities: new Set(["remember"]),
@@ -228,19 +258,20 @@ describe("subagent tool surface", () => {
       environment: "external",
     }),
     family: buildSubagentToolSurface({ environment: "family" }),
-    private: buildSubagentToolSurface({ environment: "private" }),
+    private: buildSubagentToolSurface({ environment: "private", owner: true }),
   });
 
   it("gives a delegated task in a private chat exactly the research and sandbox tools", () => {
     // Pinned by name, so widening the subagent list is a decision a reviewer sees in this test.
     expect(Object.keys(subagentSurfaces().private).sort()).toEqual([
       "bash", "execute_google_workspace", "get_current_time", "get_memory_source", "glob",
-      "grep", "inspect_workspace_image", "list_agent_schedules", "list_memories", "list_memory_threads",
-      "list_proactive_deliveries", "load_skill", "read_file", "read_memory_thread", "read_profile_view",
-      "search_memories", "search_memory_threads", "todo", "web_fetch", "web_search", "write_file",
+      "grep", "inspect_workspace_image", "list_proactive_deliveries", "load_skill", "manage_agent_schedule",
+      "manage_memory", "manage_memory_thread", "read_file", "read_profile_view",
+      "search_memories", "todo", "web_fetch", "web_search", "write_file",
     ]);
     for (const [zone, surface] of Object.entries(subagentSurfaces())) {
-      expect(Object.keys(surface).filter((name) => !SUBAGENT_TOOL_NAMES.has(name)), zone).toEqual([]);
+      expect(Object.keys(surface).filter((name) => !SUBAGENT_TOOL_NAMES.has(name) && !Object.hasOwn(SUBAGENT_TOOL_ACTIONS, name)), zone)
+        .toEqual([]);
     }
   });
 
@@ -249,26 +280,47 @@ describe("subagent tool surface", () => {
     // edit memory, reset the conversation or post into the chat in the person's name.
     const { external, family, private: personal } = subagentSurfaces();
     for (const name of [
-      "export_memory", "list_pending_family_invitations", "manage_agent_schedule",
-      "manage_external_group_schedule", "manage_family_invitation", "manage_gmail_message",
-      "manage_google_workspace_connection", "manage_memory", "manage_memory_thread",
-      "manage_profile_projection", "manage_telegram_group", "notification_settings",
-      "start_new_context",
+      "export_memory", "manage_gmail_message", "manage_google_workspace_connection", "notification_settings",
+      "owner_settings", "start_new_context",
     ]) {
-      expect(buildModeToolSurface({ environment: "private" }), `root ${name}`).toHaveProperty(name);
+      expect(buildModeToolSurface({ environment: "private", owner: true }), `root ${name}`).toHaveProperty(name);
       expect(personal, name).not.toHaveProperty(name);
     }
-    expect(family).not.toHaveProperty("manage_memory");
-    for (const name of ["manage_memory", "manage_memory_thread", "remove_group_file"]) {
-      expect(external, name).not.toHaveProperty(name);
+    expect(external).not.toHaveProperty("remove_group_file");
+  });
+
+  it("lets a delegated task only read schedules, memory records and threads", async () => {
+    const { external, family, private: personal } = subagentSurfaces();
+    const changes = {
+      manage_agent_schedule: { action: "delete", id: "00000000-0000-4000-8000-000000000001" },
+      manage_memory: { action: "delete", memoryRef: "mem_0123456789abcdef0123456789abcdef" },
+      manage_memory_thread: { action: "reactivate", threadRef: "thread_0123456789abcdef0123456789abcdef" },
+    } as const;
+    const reading = { manage_agent_schedule: "list", manage_memory: "list", manage_memory_thread: "read" } as const;
+    for (const [zone, surface] of Object.entries({ family, private: personal })) {
+      for (const [name, change] of Object.entries(changes)) {
+        const tool = surface[name]!;
+        const schema = tool.inputSchema as z.ZodType;
+        expect(schema.safeParse(change).success, `${zone} ${name}`).toBe(false);
+        expect(schema.safeParse({ action: reading[name as keyof typeof reading], threadRef: "thread_0123456789abcdef0123456789abcdef" }).success
+          || schema.safeParse({ action: reading[name as keyof typeof reading] }).success, `${zone} ${name}`).toBe(true);
+        expect(tool.description, `${zone} ${name}`).toMatch(/can only be read/u);
+        await expect(tool.execute(change as never, { session: { auth: externalAuth([]) } } as never), `${zone} ${name}`)
+          .rejects.toMatchObject({ code: "AGENT_TOOL_ACTION_FORBIDDEN" });
+      }
     }
+    for (const name of ["manage_memory", "manage_memory_thread"] as const) {
+      const schema = external[name]!.inputSchema as z.ZodType;
+      expect(schema.safeParse(changes[name]).success, `external ${name}`).toBe(false);
+    }
+    expect((external.manage_memory_thread!.inputSchema as z.ZodType).safeParse({ action: "search", query: "проект" }).success).toBe(true);
   });
 
   it("keeps the tools a delegated research or document task works with", () => {
     const { external, family, private: personal } = subagentSurfaces();
     for (const name of [
       "bash", "execute_google_workspace", "get_current_time", "glob", "grep",
-      "list_memories", "load_skill", "read_file", "read_memory_thread", "search_memories", "todo",
+      "load_skill", "manage_memory", "manage_memory_thread", "read_file", "search_memories", "todo",
       "web_fetch", "web_search", "write_file",
     ]) {
       expect(personal, name).toHaveProperty(name);
@@ -293,14 +345,15 @@ describe("external group tool surface", () => {
 
   it("emits only guarded baseline tools without a grant", () => {
     expect(names({ capabilities: new Set(), environment: "external" })).toEqual(
-      [...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent", "import_telegram_attachment", "inspect_workspace_image", "list_reminders", "load_skill", "manage_behavior_preference", "manage_reminder", "read_profile_view", "send_contact", "send_location", "send_poll"].sort(),
+      [...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent", "import_telegram_attachment", "inspect_workspace_image", "load_skill", "manage_behavior_preference", "manage_reminder", "read_profile_view", "send_contact", "send_location", "send_poll"].sort(),
     );
   });
 
   it("gives every interactive external group its own reminder tools without a grant", () => {
     const emitted = names({ capabilities: new Set(), environment: "external" });
 
-    expect(emitted).toEqual(expect.arrayContaining(["list_reminders", "manage_reminder"]));
+    expect(emitted).toContain("manage_reminder");
+    expect(emitted).not.toContain("list_reminders");
   });
 
   it("withholds reminder tools from a scheduled run and a channel-authored turn", () => {
@@ -316,7 +369,6 @@ describe("external group tool surface", () => {
     });
 
     for (const emitted of [scheduled, channelAuthored]) {
-      expect(emitted).not.toContain("list_reminders");
       expect(emitted).not.toContain("manage_reminder");
     }
   });
@@ -350,8 +402,8 @@ describe("external group tool surface", () => {
     for (const nativeTool of ["glob", "grep", "read_file", "write_file"] as const) {
       expect(surface).toHaveProperty(nativeTool);
       // Trusted zones keep the framework's own tool; only the external group gets a guarded one.
-      for (const environment of ["private", "family"] as const) {
-        expect(buildModeToolSurface({ environment })[nativeTool]?.description)
+      for (const chat of TRUSTED_CHATS) {
+        expect(buildModeToolSurface(chat)[nativeTool]?.description)
           .not.toBe(surface[nativeTool]!.description);
       }
     }
@@ -359,9 +411,9 @@ describe("external group tool surface", () => {
   });
 
   it("emits no application tool outside the effective allowlist", () => {
-    const applicationNames = new Set([...TRUSTED_MODE_TOOL_NAMES, ...PRIVATE_ONLY_TOOL_NAMES, ...FAMILY_ONLY_TOOL_NAMES]);
+    const applicationNames = new Set([...TRUSTED_MODE_TOOL_NAMES, ...PRIVATE_ONLY_TOOL_NAMES, ...OWNER_ONLY_TOOL_NAMES, ...FAMILY_ONLY_TOOL_NAMES]);
     const grantable = new Set<string>([...EXTERNAL_GROUP_TOOL_NAMES.map((name) => name.replace(/\..*$/u, ""))]);
-    const alwaysExternal = new Set(["list_reminders", "manage_behavior_preference", "manage_reminder", "read_profile_view", "send_contact", "send_location", "send_poll", ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name)]);
+    const alwaysExternal = new Set(["manage_behavior_preference", "manage_reminder", "read_profile_view", "send_contact", "send_location", "send_poll", ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name)]);
 
     for (const emitted of names({
       capabilities: new Set(),
@@ -515,8 +567,7 @@ describe("external group tool surface", () => {
     const context = {
       session: { auth: externalAuth(["manage_memory.undo"]) },
     } as never;
-    loadCurrentExternalGroupCapabilities.mockResolvedValueOnce(new Set(["manage_memory.undo"]));
-
+    // The live policy (default: nothing granted now) is checked only for an action of the view.
     expect(surface).toHaveProperty("manage_memory");
     const schema = surface.manage_memory!.inputSchema as z.ZodType;
     expect(schema.safeParse({ action: "undo", memoryRef: "mem_0123456789abcdef0123456789abcdef" }).success)
@@ -526,7 +577,35 @@ describe("external group tool surface", () => {
     expect(surface.manage_memory!.description).toContain('"action":"undo"');
     expect(surface.manage_memory!.description).not.toContain('"action":"edit"');
     expect(surface.manage_memory!.description).not.toContain('"action":"delete"');
-    await expect(surface.manage_memory!.execute({ action: "delete", id: "00000000-0000-4000-8000-000000000001" }, context)).rejects.toThrowError(/AGENT_GROUP_TOOL_FORBIDDEN/);
+    expect(surface.manage_memory!.description).not.toContain('"action":"list"');
+    await expect(surface.manage_memory!.execute({ action: "delete", memoryRef: "mem_0123456789abcdef0123456789abcdef" }, context))
+      .rejects.toThrowError(/AGENT_TOOL_ACTION_FORBIDDEN/);
+    await expect(surface.manage_memory!.execute(
+      { action: "undo", memoryRef: "mem_0123456789abcdef0123456789abcdef" },
+      { session: { auth: externalAuth([]) } } as never,
+    )).rejects.toThrowError(/AGENT_GROUP_TOOL_FORBIDDEN/);
+  });
+
+  it("gives each stored memory right its action of a memory tool, and no separate tool", () => {
+    const surface = buildModeToolSurface({
+      capabilities: new Set(["list_memories", "search_memory_threads", "read_memory_thread"]),
+      environment: "external",
+    });
+
+    for (const name of ["list_memories", "list_memory_threads", "search_memory_threads", "read_memory_thread"]) {
+      expect(surface, name).not.toHaveProperty(name);
+    }
+    const memory = surface.manage_memory!.inputSchema as z.ZodType;
+    expect(memory.safeParse({ action: "list" }).success).toBe(true);
+    // The group's list never showed earlier versions of its records, and still does not.
+    expect(memory.safeParse({ action: "list", history: true }).success).toBe(false);
+    expect(surface.manage_memory!.description).not.toMatch(/history|superseded/u);
+    expect(memory.safeParse({ action: "edit", content: "x", memoryRef: "mem_0123456789abcdef0123456789abcdef" }).success).toBe(false);
+    const threads = surface.manage_memory_thread!.inputSchema as z.ZodType;
+    expect(threads.safeParse({ action: "search", query: "проект" }).success).toBe(true);
+    expect(threads.safeParse({ action: "read", threadRef: "thread_0123456789abcdef0123456789abcdef" }).success).toBe(true);
+    // The group was never granted the list of threads, and stays without it.
+    expect(threads.safeParse({ action: "list" }).success).toBe(false);
   });
 
   it("keeps memory-thread lifecycle action-level and re-checks the live external policy", async () => {
@@ -556,7 +635,7 @@ describe("external group tool surface", () => {
         capabilities: new Set(["unknown_tool"] as unknown as ExternalGroupToolName[]),
         environment: "external",
       }),
-    ).toEqual([...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent", "import_telegram_attachment", "inspect_workspace_image", "list_reminders", "load_skill", "manage_behavior_preference", "manage_reminder", "read_profile_view", "send_contact", "send_location", "send_poll"].sort());
+    ).toEqual([...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent", "import_telegram_attachment", "inspect_workspace_image", "load_skill", "manage_behavior_preference", "manage_reminder", "read_profile_view", "send_contact", "send_location", "send_poll"].sort());
   });
 
   it("exposes only group scope in external shared-tool schemas and descriptions", () => {
@@ -570,8 +649,8 @@ describe("external group tool surface", () => {
         path: "image.png",
         question: "Что изображено?",
       },
-      list_memories: {},
-      list_memory_threads: {},
+      manage_memory: { action: "list" },
+      manage_memory_thread: { action: "list" },
       remember: {
         basis: "agent_inferred",
         content: "Проверка",
@@ -600,7 +679,7 @@ describe("external group tool surface", () => {
     expect(image.description).toMatch(/avatarOfSequence/u);
 
     const trustedRemember = buildModeToolSurface({
-      environment: "private",
+      environment: "private", owner: true,
     }).remember!;
     const trustedSchema = trustedRemember.inputSchema as z.ZodType;
     expect(

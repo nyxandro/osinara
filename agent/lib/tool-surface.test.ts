@@ -3,7 +3,8 @@
  *
  * Constructs:
  * - `agent/tools` holds only the dynamic resolver; native `agent` supplies fresh-context delegation.
- * - Exact application tool-module allowlist after CRUD consolidation.
+ * - Exact application tool-module allowlist after CRUD consolidation; a list is an action of the tool
+ *   that changes the same object (#457).
  * - Exact static package directories plus the single dynamic policy resolver.
  * - The opt-in tone skill is not part of any static skill list.
  * - The compiled dynamic resolver stays step-scoped and avoids durable helper-closure replay.
@@ -23,13 +24,8 @@ const EXPECTED_TOOL_MODULES = [
   "get_memory_source.ts",
   "import_telegram_attachment.ts",
   "inspect_workspace_image.ts",
-  "list_agent_schedules.ts",
   "list_group_history.ts",
-  "list_memories.ts",
-  "list_memory_threads.ts",
-  "list_pending_family_invitations.ts",
   "list_proactive_deliveries.ts",
-  "list_reminders.ts",
   "list_telegram_attachments.ts",
   "manage_agent_schedule.ts",
   "manage_api_keys.ts",
@@ -46,12 +42,11 @@ const EXPECTED_TOOL_MODULES = [
   "manage_skill.ts",
   "manage_telegram_group.ts",
   "notification_settings.ts",
-  "read_memory_thread.ts",
+  "owner_settings.ts",
   "read_profile_view.ts",
   "read_scheduled_group_history.ts",
   "remember.ts",
   "search_memories.ts",
-  "search_memory_threads.ts",
   "send_contact.ts",
   "send_gif.ts",
   "send_location.ts",

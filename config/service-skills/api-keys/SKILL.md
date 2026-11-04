@@ -5,7 +5,7 @@ description: Load before getting an API key of an HTTP service for a skill or sc
 
 # API keys
 
-A key of an HTTP service is kept by the application, encrypted. Neither you nor any sandbox ever sees it: a sandbox gets a placeholder and a gateway address, and the server's egress proxy puts the real key into the request on its way to the service's own address only. Everything here is available only in a private chat with the owner.
+A key of an HTTP service is kept by the application, encrypted. Neither you nor any sandbox ever sees it: a sandbox gets a placeholder and a gateway address, and the server's egress proxy puts the real key into the request on its way to the service's own address only. Everything here is available only in a private chat with the owner, through `owner_settings`: `manage_api_keys` below is its section `api_keys`, and `manage_telegram_group` is its section `groups`. Read the section's contract once in the conversation with `{"section":"api_keys"}`, then call `{"section":"api_keys","call":{...}}` with the call written below as its `call`.
 
 ## Getting a key
 

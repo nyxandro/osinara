@@ -275,7 +275,7 @@ export const telegramGroupAdministrationRepository: TelegramGroupAdministrationR
         throw new AppError(
           "AGENT_GROUP_NOT_FOUND",
           "Группа с таким telegramChatId не зарегистрирована в вашей семье. " +
-            "Вызовите manage_telegram_group ровно с {\"action\":\"status\"}, " +
+            "Вызовите owner_settings ровно с {\"section\":\"groups\",\"call\":{\"action\":\"status\"}}, " +
             "выберите нужную группу и повторите готовый startNewContextInput из результата",
         );
       }

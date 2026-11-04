@@ -13,8 +13,9 @@ const { canUndoCreate, reactivateThread } = vi.hoisted(() => ({
   reactivateThread: vi.fn(),
 }));
 
+const requireMemoryAuthorization = vi.hoisted(() => vi.fn(() => ({ familyId: "family-1", scopes: ["personal"] })));
 vi.mock("./memory-context.js", () => ({
-  requireMemoryAuthorization: () => ({ familyId: "family-1", scopes: ["personal"] }),
+  requireMemoryAuthorization,
   requireWritableScope: (_authorization: unknown, scope: unknown) => scope,
 }));
 vi.mock("./memory-repository.js", () => ({
@@ -80,6 +81,26 @@ describe("memory tool approvals", () => {
         { action: "edit", content: "Исправлено", memoryRef },
         chatType,
       )).toBe("not-applicable");
+    }
+  });
+
+  it("lets the list through without a confirmation and without checking memory access at that step", async () => {
+    // A failure of that check here would end the turn; execution checks access itself and answers the model.
+    requireMemoryAuthorization.mockClear();
+    expect(await approvalFor(manageMemory, { action: "list" }, "private")).toBe("not-applicable");
+    expect(requireMemoryAuthorization).not.toHaveBeenCalled();
+  });
+
+  it("lets a malformed call reach execution, whose own check answers it, instead of ending the turn", async () => {
+    // Thrown in the approval step, an input refusal would end the turn instead of reaching the model; since the
+    // list became an action of this tool (#457) one schema carries the fields of every action.
+    const memoryRef = "mem_0123456789abcdef0123456789abcdef";
+    for (const input of [
+      { action: "list", memoryRef },
+      { action: "edit", limit: 20, memoryRef },
+      { action: "delete" },
+    ]) {
+      expect(await approvalFor(manageMemory, input, "private"), JSON.stringify(input)).toBe("not-applicable");
     }
   });
 

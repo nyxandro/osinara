@@ -35,8 +35,9 @@ const SERVICE_SKILLS: readonly ServiceSkill[] = [
   { environments: TRUSTED, name: "schedules", tools: ["manage_reminder", "manage_agent_schedule"] },
   { environments: new Set(["external"]), name: "group-reminders", tools: ["manage_reminder"] },
   { environments: new Set(["private", "family", "external"]), name: "voice-replies", tools: ["send_voice_message"] },
-  { environments: new Set(["private"]), name: "group-admin", tools: ["manage_telegram_group", "manage_family_invitation"] },
-  { environments: new Set(["private"]), name: "api-keys", tools: ["manage_api_keys"] },
+  // The owner's administration is one door (#459); its procedures come with it.
+  { environments: new Set(["private"]), name: "group-admin", tools: ["owner_settings"] },
+  { environments: new Set(["private"]), name: "api-keys", tools: ["owner_settings"] },
   { environments: new Set(["private", "family", "external"]), name: "delegation", tools: ["agent"] },
 ];
 

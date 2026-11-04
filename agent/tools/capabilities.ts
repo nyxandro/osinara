@@ -13,6 +13,7 @@
  */
 import type { DynamicResolveContext } from "../runtime/context.js";
 import { resolveConversationEnvironment } from "../lib/conversation-environment.js";
+import { isFamilyOwner } from "../lib/family-context.js";
 import { scheduledGroupHistoryAccess } from "../lib/agent-schedules/scheduled-group-history-context.js";
 import { isScheduledSession } from "../lib/agent-schedules/scheduled-session.js";
 import { loadCurrentExternalGroupCapabilities } from "../lib/tool-policy/external-group-live-policy.js";
@@ -78,7 +79,10 @@ export async function resolveToolSurface(ctx: DynamicResolveContext) {
     });
   }
   if (environment !== "external") {
-    const surface = buildSurface({ environment, scheduledRun: isScheduledSession(ctx) });
+    const scheduledRun = isScheduledSession(ctx);
+    const surface = buildSurface(environment === "private"
+      ? { environment, owner: isFamilyOwner(auth), scheduledRun }
+      : { environment, scheduledRun });
     if (auth.current?.attributes.telegramApprovalContinuation === "true") {
       const continuation = { ...surface };
       // A control response is not a verified new message for facts or style mutations.

@@ -2,7 +2,7 @@
  * Consolidated reminder mutation tool.
  *
  * Export:
- * - `manage_reminder`: routes create, update, pause, resume, and delete actions.
+ * - `manage_reminder`: lists the person's reminders and routes create, update, pause, resume and delete.
  *
  * Key constructs:
  * - Object-shaped model schema avoids root JSON Schema unions in tool descriptors.
@@ -20,6 +20,8 @@ import { z } from "zod";
 import { calendarCopyOutlook } from "../calendar-mirror/calendar-mirror-outlook.js";
 import {
   REMINDER_CONTENT_MAX_LENGTH,
+  REMINDER_LIST_DEFAULT_LIMIT,
+  REMINDER_LIST_MAX_LIMIT,
   REMINDER_RECURRENCE_INTERVAL_MAX,
 } from "../reminders/reminder-config.js";
 import { requireReminderAuthorization } from "../reminders/reminder-context.js";
@@ -32,6 +34,7 @@ import { withCallExamples, type CallExamples } from "../tool-call-examples.js";
 import {
   optionalIsoDate,
   optionalString,
+  pageInput,
   requireAction,
   requiredEnum,
   requiredIsoDate,
@@ -43,13 +46,15 @@ import {
 } from "../tool-input-validation.js";
 
 const INPUT_ERROR_CODE = "AGENT_REMINDER_INPUT_INVALID";
-const TOOL_ACTIONS = ["create", "update", "pause", "resume", "delete"] as const;
+const TOOL_ACTIONS = ["list", "create", "update", "pause", "resume", "delete"] as const;
 const SCOPES = ["personal", "family"] as const;
 const TOP_LEVEL_FIELDS = [
   "action",
   "content",
+  "cursor",
   "firstRunAt",
   "id",
+  "limit",
   "recurrence",
   "scope",
   "timezone",
@@ -68,8 +73,10 @@ const BUTTON_MARKUP_EXAMPLE =
 const manageReminderSchema = z.object({
   action: z.enum(TOOL_ACTIONS),
   content: z.string().optional(),
+  cursor: z.string().min(1).optional(),
   firstRunAt: z.string().optional(),
   id: z.string().optional(),
+  limit: z.number().int().min(1).max(REMINDER_LIST_MAX_LIMIT).optional(),
   recurrence: z.union([recurrenceSchema, z.null()]).optional(),
   scope: z.enum(SCOPES).optional(),
   timezone: z.string().optional(),
@@ -108,7 +115,7 @@ function optionalReminderRecurrence(raw: unknown): ReminderRecurrence | null | u
 }
 
 function requireReminderId(input: Record<string, unknown>): string {
-  return requiredUuid(input, "id", INPUT_ERROR_CODE, "напоминание из list_reminders");
+  return requiredUuid(input, "id", INPUT_ERROR_CODE, "напоминание из manage_reminder с action=list");
 }
 
 /** The reminder text and the buttons written at its end; refused markup reaches the model. */
@@ -187,34 +194,45 @@ function requireIdOnlyInput(input: Record<string, unknown>, action: ReminderActi
   return requireReminderId(input);
 }
 
+function requireListInput(input: Record<string, unknown>) {
+  requireOnlyFields(input, ["action", "cursor", "limit"], "action=list", INPUT_ERROR_CODE);
+  return pageInput(input, INPUT_ERROR_CODE, {
+    defaultLimit: REMINDER_LIST_DEFAULT_LIMIT,
+    maxLimit: REMINDER_LIST_MAX_LIMIT,
+  });
+}
+
 function requireManageReminderInput(input: unknown) {
   const payload = requireInputRecord(input, "manage_reminder", INPUT_ERROR_CODE);
   requireOnlyFields(payload, TOP_LEVEL_FIELDS, "manage_reminder", INPUT_ERROR_CODE);
   const action = requireAction(payload, "manage_reminder", TOOL_ACTIONS, INPUT_ERROR_CODE);
 
+  if (action === "list") return { action, page: requireListInput(payload) } as const;
   if (action === "create") return { action, values: requireCreateInput(payload) } as const;
   if (action === "update") return { action, values: requireUpdateInput(payload) } as const;
   return { action, id: requireIdOnlyInput(payload, action) } as const;
 }
 
 const TOOL_DESCRIPTION = [
-  "Create, change, pause, resume or delete an ordinary reminder: ready-made text the bot sends at the set time without calling the model. Load the schedules skill first: it holds the text and time rules.",
+  "List, create, change, pause, resume or delete an ordinary reminder: ready-made text the bot sends at the set time without calling the model. Load the schedules skill before a change: it holds the text and time rules.",
+  "List shows the person's upcoming and paused personal and family reminders page by page, nearest first: {\"action\":\"list\"}; the result is {items,nextCursor}, and a not-null nextCursor goes back unchanged as cursor for the next page. Delivered ones are not listed: look for them in list_proactive_deliveries with sourceKind:\"reminder\".",
   "content is read at the moment of delivery: no words like \"завтра\" or \"через час\", name the event time by the clock.",
   "Not an agent schedule: for future work with research or a report use manage_agent_schedule.",
   "The result's calendarCopy says whether the reminder appears in the person's Google Calendar by itself (will_appear) or why not; never create a separate calendar event for a reminder.",
   "content is laid out like your answers, Markdown, reply buttons and a workspace file on its own line as ![caption](/workspace/...) included; a file is checked now and read at delivery, so it must stay in place.",
   "Create payload: {\"action\":\"create\",\"content\":\"Позвонить врачу\",\"firstRunAt\":\"2026-08-01T10:00:00+03:00\",\"timezone\":\"Europe/Moscow\",\"scope\":\"personal\",\"recurrence\":null}.",
   "Recurrence: none is recurrence=null; a repeat is {\"unit\":\"daily\",\"interval\":1} with unit minutely, hourly, daily, weekly, monthly or yearly and interval 1-365.",
-  "Update passes id and only the changed content, firstRunAt or recurrence (recurrence=null removes the repeat); pause, resume and delete pass only action and id. Take the id from list_reminders and do not delete and re-create a reminder to change it.",
+  "Update passes id and only the changed content, firstRunAt or recurrence (recurrence=null removes the repeat); pause, resume and delete pass only action and id. Take the id from the list and do not delete and re-create a reminder to change it.",
   "firstRunAt is an ISO datetime with a UTC offset, timezone is IANA. A delivered one-time reminder cannot change: create a new one.",
 ].join(" ");
 
 export const MANAGE_REMINDER_CALL_EXAMPLES: CallExamples = {
+  list: { action: "list" },
   create: { action: "create", content: "Пора позвонить врачу", firstRunAt: "2026-08-01T10:00:00+03:00", timezone: "Europe/Moscow", scope: "personal", recurrence: null },
-  update: { action: "update", id: "<id из list_reminders>", firstRunAt: "2026-08-01T11:00:00+03:00" },
-  pause: { action: "pause", id: "<id из list_reminders>" },
-  resume: { action: "resume", id: "<id из list_reminders>" },
-  delete: { action: "delete", id: "<id из list_reminders>" },
+  update: { action: "update", id: "<id из списка action=list>", firstRunAt: "2026-08-01T11:00:00+03:00" },
+  pause: { action: "pause", id: "<id из списка action=list>" },
+  resume: { action: "resume", id: "<id из списка action=list>" },
+  delete: { action: "delete", id: "<id из списка action=list>" },
 };
 
 export default withCallExamples(defineTool({
@@ -225,6 +243,7 @@ export default withCallExamples(defineTool({
   async execute(input, ctx) {
     const parsed = requireManageReminderInput(input);
     const authorization = requireReminderAuthorization(ctx);
+    if (parsed.action === "list") return await reminderRepository.list(authorization, parsed.page);
     // A replay after a crash is answered from its recorded effect: the files it named may have moved
     // since, and refusing them now would read as "not created".
     const namesFiles = parsed.action === "create" || (parsed.action === "update" && parsed.values.content !== undefined);

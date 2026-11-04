@@ -31,11 +31,11 @@ describe("turn interjection marker", () => {
   it("keeps the permanent rules free of any turn-specific value", () => {
     expect(TURN_INTERJECTION_RULES).toContain("<turn_interjection_marker>");
     expect(TURN_INTERJECTION_RULES).not.toMatch(/[0-9a-f]{24}/u);
-    for (const environment of ["private", "family"] as const) {
-      expect(modeInstructions({ environment })).toContain(TURN_INTERJECTION_RULES);
-      expect(modeInstructions({ environment })).toBe(modeInstructions({ environment }));
-      expect(modeInstructions({ environment, scheduledRun: true })).not.toContain(TURN_INTERJECTION_RULES);
-      expect(modeInstructions({ environment, subagentTurn: true })).not.toContain(TURN_INTERJECTION_RULES);
+    for (const chat of [{ environment: "private", owner: true }, { environment: "family" }] as const) {
+      expect(modeInstructions(chat)).toContain(TURN_INTERJECTION_RULES);
+      expect(modeInstructions(chat)).toBe(modeInstructions(chat));
+      expect(modeInstructions({ ...chat, scheduledRun: true })).not.toContain(TURN_INTERJECTION_RULES);
+      expect(modeInstructions({ ...chat, subagentTurn: true })).not.toContain(TURN_INTERJECTION_RULES);
     }
     expect(modeInstructions({ capabilities: new Set(), environment: "external" }))
       .not.toContain(TURN_INTERJECTION_RULES);

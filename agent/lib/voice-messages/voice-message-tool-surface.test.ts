@@ -51,11 +51,11 @@ describe("voice message tool surface", () => {
   });
 
   it("exposes the voice tool only to interactive roots", () => {
-    for (const environment of ["private", "family"] as const) {
-      expect(buildModeToolSurface({ environment })).toHaveProperty("send_voice_message");
-      expect(buildModeToolSurface({ environment, scheduledRun: true }))
+    for (const chat of [{ environment: "private", owner: true }, { environment: "family" }] as const) {
+      expect(buildModeToolSurface(chat)).toHaveProperty("send_voice_message");
+      expect(buildModeToolSurface({ ...chat, scheduledRun: true }))
         .not.toHaveProperty("send_voice_message");
-      expect(buildSubagentToolSurface({ environment })).not.toHaveProperty("send_voice_message");
+      expect(buildSubagentToolSurface(chat)).not.toHaveProperty("send_voice_message");
     }
     expect(buildModeToolSurface({ capabilities: new Set(), environment: "external" }))
       .not.toHaveProperty("send_voice_message");
