@@ -69,6 +69,14 @@ vi.mock("./reminders/reminder-repository.js", () => ({
   },
 }));
 vi.mock("./telegram-delivery.js", () => ({ deliverFamilyInvitation: vi.fn() }));
+// `manage_reminder` creates through `createReminderOrWait` and routes waiting reminders (#451); both reach
+// the repository mocks here so the expectations read the same request.
+vi.mock("./reminders/reminder-create.js", () => ({
+  createReminderOrWait: vi.fn(async (...args: unknown[]) => ({ kind: "reminder", reminder: await toolCalls.reminderCreate(...args) })),
+}));
+vi.mock("./reminders/reminder-timezone-wait-repository.js", () => ({
+  timezoneWaitRepository: { list: vi.fn(async () => []), operationRecorded: vi.fn(async () => false), scopeOf: vi.fn(async () => null) },
+}));
 vi.mock("./attachments/telegram-attachment-materializer.js", () => ({
   materializeTelegramAttachment: toolCalls.importAttachment,
 }));
