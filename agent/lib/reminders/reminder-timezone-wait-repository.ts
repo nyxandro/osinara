@@ -58,6 +58,16 @@ export const WAIT_COLUMNS = `id, author_user_id, owner_user_id, scope, content, 
   to_char(local_first_run, 'YYYY-MM-DD"T"HH24:MI:SS') AS local_first_run, recurrence_unit,
   recurrence_interval, followups_sent, input_hash, status, created_at`;
 
+/**
+ * One person's reminder writes and timezone saves take turns. The runtime runs the calls of one
+ * model step at once, so «save the zone» and «create the reminder» may race: without this lock a
+ * wait inserted after the save looked for waits stays waiting while the zone exists, and nothing
+ * asks about it again. Taken first in both transactions, before the settings are read.
+ */
+export async function lockPersonReminders(client: Pick<PoolClient, "query">, userId: string): Promise<void> {
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`reminder-timezone:${userId}`]);
+}
+
 export async function suggestedTimezoneOf(client: Pick<PoolClient, "query">, familyId: string): Promise<string> {
   const result = await client.query<{ timezone: string }>(
     `SELECT settings.timezone
@@ -168,15 +178,18 @@ export async function insertWait(client: PoolClient, input: WaitInsert): Promise
   return waitToRecord(inserted.rows[0]!, suggested);
 }
 
-/** The wait an earlier call with this key left, or undefined; a key reused with other input is refused. */
+/**
+ * The wait an earlier call with this key left, with what became of it, or undefined; a key reused
+ * with other input is refused.
+ */
 export async function findWaitReplay(
   client: PoolClient,
   familyId: string,
   operationKey: string,
   inputHash: string,
-): Promise<AwaitingReminderRecord | undefined> {
-  const result = await client.query<WaitRow>(
-    `SELECT ${WAIT_COLUMNS} FROM reminder_timezone_waits WHERE family_id = $1 AND operation_key = $2`,
+): Promise<{ record: AwaitingReminderRecord; reminderId: string | null; status: string } | undefined> {
+  const result = await client.query<WaitRow & { reminder_id: string | null }>(
+    `SELECT ${WAIT_COLUMNS}, reminder_id FROM reminder_timezone_waits WHERE family_id = $1 AND operation_key = $2`,
     [familyId, operationKey],
   );
   const row = result.rows[0];
@@ -184,7 +197,7 @@ export async function findWaitReplay(
   if (row.input_hash !== inputHash) {
     throw new AppError("AGENT_REMINDER_OPERATION_CONFLICT", "Повтор операции напоминания содержит другие параметры");
   }
-  return waitToRecord(row, await suggestedTimezoneOf(client, familyId));
+  return { record: waitToRecord(row, await suggestedTimezoneOf(client, familyId)), reminderId: row.reminder_id, status: row.status };
 }
 
 async function lockWaitForChange(client: PoolClient, auth: ReminderAuthorization, id: string): Promise<WaitRow | null> {
@@ -284,7 +297,7 @@ export const timezoneWaitRepository = {
          SET content = COALESCE($2, content),
              reply_buttons = CASE WHEN $3::boolean THEN $4::jsonb ELSE reply_buttons END,
              local_first_run = $5::timestamp,
-             expires_at = $6,
+             expires_at = CASE WHEN $7::boolean THEN $6 ELSE expires_at END,
              next_followup_at = CASE WHEN $7::boolean THEN $8 ELSE next_followup_at END,
              second_followup_at = CASE WHEN $7::boolean THEN $9 ELSE second_followup_at END,
              updated_at = $10

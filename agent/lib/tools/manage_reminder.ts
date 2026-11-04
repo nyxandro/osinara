@@ -160,10 +160,13 @@ function requireTimeInput(input: Record<string, unknown>): ReminderTimeInput {
       "Передайте ровно одно из полей: firstRunAt с timezone, localFirstRun или firstRunInMinutes",
     );
   }
+  const stated = input.timezone === undefined
+    ? {}
+    : { statedTimezone: requiredString(input, "timezone", INPUT_ERROR_CODE, "Europe/Moscow", { maxLength: 100 }) };
   if (given[0] === "localFirstRun") {
-    return { kind: "local", local: parseLocalFirstRun(requiredString(input, "localFirstRun", INPUT_ERROR_CODE, "2026-08-01T10:00")) };
+    return { kind: "local", local: parseLocalFirstRun(requiredString(input, "localFirstRun", INPUT_ERROR_CODE, "2026-08-01T10:00")), ...stated };
   }
-  if (given[0] === "firstRunInMinutes") return { kind: "countdown", minutes: requireCountdownMinutes(input.firstRunInMinutes) };
+  if (given[0] === "firstRunInMinutes") return { kind: "countdown", minutes: requireCountdownMinutes(input.firstRunInMinutes), ...stated };
   return {
     at: requiredIsoDate(input, "firstRunAt", INPUT_ERROR_CODE),
     kind: "absolute",

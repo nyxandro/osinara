@@ -18,8 +18,13 @@ import type { ReminderAuthorization } from "./reminder-context.js";
 import { insertReminder } from "./reminder-insert.js";
 import { type ReminderRecord, type ReminderRecurrence, reminderOperationHash, rowToReminder } from "./reminder-record.js";
 import { findReminderOperation, requireCurrentMembership, selectReminder } from "./reminder-repository-helpers.js";
-import { countdownNeedsNoTimezone, type ReminderTimeInput } from "./reminder-time-input.js";
-import { type AwaitingReminderRecord, findWaitReplay, insertWait } from "./reminder-timezone-wait-repository.js";
+import { COUNTDOWN_TIMEZONE, countdownNeedsNoTimezone, type ReminderTimeInput } from "./reminder-time-input.js";
+import {
+  type AwaitingReminderRecord,
+  findWaitReplay,
+  insertWait,
+  lockPersonReminders,
+} from "./reminder-timezone-wait-repository.js";
 import { requireReminderContent, requireReminderDate, requireReminderRecurrence } from "./reminder-validation.js";
 
 export interface ReminderCreateRequest {
@@ -36,8 +41,6 @@ export type ReminderCreateOutcome =
   | { kind: "awaiting"; awaiting: AwaitingReminderRecord }
   | { kind: "reminder"; reminder: ReminderRecord };
 
-const COUNTDOWN_UTC_ZONE = "UTC";
-
 function localTimeRequired(): AppError {
   return new AppError(
     "AGENT_REMINDER_LOCAL_TIME_REQUIRED",
@@ -45,12 +48,25 @@ function localTimeRequired(): AppError {
   );
 }
 
-/** The replay fingerprint; an exact moment keeps the shape it had before #451 so in-flight replays match. */
-function operationHash(request: ReminderCreateRequest, content: string): string {
-  const { time, ...rest } = request;
+/**
+ * The replay fingerprint. `JSON.stringify` keeps key order, so an exact moment is hashed in the order
+ * the tool built it before #451 (buttons, content, firstRunAt, recurrence, scope, timezone,
+ * operationKey): a create interrupted by a restart across the release still finds its reminder.
+ */
+export function createOperationHash(request: ReminderCreateRequest, content: string): string {
+  const { time } = request;
   if (time.kind === "absolute") {
-    return reminderOperationHash({ ...rest, content, firstRunAt: time.at.toISOString(), timezone: time.timezone });
+    return reminderOperationHash({
+      ...(request.buttons === undefined ? {} : { buttons: request.buttons }),
+      content,
+      firstRunAt: time.at.toISOString(),
+      recurrence: request.recurrence,
+      scope: request.scope,
+      timezone: time.timezone,
+      operationKey: request.operationKey,
+    });
   }
+  const { time: _time, ...rest } = request;
   return reminderOperationHash({ ...rest, content, time });
 }
 
@@ -81,10 +97,11 @@ export async function createReminderOrWait(
   const content = requireReminderContent(request.content);
   const recurrence = requireReminderRecurrence(request.recurrence);
   if (request.time.kind === "absolute") requireReminderDate(request.time.at);
-  const inputHash = operationHash(request, content);
+  const inputHash = createOperationHash(request, content);
   const client = await database().connect();
   try {
     await client.query("BEGIN");
+    await lockPersonReminders(client, auth.userId);
     await requireCurrentMembership(client, auth);
     const replayed = await findReminderOperation(client, auth.familyId, request.operationKey, "create", inputHash);
     if (replayed !== undefined) {
@@ -96,8 +113,20 @@ export async function createReminderOrWait(
     }
     const waited = await findWaitReplay(client, auth.familyId, request.operationKey, inputHash);
     if (waited) {
-      await client.query("COMMIT");
-      return { kind: "awaiting", awaiting: waited };
+      // A replay tells what became of the wait since: set, or no longer waiting.
+      if (waited.status === "waiting") {
+        await client.query("COMMIT");
+        return { kind: "awaiting", awaiting: waited.record };
+      }
+      const set = waited.reminderId === null ? null : await selectReminder(client, auth.familyId, waited.reminderId);
+      if (set) {
+        await client.query("COMMIT");
+        return { kind: "reminder", reminder: rowToReminder(set) };
+      }
+      throw new AppError(
+        "AGENT_REMINDER_AWAITING_RESOLVED",
+        "Это напоминание уже не ждёт часового пояса: проверьте актуальный список через list_reminders",
+      );
     }
     const personal = request.scope === "personal";
     await requireDestination(client, auth, personal);
@@ -125,7 +154,8 @@ export async function createReminderOrWait(
     if (timezone === undefined && (time.kind === "absolute" || !countdownNeedsNoTimezone(recurrence))) {
       throw localTimeRequired();
     }
-    if (time.kind === "absolute" && time.timezone !== timezone) {
+    const named = time.kind === "absolute" ? time.timezone : time.statedTimezone;
+    if (timezone !== undefined && named !== undefined && named !== timezone) {
       throw new AppError("AGENT_REMINDER_TIMEZONE_MISMATCH", `Подтвердите время в настроенном часовом поясе ${timezone}`);
     }
     let firstRunAt: Date;
@@ -150,8 +180,8 @@ export async function createReminderOrWait(
       recurrence,
       scope: request.scope,
       telegramChatId: auth.telegramChatId,
-      timezone: timezone ?? COUNTDOWN_UTC_ZONE,
-    }, { inputHash, operationKey: request.operationKey });
+      timezone: timezone ?? COUNTDOWN_TIMEZONE,
+    }, { inputHash, operationKey: request.operationKey }, time.kind === "countdown" ? { time: "countdown" } : {});
     await client.query("COMMIT");
     return { kind: "reminder", reminder: rowToReminder(row) };
   } catch (error) {

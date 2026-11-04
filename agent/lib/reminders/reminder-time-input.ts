@@ -16,10 +16,17 @@ import { AppError } from "../app-error.js";
 import { REMINDER_COUNTDOWN_MAX_MINUTES } from "./reminder-config.js";
 import type { ReminderRecurrence } from "./reminder-record.js";
 
+/**
+ * `statedTimezone` is a zone the model passed beside a clock time or a countdown: it must agree with
+ * the person's saved zone, and without one it is the model's guess and is not used.
+ */
 export type ReminderTimeInput =
   | { at: Date; kind: "absolute"; timezone: string }
-  | { kind: "local"; local: string }
-  | { kind: "countdown"; minutes: number };
+  | { kind: "local"; local: string; statedTimezone?: string }
+  | { kind: "countdown"; minutes: number; statedTimezone?: string };
+
+/** A countdown made without the person's zone is an exact moment and is stored in UTC. */
+export const COUNTDOWN_TIMEZONE = "UTC";
 
 const LOCAL_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/u;
 

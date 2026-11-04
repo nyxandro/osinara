@@ -17,6 +17,7 @@ import { decodeDateUuidCursor, encodeDateUuidCursor, paginationFilterDigest } fr
 import { REMINDER_LIST_MAX_LIMIT } from "./reminder-config.js";
 import type { ReminderAuthorization } from "./reminder-context.js";
 import { createReminderOrWait } from "./reminder-create.js";
+import { COUNTDOWN_TIMEZONE, countdownNeedsNoTimezone } from "./reminder-time-input.js";
 import {
   type ReminderRecord,
   type ReminderRecurrence,
@@ -41,6 +42,7 @@ import {
 } from "./reminder-mutation.js";
 import { instantToLocal } from "../calendar-mirror/calendar-mirror-local-time.js";
 import { applyTimezoneToReminders, type TimezoneApplication } from "./reminder-timezone-activation.js";
+import { lockPersonReminders } from "./reminder-timezone-wait-repository.js";
 import {
   type NotificationSettingsInput,
   requireNotificationSettings,
@@ -94,6 +96,7 @@ export const reminderRepository = {
     const client = await database().connect();
     try {
       await client.query("BEGIN");
+      await lockPersonReminders(client, auth.userId);
       await requireCurrentMembership(client, auth);
       const timezone = await requireTimezone(client, input.timezone);
       const current = await client.query<{
@@ -295,6 +298,20 @@ export const reminderRepository = {
       const reminder = await selectReminder(client, auth.familyId, id, true);
       if (!reminder) throw new AppError("AGENT_REMINDER_NOT_FOUND", "Напоминание не найдено");
       await requireReminderMutationAccess(client, auth, reminder);
+      // A countdown set without the person's zone lives in UTC: a repeat by days would follow UTC's
+      // calendar for good, so it waits for a reminder named by the person's clock (#451).
+      if (recurrence && !countdownNeedsNoTimezone(recurrence) && reminder.timezone === COUNTDOWN_TIMEZONE) {
+        const settings = await client.query<{ timezone: string }>(
+          "SELECT timezone FROM user_notification_settings WHERE user_id = $1",
+          [reminder.author_user_id],
+        );
+        if (settings.rows[0]?.timezone !== COUNTDOWN_TIMEZONE) {
+          throw new AppError(
+            "AGENT_REMINDER_LOCAL_TIME_REQUIRED",
+            "Это напоминание поставлено отсчётом без часового пояса: для повтора по дням создайте новое напоминание по часам человека",
+          );
+        }
+      }
       const updated = await applyReminderUpdate(client, reminder, {
         ...(input.buttons === undefined ? {} : { buttons: input.buttons }),
         ...(content === undefined ? {} : { content }),
