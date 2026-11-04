@@ -4,11 +4,17 @@
  * Constructs covered:
  * - `createTelegramWorkspaceAttachmentImporter`: validated persistence before model dispatch.
  * - Deterministic personal/family/group inbox references, binary persistence, and count limits.
+ * - A GIF stored as its middle frame, and its message kept without a picture when no frame can be had.
  */
 import type { TelegramAttachment } from "../../runtime/telegram/inbound.js";
+import sharp from "sharp";
 import { describe, expect, it, vi } from "vitest";
 
-import { createTelegramWorkspaceAttachmentImporter } from "./telegram-workspace-attachments.js";
+import { AppError } from "../app-error.js";
+import {
+  createTelegramWorkspaceAttachmentImporter,
+  type TelegramAttachmentImport,
+} from "./telegram-workspace-attachments.js";
 
 const auth = {
   familyId: "00000000-0000-4000-8000-000000000001",
@@ -28,6 +34,22 @@ const attachment: TelegramAttachment = {
   size: 20,
 };
 
+const gif: TelegramAttachment = {
+  fileId: "gif-file-id",
+  fileName: "preview.jpg",
+  fileUniqueId: "gif-unique-id",
+  kind: "animation",
+  mediaType: "image/jpeg",
+  size: 90_180,
+};
+
+function storedPath(file: TelegramAttachmentImport): string | null {
+  return "path" in file ? file.path : null;
+}
+
+// These imports carry no GIF, so nothing may cut a still.
+const noAnimationStill = vi.fn(async () => { throw new Error("no GIF in this import"); });
+
 describe("createTelegramWorkspaceAttachmentImporter", () => {
   it("validates and persists an authorized private attachment in personal inbox", async () => {
     const bytes = Buffer.from("name,value\nчай,2\n", "utf8");
@@ -40,7 +62,7 @@ describe("createTelegramWorkspaceAttachmentImporter", () => {
       scope: "personal",
       updatedAt: "2026-07-12T00:00:00.000Z",
     });
-    const importer = createTelegramWorkspaceAttachmentImporter({
+    const importer = createTelegramWorkspaceAttachmentImporter({ extractAnimationStill: noAnimationStill,
       download: vi.fn().mockResolvedValue(bytes),
       writeBinary,
     });
@@ -71,23 +93,23 @@ describe("createTelegramWorkspaceAttachmentImporter", () => {
   it("persists all album files without overwriting repeated filenames", async () => {
     const download = vi.fn().mockImplementation(async (file: TelegramAttachment) => Buffer.from(file.fileId));
     const writeBinary = vi.fn().mockImplementation(async (_auth, file) => ({ ...file, scope: "personal" }));
-    const importer = createTelegramWorkspaceAttachmentImporter({ download, writeBinary });
+    const importer = createTelegramWorkspaceAttachmentImporter({ extractAnimationStill: noAnimationStill, download, writeBinary });
     const files = Array.from({ length: 10 }, (_, index) => ({
       ...attachment, fileId: `file-${index}`, fileUniqueId: `unique-${index}`, fileName: "key.txt",
       telegramMessageId: String(42 + index),
     }));
     const result = await importer.persist({ attachments: files, auth, chatId: "101", messageId: "42", scope: "personal" });
     expect(result).toHaveLength(10);
-    expect(new Set(result.map(file => file.path)).size).toBe(10);
+    expect(new Set(result.map(storedPath)).size).toBe(10);
     expect(result.map(file => file.telegramMessageId)).toEqual(files.map(file => file.telegramMessageId));
-    expect(result.map(file => file.path)).toEqual(files.map(file => `inbox/${file.telegramMessageId}/key.txt`));
+    expect(result.map(storedPath)).toEqual(files.map(file => `inbox/${file.telegramMessageId}/key.txt`));
     expect(download).toHaveBeenCalledTimes(10);
     expect(writeBinary.mock.calls.map(call => call[1].bytes.toString())).toEqual(files.map(file => file.fileId));
   });
 
   it("retains two occurrences of the same file under their real Telegram message IDs", async () => {
     const writeBinary = vi.fn().mockImplementation(async (_auth, file) => ({ ...file, scope: "personal" }));
-    const importer = createTelegramWorkspaceAttachmentImporter({ download: vi.fn().mockResolvedValue(Buffer.from("same file")), writeBinary });
+    const importer = createTelegramWorkspaceAttachmentImporter({ extractAnimationStill: noAnimationStill, download: vi.fn().mockResolvedValue(Buffer.from("same file")), writeBinary });
     const result = await importer.persist({ attachments: [
       { ...attachment, telegramMessageId: "41" }, { ...attachment, telegramMessageId: "42" },
     ], auth, chatId: "101", messageId: "42", scope: "personal" });
@@ -99,7 +121,7 @@ describe("createTelegramWorkspaceAttachmentImporter", () => {
 
   it("rejects a multi-file import missing individual source identities before downloading", async () => {
     const download = vi.fn();
-    const importer = createTelegramWorkspaceAttachmentImporter({ download, writeBinary: vi.fn() });
+    const importer = createTelegramWorkspaceAttachmentImporter({ extractAnimationStill: noAnimationStill, download, writeBinary: vi.fn() });
     await expect(importer.persist({ attachments: [attachment, attachment], auth, chatId: "101", messageId: "42", scope: "personal" }))
       .rejects.toThrow(/AGENT_ATTACHMENT_SOURCE_MISSING/);
     expect(download).not.toHaveBeenCalled();
@@ -107,7 +129,7 @@ describe("createTelegramWorkspaceAttachmentImporter", () => {
 
   it("rejects an oversized album before downloading", async () => {
     const download = vi.fn();
-    const importer = createTelegramWorkspaceAttachmentImporter({
+    const importer = createTelegramWorkspaceAttachmentImporter({ extractAnimationStill: noAnimationStill,
       download,
       writeBinary: vi.fn(),
     });
@@ -133,7 +155,7 @@ describe("createTelegramWorkspaceAttachmentImporter", () => {
       scope: "personal",
       updatedAt: "2026-07-13T00:00:00.000Z",
     });
-    const importer = createTelegramWorkspaceAttachmentImporter({
+    const importer = createTelegramWorkspaceAttachmentImporter({ extractAnimationStill: noAnimationStill,
       download: vi.fn().mockResolvedValue(bytes),
       writeBinary,
     });
@@ -177,7 +199,7 @@ describe("createTelegramWorkspaceAttachmentImporter", () => {
       scope: "family",
       updatedAt: "2026-07-13T00:00:00.000Z",
     });
-    const importer = createTelegramWorkspaceAttachmentImporter({
+    const importer = createTelegramWorkspaceAttachmentImporter({ extractAnimationStill: noAnimationStill,
       download: vi.fn().mockResolvedValue(bytes),
       writeBinary,
     });
@@ -214,7 +236,7 @@ describe("createTelegramWorkspaceAttachmentImporter", () => {
       scope: "group",
       updatedAt: "2026-08-03T00:00:00.000Z",
     });
-    const importer = createTelegramWorkspaceAttachmentImporter({
+    const importer = createTelegramWorkspaceAttachmentImporter({ extractAnimationStill: noAnimationStill,
       download: vi.fn().mockResolvedValue(bytes),
       writeBinary,
     });
@@ -240,6 +262,82 @@ describe("createTelegramWorkspaceAttachmentImporter", () => {
     }));
   });
 
+  it("stores the middle frame of a GIF as its preview instead of the MP4", async () => {
+    const mp4 = Buffer.from("mp4 bytes");
+    const still = await sharp({ create: { background: "#00ff00", channels: 3, height: 4, width: 4 } }).jpeg().toBuffer();
+    const extractAnimationStill = vi.fn().mockResolvedValue(still);
+    const writeBinary = vi.fn().mockImplementation(async (_auth, file) => ({ ...file, scope: "personal" }));
+    const importer = createTelegramWorkspaceAttachmentImporter({
+      download: vi.fn().mockResolvedValue(mp4),
+      extractAnimationStill,
+      writeBinary,
+    });
+
+    const result = await importer.persist({ attachments: [gif], auth, chatId: "101", messageId: "42", scope: "personal" });
+
+    expect(extractAnimationStill).toHaveBeenCalledWith(mp4);
+    expect(writeBinary).toHaveBeenCalledWith(auth, {
+      bytes: still,
+      mediaType: "image/jpeg",
+      operationKey: "telegram-attachment:101:42:gif-unique-id",
+      path: "inbox/42/preview.jpg",
+      scope: "personal",
+    });
+    expect(result).toEqual([{ mediaType: "image/jpeg", path: "inbox/42/preview.jpg", scope: "personal", telegramMessageId: "42" }]);
+  });
+
+  // A GIF is not worth the person's message: without its still the message still reaches the
+  // model, which learns it has no picture, as a voice transcript failure leaves a video note.
+  it.each([
+    ["its frame cannot be cut", { download: vi.fn().mockResolvedValue(Buffer.from("broken")),
+      extractAnimationStill: vi.fn().mockRejectedValue(new AppError("AGENT_ANIMATION_STILL_FAILED", "Не удалось получить кадр гифки")) }],
+    ["its file cannot be downloaded", {
+      download: vi.fn().mockImplementation(async (file: TelegramAttachment) => {
+        if (file.kind === "animation") throw new AppError("AGENT_ATTACHMENT_DOWNLOAD_TOO_LARGE", "Слишком большой файл");
+        return Buffer.from("name,value\n");
+      }),
+      extractAnimationStill: vi.fn() }],
+  ])("keeps a GIF's message without a picture when %s", async (_case, dependencies) => {
+    const writeBinary = vi.fn().mockImplementation(async (_auth, file) => ({ ...file, scope: "personal" }));
+    const importer = createTelegramWorkspaceAttachmentImporter({ ...dependencies, writeBinary });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const result = await importer.persist({
+      attachments: [{ ...gif, telegramMessageId: "41" }, { ...attachment, telegramMessageId: "42" }],
+      auth,
+      chatId: "101",
+      messageId: "42",
+      scope: "personal",
+    });
+
+    expect(result).toEqual([
+      { stillUnavailable: true, telegramMessageId: "41" },
+      expect.objectContaining({ path: "inbox/42/Семейный бюджет.csv", telegramMessageId: "42" }),
+    ]);
+    expect(writeBinary).toHaveBeenCalledOnce();
+    expect(errors).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(errors.mock.calls[0]![0]))).toMatchObject({
+      code: "AGENT_ANIMATION_STILL_UNAVAILABLE",
+      telegramMessageId: "41",
+    });
+    errors.mockRestore();
+  });
+
+  // A broken server is not a bad GIF: it fails the message instead of passing for "no picture".
+  it.each([
+    ["a fault in the code", new TypeError("bug")],
+    ["a missing media tool", new AppError("AGENT_MEDIA_TOOL_MISSING", "На сервере нет программы для обработки медиафайлов")],
+  ])("does not hide %s behind a GIF without a picture", async (_case, failure) => {
+    const importer = createTelegramWorkspaceAttachmentImporter({
+      download: vi.fn().mockResolvedValue(Buffer.from("mp4 bytes")),
+      extractAnimationStill: vi.fn().mockRejectedValue(failure),
+      writeBinary: vi.fn(),
+    });
+
+    await expect(importer.persist({ attachments: [gif], auth, chatId: "101", messageId: "42", scope: "personal" }))
+      .rejects.toBe(failure);
+  });
+
   it("keeps any file an external group imports, typed by its bytes rather than its name", async () => {
     const writeBinary = vi.fn().mockImplementation(async (_auth, file) => ({ ...file, scope: "group" }));
     const groupAuth = {
@@ -250,7 +348,7 @@ describe("createTelegramWorkspaceAttachmentImporter", () => {
       telegramChatType: "supergroup" as const,
       userId: null,
     };
-    const importer = createTelegramWorkspaceAttachmentImporter({
+    const importer = createTelegramWorkspaceAttachmentImporter({ extractAnimationStill: noAnimationStill,
       download: vi.fn()
         .mockResolvedValueOnce(Buffer.from("%PDF-1.7\n%âãÏÓ\n1 0 obj\n", "latin1"))
         .mockResolvedValueOnce(Buffer.from([0x00, 0xff, 0x01])),

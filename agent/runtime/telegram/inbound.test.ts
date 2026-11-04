@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { TELEGRAM_MAX_INBOUND_ATTACHMENT_BYTES } from "../../config.js";
 import {
   formatTelegramContextBlock,
   parseTelegramUpdate,
@@ -115,14 +116,24 @@ describe("parseTelegramUpdate", () => {
 
   // A sticker, a GIF, a video, a video note or a song cover reaches vision through a still: the
   // message keeps exactly one attachment, so the still stands in for the file.
+  // A GIF's still is its middle frame, cut from its own file, unless the file is too large to download.
   it.each([
     ["a static sticker as its own WEBP", { sticker: { emoji: "😂", file_id: "sticker-file", file_unique_id: "s1", height: 512, is_animated: false, is_video: false, thumbnail: { file_id: "sticker-thumb", file_unique_id: "t1", height: 128, width: 128 }, type: "regular", width: 512 } },
       { fileId: "sticker-file", fileName: "sticker.webp", fileUniqueId: "s1", height: 512, kind: "photo", mediaType: "image/webp", width: 512 }],
     ["an animated sticker as its preview", { sticker: { file_id: "tgs-file", file_unique_id: "s2", height: 512, is_animated: true, is_video: false, thumbnail: { file_id: "tgs-thumb", file_unique_id: "t2", height: 128, width: 128 }, type: "regular", width: 512 } },
       { fileId: "tgs-thumb", fileName: "preview.jpg", fileUniqueId: "t2", height: 128, kind: "photo", mediaType: "image/jpeg", width: 128 }],
-    ["a GIF as its preview instead of the MP4 document", {
-      animation: { duration: 3, file_id: "gif-file", file_unique_id: "g1", height: 240, thumbnail: { file_id: "gif-thumb", file_unique_id: "t3", file_size: 900, height: 90, width: 160 }, width: 320 },
+    // The sender decides whether Telegram's preview exists and which frame it shows, so a GIF is
+    // read from its own file, whose middle frame the workspace receives.
+    ["a GIF by its own file instead of Telegram's preview", {
+      animation: { duration: 3, file_id: "gif-file", file_size: 90_180, file_unique_id: "g1", height: 240, mime_type: "video/mp4", thumbnail: { file_id: "gif-thumb", file_unique_id: "t3", file_size: 900, height: 90, width: 160 }, width: 320 },
       document: { file_id: "gif-file", file_unique_id: "g1", mime_type: "video/mp4" },
+    }, { fileId: "gif-file", fileName: "preview.jpg", fileUniqueId: "g1", height: 240, kind: "animation", mediaType: "image/jpeg", size: 90_180, width: 320 }],
+    ["a GIF that came without Telegram's preview by its own file", {
+      animation: { duration: 3, file_id: "gif-file", file_size: 90_180, file_unique_id: "g1", height: 216, mime_type: "video/mp4", width: 320 },
+      document: { file_id: "gif-file", file_unique_id: "g1", mime_type: "video/mp4" },
+    }, { fileId: "gif-file", fileName: "preview.jpg", fileUniqueId: "g1", height: 216, kind: "animation", mediaType: "image/jpeg", size: 90_180, width: 320 }],
+    ["a GIF larger than a bot may download by Telegram's preview", {
+      animation: { duration: 60, file_id: "gif-file", file_size: TELEGRAM_MAX_INBOUND_ATTACHMENT_BYTES + 1, file_unique_id: "g1", height: 720, mime_type: "video/mp4", thumbnail: { file_id: "gif-thumb", file_unique_id: "t3", file_size: 900, height: 90, width: 160 }, width: 1280 },
     }, { fileId: "gif-thumb", fileName: "preview.jpg", fileUniqueId: "t3", height: 90, kind: "photo", mediaType: "image/jpeg", size: 900, width: 160 }],
     ["a video note as its preview", { video_note: { duration: 20, file_id: "note-file", file_unique_id: "n1", length: 240, thumbnail: { file_id: "note-thumb", file_unique_id: "t4", height: 240, width: 240 } } },
       { fileId: "note-thumb", fileName: "preview.jpg", fileUniqueId: "t4", height: 240, kind: "photo", mediaType: "image/jpeg", width: 240 }],

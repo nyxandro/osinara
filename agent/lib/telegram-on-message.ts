@@ -17,7 +17,7 @@
 import type { TelegramInboundResult } from "../runtime/telegram/channel-types.js";
 import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
-import type { StoredTelegramAttachment } from "./attachments/telegram-workspace-attachments.js";
+import type { TelegramAttachmentImport } from "./attachments/telegram-workspace-attachments.js";
 import { AppError } from "./app-error.js";
 import { bindTelegramConversationTimeline } from "./telegram-conversation-timeline.js";
 import { evaluateConversationAccess } from "./family-access.js";
@@ -322,7 +322,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       }
     }
 
-    let storedAttachments: StoredTelegramAttachment[] = [];
+    let storedAttachments: TelegramAttachmentImport[] = [];
     if (
       message.attachments.length > 0 &&
       message.chat.type === "private"

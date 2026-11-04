@@ -2,7 +2,8 @@
  * Lazy authorized Telegram attachment materialization.
  *
  * Exports:
- * - `createTelegramAttachmentMaterializer`: resolves one opaque reference and persists its bytes.
+ * - `createTelegramAttachmentMaterializer`: resolves one opaque reference and persists its bytes; a GIF
+ *   that came without a picture is a refusal the model reads.
  * - `materializeTelegramAttachment`: production registered-group journal to workspace pipeline.
  */
 import type { TelegramAttachment } from "../../runtime/telegram/inbound.js";
@@ -11,10 +12,13 @@ import { telegramGroupAttachmentRepository } from "./telegram-group-attachment-r
 import { workspaceBinaryRepository } from "../workspaces/workspace-binary-repository.js";
 import type { WorkspaceAuthorization } from "../workspaces/workspace-repository.js";
 import { AppError } from "../app-error.js";
+import { ModelFacingError } from "../model-facing-error.js";
+import { extractAnimationStill } from "./animation-still.js";
 import { downloadTelegramAttachment } from "./telegram-attachment-download.js";
 import {
   createTelegramWorkspaceAttachmentImporter,
   type StoredTelegramAttachment,
+  type TelegramAttachmentImport,
 } from "./telegram-workspace-attachments.js";
 
 interface TelegramAttachmentMaterializerDependencies {
@@ -32,7 +36,7 @@ interface TelegramAttachmentMaterializerDependencies {
     chatId: string;
     messageId: string;
     scope: "family" | "group";
-  }): Promise<StoredTelegramAttachment[]>;
+  }): Promise<TelegramAttachmentImport[]>;
 }
 
 export function createTelegramAttachmentMaterializer(
@@ -67,12 +71,23 @@ export function createTelegramAttachmentMaterializer(
         "AGENT_TELEGRAM_ATTACHMENT_MATERIALIZATION_EMPTY: Telegram-вложение не было сохранено в workspace",
       );
     }
+    if ("stillUnavailable" in attachment) {
+      throw new ModelFacingError({
+        category: "dependency",
+        code: "AGENT_ANIMATION_STILL_UNAVAILABLE",
+        correction: "Не повторяйте вызов. Скажите человеку прямо, что не видите эту гифку, и не гадайте, что на ней.",
+        reason: "Сервер не смог получить кадр из файла этой гифки.",
+        retryable: false,
+        sideEffectStatus: "not_started",
+      });
+    }
     return attachment;
   };
 }
 
 const workspaceAttachmentImporter = createTelegramWorkspaceAttachmentImporter({
   download: downloadTelegramAttachment,
+  extractAnimationStill,
   writeBinary: workspaceBinaryRepository.writeBinary,
 });
 

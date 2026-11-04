@@ -3,7 +3,7 @@
  *
  * Exports:
  * - Workspace scope/auth projections for verified inbound access.
- * - Safe attachment context serializers.
+ * - Safe attachment context serializers, and the line naming a GIF that came without a picture.
  * - Application session scope and proactive-delivery authorization projections.
  * - `telegramProfileName`: display identity without exposing Telegram IDs.
  */
@@ -45,6 +45,13 @@ export function telegramWorkspaceAuthorization(
     telegramChatType: message.chat.type,
     userId: access.access.userId,
   };
+}
+
+// Named per message: without it the model blamed Telegram and asked to resend a GIF that never
+// carries a picture (03.11.2026).
+export function formatUnavailableAnimationStill(telegramMessageId: string): string {
+  return `You cannot see the GIF of Telegram message ${telegramMessageId}: the server could not take a frame from its file. ` +
+    "Tell the person so plainly; do not guess what it shows or why it failed.";
 }
 
 export function formatStoredTelegramAttachments(

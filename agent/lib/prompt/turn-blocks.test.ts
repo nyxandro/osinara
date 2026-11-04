@@ -20,7 +20,7 @@ import {
   createReactionSetBlockResolver,
 } from "./turn-blocks.js";
 import { EMPTY_DELIVERY_MARKER } from "../../runtime/turn/step-history.js";
-import { REPLY_BUTTON_RULES } from "./reply-button-fragments.js";
+import { LINK_AND_COPY_BUTTON_RULES, REPLY_BUTTON_RULES } from "./reply-button-fragments.js";
 import { formatReactionSetAnnouncement } from "../telegram-reaction-announcement.js";
 import { TELEGRAM_DEFAULT_REACTIONS } from "../telegram-reaction-set.js";
 
@@ -147,7 +147,7 @@ describe("mode block resolution", () => {
     expect(groupChild).not.toContain("voice message");
   });
 
-  it("teaches reply buttons in the trusted zones and nowhere else", async () => {
+  it("teaches answer buttons in the trusted zones, link and copy buttons everywhere, and none to a child", async () => {
     const resolve = createModeBlockResolver({
       loadCapabilities: vi.fn().mockResolvedValue(new Set(["remember"])),
       loadReactionPolicy: reactionPolicy,
@@ -158,8 +158,10 @@ describe("mode block resolution", () => {
     const external = await resolve(context(externalAuth));
 
     expect(personal).toContain(REPLY_BUTTON_RULES);
+    expect(personal).toContain(LINK_AND_COPY_BUTTON_RULES);
     expect(personalChild).not.toContain("tg-button");
-    expect(external).not.toContain("tg-button");
+    expect(external).not.toContain(REPLY_BUTTON_RULES);
+    expect(external).toContain(LINK_AND_COPY_BUTTON_RULES);
   });
 
   it("keeps every transport directive away from a subagent child", async () => {

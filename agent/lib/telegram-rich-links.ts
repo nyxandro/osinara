@@ -24,7 +24,8 @@
  *   left to change. A text that keeps changing (deeply nested media, crafted on purpose) gets its
  *   link syntax broken everywhere instead: the answer still goes out, plainer, and nothing opens.
  *
- * Exports also `inertLinkSyntax`, that last resort, for the filter's own one.
+ * Exports also `inertLinkSyntax`, that last resort, for the filter's own one, and
+ * `isTelegramWebAddress`, the same reading of a Telegram host, for a link button.
  */
 import type { Nodes } from "mdast";
 
@@ -67,6 +68,11 @@ function hostsOf(url: string): string[] {
 function telegramAddress(url: string): boolean {
   return hostsOf(url).some((host) =>
     TELEGRAM_LINK_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`)));
+}
+
+/** Whether an address leads into Telegram itself (`t.me` and its twins), by any common URL reading. */
+export function isTelegramWebAddress(url: string): boolean {
+  return telegramAddress(url);
 }
 
 /** Whether a link may keep its caption: a safe address, and a Telegram one only when it is the caption. */

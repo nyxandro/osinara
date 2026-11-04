@@ -10,8 +10,10 @@
  * Key constructs:
  * - The buttons ride on the last message of the answer, after every split and aside, written into
  *   it as Telegram markup that carries only the set's token and each button's index.
- * - They go only to the person the turn answers, in a private chat or a family group of the turn:
- *   the target comes from the verified Telegram context, not from the model.
+ * - Answer buttons go only to the person the turn answers, in a private chat or a family group of
+ *   the turn: the target comes from the verified Telegram context, not from the model. Link and copy
+ *   buttons answer nobody: alone they go out in any chat without a set, and beside answers that
+ *   cannot go out they go out by themselves.
  * - The exact text is recorded before that message is sent, so the caption written after a choice
  *   lands under the same words; the message number is recorded once Telegram confirmed it.
  * - Buttons are presentation of a message that matters more: when their bookkeeping fails, the
@@ -22,7 +24,12 @@
  */
 import { fitsTelegramRichMessage } from "../telegram-rich-markdown.js";
 import { isTelegramRichMessageRefusal, type SentRichMedia, type SentTelegramMessage } from "../telegram-rich-messages.js";
-import { newReplyButtonToken, type ReplyButtonRows } from "./reply-button-contract.js";
+import {
+  hasAnswerButtons,
+  newReplyButtonToken,
+  withoutAnswerButtons,
+  type ReplyButtonRows,
+} from "./reply-button-contract.js";
 import { replyButtonMarkup, type ReplyButtonMarkupReading } from "./reply-button-markup.js";
 import { replyButtonRepository } from "./reply-button-repository.js";
 
@@ -67,6 +74,33 @@ function buttonTarget(attributes: AuthAttributes | undefined, telegramChatId: st
   return { addresseeTelegramUserId: addressee, telegramChatId, telegramChatType: chatType };
 }
 
+/** Link and copy buttons alone: written into the last message, with no set to stage or activate. */
+function unstagedReplyButtons(rows: ReplyButtonRows, agentTurnId: string): TurnReplyButtons {
+  return {
+    async afterDelivery() {
+      // Nothing waits for a press: Telegram opens the page or copies the text itself.
+    },
+    async sendLast(chunk, post) {
+      if (chunk.format !== "rich") {
+        console.error(JSON.stringify({ agentTurnId, code: "AGENT_REPLY_BUTTONS_FORMAT_INVALID" }));
+        return await post(chunk.text);
+      }
+      const text = `${chunk.text}\n\n${replyButtonMarkup(rows)}`;
+      if (!fitsTelegramRichMessage(text)) {
+        console.error(JSON.stringify({ agentTurnId, code: "AGENT_REPLY_BUTTONS_TOO_LARGE" }));
+        return await post(chunk.text);
+      }
+      try {
+        return await post(text);
+      } catch (error) {
+        if (!isTelegramRichMessageRefusal(error)) throw error;
+        console.error(JSON.stringify({ agentTurnId, code: "AGENT_REPLY_BUTTONS_REJECTED" }));
+        return await post(chunk.text);
+      }
+    },
+  };
+}
+
 export function turnReplyButtons(input: {
   agentSessionId: string;
   agentTurnId: string;
@@ -79,10 +113,12 @@ export function turnReplyButtons(input: {
     logFailure("AGENT_REPLY_BUTTONS_REFUSED", input.found.error, { agentTurnId: input.agentTurnId });
     return null;
   }
+  if (!hasAnswerButtons(input.found.rows)) return unstagedReplyButtons(input.found.rows, input.agentTurnId);
   const verifiedTarget = buttonTarget(input.attributes, input.telegramChatId);
   if (verifiedTarget === null) {
     console.error(JSON.stringify({ agentTurnId: input.agentTurnId, code: "AGENT_REPLY_BUTTONS_TARGET_INVALID" }));
-    return null;
+    const utility = withoutAnswerButtons(input.found.rows);
+    return utility.length === 0 ? null : unstagedReplyButtons(utility, input.agentTurnId);
   }
   const target = verifiedTarget;
   const buttons = input.found.rows;
@@ -167,7 +203,8 @@ export function reportUndeliveredReplyButtons(
  * A reminder with buttons goes out as a rich message, the only kind that carries them; its message
  * text is staged first so a choice can be captioned under it, and the files of that message are kept
  * once it is out, since the caption's edit must name them again. A group-chat reminder never has
- * any: buttons belong to the trusted zones.
+ * answer buttons: they belong to the trusted zones. Its link and copy buttons, like any reminder's
+ * without answers, go out without a set.
  */
 export async function reminderReplyButtons(input: {
   addresseeTelegramUserId: string | null;
@@ -184,12 +221,19 @@ export async function reminderReplyButtons(input: {
   markdown: string;
 } | null> {
   if (input.buttons === null) return null;
+  const { messageText } = input;
+  const unstaged = (rows: ReplyButtonRows) => ({
+    activate: async () => {},
+    discard: async () => {},
+    markdown: `${messageText}\n\n${replyButtonMarkup(rows)}`,
+  });
+  if (!hasAnswerButtons(input.buttons)) return unstaged(input.buttons);
   const chatType = input.telegramChatType;
   if (input.scope === "group" || input.addresseeTelegramUserId === null || !isButtonChatType(chatType)) {
     console.error(JSON.stringify({ code: "AGENT_REMINDER_BUTTONS_TARGET_INVALID", reminderId: input.reminderId }));
-    return null;
+    const utility = withoutAnswerButtons(input.buttons);
+    return utility.length === 0 ? null : unstaged(utility);
   }
-  const { messageText } = input;
   let set: Awaited<ReturnType<typeof replyButtonRepository.stageForReminder>>;
   try {
     set = await replyButtonRepository.stageForReminder({

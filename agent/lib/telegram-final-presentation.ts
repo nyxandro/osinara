@@ -45,7 +45,7 @@ export interface TelegramFinalPresentationChunk {
 
 const RICH_BLOCK_PATTERN = /(?:^|\n)(?:#{2,3}\s|>\s|[-+*]\s|\d+\.\s|- \[[ xX]\]\s|```|\$\$\s*$|---\s*$|\|[^\n]*\|\s*$)/mu;
 const GFM_TABLE_DELIMITER_PATTERN = /(?:^|\n)\s*:?-{3,}:?\s*\|\s*:?-{3,}:?(?:\s*\|\s*:?-{3,}:?)*\s*(?:$|\n)/mu;
-const RICH_INLINE_PATTERN = /(?:\*\*[^*\n]+\*\*|~~[^~\n]+~~|==[^=\n]+==|\|\|[^|\n]+\|\||`[^`\n]+`|\[[^\]\n]+\]\([^\s)]+\)|<(?:details(?:\s+open)?|summary|u|ins|sub|sup)>|<\/(?:details|summary|u|ins|sub|sup)>)/iu;
+const RICH_INLINE_PATTERN = /(?:\*\*[^*\n]+\*\*|~~[^~\n]+~~|==[^=\n]+==|\|\|[^|\n]+\|\||`[^`\n]+`|\[[^\]\n]+\]\([^\s)]+\)|<(?:details(?:\s+open)?|summary|u|ins|sub|sup)>|<\/(?:details|summary|u|ins|sub|sup)>|<tg-(?:collage|map|slideshow|time)(?![\w-]))/iu;
 const RICH_ITALIC_PATTERN = /(?:^|[^\p{L}\p{N}_])(?:\*[^*\n]+\*|_[^_\n]+_)(?=$|[^\p{L}\p{N}_])/u;
 const RICH_MATH_PATTERN = /\$(?:[\\\p{L}][^$\n]*|[^$\n]*[=+*/^_-][^$\n]*)\$(?![\p{L}\p{N}])/u;
 const RICH_LIMIT_ERROR_CODES = new Set([

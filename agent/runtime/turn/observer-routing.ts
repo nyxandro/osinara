@@ -22,6 +22,7 @@ export function routeTurnObservers(observers: Readonly<Record<string, TurnObserv
   return {
     turnStarted: async (turn) => await observerOf(turn).turnStarted(turn),
     stepText: async (event) => await observerOf(event.turn).stepText(event),
+    stepTextProgress: (event) => observerOf(event.turn).stepTextProgress?.(event),
     toolsStarted: async (event) => await observerOf(event.turn).toolsStarted(event),
     inputRequested: async (event) => await observerOf(event.turn).inputRequested(event),
     turnFinished: async (event) => await observerOf(event.turn).turnFinished(event),

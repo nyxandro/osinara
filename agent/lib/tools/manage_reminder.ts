@@ -23,7 +23,7 @@ import {
   REMINDER_RECURRENCE_INTERVAL_MAX,
 } from "../reminders/reminder-config.js";
 import { requireReminderAuthorization } from "../reminders/reminder-context.js";
-import { reminderWriterRights, requireReminderFiles } from "../reminders/reminder-files.js";
+import { reminderWriterRights, requireReminderContent } from "../reminders/reminder-files.js";
 import { REMINDER_RECURRENCE_UNITS, type ReminderRecurrence } from "../reminders/reminder-record.js";
 import { reminderRepository } from "../reminders/reminder-repository.js";
 import type { ReplyButtonRows } from "../reply-buttons/reply-button-contract.js";
@@ -231,7 +231,7 @@ export default withCallExamples(defineTool({
     const replayed = namesFiles && await reminderRepository.operationRecorded(authorization, ctx.callId);
     if (parsed.action === "create") {
       if (!replayed) {
-        await requireReminderFiles({
+        await requireReminderContent({
           content: parsed.values.content,
           errorCode: INPUT_ERROR_CODE,
           rights: () => reminderWriterRights(authorization),
@@ -250,7 +250,7 @@ export default withCallExamples(defineTool({
       // by the update itself.
       const scope = !namesFiles || replayed ? null : await reminderRepository.scopeOf(authorization, id);
       if (values.content !== undefined && scope !== null && scope !== "group") {
-        await requireReminderFiles({
+        await requireReminderContent({
           content: values.content, errorCode: INPUT_ERROR_CODE, rights: () => reminderWriterRights(authorization), scope,
         });
       }

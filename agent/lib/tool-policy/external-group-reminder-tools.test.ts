@@ -154,6 +154,17 @@ describe("external group reminder tools", () => {
     expect(repository.list).toHaveBeenCalledWith(AUTH, { limit: 100 });
   });
 
+  it("refuses buttons in a group reminder, which keeps none, before storing anything", async () => {
+    const content = "Оплатить хостинг\n\n<tg-button-row><tg-button type=\"url\" url=\"https://pay.example\">💳 Оплатить</tg-button></tg-button-row>";
+
+    await expect(manageReminder.execute({ action: "create", content, firstRunAt: "2026-09-12T18:00:00+03:00", recurrence: null } as never, context))
+      .rejects.toMatchObject({ code: "AGENT_REMINDER_INPUT_INVALID", message: expect.stringContaining("без кнопок") });
+    await expect(manageReminder.execute({ action: "update", content, id: REMINDER_ID } as never, context))
+      .rejects.toMatchObject({ code: "AGENT_REMINDER_INPUT_INVALID" });
+    expect(repository.create).not.toHaveBeenCalled();
+    expect(repository.update).not.toHaveBeenCalled();
+  });
+
   it("refuses a file outside this chat's folder before storing anything", async () => {
     const content = "Созвон по проекту\n\n![](/workspace/family/plan.pdf)";
 

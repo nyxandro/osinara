@@ -7,6 +7,8 @@
  * - A truncated collapsible block is closed; other malformed allowed HTML is rendered inert.
  * - Model-authored media, Telegram service tags, and unsafe links are rendered inert.
  * - Final rich messages split only between complete blocks at Telegram's length limit.
+ * - Telegram's own moment, map, collage and slideshow tags pass in the one form Telegram receives,
+ *   a wrong one stays text, and a gallery is never split between two messages.
  */
 import fc from "fast-check";
 import { describe, expect, it, vi } from "vitest";
@@ -53,6 +55,49 @@ describe("sanitizeTelegramRichMarkdown", () => {
     expect(sanitized).toContain("опасная ссылка (javascript:alert(1))");
     expect(sanitized).not.toContain('<img src="');
     expect(sanitized).not.toContain("<tg-thinking>");
+  });
+
+  it("keeps a moment, a map and a gallery for Telegram and counts the moment's Unix time", () => {
+    const sanitized = sanitizeTelegramRichMarkdown([
+      "Созвон <tg-time at=\"2026-11-07T19:00:00+03:00\" format=\"wt\">суббота, 19:00</tg-time>.",
+      "",
+      "<tg-map long=\"37.6173\" lat=\"55.7558\" zoom=\"15\">",
+      "",
+      "<tg-collage>",
+      "",
+      "Первый кадр",
+      "",
+      "</tg-collage>",
+    ].join("\n"));
+
+    expect(sanitized).toBe([
+      "Созвон <tg-time unix=\"1794067200\" format=\"wt\">суббота, 19:00</tg-time>.",
+      "",
+      "<tg-map lat=\"55.7558\" long=\"37.6173\" zoom=\"15\"/>",
+      "",
+      "<tg-collage>",
+      "",
+      "Первый кадр",
+      "",
+      "</tg-collage>",
+    ].join("\n"));
+  });
+
+  it.each([
+    ["a moment without an offset", "<tg-time at=\"2026-11-07T19:00\" format=\"wt\">суббота</tg-time>"],
+    ["a map off the globe", "<tg-map lat=\"200\" long=\"37\"/>"],
+    ["an unclosed slideshow", "<tg-slideshow>\n\nКадр"],
+  ])("leaves %s as text", (_case, markdown) => {
+    const sanitized = sanitizeTelegramRichMarkdown(`Текст.\n\n${markdown}`);
+
+    expect(sanitized).not.toMatch(/<\/?tg-/u);
+    expect(sanitized).toContain("&lt;tg-");
+  });
+
+  it("breaks an allowed Telegram tag shown as code like any other", () => {
+    const sanitized = sanitizeTelegramRichMarkdown("Пример: `<tg-map lat=\"55\" long=\"37\"/>`");
+
+    expect(sanitized).toBe("Пример: `<\u200Btg-map lat=\"55\" long=\"37\"/>`");
   });
 
   it("neutralizes unsafe links with nested parentheses", () => {
@@ -338,6 +383,20 @@ describe("formatTelegramRichMessages", () => {
     expect(chunks[1]).toBe(code);
   });
 
+  it("keeps a gallery whole in one message when a long answer is split", () => {
+    const paragraph = "я".repeat(30_000);
+    const gallery = `<tg-slideshow>\n\n${"а".repeat(1_500)}\n\n${"б".repeat(1_500)}\n\n</tg-slideshow>`;
+    const chunks = formatTelegramRichMessages(`${paragraph}\n\n${gallery}\n\nКонец.`);
+
+    expect(chunks).toEqual([paragraph, `${gallery}\n\nКонец.`]);
+  });
+
+  it("puts the tags of a gallery written tight on lines of their own", () => {
+    expect(formatTelegramRichMessages("Кадры:\n<tg-collage>\nПервый\n</tg-collage>")).toEqual([
+      "Кадры:\n\n<tg-collage>\n\nПервый\n\n</tg-collage>",
+    ]);
+  });
+
   it("fails explicitly when one indivisible block exceeds the rich limit", () => {
     expect(() => formatTelegramRichMessages("я".repeat(32_769))).toThrow(
       "AGENT_TELEGRAM_RICH_BLOCK_TOO_LONG",
@@ -411,10 +470,18 @@ const RISKY_PIECE = fc.constantFrom(
   "<img src=\"https://evil.example/p.png\">", "<a href=\"tg://x\">", "</a>", "<details>", "</details>",
   "<summary>", "</summary>", "<u>", "</u>", "<tg-button>", "<tg://x>", "`", "```", "\\", " \"t\"", "[r]: ",
   "\n", "\n\n", "    ", "1. ", "- ", "> ", "текст", " ", "$", "$$", "~~~", "````", "IFS=$'\\n'",
+  "<tg-time at=\"2026-11-07T19:00:00+03:00\" format=\"wt\">", "</tg-time>", "<tg-time unix=\"1\" format=\"t\">",
+  "<tg-map lat=\"55\" long=\"37\"/>", "<tg-map lat=\"99\" long=\"37\"/>", "<tg-collage>", "</tg-collage>", "<tg-slideshow>",
   "<details><summary>Итог</summary>", "[подпись\n", "](\n", "|", "| a | b |\n|---|---|\n",
 );
 const SAFE_ADDRESS = /^(?:https?:|mailto:|tel:|#)/u;
-const ALLOWED_TAG = /^<\/?(?:details|summary|u|ins|sub|sup)(?: open)?>/u;
+const ALLOWED_TAG = new RegExp([
+  "^<\\/?(?:details|summary|u|ins|sub|sup)(?: open)?>",
+  "^<\\/?tg-(?:collage|slideshow)>",
+  "^<tg-time unix=\"\\d+\" format=\"(?:r|w?[dD]?[tT]?)\">",
+  "^<\\/tg-time>",
+  "^<tg-map lat=\"-?[\\d.]+\" long=\"-?[\\d.]+\"(?: zoom=\"\\d+\")?\\/>",
+].join("|"), "u");
 
 /** No live unsafe link, no media and no unknown tag outside code Telegram is sure to show as code. */
 function expectInert(sanitized: string): void {

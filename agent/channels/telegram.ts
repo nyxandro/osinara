@@ -34,6 +34,7 @@ import { stripTelegramAsideDirectives } from "../lib/telegram-authored-split.js"
 import { recordMemoryUsageDeclaration } from "../lib/memory-usage-report.js";
 import { deliverTelegramFinalOutput } from "../lib/telegram-final-delivery.js";
 import { prepareTelegramTurn } from "../lib/telegram-turn-preparation.js";
+import { answerDrafts, startAnswerDraft } from "../lib/telegram-answer-draft/answer-draft-turns.js";
 import { postTelegramPresentationChunk } from "../lib/telegram-presentation-post.js";
 import { prepareTelegramAnswerFiles } from "../lib/answer-files/telegram-answer-files.js";
 import { reportUndeliveredReplyButtons, turnReplyButtons } from "../lib/reply-buttons/reply-button-delivery.js";
@@ -96,11 +97,21 @@ async function releaseResumedTurnSources(ctx: Parameters<TelegramTurnEvents["tur
 
 export const telegramTurnEvents: TelegramTurnEvents = {
   async "input.requested"(data, channel, ctx) {
+    answerDrafts.pause(ctx.session.turn.id);
     const refusal = accountlessActorApprovalError(ctx.session.auth);
     if (refusal) throw refusal;
     return await handleTelegramInputRequested(data, channel, ctx);
   },
+  "message.progress"(data, turn) {
+    answerDrafts.text(turn.id, data.textSoFar);
+  },
+  async "actions.requested"(_data, channel, ctx) {
+    // A private chat's presenter shows "typing" itself; a group, a scheduled run and a wake-up as before.
+    if (!answerDrafts.toolsStarted(ctx.session.turn.id) && !startAnswerDraft(channel, ctx)) await channel.telegram.startTyping();
+  },
   async "message.completed"(data, channel, ctx) {
+    // The draft stops before any message goes: one landing after it would show again.
+    await answerDrafts.beforeMessage(ctx.session.turn.id);
     // Model-authored pre-tool text is a user-visible progress update, not technical tool noise.
     // A background run — scheduled or a wake-up — reports only its result, or stays silent.
     if ((isScheduledSession(ctx) || isConversationWakeupTurn(ctx)) && data.finishReason !== "stop") return;
@@ -328,6 +339,8 @@ export const telegramTurnEvents: TelegramTurnEvents = {
     }
   },
   async "turn.failed"(data, channel, ctx) {
+    // Before the failure notice, so no draft lands after it.
+    await answerDrafts.close(ctx.session.turn.id);
     // Terminal failure releases the temporary timeline retention after all tool writes have stopped.
     await releaseMemoryTurnSources(ctx);
     // First, so a failing failure notice below cannot leave the wake-up's schedule leased for good.
@@ -396,6 +409,7 @@ export const telegramTurnEvents: TelegramTurnEvents = {
     await telegramHitlApprovalRepository.clearForAgentSession(sessionId, ctx.session.id);
   },
   async "turn.cancelled"(_data, _channel, ctx) {
+    await answerDrafts.close(ctx.session.turn.id);
     // A cancelled turn closes its review like a failed one: a batch waiting for the time bound let
     // later turns chain onto a head that would never report, so their work stayed unreachable.
     await releaseMemoryTurnSources(ctx);
@@ -417,8 +431,14 @@ export const telegramTurnEvents: TelegramTurnEvents = {
       ctx.session.id,
     );
   },
-  "turn.started": prepareTelegramTurn,
+  async "turn.started"(data, channel, ctx) {
+    // "Typing" shows at once: preparing the turn reads memory and may take seconds.
+    startAnswerDraft(channel, ctx);
+    await prepareTelegramTurn(data, channel, ctx);
+  },
   async "turn.completed"(_data, channel, ctx) {
+    // Answered or parked for a person: either way nothing more shows for this turn.
+    await answerDrafts.close(ctx.session.turn.id);
     const sessionId = applicationSessionId(ctx);
     const awaitingApproval = await sessionRepository.hasPendingOperation(sessionId, ctx.session.id);
     const review = await resolveMemoryReviewBatch(ctx);

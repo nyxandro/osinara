@@ -1,5 +1,13 @@
 # Third-party notices
 
+The application image also carries the programs `ffmpeg` and `ffprobe` of **FFmpeg 9.0.2**
+(https://ffmpeg.org), built unmodified from the release tarball
+https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz (SHA-256
+`8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e`) with the configuration of the
+`media-tools` stage of the `Dockerfile`, without `--enable-gpl`. They cut the middle frame of a
+Telegram GIF. FFmpeg is licensed under the GNU Lesser General Public License, version 2.1 or later;
+its text travels in the image as `/usr/local/share/doc/ffmpeg/COPYING.LGPLv2.1`.
+
 Osinara includes code adapted from **eve 0.40.0** (https://github.com/vercel/eve, tag `eve@0.40.0`,
 commit `6b4950c2d6c71d561ed6bfcac2efc128999d718b`, directory `packages/eve/src/`).
 

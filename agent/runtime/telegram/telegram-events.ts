@@ -67,6 +67,9 @@ export function telegramTurnObserver(input: {
       const data = { finishReason: event.finishReason, message: event.message, stepIndex: event.stepIndex };
       await withChannel(event.turn, (channel, ctx) => events["message.completed"](data, channel, ctx));
     },
+    stepTextProgress(event) {
+      events["message.progress"]?.({ stepIndex: event.stepIndex, textSoFar: event.textSoFar }, { id: event.turn.id });
+    },
     async toolsStarted(event) {
       const handler = events["actions.requested"];
       await withChannel(event.turn, (channel, ctx) => handler === undefined

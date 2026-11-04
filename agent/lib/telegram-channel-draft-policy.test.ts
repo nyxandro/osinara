@@ -2,8 +2,9 @@
  * Telegram channel draft-rate regression contract.
  *
  * Constructs covered:
- * - The channel does not emit text-like drafts before knowing the terminal delivery kind.
- * - Token deltas and tool-loop events never trigger draft API calls.
+ * - No "thinking" placeholder: a private chat shows "typing" from the turn's start, before the turn
+ *   is prepared, and a draft only of the visible text (`telegram-answer-draft/`).
+ * - The draft stops before any message of the turn goes out: the answer, a reaction, the failure.
  * - Scheduled Telegram delivery is reauthorized before send and confirmed before timeline persistence.
  * - Turn start never launches a second semantic pass over the conversation.
  * - Turn-bound memory sources survive HITL and release only at a terminal turn boundary.
@@ -21,14 +22,23 @@ async function readChannelSource() {
 }
 
 describe("Telegram channel draft policy", () => {
-  it("keeps reaction-capable turns free of speculative Telegram drafts", async () => {
-    const source = await readChannelSource();
+  it("shows typing from the turn's start and stops the draft before every message of the turn", async () => {
+    const source = await readFile(TELEGRAM_CHANNEL_PATH, "utf8");
+    const started = source.slice(source.indexOf('async "turn.started"'));
+    const completed = source.slice(source.indexOf('async "message.completed"'), source.indexOf('async "turn.failed"'));
+    const failed = source.slice(source.indexOf('async "turn.failed"'));
 
-    expect(source).toContain('"turn.started": prepareTelegramTurn');
-    expect(source).not.toContain("startTelegramRichThinkingDraft");
+    expect(started.indexOf("startAnswerDraft(channel, ctx)")).toBeGreaterThan(-1);
+    expect(started.indexOf("startAnswerDraft(channel, ctx)")).toBeLessThan(started.indexOf("await prepareTelegramTurn("));
+    const stop = completed.indexOf("await answerDrafts.beforeMessage(ctx.session.turn.id)");
+    expect(stop).toBeGreaterThan(-1);
+    expect(stop).toBeLessThan(completed.indexOf("setTelegramMessageReaction("));
+    expect(stop).toBeLessThan(completed.indexOf("await deliverTelegramFinalOutput("));
+    expect(failed.indexOf("await answerDrafts.close(ctx.session.turn.id)")).toBeGreaterThan(-1);
+    expect(failed.indexOf("await answerDrafts.close(ctx.session.turn.id)")).toBeLessThan(failed.indexOf("await recordTelegramFailure("));
+    expect(source).not.toContain("tg-thinking");
     expect(source).not.toContain('"message.appended"');
     expect(source).not.toContain('"action.result"');
-    expect(source).not.toContain('"actions.requested"');
   });
 
   it("records scheduled delivery confirmation before the group timeline", async () => {

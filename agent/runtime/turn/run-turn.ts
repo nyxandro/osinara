@@ -75,6 +75,11 @@ export interface TurnObserver {
   /** Before the turn's instructions are resolved; runs again if the process died before they were saved. */
   turnStarted(turn: TurnRecord): Promise<void>;
   stepText(event: { readonly finishReason: string; readonly message: string | null; readonly stepIndex: number; readonly turn: TurnRecord }): Promise<void>;
+  /**
+   * The visible text of a step's model call written so far, on every piece of it. It must return at
+   * once: the model's stream does not wait for it, and its failure is logged, never the turn's.
+   */
+  stepTextProgress?(event: { readonly stepIndex: number; readonly textSoFar: string; readonly turn: TurnRecord }): void;
   toolsStarted(event: { readonly calls: readonly ToolCallRecord[]; readonly stepIndex: number; readonly turn: TurnRecord }): Promise<void>;
   /**
    * The turn is already parked; a failure here fails it, so no request stays without its buttons.
@@ -369,9 +374,11 @@ async function callModel(runtime: TurnRuntime, input: {
   readonly parent: SessionParent | undefined;
   readonly selection: StepModelSelection;
   readonly signal: AbortSignal;
+  readonly stepIndex: number;
   readonly turn: TurnRecord;
 }): Promise<StepModelResponse> {
-  const { selection, turn } = input;
+  const { selection, stepIndex, turn } = input;
+  const progress = runtime.observer.stepTextProgress?.bind(runtime.observer);
   // While an approval waits, other turns of the session answer without tools.
   const toolChoice = await sessionAwaitsApproval(runtime.database, turn.sessionId) ? "none" : undefined;
   // A structured answer is a value for the caller, never text a channel delivers.
@@ -389,6 +396,7 @@ async function callModel(runtime: TurnRuntime, input: {
       inactivity: MODEL_INACTIVITY_TIMEOUT,
       messages: input.messages,
       model: selection.model,
+      ...(progress === undefined ? {} : { onTextDelta: (textSoFar: string) => progress({ stepIndex, textSoFar, turn }) }),
       providerOptions: selection.providerOptions,
       system: input.frame.system,
       toolChoice,
@@ -427,7 +435,7 @@ async function runStep(
       turnInput = [];
     }
     await runtime.agent.stepStarted({ channel: turn.channel, session: sessionOf(turn, parent) });
-    const response = await callModel(runtime, { answerCheck, frame, messages, parent, selection, signal, turn });
+    const response = await callModel(runtime, { answerCheck, frame, messages, parent, selection, signal, stepIndex, turn });
     const calls = await planStepCalls({
       contextFor: toolContexts(runtime, turn, parent, signal, messages), toolCalls: response.toolCalls, tools,
     });

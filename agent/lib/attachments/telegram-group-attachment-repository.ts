@@ -25,7 +25,7 @@ interface AttachmentRow {
   attachment_file_id: string;
   attachment_file_name: string | null;
   attachment_file_unique_id: string | null;
-  attachment_kind: "document" | "photo";
+  attachment_kind: "animation" | "document" | "photo";
   attachment_media_type: string | null;
   attachment_size: string | null;
   id: string;
@@ -62,6 +62,15 @@ export interface TelegramGroupAttachmentRepository {
     message: TelegramMessage,
   ): Promise<TelegramGroupAttachmentSummary & { telegramMessageId: string }>;
 }
+
+/**
+ * Before migration 148 a GIF's journal entry referenced Telegram's preview as a photo. The same
+ * message parsed now references the GIF's own file (`animation`), so a repeated recording or a reply
+ * to that GIF replaces the old preview with it instead of refusing a conflicting reference.
+ */
+const LEGACY_GIF_PREVIEW_SQL = `(
+  message.message_kind = 'animation' AND message.attachment_kind = 'photo' AND $8 = 'animation'
+)`;
 
 function attachmentSummary(row: Pick<
   AttachmentRow,
@@ -139,7 +148,7 @@ export const telegramGroupAttachmentRepository: TelegramGroupAttachmentRepositor
               message.attachment_size IS NOT DISTINCT FROM $7 AND
               message.attachment_kind = $8 AND
               message.attachment_source_message_id = $9
-            ))
+            ) OR ${LEGACY_GIF_PREVIEW_SQL})
          RETURNING message.id, $9::text AS telegram_message_id,
                    message.attachment_file_id, message.attachment_file_unique_id,
                    message.attachment_file_name, message.attachment_media_type,
@@ -273,7 +282,7 @@ export const telegramGroupAttachmentRepository: TelegramGroupAttachmentRepositor
              message.attachment_media_type IS NOT DISTINCT FROM $6 AND
              message.attachment_size IS NOT DISTINCT FROM $7 AND
              message.attachment_kind = $8
-           ))
+           ) OR ${LEGACY_GIF_PREVIEW_SQL})
          RETURNING message.id, message.telegram_message_id::text, message.attachment_file_id,
                     attachment_file_unique_id, attachment_file_name, attachment_media_type,
                     attachment_size::text, attachment_kind, ''::text AS telegram_chat_id`,

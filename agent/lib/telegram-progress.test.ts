@@ -136,7 +136,7 @@ describe("completedTelegramOutput", () => {
   it("delivers the text of an answer whose buttons were refused, with the reason and without tags", () => {
     const output = completedTelegramOutput({
       finishReason: "stop",
-      message: "Открыть сайт?\n\n<tg-button-row><tg-button type=\"url\" url=\"https://example.com\">Сайт</tg-button></tg-button-row>",
+      message: "Открыть сайт?\n\n<tg-button-row><tg-button type=\"web_app\" url=\"https://example.com\">Сайт</tg-button></tg-button-row>",
     });
 
     expect(output).toEqual({
