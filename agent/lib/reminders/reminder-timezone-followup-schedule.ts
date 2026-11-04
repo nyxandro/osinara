@@ -12,7 +12,7 @@
  * least. A one-time wait ends when its clock time has passed in every zone, a repeating one after a
  * week, both without guessing the zone.
  */
-import { instantToLocal, localParts } from "../calendar-mirror/calendar-mirror-local-time.js";
+import { addLocalDays, instantToLocal, localParts } from "../calendar-mirror/calendar-mirror-local-time.js";
 import {
   REMINDER_TZ_FOLLOWUP_DELAY_MINUTES,
   REMINDER_TZ_FOLLOWUP_GROUP_DELAY_MINUTES,
@@ -65,13 +65,17 @@ function localHour(instant: Date, timeZone: string): number {
   return localParts(instantToLocal(instant, timeZone)).hour;
 }
 
-/** The moment itself, or the end of the night it falls in, in the given zone. */
+/**
+ * The moment itself, or the end of the night it falls in, in the given zone. The next morning is the
+ * next calendar day by the clock, not 24 hours on: a night across a daylight saving change is 23 or
+ * 25 hours long.
+ */
 function outOfNight(instant: Date, timeZone: string): Date {
   const hour = localHour(instant, timeZone);
   if (hour >= REMINDER_TZ_NIGHT_END_HOUR && hour < REMINDER_TZ_NIGHT_START_HOUR) return instant;
-  const day = instantToLocal(instant, timeZone).slice(0, 10);
-  const morning = localToInstant(`${day}T${String(REMINDER_TZ_NIGHT_END_HOUR).padStart(2, "0")}:00:00`, timeZone);
-  return hour >= REMINDER_TZ_NIGHT_START_HOUR ? new Date(morning.getTime() + 24 * 60 * MINUTE) : morning;
+  const today = `${instantToLocal(instant, timeZone).slice(0, 10)}T00:00:00`;
+  const day = (hour >= REMINDER_TZ_NIGHT_START_HOUR ? addLocalDays(today, 1) : today).slice(0, 10);
+  return localToInstant(`${day}T${String(REMINDER_TZ_NIGHT_END_HOUR).padStart(2, "0")}:00:00`, timeZone);
 }
 
 function firstFollowup(input: FollowupScheduleInput, reminderAt: Date): Date | null {
