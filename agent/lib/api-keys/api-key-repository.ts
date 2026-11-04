@@ -239,7 +239,7 @@ export const apiKeyRepository = {
    * again by Telegram (`delivered`).
    */
   async findIntake(input: { telegramChatId: string; updateId: string }): Promise<
-    | { readonly kind: "delivered" }
+    | { readonly kind: "delivered"; readonly name: string }
     | ({ readonly expiresAt: Date; readonly kind: "open" } & OpenApiKeyIntake)
     | ({ readonly kind: "guarded" } & OpenApiKeyIntake)
     | null
@@ -261,7 +261,7 @@ export const apiKeyRepository = {
     );
     const row = result.rows[0];
     if (!row) return null;
-    if (row.delivered) return { kind: "delivered" };
+    if (row.delivered) return { kind: "delivered", name: row.name };
     return row.open
       ? { expiresAt: row.intake_expires_at!, keyId: row.id, kind: "open", name: row.name }
       : { keyId: row.id, kind: "guarded", name: row.name };

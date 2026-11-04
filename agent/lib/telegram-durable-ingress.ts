@@ -9,7 +9,8 @@
  * - A reply-button press continues as the addressee's own message; the addressee's written message
  *   first removes the buttons they did not tap.
  * - A chat queue with no waiting update may run one due wake-up of its own conversation.
- * - The owner's awaited API key is taken out before storage and never becomes a queued update.
+ * - The owner's awaited API key is taken out before storage and never becomes a queued update; the
+ *   message that brought a stored key is queued with the application's notice in place of the key.
  *
  * One update runs to the end of its turn before the next update of its chat starts. The update
  * and its turn are bound in the transaction that creates the turn; after a restart a bound update
@@ -38,6 +39,7 @@ import {
   TELEGRAM_INGRESS_ADMISSION_TIMEOUT_MS,
   TELEGRAM_INGRESS_MESSAGE_CONCURRENCY,
 } from "../config.js";
+import type { ApiKeyCapture } from "./api-keys/api-key-intake.js";
 import { AppError, isAppError } from "./app-error.js";
 import { type TelegramIngressRepository, type TelegramIngressVoice, type TelegramPrivateBurstPolicy } from "./telegram-ingress-contract.js";
 import { waitForHeldPrivateChat } from "./telegram-private-burst.js";
@@ -77,8 +79,11 @@ export interface DurableIngressDependencies {
   reportFailure: typeof recordOperationalIncident;
   acceptMedia(message: Pick<TelegramMessage, "chat">, updateId: string): Promise<boolean>;
   authorizeVoice(message: Pick<TelegramMessage, "chat" | "from">, options: { readonly addressed: boolean }): Promise<boolean>;
-  /** Consumes the owner's awaited API key before storage, so it never reaches the queue or the model. */
-  captureApiKey(update: TelegramUpdate, updateId: string, waitUntil: RouteContext["waitUntil"]): Promise<boolean>;
+  /**
+   * Takes the owner's awaited API key out before storage, so it never reaches the queue or the model;
+   * a stored key's message goes on with the application's notice in its place.
+   */
+  captureApiKey(update: TelegramUpdate, updateId: string, waitUntil: RouteContext["waitUntil"]): Promise<ApiKeyCapture>;
   botUsername: string;
   /** The runtime's Telegram dispatch: the update's turn, created with the update's binding. */
   dispatch(update: TelegramUpdate, control: TelegramDispatchControl): Promise<TelegramDispatchResult>;
@@ -481,27 +486,28 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
     context: RouteContext & { readonly raw: JsonObject; readonly update: TelegramUpdate },
   ): Promise<Response> {
     const incomingUpdateId = updateId(context.raw);
-    if (await dependencies.captureApiKey(context.update, incomingUpdateId, (work) => context.waitUntil(work))) {
-      return new Response("ok");
-    }
+    const captured = await dependencies.captureApiKey(context.update, incomingUpdateId, (work) => context.waitUntil(work));
+    if (captured.kind === "consumed") return new Response("ok");
+    // From here on only the application's notice stands for a message that carried a stored key.
+    const { raw, update } = captured.kind === "replaced" ? captured : context;
     // Media of a channel or an unregistered chat is acknowledged before durable storage, download,
     // transcription or dispatch; a registered group and a private chat take in everything.
     if (
-      context.update.kind === "message" &&
-      hasTelegramInboundMedia(context.update.message) &&
-      !await dependencies.acceptMedia(context.update.message, incomingUpdateId)
+      update.kind === "message" &&
+      hasTelegramInboundMedia(update.message) &&
+      !await dependencies.acceptMedia(update.message, incomingUpdateId)
     ) {
       return new Response("ok");
     }
-    const voice = voiceMetadata(context.raw);
+    const voice = voiceMetadata(raw);
     await dependencies.repository.enqueue({
-      continuationKey: queueKey(context.update),
-      payload: context.raw,
+      continuationKey: queueKey(update),
+      payload: raw,
       updateId: incomingUpdateId,
       ...(voice ? { voice } : {}),
     });
     // A tapped button answers at once, while its message waits for the chat queue like any other.
-    context.waitUntil(dependencies.replyButtonsOnArrival(context.update, incomingUpdateId));
+    context.waitUntil(dependencies.replyButtonsOnArrival(update, incomingUpdateId));
     scheduleDrain(context);
     return new Response("ok");
   };

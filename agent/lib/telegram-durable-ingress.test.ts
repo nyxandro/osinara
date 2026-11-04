@@ -74,7 +74,7 @@ function ingress(
     reportFailure: vi.fn(),
     acceptMedia: vi.fn().mockResolvedValue(true),
     authorizeVoice: vi.fn().mockResolvedValue(true),
-    captureApiKey: vi.fn().mockResolvedValue(false),
+    captureApiKey: vi.fn().mockResolvedValue({ kind: "forwarded" }),
     botUsername: "osinara_bot",
     dispatch: vi.fn().mockResolvedValue(DISPATCHED),
     dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false),
@@ -493,7 +493,7 @@ describe("createTelegramDurableIngress", () => {
   it("stores nothing and dispatches nothing for a message the API key intake consumed", async () => {
     const storage = repository();
     storage.value.claimNext.mockReset().mockResolvedValue(null);
-    const captureApiKey = vi.fn().mockResolvedValue(true);
+    const captureApiKey = vi.fn().mockResolvedValue({ kind: "consumed" });
     const { dependencies, handle } = ingress(storage, { captureApiKey });
     const raw = {
       message: { chat: { id: 101, type: "private" }, date: 1_700_000_000, from: { first_name: "Owner", id: 101, is_bot: false },
@@ -509,6 +509,33 @@ describe("createTelegramDurableIngress", () => {
     expect(dependencies.dispatch).not.toHaveBeenCalled();
     expect(dependencies.replyButtonsOnArrival).not.toHaveBeenCalled();
     expect(background).toBeUndefined();
+  });
+
+  it("stores the application's notice in place of an API key the intake kept, never the key", async () => {
+    const storage = repository();
+    storage.value.claimNext.mockReset().mockResolvedValue(null);
+    const key = "sk-live-1234567890abcdefghij";
+    const notice = {
+      message: { chat: { id: 101, type: "private" }, date: 1_700_000_000, from: { first_name: "Owner", id: 101, is_bot: false },
+        message_id: 80, text: "[Application notice in place of the owner's message] The owner sent the API key \"groq\"." },
+      update_id: 1003,
+    };
+    const noticeUpdate = parseTelegramUpdate(notice)!;
+    const captureApiKey = vi.fn().mockResolvedValue({ kind: "replaced", raw: notice, update: noticeUpdate });
+    const { dependencies, handle } = ingress(storage, { captureApiKey });
+    const raw = {
+      message: { chat: { id: 101, type: "private" }, date: 1_700_000_000, from: { first_name: "Owner", id: 101, is_bot: false },
+        message_id: 80, text: key },
+      update_id: 1003,
+    };
+
+    const { background, response } = await deliver(handle, raw);
+
+    expect(response.status).toBe(200);
+    expect(storage.value.enqueue).toHaveBeenCalledWith(expect.objectContaining({ payload: notice, updateId: "1003" }));
+    expect(JSON.stringify(storage.value.enqueue.mock.calls)).not.toContain(key);
+    expect(dependencies.replyButtonsOnArrival).toHaveBeenCalledWith(noticeUpdate, "1003");
+    expect(background).toBeDefined();
   });
 
   it("dispatches a captionless photo with a non-empty factual model message", async () => {

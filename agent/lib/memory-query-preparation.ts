@@ -2,7 +2,8 @@
  * Turning a live message into the text the memory search is actually run on.
  *
  * Export:
- * - `prepareMemoryQuery`: removes the address to the assistant, emoji, and Markdown emphasis.
+ * - `prepareMemoryQuery`: removes the address to the assistant, emoji, Markdown emphasis, and the
+ *   application's notice that stands in for an API key the owner sent.
  *
  * Why this exists: the whole message used to go into the search as typed. The word branches build
  * their condition out of every token in it, so «Осинара, напомни где бэкап» demanded that a record
@@ -14,6 +15,7 @@
  * the same folding to the query and to its indexed column so the two always agree.
  */
 import { AGENT_NAME_STEM_SOURCE } from "./agent-name.js";
+import { withoutApiKeyDeliveredModelText } from "./telegram-model-placeholders.js";
 
 /**
  * The assistant's name in the nominative — the form used to call someone — optionally as a
@@ -57,7 +59,8 @@ const MARKDOWN_EMPHASIS_PATTERN = /\*\*|__|~~|`/gu;
 const MARKDOWN_LINE_PREFIX_PATTERN = /^[ \t]*(?:#{1,6}|>)[ \t]+/gmu;
 
 export function prepareMemoryQuery(query: string): string {
-  const prepared = query
+  // The notice is the application's words, not the owner's; theirs may follow it in one burst.
+  const prepared = withoutApiKeyDeliveredModelText(query).trim()
     .replace(ENCLOSED_ADDRESS_PATTERN, ", ")
     .replace(LEADING_MENTION_PATTERN, "")
     .replace(LEADING_ADDRESS_PATTERN, "")

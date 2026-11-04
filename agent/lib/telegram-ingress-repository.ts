@@ -3,6 +3,7 @@
  *
  * Exports:
  * - `telegramIngressRepository`: production PostgreSQL implementation.
+ * - `isTelegramUpdateQueued`: whether the queue already holds an update.
  */
 import type { PoolClient } from "pg";
 
@@ -61,6 +62,15 @@ async function requireActiveLease(
       "Срок обработки сообщения Telegram истёк. Операция остановлена для безопасного повторного запуска",
     );
   }
+}
+
+/** Stored updates are kept after their turn, so a Telegram retry of any of them is recognised. */
+export async function isTelegramUpdateQueued(updateId: string): Promise<boolean> {
+  const result = await database().query<{ queued: boolean }>(
+    "SELECT EXISTS (SELECT 1 FROM telegram_ingress_updates WHERE update_id = $1) AS queued",
+    [updateId],
+  );
+  return result.rows[0]!.queued;
 }
 
 export const telegramIngressRepository: TelegramIngressRepository = {
