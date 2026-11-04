@@ -21,9 +21,9 @@ import { TURN_INTERJECTION_RULES } from "../turn-interjection/turn-interjection-
 import { SANDBOX_API_KEY_USAGE } from "./api-key-fragments.js";
 import { chatNotesRules } from "./chat-notes-fragments.js";
 import { SUBAGENT_TURN_RULES } from "./delegation-fragments.js";
-import { REPLY_BUTTON_RULES } from "./reply-button-fragments.js";
+import { LINK_AND_COPY_BUTTON_RULES, REPLY_BUTTON_RULES } from "./reply-button-fragments.js";
 import { telegramContentRules } from "./telegram-content-fragments.js";
-import { PLACE_AND_POLL_RULES } from "./telegram-send-fragments.js";
+import { TELEGRAM_NATIVE_SEND_RULES } from "./telegram-send-fragments.js";
 
 import {
   CURRENT_MESSAGE_REPLY_CONTRACT,
@@ -220,12 +220,13 @@ function privateInstructions(
     scheduledRun || subagentTurn ? null : SPOKEN_ASIDE_RULES,
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
     liveGifReplies(scheduledRun, subagentTurn) ? GIF_REPLY_RULES : null,
-    scheduledRun || subagentTurn ? null : PLACE_AND_POLL_RULES,
+    scheduledRun || subagentTurn ? null : TELEGRAM_NATIVE_SEND_RULES,
     scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
     // A delegated child has no notes tool; it reads the notes and leaves keeping them to the turn.
     scheduledRun || subagentTurn ? null : chatNotesRules("private"),
     // A child answers its parent, never the person, so it offers no buttons.
     subagentTurn ? null : REPLY_BUTTON_RULES,
+    subagentTurn ? null : LINK_AND_COPY_BUTTON_RULES,
   ]);
 }
 
@@ -297,12 +298,13 @@ function familyInstructions(
     scheduledRun || subagentTurn ? null : GROUP_STANDALONE_MESSAGE_RULES,
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
     liveGifReplies(scheduledRun, subagentTurn) ? GIF_REPLY_RULES : null,
-    scheduledRun || subagentTurn ? null : PLACE_AND_POLL_RULES,
+    scheduledRun || subagentTurn ? null : TELEGRAM_NATIVE_SEND_RULES,
     scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
     // A delegated child has no notes tool; it reads the notes and leaves keeping them to the turn.
     scheduledRun || subagentTurn ? null : chatNotesRules("family"),
     // A child answers its parent, never the person, so it offers no buttons.
     subagentTurn ? null : REPLY_BUTTON_RULES,
+    subagentTurn ? null : LINK_AND_COPY_BUTTON_RULES,
   ]);
 }
 
@@ -450,11 +452,14 @@ API keys the owner granted to this group are the one exception. ${SANDBOX_API_KE
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
     // GIF replies need no grant but belong to the application core of a live turn.
     includeApplicationCore && liveGifReplies(scheduledRun, subagentTurn) ? GIF_REPLY_RULES : null,
-    includeApplicationCore && !scheduledRun && !subagentTurn ? PLACE_AND_POLL_RULES : null,
+    includeApplicationCore && !scheduledRun && !subagentTurn ? TELEGRAM_NATIVE_SEND_RULES : null,
     includeApplicationCore && !scheduledRun && !subagentTurn ? chatNotesRules("external") : null,
     reminders ? GROUP_REMINDER_RULES : null,
     reminders ? GROUP_SCENARIO_RULES : null,
     channelAuthored ? CHANNEL_AUTHORED_REMINDER_NOTICE : null,
+    // Link and copy buttons answer nobody, so they go out in an external group too; a child answers
+    // its parent and offers none.
+    includeApplicationCore && !subagentTurn ? LINK_AND_COPY_BUTTON_RULES : null,
     externalGroupCapabilityInstructions({ includeApplicationCore }),
   ]);
 }

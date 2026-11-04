@@ -52,6 +52,7 @@ const EXPECTED_TOOL_MODULES = [
   "remember.ts",
   "search_memories.ts",
   "search_memory_threads.ts",
+  "send_contact.ts",
   "send_gif.ts",
   "send_location.ts",
   "send_poll.ts",
