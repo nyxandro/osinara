@@ -50,6 +50,8 @@ CREATE TABLE reminder_timezone_waits (
   last_followup_error_code text CHECK (last_followup_error_code IS NULL OR char_length(last_followup_error_code) BETWEEN 1 AND 100),
   followup_pressed boolean NOT NULL DEFAULT false,
   resolved_at timestamptz,
+  -- An unanswered wait is named once, when the zone finally arrives, not on every later save.
+  expiry_reported_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (family_id, operation_key),

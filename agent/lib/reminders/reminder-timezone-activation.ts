@@ -11,8 +11,10 @@
  *   its next occurrence. A family wait whose group is gone is missed too.
  * - When the zone being replaced was the agent's guess, the person's own reminders created since
  *   that guess keep their clock time in the corrected zone. Family reminders follow the family's
- *   clock, and reminders that came from Google events keep the moment of the event, so neither moves.
- *   A one-time reminder that the correction puts in the past is paused, not delivered at once.
+ *   clock, reminders that came from Google events keep the moment of the event, and a countdown is an
+ *   exact moment, so none of them moves. A one-time reminder that the correction puts in the past is
+ *   paused, not delivered at once. One being delivered at that second is left and logged.
+ * - A person's zone is theirs in every family, so their waits in each family are set.
  */
 import type { PoolClient } from "pg";
 
@@ -32,6 +34,7 @@ export interface TimezoneApplication {
 }
 
 interface WaitDestination extends WaitRow {
+  family_id: string;
   forum_topic_id: string | null;
   group_id: string | null;
   message_thread_id: string | null;
@@ -54,11 +57,11 @@ async function advanceToFuture(client: PoolClient, id: string, now: Date): Promi
   return new Date(next.next_run_at);
 }
 
-async function groupStillRegistered(client: PoolClient, wait: WaitDestination, familyId: string): Promise<boolean> {
+async function groupStillRegistered(client: PoolClient, wait: WaitDestination): Promise<boolean> {
   if (wait.scope === "personal") return true;
   const group = await client.query(
     `SELECT 1 FROM telegram_groups WHERE id = $1 AND family_id = $2 AND telegram_chat_id = $3 AND type = 'family_private'`,
-    [wait.group_id, familyId, wait.telegram_chat_id],
+    [wait.group_id, wait.family_id, wait.telegram_chat_id],
   );
   return (group.rowCount ?? 0) > 0;
 }
@@ -80,16 +83,16 @@ async function activateWaits(
   result: TimezoneApplication,
 ): Promise<void> {
   const waits = await client.query<WaitDestination>(
-    `SELECT ${WAIT_COLUMNS}, group_id, telegram_chat_id, message_thread_id::text, forum_topic_id::text
+    `SELECT ${WAIT_COLUMNS}, family_id, group_id, telegram_chat_id, message_thread_id::text, forum_topic_id::text
      FROM reminder_timezone_waits
-     WHERE family_id = $1 AND author_user_id = $2 AND status = 'waiting'
+     WHERE author_user_id = $1 AND status = 'waiting'
      ORDER BY local_first_run, id
      FOR UPDATE`,
-    [auth.familyId, auth.userId],
+    [auth.userId],
   );
   for (const wait of waits.rows) {
     const localFirstRun = wait.local_first_run.slice(0, 16);
-    if (!await groupStillRegistered(client, wait, auth.familyId)) {
+    if (!await groupStillRegistered(client, wait)) {
       await resolveWait(client, wait.id, "missed", now, null);
       result.missed.push({ content: wait.content, localFirstRun, reason: "group_gone" });
       continue;
@@ -107,7 +110,7 @@ async function activateWaits(
       authorUserId: wait.author_user_id,
       buttons: wait.reply_buttons,
       content: wait.content,
-      familyId: auth.familyId,
+      familyId: wait.family_id,
       firstRunAt,
       forumTopicId: personal ? null : wait.forum_topic_id,
       groupId: personal ? null : wait.group_id,
@@ -124,15 +127,18 @@ async function activateWaits(
     await resolveWait(client, wait.id, "activated", now, reminder.id);
     result.activated.push({ content: wait.content, id: reminder.id, nextRunAt: nextRunAt.toISOString() });
   }
+  // Named once: a later save of the settings, quiet hours for one, does not repeat them.
   const expired = await client.query<{ content: string; local_first_run: string }>(
-    `SELECT content, to_char(local_first_run, 'YYYY-MM-DD"T"HH24:MI') AS local_first_run
-     FROM reminder_timezone_waits
-     WHERE family_id = $1 AND author_user_id = $2 AND status = 'expired'
-       AND resolved_at >= $3::timestamptz - make_interval(days => $4)
-     ORDER BY local_first_run`,
-    [auth.familyId, auth.userId, now, REMINDER_TZ_RECENTLY_EXPIRED_DAYS],
+    `UPDATE reminder_timezone_waits
+     SET expiry_reported_at = $2, updated_at = $2
+     WHERE author_user_id = $1 AND status = 'expired' AND expiry_reported_at IS NULL
+       AND resolved_at >= $2::timestamptz - make_interval(days => $3)
+     RETURNING content, to_char(local_first_run, 'YYYY-MM-DD"T"HH24:MI') AS local_first_run`,
+    [auth.userId, now, REMINDER_TZ_RECENTLY_EXPIRED_DAYS],
   );
-  result.expiredRecently.push(...expired.rows.map((row) => ({ content: row.content, localFirstRun: row.local_first_run })));
+  result.expiredRecently.push(...expired.rows
+    .sort((left, right) => left.local_first_run.localeCompare(right.local_first_run))
+    .map((row) => ({ content: row.content, localFirstRun: row.local_first_run })));
 }
 
 async function shiftGuessedReminders(
@@ -158,12 +164,25 @@ async function shiftGuessedReminders(
        AND reminder.status IN ('active', 'paused')
        AND NOT EXISTS (
          SELECT 1 FROM audit_events AS event
-         WHERE event.subject_id = reminder.id AND event.event_type = 'reminder.created'
-           AND event.metadata ->> 'source' = 'google_calendar'
+         WHERE event.family_id = reminder.family_id AND event.subject_id = reminder.id
+           AND event.event_type = 'reminder.created'
+           AND (event.metadata ->> 'source' = 'google_calendar' OR event.metadata ->> 'time' = 'countdown')
        )
      RETURNING reminder.id, reminder.content, reminder.due_at, reminder.recurrence_unit`,
     [auth.familyId, auth.userId, guess.timezone, guess.setAt, timezone, now],
   );
+  const delivering = await client.query<{ count: string }>(
+    `SELECT count(*)::text AS count FROM reminders
+     WHERE family_id = $1 AND author_user_id = $2 AND scope = 'personal' AND timezone = $3
+       AND created_at >= $4 AND status = 'leased'`,
+    [auth.familyId, auth.userId, guess.timezone, guess.setAt],
+  );
+  if (delivering.rows[0]!.count !== "0") {
+    console.warn(JSON.stringify({
+      code: "AGENT_NOTIFICATION_TIMEZONE_SHIFT_SKIPPED", count: Number(delivering.rows[0]!.count),
+      familyId: auth.familyId, reason: "being_delivered",
+    }));
+  }
   for (const row of shifted.rows) {
     if (row.due_at.getTime() > now.getTime()) {
       result.shifted.push({ content: row.content, id: row.id, nextRunAt: row.due_at.toISOString() });

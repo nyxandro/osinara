@@ -195,13 +195,22 @@ export function createTimezoneFollowups(dependencies: TimezoneFollowupDependenci
             Math.max(...rows.map((row) => row.followups_sent)),
           );
           const delivered = await deliver(dependencies, first.chat_id, text, [[{ text: `Да, ${label}` }, { text: OTHER_ZONE_BUTTON }]]);
-          await dependencies.recordDelivery({
-            content: text, deliveredAt: now, familyId: first.family_id, groupId: null, messageThreadId: null,
-            ownerUserId: first.author_user_id, scheduledFor: now, scope: "personal", sourceId: first.id,
-            sourceKind: "reminder_timezone_followup", telegramChatId: first.chat_id, telegramMessageId: delivered.messageId,
-            title: DELIVERY_TITLE,
-          });
           await recordOutcome(ids, { ...delivered, errorCode: null });
+          try {
+            await dependencies.recordDelivery({
+              content: text, deliveredAt: now, familyId: first.family_id, groupId: null, messageThreadId: null,
+              ownerUserId: first.author_user_id, scheduledFor: now, scope: "personal", sourceId: first.id,
+              sourceKind: "reminder_timezone_followup", telegramChatId: first.chat_id, telegramMessageId: delivered.messageId,
+              title: DELIVERY_TITLE,
+            });
+          } catch (error) {
+            // The question went out; only the chat history misses it, so the agent may not see it.
+            console.error(JSON.stringify({
+              code: "AGENT_REMINDER_TIMEZONE_FOLLOWUP_HISTORY_FAILED",
+              error: error instanceof Error ? error.message : String(error),
+              familyId: first.family_id,
+            }));
+          }
           console.info(JSON.stringify({ code: "AGENT_REMINDER_TIMEZONE_FOLLOWUP_SENT", familyId: first.family_id, waits: ids.length }));
           sent += 1;
         } catch (error) {

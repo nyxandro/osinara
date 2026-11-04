@@ -15,7 +15,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, database } from "../database.js";
 import { createReminderOrWait } from "./reminder-create.js";
 import { reminderRepository } from "./reminder-repository.js";
-import { timezoneWaitRepository } from "./reminder-timezone-wait-repository.js";
+import { lockPersonReminders, timezoneWaitRepository } from "./reminder-timezone-wait-repository.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 const url = process.env.DATABASE_URL;
@@ -236,6 +236,85 @@ describeWithDatabase("reminders and the person's timezone", () => {
     const corrected = await reminderRepository.configureNotifications(auth, { basis: null, source: "person", timezone: "Asia/Yerevan" }, new Date("2026-11-03T08:30:00Z"));
     expect(corrected.shiftedIntoPast).toEqual([{ content: "Полить цветы", id, pausedAt: "2026-11-03T08:20:00.000Z" }]);
     expect(await reminderRow(id)).toMatchObject({ status: "paused" });
+  });
+
+  it("makes a reminder write and a zone save of one person wait for each other", async () => {
+    // The model may call both tools in one step, and the runtime runs them at once: without a shared
+    // lock a wait written after the save looked for waits would stay waiting with the zone set.
+    const fixture = await createFixture();
+    const auth = privateAuth(fixture);
+    const holder = await database().connect();
+    const finished: string[] = [];
+    try {
+      await holder.query("BEGIN");
+      await lockPersonReminders(holder, auth.userId);
+      const create = createReminderOrWait(auth, request("lock-1", { kind: "local", local: "2026-12-20T09:00:00" }))
+        .then(() => finished.push("create"));
+      const save = reminderRepository.configureNotifications(auth, { basis: "город Тула из разговора", source: "agent", timezone: "Europe/Moscow" })
+        .then(() => finished.push("save"));
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(finished).toEqual([]);
+      await holder.query("COMMIT");
+      await Promise.all([create, save]);
+    } finally {
+      holder.release();
+    }
+    const stranded = await database().query(
+      "SELECT 1 FROM reminder_timezone_waits WHERE author_user_id = $1 AND status = 'waiting'",
+      [auth.userId],
+    );
+    expect(stranded.rows).toHaveLength(0);
+  });
+
+  it("leaves a countdown alone when a guessed zone is corrected", async () => {
+    const fixture = await createFixture();
+    const auth = privateAuth(fixture);
+    await reminderRepository.configureNotifications(auth, { basis: "город Тула из разговора", source: "agent", timezone: "Europe/Moscow" });
+    const now = new Date();
+    const countdown = await createReminderOrWait(auth, request("count-shift", { kind: "countdown", minutes: 20 }), now);
+    const id = countdown.kind === "reminder" ? countdown.reminder.id : "";
+    const corrected = await reminderRepository.configureNotifications(auth, { basis: null, source: "person", timezone: "Asia/Yekaterinburg" });
+    expect(corrected.shifted).toEqual([]);
+    expect((await reminderRow(id)).due_at.getTime()).toBe(now.getTime() + 20 * 60_000);
+  });
+
+  it("answers a replay of a wait that was set since with the reminder, and refuses a zone that disagrees", async () => {
+    const fixture = await createFixture();
+    const auth = privateAuth(fixture);
+    const first = await createReminderOrWait(auth, request("replay-set", { kind: "local", local: "2026-12-01T09:00:00" }));
+    expect(first.kind).toBe("awaiting");
+    await reminderRepository.configureNotifications(auth, { basis: null, source: "person", timezone: "Europe/Moscow" });
+    const again = await createReminderOrWait(auth, request("replay-set", { kind: "local", local: "2026-12-01T09:00:00" }));
+    expect(again).toMatchObject({ kind: "reminder", reminder: { nextRunAt: "2026-12-01T06:00:00.000Z" } });
+    await expect(createReminderOrWait(
+      auth,
+      request("stated-zone", { kind: "local", local: "2026-12-02T12:00:00", statedTimezone: "Asia/Yerevan" }),
+    )).rejects.toThrowError(/AGENT_REMINDER_TIMEZONE_MISMATCH/);
+  });
+
+  it("keeps a countdown made without a zone from repeating by days", async () => {
+    const fixture = await createFixture();
+    const auth = privateAuth(fixture);
+    const countdown = await createReminderOrWait(auth, request("count-daily", { kind: "countdown", minutes: 30 }));
+    const id = countdown.kind === "reminder" ? countdown.reminder.id : "";
+    await expect(reminderRepository.update(auth, id, { operationKey: "count-daily-update", recurrence: { interval: 1, unit: "daily" } }))
+      .rejects.toThrowError(/AGENT_REMINDER_LOCAL_TIME_REQUIRED/);
+    await expect(reminderRepository.update(auth, id, { operationKey: "count-hourly-update", recurrence: { interval: 2, unit: "hourly" } }))
+      .resolves.toMatchObject({ recurrence: { interval: 2, unit: "hourly" } });
+  });
+
+  it("names an unanswered wait once", async () => {
+    const fixture = await createFixture();
+    const auth = privateAuth(fixture);
+    const ended = await createReminderOrWait(auth, request("once-1", { kind: "local", local: "2026-11-01T09:00:00" }), new Date("2026-10-31T07:00:00Z"));
+    await database().query(
+      "UPDATE reminder_timezone_waits SET status = 'expired', resolved_at = $2 WHERE id = $1",
+      [ended.kind === "awaiting" ? ended.awaiting.id : "", new Date()],
+    );
+    const first = await reminderRepository.configureNotifications(auth, { basis: null, source: "person", timezone: "Europe/Moscow" });
+    expect(first.expiredRecently).toHaveLength(1);
+    const second = await reminderRepository.configureNotifications(auth, { basis: null, quietEnd: "08:00", quietStart: "23:00", source: "person", timezone: "Europe/Moscow" });
+    expect(second.expiredRecently).toEqual([]);
   });
 
   it("keeps quiet hours through a zone change and sets each wait once under concurrent saves", async () => {
