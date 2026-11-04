@@ -25,7 +25,10 @@ ARG FFMPEG_SHA256=8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e00
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes build-essential ca-certificates curl nasm xz-utils \
     && rm -rf /var/lib/apt/lists/*
-RUN curl --fail --show-error --location \
+# ffmpeg.org drops connections now and then (04.11.2026: a timeout, then two TLS failures in a row,
+# each failing the whole build). A bounded retry of the download is safe: the archive is checked by
+# its SHA-256 right after, and every attempt shows in the build log.
+RUN curl --fail --show-error --location --connect-timeout 30 --retry 5 --retry-delay 10 --retry-all-errors \
       "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" --output /tmp/ffmpeg.tar.xz \
     && printf '%s  %s\n' "$FFMPEG_SHA256" /tmp/ffmpeg.tar.xz | sha256sum --check - \
     && mkdir /tmp/ffmpeg \
