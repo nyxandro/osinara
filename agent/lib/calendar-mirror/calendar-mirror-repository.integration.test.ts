@@ -57,8 +57,8 @@ async function createFixture(): Promise<Fixture> {
     [familyId],
   );
   await database().query(
-    `INSERT INTO user_notification_settings (user_id, timezone, quiet_start, quiet_end)
-     VALUES ($1, 'Europe/Moscow', '23:00', '08:00'), ($2, 'Europe/Moscow', NULL, NULL)`,
+    `INSERT INTO user_notification_settings (user_id, timezone, quiet_start, quiet_end, timezone_source, timezone_set_at)
+     VALUES ($1, 'Europe/Moscow', '23:00', '08:00', 'person', now()), ($2, 'Europe/Moscow', NULL, NULL, 'person', now())`,
     [ownerId, memberId],
   );
   return {

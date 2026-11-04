@@ -15,6 +15,14 @@ const repository = vi.hoisted(() => ({
   create: vi.fn(), delete: vi.fn(), operationRecorded: vi.fn(), scopeOf: vi.fn(), update: vi.fn(),
 }));
 vi.mock("./reminder-repository.js", () => ({ reminderRepository: repository }));
+// The tool creates through `createReminderOrWait`; it reaches the repository mock so the expectations
+// below read the same request, and the reminder comes back as a set one (#451).
+vi.mock("./reminder-create.js", () => ({
+  createReminderOrWait: vi.fn(async (...args: unknown[]) => ({ kind: "reminder", reminder: await repository.create(...args) })),
+}));
+vi.mock("./reminder-timezone-wait-repository.js", () => ({
+  timezoneWaitRepository: { operationRecorded: vi.fn(async () => false), scopeOf: vi.fn(async () => null) },
+}));
 vi.mock("../calendar-mirror/calendar-mirror-outlook.js", () => ({ calendarCopyOutlook: vi.fn(async () => "no_google") }));
 vi.mock("./reminder-context.js", () => ({ requireReminderAuthorization: vi.fn(() => ({ familyId: "family-1" })) }));
 

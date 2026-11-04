@@ -2,15 +2,17 @@
  * Minute dispatcher for application-managed proactive notifications.
  *
  * Export:
- * - `reminderDispatchSchedule`: reminders, expired-session retention, workspace cleanup, physical
- *   cleanup of memory whose soft-delete recovery window has elapsed, and cancellation of Telegram
- *   approvals nobody confirmed in time.
+ * - `reminderDispatchSchedule`: reminders, the bot's questions about a timezone a waiting reminder
+ *   needs (#451), expired-session retention, workspace cleanup, physical cleanup of memory whose
+ *   soft-delete recovery window has elapsed, and cancellation of Telegram approvals nobody
+ *   confirmed in time.
  * - Records a completed cycle for external monitoring; a failed cycle records nothing. The approval
  *   sweep runs beside that cycle, admitted while a deploy drains, as before.
  */
 import type { RuntimeSchedule } from "../runtime/scheduler.js";
 
 import { dispatchDueReminders } from "../lib/reminders/reminder-dispatcher.js";
+import { productionTimezoneFollowups } from "../lib/reminders/reminder-timezone-followup.js";
 import { purgeSoftDeletedMemory } from "../lib/memory-retention.js";
 import { deleteExpiredSessions } from "../lib/sessions/session-retention.js";
 import { deleteOrphanedWorkspaces } from "../lib/workspaces/workspace-deletion.js";
@@ -27,7 +29,8 @@ export function reminderDispatchSchedule(input: {
     run({ waitUntil }) {
       waitUntil(withRuntimeAdmission("ordinary", () => withScheduleHeartbeat("reminder-dispatch", async () => {
         const results = await Promise.allSettled([
-          dispatchDueReminders(), deleteExpiredSessions(), deleteOrphanedWorkspaces(), purgeSoftDeletedMemory(new Date()),
+          dispatchDueReminders(), productionTimezoneFollowups.dispatch(new Date()), deleteExpiredSessions(),
+          deleteOrphanedWorkspaces(), purgeSoftDeletedMemory(new Date()),
         ]);
         const failed = results.find(result => result.status === "rejected");
         if (failed?.status === "rejected") throw failed.reason;

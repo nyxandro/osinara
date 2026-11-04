@@ -98,16 +98,19 @@ describe("get_current_time", () => {
     expect(dependencies.findUserTimezone).not.toHaveBeenCalled();
   });
 
-  it("returns UTC without inventing local time when timezone is not configured", async () => {
+  it("returns the UTC date and weekday without inventing local time when timezone is not configured", async () => {
     dependencies.findUserTimezone.mockResolvedValue(null);
 
     await expect(getCurrentTime.execute({}, context)).resolves.toEqual({
       capturedAtUtc: "2026-07-30T15:24:18.000Z",
       localDate: null,
       localTime: null,
+      note: "The person's timezone is unknown: utcDate and utcWeekday are for UTC, and the local date may differ near midnight.",
       timezone: null,
       timezoneSource: "not_configured",
+      utcDate: "2026-07-30",
       utcOffset: null,
+      utcWeekday: "четверг",
       weekday: null,
     });
   });

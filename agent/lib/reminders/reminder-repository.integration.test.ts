@@ -101,14 +101,14 @@ describeWithDatabase("reminder repositories", () => {
       recurrence: null,
       scope: "personal",
       timezone: "Europe/Moscow",
-    })).rejects.toThrowError(/AGENT_NOTIFICATION_SETTINGS_REQUIRED/);
-    await expect(reminderRepository.configureNotifications(auth, {
+    })).rejects.toThrowError(/AGENT_REMINDER_LOCAL_TIME_REQUIRED/);
+    await expect(reminderRepository.configureNotifications(auth, { basis: null, source: "person",
       quietEnd: "07:00",
       quietStart: "23:00",
       timezone: "Not\/A-Timezone",
     })).rejects.toThrowError(/AGENT_TIMEZONE_INVALID/);
 
-    await reminderRepository.configureNotifications(auth, {
+    await reminderRepository.configureNotifications(auth, { basis: null, source: "person",
       quietEnd: "07:00",
       quietStart: "23:00",
       timezone: "Europe/Moscow",
@@ -133,7 +133,7 @@ describeWithDatabase("reminder repositories", () => {
     const fixture = await createFixture();
     const member = familyAuth(fixture, "member");
     const owner = familyAuth(fixture, "owner");
-    await reminderRepository.configureNotifications(privateAuth(fixture, "member"), {
+    await reminderRepository.configureNotifications(privateAuth(fixture, "member"), { basis: null, source: "person",
       quietEnd: null,
       quietStart: null,
       timezone: "Europe/Moscow",
@@ -158,7 +158,7 @@ describeWithDatabase("reminder repositories", () => {
   it("replays an approved recurrence removal without a second mutation", async () => {
     const fixture = await createFixture();
     const auth = privateAuth(fixture, "member");
-    await reminderRepository.configureNotifications(auth, {
+    await reminderRepository.configureNotifications(auth, { basis: null, source: "person",
       quietEnd: null,
       quietStart: null,
       timezone: "Europe/Moscow",
@@ -203,7 +203,7 @@ describeWithDatabase("reminder repositories", () => {
   it("defers a due reminder through quiet hours and completes a one-time delivery", async () => {
     const fixture = await createFixture();
     const auth = privateAuth(fixture, "member");
-    await reminderRepository.configureNotifications(auth, {
+    await reminderRepository.configureNotifications(auth, { basis: null, source: "person",
       quietEnd: "07:00",
       quietStart: "23:00",
       timezone: "Europe/Moscow",
@@ -249,7 +249,7 @@ describeWithDatabase("reminder repositories", () => {
   it("keeps a reminder's reply buttons and hands them with its author to the dispatcher", async () => {
     const fixture = await createFixture();
     const auth = privateAuth(fixture, "member");
-    await reminderRepository.configureNotifications(auth, { quietEnd: null, quietStart: null, timezone: "Europe/Moscow" });
+    await reminderRepository.configureNotifications(auth, { basis: null, source: "person", quietEnd: null, quietStart: null, timezone: "Europe/Moscow" });
     const buttons = [[{ color: "green" as const, text: "✅ Оплатил" }, { text: "⏰ Через час" }]];
     const reminder = await reminderRepository.create(auth, {
       buttons,
@@ -284,7 +284,7 @@ describeWithDatabase("reminder repositories", () => {
   it("refuses to move, resume or pause a reminder that was already delivered", async () => {
     const fixture = await createFixture();
     const auth = privateAuth(fixture, "member");
-    await reminderRepository.configureNotifications(auth, {
+    await reminderRepository.configureNotifications(auth, { basis: null, source: "person",
       quietEnd: null,
       quietStart: null,
       timezone: "UTC",
@@ -335,7 +335,7 @@ describeWithDatabase("reminder repositories", () => {
   it("puts a failed reminder back on schedule when it is moved or resumed", async () => {
     const fixture = await createFixture();
     const auth = privateAuth(fixture, "member");
-    await reminderRepository.configureNotifications(auth, {
+    await reminderRepository.configureNotifications(auth, { basis: null, source: "person",
       quietEnd: null,
       quietStart: null,
       timezone: "UTC",
@@ -379,7 +379,7 @@ describeWithDatabase("reminder repositories", () => {
   it("lists only upcoming and paused reminders, soonest first", async () => {
     const fixture = await createFixture();
     const auth = privateAuth(fixture, "member");
-    await reminderRepository.configureNotifications(auth, {
+    await reminderRepository.configureNotifications(auth, { basis: null, source: "person",
       quietEnd: null,
       quietStart: null,
       timezone: "UTC",
@@ -413,7 +413,7 @@ describeWithDatabase("reminder repositories", () => {
   it("advances recurring wall-clock time across DST and skips missed occurrences", async () => {
     const fixture = await createFixture();
     const auth = privateAuth(fixture, "member");
-    await reminderRepository.configureNotifications(auth, {
+    await reminderRepository.configureNotifications(auth, { basis: null, source: "person",
       quietEnd: null,
       quietStart: null,
       timezone: "Europe/Berlin",
@@ -445,7 +445,7 @@ describeWithDatabase("reminder repositories", () => {
   it("does not retry an expired lease after Telegram dispatch may have started", async () => {
     const fixture = await createFixture();
     const auth = privateAuth(fixture, "member");
-    await reminderRepository.configureNotifications(auth, {
+    await reminderRepository.configureNotifications(auth, { basis: null, source: "person",
       quietEnd: null,
       quietStart: null,
       timezone: "UTC",
