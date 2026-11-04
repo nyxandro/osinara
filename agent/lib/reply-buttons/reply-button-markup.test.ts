@@ -9,7 +9,8 @@
  * - Code examples in fences and inline code are left exactly as written; an indented line is not
  *   code here, because Telegram reads it as part of the paragraph or list item above, and neither
  *   is a backslash-escaped backtick.
- * - The markup the backend writes back for Telegram carries only the set's token and indices.
+ * - Link and copy buttons are read with a safe web address and a copy text the message shows; the
+ *   markup the backend writes back for Telegram carries only the set's token and indices besides them.
  * - Properties: any valid set written after any prose is read back exactly, and no button tag
  *   survives in the text whatever the model wrote.
  */
@@ -145,8 +146,17 @@ describe("reading reply button markup", () => {
   });
 
   it.each([
-    ["a link button", "<tg-button-row><tg-button type=\"url\" url=\"https://example.com\">Сайт</tg-button></tg-button-row>", "только ответом"],
-    ["a copy button", "<tg-button-row><tg-button type=\"copy_text\" text=\"x\">Скопировать</tg-button></tg-button-row>", "только ответом"],
+    ["a mini app button", "<tg-button-row><tg-button type=\"web_app\" url=\"https://example.com\">Открыть</tg-button></tg-button-row>", "type=\"web_app\" не поддерживается"],
+    ["a login button", "<tg-button-row><tg-button type=\"login_url\" url=\"https://example.com\">Войти</tg-button></tg-button-row>", "не поддерживается"],
+    ["a link without an address", "<tg-button-row><tg-button type=\"url\">Сайт</tg-button></tg-button-row>", "адрес http или https"],
+    ["a Telegram app link", "<tg-button-row><tg-button type=\"url\" url=\"tg://resolve?domain=x\">Бот</tg-button></tg-button-row>", "адрес http или https"],
+    ["a script link", "<tg-button-row><tg-button type=\"url\" url=\"javascript:alert(1)\">Сайт</tg-button></tg-button-row>", "адрес http или https"],
+    ["a mail link", "<tg-button-row><tg-button type=\"url\" url=\"mailto:a@example.com\">Почта</tg-button></tg-button-row>", "адрес http или https"],
+    ["a t.me link", "<tg-button-row><tg-button type=\"url\" url=\"https://t.me/somebot?start=x\">Бот</tg-button></tg-button-row>", "Telegram"],
+    ["a telegram.me subdomain link", "<tg-button-row><tg-button type=\"url\" url=\"https://chat.telegram.me/x\">Чат</tg-button></tg-button-row>", "Telegram"],
+    ["a copy button without its text", "<tg-button-row><tg-button type=\"copy_text\">Скопировать</tg-button></tg-button-row>", "от 1 до 256 символов"],
+    ["a copy text over 256 characters", `<tg-button-row><tg-button type="copy_text" text="${"Вопрос".repeat(43)}">Скопировать</tg-button></tg-button-row>`, "от 1 до 256 символов"],
+    ["a copy text the message does not show", "<tg-button-row><tg-button type=\"copy_text\" text=\"SECRET42\">Скопировать</tg-button></tg-button-row>", "должен стоять в тексте сообщения"],
     ["seven buttons", `<tg-button-row>${"1234567".split("").map((n) => `<tg-button>${n}</tg-button>`).join("")}</tg-button-row>`, "от 1 до 6 кнопок"],
     ["an empty row", "<tg-button-row></tg-button-row>", "от 1 до 6 кнопок"],
     ["a blank label", "<tg-button-row><tg-button>  </tg-button></tg-button-row>", "от 1 до 40 символов"],
@@ -169,6 +179,43 @@ describe("reading reply button markup", () => {
     expect(reading.markdown.startsWith("Вопрос?")).toBe(true);
   });
 
+  it("reads link and copy buttons beside answer buttons, with decoded addresses and texts", () => {
+    const reading = readReplyButtonMarkup([
+      "Промокод `SUMMER25` и «скидка 10% & доставка».",
+      "",
+      "Заказываем?",
+      "",
+      "<tg-button-row><tg-button style=\"success\">✅ Да</tg-button><tg-button type=\"url\" url=\"https://example.com/menu?a=1&amp;b=2\">🌐 Меню</tg-button></tg-button-row>",
+      "<tg-button-row><tg-button type=\"copy_text\" text=\"SUMMER25\">📋 Промокод</tg-button><tg-button type=\"copy\" text=\"скидка 10% &amp; доставка\">📋 Условия</tg-button></tg-button-row>",
+    ].join("\n"));
+
+    expect(reading).toEqual({
+      error: null,
+      markdown: "Промокод `SUMMER25` и «скидка 10% & доставка».\n\nЗаказываем?",
+      rows: [
+        [{ color: "green", text: "✅ Да" }, { text: "🌐 Меню", url: "https://example.com/menu?a=1&b=2" }],
+        [{ copyText: "SUMMER25", text: "📋 Промокод" }, { copyText: "скидка 10% & доставка", text: "📋 Условия" }],
+      ],
+    });
+  });
+
+  it("reads a set of link buttons alone, without a question", () => {
+    const reading = readReplyButtonMarkup("Меню ресторана на сайте.\n\n<tg-button-row><tg-button type=\"url\" url=\"http://example.com\">🌐 Меню</tg-button></tg-button-row>");
+
+    expect(reading).toEqual({
+      error: null,
+      markdown: "Меню ресторана на сайте.",
+      rows: [[{ text: "🌐 Меню", url: "http://example.com" }]],
+    });
+  });
+
+  it("does not count the copy text written only inside the button tags as shown", () => {
+    const reading = readReplyButtonMarkup("Код ниже.\n\n<tg-button-row><tg-button type=\"copy_text\" text=\"7731\">📋 7731</tg-button></tg-button-row>");
+
+    expect(reading.rows).toBeNull();
+    expect(reading.error?.message).toContain("должен стоять в тексте сообщения");
+  });
+
   it("keeps the text that stood inside a broken row", () => {
     const reading = readReplyButtonMarkup("Вопрос?\n\n<tg-button-row><tg-button>Да</tg-button>\n\nА ещё вот что.");
 
@@ -189,6 +236,23 @@ describe("writing reply button markup", () => {
       "<tg-button-row><tg-button style=\"primary\">⏰ Через час</tg-button></tg-button-row>",
     ].join("\n"));
     expect(readReplyButtonMarkup(`Оплатил?\n\n${replyButtonMarkup(rows)}`).rows).toEqual(rows);
+  });
+
+  it("writes link and copy buttons with their escaped address and text, for the model and for Telegram", () => {
+    const utility = [[
+      { color: "green" as const, text: "✅ Да" },
+      { text: "🌐 Меню", url: "https://example.com/?a=1&b=\"2\"" },
+      { copyText: "say \"hi\" & <go>\nnow", text: "📋 Команда" },
+    ]];
+
+    expect(replyButtonMarkup(utility)).toBe(
+      "<tg-button-row><tg-button style=\"success\">✅ Да</tg-button><tg-button type=\"url\" url=\"https://example.com/?a=1&amp;b=&quot;2&quot;\">🌐 Меню</tg-button>" +
+      "<tg-button type=\"copy_text\" text=\"say &quot;hi&quot; &amp; &lt;go&gt;&#10;now\">📋 Команда</tg-button></tg-button-row>",
+    );
+    expect(replyButtonMarkup(utility, TOKEN)).toBe(
+      `<tg-button-row><tg-button type="callback_data" data="rb:${TOKEN}:0" style="success">✅ Да</tg-button><tg-button type="url" url="https://example.com/?a=1&amp;b=&quot;2&quot;">🌐 Меню</tg-button>` +
+      "<tg-button type=\"copy_text\" text=\"say &quot;hi&quot; &amp; &lt;go&gt;&#10;now\">📋 Команда</tg-button></tg-button-row>",
+    );
   });
 
   it("numbers the buttons across rows for Telegram, within its 64-byte callback data", () => {
@@ -217,7 +281,11 @@ const LABEL = fc.array(fc.array(LABEL_CHARACTER, { maxLength: 8, minLength: 1 })
   minLength: 1,
 }).map((words) => words.join(" ")).filter((label) => Array.from(label).length <= 40 && !/\d[\d\s()-]{6,}\d/u.test(label));
 const BUTTON_ROWS: fc.Arbitrary<ReplyButtonRows> = fc.tuple(
-  fc.uniqueArray(fc.record({ color: fc.constantFrom(undefined, "green", "red", "blue"), text: LABEL }), {
+  fc.uniqueArray(fc.record({
+    color: fc.constantFrom(undefined, "green", "red", "blue"),
+    text: LABEL,
+    url: fc.constantFrom(undefined, undefined, "https://example.com/a?b=1&c=\"2\"", "http://пример.рф/путь"),
+  }), {
     maxLength: 6,
     minLength: 1,
     selector: (button) => button.text.toLowerCase(),
@@ -228,7 +296,11 @@ const BUTTON_ROWS: fc.Arbitrary<ReplyButtonRows> = fc.tuple(
   let next = 0;
   for (const width of widths) {
     if (next >= buttons.length) break;
-    rows.push(buttons.slice(next, next + width).map(({ color, text }) => (color === undefined ? { text } : { color, text })));
+    rows.push(buttons.slice(next, next + width).map(({ color, text, url }) => ({
+      ...(color === undefined ? {} : { color }),
+      text,
+      ...(url === undefined ? {} : { url }),
+    })));
     next += width;
   }
   return rows;

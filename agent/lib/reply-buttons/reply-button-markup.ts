@@ -11,8 +11,10 @@
  * Key constructs:
  * - The model writes only what a person sees: the label and an optional color. What a press
  *   carries is the backend's: its own token and the button's index, never the model's `data`.
- * - Only answer buttons exist here. A link, a mini app or a copy button would let text the model
- *   read on a page reach a person as an action, so any other type refuses the whole set.
+ * - Answer, link and copy buttons exist here. A link opens only a web page and a copy text must stand
+ *   in the message (`reply-button-contract.ts`); a mini app, a login or a switch to another chat
+ *   would let text the model read on a page reach a person as an action, so any other type refuses
+ *   the whole set.
  * - The set is all or nothing: a half-kept set could drop the "no" and leave only the "yes".
  * - Every tag is removed from the text whether the buttons were accepted or not, so markup never
  *   reaches a person as text; the words between the tags stay. Code keeps its literal content, and
@@ -30,7 +32,9 @@ import {
   REPLY_BUTTON_STYLES,
   REPLY_BUTTONS_MAX,
   REPLY_BUTTONS_ROW_MAX,
+  validateReplyButtonCopyText,
   validateReplyButtonLabel,
+  validateReplyButtonUrl,
   type ReplyButton,
   type ReplyButtonColor,
   type ReplyButtonRows,
@@ -49,6 +53,9 @@ const CODE_MASK = "\u0000";
 const NOT_CODE = "[^\\u0000]";
 // Telegram's documented answer type, and the short spelling a model writes for it.
 const ANSWER_TYPES = new Set(["callback", "callback_data"]);
+const LINK_TYPE = "url";
+// Telegram's name of a copy button, and the short spelling a model writes for it.
+const COPY_TYPES = new Set(["copy", "copy_text"]);
 const COLOR_BY_STYLE: Readonly<Record<string, ReplyButtonColor>> = {
   blue: "blue",
   danger: "red",
@@ -108,20 +115,26 @@ function attributesOf(source: string): Map<string, string> {
   return attributes;
 }
 
-function toButton(raw: RawButton): ReplyButton {
+/** What a button does besides answering: open a page or copy a text the message shows. */
+function actionOf(attributes: ReadonlyMap<string, string>, shownText: string): Pick<ReplyButton, "copyText" | "url"> {
+  const type = attributes.get("type")?.toLowerCase();
+  if (type === undefined || ANSWER_TYPES.has(type)) return {};
+  if (type === LINK_TYPE) return { url: validateReplyButtonUrl(attributes.get("url") ?? "") };
+  if (COPY_TYPES.has(type)) return { copyText: validateReplyButtonCopyText(attributes.get("text") ?? "", shownText) };
+  return invalid(`Кнопка может быть ответом, ссылкой (type="url") или копированием (type="copy_text"); type="${attributes.get("type")}" не поддерживается`);
+}
+
+function toButton(raw: RawButton, shownText: string): ReplyButton {
   const attributes = attributesOf(raw.attributes);
-  const type = attributes.get("type");
-  if (type !== undefined && !ANSWER_TYPES.has(type.toLowerCase())) {
-    invalid(`Кнопка может быть только ответом, type="${type}" не поддерживается`);
-  }
+  const action = actionOf(attributes, shownText);
   const text = validateReplyButtonLabel(decodeEntities(raw.label).replace(/\s+/gu, " "));
   const style = attributes.get("style") ?? attributes.get("color");
   const color = style === undefined ? undefined : COLOR_BY_STYLE[style.toLowerCase()];
-  return color === undefined ? { text } : { color, text };
+  return { ...(color === undefined ? {} : { color }), ...action, text };
 }
 
-function toRows(rawRows: readonly (readonly RawButton[])[]): ReplyButtonRows {
-  const rows = rawRows.map((row) => row.map(toButton)).filter((row) => row.length > 0);
+function toRows(rawRows: readonly (readonly RawButton[])[], shownText: string): ReplyButtonRows {
+  const rows = rawRows.map((row) => row.map((raw) => toButton(raw, shownText))).filter((row) => row.length > 0);
   const total = rows.reduce((sum, row) => sum + row.length, 0);
   if (total === 0 || total > REPLY_BUTTONS_MAX) invalid(`Нужно от 1 до ${REPLY_BUTTONS_MAX} кнопок`);
   const seen = new Set<string>();
@@ -236,7 +249,7 @@ export function readReplyButtonMarkup(markdown: string): ReplyButtonMarkupReadin
   const text = withoutSpans(markdown, spans);
   try {
     if (problem !== null) invalid(problem);
-    return { error: null, markdown: text, rows: toRows(rows) };
+    return { error: null, markdown: text, rows: toRows(rows, text) };
   } catch (error) {
     if (!(error instanceof AppError)) throw error;
     return { error, markdown: text, rows: null };
@@ -248,12 +261,31 @@ function escapeLabel(text: string): string {
   return text.replaceAll("&", "&amp;");
 }
 
-/** Without a token: what the model reads and writes. With one: what Telegram receives. */
+/** An attribute value as Telegram reads it back: entities for what would end or break it. */
+function escapeAttribute(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll("\"", "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+    .replaceAll("\n", "&#10;");
+}
+
+/** The attributes of a button that opens a page or copies a text, or of an answer's press. */
+function actionMarkup(button: ReplyButton, press: string): string {
+  if (button.url !== undefined) return ` type="url" url="${escapeAttribute(button.url)}"`;
+  if (button.copyText !== undefined) return ` type="copy_text" text="${escapeAttribute(button.copyText)}"`;
+  return press;
+}
+
+/**
+ * Without a token: what the model reads and writes. With one: what Telegram receives. Every button
+ * takes an index, so a press names its button in the stored set; only an answer carries one.
+ */
 export function replyButtonMarkup(rows: ReplyButtonRows, token?: string): string {
   let index = 0;
   return rows.map((row) => {
     const buttons = row.map((button) => {
-      const press = token === undefined ? "" : ` type="callback_data" data="${REPLY_BUTTON_CALLBACK_PREFIX}${token}:${index}"`;
+      const press = actionMarkup(
+        button,
+        token === undefined ? "" : ` type="callback_data" data="${REPLY_BUTTON_CALLBACK_PREFIX}${token}:${index}"`,
+      );
       index += 1;
       const style = button.color === undefined ? "" : ` style="${REPLY_BUTTON_STYLES[button.color]}"`;
       return `<tg-button${press}${style}>${escapeLabel(button.text)}</tg-button>`;
