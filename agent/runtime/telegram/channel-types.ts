@@ -99,6 +99,11 @@ export interface TelegramTurnEvents {
   readonly "turn.started": TelegramTurnHandler<Record<string, never>>;
   /** The text of one model step; `message: null` is a deliberate silence. */
   readonly "message.completed": TelegramTurnHandler<{ readonly finishReason: string; readonly message: string | null; readonly stepIndex: number }>;
+  /**
+   * The visible text of a step written so far, on every piece of it. It returns at once: the
+   * model's stream does not wait for it, and it gets the turn alone, without the channel state.
+   */
+  readonly "message.progress"?: (data: { readonly stepIndex: number; readonly textSoFar: string }, turn: { readonly id: string }) => void;
   /** Tools of a step start running; without a handler the chat shows "typing". */
   readonly "actions.requested"?: TelegramTurnHandler<{ readonly stepIndex: number }>;
   /** The turn waits for these requests; it is already parked. */

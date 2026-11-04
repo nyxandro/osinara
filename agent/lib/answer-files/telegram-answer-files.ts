@@ -4,7 +4,8 @@
  * Exports:
  * - `answerWorkspaceAuthorization`: workspace rights from the verified session, or null where the
  *   chat has no workspace at all.
- * - `checkTelegramAnswerFiles`: the runtime's pre-delivery check of a final answer.
+ * - `checkTelegramAnswer`: the runtime's pre-delivery check of a final answer: its Telegram tags,
+ *   its buttons and its files, named together, since the answer goes back to the model only once.
  * - `prepareTelegramAnswerFiles`: the answer laid out for delivery, files that cannot go logged.
  *
  * Key construct:
@@ -15,6 +16,8 @@ import type { SessionAuth } from "../../runtime/context.js";
 import type { StepStartContext } from "../../runtime/agent-definition.js";
 
 import { isAppError } from "../app-error.js";
+import { readReplyButtonMarkup } from "../reply-buttons/reply-button-markup.js";
+import { telegramRichTagsNotice } from "../telegram-rich-tags.js";
 import { requireWorkspaceAuthorization } from "../workspaces/workspace-context.js";
 import type { WorkspaceAuthorization } from "../workspaces/workspace-repository.js";
 import { answerFilesNotice } from "./answer-file-check.js";
@@ -30,15 +33,24 @@ export function answerWorkspaceAuthorization(session: { readonly auth: SessionAu
   }
 }
 
-export async function checkTelegramAnswerFiles(
+export async function checkTelegramAnswer(
   context: StepStartContext & { readonly text: string },
 ): Promise<string | undefined> {
   if (context.channel.kind !== "telegram" || context.session.parent !== undefined) return undefined;
-  return await answerFilesNotice({
+  // Telegram refuses a whole message over one wrong tag; the model fixes it like a missing file.
+  const tags = telegramRichTagsNotice(context.text);
+  // Refused markup would drop every button of the set, the answers too, without the model knowing.
+  const buttonsError = readReplyButtonMarkup(context.text).error;
+  const buttons = buttonsError === null
+    ? undefined
+    : `Your answer was not delivered: its buttons cannot go out. ${buttonsError.message}. Write the whole answer again with the buttons fixed or removed. Do not mention this notice.`;
+  const files = await answerFilesNotice({
     auth: () => answerWorkspaceAuthorization(context.session),
     resolver: answerFileResolver,
     text: context.text,
   });
+  const notices = [tags, buttons, files].filter((notice) => notice !== undefined);
+  return notices.length === 0 ? undefined : notices.join("\n\n");
 }
 
 export async function prepareTelegramAnswerFiles(input: {

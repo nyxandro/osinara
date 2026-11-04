@@ -462,6 +462,95 @@ describeWithDatabase("Telegram group journal repositories", () => {
     )).rejects.toThrowError(/AGENT_TELEGRAM_ATTACHMENT_ACCESS_DENIED/);
   });
 
+  // The workspace receives the GIF's middle frame, so its reference keeps the file to cut it from.
+  it("keeps a group GIF's reference to its own file", async () => {
+    const { familyId, ownerId } = await createOwnedFamily("group-gif-reference");
+    const group = await telegramGroupAdministrationRepository.registerGroup({
+      familyId,
+      messageMode: "addressed_only",
+      requestedBy: ownerId,
+      telegramChatId: "-1001",
+      title: "Семейная группа",
+      toolAllowlist: [],
+      type: "family_private",
+    });
+    const gifMessage: TelegramMessage = {
+      ...message({ id: "44" }),
+      attachments: [{
+        fileId: "gif-file-secret",
+        fileName: "preview.jpg",
+        fileUniqueId: "gif-unique",
+        kind: "animation",
+        mediaType: "image/jpeg",
+        size: 90_180,
+      }],
+      raw: { animation: { file_id: "gif-file-secret" }, date: 1_700_000_044 },
+    };
+    await telegramGroupJournalRepository.record(group.groupId, gifMessage);
+    const reference = await telegramGroupAttachmentRepository.record(group.groupId, gifMessage);
+    const familyAuth = {
+      familyId,
+      groupId: group.groupId,
+      groupType: "family_private" as const,
+      role: "owner" as const,
+      telegramChatType: "supergroup" as const,
+      userId: ownerId,
+    };
+
+    await expect(telegramGroupAttachmentRepository.find(familyAuth, reference.attachmentId)).resolves.toMatchObject({
+      attachment: { fileId: "gif-file-secret", kind: "animation", size: 90_180 },
+      messageId: "44",
+    });
+  });
+
+  // Before migration 148 a GIF's entry referenced Telegram's preview as a photo.
+  it.each([
+    ["recorded again", "record"],
+    ["replied to", "reply"],
+  ] as const)("replaces a GIF's earlier preview reference with its own file when it is %s", async (_case, path) => {
+    const { familyId, ownerId } = await createOwnedFamily(`legacy-gif-${path}`);
+    const group = await telegramGroupAdministrationRepository.registerGroup({
+      familyId,
+      messageMode: "addressed_only",
+      requestedBy: ownerId,
+      telegramChatId: "-1001",
+      title: "Семейная группа",
+      toolAllowlist: [],
+      type: "family_private",
+    });
+    const gifRaw = { animation: { file_id: "gif-file" }, date: 1_700_000_045 };
+    const legacyGif: TelegramMessage = {
+      ...message({ id: "45" }),
+      attachments: [{ fileId: "gif-preview", fileName: "preview.jpg", fileUniqueId: "gif-preview-unique", kind: "photo", mediaType: "image/jpeg", size: 900 }],
+      raw: gifRaw,
+    };
+    await telegramGroupJournalRepository.record(group.groupId, legacyGif);
+    const legacy = await telegramGroupAttachmentRepository.record(group.groupId, legacyGif);
+    const gif: TelegramMessage = {
+      ...legacyGif,
+      attachments: [{ fileId: "gif-file", fileName: "preview.jpg", fileUniqueId: "gif-file-unique", kind: "animation", mediaType: "image/jpeg", size: 90_180 }],
+    };
+
+    const upgraded = path === "record"
+      ? await telegramGroupAttachmentRepository.record(group.groupId, gif)
+      : await telegramGroupAttachmentRepository.captureReplyTarget(
+        group.groupId,
+        (await telegramGroupJournalRepository.record(group.groupId, { ...message({ id: "46", text: "Что на гифке?" }),
+          replyToMessage: { chat: gif.chat, from: gif.from, messageId: gif.messageId } })).entryId,
+        gif,
+      );
+
+    expect(upgraded).toMatchObject({ attachmentId: legacy.attachmentId, kind: "animation" });
+    await expect(telegramGroupAttachmentRepository.find({
+      familyId,
+      groupId: group.groupId,
+      groupType: "family_private",
+      role: "owner",
+      telegramChatType: "supergroup",
+      userId: ownerId,
+    }, legacy.attachmentId)).resolves.toMatchObject({ attachment: { fileId: "gif-file", kind: "animation" } });
+  });
+
   it("projects an observed replied-to image attachment through durable ancestry", async () => {
     const { familyId, ownerId } = await createOwnedFamily("reply-image-ancestry");
     const group = await telegramGroupAdministrationRepository.registerGroup({

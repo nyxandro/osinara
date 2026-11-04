@@ -117,6 +117,70 @@ describe("step model call", () => {
     expect(sent.toolChoice).toEqual({ type: "none" });
   });
 
+  it("hands the text written so far to the listener on every text piece, never the reasoning", async () => {
+    const provider = model(async () => ({ stream: streamOf([
+      { type: "stream-start", warnings: [] },
+      { type: "reasoning-start", id: "r" },
+      { type: "reasoning-delta", id: "r", delta: "мысль" },
+      { type: "reasoning-end", id: "r" },
+      { type: "text-start", id: "t" },
+      { type: "text-delta", id: "t", delta: "При" },
+      { type: "text-delta", id: "t", delta: "вет" },
+      { type: "text-end", id: "t" },
+      FINISH("stop"),
+    ]) }));
+    const seen: string[] = [];
+
+    const response = await callStepModel(call(provider, { onTextDelta: (text) => seen.push(text) }), NO_WAIT);
+
+    expect(seen).toEqual(["При", "Привет"]);
+    expect(response.text).toBe("Привет");
+  });
+
+  it("starts the text over when a failed call is made again", async () => {
+    clock = 0;
+    const provider = model(
+      async () => ({ stream: streamOf([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "t" },
+        { type: "text-delta", id: "t", delta: "Обрыв" },
+        { type: "error", error: new APICallError({ isRetryable: true, message: "reset", requestBodyValues: {}, statusCode: 503, url: "https://hub" }) },
+      ]) }),
+      async () => ({ stream: streamOf(textParts("Заново")) }),
+    );
+    const seen: string[] = [];
+
+    await callStepModel(call(provider, { onTextDelta: (text) => seen.push(text) }), NO_WAIT);
+
+    // The empty text comes at the failure, before any pause: a draft of the broken text must not
+    // stay on screen while the hub is waited for.
+    expect(seen).toEqual(["Обрыв", "", "Заново"]);
+  });
+
+  it("starts the text over before an answer sent back by the check is written again", async () => {
+    const provider = model(
+      async () => ({ stream: streamOf(textParts("Первый вариант")) }),
+      async () => ({ stream: streamOf(textParts("Исправленный")) }),
+    );
+    const seen: string[] = [];
+
+    const response = await callStepModel(call(provider, {
+      checkAnswer: async (text) => text === "Первый вариант" ? "fix the file" : undefined,
+      onTextDelta: (text) => seen.push(text),
+    }), NO_WAIT);
+
+    expect(response.text).toBe("Исправленный");
+    expect(seen).toEqual(["Первый вариант", "", "Исправленный"]);
+  });
+
+  it("keeps the call going when the listener throws", async () => {
+    const provider = model(async () => ({ stream: streamOf(textParts("Ответ")) }));
+
+    const response = await callStepModel(call(provider, { onTextDelta: () => { throw new Error("presenter bug"); } }), NO_WAIT);
+
+    expect(response.text).toBe("Ответ");
+  });
+
   it("hands over a call refused by its schema with the input the model sent and the reason", async () => {
     const provider = model(async () => ({ stream: streamOf([
       { type: "stream-start", warnings: [] },

@@ -105,6 +105,29 @@ describe("an answer with files", () => {
     expect(chunks[0]!.media.map((upload) => upload.id)).toEqual(["f0", "f1"]);
   });
 
+  it("keeps the files of a gallery inside it, written tight or apart", async () => {
+    const { chunks, prepared } = await present(
+      "Фото с дачи:\n<tg-collage>\n![](/workspace/personal/a.jpg)\n![Грядки](/workspace/personal/b.jpg)\n</tg-collage>",
+      { "a.jpg": file("a.jpg", "photo"), "b.jpg": file("b.jpg", "photo") },
+    );
+
+    expect(prepared.problems).toEqual([]);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]!.text).toBe(
+      "Фото с дачи:\n\n<tg-collage>\n\n![](tg://photo?id=f0)\n\n![](tg://photo?id=f1 \"Грядки\")\n\n</tg-collage>",
+    );
+    expect(chunks[0]!.media.map((upload) => upload.id)).toEqual(["f0", "f1"]);
+  });
+
+  it("sends an answer whose only markup is a moment as a rich message", async () => {
+    const { chunks } = await present("Созвон <tg-time at=\"2026-11-07T19:00:00+03:00\" format=\"wt\">суббота, 19:00</tg-time>.", {});
+
+    expect(chunks).toEqual([expect.objectContaining({
+      format: "rich",
+      text: "Созвон <tg-time unix=\"1794067200\" format=\"wt\">суббота, 19:00</tg-time>.",
+    })]);
+  });
+
   it("never collapses a long answer with files for the model", async () => {
     const steps = Array.from({ length: 8 }, (_, index) => `${index + 1}. Шаг номер ${index + 1}`).join("\n");
     const { chunks } = await present(`![](/workspace/personal/cover.jpg)\n\n${steps}`, { "cover.jpg": file("cover.jpg", "photo") });

@@ -1,5 +1,6 @@
 /**
- * One native Telegram message a tool sends on its own: a place, a point on the map or a poll.
+ * One native Telegram message a tool sends on its own: a place, a point on the map, a poll or a
+ * contact card.
  *
  * Exports:
  * - `TelegramNativeSendTarget`: the verified chat, its topic and the group message it answers.
@@ -51,7 +52,7 @@ export async function sendTelegramNativeMessage(
   input: {
     body: JsonObject;
     codes: TelegramNativeSendCodes;
-    method: "sendLocation" | "sendPoll" | "sendVenue";
+    method: "sendContact" | "sendLocation" | "sendPoll" | "sendVenue";
     target: TelegramNativeSendTarget;
   },
   fetchImplementation: typeof fetch = fetch,

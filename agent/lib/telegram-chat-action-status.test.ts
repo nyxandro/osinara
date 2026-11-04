@@ -19,6 +19,7 @@ import {
   CHAT_ACTION_STATUS_CONFIRM_MS,
   CHAT_ACTION_STATUS_REFRESH_MS,
   createChatActionStatus,
+  isChatActionStatusShown,
   telegramChatActionStatus,
 } from "./telegram-chat-action-status.js";
 
@@ -66,6 +67,22 @@ describe("Telegram chat status", () => {
     await expect(running).resolves.toBe("voice");
     await vi.advanceTimersByTimeAsync(CHAT_ACTION_STATUS_REFRESH_MS * 3);
     expect(sendAction).toHaveBeenCalledTimes(4);
+  });
+
+  it("tells the turn's typing that the chat shows a tool's own status, for as long as it does", async () => {
+    const withStatus = createChatActionStatus(vi.fn().mockResolvedValue(undefined), FAILURE_CODE);
+    const first = deferred<string>();
+    const second = deferred<string>();
+
+    const running = [withStatus(TARGET, () => first.promise), withStatus(TARGET, () => second.promise)];
+    expect(isChatActionStatusShown(TARGET)).toBe(true);
+    expect(isChatActionStatusShown({ chatId: "-1001" })).toBe(false);
+    first.resolve("voice");
+    await running[0];
+    expect(isChatActionStatusShown(TARGET)).toBe(true);
+    second.reject(new Error("synthesis failed"));
+    await expect(running[1]).rejects.toThrow("synthesis failed");
+    expect(isChatActionStatusShown(TARGET)).toBe(false);
   });
 
   it("repeats the status inside Telegram's five-second window", () => {

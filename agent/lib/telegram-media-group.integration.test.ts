@@ -49,7 +49,9 @@ async function drain(dispatch: DurableIngressDependencies["dispatch"], notifyTim
     });
     const writeBinary = vi.fn().mockImplementation(async (_auth, file) => ({ ...file, scope: "personal" }));
     const attachments = createTelegramWorkspaceAttachmentImporter({
-      download: vi.fn().mockImplementation(async file => Buffer.from(file.fileId)), writeBinary,
+      download: vi.fn().mockImplementation(async file => Buffer.from(file.fileId)),
+      extractAnimationStill: vi.fn(async () => { throw new Error("an album holds no GIF"); }),
+      writeBinary,
     });
     const handleMessage = createTelegramMessageHandler({ ...dependencies, attachments });
     const context = telegramContext();

@@ -318,6 +318,26 @@ describe("Docker Compose runtime wiring", () => {
     expect(runtime).toContain("rm -rf /var/lib/apt/lists/*");
   });
 
+  // The agent cuts a GIF's middle frame with these tools (`agent/lib/attachments/animation-still.ts`),
+  // and the tests cut real files with the same build.
+  it("ships the image's own FFmpeg build and its license in the agent runtime and the test image", () => {
+    const dockerfile = readFileSync(new URL("Dockerfile", projectRoot), "utf8");
+    const stage = (name: string) => {
+      const start = dockerfile.indexOf(` AS ${name}\n`);
+      const end = dockerfile.indexOf("\nFROM ", start);
+      return dockerfile.slice(start, end === -1 ? undefined : end);
+    };
+    const tools = "COPY --from=media-tools /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/";
+
+    expect(stage("runtime")).toContain(tools);
+    expect(stage("runtime")).toContain(
+      "COPY --from=media-tools /opt/ffmpeg/share/doc/ffmpeg/COPYING.LGPLv2.1 /usr/local/share/doc/ffmpeg/COPYING.LGPLv2.1",
+    );
+    expect(stage("test")).toContain(tools);
+    expect(stage("media-tools")).toContain("sha256sum --check -");
+    expect(stage("media-tools")).not.toContain("--enable-gpl");
+  });
+
   it("builds every Node application service from the runtime stage", () => {
     const compose = readFileSync(new URL("compose.yaml", projectRoot), "utf8");
     const workerEntrypoints = new Map([

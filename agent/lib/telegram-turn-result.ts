@@ -7,7 +7,10 @@
 import type { TelegramInboundResult } from "../runtime/telegram/channel-types.js";
 import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
-import type { StoredTelegramAttachment } from "./attachments/telegram-workspace-attachments.js";
+import type {
+  StoredTelegramAttachment,
+  TelegramAttachmentImport,
+} from "./attachments/telegram-workspace-attachments.js";
 import { formatCurrentTimeContext } from "./current-time.js";
 import type { ApplicationConversation } from "./conversation-repository.js";
 import type { ConversationAccess, RegisteredGroup } from "./family-access.js";
@@ -19,6 +22,7 @@ import type { TelegramGroupTurnTrigger } from "./telegram-message-policy.js";
 import {
   formatStoredTelegramAttachments,
   formatTelegramAttachmentReferences,
+  formatUnavailableAnimationStill,
 } from "./telegram-on-message-context.js";
 import { alreadySeenTurnContext, turnInterjectionMarkerContext } from "./turn-interjection/turn-interjection-block.js";
 import { TURN_INTERJECTION_MARKER_ATTRIBUTE } from "./turn-interjection/turn-interjection-scope.js";
@@ -49,7 +53,7 @@ export function buildTelegramTurnResult(input: {
   };
   /** What a running turn already saw of this message, when it was shown with a tool result. */
   shownDuringTurn: TurnInterjectionContentKind | null;
-  storedAttachments: readonly StoredTelegramAttachment[];
+  storedAttachments: readonly TelegramAttachmentImport[];
   timelineEntryId: string;
   turnContext: PreparedTelegramGroupTurnContext;
   /** Announced to the model here, so only a block carrying it counts as the author's new message. */
@@ -62,8 +66,10 @@ export function buildTelegramTurnResult(input: {
     `Verified turn: scope ${input.access.memoryScopes.join(", ")}; role ${input.access.role}; actor ${input.actor.kind}.`,
     formatCurrentTimeContext(input.turnStartedAt),
   ];
-  if (input.storedAttachments.length > 0) {
-    context.push(formatStoredTelegramAttachments(input.storedAttachments));
+  const storedFiles = input.storedAttachments.filter((item): item is StoredTelegramAttachment => !("stillUnavailable" in item));
+  if (storedFiles.length > 0) context.push(formatStoredTelegramAttachments(storedFiles));
+  for (const item of input.storedAttachments) {
+    if ("stillUnavailable" in item) context.push(formatUnavailableAnimationStill(item.telegramMessageId));
   }
   if (input.lazyAttachment) context.push(formatTelegramAttachmentReferences([input.lazyAttachment]));
   if (input.pendingDelivery) context.push(input.pendingDelivery.context);

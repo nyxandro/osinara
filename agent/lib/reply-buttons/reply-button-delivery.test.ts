@@ -10,6 +10,8 @@
  *   does Telegram refusing the message that carries them: it goes again without the buttons, which
  *   are discarded and never activated. Any other failure of the send is not retried.
  * - A reminder's buttons ride on a rich message that keeps its text literal.
+ * - Link and copy buttons need no addressee and no set: alone they go out in any chat, and beside
+ *   answers that cannot go out they go out by themselves.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -45,6 +47,11 @@ const TURN = {
 const CHUNK = { format: "rich" as const, text: "Оформляем?" };
 const MARKUP = `<tg-button-row><tg-button type="callback_data" data="rb:${TOKEN}:0" style="success">✅ Да</tg-button>` +
   `<tg-button type="callback_data" data="rb:${TOKEN}:1">Нет</tg-button></tg-button-row>`;
+const LINK = { text: "🌐 Меню", url: "https://example.com/menu" };
+const COPY = { copyText: "SUMMER25", text: "📋 Промокод" };
+const UTILITY_MARKUP = `<tg-button-row><tg-button type="url" url="https://example.com/menu">🌐 Меню</tg-button>` +
+  `<tg-button type="copy_text" text="SUMMER25">📋 Промокод</tg-button></tg-button-row>`;
+const EXTERNAL = { ...ATTRIBUTES, groupType: "external", telegramChatId: "-100555", telegramChatType: "supergroup" };
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -201,6 +208,59 @@ describe("reply buttons on a turn's final answer", () => {
     expect(loggedCodes()).toEqual(["AGENT_REPLY_BUTTONS_ACTIVATION_FAILED"]);
   });
 
+  it("sends link and copy buttons without a set in any chat, an external group included", async () => {
+    const attachment = turnReplyButtons({ ...TURN, attributes: EXTERNAL, found: { error: null, rows: [[LINK, COPY]] }, telegramChatId: "-100555" })!;
+    const post = vi.fn().mockResolvedValue(SENT);
+
+    await attachment.sendLast(CHUNK, post);
+    await attachment.afterDelivery([SENT]);
+
+    expect(post.mock.calls).toEqual([[`Оформляем?\n\n${UTILITY_MARKUP}`]]);
+    expect(repository.stageForTurn).not.toHaveBeenCalled();
+    expect(repository.activateForTurn).not.toHaveBeenCalled();
+    expect(loggedCodes()).toEqual([]);
+  });
+
+  it("keeps the link and copy buttons of a set whose answers cannot go out in this chat", async () => {
+    const rows = [[{ text: "Да" }, LINK], [COPY]];
+    const attachment = turnReplyButtons({ ...TURN, attributes: EXTERNAL, found: { error: null, rows }, telegramChatId: "-100555" })!;
+    const post = vi.fn().mockResolvedValue(SENT);
+
+    await attachment.sendLast(CHUNK, post);
+
+    expect(post.mock.calls).toEqual([[
+      "Оформляем?\n\n<tg-button-row><tg-button type=\"url\" url=\"https://example.com/menu\">🌐 Меню</tg-button></tg-button-row>\n" +
+      "<tg-button-row><tg-button type=\"copy_text\" text=\"SUMMER25\">📋 Промокод</tg-button></tg-button-row>",
+    ]]);
+    expect(repository.stageForTurn).not.toHaveBeenCalled();
+    expect(loggedCodes()).toEqual(["AGENT_REPLY_BUTTONS_TARGET_INVALID"]);
+  });
+
+  it("sends the message again without its link buttons when Telegram refuses it", async () => {
+    const attachment = turnReplyButtons({ ...TURN, found: { error: null, rows: [[LINK]] } })!;
+    const post = vi.fn().mockRejectedValueOnce(REFUSAL).mockResolvedValueOnce(SENT);
+
+    await expect(attachment.sendLast(CHUNK, post)).resolves.toBe(SENT);
+
+    expect(post.mock.calls[1]).toEqual(["Оформляем?"]);
+    expect(repository.discard).not.toHaveBeenCalled();
+    expect(loggedCodes()).toEqual(["AGENT_REPLY_BUTTONS_REJECTED"]);
+  });
+
+  it("records answers with their link buttons in one set and numbers every button", async () => {
+    const rows = [[{ color: "green" as const, text: "✅ Да" }, LINK]];
+    repository.stageForTurn.mockResolvedValue({ ...SET, buttons: rows });
+    const post = vi.fn().mockResolvedValue(SENT);
+
+    await turnReplyButtons({ ...TURN, found: { error: null, rows } })!.sendLast(CHUNK, post);
+
+    expect(repository.stageForTurn).toHaveBeenCalledWith(expect.objectContaining({ buttons: rows }));
+    expect(post.mock.calls).toEqual([[
+      `Оформляем?\n\n<tg-button-row><tg-button type="callback_data" data="rb:${TOKEN}:0" style="success">✅ Да</tg-button>` +
+      "<tg-button type=\"url\" url=\"https://example.com/menu\">🌐 Меню</tg-button></tg-button-row>",
+    ]]);
+  });
+
   it("reports buttons an interim note carried", () => {
     reportUndeliveredReplyButtons({ error: null, rows: ROWS }, { agentTurnId: "turn-1" });
     reportUndeliveredReplyButtons(undefined, { agentTurnId: "turn-1" });
@@ -255,6 +315,20 @@ describe("reply buttons on a reminder", () => {
   ])("delivers without buttons for %s", async (_case, overrides) => {
     await expect(reminderReplyButtons({ ...REMINDER, ...overrides })).resolves.toBeNull();
     expect(repository.stageForReminder).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a group-chat reminder", { scope: "group" as const }],
+    ["no known addressee", { addresseeTelegramUserId: null }],
+  ])("keeps only the link and copy buttons of %s, without a set", async (_case, overrides) => {
+    const buttons = await reminderReplyButtons({ ...REMINDER, ...overrides, buttons: [[{ text: "✅ Оплатил" }, LINK, COPY]] });
+
+    expect(buttons?.markdown).toBe(`${MESSAGE}\n\n${UTILITY_MARKUP}`);
+    await buttons!.activate("601", []);
+    await buttons!.discard();
+    expect(repository.stageForReminder).not.toHaveBeenCalled();
+    expect(repository.activate).not.toHaveBeenCalled();
+    expect(repository.discard).not.toHaveBeenCalled();
   });
 
   it("delivers without buttons when they cannot be staged", async () => {

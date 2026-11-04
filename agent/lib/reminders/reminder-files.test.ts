@@ -18,7 +18,7 @@ vi.mock("../answer-files/answer-file-resolution.js", async (importOriginal) => (
 
 import type { WorkspaceAuthorization } from "../workspaces/workspace-repository.js";
 import type { ClaimedReminder } from "./reminder-dispatch-repository.js";
-import { reminderWorkspaceAuthorization, reminderWriterRights, requireReminderFiles } from "./reminder-files.js";
+import { reminderWorkspaceAuthorization, reminderWriterRights, requireReminderContent } from "./reminder-files.js";
 
 const FAMILY_ID = "00000000-0000-4000-8000-000000000010";
 const AUTHOR_ID = "00000000-0000-4000-8000-000000000020";
@@ -53,7 +53,7 @@ describe("reminder file check", () => {
   afterEach(() => vi.resetAllMocks());
 
   it("refuses a personal file in a reminder for the family group", async () => {
-    await expect(requireReminderFiles({
+    await expect(requireReminderContent({
       content: "Собрать документы\n\n![](/workspace/personal/passport.pdf)",
       errorCode: "AGENT_REMINDER_INPUT_INVALID",
       rights: () => null,
@@ -72,7 +72,7 @@ describe("reminder file check", () => {
     });
     resolver.measure.mockResolvedValue(measured("lists/shop.pdf", "family"));
 
-    await expect(requireReminderFiles({
+    await expect(requireReminderContent({
       content: "Купить продукты\n\n![Список](/workspace/family/lists/shop.pdf)",
       errorCode: "AGENT_REMINDER_INPUT_INVALID",
       rights: () => rights,
@@ -85,10 +85,20 @@ describe("reminder file check", () => {
     expect(resolver.measure).toHaveBeenCalledWith(rights, expect.objectContaining({ path: "lists/shop.pdf", scope: "family" }));
   });
 
+  it("refuses a reminder whose moment Telegram would refuse, before any file is looked at", async () => {
+    await expect(requireReminderContent({
+      content: "Созвон <tg-time at=\"2026-11-07T19:00\" format=\"wt\">суббота</tg-time>\n\n![](/workspace/family/a.pdf)",
+      errorCode: "AGENT_REMINDER_INPUT_INVALID",
+      rights: () => null,
+      scope: "family",
+    })).rejects.toMatchObject({ code: "AGENT_REMINDER_INPUT_INVALID", message: expect.stringContaining("with its offset") });
+    expect(resolver.measure).not.toHaveBeenCalled();
+  });
+
   it("checks nothing for a reminder without files", async () => {
     const rights = vi.fn(() => null);
 
-    await requireReminderFiles({ content: "Позвонить врачу", errorCode: "AGENT_REMINDER_INPUT_INVALID", rights, scope: "group" });
+    await requireReminderContent({ content: "Позвонить врачу", errorCode: "AGENT_REMINDER_INPUT_INVALID", rights, scope: "group" });
 
     expect(rights).not.toHaveBeenCalled();
   });

@@ -3,6 +3,7 @@
  *
  * Constructs covered:
  * - The verified scope, role and actor of the turn reach the model in one line.
+ * - Stored files are listed; a GIF that came without a picture is named in a plain sentence.
  */
 import { describe, expect, it } from "vitest";
 
@@ -55,5 +56,30 @@ describe("telegram turn verified facts", () => {
     expect(context.filter((entry) => entry.startsWith("Verified"))).toEqual([
       "Verified turn: scope personal; role owner; actor telegram_user.",
     ]);
+  });
+});
+
+describe("telegram turn attachments", () => {
+  it("lists stored files and says plainly which GIF came without a picture", () => {
+    const context = buildResult({
+      storedAttachments: [
+        { stillUnavailable: true, telegramMessageId: "41" },
+        { mediaType: "image/jpeg", path: "inbox/42/photo.jpg", scope: "personal", telegramMessageId: "42" },
+      ],
+    }).context ?? [];
+
+    const files = context.find((entry) => entry.startsWith("<workspace_attachments>"));
+    expect(files).toContain("inbox/42/photo.jpg");
+    expect(files).not.toContain("\"41\"");
+    expect(context).toContain(
+      "You cannot see the GIF of Telegram message 41: the server could not take a frame from its file. " +
+        "Tell the person so plainly; do not guess what it shows or why it failed.",
+    );
+  });
+
+  it("adds no file list when the only GIF came without a picture", () => {
+    const context = buildResult({ storedAttachments: [{ stillUnavailable: true, telegramMessageId: "41" }] }).context ?? [];
+
+    expect(context.some((entry) => entry.startsWith("<workspace_attachments>"))).toBe(false);
   });
 });

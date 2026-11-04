@@ -64,7 +64,7 @@ export function scriptedModel(...steps: ScriptStep[]) {
   return {
     requests,
     async callModel(call: StepModelCall): Promise<StepModelResponse> {
-      requests.push(structuredClone({ ...call, abortSignal: undefined, checkAnswer: undefined, model: undefined, tools: Object.keys(call.tools) }) as never);
+      requests.push(structuredClone({ ...call, abortSignal: undefined, checkAnswer: undefined, model: undefined, onTextDelta: undefined, tools: Object.keys(call.tools) }) as never);
       const step = steps[requests.length - 1];
       if (step === undefined) throw new Error(`TEST_MODEL_SCRIPT_EXHAUSTED: call ${requests.length}`);
       return typeof step === "function" ? await step(call) : step;

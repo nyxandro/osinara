@@ -6,6 +6,8 @@
  * - `ChatActionStatusTarget`, `ChatActionStatus`: the chat a status is shown in and its runner.
  * - `createChatActionStatus`: runs one operation while the chat shows the status.
  * - `telegramChatActionStatus`: production instance over Telegram `sendChatAction`.
+ * - `isChatActionStatusShown`: whether a chat shows one of these statuses now; the turn's "typing"
+ *   (`telegram-answer-draft/`) waits while it does, or the two would take turns every few seconds.
  *
  * Key constructs:
  * - Telegram keeps a chat action for at most five seconds, so the status is repeated inside that
@@ -44,11 +46,25 @@ class ChatActionRejected extends AppError {
   }
 }
 
+// The chats and topics that show a status of a running operation, with how many run there. The
+// process owns them: an operation that ends, however it ends, takes its count away.
+const SHOWN_STATUSES = new Map<string, number>();
+
+function statusKey(target: ChatActionStatusTarget): string {
+  return `${target.chatId}:${target.messageThreadId ?? ""}`;
+}
+
+export function isChatActionStatusShown(target: ChatActionStatusTarget): boolean {
+  return (SHOWN_STATUSES.get(statusKey(target)) ?? 0) > 0;
+}
+
 export function createChatActionStatus(sendAction: SendChatAction, failureCode: string): ChatActionStatus {
   return async function withChatActionStatus<T>(
     target: ChatActionStatusTarget,
     operation: () => Promise<T>,
   ): Promise<T> {
+    const key = statusKey(target);
+    SHOWN_STATUSES.set(key, (SHOWN_STATUSES.get(key) ?? 0) + 1);
     let failureReported = false;
     const inFlight = new Set<Promise<void>>();
     const show = () => {
@@ -75,6 +91,9 @@ export function createChatActionStatus(sendAction: SendChatAction, failureCode: 
     } finally {
       clearTimeout(confirm);
       clearInterval(refresh);
+      const left = (SHOWN_STATUSES.get(key) ?? 1) - 1;
+      if (left > 0) SHOWN_STATUSES.set(key, left);
+      else SHOWN_STATUSES.delete(key);
       await Promise.all(inFlight);
     }
   };

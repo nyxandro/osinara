@@ -18,6 +18,7 @@ import {
   TELEGRAM_RICH_MESSAGE_MEDIA_MAX_BYTES,
   TELEGRAM_RICH_MESSAGE_MEDIA_MAX_COUNT,
 } from "../../config.js";
+import { separateTelegramRichContainers } from "../telegram-rich-tags.js";
 import type { WorkspaceScope } from "../workspaces/workspace-file-record.js";
 import type { WorkspaceAuthorization } from "../workspaces/workspace-repository.js";
 import { readAnswerMedia } from "./answer-file-references.js";
@@ -69,7 +70,7 @@ async function answerFileIssues(input: {
   readonly resolver: Pick<AnswerFileResolver, "measure">;
   readonly text: string;
 }): Promise<AnswerFileIssue[]> {
-  const reading = readAnswerMedia(input.text);
+  const reading = readAnswerMedia(separateTelegramRichContainers(input.text));
   const issues: AnswerFileIssue[] = [];
   const outOfScope = reading.files.filter((file) => input.allowedScopes !== undefined && !input.allowedScopes.includes(file.scope));
   for (const file of outOfScope) issues.push({ address: workspaceAddress(file), kind: "scope" });

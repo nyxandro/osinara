@@ -44,6 +44,13 @@ export const MEMORY_SOFT_DELETE_PURGE_BATCH_SIZE = 200;
 export const TELEGRAM_API_REQUEST_TIMEOUT_MS = 15_000;
 // A chat action is presentation only, yet a voice note waits for one in flight before it is sent.
 export const TELEGRAM_CHAT_ACTION_TIMEOUT_MS = 3_000;
+// A private chat shows the answer as Telegram's draft while the model writes it. Telegram allows 20
+// draft and status calls in 5 s and 40 in 30 s per chat, and drops a draft after 30 s
+// (core.telegram.org/api/bots/ai, «Live response streaming»; api/config `message_typing_draft_ttl`).
+// On Android a visible draft blocks sending a message, so it shows only while text is written.
+export const TELEGRAM_ANSWER_STREAMING_ENABLED = true;
+export const TELEGRAM_DRAFT_MIN_INTERVAL_MS = 1_000;
+export const TELEGRAM_DRAFT_KEEPALIVE_MS = 20_000;
 // An unanswered approval parks its turn for as long as it takes. The confirmation window bounds
 // that wait so one ignored prompt cannot freeze a chat.
 export const TELEGRAM_HITL_APPROVAL_TIMEOUT_MS = 5 * 60 * 1_000;

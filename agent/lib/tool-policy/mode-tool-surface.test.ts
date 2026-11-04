@@ -124,8 +124,9 @@ describe("trusted mode tool surfaces", () => {
       Object.keys(buildSubagentToolSurface({ environment: "private" })),
     ];
 
-    for (const surface of live) expect(surface).toEqual(expect.arrayContaining(["send_location", "send_poll"]));
+    for (const surface of live) expect(surface).toEqual(expect.arrayContaining(["send_contact", "send_location", "send_poll"]));
     for (const surface of background) {
+      expect(surface).not.toContain("send_contact");
       expect(surface).not.toContain("send_location");
       expect(surface).not.toContain("send_poll");
     }
@@ -292,7 +293,7 @@ describe("external group tool surface", () => {
 
   it("emits only guarded baseline tools without a grant", () => {
     expect(names({ capabilities: new Set(), environment: "external" })).toEqual(
-      [...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent", "import_telegram_attachment", "inspect_workspace_image", "list_reminders", "load_skill", "manage_behavior_preference", "manage_reminder", "read_profile_view", "send_location", "send_poll"].sort(),
+      [...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent", "import_telegram_attachment", "inspect_workspace_image", "list_reminders", "load_skill", "manage_behavior_preference", "manage_reminder", "read_profile_view", "send_contact", "send_location", "send_poll"].sort(),
     );
   });
 
@@ -360,7 +361,7 @@ describe("external group tool surface", () => {
   it("emits no application tool outside the effective allowlist", () => {
     const applicationNames = new Set([...TRUSTED_MODE_TOOL_NAMES, ...PRIVATE_ONLY_TOOL_NAMES, ...FAMILY_ONLY_TOOL_NAMES]);
     const grantable = new Set<string>([...EXTERNAL_GROUP_TOOL_NAMES.map((name) => name.replace(/\..*$/u, ""))]);
-    const alwaysExternal = new Set(["list_reminders", "manage_behavior_preference", "manage_reminder", "read_profile_view", "send_location", "send_poll", ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name)]);
+    const alwaysExternal = new Set(["list_reminders", "manage_behavior_preference", "manage_reminder", "read_profile_view", "send_contact", "send_location", "send_poll", ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name)]);
 
     for (const emitted of names({
       capabilities: new Set(),
@@ -555,7 +556,7 @@ describe("external group tool surface", () => {
         capabilities: new Set(["unknown_tool"] as unknown as ExternalGroupToolName[]),
         environment: "external",
       }),
-    ).toEqual([...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent", "import_telegram_attachment", "inspect_workspace_image", "list_reminders", "load_skill", "manage_behavior_preference", "manage_reminder", "read_profile_view", "send_location", "send_poll"].sort());
+    ).toEqual([...ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, ...EXTERNAL_GROUP_BASE_TOOLS.map((tool) => tool.name), "agent", "import_telegram_attachment", "inspect_workspace_image", "list_reminders", "load_skill", "manage_behavior_preference", "manage_reminder", "read_profile_view", "send_contact", "send_location", "send_poll"].sort());
   });
 
   it("exposes only group scope in external shared-tool schemas and descriptions", () => {

@@ -2,7 +2,8 @@
  * Native Telegram Rich Message transport for model-authored output.
  *
  * Exports:
- * - `startTelegramRichThinkingDraft`: displays Telegram's native ephemeral thinking block.
+ * - `sendTelegramRichMessageDraft`: shows the answer written so far as Telegram's draft in a private
+ *   chat; `TelegramDraftOutcome` says whether Telegram took it and how long to wait if not.
  * - `postTelegramRichMessage`: persists completed rich output and records group anchors.
  * - `SentTelegramMessage`: confirmed Telegram identity for each delivered rich chunk.
  * - `TelegramRichMediaUpload`: a file uploaded with a chunk and placed by its media block.
@@ -15,7 +16,8 @@
  *
  * Key constructs:
  * - One stable non-zero draft ID per private chat/topic and turn.
- * - Telegram Bot API 10.1 `sendRichMessageDraft` and `sendRichMessage` validation.
+ * - Telegram Bot API 10.1 `sendRichMessageDraft` and `sendRichMessage` validation. A draft is
+ *   presentation: its refusal is returned to the presenter that paces it, never logged here.
  * - Final-delivery ambiguity diagnostics without automatic retries.
  * - First-chunk group replies anchored to a verified inbound message.
  * - A chunk with files goes as one multipart request: Bot API 10.2 `InputRichMessage.media` names
@@ -35,8 +37,6 @@ import type { TelegramReplyParameters } from "./telegram-reply.js";
 import { formatTelegramRichMessages } from "./telegram-rich-markdown.js";
 
 const TELEGRAM_DRAFT_ID_MODULUS = 2_147_483_647;
-const TELEGRAM_THINKING_CUSTOM_EMOJI_ID = "5535034915403333642";
-const TELEGRAM_THINKING_HTML = `<tg-thinking><tg-emoji emoji-id="${TELEGRAM_THINKING_CUSTOM_EMOJI_ID}"></tg-emoji> Думаю…</tg-thinking>`;
 const TELEGRAM_CHAT_TYPES = new Set<TelegramChatType>([
   "channel",
   "group",
@@ -56,6 +56,10 @@ type TelegramRichAnchorState = Pick<
 type TelegramApiBody = NonNullable<
   Parameters<typeof callTelegramApi>[0]["body"]
 >;
+
+export type TelegramDraftOutcome =
+  | { readonly ok: true }
+  | { readonly description?: string; readonly ok: false; readonly providerStatus: number; readonly retryAfterSeconds?: number };
 
 export interface SentTelegramMessage {
   readonly chatType: TelegramChatType;
@@ -149,13 +153,10 @@ function addStableErrorCode(error: Error, code: string): void {
 }
 
 async function requestTelegramRichApi(
-  method: "sendRichMessage" | "sendRichMessageDraft",
   payload: { readonly body: TelegramApiBody } | { readonly form: FormData },
 ): Promise<TelegramApiResponse> {
-  const transportCode =
-    method === "sendRichMessage"
-      ? "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_AMBIGUOUS"
-      : "AGENT_TELEGRAM_RICH_DRAFT_DELIVERY_FAILED";
+  const method = "sendRichMessage";
+  const transportCode = "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_AMBIGUOUS";
   let response: TelegramApiResponse;
   try {
     response = await callTelegramApi({
@@ -186,16 +187,8 @@ async function requestTelegramRichApi(
   ) {
     return response;
   }
-  const rejectionCode =
-    method === "sendRichMessage"
-      ? "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_FAILED"
-      : "AGENT_TELEGRAM_RICH_DRAFT_DELIVERY_FAILED";
-  // Telegram's own reason names what it refused. It is an error text, but it may quote a tag of
-  // the message, so only its start is kept.
-  const description = typeof response.body === "object" && response.body !== null &&
-    "description" in response.body && typeof response.body.description === "string"
-    ? response.body.description.slice(0, TELEGRAM_DESCRIPTION_MAX_LENGTH)
-    : null;
+  const rejectionCode = "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_FAILED";
+  const description = telegramDescription(response);
   console.error(
     JSON.stringify({
       code: rejectionCode,
@@ -206,11 +199,30 @@ async function requestTelegramRichApi(
   );
   throw new AppError(
     rejectionCode,
-    method === "sendRichMessage"
-      ? "Telegram не принял форматированный ответ. Попробуйте отправить запрос ещё раз"
-      : "Telegram не принял потоковое обновление ответа. Попробуйте отправить запрос ещё раз",
+    "Telegram не принял форматированный ответ. Попробуйте отправить запрос ещё раз",
     { details: { providerStatus: response.status, ...(description === null ? {} : { description }) } },
   );
+}
+
+/**
+ * Telegram's own reason names what it refused. It is an error text, but it may quote a tag of the
+ * message, so only its start is kept.
+ */
+function telegramDescription(response: TelegramApiResponse): string | null {
+  return typeof response.body === "object" && response.body !== null &&
+    "description" in response.body && typeof response.body.description === "string"
+    ? response.body.description.slice(0, TELEGRAM_DESCRIPTION_MAX_LENGTH)
+    : null;
+}
+
+function retryAfterSeconds(response: TelegramApiResponse): number | undefined {
+  const parameters = typeof response.body === "object" && response.body !== null && "parameters" in response.body
+    ? response.body.parameters
+    : undefined;
+  const value = typeof parameters === "object" && parameters !== null && "retry_after" in parameters
+    ? parameters.retry_after
+    : undefined;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
 /**
@@ -223,21 +235,6 @@ export function isTelegramRichMessageRefusal(error: unknown): boolean {
     error.details?.providerStatus === TELEGRAM_BAD_REQUEST_STATUS;
 }
 
-function requireDraftSuccess(response: TelegramApiResponse): void {
-  const body = response.body as { result?: unknown };
-  if (body.result === true) return;
-  console.error(
-    JSON.stringify({
-      code: "AGENT_TELEGRAM_RICH_DRAFT_DELIVERY_FAILED",
-      method: "sendRichMessageDraft",
-      providerStatus: response.status,
-    }),
-  );
-  throw new AppError(
-    "AGENT_TELEGRAM_RICH_DRAFT_DELIVERY_FAILED",
-    "Telegram вернул некорректное подтверждение потокового ответа",
-  );
-}
 
 function requireSentMessage(
   response: TelegramApiResponse,
@@ -299,24 +296,40 @@ function richBody(
   return { ...richTargetFields(target, privateOnly, replyParameters), rich_message: richMessage };
 }
 
-export async function startTelegramRichThinkingDraft(
+/**
+ * The answer written so far as Telegram's draft in a private chat. Drafts of one turn and topic
+ * share an id, so each update replaces the previous one; a sent message removes the draft.
+ */
+export async function sendTelegramRichMessageDraft(
   target: TelegramRichTarget,
   turnId: string,
-): Promise<void> {
-  if (target.chatType !== "private") return;
+  markdown: string,
+): Promise<TelegramDraftOutcome> {
+  if (target.chatType !== "private") {
+    throw new AppError("AGENT_TELEGRAM_DRAFT_TARGET_INVALID", "Черновик ответа показывается только в личном чате");
+  }
   if (!turnId) {
     throw new AppError(
       "AGENT_TELEGRAM_RICH_TURN_ID_INVALID",
       "Не удалось связать потоковый ответ с текущим запросом",
     );
   }
-  const response = await requestTelegramRichApi("sendRichMessageDraft", {
-    body: {
-      ...richBody(target, { html: TELEGRAM_THINKING_HTML }, true),
-      draft_id: draftId(target, turnId),
-    },
+  const response = await callTelegramApi({
+    body: { ...richBody(target, { markdown }, true), draft_id: draftId(target, turnId) },
+    botToken: requireTelegramBotToken(),
+    fetch: telegramRichFetch(TELEGRAM_API_REQUEST_TIMEOUT_MS),
+    method: "sendRichMessageDraft",
   });
-  requireDraftSuccess(response);
+  const body = response.body as { ok?: unknown; result?: unknown } | null;
+  if (response.ok && body?.ok === true && body.result === true) return { ok: true };
+  const description = telegramDescription(response);
+  const wait = retryAfterSeconds(response);
+  return {
+    ...(description === null ? {} : { description }),
+    ok: false,
+    providerStatus: response.status,
+    ...(wait === undefined ? {} : { retryAfterSeconds: wait }),
+  };
 }
 
 const MEDIA_BLOCK_KINDS: ReadonlySet<string> = new Set(["audio", "document", "photo", "video"]);
@@ -443,7 +456,6 @@ export async function postTelegramRichMessageChunk(
   media: readonly TelegramRichMediaUpload[] = [],
 ): Promise<SentTelegramMessage> {
   const response = await requestTelegramRichApi(
-    "sendRichMessage",
     telegramRichMessageRequest(richTargetFields(target, false, replyParameters), markdown, media),
   );
   const sent = requireSentMessage(response);
