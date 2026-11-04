@@ -106,6 +106,37 @@ describe("answer draft presenter", () => {
     shown.close();
   });
 
+  it("goes back to typing when the text starts over, and stops keeping the old draft alive", async () => {
+    const { presenter: shown, sent } = presenter();
+    shown.text("Полов");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sent.draft).toHaveBeenCalledTimes(1);
+
+    shown.text("");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(sent.typing).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sent.draft).toHaveBeenCalledTimes(1);
+    expect(sent.typing.mock.calls.length).toBeGreaterThanOrEqual(15);
+    shown.close();
+  });
+
+  it("waits for a typing status in flight before a message goes, so it cannot land after it", async () => {
+    let land!: () => void;
+    const sent = transport();
+    sent.typing.mockImplementationOnce(() => new Promise<void>((resolve) => { land = resolve; }));
+    const { presenter: shown } = presenter(sent);
+
+    let ready = false;
+    const before = shown.beforeMessage().then(() => { ready = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ready).toBe(false);
+    land();
+    await before;
+    expect(ready).toBe(true);
+    shown.close();
+  });
+
   it("goes quiet for Telegram's wait after a rate limit and then shows the latest text", async () => {
     const draft = vi.fn(async (): Promise<TelegramDraftOutcome> => ({ ok: true }))
       .mockResolvedValueOnce({ description: "Too Many Requests", ok: false, providerStatus: 429, retryAfterSeconds: 5 });

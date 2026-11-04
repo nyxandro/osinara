@@ -43,10 +43,20 @@ describe("previewAnswerText", () => {
     expect(previewAnswerText("Созвон <tg-time at=\"2026-11-07T19:00:00+03:00\" format=\"wt\">суббо")).toBe("Созвон");
     expect(previewAnswerText("Итог [память: mem_0123")).toBe("Итог");
     expect(previewAnswerText("Первое\n\n[[split]")).toBe("Первое");
+    expect(previewAnswerText("Готово.\n[[no-reply]")).toBe("Готово.");
+    expect(previewAnswerText("Это <u>важ")).toBe("Это");
+    expect(previewAnswerText("Итог.\n\n<details><summary>Подроб")).toBe("Итог.");
     expect(previewAnswerText("Готово <b")).toBe("Готово");
   });
 
+  it("shows a collapsible block whose closing tag is not written yet, closed", () => {
+    expect(previewAnswerText("Итог.\n\n<details><summary>Подробности</summary>\n\nШаг один")).toBe(
+      "Итог.\n\n<details><summary>Подробности</summary>\n\nШаг один\n\n</details>",
+    );
+  });
+
   it("shows a file as a line with its caption or name", () => {
+    expect(previewAnswerText("Смотри [отчёт](/workspace/family/report.pdf)")).toBe("Смотри 📎 отчёт");
     expect(previewAnswerText("Рецепт\n\n![Рецепты на неделю](/workspace/family/r.md)")).toBe("Рецепт\n\n📎 Рецепты на неделю");
     expect(previewAnswerText("Отчёт:\n\n![](</workspace/personal/Мой отчёт.pdf>)")).toBe("Отчёт:\n\n📎 Мой отчёт.pdf");
   });

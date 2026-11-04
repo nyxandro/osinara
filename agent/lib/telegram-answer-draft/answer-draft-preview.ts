@@ -30,10 +30,15 @@ const OPEN_REASONING_PATTERN = /<think>[\s\S]*$/iu;
 const STRAY_REASONING_CLOSE_PATTERN = /<\/think>/giu;
 const SPLIT_DIRECTIVE_PATTERN = /\[\[split\]\]|<\/?telegram-split\s*\/?>/giu;
 const BUTTONS_START_PATTERN = /<tg-button(?:-row)?(?![\w-])/iu;
-const WORKSPACE_FILE_PATTERN = /!\[([^\]\n]*)\]\(\s*<?(\/workspace\/[^)>\n]*?)>?(?:\s+"[^"\n]*")?\s*\)/gu;
+// A file, and a plain link to one, which the answer check sends back to the model.
+const WORKSPACE_FILE_PATTERN = /!?\[([^\]\n]*)\]\(\s*<?(\/workspace\/[^)>\n]*?)>?(?:\s+"[^"\n]*")?\s*\)/gu;
 // A draft shows no file and no map; the gallery's files already became lines.
 const GALLERY_AND_MAP_PATTERN = /<\/?tg-(?:collage|slideshow)\s*>|<tg-map(?![\w-])[^>\n]*>/giu;
 const UNFINISHED_ENDINGS: readonly RegExp[] = [
+  // Inline formatting not closed yet: the filter would show the whole draft as text.
+  /<(u|ins|sub|sup)>(?![\s\S]*<\/\1>)[\s\S]*$/iu,
+  // A collapsible block whose summary is not closed yet; a block closed later is closed by the filter.
+  /<details(?:\s+open)?>(?![\s\S]*<\/summary>)[\s\S]*$/iu,
   // A moment whose closing tag is not written yet.
   /<tg-time(?![\w-])[^>\n]*>(?![\s\S]*<\/tg-time>)[\s\S]*$/iu,
   // An image or a link not closed yet: `![…`, `[…`, `[…](…`.

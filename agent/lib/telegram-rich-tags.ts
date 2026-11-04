@@ -41,6 +41,9 @@ const MOMENT_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(Z|
 const TIME_FORMAT_PATTERN = /^(?:r|w?[dD]?[tT]?)$/u;
 const CANONICAL_MOMENT_PATTERN = /^<tg-time unix="\d{1,12}" format="(?:r|w?[dD]?[tT]?)">$/u;
 const MILLISECONDS_PER_MINUTE = 60_000;
+// Real zones lie between UTC-12:00 and UTC+14:00.
+const MAX_OFFSET_MINUTES = 14 * 60;
+const MAX_OFFSET_MINUTE_PART = 59;
 const MILLISECONDS_PER_SECOND = 1_000;
 const SCANNED_TAG_PATTERN = /<\/?tg-(?:collage|map|slideshow|time)(?![\w-])[^<>\n]*>/giu;
 const CONTAINER_TAG_PATTERN = /<\/?tg-(?:collage|slideshow)\s*>/giu;
@@ -87,9 +90,13 @@ export function momentUnixTime(moment: string): number | null {
     return null;
   }
   const offset = match[7]!;
+  const offsetMinutePart = offset === "Z" ? 0 : Number(offset.slice(4, 6));
   const offsetMinutes = offset === "Z" ? 0 : (offset.startsWith("-") ? -1 : 1) *
-    (Number(offset.slice(1, 3)) * 60 + Number(offset.slice(4, 6)));
-  return (wall.getTime() - offsetMinutes * MILLISECONDS_PER_MINUTE) / MILLISECONDS_PER_SECOND;
+    (Number(offset.slice(1, 3)) * 60 + offsetMinutePart);
+  if (offsetMinutePart > MAX_OFFSET_MINUTE_PART || Math.abs(offsetMinutes) > MAX_OFFSET_MINUTES) return null;
+  const unix = (wall.getTime() - offsetMinutes * MILLISECONDS_PER_MINUTE) / MILLISECONDS_PER_SECOND;
+  // Telegram refuses a whole message over a moment before 1970 (RICH_MESSAGE_DATE_INVALID, 04.11.2026).
+  return unix < 0 ? null : unix;
 }
 
 function canonicalMap(attributes: ReadonlyMap<string, string>): string | null {
@@ -139,7 +146,7 @@ function insideCode(index: number, code: readonly { end: number; start: number }
 function refusedTagLine(tag: string): string {
   const name = parseTag(tag)?.name ?? tag.slice(1).replace(/[\s/>].*$/su, "").toLowerCase();
   if (name === TIME_NAME) {
-    return `- ${tag}: write a moment as at="YYYY-MM-DDTHH:MM:SS+HH:MM" with its offset, for example at="2026-11-07T19:00:00+03:00", and format="wt", "Dt", "D", "t" or "r"; never unix.`;
+    return `- ${tag}: write a moment from 1970 on as at="YYYY-MM-DDTHH:MM:SS+HH:MM" with its offset, for example at="2026-11-07T19:00:00+03:00", and format="wt", "Dt", "D", "t" or "r"; never unix. An earlier date goes as plain text.`;
   }
   if (name === MAP_NAME) {
     return `- ${tag}: a map takes only lat from -90 to 90, long from -180 to 180 and an optional whole zoom from 0 to 24, written as <tg-map lat="55.7558" long="37.6173" zoom="15"/>.`;

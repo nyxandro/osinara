@@ -12,7 +12,9 @@
  *   at most once a second with the latest text, "typing" every four seconds and never beside it.
  * - A draft lives 30 s: one that shows a still text is sent again every twenty.
  * - A sent message removes the draft. Before one goes out the presenter stops and waits for a draft
- *   still in flight, so none lands after the message; "typing" comes back when a tool starts.
+ *   and a status still in flight, so none lands after the message; "typing" comes back when a tool
+ *   starts. Text that starts over (the hub failed, the answer went back to the model) shows
+ *   "typing" again instead of keeping the broken draft alive.
  * - A visible draft keeps a person on Android from sending a message (Telegram bug 62189, "intended
  *   behavior"), so it shows only while text is being written and never during tool work.
  * - Presentation only: a refusal with Telegram's wait silences every call until it has passed, a
@@ -69,6 +71,7 @@ export function createAnswerDraftPresenter(input: {
   let silentUntil = 0;
   let failureLogged = false;
   let inFlight: Promise<void> | null = null;
+  const statusesInFlight = new Set<Promise<void>>();
   let typingTimer: ReturnType<typeof setTimeout> | null = null;
   let draftTimer: ReturnType<typeof setTimeout> | null = null;
   let keepAliveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -89,7 +92,10 @@ export function createAnswerDraftPresenter(input: {
   function typingTick(): void {
     typingTimer = null;
     if (state !== "typing") return;
-    if (Date.now() >= silentUntil && !input.statusBusy()) void input.transport.typing().catch(logFailure);
+    if (Date.now() >= silentUntil && !input.statusBusy()) {
+      const status = input.transport.typing().catch(logFailure).finally(() => statusesInFlight.delete(status));
+      statusesInFlight.add(status);
+    }
     typingTimer = setTimeout(typingTick, CHAT_ACTION_STATUS_REFRESH_MS);
   }
 
@@ -140,6 +146,14 @@ export function createAnswerDraftPresenter(input: {
     });
   }
 
+  function backToTyping(): void {
+    if (keepAliveTimer !== null) clearTimeout(keepAliveTimer);
+    keepAliveTimer = null;
+    shown = null;
+    state = "typing";
+    typingTick();
+  }
+
   function flushDraft(): void {
     draftTimer = null;
     if ((state !== "typing" && state !== "writing") || latest === null) return;
@@ -148,7 +162,11 @@ export function createAnswerDraftPresenter(input: {
       return;
     }
     const preview = previewAnswerText(latest);
-    if (preview === null) return;
+    if (preview === null) {
+      // The text started over or turned into something nobody should see: "typing" again.
+      if (state === "writing") backToTyping();
+      return;
+    }
     if (state === "typing") {
       if (typingTimer !== null) clearTimeout(typingTimer);
       typingTimer = null;
@@ -176,7 +194,7 @@ export function createAnswerDraftPresenter(input: {
       latest = null;
       shown = null;
       if (state !== "paused") state = "quiet";
-      if (inFlight !== null) await inFlight;
+      await Promise.all([...(inFlight === null ? [] : [inFlight]), ...statusesInFlight]);
     },
     pause() {
       if (state === "closed") return;

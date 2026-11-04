@@ -55,6 +55,9 @@ describe("canonicalTelegramRichTag", () => {
     ["a closing map tag", "</tg-map>"],
     ["a moment without an offset", "<tg-time at=\"2026-11-07T19:00\" format=\"wt\">"],
     ["a date that does not exist", "<tg-time at=\"2026-02-30T19:00:00+03:00\" format=\"wt\">"],
+    ["a moment before 1970, which Telegram refuses", "<tg-time at=\"1950-04-12T00:00:00+03:00\" format=\"D\">"],
+    ["an offset no zone has", "<tg-time at=\"2026-11-07T19:00:00+15:00\" format=\"wt\">"],
+    ["an offset with impossible minutes", "<tg-time at=\"2026-11-07T19:00:00+03:75\" format=\"wt\">"],
     ["a moment without a format", "<tg-time at=\"2026-11-07T19:00:00+03:00\">"],
     ["a relative format with others", "<tg-time at=\"2026-11-07T19:00:00+03:00\" format=\"rw\">"],
     ["an unknown format letter", "<tg-time at=\"2026-11-07T19:00:00+03:00\" format=\"wx\">"],
@@ -98,6 +101,7 @@ describe("telegramRichTagsNotice", () => {
 
     expect(notice).toContain("<tg-time at=\"2026-11-07T19:00\" format=\"wt\">");
     expect(notice).toContain("with its offset");
+    expect(notice).toContain("from 1970 on");
     expect(notice).toContain("text inside <tg-time>");
     expect(notice).toContain("<tg-map lat=\"200\" long=\"37\"/>");
     expect(notice).toContain("<tg-slideshow> is not closed");

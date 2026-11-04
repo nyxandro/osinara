@@ -75,8 +75,9 @@ export interface StepModelCall {
   readonly model: LanguageModel;
   /**
    * The visible text of this call written so far, on every piece of it; reasoning never comes here.
-   * A call made again starts over. Presentation only: it must not wait, and its failure is logged,
-   * never the call's.
+   * A call made again starts over, announced with an empty text at the failure (before any pause)
+   * and before an answer the check sent back is written again. Presentation only: it must not
+   * wait, and its failure is logged, never the call's.
    */
   readonly onTextDelta?: (textSoFar: string) => void;
   readonly providerOptions: SharedV4ProviderOptions | undefined;
@@ -155,6 +156,20 @@ export function assistantStepText(messages: readonly ModelMessage[]): string {
   return "";
 }
 
+/** Tells the listener what the person may see now; a failing listener never costs the call. */
+function showText(input: StepModelCall, textSoFar: string, failed: { reported: boolean }): void {
+  if (input.onTextDelta === undefined) return;
+  try {
+    input.onTextDelta(textSoFar);
+  } catch (error) {
+    // Showing the text as it is written must never cost the answer itself.
+    if (!failed.reported) {
+      console.error(JSON.stringify({ code: "AGENT_MODEL_TEXT_LISTENER_FAILED", error: error instanceof Error ? error.message : String(error) }));
+    }
+    failed.reported = true;
+  }
+}
+
 async function callOnce(input: StepModelCall, trailing: readonly ModelMessage[]): Promise<StepModelResponse> {
   if (input.abortSignal.aborted) throw new TurnCancelledError({ cause: input.abortSignal.reason });
   const watchdog = new AbortController();
@@ -169,6 +184,8 @@ async function callOnce(input: StepModelCall, trailing: readonly ModelMessage[])
     if (NoOutputGeneratedError.isInstance(error)) return new EmptyModelResponseError({ cause: error });
     return normalizeModelCallError(error);
   };
+  let textSoFar = "";
+  const listener = { reported: false };
   try {
     const sent: ModelMessage[] = [...input.messages, ...trailing];
     const request = usesAnthropicPromptCache(input.model)
@@ -185,8 +202,6 @@ async function callOnce(input: StepModelCall, trailing: readonly ModelMessage[])
       toolChoice: input.toolChoice,
       tools: request.tools,
     });
-    let textSoFar = "";
-    let listenerFailed = false;
     for await (const part of result.stream) {
       if (part.type === "error") throw part.error;
       if (part.type === "abort") throw watchdog.signal.reason ?? input.abortSignal.reason;
@@ -194,15 +209,7 @@ async function callOnce(input: StepModelCall, trailing: readonly ModelMessage[])
       if (CONTENT_PART_TYPES.has(part.type) && (typeof delta !== "string" || delta.length > 0)) restartGap();
       if (part.type === "text-delta" && typeof delta === "string" && delta.length > 0 && input.onTextDelta !== undefined) {
         textSoFar += delta;
-        try {
-          input.onTextDelta(textSoFar);
-        } catch (error) {
-          // Showing the text as it is written must never cost the answer itself.
-          if (!listenerFailed) {
-            console.error(JSON.stringify({ code: "AGENT_MODEL_TEXT_LISTENER_FAILED", error: error instanceof Error ? error.message : String(error) }));
-          }
-          listenerFailed = true;
-        }
+        showText(input, textSoFar, listener);
       }
     }
     const [messages, toolCalls, finishReason, usage] = await Promise.all([
@@ -223,6 +230,8 @@ async function callOnce(input: StepModelCall, trailing: readonly ModelMessage[])
       usage,
     };
   } catch (error) {
+    // The broken text must not stay on screen through a pause for the hub or another attempt.
+    if (textSoFar.length > 0) showText(input, "", listener);
     throw failure(error);
   } finally {
     clearTimeout(timer);
@@ -268,6 +277,7 @@ async function checkedAnswer(input: StepModelCall, response: StepModelResponse, 
     throw new AppError("AGENT_ANSWER_CHECK_FAILED", "Не удалось проверить файлы ответа. Попробуйте отправить запрос ещё раз", { cause: error });
   }
   if (notice === undefined) return response;
+  showText(input, "", { reported: false });
   try {
     return await callWithRetries(input, [{ role: "assistant", content: response.text }, { role: "user", content: notice }], timing);
   } catch (error) {

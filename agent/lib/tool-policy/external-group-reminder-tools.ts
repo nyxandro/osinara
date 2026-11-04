@@ -27,6 +27,7 @@ import {
   REMINDER_RECURRENCE_INTERVAL_MAX,
 } from "../reminders/reminder-config.js";
 import { requireReminderContent } from "../reminders/reminder-files.js";
+import { readReplyButtonMarkup } from "../reply-buttons/reply-button-markup.js";
 import { REMINDER_RECURRENCE_UNITS, type ReminderRecurrence } from "../reminders/reminder-record.js";
 import { withCallExamples, type CallExamples } from "../tool-call-examples.js";
 import {
@@ -50,6 +51,19 @@ const TOP_LEVEL_FIELDS = ["action", "content", "firstRunAt", "id", "recurrence"]
 // The chat has one timezone, so the wall clock reported to the human and the instant that is stored
 // must be the same reading. A UTC timestamp would silently move the reminder by three hours.
 const MOSCOW_OFFSET_SUFFIX = "+03:00";
+
+/**
+ * A group reminder stores its text alone and has no buttons; markup would reach the chat as text.
+ * A link or a copy text goes into the reminder's text itself.
+ */
+function refuseReminderButtons(content: string): void {
+  const reading = readReplyButtonMarkup(content);
+  if (reading.rows === null && reading.error === null) return;
+  toolInputError(
+    INPUT_ERROR_CODE,
+    "Напоминание внешней группы приходит без кнопок: убери разметку кнопок, а ссылку или текст для копирования напиши в самом content",
+  );
+}
 
 function requireMoscowOffset(raw: unknown): void {
   if (typeof raw === "string" && !raw.trim().endsWith(MOSCOW_OFFSET_SUFFIX)) {
@@ -150,7 +164,7 @@ const MANAGE_DESCRIPTION = [
   "Create, change, pause, resume or delete a reminder of this chat: at the given time the bot itself posts its ready-made text here, without calling the model. Load the group-reminders skill first: it holds the text and time rules.",
   "content is read at the moment of delivery: no words like \"завтра\" or \"через час\", name the event time by the Moscow clock.",
   "<current_time> is UTC and Moscow is always UTC+03:00: count \"через час\" or \"завтра утром\" from it and add three hours for Moscow time.",
-  "content is laid out like your answers: Markdown and a file of this chat's folder on its own line as ![caption](/workspace/group/...); a file is checked now and read at delivery, so it must stay in place.",
+  "content is laid out like your answers: Markdown and a file of this chat's folder on its own line as ![caption](/workspace/group/...); a file is checked now and read at delivery, so it must stay in place. A group reminder carries no buttons: write a link or a text to copy into content itself.",
   `Limit: no more than ${GROUP_REMINDER_MAX_PER_CHAT} active reminders for the whole chat. The chat's timezone is always ${GROUP_REMINDER_TIMEZONE}.`,
   "Create payload: {\"action\":\"create\",\"content\":\"Созвон по проекту\",\"firstRunAt\":\"2026-09-04T18:00:00+03:00\",\"recurrence\":null}.",
   "Recurrence: none is recurrence=null; a repeat is {\"unit\":\"daily\",\"interval\":1} with unit minutely, hourly, daily, weekly, monthly or yearly and interval 1-365.",
@@ -189,6 +203,9 @@ export const EXTERNAL_GROUP_REMINDER_TOOLS: Readonly<Record<string, AnyToolDefin
     async execute(input, ctx) {
       const parsed = requireManageInput(input);
       const authorization = requireGroupReminderAuthorization(ctx);
+      if ((parsed.action === "create" || parsed.action === "update") && parsed.values.content !== undefined) {
+        refuseReminderButtons(parsed.values.content);
+      }
       if (parsed.action === "create") {
         await requireReminderContent({
           content: parsed.values.content,

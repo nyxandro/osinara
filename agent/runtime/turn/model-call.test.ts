@@ -152,7 +152,25 @@ describe("step model call", () => {
 
     await callStepModel(call(provider, { onTextDelta: (text) => seen.push(text) }), NO_WAIT);
 
-    expect(seen).toEqual(["Обрыв", "Заново"]);
+    // The empty text comes at the failure, before any pause: a draft of the broken text must not
+    // stay on screen while the hub is waited for.
+    expect(seen).toEqual(["Обрыв", "", "Заново"]);
+  });
+
+  it("starts the text over before an answer sent back by the check is written again", async () => {
+    const provider = model(
+      async () => ({ stream: streamOf(textParts("Первый вариант")) }),
+      async () => ({ stream: streamOf(textParts("Исправленный")) }),
+    );
+    const seen: string[] = [];
+
+    const response = await callStepModel(call(provider, {
+      checkAnswer: async (text) => text === "Первый вариант" ? "fix the file" : undefined,
+      onTextDelta: (text) => seen.push(text),
+    }), NO_WAIT);
+
+    expect(response.text).toBe("Исправленный");
+    expect(seen).toEqual(["Первый вариант", "", "Исправленный"]);
   });
 
   it("keeps the call going when the listener throws", async () => {

@@ -22,7 +22,7 @@ import { presentationPreferenceInstructions } from "./instructions/presentation-
 import { previousTaskStepsInstructions } from "./instructions/previous-task-steps.js";
 import { reactionSetInstructions } from "./instructions/reaction-set.js";
 import { retrievedMemoryInstructions } from "./instructions/retrieved-memory.js";
-import { checkTelegramAnswerFiles } from "./lib/answer-files/telegram-answer-files.js";
+import { checkTelegramAnswer } from "./lib/answer-files/telegram-answer-files.js";
 import { modelProviderConfig } from "./lib/model-provider-config.js";
 import { primaryModel } from "./lib/model-registry.js";
 import { isProfileCardMessage } from "./lib/prompt/profile-card.js";
@@ -42,7 +42,7 @@ export function createOsinaraAgent(): RuntimeAgent {
   return {
     basePrompt: composeBasePrompt({ instructions: AUTHORED_INSTRUCTIONS, toolsAvailable: true }),
     // Files an answer shows must reach the chat; the model fixes an unsendable one before delivery.
-    checkFinalAnswer: (ctx) => checkTelegramAnswerFiles(ctx),
+    checkFinalAnswer: (ctx) => checkTelegramAnswer(ctx),
     compactionThresholdPercent: AGENT_COMPACTION_THRESHOLD,
     instructionResolvers: [
       conversationModeInstructions,

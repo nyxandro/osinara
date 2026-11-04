@@ -26,7 +26,7 @@
  *   fits. Presentation only falls back: an unknown style leaves the button uncolored.
  */
 import { AppError } from "../app-error.js";
-import { markdownCodeRanges, readMarkdownTree } from "../markdown-syntax.js";
+import { markdownCodeRanges, readMarkdownTree, walkMarkdownTree } from "../markdown-syntax.js";
 import {
   REPLY_BUTTON_CALLBACK_PREFIX,
   REPLY_BUTTON_STYLES,
@@ -131,6 +131,19 @@ function toButton(raw: RawButton, shownText: string): ReplyButton {
   const style = attributes.get("style") ?? attributes.get("color");
   const color = style === undefined ? undefined : COLOR_BY_STYLE[style.toLowerCase()];
   return { ...(color === undefined ? {} : { color }), ...action, text };
+}
+
+/**
+ * What a person reads in the message: its text and code, never a link's address or title, a
+ * definition or an image's caption, so a copy button cannot put something there that nobody sees.
+ */
+function shownTextOf(markdown: string): string {
+  const shown: string[] = [];
+  walkMarkdownTree(readMarkdownTree(markdown), (node) => {
+    if (node.type === "image" || node.type === "imageReference" || node.type === "definition") return;
+    if (node.type === "text" || node.type === "inlineCode" || node.type === "code") shown.push(node.value);
+  });
+  return shown.join("");
 }
 
 function toRows(rawRows: readonly (readonly RawButton[])[], shownText: string): ReplyButtonRows {
@@ -249,7 +262,7 @@ export function readReplyButtonMarkup(markdown: string): ReplyButtonMarkupReadin
   const text = withoutSpans(markdown, spans);
   try {
     if (problem !== null) invalid(problem);
-    return { error: null, markdown: text, rows: toRows(rows, text) };
+    return { error: null, markdown: text, rows: toRows(rows, shownTextOf(text)) };
   } catch (error) {
     if (!(error instanceof AppError)) throw error;
     return { error, markdown: text, rows: null };
