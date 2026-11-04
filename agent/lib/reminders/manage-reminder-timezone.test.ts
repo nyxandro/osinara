@@ -17,7 +17,8 @@ vi.mock("./reminder-repository.js", () => ({ reminderRepository: repository }));
 vi.mock("./reminder-create.js", () => creation);
 vi.mock("./reminder-timezone-wait-repository.js", () => ({ timezoneWaitRepository: waits }));
 vi.mock("../calendar-mirror/calendar-mirror-outlook.js", () => ({ calendarCopyOutlook: vi.fn(async () => "no_google") }));
-vi.mock("./reminder-context.js", () => ({ requireReminderAuthorization: vi.fn(() => ({ familyId: "family-1" })) }));
+const authorization = vi.hoisted(() => ({ current: { familyId: "family-1", telegramChatType: "private" } }));
+vi.mock("./reminder-context.js", () => ({ requireReminderAuthorization: vi.fn(() => authorization.current) }));
 
 const { default: manageReminder } = await import("../tools/manage_reminder.js");
 
@@ -31,6 +32,7 @@ const AWAITING = {
 
 describe("manage_reminder without the person's timezone", () => {
   beforeEach(() => {
+    authorization.current = { familyId: "family-1", telegramChatType: "private" };
     creation.createReminderOrWait.mockReset().mockResolvedValue({ awaiting: AWAITING, kind: "awaiting" });
     for (const mock of [repository.operationRecorded, waits.operationRecorded]) mock.mockReset().mockResolvedValue(false);
     waits.scopeOf.mockReset().mockResolvedValue(null);
@@ -42,12 +44,20 @@ describe("manage_reminder without the person's timezone", () => {
   it("passes the clock time the person said and tells the agent what to do while it waits", async () => {
     const result = await manageReminder.execute({ ...BASE, localFirstRun: "2026-11-05T09:00" } as never, CONTEXT);
 
-    expect(creation.createReminderOrWait).toHaveBeenCalledWith({ familyId: "family-1" }, expect.objectContaining({
+    expect(creation.createReminderOrWait).toHaveBeenCalledWith(expect.objectContaining({ familyId: "family-1" }), expect.objectContaining({
       operationKey: "call-1",
       time: { kind: "local", local: "2026-11-05T09:00:00" },
     }));
     expect(result).toMatchObject({ status: "awaiting_timezone" });
     expect((result as { nextStep: string }).nextStep).toContain("«Да, Москва» and «Другой пояс»");
+  });
+
+  it("sends a family group's author to the private chat instead of asking for the zone in the group", async () => {
+    authorization.current = { familyId: "family-1", telegramChatType: "supergroup" };
+    const result = await manageReminder.execute({ ...BASE, localFirstRun: "2026-11-07T10:00", scope: "family" } as never, CONTEXT);
+    const nextStep = (result as { nextStep: string }).nextStep;
+    expect(nextStep).toContain("only in their private chat");
+    expect(nextStep).not.toContain("«Да, Москва»");
   });
 
   it("passes a countdown in minutes", async () => {
@@ -69,7 +79,7 @@ describe("manage_reminder without the person's timezone", () => {
   it("changes and cancels a waiting reminder, and refuses to pause it", async () => {
     waits.scopeOf.mockResolvedValue("personal");
     await manageReminder.execute({ action: "update", id: ID, localFirstRun: "2026-11-06T10:30" } as never, CONTEXT);
-    expect(waits.update).toHaveBeenCalledWith({ familyId: "family-1" }, ID, expect.objectContaining({ localFirstRun: "2026-11-06T10:30:00" }));
+    expect(waits.update).toHaveBeenCalledWith(expect.objectContaining({ familyId: "family-1" }), ID, expect.objectContaining({ localFirstRun: "2026-11-06T10:30:00" }));
     await expect(manageReminder.execute({ action: "delete", id: ID } as never, CONTEXT)).resolves.toEqual({ deleted: true });
     await expect(manageReminder.execute({ action: "pause", id: ID } as never, CONTEXT))
       .rejects.toThrowError(/AGENT_REMINDER_AWAITING_ACTION_UNSUPPORTED/);
