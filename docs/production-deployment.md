@@ -471,7 +471,18 @@ while text is written. Groups, scheduled runs and wake-ups keep the "typing" of 
 Since v0.62.0 the agent sees a GIF by the middle frame of the file itself, not by the preview Telegram
 attaches only to some GIFs. The app image carries its own FFmpeg 9.0.2 build (stage `media-tools`: MP4
 with H.264 and GIF in, JPEG out, file descriptors only, no network protocols), run as `nobody` with
-only `PATH` in its environment. Migration 148 adds the attachment kind `animation`. Log codes:
+only `PATH` in its environment, inside `media-sandbox` (`services/media-sandbox/media-sandbox.c`, a
+static helper built in the same stage): no_new_privs and no core dumps, then Landlock leaves the
+tool no file but its own program and the system libraries and no TCP, and a seccomp filter refuses
+every socket, io_uring, socket ioctls, any process of its own (threads still run) and the namespace,
+mount, keyring, bpf, perf and ptrace calls Docker's profile already refuses. A decoder taken over by
+a crafted file reads no family's files, reaches none of the container's networks and leaves nothing
+running. Its input and output stay usable as already open descriptors. The helper reports its own
+failure on descriptor 4, closed before the tool starts, so the tool cannot pass a failure of its own
+for the sandbox's. A kernel without Landlock (or a seccomp profile that hides it) makes the helper
+refuse to run the tool: `AGENT_MEDIA_TOOL_SANDBOX_UNAVAILABLE`, and the message with the GIF fails
+instead of the tool running unrestricted. The sandbox is used whenever the agent runs as root or
+with `NODE_ENV=production`; only a development machine runs the tool directly. Migration 148 adds the attachment kind `animation`. Log codes:
 `AGENT_MEDIA_TOOL_MISSING` (the binary is absent, for example `npm run dev` on a host without ffmpeg
 6.1 or newer), `AGENT_MEDIA_TOOL_FAILED`, `AGENT_MEDIA_TOOL_TIMEOUT`, `AGENT_MEDIA_TOOL_OUTPUT_TOO_LARGE`,
 `AGENT_ANIMATION_STILL_FAILED`, `AGENT_ANIMATION_FORMAT_UNSUPPORTED`; without a frame the message still
