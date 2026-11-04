@@ -504,6 +504,20 @@ one call behind it. State lives in `calendar_mirror_profiles` and `calendar_mirr
 deleting a calendar over 10-20 minutes and reports all its events as deleted at once: the mirror reads
 such a mass deletion as the calendar deleted and deletes no reminder for it.
 
+Since v0.63.0 a reminder named by the clock while the person's timezone is unknown waits instead of
+failing (`docs/plans/reminder-timezone.md`, #451). The wait lives in `reminder_timezone_waits` (migration
+149) with the clock time the person named; saving the zone through `notification_settings` sets every
+wait of that person in the same transaction. `user_notification_settings.timezone_source` says whether
+the person named the zone or the agent read it from a clear sign (`timezone_basis`); the agent may set a
+zone only where none exists, and a person's correction of an agent-set zone moves their own reminders
+created since, keeping the clock time. Until a zone arrives the minute schedule `reminder-dispatch` asks
+the person in their private chat at most twice (about three hours later outside 22:00-08:00, and at
+09:00 on the reminder's day, both in the family's or the product zone), then ends the wait without a
+guessed delivery. Log codes: `AGENT_REMINDER_AWAITING_TIMEZONE`, `..._AWAITING_ACTIVATED`,
+`..._AWAITING_MISSED`, `..._AWAITING_EXPIRED` (with `followupPressed`), `..._TIMEZONE_FOLLOWUP_SENT`,
+`AGENT_NOTIFICATION_TIMEZONE_INFERRED`, `..._CORRECTED` (informational); `AGENT_REMINDER_TIMEZONE_FOLLOWUP_FAILED`
+counts as an error. A countdown (`firstRunInMinutes`) needs no zone and is stored in UTC.
+
 Every capability that needs image input follows the same `supportsImageInput` flag of the active
 model config: without it `inspect_workspace_image` is not offered in any mode, and its prompt
 guidance and the PDF page route disappear.
