@@ -73,6 +73,12 @@ export interface StepModelCall {
   readonly inactivity: { readonly firstOutputMs: number; readonly gapMs: number };
   readonly messages: readonly ModelMessage[];
   readonly model: LanguageModel;
+  /**
+   * The visible text of this call written so far, on every piece of it; reasoning never comes here.
+   * A call made again starts over. Presentation only: it must not wait, and its failure is logged,
+   * never the call's.
+   */
+  readonly onTextDelta?: (textSoFar: string) => void;
   readonly providerOptions: SharedV4ProviderOptions | undefined;
   readonly system: string;
   readonly toolChoice: "none" | undefined;
@@ -179,11 +185,25 @@ async function callOnce(input: StepModelCall, trailing: readonly ModelMessage[])
       toolChoice: input.toolChoice,
       tools: request.tools,
     });
+    let textSoFar = "";
+    let listenerFailed = false;
     for await (const part of result.stream) {
       if (part.type === "error") throw part.error;
       if (part.type === "abort") throw watchdog.signal.reason ?? input.abortSignal.reason;
       const delta = "text" in part && typeof part.text === "string" ? part.text : "delta" in part ? part.delta : undefined;
       if (CONTENT_PART_TYPES.has(part.type) && (typeof delta !== "string" || delta.length > 0)) restartGap();
+      if (part.type === "text-delta" && typeof delta === "string" && delta.length > 0 && input.onTextDelta !== undefined) {
+        textSoFar += delta;
+        try {
+          input.onTextDelta(textSoFar);
+        } catch (error) {
+          // Showing the text as it is written must never cost the answer itself.
+          if (!listenerFailed) {
+            console.error(JSON.stringify({ code: "AGENT_MODEL_TEXT_LISTENER_FAILED", error: error instanceof Error ? error.message : String(error) }));
+          }
+          listenerFailed = true;
+        }
+      }
     }
     const [messages, toolCalls, finishReason, usage] = await Promise.all([
       result.responseMessages, result.toolCalls, result.finishReason, result.usage,
