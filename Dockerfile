@@ -41,6 +41,13 @@ RUN curl --fail --show-error --location \
     && make install \
     && install -D --mode=0644 COPYING.LGPLv2.1 /opt/ffmpeg/share/doc/ffmpeg/COPYING.LGPLv2.1 \
     && rm -rf /tmp/ffmpeg /tmp/ffmpeg.tar.xz
+# A decoder taken over by a crafted file must reach nothing: the agent runs every media tool inside
+# media-sandbox (Landlock: no file but the tool and the system libraries, no TCP; seccomp: no
+# socket). Built after FFmpeg, so a change here keeps FFmpeg's layer cached; static, so it needs no
+# library of its own.
+COPY services/media-sandbox/media-sandbox.c /tmp/media-sandbox.c
+RUN gcc -O2 -static -Wall -Wextra -Werror -o /opt/ffmpeg/bin/media-sandbox /tmp/media-sandbox.c \
+    && rm /tmp/media-sandbox.c
 
 FROM first-party-node AS dependencies
 WORKDIR /app
@@ -67,7 +74,7 @@ FROM dependencies AS test
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes jq \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=media-tools /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
+COPY --from=media-tools /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /opt/ffmpeg/bin/media-sandbox /usr/local/bin/
 COPY . .
 CMD ["npm", "test"]
 
@@ -161,7 +168,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production
-COPY --from=media-tools /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
+COPY --from=media-tools /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /opt/ffmpeg/bin/media-sandbox /usr/local/bin/
 COPY --from=media-tools /opt/ffmpeg/share/doc/ffmpeg/COPYING.LGPLv2.1 /usr/local/share/doc/ffmpeg/COPYING.LGPLv2.1
 COPY --from=production-dependencies /app/node_modules ./node_modules
 COPY --from=build /app/.runtime ./.runtime
