@@ -13,10 +13,14 @@
  *   it goes out later without the model, which could no longer fix them.
  * - A written reminder reports `calendarCopy`: whether it appears in the person's Google Calendar by
  *   itself, or why not, so the model never creates a second event for it.
+ * - The first run is named exactly one way (#451): an exact moment with the zone, the clock time the
+ *   person said, or a countdown. A clock time without the person's zone becomes a wait that is set
+ *   by itself once the zone is saved; changing or cancelling it goes through the same actions.
  */
 import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 
+import { AppError } from "../app-error.js";
 import { calendarCopyOutlook } from "../calendar-mirror/calendar-mirror-outlook.js";
 import {
   REMINDER_CONTENT_MAX_LENGTH,
@@ -25,7 +29,10 @@ import {
 import { requireReminderAuthorization } from "../reminders/reminder-context.js";
 import { reminderWriterRights, requireReminderContent } from "../reminders/reminder-files.js";
 import { REMINDER_RECURRENCE_UNITS, type ReminderRecurrence } from "../reminders/reminder-record.js";
+import { createReminderOrWait } from "../reminders/reminder-create.js";
 import { reminderRepository } from "../reminders/reminder-repository.js";
+import { parseLocalFirstRun, requireCountdownMinutes, type ReminderTimeInput } from "../reminders/reminder-time-input.js";
+import { timezoneWaitRepository } from "../reminders/reminder-timezone-wait-repository.js";
 import type { ReplyButtonRows } from "../reply-buttons/reply-button-contract.js";
 import { readReplyButtonMarkup } from "../reply-buttons/reply-button-markup.js";
 import { withCallExamples, type CallExamples } from "../tool-call-examples.js";
@@ -49,11 +56,16 @@ const TOP_LEVEL_FIELDS = [
   "action",
   "content",
   "firstRunAt",
+  "firstRunInMinutes",
   "id",
+  "localFirstRun",
   "recurrence",
   "scope",
   "timezone",
 ] as const;
+const TIME_FIELDS = ["firstRunAt", "localFirstRun", "firstRunInMinutes"] as const;
+const AWAITING_NEXT_STEP =
+  "Not set yet: the person's timezone is unknown. Ask where they are now with the buttons «Да, {suggestedLabel}» and «Другой пояс»; once notification_settings saves their zone, this reminder is set by itself at the clock time they named. Do not say it is set.";
 
 const recurrenceSchema = z.object({
   interval: z.number().int().min(1).max(REMINDER_RECURRENCE_INTERVAL_MAX),
@@ -69,7 +81,9 @@ const manageReminderSchema = z.object({
   action: z.enum(TOOL_ACTIONS),
   content: z.string().optional(),
   firstRunAt: z.string().optional(),
+  firstRunInMinutes: z.number().int().optional(),
   id: z.string().optional(),
+  localFirstRun: z.string().optional(),
   recurrence: z.union([recurrenceSchema, z.null()]).optional(),
   scope: z.enum(SCOPES).optional(),
   timezone: z.string().optional(),
@@ -133,11 +147,33 @@ function contentInput(input: Record<string, unknown>, required: boolean) {
   return raw === undefined ? undefined : reminderContent(raw);
 }
 
+/** Exactly one way of naming the first run; `timezone` belongs only to an exact moment. */
+function requireTimeInput(input: Record<string, unknown>): ReminderTimeInput {
+  const given = TIME_FIELDS.filter((field) => input[field] !== undefined);
+  if (given.length !== 1) {
+    toolInputError(
+      "AGENT_REMINDER_TIME_INPUT_AMBIGUOUS",
+      "Передайте ровно одно из полей: firstRunAt с timezone, localFirstRun или firstRunInMinutes",
+    );
+  }
+  if (given[0] === "localFirstRun") {
+    return { kind: "local", local: parseLocalFirstRun(requiredString(input, "localFirstRun", INPUT_ERROR_CODE, "2026-08-01T10:00")) };
+  }
+  if (given[0] === "firstRunInMinutes") return { kind: "countdown", minutes: requireCountdownMinutes(input.firstRunInMinutes) };
+  return {
+    at: requiredIsoDate(input, "firstRunAt", INPUT_ERROR_CODE),
+    kind: "absolute",
+    timezone: requiredString(input, "timezone", INPUT_ERROR_CODE, "Europe/Moscow", { maxLength: 100 }),
+  };
+}
+
 function requireCreateInput(input: Record<string, unknown>) {
   requireOnlyFields(input, [
     "action",
     "content",
     "firstRunAt",
+    "firstRunInMinutes",
+    "localFirstRun",
     "recurrence",
     "scope",
     "timezone",
@@ -146,10 +182,9 @@ function requireCreateInput(input: Record<string, unknown>) {
   return {
     ...(buttons === null ? {} : { buttons }),
     content,
-    firstRunAt: requiredIsoDate(input, "firstRunAt", INPUT_ERROR_CODE),
     recurrence: requireReminderRecurrence(input.recurrence),
     scope: requiredEnum(input, "scope", SCOPES, INPUT_ERROR_CODE) as (typeof SCOPES)[number],
-    timezone: requiredString(input, "timezone", INPUT_ERROR_CODE, "Europe/Moscow", { maxLength: 100 }),
+    time: requireTimeInput(input),
   };
 }
 
@@ -159,6 +194,7 @@ function requireUpdateInput(input: Record<string, unknown>) {
     "content",
     "firstRunAt",
     "id",
+    "localFirstRun",
     "recurrence",
     // MiniMax materializes these known create-only siblings; update ignores them explicitly.
     "scope",
@@ -167,17 +203,21 @@ function requireUpdateInput(input: Record<string, unknown>) {
   // New content brings its own buttons or none; without new content the buttons stay.
   const content = contentInput(input, false);
   const firstRunAt = optionalIsoDate(input, "firstRunAt", INPUT_ERROR_CODE);
+  const localFirstRun = input.localFirstRun === undefined
+    ? undefined
+    : parseLocalFirstRun(requiredString(input, "localFirstRun", INPUT_ERROR_CODE, "2026-08-01T10:00"));
   const recurrence = optionalReminderRecurrence(input.recurrence);
-  if (content === undefined && firstRunAt === undefined && recurrence === undefined) {
+  if (content === undefined && firstRunAt === undefined && localFirstRun === undefined && recurrence === undefined) {
     toolInputError(
       INPUT_ERROR_CODE,
-      "Для action=update передайте хотя бы одно изменение: content, firstRunAt или recurrence",
+      "Для action=update передайте хотя бы одно изменение: content, firstRunAt, localFirstRun или recurrence",
     );
   }
   return {
     ...(content === undefined ? {} : content),
     firstRunAt,
     id: requireReminderId(input),
+    localFirstRun,
     recurrence,
   };
 }
@@ -203,9 +243,11 @@ const TOOL_DESCRIPTION = [
   "Not an agent schedule: for future work with research or a report use manage_agent_schedule.",
   "The result's calendarCopy says whether the reminder appears in the person's Google Calendar by itself (will_appear) or why not; never create a separate calendar event for a reminder.",
   "content is laid out like your answers, Markdown, reply buttons and a workspace file on its own line as ![caption](/workspace/...) included; a file is checked now and read at delivery, so it must stay in place.",
+  "Name the first run exactly one way: firstRunAt with timezone when the person's zone is set; localFirstRun, the clock time the person said as YYYY-MM-DDTHH:MM without a zone, when it is not; firstRunInMinutes for a countdown such as «через 20 минут».",
+  "Without the person's zone a localFirstRun returns status awaiting_timezone: the reminder waits and is set by itself once the zone is saved; a countdown is set at once, alone or repeating by minutes or hours.",
   "Create payload: {\"action\":\"create\",\"content\":\"Позвонить врачу\",\"firstRunAt\":\"2026-08-01T10:00:00+03:00\",\"timezone\":\"Europe/Moscow\",\"scope\":\"personal\",\"recurrence\":null}.",
   "Recurrence: none is recurrence=null; a repeat is {\"unit\":\"daily\",\"interval\":1} with unit minutely, hourly, daily, weekly, monthly or yearly and interval 1-365.",
-  "Update passes id and only the changed content, firstRunAt or recurrence (recurrence=null removes the repeat); pause, resume and delete pass only action and id. Take the id from list_reminders and do not delete and re-create a reminder to change it.",
+  "Update passes id and only the changed content, firstRunAt or recurrence (recurrence=null removes the repeat); a waiting reminder takes content or localFirstRun. Pause, resume and delete pass only action and id; a waiting reminder cannot be paused. Take the id from list_reminders and do not delete and re-create a reminder to change it.",
   "firstRunAt is an ISO datetime with a UTC offset, timezone is IANA. A delivered one-time reminder cannot change: create a new one.",
 ].join(" ");
 
@@ -228,7 +270,10 @@ export default withCallExamples(defineTool({
     // A replay after a crash is answered from its recorded effect: the files it named may have moved
     // since, and refusing them now would read as "not created".
     const namesFiles = parsed.action === "create" || (parsed.action === "update" && parsed.values.content !== undefined);
-    const replayed = namesFiles && await reminderRepository.operationRecorded(authorization, ctx.callId);
+    const replayed = namesFiles && (
+      await reminderRepository.operationRecorded(authorization, ctx.callId) ||
+      await timezoneWaitRepository.operationRecorded(authorization, ctx.callId)
+    );
     if (parsed.action === "create") {
       if (!replayed) {
         await requireReminderContent({
@@ -238,14 +283,42 @@ export default withCallExamples(defineTool({
           scope: parsed.values.scope,
         });
       }
-      const created = await reminderRepository.create(authorization, {
-        ...parsed.values,
-        operationKey: ctx.callId,
-      });
-      return { ...created, calendarCopy: await calendarCopyOutlook(authorization, created) };
+      const outcome = await createReminderOrWait(authorization, { ...parsed.values, operationKey: ctx.callId });
+      if (outcome.kind === "awaiting") {
+        return { ...outcome.awaiting, nextStep: AWAITING_NEXT_STEP.replace("{suggestedLabel}", outcome.awaiting.suggestedLabel) };
+      }
+      return { ...outcome.reminder, calendarCopy: await calendarCopyOutlook(authorization, outcome.reminder) };
+    }
+    const targetId = parsed.action === "update" ? parsed.values.id : parsed.id;
+    const waitScope = await timezoneWaitRepository.scopeOf(authorization, targetId);
+    if (waitScope !== null) {
+      if (parsed.action === "update") {
+        const { buttons, content, firstRunAt, localFirstRun, recurrence } = parsed.values;
+        if (firstRunAt !== undefined || recurrence !== undefined) {
+          toolInputError(INPUT_ERROR_CODE, "У напоминания, которое ждёт часового пояса, меняются только content и localFirstRun");
+        }
+        if (content !== undefined && !replayed) {
+          await requireReminderContent({ content, errorCode: INPUT_ERROR_CODE, rights: () => reminderWriterRights(authorization), scope: waitScope });
+        }
+        return await timezoneWaitRepository.update(authorization, targetId, {
+          ...(content === undefined ? {} : { buttons: buttons ?? null, content }),
+          ...(localFirstRun === undefined ? {} : { localFirstRun }),
+          now: new Date(),
+        });
+      }
+      if (parsed.action === "delete") {
+        return { deleted: await timezoneWaitRepository.delete(authorization, targetId, new Date()) };
+      }
+      throw new AppError(
+        "AGENT_REMINDER_AWAITING_ACTION_UNSUPPORTED",
+        "Напоминание ещё ждёт часового пояса: его можно изменить или удалить, но не приостановить",
+      );
     }
     if (parsed.action === "update") {
-      const { id, ...values } = parsed.values;
+      const { id, localFirstRun, ...values } = parsed.values;
+      if (localFirstRun !== undefined) {
+        toolInputError(INPUT_ERROR_CODE, "localFirstRun меняет только напоминание, которое ждёт часового пояса; для поставленного передайте firstRunAt");
+      }
       // A reminder that is not found, or a public chat's one this tool may not change, is reported
       // by the update itself.
       const scope = !namesFiles || replayed ? null : await reminderRepository.scopeOf(authorization, id);

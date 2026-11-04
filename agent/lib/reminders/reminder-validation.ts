@@ -2,7 +2,7 @@
  * Pure reminder input validation.
  *
  * Exports:
- * - `NotificationSettingsInput`: explicit timezone and optional quiet-hour pair.
+ * - `NotificationSettingsInput`: a timezone with where it came from, and an optional quiet-hour pair.
  * - Date, content, recurrence, and quiet-hour validators used at repository boundaries.
  */
 import { AppError } from "../app-error.js";
@@ -13,10 +13,17 @@ import {
 import { REMINDER_RECURRENCE_UNITS, type ReminderRecurrence } from "./reminder-record.js";
 
 export interface NotificationSettingsInput {
-  quietEnd: string | null;
-  quietStart: string | null;
+  /** What the agent read the zone from, «город Тула из разговора»; required exactly when it guessed. */
+  basis: string | null;
+  /** Absent keeps the quiet hours already set; null turns them off. Given or absent together. */
+  quietEnd?: string | null;
+  quietStart?: string | null;
+  /** `person`: the person named or confirmed it; `agent`: read from a clear sign (#451). */
+  source: "agent" | "person";
   timezone: string;
 }
+
+export const TIMEZONE_BASIS_MAX_LENGTH = 200;
 
 const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 
@@ -56,11 +63,18 @@ export function requireReminderRecurrence(
   return value;
 }
 
-export function requireQuietHours(input: NotificationSettingsInput): void {
+export function requireNotificationSettings(input: NotificationSettingsInput): void {
+  if (input.source === "agent" && (!input.basis?.trim() || input.basis.length > TIMEZONE_BASIS_MAX_LENGTH)) {
+    throw new AppError(
+      "AGENT_NOTIFICATION_TIMEZONE_BASIS_REQUIRED",
+      `Укажите основание часового пояса до ${TIMEZONE_BASIS_MAX_LENGTH} символов, например «город Тула из разговора»`,
+    );
+  }
+  if (input.quietStart === undefined && input.quietEnd === undefined) return;
   const bothAbsent = input.quietStart === null && input.quietEnd === null;
   const bothValid =
-    input.quietStart !== null &&
-    input.quietEnd !== null &&
+    typeof input.quietStart === "string" &&
+    typeof input.quietEnd === "string" &&
     TIME_PATTERN.test(input.quietStart) &&
     TIME_PATTERN.test(input.quietEnd) &&
     input.quietStart !== input.quietEnd;

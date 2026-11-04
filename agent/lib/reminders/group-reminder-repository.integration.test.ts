@@ -428,7 +428,7 @@ describeWithDatabase("group reminder repository", () => {
 
   it("claims a due group reminder and ignores the family owner's quiet hours", async () => {
     const fixture = await createFixture();
-    await reminderRepository.configureNotifications(ownerPrivateAuth(fixture), {
+    await reminderRepository.configureNotifications(ownerPrivateAuth(fixture), { basis: null, source: "person",
       quietEnd: "07:00",
       quietStart: "23:00",
       timezone: GROUP_REMINDER_TIMEZONE,
