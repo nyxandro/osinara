@@ -62,6 +62,7 @@ function inspector(input: {
     authorizeScope: calls.authorizeScope,
     avatarSource: { download: calls.download, lookup: calls.lookup },
     downloadTelegramAttachment: vi.fn(),
+    extractAnimationStill: vi.fn(),
     findAvatarAuthor: calls.findAvatarAuthor,
     findTelegramAttachment: vi.fn(),
     readBinary: calls.readBinary,

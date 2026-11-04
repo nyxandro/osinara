@@ -7,6 +7,7 @@
  */
 import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
+import { extractAnimationStill } from "./attachments/animation-still.js";
 import { downloadTelegramAttachment } from "./attachments/telegram-attachment-download.js";
 import {
   telegramGroupAttachmentRepository,
@@ -14,7 +15,7 @@ import {
 } from "./attachments/telegram-group-attachment-repository.js";
 import {
   createTelegramWorkspaceAttachmentImporter,
-  type StoredTelegramAttachment,
+  type TelegramAttachmentImport,
 } from "./attachments/telegram-workspace-attachments.js";
 import { conversationRepository } from "./conversation-repository.js";
 import { conversationTimelineRepository } from "./conversation-timeline-repository.js";
@@ -57,7 +58,7 @@ export interface TelegramMessageRepositories {
       chatId: string;
       messageId: string;
       scope: WorkspaceScope;
-    }): Promise<StoredTelegramAttachment[]>;
+    }): Promise<TelegramAttachmentImport[]>;
   };
   conversations: Pick<
     typeof conversationRepository,
@@ -89,6 +90,7 @@ export const productionTelegramMessageRepositories = {
   attachmentReferences: telegramGroupAttachmentRepository,
   attachments: createTelegramWorkspaceAttachmentImporter({
     download: downloadTelegramAttachment,
+    extractAnimationStill,
     writeBinary: workspaceBinaryRepository.writeBinary,
   }),
   conversations: conversationRepository,

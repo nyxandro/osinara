@@ -10,6 +10,7 @@
  * topics.
  * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
+import { TELEGRAM_MAX_INBOUND_ATTACHMENT_BYTES } from "../../config.js";
 import { isNonEmptyString, isObject } from "../json.js";
 
 /**
@@ -36,13 +37,16 @@ export interface TelegramChat {
   readonly username?: string;
 }
 
-/** Inbound Telegram file attachment. */
+/**
+ * Inbound Telegram file attachment. An `animation` is a GIF's own file (an H.264 MP4 or a GIF); its
+ * name and media type are those of the still the workspace receives in its place.
+ */
 export interface TelegramAttachment {
   readonly fileId: string;
   readonly fileName?: string;
   readonly fileUniqueId?: string;
   readonly height?: number;
-  readonly kind: "document" | "photo";
+  readonly kind: "animation" | "document" | "photo";
   readonly mediaType?: string;
   readonly size?: number;
   readonly width?: number;
@@ -202,13 +206,35 @@ function parseTelegramUser(value: unknown): TelegramUser | undefined {
  * A sticker, a GIF, a video, a video note or a song cover reaches vision through a still: a static
  * sticker is a WEBP picture itself, the rest come with a JPEG preview. The still stands in for the
  * file, so the message keeps the single attachment a group journal entry holds.
+ * A GIF's preview is the sender's to give (Bot API `Animation.thumbnail`), and many come without
+ * one, so a GIF is read from its own file and the workspace receives its middle frame
+ * (`lib/attachments/animation-still.ts`); only a file too large for a bot to download falls back to
+ * Telegram's preview.
  */
 const PREVIEWED_MEDIA_FIELDS = ["sticker", "animation", "video", "video_note", "audio"] as const;
+
+function parseAnimationFile(media: Record<string, unknown>): TelegramAttachment | null {
+  if (typeof media.file_id !== "string" || media.file_id.length === 0) return null;
+  const size = typeof media.file_size === "number" ? media.file_size : undefined;
+  if (size !== undefined && size > TELEGRAM_MAX_INBOUND_ATTACHMENT_BYTES && isObject(media.thumbnail)) return null;
+  return {
+    fileId: media.file_id,
+    fileName: "preview.jpg",
+    fileUniqueId: typeof media.file_unique_id === "string" ? media.file_unique_id : undefined,
+    height: typeof media.height === "number" ? media.height : undefined,
+    kind: "animation",
+    mediaType: "image/jpeg",
+    size,
+    width: typeof media.width === "number" ? media.width : undefined,
+  };
+}
 
 function parseMediaPreview(value: Record<string, unknown>): TelegramAttachment | null {
   for (const field of PREVIEWED_MEDIA_FIELDS) {
     const media = value[field];
     if (!isObject(media)) continue;
+    const animation = field === "animation" ? parseAnimationFile(media) : null;
+    if (animation !== null) return animation;
     const staticSticker = field === "sticker" && media.is_animated === false && media.is_video === false;
     const still = staticSticker ? media : media.thumbnail;
     if (!isObject(still) || typeof still.file_id !== "string" || still.file_id.length === 0) return null;

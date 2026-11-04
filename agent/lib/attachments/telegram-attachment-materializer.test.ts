@@ -3,6 +3,7 @@
  *
  * Constructs covered:
  * - `createTelegramAttachmentMaterializer`: resolves an authorized reference and persists bytes only on demand.
+ * - A group GIF without a picture becomes a plain refusal for the model.
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -93,5 +94,22 @@ describe("createTelegramAttachmentMaterializer", () => {
       auth: externalAuth,
       scope: "group",
     }));
+  });
+
+  // The model asked for this one file, so it learns plainly that the GIF has no picture.
+  it("tells the model a group GIF has no picture when no frame can be had", async () => {
+    const materialize = createTelegramAttachmentMaterializer({
+      findAttachment: vi.fn().mockResolvedValue({
+        attachment: { fileId: "gif-file", fileName: "preview.jpg", kind: "animation" as const, mediaType: "image/jpeg" },
+        chatId: "-1001",
+        messageId: "44",
+      }),
+      persist: vi.fn().mockResolvedValue([{ stillUnavailable: true, telegramMessageId: "44" }]),
+    });
+
+    await expect(materialize(auth, "00000000-0000-4000-8000-000000000097")).rejects.toMatchObject({
+      code: "AGENT_ANIMATION_STILL_UNAVAILABLE",
+      contract: expect.objectContaining({ retryable: false, sideEffectStatus: "not_started" }),
+    });
   });
 });

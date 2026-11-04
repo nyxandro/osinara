@@ -38,7 +38,7 @@ export interface TelegramGroupJournalEntry {
 export interface TelegramGroupAttachmentSummary {
   attachmentId: string;
   fileName?: string;
-  kind: "document" | "photo";
+  kind: "animation" | "document" | "photo";
   mediaType?: string;
   size?: number;
 }

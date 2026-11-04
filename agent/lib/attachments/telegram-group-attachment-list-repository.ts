@@ -21,7 +21,7 @@ interface AttachmentListAccessRow {
   attachment_file_id: string | null;
   attachment_file_name: string | null;
   attachment_file_unique_id: string | null;
-  attachment_kind: "document" | "photo" | null;
+  attachment_kind: "animation" | "document" | "photo" | null;
   attachment_media_type: string | null;
   attachment_size: string | null;
   authorized: boolean;
@@ -37,7 +37,7 @@ interface AttachmentListAccessRow {
 
 interface AuthorizedAttachmentListRow extends AttachmentListAccessRow {
   attachment_file_id: string;
-  attachment_kind: "document" | "photo";
+  attachment_kind: "animation" | "document" | "photo";
   id: string;
   sent_at: Date;
   sequence_id: string;

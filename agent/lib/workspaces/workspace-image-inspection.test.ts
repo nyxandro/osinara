@@ -4,7 +4,8 @@
  * Constructs covered:
  * - `createWorkspaceImageInspector`: authorized bytes are sent to vision with the user's question.
  * - Telegram inbox images resolve by stable message ID instead of a model-copied filename.
- * - Opaque journal attachments are downloaded and analyzed without a workspace write.
+ * - Opaque journal attachments are downloaded and analyzed without a workspace write; a GIF by its
+ *   middle frame.
  * - Revoked live attachment access stops before Telegram download and vision analysis.
  * - Non-image and provider-oversized files fail before a paid model call.
  * - Provider failures are normalized for persisted and ephemeral Telegram images.
@@ -25,12 +26,15 @@ const auth = {
 const authorizeScope = vi.fn(async () => undefined);
 // The avatar branch has its own tests in telegram-avatars/; these inspections never reach it.
 const avatarDependencies = { avatarSource: { download: vi.fn(), lookup: vi.fn() }, findAvatarAuthor: vi.fn() };
+// These inspections carry no GIF, so nothing may cut a still.
+const noAnimationStill = vi.fn(async () => { throw new Error("no GIF in this inspection"); });
 
 describe("createWorkspaceImageInspector", () => {
   it("analyzes an authorized persisted image", async () => {
     const analyze = vi.fn().mockResolvedValue("На изображении семейный календарь.");
     const inspect = createWorkspaceImageInspector({
       ...avatarDependencies,
+      extractAnimationStill: noAnimationStill,
       analyze,
       authorizeScope,
       readBinary: vi.fn().mockResolvedValue({
@@ -58,6 +62,7 @@ describe("createWorkspaceImageInspector", () => {
     const analyze = vi.fn();
     const inspect = createWorkspaceImageInspector({
       ...avatarDependencies,
+      extractAnimationStill: noAnimationStill,
       analyze,
       authorizeScope,
       readBinary: vi.fn().mockResolvedValue({
@@ -82,6 +87,7 @@ describe("createWorkspaceImageInspector", () => {
     const analyze = vi.fn();
     const inspect = createWorkspaceImageInspector({
       ...avatarDependencies,
+      extractAnimationStill: noAnimationStill,
       analyze,
       authorizeScope,
       readBinary: vi.fn().mockResolvedValue({
@@ -115,6 +121,7 @@ describe("createWorkspaceImageInspector", () => {
     });
     const inspect = createWorkspaceImageInspector({
       ...avatarDependencies,
+      extractAnimationStill: noAnimationStill,
       analyze,
       authorizeScope,
       readBinary: vi.fn(),
@@ -141,6 +148,7 @@ describe("createWorkspaceImageInspector", () => {
     );
     const inspect = createWorkspaceImageInspector({
       ...avatarDependencies,
+      extractAnimationStill: noAnimationStill,
       analyze,
       authorizeScope,
       downloadTelegramAttachment,
@@ -185,11 +193,64 @@ describe("createWorkspaceImageInspector", () => {
     expect(analyze).toHaveBeenCalledWith(expect.objectContaining({ mediaType: "image/png" }));
   });
 
+  // The size of a GIF's file is not the size of its picture: only the frame meets the vision limit.
+  it("looks at the middle frame of a group GIF, however large its file", async () => {
+    const mp4 = Buffer.from("mp4 bytes");
+    const still = Buffer.from("ffd8ffe000104a46494600010100000100010000", "hex");
+    const analyze = vi.fn().mockResolvedValue("Человек закрывает уши.");
+    const extractAnimationStill = vi.fn().mockResolvedValue(still);
+    const inspect = createWorkspaceImageInspector({
+      ...avatarDependencies,
+      analyze,
+      authorizeScope,
+      downloadTelegramAttachment: vi.fn().mockResolvedValue(mp4),
+      extractAnimationStill,
+      findTelegramAttachment: vi.fn().mockResolvedValue({
+        attachment: {
+          fileId: "gif-file-id",
+          fileName: "preview.jpg",
+          kind: "animation",
+          mediaType: "image/jpeg",
+          size: VISION_MAX_FILE_BYTES + 1,
+        },
+        chatId: "-1001",
+        messageId: "44",
+      }),
+      readBinary: vi.fn(),
+      readTelegramInboxAttachment: vi.fn(),
+    });
+
+    await expect(inspect({
+      ...auth,
+      groupId: "group-1",
+      groupType: "family_private",
+      role: "member",
+      telegramChatType: "supergroup",
+    }, {
+      attachmentId: "00000000-0000-4000-8000-000000000044",
+      question: "Что на гифке?",
+      scope: "family",
+    })).resolves.toEqual({
+      analysis: "Человек закрывает уши.",
+      scope: "family",
+      source: {
+        attachmentId: "00000000-0000-4000-8000-000000000044",
+        kind: "animation",
+        mediaType: "image/jpeg",
+        size: still.byteLength,
+        telegramMessageId: "44",
+      },
+    });
+    expect(extractAnimationStill).toHaveBeenCalledWith(mp4);
+    expect(analyze).toHaveBeenCalledWith(expect.objectContaining({ bytes: still, mediaType: "image/jpeg" }));
+  });
+
   it("does not download bytes or call vision after live attachment access is revoked", async () => {
     const analyze = vi.fn();
     const downloadTelegramAttachment = vi.fn();
     const inspect = createWorkspaceImageInspector({
       ...avatarDependencies,
+      extractAnimationStill: noAnimationStill,
       analyze,
       authorizeScope,
       downloadTelegramAttachment,
@@ -219,6 +280,7 @@ describe("createWorkspaceImageInspector", () => {
     const downloadTelegramAttachment = vi.fn();
     const inspect = createWorkspaceImageInspector({
       ...avatarDependencies,
+      extractAnimationStill: noAnimationStill,
       analyze,
       authorizeScope,
       downloadTelegramAttachment,
@@ -249,6 +311,7 @@ describe("createWorkspaceImageInspector", () => {
     const analyze = vi.fn();
     const inspect = createWorkspaceImageInspector({
       ...avatarDependencies,
+      extractAnimationStill: noAnimationStill,
       analyze,
       authorizeScope,
       downloadTelegramAttachment: vi.fn().mockResolvedValue(Buffer.from("plain text")),
@@ -284,6 +347,7 @@ describe("createWorkspaceImageInspector", () => {
   it("normalizes a raw vision provider failure without exposing provider internals", async () => {
     const inspect = createWorkspaceImageInspector({
       ...avatarDependencies,
+      extractAnimationStill: noAnimationStill,
       analyze: vi.fn().mockRejectedValue(new Error("upstream API key invalid")),
       authorizeScope: vi.fn(async () => undefined),
       downloadTelegramAttachment: vi.fn(),
@@ -311,6 +375,7 @@ describe("createWorkspaceImageInspector", () => {
   it("normalizes a vision provider failure for an opaque Telegram attachment", async () => {
     const inspect = createWorkspaceImageInspector({
       ...avatarDependencies,
+      extractAnimationStill: noAnimationStill,
       analyze: vi.fn().mockRejectedValue(new Error("upstream API key invalid")),
       authorizeScope: vi.fn(async () => undefined),
       downloadTelegramAttachment: vi.fn().mockResolvedValue(

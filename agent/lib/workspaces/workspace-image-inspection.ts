@@ -2,7 +2,8 @@
  * Authorized workspace and ephemeral Telegram vision boundary.
  *
  * Exports:
- * - `createWorkspaceImageInspector`: validates and submits authorized image bytes.
+ * - `createWorkspaceImageInspector`: validates and submits authorized image bytes; a group GIF by its
+ *   middle frame.
  * - `inspectWorkspaceImage`: production server-configured protocol-native vision inspector.
  *
  * The current Telegram avatar of a chat participant is one more source; its branch lives in
@@ -13,6 +14,7 @@ import { VISION_MAX_FILE_BYTES } from "../../config.js";
 import { analyzeImageWithVisionModel } from "../vision-model-analysis.js";
 import { AppError, isAppError } from "../app-error.js";
 import { ModelFacingError } from "../model-facing-error.js";
+import { extractAnimationStill } from "../attachments/animation-still.js";
 import { downloadTelegramAttachment } from "../attachments/telegram-attachment-download.js";
 import { telegramGroupAttachmentRepository } from "../attachments/telegram-group-attachment-repository.js";
 import { validateVisionImageBytes } from "../attachments/telegram-vision-attachment.js";
@@ -43,6 +45,7 @@ interface WorkspaceImageInspectorDependencies {
   authorizeScope(auth: WorkspaceAuthorization, scope: WorkspaceScope): Promise<void>;
   avatarSource: TelegramAvatarSource;
   downloadTelegramAttachment: typeof downloadTelegramAttachment;
+  extractAnimationStill: typeof extractAnimationStill;
   findAvatarAuthor(auth: WorkspaceAuthorization, sequenceId: string): Promise<TelegramAvatarAuthor | null>;
   findTelegramAttachment: typeof telegramGroupAttachmentRepository.find;
   readBinary(
@@ -123,14 +126,17 @@ export function createWorkspaceImageInspector(
     if ("attachmentId" in input) {
       assertAttachmentScope(auth, input.scope);
       const reference = await dependencies.findTelegramAttachment(auth, input.attachmentId);
-      if (reference.attachment.size !== undefined &&
+      const animation = reference.attachment.kind === "animation";
+      // A GIF's size is that of its file; only the middle frame cut from it must meet the limit.
+      if (!animation && reference.attachment.size !== undefined &&
         reference.attachment.size > VISION_MAX_FILE_BYTES) {
         throw new AppError(
           "AGENT_WORKSPACE_VISION_FILE_TOO_LARGE",
           "Vision-модель принимает изображение размером не более 10 МБ",
         );
       }
-      const bytes = await dependencies.downloadTelegramAttachment(reference.attachment);
+      const downloaded = await dependencies.downloadTelegramAttachment(reference.attachment);
+      const bytes = animation ? await dependencies.extractAnimationStill(downloaded) : downloaded;
       if (bytes.byteLength > VISION_MAX_FILE_BYTES) {
         throw new AppError(
           "AGENT_WORKSPACE_VISION_FILE_TOO_LARGE",
@@ -203,6 +209,7 @@ export const inspectWorkspaceImage = createWorkspaceImageInspector({
   authorizeScope: workspaceBinaryRepository.authorizeScope,
   avatarSource: telegramAvatarSource,
   downloadTelegramAttachment,
+  extractAnimationStill,
   findAvatarAuthor: telegramAvatarAuthorRepository.find,
   findTelegramAttachment: telegramGroupAttachmentRepository.find,
   readBinary: workspaceBinaryRepository.readBinary,

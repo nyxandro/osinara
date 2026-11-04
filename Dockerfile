@@ -2,13 +2,45 @@ ARG OCI_SOURCE
 ARG OCI_VERSION
 ARG OCI_REVISION
 
-FROM node:24-bookworm-slim@sha256:cb4e8f7c443347358b7875e717c29e27bf9befc8f5a26cf18af3c3dec80e58c5 AS first-party-node
+FROM node:24-bookworm-slim@sha256:cb4e8f7c443347358b7875e717c29e27bf9befc8f5a26cf18af3c3dec80e58c5 AS node-base
+
+FROM node-base AS first-party-node
 ARG OCI_SOURCE
 ARG OCI_VERSION
 ARG OCI_REVISION
 LABEL org.opencontainers.image.source="${OCI_SOURCE}" \
       org.opencontainers.image.version="${OCI_VERSION}" \
       org.opencontainers.image.revision="${OCI_REVISION}"
+
+# The agent cuts the middle frame of a Telegram GIF, an H.264 MP4 a chat participant sent, with its
+# own FFmpeg build that reads only MP4 (H.264) and GIF from a descriptor, opens no path and writes only
+# JPEG: a decoder is where a crafted file attacks, and Debian's full ffmpeg would add 200 packages and
+# 481 MB. Release 9.0.2 of 18.09.2026, signed by the FFmpeg release key
+# FCF9 86EA 15E6 E293 A564 4F10 B432 2F04 D676 58D8; the checksum pins the verified tarball. License
+# and source: THIRD_PARTY_NOTICES.md. Built from `node-base`, without the release labels, so the
+# stage stays cached from one release to the next.
+FROM node-base AS media-tools
+ARG FFMPEG_VERSION=9.0.2
+ARG FFMPEG_SHA256=8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes build-essential ca-certificates curl nasm xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl --fail --show-error --location \
+      "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" --output /tmp/ffmpeg.tar.xz \
+    && printf '%s  %s\n' "$FFMPEG_SHA256" /tmp/ffmpeg.tar.xz | sha256sum --check - \
+    && mkdir /tmp/ffmpeg \
+    && tar --extract --xz --file /tmp/ffmpeg.tar.xz --directory /tmp/ffmpeg --strip-components=1 \
+    && cd /tmp/ffmpeg \
+    && ./configure --prefix=/opt/ffmpeg \
+      --disable-everything --disable-autodetect --disable-network \
+      --disable-doc --disable-debug --disable-ffplay --disable-avdevice \
+      --enable-protocol=fd,pipe --enable-demuxer=mov,gif \
+      --enable-decoder=h264,gif --enable-parser=h264,gif \
+      --enable-encoder=mjpeg --enable-muxer=image2pipe --enable-filter=select,scale,format \
+    && make -j"$(nproc)" \
+    && make install \
+    && install -D --mode=0644 COPYING.LGPLv2.1 /opt/ffmpeg/share/doc/ffmpeg/COPYING.LGPLv2.1 \
+    && rm -rf /tmp/ffmpeg /tmp/ffmpeg.tar.xz
 
 FROM first-party-node AS dependencies
 WORKDIR /app
@@ -35,6 +67,7 @@ FROM dependencies AS test
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes jq \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=media-tools /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
 COPY . .
 CMD ["npm", "test"]
 
@@ -128,6 +161,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production
+COPY --from=media-tools /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
+COPY --from=media-tools /opt/ffmpeg/share/doc/ffmpeg/COPYING.LGPLv2.1 /usr/local/share/doc/ffmpeg/COPYING.LGPLv2.1
 COPY --from=production-dependencies /app/node_modules ./node_modules
 COPY --from=build /app/.runtime ./.runtime
 # The agent runs from `.runtime`; this tree holds its authored files (`instructions.md`) and serves the

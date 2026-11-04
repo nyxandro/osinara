@@ -90,7 +90,7 @@ interface TimelineRow {
   actor_id: string;
   actor_kind: TelegramTimelineActorKind;
   attachment_file_name: string | null;
-  attachment_kind: "document" | "photo" | null;
+  attachment_kind: "animation" | "document" | "photo" | null;
   attachment_media_type: string | null;
   attachment_size: string | null;
   content_text: string | null;
