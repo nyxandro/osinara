@@ -437,6 +437,46 @@ restart reaches the model as an unknown outcome instead of a second message. A r
 example a group that does not let the bot send polls; an unconfirmed send as `..._DELIVERY_AMBIGUOUS`.
 Every kind of chat gets both without a grant; scheduled turns and subagents never receive them.
 
+Since v0.62.0 `send_contact` sends a contact card the same way (`sendContact`, a name and a number from
+the conversation, memory or a source the agent read; spaces, brackets and dashes are dropped, a
+country code is never added): `AGENT_CONTACT_DELIVERY_FAILED`, `AGENT_CONTACT_DELIVERY_AMBIGUOUS`.
+
+Buttons inside an answer are answers, links or copy buttons. Answers stay in the private chat and the
+family group (a stored set in `telegram_reply_button_sets`). A link (`type="url"`, http or https, never
+a `t.me`, `telegram.me` or `telegram.dog` address) and a copy button (`type="copy_text"`, a text of at
+most 256 characters that the message itself shows) answer nobody: they go out in every chat, a reminder
+included, without a stored set, and stay under the message after its answers are settled. A refused
+markup is logged as `AGENT_REPLY_BUTTONS_REFUSED`; a message Telegram refuses with its buttons goes again
+without them (`AGENT_REPLY_BUTTONS_REJECTED`).
+
+An answer may carry four of Telegram's own rich tags, and only these: `<tg-time>` (a moment each
+reader sees in their own time zone; the model writes ISO 8601 with an offset in `at`, the backend sends
+Telegram's `unix`), `<tg-map>` (one point, `lat`, `long`, optional `zoom` 0-24), `<tg-collage>` and
+`<tg-slideshow>` (galleries of the answer's photos and videos, never split between messages). Telegram
+refuses a whole message over one wrong tag (`RICH_MESSAGE_GEO_INVALID`, `RICH_MESSAGE_DATE_FORMAT_INVALID`),
+so such a tag stays text and the pre-delivery answer check, like reminder creation, sends it back to the
+model once. Every other `tg-` tag stays inert.
+
+In a private chat a live turn shows "typing" from its start, every four seconds, except while a tool
+shows its own status, and Telegram's draft (`sendRichMessageDraft`) with the visible answer while the
+model writes it, at most once a second and renewed every 20 s; the draft stops before any message of
+the turn goes out. The preview passes the same filter as the answer and never shows reasoning, a
+reaction, service lines, button markup or a workspace path. A refused draft or status is logged once
+per turn as `AGENT_TELEGRAM_DRAFT_UPDATE_FAILED` (warn, with Telegram's `retryAfterSeconds`; the
+presenter then waits that long), a failing listener as `AGENT_MODEL_TEXT_LISTENER_FAILED`; neither fails
+the turn. `TELEGRAM_ANSWER_STREAMING_ENABLED` in `agent/config.ts` turns the draft off. On Android a
+visible draft keeps a person from sending a message (Telegram bug 62189), which is why it shows only
+while text is written. Groups, scheduled runs and wake-ups keep the "typing" of a tool step.
+
+Since v0.62.0 the agent sees a GIF by the middle frame of the file itself, not by the preview Telegram
+attaches only to some GIFs. The app image carries its own FFmpeg 9.0.2 build (stage `media-tools`: MP4
+with H.264 and GIF in, JPEG out, file descriptors only, no network protocols), run as `nobody` with
+only `PATH` in its environment. Migration 148 adds the attachment kind `animation`. Log codes:
+`AGENT_MEDIA_TOOL_MISSING` (the binary is absent, for example `npm run dev` on a host without ffmpeg
+6.1 or newer), `AGENT_MEDIA_TOOL_FAILED`, `AGENT_MEDIA_TOOL_TIMEOUT`, `AGENT_MEDIA_TOOL_OUTPUT_TOO_LARGE`,
+`AGENT_ANIMATION_STILL_FAILED`, `AGENT_ANIMATION_FORMAT_UNSUPPORTED`; without a frame the message still
+reaches the agent with a plain note.
+
 Since v0.61.0 each connected Google profile keeps the reminders in a calendar of its own («Осинара —
 напоминания», for the family «Осинара — семейные напоминания»), both ways: the minute schedule
 `calendar-mirror` of the agent process takes a person's edits from that calendar by sync token and
