@@ -38,8 +38,8 @@ const UNFINISHED_ENDINGS: readonly RegExp[] = [
   /<tg-time(?![\w-])[^>\n]*>(?![\s\S]*<\/tg-time>)[\s\S]*$/iu,
   // An image or a link not closed yet: `![…`, `[…`, `[…](…`.
   /!?\[[^\]\n]*(?:\]\([^)\n]*)?$/u,
-  // A service line not closed yet: `[[spl`, `[[no-re`.
-  /\[\[[^\]\n]*$/u,
+  // A service line not closed yet: `[[spl`, `[[no-re`, `[[split]`.
+  /\[\[[^\]\n]*\]?$/u,
   // A tag not closed yet.
   /<[^>\n]*$/u,
 ];

@@ -42,6 +42,7 @@ describe("previewAnswerText", () => {
     expect(previewAnswerText("Смотри [сайт](https://exa")).toBe("Смотри");
     expect(previewAnswerText("Созвон <tg-time at=\"2026-11-07T19:00:00+03:00\" format=\"wt\">суббо")).toBe("Созвон");
     expect(previewAnswerText("Итог [память: mem_0123")).toBe("Итог");
+    expect(previewAnswerText("Первое\n\n[[split]")).toBe("Первое");
     expect(previewAnswerText("Готово <b")).toBe("Готово");
   });
 
@@ -83,6 +84,6 @@ describe("preview property", () => {
       for (const hidden of ["/workspace/", "tg-button", "think>", "[память", "telegram-reaction", "empty-delivery", "[[split"]) {
         expect(preview, JSON.stringify(prefix)).not.toContain(hidden);
       }
-    }));
+    }), { numRuns: 500 });
   });
 });

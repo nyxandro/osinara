@@ -179,6 +179,7 @@ const POST_V0101_MIGRATIONS = [
   "145_sandbox_api_keys.sql",
   "146_monitoring_schedule_runs_recent.sql",
   "147_reminder_calendar_mirror.sql",
+  "148_telegram_animation_attachments.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [
