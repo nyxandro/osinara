@@ -43,6 +43,28 @@ describe("followupSchedule", () => {
     expect(schedule.first?.toISOString()).toBe("2026-11-04T05:00:00.000Z");
   });
 
+  it("moves a night follow-up to eight by the clock across a daylight saving change", () => {
+    // Found by the property below in CI: 22:00 on 31.10 in New York plus 24 hours is 07:00 on 01.11,
+    // because that night is 25 hours long.
+    const schedule = followupSchedule({
+      fromGroup: false,
+      localFirstRun: "2026-11-01T07:10:00",
+      recurring: false,
+      requestedAt: new Date("2026-10-31T23:00:00Z"), // 19:00 in New York
+      suggestedTimezone: "America/New_York",
+    });
+    // The morning is past the reminder, so the quick follow-up goes instead.
+    expect(schedule.first?.toISOString()).toBe("2026-10-31T23:15:00.000Z");
+    const later = followupSchedule({
+      fromGroup: false,
+      localFirstRun: "2026-11-01T18:00:00",
+      recurring: false,
+      requestedAt: new Date("2026-10-31T23:00:00Z"),
+      suggestedTimezone: "America/New_York",
+    });
+    expect(later.first && instantToLocal(later.first, "America/New_York")).toBe("2026-11-01T08:00:00");
+  });
+
   it("asks once fifteen minutes later when the reminder is under three hours away", () => {
     const requestedAt = new Date("2026-11-03T09:00:00Z"); // 12:00 Moscow
     const schedule = followupSchedule({
