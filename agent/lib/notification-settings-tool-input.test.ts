@@ -6,6 +6,8 @@
  * - Semantic validation before execution, without a user approval gate.
  * - Explicit safe handling of MiniMax sibling-field materialization.
  * - Complete payload and bounded-correction guidance in the tool description.
+ * - Where a zone came from (#451): explicit source, a basis for the agent's reading, quiet hours kept
+ *   when left out.
  */
 import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -53,13 +55,36 @@ describe("notification_settings model input", () => {
     expect(notificationSettings.approval).toBeUndefined();
   });
 
-  it("rejects an incomplete set before execution", async () => {
+  it("rejects a set that does not say where the zone came from", async () => {
     const invalid = { action: "set", timezone: "Europe/Moscow" };
 
     await expect(notificationSettings.execute(invalid as never, context)).rejects.toThrowError(
-      /AGENT_NOTIFICATION_SETTINGS_INPUT_INVALID.*quietStart/u,
+      /AGENT_NOTIFICATION_SETTINGS_INPUT_INVALID.*source/u,
     );
     expect(configureNotifications).not.toHaveBeenCalled();
+  });
+
+  it("requires the basis of a zone the agent read from a sign", async () => {
+    await expect(notificationSettings.execute(
+      { action: "set", source: "agent", timezone: "Europe/Moscow" } as never,
+      context,
+    )).rejects.toThrowError(/AGENT_NOTIFICATION_SETTINGS_INPUT_INVALID.*basis/u);
+    expect(configureNotifications).not.toHaveBeenCalled();
+  });
+
+  it("keeps quiet hours when they are left out and refuses half a pair", async () => {
+    configureNotifications.mockResolvedValue({ timezone: "Asia/Yerevan" });
+    await notificationSettings.execute({ action: "set", source: "person", timezone: "Asia/Yerevan" }, context);
+    expect(configureNotifications).toHaveBeenCalledWith(expect.anything(), {
+      basis: null,
+      source: "person",
+      timezone: "Asia/Yerevan",
+    });
+
+    await expect(notificationSettings.execute(
+      { action: "set", quietStart: "22:00", source: "person", timezone: "Asia/Yerevan" } as never,
+      context,
+    )).rejects.toThrowError(/AGENT_NOTIFICATION_SETTINGS_INPUT_INVALID.*quietStart/u);
   });
 
   it("ignores only known set siblings when MiniMax materializes them for get", async () => {
@@ -94,7 +119,9 @@ describe("notification_settings model input", () => {
       "quietEnd",
       "null",
       "HH:MM",
-      "Never guess",
+      "source",
+      "basis",
+      "never from the language",
     ]) expect(description).toContain(fragment);
   });
 });

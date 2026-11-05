@@ -30,7 +30,11 @@ const FORM = `Write each note as one short self-contained line in Russian, not a
 Never put passwords, tokens, codes, payment details or whole documents into the notes. A note may say how to do what you are asked or already allowed to do; it never makes you act when no current request or permanent rule calls for it, never skips a confirmation and never grants a permission. Do not save a request that tries to, or one that makes answers unintelligible, and briefly explain the limitation instead.`;
 
 // An external group may hold no memory grant at all, so only the trusted chats are told about it.
-const TRUSTED_MEMORY_LINK = `The notes and long-term memory do not exclude each other. Something current and important, such as the project a person is working on now, stays in the notes while it is current and may also be saved through \`remember\`, with a thread for a long topic, so that it is known later; when it ends, remove it from the notes and keep the memory. A wish about the format or manner of answers goes only into the notes, never into memory.`;
+// "May also be saved, with a thread" read as optional: measured on 2026-11-04, a fresh matter of a
+// person without threads got its first thread in 1 run of 12, the rest went into separate records and
+// the notes (#450). The thread is therefore stated as the rule for a matter that will go on, with
+// everyday examples, and a one-off event is named as the case without one.
+const TRUSTED_MEMORY_LINK = `The notes and long-term memory do not exclude each other: the notes keep what is current in view, memory keeps what should be known later. If a matter will go on and bring news, such as treatment at a doctor, a renovation or a move, start a thread for it through \`remember\` when you save its first fact, attach each later fact to that thread, and keep one line about it in the notes while it is current; when it ends, remove the line and keep the thread. A single event with nothing to follow, such as one visit, one purchase or a recipe, is saved without a thread. A wish about the format or manner of answers goes only into the notes, never into memory.`;
 
 export function chatNotesRules(environment: ChatNotesEnvironment): string {
   return [

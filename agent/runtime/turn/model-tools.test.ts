@@ -69,9 +69,10 @@ describe("step tool order", () => {
 // 01.11.2026 the agent learnt to send a place and a poll, and the owner got `manage_api_keys` for
 // API keys that skills in sandboxes use without seeing them. On 04.11.2026 it learnt to send a contact card,
 // and a list of reminders, schedules, invitations, memory records or threads became an action of the tool
-// that changes the same object (#457); the owner's six administration tools became one door (#459).
+// that changes the same object (#457); the owner's six administration tools became one door (#459). A
+// reminder learnt to wait for the person's timezone (#451): `get_current_time` gives the UTC date without a zone.
 const CHANGED_AFTER_RECORDING = new Set([
-  "execute_google_workspace", "export_memory", "manage_agent_schedule", "manage_behavior_preference",
+  "execute_google_workspace", "export_memory", "get_current_time", "manage_agent_schedule", "manage_behavior_preference",
   "manage_gmail_message", "manage_google_workspace_connection", "manage_memory", "manage_memory_thread",
   "manage_reminder", "remember", "manage_skill", "notification_settings", "owner_settings", "search_memories",
   "send_contact", "send_location", "send_poll", "send_voice_message", "web_search",

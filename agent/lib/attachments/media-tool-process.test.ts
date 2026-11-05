@@ -6,7 +6,7 @@
  *   file as a descriptor the tool could not open itself.
  * - Refusals for a tool that runs too long, writes too much, fails, cannot start or is not installed.
  */
-import { mkdtemp, open, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, open, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -45,7 +45,8 @@ describe("runMediaTool", () => {
     try {
       const output = await runMediaTool({
         ...limits,
-        args: ["-c", `cat <&${MEDIA_TOOL_INPUT_FD}`],
+        // The shell's own `read`: under a root agent the tool may start no other program.
+        args: ["-c", `read -r line <&${MEDIA_TOOL_INPUT_FD}; printf %s "$line"`],
         binary: "/bin/sh",
         inputFd: handle.fd,
       });
@@ -79,6 +80,14 @@ describe("runMediaTool", () => {
       .rejects.toMatchObject({ code: "AGENT_MEDIA_TOOL_FAILED", details: { exitCode: 1 } });
   });
 
+  it("never takes a line the tool wrote itself for a failure of the sandbox", async () => {
+    await expect(runMediaTool({
+      ...limits,
+      args: ["-c", "echo 'media-sandbox: enforcing the Landlock ruleset: Operation not permitted (EPERM)' >&2; exit 120"],
+      binary: "/bin/sh",
+    })).rejects.toMatchObject({ code: "AGENT_MEDIA_TOOL_FAILED", details: { exitCode: 120 } });
+  });
+
   it("reports a tool that is not installed", async () => {
     await expect(runMediaTool({ ...limits, args: [], binary: "/usr/local/bin/osinara-missing-tool" }))
       .rejects.toMatchObject({ code: "AGENT_MEDIA_TOOL_MISSING" });
@@ -96,3 +105,46 @@ describe("runMediaTool", () => {
     }
   });
 });
+
+// A root or production agent runs every tool inside `media-sandbox` (services/media-sandbox/):
+// Landlock and seccomp. The test image is such an agent; a development machine runs the tool as itself.
+const SANDBOXED = process.getuid?.() === 0 || process.env.NODE_ENV === "production";
+
+(SANDBOXED ? describe : describe.skip)("runMediaTool in the sandbox", () => {
+  it("keeps the tool from every file, even one any user may read", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "osinara-media-tool-test-"));
+    const path = join(directory, "family-note.txt");
+    await writeFile(path, "семейная заметка", { mode: 0o644 });
+    await chmod(directory, 0o755);
+    try {
+      await expect(runMediaTool({ ...limits, args: ["-c", `read -r line < ${path} && printf %s "$line"`], binary: "/bin/sh" }))
+        .rejects.toMatchObject({ code: "AGENT_MEDIA_TOOL_FAILED", details: { stderr: expect.stringContaining("Permission denied") } });
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps the tool off every network", async () => {
+    await expect(runMediaTool({ ...limits, args: ["-c", "exec 4<>/dev/tcp/127.0.0.1/9"], binary: "/usr/bin/bash" }))
+      .rejects.toMatchObject({ code: "AGENT_MEDIA_TOOL_FAILED", details: { stderr: expect.stringContaining("socket: Permission denied") } });
+  });
+
+  it("lets the tool write nothing and start no other program", async () => {
+    await expect(runMediaTool({ ...limits, args: ["-c", "printf x > /tmp/osinara-media-tool-written"], binary: "/bin/sh" }))
+      .rejects.toMatchObject({ details: { stderr: expect.stringContaining("Permission denied") } });
+    await expect(runMediaTool({ ...limits, args: ["-c", "exec /usr/bin/id -u"], binary: "/usr/bin/bash" }))
+      .rejects.toMatchObject({ details: { stderr: expect.stringContaining("Permission denied") } });
+  });
+
+  it("lets the tool start threads but no other process, which could hold its output open", async () => {
+    await expect(runMediaTool({ ...limits, args: ["-c", "( sleep 30 ) & wait"], binary: "/usr/bin/bash" }))
+      .rejects.toMatchObject({ code: "AGENT_MEDIA_TOOL_FAILED", details: { stderr: expect.stringContaining("fork") } });
+  });
+
+  it("finds a tool named without a path in its PATH", async () => {
+    const output = await runMediaTool({ ...limits, args: ["кадр"], binary: "echo" });
+
+    expect(output.toString("utf8")).toBe("кадр\n");
+  });
+});
+

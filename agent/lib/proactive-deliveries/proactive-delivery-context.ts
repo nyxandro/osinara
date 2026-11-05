@@ -8,7 +8,7 @@
 import { escapeUntrustedContextJson } from "../untrusted-context-json.js";
 
 /** `calendar_mirror_notice`: a message about the reminders' Google Calendar, e.g. lost access. */
-export type ProactiveDeliverySourceKind = "agent_schedule" | "calendar_mirror_notice" | "reminder";
+export type ProactiveDeliverySourceKind = "agent_schedule" | "calendar_mirror_notice" | "reminder" | "reminder_timezone_followup";
 
 export interface ProactiveDeliveryRecord {
   content: string;
