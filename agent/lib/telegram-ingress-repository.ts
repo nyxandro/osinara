@@ -24,14 +24,15 @@ import { claimNextTelegramIngress } from "./telegram-ingress-claim-repository.js
 import { telegramPrivateBurstRepository } from "./telegram-private-burst.js";
 import { registerTelegramMediaGroupMember, settleTelegramMediaGroupMembersSql } from "./telegram-media-group-repository.js";
 
-const IGNORED_MEDIA_REASON = "external_media";
+// Any update of a channel, an unregistered or a disconnected group: acknowledged, never stored (#465).
+const IGNORED_UPDATE_REASON = "unaccepted_chat";
 
-async function insertIgnoredMedia(client: PoolClient, updateId: string): Promise<void> {
+async function insertIgnoredUpdate(client: PoolClient, updateId: string): Promise<void> {
   await client.query(
     `INSERT INTO telegram_ingress_ignored_updates (update_id, reason)
      VALUES ($1, $2)
      ON CONFLICT (update_id) DO NOTHING`,
-    [updateId, IGNORED_MEDIA_REASON],
+    [updateId, IGNORED_UPDATE_REASON],
   );
 }
 
@@ -76,12 +77,12 @@ export async function isTelegramUpdateQueued(updateId: string): Promise<boolean>
 export const telegramIngressRepository: TelegramIngressRepository = {
   ...telegramIngressProcessingRepository,
 
-  async acceptMedia(input) {
+  async acceptChatUpdate(input) {
     requireUpdateId(input.updateId);
     requireNonEmpty(
       input.chatId,
       "AGENT_TELEGRAM_CHAT_ID_INVALID",
-      "Telegram не передал идентификатор чата для проверки медиа",
+      "Telegram не передал идентификатор чата для проверки обновления",
     );
     const client = await database().connect();
     try {
@@ -108,7 +109,7 @@ export const telegramIngressRepository: TelegramIngressRepository = {
         return true;
       }
       if (input.chatType === "channel") {
-        await insertIgnoredMedia(client, input.updateId);
+        await insertIgnoredUpdate(client, input.updateId);
         await client.query("COMMIT");
         return false;
       }
@@ -121,16 +122,18 @@ export const telegramIngressRepository: TelegramIngressRepository = {
       const group = await client.query<{ type: string }>(
         `SELECT type::text
          FROM telegram_groups
-         WHERE telegram_chat_id = $1
-         FOR SHARE`,
+         WHERE telegram_chat_id = $1 AND disconnected_at IS NULL`,
         [input.chatId],
       );
-      // A registered group takes in whatever its participants send; no grant decides what it sees.
+      // A working registered group takes in whatever its participants send; no grant decides what it
+      // sees. A disconnected one keeps nothing, like a chat that was never registered (#465). The
+      // advisory lock above orders this read with every change of the group, so the row needs no lock:
+      // a plain read writes nothing to the slow disk for each group message.
       if (group.rows[0]?.type === "family_private" || group.rows[0]?.type === "external") {
         await client.query("COMMIT");
         return true;
       }
-      await insertIgnoredMedia(client, input.updateId);
+      await insertIgnoredUpdate(client, input.updateId);
       await client.query("COMMIT");
       return false;
     } catch (error) {

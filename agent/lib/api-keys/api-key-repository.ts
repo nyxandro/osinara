@@ -438,7 +438,10 @@ export const apiKeyRepository = {
          FROM sandbox_api_key_grants g
          JOIN sandbox_api_keys k ON k.id = g.key_id
          JOIN workspaces w ON w.id = g.workspace_id
+         LEFT JOIN telegram_groups tg ON tg.id = w.group_id
         WHERE g.revoked_at IS NULL AND k.value_stored_at IS NOT NULL
+          -- A disconnected group's keys leave the proxy until it is reconnected (#465).
+          AND (tg.id IS NULL OR tg.disconnected_at IS NULL)
         ORDER BY g.id`,
     );
     return result.rows.map((row) => ({

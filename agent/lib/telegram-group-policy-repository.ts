@@ -19,11 +19,24 @@ import type { TelegramGroupPolicyUpdate, TelegramGroupSkillUpdate } from "./tele
 
 const runner = new SandboxRunnerClient(SANDBOX_RUNNER_BASE_URL);
 
-export async function stopGroupSandboxes(client: PoolClient, groupId: string): Promise<void> {
+/** The sandbox sessions of a group's conversations; read before a removal unbinds them. */
+export async function groupSandboxThreads(client: Pick<PoolClient, "query">, groupId: string): Promise<string[]> {
   const sessions = await client.query<{ thread_id: string }>(
     "SELECT DISTINCT thread_id::text FROM conversation_sessions WHERE group_id=$1", [groupId],
   );
-  for (const session of sessions.rows) await runner.stop(session.thread_id);
+  return sessions.rows.map((session) => session.thread_id);
+}
+
+/** Network calls to the runner: never inside an open database transaction that holds locks (#464). */
+export async function stopSandboxThreads(threadIds: readonly string[]): Promise<void> {
+  // Every sandbox is asked to stop; the first runner failure is what the caller sees, as before.
+  const results = await Promise.allSettled(threadIds.map((threadId) => runner.stop(threadId)));
+  const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failure) throw failure.reason;
+}
+
+export async function stopGroupSandboxes(client: Pick<PoolClient, "query">, groupId: string): Promise<void> {
+  await stopSandboxThreads(await groupSandboxThreads(client, groupId));
 }
 
 export async function updateGroupPermissions(

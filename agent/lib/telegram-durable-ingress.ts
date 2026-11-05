@@ -9,6 +9,7 @@
  * - A reply-button press continues as the addressee's own message; the addressee's written message
  *   first removes the buttons they did not tap.
  * - A chat queue with no waiting update may run one due wake-up of its own conversation.
+ * - Nothing from a channel or from an unregistered or disconnected group is stored (#465).
  * - The owner's awaited API key is taken out before storage and never becomes a queued update; the
  *   message that brought a stored key is queued with the application's notice in place of the key.
  *
@@ -43,10 +44,7 @@ import type { ApiKeyCapture } from "./api-keys/api-key-intake.js";
 import { AppError, isAppError } from "./app-error.js";
 import { type TelegramIngressRepository, type TelegramIngressVoice, type TelegramPrivateBurstPolicy } from "./telegram-ingress-contract.js";
 import { waitForHeldPrivateChat } from "./telegram-private-burst.js";
-import {
-  hasTelegramInboundMedia,
-  isMessageAddressedToBot,
-} from "./telegram-message-policy.js";
+import { isMessageAddressedToBot } from "./telegram-message-policy.js";
 import { telegramIngressControl } from "./telegram-ingress-dispatch.js";
 import { combineTelegramMediaGroup } from "./telegram-media-group.js";
 import { CAPTIONLESS_ATTACHMENT_MODEL_TEXT } from "./telegram-model-placeholders.js";
@@ -77,7 +75,10 @@ const VIDEO_NOTE_MEDIA_TYPE = "video/mp4";
 
 export interface DurableIngressDependencies {
   reportFailure: typeof recordOperationalIncident;
-  acceptMedia(message: Pick<TelegramMessage, "chat">, updateId: string): Promise<boolean>;
+  /** Whether an update of this non-private chat may be stored; a refused one is remembered as ignored. */
+  acceptChatUpdate(message: Pick<TelegramMessage, "chat">, updateId: string): Promise<boolean>;
+  /** Stops the button's waiting indicator without a text; never rejects. */
+  answerCallbackQuietly(callbackQueryId: string): Promise<void>;
   authorizeVoice(message: Pick<TelegramMessage, "chat" | "from">, options: { readonly addressed: boolean }): Promise<boolean>;
   /**
    * Takes the owner's awaited API key out before storage, so it never reaches the queue or the model;
@@ -490,13 +491,13 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
     if (captured.kind === "consumed") return new Response("ok");
     // From here on only the application's notice stands for a message that carried a stored key.
     const { raw, update } = captured.kind === "replaced" ? captured : context;
-    // Media of a channel or an unregistered chat is acknowledged before durable storage, download,
-    // transcription or dispatch; a registered group and a private chat take in everything.
-    if (
-      update.kind === "message" &&
-      hasTelegramInboundMedia(update.message) &&
-      !await dependencies.acceptMedia(update.message, incomingUpdateId)
-    ) {
+    // Anything from a channel or from a group the application does not work for — never registered or
+    // disconnected — is acknowledged before durable storage, download, transcription or dispatch: none
+    // of it is kept (#465). A pressed button there is put out without a word. A private chat and a
+    // working group take in everything.
+    const chat = update.kind === "message" ? update.message.chat : update.callbackQuery.message?.chat;
+    if (chat !== undefined && chat.type !== "private" && !await dependencies.acceptChatUpdate({ chat }, incomingUpdateId)) {
+      if (update.kind === "callback_query") context.waitUntil(dependencies.answerCallbackQuietly(update.callbackQuery.id));
       return new Response("ok");
     }
     const voice = voiceMetadata(raw);

@@ -61,6 +61,16 @@ describe("ModelFacingError", () => {
     expect(unknown.contract.sideEffectStatus).toBe("unknown");
   });
 
+  // 01.11 and 02.11.2026 a group removal failed twice and nothing kept the reason (#464).
+  it("keeps the raw failure as the cause, for the log only", () => {
+    const raw = new Error("connect ECONNREFUSED 10.0.0.4:5432");
+
+    const normalized = normalizeModelFacingError(raw, { toolName: "manage_telegram_group" });
+
+    expect(normalized.cause).toBe(raw);
+    expect(normalized.message).not.toContain("10.0.0.4");
+  });
+
   it("marks bad-input, not-found, access and conflict refusals as expected", () => {
     const normalize = (error: Error) => normalizeModelFacingError(error, { toolName: "remember" });
 

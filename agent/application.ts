@@ -35,6 +35,8 @@ import { database, openDedicatedConnection } from "./lib/database.js";
 import { networkAccessPublisher } from "./lib/network-access/network-access-projection.js";
 import { apiKeyPublisher } from "./lib/api-keys/api-key-projection.js";
 import { apiKeyUsageRoute } from "./lib/api-keys/api-key-usage-route.js";
+import { handleBotMembershipUpdate } from "./lib/group-connection/group-connection-membership.js";
+import { isTelegramGroupDisconnected } from "./lib/group-connection/group-connection-repository.js";
 import { withRuntimeAdmission } from "./lib/runtime-maintenance.js";
 import { createApprovalTimeoutResolver } from "./lib/telegram-hitl/approval-timeout.js";
 import { finalizeTimedOutPrompt } from "./lib/telegram-hitl/approval-timeout-prompt.js";
@@ -45,6 +47,7 @@ import { respondInSession } from "./runtime/respond.js";
 import { acquireRunnerLock } from "./runtime/runner-lock.js";
 import { startScheduler } from "./runtime/scheduler.js";
 import { startRuntimeServer } from "./runtime/server.js";
+import { registerTelegramGroupSendGate } from "./runtime/telegram/api.js";
 import { createTelegramChannel, telegramWebhookRoutes } from "./runtime/telegram/telegram-channel.js";
 import { summarizeWithModel } from "./runtime/turn/compaction.js";
 import { lifecycleTurnObserver } from "./runtime/turn/lifecycle-observer.js";
@@ -115,6 +118,8 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
   // before any turn can run, which also repairs a publication lost to a crash.
   await networkAccessPublisher.publish();
   await apiKeyPublisher.publish();
+  // Before anything can send: no write reaches a group the owner disconnected, whatever path (#465).
+  registerTelegramGroupSendGate(async (chatId) => !await isTelegramGroupDisconnected(chatId));
   const telegram = createTelegramChannel({
     botToken: options.botToken,
     botUsername: options.botUsername,
@@ -174,6 +179,7 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
     routes: [
       ...telegramWebhookRoutes({
         drainRoute: TELEGRAM_DRAIN_ROUTE,
+        onBotMembership: (membership, context) => handleBotMembershipUpdate(membership, (work) => context.waitUntil(work)),
         onDrain: (context) => ingress.drain(context),
         onVerifiedUpdate: (context) => ingress(context),
         route: TELEGRAM_WEBHOOK_ROUTE,

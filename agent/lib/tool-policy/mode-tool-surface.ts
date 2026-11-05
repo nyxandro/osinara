@@ -28,7 +28,7 @@ import { z } from "zod";
 
 import { GIF_REPLIES_AVAILABLE } from "../gifs/gif-reply-availability.js";
 import { MODEL_VISION_AVAILABLE } from "../model-vision-availability.js";
-import { wrapModelFacingTool, wrapModelFacingToolMap } from "../model-facing-tool.js";
+import { gateDisconnectedGroup, wrapModelFacingTool, wrapModelFacingToolMap } from "../model-facing-tool.js";
 import { externalGroupLoadSkillTool } from "../group-skills/group-load-skill-tool.js";
 import { externalRememberInputSchema } from "../remember-contract.js";
 import getCurrentTime from "../tools/get_current_time.js";
@@ -238,10 +238,10 @@ function buildExternalToolSurface(
   const effectiveSurface = scheduledRun
     ? Object.fromEntries(Object.entries(surface).map(([name, definition]) => [name, scheduledExternalTool(definition)]))
     : surface;
-  // A verified external group delegates like any root turn (the built-in, never wrapped);
-  // a child never gets it, see `buildSubagentToolSurface`.
+  // A verified external group delegates like any root turn (the built-in, never wrapped for errors, only
+  // checked for a disconnected group, #465); a child never gets it, see `buildSubagentToolSurface`.
   const wrapped = wrapModelFacingToolMap(effectiveSurface);
-  return includeApplicationCore ? { ...wrapped, agent: agentTool as AnyToolDefinition } : wrapped;
+  return includeApplicationCore ? { ...wrapped, agent: gateDisconnectedGroup(agentTool as AnyToolDefinition) } : wrapped;
 }
 
 function allowlistKey(allowed: ReadonlySet<ExternalGroupToolName>): string {

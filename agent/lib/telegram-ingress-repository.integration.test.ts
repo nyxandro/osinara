@@ -4,7 +4,7 @@
  * Constructs covered:
  * - `telegramIngressRepository.enqueue`: idempotent update ingestion with conflict detection.
  * - `isTelegramUpdateQueued`: recognises an update the queue already holds.
- * - `telegramIngressRepository.acceptMedia`: a registered group takes in every medium, an unregistered
+ * - `telegramIngressRepository.acceptChatUpdate`: a registered group takes in every medium, an unregistered
  *   chat none; the decision and its tombstone are update-id atomic.
  * - `telegramIngressRepository.claimNext`: per-continuation FIFO with independent queue progress.
  * - Lease ownership: expired work can be reclaimed while stale workers are rejected.
@@ -145,7 +145,7 @@ describeWithDatabase("telegramIngressRepository", () => {
     const update = updateInput("1002", "telegram:group:-100-policy", "повтор после регистрации");
 
     // An unregistered chat takes in nothing.
-    await expect(telegramIngressRepository.acceptMedia({
+    await expect(telegramIngressRepository.acceptChatUpdate({
       chatId: "-100-policy",
       chatType: "supergroup",
       updateId: update.updateId,
@@ -156,7 +156,7 @@ describeWithDatabase("telegramIngressRepository", () => {
        VALUES ($1, '-100-policy', 'Policy group', 'family_private', 'addressed_only', '{}')`,
       [family.rows[0]!.id],
     );
-    await expect(telegramIngressRepository.acceptMedia({
+    await expect(telegramIngressRepository.acceptChatUpdate({
       chatId: "-100-policy",
       chatType: "supergroup",
       updateId: update.updateId,
@@ -190,7 +190,7 @@ describeWithDatabase("telegramIngressRepository", () => {
     for (const chatId of ["-100-media-plain", "-100-media-malformed"]) {
       // Photos, documents, stickers, voice notes and video alike: the decision no longer looks at the kind.
       for (let medium = 0; medium < 3; medium += 1) {
-        await expect(telegramIngressRepository.acceptMedia({
+        await expect(telegramIngressRepository.acceptChatUpdate({
           chatId,
           chatType: "supergroup",
           updateId: String(updateId++),
@@ -212,7 +212,7 @@ describeWithDatabase("telegramIngressRepository", () => {
        VALUES ($1, '-100-live-photo', 'Live photo group', 'external', 'addressed_only', '{}')`,
       [family.rows[0]!.id],
     );
-    await expect(telegramIngressRepository.acceptMedia({
+    await expect(telegramIngressRepository.acceptChatUpdate({
       chatId: "-100-live-photo",
       chatType: "supergroup",
       updateId: "1012",

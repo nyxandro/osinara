@@ -61,7 +61,7 @@ describe("timedOutPromptText", () => {
 describe("createTimedOutPromptFinalizer", () => {
   it("clears the keyboard of the exact prompt message", async () => {
     const editMessage = vi.fn().mockResolvedValue({ ok: true });
-    await createTimedOutPromptFinalizer(editMessage)(CLAIM);
+    await createTimedOutPromptFinalizer(editMessage, async () => false)(CLAIM);
     expect(editMessage).toHaveBeenCalledWith({
       chat_id: "649624756",
       message_id: 2801,
@@ -77,9 +77,23 @@ describe("createTimedOutPromptFinalizer", () => {
     expect(typeof body.message_id).toBe("number");
   });
 
+  // The card stays as it was in a group the owner disconnected: nothing is written there (#465).
+  it("leaves the card of a disconnected group untouched", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const editMessage = vi.fn().mockResolvedValue({ ok: true });
+    const disconnected = vi.fn(async () => true);
+
+    await createTimedOutPromptFinalizer(editMessage, disconnected)({ ...CLAIM, telegramChatId: "-1001" });
+
+    expect(disconnected).toHaveBeenCalledWith("-1001");
+    expect(editMessage).not.toHaveBeenCalled();
+    expect(JSON.parse(info.mock.calls[0]![0] as string)).toMatchObject({ code: "AGENT_GROUP_DISCONNECTED_PROMPT_LEFT" });
+    info.mockRestore();
+  });
+
   it("fails with a stable code when Telegram rejects the edit", async () => {
     const editMessage = vi.fn().mockResolvedValue({ ok: false });
-    await expect(createTimedOutPromptFinalizer(editMessage)(CLAIM)).rejects.toThrow(
+    await expect(createTimedOutPromptFinalizer(editMessage, async () => false)(CLAIM)).rejects.toThrow(
       /AGENT_APPROVAL_TIMEOUT_PROMPT_EDIT_REJECTED/u,
     );
   });

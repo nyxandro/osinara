@@ -4,6 +4,7 @@
  * Exports:
  * - `ConfigureTelegramWebhookOptions`: explicit credentials, target, fetch, and timeout inputs.
  * - `configureTelegramWebhook`: sets and verifies the exact Osinara webhook without dropping updates.
+ * - `TELEGRAM_ALLOWED_UPDATES`: the update types the webhook subscribes to.
  */
 import { InstallerError } from "./errors.js";
 
@@ -13,6 +14,8 @@ const MAX_TIMEOUT_MS = 120_000;
 const BOT_TOKEN_PATTERN = /^[0-9]+:[A-Za-z0-9_-]+$/u;
 const HOSTNAME_PATTERN = /^(?=.{1,253}$)(?!-)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 const SECRET_PATTERN = /^[A-Za-z0-9_-]{1,256}$/u;
+/** The update types the application handles; Telegram keeps the list until the next `setWebhook`. */
+export const TELEGRAM_ALLOWED_UPDATES = ["message", "callback_query", "my_chat_member"] as const;
 
 export interface ConfigureTelegramWebhookOptions {
   readonly fetch: typeof globalThis.fetch;
@@ -74,7 +77,8 @@ export async function configureTelegramWebhook(
 
   const targetUrl = `https://${options.hostname}${TELEGRAM_WEBHOOK_PATH}`;
   const registered = await telegramJson(options, "setWebhook", {
-    allowed_updates: ["message", "callback_query"],
+    // `my_chat_member`: the bot removed from or added back to a group (#465).
+    allowed_updates: [...TELEGRAM_ALLOWED_UPDATES],
     secret_token: options.secretToken,
     url: targetUrl,
   });

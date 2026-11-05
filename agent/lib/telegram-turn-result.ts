@@ -32,6 +32,28 @@ import {
 } from "./conversation-wakeups/conversation-wakeup-context.js";
 import type { TurnInterjectionContentKind } from "./turn-interjection/turn-interjection-repository.js";
 
+/**
+ * The group's last pause, while the history the turn sees spans it: messages written then were never
+ * recorded, so the agent must not claim nobody said them (#465).
+ */
+function groupPauseContext(
+  group: RegisteredGroup | null,
+  turnContext: Pick<PreparedTelegramGroupTurnContext, "visibleTimelineEntries">,
+): string | null {
+  const pause = group?.lastPause;
+  if (!pause) return null;
+  const after = BigInt(pause.afterSequence);
+  const spansPause = (turnContext.visibleTimelineEntries ?? []).some((entry) => BigInt(entry.sequenceId) <= after);
+  if (!spansPause) return null;
+  return [
+    "<group_pause>",
+    `The agent was disconnected from this group from ${pause.startedAt.toISOString()} to ${pause.endedAt.toISOString()}.`,
+    `Messages written in that time were not recorded and are unknown to you; in the history the pause falls after message ${pause.afterSequence}.`,
+    "If someone refers to them, say you did not see them.",
+    "</group_pause>",
+  ].join("\n");
+}
+
 export function buildTelegramTurnResult(input: {
   access: ConversationAccess;
   actor: TelegramInboundActor;
@@ -77,6 +99,8 @@ export function buildTelegramTurnResult(input: {
   if (input.turnInterjectionMarker) context.push(turnInterjectionMarkerContext(input.turnInterjectionMarker));
   const plannedWakeups = formatPlannedWakeupsContext(input.plannedWakeups);
   if (plannedWakeups) context.push(plannedWakeups);
+  const pause = groupPauseContext(input.group, input.turnContext);
+  if (pause) context.push(pause);
   return {
     auth: {
       attributes: {

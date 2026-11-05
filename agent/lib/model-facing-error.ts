@@ -127,6 +127,7 @@ export function normalizeModelFacingError(
       sideEffectStatus: canCorrect || category === "authorization" ? "not_started" : "unknown",
     }, { isExpectedRefusal: error instanceof AppError && error.isExpectedRefusal });
   }
+  // The raw failure stays out of the model's text but travels as the cause, for the log (#464).
   return new ModelFacingError({
     category: "dependency",
     code: "AGENT_TOOL_DEPENDENCY_FAILED",
@@ -134,5 +135,5 @@ export function normalizeModelFacingError(
     reason: `Зависимость инструмента ${context.toolName} завершилась с ошибкой.`,
     retryable: false,
     sideEffectStatus: "unknown",
-  });
+  }, { cause: error });
 }

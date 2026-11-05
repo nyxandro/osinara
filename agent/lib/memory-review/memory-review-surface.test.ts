@@ -33,6 +33,13 @@ import {
   TRUSTED_MODE_TOOL_NAMES,
 } from "../tool-policy/trusted-mode-tool-catalog.js";
 
+// Group turns ask whether the owner disconnected the group (#465); here every group is connected.
+vi.mock("../group-connection/group-connection-repository.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../group-connection/group-connection-repository.js")>(),
+  isGroupIdDisconnected: vi.fn(async () => false),
+  isTelegramGroupDisconnected: vi.fn(async () => false),
+}));
+
 // Every application tool name a mode can emit; the review prompt may cite only its own subset.
 const APPLICATION_TOOL_NAMES = [...new Set([
   ...TRUSTED_MODE_TOOL_NAMES,

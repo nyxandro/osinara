@@ -21,7 +21,7 @@ function fixture(count: number) {
     },
   }));
   const repository = {
-    acceptMedia: vi.fn(), beginDispatch: vi.fn(), beginVoiceTranscription: vi.fn(),
+    acceptChatUpdate: vi.fn(), beginDispatch: vi.fn(), beginVoiceTranscription: vi.fn(),
     claimNext: vi.fn(async () => claims.shift() ?? null), complete: vi.fn(),
     enqueue: vi.fn(), fail: vi.fn(), rekeyQueue: vi.fn(),
     release: vi.fn(), renewLease: vi.fn(), saveVoiceTranscript: vi.fn(),
@@ -31,7 +31,7 @@ function fixture(count: number) {
   const runTurn = vi.fn().mockResolvedValue({ status: "completed", text: "готово" });
   const handler = createTelegramDurableIngress({
     reportFailure: vi.fn(),
-    acceptMedia: vi.fn(), authorizeVoice: vi.fn(), captureApiKey: vi.fn(async () => ({ kind: "forwarded" as const })), botUsername: "osinara_bot", dispatch,
+    acceptChatUpdate: vi.fn(async () => true), answerCallbackQuietly: vi.fn(async () => undefined), authorizeVoice: vi.fn(), captureApiKey: vi.fn(async () => ({ kind: "forwarded" as const })), botUsername: "osinara_bot", dispatch,
     dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), replyButtonsOnArrival: vi.fn(async () => undefined), handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), leaseMilliseconds: 1_000,
     repository, runTurn, transcribeVoice: vi.fn(),
   });

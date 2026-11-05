@@ -60,7 +60,8 @@ function approvalFor(input: Record<string, unknown>) {
   const approval = (manageTelegramGroup as unknown as {
     approval: (context: { toolInput: Record<string, unknown> }) => unknown;
   }).approval;
-  return approval({ toolInput: input });
+  // The runtime hands the approval policy the whole call context, the session included.
+  return approval({ ...context(), toolInput: input });
 }
 
 describe("manage_telegram_group.status", () => {
@@ -167,6 +168,8 @@ describe("manage_telegram_group.status", () => {
       telegramChatId: "-1001",
     })).toBe("not-applicable");
     expect(approvalFor({ action: "remove", telegramChatId: "-1001" })).toBe("user-approval");
+    expect(approvalFor({ action: "disconnect", telegramChatId: "-1001" })).toBe("user-approval");
+    expect(approvalFor({ action: "reconnect", telegramChatId: "-1001" })).toBe("user-approval");
     expect(approvalFor({
       action: "register",
       registration: {

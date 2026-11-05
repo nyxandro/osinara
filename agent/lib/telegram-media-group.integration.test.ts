@@ -28,7 +28,7 @@ const lease = 60_000;
 
 async function drain(dispatch: DurableIngressDependencies["dispatch"], notifyTimeout = vi.fn()) {
   const ingress = createTelegramDurableIngress({ reportFailure: notifyTimeout, repository, botUsername: "osinara_bot", leaseMilliseconds: lease,
-    acceptMedia: vi.fn(), authorizeVoice: vi.fn(), captureApiKey: vi.fn(async () => ({ kind: "forwarded" as const })), dispatch, dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), replyButtonsOnArrival: vi.fn(async () => undefined), handleSoftwareUpdateCallback: vi.fn(),
+    acceptChatUpdate: vi.fn(async () => true), answerCallbackQuietly: vi.fn(async () => undefined), authorizeVoice: vi.fn(), captureApiKey: vi.fn(async () => ({ kind: "forwarded" as const })), dispatch, dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), replyButtonsOnArrival: vi.fn(async () => undefined), handleSoftwareUpdateCallback: vi.fn(),
     runTurn: vi.fn().mockResolvedValue({ status: "completed", text: "готово" }), transcribeVoice: vi.fn(),
   });
   const tasks: Promise<unknown>[] = [];

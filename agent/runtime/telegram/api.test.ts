@@ -1,8 +1,9 @@
 /** Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md. */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   callTelegramApi,
+  registerTelegramGroupSendGate,
   sendTelegramChatAction,
   sendTelegramMessage,
   splitTelegramMessageText,
@@ -58,6 +59,52 @@ describe("callTelegramApi", () => {
     });
 
     expect(fetchMock.mock.calls[0]![0]).toBe("https://telegram.example/bot123456:ABCDEF/getMe");
+  });
+});
+
+// The application's last line against writing to a disconnected group, whatever path forgot (#465).
+describe("group send gate", () => {
+  afterEach(() => {
+    registerTelegramGroupSendGate(null);
+    vi.restoreAllMocks();
+  });
+
+  function okFetch() {
+    return vi.fn(async () => new Response(JSON.stringify({ ok: true, result: true })));
+  }
+
+  it("does not send to a group the gate closes, and reports it loudly", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const gate = vi.fn(async (chatId: string) => chatId !== "-1001");
+    registerTelegramGroupSendGate(gate);
+    const fetchMock = okFetch();
+
+    await expect(callTelegramApi({ body: { chat_id: -1001, text: "hi" }, botToken: "t", fetch: fetchMock, method: "sendMessage" }))
+      .rejects.toThrow(/^AGENT_GROUP_DISCONNECTED_SEND_BLOCKED:/u);
+    const form = new FormData();
+    form.set("chat_id", "-1001");
+    await expect(callTelegramApi({ botToken: "t", fetch: fetchMock, form, method: "sendDocument" }))
+      .rejects.toThrow(/^AGENT_GROUP_DISCONNECTED_SEND_BLOCKED:/u);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(gate).toHaveBeenCalledWith("-1001");
+    expect(JSON.parse(error.mock.calls[0]![0] as string)).toMatchObject({
+      chatId: "-1001", code: "AGENT_GROUP_DISCONNECTED_SEND_BLOCKED", method: "sendMessage",
+    });
+  });
+
+  it("lets through a working group, a private chat and every read", async () => {
+    const gate = vi.fn(async (chatId: string) => chatId !== "-1001");
+    registerTelegramGroupSendGate(gate);
+    const fetchMock = okFetch();
+
+    await callTelegramApi({ body: { chat_id: "-1002", text: "hi" }, botToken: "t", fetch: fetchMock, method: "sendMessage" });
+    await callTelegramApi({ body: { chat_id: 101, text: "hi" }, botToken: "t", fetch: fetchMock, method: "sendMessage" });
+    await callTelegramApi({ body: { chat_id: -1001, user_id: 5 }, botToken: "t", fetch: fetchMock, method: "getChatMember" });
+    await callTelegramApi({ body: { callback_query_id: "q" }, botToken: "t", fetch: fetchMock, method: "answerCallbackQuery" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(gate).toHaveBeenCalledTimes(1);
   });
 });
 

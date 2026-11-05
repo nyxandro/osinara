@@ -22,6 +22,13 @@ import { modeInstructions } from "../prompt/mode-instructions.js";
 import { GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES } from "../tool-policy/grantable-group-capabilities.js";
 import { buildModeToolSurface, buildSubagentToolSurface } from "../tool-policy/mode-tool-surface.js";
 
+// Group turns ask whether the owner disconnected the group (#465); here every group is connected.
+vi.mock("../group-connection/group-connection-repository.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../group-connection/group-connection-repository.js")>(),
+  isGroupIdDisconnected: vi.fn(async () => false),
+  isTelegramGroupDisconnected: vi.fn(async () => false),
+}));
+
 const GRANTED = new Set(["send_voice_message"] as const);
 
 function externalAuth() {

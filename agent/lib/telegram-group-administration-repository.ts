@@ -5,7 +5,8 @@
  * - `TelegramGroupRegistration`: complete persisted registration input.
  * - `TelegramGroupPolicyUpdate`: complete external-group policy replacement input.
  * - `TelegramGroupSkillUpdate`: complete safe-skill policy replacement input.
- * - `TelegramGroupStatus`: complete read-only registration and policy projection.
+ * - `TelegramGroupStatus`, `TelegramGroupConnection`: complete read-only registration, policy and
+ *   connection projection.
  * - `TelegramGroupSessionRotation`: owner-requested canonical rotation for every group topic.
  * - `TelegramGroupAdministrationRepository`: injectable registration/removal/policy contract.
  * - `telegramGroupAdministrationRepository`: family-scoped group lifecycle operations.
@@ -17,7 +18,7 @@ import {
 } from "../config.js";
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
-import { stopGroupSandboxes, updateGroupPermissions } from "./telegram-group-policy-repository.js";
+import { groupSandboxThreads, stopGroupSandboxes, updateGroupPermissions } from "./telegram-group-policy-repository.js";
 import { grantableFamilySkills } from "./family-skills/family-skill-repository.js";
 import { skillGrantCatalog, skillNeedsBash } from "./family-skills/skill-grants.js";
 import { EXTERNAL_GROUP_BASE_SKILLS } from "./group-skills/group-skill-catalog.js";
@@ -61,7 +62,12 @@ export interface TelegramGroupSkillUpdate {
   telegramChatId: string;
 }
 
+export type TelegramGroupConnection =
+  | { state: "connected" }
+  | { reason: "bot_removed" | "owner"; since: string; state: "disconnected" };
+
 export interface TelegramGroupStatus {
+  connection: TelegramGroupConnection;
   messageMode: TelegramGroupMessageMode;
   skillAllowlist: string[];
   telegramChatId: string;
@@ -86,7 +92,7 @@ export interface TelegramGroupAdministrationRepository {
     familyId: string;
     requestedBy: string;
     telegramChatId: string;
-  }): Promise<{ groupId: string }>;
+  }): Promise<{ groupId: string; sandboxThreadIds: string[]; title: string }>;
   requestGroupSessionRotation(input: TelegramGroupSessionRotation): Promise<{
     groupId: string;
     requestedCanonicalSessions: number;
@@ -116,6 +122,8 @@ export const telegramGroupAdministrationRepository: TelegramGroupAdministrationR
       // Return the exact persisted configuration; effective external base tools are added by the
       // model-facing tool from the same static catalog used by execution policy.
       const result = await client.query<{
+        disconnected_at: Date | null;
+        disconnected_reason: "bot_removed" | "owner" | null;
         message_mode: TelegramGroupMessageMode;
         telegram_chat_id: string;
         title: string;
@@ -123,7 +131,8 @@ export const telegramGroupAdministrationRepository: TelegramGroupAdministrationR
         tool_allowlist: string[];
         type: RegisteredGroupType;
       }>(
-        `SELECT telegram_chat_id, title, type, message_mode, tool_allowlist, skill_allowlist
+        `SELECT telegram_chat_id, title, type, message_mode, tool_allowlist, skill_allowlist,
+                disconnected_at, disconnected_reason
            FROM telegram_groups
           WHERE family_id = $1
           ORDER BY lower(title), telegram_chat_id`,
@@ -131,6 +140,9 @@ export const telegramGroupAdministrationRepository: TelegramGroupAdministrationR
       );
       await client.query("COMMIT");
       return result.rows.map((row) => ({
+        connection: row.disconnected_at && row.disconnected_reason
+          ? { reason: row.disconnected_reason, since: row.disconnected_at.toISOString(), state: "disconnected" as const }
+          : { state: "connected" as const },
         messageMode: row.message_mode,
         skillAllowlist: row.skill_allowlist,
         telegramChatId: row.telegram_chat_id,
@@ -172,8 +184,8 @@ export const telegramGroupAdministrationRepository: TelegramGroupAdministrationR
       );
 
       // A type change crosses a trust boundary, so replace the row and cascade all scoped data.
-      const existing = await client.query<{ family_id: string; id: string; type: RegisteredGroupType; skill_allowlist: string[]; tool_allowlist: string[] }>(
-        `SELECT id, family_id, type, skill_allowlist, tool_allowlist
+      const existing = await client.query<{ disconnected: boolean; family_id: string; id: string; type: RegisteredGroupType; skill_allowlist: string[]; tool_allowlist: string[] }>(
+        `SELECT id, family_id, type, skill_allowlist, tool_allowlist, disconnected_at IS NOT NULL AS disconnected
          FROM telegram_groups
          WHERE telegram_chat_id = $1
          FOR UPDATE`,
@@ -184,6 +196,14 @@ export const telegramGroupAdministrationRepository: TelegramGroupAdministrationR
         throw new AppError(
           "AGENT_GROUP_REGISTRATION_CONFLICT",
           "Группа уже принадлежит другой семье",
+        );
+      }
+      // Registering again would quietly change, or with another type wipe, a group the owner only
+      // paused; bringing it back is reconnection (#465).
+      if (current?.disconnected) {
+        throw new AppError(
+          "AGENT_GROUP_DISCONNECTED",
+          "Группа отключена. Чтобы вернуть агента с прежними данными, попросите подключить её",
         );
       }
       if (current && (current.type !== input.type || JSON.stringify(current.tool_allowlist) !== JSON.stringify(input.toolAllowlist))) {
@@ -340,11 +360,13 @@ export const telegramGroupAdministrationRepository: TelegramGroupAdministrationR
         "SELECT id FROM telegram_groups WHERE family_id=$1 AND telegram_chat_id=$2 FOR UPDATE",
         [input.familyId, input.telegramChatId],
       );
-      if (existing.rows[0]) await stopGroupSandboxes(client, existing.rows[0].id);
-      const result = await client.query<{ id: string }>(
+      // The sandboxes stop after the commit (#464): the removal unbinds their sessions from the group,
+      // and the runner is never called while this transaction holds the group's locks.
+      const sandboxThreadIds = existing.rows[0] ? await groupSandboxThreads(client, existing.rows[0].id) : [];
+      const result = await client.query<{ id: string; title: string }>(
         `DELETE FROM telegram_groups
          WHERE family_id = $1 AND telegram_chat_id = $2
-         RETURNING id`,
+         RETURNING id, title`,
         [input.familyId, input.telegramChatId],
       );
       const row = result.rows[0];
@@ -355,7 +377,7 @@ export const telegramGroupAdministrationRepository: TelegramGroupAdministrationR
         );
       }
       await client.query("COMMIT");
-      return { groupId: row.id };
+      return { groupId: row.id, sandboxThreadIds, title: row.title };
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;

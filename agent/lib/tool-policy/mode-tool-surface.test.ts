@@ -35,10 +35,18 @@ vi.mock("../attachments/telegram-attachment-materializer.js", () => ({ materiali
 
 import { FAMILY_ONLY_TOOL_NAMES, OWNER_ONLY_TOOL_NAMES, PRIVATE_ONLY_TOOL_NAMES, TRUSTED_MODE_TOOL_NAMES, buildModeToolSurface, buildSubagentToolSurface } from "./mode-tool-surface.js";
 import { agentTool } from "../../runtime/tools/delegate.js";
+import { isGroupIdDisconnected } from "../group-connection/group-connection-repository.js";
 import { bash as nativeBash, glob as nativeGlob, grep as nativeGrep, readFile as nativeReadFile, writeFile as nativeWriteFile } from "../../runtime/tools/defaults.js";
 import { TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES } from "../turn-interjection/turn-interjection-surface.js";
 import { SUBAGENT_TOOL_ACTIONS, SUBAGENT_TOOL_NAMES } from "./subagent-tool-names.js";
 import { ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES, EXTERNAL_GROUP_BASE_TOOLS, EXTERNAL_GROUP_TOOL_NAMES, type ExternalGroupToolName } from "./group-tool-catalog.js";
+
+// Group turns ask whether the owner disconnected the group (#465); here every group is connected.
+vi.mock("../group-connection/group-connection-repository.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../group-connection/group-connection-repository.js")>(),
+  isGroupIdDisconnected: vi.fn(async () => false),
+  isTelegramGroupDisconnected: vi.fn(async () => false),
+}));
 
 function names(input: Parameters<typeof buildModeToolSurface>[0]): string[] {
   return Object.keys(buildModeToolSurface(input)).sort();
@@ -373,13 +381,18 @@ describe("external group tool surface", () => {
     }
   });
 
-  it("gives an interactive external group the runtime's own delegation tool, unwrapped", () => {
+  it("gives an interactive external group the runtime's own delegation tool, checked only for disconnection", async () => {
     const surface = buildModeToolSurface({
       capabilities: new Set(),
       environment: "external",
     });
 
-    expect(surface.agent).toBe(agentTool);
+    // Its own model-facing errors stay; only a disconnected group stops it before a paid sub-task (#465).
+    expect(surface.agent!.description).toBe(agentTool.description);
+    expect(surface.agent!.inputSchema).toBe(agentTool.inputSchema);
+    vi.mocked(isGroupIdDisconnected).mockResolvedValueOnce(true);
+    await expect(surface.agent!.execute({}, { session: { auth: { current: { attributes: { groupId: "group-1" } } } } } as never))
+      .rejects.toMatchObject({ code: "AGENT_GROUP_DISCONNECTED" });
     expect(buildSubagentToolSurface({ capabilities: new Set(), environment: "external" })).not.toHaveProperty("agent");
   });
 
