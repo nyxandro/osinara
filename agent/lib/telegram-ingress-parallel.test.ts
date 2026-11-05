@@ -35,7 +35,7 @@ describe("independent Telegram queue progress", () => {
       privateBurstReadyIn: vi.fn(async () => null),
       complete: vi.fn(async (id: string) => { completed.push(Number(id)); }), fail: vi.fn() };
     const handler = createTelegramDurableIngress({ reportFailure: vi.fn(), repository: repository as unknown as TelegramIngressRepository,
-      botUsername: "osinara_bot", leaseMilliseconds: 60_000, acceptMedia: vi.fn(), authorizeVoice: vi.fn(), captureApiKey: vi.fn(async () => false),
+      botUsername: "osinara_bot", leaseMilliseconds: 60_000, acceptChatUpdate: vi.fn(async () => true), answerCallbackQuietly: vi.fn(async () => undefined), authorizeVoice: vi.fn(), captureApiKey: vi.fn(async () => ({ kind: "forwarded" as const })),
       dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), replyButtonsOnArrival: vi.fn(async () => undefined), handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), transcribeVoice: vi.fn(),
       dispatch: vi.fn(async (update: TelegramUpdate) => { dispatched.push(updateMessageId(update)); return dispatchedTurn(update); }),
       runTurn: vi.fn(async (turnId: string) => {
@@ -68,7 +68,7 @@ describe("independent Telegram queue progress", () => {
     const repository = { claimNext: vi.fn(async () => items.shift() ?? null), beginDispatch: vi.fn(), renewLease: vi.fn(),
       privateBurstReadyIn: vi.fn(async () => null), complete: vi.fn(), fail: vi.fn() };
     const handler = createTelegramDurableIngress({ reportFailure: vi.fn(), repository: repository as unknown as TelegramIngressRepository,
-      botUsername: "osinara_bot", leaseMilliseconds: 60_000, acceptMedia: vi.fn(), authorizeVoice: vi.fn(), captureApiKey: vi.fn(async () => false),
+      botUsername: "osinara_bot", leaseMilliseconds: 60_000, acceptChatUpdate: vi.fn(async () => true), answerCallbackQuietly: vi.fn(async () => undefined), authorizeVoice: vi.fn(), captureApiKey: vi.fn(async () => ({ kind: "forwarded" as const })),
       dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), replyButtonsOnArrival: vi.fn(async () => undefined), handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), transcribeVoice: vi.fn(),
       dispatch: vi.fn(async (update: TelegramUpdate) => { dispatched.push(updateMessageId(update)); return dispatchedTurn(update); }),
       runTurn: vi.fn(async () => { await messageGate; return { status: "completed" as const, text: null }; }),
@@ -122,7 +122,7 @@ describe("independent Telegram queue progress", () => {
       beginDispatch: vi.fn(), complete: vi.fn(finish),
       privateBurstReadyIn: vi.fn(async () => null),
       fail: vi.fn(), renewLease: vi.fn(),
-      acceptMedia: vi.fn(), beginVoiceTranscription: vi.fn(), enqueue: vi.fn(),
+      acceptChatUpdate: vi.fn(), beginVoiceTranscription: vi.fn(), enqueue: vi.fn(),
       rekeyQueue: vi.fn(), release: vi.fn(), saveVoiceTranscript: vi.fn(),
     } satisfies TelegramIngressRepository;
     let releaseGroup!: () => void;
@@ -131,7 +131,7 @@ describe("independent Telegram queue progress", () => {
     const privateGate = new Promise<void>((resolve) => { releasePrivate = resolve; });
     const dispatched: number[] = [];
     const handler = createTelegramDurableIngress({ reportFailure: vi.fn(), repository, botUsername: "osinara_bot",
-      leaseMilliseconds: 60_000, acceptMedia: vi.fn(), authorizeVoice: vi.fn(), captureApiKey: vi.fn(async () => false),
+      leaseMilliseconds: 60_000, acceptChatUpdate: vi.fn(async () => true), answerCallbackQuietly: vi.fn(async () => undefined), authorizeVoice: vi.fn(), captureApiKey: vi.fn(async () => ({ kind: "forwarded" as const })),
       dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), replyButtonsOnArrival: vi.fn(async () => undefined), handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), transcribeVoice: vi.fn(),
       dispatch: vi.fn(async (update: TelegramUpdate) => { dispatched.push(updateMessageId(update)); return dispatchedTurn(update); }),
       runTurn: vi.fn(async (turnId: string) => {

@@ -2,7 +2,7 @@
  * Consolidated scheduled agent scenario mutation tool.
  *
  * Export:
- * - `manage_agent_schedule` routes create, update, pause, resume, run-now, and delete actions.
+ * - `manage_agent_schedule` lists the schedules and routes create, update, pause, resume, run-now and delete.
  *
  * Key constructs:
  * - Object-shaped model schema publishes machine-visible actions without a root JSON Schema union.
@@ -21,6 +21,11 @@ import {
   AGENT_SCHEDULE_USER_REQUEST_MAX_LENGTH,
 } from "../agent-schedules/agent-schedule-config.js";
 import { requireAgentScheduleAuthorization } from "../agent-schedules/agent-schedule-context.js";
+import {
+  AGENT_SCHEDULE_LIST_DESCRIPTION,
+  AGENT_SCHEDULE_LIST_FIELDS,
+  requireAgentScheduleListPage,
+} from "../agent-schedules/agent-schedule-list-action.js";
 import { agentScheduleRepository } from "../agent-schedules/agent-schedule-repository.js";
 import { AGENT_SCHEDULE_SIMPLE_RECURRENCE_KINDS, type AgentScheduleSimpleRecurrenceKind } from "../agent-schedules/agent-schedule-record.js";
 import { agentScheduleRecurrenceSchema } from "../agent-schedules/agent-schedule-recurrence-schema.js";
@@ -31,10 +36,11 @@ import { resolveCreatedScheduleCheck } from "../agent-schedules/agent-schedule-c
 import { scheduleCheckRepository } from "../agent-schedules/agent-schedule-check-repository.js";
 import { runScheduleCheckIn } from "../agent-schedules/agent-schedule-check-runner.js";
 import { withCallExamples, type CallExamples } from "../tool-call-examples.js";
+import { requireOnlyFields as requireKnownFields } from "../tool-input-validation.js";
 import { escapeUntrustedContextJson } from "../untrusted-context-json.js";
 import { AGENT_SCHEDULE_PAUSE_NOTE, agentScheduleMaxRunsField, requireAgentScheduleMaxRuns } from "../agent-schedules/agent-schedule-limits.js";
 
-const TOOL_ACTIONS = ["create", "update", "pause", "resume", "run_now", "delete"] as const;
+const TOOL_ACTIONS = ["list", "create", "update", "pause", "resume", "run_now", "delete"] as const;
 const RECURRENCE_KINDS = ["once", ...AGENT_SCHEDULE_SIMPLE_RECURRENCE_KINDS, "weekly"] as const;
 const SCOPES = ["personal", "family"] as const;
 const EXECUTION_CONTEXTS = ["conversation", "isolated"] as const;
@@ -50,9 +56,11 @@ const TOP_LEVEL_FIELDS = [
   "checkUntil",
   "maxRuns",
   "action",
+  "cursor",
   "executionContext",
   "firstRunAt",
   "id",
+  "limit",
   "nextRunAt",
   "recurrence",
   "scenarioPrompt",
@@ -68,9 +76,10 @@ const manageAgentScheduleSchema = z.object({
   checkUntil: z.string().optional().describe("With checkCommand: the end of the watch, ISO with a UTC offset."),
   maxRuns: agentScheduleMaxRunsField.optional(),
   action: z.enum(TOOL_ACTIONS),
+  ...AGENT_SCHEDULE_LIST_FIELDS,
   executionContext: z.enum(EXECUTION_CONTEXTS).optional().describe("Only in create: conversation or isolated."),
   firstRunAt: z.string().optional().describe("Only in create: the first run, for example 2026-07-15T23:33:00+03:00."),
-  id: z.string().optional().describe("The id from list_agent_schedules; for every action except create."),
+  id: z.string().optional().describe("The id from the list; for every action except list and create."),
   nextRunAt: z.string().optional().describe("Only in update: the new time of the next run with a UTC offset."),
   recurrence: agentScheduleRecurrenceSchema.optional(),
   scenarioPrompt: z.string().max(AGENT_SCHEDULE_PROMPT_MAX_LENGTH).optional().describe("The task for the agent on every run."),
@@ -80,23 +89,14 @@ const manageAgentScheduleSchema = z.object({
   userRequest: z.string().max(AGENT_SCHEDULE_USER_REQUEST_MAX_LENGTH).optional().describe("The person's original request."),
 }).strict();
 
+const INPUT_ERROR_CODE = "AGENT_SCHEDULE_INPUT_INVALID";
+
 function inputError(message: string): never {
-  throw new AppError("AGENT_SCHEDULE_INPUT_INVALID", message);
+  throw new AppError(INPUT_ERROR_CODE, message);
 }
 
-function requireOnlyFields(
-  input: Record<string, unknown>,
-  allowedFields: readonly string[],
-  label: string,
-): void {
-  const allowed = new Set(allowedFields);
-  const extra = Object.keys(input).filter((key) => !allowed.has(key));
-  if (extra.length > 0) {
-    inputError(
-      `${label} содержит неизвестные поля: ${extra.join(", ")}. ` +
-        `Используйте только: ${allowedFields.join(", ")}`,
-    );
-  }
+function requireOnlyFields(input: Record<string, unknown>, allowedFields: readonly string[], label: string): void {
+  requireKnownFields(input, allowedFields, label, INPUT_ERROR_CODE);
 }
 
 function requiredString(
@@ -143,7 +143,7 @@ function requiredUuid(input: Record<string, unknown>): string {
     "00000000-0000-4000-8000-000000000001",
   );
   if (!UUID_PATTERN.test(id)) {
-    inputError("Поле id должно быть UUID существующего агентного расписания из list_agent_schedules");
+    inputError("Поле id должно быть UUID существующего агентного расписания из manage_agent_schedule с action=list");
   }
   return id;
 }
@@ -383,6 +383,7 @@ function requireManageAgentScheduleInput(input: unknown) {
   requireOnlyFields(payload, TOP_LEVEL_FIELDS, "manage_agent_schedule");
   const action = requireAction(payload);
 
+  if (action === "list") return { action, page: requireAgentScheduleListPage(payload) } as const;
   if (action === "create") return { action, values: requireCreateInput(payload) } as const;
   if (action === "update") return { action, values: requireUpdateInput(payload) } as const;
   return { action, id: requireIdOnlyInput(payload, action) } as const;
@@ -408,8 +409,9 @@ async function requireCheckWaiting(sandbox: Parameters<typeof runScheduleCheckIn
 }
 
 const TOOL_DESCRIPTION = [
-  "Create, change, pause, resume, run now or delete an agent schedule: at the set time the agent runs with a scenario and sends the result. Load the schedules skill first: it holds the scenario, wake-up and monitor rules.",
-  "Not a reminder with ready-made text; that is manage_reminder. Take the id of an existing schedule from list_agent_schedules.",
+  "List, create, change, pause, resume, run now or delete an agent schedule: at the set time the agent runs with a scenario and sends the result. Load the schedules skill before a change: it holds the scenario, wake-up and monitor rules.",
+  "Not a reminder with ready-made text; that is manage_reminder. Take the id of an existing schedule from the list.",
+  AGENT_SCHEDULE_LIST_DESCRIPTION,
   "Create payload: {\"action\":\"create\",\"executionContext\":\"isolated\",\"title\":\"Дайджест: новые модели ИИ\",\"firstRunAt\":\"2026-07-15T23:33:00+03:00\",\"timezone\":\"Europe/Moscow\",\"recurrence\":{\"kind\":\"daily\",\"interval\":1},\"scope\":\"personal\",\"scenarioPrompt\":\"What to collect, the sources, filters, the format of the final message and when not to send an empty report\",\"userRequest\":\"ежедневно в 23:33 МСК получать сводку\"}.",
   "executionContext is required in create: isolated is a separate run with an empty context for independent reports; conversation is a wake-up that continues the current task in this conversation with its whole history, and then maxRuns is required.",
   "A scenario run only reads Google Workspace: before creating one that needs a Google change, tell the person it will only report what to do.",
@@ -421,6 +423,7 @@ const TOOL_DESCRIPTION = [
 ].join(" ");
 
 export const MANAGE_AGENT_SCHEDULE_CALL_EXAMPLES: CallExamples = {
+  list: { action: "list" },
   create: {
     isolated: {
       action: "create", executionContext: "isolated", title: "Дайджест: новые модели ИИ", firstRunAt: "2026-07-15T23:33:00+03:00",
@@ -435,11 +438,11 @@ export const MANAGE_AGENT_SCHEDULE_CALL_EXAMPLES: CallExamples = {
       userRequest: "скажи, когда привезут посылку",
     },
   },
-  update: { action: "update", id: "<id из list_agent_schedules>", nextRunAt: "2026-07-16T09:00:00+03:00" },
-  pause: { action: "pause", id: "<id из list_agent_schedules>" },
-  resume: { action: "resume", id: "<id из list_agent_schedules>" },
-  run_now: { action: "run_now", id: "<id из list_agent_schedules>" },
-  delete: { action: "delete", id: "<id из list_agent_schedules>" },
+  update: { action: "update", id: "<id из списка action=list>", nextRunAt: "2026-07-16T09:00:00+03:00" },
+  pause: { action: "pause", id: "<id из списка action=list>" },
+  resume: { action: "resume", id: "<id из списка action=list>" },
+  run_now: { action: "run_now", id: "<id из списка action=list>" },
+  delete: { action: "delete", id: "<id из списка action=list>" },
 };
 
 export default withCallExamples(defineTool({
@@ -450,6 +453,7 @@ export default withCallExamples(defineTool({
   async execute(input, ctx) {
     const parsed = requireManageAgentScheduleInput(input);
     const authorization = requireAgentScheduleAuthorization(ctx);
+    if (parsed.action === "list") return await agentScheduleRepository.list(authorization, parsed.page);
     if (parsed.action === "create") {
       // Settings are refused before the script runs, so an invalid monitor never executes anything.
       resolveCreatedScheduleCheck(parsed.values, new Date());

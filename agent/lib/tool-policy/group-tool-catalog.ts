@@ -22,7 +22,9 @@ function capabilityNames<const Catalog extends readonly ExternalGroupCapability[
   };
 }
 
-// Persisted grants are action-level where one static descriptor contains distinct side effects.
+// Persisted grants are action-level where one static descriptor contains distinct side effects. The
+// rights to list or read memory keep the names of the tools they once were (#457): they now give an
+// action of `manage_memory` or `manage_memory_thread`, see `external-group-memory-tools.ts`.
 export const EXTERNAL_GROUP_CAPABILITY_CATALOG = [
   { name: "bash" },
   { name: "import_telegram_attachment" },

@@ -5,6 +5,8 @@
  * - A message that asks memory nothing is not searched and offers no records, saying so in diagnostics.
  * - A message with any word outside small talk is searched as before.
  * - A file sent without a caption is not searched: the placeholder text is not the person's words.
+ * - Nor is the application's notice that stands in for an API key the owner sent; the owner's words
+ *   that joined it in one burst still are.
  * - Borrowed conversation is searched with, but never makes small talk searchable.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,7 +18,7 @@ import { memoryRetrievalRepository } from "./memory-retrieval-repository.js";
 import type { MemoryRetrievalBranchDiagnostics } from "./memory-retrieval-ranking.js";
 import { retrieveMemoryTurnContext } from "./memory-retrieval.js";
 import { memoryThreadBriefRepository } from "./memory-thread-brief-repository.js";
-import { CAPTIONLESS_ATTACHMENT_MODEL_TEXT } from "./telegram-model-placeholders.js";
+import { apiKeyDeliveredModelText, CAPTIONLESS_ATTACHMENT_MODEL_TEXT } from "./telegram-model-placeholders.js";
 
 vi.mock("./memory-embedding-client.js", async (importOriginal) => ({
   ...await importOriginal<typeof import("./memory-embedding-client.js")>(),
@@ -118,6 +120,44 @@ describe("retrieveMemoryTurnContext", () => {
     expect(searchSpy).not.toHaveBeenCalled();
     expect(activate).not.toHaveBeenCalled();
     expect(context.memories).toEqual([]);
+    expect(context.diagnostics.abstained).toBe(true);
+  });
+
+  it.each([true, false])("does not search memory with the notice that stands in for an API key (applied: %s)", async (applied) => {
+    const searchSpy = vi.spyOn(memoryRetrievalRepository, "searchAuthorized");
+    const notice = apiKeyDeliveredModelText({
+      applied, name: "groq", variables: { apiKey: "GROQ_API_KEY", baseUrl: "GROQ_BASE_URL" },
+    });
+
+    const context = await retrieveMemoryTurnContext(auth, notice);
+
+    expect(searchSpy).not.toHaveBeenCalled();
+    expect(context.diagnostics.abstained).toBe(true);
+  });
+
+  it("searches the owner's own words that joined the API key notice in one burst", async () => {
+    search({ russianMatched: 3, russianTopRank: 0.1 });
+    vi.spyOn(memoryThreadBriefRepository, "activate").mockResolvedValue({ threads: [], totalCharacters: 0 });
+    const notice = apiKeyDeliveredModelText({
+      applied: true, name: "groq", variables: { apiKey: "GROQ_API_KEY", baseUrl: "GROQ_BASE_URL" },
+    });
+
+    const context = await retrieveMemoryTurnContext(auth, `${notice}\n\nа теперь расшифруй это видео целиком`);
+
+    expect(context.diagnostics.abstained).toBe(false);
+    const searched = vi.mocked(memoryRetrievalRepository.searchAuthorized).mock.calls.map((call) => call[1]);
+    expect(searched).toEqual(["а теперь расшифруй это видео целиком"]);
+  });
+
+  it("stays silent when only small talk joined the API key notice", async () => {
+    const searchSpy = vi.spyOn(memoryRetrievalRepository, "searchAuthorized");
+    const notice = apiKeyDeliveredModelText({
+      applied: true, name: "groq", variables: { apiKey: "GROQ_API_KEY", baseUrl: "GROQ_BASE_URL" },
+    });
+
+    const context = await retrieveMemoryTurnContext(auth, `${notice}\n\nспасибо`);
+
+    expect(searchSpy).not.toHaveBeenCalled();
     expect(context.diagnostics.abstained).toBe(true);
   });
 

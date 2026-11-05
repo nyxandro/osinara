@@ -3,20 +3,26 @@
  *
  * Exports:
  * - `buildMemoryReviewToolSurface`: memory reads and source-backed normal-sensitivity writes only.
+ *
+ * Listing records and reading threads are actions of the memory tools since #457: the review gets
+ * them as reading views, each action checked against its own right in an external group.
  */
-import { defineTool, type ToolDefinition } from "../../runtime/tool.js";
+import { defineTool, type ToolContext, type ToolDefinition } from "../../runtime/tool.js";
 
 import { AppError } from "../app-error.js";
 import { wrapModelFacingToolMap } from "../model-facing-tool.js";
-import listMemories from "../tools/list_memories.js";
-import listMemoryThreads from "../tools/list_memory_threads.js";
-import readMemoryThread from "../tools/read_memory_thread.js";
+import manageMemory, { manageMemoryPresentation } from "../tools/manage_memory.js";
+import manageMemoryThread, {
+  manageMemoryThreadPresentation,
+  MEMORY_THREAD_READING_ACTIONS,
+} from "../tools/manage_memory_thread.js";
 import remember from "../tools/remember.js";
 import searchMemories from "../tools/search_memories.js";
-import searchMemoryThreads from "../tools/search_memory_threads.js";
 import { createReviewRememberInputSchema } from "../remember-contract.js";
 import type { MemoryScope } from "../memory-context.js";
+import { actionView } from "../tool-policy/action-view.js";
 import { authorizeCurrentExternalGroupCapability } from "../tool-policy/external-group-live-policy.js";
+import { EXTERNAL_MEMORY_THREAD_ACTION_RIGHTS } from "../tool-policy/external-group-memory-tools.js";
 import { resolveExternalGroupPolicyIdentity } from "../tool-policy/external-group-policy.js";
 import type { ExternalGroupToolName } from "../tool-policy/group-tool-catalog.js";
 
@@ -55,6 +61,17 @@ function reviewRemember(scope: MemoryScope): AnyTool {
   }) as unknown as AnyTool;
 }
 
+async function authorizeReviewRead(ctx: ToolContext, capability: ExternalGroupToolName): Promise<void> {
+  if (ctx.session.auth.current?.attributes.groupType !== "external") return;
+  const identity = resolveExternalGroupPolicyIdentity(ctx.session.auth);
+  if (!identity) throw new AppError(
+    "AGENT_GROUP_TOOL_FORBIDDEN",
+    "Текущая регистрация внешней группы не подтверждена",
+  );
+  // Descriptor grants are snapshots; every read must authorize against the live registration.
+  await authorizeCurrentExternalGroupCapability(identity, capability);
+}
+
 function reviewRead(
   capability: ExternalGroupToolName,
   definition: AnyTool,
@@ -62,15 +79,7 @@ function reviewRead(
   return defineTool({
     ...definition,
     async execute(input, ctx) {
-      if (ctx.session.auth.current?.attributes.groupType === "external") {
-        const identity = resolveExternalGroupPolicyIdentity(ctx.session.auth);
-        if (!identity) throw new AppError(
-          "AGENT_GROUP_TOOL_FORBIDDEN",
-          "Текущая регистрация внешней группы не подтверждена",
-        );
-        // Descriptor grants are snapshots; every read must authorize against the live registration.
-        await authorizeCurrentExternalGroupCapability(identity, capability);
-      }
+      await authorizeReviewRead(ctx, capability);
       return await definition.execute(input, ctx);
     },
   }) as unknown as AnyTool;
@@ -84,31 +93,29 @@ export function buildMemoryReviewToolSurface(
     externalCapabilities === undefined || externalCapabilities.has(name);
   const surface: Record<string, AnyTool> = {};
   if (allowed("list_memories")) {
-    surface.list_memories = reviewRead("list_memories", listMemories as unknown as AnyTool);
+    surface.manage_memory = actionView({
+      actions: ["list"],
+      authorize: async (ctx) => await authorizeReviewRead(ctx, "list_memories"),
+      definition: manageMemory as unknown as AnyTool,
+      presentation: manageMemoryPresentation(["list"]),
+      toolName: "manage_memory",
+    });
   }
-  if (allowed("list_memory_threads")) {
-    surface.list_memory_threads = reviewRead(
-      "list_memory_threads",
-      listMemoryThreads as unknown as AnyTool,
-    );
-  }
-  if (allowed("read_memory_thread")) {
-    surface.read_memory_thread = reviewRead(
-      "read_memory_thread",
-      readMemoryThread as unknown as AnyTool,
-    );
+  const threadActions = MEMORY_THREAD_READING_ACTIONS.filter((action) => allowed(EXTERNAL_MEMORY_THREAD_ACTION_RIGHTS[action]));
+  if (threadActions.length > 0) {
+    surface.manage_memory_thread = actionView({
+      actions: threadActions,
+      authorize: async (ctx, action) => await authorizeReviewRead(ctx, EXTERNAL_MEMORY_THREAD_ACTION_RIGHTS[action]),
+      definition: manageMemoryThread as unknown as AnyTool,
+      presentation: manageMemoryThreadPresentation(threadActions),
+      toolName: "manage_memory_thread",
+    });
   }
   if (allowed("remember")) surface.remember = reviewRemember(scope);
   if (allowed("search_memories")) {
     surface.search_memories = reviewRead(
       "search_memories",
       searchMemories as unknown as AnyTool,
-    );
-  }
-  if (allowed("search_memory_threads")) {
-    surface.search_memory_threads = reviewRead(
-      "search_memory_threads",
-      searchMemoryThreads as unknown as AnyTool,
     );
   }
   return wrapModelFacingToolMap(surface);

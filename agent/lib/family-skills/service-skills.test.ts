@@ -13,9 +13,10 @@ const names = (skills: Readonly<Record<string, unknown>>) => Object.keys(skills)
 
 describe("service skills", () => {
   it("gives a private chat the procedure skill of every tool it has", () => {
-    const tools = new Set(["manage_skill", "manage_reminder", "manage_agent_schedule", "send_voice_message", "manage_telegram_group"]);
+    const tools = new Set(["manage_skill", "manage_reminder", "manage_agent_schedule", "send_voice_message", "owner_settings"]);
 
-    expect(names(serviceSkillsFor("private", tools))).toEqual(["group-admin", "schedules", "skill-manager", "voice-replies"]);
+    // The owner's settings door (#459) brings the procedures of groups and of API keys.
+    expect(names(serviceSkillsFor("private", tools))).toEqual(["api-keys", "group-admin", "schedules", "skill-manager", "voice-replies"]);
   });
 
   it("gives the delegation procedure wherever the turn can delegate", () => {

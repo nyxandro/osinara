@@ -154,6 +154,12 @@ export const memoryReviewDispatchRepository = {
             WHERE batch.batch_kind = 'background' AND (batch.status = 'pending' OR
               (batch.status = 'leased' AND batch.lease_expires_at <= $1))
               AND batch.predecessor_sequence = candidate_lane.processed_through_sequence
+              -- A disconnected group's review waits for reconnection (#465).
+              AND NOT EXISTS (
+                SELECT 1 FROM application_conversations AS candidate_conversation
+                  JOIN telegram_groups AS candidate_group ON candidate_group.id = candidate_conversation.telegram_group_id
+                 WHERE candidate_conversation.id = batch.conversation_id AND candidate_group.disconnected_at IS NOT NULL
+              )
             ORDER BY batch.created_at, batch.id FOR UPDATE OF batch SKIP LOCKED LIMIT $2
          )
          UPDATE memory_review_batches AS batch

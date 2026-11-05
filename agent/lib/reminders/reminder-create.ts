@@ -125,7 +125,7 @@ export async function createReminderOrWait(
       }
       throw new AppError(
         "AGENT_REMINDER_AWAITING_RESOLVED",
-        "Это напоминание уже не ждёт часового пояса: проверьте актуальный список через list_reminders",
+        "Это напоминание уже не ждёт часового пояса: проверьте актуальный список через manage_reminder с action=list",
       );
     }
     const personal = request.scope === "personal";

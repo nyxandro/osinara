@@ -20,6 +20,7 @@ import type {
   AgentScheduleRecurrenceKind,
   AgentScheduleScope,
 } from "./agent-schedule-record.js";
+import { passDisconnectedGroupSchedules } from "./agent-schedule-disconnected-group.js";
 import {
   completeDeliveredAgentScheduleRun,
   type CompleteDeliveredAgentScheduleRunInput,
@@ -151,6 +152,8 @@ async function claimDueSchedules(options: ClaimOptions, monitors: boolean): Prom
     await client.query("BEGIN");
     await recoverUnstartedAgentSchedules(client, options.now);
     await recoverOrphanedConversationRuns(client, options.now);
+    // A disconnected group's due occurrences pass before anything is claimed: they never run (#465).
+    await passDisconnectedGroupSchedules(client, options.now);
 
     // Only an unfinished hand-off to the runtime expires; a confirmed running turn owns its lifecycle.
     const ambiguous = await client.query<{ family_id: string; id: string; lease_token: string }>(

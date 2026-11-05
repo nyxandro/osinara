@@ -89,14 +89,31 @@ function requireModelOutput(output: ToolModelOutput): ToolResultOutput {
   throw new TypeError("Expected toModelOutput to return a text, json or content result.");
 }
 
+// A failure the model reads only as a dependency failure keeps its real reason here: the message and,
+// for a PostgreSQL error, the fields that name the broken rule. Never `detail`: for a check violation it
+// repeats the whole failing row, memory texts and encrypted values included.
+const CAUSE_FIELDS = ["code", "constraint", "table"] as const;
+
+function causeDetails(cause: unknown): Record<string, string> | undefined {
+  if (!(cause instanceof Error)) return undefined;
+  const details: Record<string, string> = { message: cause.message };
+  for (const field of CAUSE_FIELDS) {
+    const value = (cause as unknown as Record<string, unknown>)[field];
+    if (typeof value === "string") details[field] = value;
+  }
+  return details;
+}
+
 function logFailure(error: unknown, ctx: ToolContext): void {
   // A coded refusal the tool boundary already reported must not raise the unstructured-error alert.
   if (error instanceof Error && error.name === "ModelFacingError" && (error as { isExpectedRefusal?: unknown }).isExpectedRefusal === true) return;
   const code = isObject(error) && typeof error.code === "string" ? error.code : undefined;
+  const cause = error instanceof Error ? causeDetails(error.cause) : undefined;
   console.error(JSON.stringify({
     code: "AGENT_TOOL_EXECUTION_FAILED",
     error: error instanceof Error ? error.message : String(error),
     ...(code === undefined ? {} : { errorCode: code }),
+    ...(cause === undefined ? {} : { cause }),
     sessionId: ctx.session.id,
     toolCallId: ctx.callId,
     toolName: ctx.toolName,

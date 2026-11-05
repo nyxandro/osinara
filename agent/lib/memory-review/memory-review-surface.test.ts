@@ -28,14 +28,23 @@ import { memoryReviewBatchIdFromContinuationToken } from "./memory-review-sessio
 import { EXTERNAL_GROUP_TOOL_NAMES } from "../tool-policy/group-tool-catalog.js";
 import {
   FAMILY_ONLY_TOOL_NAMES,
+  OWNER_ONLY_TOOL_NAMES,
   PRIVATE_ONLY_TOOL_NAMES,
   TRUSTED_MODE_TOOL_NAMES,
 } from "../tool-policy/trusted-mode-tool-catalog.js";
+
+// Group turns ask whether the owner disconnected the group (#465); here every group is connected.
+vi.mock("../group-connection/group-connection-repository.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../group-connection/group-connection-repository.js")>(),
+  isGroupIdDisconnected: vi.fn(async () => false),
+  isTelegramGroupDisconnected: vi.fn(async () => false),
+}));
 
 // Every application tool name a mode can emit; the review prompt may cite only its own subset.
 const APPLICATION_TOOL_NAMES = [...new Set([
   ...TRUSTED_MODE_TOOL_NAMES,
   ...PRIVATE_ONLY_TOOL_NAMES,
+  ...OWNER_ONLY_TOOL_NAMES,
   ...FAMILY_ONLY_TOOL_NAMES,
   ...EXTERNAL_GROUP_TOOL_NAMES,
 ])];
@@ -69,42 +78,37 @@ describe("memory review model surface", () => {
     authorizeCurrentExternalGroupCapability.mockReset();
   });
 
-  it("contains only memory capabilities, no runtime built-ins", () => {
-    const names = Object.keys(buildMemoryReviewToolSurface("family")).sort();
+  it("contains only memory capabilities, no runtime built-ins, and reads records and threads without changing them", () => {
+    const surface = buildMemoryReviewToolSurface("family");
 
-    expect(names).toEqual([
-      "list_memories",
-      "list_memory_threads",
-      "read_memory_thread",
-      "remember",
-      "search_memories",
-      "search_memory_threads",
-    ].sort());
-    expect(names).not.toContain("manage_memory");
-    expect(names).not.toContain("manage_memory_thread");
+    expect(Object.keys(surface).sort()).toEqual(["manage_memory", "manage_memory_thread", "remember", "search_memories"]);
+    const memory = surface.manage_memory!.inputSchema as z.ZodType;
+    const threads = surface.manage_memory_thread!.inputSchema as z.ZodType;
+    expect(memory.safeParse({ action: "list" }).success).toBe(true);
+    expect(memory.safeParse({ action: "delete", memoryRef: "mem_0123456789abcdef0123456789abcdef" }).success).toBe(false);
+    expect(threads.safeParse({ action: "read", threadRef: "thread_0123456789abcdef0123456789abcdef" }).success).toBe(true);
+    expect(threads.safeParse({ action: "reactivate", threadRef: "thread_0123456789abcdef0123456789abcdef" }).success).toBe(false);
   });
 
   it("omits external memory descriptors that are not currently granted", () => {
     const names = Object.keys(buildMemoryReviewToolSurface("family", new Set(["list_memories"]))).sort();
 
-    expect(names).toContain("list_memories");
-    expect(names).not.toContain("remember");
-    expect(names).not.toContain("search_memories");
+    expect(names).toEqual(["manage_memory"]);
   });
 
   it.each([
-    "list_memories",
-    "list_memory_threads",
-    "read_memory_thread",
-    "search_memories",
-    "search_memory_threads",
-  ] as const)("re-checks live external authorization before executing %s", async (toolName) => {
+    ["list_memories", "manage_memory", { action: "list" }],
+    ["list_memory_threads", "manage_memory_thread", { action: "list" }],
+    ["read_memory_thread", "manage_memory_thread", { action: "read", threadRef: "thread_0123456789abcdef0123456789abcdef" }],
+    ["search_memories", "search_memories", {}],
+    ["search_memory_threads", "manage_memory_thread", { action: "search", query: "проект" }],
+  ] as const)("re-checks the live external right %s before executing", async (toolName, tool, input) => {
     const surface = buildMemoryReviewToolSurface("family", new Set([toolName]));
     authorizeCurrentExternalGroupCapability.mockRejectedValueOnce(
       new Error("AGENT_GROUP_TOOL_FORBIDDEN"),
     );
 
-    await expect(surface[toolName]!.execute({}, {
+    await expect(surface[tool]!.execute(input as never, {
       session: { auth: externalAuth() },
     } as never)).rejects.toMatchObject({
       contract: {

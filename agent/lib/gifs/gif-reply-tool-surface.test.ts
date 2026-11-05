@@ -20,30 +20,30 @@ const EXTERNAL = { capabilities: new Set<never>(), environment: "external" } as 
 
 describe("GIF replies with KLIPY configured", () => {
   it("are offered in every live conversation without a grant", () => {
-    expect(buildModeToolSurface({ environment: "private" })).toHaveProperty("send_gif");
+    expect(buildModeToolSurface({ environment: "private", owner: true })).toHaveProperty("send_gif");
     expect(buildModeToolSurface({ environment: "family" })).toHaveProperty("send_gif");
     expect(buildModeToolSurface(EXTERNAL)).toHaveProperty("send_gif");
   });
 
   it("are not offered where nobody live is answered", () => {
-    expect(buildModeToolSurface({ environment: "private", scheduledRun: true })).not.toHaveProperty("send_gif");
+    expect(buildModeToolSurface({ environment: "private", owner: true, scheduledRun: true })).not.toHaveProperty("send_gif");
     expect(buildModeToolSurface({ environment: "family", scheduledRun: true })).not.toHaveProperty("send_gif");
     expect(buildModeToolSurface({ ...EXTERNAL, scheduledRun: true })).not.toHaveProperty("send_gif");
     expect(buildModeToolSurface({ ...EXTERNAL, includeApplicationCore: false })).not.toHaveProperty("send_gif");
-    expect(buildSubagentToolSurface({ environment: "private" })).not.toHaveProperty("send_gif");
+    expect(buildSubagentToolSurface({ environment: "private", owner: true })).not.toHaveProperty("send_gif");
     expect(buildSubagentToolSurface(EXTERNAL)).not.toHaveProperty("send_gif");
   });
 
   it("carry their rules only into live conversations", () => {
     for (const instructions of [
-      modeInstructions({ environment: "private" }),
+      modeInstructions({ environment: "private", owner: true }),
       modeInstructions({ environment: "family" }),
       modeInstructions({ capabilities: new Set(), environment: "external" }),
     ]) {
       expect(instructions).toContain("## Answering with a GIF");
     }
     for (const instructions of [
-      modeInstructions({ environment: "private", scheduledRun: true }),
+      modeInstructions({ environment: "private", owner: true, scheduledRun: true }),
       modeInstructions({ environment: "family", subagentTurn: true }),
       modeInstructions({ capabilities: new Set(), environment: "external", scheduledRun: true }),
       modeInstructions({ capabilities: new Set(), environment: "external", includeApplicationCore: false }),

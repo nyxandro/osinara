@@ -256,7 +256,8 @@ export default defineTool({
     return {
       expiresAt: expiresAt.toISOString(),
       name: input.name,
-      note: "The application has asked the owner for the key in a separate message. Do not ask for it or repeat that request.",
+      note: "The application has asked the owner for the key in a separate message. Do not ask for it or repeat that request. " +
+        "Once the owner sends it, the application stores it and tells you in a message in the owner's place; continue the task then, without asking the owner to report sending it.",
       sandboxVariables: apiKeyEnvironmentNames(input.name),
       status: "awaiting_value",
     };

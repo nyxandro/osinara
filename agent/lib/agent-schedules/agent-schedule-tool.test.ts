@@ -8,6 +8,8 @@
  * - `manage_agent_schedule.update`: ignores only proven MiniMax create-only sibling fields.
  * - ID-only actions reject every sibling field.
  * - Tool guidance publishes exact action payloads and forbids delete/recreate workarounds.
+ * - `manage_agent_schedule.list`: pages through the schedules, changes nothing, and keeps the guidance
+ *   on reading the last run; a list-only view serves a place that may only read them (#457).
  * - A monitor is saved only after its check ran once in the turn's sandbox without firing or
  *   failing; invalid monitor settings are refused before any script runs.
  */
@@ -15,9 +17,10 @@ import type { ToolContext } from "../../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-const { createSchedule, deleteSchedule, runScheduleNow, updateSchedule } = vi.hoisted(() => ({
+const { createSchedule, deleteSchedule, listSchedules, runScheduleNow, updateSchedule } = vi.hoisted(() => ({
   createSchedule: vi.fn(),
   deleteSchedule: vi.fn(),
+  listSchedules: vi.fn(),
   runScheduleNow: vi.fn(),
   updateSchedule: vi.fn(),
 }));
@@ -43,12 +46,15 @@ vi.mock("./agent-schedule-repository.js", () => ({
   agentScheduleRepository: {
     create: createSchedule,
     delete: deleteSchedule,
+    list: listSchedules,
     runNow: runScheduleNow,
     update: updateSchedule,
   },
 }));
 
 import manageAgentSchedule from "../tools/manage_agent_schedule.js";
+import { AGENT_SCHEDULE_LIST_DEFAULT_LIMIT } from "./agent-schedule-config.js";
+import { AGENT_SCHEDULE_LIST_VIEW } from "./agent-schedule-list-action.js";
 
 const context = { callId: "call-1" } as ToolContext;
 const scheduleId = "00000000-0000-4000-8000-000000000001";
@@ -84,7 +90,7 @@ describe("manage_agent_schedule", () => {
     expect(jsonSchema).toMatchObject({ additionalProperties: false, type: "object" });
     expect(jsonSchema).not.toHaveProperty("anyOf");
     expect(jsonSchema).not.toHaveProperty("oneOf");
-    expect(properties.action.enum).toEqual(["create", "update", "pause", "resume", "run_now", "delete"]);
+    expect(properties.action.enum).toEqual(["list", "create", "update", "pause", "resume", "run_now", "delete"]);
     expect(schema.safeParse({ ...validDailyCreatePayload, recurrence: { kind: "once" } }).success).toBe(true);
     expect(schema.safeParse({
       ...validDailyCreatePayload,
@@ -236,6 +242,45 @@ describe("manage_agent_schedule", () => {
       "Pause, resume, run_now and delete pass only action and id",
     );
     expect(manageAgentSchedule.description).toContain("keep the id instead of deleting and re-creating");
+  });
+});
+
+describe("manage_agent_schedule list", () => {
+  beforeEach(() => {
+    for (const method of [createSchedule, deleteSchedule, listSchedules, runScheduleNow, updateSchedule]) method.mockReset();
+    listSchedules.mockResolvedValue({ items: [], nextCursor: null });
+  });
+
+  it("pages through the schedules and changes nothing", async () => {
+    await expect(manageAgentSchedule.execute({ action: "list" } as never, context))
+      .resolves.toEqual({ items: [], nextCursor: null });
+    await manageAgentSchedule.execute({ action: "list", cursor: "next", limit: 5 } as never, context);
+
+    expect(listSchedules.mock.calls.map((call) => call[1])).toEqual([
+      { limit: AGENT_SCHEDULE_LIST_DEFAULT_LIMIT },
+      { cursor: "next", limit: 5 },
+    ]);
+    for (const method of [createSchedule, deleteSchedule, runScheduleNow, updateSchedule]) expect(method).not.toHaveBeenCalled();
+  });
+
+  it("refuses a list call with a field of another action", async () => {
+    await expect(manageAgentSchedule.execute({ action: "list", id: scheduleId } as never, context))
+      .rejects.toMatchObject({ code: "AGENT_SCHEDULE_INPUT_INVALID" });
+    expect(listSchedules).not.toHaveBeenCalled();
+  });
+
+  it("keeps the guidance on reading the last run, in the tool and in the list-only view", () => {
+    for (const description of [manageAgentSchedule.description, AGENT_SCHEDULE_LIST_VIEW.description]) {
+      expect(description).toContain("lastRun.executionStatus");
+      expect(description).toContain("nextRunAtLocal");
+    }
+  });
+
+  it("offers a list-only view whose schema knows no other action", () => {
+    const schema = AGENT_SCHEDULE_LIST_VIEW.inputSchema as z.ZodType;
+    expect(schema.safeParse({ action: "list", limit: 5 }).success).toBe(true);
+    expect(schema.safeParse({ action: "delete", id: scheduleId }).success).toBe(false);
+    expect(AGENT_SCHEDULE_LIST_VIEW.description).not.toMatch(/\bcreate\b|\bdelete\b/u);
   });
 });
 

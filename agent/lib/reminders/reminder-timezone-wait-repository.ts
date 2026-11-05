@@ -235,7 +235,7 @@ async function inTransaction<T>(work: (client: PoolClient) => Promise<T>): Promi
 function notWaiting(): AppError {
   return new AppError(
     "AGENT_REMINDER_AWAITING_RESOLVED",
-    "Это напоминание уже не ждёт часового пояса: проверьте актуальный список через list_reminders",
+    "Это напоминание уже не ждёт часового пояса: проверьте актуальный список через manage_reminder с action=list",
   );
 }
 

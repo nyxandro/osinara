@@ -60,7 +60,8 @@ function approvalFor(input: Record<string, unknown>) {
   const approval = (manageTelegramGroup as unknown as {
     approval: (context: { toolInput: Record<string, unknown> }) => unknown;
   }).approval;
-  return approval({ toolInput: input });
+  // The runtime hands the approval policy the whole call context, the session included.
+  return approval({ ...context(), toolInput: input });
 }
 
 describe("manage_telegram_group.status", () => {
@@ -167,6 +168,8 @@ describe("manage_telegram_group.status", () => {
       telegramChatId: "-1001",
     })).toBe("not-applicable");
     expect(approvalFor({ action: "remove", telegramChatId: "-1001" })).toBe("user-approval");
+    expect(approvalFor({ action: "disconnect", telegramChatId: "-1001" })).toBe("user-approval");
+    expect(approvalFor({ action: "reconnect", telegramChatId: "-1001" })).toBe("user-approval");
     expect(approvalFor({
       action: "register",
       registration: {
@@ -179,10 +182,11 @@ describe("manage_telegram_group.status", () => {
   });
 
   it("requires status before replacing an unknown current policy", () => {
-    const instructions = modeInstructions({ environment: "private" });
-    const procedure = serviceSkillsFor("private", new Set(["manage_telegram_group"]))["group-admin"]!.markdown;
+    const instructions = modeInstructions({ environment: "private", owner: true });
+    const procedure = serviceSkillsFor("private", new Set(["owner_settings"]))["group-admin"]!.markdown;
 
-    expect(instructions).toContain("`{\"action\":\"status\"}`");
+    // The groups are a section of the owner's settings door (#459).
+    expect(instructions).toContain("`{\"section\":\"groups\",\"call\":{\"action\":\"status\"}}`");
     expect(instructions).toContain("the `/status` command");
     expect(instructions).toContain("in one message");
     expect(procedure).toContain("Before any other group action, call status");

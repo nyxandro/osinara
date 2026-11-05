@@ -3,6 +3,7 @@
  *
  * Constructs covered:
  * - `message.completed` replies to the verified triggering member message by default.
+ * - A turn of a group disconnected while it ran delivers nothing and shows no typing (#465).
  * - An answer the model marked as standalone reaches Telegram without a reply and without the
  *   directive; the delivery identity records that choice, which the outbox hashes on retry.
  * - A standalone answer still fails on a reply context that does not belong to this chat.
@@ -10,6 +11,13 @@
  * - The memory usage line learns which kind of message carried it, final answer or a step.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// Group turns ask whether the owner disconnected the group (#465); here every group is connected.
+vi.mock("./group-connection/group-connection-repository.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./group-connection/group-connection-repository.js")>(),
+  isGroupIdDisconnected: vi.fn(async () => false),
+  isTelegramGroupDisconnected: vi.fn(async () => false),
+}));
 
 const dependencies = vi.hoisted(() => ({
   deliverFinalOutput: vi.fn(),
@@ -42,6 +50,7 @@ vi.mock("./conversation-timeline-repository.js", () => ({
 
 vi.mock("./reply-buttons/reply-button-delivery.js", () => ({ reportUndeliveredReplyButtons: vi.fn(), turnReplyButtons: vi.fn(() => null) }));
 const { telegramTurnEvents } = await import("../channels/telegram.js");
+const { isGroupIdDisconnected } = await import("./group-connection/group-connection-repository.js");
 const { recordMemoryUsageDeclaration } = await import("./memory-usage-report.js");
 
 const context = {
@@ -130,4 +139,20 @@ describe("group final-delivery reply binding", () => {
     expect(delivery.deliveryIdentity.replyParameters).toBeNull();
     expect(delivery.answer.markdown).toBe("Объявление\n[[split]]\nи ещё");
   });
+
+  it("delivers nothing and shows no typing for a group disconnected while the turn ran", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    vi.mocked(isGroupIdDisconnected).mockResolvedValue(true);
+    const startTyping = vi.fn();
+
+    expect(await complete("Код домофона 4271.")).toBeUndefined();
+    await (telegramTurnEvents as Record<string, any>)["actions.requested"]({}, { ...channel, telegram: { ...channel.telegram, startTyping } }, context);
+
+    expect(dependencies.recordAgentResponse).not.toHaveBeenCalled();
+    expect(startTyping).not.toHaveBeenCalled();
+    expect(info.mock.calls.map(([line]) => String(line)).some((line) => line.includes("AGENT_GROUP_DISCONNECTED_TURN_SILENCED"))).toBe(true);
+    vi.mocked(isGroupIdDisconnected).mockResolvedValue(false);
+    info.mockRestore();
+  });
 });
+

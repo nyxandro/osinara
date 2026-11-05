@@ -5,7 +5,7 @@ description: Load before getting an API key of an HTTP service for a skill or sc
 
 # API keys
 
-A key of an HTTP service is kept by the application, encrypted. Neither you nor any sandbox ever sees it: a sandbox gets a placeholder and a gateway address, and the server's egress proxy puts the real key into the request on its way to the service's own address only. Everything here is available only in a private chat with the owner.
+A key of an HTTP service is kept by the application, encrypted. Neither you nor any sandbox ever sees it: a sandbox gets a placeholder and a gateway address, and the server's egress proxy puts the real key into the request on its way to the service's own address only. Everything here is available only in a private chat with the owner, through `owner_settings`: `manage_api_keys` below is its section `api_keys`, and `manage_telegram_group` is its section `groups`. Read the section's contract once in the conversation with `{"section":"api_keys"}`, then call `{"section":"api_keys","call":{...}}` with the call written below as its `call`.
 
 ## Getting a key
 
@@ -19,7 +19,7 @@ Never ask anyone to paste a key into a chat and never take one written there: a 
    - `Authorization: Bearer <key>` (OpenAI-compatible services and most others): `authHeader=authorization`, `authScheme=bearer`. The bare key in its own header, e.g. `x-api-key: <key>`: that header and `authScheme=raw`.
    A key the service takes in the query string or the body is not supported: say so.
 3. The application itself asks the owner for the key in a separate message that names the address. Tell the owner in one line to send it as the next message; do not repeat the application's request. The wait lasts 30 minutes, and any ordinary message ends it.
-4. The application confirms to the owner when the key is stored. `action=list` then shows `status=stored`.
+4. When the key is stored, the application confirms it to the owner and tells you in a message in the owner's place: continue the task you requested the key for, without asking the owner whether they sent it. `action=list` then shows `status=stored`.
 
 To replace a stored key, request it again with the same name, `baseUrl`, `authHeader` and `authScheme`. A stored key cannot change its address or header: delete it and request it anew.
 

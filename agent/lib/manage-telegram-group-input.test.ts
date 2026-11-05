@@ -11,6 +11,15 @@ import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
+// Removal goes through the connection actions, which also purge the chat's raw copies (#464).
+vi.mock("./group-connection/group-connection-actions.js", () => ({
+  groupConnectionActions: {
+    disconnect: vi.fn(),
+    reconnect: vi.fn(),
+    remove: vi.fn(async () => ({ ownerNotified: true, status: "removed", telegramChatId: "-1001234567890", title: "Внешняя" })),
+  },
+}));
+
 const repositories = vi.hoisted(() => ({
   listStatuses: vi.fn(),
   registerGroup: vi.fn(),
@@ -43,8 +52,9 @@ const context = {
 } as unknown as ToolContext;
 
 function approvalFor(input: Record<string, unknown>) {
+  // The runtime hands the approval policy the whole call context, the session included.
   return (manageTelegramGroup.approval as (context: never) => unknown)(
-    { toolInput: input } as never,
+    { ...context, toolInput: input } as never,
   );
 }
 
@@ -72,6 +82,8 @@ describe("manage_telegram_group model input", () => {
     expect(schema.type).toBe("object");
     expect(schema.required).toContain("action");
     expect(schema.properties.action?.enum).toEqual([
+      "disconnect",
+      "reconnect",
       "register",
       "remove",
       "start_new_context",
@@ -158,7 +170,7 @@ describe("manage_telegram_group model input", () => {
     await expect(manageTelegramGroup.execute({
       action: "remove",
       telegramChatId: "-1001234567890",
-    }, context)).resolves.toMatchObject({ groupId: "group-1" });
+    }, context)).resolves.toMatchObject({ status: "removed" });
   });
 
   it("documents exact action payloads and leaves finite enums to the schema", () => {

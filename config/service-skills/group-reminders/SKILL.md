@@ -1,6 +1,6 @@
 ---
 name: group-reminders
-description: Load before setting, listing, changing, pausing, resuming or deleting a reminder of this chat (list_reminders, manage_reminder). It holds the reminder text rules, Moscow time and how to find a reminder a participant names in words.
+description: Load before setting, listing, changing, pausing, resuming or deleting a reminder of this chat (manage_reminder). It holds the reminder text rules, Moscow time and how to find a reminder a participant names in words.
 ---
 
 # Reminders of this chat

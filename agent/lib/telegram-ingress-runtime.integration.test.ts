@@ -37,7 +37,7 @@ async function ownerAuth(): Promise<SessionAuthContext> {
 
 function ingressOver(telegram: ReturnType<typeof runtimeTelegram>, runTurn = telegram.runTurn) {
   return createTelegramDurableIngress({
-    acceptMedia: vi.fn(), authorizeVoice: vi.fn(), captureApiKey: vi.fn(async () => false), botUsername: "osinara_bot", dispatch: telegram.dispatch,
+    acceptChatUpdate: vi.fn(async () => true), answerCallbackQuietly: vi.fn(async () => undefined), authorizeVoice: vi.fn(), captureApiKey: vi.fn(async () => ({ kind: "forwarded" as const })), botUsername: "osinara_bot", dispatch: telegram.dispatch,
     dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), replyButtonsOnArrival: vi.fn(async () => undefined), handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), leaseMilliseconds: 60_000, privateBurst: NO_BURSTS,
     reportFailure: vi.fn(), repository: telegramIngressRepository, runTurn, transcribeVoice: vi.fn(),
   });

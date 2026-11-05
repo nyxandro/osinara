@@ -22,6 +22,9 @@ export interface TelegramProfile {
 interface TelegramGroupRow {
   family_id: string;
   id: string;
+  last_pause_after_sequence: string | null;
+  last_pause_ended_at: Date | null;
+  last_pause_started_at: Date | null;
   message_mode: RegisteredGroup["messageMode"];
   skill_allowlist: string[];
   telegram_chat_id: string;
@@ -122,21 +125,23 @@ export const telegramRepository: TelegramRepository = {
   },
 
   async findGroup(telegramChatId, telegramChatType) {
-    // Only the first verified update writes the type; steady-state reads avoid row locks and bloat.
+    // A disconnected group is not found here: every message path then treats it as unregistered, which
+    // records nothing and answers nothing (#465). Only the first verified update writes the type;
+    // steady-state reads avoid row locks and bloat.
+    const columns = `id, family_id, telegram_chat_id, type, message_mode, tool_allowlist, skill_allowlist,
+                     last_pause_started_at, last_pause_ended_at, last_pause_after_sequence::text`;
     const initialized = await database().query<TelegramGroupRow>(
       `UPDATE telegram_groups SET telegram_chat_type = $2
-        WHERE telegram_chat_id = $1 AND telegram_chat_type IS NULL
-      RETURNING id, family_id, telegram_chat_id, type, message_mode,
-                tool_allowlist, skill_allowlist`,
+        WHERE telegram_chat_id = $1 AND telegram_chat_type IS NULL AND disconnected_at IS NULL
+      RETURNING ${columns}`,
       [telegramChatId, telegramChatType],
     );
     const result = initialized.rows[0]
       ? initialized
       : await database().query<TelegramGroupRow>(
-          `SELECT id, family_id, telegram_chat_id, type, message_mode,
-                  tool_allowlist, skill_allowlist
+          `SELECT ${columns}
              FROM telegram_groups
-            WHERE telegram_chat_id = $1 AND telegram_chat_type = $2`,
+            WHERE telegram_chat_id = $1 AND telegram_chat_type = $2 AND disconnected_at IS NULL`,
           [telegramChatId, telegramChatType],
         );
     const row = result.rows[0];
@@ -144,6 +149,9 @@ export const telegramRepository: TelegramRepository = {
     const common = {
       familyId: row.family_id,
       groupId: row.id,
+      ...(row.last_pause_started_at && row.last_pause_ended_at && row.last_pause_after_sequence !== null
+        ? { lastPause: { afterSequence: row.last_pause_after_sequence, endedAt: row.last_pause_ended_at, startedAt: row.last_pause_started_at } }
+        : {}),
       skillAllowlist: row.skill_allowlist,
       telegramChatId: row.telegram_chat_id,
       toolAllowlist: row.tool_allowlist,

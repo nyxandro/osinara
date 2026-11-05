@@ -38,7 +38,7 @@ describe("software update callback durable ingress", () => {
       voice: null,
     };
     const repository = {
-      acceptMedia: vi.fn(),
+      acceptChatUpdate: vi.fn(),
       beginDispatch: vi.fn(),
       beginVoiceTranscription: vi.fn(),
       claimNext: vi.fn().mockResolvedValueOnce(claim).mockResolvedValueOnce(null),
@@ -56,9 +56,9 @@ describe("software update callback durable ingress", () => {
     let backgroundTask: Promise<unknown> | undefined;
     const ingress = createTelegramDurableIngress({
       reportFailure: vi.fn(),
-      acceptMedia: vi.fn(),
+      acceptChatUpdate: vi.fn(async () => true), answerCallbackQuietly: vi.fn(async () => undefined),
       authorizeVoice: vi.fn(),
-      captureApiKey: vi.fn(async () => false),
+      captureApiKey: vi.fn(async () => ({ kind: "forwarded" as const })),
       botUsername: "osinara_bot",
       dispatch,
       dismissReplyButtons: vi.fn(async () => undefined),

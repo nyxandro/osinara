@@ -28,7 +28,7 @@ import type {
 } from "./memory-retrieval-ranking.js";
 import type { MemorySelectionWindow } from "./memory-show-journal.js";
 import { isSmallTalkMessage } from "./memory-small-talk.js";
-import { CAPTIONLESS_ATTACHMENT_MODEL_TEXT } from "./telegram-model-placeholders.js";
+import { CAPTIONLESS_ATTACHMENT_MODEL_TEXT, isApiKeyDeliveredModelText } from "./telegram-model-placeholders.js";
 import { isTelegramMediaPlaceholderOnly } from "./telegram-content/telegram-content-description.js";
 import type { ModelMemoryEvidence } from "./model-memory.js";
 import { GROUP_REMINDER_TIMEZONE } from "./reminders/reminder-config.js";
@@ -170,9 +170,10 @@ export async function selectMemoriesAutomatically(
     window: MemorySelectionWindow | null;
   },
 ): Promise<AutomaticMemorySelection> {
-  // A file sent without a caption, a sticker or a GIF reaches the model as a placeholder: no word of
-  // it is the person's.
-  if (isSmallTalkMessage(prepared) || prepared === CAPTIONLESS_ATTACHMENT_MODEL_TEXT || isTelegramMediaPlaceholderOnly(prepared)) {
+  // A file sent without a caption, a sticker, a GIF or an API key reaches the model as a placeholder:
+  // no word of it is the person's.
+  if (isSmallTalkMessage(prepared) || prepared === CAPTIONLESS_ATTACHMENT_MODEL_TEXT || isApiKeyDeliveredModelText(prepared) ||
+    isTelegramMediaPlaceholderOnly(prepared)) {
     return {
       abstained: true, dateWindow: null,
       diagnostics: SILENT_SELECTION_DIAGNOSTICS, embeddings: [], selected: [],

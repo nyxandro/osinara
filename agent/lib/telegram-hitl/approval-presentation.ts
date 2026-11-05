@@ -17,6 +17,7 @@ import { profileProjectionPolicyRepository } from "../profile-projection-policy-
 import { requireProfileProjectionUpdate } from "../profile-projection-input.js";
 import { telegramGroupAdministrationRepository } from "../telegram-group-administration-repository.js";
 import { requireManageTelegramGroupInput } from "../tools/manage_telegram_group.js";
+import { ownerSettingsCardAction } from "../owner-settings/owner-settings-sections.js";
 import {
   localizeTelegramInputRequest,
   type TelegramInputRequest,
@@ -63,6 +64,16 @@ const GROUP_MESSAGE_MODES = {
 export function createTelegramApprovalPresenter(
   dependencies: ApprovalPresentationDependencies,
 ): TelegramApprovalPresenter {
+  const presentCard = cardPresenter(dependencies);
+  return async (request, ctx) => {
+    // A call through the owner's settings door is shown as the call it carries (#459); the door's own
+    // call stays the identity the confirmation is recorded and answered under.
+    const presented = await presentCard({ ...request, action: ownerSettingsCardAction(request.action) }, ctx);
+    return { ...presented, action: request.action };
+  };
+}
+
+function cardPresenter(dependencies: ApprovalPresentationDependencies): TelegramApprovalPresenter {
   return async (request, ctx) => {
     const localized = localizeTelegramInputRequest(request);
     if (request.action.toolName === "manage_profile_projection") {

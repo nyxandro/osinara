@@ -3,7 +3,8 @@
  *
  * Constructs covered:
  * - `telegramIngressRepository.enqueue`: idempotent update ingestion with conflict detection.
- * - `telegramIngressRepository.acceptMedia`: a registered group takes in every medium, an unregistered
+ * - `isTelegramUpdateQueued`: recognises an update the queue already holds.
+ * - `telegramIngressRepository.acceptChatUpdate`: a registered group takes in every medium, an unregistered
  *   chat none; the decision and its tombstone are update-id atomic.
  * - `telegramIngressRepository.claimNext`: per-continuation FIFO with independent queue progress.
  * - Lease ownership: expired work can be reclaimed while stale workers are rejected.
@@ -20,7 +21,7 @@ vi.mock("./model-vision-availability.js", () => ({
 }));
 
 import { closeDatabase, database } from "./database.js";
-import { telegramIngressRepository } from "./telegram-ingress-repository.js";
+import { isTelegramUpdateQueued, telegramIngressRepository } from "./telegram-ingress-repository.js";
 import {
   BOT_USERNAME,
   groupMessage,
@@ -66,6 +67,15 @@ function updateInput(updateId: string, continuationKey: string, text: string) {
 }
 
 describeWithDatabase("telegramIngressRepository", () => {
+  it("tells whether the queue already holds an update", async () => {
+    expect(await isTelegramUpdateQueued("1001")).toBe(false);
+
+    await telegramIngressRepository.enqueue(updateInput("1001", "101::", "first"));
+
+    expect(await isTelegramUpdateQueued("1001")).toBe(true);
+    expect(await isTelegramUpdateQueued("1002")).toBe(false);
+  });
+
   it("lets concurrent drainers claim different queues but never two heads of the same queue", async () => {
     await telegramIngressRepository.enqueue(updateInput("1001", "101::", "first"));
     await telegramIngressRepository.enqueue(updateInput("1002", "101::", "second"));
@@ -135,7 +145,7 @@ describeWithDatabase("telegramIngressRepository", () => {
     const update = updateInput("1002", "telegram:group:-100-policy", "повтор после регистрации");
 
     // An unregistered chat takes in nothing.
-    await expect(telegramIngressRepository.acceptMedia({
+    await expect(telegramIngressRepository.acceptChatUpdate({
       chatId: "-100-policy",
       chatType: "supergroup",
       updateId: update.updateId,
@@ -146,7 +156,7 @@ describeWithDatabase("telegramIngressRepository", () => {
        VALUES ($1, '-100-policy', 'Policy group', 'family_private', 'addressed_only', '{}')`,
       [family.rows[0]!.id],
     );
-    await expect(telegramIngressRepository.acceptMedia({
+    await expect(telegramIngressRepository.acceptChatUpdate({
       chatId: "-100-policy",
       chatType: "supergroup",
       updateId: update.updateId,
@@ -180,7 +190,7 @@ describeWithDatabase("telegramIngressRepository", () => {
     for (const chatId of ["-100-media-plain", "-100-media-malformed"]) {
       // Photos, documents, stickers, voice notes and video alike: the decision no longer looks at the kind.
       for (let medium = 0; medium < 3; medium += 1) {
-        await expect(telegramIngressRepository.acceptMedia({
+        await expect(telegramIngressRepository.acceptChatUpdate({
           chatId,
           chatType: "supergroup",
           updateId: String(updateId++),
@@ -202,7 +212,7 @@ describeWithDatabase("telegramIngressRepository", () => {
        VALUES ($1, '-100-live-photo', 'Live photo group', 'external', 'addressed_only', '{}')`,
       [family.rows[0]!.id],
     );
-    await expect(telegramIngressRepository.acceptMedia({
+    await expect(telegramIngressRepository.acceptChatUpdate({
       chatId: "-100-live-photo",
       chatType: "supergroup",
       updateId: "1012",

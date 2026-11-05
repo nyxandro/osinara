@@ -58,7 +58,7 @@ function surfaces() {
     external: buildModeToolSurface(externalInput),
     family: buildModeToolSurface({ environment: "family" }),
     memoryReview: buildMemoryReviewToolSurface("family"),
-    private: buildModeToolSurface({ environment: "private" }),
+    private: buildModeToolSurface({ environment: "private", owner: true }),
     scheduledExternal: buildModeToolSurface({
       ...externalInput,
       scheduledHistory: true,

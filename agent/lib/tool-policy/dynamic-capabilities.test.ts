@@ -23,6 +23,7 @@ vi.mock("./external-group-live-policy.js", () => ({
 }));
 
 import { resolveToolSurface } from "../../tools/capabilities.js";
+import { OWNER_ONLY_TOOL_NAMES } from "./trusted-mode-tool-catalog.js";
 import {
   ALWAYS_AVAILABLE_SANDBOX_FILE_TOOL_NAMES,
   EXTERNAL_GROUP_BASE_TOOLS,
@@ -93,6 +94,20 @@ describe("dynamic capability resolver", () => {
     expect(loadCurrentExternalGroupCapabilities).not.toHaveBeenCalled();
   });
 
+  it("gives the owner administration in the private chat and another family member none of it", async () => {
+    const owner = Object.keys(await resolve({ memoryScopes: ["personal", "family"], role: "owner", telegramChatType: "private" }) ?? {});
+    const member = Object.keys(await resolve({ memoryScopes: ["personal", "family"], role: "member", telegramChatType: "private" }) ?? {});
+    const recovery = Object.keys(await resolve({ memoryScopes: ["personal", "family"], role: "recovery_owner", telegramChatType: "private" }) ?? {});
+
+    for (const name of OWNER_ONLY_TOOL_NAMES) {
+      expect(owner, name).toContain(name);
+      // Every one of them refuses anyone but the owner at execution: offered, it only weighs on each turn.
+      expect(member, name).not.toContain(name);
+      expect(recovery, name).not.toContain(name);
+    }
+    for (const name of ["export_memory", "manage_skill", "notification_settings"]) expect(member, name).toContain(name);
+  });
+
   it("emits the family surface for a registered family group", async () => {
     const surface = await resolve({
       groupType: "family_private",
@@ -123,7 +138,6 @@ describe("dynamic capability resolver", () => {
         "agent",
         // Attachments are baseline access; image inspection needs a model that sees images.
         "import_telegram_attachment",
-        "list_reminders",
         "manage_behavior_preference",
         "manage_reminder",
         "read_profile_view",

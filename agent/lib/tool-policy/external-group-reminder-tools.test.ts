@@ -38,7 +38,6 @@ const AUTH = {
 const context = { callId: "call-1" } as never;
 
 const manageReminder = EXTERNAL_GROUP_REMINDER_TOOLS.manage_reminder!;
-const listReminders = EXTERNAL_GROUP_REMINDER_TOOLS.list_reminders!;
 
 describe("external group reminder tools", () => {
   beforeEach(() => {
@@ -146,12 +145,14 @@ describe("external group reminder tools", () => {
     expect(repository.create).not.toHaveBeenCalled();
   });
 
-  it("lists the chat reminders of the verified author's chat", async () => {
+  it("lists the chat reminders of the verified author's chat as an action of the reminder tool", async () => {
     repository.list.mockResolvedValue({ items: [], nextCursor: null });
 
-    await expect(listReminders.execute({ limit: 100 } as never, context))
+    await expect(manageReminder.execute({ action: "list" } as never, context))
       .resolves.toEqual({ items: [], nextCursor: null });
-    expect(repository.list).toHaveBeenCalledWith(AUTH, { limit: 100 });
+    await manageReminder.execute({ action: "list", cursor: "next", limit: 5 } as never, context);
+    expect(repository.list.mock.calls).toEqual([[AUTH, { limit: 100 }], [AUTH, { cursor: "next", limit: 5 }]]);
+    expect(Object.keys(EXTERNAL_GROUP_REMINDER_TOOLS)).toEqual(["manage_reminder"]);
   });
 
   it("refuses buttons in a group reminder, which keeps none, before storing anything", async () => {

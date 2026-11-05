@@ -2,8 +2,9 @@
  * Skills of a turn as the runtime resolves them (`agent/skills/scoped.ts`), service skills included.
  *
  * Constructs covered:
- * - The service skills follow the real tool surface of each kind of turn: a live private chat, a
- *   scheduled run, a delegated child and a live external group.
+ * - The service skills follow the real tool surface of each kind of turn: the owner's live private
+ *   chat, another member's, a scheduled run, a delegated child and a live external group. A child's
+ *   reading views of schedules and memory (#457) bring no procedure of their changes.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -40,7 +41,7 @@ async function serviceSkills(context: ReturnType<typeof turn>): Promise<string[]
   return Object.keys(await resolveScopedSkills(context as never)).filter((name) => SERVICE.includes(name)).sort();
 }
 
-const PRIVATE = { memoryScopes: ["personal", "family"], telegramChatType: "private" };
+const PRIVATE = { memoryScopes: ["personal", "family"], role: "owner", telegramChatType: "private" };
 
 describe("scoped skills", () => {
   beforeEach(() => {
@@ -52,6 +53,11 @@ describe("scoped skills", () => {
   it("gives a live private chat every procedure of its tools", async () => {
     expect(await serviceSkills(turn(PRIVATE)))
       .toEqual(["delegation", "group-admin", "schedules", "skill-manager", "voice-replies"]);
+  });
+
+  it("gives another member's private chat no procedure of the owner's administration", async () => {
+    expect(await serviceSkills(turn({ ...PRIVATE, role: "member" })))
+      .toEqual(["delegation", "schedules", "skill-manager", "voice-replies"]);
   });
 
   it("gives a scheduled run only the procedures of the tools it keeps", async () => {

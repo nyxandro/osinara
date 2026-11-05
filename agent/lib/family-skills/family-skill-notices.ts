@@ -69,7 +69,10 @@ interface ClaimedNotice {
   readonly text: string;
 }
 
-/** The chat to send to, if the recipient still belongs to the family. */
+/**
+ * The chat to send to, if the recipient still belongs to the family. A disconnected group gets nothing:
+ * the notice closes unsent and is not sent after reconnection either (#465).
+ */
 async function recipientChat(notice: ClaimedNotice): Promise<string | null> {
   const row = notice.recipient_user_id !== null
     ? (await database().query<{ chat_id: string }>(
@@ -79,7 +82,7 @@ async function recipientChat(notice: ClaimedNotice): Promise<string | null> {
       [notice.recipient_user_id, notice.family_id],
     )).rows[0]
     : (await database().query<{ chat_id: string }>(
-      "SELECT telegram_chat_id AS chat_id FROM telegram_groups WHERE id = $1 AND family_id = $2",
+      "SELECT telegram_chat_id AS chat_id FROM telegram_groups WHERE id = $1 AND family_id = $2 AND disconnected_at IS NULL",
       [notice.recipient_group_id, notice.family_id],
     )).rows[0];
   return row?.chat_id ?? null;

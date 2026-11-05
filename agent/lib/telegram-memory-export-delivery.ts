@@ -4,7 +4,7 @@
  * Export:
  * - `deliverMemoryExportFiles`: atomically sends JSON and Markdown as one media group.
  */
-import { resolveTelegramBotToken } from "../runtime/telegram/api.js";
+import { requireTelegramGroupWritable, resolveTelegramBotToken } from "../runtime/telegram/api.js";
 
 import { AppError } from "./app-error.js";
 
@@ -35,6 +35,8 @@ export async function deliverMemoryExportFiles(
     new Blob([input.markdown], { type: "text/markdown;charset=utf-8" }),
     "osinara-memory.md",
   );
+  // This path posts with its own fetch, so it asks the application's group gate itself (#465).
+  await requireTelegramGroupWritable("sendMediaGroup", form.get("chat_id"));
   let response: Response;
   try {
     response = await fetchImplementation(

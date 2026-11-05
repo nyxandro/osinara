@@ -12,6 +12,9 @@
  * the conversation. A list of what it may do keeps a new tool off it until someone decides
  * otherwise. Changes outside the sandbox stay with the root, which talks to the person and reads
  * the child's result first. Google Workspace stays for reading only, see `google-workspace-live-turn.ts`.
+ *
+ * - `SUBAGENT_TOOL_ACTIONS`: tools a child holds only for reading (#457 folded their separate list
+ *   tools into them): it sees them with these actions alone, and any other action is refused.
  */
 export const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set([
   "bash",
@@ -22,21 +25,22 @@ export const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set([
   "grep",
   "import_telegram_attachment",
   "inspect_workspace_image",
-  "list_agent_schedules",
   "list_group_history",
-  "list_memories",
-  "list_memory_threads",
   "list_proactive_deliveries",
   "list_telegram_attachments",
   "load_skill",
   "read_file",
-  "read_memory_thread",
   "read_profile_view",
   "read_scheduled_group_history",
   "search_memories",
-  "search_memory_threads",
   "todo",
   "web_fetch",
   "web_search",
   "write_file",
 ]);
+
+export const SUBAGENT_TOOL_ACTIONS: Readonly<Record<string, readonly string[]>> = {
+  manage_agent_schedule: ["list"],
+  manage_memory: ["list"],
+  manage_memory_thread: ["list", "search", "read"],
+};

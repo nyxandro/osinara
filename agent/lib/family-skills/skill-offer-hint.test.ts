@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import type { SessionAuth } from "../../runtime/context.js";
 import { previousTaskStepsHint } from "./skill-offer-hint.js";
 
-type Call = { readonly skill?: string; readonly tool_name: string; readonly turn: string };
+type Call = { readonly action?: string; readonly call?: boolean; readonly skill?: string; readonly tool_name: string; readonly turn: string };
 
 function journal(previous: { id: string; resumes_turn_id?: string | null; status: string } | undefined, calls: readonly Call[]) {
   const seen: unknown[][] = [];
@@ -22,7 +22,8 @@ function journal(previous: { id: string; resumes_turn_id?: string | null; status
         seen.push(values);
         if (sql.includes("FROM agent_turns")) return { rows: previous === undefined ? [] : [{ resumes_turn_id: null, ...previous }] };
         const turns = values[0] as string[];
-        return { rows: calls.filter((call) => turns.includes(call.turn)).map((call) => ({ skill: call.skill ?? null, tool_name: call.tool_name })) };
+        return { rows: calls.filter((call) => turns.includes(call.turn))
+          .map((call) => ({ action: call.action ?? null, has_call: call.call ?? false, skill: call.skill ?? null, tool_name: call.tool_name })) };
       },
     } as never,
   };
@@ -66,6 +67,34 @@ describe("previous task steps hint", () => {
     }
     await expect(previousTaskStepsHint(builtIn.database, ctx(), { scheduledRun: false })).resolves.toContain("took 4 tool steps");
     await expect(previousTaskStepsHint(journal(undefined, []).database, ctx(), { scheduledRun: false })).resolves.toBeNull();
+  });
+
+  it("counts listing memory as a service step and changing it as work, like the separate list tool before #457", async () => {
+    const listing = journal({ id: "turn-1", status: "completed" }, [
+      ...steps("turn-1", "bash", "bash", "web_fetch"),
+      { action: "list", tool_name: "manage_memory", turn: "turn-1" },
+    ]);
+    const editing = journal({ id: "turn-1", status: "completed" }, [
+      ...steps("turn-1", "bash", "bash", "web_fetch"),
+      { action: "edit", tool_name: "manage_memory", turn: "turn-1" },
+    ]);
+
+    await expect(previousTaskStepsHint(listing.database, ctx(), { scheduledRun: false })).resolves.toBeNull();
+    await expect(previousTaskStepsHint(editing.database, ctx(), { scheduledRun: false })).resolves.toContain("took 4 tool steps");
+  });
+
+  it("counts reading a section of the owner's settings as a service step and a call of it as work (#459)", async () => {
+    const reading = journal({ id: "turn-1", status: "completed" }, [
+      ...steps("turn-1", "bash", "bash", "web_fetch"),
+      { tool_name: "owner_settings", turn: "turn-1" },
+    ]);
+    const calling = journal({ id: "turn-1", status: "completed" }, [
+      ...steps("turn-1", "bash", "bash", "web_fetch"),
+      { call: true, tool_name: "owner_settings", turn: "turn-1" },
+    ]);
+
+    await expect(previousTaskStepsHint(reading.database, ctx(), { scheduledRun: false })).resolves.toBeNull();
+    await expect(previousTaskStepsHint(calling.database, ctx(), { scheduledRun: false })).resolves.toContain("took 4 tool steps");
   });
 
   it("counts the parked part of a task resumed after a confirmation", async () => {

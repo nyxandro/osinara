@@ -19,7 +19,21 @@ import { isServiceSkillName } from "./service-skills.js";
 
 // Mia's threshold: four working calls make a task more than a quick answer.
 export const SKILL_HINT_MIN_STEPS = 4;
-const SERVICE_TOOLS = new Set(["list_memories", "load_skill", "remember", "search_memories", "todo"]);
+const SERVICE_TOOLS = new Set(["load_skill", "remember", "search_memories", "todo"]);
+// Listing memory is a service step like a search: an action of `manage_memory` since #457. Reading a
+// section of the owner's settings door (#459) is one too; only a call of a section is work.
+const SERVICE_ACTIONS: Readonly<Record<string, ReadonlySet<string>>> = { manage_memory: new Set(["list"]) };
+
+interface JournalCall {
+  readonly action: string | null;
+  readonly has_call: boolean;
+  readonly tool_name: string;
+}
+
+function isServiceCall(call: JournalCall): boolean {
+  if (call.tool_name === "owner_settings") return !call.has_call;
+  return SERVICE_TOOLS.has(call.tool_name) || (call.action !== null && SERVICE_ACTIONS[call.tool_name]?.has(call.action) === true);
+}
 
 interface HintContext {
   readonly channel: { readonly kind?: string };
@@ -42,15 +56,15 @@ export async function previousTaskStepsHint(
   if (previous === undefined || previous.status !== "completed") return null;
   // A turn resumed after a confirmation continues the task its parked turn began.
   const turnIds = previous.resumes_turn_id === null ? [previous.id] : [previous.id, previous.resumes_turn_id];
-  const calls = (await database.query<{ skill: string | null; tool_name: string }>(
-    `SELECT tool_name, input->>'skill' AS skill FROM agent_tool_calls
+  const calls = (await database.query<JournalCall & { skill: string | null }>(
+    `SELECT tool_name, input->>'skill' AS skill, input->>'action' AS action, input->'call' IS NOT NULL AS has_call FROM agent_tool_calls
       WHERE turn_id = ANY($1::text[]) AND state = 'completed' ORDER BY created_at, position`,
     [turnIds],
   )).rows;
   const familySkillLoaded = calls.some((call) => call.tool_name === "load_skill" && call.skill !== null &&
     !isGroupSafeSkillName(call.skill) && !isServiceSkillName(call.skill));
   if (familySkillLoaded || calls.some((call) => call.tool_name === "manage_skill")) return null;
-  const working = calls.filter((call) => !SERVICE_TOOLS.has(call.tool_name));
+  const working = calls.filter((call) => !isServiceCall(call));
   if (working.length < SKILL_HINT_MIN_STEPS) return null;
   const tools = [...new Set(working.map((call) => call.tool_name))];
   return `<previous_task_steps>The previous task in this conversation took ${working.length} tool steps: ${tools.join(", ")}.</previous_task_steps>`;

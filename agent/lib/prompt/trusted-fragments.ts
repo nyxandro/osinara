@@ -43,7 +43,7 @@ const PHRASES: Readonly<Record<TrustedScope, TrustedScopePhrases>> = {
   },
   personal: {
     apiKeyIntake:
-      "An API key of an HTTP service that takes it in a request header is never accepted in the chat: the owner stores it with `manage_api_keys` (load the `api-keys` skill), the application asks for it itself and you never see it. If someone pastes such a key anyway, do not repeat or save it and suggest replacing it at the service.",
+      "An API key of an HTTP service that takes it in a request header is never accepted in the chat: the owner stores it in their own private chat, the application asks for it itself and you never see it. If someone pastes such a key anyway, do not repeat or save it and suggest replacing it at the service.",
     credentialIntake:
       "You may accept logins, passwords, tokens, cookies and one-time codes from the current authorized user when they are needed for their request.",
     environmentName: "the permanent personal environment",
@@ -92,17 +92,24 @@ The \`<recent_proactive_deliveries>\` block holds scenario results and reminders
 If the user asks about a previously delivered notification that is not in the current context, use \`list_proactive_deliveries\` with \`sourceKind:"reminder"\` for reminders and \`sourceKind:"agent_schedule"\` for scenario results. Do not substitute the schedule's current configuration for the history of a result.
 `.trim();
 
-const ROUTE_LINES: Readonly<Record<TrustedScope, readonly string[]>> = {
+// The owner's private chat carries the owner's administration; another member's private chat does not,
+// so its route names only where that lives.
+const ROUTE_LINES: Readonly<Record<"family" | "member" | "owner", readonly string[]>> = {
   family: [
     "- Earlier messages of this group: `list_group_history`.",
   ],
-  personal: [
+  member: [
+    "- The family's own skills: load `skill-manager`. Groups, invitations and API keys are kept by the owner in their own private chat.",
+  ],
+  owner: [
+    "- The owner's settings (groups, their automations, invitations, profiles from groups, network access, API keys): `owner_settings`, one section at a time.",
     "- Groups and invitations: load `group-admin`; the family's own skills: load `skill-manager`.",
     "- An API key a skill or script needs, or giving one to the family or a group: load `api-keys`.",
   ],
 };
 
-export function trustedRouteRules(scope: TrustedScope): string {
+export function trustedRouteRules(chat: { readonly scope: "family" } | { readonly owner: boolean; readonly scope: "personal" }): string {
+  const routes = chat.scope === "family" ? ROUTE_LINES.family : ROUTE_LINES[chat.owner ? "owner" : "member"];
   return [
     "## Where to go",
     [
@@ -113,7 +120,7 @@ export function trustedRouteRules(scope: TrustedScope): string {
       "- A PDF, DOCX or XLSX file: the `pdf`, `docx` or `xlsx` skill first; other files of the workspace: `glob`, `grep`, `read_file`.",
       "- Mail, calendar, documents and contacts in Google: `execute_google_workspace`.",
       "- How to talk or work in this chat, or what it must keep in view: the chat notes, `manage_behavior_preference`.",
-      ...ROUTE_LINES[scope],
+      ...routes,
       "- Work of several tool steps (research, several pages, a site or service to try, files to generate or convert): `agent`, as the delegation rules say.",
     ].join("\n"),
   ].join("\n\n");

@@ -524,8 +524,17 @@ guidance and the PDF page route disappear.
 
 What participants send is no grant. Since 01.11.2026 every registered group, an external one included,
 takes in every medium and offers `inspect_workspace_image` (with an image-capable model) and
-`import_telegram_attachment` without a grant; only a channel and an unregistered chat are still
-acknowledged and dropped (`telegram_ingress_ignored_updates`, reason `external_media`). Earlier
+`import_telegram_attachment` without a grant. Since v0.63.0 nothing from a channel, an unregistered group
+or a disconnected one is stored: every update of such a chat is acknowledged and dropped before the queue
+(`telegram_ingress_ignored_updates` keeps only its id, reason `unaccepted_chat`; earlier rows say
+`external_media`).
+
+A disconnected external group (v0.63.0, `docs/plans/group-disconnect.md`) keeps its data and does nothing:
+no turn, no send (`registerTelegramGroupSendGate` stops any write to it and logs
+`AGENT_GROUP_DISCONNECTED_SEND_BLOCKED`), no reminder, schedule, memory review or key. The webhook must be
+subscribed to `my_chat_member` to hear that the bot was removed from a group: the installer does it; a host
+installed before v0.63.0 needs it once after the release,
+`docker exec osinara-production-agent-1 node .runtime/scripts/telegram-webhook-subscription.js`. Earlier
 releases granted both per external group: such a persisted grant still parses, grants nothing more
 and is neither offered nor reported by `manage_telegram_group`. The import keeps a file of any format
 in the group's own `/workspace/group` folder, typed by its bytes; before 01.11.2026 an external group

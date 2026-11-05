@@ -28,7 +28,7 @@ import { latestUserText } from "./memory-retrieval.js";
 import { isSmallTalkMessage } from "./memory-small-talk.js";
 import { isTelegramMediaPlaceholderOnly } from "./telegram-content/telegram-content-description.js";
 import { currentTelegramMessageReply } from "./telegram-group-turn-context.js";
-import { CAPTIONLESS_ATTACHMENT_MODEL_TEXT } from "./telegram-model-placeholders.js";
+import { CAPTIONLESS_ATTACHMENT_MODEL_TEXT, isApiKeyDeliveredModelText } from "./telegram-model-placeholders.js";
 
 const SHORT_MESSAGE_WORDS = 8;
 const PREVIOUS_MESSAGES = 3;
@@ -74,7 +74,8 @@ function refersElsewhere(text: string, replies: boolean): boolean {
 // The same words the selection itself stays silent on (`memory-automatic-selection.ts`).
 function asksMemoryNothing(text: string): boolean {
   const prepared = prepareMemoryQuery(text);
-  return isSmallTalkMessage(prepared) || prepared === CAPTIONLESS_ATTACHMENT_MODEL_TEXT || isTelegramMediaPlaceholderOnly(prepared);
+  return isSmallTalkMessage(prepared) || prepared === CAPTIONLESS_ATTACHMENT_MODEL_TEXT || isApiKeyDeliveredModelText(prepared) ||
+    isTelegramMediaPlaceholderOnly(prepared);
 }
 
 function bounded(text: string): string {

@@ -6,8 +6,13 @@
  * - `telegramContinuationToken`: the conversation address `chatId:thread:conversation`. The format
  *   is stored in the database and in session history, so it never changes.
  * - `splitTelegramMessageText`: chunks within Telegram's 4096-character cap.
+ * - `registerTelegramGroupSendGate`, `requireTelegramGroupWritable`: the application's check before any
+ *   write to a group chat.
  *
  * The bot token is passed in; there is no environment fallback.
+ * The core knows nothing of groups the application stopped working for. The application registers one
+ * check at startup; every call that writes to a group chat (a negative chat id; reads `get*` are never
+ * written) asks it first, and a closed group gets nothing, whichever path forgot its own check (#465).
  * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import { isObject, parseJsonObject, type JsonObject } from "../json.js";
@@ -99,6 +104,31 @@ export async function resolveTelegramBotToken(token?: TelegramBotToken): Promise
   return source;
 }
 
+/** Answers whether the application may write to this group chat now. */
+export type TelegramGroupSendGate = (chatId: string) => Promise<boolean>;
+
+// Set once by the application at startup; tests and scripts that never register one write freely.
+let groupSendGate: TelegramGroupSendGate | null = null;
+
+export function registerTelegramGroupSendGate(gate: TelegramGroupSendGate | null): void {
+  groupSendGate = gate;
+}
+
+const GROUP_CHAT_ID_PATTERN = /^-\d+$/u;
+
+/**
+ * Asks the registered gate before a write to a group chat. `callTelegramApi` calls it itself; a path
+ * that posts to the Bot API with its own fetch calls it before sending.
+ */
+export async function requireTelegramGroupWritable(method: string, chatIdValue: unknown): Promise<void> {
+  if (groupSendGate === null || method.startsWith("get")) return;
+  const chatId = typeof chatIdValue === "number" ? String(chatIdValue) : typeof chatIdValue === "string" ? chatIdValue : null;
+  if (chatId === null || !GROUP_CHAT_ID_PATTERN.test(chatId) || await groupSendGate(chatId)) return;
+  // Reaching here means a path did not check the group itself: the expected ones stop earlier, quietly.
+  console.error(JSON.stringify({ chatId, code: "AGENT_GROUP_DISCONNECTED_SEND_BLOCKED", method }));
+  throw new Error(`AGENT_GROUP_DISCONNECTED_SEND_BLOCKED: ${method} to a disconnected group was not sent`);
+}
+
 /** Low-level Telegram API call: a JSON body, or multipart fields when it uploads files. */
 export async function callTelegramApi(input: {
   readonly apiBaseUrl?: string;
@@ -112,6 +142,7 @@ export async function callTelegramApi(input: {
   if (input.body !== undefined && input.form !== undefined) {
     throw new Error("AGENT_TELEGRAM_API_BODY_AMBIGUOUS: a Telegram call takes a JSON body or a form, not both");
   }
+  await requireTelegramGroupWritable(input.method, input.body !== undefined ? input.body.chat_id : input.form?.get("chat_id"));
   const apiFetch = input.fetch ?? fetch;
   const token = await resolveTelegramBotToken(input.botToken);
   const init: RequestInit = input.form === undefined

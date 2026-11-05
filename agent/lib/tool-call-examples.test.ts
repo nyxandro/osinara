@@ -14,7 +14,7 @@ import { withCallExamples } from "./tool-call-examples.js";
 
 const EXAMPLES = {
   create: { action: "create", content: "Пора позвонить врачу" },
-  delete: { action: "delete", id: "<id из list_reminders>" },
+  delete: { action: "delete", id: "<id из списка action=list>" },
 };
 
 function tool(failure: Error) {

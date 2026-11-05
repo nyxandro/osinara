@@ -48,14 +48,27 @@ describe("ModelFacingError", () => {
     );
     const unknown = normalizeModelFacingError(
       new Error("connect ECONNREFUSED 10.0.0.4:5432"),
-      { toolName: "list_memories" },
+      { toolName: "manage_memory" },
     );
 
     expect(known.contract.code).toBe("AGENT_MEMORY_NOT_FOUND");
-    expect(known.contract.correction).toMatch(/list_memories|search_memories/iu);
+    // The list is an action of the memory tool since #457: the hint must not send the model to a removed tool.
+    expect(known.contract.correction).toContain("search_memories");
+    expect(known.contract.correction).toContain("action=list");
+    expect(known.contract.correction).not.toMatch(/list_memories/u);
     expect(unknown.contract.code).toBe("AGENT_TOOL_DEPENDENCY_FAILED");
     expect(unknown.message).not.toContain("10.0.0.4");
     expect(unknown.contract.sideEffectStatus).toBe("unknown");
+  });
+
+  // 01.11 and 02.11.2026 a group removal failed twice and nothing kept the reason (#464).
+  it("keeps the raw failure as the cause, for the log only", () => {
+    const raw = new Error("connect ECONNREFUSED 10.0.0.4:5432");
+
+    const normalized = normalizeModelFacingError(raw, { toolName: "manage_telegram_group" });
+
+    expect(normalized.cause).toBe(raw);
+    expect(normalized.message).not.toContain("10.0.0.4");
   });
 
   it("marks bad-input, not-found, access and conflict refusals as expected", () => {
@@ -69,7 +82,7 @@ describe("ModelFacingError", () => {
   });
 
   it("keeps operation and dependency failures loud unless the thrower marks a refusal", () => {
-    const normalize = (error: Error) => normalizeModelFacingError(error, { toolName: "search_memory_threads" });
+    const normalize = (error: Error) => normalizeModelFacingError(error, { toolName: "manage_memory_thread" });
 
     // `operation` is the fallback category, so a broken integration lands there too.
     expect(normalize(new AppError("AGENT_MEMORY_EMBEDDING_MODEL_MISMATCH", "Модель другая")).isExpectedRefusal)

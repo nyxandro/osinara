@@ -31,7 +31,7 @@ const LIVE_GROUP_GRANTS = new Set<ExternalGroupToolName>([
 ] as ExternalGroupToolName[]);
 
 const CHATS: Array<[string, ModeInstructionsInput]> = [
-  ["the private chat", { environment: "private" }],
+  ["the private chat", { environment: "private", owner: true }],
   ["the family group", { environment: "family" }],
   ["an external group", { capabilities: LIVE_GROUP_GRANTS, environment: "external" }],
 ];

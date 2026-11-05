@@ -11,6 +11,7 @@ import { callTelegramApi } from "../../runtime/telegram/api.js";
 
 import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../../config.js";
 import { AppError } from "../app-error.js";
+import { isTelegramGroupDisconnected } from "../group-connection/group-connection-repository.js";
 import type { TimedOutApprovalClaim } from "./approval-timeout.js";
 import { boundSettledPrompt, settledPromptText } from "./settled-prompt.js";
 
@@ -42,8 +43,14 @@ export function timedOutPromptEditBody(claim: TimedOutApprovalClaim): {
 
 export function createTimedOutPromptFinalizer(
   editMessage: (body: ReturnType<typeof timedOutPromptEditBody>) => Promise<{ ok: boolean }>,
+  isChatDisconnected: (telegramChatId: string) => Promise<boolean>,
 ) {
   return async function finalizePrompt(claim: TimedOutApprovalClaim): Promise<void> {
+    // Nothing is written to a group the owner disconnected; its card simply stays (#465).
+    if (await isChatDisconnected(claim.telegramChatId)) {
+      console.info(JSON.stringify({ approvalId: claim.id, code: "AGENT_GROUP_DISCONNECTED_PROMPT_LEFT" }));
+      return;
+    }
     const edited = await editMessage(timedOutPromptEditBody(claim));
     if (!edited.ok) {
       throw new AppError(
@@ -62,4 +69,4 @@ export const finalizeTimedOutPrompt = createTimedOutPromptFinalizer(async (body)
       fetch(request, { ...init, signal: AbortSignal.timeout(TELEGRAM_API_REQUEST_TIMEOUT_MS) }),
     method: "editMessageText",
   });
-});
+}, isTelegramGroupDisconnected);

@@ -125,6 +125,50 @@ describe("Telegram approval presentation", () => {
     expect(result.prompt).toContain(API_KEY_GRANT_CONSEQUENCE);
   });
 
+  it("shows a call through the owner's settings door as the card of the call it carries, and keeps the door's call", async () => {
+    const findApiKey = vi.fn().mockResolvedValue({
+      authHeader: "authorization", authScheme: "bearer", name: "neuraldeep",
+      purpose: "генерация картинок", upstreamBaseUrl: "https://api.neuraldeep.ru/v1",
+    });
+    const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES, findApiKey, findProfileProjectionGroup, findGroupTitle });
+    const action = { callId: "door-call", kind: "tool-call" as const, toolName: "owner_settings",
+      input: { call: { action: "grant", name: "neuraldeep", target: "group", telegramChatId: "-100123" }, section: "api_keys" } };
+
+    const result = await present({
+      action, kind: "tool-approval" as const, prompt: "Approval", requestId: "door-request",
+      options: [{ id: "approve", label: "Yes", style: "primary" }],
+    }, context());
+
+    expect(result.prompt).toContain("Ключ: neuraldeep — генерация картинок");
+    expect(result.prompt).toContain(API_KEY_GRANT_CONSEQUENCE);
+    expect(result.prompt).not.toContain("owner_settings");
+    // The confirmation is recorded and answered under the call the model made.
+    expect(result.action).toEqual(action);
+  });
+
+  it("shows group permissions and profile transfer through the door with the cards they always had", async () => {
+    const findProjection = vi.fn().mockResolvedValue("Рабочий чат");
+    const present = createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES, findGroupTitle, findProfileProjectionGroup: findProjection });
+    const door = (section: string, call: TelegramInputRequest["action"]["input"]) => ({
+      action: { callId: `door-${section}`, kind: "tool-call" as const, toolName: "owner_settings", input: { call, section } },
+      kind: "tool-approval" as const, prompt: "Approval", requestId: `request-${section}`,
+      options: [{ id: "approve", label: "Yes", style: "primary" as const }],
+    });
+
+    const policy = await present(door("groups", {
+      action: "update_policy", telegramChatId: "-100123", messageMode: "all", toolAllowlist: [],
+    }), context());
+    const projection = await present(door("group_profiles", {
+      action: "update", enabled: true, groupRef: "grp_0123456789abcdef0123456789abcdef",
+    }), context());
+
+    expect(policy.prompt).toContain("Группа: Тестовая группа (-100123)");
+    expect(policy.prompt).toContain(GROUP_TOOLS_NO_BASH_CONSEQUENCE);
+    expect(projection.prompt).toContain("Группа: Рабочий чат");
+    expect(projection.options?.find((option) => option.id === "approve")?.label).toBe("Включить перенос");
+    for (const card of [policy, projection]) expect(card.action.toolName).toBe("owner_settings");
+  });
+
   it.each([
     ["owner_only", "Запуск только по обращению владельца; контекст всех сообщений (owner_only)"],
     ["addressed_only", "Запуск по обращению любого участника; контекст всех сообщений (addressed_only)"],

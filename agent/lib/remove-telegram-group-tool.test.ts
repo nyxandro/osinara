@@ -3,15 +3,16 @@
  *
  * Constructs covered:
  * - `manage_telegram_group.remove`: requires private owner approval context.
- * - Group removal is scoped by the verified family and Telegram chat identifier.
+ * - Group removal is scoped by the verified family and Telegram chat identifier, and goes through the
+ *   removal that also deletes the chat's raw copies and confirms to the owner (#464).
  */
 import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { removeRegistration } = vi.hoisted(() => ({ removeRegistration: vi.fn() }));
 
-vi.mock("./telegram-group-administration-repository.js", () => ({
-  telegramGroupAdministrationRepository: { registerGroup: vi.fn(), removeRegistration },
+vi.mock("./group-connection/group-connection-actions.js", () => ({
+  groupConnectionActions: { disconnect: vi.fn(), reconnect: vi.fn(), remove: removeRegistration },
 }));
 
 import manageTelegramGroup from "./tools/manage_telegram_group.js";
@@ -44,7 +45,7 @@ function context(chatType: "private" | "supergroup"): ToolContext {
 describe("manage_telegram_group.remove", () => {
   beforeEach(() => {
     removeRegistration.mockReset();
-    removeRegistration.mockResolvedValue({ groupId: "group-1" });
+    removeRegistration.mockResolvedValue({ ownerNotified: true, status: "removed", telegramChatId: "-1003567628736", title: "Семья" });
   });
 
   it("removes a same-family group after private owner approval", async () => {
@@ -53,14 +54,10 @@ describe("manage_telegram_group.remove", () => {
         { action: "remove", telegramChatId: "-1003567628736" },
         context("private"),
       ),
-    ).resolves.toEqual({
-      botMembership: "unchanged",
-      groupId: "group-1",
-      registrationRemoved: true,
-      telegramChatId: "-1003567628736",
-    });
+    ).resolves.toEqual({ ownerNotified: true, status: "removed", telegramChatId: "-1003567628736", title: "Семья" });
     expect(removeRegistration).toHaveBeenCalledWith({
       familyId: "family-1",
+      ownerTelegramChatId: "101",
       requestedBy: "owner-1",
       telegramChatId: "-1003567628736",
     });
@@ -74,7 +71,7 @@ describe("manage_telegram_group.remove", () => {
       skillAllowlist: ["behavior-preferences"],
       telegramChatId: "-1003567628736",
       toolAllowlist: ["remember"],
-    }, context("private"))).resolves.toMatchObject({ registrationRemoved: true });
+    }, context("private"))).resolves.toMatchObject({ status: "removed" });
     expect(removeRegistration).toHaveBeenCalledWith(expect.objectContaining({
       telegramChatId: "-1003567628736",
     }));

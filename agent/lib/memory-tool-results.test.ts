@@ -4,7 +4,8 @@
  * Constructs covered:
  * - `remember`: persists the main agent's source-backed decision and optional atomic thread action.
  * - Tool results expose only opaque memory/thread refs and preserve immediate undo guidance.
- * - `list_memories`: projects internal records while preserving an opaque pagination cursor.
+ * - `manage_memory` list: projects internal records while preserving an opaque pagination cursor; the
+ *   list is an action of the memory tool since #457, and the page reaches the repository as asked.
  * - `search_memories`: returns the already-safe retrieval DTO unchanged.
  * - `remember`: a stop before retiring the current version of a property is an answer with that
  *   version's text, never a logged failure; `replaces` reaches the repository as the model sent it.
@@ -75,7 +76,7 @@ vi.mock("./session-auth.js", () => ({
   }),
 }));
 import { AppError } from "./app-error.js";
-import listMemoriesTool from "./tools/list_memories.js";
+import manageMemory from "./tools/manage_memory.js";
 import { MemoryAttributeReplacementRefusal } from "./memory-attribute-replacement-refusal.js";
 import { MemoryNeighbourRefusal } from "./memory-neighbour-gate.js";
 import { MemoryThreadCandidateError } from "./memory-thread-write.js";
@@ -424,7 +425,7 @@ describe("model-facing memory tool results", () => {
   it("returns only safe list items and keeps the repository cursor", async () => {
     listMemories.mockResolvedValue({ items: [internalMemory], nextCursor: "opaque-cursor" });
 
-    const result = await executeNonStreamingTool(listMemoriesTool, { limit: 20 }, context);
+    const result = await executeNonStreamingTool(manageMemory, { action: "list", limit: 20 }, context);
 
     expect(result).toEqual({
       items: [{
@@ -442,6 +443,21 @@ describe("model-facing memory tool results", () => {
       nextCursor: "opaque-cursor",
     });
     expect(JSON.stringify(result)).not.toMatch(/user-1|7100000001|session-internal|turn-internal/u);
+    expect(listMemories).toHaveBeenLastCalledWith(expect.anything(), { limit: 20 });
+  });
+
+  it("passes the requested page, history and scope of a list to the repository and nothing else", async () => {
+    listMemories.mockResolvedValue({ items: [], nextCursor: null });
+
+    await executeNonStreamingTool(manageMemory, { action: "list" }, context);
+    await executeNonStreamingTool(manageMemory, { action: "list", cursor: "c", history: true, limit: 5, scope: "family" }, context);
+
+    expect(listMemories.mock.calls.map((call) => call[1])).toEqual([
+      { limit: 20 },
+      { cursor: "c", history: true, limit: 5, scope: "family" },
+    ]);
+    await expect(executeNonStreamingTool(manageMemory, { action: "list", memoryRef: MEMORY_REF }, context))
+      .rejects.toMatchObject({ code: "AGENT_MEMORY_INPUT_INVALID" });
   });
 
   it("journals what each reading tool showed, under the turn of the conversation", async () => {
@@ -462,7 +478,7 @@ describe("model-facing memory tool results", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
 
     try {
-      await executeNonStreamingTool(listMemoriesTool, { limit: 20 }, inConversation);
+      await executeNonStreamingTool(manageMemory, { action: "list", limit: 20 }, inConversation);
       await executeNonStreamingTool(searchMemories, { query: "чай" }, inConversation);
     } finally { info.mockRestore(); }
 

@@ -6,10 +6,15 @@
  * - Emoji, variation selectors, and Markdown emphasis leave, the words they wrapped stay.
  * - Identifiers that carry underscores or dots are not mistaken for emphasis.
  * - Preparation never returns an empty query: a message that is only an address stays as it was.
+ * - The application's notice in place of an API key leaves; the owner's words around it in one burst
+ *   stay, and a notice alone stays as it was, for the abstention check to recognise.
  */
 import { describe, expect, it } from "vitest";
 
 import { prepareMemoryQuery } from "./memory-query-preparation.js";
+import { apiKeyDeliveredModelText, isApiKeyDeliveredModelText } from "./telegram-model-placeholders.js";
+
+const VARIABLES = { apiKey: "GROQ_API_KEY", baseUrl: "GROQ_BASE_URL" };
 
 describe("prepareMemoryQuery", () => {
   it.each([
@@ -76,6 +81,23 @@ describe("prepareMemoryQuery", () => {
       expect(prepareMemoryQuery(input)).toBe(input);
     },
   );
+
+  it.each([true, false])("keeps only the owner's words around an API key notice (applied: %s)", (applied) => {
+    const notice = apiKeyDeliveredModelText({ applied, name: "groq", variables: VARIABLES });
+
+    expect(prepareMemoryQuery(`${notice}\n\nОсинара, а теперь расшифруй это видео`)).toBe("а теперь расшифруй это видео");
+    expect(prepareMemoryQuery(`что с ключом?\n\n${notice}`)).toBe("что с ключом?");
+    expect(isApiKeyDeliveredModelText(prepareMemoryQuery(notice))).toBe(true);
+  });
+
+  it.each(["a", "a__b", "osinara", "a".repeat(32)])("recognises the notice for the key name %j", (name) => {
+    const notice = apiKeyDeliveredModelText({
+      applied: true, name, variables: { apiKey: `${name.toUpperCase()}_API_KEY`, baseUrl: `${name.toUpperCase()}_BASE_URL` },
+    });
+
+    expect(isApiKeyDeliveredModelText(prepareMemoryQuery(notice))).toBe(true);
+    expect(isApiKeyDeliveredModelText(prepareMemoryQuery(`${notice} держи`))).toBe(false);
+  });
 
   it("collapses the whitespace left behind by everything it removed", () => {
     expect(prepareMemoryQuery("Осинара,   напомни    🎂   про  торт"))

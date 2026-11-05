@@ -6,6 +6,7 @@
  * - `requireOnlyFields`: fails on misspelled or unsupported payload fields.
  * - `requireAction`: validates action discriminators without publishing JSON Schema unions.
  * - Field validators for strings, enums, UUIDs, ISO datetimes, and plain objects.
+ * - `pageInput`: the cursor and limit of a list action.
  */
 import { AppError } from "./app-error.js";
 
@@ -143,4 +144,27 @@ export function requiredObjectField(
     toolInputError(code, message);
   }
   return value as Record<string, unknown>;
+}
+
+export interface PageLimits {
+  readonly defaultLimit: number;
+  readonly maxLimit: number;
+}
+
+/**
+ * The page of a list action: the opaque cursor of the previous page, passed back unchanged, and a
+ * limit. The default is applied here rather than in the schema: a schema default would add `limit`
+ * to every other action of the same tool.
+ */
+export function pageInput(
+  input: Record<string, unknown>,
+  code: string,
+  limits: PageLimits,
+): { cursor?: string; limit: number } {
+  const cursor = optionalString(input, "cursor", code, "<nextCursor из прошлой страницы>");
+  const limit = input.limit ?? limits.defaultLimit;
+  if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > limits.maxLimit) {
+    toolInputError(code, `Поле limit должно быть целым числом от 1 до ${limits.maxLimit}`);
+  }
+  return { ...(cursor === undefined ? {} : { cursor }), limit };
 }
