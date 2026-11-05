@@ -7,7 +7,7 @@
  * - `deliverWorkspaceFile`: sends exact bytes as a voice note. Other files go inside the rich message
  *   of the answer that shows them (`answer-files/`).
  */
-import { resolveTelegramBotToken } from "../../runtime/telegram/api.js";
+import { requireTelegramGroupWritable, resolveTelegramBotToken } from "../../runtime/telegram/api.js";
 
 import {
   TELEGRAM_API_REQUEST_TIMEOUT_MS,
@@ -104,6 +104,8 @@ export async function deliverWorkspaceFile(
   }
   form.set(field, new Blob([Buffer.from(input.bytes)], { type: input.mediaType }), input.fileName);
 
+  // This path posts with its own fetch, so it asks the application's group gate itself (#465).
+  await requireTelegramGroupWritable(method, form.get("chat_id"));
   let response: Response;
   try {
     response = await fetchImplementation(`https://api.telegram.org/bot${token}/${method}`, {

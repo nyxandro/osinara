@@ -57,6 +57,7 @@ describeWithDatabase("Telegram group status repository", () => {
       requestedBy: current.ownerId,
     })).resolves.toEqual([
       {
+        connection: { state: "connected" },
         messageMode: "owner_only",
         skillAllowlist: ["behavior-preferences"],
         telegramChatId: "-1002",
@@ -65,6 +66,7 @@ describeWithDatabase("Telegram group status repository", () => {
         type: "external",
       },
       {
+        connection: { state: "connected" },
         messageMode: "all",
         skillAllowlist: [],
         telegramChatId: "-1001",

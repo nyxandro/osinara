@@ -23,9 +23,19 @@ export interface FamilyIdentity {
   userId: string;
 }
 
+/** The group's last pause: the agent saw nothing written between these instants (#465). */
+export interface RegisteredGroupPause {
+  /** The last history position before the pause; later positions came after reconnection. */
+  afterSequence: string;
+  endedAt: Date;
+  startedAt: Date;
+}
+
 interface RegisteredGroupBase {
   familyId: string;
   groupId: string;
+  /** Absent for a group that was never disconnected. */
+  lastPause?: RegisteredGroupPause;
   skillAllowlist: string[];
   telegramChatId: string;
   toolAllowlist: string[];

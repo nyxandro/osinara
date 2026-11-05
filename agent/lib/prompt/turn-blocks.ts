@@ -31,6 +31,7 @@ import {
 } from "../behavior-preferences.js";
 import { behaviorPreferenceRepository } from "../behavior-preference-repository.js";
 import { resolveConversationEnvironment } from "../conversation-environment.js";
+import { isFamilyOwner } from "../family-context.js";
 import {
   requireMemoryAuthorization,
   type MemoryAuthorization,
@@ -201,7 +202,10 @@ export function createModeBlockResolver(dependencies: {
         logBlockFailure("AGENT_TELEGRAM_REACTION_POLICY_LOOKUP_FAILED", error);
       }
     }
-    if (environment !== "external") {
+    if (environment === "private") {
+      return modeInstructions({ environment, owner: isFamilyOwner(ctx.session.auth), reactions, scheduledRun, subagentTurn });
+    }
+    if (environment === "family") {
       return modeInstructions({ environment, reactions, scheduledRun, subagentTurn });
     }
 

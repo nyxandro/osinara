@@ -7,6 +7,7 @@
  * - Explicit safe handling of MiniMax sibling-field materialization.
  * - Complete payload and bounded-correction guidance in the tool description.
  * - Durable fail-closed delivery when Telegram succeeds but completion persistence fails.
+ * - The list of candidates waiting for confirmation is an action that asks no confirmation (#457).
  */
 import type { ToolContext } from "../runtime/tool.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,12 +17,14 @@ const {
   approveInvitation,
   createInvitation,
   deliverFamilyInvitation,
+  listPendingInvitations,
   markInvitationDelivered,
   markInvitationDeliveryStarted,
 } = vi.hoisted(() => ({
   approveInvitation: vi.fn(),
   createInvitation: vi.fn(),
   deliverFamilyInvitation: vi.fn(),
+  listPendingInvitations: vi.fn(),
   markInvitationDelivered: vi.fn(),
   markInvitationDeliveryStarted: vi.fn(),
 }));
@@ -37,6 +40,7 @@ vi.mock("./family-repository.js", () => ({
   familyRepository: {
     approveInvitation,
     createInvitation,
+    listPendingInvitations,
     markInvitationDelivered,
     markInvitationDeliveryStarted,
   },
@@ -57,6 +61,7 @@ describe("manage_family_invitation model input", () => {
   beforeEach(() => {
     approveInvitation.mockReset();
     createInvitation.mockReset();
+    listPendingInvitations.mockReset();
     deliverFamilyInvitation.mockReset();
     markInvitationDelivered.mockReset();
     markInvitationDeliveryStarted.mockReset();
@@ -75,7 +80,24 @@ describe("manage_family_invitation model input", () => {
 
     expect(schema.type).toBe("object");
     expect(schema.required).toContain("action");
-    expect(schema.properties.action?.enum).toEqual(["create", "approve"]);
+    expect(schema.properties.action?.enum).toEqual(["list", "create", "approve"]);
+  });
+
+  it("lists the candidates waiting for confirmation without asking for one and without a change", async () => {
+    listPendingInvitations.mockResolvedValue({ candidates: [] });
+
+    expect(approvalFor({ action: "list" })).toBe("not-applicable");
+    await expect(manageFamilyInvitation.execute({ action: "list" } as never, context))
+      .resolves.toEqual({ candidates: [] });
+    expect(listPendingInvitations).toHaveBeenCalledWith("family-1", "owner-1");
+    for (const method of [approveInvitation, createInvitation]) expect(method).not.toHaveBeenCalled();
+    expect(approvalFor({ action: "create" })).toBe("user-approval");
+  });
+
+  it("refuses a list call that carries a candidate", async () => {
+    await expect(manageFamilyInvitation.execute({ action: "list", invitationId: "x" } as never, context))
+      .rejects.toMatchObject({ code: "AGENT_FAMILY_INVITATION_INPUT_INVALID" });
+    expect(listPendingInvitations).not.toHaveBeenCalled();
   });
 
   it("passes an incomplete approval candidate to execution, which refuses it with an example", async () => {
@@ -152,6 +174,7 @@ describe("manage_family_invitation model input", () => {
     const description = manageFamilyInvitation.description;
 
     for (const fragment of [
+      '{"action":"list"}',
       '{"action":"create"}',
       '"action":"approve"',
       "invitationId",

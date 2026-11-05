@@ -156,7 +156,7 @@ describeWithDatabase("API key repository", () => {
     expect(await store(fixture, "neuraldeep", "501")).toBe(true);
 
     expect(await apiKeyRepository.findIntake({ telegramChatId: fixture.chatId, updateId: "501" }))
-      .toEqual({ kind: "delivered" });
+      .toEqual({ kind: "delivered", name: "neuraldeep" });
     expect(await apiKeyRepository.findIntake({ telegramChatId: fixture.chatId, updateId: "502" }))
       .toMatchObject({ kind: "guarded", name: "neuraldeep" });
   });

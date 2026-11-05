@@ -12,7 +12,7 @@
  * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
 import type { JsonObject } from "../json.js";
-import { parseJsonObject } from "../json.js";
+import { isObject, parseJsonObject } from "../json.js";
 import type { RouteContext, RuntimeRoute } from "../server.js";
 import type { TurnObserver } from "../turn/run-turn.js";
 import type { JournalDatabase } from "../turn/journal-repository.js";
@@ -111,6 +111,11 @@ async function verifiedBody(request: Request, webhookSecretToken: string): Promi
 
 export function telegramWebhookRoutes(input: {
   readonly drainRoute: string;
+  /**
+   * A `my_chat_member` update: the bot's own membership changed in a chat. Never a queued message. The
+   * handler records it before the answer and leaves slower follow-ups to `waitUntil`.
+   */
+  readonly onBotMembership: (membership: JsonObject, context: RouteContext) => Promise<void>;
   readonly onDrain: (context: RouteContext) => Promise<Response>;
   readonly onVerifiedUpdate: (context: RouteContext & { readonly raw: JsonObject; readonly update: TelegramUpdate }) => Promise<Response>;
   readonly route: string;
@@ -129,6 +134,11 @@ export function telegramWebhookRoutes(input: {
         } catch (error) {
           // Telegram would redeliver a rejected update forever; a malformed one is acknowledged.
           console.warn(JSON.stringify({ code: "AGENT_TELEGRAM_WEBHOOK_BODY_INVALID", error: error instanceof Error ? error.message : String(error) }));
+          return new Response("ok");
+        }
+        if (isObject(raw.my_chat_member)) {
+          // A failure answers with an error, so Telegram delivers the event again.
+          await input.onBotMembership(raw.my_chat_member as JsonObject, context);
           return new Response("ok");
         }
         const update = parseTelegramUpdate(raw);

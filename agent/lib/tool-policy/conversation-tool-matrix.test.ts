@@ -6,7 +6,9 @@ import { isGrantableExternalGroupToolName } from "./grantable-group-capabilities
 describe("conversation tool matrix", () => {
   it("makes web search and page reading available in every conversation scope", () => {
     for (const environment of ["private", "family", "external"] as const) {
-      const input = environment === "external" ? { environment, capabilities: new Set<never>() } : { environment };
+      const input = environment === "external"
+        ? { environment, capabilities: new Set<never>() }
+        : environment === "private" ? { environment, owner: true } : { environment };
       const surface = buildModeToolSurface(input);
       expect(surface).toHaveProperty("web_search");
       expect(surface).toHaveProperty("web_fetch");

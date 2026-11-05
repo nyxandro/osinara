@@ -126,11 +126,12 @@ describe("manage_telegram_group.start_new_context", () => {
   });
 
   it("instructs the model to resolve the registered chat before rotating it", () => {
-    const instructions = modeInstructions({ environment: "private" });
+    const instructions = modeInstructions({ environment: "private", owner: true });
     // How to rotate a group's context is in the group-admin skill, loaded before any group change.
-    const procedure = serviceSkillsFor("private", new Set(["manage_telegram_group"]))["group-admin"]!.markdown;
+    const procedure = serviceSkillsFor("private", new Set(["owner_settings"]))["group-admin"]!.markdown;
 
-    expect(instructions).toContain('`{"action":"status"}`');
+    // The groups are a section of the owner's settings door (#459).
+    expect(instructions).toContain('`{"section":"groups","call":{"action":"status"}}`');
     expect(instructions).toContain("load the `group-admin` skill");
     expect(instructions).toContain("If the request points to another group, do not call `start_new_context`");
     expect(procedure).toContain("Before any other group action, call status");

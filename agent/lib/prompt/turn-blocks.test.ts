@@ -164,6 +164,25 @@ describe("mode block resolution", () => {
     expect(external).toContain(LINK_AND_COPY_BUTTON_RULES);
   });
 
+  it("teaches group and invitation administration only to the owner's private chat, skills to every member", async () => {
+    const resolve = createModeBlockResolver({
+      loadCapabilities: vi.fn().mockResolvedValue(new Set()),
+      loadReactionPolicy: reactionPolicy,
+    });
+    const memberAuth = auth({ ...privateAuth.current!.attributes, role: "member" });
+    const ownerAuth = auth({ ...privateAuth.current!.attributes, role: "owner" });
+
+    const member = await resolve(context(memberAuth));
+    const owner = await resolve(context(ownerAuth));
+
+    expect(owner).toContain("owner_settings");
+    // A member's chat has no tool for it: a rule naming one would send the model to a refusal.
+    expect(member).not.toContain("owner_settings");
+    expect(member).not.toContain("group-admin");
+    expect(member).not.toContain("`api-keys`");
+    for (const markdown of [owner, member]) expect(markdown).toContain("manage_skill");
+  });
+
   it("keeps every transport directive away from a subagent child", async () => {
     const resolve = createModeBlockResolver({
       loadCapabilities: vi.fn().mockResolvedValue(new Set()),

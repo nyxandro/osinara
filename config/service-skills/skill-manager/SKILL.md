@@ -23,5 +23,5 @@ The family's own skills are a shared library kept by the application. People cha
 - In a family chat: take `group` from `familyGroups` of `list`, then `{"action":"enable","name":"…","target":"family_group","group":"…"}`. It then works for everyone writing there.
 - Return a previous version: `{"action":"rollback","name":"…","version":N}`. Delete: `delete`.
 - A new version, a rollback or a deletion belongs to the skill's author or the family's owner. For someone else's skill, offer to tell its author or to save a corrected copy under another name.
-- An external group's skills are changed only by the owner, through `manage_telegram_group` (`update_skills`).
+- An external group's skills are changed only by the owner, through `owner_settings`, section `groups` (`update_skills`).
 - Built-in skills always work in private and family chats; they are not enabled, changed or deleted.

@@ -80,6 +80,12 @@ import {
 import { transcribeTelegramVoice } from "../lib/groq-voice-transcription.js";
 import { telegramIngressRepository } from "../lib/telegram-ingress-repository.js";
 import { captureApiKeyMessage } from "../lib/api-keys/api-key-intake.js";
+import { answerCallbackQuietly } from "../lib/telegram-quiet-callback-answer.js";
+import {
+  disconnectedGroupApprovalRefusal,
+  isDisconnectedGroupTurn,
+  logDisconnectedGroupTurnSilenced,
+} from "../lib/group-connection/group-connection-turn.js";
 import { createTelegramVoiceAuthorizer } from "../lib/telegram-voice-authorization.js";
 import { telegramRepository } from "../lib/telegram-repository.js";
 import { handleSoftwareUpdateCallback } from "../lib/software-updates/callback.js";
@@ -100,12 +106,14 @@ export const telegramTurnEvents: TelegramTurnEvents = {
     answerDrafts.pause(ctx.session.turn.id);
     const refusal = accountlessActorApprovalError(ctx.session.auth);
     if (refusal) throw refusal;
+    if (await isDisconnectedGroupTurn(ctx.session.auth)) throw disconnectedGroupApprovalRefusal();
     return await handleTelegramInputRequested(data, channel, ctx);
   },
   "message.progress"(data, turn) {
     answerDrafts.text(turn.id, data.textSoFar);
   },
   async "actions.requested"(_data, channel, ctx) {
+    if (await isDisconnectedGroupTurn(ctx.session.auth)) return;
     // A private chat's presenter shows "typing" itself; a group, a scheduled run and a wake-up as before.
     if (!answerDrafts.toolsStarted(ctx.session.turn.id) && !startAnswerDraft(channel, ctx)) await channel.telegram.startTyping();
   },
@@ -119,6 +127,14 @@ export const telegramTurnEvents: TelegramTurnEvents = {
     if (!output) return;
     const sessionId = applicationSessionId(ctx);
     if (!await sessionRepository.isCurrentAgentSession(sessionId, ctx.session.id)) return;
+    // The owner disconnected the group while this turn ran: it says nothing more there (#465).
+    if (await isDisconnectedGroupTurn(ctx.session.auth)) {
+      logDisconnectedGroupTurnSilenced({
+        agentSessionId: ctx.session.id, agentTurnId: ctx.session.turn.id, auth: ctx.session.auth, what: output.kind,
+      });
+      if (isScheduledSession(ctx)) await agentScheduleDispatchRepository.completeSilentRun(sessionId, ctx.session.id, new Date());
+      return;
+    }
     // Behind the barrier: a superseded session must not move counters either.
     await recordMemoryUsageDeclaration({
       auth: ctx.session.auth,
@@ -487,13 +503,14 @@ const authorizeTelegramVoice = createTelegramVoiceAuthorizer(telegramRepository)
 export function createTelegramIngress(runtime: Pick<DurableIngressDependencies, "dispatch" | "processConversationWakeup" | "runTurn">) {
   return createTelegramDurableIngress({
     ...runtime,
-    acceptMedia(message, incomingUpdateId) {
-      return telegramIngressRepository.acceptMedia({
+    acceptChatUpdate(message, incomingUpdateId) {
+      return telegramIngressRepository.acceptChatUpdate({
         chatId: message.chat.id,
         chatType: message.chat.type,
         updateId: incomingUpdateId,
       });
     },
+    answerCallbackQuietly,
     authorizeVoice: authorizeTelegramVoice,
     botUsername: requiredBotUsername(),
     captureApiKey: captureApiKeyMessage,

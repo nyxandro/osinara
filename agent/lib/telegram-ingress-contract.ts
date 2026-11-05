@@ -70,7 +70,7 @@ export interface TelegramPrivateBurstPolicy {
 }
 
 export interface TelegramIngressRepository {
-  acceptMedia(input: {
+  acceptChatUpdate(input: {
     chatId: string;
     chatType: "channel" | "group" | "private" | "supergroup";
     updateId: string;

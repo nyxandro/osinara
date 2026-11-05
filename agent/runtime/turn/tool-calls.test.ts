@@ -58,6 +58,28 @@ describe("tool call execution", () => {
     });
   });
 
+  it("logs the raw cause of a failure the model only sees as a dependency failure", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const database = Object.assign(new Error("update or delete on table \"x\" violates foreign key constraint \"x_fk\""), {
+      code: "23503", constraint: "x_fk", detail: "Key (id)=(1) is still referenced.", table: "x",
+    });
+    const wrapped = Object.assign(new Error("AGENT_TOOL_DEPENDENCY_FAILED: {}"), {
+      cause: database, code: "AGENT_TOOL_DEPENDENCY_FAILED", name: "ModelFacingError",
+    });
+
+    await executeToolCall(probe(async () => { throw wrapped; }), {}, CONTEXT);
+
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(log.mock.calls[0]![0] as string)).toMatchObject({
+      cause: {
+        code: "23503", constraint: "x_fk",
+        message: 'update or delete on table "x" violates foreign key constraint "x_fk"', table: "x",
+      },
+      code: "AGENT_TOOL_EXECUTION_FAILED", errorCode: "AGENT_TOOL_DEPENDENCY_FAILED",
+    });
+    expect(log.mock.calls[0]![0]).not.toContain("still referenced");
+  });
+
   it("does not log an expected coded refusal a second time", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const refusal = Object.assign(new Error("AGENT_SITE_REFUSED: сайт отказал"), { name: "ModelFacingError", isExpectedRefusal: true });

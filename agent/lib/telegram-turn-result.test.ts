@@ -83,3 +83,37 @@ describe("telegram turn attachments", () => {
     expect(context.some((entry) => entry.startsWith("<workspace_attachments>"))).toBe(false);
   });
 });
+
+// After a reconnection the agent must not claim nothing was said in the pause: it did not see it (#465).
+describe("telegram turn group pause", () => {
+  const group = {
+    familyId: "family-1", groupId: "group-1", lastPause: {
+      afterSequence: "120", endedAt: new Date("2026-12-02T09:00:00.000Z"), startedAt: new Date("2026-11-04T20:00:00.000Z"),
+    },
+    messageMode: "all", skillAllowlist: [], telegramChatId: "-1001", toolAllowlist: [], type: "external",
+  };
+
+  function turnContext(sequences: string[]) {
+    return {
+      cursorSequence: "130", durableMessage: "…", omittedBeforeSequence: null,
+      visibleEntryIds: sequences.map((sequence) => `entry-${sequence}`),
+      visibleTimelineEntries: sequences.map((sequenceId) => ({ sequenceId })),
+    };
+  }
+
+  it("tells the agent about the pause while its visible history spans it", () => {
+    const context = buildResult({ group, turnContext: turnContext(["118", "121", "130"]) } as never).context ?? [];
+
+    const pause = context.find((entry) => entry.startsWith("<group_pause>"));
+    expect(pause).toContain("2026-11-04T20:00:00.000Z");
+    expect(pause).toContain("2026-12-02T09:00:00.000Z");
+    expect(pause).toContain("120");
+  });
+
+  it("says nothing once the visible history starts after the pause", () => {
+    const context = buildResult({ group, turnContext: turnContext(["125", "130"]) } as never).context ?? [];
+
+    expect(context.some((entry) => entry.startsWith("<group_pause>"))).toBe(false);
+  });
+});
+

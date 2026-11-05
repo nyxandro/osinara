@@ -239,7 +239,7 @@ export const apiKeyRepository = {
    * again by Telegram (`delivered`).
    */
   async findIntake(input: { telegramChatId: string; updateId: string }): Promise<
-    | { readonly kind: "delivered" }
+    | { readonly kind: "delivered"; readonly name: string }
     | ({ readonly expiresAt: Date; readonly kind: "open" } & OpenApiKeyIntake)
     | ({ readonly kind: "guarded" } & OpenApiKeyIntake)
     | null
@@ -261,7 +261,7 @@ export const apiKeyRepository = {
     );
     const row = result.rows[0];
     if (!row) return null;
-    if (row.delivered) return { kind: "delivered" };
+    if (row.delivered) return { kind: "delivered", name: row.name };
     return row.open
       ? { expiresAt: row.intake_expires_at!, keyId: row.id, kind: "open", name: row.name }
       : { keyId: row.id, kind: "guarded", name: row.name };
@@ -438,7 +438,10 @@ export const apiKeyRepository = {
          FROM sandbox_api_key_grants g
          JOIN sandbox_api_keys k ON k.id = g.key_id
          JOIN workspaces w ON w.id = g.workspace_id
+         LEFT JOIN telegram_groups tg ON tg.id = w.group_id
         WHERE g.revoked_at IS NULL AND k.value_stored_at IS NOT NULL
+          -- A disconnected group's keys leave the proxy until it is reconnected (#465).
+          AND (tg.id IS NULL OR tg.disconnected_at IS NULL)
         ORDER BY g.id`,
     );
     return result.rows.map((row) => ({

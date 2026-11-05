@@ -100,7 +100,7 @@ export const memoryThreadSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("attach").describe("Attach the record to an existing thread"),
     role: threadRoleSchema.describe("The role of the new record inside the thread"),
-    threadRef: z.string().regex(THREAD_REF_PATTERN).describe("An opaque ref from list/search/read_memory_thread"),
+    threadRef: z.string().regex(THREAD_REF_PATTERN).describe("An opaque ref from manage_memory_thread list, search or read"),
   }).strict(),
   z.object({
     action: z.literal("create").describe("Atomically create a thread together with the record"),

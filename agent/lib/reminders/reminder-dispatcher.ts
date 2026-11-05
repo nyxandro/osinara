@@ -4,6 +4,9 @@
  * Exports:
  * - `createReminderDispatcher`: injectable deterministic lease-to-delivery processor.
  * - `dispatchDueReminders`: production dispatcher used by the minute schedule.
+ *
+ * A reminder of a disconnected group passes without delivery: its occurrence is closed as if the
+ * group's processes had not run, and nothing of it reaches the group later (#465).
  */
 import { isAppError } from "../app-error.js";
 import { recoverDatabaseBookkeeping } from "../database-recovery.js";
@@ -21,6 +24,7 @@ import {
   telegramGroupJournalRepository,
   type TelegramGroupJournalRepository,
 } from "../telegram-group-journal-repository.js";
+import { isGroupIdDisconnected } from "../group-connection/group-connection-repository.js";
 
 interface ReminderDispatcherRepository {
   claimDue(options: {
@@ -35,10 +39,12 @@ interface ReminderDispatcherRepository {
   ): Promise<void>;
   fail(job: ClaimedReminder, errorCode: string): Promise<void>;
   markDispatchStarted(id: string, leaseToken: string): Promise<void>;
+  skipWhileGroupDisconnected(job: ClaimedReminder, at: Date): Promise<void>;
 }
 
 interface ReminderDispatcherDependencies {
   deliver(job: ClaimedReminder): Promise<ProactiveDeliveryReceipt>;
+  isGroupDisconnected(groupId: string): Promise<boolean>;
   repository: ReminderDispatcherRepository;
   timeline: Pick<TelegramGroupJournalRepository, "recordAgentResponse">;
 }
@@ -53,6 +59,20 @@ export function createReminderDispatcher(dependencies: ReminderDispatcherDepende
 
     // Sequential delivery bounds Telegram pressure and gives every lease an unambiguous marker order.
     for (const job of jobs) {
+      if (job.groupId && await dependencies.isGroupDisconnected(job.groupId)) {
+        try {
+          await dependencies.repository.skipWhileGroupDisconnected(job, now);
+        } catch (error) {
+          // The lease expires on its own and the next pass skips the occurrence again; the rest of the
+          // batch must not wait for it.
+          console.error(JSON.stringify({
+            code: "AGENT_REMINDER_SKIP_FAILED",
+            error: error instanceof Error ? error.message : String(error),
+            reminderId: job.id,
+          }));
+        }
+        continue;
+      }
       let completedAt: Date;
       let receipt: ProactiveDeliveryReceipt;
       try {
@@ -95,6 +115,7 @@ export function createReminderDispatcher(dependencies: ReminderDispatcherDepende
 
 export const dispatchDueReminders = createReminderDispatcher({
   deliver: deliverTelegramReminder,
+  isGroupDisconnected: isGroupIdDisconnected,
   repository: reminderDispatchRepository,
   timeline: telegramGroupJournalRepository,
 });

@@ -373,6 +373,55 @@ export const reminderDispatchRepository = {
     }
   },
 
+  /**
+   * Closes a due occurrence of a disconnected group's reminder without delivery: a one-off one ends, a
+   * repeating one moves to its next time after `at`. Nothing is recorded as delivered or failed (#465).
+   */
+  async skipWhileGroupDisconnected(job: ClaimedReminder, at: Date): Promise<void> {
+    const client = await database().connect();
+    try {
+      await client.query("BEGIN");
+      const reminder = await client.query<{ family_id: string; recurrence_unit: ReminderRecurrenceUnit | null }>(
+        `SELECT family_id, recurrence_unit FROM reminders
+          WHERE id = $1 AND status = 'leased' AND lease_token = $2 AND dispatch_started_at IS NULL
+          FOR UPDATE`,
+        [job.id, job.leaseToken],
+      );
+      const current = reminder.rows[0];
+      if (!current) throw new AppError("AGENT_REMINDER_LEASE_STALE", "Срабатывание напоминания уже неактуально");
+      if (current.recurrence_unit === null) {
+        await client.query(
+          `UPDATE reminders
+              SET status = 'completed', lease_token = NULL, lease_expires_at = NULL, delayed_by_quiet_hours = false,
+                  last_error_code = NULL, updated_at = $2
+            WHERE id = $1`,
+          [job.id, at],
+        );
+      } else {
+        const next = await nextAnchoredOccurrence(client, "reminders", job.id, at);
+        await client.query(
+          `UPDATE reminders
+              SET status = 'active', occurrence_index = $2, due_at = $3, available_at = $3, attempts = 0,
+                  lease_token = NULL, lease_expires_at = NULL, delayed_by_quiet_hours = false,
+                  last_error_code = NULL, updated_at = $4
+            WHERE id = $1`,
+          [job.id, next.next_index, next.next_run_at, at],
+        );
+      }
+      await client.query(
+        `INSERT INTO audit_events (family_id, event_type, subject_id, metadata)
+         VALUES ($1, 'reminder.skipped_group_disconnected', $2, '{}'::jsonb)`,
+        [current.family_id, job.id],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
   async fail(job: ClaimedReminder, errorCode: string): Promise<void> {
     const client = await database().connect();
     try {

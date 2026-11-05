@@ -2,11 +2,12 @@
  * Consolidated family invitation mutation tool.
  *
  * Export:
- * - `manage_family_invitation`: creates a one-time invitation or approves a candidate.
+ * - `manage_family_invitation`: lists the candidates waiting for confirmation, creates a one-time
+ *   invitation or approves a candidate.
  *
  * Key constructs:
  * - Object-shaped model schema publishes a required finite action discriminator.
- * - One semantic parser validates both approval and execution inputs.
+ * - One semantic parser validates both approval and execution inputs; the list asks no confirmation.
  * - Input validators prevent malformed payloads from reaching invitation side effects.
  */
 import { defineTool } from "../../runtime/tool.js";
@@ -26,7 +27,7 @@ import {
 } from "../tool-input-validation.js";
 
 const INPUT_ERROR_CODE = "AGENT_FAMILY_INVITATION_INPUT_INVALID";
-const TOOL_ACTIONS = ["create", "approve"] as const;
+const TOOL_ACTIONS = ["list", "create", "approve"] as const;
 const TOP_LEVEL_FIELDS = [
   "action",
   "candidateDisplayName",
@@ -35,7 +36,7 @@ const TOP_LEVEL_FIELDS = [
 ] as const;
 
 const manageFamilyInvitationSchema = z.object({
-  action: z.enum(TOOL_ACTIONS).describe("Required action: create or approve."),
+  action: z.enum(TOOL_ACTIONS).describe("Required action: list, create or approve."),
   candidateDisplayName: z.string().optional().describe("Required only for action=approve."),
   candidateTelegramUserId: z.string().optional().describe("Required only for action=approve."),
   invitationId: z.string().optional().describe("A UUID, required only for action=approve."),
@@ -55,7 +56,7 @@ function requireApproveInput(input: Record<string, unknown>) {
     candidateTelegramUserId: requiredString(input, "candidateTelegramUserId", INPUT_ERROR_CODE, "123456789", {
       maxLength: 64,
     }),
-    invitationId: requiredUuid(input, "invitationId", INPUT_ERROR_CODE, "приглашение из list_pending_family_invitations"),
+    invitationId: requiredUuid(input, "invitationId", INPUT_ERROR_CODE, "приглашение из manage_family_invitation с action=list"),
   };
 }
 
@@ -64,6 +65,10 @@ function requireManageFamilyInvitationInput(input: unknown) {
   requireOnlyFields(payload, TOP_LEVEL_FIELDS, "manage_family_invitation", INPUT_ERROR_CODE);
   const action = requireAction(payload, "manage_family_invitation", TOOL_ACTIONS, INPUT_ERROR_CODE);
 
+  if (action === "list") {
+    requireOnlyFields(payload, ["action"], "action=list", INPUT_ERROR_CODE);
+    return { action } as const;
+  }
   // MiniMax may materialize known approve-only siblings for create. Creation ignores them and
   // cannot bind a candidate accidentally; unpublished fields still fail in the global guard.
   if (action === "create") return { action } as const;
@@ -71,14 +76,16 @@ function requireManageFamilyInvitationInput(input: unknown) {
 }
 
 const TOOL_DESCRIPTION = [
-  "Create a one-time family invitation or approve a candidate from list_pending_family_invitations; only the owner can use it, and both actions ask for confirmation.",
+  "Show the family candidates waiting for confirmation, create a one-time family invitation or approve a candidate from that list; only the owner can use it. Create and approve ask for confirmation, the list does not.",
+  "List: {\"action\":\"list\"}.",
   "Create: {\"action\":\"create\"} with no candidate fields.",
-  "Approve: {\"action\":\"approve\",\"invitationId\":\"<UUID from list_pending_family_invitations>\",\"candidateTelegramUserId\":\"123456789\",\"candidateDisplayName\":\"Анна\"}, all three copied exactly from the chosen candidate; never guess them.",
+  "Approve: {\"action\":\"approve\",\"invitationId\":\"<UUID from the list>\",\"candidateTelegramUserId\":\"123456789\",\"candidateDisplayName\":\"Анна\"}, all three copied exactly from the chosen candidate; never guess them.",
 ].join(" ");
 
 export const MANAGE_FAMILY_INVITATION_CALL_EXAMPLES: CallExamples = {
+  list: { action: "list" },
   create: { action: "create" },
-  approve: { action: "approve", invitationId: "<UUID из list_pending_family_invitations>", candidateTelegramUserId: "123456789", candidateDisplayName: "Анна" },
+  approve: { action: "approve", invitationId: "<UUID из списка action=list>", candidateTelegramUserId: "123456789", candidateDisplayName: "Анна" },
 };
 
 export default withCallExamples(defineTool({
@@ -86,20 +93,21 @@ export default withCallExamples(defineTool({
   replaySafe: true,
   approval: ({ toolInput }) => {
     try {
-      requireManageFamilyInvitationInput(toolInput);
+      // Reading the list changes nothing, so the owner is not asked to confirm it.
+      return requireManageFamilyInvitationInput(toolInput).action === "list" ? "not-applicable" : "user-approval";
     } catch (error) {
       // An invalid call goes on to execution, whose own check refuses it before any change and
       // answers with an example; thrown here, it would end the turn.
       if (isAppError(error)) return "not-applicable";
       throw error;
     }
-    return "user-approval";
   },
   description: TOOL_DESCRIPTION,
   inputSchema: manageFamilyInvitationSchema,
   async execute(input, ctx) {
     const parsed = requireManageFamilyInvitationInput(input);
     const owner = requirePrivateTelegramOwner(ctx);
+    if (parsed.action === "list") return await familyRepository.listPendingInvitations(owner.familyId, owner.userId);
     if (parsed.action === "approve") {
       return await familyRepository.approveInvitation({
         approvedBy: owner.userId,

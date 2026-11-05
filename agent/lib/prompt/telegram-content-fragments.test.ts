@@ -17,7 +17,7 @@ describe("telegramContentRules in mode instructions", () => {
   it("explains the server-written content lines in every chat mode", () => {
     const withImages = telegramContentRules(true);
 
-    expect(modeInstructions({ environment: "private" })).toContain(withImages);
+    expect(modeInstructions({ environment: "private", owner: true })).toContain(withImages);
     expect(modeInstructions({ environment: "family" })).toContain(withImages);
     expect(modeInstructions({ capabilities: new Set(), environment: "external" })).toContain(withImages);
     expect(modeInstructions({ capabilities: new Set(), environment: "external", includeApplicationCore: false }))

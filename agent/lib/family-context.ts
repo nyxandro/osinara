@@ -3,11 +3,12 @@
  *
  * Exports:
  * - `requireFamilyCaller`: validates a family-authenticated session.
+ * - `isFamilyOwner`: whether the verified caller is the owner, for what a turn is offered.
  * - `requireOwner`: enforces owner-only administration.
  * - `requirePrivateTelegramOwner`: limits secret delivery to the verified owner chat.
  * - `requirePrivateTelegramMember`: a family member in their own private chat.
  */
-import type { SessionContext } from "../runtime/context.js";
+import type { SessionAuth, SessionContext } from "../runtime/context.js";
 
 import { AppError } from "./app-error.js";
 import type { FamilyRole } from "./family-access.js";
@@ -35,6 +36,15 @@ export function requireFamilyCaller(ctx: Pick<SessionContext, "session">): Famil
     throw new AppError("AGENT_ACCESS_DENIED", "Требуется доступ члена семьи");
   }
   return { familyId, role: role as FamilyRole, userId: caller.principalId };
+}
+
+/**
+ * Whether the verified caller of this turn is the family's owner. The tool surface and the mode block
+ * offer the owner's administration only then; each of those tools still checks it at execution.
+ */
+export function isFamilyOwner(auth: SessionAuth): boolean {
+  const caller = auth.current;
+  return caller?.principalType === "user" && caller.attributes.role === "owner";
 }
 
 export function requireOwner(ctx: Pick<SessionContext, "session">): FamilyCaller {

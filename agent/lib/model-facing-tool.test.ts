@@ -5,6 +5,7 @@
  * - `wrapModelFacingTool`: preserves successful output and normalizes thrown failures.
  * - `wrapModelFacingToolMap`: applies the same boundary to a complete mode surface.
  * - The metrics line carries the failure code and log-only details of a failed call.
+ * - A turn of a disconnected group gets no tool at all, whatever the tool (#465).
  */
 import { defineTool, type ToolDefinition } from "../runtime/tool.js";
 import { afterEach, describe, expect, it, vi, type MockInstance } from "vitest";
@@ -12,6 +13,14 @@ import { z } from "zod";
 
 import { AppError } from "./app-error.js";
 import { wrapModelFacingTool, wrapModelFacingToolMap } from "./model-facing-tool.js";
+
+vi.mock("./group-connection/group-connection-repository.js", () => ({
+  isGroupIdDisconnected: vi.fn(async (groupId: string) => groupId === "group-off"),
+}));
+
+function groupTurn(groupId: string) {
+  return { session: { auth: { current: { attributes: { groupId } } } } } as never;
+}
 
 function tool(execute: () => unknown) {
   return defineTool({
@@ -50,6 +59,35 @@ describe("model-facing tool boundary", () => {
       contract: { code: "AGENT_TOOL_DEPENDENCY_FAILED", retryable: false },
     });
     await expect(surface.raw!.execute({}, {} as never)).rejects.not.toThrow(/secret/u);
+  });
+
+  it("refuses every tool of a turn in a disconnected group before the tool runs", async () => {
+    const execute = vi.fn(() => ({ ok: true }));
+    const wrapped = wrapModelFacingTool("remember", tool(execute));
+
+    await expect(wrapped.execute({}, groupTurn("group-off"))).rejects.toMatchObject({
+      contract: { code: "AGENT_GROUP_DISCONNECTED", retryable: false },
+      isExpectedRefusal: true,
+    });
+    expect(execute).not.toHaveBeenCalled();
+    await expect(wrapped.execute({}, groupTurn("group-on"))).resolves.toEqual({ ok: true });
+  });
+
+  it("refuses the confirmation of a tool in a disconnected group before any card", async () => {
+    const approval = vi.fn(() => "user-approval" as const);
+    const wrapped = wrapModelFacingTool("remove_group_file", { ...tool(() => ({ ok: true })), approval } as ToolDefinition<any, any>);
+
+    await expect(wrapped.approval!({ ...(groupTurn("group-off") as object), toolInput: {} } as never))
+      .resolves.toMatchObject({ reason: expect.stringContaining("AGENT_GROUP_DISCONNECTED"), type: "denied" });
+    expect(approval).not.toHaveBeenCalled();
+    await expect(wrapped.approval!({ ...(groupTurn("group-on") as object), toolInput: {} } as never)).resolves.toBe("user-approval");
+  });
+
+  it("lets a background memory review taken before the disconnection finish", async () => {
+    const wrapped = wrapModelFacingTool("remember", tool(() => ({ ok: true })));
+    const review = { session: { auth: { current: { attributes: { groupId: "group-off", memoryReviewMode: "background" } } } } } as never;
+
+    await expect(wrapped.execute({}, review)).resolves.toEqual({ ok: true });
   });
 
   describe("metrics line", () => {
