@@ -38,6 +38,9 @@ import searchMemories from "../tools/search_memories.js";
 import sendGif from "../tools/send_gif.js";
 import sendContact from "../tools/send_contact.js";
 import sendLocation from "../tools/send_location.js";
+import sendWidget from "../tools/send_widget.js";
+import updateWidget from "../tools/update_widget.js";
+import { TELEGRAM_WIDGETS_AVAILABLE } from "../widgets/widget-config.js";
 import sendPoll from "../tools/send_poll.js";
 import sendVoiceMessage from "../tools/send_voice_message.js";
 import startNewContext from "../tools/start_new_context.js";
@@ -84,6 +87,10 @@ export const PRIVATE_ONLY_TOOLS: ToolMap = {
   get_memory_source: getMemorySource as unknown as AnyToolDefinition,
   manage_skill: manageSkill as unknown as AnyToolDefinition,
   notification_settings: notificationSettings as unknown as AnyToolDefinition,
+  // Widgets work only in the private chat with the bot for now (owner's decision of 06.11.2026, #468).
+  ...(TELEGRAM_WIDGETS_AVAILABLE
+    ? { send_widget: sendWidget as unknown as AnyToolDefinition, update_widget: updateWidget as unknown as AnyToolDefinition }
+    : {}),
 };
 
 /**

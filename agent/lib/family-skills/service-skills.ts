@@ -39,6 +39,8 @@ const SERVICE_SKILLS: readonly ServiceSkill[] = [
   { environments: new Set(["private"]), name: "group-admin", tools: ["owner_settings"] },
   { environments: new Set(["private"]), name: "api-keys", tools: ["owner_settings"] },
   { environments: new Set(["private", "family", "external"]), name: "delegation", tools: ["agent"] },
+  // Widgets work only in the private chat with the bot for now (#468).
+  { environments: new Set(["private"]), name: "widgets", tools: ["send_widget", "update_widget"] },
 ];
 
 function loadServiceSkill(name: string): SkillDefinition {

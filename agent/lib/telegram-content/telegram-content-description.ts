@@ -175,6 +175,8 @@ const DESCRIBERS: readonly (readonly [string, (raw: Raw) => string])[] = [
   ["giveaway", () => "[розыгрыш]"],
   ["invoice", (raw) => bracketed("счёт", [quoted(text(raw.title))])],
   ["live_photo", () => "[живое фото]"],
+  // A widget's HTML is someone else's code (Bot API 10.4, #468): only its presence is named; its caption is the text.
+  ["widget", () => "[виджет]"],
 ];
 
 const CONTEXT_FIELDS = ["forward_origin", "external_reply", "reply_to_story"] as const;

@@ -38,6 +38,14 @@ export async function claimNextTelegramIngress(leaseMilliseconds: number, burst:
                AND (earlier.media_group_leader_id IS NULL OR earlier.media_group_late)
                AND earlier.status IN ('pending', 'processing')
            )
+           -- One update of a chat runs at a time, whatever its number: a widget press is queued under a
+           -- number above every real update (#468), and a message typed while it runs must wait for it.
+           AND NOT EXISTS (
+             SELECT 1 FROM telegram_ingress_updates running
+             WHERE running.queue_id = item.queue_id AND running.update_id <> item.update_id
+               AND running.status = 'processing' AND running.lease_expires_at > now()
+               AND (running.media_group_leader_id IS NULL OR running.media_group_late)
+           )
            -- A private chat still receiving a burst is left alone until it has been quiet for the
            -- window, or the cap has passed since its head arrived. Only a new message waits for it.
            -- A button press has no message and must compare as not private, never as unknown.

@@ -42,6 +42,7 @@ import { apiKeyUsageRoute } from "./lib/api-keys/api-key-usage-route.js";
 import { handleBotMembershipUpdate } from "./lib/group-connection/group-connection-membership.js";
 import { isTelegramGroupDisconnected } from "./lib/group-connection/group-connection-repository.js";
 import { withRuntimeAdmission } from "./lib/runtime-maintenance.js";
+import { AppError } from "./lib/app-error.js";
 import { createApprovalTimeoutResolver } from "./lib/telegram-hitl/approval-timeout.js";
 import { finalizeTimedOutPrompt } from "./lib/telegram-hitl/approval-timeout-prompt.js";
 import { approvalTimeoutRepository } from "./lib/telegram-hitl/approval-timeout-repository.js";
@@ -53,6 +54,8 @@ import { startScheduler } from "./runtime/scheduler.js";
 import { startRuntimeServer } from "./runtime/server.js";
 import { registerTelegramGroupSendGate } from "./runtime/telegram/api.js";
 import { createTelegramChannel, telegramWebhookRoutes } from "./runtime/telegram/telegram-channel.js";
+import { handleWidgetQuery } from "./lib/widgets/widget-press.js";
+import { widgetWebhookSecret } from "./lib/widgets/widget-webhook-secret.js";
 import { summarizeWithModel } from "./runtime/turn/compaction.js";
 import { lifecycleTurnObserver } from "./runtime/turn/lifecycle-observer.js";
 import { callStepModel } from "./runtime/turn/model-call.js";
@@ -191,8 +194,16 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
         onBotMembership: (membership, context) => handleBotMembershipUpdate(membership, (work) => context.waitUntil(work)),
         onDrain: (context) => ingress.drain(context),
         onVerifiedUpdate: (context) => ingress(context),
+        onWidgetQuery: async (raw, context) => {
+          // A press is decided and written like a reply button's arrival: never while the application is
+          // frozen for a backup. The error answers the webhook with 500, so Telegram delivers it again.
+          const handled = await withRuntimeAdmission("callback", async () => { await handleWidgetQuery(raw); return true; });
+          if (handled === null) throw new AppError("AGENT_WIDGET_QUERY_DEFERRED", "Нажатие в виджете отложено до конца обслуживания");
+          await ingress.drain(context);
+        },
         route: TELEGRAM_WEBHOOK_ROUTE,
         webhookSecretToken: options.webhookSecretToken,
+        widgetSecretToken: widgetWebhookSecret(options.webhookSecretToken),
       }),
       ...googleOAuthRoutes(),
       apiKeyUsageRoute,
