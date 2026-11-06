@@ -183,6 +183,7 @@ const POST_V0101_MIGRATIONS = [
   "149_reminder_timezone_waits.sql",
   "150_telegram_group_connection.sql",
   "151_private_questions.sql",
+  "152_telegram_widgets.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [
