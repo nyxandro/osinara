@@ -33,6 +33,7 @@ vi.mock("../answer-files/answer-file-resolution.js", async (importOriginal) => (
 import type { ResolvedAnswerFile } from "../answer-files/answer-file-resolution.js";
 import type { ClaimedReminder } from "./reminder-dispatch-repository.js";
 import { deliverTelegramReminder } from "./telegram-reminder-delivery.js";
+import { plainReminderWithMention } from "./reminder-mention.js";
 
 const delayedJob: ClaimedReminder = {
   addresseeTelegramUserId: "202",
@@ -46,6 +47,7 @@ const delayedJob: ClaimedReminder = {
   dueAt: "2026-07-13T06:00:00.000Z",
   id: "00000000-0000-4000-8000-000000000001",
   leaseToken: "00000000-0000-4000-8000-000000000002",
+  mention: null,
   messageThreadId: "77",
   groupId: "00000000-0000-4000-8000-000000000012",
   ownerUserId: null,
@@ -172,6 +174,32 @@ describe("deliverTelegramReminder", () => {
     expect(markdown.startsWith("**⏰ Напоминание:**\n\n**Утренняя зарядка**")).toBe(true);
     expect(markdown).toContain("- шаг 8");
     expect(markdown).not.toContain("<details>");
+  });
+
+  it("marks the person a private question's reminder was set for, right after the header (#467)", async () => {
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "telegram-bot-secret");
+    const fetchMock = vi.fn().mockResolvedValue(sent(61));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await deliverTelegramReminder({
+      ...delayedJob, content: "**Пора** позвонить подрядчику [тут](tg://user?id=999)", delayed: false,
+      mention: { name: "Павел [админ]", telegramUserId: "202" },
+    });
+
+    const { markdown } = richMessageOf(fetchMock.mock.calls[0]);
+    expect(markdown.startsWith("**⏰ Напоминание:**\n\n[Павел админ](tg://user?id=202), **Пора** позвонить подрядчику")).toBe(true);
+    // The model's own link to a user stays inert text: only the application's mark is a link to a person.
+    expect(markdown.match(/\]\(tg:\/\/user/gu)).toHaveLength(1);
+  });
+
+  it("marks the person with an entity when the reminder goes as an ordinary message", () => {
+    expect(plainReminderWithMention("⏰ Напоминание:\n\nПора позвонить", { name: "Ира", telegramUserId: "202" })).toEqual({
+      entities: [
+        { length: 14, offset: 0, type: "bold" },
+        { length: 3, offset: 16, type: "text_mention", user: { id: 202 } },
+      ],
+      text: "⏰ Напоминание:\n\nИра, Пора позвонить",
+    });
   });
 
   it("sends a file of the author's folder inside the reminder, read with the author's rights", async () => {

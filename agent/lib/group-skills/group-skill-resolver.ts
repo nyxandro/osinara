@@ -52,6 +52,8 @@ export async function resolveConversationSkills(
   turn: { readonly toolNames: ReadonlySet<string> },
 ): Promise<Record<string, SkillDefinition>> {
   const environment = resolveConversationEnvironment(auth);
+  // A private question (`/me`, #467) runs no scripts and reads no files: only the how-to of its own tools.
+  if (auth.current?.attributes.privateQuestion === "true") return serviceSkillsFor(environment, turn.toolNames);
   const external = environment === "external";
   const familyId = external ? resolveExternalGroupPolicyIdentity(auth)?.familyId ?? null : trustedFamilyId(auth);
   // A group's skills keep the order of its list; a trusted chat lists built-in skills first.

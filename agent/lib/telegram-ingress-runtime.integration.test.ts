@@ -15,7 +15,7 @@ import { reply, toolCalls } from "../runtime/turn/turn.integration-fixtures.js";
 import { closeDatabase, database } from "./database.js";
 import { createTelegramDurableIngress } from "./telegram-durable-ingress.js";
 import { telegramIngressRepository } from "./telegram-ingress-repository.js";
-import { NO_BURSTS } from "./telegram-ingress.test-fixtures.js";
+import { NO_BURSTS, NO_PRIVATE_QUESTIONS } from "./telegram-ingress.test-fixtures.js";
 import { createApprovalTimeoutResolver, type TimedOutApprovalClaim } from "./telegram-hitl/approval-timeout.js";
 import { runtimeTelegram } from "./telegram-runtime.integration-fixtures.js";
 
@@ -39,6 +39,7 @@ function ingressOver(telegram: ReturnType<typeof runtimeTelegram>, runTurn = tel
   return createTelegramDurableIngress({
     acceptChatUpdate: vi.fn(async () => true), answerCallbackQuietly: vi.fn(async () => undefined), authorizeVoice: vi.fn(), captureApiKey: vi.fn(async () => ({ kind: "forwarded" as const })), botUsername: "osinara_bot", dispatch: telegram.dispatch,
     dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), replyButtonsOnArrival: vi.fn(async () => undefined), handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), leaseMilliseconds: 60_000, privateBurst: NO_BURSTS,
+ privateQuestions: NO_PRIVATE_QUESTIONS,
     reportFailure: vi.fn(), repository: telegramIngressRepository, runTurn, transcribeVoice: vi.fn(),
   });
 }

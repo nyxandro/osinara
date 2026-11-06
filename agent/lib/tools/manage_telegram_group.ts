@@ -12,6 +12,7 @@
  */
 import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
+import { syncPrivateQuestionCommands } from "../private-questions/private-question-commands.js";
 
 import { isScheduledSession } from "../agent-schedules/scheduled-session.js";
 import { AppError, isAppError } from "../app-error.js";
@@ -410,6 +411,8 @@ export default withCallExamples(defineTool({
         telegramChatId,
         toolAllowlist,
       });
+      // "Only the owner" changes who sees /me in the menu (#467).
+      await syncPrivateQuestionCommands("update_policy");
       return {
         botMembership: "unchanged",
         groupId: result.groupId,
@@ -449,18 +452,22 @@ export default withCallExamples(defineTool({
         requestedBy: owner.userId,
         telegramChatId: parsed.telegramChatId,
       };
-      return parsed.action === "disconnect"
+      const changed = parsed.action === "disconnect"
         ? await groupConnectionActions.disconnect(request)
         : await groupConnectionActions.reconnect(request);
+      await syncPrivateQuestionCommands(parsed.action);
+      return changed;
     }
     if (parsed.action === "remove") {
       if (!inOwnersConversation(ctx)) throw connectionChangeOutsideConversation();
-      return await groupConnectionActions.remove({
+      const removed = await groupConnectionActions.remove({
         familyId: owner.familyId,
         ownerTelegramChatId: owner.telegramChatId,
         requestedBy: owner.userId,
         telegramChatId: parsed.telegramChatId,
       });
+      await syncPrivateQuestionCommands("remove");
+      return removed;
     }
 
     const { registration } = parsed;
@@ -469,6 +476,7 @@ export default withCallExamples(defineTool({
       familyId: owner.familyId,
       requestedBy: owner.userId,
     });
+    await syncPrivateQuestionCommands("register");
     return {
       active: true,
       groupId: result.groupId,

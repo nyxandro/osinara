@@ -39,8 +39,10 @@ import {
   TELEGRAM_PRIVATE_BURST_QUIET_MS,
   TELEGRAM_INGRESS_ADMISSION_TIMEOUT_MS,
   TELEGRAM_INGRESS_MESSAGE_CONCURRENCY,
+  TELEGRAM_PRIVATE_QUESTION_CONCURRENCY,
 } from "../config.js";
 import type { ApiKeyCapture } from "./api-keys/api-key-intake.js";
+import type { PrivateQuestionIngress } from "./private-questions/private-question-ingress.js";
 import { AppError, isAppError } from "./app-error.js";
 import { type TelegramIngressRepository, type TelegramIngressVoice, type TelegramPrivateBurstPolicy } from "./telegram-ingress-contract.js";
 import { waitForHeldPrivateChat } from "./telegram-private-burst.js";
@@ -104,6 +106,8 @@ export interface DurableIngressDependencies {
   processConversationWakeup?(input: { slots: Sema }): Promise<boolean>;
   admissionMilliseconds?: number;
   privateBurst?: TelegramPrivateBurstPolicy;
+  /** A private question (`/me`, #467) never takes the group's path: its own queue, slots and turn. */
+  privateQuestions: PrivateQuestionIngress;
   repository: TelegramIngressRepository;
   /** Runs a turn to its end, or returns the outcome of one that already ended. */
   runTurn(turnId: string): Promise<TurnOutcome>;
@@ -206,6 +210,7 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
   const messageSlots = new Sema(TELEGRAM_INGRESS_MESSAGE_CONCURRENCY);
   const callbackSlots = new Sema(TELEGRAM_INGRESS_CALLBACK_CONCURRENCY);
   const wakeupSlots = new Sema(TELEGRAM_INGRESS_WAKEUP_CONCURRENCY);
+  const privateQuestionSlots = new Sema(TELEGRAM_PRIVATE_QUESTION_CONCURRENCY);
   const privateBurst = dependencies.privateBurst ?? {
     maxCharacters: TELEGRAM_PRIVATE_BURST_MAX_CHARACTERS,
     maxMessages: TELEGRAM_PRIVATE_BURST_MAX_MESSAGES,
@@ -305,6 +310,9 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
     acceptedUpdate: TelegramUpdate,
     signal: AbortSignal,
   ): Promise<string | null> {
+    if (dependencies.privateQuestions.isPrivate(claim.payload)) {
+      return await dependencies.privateQuestions.process(claim.payload, claim.updateId);
+    }
     const binding = claim.dispatchBinding;
     if (claim.dispatchStarted && binding !== null) {
       // The update already created its turn; after a restart that turn only finishes.
@@ -422,7 +430,9 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
         // SQL coalesces each queue behind its live leased head. A waiter whose lease was lost
         // cannot dispatch after acquiring a slot; callbacks have capacity separate from model turns.
         // A reply button starts a new turn like a message, so it takes a message slot.
-        const slots = acceptedUpdate.kind === "callback_query" && !isReplyButtonCallback(acceptedUpdate.callbackQuery.data)
+        const slots = dependencies.privateQuestions.isPrivate(claim.payload)
+          ? privateQuestionSlots
+          : acceptedUpdate.kind === "callback_query" && !isReplyButtonCallback(acceptedUpdate.callbackQuery.data)
           ? callbackSlots
           : messageSlots;
         const waitedForSlot = slots.tryAcquire() === undefined;
@@ -464,6 +474,13 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
         // The record is terminal, but the rest of the queue is not: a rethrow here left every
         // later message waiting for the next inbound webhook to start a new drain.
         await dependencies.repository.fail(claim.updateId, claim.leaseToken, failure, dispatchedSessionId);
+        if (dependencies.privateQuestions.isPrivate(claim.payload)) {
+          // The person's «Думаю…» becomes the failure text; a failure of that must not stop the queue.
+          await dependencies.privateQuestions.fail(claim.updateId, failure.code).catch((noticeError: unknown) => {
+            console.error(JSON.stringify({ code: "AGENT_PRIVATE_QUESTION_FAIL_NOTICE_FAILED",
+              error: noticeError instanceof Error ? noticeError.message : String(noticeError), updateId: claim.updateId }));
+          });
+        }
         const failedUpdate = parseTelegramUpdate(claim.payload);
         const origin = failedUpdate?.kind === "message" ? failedUpdate.message : failedUpdate?.callbackQuery.message;
         await dependencies.reportFailure({ key: `telegram:${claim.updateId}`, code: failure.code,
@@ -498,6 +515,17 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
     const chat = update.kind === "message" ? update.message.chat : update.callbackQuery.message?.chat;
     if (chat !== undefined && chat.type !== "private" && !await dependencies.acceptChatUpdate({ chat }, incomingUpdateId)) {
       if (update.kind === "callback_query") context.waitUntil(dependencies.answerCallbackQuietly(update.callbackQuery.id));
+      return new Response("ok");
+    }
+    if (dependencies.privateQuestions.isPrivate(raw)) {
+      // Seen by one person: its own queue, and none of the group's arrival steps (reply buttons).
+      await dependencies.repository.enqueue({
+        continuationKey: dependencies.privateQuestions.queueKey(raw),
+        payload: raw,
+        updateId: incomingUpdateId,
+      });
+      context.waitUntil(dependencies.privateQuestions.arrive(raw, incomingUpdateId));
+      scheduleDrain(context);
       return new Response("ok");
     }
     const voice = voiceMetadata(raw);

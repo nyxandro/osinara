@@ -24,6 +24,10 @@
 import { createTelegramIngress, telegramChannelHooks, telegramTurnEvents } from "./channels/telegram.js";
 import { googleOAuthRoutes } from "./channels/google-oauth.js";
 import { createMemoryReviewStart, MEMORY_REVIEW_CHANNEL_KIND, memoryReviewTurnEvents } from "./channels/memory-review.js";
+import { privateQuestionObserver } from "./channels/private-question.js";
+import { syncPrivateQuestionCommands } from "./lib/private-questions/private-question-commands.js";
+import { createPrivateQuestionIngress } from "./lib/private-questions/private-question-ingress.js";
+import { PRIVATE_QUESTION_CHANNEL_KIND } from "./lib/private-questions/private-question-turn.js";
 import { TELEGRAM_INGRESS_LEASE_MS } from "./config.js";
 import { createScheduleCheckRunner } from "./lib/agent-schedules/agent-schedule-check-runner.js";
 import { AGENT_SCHEDULE_CONVERSATION_ADMISSION_MILLISECONDS } from "./lib/agent-schedules/agent-schedule-config.js";
@@ -139,6 +143,7 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
       database: db,
       observer: routeTurnObservers({
         [MEMORY_REVIEW_CHANNEL_KIND]: lifecycleTurnObserver(memoryReviewTurnEvents),
+        [PRIVATE_QUESTION_CHANNEL_KIND]: privateQuestionObserver,
         telegram: telegram.observer,
       }),
       runnerId: options.runnerId,
@@ -156,6 +161,7 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
   });
   const ingress = createTelegramIngress({
     dispatch: telegram.dispatch,
+    privateQuestions: createPrivateQuestionIngress({ database: db, runTurn: dispatcher.run }),
     processConversationWakeup: ({ slots }) => createConversationWakeupProcessor({
       createTurn: createWakeupTurn,
       leaseMilliseconds: TELEGRAM_INGRESS_LEASE_MS,
@@ -172,6 +178,9 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
   };
 
   await dispatcher.recover();
+  // The `/me` menu follows the groups; a change made while the bot was down is caught up here. It never
+  // rejects and must not hold the server back while Telegram is slow.
+  void syncPrivateQuestionCommands("startup");
   await reportsBeforeRequests(dispatcher);
   const server = await startRuntimeServer({
     host: options.host,

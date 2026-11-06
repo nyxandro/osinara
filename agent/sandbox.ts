@@ -12,6 +12,7 @@ import type { Pool } from "pg";
 import { apiKeySandboxEnvironment } from "./lib/api-keys/api-key-environment.js";
 import { isMemoryReviewSession } from "./lib/memory-review/memory-review-session.js";
 import { openRunnerSandbox } from "./lib/sandbox-runner/runner-sandbox-backend.js";
+import { isPrivateQuestionSession } from "./lib/private-questions/private-question-session.js";
 import { sandboxSessionId } from "./lib/sessions/session-context.js";
 import { requireWorkspaceAuthorization } from "./lib/workspaces/workspace-context.js";
 import { workspaceRepository } from "./lib/workspaces/workspace-repository.js";
@@ -23,7 +24,10 @@ export function createSessionSandboxes(dependencies: { readonly baseUrl?: string
   return async (session: { readonly auth: SessionAuth; readonly id: string }): Promise<RuntimeSandboxSession> => {
     const ctx = { session };
     // Silent review has no file tools or skills: it keeps a sandbox identity without compute.
-    const mounts = isMemoryReviewSession(ctx) ? [] : await workspaceRepository.mounts(requireWorkspaceAuthorization(ctx));
+    // A private question reads no files either (#467): nothing of a group's folder reaches one person's answer.
+    const mounts = isMemoryReviewSession(ctx) || isPrivateQuestionSession(ctx)
+      ? []
+      : await workspaceRepository.mounts(requireWorkspaceAuthorization(ctx));
     const use = { mounts: [...mounts], sandboxSessionId: sandboxSessionId(ctx) };
     const environment = () => apiKeySandboxEnvironment(mounts.map((mount) => mount.workspaceId));
     let stored = await loadSandboxState(dependencies.database, session.id);
