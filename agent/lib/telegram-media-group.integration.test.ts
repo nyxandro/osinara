@@ -7,7 +7,7 @@ import { createTelegramDurableIngress } from "./telegram-durable-ingress.js";
 import { createTelegramMessageHandler } from "./telegram-on-message.js";
 import { repositories, telegramContext } from "./telegram-on-message.test-fixtures.js";
 import { createTelegramWorkspaceAttachmentImporter } from "./attachments/telegram-workspace-attachments.js";
-import { NO_BURSTS } from "./telegram-ingress.test-fixtures.js";
+import { NO_BURSTS, NO_PRIVATE_QUESTIONS } from "./telegram-ingress.test-fixtures.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 if (enabled && (!process.env.DATABASE_URL || !new URL(process.env.DATABASE_URL).pathname.endsWith("_test"))) {
@@ -28,6 +28,7 @@ const lease = 60_000;
 
 async function drain(dispatch: DurableIngressDependencies["dispatch"], notifyTimeout = vi.fn()) {
   const ingress = createTelegramDurableIngress({ reportFailure: notifyTimeout, repository, botUsername: "osinara_bot", leaseMilliseconds: lease,
+ privateQuestions: NO_PRIVATE_QUESTIONS,
     acceptChatUpdate: vi.fn(async () => true), answerCallbackQuietly: vi.fn(async () => undefined), authorizeVoice: vi.fn(), captureApiKey: vi.fn(async () => ({ kind: "forwarded" as const })), dispatch, dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), replyButtonsOnArrival: vi.fn(async () => undefined), handleSoftwareUpdateCallback: vi.fn(),
     runTurn: vi.fn().mockResolvedValue({ status: "completed", text: "готово" }), transcribeVoice: vi.fn(),
   });

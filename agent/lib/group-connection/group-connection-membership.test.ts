@@ -31,6 +31,7 @@ function setup() {
       ({ ...GROUP, change: "disconnected" }) as Awaited<ReturnType<BotMembershipDependencies["recordBotMembership"]>>),
     sendToOwner: vi.fn(async (_chatId: string, _text: string) => undefined),
     stopSandboxes: vi.fn(async (_groupId: string) => undefined),
+    syncCommands: vi.fn(async (_reason: string) => undefined),
   };
   const handler = createBotMembershipHandler(dependencies);
   // The follow-ups run in the background after Telegram's answer; the test waits for them.
@@ -59,6 +60,8 @@ describe("bot membership", () => {
     expect(dependencies.sendToOwner).toHaveBeenCalledTimes(1);
     expect(dependencies.sendToOwner.mock.calls[0]![0]).toBe("101");
     expect(dependencies.sendToOwner.mock.calls[0]![1]).toContain("Меня удалили из группы «Внешняя группа»");
+    // The /me menu of a chat the bot left is taken down (#467).
+    expect(dependencies.syncCommands).toHaveBeenCalledWith("bot_membership");
   });
 
   it("only tells the owner when the bot is added back to a disconnected group", async () => {

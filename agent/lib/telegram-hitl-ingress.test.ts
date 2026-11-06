@@ -1,4 +1,5 @@
 /** Runtime HITL callbacks reach their verified session instead of being dropped as unknown buttons. */
+import { NO_PRIVATE_QUESTIONS } from "./telegram-ingress.test-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 import { TELEGRAM_HITL_CALLBACK_PREFIX } from "../runtime/telegram/hitl.js";
 import { createTelegramDurableIngress } from "./telegram-durable-ingress.js";
@@ -33,6 +34,7 @@ function fixture(count: number) {
     reportFailure: vi.fn(),
     acceptChatUpdate: vi.fn(async () => true), answerCallbackQuietly: vi.fn(async () => undefined), authorizeVoice: vi.fn(), captureApiKey: vi.fn(async () => ({ kind: "forwarded" as const })), botUsername: "osinara_bot", dispatch,
     dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), replyButtonsOnArrival: vi.fn(async () => undefined), handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false), leaseMilliseconds: 1_000,
+ privateQuestions: NO_PRIVATE_QUESTIONS,
     repository, runTurn, transcribeVoice: vi.fn(),
   });
   async function drain() {

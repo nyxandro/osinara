@@ -104,6 +104,20 @@ describe("trusted mode tool surfaces", () => {
     expect(externalNames).toEqual(expect.arrayContaining(["read_profile_view"]));
   });
 
+  it("offers widgets only in a live private chat with the bot (#468)", () => {
+    const widgetTools = ["send_widget", "update_widget"];
+    expect(names({ environment: "private", owner: true })).toEqual(expect.arrayContaining(widgetTools));
+    expect(names({ environment: "private", owner: false } as never)).toEqual(expect.arrayContaining(widgetTools));
+    for (const surface of [
+      names({ environment: "family" }),
+      names({ capabilities: new Set(), environment: "external" }),
+      names({ environment: "private", owner: true, scheduledRun: true }),
+    ]) {
+      for (const tool of widgetTools) expect(surface).not.toContain(tool);
+    }
+    for (const tool of widgetTools) expect(SUBAGENT_TOOL_NAMES.has(tool)).toBe(false);
+  });
+
   it("gives a family group the shared tools plus group history and attachments only", () => {
     expect(names({ environment: "family" })).toEqual(
       [...TRUSTED_MODE_TOOL_NAMES, ...FAMILY_ONLY_TOOL_NAMES, ...TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES, ...UNWRAPPED_BUILT_IN_NAMES].sort(),

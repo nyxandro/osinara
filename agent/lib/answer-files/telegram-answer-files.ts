@@ -36,7 +36,10 @@ export function answerWorkspaceAuthorization(session: { readonly auth: SessionAu
 export async function checkTelegramAnswer(
   context: StepStartContext & { readonly text: string },
 ): Promise<string | undefined> {
-  if (context.channel.kind !== "telegram" || context.session.parent !== undefined) return undefined;
+  if (context.session.parent !== undefined) return undefined;
+  // A private question's answer is one Rich Message too (#467): only its tags can be wrong, it has no files or buttons.
+  if (context.channel.kind === "private-question") return telegramRichTagsNotice(context.text);
+  if (context.channel.kind !== "telegram") return undefined;
   // Telegram refuses a whole message over one wrong tag; the model fixes it like a missing file.
   const tags = telegramRichTagsNotice(context.text);
   // Refused markup would drop every button of the set, the answers too, without the model knowing.

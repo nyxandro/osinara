@@ -71,6 +71,14 @@ export const TELEGRAM_INGRESS_ADMISSION_TIMEOUT_MS = 15 * 60 * 1_000;
 // Bound expensive turns on the single-process deployment without letting groups occupy button slots.
 export const TELEGRAM_INGRESS_MESSAGE_CONCURRENCY = 2;
 export const TELEGRAM_INGRESS_CALLBACK_CONCURRENCY = 2;
+// Private questions (/me, #467) run on their own slots, so a long group task never holds one back.
+export const TELEGRAM_PRIVATE_QUESTION_CONCURRENCY = 2;
+// Telegram accepts a reply to an ephemeral command only within 15 s of it; one second is kept for the call.
+export const PRIVATE_QUESTION_REPLY_WINDOW_MS = 14_000;
+// A private question and its answer are kept a day, then erased with the text of its raw copy (F8).
+export const PRIVATE_QUESTION_RETENTION_MS = 24 * 60 * 60 * 1000;
+// How many of the person's earlier private exchanges in the chat a new question sees.
+export const PRIVATE_QUESTION_RECENT_EXCHANGES = 3;
 // Wake-up turns run on their own slot, so a long wake-up never takes a message's place; at most
 // this many wake-up turns run at once across all chats.
 export const TELEGRAM_INGRESS_WAKEUP_CONCURRENCY = 1;

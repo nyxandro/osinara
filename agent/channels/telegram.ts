@@ -500,7 +500,7 @@ export const telegramChannelHooks: Pick<TelegramChannelHooks, "onHitlCallbackQue
 const authorizeTelegramVoice = createTelegramVoiceAuthorizer(telegramRepository);
 
 /** The production ingress over the runtime's dispatch and turn runner. */
-export function createTelegramIngress(runtime: Pick<DurableIngressDependencies, "dispatch" | "processConversationWakeup" | "runTurn">) {
+export function createTelegramIngress(runtime: Pick<DurableIngressDependencies, "dispatch" | "privateQuestions" | "processConversationWakeup" | "runTurn">) {
   return createTelegramDurableIngress({
     ...runtime,
     acceptChatUpdate(message, incomingUpdateId) {

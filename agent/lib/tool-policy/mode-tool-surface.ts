@@ -307,6 +307,9 @@ const TRUSTED_SCHEDULED_SURFACES: Readonly<Record<TrustedSurfaceKey, ToolMap>> =
       send_location: _sendLocation,
       send_poll: _sendPoll,
       send_voice_message: _sendVoiceMessage,
+      // A widget answers a live person, and its presses come back to a live chat.
+      send_widget: _sendWidget,
+      update_widget: _updateWidget,
       ...readOnlyPromptSurface
     } = surface;
     return [environment, {

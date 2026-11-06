@@ -42,10 +42,20 @@ export interface BehaviorPreferenceChannelReadAuthorization {
   timelineEntryId: string;
 }
 
+/** A private question (`/me`, #467): reads its chat's notes, never changes them, whoever asked. */
+export interface BehaviorPreferencePrivateQuestionReadAuthorization {
+  conversationId: string;
+  familyId: string;
+  groupId: string;
+  kind: "private_question";
+  telegramChatId: string;
+}
+
 export type BehaviorPreferenceReadAuthorization =
   | BehaviorPreferenceAuthorization
   | BehaviorPreferenceBoundChatReadAuthorization
-  | BehaviorPreferenceChannelReadAuthorization;
+  | BehaviorPreferenceChannelReadAuthorization
+  | BehaviorPreferencePrivateQuestionReadAuthorization;
 
 type PreferenceContext =
   | Pick<DynamicResolveContext, "session">
@@ -157,6 +167,22 @@ export function requireBehaviorPreferenceReadAuthorization(
       kind: "scheduled",
       scope: scheduled.scope,
       telegramChatId: scheduled.telegramChatId,
+    };
+  }
+  // A private question has no message in the chat's timeline; the turn's verified chat is enough to read.
+  if (attrs?.privateQuestion === "true") {
+    if (
+      typeof attrs.familyId !== "string" || typeof attrs.groupId !== "string" ||
+      typeof attrs.telegramChatId !== "string" || typeof attrs.telegramConversationId !== "string"
+    ) {
+      throw contextError();
+    }
+    return {
+      conversationId: attrs.telegramConversationId,
+      familyId: attrs.familyId,
+      groupId: attrs.groupId,
+      kind: "private_question",
+      telegramChatId: attrs.telegramChatId,
     };
   }
   // The notes belong to the chat, not to the author, and the group's memory is already read here.

@@ -1,5 +1,5 @@
 /**
- * Model-facing failure contract of the tools that send a place, a poll or a contact card.
+ * Model-facing failure contract of the tools that send a place, a poll, a contact card or a widget.
  *
  * Exports:
  * - `telegramSendInputError`: correctable argument failure, stopped before anything is sent.
@@ -17,7 +17,7 @@ export interface TelegramSendTool {
   ambiguousCode: string;
   /** The code of a failure without its own, such as a programming error. */
   failureCode: string;
-  name: "send_contact" | "send_location" | "send_poll";
+  name: "send_contact" | "send_location" | "send_poll" | "send_widget";
   /** What the person asked for, in the reason of an unexpected failure. */
   subject: string;
 }

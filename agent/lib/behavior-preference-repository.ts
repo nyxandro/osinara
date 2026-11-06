@@ -19,6 +19,7 @@ import type {
   BehaviorPreferenceAuthorization,
   BehaviorPreferenceReadAuthorization,
   BehaviorPreferenceBoundChatReadAuthorization,
+  BehaviorPreferencePrivateQuestionReadAuthorization,
   BehaviorPreferenceChannelReadAuthorization,
 } from "./behavior-preference-context.js";
 import {
@@ -42,6 +43,26 @@ interface PromptRow {
 interface AuthorizedBoundary {
   actorUserId: string | null;
   familyId: string;
+}
+
+/** The private question's rights were checked when its turn started; here the chat must still be the group's. */
+async function requirePrivateQuestionReadBoundary(
+  client: PoolClient,
+  auth: BehaviorPreferencePrivateQuestionReadAuthorization,
+): Promise<string> {
+  const conversation = await client.query<{ id: string }>(
+    `SELECT conversation.id FROM application_conversations AS conversation
+       JOIN telegram_groups AS chat ON chat.id = conversation.telegram_group_id
+      WHERE conversation.id = $1 AND conversation.family_id = $2 AND conversation.telegram_group_id = $3
+        AND conversation.telegram_chat_id = $4 AND chat.family_id = $2 AND chat.disconnected_at IS NULL
+      FOR SHARE OF conversation`,
+    [auth.conversationId, auth.familyId, auth.groupId, auth.telegramChatId],
+  );
+  const row = conversation.rows[0];
+  if (!row) {
+    throw new AppError("AGENT_BEHAVIOR_PREFERENCE_ACCESS_DENIED", "Не удалось подтвердить чат для применения оперативных инструкций");
+  }
+  return row.id;
 }
 
 async function requireBoundChatReadBoundary(
@@ -236,7 +257,9 @@ export const behaviorPreferenceRepository = {
         ? (await requireLiveBoundary(client, auth), auth.conversationId)
         : auth.kind === "channel"
           ? await requireChannelReadBoundary(client, auth)
-          : await requireBoundChatReadBoundary(client, auth);
+          : auth.kind === "private_question"
+            ? await requirePrivateQuestionReadBoundary(client, auth)
+            : await requireBoundChatReadBoundary(client, auth);
       const row = await currentPrompt(client, conversationId);
       await client.query("COMMIT");
       return project(row);

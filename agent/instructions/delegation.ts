@@ -16,11 +16,13 @@ import {
   resolveExternalGroupToolPolicy,
 } from "../lib/tool-policy/external-group-policy.js";
 import type { InstructionResolver } from "../runtime/prompt/turn-instructions.js";
+import { isPrivateQuestionSession } from "../lib/private-questions/private-question-session.js";
 
 export const delegationInstructions: InstructionResolver = {
   name: "delegation",
   resolve(ctx) {
-    if (ctx.channel.kind === "subagent" || isMemoryReviewSession(ctx)) return null;
+    // A private question (#467) has no `agent` tool: it only reads and answers.
+    if (ctx.channel.kind === "subagent" || isMemoryReviewSession(ctx) || isPrivateQuestionSession(ctx)) return null;
     const auth = ctx.session.auth;
     if (isTelegramChannelSession(auth)) return null;
     if (resolveExternalGroupToolPolicy(auth).restricted && resolveExternalGroupPolicyIdentity(auth) === null) return null;

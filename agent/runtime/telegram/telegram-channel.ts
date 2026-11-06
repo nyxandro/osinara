@@ -11,6 +11,7 @@
  *
  * Contains code adapted from eve 0.40.0 (Apache-2.0); see THIRD_PARTY_NOTICES.md.
  */
+import { timingSafeEqual } from "node:crypto";
 import type { JsonObject } from "../json.js";
 import { isObject, parseJsonObject } from "../json.js";
 import type { RouteContext, RuntimeRoute } from "../server.js";
@@ -100,6 +101,13 @@ export function createTelegramChannel(input: {
   };
 }
 
+/** Which secret a request names, compared in constant time like the verification itself. */
+function sameSecret(header: string, secret: string): boolean {
+  const given = Buffer.from(header);
+  const expected = Buffer.from(secret);
+  return given.length === expected.length && timingSafeEqual(given, expected);
+}
+
 async function verifiedBody(request: Request, webhookSecretToken: string): Promise<string | null> {
   try {
     return await verifyTelegramRequest(request, { secretToken: webhookSecretToken });
@@ -118,15 +126,23 @@ export function telegramWebhookRoutes(input: {
   readonly onBotMembership: (membership: JsonObject, context: RouteContext) => Promise<void>;
   readonly onDrain: (context: RouteContext) => Promise<Response>;
   readonly onVerifiedUpdate: (context: RouteContext & { readonly raw: JsonObject; readonly update: TelegramUpdate }) => Promise<Response>;
+  /**
+   * A press in a widget (`widget_query`, Bot API 10.4). Presses come from Telegram's beta server, which
+   * is subscribed to the same route with `widgetSecretToken` and only for presses; anything else that
+   * server delivers is a copy of an update the regular server already sent, so it is dropped.
+   */
+  readonly onWidgetQuery: (raw: JsonObject, context: RouteContext) => Promise<void>;
   readonly route: string;
   readonly webhookSecretToken: string;
+  readonly widgetSecretToken: string;
 }): RuntimeRoute[] {
   return [
     {
       method: "POST",
       path: input.route,
       async handle(request, context) {
-        const body = await verifiedBody(request, input.webhookSecretToken);
+        const fromWidgetServer = sameSecret(request.headers.get("x-telegram-bot-api-secret-token") ?? "", input.widgetSecretToken);
+        const body = await verifiedBody(request, fromWidgetServer ? input.widgetSecretToken : input.webhookSecretToken);
         if (body === null) return new Response("unauthorized", { status: 401 });
         let raw: JsonObject;
         try {
@@ -134,6 +150,15 @@ export function telegramWebhookRoutes(input: {
         } catch (error) {
           // Telegram would redeliver a rejected update forever; a malformed one is acknowledged.
           console.warn(JSON.stringify({ code: "AGENT_TELEGRAM_WEBHOOK_BODY_INVALID", error: error instanceof Error ? error.message : String(error) }));
+          return new Response("ok");
+        }
+        if (isObject(raw.widget_query)) {
+          // A failure answers with an error, so Telegram delivers the press again; it is decided idempotently.
+          await input.onWidgetQuery(raw, context);
+          return new Response("ok");
+        }
+        if (fromWidgetServer) {
+          console.warn(JSON.stringify({ code: "AGENT_TELEGRAM_WIDGET_SERVER_UPDATE_DROPPED", kinds: Object.keys(raw).filter((key) => key !== "update_id") }));
           return new Response("ok");
         }
         if (isObject(raw.my_chat_member)) {

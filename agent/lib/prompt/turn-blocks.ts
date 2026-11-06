@@ -20,6 +20,8 @@
  */
 import type { SessionAuth } from "../../runtime/context.js";
 import type { ModelMessage } from "ai";
+import { isPrivateQuestionSession } from "../private-questions/private-question-session.js";
+import { withPrivateQuestionRules } from "./private-question-fragments.js";
 
 import {
   requireBehaviorPreferenceReadAuthorization,
@@ -179,6 +181,18 @@ export function createModeBlockResolver(dependencies: {
   loadCapabilities: CapabilityLoader;
   loadReactionPolicy: ReactionPolicyLoader;
 }) {
+  const resolveMode = createConversationModeBlockResolver(dependencies);
+  return async function resolve(ctx: TurnBlockContext): Promise<string> {
+    const rules = await resolveMode(ctx);
+    if (!isPrivateQuestionSession(ctx)) return rules;
+    return withPrivateQuestionRules(rules, ctx.session.auth.current?.attributes.groupType === "family_private" ? "family" : "external");
+  };
+}
+
+function createConversationModeBlockResolver(dependencies: {
+  loadCapabilities: CapabilityLoader;
+  loadReactionPolicy: ReactionPolicyLoader;
+}) {
   return async function resolve(ctx: TurnBlockContext): Promise<string> {
     let environment: ReturnType<typeof resolveConversationEnvironment>;
     try {
@@ -187,7 +201,8 @@ export function createModeBlockResolver(dependencies: {
       logBlockFailure("AGENT_CONVERSATION_ENVIRONMENT_INVALID", error);
       return MODE_UNAVAILABLE_BLOCK;
     }
-    const scheduledRun = isScheduledSession(ctx);
+    // A private question (#467) delivers nothing to the chat itself, like a scheduled run.
+    const scheduledRun = isScheduledSession(ctx) || isPrivateQuestionSession(ctx);
     // A child answers its parent through the `agent` tool result, never the chat itself.
     const subagentTurn = ctx.channel?.kind === "subagent" || Boolean(ctx.session.parent);
     // A scheduled run has no inbound message to react to, and a channel-authored turn keeps its
@@ -244,8 +259,9 @@ export function createReactionSetBlockResolver(dependencies: {
   loadReactionPolicy: ReactionPolicyLoader;
 }) {
   return async function resolve(ctx: TurnBlockContext): Promise<string | null> {
-    // A scheduled run has no message to react to, and a channel-authored turn stays text-only.
-    if (isScheduledSession(ctx) || isTelegramChannelSession(ctx.session.auth)) return null;
+    // A scheduled run has no message to react to, a channel-authored turn stays text-only, and a private
+    // question (#467) answers with text only.
+    if (isScheduledSession(ctx) || isTelegramChannelSession(ctx.session.auth) || isPrivateQuestionSession(ctx)) return null;
     const telegramChatId = verifiedTelegramChatId(ctx.session.auth);
     if (telegramChatId === null) return null;
 
@@ -331,7 +347,9 @@ export function createMemoryBlockResolver(dependencies: {
       // A delegated child inherits the parent's verified auth, conversation included, but it is
       // not a turn of the conversation: it runs inside one. Giving it a window would let its work
       // hide records from the person's next question and would spend turn numbers nobody spoke in.
-      const conversationId = delegated
+      // A private question (#467) is not a turn of the group's conversation either: what it was shown must not
+      // hide records from the group's next public answers, nor take the group's turn numbers.
+      const conversationId = delegated || isPrivateQuestionSession(ctx)
         ? undefined
         : ctx.session.auth.current?.attributes.telegramConversationId;
       const window = typeof conversationId === "string"
