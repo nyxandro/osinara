@@ -23,7 +23,8 @@ import { chatNotesRules } from "./chat-notes-fragments.js";
 import { SUBAGENT_TURN_RULES } from "./delegation-fragments.js";
 import { LINK_AND_COPY_BUTTON_RULES, REPLY_BUTTON_RULES } from "./reply-button-fragments.js";
 import { telegramContentRules } from "./telegram-content-fragments.js";
-import { TELEGRAM_NATIVE_SEND_RULES } from "./telegram-send-fragments.js";
+import { TELEGRAM_NATIVE_SEND_RULES, TELEGRAM_WIDGET_RULES } from "./telegram-send-fragments.js";
+import { TELEGRAM_WIDGETS_AVAILABLE } from "../widgets/widget-config.js";
 
 import {
   CURRENT_MESSAGE_REPLY_CONTRACT,
@@ -109,6 +110,11 @@ function block(sections: readonly (string | null)[]): string {
 /** A GIF answers a live participant: neither a scheduled report nor a delegated child sends one. */
 function liveGifReplies(scheduledRun: boolean, subagentTurn: boolean): boolean {
   return GIF_REPLIES_AVAILABLE && !scheduledRun && !subagentTurn;
+}
+
+/** Widgets answer a live person in the private chat with the bot only (#468), like the tools that send them. */
+function liveWidgets(scheduledRun: boolean, subagentTurn: boolean): boolean {
+  return TELEGRAM_WIDGETS_AVAILABLE && !scheduledRun && !subagentTurn;
 }
 
 /** The zone's image route is named only when the model can actually inspect images. */
@@ -238,6 +244,7 @@ function privateInstructions(
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
     liveGifReplies(scheduledRun, subagentTurn) ? GIF_REPLY_RULES : null,
     scheduledRun || subagentTurn ? null : TELEGRAM_NATIVE_SEND_RULES,
+    liveWidgets(scheduledRun, subagentTurn) ? TELEGRAM_WIDGET_RULES : null,
     scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
     // A delegated child has no notes tool; it reads the notes and leaves keeping them to the turn.
     scheduledRun || subagentTurn ? null : chatNotesRules("private"),

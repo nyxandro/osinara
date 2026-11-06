@@ -1,0 +1,15 @@
+{
+  "name": "osinara-widget-check",
+  "private": true,
+  "type": "module",
+  "description": "Runtime packages of Telegram's official widget check (widget-sandbox v0.6.1), installed by the Dockerfile stage widget-check next to the checker's own sources.",
+  "dependencies": {
+    "@telegram/widget-sandbox-quickjs": "file:./quickjs-wasm",
+    "css-tree": "3.2.1",
+    "esbuild": "0.28.2",
+    "linkedom": "0.18.13",
+    "parse5": "8.0.1",
+    "quickjs-emscripten-core": "0.32.0",
+    "tsx": "4.23.0"
+  }
+}

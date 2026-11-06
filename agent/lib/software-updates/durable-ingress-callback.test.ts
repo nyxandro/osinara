@@ -5,6 +5,7 @@
  * - Application update callbacks are consumed before the dispatch start marker.
  * - Consumed callbacks complete their ingress item without creating a turn.
  */
+import { NO_PRIVATE_QUESTIONS } from "../telegram-ingress.test-fixtures.js";
 import { describe, expect, it, vi } from "vitest";
 
 import type { TelegramIngressRepository } from "../telegram-ingress-contract.js";
@@ -66,6 +67,8 @@ describe("software update callback durable ingress", () => {
       handleReplyButtonPress: vi.fn(),
       handleSoftwareUpdateCallback,
       leaseMilliseconds: 60_000,
+
+      privateQuestions: NO_PRIVATE_QUESTIONS,
       repository,
       runTurn: vi.fn(),
       transcribeVoice: vi.fn(),

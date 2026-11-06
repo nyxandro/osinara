@@ -1,4 +1,5 @@
 /** The durable ingress over the runtime's Telegram path with real PostgreSQL disconnects, including a lost commit acknowledgement. */
+import { NO_PRIVATE_QUESTIONS } from "./telegram-ingress.test-fixtures.js";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { database, closeDatabase } from "./database.js";
 import { createTelegramDurableIngress } from "./telegram-durable-ingress.js";
@@ -80,6 +81,7 @@ suite("Telegram recovery across PostgreSQL interruption", () => {
       }
     } };
     const ingress = createTelegramDurableIngress({ reportFailure: vi.fn(), repository, botUsername: "osinara_bot", leaseMilliseconds: 60000,
+ privateQuestions: NO_PRIVATE_QUESTIONS,
       acceptChatUpdate: vi.fn(async () => true), answerCallbackQuietly: vi.fn(async () => undefined), authorizeVoice: vi.fn(), captureApiKey: vi.fn(async () => ({ kind: "forwarded" as const })), dispatch: telegram.dispatch, dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), replyButtonsOnArrival: vi.fn(async () => undefined), handleSoftwareUpdateCallback: vi.fn(),
       runTurn: telegram.runTurn, transcribeVoice: vi.fn() });
     const work: Promise<unknown>[] = [];

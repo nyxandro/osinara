@@ -21,6 +21,7 @@
  * - Reply buttons react on arrival, as soon as the update is stored and before its place in the
  *   chat queue comes: the queue may be busy with a turn of minutes.
  */
+import { NO_PRIVATE_QUESTIONS } from "./telegram-ingress.test-fixtures.js";
 import { parseTelegramUpdate } from "../runtime/telegram/inbound.js";
 import type { RouteContext } from "../runtime/server.js";
 import type { JsonObject } from "../runtime/json.js";
@@ -81,6 +82,8 @@ function ingress(
     dismissReplyButtons: vi.fn(async () => undefined), handleReplyButtonPress: vi.fn(), handleSoftwareUpdateCallback: vi.fn().mockResolvedValue(false),
     replyButtonsOnArrival: vi.fn(async () => undefined),
     leaseMilliseconds: 60_000,
+
+    privateQuestions: NO_PRIVATE_QUESTIONS,
     admissionMilliseconds: 60_000,
     repository: storage.value,
     runTurn: vi.fn().mockResolvedValue({ status: "completed", text: "готово" }),
@@ -141,6 +144,58 @@ function repository() {
 }
 
 describe("createTelegramDurableIngress", () => {
+  it("routes a private question (/me, #467) to its own queue and turn, past the group's reply-button steps", async () => {
+    const storage = repository();
+    const privatePayload = {
+      message: {
+        chat: { id: -1001, type: "supergroup" }, date: 1_793_982_106,
+        entities: [{ length: 15, offset: 0, type: "bot_command" }], ephemeral_message_id: 77,
+        from: { first_name: "Ирина", id: 111, is_bot: false }, message_id: 0, text: "/me@osinara_bot вопрос",
+      },
+      update_id: 1001,
+    };
+    storage.claim.payload = privatePayload;
+    storage.claim.voice = null;
+    const privateQuestions = {
+      arrive: vi.fn(async () => undefined),
+      fail: vi.fn(async () => undefined),
+      isPrivate: vi.fn((raw: Record<string, unknown>) => (raw.message as { message_id?: number } | undefined)?.message_id === 0),
+      process: vi.fn(async () => "wrun_private"),
+      queueKey: vi.fn(() => "-1001::private-question-111"),
+    };
+    const { dependencies, handle } = ingress(storage, { privateQuestions });
+
+    await runDrain(handle, privatePayload);
+
+    expect(storage.value.enqueue).toHaveBeenCalledWith({ continuationKey: "-1001::private-question-111", payload: privatePayload, updateId: "1001" });
+    expect(privateQuestions.arrive).toHaveBeenCalledWith(privatePayload, "1001");
+    expect(privateQuestions.process).toHaveBeenCalledWith(privatePayload, "1001");
+    expect(dependencies.replyButtonsOnArrival).not.toHaveBeenCalled();
+    expect(dependencies.dismissReplyButtons).not.toHaveBeenCalled();
+    expect(dependencies.dispatch).not.toHaveBeenCalled();
+    expect(storage.value.complete).toHaveBeenCalledWith("1001", storage.claim.leaseToken, "wrun_private");
+  });
+
+  it("turns a private question's «Думаю…» into the failure text when its processing breaks", async () => {
+    const storage = repository();
+    storage.claim.payload = { message: { chat: { id: -1001, type: "supergroup" }, message_id: 0, ephemeral_message_id: 77, date: 1, text: "/me x", from: { id: 111, is_bot: false } }, update_id: 1001 };
+    storage.claim.voice = null;
+    const privateQuestions = {
+      arrive: vi.fn(async () => undefined),
+      fail: vi.fn(async () => undefined),
+      isPrivate: vi.fn(() => true),
+      process: vi.fn(async () => { throw new Error("boom"); }),
+      queueKey: vi.fn(() => "-1001::private-question-111"),
+    };
+    const { handle } = ingress(storage, { privateQuestions });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await runDrain(handle, storage.claim.payload);
+
+    expect(storage.value.fail).toHaveBeenCalled();
+    expect(privateQuestions.fail).toHaveBeenCalledWith("1001", "AGENT_TELEGRAM_INGRESS_FAILED");
+  });
+
   it("acknowledges after enqueue, then transcribes the voice once and runs its turn to the end", async () => {
     const storage = repository();
     const order: string[] = [];

@@ -59,6 +59,7 @@ describe("telegramContentDescription", () => {
     }, "☑️ Список «Покупки»: ✓ хлеб / молоко"],
     ["a sticker", { sticker: { emoji: "😂", file_id: "f", file_unique_id: "u", height: 512, set_name: "Cats", width: 512 } }, "[стикер 😂 из набора «Cats»]"],
     ["a bare sticker", { sticker: { file_id: "f", file_unique_id: "u", height: 512, width: 512 } }, "[стикер]"],
+    ["a widget, never its HTML", { widget: { html: "<b>secret</b><script>x()</script>" } }, "[виджет]"],
     ["a GIF", { animation: { duration: 3, file_id: "f", file_unique_id: "u", height: 1, width: 1 } }, "[GIF 0:03]"],
     ["a video", { video: { duration: 75, file_id: "f", file_unique_id: "u", height: 1, width: 1 } }, "[видео 1:15]"],
     ["a video note", { video_note: { duration: 20, file_id: "f", file_unique_id: "u", length: 240 } }, "[видеосообщение 0:20]"],

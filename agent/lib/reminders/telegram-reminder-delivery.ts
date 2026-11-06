@@ -24,6 +24,7 @@ import { reminderReplyButtons } from "../reply-buttons/reply-button-delivery.js"
 import { sentRichMediaOf, telegramRichMessageRequest, type SentRichMedia } from "../telegram-rich-messages.js";
 import type { ClaimedReminder } from "./reminder-dispatch-repository.js";
 import { prepareReminderFiles } from "./reminder-files.js";
+import { plainReminderWithMention, richReminderWithMention } from "./reminder-mention.js";
 import {
   presentReminder,
   REMINDER_HEADER,
@@ -101,12 +102,17 @@ function reminderRequest(
   const threadId = messageThreadId(job.messageThreadId);
   const thread: JsonObject = threadId === undefined ? {} : { message_thread_id: threadId };
   if (message.format === "rich") {
+    const markdown = richMarkdown ?? message.markdown;
     const request = telegramRichMessageRequest(
       { chat_id: job.telegramChatId, ...thread },
-      richMarkdown ?? message.markdown,
+      job.mention === null ? markdown : richReminderWithMention(markdown, job.mention),
       message.media,
     );
     return { ...request, method: "sendRichMessage" };
+  }
+  if (job.mention !== null) {
+    const marked = plainReminderWithMention(message.text, job.mention);
+    return { body: { chat_id: job.telegramChatId, entities: [...marked.entities] as JsonObject[], ...thread, text: marked.text }, method: "sendMessage" };
   }
   // Telegram counts entity offsets in UTF-16 code units, which is what String length is.
   const entities = [{ length: REMINDER_HEADER.length, offset: 0, type: "bold" }];

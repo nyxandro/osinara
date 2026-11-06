@@ -88,6 +88,18 @@ describeWithDatabase("telegramIngressRepository", () => {
     await telegramIngressRepository.complete(first.updateId, first.leaseToken);
     expect((await telegramIngressRepository.claimNext(LEASE_MILLISECONDS, NO_BURSTS))?.updateId).toBe("1002");
   });
+
+  it("keeps a message typed during a widget press waiting until the press is done (#468)", async () => {
+    // A press is queued under a number above every real update (2^50 + the beta server's number).
+    const press = String(2n ** 50n + 69_454_100n);
+    await telegramIngressRepository.enqueue(updateInput(press, "101::", "[Pressed «Готово» in your widget «Меню»]"));
+    const running = await telegramIngressRepository.claimNext(LEASE_MILLISECONDS, NO_BURSTS);
+    expect(running?.updateId).toBe(press);
+    await telegramIngressRepository.enqueue(updateInput("1004", "101::", "typed meanwhile"));
+    expect(await telegramIngressRepository.claimNext(LEASE_MILLISECONDS, NO_BURSTS)).toBeNull();
+    await telegramIngressRepository.complete(running!.updateId, running!.leaseToken);
+    expect((await telegramIngressRepository.claimNext(LEASE_MILLISECONDS, NO_BURSTS))?.updateId).toBe("1004");
+  });
   beforeEach(async () => {
     await database().query(
       `TRUNCATE telegram_ingress_ignored_updates,

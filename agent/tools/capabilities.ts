@@ -32,8 +32,16 @@ import {
 } from "../lib/memory-review/memory-review-session.js";
 import { buildMemoryReviewToolSurface } from "../lib/memory-review/memory-review-tool-surface.js";
 import { isTelegramChannelSession } from "../lib/telegram-session-actor.js";
+import { isPrivateQuestionSession } from "../lib/private-questions/private-question-session.js";
+import { privateQuestionToolSurface } from "../lib/private-questions/private-question-tool-surface.js";
 
 export async function resolveToolSurface(ctx: DynamicResolveContext) {
+  // A private question (`/me`, #467) reads what its group's ordinary turn could, and changes only reminders.
+  if (isPrivateQuestionSession(ctx)) return privateQuestionToolSurface(await resolveConversationToolSurface(ctx));
+  return await resolveConversationToolSurface(ctx);
+}
+
+async function resolveConversationToolSurface(ctx: DynamicResolveContext) {
   if (isMemoryReviewSession(ctx)) {
     const reviewScope = memoryReviewScope(ctx);
     if (ctx.session.auth.current?.attributes.groupType !== "external") {

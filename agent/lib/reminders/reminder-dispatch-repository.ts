@@ -39,6 +39,8 @@ export interface ClaimedReminder {
   id: string;
   leaseToken: string;
   messageThreadId: string | null;
+  /** The person a private question's reminder marks at its start (#467); null for any other reminder. */
+  mention: { readonly name: string; readonly telegramUserId: string } | null;
   ownerUserId: string | null;
   scope: ReminderScope;
   telegramChatId: string;
@@ -65,6 +67,8 @@ interface ClaimedRow {
   id: string;
   lease_token: string;
   message_thread_id: string | null;
+  mention_name: string | null;
+  mention_telegram_user_id: string | null;
   owner_user_id: string | null;
   reply_buttons: ReplyButtonRows | null;
   scope: ReminderScope;
@@ -232,6 +236,7 @@ export const reminderDispatchRepository = {
                    reminder.content, reminder.scope, reminder.timezone, reminder.telegram_chat_id,
                     reminder.message_thread_id::text, reminder.forum_topic_id::text,
                     reminder.due_at, reminder.lease_token::text, reminder.reply_buttons,
+                    reminder.mention_telegram_user_id, reminder.mention_name,
                    CASE WHEN reminder.scope = 'group' THEN reminder.author_telegram_user_id
                         ELSE (SELECT author.telegram_user_id FROM users AS author WHERE author.id = reminder.author_user_id)
                    END AS addressee_telegram_user_id,
@@ -265,6 +270,9 @@ export const reminderDispatchRepository = {
         id: row.id,
         leaseToken: row.lease_token,
         messageThreadId: row.message_thread_id,
+        mention: row.mention_telegram_user_id !== null && row.mention_name !== null
+          ? { name: row.mention_name, telegramUserId: row.mention_telegram_user_id }
+          : null,
         ownerUserId: row.owner_user_id,
         scope: row.scope,
         telegramChatId: row.telegram_chat_id,

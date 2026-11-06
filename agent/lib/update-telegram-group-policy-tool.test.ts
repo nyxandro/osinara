@@ -10,6 +10,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { updatePolicy } = vi.hoisted(() => ({ updatePolicy: vi.fn() }));
 
+// The /me menu sync (#467) talks to PostgreSQL and Telegram; the tool only has to ask for it.
+vi.mock("./private-questions/private-question-commands.js", () => ({ syncPrivateQuestionCommands: vi.fn(async () => undefined) }));
 vi.mock("./telegram-group-administration-repository.js", () => ({
   telegramGroupAdministrationRepository: {
     registerGroup: vi.fn(),
@@ -18,6 +20,7 @@ vi.mock("./telegram-group-administration-repository.js", () => ({
   },
 }));
 
+import { syncPrivateQuestionCommands } from "./private-questions/private-question-commands.js";
 import manageTelegramGroup from "./tools/manage_telegram_group.js";
 
 function context(chatType: "private" | "supergroup", role: "member" | "owner" = "owner"): ToolContext {
@@ -73,6 +76,8 @@ describe("manage_telegram_group.update_policy", () => {
       telegramChatId: "-1003567628736",
       toolAllowlist: ["remember", "list_group_history", "search_memories"],
     });
+    // "Only the owner" changes who sees /me in this chat's menu.
+    expect(syncPrivateQuestionCommands).toHaveBeenCalledWith("update_policy");
   });
 
   it("describes a complete in-place replacement without type or title", () => {

@@ -24,6 +24,7 @@ const job: ClaimedReminder = {
   dueAt: "2026-07-13T06:00:00.000Z",
   id: "00000000-0000-4000-8000-000000000001",
   leaseToken: "00000000-0000-4000-8000-000000000002",
+  mention: null,
   messageThreadId: null,
   groupId: null,
   ownerUserId: "00000000-0000-4000-8000-000000000011",

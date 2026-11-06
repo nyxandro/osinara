@@ -19,6 +19,7 @@ import { isObject } from "../../runtime/json.js";
 import { apiKeyPublisher } from "../api-keys/api-key-projection.js";
 import { database } from "../database.js";
 import { stopGroupSandboxes } from "../telegram-group-policy-repository.js";
+import { syncPrivateQuestionCommands } from "../private-questions/private-question-commands.js";
 import { groupConnectionRepository } from "./group-connection-repository.js";
 import { botRejoinedNotice, botRemovedNotice, groupConnectionTelegram } from "./group-connection-telegram.js";
 
@@ -32,6 +33,8 @@ export interface BotMembershipDependencies {
   recordBotMembership: typeof groupConnectionRepository.recordBotMembership;
   sendToOwner(ownerTelegramChatId: string, text: string): Promise<void>;
   stopSandboxes(groupId: string): Promise<void>;
+  /** Brings the `/me` menu in line with the groups (#467); never rejects. */
+  syncCommands(reason: string): Promise<void>;
 }
 
 interface BotMembershipEvent {
@@ -86,6 +89,7 @@ export function createBotMembershipHandler(dependencies: BotMembershipDependenci
     const result = await dependencies.recordBotMembership(event);
     if (result.change === "none") return;
     console.info(JSON.stringify({ change: result.change, code: "AGENT_GROUP_BOT_MEMBERSHIP_CHANGED", groupId: result.groupId }));
+    waitUntil(dependencies.syncCommands("bot_membership"));
     if (result.change === "rejoined_while_disconnected") {
       waitUntil(tellOwner(result.familyId, botRejoinedNotice(result.title), result.groupId));
       return;
@@ -112,6 +116,7 @@ export const handleBotMembershipUpdate = createBotMembershipHandler({
   publishApiKeys: () => apiKeyPublisher.publish(),
   recordBotMembership: (input) => groupConnectionRepository.recordBotMembership(input),
   sendToOwner: (chatId, text) => groupConnectionTelegram.sendToOwner(chatId, text),
+  syncCommands: (reason) => syncPrivateQuestionCommands(reason),
   async stopSandboxes(groupId) {
     const client = await database().connect();
     try {

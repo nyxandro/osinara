@@ -1,15 +1,18 @@
 /**
- * One native Telegram message a tool sends on its own: a place, a point on the map, a poll or a
- * contact card.
+ * One native Telegram message a tool sends on its own: a place, a point on the map, a poll, a
+ * contact card or a widget.
  *
  * Exports:
  * - `TelegramNativeSendTarget`: the verified chat, its topic and the group message it answers.
  * - `TelegramNativeSendCodes`: the stable codes and texts of a refused and an unconfirmed send.
+ * - `TelegramNativeSendRefusal`: a refusal the calling tool recognizes by Telegram's description.
  * - `sendTelegramNativeMessage`: calls one Bot API send method and returns the sent message's id.
  * - `groupReplyToMessageId`: in a group, the message that addressed the agent, which a sent
  *   message answers like a text answer does.
  *
  * Key construct:
+ * - A refusal a tool lists in `refusals` keeps its own code, so the tool can tell the model what to fix
+ *   (a widget over Telegram's size); any other refusal is the tool's general failure.
  * - A refusal from Telegram is definitive. A lost connection, a server error or an answer without a
  *   message id leaves open whether the chat already shows the message, so it is reported as
  *   ambiguous and never repeated automatically.
@@ -26,6 +29,13 @@ export interface TelegramNativeSendTarget {
   chatId: string;
   messageThreadId?: number;
   replyToMessageId?: number;
+}
+
+export interface TelegramNativeSendRefusal {
+  readonly code: string;
+  readonly message: string;
+  /** A fragment of Telegram's description, such as `INPUT_MEDIA_WIDGET_TOO_LARGE`. */
+  readonly telegramError: string;
 }
 
 export interface TelegramNativeSendCodes {
@@ -50,9 +60,12 @@ function sentMessageId(body: unknown): number | null {
 
 export async function sendTelegramNativeMessage(
   input: {
+    /** The Bot API address, when the method lives elsewhere (the widget methods on the beta address). */
+    apiBaseUrl?: string;
     body: JsonObject;
     codes: TelegramNativeSendCodes;
-    method: "sendContact" | "sendLocation" | "sendPoll" | "sendVenue";
+    method: "sendContact" | "sendLocation" | "sendPoll" | "sendVenue" | "sendWidget";
+    refusals?: readonly TelegramNativeSendRefusal[];
     target: TelegramNativeSendTarget;
   },
   fetchImplementation: typeof fetch = fetch,
@@ -63,6 +76,7 @@ export async function sendTelegramNativeMessage(
   let response: Awaited<ReturnType<typeof callTelegramApi>>;
   try {
     response = await callTelegramApi({
+      ...(input.apiBaseUrl === undefined ? {} : { apiBaseUrl: input.apiBaseUrl }),
       body: {
         ...input.body,
         chat_id: target.chatId,
@@ -90,13 +104,15 @@ export async function sendTelegramNativeMessage(
     throw new AppError(codes.ambiguous, codes.ambiguousMessage);
   }
   if (!response.ok) {
+    const description = telegramDescription(response.body);
+    const refusal = input.refusals?.find((known) => description?.includes(known.telegramError) === true);
     console.error(JSON.stringify({
-      code: codes.failed,
-      description: telegramDescription(response.body),
+      code: refusal?.code ?? codes.failed,
+      description,
       method: input.method,
       providerStatus: response.status,
     }));
-    throw new AppError(codes.failed, codes.failedMessage);
+    throw new AppError(refusal?.code ?? codes.failed, refusal?.message ?? codes.failedMessage);
   }
   const messageId = sentMessageId(response.body);
   if (messageId === null) {

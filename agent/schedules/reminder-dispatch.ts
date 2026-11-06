@@ -15,6 +15,7 @@ import { dispatchDueReminders } from "../lib/reminders/reminder-dispatcher.js";
 import { productionTimezoneFollowups } from "../lib/reminders/reminder-timezone-followup.js";
 import { purgeSoftDeletedMemory } from "../lib/memory-retention.js";
 import { deleteExpiredSessions } from "../lib/sessions/session-retention.js";
+import { privateQuestionStore } from "../lib/private-questions/private-question-repository.js";
 import { deleteOrphanedWorkspaces } from "../lib/workspaces/workspace-deletion.js";
 import { withRuntimeAdmission } from "../lib/runtime-maintenance.js";
 import { withScheduleHeartbeat } from "../lib/schedule-heartbeat.js";
@@ -31,6 +32,8 @@ export function reminderDispatchSchedule(input: {
         const results = await Promise.allSettled([
           dispatchDueReminders(), productionTimezoneFollowups.dispatch(new Date()), deleteExpiredSessions(),
           deleteOrphanedWorkspaces(), purgeSoftDeletedMemory(new Date()),
+          // A private question and its answer live a day (#467).
+          privateQuestionStore.eraseExpired(new Date()),
         ]);
         const failed = results.find(result => result.status === "rejected");
         if (failed?.status === "rejected") throw failed.reason;

@@ -24,6 +24,10 @@
 import { createTelegramIngress, telegramChannelHooks, telegramTurnEvents } from "./channels/telegram.js";
 import { googleOAuthRoutes } from "./channels/google-oauth.js";
 import { createMemoryReviewStart, MEMORY_REVIEW_CHANNEL_KIND, memoryReviewTurnEvents } from "./channels/memory-review.js";
+import { privateQuestionObserver } from "./channels/private-question.js";
+import { syncPrivateQuestionCommands } from "./lib/private-questions/private-question-commands.js";
+import { createPrivateQuestionIngress } from "./lib/private-questions/private-question-ingress.js";
+import { PRIVATE_QUESTION_CHANNEL_KIND } from "./lib/private-questions/private-question-turn.js";
 import { TELEGRAM_INGRESS_LEASE_MS } from "./config.js";
 import { createScheduleCheckRunner } from "./lib/agent-schedules/agent-schedule-check-runner.js";
 import { AGENT_SCHEDULE_CONVERSATION_ADMISSION_MILLISECONDS } from "./lib/agent-schedules/agent-schedule-config.js";
@@ -38,6 +42,7 @@ import { apiKeyUsageRoute } from "./lib/api-keys/api-key-usage-route.js";
 import { handleBotMembershipUpdate } from "./lib/group-connection/group-connection-membership.js";
 import { isTelegramGroupDisconnected } from "./lib/group-connection/group-connection-repository.js";
 import { withRuntimeAdmission } from "./lib/runtime-maintenance.js";
+import { AppError } from "./lib/app-error.js";
 import { createApprovalTimeoutResolver } from "./lib/telegram-hitl/approval-timeout.js";
 import { finalizeTimedOutPrompt } from "./lib/telegram-hitl/approval-timeout-prompt.js";
 import { approvalTimeoutRepository } from "./lib/telegram-hitl/approval-timeout-repository.js";
@@ -49,6 +54,8 @@ import { startScheduler } from "./runtime/scheduler.js";
 import { startRuntimeServer } from "./runtime/server.js";
 import { registerTelegramGroupSendGate } from "./runtime/telegram/api.js";
 import { createTelegramChannel, telegramWebhookRoutes } from "./runtime/telegram/telegram-channel.js";
+import { handleWidgetQuery } from "./lib/widgets/widget-press.js";
+import { widgetWebhookSecret } from "./lib/widgets/widget-webhook-secret.js";
 import { summarizeWithModel } from "./runtime/turn/compaction.js";
 import { lifecycleTurnObserver } from "./runtime/turn/lifecycle-observer.js";
 import { callStepModel } from "./runtime/turn/model-call.js";
@@ -139,6 +146,7 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
       database: db,
       observer: routeTurnObservers({
         [MEMORY_REVIEW_CHANNEL_KIND]: lifecycleTurnObserver(memoryReviewTurnEvents),
+        [PRIVATE_QUESTION_CHANNEL_KIND]: privateQuestionObserver,
         telegram: telegram.observer,
       }),
       runnerId: options.runnerId,
@@ -156,6 +164,7 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
   });
   const ingress = createTelegramIngress({
     dispatch: telegram.dispatch,
+    privateQuestions: createPrivateQuestionIngress({ database: db, runTurn: dispatcher.run }),
     processConversationWakeup: ({ slots }) => createConversationWakeupProcessor({
       createTurn: createWakeupTurn,
       leaseMilliseconds: TELEGRAM_INGRESS_LEASE_MS,
@@ -172,6 +181,9 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
   };
 
   await dispatcher.recover();
+  // The `/me` menu follows the groups; a change made while the bot was down is caught up here. It never
+  // rejects and must not hold the server back while Telegram is slow.
+  void syncPrivateQuestionCommands("startup");
   await reportsBeforeRequests(dispatcher);
   const server = await startRuntimeServer({
     host: options.host,
@@ -182,8 +194,16 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
         onBotMembership: (membership, context) => handleBotMembershipUpdate(membership, (work) => context.waitUntil(work)),
         onDrain: (context) => ingress.drain(context),
         onVerifiedUpdate: (context) => ingress(context),
+        onWidgetQuery: async (raw, context) => {
+          // A press is decided and written like a reply button's arrival: never while the application is
+          // frozen for a backup. The error answers the webhook with 500, so Telegram delivers it again.
+          const handled = await withRuntimeAdmission("callback", async () => { await handleWidgetQuery(raw); return true; });
+          if (handled === null) throw new AppError("AGENT_WIDGET_QUERY_DEFERRED", "Нажатие в виджете отложено до конца обслуживания");
+          await ingress.drain(context);
+        },
         route: TELEGRAM_WEBHOOK_ROUTE,
         webhookSecretToken: options.webhookSecretToken,
+        widgetSecretToken: widgetWebhookSecret(options.webhookSecretToken),
       }),
       ...googleOAuthRoutes(),
       apiKeyUsageRoute,

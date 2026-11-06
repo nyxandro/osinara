@@ -11,6 +11,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { disconnect, reconnect } = vi.hoisted(() => ({ disconnect: vi.fn(), reconnect: vi.fn() }));
 
+// The /me menu sync (#467) talks to PostgreSQL and Telegram; the tool only has to ask for it.
+vi.mock("../private-questions/private-question-commands.js", () => ({ syncPrivateQuestionCommands: vi.fn(async () => undefined) }));
 vi.mock("./group-connection-actions.js", () => ({ groupConnectionActions: { disconnect, reconnect } }));
 
 import manageTelegramGroup from "../tools/manage_telegram_group.js";

@@ -11,6 +11,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { registerGroup } = vi.hoisted(() => ({ registerGroup: vi.fn() }));
 
+// The /me menu sync (#467) talks to PostgreSQL and Telegram; the tool only has to ask for it.
+vi.mock("./private-questions/private-question-commands.js", () => ({ syncPrivateQuestionCommands: vi.fn(async () => undefined) }));
 vi.mock("./telegram-group-administration-repository.js", () => ({
   telegramGroupAdministrationRepository: { registerGroup, removeRegistration: vi.fn() },
 }));

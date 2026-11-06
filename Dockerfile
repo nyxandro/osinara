@@ -52,6 +52,27 @@ COPY services/media-sandbox/media-sandbox.c /tmp/media-sandbox.c
 RUN gcc -O2 -static -Wall -Wextra -Werror -o /opt/ffmpeg/bin/media-sandbox /tmp/media-sandbox.c \
     && rm /tmp/media-sandbox.c
 
+# Telegram's official widget check (widget-sandbox), run on a widget the model writes as its own HTML
+# (#468, the owner's decision F4). The repository has no licence yet, so its code is not in this
+# repository: the image takes the pinned release from GitHub, checked by its commit, and keeps only the
+# checker's sources and the runtime packages it needs (its `quickjs-wasm` is MIT). Built from
+# `node-base`, so the layer stays cached between releases.
+FROM node-base AS widget-check
+ARG WIDGET_SANDBOX_TAG=v0.6.1
+ARG WIDGET_SANDBOX_COMMIT=3acba1b62093c83815d38603d26f48c4f26a94c2
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 --branch "$WIDGET_SANDBOX_TAG" https://github.com/TelegramMessenger/widget-sandbox.git /tmp/widget-sandbox \
+    && test "$(git -C /tmp/widget-sandbox rev-parse HEAD)" = "$WIDGET_SANDBOX_COMMIT" \
+    && mkdir -p /opt/widget-check \
+    && cp -r /tmp/widget-sandbox/packages/core/src /tmp/widget-sandbox/packages/core/scripts /tmp/widget-sandbox/packages/core/profile.json /opt/widget-check/ \
+    && cp -r /tmp/widget-sandbox/packages/quickjs-wasm /opt/widget-check/quickjs-wasm \
+    && rm -rf /tmp/widget-sandbox
+# Our own manifest and lockfile pin every package the checker runs with, so the image builds the same.
+COPY infra/widget-check/package.json infra/widget-check/package-lock.json /opt/widget-check/
+RUN cd /opt/widget-check && npm ci --omit=dev --no-audit --no-fund
+
 FROM first-party-node AS dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -173,6 +194,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=media-tools /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /opt/ffmpeg/bin/media-sandbox /usr/local/bin/
 COPY --from=media-tools /opt/ffmpeg/share/doc/ffmpeg/COPYING.LGPLv2.1 /usr/local/share/doc/ffmpeg/COPYING.LGPLv2.1
+COPY --from=widget-check /opt/widget-check /opt/widget-check
 COPY --from=production-dependencies /app/node_modules ./node_modules
 COPY --from=build /app/.runtime ./.runtime
 # The agent runs from `.runtime`; this tree holds its authored files (`instructions.md`) and serves the

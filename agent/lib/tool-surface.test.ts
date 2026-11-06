@@ -52,7 +52,9 @@ const EXPECTED_TOOL_MODULES = [
   "send_location.ts",
   "send_poll.ts",
   "send_voice_message.ts",
+  "send_widget.ts",
   "start_new_context.ts",
+  "update_widget.ts",
 ] as const;
 
 const EXPECTED_DISCOVERED_TOOL_FILES = ["capabilities.ts"] as const;
