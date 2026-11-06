@@ -540,6 +540,54 @@ and is neither offered nor reported by `manage_telegram_group`. The import keeps
 in the group's own `/workspace/group` folder, typed by its bytes; before 01.11.2026 an external group
 could import only UTF-8 text files.
 
+Since v0.70.0 a person in any connected group may ask the bot privately with `/me <question>`
+(`docs/plans/private-questions.md`, #467): Telegram shows the command and the answer only to them
+(Bot API 10.2 ephemeral messages). The backend takes such an update before the group feed, answers
+within Telegram's 15 seconds with a "thinking" message only that person sees, runs a one-off turn with
+read-only tools plus `manage_reminder` at an exact time, and edits the answer into that message; any
+other send from that turn is refused. Neither the question nor the answer enters the group feed, its
+memory review or its notebook; `telegram_private_questions` (migration 151) keeps them a day for
+follow-ups. The `/me` menu is set per connected group at every start and after every group change
+(`telegram_private_question_command_scopes`) and removed on disconnect, deletion and removal of the
+bot: no post-release step. During a release a question is refused with "the bot is updating". An
+ephemeral message lives in the Telegram app only, so an answer can be lost after the app restarts
+and the bot does not learn of it: the person asks again. v0.63.0 failed on such an update
+(`AGENT_TELEGRAM_INGRESS_FAILED`, message number 0); v0.70.0 handles it. Log codes:
+`AGENT_PRIVATE_QUESTION_*` and `AGENT_PRIVATE_ANSWER_*`; the menu sync, a question taken, refused,
+answered or cancelled are informational.
+
+Since v0.70.0 a private chat with the bot, the owner's and every family member's, gets HTML widgets
+(Bot API 10.4, `docs/plans/telegram-widgets.md`, #468) without a grant: interactive root turns only,
+never scheduled turns, subagents or groups. `send_widget` takes either an A2UI 1.0 surface in the
+project's catalog (`urn:osinara:a2ui:telegram-widget:1`), which the backend validates and renders into
+the widget's HTML, or the model's own HTML for a game or an animation. Own HTML passes a quick check,
+then Telegram's official checker (widget-sandbox `v0.6.1`, image stage `widget-check`, `/opt/widget-check`,
+a child process with only `PATH`, a 256 MB heap, 10 seconds, one at a time), gets a guard script that
+keeps it from opening Telegram links, and is sent without presses. widget-sandbox carried no licence
+on 06.11.2026; the owner accepted using it until one appears. A widget is at most 32 768 bytes and
+3 800 bytes compressed (Telegram's limit is 4 096). `update_widget` changes the values a surface
+bound, never its layout. `telegram_widgets` and `telegram_widget_queries` (migration 152) keep each
+widget's surface and state and each press.
+
+On 06.11.2026 the widget methods answer only on `https://api.telegram.org/beta`
+(`TELEGRAM_WIDGET_API_BASE_URL` in `agent/lib/widgets/widget-config.ts`), and presses (`widget_query`)
+come only from that server. It is a separate Bot API server with its own queue and numbering of the
+bot's updates, copies of every message included, so it is subscribed to the same webhook address for
+presses only, with a secret derived from `TELEGRAM_WEBHOOK_SECRET_TOKEN` (no new variable) and its
+pending updates dropped; anything else it delivers is dropped and logged as
+`AGENT_TELEGRAM_WIDGET_SERVER_UPDATE_DROPPED`. Every host needs this once after the release:
+`docker exec osinara-production-agent-1 node .runtime/scripts/widgets/subscribe-beta-widget-queries.js`
+must print `"betaExpected": true` and `"regularUnchanged": true`; `--remove` takes the subscription
+back. Without it widgets show and a press ends in Telegram's error after 15 seconds. When 10.4 reaches
+the regular address, move the base URL there and remove the beta subscription. A press is claimed by
+its query id (one unprocessed press per person and widget, another is answered "busy"), its message is
+built once and enters the chat's own queue as an ordinary update (`update_id` 2^50 plus the beta's
+number), and Telegram gets its answer at once. A press while the runtime is frozen for a backup is
+refused with `AGENT_WIDGET_QUERY_DEFERRED` and arrives late after Telegram's "not sent". Log codes:
+`AGENT_WIDGET_SENT`, `..._UPDATED`, `..._QUERY` and `..._HTML_REFUSED` are informational;
+`AGENT_WIDGET_RECORD_FAILED`, `..._UPDATE_FAILED`, `..._QUERY_ANSWER_FAILED`, `..._QUERY_INVALID`,
+`..._PRESS_CONTEXT_FAILED` and `..._HTML_CHECK_UNAVAILABLE` count as errors.
+
 The same `inspect_workspace_image` also shows the vision model the current Telegram avatar of a
 person who wrote in the current chat. The model names a message number of that chat; the backend
 resolves its author only inside that chat, asks `getUserProfilePhotos` for the current photo with

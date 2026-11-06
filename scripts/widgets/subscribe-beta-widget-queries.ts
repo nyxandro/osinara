@@ -9,9 +9,9 @@
  * pending updates dropped — otherwise hundreds of copies of old messages would arrive and be answered
  * a second time. The regular subscription is read, never changed.
  *
- * Run inside the agent container, after the release that handles presses is live:
- *   node --import tsx scripts/widgets/subscribe-beta-widget-queries.ts          # subscribe and check
- *   node --import tsx scripts/widgets/subscribe-beta-widget-queries.ts --remove # roll back
+ * Run inside the agent container (it is built into `.runtime`), after the release that handles presses is live:
+ *   node .runtime/scripts/widgets/subscribe-beta-widget-queries.js          # subscribe and check
+ *   node .runtime/scripts/widgets/subscribe-beta-widget-queries.js --remove # roll back
  * Prints the checks, never the token, the secret or the webhook address.
  */
 import { widgetWebhookSecret } from "../../agent/lib/widgets/widget-webhook-secret.js";
