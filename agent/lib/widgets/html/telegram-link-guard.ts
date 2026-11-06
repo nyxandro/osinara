@@ -16,12 +16,7 @@
  *   replaced. What a client does with a cancelled tap on a link is not verified.
  */
 
-export const TELEGRAM_LINK_GUARD = "<script>(()=>{const W=window.TelegramWidget;if(!W)return;"
-  + "const t=u=>{try{const h=new URL(String(u),'https://x.invalid').hostname.toLowerCase().replace(/\\.$/,'');"
-  + "return /^tg:/i.test(String(u))||/(^|\\.)(t\\.me|telegram\\.(me|dog|org))$/.test(h)}catch(e){return true}},o=W.openLink;"
-  + "Object.defineProperty(W,'openTelegramLink',{value:()=>{},writable:false,configurable:false});"
-  + "Object.defineProperty(W,'openLink',{value:u=>{if(!t(u))o.call(W,u)},writable:false,configurable:false});"
-  + "document.addEventListener('click',e=>{const a=e.target&&e.target.closest&&e.target.closest('a[href]');if(a&&t(a.getAttribute('href'))){e.preventDefault();e.stopPropagation()}},true)})()</script>";
+export const TELEGRAM_LINK_GUARD = "<script>(()=>{const W=window.TelegramWidget;if(!W)return;const t=u=>{try{const h=new URL(String(u),'https://x.invalid').hostname.toLowerCase().replace(/\\.$/,'');return/^tg:/i.test(u)||/(^|\\.)(t\\.me|telegram\\.(me|dog|org))$/.test(h)}catch(e){return!0}},o=W.openLink,d=(k,v)=>Object.defineProperty(W,k,{value:v,writable:!1,configurable:!1});d('openTelegramLink',()=>{});d('openLink',u=>{t(u)||o.call(W,u)});document.addEventListener('click',e=>{const a=e.target.closest&&e.target.closest('a[href]');a&&t(a.getAttribute('href'))&&(e.preventDefault(),e.stopPropagation())},!0)})()</script>";
 
 export function withTelegramLinkGuard(html: string): string {
   return `${TELEGRAM_LINK_GUARD}${html}`;
