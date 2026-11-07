@@ -65,10 +65,13 @@ export function parseStoredSandboxMetadata(
   }
 
   // Existing mounted state remains compatible and reuses the runner's strict trust-zone parser.
+  // The network is not stored: it follows the person's guest status on every open (#471), so the shape is
+  // checked as a family member's.
   const request = parseCreateSandboxRequest({
     access: value.access,
     agentSessionId,
     mounts: useOptions.mounts,
+    ownNetwork: false,
     sandboxSessionId: useOptions.sandboxSessionId,
     seedDigest: sandboxSeedDigest([]),
   });

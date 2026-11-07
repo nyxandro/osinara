@@ -48,6 +48,8 @@ export function sandboxRequestHash(request: SandboxRunnerCreateRequest): string 
   return createHash("sha256").update(JSON.stringify({
     access: request.access,
     mounts,
+    // Only a guest's sandbox names it, so every other container keeps the hash it was created with.
+    ...(request.ownNetwork ? { ownNetwork: true } : {}),
     policyVersion: SANDBOX_CONTAINER_POLICY_VERSION,
     sandboxSessionId: request.sandboxSessionId,
     seedDigest: request.seedDigest,

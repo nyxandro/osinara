@@ -5,12 +5,14 @@
  * - The service skills follow the real tool surface of each kind of turn: the owner's live private
  *   chat, another member's, a scheduled run, a delegated child and a live external group. A child's
  *   reading views of schedules and memory (#457) bring no procedure of their changes.
+ * - A guest (#471) gets no skill the owner turned off for them, built-in or their own, and a removed guest none.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const loadCurrentExternalGroupCapabilities = vi.hoisted(() => vi.fn());
 const loadGroupSkillAllowlist = vi.hoisted(() => vi.fn());
 const loadWorking = vi.hoisted(() => vi.fn());
+const loadGuestAccessPolicy = vi.hoisted(() => vi.fn());
 
 vi.mock("../tool-policy/external-group-live-policy.js", () => ({
   authorizeCurrentExternalGroupCapability: vi.fn(),
@@ -22,6 +24,7 @@ vi.mock("./group-skill-repository.js", () => ({
 vi.mock("../family-skills/family-skill-repository.js", () => ({
   familySkillRepository: { loadWorking },
 }));
+vi.mock("../guests/guest-repository.js", () => ({ loadGuestAccessPolicy }));
 
 import { resolveScopedSkills } from "../../skills/scoped.js";
 
@@ -46,6 +49,7 @@ const PRIVATE = { memoryScopes: ["personal", "family"], role: "owner", telegramC
 describe("scoped skills", () => {
   beforeEach(() => {
     loadWorking.mockResolvedValue({});
+    loadGuestAccessPolicy.mockResolvedValue(null);
     loadGroupSkillAllowlist.mockResolvedValue(new Set());
     loadCurrentExternalGroupCapabilities.mockResolvedValue(new Set(["remember", "send_voice_message", "manage_memory.edit"]));
   });
@@ -58,6 +62,25 @@ describe("scoped skills", () => {
   it("gives another member's private chat no procedure of the owner's administration", async () => {
     expect(await serviceSkills(turn({ ...PRIVATE, role: "member" })))
       .toEqual(["delegation", "schedules", "skill-manager", "voice-replies"]);
+  });
+
+  it("gives a guest no skill the owner turned off, built-in or their own", async () => {
+    loadWorking.mockResolvedValue({ "my-notes": { description: "guest's own", name: "my-notes" }, "trip-plan": { description: "guest's own", name: "trip-plan" } });
+    loadGuestAccessPolicy.mockResolvedValue({
+      active: true,
+      disabledSkills: new Set(["pdf", "my-notes"]),
+      disabledTools: new Set(),
+      guestUserId: "user-1",
+    });
+    const names = Object.keys(await resolveScopedSkills(turn({ ...PRIVATE, familyId: "guest-family", role: "member" }) as never));
+
+    expect(names).not.toContain("pdf");
+    expect(names).not.toContain("my-notes");
+    expect(names).toContain("docx");
+    expect(names).toContain("trip-plan");
+
+    loadGuestAccessPolicy.mockResolvedValue({ active: false, disabledSkills: new Set(), disabledTools: new Set(), guestUserId: "user-1" });
+    expect(await resolveScopedSkills(turn({ ...PRIVATE, familyId: "guest-family", role: "member" }) as never)).toEqual({});
   });
 
   it("gives a scheduled run only the procedures of the tools it keeps", async () => {

@@ -7,14 +7,43 @@
  * Key constructs:
  * - Bootstrap claims accept only the exact one-time `/start <43-character-code>` command.
  * - Invitation claims and existing-member deep links never become ordinary model turns.
+ * - A guest link admits its claimant at once (#471): the guest is welcomed and the inviting owner told.
  */
 import type { TelegramContext } from "../runtime/telegram/channel-types.js";
 import type { TelegramMessage } from "../runtime/telegram/inbound.js";
+
+import type { GuestInvitationClaim } from "./guests/guest-enrollment.js";
 
 import { telegramProfileName } from "./telegram-on-message-context.js";
 import type { TelegramMessageRepositories } from "./telegram-on-message-repositories.js";
 
 const OWNER_BOOTSTRAP_COMMAND_PATTERN = /^\/start ([A-Za-z0-9_-]{43})$/u;
+
+const GUEST_WELCOME: Readonly<Record<GuestInvitationClaim["guest"], string>> = {
+  joined: "Готово, вы подключены к агенту как гость. Пишите сюда — я помогу с поиском, файлами, напоминаниями и другими задачами. Ваша память отдельная и не пересекается с памятью других людей.",
+  returned: "С возвращением! Доступ к агенту снова открыт: ваша память и файлы на месте, а напоминания и сценарии стоят на паузе — попросите меня их возобновить.",
+};
+
+/**
+ * One line to the owner about each guest who came in by their link, so a forwarded link that reached the wrong
+ * person is noticed. The join is already committed: a failed notice is logged, and the owner still sees the
+ * guest in their list.
+ */
+async function tellOwnerAboutGuest(ctx: TelegramContext, claim: GuestInvitationClaim, message: TelegramMessage): Promise<void> {
+  const username = message.from?.username;
+  const who = `${telegramProfileName(message)}${username ? ` (@${username})` : ""}`;
+  const failed = (error: string) => console.error(JSON.stringify({ code: "AGENT_GUEST_JOIN_OWNER_NOTICE_FAILED", error }));
+  try {
+    const response = await ctx.telegram.request("sendMessage", {
+      chat_id: claim.hostOwnerTelegramUserId,
+      text: `Гость подключился по вашей ссылке: ${who}. Посмотреть гостей, выключить им инструменты и скиллы или закрыть доступ можно здесь, в личном чате со мной.`,
+    });
+    // Telegram answers a refusal (the owner blocked the bot, say) with ok=false rather than a thrown error.
+    if (!response.ok) failed(`Telegram refused the notice with status ${response.status}`);
+  } catch (error) {
+    failed(error instanceof Error ? error.message : String(error));
+  }
+}
 
 type TelegramIdentity = Awaited<ReturnType<TelegramMessageRepositories["telegram"]["findIdentity"]>>;
 
@@ -30,7 +59,7 @@ export async function handleTelegramEnrollmentBoundary(input: {
   // Invitation secrets are channel commands, not conversation content, even for existing members.
   if (input.identity && input.invitationCode) {
     await input.ctx.telegram.sendMessage(
-      "AGENT_INVITATION_NOT_APPLICABLE: Вы уже подключены к семейному агенту.",
+      "AGENT_INVITATION_NOT_APPLICABLE: Вы уже подключены к агенту.",
     );
     return true;
   }
@@ -79,6 +108,18 @@ export async function handleTelegramEnrollmentBoundary(input: {
       await input.ctx.telegram.sendMessage(
         "AGENT_INVITATION_PENDING: Заявка отправлена владельцу. Доступ появится после подтверждения.",
       );
+      return true;
+    }
+    if (claim === "former_guest") {
+      await input.ctx.telegram.sendMessage(
+        "AGENT_INVITATION_FORMER_GUEST: Вы были гостем этого агента, а гостя пока нельзя перевести в семью. Сообщите об этом владельцу.",
+      );
+      return true;
+    }
+    if (claim !== "invalid") {
+      // The owner's line goes out first and whatever happens to the welcome: it is how a wrong claimant is noticed.
+      await tellOwnerAboutGuest(input.ctx, claim, input.message);
+      await input.ctx.telegram.sendMessage(GUEST_WELCOME[claim.guest]);
       return true;
     }
   }

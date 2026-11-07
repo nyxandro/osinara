@@ -70,7 +70,7 @@ describe("sandbox runner HTTP server", () => {
     const gate = new Promise<void>(resolve => { release = resolve; });
     engine.createSession = vi.fn(async () => { await gate; return { created: true, seedRequired: false, sessionId: SANDBOX_SESSION_ID }; });
     const incoming = fetch(`${baseUrl}/v1/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
-      access: "restricted", agentSessionId: SESSION_ID, sandboxSessionId: SANDBOX_SESSION_ID,
+      access: "restricted", ownNetwork: false, agentSessionId: SESSION_ID, sandboxSessionId: SANDBOX_SESSION_ID,
       mounts: [{ mountPoint: "group", workspaceId: WORKSPACE_ID }], seedDigest: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", seedFiles: [],
     }) });
     try {
@@ -159,6 +159,7 @@ describe("sandbox runner HTTP server", () => {
     const sessionResponse = await fetch(`${baseUrl}/v1/sessions`, {
       body: JSON.stringify({
         access: "trusted",
+        ownNetwork: false,
         mounts: [{ mountPoint: "personal", workspaceId: WORKSPACE_ID }],
         agentSessionId: SESSION_ID,
         sandboxSessionId: SANDBOX_SESSION_ID,
@@ -179,6 +180,7 @@ describe("sandbox runner HTTP server", () => {
     expect(await processResponse.json()).toMatchObject({ exitCode: 0, stdout: "Linux\n" });
     expect(engine.createSession).toHaveBeenCalledWith({
       access: "trusted",
+      ownNetwork: false,
       agentSessionId: SESSION_ID,
       mounts: [{ mountPoint: "personal", workspaceId: WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,
@@ -197,6 +199,7 @@ describe("sandbox runner HTTP server", () => {
     const response = await fetch(`${baseUrl}/v1/sessions`, {
       body: JSON.stringify({
         access: "trusted",
+        ownNetwork: false,
         agentSessionId: SESSION_ID,
         mounts: [{ mountPoint: "group", workspaceId: WORKSPACE_ID }],
         sandboxSessionId: SANDBOX_SESSION_ID,

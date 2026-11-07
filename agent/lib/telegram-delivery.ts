@@ -9,6 +9,8 @@ import { sendTelegramMessage } from "../runtime/telegram/api.js";
 import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../config.js";
 
 interface FamilyInvitationDelivery {
+  /** A family invitation waits for the owner's approval; a guest link admits whoever opens it first (#471). */
+  audience: "family" | "guest";
   chatId: string;
   code: string;
   expiresAt: string;
@@ -46,11 +48,17 @@ export async function deliverFamilyInvitation(input: FamilyInvitationDelivery): 
   try {
     await sendTelegramMessage({
       body: {
-        text: [
-          "Одноразовое приглашение в семейного агента:",
-          startLink,
-          `Действует до ${input.expiresAt}.`,
-        ].join("\n"),
+        text: input.audience === "family"
+          ? [
+            "Одноразовое приглашение в семейного агента:",
+            startLink,
+            `Действует до ${input.expiresAt}.`,
+          ].join("\n")
+          : [
+            "Одноразовая ссылка для гостя:",
+            startLink,
+            `Действует до ${input.expiresAt}. Перешлите её человеку: кто первым откроет ссылку, сразу получит доступ к агенту в личном чате. Семейная память, скиллы и группы гостю не видны.`,
+          ].join("\n"),
       },
       chatId: input.chatId,
       credentials: { botToken },

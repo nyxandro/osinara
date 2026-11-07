@@ -597,6 +597,23 @@ channels and the agent itself have no avatar to show. The log carries `AGENT_TEL
 (`avatar` found or missing and the author kind, no personal data) and
 `AGENT_TELEGRAM_AVATAR_LOOKUP_FAILED` (`providerStatus` of a failed Telegram answer).
 
+Since v0.71.0 the owner may let in guests, people outside the family (#471): section `guests` of
+`owner_settings` (`manage_guest_access`) creates a one-time link (an `invitations` row with
+`kind = 'guest'`, the same code, lifetime and delivery as a family invitation) and turns a guest's tools
+and skills off or removes the guest. Whoever opens the link first becomes a `member` of a new family of
+their own with no owner, linked to the inviting family by `guest_accounts` (migration 153), and the owner
+gets one line about who joined (`AGENT_GUEST_JOIN_OWNER_NOTICE_FAILED` when Telegram refuses it; the join
+stays). A guest's private chat carries a member's tool surface less `disabled_tools`, each tool rechecking
+the live row when it runs, and a member's skills less `disabled_skills`; when the row cannot be read the
+step has no tools (`AGENT_GUEST_POLICY_LOOKUP_FAILED`). A guest's trusted sandbox runs on a network of its
+own (`ownNetwork` in the runner's create request, the same isolated bridge an external group's Bash gets),
+so the proxy refuses it the owner's network grants and the family's API keys. Removing a guest pauses
+their active reminders and scenarios, sets `status = 'revoked'` and deletes their membership, so every
+check that requires membership refuses them; their records stay in their family, and a new link to the
+same person restores the membership. A current or former guest cannot join a family: their private chat
+belongs to their guest family (`AGENT_INVITATION_FORMER_GUEST`). Software update proposals look for the
+single owner among all families, so a guest's family must never get one.
+
 Long-term memory has no separate model route. The root agent decides whether to call `remember`;
 PostgreSQL validates the current Telegram source and atomically writes optional thread state. Thread
 activation and context use local E5 embeddings plus deterministic source projections. Semantic

@@ -179,10 +179,10 @@ describe("trusted mode tool surfaces", () => {
       return (door.inputSchema as { properties: { section: { enum: string[] } } }).properties.section.enum;
     };
     expect(sections(buildModeToolSurface({ environment: "private", owner: true }))).toEqual(
-      ["groups", "group_schedules", "invitations", "group_profiles", "network", "api_keys"],
+      ["groups", "group_schedules", "invitations", "guests", "group_profiles", "network", "api_keys"],
     );
     expect(sections(buildModeToolSurface({ environment: "private", owner: true, scheduledRun: true }))).toEqual(
-      ["groups", "group_schedules", "invitations", "group_profiles"],
+      ["groups", "group_schedules", "invitations", "guests", "group_profiles"],
     );
     expect(buildSubagentToolSurface({ environment: "private", owner: true })).not.toHaveProperty("owner_settings");
     expect(names({ environment: "family" })).not.toContain("owner_settings");

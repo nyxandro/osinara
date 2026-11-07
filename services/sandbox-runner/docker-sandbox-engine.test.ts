@@ -51,6 +51,7 @@ describe("buildSandboxContainerOptions", () => {
   it("keeps family files visible in private chat without exposing Google credentials", () => {
     const options = buildSandboxContainerOptions(runtime, {
       access: "trusted",
+      ownNetwork: false,
       agentSessionId: AGENT_SESSION_ID,
       mounts: [
         { mountPoint: "personal", workspaceId: PERSONAL_WORKSPACE_ID },
@@ -137,6 +138,7 @@ describe("buildSandboxContainerOptions", () => {
   it("mounts only the family tool environment without Google credentials", () => {
     const options = buildSandboxContainerOptions(runtime, {
       access: "trusted",
+      ownNetwork: false,
       agentSessionId: AGENT_SESSION_ID,
       mounts: [{ mountPoint: "family", workspaceId: FAMILY_WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,
@@ -167,6 +169,7 @@ describe("buildSandboxContainerOptions", () => {
   it("gives an external group no tools volume and no network", () => {
     const options = buildSandboxContainerOptions(runtime, {
       access: "restricted",
+      ownNetwork: false,
       agentSessionId: AGENT_SESSION_ID,
       mounts: [{ mountPoint: "group", workspaceId: GROUP_WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,
@@ -198,6 +201,7 @@ describe("buildSandboxContainerOptions", () => {
   it("gives an enabled group its own tools and dedicated proxy-only network, not the trusted network", () => {
     const request = {
       access: "group-tools" as const,
+      ownNetwork: false,
       agentSessionId: AGENT_SESSION_ID,
       mounts: [{ mountPoint: "group" as const, workspaceId: GROUP_WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,
@@ -215,6 +219,34 @@ describe("buildSandboxContainerOptions", () => {
     expect(options.Env).toContain("AGENT_BROWSER_PROXY=http://sandbox-egress-proxy:3128");
     expect(options.Env?.join("\n")).not.toMatch(/\/tools\/(personal|family)|GOOGLE_WORKSPACE_CLI_TOKEN/u);
     expect(() => buildSandboxContainerOptions(runtime, request)).toThrow("AGENT_SANDBOX_GROUP_NETWORK_REQUIRED");
+  });
+
+  it("puts a guest's trusted sandbox on a network of its own, never on the family's sandbox network (#471)", () => {
+    const request = {
+      access: "trusted" as const,
+      ownNetwork: true,
+      agentSessionId: AGENT_SESSION_ID,
+      mounts: [
+        { mountPoint: "personal" as const, workspaceId: PERSONAL_WORKSPACE_ID },
+        { mountPoint: "family" as const, workspaceId: FAMILY_WORKSPACE_ID },
+      ],
+      sandboxSessionId: SANDBOX_SESSION_ID,
+      seedDigest: EMPTY_SEED_DIGEST,
+    };
+    const ownNetwork = `osinara-group-egress-${PERSONAL_WORKSPACE_ID}`;
+    const options = buildSandboxContainerOptions(runtime, request, ownNetwork);
+
+    expect(options.HostConfig?.NetworkMode).toBe(ownNetwork);
+    expect(options.Labels?.["dev.osinara.sandbox.group-workspace-id"]).toBe(PERSONAL_WORKSPACE_ID);
+    // Everything else stays a person's trusted sandbox: their folders, their persistent tools.
+    expect(options.Env).toContain("HOME=/tools/personal/home");
+    expect(options.WorkingDir).toBe("/workspace");
+    expect(() => buildSandboxContainerOptions(runtime, request)).toThrow("AGENT_SANDBOX_GROUP_NETWORK_REQUIRED");
+    expect(() => buildSandboxContainerOptions(runtime, request, runtime.egressNetwork)).toThrow("AGENT_SANDBOX_GROUP_NETWORK_REQUIRED");
+    // A family member's sandbox stays on the shared network, with no network label.
+    const member = buildSandboxContainerOptions(runtime, { ...request, ownNetwork: false });
+    expect(member.HostConfig?.NetworkMode).toBe(runtime.egressNetwork);
+    expect(member.Labels?.["dev.osinara.sandbox.group-workspace-id"]).toBeUndefined();
   });
 
   it("replaces stale policy compute while preserving named-volume data", async () => {
@@ -252,6 +284,7 @@ describe("buildSandboxContainerOptions", () => {
 
     await expect(engine.createSession({
       access: "restricted",
+      ownNetwork: false,
       agentSessionId: AGENT_SESSION_ID,
       mounts: [{ mountPoint: "group", workspaceId: GROUP_WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,
@@ -269,6 +302,7 @@ describe("buildSandboxContainerOptions", () => {
     temporaryRoots.push(root);
     const request = {
       access: "restricted" as const,
+      ownNetwork: false,
       agentSessionId: AGENT_SESSION_ID,
       mounts: [{ mountPoint: "group" as const, workspaceId: GROUP_WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,

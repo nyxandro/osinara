@@ -156,7 +156,7 @@ describe("manage_family_invitation model input", () => {
     await expect(manageFamilyInvitation.execute(input, context)).resolves.toMatchObject({
       delivered: true,
     });
-    expect(createInvitation).toHaveBeenCalledWith("family-1", "owner-1", "call-1");
+    expect(createInvitation).toHaveBeenCalledWith("family-1", "owner-1", "call-1", "member");
     expect(approveInvitation).not.toHaveBeenCalled();
   });
 

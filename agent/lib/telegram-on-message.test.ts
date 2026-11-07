@@ -180,7 +180,7 @@ describe("createTelegramMessageHandler", () => {
     expect(result).toBeNull();
     expect(repository.family.claimInvitation).not.toHaveBeenCalled();
     expect(sendMessage).toHaveBeenCalledWith(
-      "AGENT_INVITATION_NOT_APPLICABLE: Вы уже подключены к семейному агенту.",
+      "AGENT_INVITATION_NOT_APPLICABLE: Вы уже подключены к агенту.",
     );
   });
 
