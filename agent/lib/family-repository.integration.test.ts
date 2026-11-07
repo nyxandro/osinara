@@ -70,6 +70,7 @@ describeWithDatabase("familyRepository invitations", () => {
       owner.familyId,
       owner.ownerId,
       "create-call-one",
+      "member",
     );
 
     await expect(
@@ -137,6 +138,7 @@ describeWithDatabase("familyRepository invitations", () => {
       invitingOwner.familyId,
       invitingOwner.ownerId,
       "create-call-cross-family",
+      "member",
     );
     await familyRepository.claimInvitation(invitation.code, {
       displayName: "Кандидат",
@@ -166,11 +168,13 @@ describeWithDatabase("familyRepository invitations", () => {
       owner.familyId,
       owner.ownerId,
       "durable-create-call",
+      "member",
     );
     const replay = await familyRepository.createInvitation(
       owner.familyId,
       owner.ownerId,
       "durable-create-call",
+      "member",
     );
 
     expect(replay).toEqual(first);
@@ -192,6 +196,7 @@ describeWithDatabase("familyRepository invitations", () => {
         owner.familyId,
         owner.ownerId,
         "durable-create-call",
+        "member",
       ),
     ).resolves.toMatchObject({ deliveryRequired: false });
     const count = await database().query<{ count: string }>(
@@ -204,6 +209,7 @@ describeWithDatabase("familyRepository invitations", () => {
       owner.familyId,
       owner.ownerId,
       "revoked-before-delivery-call",
+      "member",
     );
     await database().query("DELETE FROM family_memberships WHERE user_id = $1", [owner.ownerId]);
     await expect(familyRepository.markInvitationDeliveryStarted({
@@ -213,7 +219,7 @@ describeWithDatabase("familyRepository invitations", () => {
       operationKey: "revoked-before-delivery-call",
     })).rejects.toThrowError(/AGENT_OWNER_REQUIRED/u);
     await expect(
-      familyRepository.createInvitation(owner.familyId, owner.ownerId, "stale-owner-call"),
+      familyRepository.createInvitation(owner.familyId, owner.ownerId, "stale-owner-call", "member"),
     ).rejects.toThrowError(/AGENT_OWNER_REQUIRED/);
     await expect(
       familyRepository.listPendingInvitations(owner.familyId, owner.ownerId),
@@ -226,6 +232,7 @@ describeWithDatabase("familyRepository invitations", () => {
       owner.familyId,
       owner.ownerId,
       "ambiguous-create-call",
+      "member",
     );
     await familyRepository.markInvitationDeliveryStarted({
       createdBy: owner.ownerId,
@@ -245,6 +252,7 @@ describeWithDatabase("familyRepository invitations", () => {
       owner.familyId,
       owner.ownerId,
       "ambiguous-create-call",
+      "member",
     )).rejects.toThrowError(/AGENT_INVITATION_DELIVERY_AMBIGUOUS/u);
 
     const persisted = await database().query<{
@@ -276,11 +284,13 @@ describeWithDatabase("familyRepository invitations", () => {
       owner.familyId,
       owner.ownerId,
       "duplicate-create-one",
+      "member",
     );
     const second = await familyRepository.createInvitation(
       owner.familyId,
       owner.ownerId,
       "duplicate-create-two",
+      "member",
     );
     const profile = { displayName: "Один кандидат", telegramUserId: "duplicate-candidate" };
 
@@ -311,11 +321,13 @@ describeWithDatabase("familyRepository invitations", () => {
       owner.familyId,
       owner.ownerId,
       "expiry-create-stale",
+      "member",
     );
     const fresh = await familyRepository.createInvitation(
       owner.familyId,
       owner.ownerId,
       "expiry-create-fresh",
+      "member",
     );
     const profile = { displayName: "Кандидат", telegramUserId: "expiry-candidate" };
     await familyRepository.claimInvitation(stale.code, profile);
@@ -338,6 +350,7 @@ describeWithDatabase("familyRepository invitations", () => {
       owner.familyId,
       owner.ownerId,
       "expired-replay-create",
+      "member",
     );
     await database().query(
       "UPDATE invitations SET expires_at = now() - interval '1 second' WHERE id = $1",
@@ -349,6 +362,7 @@ describeWithDatabase("familyRepository invitations", () => {
         owner.familyId,
         owner.ownerId,
         "expired-replay-create",
+        "member",
       ),
     ).rejects.toThrowError(/AGENT_INVITATION_EXPIRED/);
   });

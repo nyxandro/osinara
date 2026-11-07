@@ -28,6 +28,11 @@ const MANAGED_ACTION_LABELS: Readonly<Record<string, Readonly<Record<string, str
     approve: "добавить участника в семью",
     create: "создать приглашение в семейного агента",
   },
+  manage_guest_access: {
+    configure: "изменить инструменты и скиллы гостя",
+    invite: "создать ссылку-приглашение для гостя. Кто первым её откроет, получит доступ к агенту в личном чате",
+    revoke: "закрыть гостю доступ к агенту. Его записи останутся запечатанными",
+  },
   manage_network_access: {
     request: "открыть агенту доступ к адресу в вашей сети. Доступ получат песочницы семьи, внешние группы — нет",
   },
@@ -140,6 +145,16 @@ function approvalParameterLines(toolName: string, input: Record<string, unknown>
         ...line("Кандидат", "candidateDisplayName"),
         ...line("Telegram user ID", "candidateTelegramUserId"),
       ];
+    case "manage_guest_access": {
+      if (input.action === "invite") return [];
+      const names = (key: string): string[] => {
+        const list = input[key];
+        if (!Array.isArray(list)) return [];
+        const shown = list.filter((item): item is string => typeof item === "string").map(safe).join(", ");
+        return [`${key === "disabledTools" ? "Выключенные инструменты" : "Выключенные скиллы"}: ${shown || "нет"}`];
+      };
+      return [...line("Гость", "guestDisplayName"), ...names("disabledTools"), ...names("disabledSkills")];
+    }
     case "manage_network_access": {
       const address = value("address");
       const port = input.port;

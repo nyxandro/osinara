@@ -204,6 +204,8 @@ export function openRunnerSandbox(input: {
   readonly baseUrl?: string;
   /** Variables added to every command: the API keys granted to the session's workspaces. */
   readonly environment: () => Promise<Readonly<Record<string, string>>>;
+  /** A guest's sandbox (#471) gets a network of its own instead of the family's sandbox network. */
+  readonly ownNetwork: boolean;
   /** The agent session id; the runner records it with the container. */
   readonly sessionId: string;
   readonly stored: Record<string, unknown> | null;
@@ -218,7 +220,9 @@ export function openRunnerSandbox(input: {
   const disabled = use.mounts.length === 0;
   let request: SandboxRunnerCreateRequest | null = disabled ? null : (() => {
     const access = accessForMounts(use.mounts);
-    return parseCreateSandboxRequest({ access, agentSessionId: input.sessionId, mounts: use.mounts, sandboxSessionId: use.sandboxSessionId, ...NO_SEED });
+    return parseCreateSandboxRequest({
+      access, agentSessionId: input.sessionId, mounts: use.mounts, ownNetwork: input.ownNetwork, sandboxSessionId: use.sandboxSessionId, ...NO_SEED,
+    });
   })();
   if (restored !== null && !restored.disabled && request !== null) {
     request = parseCreateSandboxRequest({ ...request, access: restored.access });

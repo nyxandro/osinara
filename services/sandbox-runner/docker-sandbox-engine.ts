@@ -39,6 +39,7 @@ import { reconcileSandboxContainers } from "./docker-sandbox-reconciliation.js";
 import { writeSandboxSeedArchive } from "./docker-sandbox-seed.js";
 import {
   buildSandboxContainerOptions,
+  ownNetworkWorkspaceId,
   resolveSandboxToolMount,
   type SandboxDockerRuntime,
 } from "./docker-sandbox-options.js";
@@ -192,9 +193,10 @@ export function createDockerSandboxEngine(input: {
           await existing.container.remove({ force: true, v: true });
           existing = null;
         }
+        const networkWorkspaceId = ownNetworkWorkspaceId(request);
         if (existing) {
-          if (request.access === "group-tools") {
-            const workspaceId = request.mounts[0]!.workspaceId;
+          if (networkWorkspaceId !== null) {
+            const workspaceId = networkWorkspaceId;
             await activity.runExclusive(`network:${workspaceId}`, async () => {
               await ensureGroupNetwork(input.docker, input.runtime.project, workspaceId);
               if (!existing.inspection.State.Running) await existing.container.start();
@@ -226,8 +228,8 @@ export function createDockerSandboxEngine(input: {
           }
           return { created: true, seedRequired: false, sessionId, instanceId: container.id };
         };
-        if (request.access !== "group-tools") return create();
-        const workspaceId = request.mounts[0]!.workspaceId;
+        if (networkWorkspaceId === null) return create();
+        const workspaceId = networkWorkspaceId;
         return activity.runExclusive(`network:${workspaceId}`, async () => create(
           await ensureGroupNetwork(input.docker, input.runtime.project, workspaceId),
         ));

@@ -23,6 +23,7 @@ describe("deliverFamilyInvitation", () => {
 
     await expect(
       deliverFamilyInvitation({
+        audience: "family",
         chatId: "owner-chat-1",
         code: "a".repeat(32),
         expiresAt: "2026-07-12T12:00:00.000Z",
@@ -49,6 +50,31 @@ describe("deliverFamilyInvitation", () => {
     });
   });
 
+  it("tells the owner that a guest link admits whoever opens it first", async () => {
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "telegram-bot-secret");
+    vi.stubEnv("TELEGRAM_BOT_USERNAME", "osinara_bot");
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await deliverFamilyInvitation({
+      audience: "guest",
+      chatId: "owner-chat-1",
+      code: "b".repeat(32),
+      expiresAt: "2026-11-08T12:00:00.000Z",
+      signal: new AbortController().signal,
+    });
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(JSON.parse(String(request?.body))).toEqual({
+      chat_id: "owner-chat-1",
+      text: [
+        "Одноразовая ссылка для гостя:",
+        "https://t.me/osinara_bot?start=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "Действует до 2026-11-08T12:00:00.000Z. Перешлите её человеку: кто первым откроет ссылку, сразу получит доступ к агенту в личном чате. Семейная память, скиллы и группы гостю не видны.",
+      ].join("\n"),
+    });
+  });
+
   it("reports a stable error when Telegram rejects delivery", async () => {
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "telegram-bot-secret");
     vi.stubEnv("TELEGRAM_BOT_USERNAME", "osinara_bot");
@@ -56,6 +82,7 @@ describe("deliverFamilyInvitation", () => {
 
     await expect(
       deliverFamilyInvitation({
+        audience: "family",
         chatId: "owner-chat-1",
         code: "a".repeat(32),
         expiresAt: "2026-07-12T12:00:00.000Z",

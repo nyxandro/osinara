@@ -60,6 +60,13 @@ import {
   GROUP_TIMELINE_TRUST,
 } from "./group-fragments.js";
 import {
+  GUEST_CHILD_MEMORY,
+  GUEST_INTRODUCTION,
+  GUEST_MEMORY,
+  guestAdministrationRules,
+  type GuestModeFacts,
+} from "./guest-fragments.js";
+import {
   CURRENT_TIME_TOOL_RULES,
   PROACTIVE_DELIVERY_RULES,
   PROGRESS_UPDATE_RULES,
@@ -76,7 +83,15 @@ import {
 export type ModeInstructionsInput =
   | { environment: "family"; reactions?: readonly string[] | null; scheduledRun?: boolean; subagentTurn?: boolean }
   // `owner`: the verified caller is the family's owner; another member's chat gets none of the owner's administration.
-  | { environment: "private"; owner: boolean; reactions?: readonly string[] | null; scheduledRun?: boolean; subagentTurn?: boolean }
+  // `guest`: present only in a guest's own chat (#471), with what the owner turned off for them.
+  | {
+      environment: "private";
+      guest?: GuestModeFacts;
+      owner: boolean;
+      reactions?: readonly string[] | null;
+      scheduledRun?: boolean;
+      subagentTurn?: boolean;
+    }
   | {
       capabilities: ReadonlySet<ExternalGroupToolName>;
       channelAuthored?: boolean;
@@ -138,7 +153,7 @@ const FAMILY_SKILL_ADMINISTRATION = `Any family member manages the family's own 
 // The owner's administration: its tools exist only in the owner's own private chat.
 const PRIVATE_ADMINISTRATION_RULES = `## Administration
 
-Telegram groups of the family and family invitations are managed only here. On the \`/status\` command or a request to show the settings of groups, call \`owner_settings\` with exactly \`{"section":"groups","call":{"action":"status"}}\` and show the result in one message. Before changing a group (permissions, skills, a new context in a group, registration, removal), an automation for an external group or invitations, load the \`group-admin\` skill and follow it.
+Telegram groups of the family, family invitations and guests are managed only here. On the \`/status\` command or a request to show the settings of groups, call \`owner_settings\` with exactly \`{"section":"groups","call":{"action":"status"}}\` and show the result in one message. Before changing a group (permissions, skills, a new context in a group, registration, removal), an automation for an external group, invitations or guests, load the \`group-admin\` skill and follow it.
 
 ${FAMILY_SKILL_ADMINISTRATION}`;
 
@@ -222,21 +237,32 @@ function sectionsFor(sections: readonly string[], subagentTurn: boolean): readon
   return subagentTurn ? sections.filter((section) => !CHILD_OMITTED_SECTIONS.has(section)) : sections;
 }
 
+function privateMemory(guest: GuestModeFacts | undefined, subagentTurn: boolean): string {
+  if (guest !== undefined) return subagentTurn ? GUEST_CHILD_MEMORY : GUEST_MEMORY;
+  return subagentTurn ? PRIVATE_CHILD_MEMORY : PRIVATE_MEMORY;
+}
+
 function privateInstructions(
   scheduledRun: boolean,
   reactions: readonly string[] | null,
   subagentTurn: boolean,
   owner: boolean,
+  guest: GuestModeFacts | undefined,
 ): string {
-  const sections = owner
-    ? PRIVATE_INSTRUCTION_SECTIONS
-    : PRIVATE_INSTRUCTION_SECTIONS.map((section) => section === PRIVATE_ADMINISTRATION_RULES ? MEMBER_ADMINISTRATION_RULES : section);
+  const administration = owner
+    ? PRIVATE_ADMINISTRATION_RULES
+    : guest === undefined ? MEMBER_ADMINISTRATION_RULES : guestAdministrationRules(guest);
+  // A delegated child acts on no administration, whoever's chat it runs in.
+  const sections = PRIVATE_INSTRUCTION_SECTIONS.flatMap((section) => section !== PRIVATE_ADMINISTRATION_RULES
+    ? [section]
+    : subagentTurn ? [] : [administration]);
   return block([
     ...PRIVATE_HEADING,
+    guest === undefined ? null : GUEST_INTRODUCTION,
     subagentTurn ? SUBAGENT_TURN_RULES : null,
     // The route names tools of a live turn; a scheduled run and a delegated child have fewer.
-    scheduledRun || subagentTurn ? null : trustedRouteRules({ owner, scope: "personal" }),
-    subagentTurn ? PRIVATE_CHILD_MEMORY : PRIVATE_MEMORY,
+    scheduledRun || subagentTurn ? null : trustedRouteRules({ guest: guest !== undefined, owner, scope: "personal" }),
+    privateMemory(guest, subagentTurn),
     ...sectionsFor(sections, subagentTurn),
     // A scheduled report is not a live exchange: it has no message to react to and never imitates
     // a spontaneous afterthought.
@@ -492,7 +518,7 @@ export function modeInstructions(input: ModeInstructionsInput): string {
   const reactions = input.reactions ?? null;
   const scheduledRun = input.scheduledRun ?? false;
   const subagentTurn = input.subagentTurn ?? false;
-  if (input.environment === "private") return privateInstructions(scheduledRun, reactions, subagentTurn, input.owner);
+  if (input.environment === "private") return privateInstructions(scheduledRun, reactions, subagentTurn, input.owner, input.guest);
   if (input.environment === "family") return familyInstructions(scheduledRun, reactions, subagentTurn);
   return externalInstructions(
     input.capabilities,

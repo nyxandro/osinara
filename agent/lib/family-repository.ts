@@ -5,6 +5,7 @@
  * - `PendingFamilyInvitation`: owner-visible pending candidate projection.
  * - `FamilyRepository`: injectable invitation administration contract.
  * - `familyRepository`: transactional family administration implementation.
+ * - `InvitationKind`, `InvitationClaim`: a family or a guest invitation, and what claiming one gave.
  * - Durable invitation transport reservation with live owner authorization.
  */
 import { AppError } from "./app-error.js";
@@ -15,7 +16,23 @@ import {
   INVITATION_CODE_TTL_MS,
   requireInvitationSigningSecret,
 } from "./invitation-code.js";
+import { claimGuestInvitation, type GuestInvitationClaim } from "./guests/guest-enrollment.js";
 import type { TelegramProfile } from "./telegram-repository.js";
+
+/** A family invitation waits for the owner's approval; a guest one admits its first claimant at once (#471). */
+export type InvitationKind = "guest" | "member";
+/**
+ * `former_guest`: a family invitation opened by someone who has been a guest. Their private chat belongs to their
+ * own guest family, and a member's chat cannot be moved across families, so they cannot join this one (#471).
+ */
+export type InvitationClaim = "former_guest" | "invalid" | "pending" | GuestInvitationClaim;
+
+function formerGuestError(): AppError {
+  return new AppError(
+    "AGENT_INVITATION_FORMER_GUEST",
+    "Этот человек был гостем агента, а гостя пока нельзя перевести в семью",
+  );
+}
 
 export interface PendingFamilyInvitation {
   claimedAt: string;
@@ -44,11 +61,12 @@ function invitationDeliveryAmbiguousError(): AppError {
 
 export interface FamilyRepository {
   approveInvitation(input: ApproveInvitationInput): Promise<{ approved: true }>;
-  claimInvitation(code: string, profile: TelegramProfile): Promise<"invalid" | "pending">;
+  claimInvitation(code: string, profile: TelegramProfile): Promise<InvitationClaim>;
   createInvitation(
     familyId: string,
     createdBy: string,
     operationKey: string,
+    kind: InvitationKind,
   ): Promise<{
     code: string;
     deliveryRequired: boolean;
@@ -80,8 +98,8 @@ export const familyRepository: FamilyRepository = {
       await client.query("BEGIN");
 
       // The invitation lock reserves a one-time code for exactly one Telegram identity.
-      const invitation = await client.query<{ family_id: string; id: string }>(
-        `SELECT id, family_id
+      const invitation = await client.query<{ created_by: string; family_id: string; id: string; kind: InvitationKind }>(
+        `SELECT id, family_id, kind, created_by
          FROM invitations
          WHERE code_hash = $1 AND status = 'open' AND expires_at >= now()
          FOR UPDATE`,
@@ -105,6 +123,23 @@ export const familyRepository: FamilyRepository = {
       const candidateId = user.rows[0]?.id;
       if (!candidateId) {
         throw new Error("AGENT_INVITATION_CANDIDATE_WRITE_FAILED: Кандидат не был сохранен");
+      }
+
+      if (row.kind === "guest") {
+        const claim = await claimGuestInvitation(client, {
+          createdBy: row.created_by,
+          guestUserId: candidateId,
+          hostFamilyId: row.family_id,
+          invitationId: row.id,
+          telegramUserId: profile.telegramUserId,
+        });
+        await client.query(claim === "invalid" ? "ROLLBACK" : "COMMIT");
+        return claim;
+      }
+      const formerGuest = await client.query("SELECT 1 FROM guest_accounts WHERE user_id = $1", [candidateId]);
+      if (formerGuest.rowCount) {
+        await client.query("ROLLBACK");
+        return "former_guest";
       }
 
       // Expiration releases the unique pending slot before checking this candidate's new claim.
@@ -154,7 +189,7 @@ export const familyRepository: FamilyRepository = {
     }
   },
 
-  async createInvitation(familyId, createdBy, operationKey) {
+  async createInvitation(familyId, createdBy, operationKey, kind) {
     const client = await database().connect();
     try {
       await client.query("BEGIN");
@@ -179,19 +214,20 @@ export const familyRepository: FamilyRepository = {
       const expiresAt = new Date(Date.now() + INVITATION_CODE_TTL_MS);
       const inserted = await client.query<{ id: string }>(
         `INSERT INTO invitations
-           (family_id, created_by, operation_key, code_hash, expires_at)
-         VALUES ($1, $2, $3, $4, $5)
+           (family_id, created_by, operation_key, code_hash, expires_at, kind)
+         VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (family_id, created_by, operation_key) DO NOTHING
          RETURNING id`,
-        [familyId, createdBy, operationKey, generated.codeHash, expiresAt],
+        [familyId, createdBy, operationKey, generated.codeHash, expiresAt, kind],
       );
       const insertedId = inserted.rows[0]?.id;
       if (insertedId) {
         await client.query(
           `INSERT INTO audit_events
              (family_id, actor_user_id, event_type, subject_id, metadata)
-           VALUES ($1, $2, 'invitation.created', $3, jsonb_build_object('operationKey', $4::text))`,
-          [familyId, createdBy, insertedId, operationKey],
+           VALUES ($1, $2, 'invitation.created', $3,
+                   jsonb_build_object('operationKey', $4::text, 'kind', $5::text))`,
+          [familyId, createdBy, insertedId, operationKey, kind],
         );
       }
       const result = await client.query<{
@@ -200,15 +236,16 @@ export const familyRepository: FamilyRepository = {
         delivery_started_at: Date | null;
         expires_at: Date;
         id: string;
+        kind: InvitationKind;
         status: string;
       }>(
-        `SELECT id, code_hash, expires_at, delivery_started_at, delivery_completed_at, status
+        `SELECT id, code_hash, expires_at, delivery_started_at, delivery_completed_at, status, kind
          FROM invitations
          WHERE family_id = $1 AND created_by = $2 AND operation_key = $3`,
         [familyId, createdBy, operationKey],
       );
       const invitation = result.rows[0];
-      if (!invitation || invitation.code_hash !== generated.codeHash) {
+      if (!invitation || invitation.code_hash !== generated.codeHash || invitation.kind !== kind) {
         throw new Error(
           "AGENT_INVITATION_REPLAY_MISMATCH: Не удалось безопасно восстановить приглашение",
         );
@@ -343,6 +380,9 @@ export const familyRepository: FamilyRepository = {
         await client.query("COMMIT");
         return { approved: true };
       }
+      // A candidate who claimed before becoming a guest still cannot leave their guest family's chat.
+      const formerGuest = await client.query("SELECT 1 FROM guest_accounts WHERE user_id = $1", [row.candidate_id]);
+      if (formerGuest.rowCount) throw formerGuestError();
 
       // A user belongs to only one family; a conflicting grant fails without changing invitation state.
       const membership = await client.query<{ user_id: string }>(

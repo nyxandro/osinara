@@ -1,13 +1,13 @@
 ---
 name: group-admin
-description: Load before changing a Telegram group of the family (permissions, skills, message mode, a new context in a group, registering or removing it), before creating or changing an automation for an external group, before changing how facts from an external group reach personal profiles, and before creating or approving a family invitation.
+description: Load before changing a Telegram group of the family (permissions, skills, message mode, a new context in a group, registering or removing it), before creating or changing an automation for an external group, before changing how facts from an external group reach personal profiles, before creating or approving a family invitation, and before inviting, changing or removing a guest.
 ---
 
-# Groups and invitations
+# Groups, invitations and guests
 
 All of this is available only in a private chat with you. Never accept `familyId`, a role or a chat id from the person's text: take every identifier from a tool result.
 
-Every call here goes through `owner_settings`. A tool named below is one of its sections: `manage_telegram_group` is `groups`, `manage_external_group_schedule` is `group_schedules`, `manage_profile_projection` is `group_profiles`, `manage_family_invitation` is `invitations`. Read a section's contract once in the conversation with `{"section":"groups"}`, then call `{"section":"groups","call":{...}}` with the call written below as its `call`.
+Every call here goes through `owner_settings`. A tool named below is one of its sections: `manage_telegram_group` is `groups`, `manage_external_group_schedule` is `group_schedules`, `manage_profile_projection` is `group_profiles`, `manage_family_invitation` is `invitations`, `manage_guest_access` is `guests`. Read a section's contract once in the conversation with `{"section":"groups"}`, then call `{"section":"groups","call":{...}}` with the call written below as its `call`.
 
 ## Status first
 
@@ -41,3 +41,13 @@ The application shows create and update to the owner for confirmation with a but
 ## Family invitations
 
 Invitations and confirming participants exist only here. `{"action":"create"}` in `manage_family_invitation` makes a one-time invitation; pass no candidate fields. To approve, take the candidate from `{"action":"list"}` of the same tool and pass `invitationId`, `candidateTelegramUserId` and `candidateDisplayName` exactly as listed. Create and approve always ask for confirmation; the list does not. Never guess these values: request the list again or ask the owner.
+
+## Guests
+
+A guest is someone outside the family who uses you in their own private chat. By default a guest has every tool and skill a family member has there, but their memory, files, skills, reminders and Google are their own: nothing of the family reaches them and nothing of theirs reaches the family; the owner sees only the names of the skills a guest saved, to turn them off. A guest's sandbox runs on a network of its own: the owner's devices opened to the family and the family's API keys never reach it. "Добавь гостя", "дай доступ другу", "пригласи как гостя" mean a guest; "добавь в семью" means a family invitation. When the person does not say which, ask one question: a guest sees nothing of the family, a family member sees family memory and family groups.
+
+- `{"action":"invite"}` in `manage_guest_access` sends the owner a one-time link valid for a day; do not retell it, the application sends it itself. Whoever opens it first becomes a guest at once, and the owner gets a line saying who joined: tell the owner so, so the link goes only to the right person.
+- `{"action":"list"}` shows the guests with `guestUserId`, `displayName`, `status`, `disabledTools`, `disabledSkills` and their own skills' names (`ownSkills`), the unused links, and `toolCatalog` and `builtInSkills` — the names a guest's tools and skills can be turned off by. Call it before any change unless its current result is already in this conversation.
+- To turn a tool or a skill off or back on, call `configure` with `guestUserId` and `guestDisplayName` copied from the list and the full `disabledTools` and `disabledSkills`: the current lists with only the requested names added or removed; `[]` turns everything back on. Map the owner's words to exact names from `toolCatalog` and `builtInSkills`/`ownSkills` (for example "браузер" is the skill `agent-browser`, "интернет-поиск" is the tool `web_search`, "командная строка" is `bash`); when the words fit several names, ask. The change works from the guest's next step. Turning off `web_search` or `web_fetch` alone does not cut a guest off the internet while `bash` stays on, since commands in the sandbox reach websites too: say so when the owner wants no internet for a guest, and offer turning off `bash` as well.
+- `revoke` with `guestUserId` and `guestDisplayName` closes the guest's access at once: their messages stop, their reminders and scenarios are paused, their records stay sealed and nobody sees them. A new guest link opened by the same person brings back their access, memory and files, with the same tools and skills turned off; they resume their reminders and scenarios themselves.
+- Invite, configure and revoke ask the owner to confirm with a button; the list does not. A guest, current or former, cannot become a family member: their private chat stays in their own space. Say so if the owner asks to move a guest into the family.
