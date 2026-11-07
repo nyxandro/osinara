@@ -25,6 +25,7 @@ const OTHER_WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
 const EMPTY_SEED_DIGEST = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 const BASE_REQUEST: SandboxRunnerCreateRequest = {
   access: "trusted",
+  ownNetwork: false,
   agentSessionId: AGENT_SESSION_ID,
   mounts: [{ mountPoint: "personal", workspaceId: WORKSPACE_ID }],
   sandboxSessionId: SANDBOX_SESSION_ID,
@@ -41,6 +42,8 @@ describe("Docker sandbox lifecycle", () => {
     })).not.toBe(sandboxRequestHash(BASE_REQUEST));
     expect(sandboxRequestHash({ ...BASE_REQUEST, seedDigest: "a".repeat(64) }))
       .not.toBe(sandboxRequestHash(BASE_REQUEST));
+    // A guest's own network is part of the policy; a family member's hash is the one it had before #471.
+    expect(sandboxRequestHash({ ...BASE_REQUEST, ownNetwork: true })).not.toBe(sandboxRequestHash(BASE_REQUEST));
   });
 
   it("replaces compute with stale policy or a different application owner", () => {

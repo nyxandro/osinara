@@ -127,6 +127,18 @@ function isolatedEnvironment(): string[] {
   ];
 }
 
+/**
+ * The workspace whose network of its own a sandbox runs on: an external group's Bash, or a guest's trusted
+ * sandbox (#471), named after the guest's personal workspace. Null for the family's shared sandbox network.
+ */
+export function ownNetworkWorkspaceId(request: SandboxRunnerCreateRequest): string | null {
+  if (request.access === "group-tools") return request.mounts[0]!.workspaceId;
+  if (request.access !== "trusted" || !request.ownNetwork) return null;
+  const personal = request.mounts.find((mount) => mount.mountPoint === "personal");
+  if (!personal) throw new Error("AGENT_SANDBOX_RUNNER_SCOPE_INVALID: Own network requires a personal workspace");
+  return personal.workspaceId;
+}
+
 export function buildSandboxContainerOptions(
   runtime: SandboxDockerRuntime,
   request: SandboxRunnerCreateRequest,
@@ -134,8 +146,9 @@ export function buildSandboxContainerOptions(
 ): Docker.ContainerCreateOptions {
   const trusted = request.access === "trusted";
   const toolsEnabled = request.access !== "restricted";
-  if (request.access === "group-tools" && (!groupNetwork || groupNetwork === runtime.egressNetwork)) {
-    throw new Error("AGENT_SANDBOX_GROUP_NETWORK_REQUIRED: External Bash requires a dedicated group network");
+  const networkWorkspaceId = ownNetworkWorkspaceId(request);
+  if (networkWorkspaceId !== null && (!groupNetwork || groupNetwork === runtime.egressNetwork)) {
+    throw new Error("AGENT_SANDBOX_GROUP_NETWORK_REQUIRED: This sandbox requires a dedicated network of its own");
   }
   const toolMount = toolsEnabled ? resolveSandboxToolMount(request) : null;
   const mounts = workspaceMounts(runtime, request.mounts);
@@ -157,7 +170,7 @@ export function buildSandboxContainerOptions(
       Memory: SANDBOX_MEMORY_BYTES,
       Mounts: mounts,
       NanoCpus: SANDBOX_CPU_NANOSECONDS,
-      NetworkMode: trusted ? runtime.egressNetwork : request.access === "group-tools" ? groupNetwork : "none",
+      NetworkMode: networkWorkspaceId !== null ? groupNetwork : trusted ? runtime.egressNetwork : "none",
       PidsLimit: SANDBOX_PIDS_LIMIT,
       Privileged: false,
       ReadonlyRootfs: false,
@@ -176,7 +189,8 @@ export function buildSandboxContainerOptions(
       "dev.osinara.sandbox.policy-version": SANDBOX_CONTAINER_POLICY_VERSION,
       "dev.osinara.sandbox.project": runtime.project,
       "dev.osinara.sandbox.session-id": request.sandboxSessionId,
-      ...(request.access === "group-tools" ? { "dev.osinara.sandbox.group-workspace-id": request.mounts[0]!.workspaceId } : {}),
+      // The label keeps the network until its last container is gone, then lets it be removed.
+      ...(networkWorkspaceId === null ? {} : { "dev.osinara.sandbox.group-workspace-id": networkWorkspaceId }),
     },
     OpenStdin: false,
     StdinOnce: false,

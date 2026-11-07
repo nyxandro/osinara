@@ -5,7 +5,8 @@
  * - `resolveConversationSkills`: a private chat gets every built-in skill and the family skills its
  *   person enabled for themselves; a family group gets every built-in skill and the family skills on
  *   its list; an external group gets the skills of its verified list that still exist. Every zone also
- *   gets the service skills of the tools in the turn's surface (`service-skills.ts`).
+ *   gets the service skills of the tools in the turn's surface (`service-skills.ts`). A guest's private chat
+ *   (#471) loses the skills the owner turned off for that guest, and a removed guest's has none.
  *
  * The family's skills are read from the database on every turn, so a change takes effect from the
  * next turn without a new context. A built-in skill keeps its name if a family skill with the same
@@ -15,8 +16,10 @@ import type { SessionAuth } from "../../runtime/context.js";
 import type { SkillDefinition } from "../../runtime/skills/definition.js";
 import { AppError } from "../app-error.js";
 import { resolveConversationEnvironment, type ConversationEnvironment } from "../conversation-environment.js";
+import { isFamilyOwner } from "../family-context.js";
 import { familySkillRepository, type FamilySkillSelection } from "../family-skills/family-skill-repository.js";
 import { serviceSkillsFor } from "../family-skills/service-skills.js";
+import { guestPolicyFor } from "../guests/guest-policy.js";
 import {
   resolveExternalGroupPolicyIdentity,
   resolveExternalGroupSkillPolicy,
@@ -54,6 +57,8 @@ export async function resolveConversationSkills(
   const environment = resolveConversationEnvironment(auth);
   // A private question (`/me`, #467) runs no scripts and reads no files: only the how-to of its own tools.
   if (auth.current?.attributes.privateQuestion === "true") return serviceSkillsFor(environment, turn.toolNames);
+  const guest = environment === "private" && !isFamilyOwner(auth) ? await guestPolicyFor(auth) : null;
+  if (guest !== null && !guest.policy.active) return {};
   const external = environment === "external";
   const familyId = external ? resolveExternalGroupPolicyIdentity(auth)?.familyId ?? null : trustedFamilyId(auth);
   // A group's skills keep the order of its list; a trusted chat lists built-in skills first.
@@ -66,8 +71,11 @@ export async function resolveConversationSkills(
   const family = selection === null ? {} : await familySkillRepository.loadWorking(familyId!, selection);
   const catalog: Record<string, SkillDefinition> = { ...family, ...GROUP_SAFE_SKILL_DEFINITIONS };
   const names = external ? granted : [...granted, ...Object.keys(family).filter((name) => !isGroupSafeSkillName(name))];
-  return {
+  const skills = {
     ...Object.fromEntries(names.flatMap((name) => catalog[name] === undefined ? [] : [[name, catalog[name]]])),
     ...serviceSkillsFor(environment, turn.toolNames),
   };
+  return guest === null
+    ? skills
+    : Object.fromEntries(Object.entries(skills).filter(([name]) => !guest.policy.disabledSkills.has(name)));
 }

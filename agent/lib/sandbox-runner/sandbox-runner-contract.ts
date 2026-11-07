@@ -68,6 +68,9 @@ const createSandboxRequestSchema = z.strictObject({
   access: z.enum(["restricted", "group-tools", "trusted"]),
   agentSessionId: agentSessionIdSchema,
   mounts: z.array(workspaceMountSchema).min(1).max(2),
+  // A guest's trusted sandbox (#471) runs on a network of its own, not on the family's sandbox network: the
+  // proxy then refuses it the owner's network grants and the family's API keys, and no family sandbox is near.
+  ownNetwork: z.boolean(),
   sandboxSessionId: sessionIdSchema,
   seedDigest: z.string().regex(/^[0-9a-f]{64}$/u),
   seedFiles: z.array(seedFileSchema).max(SANDBOX_RUNNER_SEED_FILES_MAX).optional(),
@@ -101,6 +104,10 @@ const createSandboxRequestSchema = z.strictObject({
   }
   if (request.seedFiles && sandboxSeedDigest(request.seedFiles) !== request.seedDigest) {
     context.addIssue({ code: "custom", message: "Seed digest mismatch", path: ["seedDigest"] });
+  }
+
+  if (request.ownNetwork && (request.access !== "trusted" || !points.includes("personal"))) {
+    context.addIssue({ code: "custom", message: "Own network requires a trusted personal sandbox", path: ["ownNetwork"] });
   }
 
   // Restricted sessions are external groups and may receive only their isolated group workspace.

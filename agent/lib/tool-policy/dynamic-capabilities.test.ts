@@ -7,12 +7,16 @@
  * - Scheduled history is visible only with a successfully resolved application-core policy.
  * - Live policy changes affect visibility on the next turn and execution checks enforce revocation.
  * - Every returned entry is a complete tool: description, input schema and executor.
+ * - A guest's private chat (#471): a member's, less what the owner turned off, re-checked at execution.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const loadCurrentExternalGroupCapabilities = vi.hoisted(() => vi.fn());
 const authorizeCurrentExternalGroupCapability = vi.hoisted(() => vi.fn());
 const loadGroupSkillAllowlist = vi.hoisted(() => vi.fn());
+const loadGuestAccessPolicy = vi.hoisted(() => vi.fn());
+
+vi.mock("../guests/guest-repository.js", () => ({ loadGuestAccessPolicy }));
 
 vi.mock("../group-skills/group-skill-repository.js", () => ({
   groupSkillPolicyRepository: { loadGroupSkillAllowlist },
@@ -49,6 +53,7 @@ function resolve(
       auth: {
         current: attributes === null ? null : {
           attributes: {
+            familyId: "family-1",
             telegramActorId: "101",
             telegramActorKind: "telegram_user",
             telegramUserId: "101",
@@ -81,6 +86,9 @@ describe("dynamic capability resolver", () => {
     loadCurrentExternalGroupCapabilities.mockResolvedValue(new Set());
     loadGroupSkillAllowlist.mockReset();
     loadGroupSkillAllowlist.mockResolvedValue(new Set());
+    // Every family member's chat is looked up as a possible guest's; none of them is one by default.
+    loadGuestAccessPolicy.mockReset();
+    loadGuestAccessPolicy.mockResolvedValue(null);
   });
 
   it("emits the private surface for a verified private chat", async () => {
@@ -106,6 +114,51 @@ describe("dynamic capability resolver", () => {
       expect(recovery, name).not.toContain(name);
     }
     for (const name of ["export_memory", "manage_skill", "notification_settings"]) expect(member, name).toContain(name);
+  });
+
+  it("gives a guest a member's private chat less what the owner turned off", async () => {
+    loadGuestAccessPolicy.mockResolvedValue({
+      active: true,
+      disabledSkills: new Set(),
+      disabledTools: new Set(["bash", "web_search"]),
+      guestUserId: "guest-1",
+    });
+    const guest = await resolve({ familyId: "guest-family", memoryScopes: ["personal", "family"], role: "member", telegramChatType: "private" });
+    const names = Object.keys(guest ?? {});
+
+    expect(loadGuestAccessPolicy).toHaveBeenCalledWith("guest-family");
+    expect(names).not.toContain("bash");
+    expect(names).not.toContain("web_search");
+    for (const name of OWNER_ONLY_TOOL_NAMES) expect(names, name).not.toContain(name);
+    for (const name of ["export_memory", "manage_skill", "remember", "read_file"]) expect(names, name).toContain(name);
+    for (const [name, definition] of Object.entries(guest ?? {})) expectRuntimeTool(name, definition);
+
+    // The owner turns a tool off while it is already on the surface: the call is refused when it runs.
+    loadGuestAccessPolicy.mockResolvedValue({
+      active: true,
+      disabledSkills: new Set(),
+      disabledTools: new Set(["get_current_time"]),
+      guestUserId: "guest-1",
+    });
+    await expect(guest!.get_current_time!.execute({}, {} as never)).rejects.toMatchObject({ code: "AGENT_GUEST_TOOL_DISABLED" });
+    loadGuestAccessPolicy.mockResolvedValue({ active: false, disabledSkills: new Set(), disabledTools: new Set(), guestUserId: "guest-1" });
+    await expect(guest!.get_current_time!.execute({}, {} as never)).rejects.toMatchObject({ code: "AGENT_GUEST_ACCESS_REVOKED" });
+  });
+
+  it("gives a removed guest no tools and closes the surface when the guest's limits cannot be read", async () => {
+    loadGuestAccessPolicy.mockResolvedValue({ active: false, disabledSkills: new Set(), disabledTools: new Set(), guestUserId: "guest-1" });
+    expect(await resolve({ familyId: "guest-family", memoryScopes: ["personal", "family"], role: "member", telegramChatType: "private" })).toEqual({});
+
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    loadGuestAccessPolicy.mockRejectedValue(new Error("connection terminated"));
+    expect(await resolve({ familyId: "guest-family", memoryScopes: ["personal", "family"], role: "member", telegramChatType: "private" })).toEqual({});
+    expect(logged.mock.calls.some(([line]) => String(line).includes("AGENT_GUEST_POLICY_LOOKUP_FAILED"))).toBe(true);
+    logged.mockRestore();
+  });
+
+  it("never reads guest limits for the owner", async () => {
+    await resolve({ memoryScopes: ["personal", "family"], role: "owner", telegramChatType: "private" });
+    expect(loadGuestAccessPolicy).not.toHaveBeenCalled();
   });
 
   it("emits the family surface for a registered family group", async () => {

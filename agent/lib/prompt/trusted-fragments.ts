@@ -94,22 +94,30 @@ If the user asks about a previously delivered notification that is not in the cu
 
 // The owner's private chat carries the owner's administration; another member's private chat does not,
 // so its route names only where that lives.
-const ROUTE_LINES: Readonly<Record<"family" | "member" | "owner", readonly string[]>> = {
+const ROUTE_LINES: Readonly<Record<"family" | "guest" | "member" | "owner", readonly string[]>> = {
   family: [
     "- Earlier messages of this group: `list_group_history`.",
+  ],
+  // A guest (#471) has no family, no groups and none of the owner's settings.
+  guest: [
+    "- Their own skills: load `skill-manager`. Their access, tools and skills are set by the agent's owner.",
   ],
   member: [
     "- The family's own skills: load `skill-manager`. Groups, invitations and API keys are kept by the owner in their own private chat.",
   ],
   owner: [
-    "- The owner's settings (groups, their automations, invitations, profiles from groups, network access, API keys): `owner_settings`, one section at a time.",
-    "- Groups and invitations: load `group-admin`; the family's own skills: load `skill-manager`.",
+    "- The owner's settings (groups, their automations, invitations, guests, profiles from groups, network access, API keys): `owner_settings`, one section at a time.",
+    "- Groups, invitations and guests: load `group-admin`; the family's own skills: load `skill-manager`.",
     "- An API key a skill or script needs, or giving one to the family or a group: load `api-keys`.",
   ],
 };
 
-export function trustedRouteRules(chat: { readonly scope: "family" } | { readonly owner: boolean; readonly scope: "personal" }): string {
-  const routes = chat.scope === "family" ? ROUTE_LINES.family : ROUTE_LINES[chat.owner ? "owner" : "member"];
+export function trustedRouteRules(
+  chat: { readonly scope: "family" } | { readonly guest: boolean; readonly owner: boolean; readonly scope: "personal" },
+): string {
+  const routes = chat.scope === "family"
+    ? ROUTE_LINES.family
+    : ROUTE_LINES[chat.owner ? "owner" : chat.guest ? "guest" : "member"];
   return [
     "## Where to go",
     [

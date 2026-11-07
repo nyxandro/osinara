@@ -15,6 +15,7 @@ export const OWNER_SETTINGS_SECTION_TOOLS = {
   groups: "manage_telegram_group",
   group_schedules: "manage_external_group_schedule",
   invitations: "manage_family_invitation",
+  guests: "manage_guest_access",
   group_profiles: "manage_profile_projection",
   network: "manage_network_access",
   api_keys: "manage_api_keys",
@@ -24,7 +25,7 @@ export type OwnerSettingsSection = keyof typeof OWNER_SETTINGS_SECTION_TOOLS;
 
 export const OWNER_SETTINGS_SECTIONS = Object.keys(OWNER_SETTINGS_SECTION_TOOLS) as OwnerSettingsSection[];
 export const OWNER_SETTINGS_SCHEDULED_SECTIONS: readonly OwnerSettingsSection[] = [
-  "groups", "group_schedules", "invitations", "group_profiles",
+  "groups", "group_schedules", "invitations", "guests", "group_profiles",
 ];
 
 export function isOwnerSettingsSection(value: unknown): value is OwnerSettingsSection {

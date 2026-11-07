@@ -5,6 +5,7 @@
  * - Trusted personal/family mount validation.
  * - Restricted external-group mount validation.
  * - Duplicate, mixed-scope, and unsafe seed-path rejection.
+ * - A network of its own only for a trusted personal sandbox (a guest's, #471).
  */
 import { describe, expect, it } from "vitest";
 
@@ -24,6 +25,7 @@ describe("parseCreateSandboxRequest", () => {
   it("accepts trusted personal and family mounts with persistent tools", () => {
     expect(parseCreateSandboxRequest({
       access: "trusted",
+      ownNetwork: false,
       agentSessionId: AGENT_SESSION_ID,
       mounts: [
         { mountPoint: "personal", workspaceId: PERSONAL_WORKSPACE_ID },
@@ -33,6 +35,7 @@ describe("parseCreateSandboxRequest", () => {
       seedDigest: EMPTY_SEED_DIGEST,
     })).toEqual({
       access: "trusted",
+      ownNetwork: false,
       agentSessionId: AGENT_SESSION_ID,
       mounts: [
         { mountPoint: "personal", workspaceId: PERSONAL_WORKSPACE_ID },
@@ -43,9 +46,26 @@ describe("parseCreateSandboxRequest", () => {
     });
   });
 
+  it("gives a network of its own only to a trusted personal sandbox", () => {
+    const personal = { mountPoint: "personal" as const, workspaceId: PERSONAL_WORKSPACE_ID };
+    const base = { agentSessionId: AGENT_SESSION_ID, sandboxSessionId: SANDBOX_SESSION_ID, seedDigest: EMPTY_SEED_DIGEST };
+
+    expect(parseCreateSandboxRequest({ ...base, access: "trusted", mounts: [personal], ownNetwork: true }))
+      .toMatchObject({ ownNetwork: true });
+    expect(() => parseCreateSandboxRequest({
+      ...base, access: "trusted", mounts: [{ mountPoint: "family", workspaceId: FAMILY_WORKSPACE_ID }], ownNetwork: true,
+    })).toThrow(/Own network requires a trusted personal sandbox/u);
+    expect(() => parseCreateSandboxRequest({
+      ...base, access: "group-tools", mounts: [{ mountPoint: "group", workspaceId: GROUP_WORKSPACE_ID }], ownNetwork: true,
+    })).toThrow(/Own network requires a trusted personal sandbox/u);
+    // The field is required: a request that does not say which network it wants is refused.
+    expect(() => parseCreateSandboxRequest({ ...base, access: "trusted", mounts: [personal] })).toThrow(/ownNetwork/u);
+  });
+
   it("accepts only a group mount for a restricted session", () => {
     expect(parseCreateSandboxRequest({
       access: "restricted",
+      ownNetwork: false,
       agentSessionId: AGENT_SESSION_ID,
       mounts: [{ mountPoint: "group", workspaceId: GROUP_WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,
@@ -56,6 +76,7 @@ describe("parseCreateSandboxRequest", () => {
   it.each([
     {
       access: "trusted",
+      ownNetwork: false,
       agentSessionId: AGENT_SESSION_ID,
       mounts: [{ mountPoint: "group", workspaceId: GROUP_WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,
@@ -63,6 +84,7 @@ describe("parseCreateSandboxRequest", () => {
     },
     {
       access: "restricted",
+      ownNetwork: false,
       agentSessionId: AGENT_SESSION_ID,
       mounts: [{ mountPoint: "family", workspaceId: FAMILY_WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,
@@ -70,6 +92,7 @@ describe("parseCreateSandboxRequest", () => {
     },
     {
       access: "trusted",
+      ownNetwork: false,
       agentSessionId: AGENT_SESSION_ID,
       mounts: [
         { mountPoint: "family", workspaceId: FAMILY_WORKSPACE_ID },
@@ -90,6 +113,7 @@ describe("parseCreateSandboxRequest", () => {
     ];
     expect(() => parseCreateSandboxRequest({
       access: "restricted",
+      ownNetwork: false,
       agentSessionId: AGENT_SESSION_ID,
       mounts: [{ mountPoint: "group", workspaceId: GROUP_WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,
@@ -107,6 +131,7 @@ describe("parseCreateSandboxRequest", () => {
     const seedFiles = [{ contentBase64: "c2VjcmV0", path }];
     expect(() => parseCreateSandboxRequest({
       access: "trusted",
+      ownNetwork: false,
       agentSessionId: AGENT_SESSION_ID,
       mounts: [{ mountPoint: "personal", workspaceId: PERSONAL_WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,
@@ -119,6 +144,7 @@ describe("parseCreateSandboxRequest", () => {
     const seedFiles = [{ contentBase64: "c2VjcmV0", path: "/workspace/notes.md" }];
     expect(parseCreateSandboxRequest({
       access: "trusted",
+      ownNetwork: false,
       agentSessionId: AGENT_SESSION_ID,
       mounts: [{ mountPoint: "personal", workspaceId: PERSONAL_WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,
@@ -131,6 +157,7 @@ describe("parseCreateSandboxRequest", () => {
     const seedFiles = [{ contentBase64: "c2tpbGw=", path: "/tools/personal/skill.md" }];
     expect(() => parseCreateSandboxRequest({
       access: "restricted",
+      ownNetwork: false,
       agentSessionId: AGENT_SESSION_ID,
       mounts: [{ mountPoint: "group", workspaceId: GROUP_WORKSPACE_ID }],
       sandboxSessionId: SANDBOX_SESSION_ID,

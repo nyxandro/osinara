@@ -10,10 +10,14 @@
  * - The runtime calls it before every model call, so a revoked capability leaves the next step.
  * - Tool and skill policy share verified auth; execution still rechecks live revocation.
  * - Each independent policy lookup fails closed for its own application capability class.
+ * - A guest's private chat (#471) is a member's, less what the owner turned off for that guest.
  */
 import type { DynamicResolveContext } from "../runtime/context.js";
+import type { ToolDefinition } from "../runtime/tool.js";
 import { resolveConversationEnvironment } from "../lib/conversation-environment.js";
 import { isFamilyOwner } from "../lib/family-context.js";
+import { guestPolicyFor } from "../lib/guests/guest-policy.js";
+import { guestToolSurface } from "../lib/guests/guest-tool-surface.js";
 import { scheduledGroupHistoryAccess } from "../lib/agent-schedules/scheduled-group-history-context.js";
 import { isScheduledSession } from "../lib/agent-schedules/scheduled-session.js";
 import { loadCurrentExternalGroupCapabilities } from "../lib/tool-policy/external-group-live-policy.js";
@@ -34,6 +38,23 @@ import { buildMemoryReviewToolSurface } from "../lib/memory-review/memory-review
 import { isTelegramChannelSession } from "../lib/telegram-session-actor.js";
 import { isPrivateQuestionSession } from "../lib/private-questions/private-question-session.js";
 import { privateQuestionToolSurface } from "../lib/private-questions/private-question-tool-surface.js";
+
+type ToolMap = Readonly<Record<string, ToolDefinition<any, any>>>;
+
+/** Another person's private chat: a guest's loses what the owner turned off; a family member's is unchanged. */
+async function guestScopedSurface(auth: DynamicResolveContext["session"]["auth"], surface: ToolMap): Promise<ToolMap> {
+  try {
+    const guest = await guestPolicyFor(auth);
+    return guest === null ? surface : guestToolSurface(surface, guest);
+  } catch (error) {
+    // Without the guest's current limits nothing proves which tools the owner left them: no tools this step.
+    console.error(JSON.stringify({
+      code: "AGENT_GUEST_POLICY_LOOKUP_FAILED",
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    return {};
+  }
+}
 
 export async function resolveToolSurface(ctx: DynamicResolveContext) {
   // A private question (`/me`, #467) reads what its group's ordinary turn could, and changes only reminders.
@@ -88,17 +109,18 @@ async function resolveConversationToolSurface(ctx: DynamicResolveContext) {
   }
   if (environment !== "external") {
     const scheduledRun = isScheduledSession(ctx);
-    const surface = buildSurface(environment === "private"
-      ? { environment, owner: isFamilyOwner(auth), scheduledRun }
+    const owner = environment === "private" && isFamilyOwner(auth);
+    let surface = buildSurface(environment === "private"
+      ? { environment, owner, scheduledRun }
       : { environment, scheduledRun });
     if (auth.current?.attributes.telegramApprovalContinuation === "true") {
       const continuation = { ...surface };
       // A control response is not a verified new message for facts or style mutations.
       delete continuation.remember;
       delete continuation.manage_behavior_preference;
-      return continuation;
+      surface = continuation;
     }
-    return surface;
+    return environment === "private" && !owner ? await guestScopedSurface(auth, surface) : surface;
   }
 
   // A visible channel is not a human authority. It may receive a text response in the external

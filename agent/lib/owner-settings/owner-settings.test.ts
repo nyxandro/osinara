@@ -141,8 +141,8 @@ describe("owner_settings", () => {
     expect(await sections(door)).toEqual([...OWNER_SETTINGS_SECTIONS]);
 
     const scheduled = createOwnerSettingsTool(OWNER_SETTINGS_SCHEDULED_SECTIONS);
-    expect(OWNER_SETTINGS_SCHEDULED_SECTIONS).toEqual(["groups", "group_schedules", "invitations", "group_profiles"]);
-    expect(await sections(scheduled)).toEqual(["groups", "group_schedules", "invitations", "group_profiles"]);
+    expect(OWNER_SETTINGS_SCHEDULED_SECTIONS).toEqual(["groups", "group_schedules", "invitations", "guests", "group_profiles"]);
+    expect(await sections(scheduled)).toEqual(["groups", "group_schedules", "invitations", "guests", "group_profiles"]);
     await expect(scheduled.execute({ section: "network" }, CONTEXT)).rejects.toMatchObject({ code: "AGENT_OWNER_SETTINGS_SECTION_FORBIDDEN" });
     await expect(door.execute({ section: "everything" }, CONTEXT)).rejects.toMatchObject({ code: "AGENT_OWNER_SETTINGS_INPUT_INVALID" });
   });

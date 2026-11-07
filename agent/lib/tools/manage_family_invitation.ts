@@ -121,6 +121,7 @@ export default withCallExamples(defineTool({
       owner.familyId,
       owner.userId,
       ctx.callId,
+      "member",
     );
     if (invitation.deliveryRequired) {
       // The repository persists one transport attempt and rechecks live owner access before send.
@@ -131,6 +132,7 @@ export default withCallExamples(defineTool({
         operationKey: ctx.callId,
       });
       await deliverFamilyInvitation({
+        audience: "family",
         chatId: owner.telegramChatId,
         code: invitation.code,
         expiresAt: invitation.expiresAt,

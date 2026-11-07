@@ -38,6 +38,7 @@ import {
 import manageApiKeys from "./manage_api_keys.js";
 import manageExternalGroupSchedule from "./manage_external_group_schedule.js";
 import manageFamilyInvitation from "./manage_family_invitation.js";
+import manageGuestAccess from "./manage_guest_access.js";
 import manageNetworkAccess from "./manage_network_access.js";
 import manageProfileProjection from "./manage_profile_projection.js";
 import manageTelegramGroup from "./manage_telegram_group.js";
@@ -50,6 +51,7 @@ const SECTION_TOOLS: Readonly<Record<OwnerSettingsSection, AnyToolDefinition>> =
   groups: manageTelegramGroup as unknown as AnyToolDefinition,
   group_schedules: manageExternalGroupSchedule as unknown as AnyToolDefinition,
   invitations: manageFamilyInvitation as unknown as AnyToolDefinition,
+  guests: manageGuestAccess as unknown as AnyToolDefinition,
   group_profiles: manageProfileProjection as unknown as AnyToolDefinition,
   network: manageNetworkAccess as unknown as AnyToolDefinition,
   api_keys: manageApiKeys as unknown as AnyToolDefinition,
@@ -59,6 +61,7 @@ const SECTION_PURPOSES: Readonly<Record<OwnerSettingsSection, string>> = {
   groups: "Telegram groups of the family: status, permissions, skills, a new context, registration",
   group_schedules: "automations that post into an external group",
   invitations: "family invitations and candidates waiting for confirmation",
+  guests: "guests outside the family: a guest link, their tools and skills, removing a guest",
   group_profiles: "facts of an external group in its participants' personal profiles",
   network: "network access of the sandbox to the owner's addresses",
   api_keys: "API keys that skills use without seeing them",

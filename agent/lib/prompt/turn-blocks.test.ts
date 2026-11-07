@@ -93,8 +93,41 @@ const channelAuth: SessionAuth = {
 const reactionPolicy = vi.fn().mockResolvedValue(null);
 
 describe("mode block resolution", () => {
+  it("tells a guest's chat who the person is and what the owner turned off, and a member's nothing of it", async () => {
+    const guestAuth = auth({ ...privateAuth.current!.attributes, familyId: "guest-family", role: "member" });
+    const loadGuest = vi.fn().mockResolvedValue({
+      familyId: "guest-family",
+      policy: { active: true, disabledSkills: new Set(["pdf"]), disabledTools: new Set(["web_search", "bash"]), guestUserId: "user-1" },
+    });
+    const resolve = createModeBlockResolver({
+      loadCapabilities: vi.fn().mockResolvedValue(new Set()),
+      loadGuest,
+      loadReactionPolicy: reactionPolicy,
+    });
+
+    const guest = await resolve(context(guestAuth));
+    expect(guest).toContain("This person is a guest of the agent's owner");
+    expect(guest).toContain("The owner turned off for this guest: tools `bash`, `web_search`; skills `pdf`.");
+    expect(guest).not.toContain("Personal and family memory are available");
+    expect(guest).not.toContain("Any family member manages the family's own skills");
+
+    loadGuest.mockResolvedValue(null);
+    const member = await resolve(context(guestAuth));
+    expect(member).not.toContain("guest");
+    expect(member).toContain("Personal and family memory are available");
+
+    // A removed guest's run and unreadable limits leave the chat without a determined mode.
+    loadGuest.mockResolvedValue({ familyId: "guest-family", policy: { active: false, disabledSkills: new Set(), disabledTools: new Set(), guestUserId: "user-1" } });
+    expect(await resolve(context(guestAuth))).toContain("AGENT_CONVERSATION_ENVIRONMENT_INVALID");
+    loadGuest.mockRejectedValue(new Error("connection terminated"));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(await resolve(context(guestAuth))).toContain("AGENT_CONVERSATION_ENVIRONMENT_INVALID");
+    logged.mockRestore();
+  });
+
   it("offers the group response outcomes only to a live root group turn", async () => {
     const resolve = createModeBlockResolver({
+      loadGuest: vi.fn().mockResolvedValue(null),
       loadCapabilities: vi.fn().mockResolvedValue(new Set()),
       loadReactionPolicy: reactionPolicy,
     });
@@ -126,6 +159,7 @@ describe("mode block resolution", () => {
 
   it("names voice replies only where the voice tool is emitted and leaves how to the skill", async () => {
     const resolve = (capabilities: ReadonlySet<ExternalGroupToolName>) => createModeBlockResolver({
+      loadGuest: vi.fn().mockResolvedValue(null),
       loadCapabilities: vi.fn().mockResolvedValue(capabilities),
       loadReactionPolicy: reactionPolicy,
     });
@@ -149,6 +183,7 @@ describe("mode block resolution", () => {
 
   it("teaches answer buttons in the trusted zones, link and copy buttons everywhere, and none to a child", async () => {
     const resolve = createModeBlockResolver({
+      loadGuest: vi.fn().mockResolvedValue(null),
       loadCapabilities: vi.fn().mockResolvedValue(new Set(["remember"])),
       loadReactionPolicy: reactionPolicy,
     });
@@ -166,6 +201,7 @@ describe("mode block resolution", () => {
 
   it("teaches group and invitation administration only to the owner's private chat, skills to every member", async () => {
     const resolve = createModeBlockResolver({
+      loadGuest: vi.fn().mockResolvedValue(null),
       loadCapabilities: vi.fn().mockResolvedValue(new Set()),
       loadReactionPolicy: reactionPolicy,
     });
@@ -185,6 +221,7 @@ describe("mode block resolution", () => {
 
   it("keeps every transport directive away from a subagent child", async () => {
     const resolve = createModeBlockResolver({
+      loadGuest: vi.fn().mockResolvedValue(null),
       loadCapabilities: vi.fn().mockResolvedValue(new Set()),
       loadReactionPolicy: vi.fn().mockResolvedValue({ allowsAll: false, emoji: ["👍", "🔥"] }),
     });
@@ -205,6 +242,7 @@ describe("mode block resolution", () => {
 
   it("resolves the verified profile for a trusted conversation", async () => {
     const resolve = createModeBlockResolver({
+      loadGuest: vi.fn().mockResolvedValue(null),
       loadCapabilities: vi.fn(),
       loadReactionPolicy: reactionPolicy,
     });
@@ -216,6 +254,7 @@ describe("mode block resolution", () => {
 
   it("returns an explicit fail-closed block instead of throwing on invalid auth", async () => {
     const resolve = createModeBlockResolver({
+      loadGuest: vi.fn().mockResolvedValue(null),
       loadCapabilities: vi.fn(),
       loadReactionPolicy: reactionPolicy,
     });
@@ -230,6 +269,7 @@ describe("mode block resolution", () => {
   it("degrades to an empty allowlist when the live capability lookup fails", async () => {
     const loadCapabilities = vi.fn().mockRejectedValue(new Error("database unavailable"));
     const resolve = createModeBlockResolver({
+      loadGuest: vi.fn().mockResolvedValue(null),
       loadCapabilities,
       loadReactionPolicy: reactionPolicy,
     });
@@ -248,6 +288,7 @@ describe("mode block resolution", () => {
     });
     const scheduledAuth = { ...current, initiator: current.current };
     const resolve = createModeBlockResolver({
+      loadGuest: vi.fn().mockResolvedValue(null),
       loadCapabilities: vi.fn().mockRejectedValue(new Error("database unavailable")),
       loadReactionPolicy: reactionPolicy,
     });
@@ -265,6 +306,7 @@ describe("mode block resolution", () => {
     });
     const scheduledAuth = { ...current, initiator: current.current };
     const resolve = createModeBlockResolver({
+      loadGuest: vi.fn().mockResolvedValue(null),
       loadCapabilities: vi.fn().mockResolvedValue(new Set()),
       loadReactionPolicy: reactionPolicy,
     });
@@ -277,6 +319,7 @@ describe("mode block resolution", () => {
   it("omits a capability revoked from the current database policy", async () => {
     const loadCapabilities = vi.fn().mockResolvedValue(new Set<ExternalGroupToolName>());
     const resolve = createModeBlockResolver({
+      loadGuest: vi.fn().mockResolvedValue(null),
       loadCapabilities,
       loadReactionPolicy: reactionPolicy,
     });
@@ -292,6 +335,7 @@ describe("mode block resolution", () => {
       new Set<ExternalGroupToolName>(["remember", "web_fetch"]),
     );
     const resolve = createModeBlockResolver({
+      loadGuest: vi.fn().mockResolvedValue(null),
       loadCapabilities,
       loadReactionPolicy: reactionPolicy,
     });
@@ -305,6 +349,7 @@ describe("mode block resolution", () => {
   it("does not describe human capabilities or skills to a channel actor", async () => {
     const loadCapabilities = vi.fn().mockResolvedValue(new Set(["remember"]));
     const resolve = createModeBlockResolver({
+      loadGuest: vi.fn().mockResolvedValue(null),
       loadCapabilities,
       loadReactionPolicy: reactionPolicy,
     });

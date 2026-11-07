@@ -88,9 +88,10 @@ async function open(
   mounts: Array<{ mountPoint: "family" | "group" | "personal"; workspaceId: string }>,
   stored: Record<string, unknown> | null = null,
   environment: () => Promise<Readonly<Record<string, string>>> = async () => ({}),
+  ownNetwork = false,
 ) {
   return openRunnerSandbox({
-    baseUrl: await runnerUrl(engine), environment, sessionId: SESSION_ID, stored,
+    baseUrl: await runnerUrl(engine), environment, ownNetwork, sessionId: SESSION_ID, stored,
     use: { mounts, sandboxSessionId: SANDBOX_SESSION_ID },
   });
 }
@@ -231,6 +232,7 @@ describe("session sandbox on the runner", () => {
       access: "trusted",
       agentSessionId: SESSION_ID,
       mounts: PERSONAL,
+      ownNetwork: false,
       sandboxSessionId: SANDBOX_SESSION_ID,
       seedDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),
       seedFiles: [],
@@ -238,6 +240,14 @@ describe("session sandbox on the runner", () => {
     expect(session.id).toBe(SANDBOX_SESSION_ID);
     await session.stop();
     expect(engine.stopSession).toHaveBeenCalledWith(SANDBOX_SESSION_ID);
+  });
+
+  it("asks a network of its own for a guest's sandbox (#471)", async () => {
+    const engine = fakeEngine();
+    const { session } = await open(engine, PERSONAL, null, async () => ({}), true);
+
+    await session.run({ command: "true" });
+    expect(engine.createSession).toHaveBeenCalledWith(expect.objectContaining({ access: "trusted", ownNetwork: true }));
   });
 
   it("classifies a group-only session as restricted and rejects network escalation", async () => {

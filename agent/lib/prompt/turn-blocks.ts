@@ -34,6 +34,7 @@ import {
 import { behaviorPreferenceRepository } from "../behavior-preference-repository.js";
 import { resolveConversationEnvironment } from "../conversation-environment.js";
 import { isFamilyOwner } from "../family-context.js";
+import { guestPolicyFor, type SessionGuest } from "../guests/guest-policy.js";
 import {
   requireMemoryAuthorization,
   type MemoryAuthorization,
@@ -83,6 +84,7 @@ import {
 } from "../tool-policy/external-group-policy.js";
 import { scheduledGroupHistoryAccess } from "../agent-schedules/scheduled-group-history-context.js";
 import { isScheduledSession } from "../agent-schedules/scheduled-session.js";
+import type { GuestModeFacts } from "./guest-fragments.js";
 import { modeInstructions } from "./mode-instructions.js";
 import { applyTurnMemoryBudget } from "./turn-memory-budget.js";
 import { formatTurnMemoryContext } from "./turn-memory-context.js";
@@ -177,8 +179,11 @@ function verifiedTelegramChatId(auth: SessionAuth): string | null {
   return typeof chatId === "string" && chatId.length > 0 ? chatId : null;
 }
 
+type GuestLoader = (auth: SessionAuth) => Promise<SessionGuest | null>;
+
 export function createModeBlockResolver(dependencies: {
   loadCapabilities: CapabilityLoader;
+  loadGuest: GuestLoader;
   loadReactionPolicy: ReactionPolicyLoader;
 }) {
   const resolveMode = createConversationModeBlockResolver(dependencies);
@@ -189,8 +194,26 @@ export function createModeBlockResolver(dependencies: {
   };
 }
 
+/**
+ * What the owner turned off for the guest whose chat this is (#471); undefined for anyone else. A removed guest's
+ * run, or limits that cannot be read, leave the chat without a determined mode, as its tool surface is empty.
+ */
+async function guestModeFacts(auth: SessionAuth, loadGuest: GuestLoader): Promise<GuestModeFacts | undefined | null> {
+  if (isFamilyOwner(auth)) return undefined;
+  try {
+    const guest = await loadGuest(auth);
+    if (guest === null) return undefined;
+    if (!guest.policy.active) return null;
+    return { disabledSkills: [...guest.policy.disabledSkills].sort(), disabledTools: [...guest.policy.disabledTools].sort() };
+  } catch (error) {
+    logBlockFailure("AGENT_GUEST_POLICY_LOOKUP_FAILED", error);
+    return null;
+  }
+}
+
 function createConversationModeBlockResolver(dependencies: {
   loadCapabilities: CapabilityLoader;
+  loadGuest: GuestLoader;
   loadReactionPolicy: ReactionPolicyLoader;
 }) {
   return async function resolve(ctx: TurnBlockContext): Promise<string> {
@@ -218,7 +241,16 @@ function createConversationModeBlockResolver(dependencies: {
       }
     }
     if (environment === "private") {
-      return modeInstructions({ environment, owner: isFamilyOwner(ctx.session.auth), reactions, scheduledRun, subagentTurn });
+      const guest = await guestModeFacts(ctx.session.auth, dependencies.loadGuest);
+      if (guest === null) return MODE_UNAVAILABLE_BLOCK;
+      return modeInstructions({
+        environment,
+        ...(guest === undefined ? {} : { guest }),
+        owner: isFamilyOwner(ctx.session.auth),
+        reactions,
+        scheduledRun,
+        subagentTurn,
+      });
     }
     if (environment === "family") {
       return modeInstructions({ environment, reactions, scheduledRun, subagentTurn });
@@ -517,6 +549,7 @@ const reactionPolicyLoader: ReactionPolicyLoader = async (telegramChatId) => {
 
 export const resolveModeBlock = createModeBlockResolver({
   loadCapabilities: loadCurrentExternalGroupCapabilities,
+  loadGuest: guestPolicyFor,
   loadReactionPolicy: reactionPolicyLoader,
 });
 
