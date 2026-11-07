@@ -57,7 +57,10 @@ function gateGuestTool(toolName: string, definition: AnyToolDefinition, familyId
         await requireGuestTool(familyId, toolName);
       } catch (error) {
         if (error instanceof ModelFacingError) {
-          console.info(JSON.stringify({ code: "AGENT_GUEST_TOOL_REFUSED", errorCode: error.code, familyId, toolName }));
+          // The call's one metrics record, as the model-facing wrapper writes it for any refused call.
+          console.info(JSON.stringify({ code: "AGENT_TOOL_CALL_METRICS", toolName, outcome: "failed",
+            sessionId: ctx?.session?.id ?? null, turnId: ctx?.session?.turn?.id ?? null,
+            callId: ctx?.callId ?? null, durationMs: 0, errorCode: error.code }));
           throw error;
         }
         throw normalizeModelFacingError(error, { toolName });
