@@ -5,8 +5,10 @@
  * - The list asks no confirmation and returns the guest tool catalog and built-in skills to choose from.
  * - Invite, configure and revoke ask for confirmation; an invalid call reaches execution and is refused there.
  * - A guest link is a `guest` invitation delivered once to the owner's chat, never returned to the model.
- * - Configure refuses a tool the guest's chat cannot carry, before any change.
- * - The confirmation card names the guest and the full lists, and says what a link does.
+ * - Configure refuses a tool the guest's chat cannot carry, before any change; it changes only the lists it is
+ *   given (#474), so a change of what is off never drops the owner's skills granted to the guest.
+ * - Removing a guest republishes the API key grants the proxy reads; a failed publication says the keys are open.
+ * - The confirmation card names the guest and the lists given, and says what a link does.
  */
 import type { ToolContext } from "../../runtime/tool.js";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,6 +24,7 @@ const family = vi.hoisted(() => ({
   markInvitationDeliveryStarted: vi.fn(),
 }));
 const deliverFamilyInvitation = vi.hoisted(() => vi.fn());
+const apiKeyPublisher = vi.hoisted(() => ({ publish: vi.fn() }));
 
 vi.mock("../family-context.js", () => ({
   requirePrivateTelegramOwner: vi.fn(() => ({ familyId: "family-1", role: "owner", telegramChatId: "101", userId: "owner-1" })),
@@ -29,6 +32,7 @@ vi.mock("../family-context.js", () => ({
 vi.mock("./guest-repository.js", () => ({ guestRepository: repository, loadGuestAccessPolicy: vi.fn() }));
 vi.mock("../family-repository.js", () => ({ familyRepository: family }));
 vi.mock("../telegram-delivery.js", () => ({ deliverFamilyInvitation }));
+vi.mock("../api-keys/api-key-projection.js", () => ({ apiKeyPublisher }));
 
 import manageGuestAccess from "../tools/manage_guest_access.js";
 import { localizeTelegramInputRequest, type TelegramInputRequest } from "../telegram-interface.js";
@@ -48,7 +52,9 @@ describe("manage_guest_access", () => {
   }, 60_000);
 
   beforeEach(() => {
-    for (const fn of [...Object.values(repository), ...Object.values(family), deliverFamilyInvitation]) fn.mockReset();
+    for (const fn of [...Object.values(repository), ...Object.values(family), deliverFamilyInvitation, apiKeyPublisher.publish]) {
+      fn.mockReset();
+    }
   });
 
   it("lists guests without confirmation, with the names the owner can turn off", async () => {
@@ -70,7 +76,9 @@ describe("manage_guest_access", () => {
     expect(approvalFor({ action: "revoke" })).toBe("not-applicable");
     await expect(manageGuestAccess.execute({ action: "revoke" } as never, context))
       .rejects.toMatchObject({ code: "AGENT_GUEST_ACCESS_INPUT_INVALID" });
-    await expect(manageGuestAccess.execute({ action: "configure", ...GUEST, disabledTools: ["bash"] } as never, context))
+    await expect(manageGuestAccess.execute({ action: "configure", ...GUEST } as never, context))
+      .rejects.toMatchObject({ code: "AGENT_GUEST_ACCESS_INPUT_INVALID" });
+    await expect(manageGuestAccess.execute({ action: "configure", ...GUEST, grantedSkills: "image-gen" } as never, context))
       .rejects.toMatchObject({ code: "AGENT_GUEST_ACCESS_INPUT_INVALID" });
     expect(repository.revokeGuest).not.toHaveBeenCalled();
     expect(repository.configureGuest).not.toHaveBeenCalled();
@@ -108,6 +116,31 @@ describe("manage_guest_access", () => {
     }));
   });
 
+  it("changes only the lists it is given", async () => {
+    repository.configureGuest.mockResolvedValue({
+      disabledSkills: [], disabledTools: ["bash"], grantedSkills: ["image-gen"], skillsNeedingKeys: [],
+    });
+
+    await manageGuestAccess.execute({ action: "configure", ...GUEST, grantedSkills: ["image-gen"] } as never, context);
+
+    const call = repository.configureGuest.mock.calls[0]![0] as Record<string, unknown>;
+    expect(call).toMatchObject({ ...GUEST, grantedSkills: ["image-gen"], hostFamilyId: "family-1", ownerUserId: "owner-1" });
+    expect(call).not.toHaveProperty("disabledTools");
+    expect(call).not.toHaveProperty("disabledSkills");
+  });
+
+  it("closes a removed guest's API keys in the proxy, and says so when it could not", async () => {
+    repository.revokeGuest.mockResolvedValue({ revoked: true });
+    apiKeyPublisher.publish.mockResolvedValue(undefined);
+
+    await expect(manageGuestAccess.execute({ action: "revoke", ...GUEST } as never, context)).resolves.toEqual({ revoked: true });
+    expect(apiKeyPublisher.publish).toHaveBeenCalledOnce();
+
+    apiKeyPublisher.publish.mockRejectedValue(new Error("disk full"));
+    await expect(manageGuestAccess.execute({ action: "revoke", ...GUEST } as never, context))
+      .rejects.toMatchObject({ code: "AGENT_GUEST_KEYS_NOT_CLOSED" });
+  });
+
   it("shows the owner whom a change concerns and what a link does", () => {
     const card = (input: Record<string, unknown>) => localizeTelegramInputRequest({
       action: { input, toolName: "manage_guest_access" },
@@ -122,6 +155,10 @@ describe("manage_guest_access", () => {
     expect(configure).toContain("Гость: Пётр");
     expect(configure).toContain("Выключенные инструменты: bash, web_search");
     expect(configure).toContain("Выключенные скиллы: нет");
+    expect(configure).not.toContain("Скиллы владельца");
+    const granted = card({ action: "configure", ...GUEST, grantedSkills: ["image-gen"] });
+    expect(granted).toContain("Скиллы владельца: image-gen");
+    expect(granted).not.toContain("Выключенные инструменты");
     expect(card({ action: "revoke", ...GUEST })).toContain("закрыть гостю доступ к агенту");
   });
 });

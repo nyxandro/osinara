@@ -6,6 +6,8 @@
  *   chat, another member's, a scheduled run, a delegated child and a live external group. A child's
  *   reading views of schedules and memory (#457) bring no procedure of their changes.
  * - A guest (#471) gets no skill the owner turned off for them, built-in or their own, and a removed guest none.
+ * - A guest gets the skills of the owner's library given to them (#474), read from the host family; their own skill
+ *   of the same name wins, and nobody else's turn reads the host library on a guest's behalf.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -46,8 +48,22 @@ async function serviceSkills(context: ReturnType<typeof turn>): Promise<string[]
 
 const PRIVATE = { memoryScopes: ["personal", "family"], role: "owner", telegramChatType: "private" };
 
+function guestPolicy(overrides: Record<string, unknown>) {
+  return {
+    active: true,
+    disabledSkills: new Set(),
+    disabledTools: new Set(),
+    grantedApiKeys: [],
+    grantedSkills: new Set(),
+    guestUserId: "user-1",
+    hostFamilyId: "host-family",
+    ...overrides,
+  };
+}
+
 describe("scoped skills", () => {
   beforeEach(() => {
+    loadWorking.mockReset();
     loadWorking.mockResolvedValue({});
     loadGuestAccessPolicy.mockResolvedValue(null);
     loadGroupSkillAllowlist.mockResolvedValue(new Set());
@@ -66,12 +82,7 @@ describe("scoped skills", () => {
 
   it("gives a guest no skill the owner turned off, built-in or their own", async () => {
     loadWorking.mockResolvedValue({ "my-notes": { description: "guest's own", name: "my-notes" }, "trip-plan": { description: "guest's own", name: "trip-plan" } });
-    loadGuestAccessPolicy.mockResolvedValue({
-      active: true,
-      disabledSkills: new Set(["pdf", "my-notes"]),
-      disabledTools: new Set(),
-      guestUserId: "user-1",
-    });
+    loadGuestAccessPolicy.mockResolvedValue(guestPolicy({ disabledSkills: new Set(["pdf", "my-notes"]) }));
     const names = Object.keys(await resolveScopedSkills(turn({ ...PRIVATE, familyId: "guest-family", role: "member" }) as never));
 
     expect(names).not.toContain("pdf");
@@ -79,8 +90,35 @@ describe("scoped skills", () => {
     expect(names).toContain("docx");
     expect(names).toContain("trip-plan");
 
-    loadGuestAccessPolicy.mockResolvedValue({ active: false, disabledSkills: new Set(), disabledTools: new Set(), guestUserId: "user-1" });
+    loadGuestAccessPolicy.mockResolvedValue(guestPolicy({ active: false }));
     expect(await resolveScopedSkills(turn({ ...PRIVATE, familyId: "guest-family", role: "member" }) as never)).toEqual({});
+  });
+
+  it("gives a guest the owner's skills given to them, their own winning a shared name", async () => {
+    const library: Record<string, Record<string, { description: string; name: string }>> = {
+      "guest-family": { "trip-plan": { description: "guest's own", name: "trip-plan" } },
+      "host-family": { "image-gen": { description: "owner's", name: "image-gen" }, "trip-plan": { description: "owner's", name: "trip-plan" } },
+    };
+    // As the repository does for a guest: the names given to them, read with the skills in one query.
+    loadWorking.mockImplementation(async (familyId: string, selection: { givenToGuestFamily?: string }) => Object.fromEntries(
+      Object.entries(library[familyId] ?? {}).filter(([name]) => selection.givenToGuestFamily === undefined || name !== "unrelated"),
+    ));
+    loadGuestAccessPolicy.mockResolvedValue(guestPolicy({ grantedSkills: new Set(["image-gen", "trip-plan"]) }));
+
+    const skills = await resolveScopedSkills(turn({ ...PRIVATE, familyId: "guest-family", role: "member" }) as never) as Record<string, { description: string }>;
+
+    expect(skills["image-gen"]?.description).toBe("owner's");
+    expect(skills["trip-plan"]?.description).toBe("guest's own");
+    expect(loadWorking).toHaveBeenCalledWith("host-family", { givenToGuestFamily: "guest-family" });
+  });
+
+  it("reads no host library for a guest with nothing given, nor for a family member", async () => {
+    loadGuestAccessPolicy.mockResolvedValue(guestPolicy({}));
+    await resolveScopedSkills(turn({ ...PRIVATE, familyId: "guest-family", role: "member" }) as never);
+    loadGuestAccessPolicy.mockResolvedValue(null);
+    await resolveScopedSkills(turn({ ...PRIVATE, role: "member" }) as never);
+
+    expect(loadWorking.mock.calls.map(([familyId]) => familyId)).not.toContain("host-family");
   });
 
   it("gives a scheduled run only the procedures of the tools it keeps", async () => {

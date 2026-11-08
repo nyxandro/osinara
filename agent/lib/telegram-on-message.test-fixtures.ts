@@ -96,6 +96,9 @@ export function repositories() {
       }),
       syncTimelineParticipants: vi.fn().mockResolvedValue([]),
     },
+    apiKeys: {
+      publish: vi.fn().mockResolvedValue(undefined),
+    },
     family: {
       claimInvitation: vi.fn(),
     },

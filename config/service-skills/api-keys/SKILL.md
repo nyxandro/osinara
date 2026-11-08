@@ -5,7 +5,7 @@ description: Load before getting an API key of an HTTP service for a skill or sc
 
 # API keys
 
-A key of an HTTP service is kept by the application, encrypted. Neither you nor any sandbox ever sees it: a sandbox gets a placeholder and a gateway address, and the server's egress proxy puts the real key into the request on its way to the service's own address only. Everything here is available only in a private chat with the owner, through `owner_settings`: `manage_api_keys` below is its section `api_keys`, and `manage_telegram_group` is its section `groups`. Read the section's contract once in the conversation with `{"section":"api_keys"}`, then call `{"section":"api_keys","call":{...}}` with the call written below as its `call`.
+A key of an HTTP service is kept by the application, encrypted. Neither you nor any sandbox ever sees it: a sandbox gets a placeholder and a gateway address, and the server's egress proxy puts the real key into the request on its way to the service's own address only. Everything here is available only in a private chat with the owner, through `owner_settings`: `manage_api_keys` below is its section `api_keys`, `manage_telegram_group` is its section `groups`, and the guests' list is its section `guests`. Read the section's contract once in the conversation with `{"section":"api_keys"}`, then call `{"section":"api_keys","call":{...}}` with the call written below as its `call`.
 
 ## Getting a key
 
@@ -25,7 +25,9 @@ To replace a stored key, request it again with the same name, `baseUrl`, `authHe
 
 ## Granting and accounting
 
-A requested key works at once in the owner's own private chat. `action=grant` gives it to `target=family` (the private chats of all family members and the family groups) or to `target=group` with the external group's `telegramChatId` from `manage_telegram_group` status; both wait for the owner's button. An external group uses a key only from Bash, so it needs `bash`. `action=revoke` takes a grant back from the next request on; `action=delete` removes the key with its grants and their accounting.
+A requested key works at once in the owner's own private chat. `action=grant` gives it to `target=family` (the private chats of all family members and the family groups), to `target=group` with the external group's `telegramChatId` from `manage_telegram_group` status, or to `target=guest` with `guestUserId` and `guestDisplayName` copied from the `guests` section's list; each waits for the owner's button. An external group and a guest use a key only from Bash, so they need `bash`. A grantee can do at the service whatever the key itself allows there, not only what the skill does: before granting to a group or a guest, say so in one sentence when the key opens more than usage, such as the owner's stored data or making new keys. `action=revoke` takes a grant back from the next request on; `action=delete` removes the key with its grants and their accounting.
+
+A grant re-applies the whole list of grants on the server even when it already existed (`already_granted`). When a granted key is refused in a chat that should have it — for example a guest who came back after being removed — grant it again.
 
 `action=list` shows each key's status, address, grants, and per grant the number of requests in total and in the last 7 days and the last use. There are no limits, only this accounting.
 

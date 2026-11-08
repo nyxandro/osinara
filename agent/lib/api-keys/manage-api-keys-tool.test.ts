@@ -2,8 +2,9 @@
  * manage_api_keys tool contract tests.
  *
  * Constructs covered:
- * - Granting a key to the family or to an external group waits for the owner's button; requesting,
- *   listing, revoking, deleting and the owner's own personal grant do not.
+ * - Granting a key to the family, to an external group or to a guest (#474) waits for the owner's button;
+ *   requesting, listing, revoking, deleting and the owner's own personal grant do not.
+ * - The card names the recipient: a guest's grant is never shown as one to the whole family.
  * - Invalid input, an unsafe destination and a non-owner are denied before any card.
  * - A request opens the wait, republishes the proxy file and the application itself tells the
  *   owner where the key will go; the model gets the variable names, never a value.
@@ -40,8 +41,10 @@ vi.mock("./api-key-projection.js", () => ({ apiKeyPublisher: { publish: mocks.pu
 vi.mock("./api-key-telegram.js", () => ({ apiKeyTelegram: { sendMessage: mocks.sendMessage } }));
 
 import manageApiKeys from "../tools/manage_api_keys.js";
+import { apiKeyGrantPrompt } from "./api-key-approval.js";
 
 const OWNER = { familyId: "family-1", role: "owner", telegramChatId: "101", userId: "owner-1" };
+const GUEST = { guestDisplayName: "Пётр", guestUserId: "00000000-0000-4000-8000-000000000007" };
 const context = { callId: "call-1" } as ToolContext;
 const request = {
   action: "request",
@@ -75,6 +78,8 @@ describe("manage_api_keys", () => {
     expect(approvalFor({ action: "grant", name: "neuraldeep", target: "group", telegramChatId: "-1001234567890" }))
       .toBe("user-approval");
     expect(approvalFor({ action: "grant", name: "neuraldeep", target: "family" })).toBe("user-approval");
+    expect(approvalFor({ action: "grant", name: "neuraldeep", target: "guest", ...GUEST })).toBe("user-approval");
+    expect(approvalFor({ action: "revoke", name: "neuraldeep", target: "guest", ...GUEST })).toBe("not-applicable");
     expect(approvalFor({ action: "grant", name: "neuraldeep", target: "personal" })).toBe("not-applicable");
     expect(approvalFor(request)).toBe("not-applicable");
     expect(approvalFor({ action: "list" })).toBe("not-applicable");
@@ -96,6 +101,9 @@ describe("manage_api_keys", () => {
     [{ ...request, value: "sk-live" }],
     [{ action: "grant", name: "neuraldeep", target: "group" }],
     [{ action: "grant", name: "neuraldeep", target: "everyone" }],
+    [{ action: "grant", name: "neuraldeep", target: "guest", guestDisplayName: "Пётр" }],
+    [{ action: "grant", name: "neuraldeep", target: "guest", guestUserId: GUEST.guestUserId }],
+    [{ action: "grant", name: "neuraldeep", target: "family", ...GUEST }],
   ])("denies %j before any card", (input) => {
     expect(approvalFor(input)).toMatchObject({ reason: expect.stringMatching(/^AGENT_API_KEY_INPUT_INVALID: /u), type: "denied" });
   });
@@ -180,6 +188,32 @@ describe("manage_api_keys", () => {
     });
     expect(mocks.publish).toHaveBeenCalledTimes(1);
     expect(result).toEqual({ name: "neuraldeep", status: "granted" });
+  });
+
+  it("grants to a guest named as listed and republishes, even when the grant already existed", async () => {
+    mocks.grant.mockResolvedValue({ created: false });
+
+    const result = await execute({ action: "grant", name: "neuraldeep", target: "guest", ...GUEST });
+
+    expect(mocks.grant).toHaveBeenCalledWith({
+      familyId: "family-1", grantedBy: "owner-1", name: "neuraldeep", target: { kind: "guest", ...GUEST },
+    });
+    // A repeated grant re-applies the proxy file: the way out when a guest's key did not come back with them.
+    expect(mocks.publish).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ name: "neuraldeep", status: "already_granted" });
+  });
+
+  it("names the recipient on the card, a guest as a guest", async () => {
+    const key = { ...request, name: "neuraldeep", upstreamBaseUrl: "https://api.neuraldeep.ru/v1" };
+    const prompt = (input: Record<string, unknown>) => apiKeyGrantPrompt({
+      findGroupTitle: async () => "Внешний чат", key, target: input.target, telegramChatId: input.telegramChatId, ...input,
+    } as never);
+
+    const guest = await prompt({ guestDisplayName: "Пётр", target: "guest" });
+    expect(guest).toContain("Кому: гость Пётр (его личный чат и песочница)");
+    expect(guest).not.toContain("вся семья");
+    expect(await prompt({ target: "family" })).toContain("Кому: вся семья");
+    expect(await prompt({ target: "group", telegramChatId: "-1001234567890" })).toContain("Кому: внешняя группа «Внешний чат»");
   });
 
   it("revokes and deletes, republishing after each", async () => {

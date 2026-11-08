@@ -97,7 +97,10 @@ describe("mode block resolution", () => {
     const guestAuth = auth({ ...privateAuth.current!.attributes, familyId: "guest-family", role: "member" });
     const loadGuest = vi.fn().mockResolvedValue({
       familyId: "guest-family",
-      policy: { active: true, disabledSkills: new Set(["pdf"]), disabledTools: new Set(["web_search", "bash"]), guestUserId: "user-1" },
+      policy: {
+        active: true, disabledSkills: new Set(["pdf"]), disabledTools: new Set(["web_search", "bash"]),
+        grantedApiKeys: ["imagegen"], grantedSkills: new Set(["image-gen"]), guestUserId: "user-1", hostFamilyId: "family-1",
+      },
     });
     const resolve = createModeBlockResolver({
       loadCapabilities: vi.fn().mockResolvedValue(new Set()),
@@ -108,6 +111,9 @@ describe("mode block resolution", () => {
     const guest = await resolve(context(guestAuth));
     expect(guest).toContain("This person is a guest of the agent's owner");
     expect(guest).toContain("The owner turned off for this guest: tools `bash`, `web_search`; skills `pdf`.");
+    // What the owner gave them (#474): named, with the key's variable, and not theirs to change.
+    expect(guest).toContain("The owner gave this guest skills `image-gen` and API keys `imagegen` (`IMAGEGEN_API_KEY`)");
+    expect(guest).toContain("except the skills and API keys the owner gave this guest");
     expect(guest).not.toContain("Personal and family memory are available");
     expect(guest).not.toContain("Any family member manages the family's own skills");
 
@@ -117,7 +123,9 @@ describe("mode block resolution", () => {
     expect(member).toContain("Personal and family memory are available");
 
     // A removed guest's run and unreadable limits leave the chat without a determined mode.
-    loadGuest.mockResolvedValue({ familyId: "guest-family", policy: { active: false, disabledSkills: new Set(), disabledTools: new Set(), guestUserId: "user-1" } });
+    loadGuest.mockResolvedValue({ familyId: "guest-family", policy: { active: true, disabledSkills: new Set(), disabledTools: new Set(), grantedApiKeys: [], grantedSkills: new Set(), guestUserId: "user-1", hostFamilyId: "family-1" } });
+    expect(await resolve(context(guestAuth))).toContain("The owner has not given this guest any of the owner's skills or API keys.");
+    loadGuest.mockResolvedValue({ familyId: "guest-family", policy: { active: false, disabledSkills: new Set(), disabledTools: new Set(), grantedApiKeys: [], grantedSkills: new Set(), guestUserId: "user-1", hostFamilyId: "family-1" } });
     expect(await resolve(context(guestAuth))).toContain("AGENT_CONVERSATION_ENVIRONMENT_INVALID");
     loadGuest.mockRejectedValue(new Error("connection terminated"));
     const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
