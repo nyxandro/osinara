@@ -7,6 +7,9 @@
  * - The owner lists guests, turns tools and skills off, and removes a guest; removal closes access.
  * - A removed guest who opens a new link comes back into the family their records were sealed in.
  * - The guest is refused in the owner's family group, as anyone outside the family.
+ * - The owner gives a guest skills of the family library by name (#474): only a library skill with a current
+ *   version, never one sharing a name with the guest's own; a change of one list keeps the others; the list and
+ *   the change name the API keys a given skill mentions that the guest lacks.
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -50,6 +53,33 @@ async function guestLink(owner: { familyId: string; ownerId: string }, operation
 }
 
 const PETR = { displayName: "Пётр", telegramUserId: "guest-1", username: "petr" };
+
+/** A library skill in its first version; a skill without a version cannot be given. */
+async function createSkill(familyId: string, name: string, markdown: string, options: { versioned?: boolean } = {}): Promise<void> {
+  const versioned = options.versioned ?? true;
+  // Without a version first: each query here commits alone, so the deferred version check runs at once.
+  const skill = await database().query<{ id: string }>(
+    "INSERT INTO family_skills (family_id, name) VALUES ($1, $2) RETURNING id",
+    [familyId, name],
+  );
+  if (!versioned) return;
+  const files = [{ content: Buffer.from("curl \"$IMAGEGEN_BASE_URL/x\"\n").toString("base64"), executable: true, path: "scripts/run.sh", size: 25 }];
+  await database().query(
+    `INSERT INTO family_skill_versions (skill_id, version, description, markdown, files, content_hash, origin_kind)
+     VALUES ($1, 1, $2, $3, $4, $5, 'authored')`,
+    [skill.rows[0]!.id, `Скилл ${name}`, markdown, JSON.stringify(name === "image-gen" ? files : []), "0".repeat(64)],
+  );
+  await database().query("UPDATE family_skills SET active_version = 1 WHERE id = $1", [skill.rows[0]!.id]);
+}
+
+async function createStoredKey(familyId: string, name: string): Promise<void> {
+  await database().query(
+    `INSERT INTO sandbox_api_keys (family_id, name, purpose, upstream_base_url, auth_header, auth_scheme,
+                                   value_ciphertext, value_nonce, value_auth_tag, value_stored_at, value_update_id)
+     VALUES ($1, $2, 'тест', 'https://api.example.com/v1', 'authorization', 'bearer', 'YQ==', 'YQ==', 'YQ==', now(), $3)`,
+    [familyId, name, `update-${name}`],
+  );
+}
 
 describeWithDatabase("guest access", () => {
   beforeEach(async () => {
@@ -132,7 +162,7 @@ describeWithDatabase("guest access", () => {
       guestUserId: identity.userId,
       hostFamilyId: owner.familyId,
       ownerUserId: owner.ownerId,
-    })).resolves.toEqual({ disabledSkills: ["pdf"], disabledTools: ["bash"] });
+    })).resolves.toEqual({ disabledSkills: ["pdf"], disabledTools: ["bash"], grantedSkills: [], skillsNeedingKeys: [] });
     await expect(guestRepository.configureGuest({
       builtInSkills: BUILT_IN_SKILLS,
       disabledSkills: ["no-such-skill"],
@@ -209,6 +239,70 @@ describeWithDatabase("guest access", () => {
     const policy = await loadGuestAccessPolicy(identity.familyId);
     expect(policy?.active).toBe(true);
     expect([...policy!.disabledTools]).toEqual(["bash"]);
+  });
+
+  it("gives the guest skills of the owner's library and changes only the lists given", async () => {
+    const owner = await createOwner();
+    await familyRepository.claimInvitation(await guestLink(owner, "guest-call-skills"), PETR);
+    const identity = (await telegramRepository.findIdentity("guest-1"))!;
+    await createSkill(owner.familyId, "image-gen", "Рисует картинку через сервис по ключу.");
+    await createSkill(owner.familyId, "clash", "Скилл владельца с тем же именем, что у гостя.");
+    await createSkill(owner.familyId, "draft", "Ещё без версии.", { versioned: false });
+    await createSkill(identity.familyId, "clash", "Свой скилл гостя.");
+    await createStoredKey(owner.familyId, "imagegen");
+    await createStoredKey(owner.familyId, "unused");
+    const target = { guestDisplayName: "Пётр", guestUserId: identity.userId, hostFamilyId: owner.familyId, ownerUserId: owner.ownerId };
+
+    await guestRepository.configureGuest({ ...target, builtInSkills: BUILT_IN_SKILLS, disabledTools: ["bash"] });
+    await expect(guestRepository.configureGuest({ ...target, builtInSkills: BUILT_IN_SKILLS, grantedSkills: ["image-gen", "image-gen"] }))
+      .resolves.toEqual({
+        disabledSkills: [],
+        disabledTools: ["bash"],
+        grantedSkills: ["image-gen"],
+        skillsNeedingKeys: [{ keys: ["imagegen"], skill: "image-gen" }],
+      });
+    // Turning a tool back on keeps the skills given.
+    await expect(guestRepository.configureGuest({ ...target, builtInSkills: BUILT_IN_SKILLS, disabledTools: [] }))
+      .resolves.toMatchObject({ disabledTools: [], grantedSkills: ["image-gen"] });
+
+    for (const [name, code] of [
+      ["no-such-skill", "AGENT_GUEST_SKILL_UNKNOWN"],
+      ["draft", "AGENT_GUEST_SKILL_UNKNOWN"],
+      ["pdf", "AGENT_GUEST_SKILL_UNKNOWN"],
+      ["clash", "AGENT_GUEST_SKILL_NAME_CONFLICT"],
+    ] as const) {
+      await expect(guestRepository.configureGuest({ ...target, builtInSkills: BUILT_IN_SKILLS, grantedSkills: [name] }))
+        .rejects.toThrow(new RegExp(code));
+    }
+    // A library skill is given, never turned off: the list of what is off holds built-in and the guest's own skills.
+    await expect(guestRepository.configureGuest({ ...target, builtInSkills: BUILT_IN_SKILLS, disabledSkills: ["image-gen"] }))
+      .rejects.toThrow(/AGENT_GUEST_SKILL_UNKNOWN/);
+
+    // A name left turned off from a skill of the guest's own that is gone does not hide a skill given under it.
+    await guestRepository.configureGuest({ ...target, builtInSkills: BUILT_IN_SKILLS, disabledSkills: ["clash"] });
+    await database().query("DELETE FROM family_skills WHERE family_id = $1 AND name = 'clash'", [identity.familyId]);
+    await expect(guestRepository.configureGuest({ ...target, builtInSkills: BUILT_IN_SKILLS, grantedSkills: ["clash", "image-gen"] }))
+      .resolves.toMatchObject({ disabledSkills: [], grantedSkills: ["clash", "image-gen"] });
+    await guestRepository.configureGuest({ ...target, builtInSkills: BUILT_IN_SKILLS, grantedSkills: ["image-gen"] });
+    await createSkill(identity.familyId, "clash", "Свой скилл гостя.");
+
+    const policy = (await loadGuestAccessPolicy(identity.familyId))!;
+    expect([...policy.grantedSkills]).toEqual(["image-gen"]);
+    expect(policy.hostFamilyId).toBe(owner.familyId);
+    expect(policy.grantedApiKeys).toEqual([]);
+
+    const listed = await guestRepository.listGuests({ hostFamilyId: owner.familyId, ownerUserId: owner.ownerId });
+    expect(listed.hostSkills).toEqual(["clash", "image-gen"]);
+    expect(listed.guests).toEqual([expect.objectContaining({
+      apiKeys: [],
+      grantedSkills: ["image-gen"],
+      ownSkills: ["clash"],
+      skillsNeedingKeys: [{ keys: ["imagegen"], skill: "image-gen" }],
+    })]);
+    const audit = await database().query<{ metadata: { grantedSkills: string[] } }>(
+      "SELECT metadata FROM audit_events WHERE event_type = 'guest.configured' ORDER BY created_at DESC, id DESC LIMIT 1",
+    );
+    expect(audit.rows[0]?.metadata.grantedSkills).toEqual(["image-gen"]);
   });
 
   it("refuses a family invitation to a former guest instead of failing on their private chat", async () => {

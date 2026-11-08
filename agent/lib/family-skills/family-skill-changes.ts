@@ -94,13 +94,14 @@ async function enabledUsers(client: PoolClient, skillId: string): Promise<string
 
 /**
  * Who hears of a change to a skill: the person making it, everyone who has it enabled and, when an
- * external group's list holds it, the owner — outsiders get it on the owner's word.
+ * external group's list holds it or a guest was given it (#474), the owner — outsiders get it on the owner's word.
  */
 async function concerned(client: PoolClient, actor: FamilySkillActor, skillId: string, name: string): Promise<FamilySkillNoticeRecipient[]> {
   const owners = (await client.query<{ user_id: string }>(
     `SELECT membership.user_id FROM family_memberships membership
       WHERE membership.family_id = $1 AND membership.role = 'owner'
-        AND EXISTS (SELECT 1 FROM telegram_groups WHERE family_id = $1 AND type = 'external' AND $2 = ANY(skill_allowlist))`,
+        AND (EXISTS (SELECT 1 FROM telegram_groups WHERE family_id = $1 AND type = 'external' AND $2 = ANY(skill_allowlist))
+          OR EXISTS (SELECT 1 FROM guest_accounts WHERE host_family_id = $1 AND $2 = ANY(granted_skills)))`,
     [actor.familyId, name],
   )).rows.map((row) => row.user_id);
   return [actor.userId, ...await enabledUsers(client, skillId), ...owners].map((userId) => ({ userId }));
@@ -328,10 +329,15 @@ export const familySkillChanges = {
       await requireSkillEditor(client, actor, member, skill, name);
       const recipients = await concerned(client, actor, skill.id, name);
       await client.query("DELETE FROM family_skills WHERE id = $1", [skill.id]);
-      // A later skill under the same name must not be granted by an old list entry.
+      // A later skill under the same name must not be granted by an old list entry, a group's or a guest's.
       await client.query(
         `UPDATE telegram_groups SET skill_allowlist = array_remove(skill_allowlist, $2)
           WHERE family_id = $1 AND $2 = ANY(skill_allowlist)`,
+        [actor.familyId, name],
+      );
+      await client.query(
+        `UPDATE guest_accounts SET granted_skills = array_remove(granted_skills, $2), updated_at = now()
+          WHERE host_family_id = $1 AND $2 = ANY(granted_skills)`,
         [actor.familyId, name],
       );
       await client.query(

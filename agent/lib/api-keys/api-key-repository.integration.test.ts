@@ -11,6 +11,10 @@
  *   loses its family and group grants.
  * - Grants reach the proxy projection and the sandbox environment only once the value is stored, an
  *   external group's grant carries its own network and a family group is refused as a target.
+ * - A guest's grant (#474) lands in the guest's own personal folder and is bound to that folder's network, never
+ *   the family's trusted one; it leaves the proxy while the guest is removed and comes back with them; only the
+ *   owner's own guest, named as listed, can be a target, and a removed guest gets no new grant. A grant in
+ *   another family's folder that no live guest of the key's family holds never reaches the proxy.
  * - Revocation and deletion close the key at once; usage is recorded once per id and counted.
  * - The schema refuses a malformed placeholder and a value without its parts.
  */
@@ -89,6 +93,23 @@ function intake(fixture: Fixture, name: string, overrides: Partial<typeof SETTIN
     ownerUserId: fixture.ownerUserId,
     telegramChatId: fixture.chatId,
   };
+}
+
+/** A guest of the fixture's family, living in a one-person family of their own. */
+async function createGuest(fixture: Fixture, suffix: string, hostFamilyId = fixture.familyId): Promise<{ familyId: string; userId: string }> {
+  const family = await database().query<{ id: string }>("INSERT INTO families (name) VALUES ($1) RETURNING id", [`Guest ${suffix}`]);
+  const user = await database().query<{ id: string }>(
+    "INSERT INTO users (telegram_user_id, display_name) VALUES ($1, 'Пётр') RETURNING id",
+    [`api-key-guest-${suffix}`],
+  );
+  const familyId = family.rows[0]!.id;
+  const userId = user.rows[0]!.id;
+  await database().query("INSERT INTO family_memberships (family_id, user_id, role) VALUES ($1, $2, 'member')", [familyId, userId]);
+  await database().query(
+    "INSERT INTO guest_accounts (user_id, guest_family_id, host_family_id, status) VALUES ($1, $2, $3, 'active')",
+    [userId, familyId, hostFamilyId],
+  );
+  return { familyId, userId };
 }
 
 async function workspaceIds(fixture: Fixture): Promise<Record<string, string>> {
@@ -230,6 +251,72 @@ describeWithDatabase("API key repository", () => {
       familyId: fixture.familyId, grantedBy: fixture.ownerUserId, name: "neuraldeep",
       target: { kind: "group", telegramChatId: fixture.familyChatId },
     })).rejects.toMatchObject({ code: "AGENT_API_KEY_GROUP_NOT_FOUND" });
+  });
+
+  it("grants a key to a guest on the guest's own network, and keeps it from the proxy while the guest is removed", async () => {
+    const fixture = await createFixture("guest");
+    await apiKeyRepository.openIntake(intake(fixture, "neuraldeep"));
+    await store(fixture, "neuraldeep", "951");
+    const guest = await createGuest(fixture, "guest");
+    const target = { guestDisplayName: "Пётр", guestUserId: guest.userId, kind: "guest" } as const;
+    const grant = () => apiKeyRepository.grant({ familyId: fixture.familyId, grantedBy: fixture.ownerUserId, name: "neuraldeep", target });
+
+    expect(await grant()).toEqual({ created: true });
+    expect(await grant()).toEqual({ created: false });
+    const folder = (await database().query<{ id: string }>(
+      "SELECT id FROM workspaces WHERE family_id = $1 AND scope = 'personal' AND owner_user_id = $2",
+      [guest.familyId, guest.userId],
+    )).rows[0]!.id;
+    // Nothing of the key lands in the owner's family folders for the guest.
+    expect(Object.keys(await workspaceIds(fixture))).toEqual(["personal"]);
+
+    const projected = await projectedForFamily(fixture);
+    expect(projected.map((entry) => entry.network)).toEqual(expect.arrayContaining([
+      { kind: "trusted" }, { kind: "group", workspaceId: folder },
+    ]));
+    expect(projected.filter((entry) => entry.network.kind === "trusted")).toHaveLength(1);
+    const guestGrant = projected.find((entry) => entry.network.kind === "group")!;
+    expect(await apiKeyRepository.environmentGrants([folder])).toEqual([{ name: "neuraldeep", placeholder: guestGrant.placeholder }]);
+    const listed = (await apiKeyRepository.list(fixture.familyId))[0]!;
+    expect(listed.grants.map((entry) => entry.target)).toEqual(expect.arrayContaining([
+      { kind: "personal" },
+      { displayName: "Пётр", guestStatus: "active", guestUserId: guest.userId, kind: "guest" },
+    ]));
+
+    await database().query("UPDATE guest_accounts SET status = 'revoked', revoked_at = now() WHERE user_id = $1", [guest.userId]);
+    expect((await projectedForFamily(fixture)).map((entry) => entry.network)).toEqual([{ kind: "trusted" }]);
+    await expect(grant()).rejects.toMatchObject({ code: "AGENT_GUEST_REMOVED" });
+    expect((await apiKeyRepository.list(fixture.familyId))[0]!.grants.map((entry) => entry.target))
+      .toContainEqual({ displayName: "Пётр", guestStatus: "revoked", guestUserId: guest.userId, kind: "guest" });
+    await database().query("UPDATE guest_accounts SET status = 'active', revoked_at = NULL WHERE user_id = $1", [guest.userId]);
+    expect(await projectedForFamily(fixture)).toHaveLength(2);
+
+    await expect(apiKeyRepository.grant({
+      familyId: fixture.familyId, grantedBy: fixture.ownerUserId, name: "neuraldeep", target: { ...target, guestDisplayName: "Пётр Иванов" },
+    })).rejects.toMatchObject({ code: "AGENT_GUEST_NOT_FOUND" });
+    const other = await createFixture("guest-other");
+    const stranger = await createGuest(other, "guest-stranger");
+    await expect(apiKeyRepository.grant({
+      familyId: fixture.familyId, grantedBy: fixture.ownerUserId, name: "neuraldeep", target: { ...target, guestUserId: stranger.userId },
+    })).rejects.toMatchObject({ code: "AGENT_GUEST_NOT_FOUND" });
+    // A folder of another family that is no guest's of this key's family: the grant fails closed, never trusted.
+    const strangerFolder = (await database().query<{ id: string }>(
+      "INSERT INTO workspaces (family_id, owner_user_id, scope) VALUES ($1, $2, 'personal') RETURNING id",
+      [stranger.familyId, stranger.userId],
+    )).rows[0]!.id;
+    const key = (await database().query<{ id: string }>(
+      "SELECT id FROM sandbox_api_keys WHERE family_id = $1 AND name = 'neuraldeep'", [fixture.familyId],
+    )).rows[0]!.id;
+    await database().query(
+      "INSERT INTO sandbox_api_key_grants (key_id, workspace_id, placeholder, granted_by) VALUES ($1, $2, $3, $4)",
+      [key, strangerFolder, `osk_${"s".repeat(43)}`, fixture.ownerUserId],
+    );
+    expect((await projectedForFamily(fixture)).map((entry) => entry.placeholder)).not.toContain(`osk_${"s".repeat(43)}`);
+    await database().query("DELETE FROM sandbox_api_key_grants WHERE workspace_id = $1", [strangerFolder]);
+
+    expect(await apiKeyRepository.revoke({ familyId: fixture.familyId, name: "neuraldeep", revokedBy: fixture.ownerUserId, target }))
+      .toBe(true);
+    expect(await apiKeyRepository.environmentGrants([folder])).toEqual([]);
   });
 
   it("closes a revoked grant at once and creates nothing to revoke a never used target", async () => {

@@ -195,7 +195,7 @@ export function createModeBlockResolver(dependencies: {
 }
 
 /**
- * What the owner turned off for the guest whose chat this is (#471); undefined for anyone else. A removed guest's
+ * What the owner turned off for the guest whose chat this is (#471) and gave them (#474); undefined for anyone else. A removed guest's
  * run, or limits that cannot be read, leave the chat without a determined mode, as its tool surface is empty.
  */
 async function guestModeFacts(auth: SessionAuth, loadGuest: GuestLoader): Promise<GuestModeFacts | undefined | null> {
@@ -204,7 +204,12 @@ async function guestModeFacts(auth: SessionAuth, loadGuest: GuestLoader): Promis
     const guest = await loadGuest(auth);
     if (guest === null) return undefined;
     if (!guest.policy.active) return null;
-    return { disabledSkills: [...guest.policy.disabledSkills].sort(), disabledTools: [...guest.policy.disabledTools].sort() };
+    return {
+      disabledSkills: [...guest.policy.disabledSkills].sort(),
+      disabledTools: [...guest.policy.disabledTools].sort(),
+      grantedApiKeys: [...guest.policy.grantedApiKeys].sort(),
+      grantedSkills: [...guest.policy.grantedSkills].sort(),
+    };
   } catch (error) {
     logBlockFailure("AGENT_GUEST_POLICY_LOOKUP_FAILED", error);
     return null;

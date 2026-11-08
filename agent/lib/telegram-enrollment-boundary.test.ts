@@ -5,6 +5,8 @@
  * - `handleTelegramEnrollmentBoundary`: accepts exact bootstrap commands without model dispatch.
  * - Ordinary private text cannot consume a bootstrap attempt.
  * - Existing identities cannot turn invitation deep links into conversation content.
+ * - A returning guest's API keys go back to the sandbox proxy (#474); a failed publication is logged and the
+ *   guest is still let in.
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -86,6 +88,8 @@ describe("handleTelegramEnrollmentBoundary", () => {
       chat_id: "owner-77",
       text: "Гость подключился по вашей ссылке: Анна (@anna). Посмотреть гостей, выключить им инструменты и скиллы или закрыть доступ можно здесь, в личном чате со мной.",
     });
+    // A new guest holds no grants yet: nothing to put back.
+    expect(repository.apiKeys.publish).not.toHaveBeenCalled();
   });
 
   it("welcomes a removed guest back and keeps the join when Telegram refuses the owner's notice", async () => {
@@ -109,6 +113,29 @@ describe("handleTelegramEnrollmentBoundary", () => {
       "С возвращением! Доступ к агенту снова открыт: ваша память и файлы на месте, а напоминания и сценарии стоят на паузе — попросите меня их возобновить.",
     );
     expect(logged.mock.calls.some(([line]) => String(line).includes("AGENT_GUEST_JOIN_OWNER_NOTICE_FAILED"))).toBe(true);
+    expect(repository.apiKeys.publish).toHaveBeenCalledOnce();
+    logged.mockRestore();
+  });
+
+  it("lets a returning guest in when their API keys could not be put back, and logs it", async () => {
+    const repository = repositories();
+    repository.telegram.hasOwner.mockResolvedValue(true);
+    repository.family.claimInvitation.mockResolvedValue({ guest: "returned", hostOwnerTelegramUserId: "owner-77" });
+    repository.apiKeys.publish.mockRejectedValue(new Error("disk full"));
+    const { context, sendMessage } = telegramContext();
+    Object.assign(context.telegram, { request: vi.fn().mockResolvedValue({ ok: true }) });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(handleTelegramEnrollmentBoundary({
+      ctx: context,
+      identity: null,
+      invitationCode: "g".repeat(32),
+      message: privateMessage(`/start ${"g".repeat(32)}`),
+      repositories: repository,
+    })).resolves.toBe(true);
+
+    expect(sendMessage).toHaveBeenCalledWith(expect.stringContaining("С возвращением!"));
+    expect(logged.mock.calls.some(([line]) => String(line).includes("AGENT_API_KEY_PUBLISH_FAILED"))).toBe(true);
     logged.mockRestore();
   });
 

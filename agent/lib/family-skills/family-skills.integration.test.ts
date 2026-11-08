@@ -10,6 +10,8 @@
  * - Broken packages, taken names, missing folders and a skill pointing at its draft are refused; a
  *   checkout writes the current version back into the draft folder; versions are pruned.
  * - The library with its usage and a skill's versions reach the model as data, as the turn runs the call.
+ * - A skill given to a guest (#474): the owner hears of its changes, a deleted skill leaves the guest's list so a
+ *   later skill of its name is not given, and the guest cannot save a skill of their own under its name.
  */
 import { symlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -22,6 +24,7 @@ import type { ToolContext } from "../../runtime/tool.js";
 import { executeToolCall } from "../../runtime/turn/tool-calls.js";
 import { closeDatabase, database } from "../database.js";
 import { groupSkillPolicyRepository } from "../group-skills/group-skill-repository.js";
+import { guestRepository, loadGuestAccessPolicy } from "../guests/guest-repository.js";
 import { resolveConversationSkills } from "../group-skills/group-skill-resolver.js";
 import { withGroupSandboxAccess } from "../sandbox-runner/group-sandbox-policy.js";
 import manageSkill from "../tools/manage_skill.js";
@@ -286,6 +289,41 @@ describeWithDatabase("family skill library", () => {
     await run(f, f.owner, { action: "delete", name: "tides" });
     expect((await notices({ userId: f.member.id })).at(-1)).toBe("Скилл «tides» удалён из библиотеки семьи (удалил: Owner 5503).");
     await expect(run(f, f.member, { action: "list" })).resolves.toMatchObject({ family: [{ name: "weather", author: "Owner 5503", enabledForMe: false }] });
+  });
+
+  it("keeps a skill given to a guest in step with the library", async () => {
+    const f = await fixture("5512");
+    const guestFamily = (await database().query<{ id: string }>("INSERT INTO families (name) VALUES ('Гость') RETURNING id")).rows[0]!.id;
+    const guest = await person(guestFamily, "995512", "Пётр 5512", "member");
+    await database().query(
+      "INSERT INTO guest_accounts (user_id, guest_family_id, host_family_id, status) VALUES ($1, $2, $3, 'active')",
+      [guest.id, guestFamily, f.familyId],
+    );
+    const asGuest: Fixture = { ...f, familyId: guestFamily };
+    await writeFolder(f, f.member, "skills/tides", { "SKILL.md": "---\nname: tides\ndescription: Приливы\n---\nТекст\n" });
+    await save(f, f.member, { path: "skills/tides" });
+    await guestRepository.configureGuest({
+      builtInSkills: new Set(), grantedSkills: ["tides"], guestDisplayName: "Пётр 5512", guestUserId: guest.id,
+      hostFamilyId: f.familyId, ownerUserId: f.owner.id,
+    });
+
+    // The guest gets it on the owner's word, so the owner hears when its author changes it.
+    await writeFolder(f, f.member, "skills/tides", { "SKILL.md": "---\nname: tides\ndescription: Приливы v2\n---\nТекст\n" });
+    await save(f, f.member, { path: "skills/tides" });
+    expect((await notices({ userId: f.owner.id })).at(-1)).toContain("Скилл «tides» теперь работает в версии 2 вместо 1 (изменил: Dina 5512).");
+    // The guest is told nothing: the notices are the family library's.
+    expect(await notices({ userId: guest.id })).toEqual([]);
+
+    await writeFolder(asGuest, guest, "skills/tides", { "SKILL.md": "---\nname: tides\ndescription: Свои приливы\n---\nТекст\n" });
+    await expect(save(asGuest, guest, { path: "skills/tides" })).rejects.toMatchObject({ code: "AGENT_SKILL_NAME_TAKEN" });
+
+    await run(f, f.owner, { action: "delete", name: "tides" });
+    expect([...(await loadGuestAccessPolicy(guestFamily))!.grantedSkills]).toEqual([]);
+    await writeFolder(f, f.owner, "skills/tides", { "SKILL.md": "---\nname: tides\ndescription: Другие приливы\n---\nТекст\n" });
+    await save(f, f.owner, { path: "skills/tides" });
+    expect([...(await loadGuestAccessPolicy(guestFamily))!.grantedSkills]).toEqual([]);
+    // With nothing given under the name any more, the guest saves a skill of their own under it.
+    await expect(save(asGuest, guest, { path: "skills/tides" })).resolves.toMatchObject({ status: "saved_and_enabled_for_you" });
   });
 
   it("refuses a broken package, a taken name, a missing folder and a skill that runs from its draft", async () => {

@@ -2,7 +2,7 @@
  * Persistence of sandbox API keys, their grants and their usage.
  *
  * Exports:
- * - `ApiKeyTarget`: who a key is granted to; `ApiKeySettings`: where and how the key is sent.
+ * - `ApiKeySettings`: where and how the key is sent; who it is granted to is `ApiKeyTarget` (`api-key-targets.ts`).
  * - `apiKeyRepository`: the owner's operations, the webhook intake, the proxy projection, the
  *   sandbox environment and the usage the proxy reports.
  *
@@ -20,11 +20,7 @@ import {
   type ApiKeyProjectionGrant,
   type ApiKeyUsageEvent,
 } from "./api-key-contract.js";
-
-export type ApiKeyTarget =
-  | { readonly kind: "family" }
-  | { readonly kind: "group"; readonly telegramChatId: string }
-  | { readonly kind: "personal" };
+import { targetWorkspace, type ApiKeyTarget } from "./api-key-targets.js";
 
 export interface ApiKeySettings {
   readonly authHeader: string;
@@ -39,6 +35,12 @@ export interface ApiKeyGrantSummary {
   readonly target:
     | { readonly kind: "family" }
     | { readonly kind: "group"; readonly telegramChatId: string; readonly title: string }
+    | {
+      readonly displayName: string;
+      readonly guestStatus: "active" | "revoked";
+      readonly guestUserId: string;
+      readonly kind: "guest";
+    }
     | { readonly kind: "personal" };
   readonly uses: number;
   readonly usesLast7Days: number;
@@ -84,54 +86,29 @@ async function transaction<T>(work: (client: PoolClient) => Promise<T>): Promise
   }
 }
 
+interface GrantTargetRow {
+  readonly guest_display_name: string | null;
+  readonly guest_status: "active" | "revoked" | null;
+  readonly guest_user_id: string | null;
+  readonly scope: "family" | "group" | "personal";
+  readonly telegram_chat_id: string | null;
+  readonly title: string | null;
+}
+
+function grantTarget(row: GrantTargetRow): ApiKeyGrantSummary["target"] {
+  if (row.guest_user_id !== null) {
+    return { displayName: row.guest_display_name!, guestStatus: row.guest_status!, guestUserId: row.guest_user_id, kind: "guest" };
+  }
+  if (row.scope === "group") return { kind: "group", telegramChatId: row.telegram_chat_id!, title: row.title! };
+  return { kind: row.scope };
+}
+
 function keyNotFound(name: string): AppError {
   return new AppError(
     "AGENT_API_KEY_NOT_FOUND",
     "Такого ключа нет. Посмотрите список ключей и повторите с точным именем",
     { details: { name } },
   );
-}
-
-/**
- * The workspace a target names. A grant creates it on first use like any other workspace; a
- * revocation only looks it up and gets null when it was never created.
- */
-async function targetWorkspace(
-  client: PoolClient,
-  input: { create: boolean; familyId: string; ownerUserId: string; target: ApiKeyTarget },
-): Promise<string | null> {
-  let groupId: string | null = null;
-  if (input.target.kind === "group") {
-    const group = await client.query<{ id: string }>(
-      `SELECT id FROM telegram_groups
-        WHERE family_id = $1 AND telegram_chat_id = $2 AND type = 'external'`,
-      [input.familyId, input.target.telegramChatId],
-    );
-    if (!group.rows[0]) {
-      throw new AppError(
-        "AGENT_API_KEY_GROUP_NOT_FOUND",
-        "Такой внешней группы нет в вашей семье. Для семейных групп выдайте ключ всей семье",
-        { details: { telegramChatId: input.target.telegramChatId } },
-      );
-    }
-    groupId = group.rows[0].id;
-  }
-  const values = [input.familyId, input.target.kind === "personal" ? input.ownerUserId : null, groupId, input.target.kind];
-  const workspace = input.create
-    ? await client.query<{ id: string }>(
-      `INSERT INTO workspaces (family_id, owner_user_id, group_id, scope)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (family_id, scope, owner_user_id, group_id) DO UPDATE SET family_id = EXCLUDED.family_id
-       RETURNING id`,
-      values,
-    )
-    : await client.query<{ id: string }>(
-      `SELECT id FROM workspaces
-        WHERE family_id = $1 AND owner_user_id IS NOT DISTINCT FROM $2 AND group_id IS NOT DISTINCT FROM $3
-          AND scope = $4`,
-      values,
-    );
-  return workspace.rows[0]?.id ?? null;
 }
 
 async function insertGrant(
@@ -305,6 +282,9 @@ export const apiKeyRepository = {
     );
     const grants = await database().query<{
       created_at: Date;
+      guest_display_name: string | null;
+      guest_status: "active" | "revoked" | null;
+      guest_user_id: string | null;
       key_id: string;
       last_used_at: Date | null;
       scope: "family" | "group" | "personal";
@@ -314,11 +294,15 @@ export const apiKeyRepository = {
       uses_last_7_days: string;
     }>(
       `SELECT g.key_id, g.created_at, w.scope, tg.telegram_chat_id, tg.title,
+              ga.user_id AS guest_user_id, ga.status AS guest_status, guest_user.display_name AS guest_display_name,
               usage.uses, usage.uses_last_7_days, usage.last_used_at
          FROM sandbox_api_key_grants g
          JOIN sandbox_api_keys k ON k.id = g.key_id
          JOIN workspaces w ON w.id = g.workspace_id
          LEFT JOIN telegram_groups tg ON tg.id = w.group_id
+         -- A folder of another family is a guest's (#474): only a guest of this key's family can hold one.
+         LEFT JOIN guest_accounts ga ON ga.guest_family_id = w.family_id AND ga.host_family_id = k.family_id
+         LEFT JOIN users guest_user ON guest_user.id = ga.user_id
          CROSS JOIN LATERAL (
            SELECT count(*) AS uses,
                   count(*) FILTER (WHERE u.used_at > now() - interval '7 days') AS uses_last_7_days,
@@ -337,9 +321,7 @@ export const apiKeyRepository = {
       grants: grants.rows.filter((grant) => grant.key_id === key.id).map((grant) => ({
         grantedAt: grant.created_at,
         lastUsedAt: grant.last_used_at,
-        target: grant.scope === "group"
-          ? { kind: "group" as const, telegramChatId: grant.telegram_chat_id!, title: grant.title! }
-          : { kind: grant.scope },
+        target: grantTarget(grant),
         uses: Number(grant.uses),
         usesLast7Days: Number(grant.uses_last_7_days),
       })),
@@ -424,6 +406,7 @@ export const apiKeyRepository = {
       auth_header: string;
       auth_scheme: ApiKeyAuthScheme;
       grant_id: string;
+      guest_folder: boolean;
       name: string;
       placeholder: string;
       scope: "family" | "group" | "personal";
@@ -434,14 +417,19 @@ export const apiKeyRepository = {
       workspace_id: string;
     }>(
       `SELECT g.id AS grant_id, g.placeholder, g.workspace_id, w.scope, k.name, k.upstream_base_url,
-              k.auth_header, k.auth_scheme, k.value_ciphertext, k.value_nonce, k.value_auth_tag
+              k.auth_header, k.auth_scheme, k.value_ciphertext, k.value_nonce, k.value_auth_tag,
+              w.family_id <> k.family_id AS guest_folder
          FROM sandbox_api_key_grants g
          JOIN sandbox_api_keys k ON k.id = g.key_id
          JOIN workspaces w ON w.id = g.workspace_id
          LEFT JOIN telegram_groups tg ON tg.id = w.group_id
+         LEFT JOIN guest_accounts ga ON ga.guest_family_id = w.family_id AND ga.host_family_id = k.family_id
         WHERE g.revoked_at IS NULL AND k.value_stored_at IS NOT NULL
           -- A disconnected group's keys leave the proxy until it is reconnected (#465).
           AND (tg.id IS NULL OR tg.disconnected_at IS NULL)
+          -- A folder of another family is only ever a live guest's of the key's family (#474): a removed guest's
+          -- keys leave the proxy until the guest comes back, and any other such grant fails closed.
+          AND (w.family_id = k.family_id OR ga.status = 'active')
         ORDER BY g.id`,
     );
     return result.rows.map((row) => ({
@@ -449,8 +437,9 @@ export const apiKeyRepository = {
       authScheme: row.auth_scheme,
       grantId: row.grant_id,
       keyName: row.name,
-      // Personal and family sandboxes share the trusted network; each group has its own.
-      network: row.scope === "group" ? { kind: "group", workspaceId: row.workspace_id } : { kind: "trusted" },
+      // Personal and family sandboxes share the trusted network; each group, and each guest, has its own, named after
+      // the group's folder or the guest's personal one (#471): the proxy accepts the grant only from there.
+      network: row.scope === "group" || row.guest_folder ? { kind: "group", workspaceId: row.workspace_id } : { kind: "trusted" },
       placeholder: row.placeholder,
       upstreamBaseUrl: row.upstream_base_url,
       value: { authTag: row.value_auth_tag, ciphertext: row.value_ciphertext, nonce: row.value_nonce },

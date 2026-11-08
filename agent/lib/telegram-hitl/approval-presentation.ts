@@ -154,6 +154,7 @@ function cardPresenter(dependencies: ApprovalPresentationDependencies): Telegram
         ...localized,
         prompt: await apiKeyGrantPrompt({
           findGroupTitle: (telegramChatId) => dependencies.findGroupTitle(telegramChatId, ctx),
+          guestDisplayName: input.guestDisplayName,
           key: await dependencies.findApiKey(String(input.name), ctx),
           target: input.target,
           telegramChatId: input.telegramChatId,
