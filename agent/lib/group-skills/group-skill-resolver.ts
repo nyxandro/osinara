@@ -6,7 +6,9 @@
  *   person enabled for themselves; a family group gets every built-in skill and the family skills on
  *   its list; an external group gets the skills of its verified list that still exist. Every zone also
  *   gets the service skills of the tools in the turn's surface (`service-skills.ts`). A guest's private chat
- *   (#471) loses the skills the owner turned off for that guest, and a removed guest's has none.
+ *   (#471) loses the skills the owner turned off for that guest, and a removed guest's has none. It also gets
+ *   the skills of the owner's library given to that guest (#474), read from the host family; the guest's own
+ *   skill of the same name wins.
  *
  * The family's skills are read from the database on every turn, so a change takes effect from the
  * next turn without a new context. A built-in skill keeps its name if a family skill with the same
@@ -19,7 +21,7 @@ import { resolveConversationEnvironment, type ConversationEnvironment } from "..
 import { isFamilyOwner } from "../family-context.js";
 import { familySkillRepository, type FamilySkillSelection } from "../family-skills/family-skill-repository.js";
 import { serviceSkillsFor } from "../family-skills/service-skills.js";
-import { guestPolicyFor } from "../guests/guest-policy.js";
+import { guestPolicyFor, type SessionGuest } from "../guests/guest-policy.js";
 import {
   resolveExternalGroupPolicyIdentity,
   resolveExternalGroupSkillPolicy,
@@ -73,9 +75,20 @@ export async function resolveConversationSkills(
   const names = external ? granted : [...granted, ...Object.keys(family).filter((name) => !isGroupSafeSkillName(name))];
   const skills = {
     ...Object.fromEntries(names.flatMap((name) => catalog[name] === undefined ? [] : [[name, catalog[name]]])),
+    ...await hostSkillsGivenTo(guest, new Set(names)),
     ...serviceSkillsFor(environment, turn.toolNames),
   };
   return guest === null
     ? skills
     : Object.fromEntries(Object.entries(skills).filter(([name]) => !guest.policy.disabledSkills.has(name)));
+}
+
+/**
+ * The owner's library skills given to a guest, less a name the guest's chat already has. What is given is read again
+ * with the skills themselves, in one statement: the policy read before it only says whether to look.
+ */
+async function hostSkillsGivenTo(guest: SessionGuest | null, taken: ReadonlySet<string>): Promise<Record<string, SkillDefinition>> {
+  if (guest === null || guest.policy.grantedSkills.size === 0) return {};
+  const given = await familySkillRepository.loadWorking(guest.policy.hostFamilyId, { givenToGuestFamily: guest.familyId });
+  return Object.fromEntries(Object.entries(given).filter(([name]) => !taken.has(name)));
 }

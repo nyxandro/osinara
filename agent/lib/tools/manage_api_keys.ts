@@ -29,7 +29,8 @@ import {
 import { API_KEY_ENCRYPTION_KEY_ENVIRONMENT_NAME, requireApiKeyEncryptionKey } from "../api-keys/api-key-crypto.js";
 import { API_KEY_INTAKE_GUARD_HOURS, API_KEY_INTAKE_MINUTES } from "../api-keys/api-key-intake.js";
 import { apiKeyPublisher } from "../api-keys/api-key-projection.js";
-import { apiKeyRepository, type ApiKeySummary, type ApiKeyTarget } from "../api-keys/api-key-repository.js";
+import { apiKeyRepository, type ApiKeySummary } from "../api-keys/api-key-repository.js";
+import type { ApiKeyTarget } from "../api-keys/api-key-targets.js";
 import { apiKeyTelegram } from "../api-keys/api-key-telegram.js";
 import { AppError, isAppError } from "../app-error.js";
 import { requirePrivateTelegramOwner } from "../family-context.js";
@@ -38,6 +39,7 @@ import {
   requireAction,
   requiredEnum,
   requiredString,
+  requiredUuid,
   requireInputRecord,
   requireOnlyFields,
   toolInputError,
@@ -45,9 +47,9 @@ import {
 
 const INPUT_ERROR_CODE = "AGENT_API_KEY_INPUT_INVALID";
 const TOOL_ACTIONS = ["request", "list", "grant", "revoke", "delete"] as const;
-const TARGETS = ["personal", "family", "group"] as const;
+const TARGETS = ["personal", "family", "group", "guest"] as const;
 const TOP_LEVEL_FIELDS = [
-  "action", "authHeader", "authScheme", "baseUrl", "name", "purpose", "target", "telegramChatId",
+  "action", "authHeader", "authScheme", "baseUrl", "guestDisplayName", "guestUserId", "name", "purpose", "target", "telegramChatId",
 ] as const;
 const PURPOSE_MAX_LENGTH = 200;
 // One line of plain text: the purpose must not be able to add a line of its own to the request.
@@ -62,8 +64,10 @@ const manageApiKeysSchema = z.object({
   baseUrl: z.string().optional().describe("For request: the service's HTTPS API base, e.g. https://api.example.com/v1."),
   name: z.string().optional().describe("Key name, e.g. neuraldeep; required except for list."),
   purpose: z.string().optional().describe("For request: what the key is for, shown to the owner."),
-  target: z.enum(TARGETS).optional().describe("For grant and revoke: personal, family or group."),
+  target: z.enum(TARGETS).optional().describe("For grant and revoke: personal, family, group or guest."),
   telegramChatId: z.string().optional().describe("For target=group: the external group's chat id."),
+  guestUserId: z.string().optional().describe("For target=guest: the guest's guestUserId from the guests section's list."),
+  guestDisplayName: z.string().optional().describe("For target=guest: the guest's displayName from that list, copied exactly."),
 }).strict();
 
 type ApiKeysInput =
@@ -90,6 +94,17 @@ function requireName(input: Record<string, unknown>): string {
 
 function requireTarget(input: Record<string, unknown>): ApiKeyTarget {
   const kind = requiredEnum(input, "target", TARGETS, INPUT_ERROR_CODE);
+  // A guest named with another target would hand the key to that target instead: the family, for one.
+  if (kind !== "guest" && (input.guestUserId !== undefined || input.guestDisplayName !== undefined)) {
+    toolInputError(INPUT_ERROR_CODE, "Поля guestUserId и guestDisplayName — только для target=guest. Пример: {\"target\":\"guest\",\"guestUserId\":\"<из списка гостей>\",\"guestDisplayName\":\"Пётр\"}");
+  }
+  if (kind === "guest") {
+    return {
+      guestDisplayName: requiredString(input, "guestDisplayName", INPUT_ERROR_CODE, "Пётр", { maxLength: 200 }),
+      guestUserId: requiredUuid(input, "guestUserId", INPUT_ERROR_CODE, "гость из списка гостей (раздел guests, action=list)"),
+      kind,
+    };
+  }
   if (kind !== "group") return { kind };
   const telegramChatId = requiredString(input, "telegramChatId", INPUT_ERROR_CODE, "-1001234567890", { maxLength: 32 });
   if (!TELEGRAM_GROUP_ID_PATTERN.test(telegramChatId)) {
@@ -174,7 +189,7 @@ function keyForModel(key: ApiKeySummary, now: Date) {
 const TOOL_DESCRIPTION = [
   "API keys of HTTP services for skills and scripts in sandboxes; the model never sees a key. Load the `api-keys` skill before use.",
   "request (name, purpose, baseUrl, authHeader, authScheme) makes the application ask the owner for the key itself; never ask for it in chat.",
-  "grant/revoke (name, target personal|family|group, telegramChatId for group); grant beyond personal asks the owner to confirm. list shows keys and usage; delete removes a key.",
+  "grant/revoke (name, target personal|family|group|guest, telegramChatId for group, guestUserId and guestDisplayName for guest); grant beyond personal asks the owner to confirm, and a repeated grant re-applies the grants on the server. list shows keys and usage; delete removes a key.",
 ].join(" ");
 
 export default defineTool({

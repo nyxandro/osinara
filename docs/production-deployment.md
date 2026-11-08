@@ -614,6 +614,17 @@ same person restores the membership. A current or former guest cannot join a fam
 belongs to their guest family (`AGENT_INVITATION_FORMER_GUEST`). Software update proposals look for the
 single owner among all families, so a guest's family must never get one.
 
+Since v0.72.0 the owner may give a guest skills of the family library and access to stored API keys, one by
+one (#474). Given skills are names in `guest_accounts.granted_skills` (migration 154), set by `configure`
+(`grantedSkills`; every list of `configure` is now optional and a list left out stays as it is); a guest's
+turn loads them from the host family, the guest's own skill of the same name winning, and deleting a library
+skill removes its name from every guest's list. A key goes to a guest with `manage_api_keys` `target=guest`:
+the grant lands in the guest's own personal workspace, and the proxy file binds it to that workspace's own
+network (`kind: "group"`), never the trusted one. A removed guest's grants stay in the database but leave the
+proxy file; removing a guest republishes the file (`AGENT_GUEST_KEYS_NOT_CLOSED` when that fails: the owner
+repeats the removal), and a returning guest's link republishes it again (`AGENT_API_KEY_PUBLISH_FAILED` in the
+log when that fails; the join stays, and any later grant re-applies the file).
+
 Long-term memory has no separate model route. The root agent decides whether to call `remember`;
 PostgreSQL validates the current Telegram source and atomically writes optional thread state. Thread
 activation and context use local E5 embeddings plus deterministic source projections. Semantic

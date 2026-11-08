@@ -147,13 +147,19 @@ function approvalParameterLines(toolName: string, input: Record<string, unknown>
       ];
     case "manage_guest_access": {
       if (input.action === "invite") return [];
-      const names = (key: string): string[] => {
+      // Only the lists the call gives: a list it leaves out stays as it is (#474).
+      const names = (key: string, label: string): string[] => {
         const list = input[key];
         if (!Array.isArray(list)) return [];
         const shown = list.filter((item): item is string => typeof item === "string").map(safe).join(", ");
-        return [`${key === "disabledTools" ? "Выключенные инструменты" : "Выключенные скиллы"}: ${shown || "нет"}`];
+        return [`${label}: ${shown || "нет"}`];
       };
-      return [...line("Гость", "guestDisplayName"), ...names("disabledTools"), ...names("disabledSkills")];
+      return [
+        ...line("Гость", "guestDisplayName"),
+        ...names("disabledTools", "Выключенные инструменты"),
+        ...names("disabledSkills", "Выключенные скиллы"),
+        ...names("grantedSkills", "Скиллы владельца"),
+      ];
     }
     case "manage_network_access": {
       const address = value("address");

@@ -41,6 +41,8 @@ import {
 } from "./telegram-memory-thread-notice.js";
 import { telegramRepository, type TelegramRepository } from "./telegram-repository.js";
 import { workspaceBinaryRepository } from "./workspaces/workspace-binary-repository.js";
+import { apiKeyPublisher } from "./api-keys/api-key-projection.js";
+import type { ProjectionPublisher } from "./network-access/projection-file.js";
 import type {
   WorkspaceAuthorization,
   WorkspaceScope,
@@ -69,6 +71,8 @@ export interface TelegramMessageRepositories {
     typeof profileProjectionPolicyRepository,
     "claimPendingGroupNotice" | "markGroupNoticePresented"
   >;
+  /** The sandbox proxy's file of API key grants, rewritten when a removed guest comes back (#474). */
+  apiKeys: Pick<ProjectionPublisher, "publish">;
   family: Pick<FamilyRepository, "claimInvitation">;
   groupContext: { prepare: TelegramGroupTurnContextPreparer };
   hitl: Pick<TelegramHitlApprovalRepository, "authorizeReply">;
@@ -95,6 +99,7 @@ export const productionTelegramMessageRepositories = {
   }),
   conversations: conversationRepository,
   profilePolicies: profileProjectionPolicyRepository,
+  apiKeys: apiKeyPublisher,
   family: familyRepository,
   groupContext: { prepare: telegramGroupTurnContextPreparer },
   hitl: telegramHitlApprovalRepository,

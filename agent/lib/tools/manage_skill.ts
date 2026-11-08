@@ -13,6 +13,8 @@
  * - The application, not the model, sends a notice of every change to whom it concerns
  *   (`family-skills/family-skill-notices.ts`). An external group's skills stay with the owner
  *   (`manage_telegram_group`).
+ * - A guest's library is their own family's; the owner's skills given to a guest are not in it, so the guest
+ *   cannot change them, and a skill of the guest's own cannot take the name of one (#474).
  */
 import { z } from "zod";
 
@@ -28,6 +30,7 @@ import { familySkillUsage } from "../family-skills/family-skill-usage.js";
 import { isServiceSkillName } from "../family-skills/service-skills.js";
 import { readWorkspaceSkillFolder, skillManifest, writeWorkspaceSkillFolder } from "../family-skills/workspace-skill-folder.js";
 import { GROUP_SAFE_SKILL_NAMES, isGroupSafeSkillName } from "../group-skills/group-skill-catalog.js";
+import { loadGuestAccessPolicy } from "../guests/guest-repository.js";
 import {
   requireAction,
   requiredEnum,
@@ -176,6 +179,13 @@ export default defineTool({
         const skill = validateSkillPackage({ files, limits: FAMILY_SKILL_LIMITS });
         if (isGroupSafeSkillName(skill.name) || isServiceSkillName(skill.name)) {
           throw new AppError("AGENT_SKILL_NAME_TAKEN", `Имя ${skill.name} занято встроенным скиллом. Переименуйте скилл в SKILL.md`);
+        }
+        // A guest's chat already has the owner's skill under a name the owner gave them (#474).
+        if ((await loadGuestAccessPolicy(member.familyId))?.grantedSkills.has(skill.name)) {
+          throw new AppError(
+            "AGENT_SKILL_NAME_TAKEN",
+            `Имя ${skill.name} занято скиллом, который выдал вам владелец агента. Переименуйте скилл в SKILL.md`,
+          );
         }
         requireNoDraftPathReference(skill);
         const saved = await familySkillChanges.save({

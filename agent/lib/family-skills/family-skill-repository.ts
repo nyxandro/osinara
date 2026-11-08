@@ -48,8 +48,33 @@ export interface FamilySkillSummary {
   readonly name: string;
 }
 
-/** Whose skills a conversation gets: a person's own selection, or the names a group's list holds. */
-export type FamilySkillSelection = { readonly enabledBy: string } | { readonly names: readonly string[] };
+/**
+ * Whose skills a conversation gets: a person's own selection, the names a group's list holds, or what the owner gave
+ * a live guest (#474), read with the skills in one statement so a skill deleted and made anew under a given name
+ * between two reads is never handed out.
+ */
+export type FamilySkillSelection =
+  | { readonly enabledBy: string }
+  | { readonly givenToGuestFamily: string }
+  | { readonly names: readonly string[] };
+
+function selectionCondition(selection: FamilySkillSelection): { readonly condition: string; readonly value: unknown } {
+  if ("enabledBy" in selection) {
+    return {
+      condition: "EXISTS (SELECT 1 FROM family_skill_activations activation WHERE activation.skill_id = skill.id AND activation.user_id = $2)",
+      value: selection.enabledBy,
+    };
+  }
+  if ("givenToGuestFamily" in selection) {
+    return {
+      condition: `skill.name = ANY(COALESCE((SELECT guest.granted_skills FROM guest_accounts guest
+                    WHERE guest.guest_family_id = $2::uuid AND guest.host_family_id = skill.family_id
+                      AND guest.status = 'active'), '{}'))`,
+      value: selection.givenToGuestFamily,
+    };
+  }
+  return { condition: "skill.name = ANY($2::text[])", value: [...selection.names] };
+}
 
 interface StoredFileRow extends StoredSkillFile {
   readonly content: string;
@@ -98,18 +123,15 @@ export async function grantableFamilySkills(
 export const familySkillRepository = {
   /** The selected skills in their current versions, as a turn receives them. */
   async loadWorking(familyId: string, selection: FamilySkillSelection): Promise<Record<string, SkillDefinition>> {
-    const byPerson = "enabledBy" in selection;
-    if (!byPerson && selection.names.length === 0) return {};
+    if ("names" in selection && selection.names.length === 0) return {};
+    const { condition, value } = selectionCondition(selection);
     const rows = (await database().query<{ description: string; files: StoredFileRow[]; license: string | null; markdown: string; name: string }>(
       `SELECT skill.name, version.description, version.license, version.markdown, version.files
          FROM family_skills skill
          JOIN family_skill_versions version ON version.skill_id = skill.id AND version.version = skill.active_version
-        WHERE skill.family_id = $1
-          AND ${byPerson
-            ? "EXISTS (SELECT 1 FROM family_skill_activations activation WHERE activation.skill_id = skill.id AND activation.user_id = $2)"
-            : "skill.name = ANY($2::text[])"}
+        WHERE skill.family_id = $1 AND ${condition}
         ORDER BY skill.name`,
-      [familyId, byPerson ? selection.enabledBy : [...selection.names]],
+      [familyId, value],
     )).rows;
     return Object.fromEntries(rows.map((row) => [row.name, {
       description: row.description,

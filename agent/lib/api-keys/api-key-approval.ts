@@ -3,7 +3,8 @@
  *
  * Export:
  * - `apiKeyGrantPrompt`: the card text, built from the stored key and the live group title, not
- *   from words the model chose.
+ *   from words the model chose. A guest is named as the call names them; execution rechecks that name against
+ *   the guest's record, like every guest change (#474).
  */
 import { AppError } from "../app-error.js";
 import { API_KEY_GRANT_CONSEQUENCE } from "../telegram-hitl/approval-consequences.js";
@@ -12,6 +13,7 @@ import type { ApiKeySettings } from "./api-key-repository.js";
 
 export async function apiKeyGrantPrompt(input: {
   readonly findGroupTitle: (telegramChatId: string) => Promise<string | null>;
+  readonly guestDisplayName: unknown;
   readonly key: (ApiKeySettings & { readonly name: string }) | null;
   readonly target: unknown;
   readonly telegramChatId: unknown;
@@ -20,6 +22,7 @@ export async function apiKeyGrantPrompt(input: {
     throw new AppError("AGENT_API_KEY_NOT_FOUND", "Такого ключа нет. Посмотрите список ключей и повторите с точным именем");
   }
   let recipient = "вся семья: личные чаты членов семьи и семейные группы";
+  if (input.target === "guest") recipient = `гость ${String(input.guestDisplayName)} (его личный чат и песочница)`;
   if (input.target === "group") {
     const telegramChatId = String(input.telegramChatId);
     const title = await input.findGroupTitle(telegramChatId);

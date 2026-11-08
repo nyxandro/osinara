@@ -8,6 +8,8 @@
  * - Bootstrap claims accept only the exact one-time `/start <43-character-code>` command.
  * - Invitation claims and existing-member deep links never become ordinary model turns.
  * - A guest link admits its claimant at once (#471): the guest is welcomed and the inviting owner told.
+ * - A returning guest's API keys go back to the sandbox proxy (#474). The return is already committed: a failed
+ *   publication is logged, and the next one (any key change, a repeated grant, a restart) puts them back.
  */
 import type { TelegramContext } from "../runtime/telegram/channel-types.js";
 import type { TelegramMessage } from "../runtime/telegram/inbound.js";
@@ -45,6 +47,18 @@ async function tellOwnerAboutGuest(ctx: TelegramContext, claim: GuestInvitationC
   }
 }
 
+async function restoreReturningGuestKeys(apiKeys: TelegramMessageRepositories["apiKeys"]): Promise<void> {
+  try {
+    await apiKeys.publish();
+  } catch (error) {
+    console.error(JSON.stringify({
+      code: "AGENT_API_KEY_PUBLISH_FAILED",
+      error: error instanceof Error ? error.message : String(error),
+      reason: "guest_returned",
+    }));
+  }
+}
+
 type TelegramIdentity = Awaited<ReturnType<TelegramMessageRepositories["telegram"]["findIdentity"]>>;
 
 export async function handleTelegramEnrollmentBoundary(input: {
@@ -52,7 +66,7 @@ export async function handleTelegramEnrollmentBoundary(input: {
   identity: TelegramIdentity;
   invitationCode: string | null;
   message: TelegramMessage;
-  repositories: Pick<TelegramMessageRepositories, "family" | "telegram">;
+  repositories: Pick<TelegramMessageRepositories, "apiKeys" | "family" | "telegram">;
 }): Promise<boolean> {
   // A replay after owner creation must never forward the one-time bootstrap secret to the model.
   if (input.identity && OWNER_BOOTSTRAP_COMMAND_PATTERN.test(input.message.text.trim())) return true;
@@ -119,6 +133,8 @@ export async function handleTelegramEnrollmentBoundary(input: {
     if (claim !== "invalid") {
       // The owner's line goes out first and whatever happens to the welcome: it is how a wrong claimant is noticed.
       await tellOwnerAboutGuest(input.ctx, claim, input.message);
+      // The removal took the guest's grants out of the proxy file; a new guest has none to put back.
+      if (claim.guest === "returned") await restoreReturningGuestKeys(input.repositories.apiKeys);
       await input.ctx.telegram.sendMessage(GUEST_WELCOME[claim.guest]);
       return true;
     }
