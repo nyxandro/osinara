@@ -99,9 +99,9 @@ describe("scoped skills", () => {
       "guest-family": { "trip-plan": { description: "guest's own", name: "trip-plan" } },
       "host-family": { "image-gen": { description: "owner's", name: "image-gen" }, "trip-plan": { description: "owner's", name: "trip-plan" } },
     };
-    // As the repository does: a selection by names reads only those names.
-    loadWorking.mockImplementation(async (familyId: string, selection: { names?: string[] }) => Object.fromEntries(
-      Object.entries(library[familyId] ?? {}).filter(([name]) => selection.names === undefined || selection.names.includes(name)),
+    // As the repository does for a guest: the names given to them, read with the skills in one query.
+    loadWorking.mockImplementation(async (familyId: string, selection: { givenToGuestFamily?: string }) => Object.fromEntries(
+      Object.entries(library[familyId] ?? {}).filter(([name]) => selection.givenToGuestFamily === undefined || name !== "unrelated"),
     ));
     loadGuestAccessPolicy.mockResolvedValue(guestPolicy({ grantedSkills: new Set(["image-gen", "trip-plan"]) }));
 
@@ -109,7 +109,7 @@ describe("scoped skills", () => {
 
     expect(skills["image-gen"]?.description).toBe("owner's");
     expect(skills["trip-plan"]?.description).toBe("guest's own");
-    expect(loadWorking).toHaveBeenCalledWith("host-family", { names: ["image-gen"] });
+    expect(loadWorking).toHaveBeenCalledWith("host-family", { givenToGuestFamily: "guest-family" });
   });
 
   it("reads no host library for a guest with nothing given, nor for a family member", async () => {

@@ -15,6 +15,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "../database.js";
 import { evaluateConversationAccess } from "../family-access.js";
+import { familySkillRepository } from "../family-skills/family-skill-repository.js";
 import { familyRepository } from "../family-repository.js";
 import { telegramRepository } from "../telegram-repository.js";
 import { guestRepository, loadGuestAccessPolicy } from "./guest-repository.js";
@@ -288,6 +289,10 @@ describeWithDatabase("guest access", () => {
 
     const policy = (await loadGuestAccessPolicy(identity.familyId))!;
     expect([...policy.grantedSkills]).toEqual(["image-gen"]);
+    // A turn reads what is given and the skills in one query, so a skill deleted and made anew under a given name
+    // between two reads cannot slip through.
+    expect(Object.keys(await familySkillRepository.loadWorking(owner.familyId, { givenToGuestFamily: identity.familyId })))
+      .toEqual(["image-gen"]);
     expect(policy.hostFamilyId).toBe(owner.familyId);
     expect(policy.grantedApiKeys).toEqual([]);
 

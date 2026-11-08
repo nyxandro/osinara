@@ -83,10 +83,12 @@ export async function resolveConversationSkills(
     : Object.fromEntries(Object.entries(skills).filter(([name]) => !guest.policy.disabledSkills.has(name)));
 }
 
-/** The owner's library skills given to a guest, less a name the guest's chat already has. */
+/**
+ * The owner's library skills given to a guest, less a name the guest's chat already has. What is given is read again
+ * with the skills themselves, in one statement: the policy read before it only says whether to look.
+ */
 async function hostSkillsGivenTo(guest: SessionGuest | null, taken: ReadonlySet<string>): Promise<Record<string, SkillDefinition>> {
-  if (guest === null) return {};
-  const names = [...guest.policy.grantedSkills].filter((name) => !taken.has(name)).sort();
-  if (names.length === 0) return {};
-  return await familySkillRepository.loadWorking(guest.policy.hostFamilyId, { names });
+  if (guest === null || guest.policy.grantedSkills.size === 0) return {};
+  const given = await familySkillRepository.loadWorking(guest.policy.hostFamilyId, { givenToGuestFamily: guest.familyId });
+  return Object.fromEntries(Object.entries(given).filter(([name]) => !taken.has(name)));
 }
