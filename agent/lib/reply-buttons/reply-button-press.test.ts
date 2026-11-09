@@ -14,6 +14,10 @@
  * - A replayed press rebuilds the same message and settles its buttons again without answering
  *   Telegram twice; a press on buttons already decided settles them again on arrival, naming the
  *   presser in a group.
+ * - A scenario's read button (#480) skips its scenario for the day with the recorded moments of the
+ *   message and the press, answers with a pop-up, writes «✅ Прочитано в …» and never becomes a
+ *   message; a card of an earlier day or of a deleted scenario says so; a skip that failed on
+ *   arrival is finished by the queue step.
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -46,11 +50,17 @@ function press(input: { chat?: Record<string, unknown>; data?: string; from?: nu
   return update.callbackQuery;
 }
 
+const SENT_AT = new Date("2026-10-26T04:30:00.000Z");
+const SCHEDULE_ID = "0f398fc5-e589-4e66-bf52-8db8aa3f7251";
+
 function selected(overrides: Partial<ReplyButtonSet> = {}): ReplyButtonSet {
   return {
+    activatedAt: SENT_AT,
     addresseeTelegramUserId: "101",
+    createdAt: SENT_AT,
     buttons: [[{ color: "green", text: "✅ Да, заказываем" }, { text: "❌ Отмена" }]],
     id: "set-1",
+    messageFormat: "rich",
     messageMedia: [],
     messageText: "Корзина собрана. Итого 2 340 ₽. Оформляем?",
     resolvedAt: PRESSED_AT,
@@ -64,15 +74,78 @@ function selected(overrides: Partial<ReplyButtonSet> = {}): ReplyButtonSet {
   };
 }
 
-function handler(claim: unknown, routeOpen = false) {
+function handler(claim: unknown, routeOpen = false, skip: unknown = { kind: "skipped", localTime: "15:00", title: "Контроль задач" }) {
   const repository = {
     claimPress: vi.fn().mockResolvedValue(claim),
     replyRouteIsOpen: vi.fn().mockResolvedValue(routeOpen),
   };
+  const skipSchedule = skip instanceof Error ? vi.fn().mockRejectedValue(skip) : vi.fn().mockResolvedValue(skip);
   const telegram = { answerPress: vi.fn().mockResolvedValue(undefined), settle: vi.fn().mockResolvedValue(undefined) };
-  const pressHandler = createReplyButtonPressHandler({ repository, telegram });
-  return { acknowledge: pressHandler.acknowledge, handle: pressHandler.continueAsMessage, repository, telegram };
+  const pressHandler = createReplyButtonPressHandler({ repository, skipSchedule, telegram });
+  return { acknowledge: pressHandler.acknowledge, handle: pressHandler.continueAsMessage, repository, skipSchedule, telegram };
 }
+
+const READ_SET = { buttons: [[{ color: "green" as const, skipScheduleId: SCHEDULE_ID, text: "✅ Задачи на день услышаны" }]] };
+
+describe("a scenario's read button (#480)", () => {
+  it("skips the scenario for the day on arrival, answers with a pop-up and writes the time", async () => {
+    const { acknowledge, skipSchedule, telegram } = handler({ set: selected(READ_SET), status: "claimed" });
+
+    await acknowledge(press(), "7001");
+
+    expect(skipSchedule).toHaveBeenCalledWith({
+      addresseeTelegramUserId: "101",
+      pressedAt: PRESSED_AT,
+      pressId: TOKEN,
+      scheduleId: SCHEDULE_ID,
+      sentAt: SENT_AT,
+      telegramChatId: "101",
+    });
+    expect(telegram.answerPress).toHaveBeenCalledWith({ callbackQueryId: "cb-1", text: "Прочитано. Повторы на сегодня сняты" });
+    expect(telegram.settle).toHaveBeenCalledWith(expect.objectContaining({ id: "set-1" }), "✅ Прочитано в 15:00");
+  });
+
+  it("never turns the press into a message for the model", async () => {
+    const { handle, telegram } = handler({ set: selected(READ_SET), status: "replayed" });
+
+    await expect(handle(press(), "7001")).resolves.toEqual({ status: "answered" });
+    expect(telegram.answerPress).not.toHaveBeenCalled();
+    expect(telegram.settle).toHaveBeenCalledWith(expect.anything(), "✅ Прочитано в 15:00");
+  });
+
+  it.each([
+    ["stale", "Не засчитано: эта карточка за прошлый день"],
+    ["missing", "Не засчитано: этого сценария больше нет"],
+  ] as const)("says so when the press cannot count (%s)", async (kind, line) => {
+    const { acknowledge, telegram } = handler({ set: selected(READ_SET), status: "claimed" }, false, { kind });
+
+    await acknowledge(press(), "7001");
+
+    expect(telegram.answerPress).toHaveBeenCalledWith({ callbackQueryId: "cb-1", text: line });
+    expect(telegram.settle).toHaveBeenCalledWith(expect.anything(), line);
+  });
+
+  it("stops the spinner and leaves the skip to the queue step when it fails on arrival", async () => {
+    const failing = handler({ set: selected(READ_SET), status: "claimed" }, false, new Error("database unavailable"));
+
+    await failing.acknowledge(press(), "7001");
+
+    expect(failing.telegram.answerPress).toHaveBeenCalledWith({ callbackQueryId: "cb-1" });
+    expect(failing.telegram.settle).not.toHaveBeenCalled();
+
+    const queue = handler({ set: selected(READ_SET), status: "replayed" });
+    await expect(queue.handle(press(), "7001")).resolves.toEqual({ status: "answered" });
+    expect(queue.skipSchedule).toHaveBeenCalledTimes(1);
+    expect(queue.telegram.settle).toHaveBeenCalledWith(expect.anything(), "✅ Прочитано в 15:00");
+  });
+
+  it("leaves an ordinary answer button to the model without touching any scenario", async () => {
+    const { handle, skipSchedule } = handler({ set: selected(), status: "claimed" });
+
+    await expect(handle(press(), "7001")).resolves.toMatchObject({ status: "message" });
+    expect(skipSchedule).not.toHaveBeenCalled();
+  });
+});
 
 describe("reply button press on arrival", () => {
   it.each([

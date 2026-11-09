@@ -35,6 +35,7 @@ import {
   validateReplyButtonCopyText,
   validateReplyButtonLabel,
   validateReplyButtonUrl,
+  validateSkipScheduleId,
   type ReplyButton,
   type ReplyButtonColor,
   type ReplyButtonRows,
@@ -56,6 +57,8 @@ const ANSWER_TYPES = new Set(["callback", "callback_data"]);
 const LINK_TYPE = "url";
 // Telegram's name of a copy button, and the short spelling a model writes for it.
 const COPY_TYPES = new Set(["copy", "copy_text"]);
+// Our own type, never sent to Telegram: a scenario's "read" button (#480).
+const READ_TYPE = "read";
 const COLOR_BY_STYLE: Readonly<Record<string, ReplyButtonColor>> = {
   blue: "blue",
   danger: "red",
@@ -115,13 +118,17 @@ function attributesOf(source: string): Map<string, string> {
   return attributes;
 }
 
-/** What a button does besides answering: open a page or copy a text the message shows. */
-function actionOf(attributes: ReadonlyMap<string, string>, shownText: string): Pick<ReplyButton, "copyText" | "url"> {
+/** What a button does besides answering: open a page, copy a text the message shows or read a scenario. */
+function actionOf(
+  attributes: ReadonlyMap<string, string>,
+  shownText: string,
+): Pick<ReplyButton, "copyText" | "skipScheduleId" | "url"> {
   const type = attributes.get("type")?.toLowerCase();
   if (type === undefined || ANSWER_TYPES.has(type)) return {};
   if (type === LINK_TYPE) return { url: validateReplyButtonUrl(attributes.get("url") ?? "") };
   if (COPY_TYPES.has(type)) return { copyText: validateReplyButtonCopyText(attributes.get("text") ?? "", shownText) };
-  return invalid(`Кнопка может быть ответом, ссылкой (type="url") или копированием (type="copy_text"); type="${attributes.get("type")}" не поддерживается`);
+  if (type === READ_TYPE) return { skipScheduleId: validateSkipScheduleId(attributes.get("schedule") ?? "") };
+  return invalid(`Кнопка может быть ответом, ссылкой (type="url"), копированием (type="copy_text") или «прочитано» сценария (type="read" schedule="id"); type="${attributes.get("type")}" не поддерживается`);
 }
 
 function toButton(raw: RawButton, shownText: string): ReplyButton {
@@ -280,10 +287,14 @@ function escapeAttribute(value: string): string {
     .replaceAll("\n", "&#10;");
 }
 
-/** The attributes of a button that opens a page or copies a text, or of an answer's press. */
+/**
+ * The attributes of a button that opens a page or copies a text, or of a press. A "read" button is
+ * pressed like an answer; only the model's own reading names its scenario.
+ */
 function actionMarkup(button: ReplyButton, press: string): string {
   if (button.url !== undefined) return ` type="url" url="${escapeAttribute(button.url)}"`;
   if (button.copyText !== undefined) return ` type="copy_text" text="${escapeAttribute(button.copyText)}"`;
+  if (press === "" && button.skipScheduleId !== undefined) return ` type="read" schedule="${button.skipScheduleId}"`;
   return press;
 }
 

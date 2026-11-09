@@ -186,6 +186,7 @@ const POST_V0101_MIGRATIONS = [
   "152_telegram_widgets.sql",
   "153_guest_access.sql",
   "154_guest_shared_skills.sql",
+  "155_scenario_sends.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [

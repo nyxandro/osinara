@@ -90,6 +90,8 @@ Icon names: baby, bell, book, calendar, car, cart, check, clock, close, cloud, f
 
 1-3 lines up to 300 characters: what the widget is and the facts a person acts on (a time, a place, an amount, a deadline). Some apps do not show widgets yet and show only the caption. After the widget, write only what it does not show.
 
+Ordinary buttons go under the card, in the same message: write them at the very end of `caption` with the reply-button markup, exactly as under an answer, for example `Задачи на сегодня: 4 <tg-button-row><tg-button type="read" schedule="<id>" style="success">✅ Задачи на день услышаны</tg-button></tg-button-row>`. They do not count toward the 300 characters, and every Telegram app shows them, also one that shows no widgets. A confirmation that should stop a scenario's repeats is such a button under the card (type `read`, see the reply-button rules), never a `Button` inside the card.
+
 ## Examples
 
 <!-- examples:start (generated from agent/lib/widgets/a2ui/widget-examples.ts) -->

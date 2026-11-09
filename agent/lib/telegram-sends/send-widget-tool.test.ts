@@ -18,17 +18,18 @@ import { AppError } from "../app-error.js";
 import { createSendWidgetTool } from "../tools/send_widget.js";
 import { createUpdateWidgetTool } from "../tools/update_widget.js";
 import { WIDGET_EXAMPLES } from "../widgets/a2ui/widget-examples.js";
+import { prepareWidgetButtons } from "../widgets/widget-buttons.js";
 import { TELEGRAM_LINK_GUARD } from "../widgets/html/telegram-link-guard.js";
 import { TELEGRAM_WIDGET_API_BASE_URL } from "../widgets/widget-config.js";
 import type { StoredWidget } from "../widgets/widget-repository.js";
 
-function context(): ToolContext {
+function context(extra: Record<string, string> = {}): ToolContext {
   return {
     callId: "call-widget-1",
     session: {
       auth: {
         current: {
-          attributes: { familyId: "family-1", role: "owner", telegramChatId: "42", telegramChatType: "private" },
+          attributes: { familyId: "family-1", role: "owner", telegramChatId: "42", telegramChatType: "private", ...extra },
           authenticator: "telegram",
           principalId: "user-1",
           principalType: "user",
@@ -41,8 +42,15 @@ function context(): ToolContext {
   } as unknown as ToolContext;
 }
 
+/** The caption's buttons as `prepareWidgetButtons` returns them; a plain caption has none. */
+function plainButtons(caption: string) {
+  return { afterDelivery: vi.fn(), afterRefusal: vi.fn(), caption, labels: [], replyMarkup: null };
+}
+
 function dependencies(overrides: Record<string, unknown> = {}) {
   return {
+    // The real reader: a caption without button markup needs no database.
+    buttons: vi.fn(prepareWidgetButtons),
     check: vi.fn(async () => ({ refusals: [], warnings: [] })),
     recordTimeline: vi.fn().mockResolvedValue(true),
     repository: { save: vi.fn(async (input: unknown) => input), surfaceIdTaken: vi.fn(async () => false) },
@@ -55,13 +63,59 @@ const MENU = WIDGET_EXAMPLES.find((example) => example.name === "menu")!;
 const SCHEDULE = WIDGET_EXAMPLES.find((example) => example.name === "schedule")!;
 const GAME = "<style>button{width:30%}</style><div id='b'></div><script>for(let i=0;i<9;i++){const c=document.createElement('button');c.textContent='·';c.onclick=()=>{c.textContent='X'};document.getElementById('b').append(c)}</script>";
 
-async function send(deps: ReturnType<typeof dependencies>, input: unknown) {
-  return await createSendWidgetTool(deps as never).execute(input as never, context()) as Record<string, unknown>;
+async function send(deps: ReturnType<typeof dependencies>, input: unknown, extra: Record<string, string> = {}) {
+  return await createSendWidgetTool(deps as never).execute(input as never, context(extra)) as Record<string, unknown>;
 }
 
 function contract(error: unknown): Record<string, unknown> {
   return JSON.parse((error as Error).message.replace(/^[A-Z_]+: /u, "")) as Record<string, unknown>;
 }
+
+describe("send_widget buttons under the card (#480)", () => {
+  it("sends the caption without markup and the buttons as the card's keyboard, then offers them", async () => {
+    const keyboard = { inline_keyboard: [[{ callback_data: "rb:AbCdEfGhIjKlMnOpQrStUv:0", style: "success", text: "✅ Задачи на день услышаны" }]] };
+    const buttons = { ...plainButtons("Задачи на сегодня: 4"), labels: ["✅ Задачи на день услышаны"], replyMarkup: keyboard };
+    const deps = dependencies({ buttons: vi.fn(async () => buttons) });
+
+    await send(deps, { caption: "Задачи на сегодня: 4 <tg-button type=\"read\" schedule=\"x\">✅ Задачи на день услышаны</tg-button>", surface: SCHEDULE.message });
+
+    const call = deps.send.mock.calls[0]![0] as { body: Record<string, unknown> };
+    expect(call.body).toMatchObject({ caption: "Задачи на сегодня: 4", reply_markup: keyboard });
+    expect(buttons.afterDelivery).toHaveBeenCalledWith("7097");
+    expect(deps.repository.save).toHaveBeenCalledWith(expect.objectContaining({ caption: "Задачи на сегодня: 4" }));
+    expect(deps.recordTimeline).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({
+      contentText: expect.stringContaining("[кнопки: «✅ Задачи на день услышаны»]"),
+    }));
+  });
+
+  it("takes the buttons back when Telegram refuses the card", async () => {
+    const buttons = plainButtons("Задачи");
+    const refused = Object.assign(new Error("refused"), { code: "AGENT_WIDGET_DELIVERY_FAILED" });
+    const deps = dependencies({ buttons: vi.fn(async () => buttons), send: vi.fn().mockRejectedValue(refused) });
+
+    await expect(send(deps, { caption: "Задачи", surface: SCHEDULE.message })).rejects.toThrow();
+    expect(buttons.afterRefusal).toHaveBeenCalledOnce();
+    expect(buttons.afterDelivery).not.toHaveBeenCalled();
+  });
+
+  it("keeps the buttons ready when the send's outcome is unknown", async () => {
+    const buttons = plainButtons("Задачи");
+    const ambiguous = Object.assign(new Error("timeout"), { code: "AGENT_WIDGET_DELIVERY_AMBIGUOUS" });
+    const deps = dependencies({ buttons: vi.fn(async () => buttons), send: vi.fn().mockRejectedValue(ambiguous) });
+
+    await expect(send(deps, { caption: "Задачи", surface: SCHEDULE.message })).rejects.toThrow();
+    expect(buttons.afterRefusal).not.toHaveBeenCalled();
+  });
+
+  it("tells a scenario run that presses go to the chat, not to it", async () => {
+    const deps = dependencies();
+
+    const result = await send(deps, { caption: MENU.caption, surface: MENU.message }, { scheduledRunId: "run-1" });
+
+    expect(result.nextStep).toMatch(/придут не сюда, а в разговор этого чата/u);
+    expect(result.nextStep).not.toMatch(/update_widget/u);
+  });
+});
 
 describe("send_widget", () => {
   it("builds, sends, stores and records an A2UI widget", async () => {

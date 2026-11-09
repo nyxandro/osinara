@@ -6,6 +6,8 @@
  * - `turnReplyButtons`: the buttons the model wrote into its final answer, or null for none.
  * - `reportUndeliveredReplyButtons`: reports buttons written where they cannot go out.
  * - `reminderReplyButtons`: one reminder delivery as a rich message with its buttons, or null.
+ * - `replyButtonTarget`: the verified person and chat answer buttons go to.
+ * - `withCheckedSkipTargets`: a set whose "read" buttons name only scenarios of this chat (#480).
  *
  * Key constructs:
  * - The buttons ride on the last message of the answer, after every split and aside, written into
@@ -25,9 +27,15 @@
 import { fitsTelegramRichMessage } from "../telegram-rich-markdown.js";
 import { isTelegramRichMessageRefusal, type SentRichMedia, type SentTelegramMessage } from "../telegram-rich-messages.js";
 import {
+  findAgentScheduleSkipTargets,
+  type AgentScheduleSkipTarget,
+} from "../agent-schedules/agent-schedule-skip.js";
+import {
   hasAnswerButtons,
   newReplyButtonToken,
+  skipScheduleIds,
   withoutAnswerButtons,
+  withSkipTargets,
   type ReplyButtonRows,
 } from "./reply-button-contract.js";
 import { replyButtonMarkup, type ReplyButtonMarkupReading } from "./reply-button-markup.js";
@@ -60,7 +68,8 @@ function isButtonChatType(value: unknown): value is ButtonChatType {
   return typeof value === "string" && BUTTON_CHAT_TYPES.has(value);
 }
 
-function buttonTarget(attributes: AuthAttributes | undefined, telegramChatId: string) {
+/** Who answer buttons in this chat are for: the verified person of a private chat or family group. */
+export function replyButtonTarget(attributes: AuthAttributes | undefined, telegramChatId: string) {
   const chatType = attributes?.telegramChatType;
   const addressee = attributes?.telegramUserId;
   if (
@@ -72,6 +81,24 @@ function buttonTarget(attributes: AuthAttributes | undefined, telegramChatId: st
     return null;
   }
   return { addresseeTelegramUserId: addressee, telegramChatId, telegramChatType: chatType };
+}
+
+/**
+ * The set with each "read" button checked against the scenarios of this chat (#480): one naming a
+ * scenario the person cannot read here becomes a plain answer, so its press reaches the agent.
+ */
+export async function withCheckedSkipTargets(
+  rows: ReplyButtonRows,
+  target: AgentScheduleSkipTarget,
+  context: string,
+): Promise<ReplyButtonRows> {
+  const named = skipScheduleIds(rows);
+  if (named.length === 0) return rows;
+  const valid = await findAgentScheduleSkipTargets({ ...target, scheduleIds: named });
+  if (valid.size < named.length) {
+    console.error(JSON.stringify({ code: "AGENT_REPLY_BUTTON_SKIP_TARGET_INVALID", context, invalid: named.length - valid.size }));
+  }
+  return withSkipTargets(rows, valid);
 }
 
 /** Link and copy buttons alone: written into the last message, with no set to stage or activate. */
@@ -114,7 +141,7 @@ export function turnReplyButtons(input: {
     return null;
   }
   if (!hasAnswerButtons(input.found.rows)) return unstagedReplyButtons(input.found.rows, input.agentTurnId);
-  const verifiedTarget = buttonTarget(input.attributes, input.telegramChatId);
+  const verifiedTarget = replyButtonTarget(input.attributes, input.telegramChatId);
   if (verifiedTarget === null) {
     console.error(JSON.stringify({ agentTurnId: input.agentTurnId, code: "AGENT_REPLY_BUTTONS_TARGET_INVALID" }));
     const utility = withoutAnswerButtons(input.found.rows);
@@ -137,12 +164,13 @@ export function turnReplyButtons(input: {
       return null;
     }
     try {
+      const checked = await withCheckedSkipTargets(buttons, target, input.agentTurnId);
       // A replay of the same turn finds its staged set again and keeps its token.
       const set = await replyButtonRepository.stageForTurn({
         ...target,
         agentSessionId: input.agentSessionId,
         agentTurnId: input.agentTurnId,
-        buttons,
+        buttons: checked,
         messageText: chunk.text,
         token: newReplyButtonToken(),
       });

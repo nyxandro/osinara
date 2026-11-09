@@ -22,15 +22,21 @@ import { telegramSendFailure, telegramSendInputError } from "../telegram-sends/t
 import { recordToolDeliveryInTimeline, toolDeliveryTimelineTarget } from "../telegram-tool-delivery-timeline.js";
 import { officialCheck } from "../widgets/html/official-check.js";
 import { sendWidget, type SendWidgetDependencies, WIDGET_TOOL_CODES } from "../widgets/send-widget.js";
-import { WIDGET_CAPTION_MAX_LENGTH, WIDGET_HEIGHT_MAX, WIDGET_HEIGHT_MIN } from "../widgets/widget-config.js";
+import { prepareWidgetButtons } from "../widgets/widget-buttons.js";
+import {
+  WIDGET_CAPTION_MAX_LENGTH,
+  WIDGET_CAPTION_WITH_BUTTONS_MAX_LENGTH,
+  WIDGET_HEIGHT_MAX,
+  WIDGET_HEIGHT_MIN,
+} from "../widgets/widget-config.js";
 import { widgetRepository } from "../widgets/widget-repository.js";
 import { requireTelegramDeliveryTarget } from "../workspaces/workspace-context.js";
 
 type AnyToolDefinition = ToolDefinition<any, any>;
 
 const inputSchema = z.object({
-  caption: z.string().trim().min(1).max(WIDGET_CAPTION_MAX_LENGTH)
-    .describe(`1-3 lines up to ${WIDGET_CAPTION_MAX_LENGTH} characters: what the widget is and the facts a person acts on (time, place, amount). People whose app does not show widgets see only this.`),
+  caption: z.string().trim().min(1).max(WIDGET_CAPTION_WITH_BUTTONS_MAX_LENGTH)
+    .describe(`1-3 lines up to ${WIDGET_CAPTION_MAX_LENGTH} characters: what the widget is and the facts a person acts on (time, place, amount). People whose app does not show widgets see only this. Buttons under the card are written at its end with the same <tg-button> markup as under an answer; they do not count toward the length.`),
   height: z.number().int().min(WIDGET_HEIGHT_MIN).max(WIDGET_HEIGHT_MAX).optional()
     .describe("Only with html: a fixed height in px for a canvas or an animation; otherwise the height follows the content"),
   html: z.string().min(1).optional()
@@ -89,6 +95,7 @@ export function createSendWidgetTool(dependencies: SendWidgetDependencies): AnyT
 }
 
 export default createSendWidgetTool({
+  buttons: prepareWidgetButtons,
   check: officialCheck,
   recordTimeline: recordToolDeliveryInTimeline,
   repository: widgetRepository,

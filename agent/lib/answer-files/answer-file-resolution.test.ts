@@ -125,6 +125,8 @@ describe("answer file loading", () => {
   it.each([
     ["video/mp4", "video"],
     ["audio/mpeg", "audio"],
+    // A voice note: Telegram refuses it as a document and shows it as a voice note when sent as audio (#480).
+    ["audio/ogg; codecs=opus", "audio"],
     ["image/gif", "document"],
     ["video/quicktime", "document"],
     ["application/pdf", "document"],

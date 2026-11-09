@@ -4,7 +4,11 @@
  *
  * Exports:
  * - `ReplyButton`, `ReplyButtonRows`, `ReplyButtonColor`: one stored set, row by row. A button is an
- *   answer, a link (`url`) or a copy button (`copyText`).
+ *   answer, a link (`url`), a copy button (`copyText`) or a scenario's "read" button
+ *   (`skipScheduleId`, #480).
+ * - `skipScheduleIdOf`, `skipScheduleIds`, `validateSkipScheduleId`: the scenario a "read" button
+ *   skips for the day; the backend presses it, never the model.
+ * - `skippedReplyCaption`, `SKIP_REFUSED_CAPTIONS`: the line a "read" button leaves after its press.
  * - `isAnswerButton`, `hasAnswerButtons`, `withoutAnswerButtons`: answers need an addressee and a
  *   stored set; links and copy buttons are Telegram's own and stay after a choice.
  * - `validateReplyButtonUrl`, `validateReplyButtonCopyText`: the rules of a link and a copy text.
@@ -62,6 +66,11 @@ export interface ReplyButton {
   readonly color?: ReplyButtonColor;
   /** A copy button: what goes to the clipboard. */
   readonly copyText?: string;
+  /**
+   * A "read" button: its press skips the rest of today's runs of this scenario and goes no further,
+   * so it needs an addressee and a stored set like an answer, but never reaches the model.
+   */
+  readonly skipScheduleId?: string;
   readonly text: string;
   /** A link button: the web page it opens. */
   readonly url?: string;
@@ -121,6 +130,46 @@ export function validateReplyButtonCopyText(copyText: string, shownText: string)
   }
   return copyText;
 }
+
+const SCHEDULE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+/** The id of the scenario a "read" button skips, as `manage_agent_schedule` lists it. */
+export function validateSkipScheduleId(value: string): string {
+  const id = value.trim().toLowerCase();
+  if (!SCHEDULE_ID_PATTERN.test(id)) {
+    throw new AppError(INVALID_CODE, `Кнопка «прочитано» называет сценарий его id из списка сценариев (uuid): «${value}»`);
+  }
+  return id;
+}
+
+export function skipScheduleIdOf(button: ReplyButton | undefined): string | null {
+  return button?.skipScheduleId ?? null;
+}
+
+/** The set with a "read" button whose scenario is not a valid target turned into a plain answer. */
+export function withSkipTargets(rows: ReplyButtonRows, valid: ReadonlySet<string>): ReplyButtonRows {
+  return rows.map((row) => row.map((button) => {
+    if (button.skipScheduleId === undefined || valid.has(button.skipScheduleId)) return button;
+    const { skipScheduleId: _invalid, ...answer } = button;
+    return answer;
+  }));
+}
+
+/** Every scenario the "read" buttons of a set skip. */
+export function skipScheduleIds(rows: ReplyButtonRows): string[] {
+  return [...new Set(rows.flat().flatMap((button) => button.skipScheduleId === undefined ? [] : [button.skipScheduleId]))];
+}
+
+/** The line under a message whose "read" button was pressed, with the scenario's local time. */
+export function skippedReplyCaption(localTime: string): string {
+  return `✅ Прочитано в ${localTime}`;
+}
+
+/** What a "read" button says when it could not count the press. */
+export const SKIP_REFUSED_CAPTIONS = {
+  missing: "Не засчитано: этого сценария больше нет",
+  stale: "Не засчитано: эта карточка за прошлый день",
+} as const;
 
 export function replyButtonLabels(rows: ReplyButtonRows): string[] {
   return rows.flatMap((row) => row.map((button) => button.text));

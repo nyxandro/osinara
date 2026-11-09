@@ -398,15 +398,20 @@ stably, remove them together by hand: `docker volume rm osinara-production-cli-p
 `CLI_PROXY_API_KEY` line. Deployment backups no longer archive the volume, so only backups taken
 by v0.49.0 and earlier hold a copy of it.
 
-Interactive root turns may call the application-owned `send_voice_message` boundary when the current
-message explicitly asks for a voice reply. It synthesizes one ElevenLabs `eleven_v4` Ogg Opus note
+Root turns may call the application-owned `send_voice_message` boundary when the current message or
+the running scenario explicitly asks for a voice reply. It synthesizes one ElevenLabs `eleven_v4` Ogg Opus note
 with the pinned voice, reserves the call in `voice_message_operations` before the billable request,
 never retries an ambiguous result, stores the audio in the authorized workspace, and sends it through
 the exact-once workspace file delivery as a Telegram voice note. The optional `ELEVENLABS_API_KEY`
 only authenticates the calls: without it the tool stays visible and every call fails with
 `AGENT_VOICE_MESSAGE_CONFIG_MISSING`, after which the agent answers in text. The pinned voice is an
 ElevenLabs library voice, which the API serves only on a paid ElevenLabs plan. External groups
-receive the capability only through an owner grant; scheduled turns and subagents never receive it.
+receive the capability only through an owner grant; since v0.73.0 (#480) scenario runs receive it like a
+live turn of their chat (an external group's scenario while the group holds the grant), subagents never.
+A refusal only the owner can fix (`AGENT_VOICE_MESSAGE_PROVIDER_PAYMENT_REQUIRED` for credits or a paid
+plan, `..._ACCESS_DENIED` for the key) also sends the owner one message a day per cause through
+`operational_incidents`. The production key may lack the permission to read the subscription
+(`missing_permissions` on `GET /v1/user/subscription`): look up the balance in the ElevenLabs account.
 
 Interactive root turns may answer with a GIF through the application-owned `send_gif` boundary, on
 request and on the model's own initiative. One call makes one KLIPY search for 18 results with the
@@ -417,7 +422,8 @@ chosen MP4 URL goes to Telegram `sendAnimation` unchanged; the backend never sto
 tool is not replay-safe, so a call interrupted by a restart reaches the model as an unknown outcome
 instead of a second GIF. It exists only when the active model config accepts images and
 `KLIPY_API_KEY` is set: otherwise neither the tool nor its prompt rules appear anywhere. External
-groups get it without a grant; scheduled turns and subagents never receive it. KLIPY's usage terms
+groups get it without a grant; since v0.73.0 scenario runs get it too (only when the scenario asks for
+a GIF), subagents never. KLIPY's usage terms
 require their written approval for server-side requests and for choosing among results.
 
 Every chat keeps its last 500 000 messages in `telegram_group_messages` (10 000 before 01.11.2026);
@@ -435,14 +441,23 @@ conversation history like a received place or poll, and is not replay-safe: a ca
 restart reaches the model as an unknown outcome instead of a second message. A refusal is logged as
 `AGENT_LOCATION_DELIVERY_FAILED` or `AGENT_POLL_DELIVERY_FAILED` with Telegram's description, for
 example a group that does not let the bot send polls; an unconfirmed send as `..._DELIVERY_AMBIGUOUS`.
-Every kind of chat gets both without a grant; scheduled turns and subagents never receive them.
+Every kind of chat gets both without a grant; since v0.73.0 scenario runs get them too (#480),
+subagents never.
 
 Since v0.62.0 `send_contact` sends a contact card the same way (`sendContact`, a name and a number from
 the conversation, memory or a source the agent read; spaces, brackets and dashes are dropped, a
 country code is never added): `AGENT_CONTACT_DELIVERY_FAILED`, `AGENT_CONTACT_DELIVERY_AMBIGUOUS`.
 
-Buttons inside an answer are answers, links or copy buttons. Answers stay in the private chat and the
-family group (a stored set in `telegram_reply_button_sets`). A link (`type="url"`, http or https, never
+Buttons inside an answer are answers, links, copy buttons or a scenario's read button. Answers stay in the private chat and the
+family group (a stored set in `telegram_reply_button_sets`). A read button (`type="read"
+schedule="<id>"`, v0.73.0, #480) is pressed by the backend alone: the scenario of the same chat and
+person skips its remaining runs until midnight of its timezone (`agent_schedules.skipped_until`,
+`skipped_at`, migration 155; audit event `agent_schedule.skipped_for_day`), the buttons become
+«✅ Прочитано в HH:MM», and nothing reaches the model; a card of an earlier day or a deleted scenario
+says so instead. The dispatcher passes the skipped occurrences without creating runs. A read button
+naming a scenario that is not a valid target is logged as `AGENT_REPLY_BUTTON_SKIP_TARGET_INVALID` and
+goes out as a plain answer. Buttons written at the end of a widget's caption go under the card as its
+keyboard in the same message (set origin and format `widget`). A link (`type="url"`, http or https, never
 a `t.me`, `telegram.me` or `telegram.dog` address) and a copy button (`type="copy_text"`, a text of at
 most 256 characters that the message itself shows) answer nobody: they go out in every chat, a reminder
 included, without a stored set, and stay under the message after its answers are settled. A refused
@@ -557,8 +572,9 @@ and the bot does not learn of it: the person asks again. v0.63.0 failed on such 
 answered or cancelled are informational.
 
 Since v0.70.0 a private chat with the bot, the owner's and every family member's, gets HTML widgets
-(Bot API 10.4, `docs/plans/telegram-widgets.md`, #468) without a grant: interactive root turns only,
-never scheduled turns, subagents or groups. `send_widget` takes either an A2UI 1.0 surface in the
+(Bot API 10.4, `docs/plans/telegram-widgets.md`, #468) without a grant: root turns of the private
+chat, scenario runs of it included since v0.73.0 (#480), never subagents or groups; `update_widget`
+stays with live turns. `send_widget` takes either an A2UI 1.0 surface in the
 project's catalog (`urn:osinara:a2ui:telegram-widget:1`), which the backend validates and renders into
 the widget's HTML, or the model's own HTML for a game or an animation. Own HTML passes a quick check,
 then Telegram's official checker (widget-sandbox `v0.6.1`, image stage `widget-check`, `/opt/widget-check`,

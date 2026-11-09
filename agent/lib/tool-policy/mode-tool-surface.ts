@@ -57,7 +57,7 @@ import { controlledWebFetchTool } from "./controlled-web-fetch.js";
 import { EXTERNAL_GROUP_FILE_TOOLS } from "./external-group-file-tools.js";
 import { authorizeExternalGroupRight, externalMemoryTools, FOLDED_MEMORY_RIGHTS } from "./external-group-memory-tools.js";
 import { EXTERNAL_GROUP_REMINDER_TOOLS } from "./external-group-reminder-tools.js";
-import { scheduledExternalTool } from "./scheduled-external-tool.js";
+import { scheduledExternalTool, scheduledSendTool } from "./scheduled-external-tool.js";
 import { SUBAGENT_TOOL_ACTIONS, SUBAGENT_TOOL_NAMES } from "./subagent-tool-names.js";
 import { withTurnInterjectionSurface } from "../turn-interjection/turn-interjection-surface.js";
 import { BASELINE_EXTERNAL_GROUP_GRANTS, isExternalGroupToolName, type ExternalGroupToolName } from "./group-tool-catalog.js";
@@ -202,14 +202,14 @@ function buildExternalToolSurface(
     // What participants send is visible in every group: no grant, only a model that sees images.
     surface.import_telegram_attachment = externalContentTool("import_telegram_attachment");
     if (MODEL_VISION_AVAILABLE) surface.inspect_workspace_image = externalContentTool("inspect_workspace_image");
+    // A GIF, a place, a poll and a contact card need no grant, in a live turn and in a scenario alike:
+    // the owner's rule of 09.11.2026 (F3 of #480) makes them available to everyone everywhere.
+    if (GIF_REPLIES_AVAILABLE) surface.send_gif = sendGif as unknown as AnyToolDefinition;
+    surface.send_contact = sendContact as unknown as AnyToolDefinition;
+    surface.send_location = sendLocation as unknown as AnyToolDefinition;
+    surface.send_poll = sendPoll as unknown as AnyToolDefinition;
     if (!scheduledRun) {
       surface.manage_behavior_preference = manageBehaviorPreference as unknown as AnyToolDefinition;
-      // A GIF answers a live participant, so it needs no grant but never runs in a background run.
-      if (GIF_REPLIES_AVAILABLE) surface.send_gif = sendGif as unknown as AnyToolDefinition;
-      // A place, a poll or a contact card answers a live participant too, and needs no grant either.
-      surface.send_contact = sendContact as unknown as AnyToolDefinition;
-      surface.send_location = sendLocation as unknown as AnyToolDefinition;
-      surface.send_poll = sendPoll as unknown as AnyToolDefinition;
       // Reminders need no grant: the caps are enforced per Telegram author and per chat, and a
       // background run has no participant who could own a new one.
       Object.assign(surface, EXTERNAL_GROUP_REMINDER_TOOLS);
@@ -225,8 +225,6 @@ function buildExternalToolSurface(
     if (BASELINE_EXTERNAL_GROUP_GRANTS.has(capability)) continue;
     // A scheduled prompt has no current user message that can back a new memory claim.
     if (scheduledRun && capability === "remember") continue;
-    // A voice note spends ElevenLabs credits and replaces a reply, so it needs a live participant.
-    if (scheduledRun && capability === "send_voice_message") continue;
     if (FOLDED_MEMORY_RIGHTS.has(capability)) continue;
     if (!isExternalGroupToolName(capability)) continue;
     const definition = EXTERNAL_DIRECT_TOOLS[capability as DirectExternalToolName];
@@ -292,29 +290,38 @@ const TRUSTED_SURFACES: Readonly<Record<TrustedSurfaceKey, ToolMap>> = {
   private: { ...UNWRAPPED_BUILT_INS, ...withTurnInterjectionSurface(TRUSTED_APPLICATION_SURFACES.private) },
 };
 
+// What a scenario sends goes out only while its run, author and chat are still authorized, as its
+// final text does before delivery (#480).
+const SCENARIO_SEND_TOOL_NAMES = ["send_contact", "send_gif", "send_location", "send_poll", "send_voice_message", "send_widget"] as const;
+const RAW_TRUSTED_TOOLS: ToolMap = { ...TRUSTED_MODE_TOOLS, ...FAMILY_ONLY_TOOLS, ...PRIVATE_ONLY_TOOLS, ...OWNER_ONLY_TOOLS };
+
+function authorizedScenarioSends(surface: ToolMap): ToolMap {
+  return Object.fromEntries(SCENARIO_SEND_TOOL_NAMES.flatMap((name) => {
+    const raw = RAW_TRUSTED_TOOLS[name];
+    return surface[name] === undefined || raw === undefined ? [] : [[name, wrapModelFacingTool(name, scheduledSendTool(raw))]];
+  }));
+}
+
 const TRUSTED_SCHEDULED_SURFACES: Readonly<Record<TrustedSurfaceKey, ToolMap>> = Object.fromEntries(
   Object.entries(TRUSTED_APPLICATION_SURFACES).map(([environment, surface]) => {
     // A scheduled turn can read chat instructions but has no user source for prompt or memory writes.
     // Family skills are managed only in a conversation with the owner, and nobody is there to confirm
     // network access or to send a requested API key: the owner's door keeps its other sections.
+    // A scenario sends whatever a live turn of its chat sends (#480): a voice note, a widget, a GIF,
+    // a place, a poll, a contact. Only changing a widget already shown stays with the live chat,
+    // where its presses arrive.
     const {
       manage_behavior_preference: _manageBehaviorPreference,
       manage_skill: _manageSkill,
       owner_settings: ownerSettings,
       remember: _remember,
-      send_contact: _sendContact,
-      send_gif: _sendGif,
-      send_location: _sendLocation,
-      send_poll: _sendPoll,
-      send_voice_message: _sendVoiceMessage,
-      // A widget answers a live person, and its presses come back to a live chat.
-      send_widget: _sendWidget,
       update_widget: _updateWidget,
       ...readOnlyPromptSurface
     } = surface;
     return [environment, {
       ...TRUSTED_BUILT_IN_TOOLS,
       ...readOnlyPromptSurface,
+      ...authorizedScenarioSends(readOnlyPromptSurface),
       ...(ownerSettings === undefined ? {} : {
         owner_settings: wrapModelFacingTool("owner_settings", createOwnerSettingsTool(OWNER_SETTINGS_SCHEDULED_SECTIONS)),
       }),

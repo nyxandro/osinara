@@ -160,11 +160,16 @@ async function resolveConversationToolSurface(ctx: DynamicResolveContext) {
     includeApplicationCore = false;
   }
 
+  const scheduledRun = isScheduledSession(ctx);
+  const capabilities = new Set([...policy.allowed].filter((name) => current.has(name)));
+  // The owner's rule (F3 of #480): a group's scenario may speak whenever the group itself may; the
+  // voice tool checks the group's live grant again when it runs.
+  if (scheduledRun && current.has("send_voice_message")) capabilities.add("send_voice_message");
   return buildSurface({
-    capabilities: new Set([...policy.allowed].filter((name) => current.has(name))),
+    capabilities,
     environment: "external",
     includeApplicationCore,
     scheduledHistory: includeApplicationCore && scheduledGroupHistoryAccess(auth) !== null,
-    scheduledRun: isScheduledSession(ctx),
+    scheduledRun,
   });
 }

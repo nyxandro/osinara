@@ -69,8 +69,8 @@ function scheduledRunPrompt(job: ClaimedAgentSchedule): string {
   return [
     "Carry out the scheduled agent scenario for Telegram.",
     "Do not write intermediate statuses and do not describe the process. The final answer must be a ready message for the user, in Russian.",
-    `If the scenario says to send nothing when there is nothing to report, and this is exactly such a case, end the run with exactly the line ${EMPTY_DELIVERY_MARKER} and no other text: this is a successful run without a message, not an error. This is allowed only if you sent nothing in this run, including as a file. Any phrase like "новостей нет" goes to the chat as a message.`,
-    "If required authorization or data is missing, ask one clear question or report the specific error.",
+    `If the scenario says to send nothing when there is nothing to report, and this is exactly such a case, end the run with exactly the line ${EMPTY_DELIVERY_MARKER} and no other text: this is a successful run without a message, not an error. End the run with the same line when everything the scenario asks for has already gone out through tools (a voice message, a widget, a GIF, a place, a poll, a contact) and nothing is left to say. Any phrase like "новостей нет" goes to the chat as a message.`,
+    "If required authorization or data is missing, say in plain Russian what is missing and what the person can write in the chat; nobody answers inside this run.",
     "A failure of one dependency does not cancel independent parts of the task. In the result, clearly separate verified facts from unavailable sections; do not declare an incomplete task fully completed.",
     "<scheduled_agent_run>",
     `schedule_id: ${job.id}`,

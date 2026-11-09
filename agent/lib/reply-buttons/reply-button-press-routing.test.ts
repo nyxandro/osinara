@@ -28,8 +28,8 @@ async function pressedMessage(chat: Record<string, unknown>, chatType: ReplyButt
   });
   if (update?.kind !== "callback_query") throw new Error("TEST_CALLBACK_INVALID");
   const set: ReplyButtonSet = {
-    addresseeTelegramUserId: "telegram-101", buttons: [[{ text: "✅ Да" }]], id: "set-1",
-    messageMedia: [], messageText: "Оформляем?", resolvedAt: new Date(1_700_000_010_000), selectedIndex: 0, status: "selected",
+    activatedAt: new Date(1_700_000_000_000), addresseeTelegramUserId: "telegram-101", createdAt: new Date(1_700_000_000_000), buttons: [[{ text: "✅ Да" }]], id: "set-1",
+    messageFormat: "rich", messageMedia: [], messageText: "Оформляем?", resolvedAt: new Date(1_700_000_010_000), selectedIndex: 0, status: "selected",
     telegramChatId: String(chat.id), telegramChatType: chatType, telegramMessageId: "88", token: TOKEN,
   };
   const { continueAsMessage: handle } = createReplyButtonPressHandler({
@@ -37,6 +37,7 @@ async function pressedMessage(chat: Record<string, unknown>, chatType: ReplyButt
       claimPress: vi.fn().mockResolvedValue({ set, status: "replayed" }),
       replyRouteIsOpen: vi.fn().mockResolvedValue(false),
     },
+    skipSchedule: vi.fn(),
     telegram: { answerPress: vi.fn(), settle: vi.fn() },
   });
   const outcome = await handle(update.callbackQuery, "9001");

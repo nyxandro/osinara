@@ -10,6 +10,8 @@
  *   in their place: the buttons are part of the message, so the edit that adds the caption is the
  *   edit that removes them. Link and copy buttons are written again under the caption: they stay. A message with files names each of them again by its Telegram file:
  *   Telegram refuses an edit of such a message that does not.
+ * - A widget card carries its buttons as a keyboard (#480): settling replaces that keyboard with the
+ *   staying buttons and the caption as a disabled button; the card and its caption stay untouched.
  * - Every refusal is logged with Telegram's own description, so a failure can be diagnosed later.
  */
 import {
@@ -23,6 +25,7 @@ import type { JsonObject } from "../../runtime/json.js";
 import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../../config.js";
 import { AppError } from "../app-error.js";
 import { withoutAnswerButtons } from "./reply-button-contract.js";
+import { settledReplyButtonKeyboard } from "./reply-button-keyboard.js";
 import { replyButtonMarkup } from "./reply-button-markup.js";
 import type { ReplyButtonSet } from "./reply-button-repository.js";
 
@@ -30,7 +33,7 @@ export interface ReplyButtonTelegram {
   answerPress(input: { callbackQueryId: string; showAlert?: boolean; text?: string }): Promise<void>;
   /** Removes the buttons of a delivered set and writes the caption in their place. */
   settle(
-    set: Pick<ReplyButtonSet, "buttons" | "messageMedia" | "messageText" | "telegramChatId" | "telegramMessageId">,
+    set: Pick<ReplyButtonSet, "buttons" | "messageFormat" | "messageMedia" | "messageText" | "telegramChatId" | "telegramMessageId">,
     caption: string,
   ): Promise<void>;
 }
@@ -88,16 +91,22 @@ export const replyButtonTelegram: ReplyButtonTelegram = {
       throw new AppError("AGENT_REPLY_BUTTONS_MESSAGE_MISSING", "Неизвестно сообщение, в котором стоят кнопки");
     }
     const staying = withoutAnswerButtons(set.buttons);
-    const edited = await request("editMessageText", {
-      chat_id: set.telegramChatId,
-      message_id: Number(set.telegramMessageId),
-      rich_message: {
-        markdown: `${set.messageText}\n\n_${caption}_${staying.length === 0 ? "" : `\n\n${replyButtonMarkup(staying)}`}`,
-        ...(set.messageMedia.length === 0
-          ? {}
-          : { media: set.messageMedia.map((file) => ({ id: file.id, media: { media: file.fileId, type: file.kind } })) }),
-      },
-    });
+    const edited = set.messageFormat === "widget"
+      ? await request("editMessageReplyMarkup", {
+        chat_id: set.telegramChatId,
+        message_id: Number(set.telegramMessageId),
+        reply_markup: settledReplyButtonKeyboard(staying, caption),
+      })
+      : await request("editMessageText", {
+        chat_id: set.telegramChatId,
+        message_id: Number(set.telegramMessageId),
+        rich_message: {
+          markdown: `${set.messageText}\n\n_${caption}_${staying.length === 0 ? "" : `\n\n${replyButtonMarkup(staying)}`}`,
+          ...(set.messageMedia.length === 0
+            ? {}
+            : { media: set.messageMedia.map((file) => ({ id: file.id, media: { media: file.fileId, type: file.kind } })) }),
+        },
+      });
     if (edited.ok || alreadySettled(edited)) return;
     throw new AppError("AGENT_REPLY_BUTTONS_SETTLE_FAILED", "Telegram не убрал кнопки из сообщения", {
       details: { ...failureDetails(edited), telegramChatId: set.telegramChatId, telegramMessageId: set.telegramMessageId },

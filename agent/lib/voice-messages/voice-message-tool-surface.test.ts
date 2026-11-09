@@ -57,22 +57,21 @@ describe("voice message tool surface", () => {
     });
   });
 
-  it("exposes the voice tool only to interactive roots", () => {
+  it("exposes the voice tool to live turns and scenarios, never to a child (#480)", () => {
     for (const chat of [{ environment: "private", owner: true }, { environment: "family" }] as const) {
       expect(buildModeToolSurface(chat)).toHaveProperty("send_voice_message");
-      expect(buildModeToolSurface({ ...chat, scheduledRun: true }))
-        .not.toHaveProperty("send_voice_message");
+      expect(buildModeToolSurface({ ...chat, scheduledRun: true })).toHaveProperty("send_voice_message");
       expect(buildSubagentToolSurface(chat)).not.toHaveProperty("send_voice_message");
     }
     expect(buildModeToolSurface({ capabilities: new Set(), environment: "external" }))
       .not.toHaveProperty("send_voice_message");
     expect(buildModeToolSurface({ capabilities: GRANTED, environment: "external" }))
       .toHaveProperty("send_voice_message");
-    expect(buildModeToolSurface({
-      capabilities: GRANTED,
-      environment: "external",
-      scheduledRun: true,
-    })).not.toHaveProperty("send_voice_message");
+    // A group's scenario speaks when the group may: the resolver passes the group's live grant.
+    expect(buildModeToolSurface({ capabilities: GRANTED, environment: "external", scheduledRun: true }))
+      .toHaveProperty("send_voice_message");
+    expect(buildModeToolSurface({ capabilities: new Set(), environment: "external", scheduledRun: true }))
+      .not.toHaveProperty("send_voice_message");
     expect(buildSubagentToolSurface({ capabilities: GRANTED, environment: "external" }))
       .not.toHaveProperty("send_voice_message");
   });
@@ -97,14 +96,18 @@ describe("voice message tool surface", () => {
     expect(schema.safeParse({ scope: "group", text: "Привет" }).success).toBe(false);
   });
 
-  it("lets the owner grant the capability and names it only in interactive group turns", () => {
+  it("lets the owner grant the capability and names it in the group's live turns and scenarios (#480)", () => {
     expect(GRANTABLE_EXTERNAL_GROUP_TOOL_NAMES).toContain("send_voice_message");
     const interactive = modeInstructions({ capabilities: GRANTED, environment: "external", includeApplicationCore: true });
     const scheduled = modeInstructions({
       capabilities: GRANTED, environment: "external", includeApplicationCore: true, scheduledRun: true,
     });
+    const ungrantedScenario = modeInstructions({
+      capabilities: new Set(), environment: "external", includeApplicationCore: true, scheduledRun: true,
+    });
 
     expect(interactive).toContain("answer with a voice message");
-    expect(scheduled).not.toContain("voice message");
+    expect(scheduled).toContain("send_voice_message");
+    expect(ungrantedScenario).not.toContain("send_voice_message");
   });
 });
