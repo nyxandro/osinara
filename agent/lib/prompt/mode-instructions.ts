@@ -23,7 +23,7 @@ import { chatNotesRules } from "./chat-notes-fragments.js";
 import { SUBAGENT_TURN_RULES } from "./delegation-fragments.js";
 import { LINK_AND_COPY_BUTTON_RULES, REPLY_BUTTON_RULES } from "./reply-button-fragments.js";
 import { telegramContentRules } from "./telegram-content-fragments.js";
-import { TELEGRAM_NATIVE_SEND_RULES, TELEGRAM_WIDGET_RULES } from "./telegram-send-fragments.js";
+import { scheduledSendRules, TELEGRAM_NATIVE_SEND_RULES, TELEGRAM_WIDGET_RULES } from "./telegram-send-fragments.js";
 import { TELEGRAM_WIDGETS_AVAILABLE } from "../widgets/widget-config.js";
 
 import {
@@ -81,13 +81,21 @@ import {
 } from "./trusted-fragments.js";
 
 export type ModeInstructionsInput =
-  | { environment: "family"; reactions?: readonly string[] | null; scheduledRun?: boolean; subagentTurn?: boolean }
+  | {
+      environment: "family";
+      /** A private question (`/me`, #467) runs like a scheduled run but is no scenario: it sends nothing else. */
+      privateQuestion?: boolean;
+      reactions?: readonly string[] | null;
+      scheduledRun?: boolean;
+      subagentTurn?: boolean;
+    }
   // `owner`: the verified caller is the family's owner; another member's chat gets none of the owner's administration.
   // `guest`: present only in a guest's own chat (#471), with what the owner turned off for them.
   | {
       environment: "private";
       guest?: GuestModeFacts;
       owner: boolean;
+      privateQuestion?: boolean;
       reactions?: readonly string[] | null;
       scheduledRun?: boolean;
       subagentTurn?: boolean;
@@ -97,6 +105,7 @@ export type ModeInstructionsInput =
       channelAuthored?: boolean;
       environment: "external";
       includeApplicationCore?: boolean;
+      privateQuestion?: boolean;
       reactions?: readonly string[] | null;
       scheduledHistory?: boolean;
       scheduledRun?: boolean;
@@ -248,6 +257,7 @@ function privateInstructions(
   subagentTurn: boolean,
   owner: boolean,
   guest: GuestModeFacts | undefined,
+  scenarioRun: boolean,
 ): string {
   const administration = owner
     ? PRIVATE_ADMINISTRATION_RULES
@@ -271,6 +281,9 @@ function privateInstructions(
     liveGifReplies(scheduledRun, subagentTurn) ? GIF_REPLY_RULES : null,
     scheduledRun || subagentTurn ? null : TELEGRAM_NATIVE_SEND_RULES,
     liveWidgets(scheduledRun, subagentTurn) ? TELEGRAM_WIDGET_RULES : null,
+    scenarioRun
+      ? scheduledSendRules({ gifs: GIF_REPLIES_AVAILABLE, voice: true, widgets: TELEGRAM_WIDGETS_AVAILABLE })
+      : null,
     scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
     // A delegated child has no notes tool; it reads the notes and leaves keeping them to the turn.
     scheduledRun || subagentTurn ? null : chatNotesRules("private"),
@@ -336,6 +349,7 @@ function familyInstructions(
   scheduledRun: boolean,
   reactions: readonly string[] | null,
   subagentTurn: boolean,
+  scenarioRun: boolean,
 ): string {
   return block([
     ...FAMILY_HEADING,
@@ -349,6 +363,7 @@ function familyInstructions(
     scheduledRun || subagentTurn ? null : reactionRules(reactions),
     liveGifReplies(scheduledRun, subagentTurn) ? GIF_REPLY_RULES : null,
     scheduledRun || subagentTurn ? null : TELEGRAM_NATIVE_SEND_RULES,
+    scenarioRun ? scheduledSendRules({ gifs: GIF_REPLIES_AVAILABLE, voice: true, widgets: false }) : null,
     scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
     // A delegated child has no notes tool; it reads the notes and leaves keeping them to the turn.
     scheduledRun || subagentTurn ? null : chatNotesRules("family"),
@@ -388,6 +403,7 @@ function externalInstructions(
   scheduledHistory = false,
   channelAuthored = false,
   subagentTurn = false,
+  scenarioRun = false,
 ): string {
   // Images and attachments are no grant: every group with the application core sees them.
   const images = includeApplicationCore && MODEL_VISION_AVAILABLE;
@@ -395,9 +411,9 @@ function externalInstructions(
   const reminders = includeApplicationCore && !scheduledRun && !subagentTurn;
   // A child reads the group's memory but never saves, edits or deletes a record.
   const saving = capabilities.has("remember") && !subagentTurn;
-  // The voice tool answers a live participant in the chat itself, so a scheduled run and a child
-  // that answers its parent never receive it and must not be told they can speak.
-  const voiceMessages = capabilities.has("send_voice_message") && !scheduledRun && !subagentTurn;
+  // A child answers its parent, never the chat, and a private question answers one person privately,
+  // so neither speaks; a group's scenario speaks when the group may (#480).
+  const voiceMessages = capabilities.has("send_voice_message") && !subagentTurn && (!scheduledRun || scenarioRun);
   const surfaceCapabilities = voiceMessages
     ? capabilities
     : new Set([...capabilities].filter((name) => name !== "send_voice_message"));
@@ -431,6 +447,9 @@ function externalInstructions(
     }),
     EXTERNAL_TASK_BOUNDARIES,
     EXTERNAL_PEOPLE_RULES,
+    scenarioRun && includeApplicationCore
+      ? scheduledSendRules({ gifs: GIF_REPLIES_AVAILABLE, voice: voiceMessages, widgets: false })
+      : null,
     externalMemorySection(capabilities, subagentTurn),
     saving ? MEMORY_SAVING_HEADING : null,
     saving ? MEMORY_WRITE_CONTRACT : null,
@@ -518,8 +537,12 @@ export function modeInstructions(input: ModeInstructionsInput): string {
   const reactions = input.reactions ?? null;
   const scheduledRun = input.scheduledRun ?? false;
   const subagentTurn = input.subagentTurn ?? false;
-  if (input.environment === "private") return privateInstructions(scheduledRun, reactions, subagentTurn, input.owner, input.guest);
-  if (input.environment === "family") return familyInstructions(scheduledRun, reactions, subagentTurn);
+  // A scenario run sends what its chat sends (#480); a private question and a child send nothing more.
+  const scenarioRun = scheduledRun && !subagentTurn && input.privateQuestion !== true;
+  if (input.environment === "private") {
+    return privateInstructions(scheduledRun, reactions, subagentTurn, input.owner, input.guest, scenarioRun);
+  }
+  if (input.environment === "family") return familyInstructions(scheduledRun, reactions, subagentTurn, scenarioRun);
   return externalInstructions(
     input.capabilities,
     reactions,
@@ -528,6 +551,7 @@ export function modeInstructions(input: ModeInstructionsInput): string {
     input.scheduledHistory,
     input.channelAuthored,
     subagentTurn,
+    scenarioRun,
   );
 }
 

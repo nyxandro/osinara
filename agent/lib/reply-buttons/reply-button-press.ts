@@ -28,9 +28,15 @@
  *   conversation owns (a reminder, a scenario report) would open a separate one, and a conversation
  *   waiting for an approval turns replies away, so then it goes to the main conversation.
  *   In both, its text quotes the message the button was under.
+ * - A scenario's "read" button (#480) goes no further than the backend: its press skips the rest of
+ *   the day's runs of its scenario, answers with a pop-up and leaves «✅ Прочитано в 8:10» in place of
+ *   the buttons; the model is not called. Both steps apply the skip: it is idempotent, so the queue
+ *   step finishes what an arrival that failed in between left undone.
  */
 import { parseTelegramUpdate, type TelegramCallbackQuery, type TelegramMessage } from "../../runtime/telegram/inbound.js";
 
+import type { AgentScheduleSkipOutcome } from "../agent-schedules/agent-schedule-skip.js";
+import { skipAgentScheduleForDay } from "../agent-schedules/agent-schedule-skip.js";
 import { AppError } from "../app-error.js";
 import { telegramBaseContinuationToken } from "../telegram-reply-routing.js";
 import {
@@ -38,6 +44,9 @@ import {
   parseReplyButtonCallback,
   replyButtonLabels,
   selectedReplyCaption,
+  SKIP_REFUSED_CAPTIONS,
+  skippedReplyCaption,
+  skipScheduleIdOf,
 } from "./reply-button-contract.js";
 import { replyButtonRepository, type ReplyButtonPressClaim, type ReplyButtonSet } from "./reply-button-repository.js";
 import { replyButtonTelegram, type ReplyButtonTelegram } from "./reply-button-telegram.js";
@@ -53,7 +62,18 @@ export type ReplyButtonPressOutcome =
 
 interface ReplyButtonPressDependencies {
   repository: Pick<typeof replyButtonRepository, "claimPress" | "replyRouteIsOpen">;
+  skipSchedule: typeof skipAgentScheduleForDay;
   telegram: ReplyButtonTelegram;
+}
+
+const SKIPPED_POP_UP = "Прочитано. Повторы на сегодня сняты";
+
+function skipCaption(outcome: AgentScheduleSkipOutcome): string {
+  return outcome.kind === "skipped" ? skippedReplyCaption(outcome.localTime) : SKIP_REFUSED_CAPTIONS[outcome.kind];
+}
+
+function skipPopUp(outcome: AgentScheduleSkipOutcome): string {
+  return outcome.kind === "skipped" ? SKIPPED_POP_UP : SKIP_REFUSED_CAPTIONS[outcome.kind];
 }
 
 /** The words of the message on one line: its HTML tags and entities are rich-message markup. */
@@ -156,6 +176,27 @@ export function createReplyButtonPressHandler(dependencies: ReplyButtonPressDepe
     return selectedReplyCaption(replyButtonLabels(set.buttons)[set.selectedIndex]!, presser);
   }
 
+  /** The scenario skip of a decided set whose "read" button was pressed, or null for any other press. */
+  async function skipOf(set: ReplyButtonSet): Promise<AgentScheduleSkipOutcome | null> {
+    if (set.status !== "selected" || set.selectedIndex === null || set.resolvedAt === null) return null;
+    const scheduleId = skipScheduleIdOf(set.buttons.flat()[set.selectedIndex]);
+    if (scheduleId === null) return null;
+    return await dependencies.skipSchedule({
+      addresseeTelegramUserId: set.addresseeTelegramUserId,
+      pressedAt: set.resolvedAt,
+      scheduleId,
+      // A set whose activation was never recorded was staged right before its message went out.
+      sentAt: set.activatedAt ?? set.createdAt,
+      telegramChatId: set.telegramChatId,
+    });
+  }
+
+  /** The caption of a decided set, a "read" button's own line included. */
+  async function settledCaption(set: ReplyButtonSet, query: TelegramCallbackQuery): Promise<string> {
+    const skip = await skipOf(set);
+    return skip === null ? decidedCaption(set, query) : skipCaption(skip);
+  }
+
   async function claim(query: TelegramCallbackQuery): Promise<ReplyButtonPressClaim | null> {
     const parsed = query.data === undefined ? null : parseReplyButtonCallback(query.data);
     if (parsed === null || query.message === undefined) return null;
@@ -195,11 +236,24 @@ export function createReplyButtonPressHandler(dependencies: ReplyButtonPressDepe
       if (claimed.status === "expired") {
         await answer(query.id, PRESS_EXPIRED);
         // Buttons still on screen after their decision mean an earlier edit never landed.
-        if (claimed.decided !== undefined) await settle(claimed.decided, decidedCaption(claimed.decided, query));
+        if (claimed.decided !== undefined) await settle(claimed.decided, await settledCaption(claimed.decided, query));
         return;
       }
-      if (claimed.status === "claimed") await answer(query.id);
-      await settle(claimed.set, decidedCaption(claimed.set, query));
+      let skip: AgentScheduleSkipOutcome | null;
+      try {
+        skip = await skipOf(claimed.set);
+      } catch (error) {
+        // The queue step applies the skip again and settles the buttons; the spinner stops now.
+        console.error(JSON.stringify({
+          code: "AGENT_REPLY_BUTTON_SKIP_DEFERRED",
+          error: error instanceof Error ? error.message : String(error),
+          setId: claimed.set.id,
+        }));
+        if (claimed.status === "claimed") await answer(query.id);
+        return;
+      }
+      if (claimed.status === "claimed") await answer(query.id, skip === null ? undefined : skipPopUp(skip));
+      await settle(claimed.set, skip === null ? decidedCaption(claimed.set, query) : skipCaption(skip));
     },
 
     /** In the chat queue: the press continues as the addressee's message. */
@@ -209,8 +263,11 @@ export function createReplyButtonPressHandler(dependencies: ReplyButtonPressDepe
         return { status: "answered" };
       }
       const { set } = claimed;
-      if (claimed.status === "claimed") await answer(query.id);
-      await settle(set, decidedCaption(set, query));
+      const skip = await skipOf(set);
+      if (claimed.status === "claimed") await answer(query.id, skip === null ? undefined : skipPopUp(skip));
+      await settle(set, skip === null ? decidedCaption(set, query) : skipCaption(skip));
+      // A "read" button speaks to the backend alone: the model is not called.
+      if (skip !== null) return { status: "answered" };
       return {
         buttonMessageId: set.telegramMessageId!,
         message: pressMessage(query, set, updateId, await asReply(query, set, updateId)),
@@ -222,6 +279,7 @@ export function createReplyButtonPressHandler(dependencies: ReplyButtonPressDepe
 
 const pressHandler = createReplyButtonPressHandler({
   repository: replyButtonRepository,
+  skipSchedule: skipAgentScheduleForDay,
   telegram: replyButtonTelegram,
 });
 

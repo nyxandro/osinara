@@ -30,7 +30,7 @@ export function agentScheduleColumns(qualifier?: string): string {
   ${column("history_window_days")}, ${column("tool_allowlist")}, ${column("last_error_code")}, ${column("created_at")}, ${column("updated_at")},
   ${column("max_runs")}, ${column("completed_runs")}, ${column("pause_requested")}, ${column("execution_context")},
   ${column("check_command")}, ${column("check_until")}, ${column("check_failures")}, ${column("last_checked_at")},
-  ${column("last_check_error_code")}`;
+  ${column("last_check_error_code")}, ${column("skipped_until")}, ${column("skipped_at")}`;
 }
 
 export const AGENT_SCHEDULE_COLUMNS = agentScheduleColumns();

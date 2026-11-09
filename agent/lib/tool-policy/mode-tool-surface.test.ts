@@ -104,18 +104,22 @@ describe("trusted mode tool surfaces", () => {
     expect(externalNames).toEqual(expect.arrayContaining(["read_profile_view"]));
   });
 
-  it("offers widgets only in a live private chat with the bot (#468)", () => {
-    const widgetTools = ["send_widget", "update_widget"];
-    expect(names({ environment: "private", owner: true })).toEqual(expect.arrayContaining(widgetTools));
-    expect(names({ environment: "private", owner: false } as never)).toEqual(expect.arrayContaining(widgetTools));
+  it("offers widgets in the private chat with the bot, a scenario of it included, and changes them only live (#468, #480)", () => {
+    expect(names({ environment: "private", owner: true })).toEqual(expect.arrayContaining(["send_widget", "update_widget"]));
+    expect(names({ environment: "private", owner: false } as never)).toEqual(expect.arrayContaining(["send_widget", "update_widget"]));
+    const scenario = names({ environment: "private", owner: true, scheduledRun: true });
+    expect(scenario).toContain("send_widget");
+    // A scenario's card is changed only by the chat's conversation, where its presses arrive.
+    expect(scenario).not.toContain("update_widget");
     for (const surface of [
       names({ environment: "family" }),
+      names({ environment: "family", scheduledRun: true }),
       names({ capabilities: new Set(), environment: "external" }),
-      names({ environment: "private", owner: true, scheduledRun: true }),
     ]) {
-      for (const tool of widgetTools) expect(surface).not.toContain(tool);
+      expect(surface).not.toContain("send_widget");
+      expect(surface).not.toContain("update_widget");
     }
-    for (const tool of widgetTools) expect(SUBAGENT_TOOL_NAMES.has(tool)).toBe(false);
+    for (const tool of ["send_widget", "update_widget"]) expect(SUBAGENT_TOOL_NAMES.has(tool)).toBe(false);
   });
 
   it("gives a family group the shared tools plus group history and attachments only", () => {
@@ -142,25 +146,35 @@ describe("trusted mode tool surfaces", () => {
     expect(scheduled).toContain("agent");
   });
 
-  it("sends a place or a poll only from a live turn, in every kind of chat", () => {
-    const live = [
+  it("sends a place, a poll and a contact from live turns and scenarios of every chat, never from a child (#480)", () => {
+    const sending = [
       names({ environment: "private", owner: true }),
       names({ environment: "family" }),
       names({ capabilities: new Set(), environment: "external" }),
-    ];
-    const background = [
       names({ environment: "private", owner: true, scheduledRun: true }),
+      names({ environment: "private", owner: false, scheduledRun: true } as never),
       names({ environment: "family", scheduledRun: true }),
       names({ capabilities: new Set(), environment: "external", scheduledRun: true } as never),
+    ];
+    const silent = [
       names({ capabilities: new Set(), environment: "external", includeApplicationCore: false }),
       Object.keys(buildSubagentToolSurface({ environment: "private", owner: true })),
     ];
 
-    for (const surface of live) expect(surface).toEqual(expect.arrayContaining(["send_contact", "send_location", "send_poll"]));
-    for (const surface of background) {
+    for (const surface of sending) expect(surface).toEqual(expect.arrayContaining(["send_contact", "send_location", "send_poll"]));
+    for (const surface of silent) {
       expect(surface).not.toContain("send_contact");
       expect(surface).not.toContain("send_location");
       expect(surface).not.toContain("send_poll");
+    }
+  });
+
+  it("keeps memory writes, chat notes and skills away from every scenario (#480)", () => {
+    for (const scenario of [
+      names({ environment: "private", owner: true, scheduledRun: true }),
+      names({ environment: "family", scheduledRun: true }),
+    ]) {
+      for (const tool of ["remember", "manage_behavior_preference", "manage_skill", "update_widget"]) expect(scenario).not.toContain(tool);
     }
   });
 

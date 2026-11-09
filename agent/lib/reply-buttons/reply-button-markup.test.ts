@@ -13,6 +13,8 @@
  *   markup the backend writes back for Telegram carries only the set's token and indices besides them.
  * - Properties: any valid set written after any prose is read back exactly, and no button tag
  *   survives in the text whatever the model wrote.
+ * - A scenario's read button (#480) names its scenario by id; the model reads it back as written,
+ *   while Telegram receives an ordinary press with the set's token.
  */
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
@@ -337,6 +339,31 @@ const MARKUP_PIECE = fc.constantFrom(
   "<tg-button type=\"url\" url=\"https://example.com\">", "</tg-button>", "<tg-button", "</tg-button", "<tg-", "button", "-row",
   "<", ">", "/", "Да", "Нет", "✅ Ок", "текст", " ", "    ", "\t", "\n", "\n\n", "&amp;", "\\", "\\`",
 );
+
+describe("a scenario's read button (#480)", () => {
+  const ID = "0f398fc5-e589-4e66-bf52-8db8aa3f7251";
+
+  it("reads the scenario it skips and removes the tag from the text", () => {
+    const reading = readReplyButtonMarkup(`Задачи на сегодня: 4\n\n<tg-button-row><tg-button type="read" schedule="${ID.toUpperCase()}" style="success">✅ Задачи на день услышаны</tg-button></tg-button-row>`);
+    expect(reading).toEqual({
+      error: null,
+      markdown: "Задачи на сегодня: 4",
+      rows: [[{ color: "green", skipScheduleId: ID, text: "✅ Задачи на день услышаны" }]],
+    });
+  });
+
+  it("refuses a read button without a scenario id", () => {
+    const reading = readReplyButtonMarkup(`Готово?\n\n<tg-button type="read" schedule="tasks">✅ Да</tg-button>`);
+    expect(reading.rows).toBeNull();
+    expect(reading.error?.message).toContain("сценарий его id");
+  });
+
+  it("writes the scenario back for the model and a plain press for Telegram", () => {
+    const rows: ReplyButtonRows = [[{ color: "green", skipScheduleId: ID, text: "✅ Задачи на день услышаны" }]];
+    expect(replyButtonMarkup(rows)).toBe(`<tg-button-row><tg-button type="read" schedule="${ID}" style="success">✅ Задачи на день услышаны</tg-button></tg-button-row>`);
+    expect(replyButtonMarkup(rows, TOKEN)).toBe(`<tg-button-row><tg-button type="callback_data" data="rb:${TOKEN}:0" style="success">✅ Задачи на день услышаны</tg-button></tg-button-row>`);
+  });
+});
 
 describe("reply button markup properties", () => {
   it("reads back any valid set written after any prose, and leaves the prose as written", () => {

@@ -14,7 +14,7 @@ import { renderWidget } from "./a2ui/render.js";
 import { validateCreateSurface } from "./a2ui/validate-surface.js";
 import { WIDGET_EXAMPLES } from "./a2ui/widget-examples.js";
 import { createWidgetPressHandler, WIDGET_PRESS_UPDATE_ID_BASE } from "./widget-press.js";
-import type { StoredWidget, WidgetQueryClaim } from "./widget-repository.js";
+import type { StoredWidget, WidgetQueryClaim, WidgetScenario } from "./widget-repository.js";
 
 function menuWidget(): StoredWidget {
   const validated = validateCreateSurface(WIDGET_EXAMPLES.find((example) => example.name === "menu")!.message);
@@ -43,7 +43,7 @@ function update(data: string, chatType = "private") {
   };
 }
 
-function dependencies(claim: (widget: StoredWidget) => WidgetQueryClaim, replyOpen = false) {
+function dependencies(claim: (widget: StoredWidget) => WidgetQueryClaim, replyOpen = false, scenario: WidgetScenario | null = null) {
   const widget = menuWidget();
   const calls: string[] = [];
   let stored: unknown = null;
@@ -55,6 +55,7 @@ function dependencies(claim: (widget: StoredWidget) => WidgetQueryClaim, replyOp
     repository: {
       claimQuery: vi.fn(async () => claim(widget)),
       findByMessage: vi.fn(async () => widget),
+      scenarioOf: vi.fn(async () => scenario),
       storePressPayload: vi.fn(async (_id: string, payload: unknown) => {
         stored ??= payload;
         return stored;
@@ -83,6 +84,17 @@ describe("widget presses", () => {
       version: "1.0",
     });
     expect(deps.telegram.answerQuery).toHaveBeenCalledWith({ data: "{\"ok\":1}", widgetQueryId: "q-1" });
+  });
+
+  it("names the scenario and the moment of its run when a scenario sent the widget (#480)", async () => {
+    const scenario = { id: "7e967fe7-9651-460d-a7d7-d94202b77757", scheduledForLocal: "09.11.2026 07:30", title: "Утренние задачи" };
+    const { deps } = dependencies(accepted, false, scenario);
+    await createWidgetPressHandler(deps as never)(update("a0.0.w"));
+    const queued = (deps.enqueue.mock.calls[0] as unknown as [{ payload: { message: { text: string } } }])[0];
+    expect(queued.payload.message.text.split("\n")[0]).toBe(
+      "[Pressed «Готово» in your widget «Меню на неделю» sent by your scheduled scenario «Утренние задачи» (schedule_id 7e967fe7-9651-460d-a7d7-d94202b77757, run of 09.11.2026 07:30 local time); read it with manage_agent_schedule list to see what this press means]",
+    );
+    expect(deps.repository.scenarioOf).toHaveBeenCalledWith("w1");
   });
 
   it("answers busy, closed and invalid presses without queueing them", async () => {

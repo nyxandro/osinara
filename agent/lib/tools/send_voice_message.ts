@@ -11,6 +11,8 @@
  * - A stored voice note is delivered through the exact-once workspace file delivery ledger.
  * - Every failure is returned with the owner-defined recovery path: answer the request in text.
  * - While the voice is synthesized, the chat shows "recording a voice message" instead of typing.
+ * - A refusal only the owner can fix (balance, plan, key) also reaches the owner, once a day per
+ *   cause (#480); a failure to record that message never changes what the model is told.
  */
 import { createHash } from "node:crypto";
 
@@ -19,8 +21,10 @@ import { z } from "zod";
 
 import { AppError, isAppError } from "../app-error.js";
 import { telegramCaptionFits } from "../attachments/telegram-workspace-file-delivery.js";
+import { isFamilyOwner } from "../family-context.js";
 import { sendWorkspaceFileToCurrentChat } from "../attachments/workspace-file-chat-delivery.js";
 import { EMPTY_DELIVERY_MARKER } from "../../runtime/turn/step-history.js";
+import { isScheduledSession } from "../agent-schedules/scheduled-session.js";
 import {
   VOICE_MESSAGE_MEDIA_TYPE,
   VOICE_MESSAGE_TEXT_MAX_LENGTH,
@@ -33,6 +37,8 @@ import {
   type VoiceMessageReservation,
 } from "../voice-messages/voice-message-operation-repository.js";
 import { voiceMessageFailure, voiceMessageInputError } from "../voice-messages/voice-message-errors.js";
+import { voiceProviderOwnerAlert } from "../voice-messages/voice-provider-owner-alert.js";
+import { recordOperationalIncident, type OperationalIncident } from "../operational-incidents/owner-alerts.js";
 import {
   telegramChatActionStatus,
   type ChatActionStatusTarget,
@@ -48,6 +54,8 @@ import type { WorkspaceAuthorization, WorkspaceScope } from "../workspaces/works
 type AnyToolDefinition = ToolDefinition<any, any>;
 
 interface SendVoiceMessageDependencies {
+  /** Records the owner's message about an account refusal; idempotent per key. */
+  alertOwner(incident: OperationalIncident): Promise<void>;
   deliver(input: {
     caption?: string;
     path: string;
@@ -279,9 +287,27 @@ async function sendVoiceMessage(
     ...delivery,
     characterCost,
     generated,
-    nextStep: `Голосовое уже доставлено и является твоим ответом: заверши ход ровно строкой ${EMPTY_DELIVERY_MARKER} без другого текста.`,
+    nextStep: isScheduledSession(ctx)
+      // A scenario often sends a card after its voice note (#480): the run is not over yet.
+      ? `Голосовое уже доставлено как часть результата сценария. Выполни оставшиеся шаги сценария; если сказать больше нечего, заверши ход ровно строкой ${EMPTY_DELIVERY_MARKER} без другого текста.`
+      : `Голосовое уже доставлено и является твоим ответом: заверши ход ровно строкой ${EMPTY_DELIVERY_MARKER} без другого текста.`,
     path: file.path,
   };
+}
+
+/** The owner's own private chat: the only place an account refusal's cause is named to a person. */
+function isOwnerPrivateChat(ctx: ToolContext): boolean {
+  return ctx.session.auth.current?.attributes.telegramChatType === "private" && isFamilyOwner(ctx.session.auth);
+}
+
+async function alertOwnerOfRefusal(dependencies: SendVoiceMessageDependencies, error: unknown): Promise<void> {
+  const incident = voiceProviderOwnerAlert(error, new Date());
+  if (incident === null) return;
+  try {
+    await dependencies.alertOwner(incident);
+  } catch (alertError) {
+    logLedgerFailure("AGENT_VOICE_MESSAGE_OWNER_ALERT_FAILED", incident.key, alertError);
+  }
 }
 
 export function createSendVoiceMessageTool(dependencies: SendVoiceMessageDependencies): AnyToolDefinition {
@@ -289,7 +315,7 @@ export function createSendVoiceMessageTool(dependencies: SendVoiceMessageDepende
     // Repeating it after a crash is safe: its effect is keyed on the call id.
     replaySafe: true,
     description: [
-      "Only when the current message explicitly asks to answer by voice or to send a voice message: speak text through ElevenLabs and send it as a voice message to the current chat.",
+      "Only when the current message or the instructions of the running scenario explicitly ask to answer by voice or to send a voice message: speak text through ElevenLabs and send it as a voice message to the current chat.",
       "Without such a request answer with text, even if the person sent a voice message; one request does not switch later answers to voice.",
       "Load the voice-replies skill before the call: text is live speech with numbers in words and no markup, and links or data go to caption.",
       "After delivered=true follow nextStep; on an error follow correction and do not repeat the call.",
@@ -299,13 +325,15 @@ export function createSendVoiceMessageTool(dependencies: SendVoiceMessageDepende
       try {
         return await sendVoiceMessage(dependencies, parseInput(rawInput), ctx);
       } catch (error) {
-        throw voiceMessageFailure(error);
+        await alertOwnerOfRefusal(dependencies, error);
+        throw voiceMessageFailure(error, { ownerChat: isOwnerPrivateChat(ctx) });
       }
     },
   }) as AnyToolDefinition;
 }
 
 export default createSendVoiceMessageTool({
+  alertOwner: async (incident) => await recordOperationalIncident(incident),
   deliver: async (input, ctx) => await sendWorkspaceFileToCurrentChat({
     ...(input.caption === undefined ? {} : { caption: input.caption }),
     path: input.path,

@@ -16,10 +16,13 @@
  * - A widget Telegram confirmed is never sent again: a failure to store it is logged and leaves a
  *   widget that cannot be updated or pressed, which the result says.
  * - Logs carry sizes and codes, never the widget's content or caption: they may hold personal data.
+ * - Buttons written into the caption go under the card as its keyboard (`widget-buttons.ts`, #480).
  */
+import type { JsonObject } from "../../runtime/json.js";
 import type { ToolContext } from "../../runtime/tool.js";
 
 import { EMPTY_DELIVERY_MARKER } from "../../runtime/turn/step-history.js";
+import { isScheduledSession } from "../agent-schedules/scheduled-session.js";
 import { telegramSendInputError } from "../telegram-sends/telegram-send-errors.js";
 import type { sendTelegramNativeMessage } from "../telegram-sends/telegram-native-send.js";
 import type { recordToolDeliveryInTimeline, ToolDeliveryTimelineTarget } from "../telegram-tool-delivery-timeline.js";
@@ -35,6 +38,7 @@ import {
   WIDGET_COMPRESSED_MAX_BYTES,
   WIDGET_HTML_MAX_BYTES,
 } from "./widget-config.js";
+import type { prepareWidgetButtons, WidgetButtons } from "./widget-buttons.js";
 import type { widgetRepository } from "./widget-repository.js";
 
 export const WIDGET_TOOL_CODES = {
@@ -54,6 +58,7 @@ export interface SendWidgetInput {
 }
 
 export interface SendWidgetDependencies {
+  readonly buttons: typeof prepareWidgetButtons;
   readonly check: OfficialCheck;
   readonly recordTimeline: typeof recordToolDeliveryInTimeline;
   readonly repository: Pick<typeof widgetRepository, "save" | "surfaceIdTaken">;
@@ -93,10 +98,40 @@ function tooLarge(htmlBytes: number, compressedBytes: number): Error {
   });
 }
 
+/** The card with its buttons under it; a refusal takes back the buttons staged for it. */
+async function deliverWithButtons(
+  dependencies: SendWidgetDependencies,
+  delivery: Delivery,
+  buttons: WidgetButtons,
+  body: Record<string, string | number | boolean>,
+): Promise<string> {
+  let telegramMessageId: string;
+  try {
+    telegramMessageId = await deliver(dependencies, delivery, {
+      ...body,
+      caption: buttons.caption,
+      ...(buttons.replyMarkup === null ? {} : { reply_markup: buttons.replyMarkup }),
+    });
+  } catch (error) {
+    // Only an unconfirmed send may have shown the card: its buttons stay ready for their press.
+    if (!(error instanceof Error && "code" in error && error.code === WIDGET_TOOL_CODES.ambiguous)) await buttons.afterRefusal();
+    throw error;
+  }
+  await buttons.afterDelivery(telegramMessageId);
+  return telegramMessageId;
+}
+
+/** The history line of a card: its caption and the buttons under it. */
+function historyCaption(buttons: WidgetButtons): string {
+  return buttons.labels.length === 0
+    ? buttons.caption
+    : `${buttons.caption} [кнопки: ${buttons.labels.map((label) => `«${label}»`).join(", ")}]`;
+}
+
 async function deliver(
   dependencies: SendWidgetDependencies,
   delivery: Delivery,
-  body: Record<string, string | number | boolean>,
+  body: JsonObject,
 ): Promise<string> {
   try {
     const sent = await dependencies.send({
@@ -129,7 +164,11 @@ async function deliver(
   }
 }
 
-function nextStep(actions: readonly string[], surfaceId: string | null): string {
+// A scenario run never sees presses or changes its card: both belong to the chat's conversation (#480).
+const SCHEDULED_NEXT_STEP = `Виджет уже в чате как часть результата сценария. Нажатия его кнопок придут не сюда, а в разговор этого чата. Выполни оставшиеся шаги сценария; если сказать больше нечего, заверши ход ровно строкой ${EMPTY_DELIVERY_MARKER} без другого текста.`;
+
+function nextStep(actions: readonly string[], surfaceId: string | null, scheduled = false): string {
+  if (scheduled) return SCHEDULED_NEXT_STEP;
   const base = `Виджет уже в чате и стал частью твоего ответа. Если он отвечает на просьбу целиком, заверши ход ровно строкой ${EMPTY_DELIVERY_MARKER} без другого текста; если нужны слова, напиши только то, чего в виджете нет, и не пересказывай его.`;
   if (surfaceId === null) return base;
   const presses = actions.length === 0
@@ -149,8 +188,8 @@ async function sendSurface(dependencies: SendWidgetDependencies, input: SendWidg
   if (!rendered.ok) throw surfaceErrors(rendered.errors);
   const widget = rendered.widget;
   if (widget.htmlBytes > WIDGET_HTML_MAX_BYTES || widget.compressedBytes > WIDGET_COMPRESSED_MAX_BYTES) throw tooLarge(widget.htmlBytes, widget.compressedBytes);
-  const telegramMessageId = await deliver(dependencies, delivery, {
-    caption: input.caption,
+  const buttons = await dependencies.buttons(input.caption, ctx, delivery.chatId);
+  const telegramMessageId = await deliverWithButtons(dependencies, delivery, buttons, {
     html: widget.html,
     ...(widget.actions.length > 0 ? { allow_queries: true } : {}),
   });
@@ -160,7 +199,7 @@ async function sendSurface(dependencies: SendWidgetDependencies, input: SendWidg
     await dependencies.repository.save({
       agentSessionId: ctx.session.id,
       agentTurnId: ctx.session.turn.id,
-      caption: input.caption,
+      caption: buttons.caption,
       dataModel: surface.dataModel,
       surface: { actions: widget.actions, baked: widget.baked, bindings: widget.bindings, frozen: widget.frozen, sendDataModel: surface.sendDataModel, slots: widget.slots },
       surfaceId: surface.surfaceId,
@@ -173,7 +212,7 @@ async function sendSurface(dependencies: SendWidgetDependencies, input: SendWidg
     console.error(JSON.stringify({ code: "AGENT_WIDGET_RECORD_FAILED", error: error instanceof Error ? error.message : String(error), telegramMessageId }));
   }
   const projectionCompleted = await dependencies.recordTimeline(ctx, delivery.timelineTarget, {
-    contentText: `[виджет ${surface.surfaceId}] ${input.caption}`,
+    contentText: `[виджет ${surface.surfaceId}] ${historyCaption(buttons)}`,
     failureCode: "AGENT_WIDGET_PROJECTION_FAILED",
     telegramMessageId,
   });
@@ -181,7 +220,7 @@ async function sendSurface(dependencies: SendWidgetDependencies, input: SendWidg
   return {
     actions: updatable ? actions : [],
     delivered: true,
-    nextStep: updatable ? nextStep(actions, surface.surfaceId) : nextStep([], null),
+    nextStep: updatable ? nextStep(actions, surface.surfaceId, isScheduledSession(ctx)) : nextStep([], null, isScheduledSession(ctx)),
     projectionCompleted,
     retryable: false,
     sideEffectStatus: "completed",
@@ -207,20 +246,20 @@ async function sendHtml(dependencies: SendWidgetDependencies, input: SendWidgetI
     console.info(JSON.stringify({ code: "AGENT_WIDGET_HTML_REFUSED", findings: verdict.refusals.map((finding) => finding.code), stage: "official" }));
     throw htmlRefused(verdict.refusals);
   }
-  const telegramMessageId = await deliver(dependencies, delivery, {
-    caption: input.caption,
+  const buttons = await dependencies.buttons(input.caption, ctx, delivery.chatId);
+  const telegramMessageId = await deliverWithButtons(dependencies, delivery, buttons, {
     html,
     ...(input.height === undefined ? {} : { height: input.height }),
   });
   console.info(JSON.stringify({ code: "AGENT_WIDGET_SENT", compressedBytes: sent.compressedBytes, htmlBytes: sent.htmlBytes, kind: "html", warnings: verdict.warnings.length }));
   const projectionCompleted = await dependencies.recordTimeline(ctx, delivery.timelineTarget, {
-    contentText: `[виджет] ${input.caption}`,
+    contentText: `[виджет] ${historyCaption(buttons)}`,
     failureCode: "AGENT_WIDGET_PROJECTION_FAILED",
     telegramMessageId,
   });
   return {
     delivered: true,
-    nextStep: nextStep([], null),
+    nextStep: nextStep([], null, isScheduledSession(ctx)),
     projectionCompleted,
     retryable: false,
     sideEffectStatus: "completed",

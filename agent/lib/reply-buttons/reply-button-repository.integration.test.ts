@@ -154,6 +154,44 @@ describeWithDatabase("reply button repository", () => {
     });
   });
 
+  it("keeps a scenario's read button when the person writes something else (#480)", async () => {
+    const read = await replyButtonRepository.stageForTurn({
+      ...TARGET, agentSessionId: "wrun_1", agentTurnId: "turn_read",
+      buttons: [[{ color: "green", skipScheduleId: "0f398fc5-e589-4e66-bf52-8db8aa3f7251", text: "✅ Задачи на день услышаны" }]],
+      messageText: "Задачи на сегодня", token: "R".repeat(22),
+    });
+    await replyButtonRepository.activate(read.id, "60", []);
+    const plain = await delivered("turn_plain", "61", "P".repeat(22));
+
+    const dismissed = await replyButtonRepository.dismissForAddressee({
+      addresseeTelegramUserId: "101", afterUpdateId: "9000", telegramChatId: "101", writtenAt: new Date(Date.now() + 1_000),
+    });
+
+    expect(dismissed.map((set) => set.id)).toEqual([plain.id]);
+  });
+
+  it("keeps a widget card's buttons apart from the turn that sent it (#480)", async () => {
+    const widget = await replyButtonRepository.stageForWidget({
+      ...TARGET, buttons: ROWS, caption: "Задачи на сегодня: 4", token: "W".repeat(22),
+    });
+    await stageTurn("turn_1", "T".repeat(22));
+
+    await replyButtonRepository.activate(widget.id, "70", []);
+    await replyButtonRepository.activateForTurn("turn_1", "71", []);
+
+    const rows = (await database().query<{ id: string; message_format: string; origin: string; telegram_message_id: string }>(
+      "SELECT id, origin, message_format, telegram_message_id::text FROM telegram_reply_button_sets ORDER BY telegram_message_id",
+    )).rows;
+    expect(rows).toEqual([
+      { id: widget.id, message_format: "widget", origin: "widget", telegram_message_id: "70" },
+      { id: expect.any(String), message_format: "rich", origin: "turn", telegram_message_id: "71" },
+    ]);
+    const claimed = await replyButtonRepository.claimPress({
+      callbackQueryId: "cb-w", index: 0, pressedByTelegramUserId: "101", telegramChatId: "101", telegramMessageId: "70", token: "W".repeat(22),
+    });
+    expect(claimed).toMatchObject({ set: { activatedAt: expect.any(Date), messageFormat: "widget", messageText: "Задачи на сегодня: 4" }, status: "claimed" });
+  });
+
   it("leaves buttons whose earlier tap still waits to be decided", async () => {
     const tapped = await delivered("turn_1", "50", "A".repeat(22));
     const untouched = await delivered("turn_2", "51", "B".repeat(22));

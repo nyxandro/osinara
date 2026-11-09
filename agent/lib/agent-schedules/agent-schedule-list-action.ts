@@ -20,7 +20,7 @@ export const AGENT_SCHEDULE_LIST_FIELDS = {
 };
 
 const LAST_RUN_GUIDANCE =
-  "Use the list to check the last run before explaining a failure. lastRun.executionStatus is the execution state, deliveredAt the fact of delivery; completed without deliveredAt means the scenario deliberately stayed silent; taskOutcome=not_verified does not confirm that the requirements were met. diagnostics holds only observed errors, which by themselves do not prove the whole task failed. Take times for the user from nextRunAtLocal and lastRun.scheduledForLocal.";
+  "Use the list to check the last run before explaining a failure. lastRun.executionStatus is the execution state, deliveredAt the fact of delivery; completed without deliveredAt means the scenario deliberately stayed silent; taskOutcome=not_verified does not confirm that the requirements were met. diagnostics holds only observed errors, which by themselves do not prove the whole task failed. Take times for the user from nextRunAtLocal and lastRun.scheduledForLocal. skip appears after the person pressed the scenario\'s read button (skip.pressedAt): its runs before skip.until pass without running.";
 
 export const AGENT_SCHEDULE_LIST_DESCRIPTION = [
   "List shows the current user's personal and family agent schedules page by page: {\"action\":\"list\"}; the result is {items,nextCursor}, and a not-null nextCursor goes back unchanged as cursor for the next page.",

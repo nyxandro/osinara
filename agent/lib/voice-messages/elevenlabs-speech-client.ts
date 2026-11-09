@@ -52,11 +52,14 @@ export type VoiceMessageProviderOutcome = "ambiguous" | "definitive";
 
 export class VoiceMessageProviderError extends AppError {
   readonly outcome: VoiceMessageProviderOutcome;
+  /** ElevenLabs' own code of a refusal, such as `insufficient_credits`; null when it gave none. */
+  readonly providerErrorCode: string | null;
 
-  constructor(code: string, message: string, outcome: VoiceMessageProviderOutcome) {
+  constructor(code: string, message: string, outcome: VoiceMessageProviderOutcome, providerErrorCode: string | null = null) {
     super(code, message);
     this.name = "VoiceMessageProviderError";
     this.outcome = outcome;
+    this.providerErrorCode = providerErrorCode;
   }
 }
 
@@ -107,8 +110,8 @@ const REJECTED_ERROR = [
   "Сервис озвучки ElevenLabs отклонил запрос на озвучку",
 ] as const;
 
-function providerError(code: string, message: string, outcome: VoiceMessageProviderOutcome) {
-  return new VoiceMessageProviderError(code, message, outcome);
+function providerError(code: string, message: string, outcome: VoiceMessageProviderOutcome, providerErrorCode: string | null = null) {
+  return new VoiceMessageProviderError(code, message, outcome, providerErrorCode);
 }
 
 function missingConfiguration(): VoiceMessageProviderError {
@@ -280,7 +283,11 @@ export function createElevenLabsSpeechClient(options: ElevenLabsSpeechClientOpti
           providerStatus: response.status,
           requestId: detail.requestId,
         }));
-        throw providerError(code, message, definitive ? "definitive" : "ambiguous");
+        // The code that classified the refusal names its cause; either field may carry it.
+        const providerCode = [detail.providerErrorCode, detail.providerErrorStatus]
+          .find((candidate) => candidate !== null && PAYMENT_PROVIDER_CODES.has(candidate))
+          ?? detail.providerErrorCode ?? detail.providerErrorStatus;
+        throw providerError(code, message, definitive ? "definitive" : "ambiguous", providerCode);
       }
 
       const bytes = await readSpeech(response);

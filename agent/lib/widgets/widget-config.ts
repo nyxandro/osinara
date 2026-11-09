@@ -29,6 +29,8 @@ export const WIDGET_PUBLIC_DATA_MAX_BYTES = 1_024;
 /** A widget request's data, in bytes (Bot API 10.4 beta). */
 export const WIDGET_QUERY_DATA_MAX_BYTES = 64;
 export const WIDGET_CAPTION_MAX_LENGTH = 300;
+/** The caption as written, its button markup included (#480): Telegram's limit of a media caption. */
+export const WIDGET_CAPTION_WITH_BUTTONS_MAX_LENGTH = 1_024;
 export const WIDGET_HEIGHT_MIN = 50;
 export const WIDGET_HEIGHT_MAX = 600;
 /** Agent actions in one widget: each is a button whose press reaches the agent. */

@@ -21,6 +21,15 @@ const DELIVERY_UNCONFIRMED_CODES = new Set([
 const TEXT_REPLY_CORRECTION =
   "Не вызывай send_voice_message повторно в этом ходе. Ответь на ту же просьбу обычным текстом и первой фразой коротко скажи, что голосовое сейчас не получилось, опираясь на reason, поэтому отвечаешь текстом.";
 
+// The owner's account is the owner's business: anyone else, a guest included, learns only that the
+// voice note did not work this time, while the owner gets the cause in a message of their own (#480).
+const ACCOUNT_REFUSAL_CODES = new Set([
+  "AGENT_VOICE_MESSAGE_CONFIG_MISSING",
+  "AGENT_VOICE_MESSAGE_PROVIDER_ACCESS_DENIED",
+  "AGENT_VOICE_MESSAGE_PROVIDER_PAYMENT_REQUIRED",
+]);
+const PRIVATE_ACCOUNT_REASON = "Голосовое сейчас недоступно.";
+
 const UNCONFIRMED_DELIVERY_CORRECTION =
   "Не вызывай send_voice_message повторно: голосовое могло дойти до чата. Ответь на ту же просьбу обычным текстом и первой фразой коротко скажи, что не удалось подтвердить отправку голосового, поэтому дублируешь ответ текстом.";
 
@@ -38,12 +47,15 @@ export function voiceMessageInputError(): ModelFacingError {
   });
 }
 
-export function voiceMessageFailure(error: unknown): ModelFacingError {
+/** `ownerChat`: the owner's own private chat, the only place the account's cause may be named. */
+export function voiceMessageFailure(error: unknown, options: { ownerChat: boolean } = { ownerChat: true }): ModelFacingError {
   if (error instanceof ModelFacingError) return error;
   const code = isAppError(error) ? error.code : "AGENT_VOICE_MESSAGE_FAILED";
-  const reason = isAppError(error)
-    ? error.message.replace(new RegExp(`^${error.code}:\\s*`, "u"), "")
-    : UNEXPECTED_FAILURE_REASON;
+  const reason = !isAppError(error)
+    ? UNEXPECTED_FAILURE_REASON
+    : !options.ownerChat && ACCOUNT_REFUSAL_CODES.has(code)
+      ? PRIVATE_ACCOUNT_REASON
+      : error.message.replace(new RegExp(`^${error.code}:\\s*`, "u"), "");
   if (!isAppError(error)) {
     console.error(JSON.stringify({
       code,

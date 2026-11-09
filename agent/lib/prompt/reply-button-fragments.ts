@@ -3,7 +3,8 @@
  *
  * Exports:
  * - `REPLY_BUTTON_RULES`: when to offer tap-to-answer buttons, how to write, word and color them
- *   in the text of the answer, what a tap means, and what a tap under a reminder asks for.
+ *   in the text of the answer, what a tap means, what a scenario's read button does (#480), and
+ *   what a tap under a reminder asks for.
  * - `LINK_AND_COPY_BUTTON_RULES`: buttons that open a web page or copy a text, in every chat; the
  *   backend refuses a Telegram address and a copy text the message does not show
  *   (`reply-buttons/reply-button-contract.ts`).
@@ -27,6 +28,8 @@ Each button is the person's answer in their own words, one line of up to 40 char
 Do not put buttons on an answer that asks nothing, on an open question that needs free text, in a note written before a tool call, or out of habit. Do not put buttons in front of an action that asks for confirmation itself: call the tool, and the person confirms on its own card. Never describe the markup or the buttons' mechanics to the person.
 
 A tap reaches you as the person's own message \`[Tapped button «…» under your message: «…»]\`. It means exactly what typing those words would: an answer, never a confirmation. Buttons stay until the person taps one or writes anything else; if they write instead, just answer their message. In a group only the person you are answering can tap.
+
+A read button confirms a scenario that repeats something until the person confirms it, for example tasks read out every hour until they are heard: \`<tg-button type="read" schedule="<id of the repeating scenario>" style="success">✅ Задачи на день услышаны</tg-button>\`. Its tap never reaches you: the backend counts that scenario as read for the day, skips its remaining runs until midnight of its timezone and writes «✅ Прочитано в 8:10» in place of the buttons; \`manage_agent_schedule\` list then shows the scenario with \`skip\`. Take the id from that list; the scenario must belong to this chat. When the person writes instead that they have read it, do the same yourself: move the repeating scenario's next run to its first time tomorrow.
 
 A reminder may carry the same buttons, for example «✅ Оплатил» and «⏰ Через час» under paying the internet bill; how to write them is in the \`schedules\` skill. A tap under a reminder comes to you the same way: for a postponement set a new one-time reminder with the same content, buttons included, for the moment the button names, counted from the tap, and say for what time; for a done action answer briefly.
 `.trim();
