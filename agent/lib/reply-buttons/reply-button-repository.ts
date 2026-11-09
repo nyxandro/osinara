@@ -24,13 +24,21 @@ import { database } from "../database.js";
 import type { SentRichMedia } from "../telegram-rich-messages.js";
 import type { ReplyButtonRows } from "./reply-button-contract.js";
 
-// Buttons live only in rich messages; the column keeps the message's format explicit.
+// Buttons live in rich messages, and under a widget card as its keyboard (#480); the column keeps
+// the message's format explicit, because the edit after a choice differs.
 const RICH_MESSAGE_FORMAT = "rich";
+const WIDGET_MESSAGE_FORMAT = "widget";
+
+export type ReplyButtonMessageFormat = "plain" | "rich" | "widget";
 
 export interface ReplyButtonSet {
+  /** When the buttons were first offered; null while the set is only staged. */
+  activatedAt: Date | null;
+  createdAt: Date;
   addresseeTelegramUserId: string;
   buttons: ReplyButtonRows;
   id: string;
+  messageFormat: ReplyButtonMessageFormat | null;
   /** The Telegram files the message shows; empty for a message without files. */
   messageMedia: readonly SentRichMedia[];
   /** The rich markdown of the message without its buttons. */
@@ -50,9 +58,12 @@ export type ReplyButtonPressClaim =
   | { status: "forbidden" };
 
 interface SetRow {
+  activated_at: Date | null;
+  created_at: Date;
   addressee_telegram_user_id: string;
   buttons: ReplyButtonRows;
   id: string;
+  message_format: ReplyButtonMessageFormat | null;
   message_media: SentRichMedia[] | null;
   message_text: string | null;
   resolved_at: Date | null;
@@ -65,13 +76,17 @@ interface SetRow {
 }
 
 const SET_COLUMNS = `id, token, telegram_chat_id, telegram_chat_type, addressee_telegram_user_id, buttons,
-  telegram_message_id::text, message_text, message_media, selected_index, resolved_at, status`;
+  telegram_message_id::text, message_text, message_format, message_media, selected_index, resolved_at, status,
+  activated_at, created_at`;
 
 function toSet(row: SetRow): ReplyButtonSet {
   return {
+    activatedAt: row.activated_at,
     addresseeTelegramUserId: row.addressee_telegram_user_id,
+    createdAt: row.created_at,
     buttons: row.buttons,
     id: row.id,
+    messageFormat: row.message_format,
     messageMedia: row.message_media ?? [],
     messageText: row.message_text,
     resolvedAt: row.resolved_at,
@@ -134,6 +149,27 @@ export const replyButtonRepository = {
        RETURNING ${SET_COLUMNS}`,
       [input.token, input.reminderId, input.telegramChatId, input.telegramChatType, input.addresseeTelegramUserId,
         JSON.stringify(input.buttons), input.messageText, RICH_MESSAGE_FORMAT],
+    );
+    return toSet(result.rows[0]!);
+  },
+
+  /**
+   * The buttons under a widget card, with its caption as the set's text. They belong to no turn, so
+   * the final answer of the same turn never takes them for its own (#480).
+   */
+  async stageForWidget(input: ReplyButtonTarget & {
+    buttons: ReplyButtonRows;
+    caption: string;
+    token: string;
+  }): Promise<ReplyButtonSet> {
+    const result = await database().query<SetRow>(
+      `INSERT INTO telegram_reply_button_sets
+         (token, origin, telegram_chat_id, telegram_chat_type, addressee_telegram_user_id,
+          buttons, status, message_text, message_format)
+       VALUES ($1, 'widget', $2, $3, $4, $5::jsonb, 'staged', $6, $7)
+       RETURNING ${SET_COLUMNS}`,
+      [input.token, input.telegramChatId, input.telegramChatType, input.addresseeTelegramUserId,
+        JSON.stringify(input.buttons), input.caption, WIDGET_MESSAGE_FORMAT],
     );
     return toSet(result.rows[0]!);
   },
@@ -256,12 +292,16 @@ export const replyButtonRepository = {
     return result.rows[0]?.open === true;
   },
 
-  /** Whether the person has buttons on screen in this chat; a read, so most messages write nothing. */
+  /**
+   * Whether the person has buttons on screen in this chat that a message of theirs would remove; a
+   * read, so most messages write nothing. A "read" button stays (#480), so it does not count.
+   */
   async hasActiveForAddressee(input: { addresseeTelegramUserId: string; telegramChatId: string }): Promise<boolean> {
     const result = await database().query<{ offered: boolean }>(
       `SELECT EXISTS (
          SELECT 1 FROM telegram_reply_button_sets
           WHERE telegram_chat_id = $1 AND addressee_telegram_user_id = $2 AND status = 'active'
+            AND NOT jsonb_path_exists(buttons, '$[*][*].skipScheduleId')
        ) AS offered`,
       [input.telegramChatId, input.addresseeTelegramUserId],
     );
@@ -270,7 +310,8 @@ export const replyButtonRepository = {
 
   /**
    * The addressee wrote instead of tapping: every set they could still tap before that goes away,
-   * except one whose tap arrived earlier and is still waiting to be decided.
+   * except one whose tap arrived earlier and is still waiting to be decided, and one with a
+   * scenario's "read" button: a word in between does not mean the day's tasks were read (#480).
    */
   async dismissForAddressee(input: {
     addresseeTelegramUserId: string;
@@ -284,6 +325,7 @@ export const replyButtonRepository = {
           SET status = 'dismissed', resolved_at = now()
         WHERE offered.telegram_chat_id = $1 AND offered.addressee_telegram_user_id = $2
           AND offered.status = 'active' AND offered.activated_at < $3
+          AND NOT jsonb_path_exists(offered.buttons, '$[*][*].skipScheduleId')
           AND NOT EXISTS (
             SELECT 1 FROM telegram_ingress_updates AS tap
              WHERE tap.status IN ('pending', 'processing') AND tap.update_id < $4::bigint

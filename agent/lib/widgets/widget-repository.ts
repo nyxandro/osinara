@@ -64,6 +64,14 @@ interface WidgetRow {
   telegram_message_id: string;
 }
 
+/** The scenario run that sent a widget, as a press names it to the chat's conversation (#480). */
+export interface WidgetScenario {
+  readonly id: string;
+  /** The run's moment in the scenario's own timezone, so a press on an older card reads as one. */
+  readonly scheduledForLocal: string;
+  readonly title: string;
+}
+
 /** How long a claimed press may wait for its message to reach the queue before it stops counting as busy. */
 const UNQUEUED_PRESS_BUSY_SECONDS = 120;
 
@@ -84,6 +92,25 @@ function toWidget(row: WidgetRow): StoredWidget {
 }
 
 export const widgetRepository = {
+  /**
+   * The isolated scenario run whose turn sent this widget, or null. Matched by the turn, not the
+   * session: a wake-up shares its session with the chat and its widgets are the chat's own.
+   */
+  async scenarioOf(widgetId: string): Promise<WidgetScenario | null> {
+    const found = await database().query<{ id: string; scheduled_for_local: string; title: string }>(
+      `SELECT schedule.id, schedule.title,
+              to_char(run.scheduled_for AT TIME ZONE schedule.timezone, 'DD.MM.YYYY HH24:MI') AS scheduled_for_local
+         FROM telegram_widgets AS widget
+         JOIN agent_schedule_runs AS run ON run.agent_turn_id = widget.agent_turn_id
+         JOIN agent_schedules AS schedule ON schedule.id = run.schedule_id
+        WHERE widget.id = $1 AND schedule.execution_context = 'isolated'
+        LIMIT 1`,
+      [widgetId],
+    );
+    const row = found.rows[0];
+    return row === undefined ? null : { id: row.id, scheduledForLocal: row.scheduled_for_local, title: row.title };
+  },
+
   async surfaceIdTaken(telegramChatId: string, surfaceId: string): Promise<boolean> {
     const found = await database().query(
       "SELECT 1 FROM telegram_widgets WHERE telegram_chat_id = $1 AND surface_id = $2",

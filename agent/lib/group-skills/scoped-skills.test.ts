@@ -121,11 +121,12 @@ describe("scoped skills", () => {
     expect(loadWorking.mock.calls.map(([familyId]) => familyId)).not.toContain("host-family");
   });
 
-  it("gives a scheduled run only the procedures of the tools it keeps", async () => {
+  it("gives a scheduled run only the procedures of the tools it keeps (#480)", async () => {
     const skills = await serviceSkills(turn({ ...PRIVATE, scheduledRunId: "run-1" }));
 
     expect(skills).toContain("schedules");
-    expect(skills).not.toContain("voice-replies");
+    // A scenario speaks and sends cards like a live answer of its chat.
+    expect(skills).toContain("voice-replies");
     expect(skills).not.toContain("skill-manager");
   });
 

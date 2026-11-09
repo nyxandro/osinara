@@ -380,6 +380,9 @@ export const agentScheduleRepository = {
               recurrence_anchor_at = CASE WHEN $8 THEN $9::timestamptz ELSE recurrence_anchor_at END,
              occurrence_index = CASE WHEN $8 THEN 0 ELSE occurrence_index END,
              next_run_at = CASE WHEN $8 THEN $9 ELSE next_run_at END,
+              -- An explicit new time outranks a "read" press (#480): the skip would swallow it.
+              skipped_until = CASE WHEN $8 THEN NULL ELSE skipped_until END,
+              skipped_at = CASE WHEN $8 THEN NULL ELSE skipped_at END,
               status = CASE WHEN status = 'leased' THEN status
                             WHEN $13::integer IS NOT NULL AND completed_runs >= $13 THEN 'completed'::agent_schedule_status
                             WHEN $10 = false THEN 'paused'::agent_schedule_status
@@ -532,6 +535,8 @@ export const agentScheduleRepository = {
       const updated = await client.query<AgentScheduleRow>(
         `UPDATE agent_schedules
             SET status = 'active', next_run_at = now(), attempts = 0,
+                -- "Run it now" outranks a "read" press (#480): the skip would swallow the run.
+                skipped_until = NULL, skipped_at = NULL,
                 pause_requested = false, last_error_code = NULL, updated_at = now()
           WHERE id = $1
           RETURNING ${AGENT_SCHEDULE_COLUMNS}`,

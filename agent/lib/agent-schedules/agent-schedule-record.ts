@@ -43,6 +43,8 @@ export interface AgentScheduleRow {
   recurrence_kind: AgentScheduleRecurrenceKind;
   scenario_prompt: string;
   scope: AgentScheduleScope;
+  skipped_at: Date | null;
+  skipped_until: Date | null;
   status: AgentScheduleStatus;
   timezone: string;
   title: string;
@@ -75,11 +77,19 @@ export interface AgentScheduleRecord {
   recurrence: AgentScheduleRecurrence;
   scenarioPrompt: string;
   scope: AgentScheduleScope;
+  /** Present only after its "read" button was pressed: runs before `until` pass without running. */
+  skip?: AgentScheduleSkipRecord;
   status: AgentScheduleStatus;
   timezone: string;
   title: string;
   updatedAt: string;
   userRequest: string;
+}
+
+/** The last press of a button that read the scenario for the day (#480). */
+export interface AgentScheduleSkipRecord {
+  pressedAt: string;
+  until: string;
 }
 
 function rowRecurrence(row: AgentScheduleRow): AgentScheduleRecurrence {
@@ -107,6 +117,9 @@ function rowCheck(row: AgentScheduleRow): AgentScheduleCheckRecord | null {
 
 export function rowToAgentSchedule(row: AgentScheduleRow): AgentScheduleRecord {
   const check = rowCheck(row);
+  const skip = row.skipped_until === null || row.skipped_at === null
+    ? null
+    : { pressedAt: row.skipped_at.toISOString(), until: row.skipped_until.toISOString() };
   return {
     ...(check === null ? {} : { check }),
     completedRuns: row.completed_runs,
@@ -121,6 +134,7 @@ export function rowToAgentSchedule(row: AgentScheduleRow): AgentScheduleRecord {
     recurrence: rowRecurrence(row),
     scenarioPrompt: row.scenario_prompt,
     scope: row.scope,
+    ...(skip === null ? {} : { skip }),
     status: row.status,
     timezone: row.timezone,
     title: row.title,

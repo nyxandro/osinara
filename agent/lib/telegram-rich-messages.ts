@@ -333,6 +333,7 @@ export async function sendTelegramRichMessageDraft(
 }
 
 const MEDIA_BLOCK_KINDS: ReadonlySet<string> = new Set(["audio", "document", "photo", "video"]);
+const RETURNED_VOICE_NOTE = "voice_note";
 const MEDIA_BLOCK_LINE_PATTERN = /^!\[\]\(tg:\/\/(audio|document|photo|video)\?id=([A-Za-z0-9_-]{1,64})(?: "(?:[^"\\\n]|\\.)*")?\)$/gmu;
 
 /**
@@ -359,7 +360,10 @@ function returnedMediaBlocks(value: unknown, found: Array<{ fileId: string | nul
     for (const item of value) returnedMediaBlocks(item, found);
   } else if (typeof value === "object" && value !== null) {
     const block = value as Record<string, unknown>;
-    if (typeof block.type === "string" && MEDIA_BLOCK_KINDS.has(block.type)) {
+    // An Opus file written as `tg://audio` comes back as a voice note (live probe of 09.11.2026, #480).
+    if (block.type === RETURNED_VOICE_NOTE) {
+      found.push({ fileId: blockFileId(block), kind: "audio" });
+    } else if (typeof block.type === "string" && MEDIA_BLOCK_KINDS.has(block.type)) {
       found.push({ fileId: blockFileId(block), kind: block.type });
     } else {
       for (const nested of Object.values(block)) returnedMediaBlocks(nested, found);

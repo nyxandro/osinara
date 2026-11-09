@@ -82,7 +82,7 @@ const manageAgentScheduleSchema = z.object({
   id: z.string().optional().describe("The id from the list; for every action except list and create."),
   nextRunAt: z.string().optional().describe("Only in update: the new time of the next run with a UTC offset."),
   recurrence: agentScheduleRecurrenceSchema.optional(),
-  scenarioPrompt: z.string().max(AGENT_SCHEDULE_PROMPT_MAX_LENGTH).optional().describe("The task for the agent on every run."),
+  scenarioPrompt: z.string().max(AGENT_SCHEDULE_PROMPT_MAX_LENGTH).optional().describe("The task for the agent on every run. A run sends what a live answer in this chat sends, but saves no memory, changes no notes or skills and gets no answer back: the schedules skill lists what it cannot do and how a read button stops repeats."),
   scope: z.enum(SCOPES).optional().describe("Only in create."),
   timezone: z.string().max(AGENT_SCHEDULE_TIMEZONE_MAX_LENGTH).optional().describe("Only in create: IANA, for example Europe/Moscow."),
   title: z.string().max(AGENT_SCHEDULE_TITLE_MAX_LENGTH).optional().describe("A short name for the list of schedules."),

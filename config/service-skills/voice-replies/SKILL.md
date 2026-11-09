@@ -1,6 +1,6 @@
 ---
 name: voice-replies
-description: Load before calling send_voice_message, that is when the current message explicitly asks you to answer by voice or to send a voice message. It says how to write the spoken text, the delivery tags, the length and the caption.
+description: Load before calling send_voice_message, that is when the current message or the instructions of the running scenario explicitly ask you to answer by voice or to send a voice message. It says how to write the spoken text, the delivery tags, the length and the caption.
 ---
 
 # Voice replies

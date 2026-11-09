@@ -5,9 +5,11 @@
  * - `TELEGRAM_NATIVE_SEND_RULES`: when to use `send_location`, `send_poll` and `send_contact`,
  *   where coordinates and numbers come from, and how the sent message stands in the answer.
  * - `TELEGRAM_WIDGET_RULES`: when a widget beats text, buttons or a poll; the skill holds the rest.
+ * - `scheduledSendRules`: what a scenario run sends besides its text, and that nothing comes back (#480).
  *
  * Key construct:
- * - Only a live turn holds the tools (`mode-tool-surface.ts`), so only a live turn reads the rules.
+ * - A live turn reads the rules above; a scenario run holds the same tools (#480) but reads its own
+ *   short block, because presses and replies never come back to it.
  * - Coordinates and phone numbers must come from the conversation, memory or a source the agent
  *   read: a guessed point sends people to the wrong place, a guessed number calls a stranger.
  * - The empty-delivery line itself is named only in the tool result: a private chat's mode block
@@ -30,5 +32,26 @@ export const TELEGRAM_WIDGET_RULES = `## Widgets
 
 Load the \`widgets\` skill before your first widget in a conversation; it has the A2UI catalog, the rules and examples. Describe the widget as A2UI (\`surface\`); write your own HTML (\`html\`) only for a game or an animation the catalog cannot describe, and such a widget cannot reach you. Send one widget per answer. Put the facts a person acts on — a time, a place, an amount — into the caption: some apps do not show widgets yet and show only the caption.
 
-A press of a widget button reaches you as the person's message «[Pressed «…» in your widget «…»]» with the A2UI action and its context: answer it like their words. To change what a widget you sent shows, call \`update_widget\` with its surfaceId.`;
+A press of a widget button reaches you as the person's message «[Pressed «…» in your widget «…»]» with the A2UI action and its context: answer it like their words. To change what a widget you sent shows, call \`update_widget\` with its surfaceId.
 
+Ordinary buttons under the card go at the very end of \`caption\`, written with the same reply-button markup as under an answer; they appear under the card in the same message and are seen in every Telegram app, also where the card itself is not shown.`;
+
+
+/**
+ * What a scenario run sends besides its final text (#480). It sends the same as a live turn of its
+ * chat, but only what the scenario asks for, and nothing of it comes back to the run.
+ */
+export function scheduledSendRules(sends: { readonly gifs: boolean; readonly voice: boolean; readonly widgets: boolean }): string {
+  return [
+    "## Sending in a scenario",
+    "This run may send what a live answer in this chat sends; send exactly what the scenario asks for and nothing on your own initiative. Each send is one message of the run's result: do not repeat its content in the final text.",
+    [
+      sends.voice ? "- A voice message: load `voice-replies`, then `send_voice_message`. It carries no buttons: a read button goes under the card or into the final text after it." : null,
+      sends.widgets ? "- A widget card: load `widgets`, then `send_widget`. Give every card a new `surfaceId` with the date and time of this run, for example `tasks_2026_11_09_0830`." : null,
+      sends.gifs ? "- A GIF: `send_gif`, as its description says." : null,
+      "- A place, a poll or a contact card: `send_location`, `send_poll`, `send_contact`, as their descriptions say.",
+    ].filter((line): line is string => line !== null).join("\n"),
+    "Nothing comes back to this run: a press of a button, a vote or a reply reaches the chat's own conversation, where you answer it later. A scenario that waits for the person to confirm something offers a read button (see the reply-button rules): its press counts the scenario as read for the day without you.",
+    "When everything the scenario asks for has gone out through these tools and nothing is left to say, end the run with exactly the empty-delivery line. If a part of the scenario cannot be done in this run, say in plain Russian what was not done and what the person can write in the chat instead, without names of tools, skills, files or services.",
+  ].join("\n\n");
+}

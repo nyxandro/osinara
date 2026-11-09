@@ -189,6 +189,29 @@ describe("mode block resolution", () => {
     expect(groupChild).not.toContain("voice message");
   });
 
+  it("tells a scenario what it sends, a group's scenario its voice by the group's grant, and a private question nothing of it (#480)", async () => {
+    const resolve = (capabilities: ReadonlySet<ExternalGroupToolName>) => createModeBlockResolver({
+      loadGuest: vi.fn().mockResolvedValue(null),
+      loadCapabilities: vi.fn().mockResolvedValue(capabilities),
+      loadReactionPolicy: reactionPolicy,
+    });
+    // A group's scenario keeps its own narrow list, which never names the voice tool.
+    const groupScenario = auth({ ...externalAuth.current!.attributes, scheduledRunId: "run-1", toolAllowlist: ["search_memories"] });
+    const withVoice = await resolve(new Set(["search_memories", "send_voice_message"]))(context(groupScenario));
+    const withoutVoice = await resolve(new Set(["search_memories"]))(context(groupScenario));
+    const privateScenario = await resolve(new Set())(context(auth({ ...privateAuth.current!.attributes, scheduledRunId: "run-1" })));
+    const privateQuestion = await resolve(new Set(["send_voice_message"]))(context(auth({
+      ...externalAuth.current!.attributes, privateQuestion: "true", toolAllowlist: ["send_voice_message"],
+    })));
+
+    expect(privateScenario).toContain("## Sending in a scenario");
+    expect(withVoice).toContain("- A voice message: load `voice-replies`, then `send_voice_message`.");
+    expect(withoutVoice).toContain("## Sending in a scenario");
+    expect(withoutVoice).not.toContain("send_voice_message");
+    expect(privateQuestion).not.toContain("## Sending in a scenario");
+    expect(privateQuestion).not.toContain("voice message");
+  });
+
   it("teaches answer buttons in the trusted zones, link and copy buttons everywhere, and none to a child", async () => {
     const resolve = createModeBlockResolver({
       loadGuest: vi.fn().mockResolvedValue(null),

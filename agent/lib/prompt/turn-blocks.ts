@@ -168,10 +168,10 @@ async function effectiveExternalCapabilities(
     logBlockFailure("AGENT_GROUP_CAPABILITY_LOOKUP_FAILED", error);
     return { capabilities: new Set(), includeApplicationCore: false };
   }
-  return {
-    capabilities: new Set([...policy.allowed].filter((capability) => current.has(capability))),
-    includeApplicationCore: true,
-  };
+  const capabilities = new Set([...policy.allowed].filter((capability) => current.has(capability)));
+  // As the tool surface does (`agent/tools/capabilities.ts`): a group's scenario speaks when the group may (#480).
+  if (isScheduledSession({ session: { auth } }) && current.has("send_voice_message")) capabilities.add("send_voice_message");
+  return { capabilities, includeApplicationCore: true };
 }
 
 function verifiedTelegramChatId(auth: SessionAuth): string | null {
@@ -229,8 +229,10 @@ function createConversationModeBlockResolver(dependencies: {
       logBlockFailure("AGENT_CONVERSATION_ENVIRONMENT_INVALID", error);
       return MODE_UNAVAILABLE_BLOCK;
     }
-    // A private question (#467) delivers nothing to the chat itself, like a scheduled run.
-    const scheduledRun = isScheduledSession(ctx) || isPrivateQuestionSession(ctx);
+    // A private question (#467) delivers nothing to the chat itself, like a scheduled run, but it is no
+    // scenario and sends nothing besides its answer (#480).
+    const privateQuestion = isPrivateQuestionSession(ctx);
+    const scheduledRun = isScheduledSession(ctx) || privateQuestion;
     // A child answers its parent through the `agent` tool result, never the chat itself.
     const subagentTurn = ctx.channel?.kind === "subagent" || Boolean(ctx.session.parent);
     // A scheduled run has no inbound message to react to, and a channel-authored turn keeps its
@@ -252,13 +254,14 @@ function createConversationModeBlockResolver(dependencies: {
         environment,
         ...(guest === undefined ? {} : { guest }),
         owner: isFamilyOwner(ctx.session.auth),
+        privateQuestion,
         reactions,
         scheduledRun,
         subagentTurn,
       });
     }
     if (environment === "family") {
-      return modeInstructions({ environment, reactions, scheduledRun, subagentTurn });
+      return modeInstructions({ environment, privateQuestion, reactions, scheduledRun, subagentTurn });
     }
 
     // Channel-authored turns can receive text only. Keep prompt instructions aligned with the
@@ -269,6 +272,7 @@ function createConversationModeBlockResolver(dependencies: {
         channelAuthored: true,
         environment: "external",
         includeApplicationCore: false,
+        privateQuestion,
         reactions,
         scheduledRun,
         subagentTurn,
@@ -283,6 +287,7 @@ function createConversationModeBlockResolver(dependencies: {
       capabilities: effective.capabilities,
       environment: "external",
       includeApplicationCore: effective.includeApplicationCore,
+      privateQuestion,
       reactions,
       scheduledHistory: effective.includeApplicationCore &&
         scheduledGroupHistoryAccess(ctx.session.auth) !== null,

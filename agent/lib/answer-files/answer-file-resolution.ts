@@ -15,8 +15,10 @@
  *   whole folder never pulls it into the agent's memory.
  * - Telegram's photo limits are checked here, because it refuses a whole rich message over one
  *   photo it cannot take (PHOTO_INVALID_DIMENSIONS); such a picture still arrives as a document.
- * - Video and audio are only the types tried in a live rich message (MP4, MP3); a GIF there was
- *   refused as an animation and accepted as a document. Anything else is a document.
+ * - Video and audio are only the types tried in a live rich message (MP4, MP3, and an Ogg Opus voice
+ *   note on 09.11.2026, which Telegram refuses as a document with RICH_MESSAGE_DOCUMENT_INVALID and
+ *   shows as a voice note when sent as audio, #480); a GIF there was refused as an animation and
+ *   accepted as a document. Anything else is a document.
  * - The files of one answer share one upload limit: every message of the answer then fits it too.
  */
 import { basename } from "node:path";
@@ -69,6 +71,8 @@ const TELEGRAM_PHOTO_MAX_SIDE_RATIO = 20;
 const TELEGRAM_PHOTO_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const TELEGRAM_RICH_KINDS_BY_MEDIA_TYPE: Readonly<Record<string, AnswerFileKind>> = {
   "audio/mpeg": "audio",
+  // The type the workspace detects for a voice note (`workspace-file-metadata.ts`).
+  "audio/ogg; codecs=opus": "audio",
   "video/mp4": "video",
 };
 const PROBLEMS_BY_WORKSPACE_CODE: Readonly<Record<string, AnswerFileProblem>> = {

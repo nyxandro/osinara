@@ -21,6 +21,7 @@ import type {
   AgentScheduleScope,
 } from "./agent-schedule-record.js";
 import { passDisconnectedGroupSchedules } from "./agent-schedule-disconnected-group.js";
+import { passSkippedAgentSchedules } from "./agent-schedule-skip.js";
 import {
   completeDeliveredAgentScheduleRun,
   type CompleteDeliveredAgentScheduleRunInput,
@@ -154,6 +155,8 @@ async function claimDueSchedules(options: ClaimOptions, monitors: boolean): Prom
     await recoverOrphanedConversationRuns(client, options.now);
     // A disconnected group's due occurrences pass before anything is claimed: they never run (#465).
     await passDisconnectedGroupSchedules(client, options.now);
+    // A scenario read for the day by its button passes the rest of that day without running (#480).
+    await passSkippedAgentSchedules(client, options.now);
 
     // Only an unfinished hand-off to the runtime expires; a confirmed running turn owns its lifecycle.
     const ambiguous = await client.query<{ family_id: string; id: string; lease_token: string }>(
@@ -308,6 +311,8 @@ async function claimDueSchedules(options: ClaimOptions, monitors: boolean): Prom
          JOIN users ON users.id = schedule.author_user_id
          WHERE schedule.status = 'active' AND schedule.next_run_at <= $1
            AND NOT schedule.pause_requested
+           -- A skip that landed after the pass above, or a lease that expired back to active, still holds (#480).
+           AND (schedule.skipped_until IS NULL OR schedule.next_run_at >= schedule.skipped_until)
            AND (schedule.max_runs IS NULL OR schedule.completed_runs < schedule.max_runs)
           AND schedule.attempts < $3
           AND (schedule.check_command IS NOT NULL) = $4

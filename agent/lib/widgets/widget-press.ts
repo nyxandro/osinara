@@ -23,6 +23,9 @@
  *   history and memory as typed text and authorizes nothing more.
  * - Widgets work only in the private chat with the bot for now (the owner's decision of 06.11.2026);
  *   a press anywhere else is answered as closed.
+ * - A widget a scenario run sent (#480) is pressed in the chat's own conversation, which did not see
+ *   it sent: the press names the scenario and the moment of its run, so the agent can read what the
+ *   scenario expects and tell a card of an earlier run from today's.
  * - The message follows A2UI's renderer-to-agent `action` message, so the model reads presses in the
  *   protocol it wrote the widget in.
  */
@@ -35,7 +38,7 @@ import type { JsonObject, JsonValue } from "./a2ui/a2ui-types.js";
 import { evaluateString, evaluateValue, WidgetEvaluationError } from "./a2ui/evaluate.js";
 import type { WidgetAction } from "./a2ui/render.js";
 import { parseWidgetQueryData, pressedDataModel } from "./widget-query-data.js";
-import { type StoredWidget, widgetRepository } from "./widget-repository.js";
+import { type StoredWidget, widgetRepository, type WidgetScenario } from "./widget-repository.js";
 import { type WidgetTelegram, widgetTelegram } from "./widget-telegram.js";
 
 export const WIDGET_PRESS_UPDATE_ID_BASE = 2n ** 50n;
@@ -48,7 +51,7 @@ export interface WidgetPressDependencies {
   readonly enqueue: (input: { readonly continuationKey: string; readonly payload: JsonObject; readonly updateId: string }) => Promise<unknown>;
   readonly continuationKey: (input: { readonly chatId: string; readonly conversationId?: string }) => string;
   readonly replyRouteIsOpen: (baseContinuationToken: string) => Promise<boolean>;
-  readonly repository: Pick<typeof widgetRepository, "claimQuery" | "findByMessage" | "storePressPayload">;
+  readonly repository: Pick<typeof widgetRepository, "claimQuery" | "findByMessage" | "scenarioOf" | "storePressPayload">;
   readonly telegram: Pick<WidgetTelegram, "answerQuery">;
 }
 
@@ -86,9 +89,18 @@ function oneLine(text: string): string {
 }
 
 /** What the model reads as the person's message: the pressed button, the widget and A2UI's action. */
-export function widgetPressText(input: { readonly action: JsonObject; readonly caption: string; readonly label: string; readonly stale: string | null }): string {
+export function widgetPressText(input: {
+  readonly action: JsonObject;
+  readonly caption: string;
+  readonly label: string;
+  readonly scenario?: WidgetScenario | null;
+  readonly stale: string | null;
+}): string {
   const stale = input.stale === null ? "" : ` ${input.stale}`;
-  return `[Pressed «${oneLine(input.label)}» in your widget «${oneLine(input.caption)}»]${stale}\n${JSON.stringify({ action: input.action, version: "1.0" })}`;
+  const scenario = input.scenario === undefined || input.scenario === null
+    ? ""
+    : ` sent by your scheduled scenario «${oneLine(input.scenario.title)}» (schedule_id ${input.scenario.id}, run of ${input.scenario.scheduledForLocal} local time); read it with manage_agent_schedule list to see what this press means`;
+  return `[Pressed «${oneLine(input.label)}» in your widget «${oneLine(input.caption)}»${scenario}]${stale}\n${JSON.stringify({ action: input.action, version: "1.0" })}`;
 }
 
 function a2uiAction(widget: StoredWidget, action: WidgetAction, dataModel: JsonObject, score: number | null): JsonObject {
@@ -137,7 +149,7 @@ export function createWidgetPressHandler(dependencies: WidgetPressDependencies) 
       date: Math.floor(Date.now() / 1_000),
       from: query.from,
       message_id: Number(WIDGET_PRESS_MESSAGE_ID_BASE + betaUpdateId),
-      text: widgetPressText({ action: a2ui, caption: widget.caption, label: action.label, stale }),
+      text: widgetPressText({ action: a2ui, caption: widget.caption, label: action.label, scenario: await dependencies.repository.scenarioOf(widget.id), stale }),
       ...(reply ? { reply_to_message: { chat: query.chat, from: { first_name: "bot", id: Number(await dependencies.botUserId()), is_bot: true }, message_id: Number(widget.telegramMessageId) } } : {}),
     };
   }

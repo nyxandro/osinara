@@ -15,11 +15,18 @@
  *   answer the channel delivers.
  * - Telegram already confirmed the side effect, so a projection failure is logged under the
  *   caller's code and reported as `false`, never thrown: an error would invite a duplicate send.
+ * - A scenario run's own session closes with the run (#480): what a tool sent in it is recorded the
+ *   way the run's final text is, as one of the scenario's messages that the chat's conversation reads
+ *   later, and no reply is routed to the run. A group's journal names no session for it, as for the
+ *   final text (`channels/telegram.ts`).
  */
 import type { ToolContext } from "../runtime/tool.js";
 
 import { AppError } from "./app-error.js";
+import { scheduledDeliveryMetadata, type ScheduledDeliveryMetadata } from "./agent-schedules/scheduled-session.js";
 import { conversationTimelineRepository } from "./conversation-timeline-repository.js";
+import { database } from "./database.js";
+import { recordProactiveDelivery } from "./proactive-deliveries/proactive-delivery-repository.js";
 import {
   applicationSessionId,
   registerTelegramMessageRoutes,
@@ -68,6 +75,40 @@ export function toolDeliveryTimelineTarget(ctx: ToolContext): ToolDeliveryTimeli
   };
 }
 
+/** One message a tool sent in a scenario run, recorded as the scenario's own (#480). */
+async function recordScheduledToolDelivery(
+  scheduled: ScheduledDeliveryMetadata,
+  target: ToolDeliveryTimelineTarget,
+  input: { contentText: string; telegramMessageId: string },
+): Promise<void> {
+  const deliveredAt = new Date();
+  await recordProactiveDelivery(database(), {
+    content: input.contentText,
+    deliveredAt,
+    familyId: scheduled.familyId,
+    groupId: scheduled.groupId,
+    messageThreadId: scheduled.messageThreadId,
+    ownerUserId: scheduled.ownerUserId,
+    scheduledFor: new Date(scheduled.scheduledFor),
+    scope: scheduled.scope,
+    sourceId: scheduled.runId,
+    sourceKind: "agent_schedule",
+    telegramChatId: scheduled.telegramChatId,
+    telegramMessageId: input.telegramMessageId,
+    title: scheduled.title,
+  });
+  if (target.groupId === null) return;
+  await telegramGroupJournalRepository.recordAgentResponse({
+    applicationSessionId: null,
+    contentText: input.contentText,
+    deliveredAt,
+    groupId: target.groupId,
+    messageThreadId: scheduled.forumTopicId ?? target.forumTopicId ?? null,
+    replyToEntryId: null,
+    telegramMessageIds: [input.telegramMessageId],
+  });
+}
+
 export async function recordToolDeliveryInTimeline(
   ctx: ToolContext,
   target: ToolDeliveryTimelineTarget,
@@ -77,6 +118,21 @@ export async function recordToolDeliveryInTimeline(
     telegramMessageId: string;
   },
 ): Promise<boolean> {
+  let scheduled: ScheduledDeliveryMetadata | null;
+  try {
+    scheduled = scheduledDeliveryMetadata(ctx);
+    if (scheduled !== null) {
+      await recordScheduledToolDelivery(scheduled, target, input);
+      return true;
+    }
+  } catch (error) {
+    console.error(JSON.stringify({
+      code: input.failureCode,
+      error: error instanceof Error ? error.message : String(error),
+      telegramMessageId: input.telegramMessageId,
+    }));
+    return false;
+  }
   if (target.groupId === null && target.conversationId === null) return true;
   try {
     const sessionId = applicationSessionId(ctx);

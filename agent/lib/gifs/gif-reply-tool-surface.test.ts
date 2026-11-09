@@ -25,16 +25,16 @@ describe("GIF replies with KLIPY configured", () => {
     expect(buildModeToolSurface(EXTERNAL)).toHaveProperty("send_gif");
   });
 
-  it("are not offered where nobody live is answered", () => {
-    expect(buildModeToolSurface({ environment: "private", owner: true, scheduledRun: true })).not.toHaveProperty("send_gif");
-    expect(buildModeToolSurface({ environment: "family", scheduledRun: true })).not.toHaveProperty("send_gif");
-    expect(buildModeToolSurface({ ...EXTERNAL, scheduledRun: true })).not.toHaveProperty("send_gif");
+  it("are offered to live turns and scenarios, never to a child or a turn without the application core (#480)", () => {
+    expect(buildModeToolSurface({ environment: "private", owner: true, scheduledRun: true })).toHaveProperty("send_gif");
+    expect(buildModeToolSurface({ environment: "family", scheduledRun: true })).toHaveProperty("send_gif");
+    expect(buildModeToolSurface({ ...EXTERNAL, scheduledRun: true })).toHaveProperty("send_gif");
     expect(buildModeToolSurface({ ...EXTERNAL, includeApplicationCore: false })).not.toHaveProperty("send_gif");
     expect(buildSubagentToolSurface({ environment: "private", owner: true })).not.toHaveProperty("send_gif");
     expect(buildSubagentToolSurface(EXTERNAL)).not.toHaveProperty("send_gif");
   });
 
-  it("carry their rules only into live conversations", () => {
+  it("carry the live rules into conversations and the scenario's own line into scenarios (#480)", () => {
     for (const instructions of [
       modeInstructions({ environment: "private", owner: true }),
       modeInstructions({ environment: "family" }),
@@ -44,8 +44,14 @@ describe("GIF replies with KLIPY configured", () => {
     }
     for (const instructions of [
       modeInstructions({ environment: "private", owner: true, scheduledRun: true }),
-      modeInstructions({ environment: "family", subagentTurn: true }),
       modeInstructions({ capabilities: new Set(), environment: "external", scheduledRun: true }),
+    ]) {
+      // A scenario sends a GIF only when it asks for one, never as a reaction.
+      expect(instructions).not.toContain("## Answering with a GIF");
+      expect(instructions).toContain("- A GIF: `send_gif`");
+    }
+    for (const instructions of [
+      modeInstructions({ environment: "family", subagentTurn: true }),
       modeInstructions({ capabilities: new Set(), environment: "external", includeApplicationCore: false }),
     ]) {
       expect(instructions).not.toContain("send_gif");

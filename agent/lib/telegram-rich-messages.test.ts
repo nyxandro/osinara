@@ -234,6 +234,20 @@ describe("postTelegramRichMessage", () => {
     });
   });
 
+  it("learns the file of a voice note Telegram returns for an audio block (#480)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(telegramResponse({
+      chat: { type: "private" },
+      message_id: 94,
+      rich_message: { blocks: [{ type: "paragraph" }, { type: "voice_note", voice_note: { file_id: "voice-1" } }] },
+    }));
+
+    const sent = await postTelegramRichMessageChunk("Задачи на сегодня\n\n![](tg://audio?id=f0)", telegramTarget(), undefined, undefined, [
+      { bytes: new Uint8Array([1]), fileName: "tasks.ogg", id: "f0", kind: "audio", mediaType: "audio/ogg; codecs=opus", sha256: "s0" },
+    ]);
+
+    expect(sent.media).toEqual([{ fileId: "voice-1", id: "f0", kind: "audio" }]);
+  });
+
   it("does not take a media-like line the model showed as code for a block", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(telegramResponse({
       chat: { type: "private" },
