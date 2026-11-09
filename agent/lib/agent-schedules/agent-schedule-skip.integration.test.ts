@@ -88,10 +88,10 @@ describeWithDatabase("scenario read for the day (#480)", () => {
     const pressedAt = new Date();
 
     const first = await skipAgentScheduleForDay({
-      addresseeTelegramUserId: "101", pressedAt, scheduleId: schedule.id, sentAt: minutes(-5), telegramChatId: "101",
+      addresseeTelegramUserId: "101", pressedAt, pressId: "press-1", scheduleId: schedule.id, sentAt: pressedAt, telegramChatId: "101",
     });
     const replay = await skipAgentScheduleForDay({
-      addresseeTelegramUserId: "101", pressedAt, scheduleId: schedule.id, sentAt: minutes(-5), telegramChatId: "101",
+      addresseeTelegramUserId: "101", pressedAt, pressId: "press-1", scheduleId: schedule.id, sentAt: pressedAt, telegramChatId: "101",
     });
 
     expect(first).toMatchObject({ kind: "skipped", title: "Контроль задач" });
@@ -109,7 +109,7 @@ describeWithDatabase("scenario read for the day (#480)", () => {
     const schedule = await createHourly();
     const pressedAt = new Date();
     await skipAgentScheduleForDay({
-      addresseeTelegramUserId: "101", pressedAt, scheduleId: schedule.id, sentAt: pressedAt, telegramChatId: "101",
+      pressId: "press-auto-1", addresseeTelegramUserId: "101", pressedAt, scheduleId: schedule.id, sentAt: pressedAt, telegramChatId: "101",
     });
     await database().query("UPDATE agent_schedules SET next_run_at = $2 WHERE id = $1", [schedule.id, minutes(-1)]);
 
@@ -136,13 +136,13 @@ describeWithDatabase("scenario read for the day (#480)", () => {
     const yesterday = new Date(pressedAt.getTime() - 26 * 60 * 60_000);
 
     await expect(skipAgentScheduleForDay({
-      addresseeTelegramUserId: "101", pressedAt, scheduleId: schedule.id, sentAt: yesterday, telegramChatId: "101",
+      pressId: "press-auto-2", addresseeTelegramUserId: "101", pressedAt, scheduleId: schedule.id, sentAt: yesterday, telegramChatId: "101",
     })).resolves.toEqual({ kind: "stale" });
     await expect(skipAgentScheduleForDay({
-      addresseeTelegramUserId: "202", pressedAt, scheduleId: schedule.id, sentAt: pressedAt, telegramChatId: "101",
+      pressId: "press-auto-3", addresseeTelegramUserId: "202", pressedAt, scheduleId: schedule.id, sentAt: pressedAt, telegramChatId: "101",
     })).resolves.toEqual({ kind: "missing" });
     await expect(skipAgentScheduleForDay({
-      addresseeTelegramUserId: "101", pressedAt, scheduleId: schedule.id, sentAt: pressedAt, telegramChatId: "999",
+      pressId: "press-auto-4", addresseeTelegramUserId: "101", pressedAt, scheduleId: schedule.id, sentAt: pressedAt, telegramChatId: "999",
     })).resolves.toEqual({ kind: "missing" });
     const stored = await database().query("SELECT 1 FROM agent_schedules WHERE id = $1 AND skipped_until IS NULL", [schedule.id]);
     expect(stored.rowCount).toBe(1);
@@ -163,12 +163,12 @@ describeWithDatabase("scenario read for the day (#480)", () => {
     const today = new Date();
     const yesterday = new Date(today.getTime() - 26 * 60 * 60_000);
     await skipAgentScheduleForDay({
-      addresseeTelegramUserId: "101", pressedAt: today, scheduleId: schedule.id, sentAt: today, telegramChatId: "101",
+      pressId: "press-auto-5", addresseeTelegramUserId: "101", pressedAt: today, scheduleId: schedule.id, sentAt: today, telegramChatId: "101",
     });
 
     // Yesterday's card, pressed yesterday and settled again today after its edit was lost.
     await expect(skipAgentScheduleForDay({
-      addresseeTelegramUserId: "101", pressedAt: yesterday, scheduleId: schedule.id, sentAt: yesterday, telegramChatId: "101",
+      pressId: "press-auto-6", addresseeTelegramUserId: "101", pressedAt: yesterday, scheduleId: schedule.id, sentAt: yesterday, telegramChatId: "101",
     })).resolves.toMatchObject({ kind: "skipped" });
 
     const stored = (await database().query<{ skipped_until: Date }>("SELECT skipped_until FROM agent_schedules WHERE id = $1", [schedule.id])).rows[0]!;
@@ -179,12 +179,12 @@ describeWithDatabase("scenario read for the day (#480)", () => {
     const schedule = await createHourly();
     const pressedAt = new Date();
     const first = await skipAgentScheduleForDay({
-      addresseeTelegramUserId: "101", pressedAt, scheduleId: schedule.id, sentAt: pressedAt, telegramChatId: "101",
+      pressId: "press-auto-7", addresseeTelegramUserId: "101", pressedAt, scheduleId: schedule.id, sentAt: pressedAt, telegramChatId: "101",
     });
     await database().query("UPDATE agent_schedules SET status = 'completed' WHERE id = $1", [schedule.id]);
 
     await expect(skipAgentScheduleForDay({
-      addresseeTelegramUserId: "101", pressedAt, scheduleId: schedule.id, sentAt: pressedAt, telegramChatId: "101",
+      pressId: "press-auto-7", addresseeTelegramUserId: "101", pressedAt, scheduleId: schedule.id, sentAt: pressedAt, telegramChatId: "101",
     })).resolves.toEqual(first);
   });
 
@@ -192,15 +192,18 @@ describeWithDatabase("scenario read for the day (#480)", () => {
     for (const change of ["update", "runNow"] as const) {
       const schedule = await createHourly();
       const pressedAt = new Date();
-      await skipAgentScheduleForDay({
-        addresseeTelegramUserId: "101", pressedAt, scheduleId: schedule.id, sentAt: pressedAt, telegramChatId: "101",
+      const press = () => skipAgentScheduleForDay({
+        pressId: `press-${change}`, addresseeTelegramUserId: "101", pressedAt, scheduleId: schedule.id, sentAt: pressedAt, telegramChatId: "101",
       });
+      await press();
 
       if (change === "update") {
         await agentScheduleRepository.update(auth, schedule.id, { nextRunAt: minutes(5), operationKey: `move-${schedule.id}` });
       } else {
         await agentScheduleRepository.runNow(auth, schedule.id, `run-${schedule.id}`);
       }
+      // The same press replayed afterwards (the queue step, a lost edit) must not swallow that run.
+      await expect(press()).resolves.toMatchObject({ kind: "skipped" });
 
       const stored = (await database().query("SELECT skipped_until, skipped_at FROM agent_schedules WHERE id = $1", [schedule.id])).rows[0];
       expect(stored, change).toEqual({ skipped_at: null, skipped_until: null });
@@ -232,7 +235,7 @@ describeWithDatabase("scenario read for the day (#480)", () => {
       timezone: TIMEZONE, title: "Семейные дела", userRequest: "Напоминай семье каждый час",
     });
     const press = (addressee: string) => skipAgentScheduleForDay({
-      addresseeTelegramUserId: addressee, pressedAt: new Date(), scheduleId: schedule.id, sentAt: new Date(), telegramChatId: "-100-family",
+      pressId: "press-auto-10", addresseeTelegramUserId: addressee, pressedAt: new Date(), scheduleId: schedule.id, sentAt: new Date(), telegramChatId: "-100-family",
     });
 
     await expect(press("303")).resolves.toEqual({ kind: "missing" });
@@ -248,7 +251,7 @@ describeWithDatabase("scenario read for the day (#480)", () => {
     });
     const pressedAt = new Date();
     await skipAgentScheduleForDay({
-      addresseeTelegramUserId: "101", pressedAt, scheduleId: schedule.id, sentAt: pressedAt, telegramChatId: "101",
+      pressId: "press-auto-11", addresseeTelegramUserId: "101", pressedAt, scheduleId: schedule.id, sentAt: pressedAt, telegramChatId: "101",
     });
     await database().query("UPDATE agent_schedules SET next_run_at = $2 WHERE id = $1", [schedule.id, minutes(-1)]);
 

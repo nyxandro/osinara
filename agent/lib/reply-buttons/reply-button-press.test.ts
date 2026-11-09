@@ -96,6 +96,7 @@ describe("a scenario's read button (#480)", () => {
     expect(skipSchedule).toHaveBeenCalledWith({
       addresseeTelegramUserId: "101",
       pressedAt: PRESSED_AT,
+      pressId: TOKEN,
       scheduleId: SCHEDULE_ID,
       sentAt: SENT_AT,
       telegramChatId: "101",

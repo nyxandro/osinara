@@ -311,6 +311,19 @@ describe("send_voice_message", () => {
     expect(deps.alertOwner).toHaveBeenCalledWith(expect.objectContaining({ key: expect.stringMatching(/^voice-provider:key:/u) }));
   });
 
+  it("tells a refused voice or model apart from a refused key (#480)", async () => {
+    const deps = dependencies();
+    deps.speech.synthesize.mockRejectedValue(new VoiceMessageProviderError(
+      "AGENT_VOICE_MESSAGE_PROVIDER_ACCESS_DENIED", "Сервис озвучки ElevenLabs запретил доступ к голосу или модели", "definitive", "voice_access_denied",
+    ));
+
+    await failure(createSendVoiceMessageTool(deps as never).execute(INPUT, context()));
+
+    expect(deps.alertOwner).toHaveBeenCalledWith(expect.objectContaining({
+      key: expect.stringMatching(/^voice-provider:access:/u), summary: expect.stringContaining("доступ к нашему голосу"),
+    }));
+  });
+
   it("does not alert the owner about a failure that is not the account's (#480)", async () => {
     const deps = dependencies();
     deps.speech.synthesize.mockRejectedValue(new VoiceMessageProviderError(
@@ -348,7 +361,10 @@ describe("send_voice_message", () => {
 
     expect(toOwner.contract.reason).toBe("В ElevenLabs закончились кредиты");
     expect(toGuest.contract.reason).toBe("Голосовое сейчас недоступно.");
-    expect(toGuest.contract.code).toBe("AGENT_VOICE_MESSAGE_PROVIDER_PAYMENT_REQUIRED");
+    expect(toGuest.contract.code).toBe("AGENT_VOICE_MESSAGE_UNAVAILABLE");
+    expect(toOwner.contract.code).toBe("AGENT_VOICE_MESSAGE_PROVIDER_PAYMENT_REQUIRED");
+    // The ledger keeps the real cause either way.
+    expect(guest.operations.markFailed).toHaveBeenCalledWith(CALL_ID, "AGENT_VOICE_MESSAGE_PROVIDER_PAYMENT_REQUIRED");
   });
 
   it("records an unconfirmed synthesis as ambiguous without retrying", async () => {

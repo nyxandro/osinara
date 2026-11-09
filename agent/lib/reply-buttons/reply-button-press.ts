@@ -184,6 +184,8 @@ export function createReplyButtonPressHandler(dependencies: ReplyButtonPressDepe
     return await dependencies.skipSchedule({
       addresseeTelegramUserId: set.addresseeTelegramUserId,
       pressedAt: set.resolvedAt,
+      // A set takes one press: its token names that press across the arrival and the queue step.
+      pressId: set.token,
       scheduleId,
       // A set whose activation was never recorded was staged right before its message went out.
       sentAt: set.activatedAt ?? set.createdAt,

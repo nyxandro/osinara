@@ -18,8 +18,11 @@
  *   never a target, because buttons with an addressee go out only in private chats and family groups.
  * - A card of an earlier day does not skip today: the person has not seen today's tasks.
  * - The skip only ever moves forward: an old card pressed again never brings back runs a newer press
- *   skipped. It is computed from the recorded moment of the press, so a replay after a crash writes
- *   nothing new, and a press already applied counts even after the scenario ended since.
+ *   skipped.
+ * - Each counted press is recorded once in the audit journal under its own id (the button set's
+ *   token). A replay of that press — the queue step after the arrival, an edit that never landed —
+ *   finds it there and changes nothing: it neither swallows a run the person asked for since ("run it
+ *   now" and a new time clear the skip) nor turns into «не засчитано» after the scenario ended.
  */
 import type { PoolClient } from "pg";
 
@@ -36,6 +39,8 @@ export type AgentScheduleSkipOutcome =
   | { kind: "missing" }
   | { kind: "skipped"; localTime: string; title: string }
   | { kind: "stale" };
+
+const SKIP_EVENT = "agent_schedule.skipped_for_day";
 
 // A scenario that is not running anymore cannot be read for the day.
 const SKIPPABLE_STATUSES = ["active", "leased", "paused"];
@@ -71,6 +76,8 @@ export async function findAgentScheduleSkipTargets(
 
 export async function skipAgentScheduleForDay(input: AgentScheduleSkipTarget & {
   pressedAt: Date;
+  /** The press's own id: the token of its button set, which takes one press. */
+  pressId: string;
   scheduleId: string;
   /** When the message with the button went out; its local day must be the day of the press. */
   sentAt: Date;
@@ -79,11 +86,10 @@ export async function skipAgentScheduleForDay(input: AgentScheduleSkipTarget & {
   try {
     await client.query("BEGIN");
     const found = await client.query<{
-      applied: boolean; family_id: string; local_time: string; same_day: boolean; skippable: boolean; title: string; until: Date;
+      family_id: string; local_time: string; same_day: boolean; skippable: boolean; title: string; until: Date;
     }>(
       `SELECT schedule.family_id, schedule.title,
               schedule.status::text = ANY($4::text[]) AS skippable,
-              schedule.skipped_at IS NOT DISTINCT FROM $6::timestamptz AS applied,
               ($5::timestamptz AT TIME ZONE schedule.timezone)::date
                 = ($6::timestamptz AT TIME ZONE schedule.timezone)::date AS same_day,
               ((($6::timestamptz AT TIME ZONE schedule.timezone)::date + 1)::timestamp
@@ -97,10 +103,18 @@ export async function skipAgentScheduleForDay(input: AgentScheduleSkipTarget & {
         input.sentAt, input.pressedAt],
     );
     const schedule = found.rows[0];
-    // This very press was applied before, by the arrival step or an earlier replay.
-    if (schedule?.applied === true) {
-      await client.query("ROLLBACK");
-      return { kind: "skipped", localTime: schedule.local_time, title: schedule.title };
+    if (schedule !== undefined) {
+      // This very press was counted before; the schedule row lock above orders the check and the record.
+      const counted = await client.query(
+        `SELECT 1 FROM audit_events
+          WHERE family_id = $1 AND event_type = $2 AND subject_id = $3 AND metadata->>'pressId' = $4
+          LIMIT 1`,
+        [schedule.family_id, SKIP_EVENT, input.scheduleId, input.pressId],
+      );
+      if ((counted.rowCount ?? 0) > 0) {
+        await client.query("ROLLBACK");
+        return { kind: "skipped", localTime: schedule.local_time, title: schedule.title };
+      }
     }
     if (schedule === undefined || !schedule.skippable) {
       await client.query("ROLLBACK");
@@ -111,18 +125,16 @@ export async function skipAgentScheduleForDay(input: AgentScheduleSkipTarget & {
       return { kind: "stale" };
     }
     // Only forward: a newer press that skips further stays.
-    const updated = await client.query(
+    await client.query(
       `UPDATE agent_schedules SET skipped_until = $2, skipped_at = $3, updated_at = now()
         WHERE id = $1 AND (skipped_until IS NULL OR skipped_until < $2)`,
       [input.scheduleId, schedule.until, input.pressedAt],
     );
-    if ((updated.rowCount ?? 0) > 0) {
-      await client.query(
-        `INSERT INTO audit_events (family_id, event_type, subject_id, metadata)
-         VALUES ($1, 'agent_schedule.skipped_for_day', $2, '{}'::jsonb)`,
-        [schedule.family_id, input.scheduleId],
-      );
-    }
+    await client.query(
+      `INSERT INTO audit_events (family_id, event_type, subject_id, metadata)
+       VALUES ($1, $2, $3, jsonb_build_object('pressId', $4::text))`,
+      [schedule.family_id, SKIP_EVENT, input.scheduleId, input.pressId],
+    );
     await client.query("COMMIT");
     return { kind: "skipped", localTime: schedule.local_time, title: schedule.title };
   } catch (error) {

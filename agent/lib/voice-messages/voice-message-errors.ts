@@ -29,6 +29,7 @@ const ACCOUNT_REFUSAL_CODES = new Set([
   "AGENT_VOICE_MESSAGE_PROVIDER_PAYMENT_REQUIRED",
 ]);
 const PRIVATE_ACCOUNT_REASON = "Голосовое сейчас недоступно.";
+const PRIVATE_ACCOUNT_CODE = "AGENT_VOICE_MESSAGE_UNAVAILABLE";
 
 const UNCONFIRMED_DELIVERY_CORRECTION =
   "Не вызывай send_voice_message повторно: голосовое могло дойти до чата. Ответь на ту же просьбу обычным текстом и первой фразой коротко скажи, что не удалось подтвердить отправку голосового, поэтому дублируешь ответ текстом.";
@@ -50,10 +51,14 @@ export function voiceMessageInputError(): ModelFacingError {
 /** `ownerChat`: the owner's own private chat, the only place the account's cause may be named. */
 export function voiceMessageFailure(error: unknown, options: { ownerChat: boolean } = { ownerChat: true }): ModelFacingError {
   if (error instanceof ModelFacingError) return error;
-  const code = isAppError(error) ? error.code : "AGENT_VOICE_MESSAGE_FAILED";
+  const actualCode = isAppError(error) ? error.code : "AGENT_VOICE_MESSAGE_FAILED";
+  // Even the code would tell a guest what the owner's account lacks; the ledger and the owner's
+  // message keep the real one.
+  const privateAccount = !options.ownerChat && ACCOUNT_REFUSAL_CODES.has(actualCode);
+  const code = privateAccount ? PRIVATE_ACCOUNT_CODE : actualCode;
   const reason = !isAppError(error)
     ? UNEXPECTED_FAILURE_REASON
-    : !options.ownerChat && ACCOUNT_REFUSAL_CODES.has(code)
+    : privateAccount
       ? PRIVATE_ACCOUNT_REASON
       : error.message.replace(new RegExp(`^${error.code}:\\s*`, "u"), "");
   if (!isAppError(error)) {
