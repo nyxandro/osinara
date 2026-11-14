@@ -12,7 +12,7 @@
 | Файл | Что делает |
 | --- | --- |
 | `pack.conf` | Имя проекта и список файлов с секретами, которых в пакете нет |
-| `collector/compose.override.yaml` | Добавляет к сборщику `sql-exporter` и включает его в сеть Osinara |
+| `collector/compose.override.yaml` | Добавляет к сборщику `sql-exporter` и включает его в сеть Osinara; ведёт сборщик к хабу через Tailscale, пока прямой путь с `king-server` оборван (#484) |
 | `collector/sql-exporter.yaml` | Запросы к вьюхам `monitoring_*` боевой базы: очередь, память, расписания, доступность модели |
 | `collector/alloy/50-osinara-sql.alloy` | Велит сборщику опрашивать этот экспортёр раз в 30 секунд |
 | `collector/osinara-metrics.env.example` | Образец доступа к базе. Реальный файл — только на сервере, `0600` |
