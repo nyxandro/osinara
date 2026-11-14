@@ -158,6 +158,7 @@ describe("plain HTTP through the sandbox egress proxy", () => {
   it("opens nothing to a site for a client gone before its address was decided", async () => {
     let siteConnections = 0;
     const sitePort = await listen(createServer(() => undefined).on("connection", () => { siteConnections += 1; }));
+    const deciding = Promise.withResolvers<void>();
     const decided = Promise.withResolvers<void>();
     let checks = 0;
     // The grant check takes a while and the client hangs up meanwhile. Every later check refuses, as
@@ -166,6 +167,7 @@ describe("plain HTTP through the sandbox egress proxy", () => {
       authorize: async () => {
         checks += 1;
         if (checks > 1) throw new Error("revoked");
+        deciding.resolve();
         await new Promise((resolve) => setTimeout(resolve, 300));
         decided.resolve();
       },
@@ -173,7 +175,8 @@ describe("plain HTTP through the sandbox egress proxy", () => {
     const proxy = await listen(createSandboxEgressProxy({ grantRecheckMilliseconds: 200, networkAccess: slowGate }));
     const client = download(proxy, sitePort);
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // The client hangs up only once the proxy is deciding, so the case under test really happens.
+    await within(deciding.promise, "the proxy starting to decide");
     client.outgoing.destroy();
     await within(decided.promise, "the grant decision");
     // Long enough for several rechecks of anything still tracked.
