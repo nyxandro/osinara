@@ -361,6 +361,17 @@ describe("Docker Compose runtime wiring", () => {
     expect(stage("media-tools")).toContain("-static -Wall -Wextra -Werror -o /opt/ffmpeg/bin/media-sandbox /tmp/media-sandbox.c");
   });
 
+  // The model's sandbox has no working package manager (no privileges), so tools it needs often
+  // come with the image: on 04.11.2026 it looked for FFmpeg twice in a day, for audio and video (#463).
+  it("ships Debian's FFmpeg in the sandbox runtime, where the model cannot install it", () => {
+    const dockerfile = readFileSync(new URL("Dockerfile", projectRoot), "utf8");
+    const start = dockerfile.indexOf(" AS sandbox-runtime\n");
+    const sandbox = dockerfile.slice(start, dockerfile.indexOf("\nFROM ", start));
+
+    expect(sandbox).toMatch(/apt-get install --no-install-recommends --yes \\\n(?: {6}[a-z0-9.+-]+ \\\n)* {6}ffmpeg \\\n/u);
+    expect(sandbox).toContain("rm -rf /var/lib/apt/lists/*");
+  });
+
   it("builds every Node application service from the runtime stage", () => {
     const compose = readFileSync(new URL("compose.yaml", projectRoot), "utf8");
     const workerEntrypoints = new Map([

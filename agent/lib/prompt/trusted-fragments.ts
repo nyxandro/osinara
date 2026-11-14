@@ -15,6 +15,7 @@
  * trusted zones share one source of truth instead of two drifting profile literals.
  */
 import { SANDBOX_API_KEY_USAGE } from "./api-key-fragments.js";
+import { SANDBOX_PACKAGE_RULES } from "./sandbox-package-fragments.js";
 
 export type TrustedScope = "family" | "personal";
 
@@ -64,7 +65,7 @@ The physical workspace is the source of truth; no separate registration, synchro
 
 ${phrases.mounts}
 
-If a task lacks a CLI, an npm or a Python package, install it yourself and continue working. The npm global prefix, the Python virtualenv, the browser cache and \`$HOME\` belong to ${phrases.environmentName} and survive a new context.
+If a task lacks a tool, install it yourself and continue working. ${SANDBOX_PACKAGE_RULES} The npm global prefix, the Python virtualenv, the browser cache and \`$HOME\` belong to ${phrases.environmentName} and survive a new context.
 `.trim();
 }
 

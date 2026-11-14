@@ -113,11 +113,16 @@ RUN npm ci --omit=dev --ignore-scripts \
 
 FROM first-party-node AS sandbox-runtime
 COPY infra/certificates/russian-trusted-root-ca.crt /usr/local/share/ca-certificates/russian-trusted-root-ca.crt
+# The model's commands run here without privileges, so apt cannot install anything at run time: what
+# its tasks need beyond pip and npm comes with the image. FFmpeg converts the audio and video people
+# send and lets yt-dlp join formats (looked for twice on 04.11.2026, #463); measured on 14.11 it adds
+# 124 packages and 374 MB to this image.
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes \
       build-essential \
       ca-certificates \
       curl \
+      ffmpeg \
       fonts-liberation \
       findutils \
       grep \
