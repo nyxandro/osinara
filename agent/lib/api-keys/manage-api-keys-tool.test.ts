@@ -206,11 +206,13 @@ describe("manage_api_keys", () => {
   it("names the recipient on the card, a guest as a guest", async () => {
     const key = { ...request, name: "neuraldeep", upstreamBaseUrl: "https://api.neuraldeep.ru/v1" };
     const prompt = (input: Record<string, unknown>) => apiKeyGrantPrompt({
-      findGroupTitle: async () => "Внешний чат", key, target: input.target, telegramChatId: input.telegramChatId, ...input,
+      findGroupTitle: async () => "Внешний чат",
+      findGuest: async () => ({ displayName: "Пётр", telegramUserId: "777", telegramUsername: null }),
+      key, target: input.target, telegramChatId: input.telegramChatId, ...input,
     } as never);
 
-    const guest = await prompt({ guestDisplayName: "Пётр", target: "guest" });
-    expect(guest).toContain("Кому: гость Пётр (его личный чат и песочница)");
+    const guest = await prompt({ ...GUEST, target: "guest" });
+    expect(guest).toContain("Кому: гость Пётр (Telegram ID 777) — его личный чат и песочница");
     expect(guest).not.toContain("вся семья");
     expect(await prompt({ target: "family" })).toContain("Кому: вся семья");
     expect(await prompt({ target: "group", telegramChatId: "-1001234567890" })).toContain("Кому: внешняя группа «Внешний чат»");

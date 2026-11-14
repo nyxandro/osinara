@@ -19,14 +19,20 @@ services:
     # the slice instead of going to development in system.slice.
     # PostgreSQL's own memory is ~160 MB (128 MB shared buffers); the rest keeps hot pages cached.
     mem_reservation: 300m
+    # Without it the server is PID 1 and inherits every orphan in the container. A health check
+    # Docker killed on timeout left one, and the server read its exit code 2 as a crashed backend:
+    # it dropped every connection and ran crash recovery (#460).
+    init: true
     environment:
       POSTGRES_DB: osinara
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_USER: osinara
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U osinara -d osinara"]
+      # No shell between Docker and pg_isready, and pg_isready gives up on its own first: Docker's
+      # timeout only backs up a check that could not even start on a stalled host.
+      test: ["CMD", "pg_isready", "-U", "osinara", "-d", "osinara", "-t", "3"]
       interval: 5s
-      timeout: 3s
+      timeout: 10s
       retries: 20
     networks:
       - app-network

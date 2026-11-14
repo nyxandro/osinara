@@ -18,6 +18,7 @@ import { evaluateConversationAccess } from "../family-access.js";
 import { familySkillRepository } from "../family-skills/family-skill-repository.js";
 import { familyRepository } from "../family-repository.js";
 import { telegramRepository } from "../telegram-repository.js";
+import { findGuestApprovalSubject } from "./guest-approval-subject.js";
 import { guestRepository, loadGuestAccessPolicy } from "./guest-repository.js";
 
 const integrationTestsEnabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
@@ -331,6 +332,18 @@ describeWithDatabase("guest access", () => {
       operationKey: "approve-call",
     })).rejects.toThrow(/AGENT_INVITATION_FORMER_GUEST/);
     await expect(telegramRepository.findIdentity("guest-1")).resolves.toBeNull();
+  });
+
+  it("finds the guest a confirmation card names only in the owner's own family (#479)", async () => {
+    const owner = await createOwner();
+    await familyRepository.claimInvitation(await guestLink(owner, "guest-call-card"), PETR);
+    const guestUserId = (await telegramRepository.findIdentity("guest-1"))!.userId;
+    const stranger = await database().query<{ id: string }>("INSERT INTO families (name) VALUES ('Чужая семья') RETURNING id");
+
+    await expect(findGuestApprovalSubject({ guestUserId, hostFamilyId: owner.familyId }))
+      .resolves.toEqual({ displayName: "Пётр", telegramUserId: "guest-1", telegramUsername: "petr" });
+    await expect(findGuestApprovalSubject({ guestUserId, hostFamilyId: stranger.rows[0]!.id })).resolves.toBeNull();
+    await expect(findGuestApprovalSubject({ guestUserId: "not-a-uuid", hostFamilyId: owner.familyId })).resolves.toBeNull();
   });
 
   it("refuses an unknown guest and anyone but the live owner", async () => {

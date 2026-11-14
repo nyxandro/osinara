@@ -17,13 +17,16 @@
  *   buttons answer nobody: alone they go out in any chat without a set, and beside answers that
  *   cannot go out they go out by themselves.
  * - The exact text is recorded before that message is sent, so the caption written after a choice
- *   lands under the same words; the message number is recorded once Telegram confirmed it.
+ *   lands under the same words; the message number is recorded once Telegram confirmed it. When
+ *   Telegram refused its files and it went with a line in place of each, those delivered words
+ *   replace the recorded ones: an edit naming files the message lacks is refused (#476).
  * - Buttons are presentation of a message that matters more: when their bookkeeping fails, the
  *   answer or the reminder goes out without them and the failure is logged. So it does when
  *   Telegram refuses the message carrying them: a refusal means nothing was delivered, so the same
  *   message goes once more without the buttons, which are discarded. Any other failure of the send
  *   may hide a delivered message and is never sent again.
  */
+import { withRefusedFiles } from "../answer-files/answer-file-delivery.js";
 import { fitsTelegramRichMessage } from "../telegram-rich-markdown.js";
 import { isTelegramRichMessageRefusal, type SentRichMedia, type SentTelegramMessage } from "../telegram-rich-messages.js";
 import {
@@ -199,8 +202,9 @@ export function turnReplyButtons(input: {
     async sendLast(chunk, post) {
       const attached = await withButtons(chunk);
       if (attached === null) return await post(chunk.text);
+      let sent: SentTelegramMessage;
       try {
-        return await post(attached.text);
+        sent = await post(attached.text);
       } catch (error) {
         if (!isTelegramRichMessageRefusal(error)) throw error;
         // The transport has just logged Telegram's reason with the refusal.
@@ -214,6 +218,16 @@ export function turnReplyButtons(input: {
         }
         return await post(chunk.text);
       }
+      if (sent.refusedFiles !== undefined) {
+        // The buttons went out under these words; the files they name in the staged text did not.
+        try {
+          await replyButtonRepository.replaceMessageText(attached.setId, withRefusedFiles(chunk.text, sent.refusedFiles));
+        } catch (error) {
+          // The answer is delivered and its buttons work; only their later edit will be refused.
+          logFailure("AGENT_REPLY_BUTTONS_TEXT_UPDATE_FAILED", error, { setId: attached.setId });
+        }
+      }
+      return sent;
     },
   };
 }

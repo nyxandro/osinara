@@ -13,6 +13,9 @@
  * - A widget card carries its buttons as a keyboard (#480): settling replaces that keyboard with the
  *   staying buttons and the caption as a disabled button; the card and its caption stay untouched.
  * - Every refusal is logged with Telegram's own description, so a failure can be diagnosed later.
+ *   An edit Telegram cancelled for a newer edit of the same message is none: a press is settled on
+ *   arrival and again in the chat queue moments later, and the later edit, checked by its own call,
+ *   decides what the message shows (#476).
  */
 import {
   answerTelegramCallbackQuery,
@@ -51,11 +54,14 @@ const timedFetch: typeof fetch = (request, init) =>
 
 // Telegram refuses an edit that changes nothing: the message already shows what the edit asked for.
 const NOT_MODIFIED = "message is not modified";
+// Telegram drops an edit when a newer one of the same message arrives before it is applied (seen in
+// production 02.11–09.11, #476; the Bot API pages do not list this refusal).
+const CANCELED_BY_NEWER_EDIT = "canceled by new edit message request";
 
-function alreadySettled(response: TelegramApiResponse): boolean {
+function refusedBecause(response: TelegramApiResponse, reason: string): boolean {
   const body = response.body;
   return typeof body === "object" && body !== null && "description" in body &&
-    typeof body.description === "string" && body.description.includes(NOT_MODIFIED);
+    typeof body.description === "string" && body.description.includes(reason);
 }
 
 /** Telegram's own explanation of a refusal, when it gave one, with the HTTP status. */
@@ -107,7 +113,7 @@ export const replyButtonTelegram: ReplyButtonTelegram = {
             : { media: set.messageMedia.map((file) => ({ id: file.id, media: { media: file.fileId, type: file.kind } })) }),
         },
       });
-    if (edited.ok || alreadySettled(edited)) return;
+    if (edited.ok || refusedBecause(edited, NOT_MODIFIED) || refusedBecause(edited, CANCELED_BY_NEWER_EDIT)) return;
     throw new AppError("AGENT_REPLY_BUTTONS_SETTLE_FAILED", "Telegram не убрал кнопки из сообщения", {
       details: { ...failureDetails(edited), telegramChatId: set.telegramChatId, telegramMessageId: set.telegramMessageId },
     });

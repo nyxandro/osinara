@@ -10,6 +10,7 @@
  * - The addressee's message dismisses only the sets they could tap before writing it, and leaves a
  *   set whose tap arrived earlier and still waits to be decided.
  * - A reminder's set carries its text.
+ * - A set keeps the words its message actually went out with when they replace the staged ones.
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -80,6 +81,16 @@ describeWithDatabase("reply button repository", () => {
     await replyButtonRepository.activateForTurn("turn_1", "50", []);
 
     await expect(pressOf()).resolves.toMatchObject({ set: { messageMedia: media }, status: "claimed" });
+  });
+
+  it("keeps the words a message went out with in place of the staged ones (#476)", async () => {
+    const set = await stageTurn("turn_1", TOKEN, TARGET, "Рецепт\n\n![](tg://photo?id=f0)");
+    const delivered = "Рецепт\n\n⚠️ Не удалось приложить «обложка.jpg»: Telegram не принял файл (AGENT_ANSWER_FILE_REFUSED)";
+
+    await replyButtonRepository.replaceMessageText(set.id, delivered);
+    await replyButtonRepository.activateForTurn("turn_1", "50", []);
+
+    await expect(pressOf()).resolves.toMatchObject({ set: { messageMedia: [], messageText: delivered }, status: "claimed" });
   });
 
   it("reads a message without files as one with none", async () => {

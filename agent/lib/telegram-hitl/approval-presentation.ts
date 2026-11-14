@@ -12,6 +12,11 @@ import { apiKeyGrantPrompt } from "../api-keys/api-key-approval.js";
 import { apiKeyRepository, type ApiKeySettings } from "../api-keys/api-key-repository.js";
 import { AppError } from "../app-error.js";
 import { requirePrivateTelegramOwner } from "../family-context.js";
+import {
+  findGuestApprovalSubject,
+  guestApprovalLabel,
+  type GuestApprovalSubject,
+} from "../guests/guest-approval-subject.js";
 import { requireMemoryAuthorization } from "../memory-context.js";
 import { profileProjectionPolicyRepository } from "../profile-projection-policy-repository.js";
 import { requireProfileProjectionUpdate } from "../profile-projection-input.js";
@@ -41,6 +46,8 @@ import { externalAgentScheduleRepository } from "../agent-schedules/external-age
 
 interface ApprovalPresentationDependencies {
   findApiKey(name: string, ctx: Pick<SessionContext, "session">): Promise<(ApiKeySettings & { name: string }) | null>;
+  /** A guest of the owner's own family, or null for anyone else (#479). */
+  findGuest(guestUserId: string, ctx: Pick<SessionContext, "session">): Promise<GuestApprovalSubject | null>;
   findProfileProjectionGroup(groupRef: string, ctx: Pick<SessionContext, "session">): Promise<string | null>;
   findGroupTitle(telegramChatId: string, ctx: Pick<SessionContext, "session">): Promise<string | null>;
   /** The owner's automation an update targets; fails when it is not one of theirs. */
@@ -147,6 +154,13 @@ function cardPresenter(dependencies: ApprovalPresentationDependencies): Telegram
         };
       }
     }
+    if (request.action.toolName === "manage_guest_access" &&
+      (request.action.input.action === "configure" || request.action.input.action === "revoke")) {
+      // The card names the guest from their record (#479); the call stays as the model made it.
+      const input = request.action.input;
+      const guest = guestApprovalLabel(await dependencies.findGuest(String(input.guestUserId), ctx), input.guestDisplayName);
+      return localizeTelegramInputRequest({ ...request, action: { ...request.action, input: { ...input, guestDisplayName: guest } } });
+    }
     if (request.action.toolName === "manage_api_keys" && request.action.input.action === "grant") {
       // The approval policy denied any invalid input already; a personal grant has no card.
       const input = request.action.input;
@@ -154,7 +168,9 @@ function cardPresenter(dependencies: ApprovalPresentationDependencies): Telegram
         ...localized,
         prompt: await apiKeyGrantPrompt({
           findGroupTitle: (telegramChatId) => dependencies.findGroupTitle(telegramChatId, ctx),
+          findGuest: (guestUserId) => dependencies.findGuest(guestUserId, ctx),
           guestDisplayName: input.guestDisplayName,
+          guestUserId: input.guestUserId,
           key: await dependencies.findApiKey(String(input.name), ctx),
           target: input.target,
           telegramChatId: input.telegramChatId,
@@ -180,6 +196,10 @@ export const presentTelegramApproval = createTelegramApprovalPresenter({
   async findApiKey(name, ctx) {
     const owner = requirePrivateTelegramOwner(ctx);
     return await apiKeyRepository.find({ familyId: owner.familyId, name });
+  },
+  async findGuest(guestUserId, ctx) {
+    const owner = requirePrivateTelegramOwner(ctx);
+    return await findGuestApprovalSubject({ guestUserId, hostFamilyId: owner.familyId });
   },
   async findProfileProjectionGroup(groupRef, ctx) {
     requirePrivateTelegramOwner(ctx);

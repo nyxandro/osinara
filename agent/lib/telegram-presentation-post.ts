@@ -5,7 +5,8 @@
  * - `postTelegramPresentationChunk`: sends a plain chunk as an ordinary message and a rich chunk as
  *   a native rich message with the files it shows, so a final answer and a progress notice reach
  *   the chat the same way. A message with files Telegram refused for good goes once more without
- *   them, so one file Telegram cannot take costs no answer.
+ *   them, so one file Telegram cannot take costs no answer. That message names the files it went
+ *   without: its reply buttons record the words it really carries (#476).
  */
 import type { TelegramEventContext } from "../runtime/telegram/channel-types.js";
 
@@ -38,6 +39,7 @@ export async function postTelegramPresentationChunk(
     // Refused for good means not delivered: the same words go once more, each file replaced by a
     // line saying it could not go. A failure whose outcome is unknown is never resent.
     console.error(JSON.stringify({ code: "AGENT_ANSWER_FILES_REFUSED", files: media.length }));
-    return await postTelegramRichMessageChunk(withRefusedFiles(chunk.text, media), channel.telegram, channel.state, replyParameters, []);
+    const sent = await postTelegramRichMessageChunk(withRefusedFiles(chunk.text, media), channel.telegram, channel.state, replyParameters, []);
+    return { ...sent, refusedFiles: media };
   }
 }

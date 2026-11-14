@@ -6,6 +6,8 @@
  * - The prompt explains the exact consequence before a decision is requested.
  * - A Google Workspace access grant exposes the complete exact argv.
  * - An API key grant names the stored key, its service and the live group title, not model words.
+ * - A card about a guest names them from their record, with their @username or, without one, their
+ *   Telegram ID, so two guests with one name stay apart; a call naming a guest otherwise gets no card (#479).
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -18,6 +20,7 @@ import type { TelegramInputRequest } from "../telegram-interface.js";
 const SKILL_DEPENDENCIES = {
   findApiKey: vi.fn(),
   findExternalSchedule: vi.fn(),
+  findGuest: vi.fn(),
 };
 
 const findGroupTitle = vi.fn().mockResolvedValue("Тестовая группа");
@@ -242,4 +245,87 @@ describe("Telegram approval presentation", () => {
     expect(result.prompt).toContain("будет выполнена один раз");
   });
 
+});
+
+describe("guest approval presentation (#479)", () => {
+  const PETR_ID = "00000000-0000-4000-8000-000000000007";
+
+  function guestCard(toolName: string, input: TelegramInputRequest["action"]["input"]) {
+    return {
+      action: { callId: "guest-call", input, kind: "tool-call" as const, toolName },
+      kind: "tool-approval" as const,
+      options: [{ id: "approve", label: "Yes", style: "primary" as const }],
+      prompt: "Approval",
+      requestId: "guest-request",
+    };
+  }
+
+  function presenter(guest: { displayName: string; telegramUserId: string; telegramUsername: string | null } | null) {
+    const findGuest = vi.fn().mockResolvedValue(guest);
+    const findApiKey = vi.fn().mockResolvedValue({
+      authHeader: "authorization", authScheme: "bearer", name: "neuraldeep",
+      purpose: "генерация картинок", upstreamBaseUrl: "https://api.neuraldeep.ru/v1",
+    });
+    return {
+      findGuest,
+      present: createTelegramApprovalPresenter({ ...SKILL_DEPENDENCIES, findApiKey, findGroupTitle, findGuest, findProfileProjectionGroup }),
+    };
+  }
+
+  it("names the guest of a change by their record and @username", async () => {
+    const { findGuest, present } = presenter({ displayName: "Пётр", telegramUserId: "777", telegramUsername: "petr_s" });
+
+    const result = await present(guestCard("manage_guest_access", {
+      action: "configure", disabledTools: ["bash"], guestDisplayName: "Пётр", guestUserId: PETR_ID,
+    }), context());
+
+    expect(findGuest).toHaveBeenCalledWith(PETR_ID, expect.anything());
+    expect(result.prompt).toContain("Гость: Пётр (@petr_s)");
+    expect(result.prompt).toContain("Выключенные инструменты: bash");
+  });
+
+  it("names a guest without a @username by their Telegram ID", async () => {
+    const { present } = presenter({ displayName: "Пётр", telegramUserId: "777", telegramUsername: null });
+
+    const result = await present(guestCard("manage_guest_access", {
+      action: "revoke", guestDisplayName: "Пётр", guestUserId: PETR_ID,
+    }), context());
+
+    expect(result.prompt).toContain("Гость: Пётр (Telegram ID 777)");
+  });
+
+  it("names the guest a key goes to the same way", async () => {
+    const { present } = presenter({ displayName: "Пётр", telegramUserId: "777", telegramUsername: "petr_s" });
+
+    const result = await present(guestCard("manage_api_keys", {
+      action: "grant", guestDisplayName: "Пётр", guestUserId: PETR_ID, name: "neuraldeep", target: "guest",
+    }), context());
+
+    expect(result.prompt).toContain("Кому: гость Пётр (@petr_s) — его личный чат и песочница");
+  });
+
+  it("shows the same card for a guest change through the owner's settings door", async () => {
+    const { present } = presenter({ displayName: "Пётр", telegramUserId: "777", telegramUsername: "petr_s" });
+    const action = { callId: "door-call", kind: "tool-call" as const, toolName: "owner_settings",
+      input: { call: { action: "revoke", guestDisplayName: "Пётр", guestUserId: PETR_ID }, section: "guests" } };
+
+    const result = await present({ ...guestCard("owner_settings", action.input), action }, context());
+
+    expect(result.prompt).toContain("Гость: Пётр (@petr_s)");
+    expect(result.action).toEqual(action);
+  });
+
+  it.each([
+    ["a guest of another family or none at all", null],
+    ["a guest whose name the call got wrong", { displayName: "Пётр Иванов", telegramUserId: "777", telegramUsername: null }],
+  ])("shows no card for %s", async (_case, guest) => {
+    const { present } = presenter(guest);
+
+    await expect(present(guestCard("manage_guest_access", {
+      action: "revoke", guestDisplayName: "Пётр", guestUserId: PETR_ID,
+    }), context())).rejects.toMatchObject({ code: "AGENT_GUEST_NOT_FOUND" });
+    await expect(present(guestCard("manage_api_keys", {
+      action: "grant", guestDisplayName: "Пётр", guestUserId: PETR_ID, name: "neuraldeep", target: "guest",
+    }), context())).rejects.toMatchObject({ code: "AGENT_GUEST_NOT_FOUND" });
+  });
 });

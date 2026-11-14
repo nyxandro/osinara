@@ -198,6 +198,14 @@ export const replyButtonRepository = {
     );
   },
 
+  /**
+   * The words the buttons' message went out with, when they differ from the staged ones: Telegram
+   * refused its files and a line took the place of each. Every later edit rewrites these (#476).
+   */
+  async replaceMessageText(id: string, messageText: string): Promise<void> {
+    await database().query("UPDATE telegram_reply_button_sets SET message_text = $2 WHERE id = $1", [id, messageText]);
+  },
+
   /** Telegram refused the message that carried these buttons: they never went out. */
   async discard(id: string): Promise<void> {
     await database().query("DELETE FROM telegram_reply_button_sets WHERE id = $1 AND status = 'staged'", [id]);

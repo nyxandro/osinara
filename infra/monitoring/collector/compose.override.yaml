@@ -45,6 +45,14 @@ services:
     volumes:
       - ./sql-exporter.yaml:/etc/sql-exporter/collectors.yaml:ro
 
+  alloy:
+    # Since 14.11.2026 king-server barely opens new TCP connections to the hub's public address at
+    # Hostland: a filter between the providers drops them, while connections already open live on
+    # (#484). The hub is reached over Tailscale instead, by the same name, so its certificate still
+    # matches. Remove this once a new direct connection opens reliably again.
+    extra_hosts:
+      - "hub.178.212.13.132.sslip.io:100.107.117.118"
+
 networks:
   # Created by the application's own deployment; the collector only joins it to reach PostgreSQL.
   osinara:

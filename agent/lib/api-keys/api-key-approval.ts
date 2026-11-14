@@ -2,18 +2,21 @@
  * The owner's confirmation card for granting an API key beyond the private chat.
  *
  * Export:
- * - `apiKeyGrantPrompt`: the card text, built from the stored key and the live group title, not
- *   from words the model chose. A guest is named as the call names them; execution rechecks that name against
- *   the guest's record, like every guest change (#474).
+ * - `apiKeyGrantPrompt`: the card text, built from the stored key, the live group title and the guest's
+ *   record, not from words the model chose. A guest is named with their @username or Telegram ID (#479);
+ *   execution still rechecks the name against the guest's record, like every guest change (#474).
  */
 import { AppError } from "../app-error.js";
+import { guestApprovalLabel, type GuestApprovalSubject } from "../guests/guest-approval-subject.js";
 import { API_KEY_GRANT_CONSEQUENCE } from "../telegram-hitl/approval-consequences.js";
 import { approvalFact, buildApprovalMessage } from "../telegram-hitl/approval-message.js";
 import type { ApiKeySettings } from "./api-key-repository.js";
 
 export async function apiKeyGrantPrompt(input: {
   readonly findGroupTitle: (telegramChatId: string) => Promise<string | null>;
+  readonly findGuest: (guestUserId: string) => Promise<GuestApprovalSubject | null>;
   readonly guestDisplayName: unknown;
+  readonly guestUserId: unknown;
   readonly key: (ApiKeySettings & { readonly name: string }) | null;
   readonly target: unknown;
   readonly telegramChatId: unknown;
@@ -22,7 +25,10 @@ export async function apiKeyGrantPrompt(input: {
     throw new AppError("AGENT_API_KEY_NOT_FOUND", "Такого ключа нет. Посмотрите список ключей и повторите с точным именем");
   }
   let recipient = "вся семья: личные чаты членов семьи и семейные группы";
-  if (input.target === "guest") recipient = `гость ${String(input.guestDisplayName)} (его личный чат и песочница)`;
+  if (input.target === "guest") {
+    const guest = guestApprovalLabel(await input.findGuest(String(input.guestUserId)), input.guestDisplayName);
+    recipient = `гость ${guest} — его личный чат и песочница`;
+  }
   if (input.target === "group") {
     const telegramChatId = String(input.telegramChatId);
     const title = await input.findGroupTitle(telegramChatId);
