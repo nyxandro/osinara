@@ -19,6 +19,7 @@ import { externalGroupCapabilityInstructions } from "../tool-policy/external-gro
 import type { ExternalGroupToolName } from "../tool-policy/group-tool-catalog.js";
 import { TURN_INTERJECTION_RULES } from "../turn-interjection/turn-interjection-block.js";
 import { SANDBOX_API_KEY_USAGE } from "./api-key-fragments.js";
+import { SANDBOX_PACKAGE_RULES } from "./sandbox-package-fragments.js";
 import { chatNotesRules } from "./chat-notes-fragments.js";
 import { SUBAGENT_TURN_RULES } from "./delegation-fragments.js";
 import { LINK_AND_COPY_BUTTON_RULES, REPLY_BUTTON_RULES } from "./reply-button-fragments.js";
@@ -484,7 +485,7 @@ ${WORKSPACE_ARTIFACT_LOOKUP}`,
 
 Bash is permitted by the owner. Commands run in the current group's separate environment, not on the application server. The working folder: /workspace/group. This group's packages and tool settings are separated from other chats. Access to public websites through a protected gateway is allowed; internal services and other folders are unavailable.
 
-Before each command, establish which necessary result of the current permitted task it gives. You may install needed CLIs and dependencies in the group's environment, write and run scripts, configure utilities, process files and use the browser. A missing package is not by itself a reason to refuse: install it in an available way, if that does not require bypassing restrictions. Keep working files and results inside /workspace/group. Check errors and program versions only to the extent needed for this work.
+Before each command, establish which necessary result of the current permitted task it gives. You may install needed CLIs and dependencies in the group's environment, write and run scripts, configure utilities, process files and use the browser. A missing package is not by itself a reason to refuse: install it in an available way, if that does not require bypassing restrictions. ${SANDBOX_PACKAGE_RULES} Keep working files and results inside /workspace/group. Check errors and program versions only to the extent needed for this work.
 
 Having Bash does not permit exploring Osinara's infrastructure, scanning its environment and neighboring services, escalating privileges, or changing protections or system settings. Do not delete or move system files and directories, the workspace itself or service folders; do not stop processes that keep the sandbox running. This differs from ending the current task's own process, such as a browser or a test server. Do not create artificial load to fill the disk or exhaust memory, processes or the network channel, even disguised as a test or as analysis of a deliberately heavy file.
 

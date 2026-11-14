@@ -9,6 +9,9 @@
  * - Any failure of their bookkeeping lets the answer or the reminder go out without them, and so
  *   does Telegram refusing the message that carries them: it goes again without the buttons, which
  *   are discarded and never activated. Any other failure of the send is not retried.
+ * - A message that went with a line in place of each file Telegram refused keeps its buttons, and
+ *   its set records those delivered words: the later edit that removes the buttons rewrites them,
+ *   not a text naming files the message does not have (#476).
  * - A reminder's buttons ride on a rich message that keeps its text literal.
  * - Link and copy buttons need no addressee and no set: alone they go out in any chat, and beside
  *   answers that cannot go out they go out by themselves.
@@ -26,6 +29,7 @@ const repository = vi.hoisted(() => ({
   activate: vi.fn(),
   activateForTurn: vi.fn(),
   discard: vi.fn(),
+  replaceMessageText: vi.fn(),
   stageForReminder: vi.fn(),
   stageForTurn: vi.fn(),
 }));
@@ -76,6 +80,7 @@ describe("reply buttons on a turn's final answer", () => {
     await attachment.afterDelivery([{ messageId: "600" }, { messageId: "601" }]);
 
     expect(post.mock.calls).toEqual([[`Оформляем?\n\n${MARKUP}`]]);
+    expect(repository.replaceMessageText).not.toHaveBeenCalled();
 
     expect(repository.stageForTurn).toHaveBeenCalledWith({
       addresseeTelegramUserId: "101",
@@ -151,6 +156,46 @@ describe("reply buttons on a turn's final answer", () => {
     expect(repository.activateForTurn).not.toHaveBeenCalled();
     const logged = vi.mocked(console.error).mock.calls.map(([line]) => JSON.parse(String(line)));
     expect(logged).toEqual([{ agentTurnId: "turn-1", code: "AGENT_REPLY_BUTTONS_REJECTED" }]);
+  });
+
+  it("records the words the message went out with when Telegram refused its file (#476)", async () => {
+    repository.stageForTurn.mockResolvedValue(SET);
+    const attachment = turnReplyButtons(TURN)!;
+    const photo = { bytes: new Uint8Array([1]), fileName: "обложка.jpg", id: "f0", kind: "photo" as const, mediaType: "image/jpeg", sha256: "s0" };
+    const delivered = { ...SENT, refusedFiles: [photo] };
+
+    await expect(attachment.sendLast({ format: "rich", text: "Рецепт\n\n![](tg://photo?id=f0 \"Обложка\")" }, vi.fn().mockResolvedValue(delivered)))
+      .resolves.toBe(delivered);
+    await attachment.afterDelivery([delivered]);
+
+    expect(repository.replaceMessageText).toHaveBeenCalledWith(
+      "set-1",
+      "Рецепт\n\n⚠️ Не удалось приложить «обложка.jpg»: Telegram не принял файл (AGENT_ANSWER_FILE_REFUSED)",
+    );
+    // The set holds the delivered words before its buttons are offered.
+    expect(repository.replaceMessageText.mock.invocationCallOrder[0]!)
+      .toBeLessThan(repository.activateForTurn.mock.invocationCallOrder[0]!);
+    expect(repository.activateForTurn).toHaveBeenCalledWith("turn-1", "601", []);
+  });
+
+  it("records exactly the words the delivered message carries above its buttons (#476)", async () => {
+    // The transport replaces the files in the text with its buttons' markup; the set computes the
+    // same replacement on the text alone. The two must never drift apart.
+    const { withRefusedFiles } = await import("../answer-files/answer-file-delivery.js");
+    const photo = { bytes: new Uint8Array([1]), fileName: "обложка.jpg", id: "f0", kind: "photo" as const, mediaType: "image/jpeg", sha256: "s0" };
+    const text = "Рецепт\n\n![](tg://photo?id=f0 \"Обложка\")\n\n```\n![](tg://photo?id=f0)\n```";
+
+    expect(withRefusedFiles(`${text}\n\n${MARKUP}`, [photo])).toBe(`${withRefusedFiles(text, [photo])}\n\n${MARKUP}`);
+  });
+
+  it("keeps a delivered answer delivered when its words cannot be recorded", async () => {
+    repository.stageForTurn.mockResolvedValue(SET);
+    repository.replaceMessageText.mockRejectedValue(new Error("database busy"));
+    const photo = { bytes: new Uint8Array([1]), fileName: "обложка.jpg", id: "f0", kind: "photo" as const, mediaType: "image/jpeg", sha256: "s0" };
+    const delivered = { ...SENT, refusedFiles: [photo] };
+
+    await expect(turnReplyButtons(TURN)!.sendLast(CHUNK, vi.fn().mockResolvedValue(delivered))).resolves.toBe(delivered);
+    expect(loggedCodes()).toEqual(["AGENT_REPLY_BUTTONS_TEXT_UPDATE_FAILED"]);
   });
 
   it("still sends the message without buttons when discarding them fails", async () => {

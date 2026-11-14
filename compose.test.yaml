@@ -3,14 +3,16 @@ name: osinara-test
 services:
   postgres:
     image: pgvector/pgvector:pg17
+    # The server must not be PID 1: see the same service in compose.production.yaml (#460).
+    init: true
     environment:
       POSTGRES_DB: osinara_test
       POSTGRES_PASSWORD: osinara-test-only
       POSTGRES_USER: osinara_test
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U osinara_test -d osinara_test"]
+      test: ["CMD", "pg_isready", "-U", "osinara_test", "-d", "osinara_test", "-t", "3"]
       interval: 2s
-      timeout: 3s
+      timeout: 10s
       retries: 20
     tmpfs:
       - /var/lib/postgresql/data

@@ -16,6 +16,10 @@
  *   is closed once a recheck finds the grant gone.
  * - Proxy credentials and hop-by-hop headers are never forwarded.
  * - Logs name the destination host, never a full URL: it may carry credentials or tokens.
+ * - Neither side of a plain HTTP exchange is left orphaned, as with a CONNECT tunnel: a sandbox
+ *   client that hangs up ends the request to the site at once, and a site that drops its response
+ *   cuts the response to the sandbox. Either is routine traffic; only the proxy's own failure to
+ *   reach or hear from the site is logged as a failure (#462).
  */
 import { createServer, request as httpRequest } from "node:http";
 import { connect, type Socket } from "node:net";
@@ -176,6 +180,21 @@ export function createSandboxEgressProxy({ grantRecheckMilliseconds, networkAcce
       }
       const port = parseDestinationPort(targetUrl.hostname, targetUrl.port || "80");
       const target = await resolveTarget(networkAccess, targetUrl.hostname, port, incoming.socket.localAddress);
+      // A client gone while the destination was being decided closed before any listener below
+      // existed: nothing is opened for it, and nothing tracked under an owner's grant.
+      if (outgoing.destroyed) return;
+      // Which side ended an unfinished exchange first; the close of the other side that follows is
+      // its echo, not a second event (#462).
+      let endedBy: "client" | "failure" | "revocation" | "site" | null = null;
+      let responseStarted = false;
+      let timedOut = false;
+      // The site ended a connection it had already answered on: its own decision, as on an
+      // established tunnel, so routine traffic whether it closed or reset the connection.
+      const siteEnded = () => {
+        endedBy = "site";
+        writeEgressLog({ code: SANDBOX_EGRESS_UPSTREAM_CLOSED_CODE, hostname: target.hostname, phase: "response", port });
+        outgoing.destroy();
+      };
       const upstream = httpRequest({
         family: target.family,
         headers: { ...filteredHeaders(incoming.headers), host: targetUrl.host },
@@ -185,16 +204,31 @@ export function createSandboxEgressProxy({ grantRecheckMilliseconds, networkAcce
         port: target.port,
         timeout: CONNECT_TIMEOUT_MS,
       }, (upstreamResponse) => {
+        responseStarted = true;
         outgoing.writeHead(
           upstreamResponse.statusCode ?? 502,
           filteredHeaders(upstreamResponse.headers),
         );
         upstreamResponse.pipe(outgoing);
+        // A site dropping its response halfway ends it without `end`, and the pipe would leave the
+        // sandbox waiting for the rest: its response is cut too, so the client sees a broken transfer.
+        upstreamResponse.once("close", () => {
+          if (upstreamResponse.complete || endedBy !== null || timedOut) return;
+          siteEnded();
+        });
       });
-      upstream.on("timeout", () => upstream.destroy(
-        new Error("AGENT_SANDBOX_EGRESS_TIMEOUT: Upstream connection timed out"),
-      ));
+      upstream.on("timeout", () => {
+        timedOut = true;
+        upstream.destroy(new Error("AGENT_SANDBOX_EGRESS_TIMEOUT: Upstream connection timed out"));
+      });
       upstream.on("error", (error: NodeJS.ErrnoException) => {
+        if (endedBy !== null) return;
+        // A reset in the middle of the body; a site that went silent stays a failure of the path.
+        if (responseStarted && !timedOut) {
+          siteEnded();
+          return;
+        }
+        endedBy = "failure";
         writeEgressLog({
           code: "AGENT_SANDBOX_EGRESS_HTTP_FAILED",
           errorCode: error.code ?? null,
@@ -202,13 +236,34 @@ export function createSandboxEgressProxy({ grantRecheckMilliseconds, networkAcce
           hostname: target.hostname,
           port,
         });
-        if (!outgoing.headersSent) outgoing.writeHead(502);
+        // Text appended to a body already under way would corrupt it: a started response is cut.
+        if (outgoing.headersSent) {
+          outgoing.destroy();
+          return;
+        }
+        outgoing.writeHead(502);
         outgoing.end("AGENT_SANDBOX_EGRESS_FAILED: Public destination request failed\n");
+      });
+      // A sandbox client that hangs up before the whole response came, as apt does with a package it
+      // cannot store, leaves nobody to read the site. The request ends now, recorded as the client's
+      // own close, instead of idling into a timeout blamed on the site (#462).
+      outgoing.once("close", () => {
+        if (outgoing.writableFinished || endedBy !== null) return;
+        endedBy = "client";
+        writeEgressLog({
+          code: SANDBOX_EGRESS_CLIENT_CLOSED_CODE,
+          hostname: target.hostname,
+          phase: responseStarted ? "response" : "request",
+          port,
+        });
+        upstream.destroy();
       });
       if (target.granted) {
         const untrack = grantedConnections.track({
           address: target.address,
           close: () => {
+            // The registry records the revocation itself.
+            endedBy ??= "revocation";
             upstream.destroy();
             outgoing.destroy();
           },

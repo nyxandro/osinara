@@ -46,6 +46,8 @@ services:
     mem_limit: 1g
     memswap_limit: 1g
     cpus: 1.5
+    # Сервер не должен быть процессом номер 1: см. тот же сервис в compose.production.yaml (#460).
+    init: true
     environment:
       POSTGRES_DB: osinara_eval
       POSTGRES_PASSWORD: eval-only-local
@@ -53,9 +55,9 @@ services:
     healthcheck:
       # По TCP: временный сервер первичной инициализации слушает только сокет, и проверка через сокет
       # проходила раньше, чем база создана.
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U osinara_eval -d osinara_eval"]
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "osinara_eval", "-d", "osinara_eval", "-t", "3"]
       interval: 2s
-      timeout: 3s
+      timeout: 10s
       retries: 30
     networks: [eval]
     volumes:

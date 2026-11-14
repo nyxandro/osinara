@@ -12,6 +12,7 @@
  * - Agent containers map one selected-provider secret into the provider-neutral runtime boundary.
  * - The controller-compatible retired memory worker exposes stabilized readiness without work.
  * - Nginx re-resolves the agent service after Docker replaces its container IP.
+ * - A timed-out database health check cannot leave an orphan that PostgreSQL reads as a crash.
  */
 import { existsSync, readFileSync } from "node:fs";
 
@@ -109,6 +110,23 @@ function megabytes(block: string, key: string): number | undefined {
 }
 
 const PROTECTED_SERVICES = ["postgres", "agent", "memory-embedding"] as const;
+
+/** The PostgreSQL service of every stack. The image's entrypoint execs the server as PID 1. */
+const POSTGRES_SERVICES = [
+  ["compose.production.yaml", "postgres"],
+  ["compose.yaml", "postgres"],
+  ["compose.test.yaml", "postgres"],
+  ["compose.memory-golden-eval.yaml", "db"],
+] as const;
+
+/** A health check duration key in whole seconds; any other form fails instead of being skipped. */
+function healthCheckSeconds(block: string, key: string): number {
+  const line = block.match(new RegExp(`\\n {6}${key}: (.+)\\n`, "u"))?.[1];
+  if (line === undefined) throw new Error(`healthcheck ${key} is not set`);
+  const value = line.match(/^(\d+)s$/u)?.[1];
+  if (value === undefined) throw new Error(`healthcheck ${key}: ${line} is not written in seconds`);
+  return Number(value);
+}
 
 describe("Docker Compose runtime wiring", () => {
   it("wires the agent straight to the selected provider without a subscription gateway", () => {
@@ -343,6 +361,17 @@ describe("Docker Compose runtime wiring", () => {
     expect(stage("media-tools")).toContain("-static -Wall -Wextra -Werror -o /opt/ffmpeg/bin/media-sandbox /tmp/media-sandbox.c");
   });
 
+  // The model's sandbox has no working package manager (no privileges), so tools it needs often
+  // come with the image: on 04.11.2026 it looked for FFmpeg twice in a day, for audio and video (#463).
+  it("ships Debian's FFmpeg in the sandbox runtime, where the model cannot install it", () => {
+    const dockerfile = readFileSync(new URL("Dockerfile", projectRoot), "utf8");
+    const start = dockerfile.indexOf(" AS sandbox-runtime\n");
+    const sandbox = dockerfile.slice(start, dockerfile.indexOf("\nFROM ", start));
+
+    expect(sandbox).toMatch(/apt-get install --no-install-recommends --yes \\\n(?: {6}[a-z0-9.+-]+ \\\n)* {6}ffmpeg \\\n/u);
+    expect(sandbox).toContain("rm -rf /var/lib/apt/lists/*");
+  });
+
   it("builds every Node application service from the runtime stage", () => {
     const compose = readFileSync(new URL("compose.yaml", projectRoot), "utf8");
     const workerEntrypoints = new Map([
@@ -371,6 +400,29 @@ describe("Docker Compose runtime wiring", () => {
       }
     }
   });
+
+  it.each(POSTGRES_SERVICES)(
+    "keeps orphaned processes away from the PostgreSQL server in %s",
+    (file, name) => {
+      const block = serviceBlock(file, name);
+
+      // Docker kills a timed-out health check by its top process only. Under CMD-SHELL that was
+      // the shell, and the pg_isready inside it passed to PID 1, the PostgreSQL server. Its exit
+      // code 2, "no response", then read as a crashed backend: the server dropped every
+      // connection and ran crash recovery on 28.10, 04.11 and 14.11 (#460). An init process
+      // reaps any orphan instead, and pg_isready giving up before Docker leaves nothing to kill.
+      expect(block, `${file}: ${name} runs without an init process`).toContain("\n    init: true\n");
+      const test = block.match(/\n {6}test: (\[.*\])\n/u)?.[1];
+      if (test === undefined) throw new Error(`${file}: ${name} has no health check command`);
+      const command = JSON.parse(test) as string[];
+      expect(command.slice(0, 2), `${file}: ${name} checks through a shell`).toEqual(["CMD", "pg_isready"]);
+      const ownTimeoutFlag = command.indexOf("-t");
+      expect(ownTimeoutFlag, `${file}: ${name} relies on the pg_isready default timeout`).toBeGreaterThan(1);
+      const ownTimeout = Number(command[ownTimeoutFlag + 1]);
+      expect(ownTimeout).toBeGreaterThan(0);
+      expect(ownTimeout).toBeLessThan(healthCheckSeconds(block, "timeout"));
+    },
+  );
 
   it("lets a hung indexing worker become an unhealthy container", () => {
     // A live process doing nothing is the one failure this worker had no signal for: it exits
