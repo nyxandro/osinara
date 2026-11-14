@@ -125,6 +125,8 @@ describe("Docker Compose runtime wiring", () => {
       expect(agent).toContain("      GROQ_API_KEY: ${GROQ_API_KEY-}\n");
       expect(agent).toContain("      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY-}\n");
       expect(agent).toContain("      KLIPY_API_KEY: ${KLIPY_API_KEY-}\n");
+      // An optional host binding: a server that cannot reach its provider directly names a proxy (#485).
+      expect(agent).toContain("      MODEL_PROXY_URL: ${MODEL_PROXY_URL-}\n");
     }
     expect(localCompose).not.toContain("MODEL_UPSTREAM_API_KEY");
     expect(productionCompose).not.toContain("MODEL_UPSTREAM_API_KEY");
