@@ -13,6 +13,8 @@
  *   sees the request, its key or the answer.
  * - Undici's own fetch is paired with its own `ProxyAgent`: Node's bundled fetch is a different
  *   undici build and does not reliably accept a dispatcher from the npm package.
+ * - HTTP/1.1 only, like the direct route: the npm undici offers HTTP/2 by default, and then every
+ *   concurrent model call of every chat would share one tunnel and fail together when it drops.
  */
 import type { FetchFunction } from "@ai-sdk/provider-utils";
 import { fetch as undiciFetch, ProxyAgent, type RequestInit as UndiciRequestInit } from "undici";
@@ -21,24 +23,20 @@ import { AppError } from "./app-error.js";
 
 const PROXY_PROTOCOLS = new Set(["http:", "https:"]);
 
-function invalidProxyUrl(cause?: unknown): AppError {
-  // The value is never echoed: a mistyped binding may carry credentials.
+function invalidProxyUrl(): AppError {
+  // Neither the value nor the URL parser's error (it keeps the raw input) is attached: a mistyped
+  // binding may carry credentials, and this error is printed at startup.
   return new AppError(
     "AGENT_MODEL_PROXY_URL_INVALID",
     "MODEL_PROXY_URL должен быть адресом HTTP-прокси вида http://хост:порт без пути и учётных данных",
-    cause === undefined ? undefined : { cause },
   );
 }
 
 /** Returns the proxy origin, or `undefined` when the binding is absent or empty. */
 export function parseModelProxyUrl(value: string | undefined): string | undefined {
   if (value === undefined || value === "") return undefined;
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch (error) {
-    throw invalidProxyUrl(error);
-  }
+  if (!URL.canParse(value)) throw invalidProxyUrl();
+  const url = new URL(value);
   if (
     !PROXY_PROTOCOLS.has(url.protocol)
     || url.username !== ""
@@ -53,7 +51,7 @@ export function parseModelProxyUrl(value: string | undefined): string | undefine
 }
 
 export function createModelProxyFetch(proxyUrl: string): FetchFunction {
-  const dispatcher = new ProxyAgent({ proxyTunnel: true, uri: proxyUrl });
+  const dispatcher = new ProxyAgent({ allowH2: false, proxyTunnel: true, uri: proxyUrl });
   return async (input, init) => {
     // AI SDK providers pass the endpoint as a URL string; a Request object would lose its own
     // method and headers when handed to a different fetch implementation.

@@ -9,8 +9,9 @@
  */
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { connect, type AddressInfo, type Socket } from "node:net";
+import { inspect } from "node:util";
 
-import { generateText } from "ai";
+import { APICallError, generateText, streamText } from "ai";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { isAppError } from "./app-error.js";
@@ -48,6 +49,27 @@ async function startProvider(received: { authorization?: string; requests: numbe
         object: "chat.completion",
         usage: { completion_tokens: 1, prompt_tokens: 5, total_tokens: 6 },
       }));
+    });
+  }));
+}
+
+/** Streaming provider stub: production turns read the answer as server-sent chunks. */
+async function startStreamingProvider(): Promise<number> {
+  const chunk = (delta: Record<string, string>, finishReason: string | null) => `data: ${JSON.stringify({
+    choices: [{ delta, finish_reason: finishReason, index: 0 }],
+    created: 1,
+    id: "chatcmpl-proxy-stream",
+    model: "test-model",
+    object: "chat.completion.chunk",
+  })}\n\n`;
+  return await listen(createServer((incoming, response) => {
+    incoming.resume();
+    incoming.on("end", () => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write(chunk({ content: "Па", role: "assistant" }, null));
+      response.write(chunk({ content: "риж" }, null));
+      response.write(chunk({}, "stop"));
+      response.end("data: [DONE]\n\n");
     });
   }));
 }
@@ -107,6 +129,7 @@ describe("parseModelProxyUrl", () => {
     "172.17.0.1:10810",
     "socks5://172.17.0.1:10808",
     "http://user:secret@172.17.0.1:10810",
+    "http://user:secret@[bad:10810",
     "http://172.17.0.1:10810/models",
     "http://172.17.0.1:10810?route=model",
   ])("rejects %s with a stable code and without echoing the value", (value) => {
@@ -117,7 +140,8 @@ describe("parseModelProxyUrl", () => {
       failure = error;
     }
     expect(isAppError(failure) && failure.code).toBe("AGENT_MODEL_PROXY_URL_INVALID");
-    expect(String((failure as Error).message)).not.toContain("secret");
+    // Startup prints the whole error, causes included: no part of it may carry the credentials.
+    expect(inspect(failure, { depth: null })).not.toContain("secret");
   });
 });
 
@@ -136,6 +160,23 @@ describe("model calls through MODEL_PROXY_URL", () => {
     expect(result.text).toBe("Париж");
     expect(tunnels).toEqual([`127.0.0.1:${providerPort}`]);
     expect(received).toEqual({ authorization: "Bearer test-model-key", requests: 1 });
+  });
+
+  it("streams the answer through the proxy chunk by chunk", async () => {
+    const providerPort = await startStreamingProvider();
+    const tunnels: string[] = [];
+    const proxyPort = await startProxy(tunnels);
+
+    const result = streamText({
+      model: modelThrough(providerPort, `http://127.0.0.1:${proxyPort}`),
+      prompt: "Столица Франции?",
+    });
+    const parts: string[] = [];
+    for await (const part of result.textStream) parts.push(part);
+
+    expect(parts).toEqual(["Па", "риж"]);
+    expect(await result.finishReason).toBe("stop");
+    expect(tunnels).toEqual([`127.0.0.1:${providerPort}`]);
   });
 
   it("goes straight to the provider when no proxy is configured", async () => {
@@ -175,12 +216,15 @@ describe("model calls through MODEL_PROXY_URL", () => {
     const tunnels: string[] = [];
     const proxyPort = await startProxy(tunnels, true);
 
-    await expect(generateText({
+    const failure = await generateText({
       maxRetries: 0,
       model: modelThrough(providerPort, `http://127.0.0.1:${proxyPort}`),
       prompt: "Столица Франции?",
-    })).rejects.toThrow();
+    }).then(() => undefined, (error: unknown) => error);
 
+    // A connection failure, retryable like an unreachable provider, so the turn's existing
+    // "model temporarily unavailable" handling applies unchanged.
+    expect(APICallError.isInstance(failure) && failure.isRetryable).toBe(true);
     expect(tunnels).toEqual([`127.0.0.1:${providerPort}`]);
     expect(received.requests).toBe(0);
   });

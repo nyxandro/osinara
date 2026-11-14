@@ -412,7 +412,10 @@ fetch("https://api.neuraldeep.ru/v1/models", { dispatcher: new ProxyAgent("http:
 ```
 
 If the model provider changes, add its API host to the `osinara-model` routing rule before switching;
-otherwise every model call is refused by the proxy.
+otherwise every model call is refused by the proxy. The installer's model catalog and smoke check
+(`osinara install`, the model configuration controller) still call the provider directly, so on this
+host they fail while the direct route is blocked; switch the model by editing
+`/opt/osinara/agent-model-providers.json` and restarting the agent instead.
 
 The first release without the gateway removes its container but leaves two things on the production
 host on purpose: the `osinara-production-cli-proxy-auth` volume and `CLI_PROXY_API_KEY` in
