@@ -9,6 +9,7 @@
  * - Anthropic Messages adaptive thinking is enforced at the transport boundary.
  * - Explicit MiniMax compatibility preserves provider web-search payloads across Anthropic parsing.
  * - Retryable physical provider responses are logged before AI SDK applies its bounded retry policy.
+ * - A configured `proxyUrl` carries every model request through a CONNECT tunnel (`model-proxy.ts`).
  * - OpenAI Chat Completions carries explicit provider-native thinking controls when configured.
  * - Turn memory is projected into the turn tail so the instruction prefix stays reusable.
  */
@@ -27,6 +28,7 @@ import type { AgentModelTransport } from "./model-provider-config.js";
 import { AppError } from "./app-error.js";
 import { createMiniMaxAnthropicCompatibilityFetch } from "./minimax-anthropic-compatibility.js";
 import { createModelCallMetrics } from "./model-call-metrics.js";
+import { createModelProxyFetch } from "./model-proxy.js";
 import type { SuccessfulModelCall } from "./model-availability-repository.js";
 import { modelRouteKey } from "./model-route.js";
 import { modelSuccessObserver } from "./model-success-observer.js";
@@ -37,6 +39,8 @@ export interface ConfiguredLanguageModelOptions {
   readonly fetch?: FetchFunction;
   readonly maxOutputTokens: number;
   readonly modelId: string;
+  /** Validated `MODEL_PROXY_URL` origin; absent means the provider is called directly. */
+  readonly proxyUrl?: string;
   readonly transport: AgentModelTransport;
   readonly onSuccessfulCall?: (event: SuccessfulModelCall) => Promise<void> | void;
 }
@@ -56,6 +60,7 @@ function isRetryableModelResponse(response: Response): boolean {
 }
 
 function createCredentialGuardedFetch(options: ConfiguredLanguageModelOptions): FetchFunction {
+  const proxyFetch = options.proxyUrl === undefined ? undefined : createModelProxyFetch(options.proxyUrl);
   return async (input, init) => {
     if (!options.apiKey || /\s/u.test(options.apiKey)) {
       throw new AppError(
@@ -63,7 +68,7 @@ function createCredentialGuardedFetch(options: ConfiguredLanguageModelOptions): 
         "Не задан корректный ключ доступа к основной модели",
       );
     }
-    const response = await (options.fetch ?? globalThis.fetch)(input, init);
+    const response = await (options.fetch ?? proxyFetch ?? globalThis.fetch)(input, init);
     if (isRetryableModelResponse(response)) {
       console.error(JSON.stringify({
         code: "AGENT_MODEL_TRANSIENT_RESPONSE",

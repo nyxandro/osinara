@@ -9,17 +9,24 @@
 import { createGroq } from "@ai-sdk/groq";
 
 import { modelProviderConfig } from "./model-provider-config.js";
+import { parseModelProxyUrl } from "./model-proxy.js";
 import { createConfiguredLanguageModel } from "./model-transport.js";
 import { recordSuccessfulModelCall } from "./model-availability-repository.js";
 
 const agentModelApiKey = process.env.MODEL_API_KEY as string;
 const groqApiKey = process.env.GROQ_API_KEY;
+// Parsed at startup: a malformed binding stops the process instead of failing every turn later.
+const modelProxyUrl = parseModelProxyUrl(process.env.MODEL_PROXY_URL);
+if (modelProxyUrl !== undefined) {
+  console.info(JSON.stringify({ code: "AGENT_MODEL_PROXY_ENABLED", proxy: modelProxyUrl }));
+}
 
 export const primaryModel = createConfiguredLanguageModel({
   onSuccessfulCall: recordSuccessfulModelCall,
   apiKey: agentModelApiKey,
   maxOutputTokens: modelProviderConfig.agent.models.primary.maxOutputTokens,
   modelId: modelProviderConfig.agent.models.primary.id,
+  ...(modelProxyUrl === undefined ? {} : { proxyUrl: modelProxyUrl }),
   transport: modelProviderConfig.agent.transport,
 });
 const visionConfig = modelProviderConfig.agent.models.vision;
@@ -29,6 +36,7 @@ export const visionModel = visionConfig.supportsImageInput
       apiKey: agentModelApiKey,
       maxOutputTokens: visionConfig.maxOutputTokens,
       modelId: visionConfig.id,
+      ...(modelProxyUrl === undefined ? {} : { proxyUrl: modelProxyUrl }),
       transport: modelProviderConfig.agent.transport,
     })
   : null;

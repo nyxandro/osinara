@@ -18,12 +18,21 @@ When your answer ends with a question that has a few short, predictable answers 
 \`\`\`
 Заказываем «Маргариту» на 19:00 за 650 ₽?
 
-<tg-button-row><tg-button style="success">✅ Да</tg-button><tg-button style="danger">❌ Нет</tg-button><tg-button style="primary">✏️ Изменить</tg-button></tg-button-row>
+<tg-button-row><tg-button style="success">✅ Да</tg-button><tg-button style="danger">❌ Нет</tg-button><tg-button style="primary">⏰ Позже</tg-button></tg-button-row>
 \`\`\`
 
-The buttons appear inside that message, below its text, and the tags never reach the person. The question line stays in the text and names what the buttons answer; do not list the options again. One \`<tg-button-row>\` is one row of up to three buttons side by side; put a longer or secondary answer on its own row. One to six buttons in all, at the very end of the answer; with \`[[split]]\`, at the end of the last part.
+The buttons appear inside that message, below its text, and the tags never reach the person. The question line stays in the text and names what the buttons answer; do not list the options again. One \`<tg-button-row>\` is one row. One to six buttons in all, at the very end of the answer; with \`[[split]]\`, at the end of the last part.
 
-Each button is the person's answer in their own words, one line of up to 40 characters, and may start with a fitting emoji: «✅ Да, заказываем», «✏️ Изменить заказ», «❌ Отмена». No markup characters inside it (\`* _ ~ = | \` [ ] < > \\ $ #\`) and no two alike. An answer button carries only its label and an optional \`style\`: no \`type\`, no \`data\`. Color carries meaning, so use it sparingly: \`success\` (green) for the main yes, \`danger\` (red) for cancel or something irreversible, \`primary\` (blue) for the main alternative; leave the rest without a style, with at most one green and one red.
+Each button is the person's answer in their own words, one line of up to 30 characters, and may start with a fitting emoji: «✅ Да, заказываем», «✏️ Изменить заказ», «❌ Отмена». No markup characters inside it (\`* _ ~ = | \` [ ] < > \\ $ #\`) and no two alike. An answer button carries only its label and an optional \`style\`: no \`type\`, no \`data\`.
+
+The buttons of a row share the width of a phone screen, and a label that does not fit is cut off mid-word, so the person cannot read the choice. Choose the rows by the length of the labels, counting the emoji and the spaces:
+- three buttons in a row only when every label is a single short word, up to 8 characters: «✅ Да», «❌ Нет», «⏰ Позже»;
+- two buttons in a row when every label is up to 14 characters: «✅ Оплатил», «⏰ Через час»;
+- any longer label on a row of its own, as do the titles of articles, films, dishes or plans you offer to choose from: «🔥 METR против всех» takes a whole row.
+
+When in doubt, give each button its own row: a taller message reads better than a cut label.
+
+Color carries meaning, so use it sparingly: \`success\` (green) for the main yes, \`danger\` (red) for cancel or something irreversible, \`primary\` (blue) for the main alternative; leave the rest without a style, with at most one green and one red.
 
 Do not put buttons on an answer that asks nothing, on an open question that needs free text, in a note written before a tool call, or out of habit. Do not put buttons in front of an action that asks for confirmation itself: call the tool, and the person confirms on its own card. Never describe the markup or the buttons' mechanics to the person.
 
@@ -37,7 +46,7 @@ A reminder may carry the same buttons, for example «✅ Оплатил» and «
 export const LINK_AND_COPY_BUTTON_RULES = `
 ## Link and copy buttons
 
-A button can also open a web page or copy a text, in any chat. Use a link button when the answer leads to one page the person will open next, such as a menu, a booking form or a ticket page: \`<tg-button type="url" url="https://example.com/menu">🌐 Меню ресторана</tg-button>\`. Use a copy button when the answer gives a short text the person will paste somewhere else, such as a promo code, an order or tracking number, an address, an account number or a command: \`<tg-button type="copy_text" text="SUMMER25">📋 Скопировать промокод</tg-button>\`. Put them in a \`<tg-button-row>\` at the very end of the answer, like any button: one to six buttons in all, each label one line of up to 40 characters without markup characters.
+A button can also open a web page or copy a text, in any chat. Use a link button when the answer leads to one page the person will open next, such as a menu, a booking form or a ticket page: \`<tg-button type="url" url="https://example.com/menu">🌐 Меню ресторана</tg-button>\`. Use a copy button when the answer gives a short text the person will paste somewhere else, such as a promo code, an order or tracking number, an address, an account number or a command: \`<tg-button type="copy_text" text="SUMMER25">📋 Скопировать промокод</tg-button>\`. Put them in a \`<tg-button-row>\` at the very end of the answer, like any button: one to six buttons in all, each label one line of up to 30 characters without markup characters, and each button on a row of its own unless both labels of a row are up to 14 characters: a row shares the width of a phone screen, and a longer label is cut off mid-word.
 
 A link button opens only an \`http\` or \`https\` address the person gave you or a source you read showed, never a guessed one and never a Telegram address (\`t.me\` and the like): such a link goes into the text with its address in sight. The text of a copy button must stand in the answer exactly as in the button, for example in \`code\`, and be at most 256 characters. These buttons stay under the message after an answer button is tapped, and you never learn whether someone pressed them. Do not add them out of habit: a page mentioned in passing is an ordinary link in the text.
 `.trim();

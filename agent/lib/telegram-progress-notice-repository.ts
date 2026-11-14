@@ -1,17 +1,17 @@
 /**
  * Durable at-most-once barrier for Telegram progress notices.
  *
- * Exports:
- * - `TELEGRAM_PROGRESS_NOTICE_MAX_PER_TURN`: flood ceiling for one turn.
+ * Export:
  * - `telegramProgressNoticeRepository`: claim before the send, receipt after it.
  *
  * Key construct:
  * - A notice is cosmetic, so a lost one is acceptable and a duplicated one is not: the claim wins
  *   or the send is skipped, and no state transition can turn a skipped notice into a failure.
+ * - A turn has no ceiling on notices: the private chat shows a note while it is written, and one
+ *   that then never became a message vanished before the person's eyes (#483). How many notes a
+ *   turn writes is the prompt's matter.
  */
 import { database } from "./database.js";
-
-export const TELEGRAM_PROGRESS_NOTICE_MAX_PER_TURN = 5;
 
 export const telegramProgressNoticeRepository = {
   async claim(input: {
@@ -23,11 +23,7 @@ export const telegramProgressNoticeRepository = {
     const claimed = await database().query<{ id: string }>(
       `INSERT INTO telegram_progress_notices
          (agent_session_id, agent_turn_id, step_index, application_session_id)
-       SELECT $1, $2, $3, $4
-       WHERE (
-         SELECT count(*) FROM telegram_progress_notices
-         WHERE agent_session_id = $1 AND agent_turn_id = $2
-       ) < $5
+       VALUES ($1, $2, $3, $4)
        ON CONFLICT (agent_session_id, agent_turn_id, step_index) DO NOTHING
        RETURNING id`,
       [
@@ -35,7 +31,6 @@ export const telegramProgressNoticeRepository = {
         input.agentTurnId,
         input.stepIndex,
         input.applicationSessionId,
-        TELEGRAM_PROGRESS_NOTICE_MAX_PER_TURN,
       ],
     );
     const noticeId = claimed.rows[0]?.id;
