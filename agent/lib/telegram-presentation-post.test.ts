@@ -4,6 +4,7 @@
  * Constructs covered:
  * - A rich message Telegram refused for good (HTTP 400) was not delivered: with files, it goes once
  *   more with a visible line in place of each file, so a file Telegram cannot take costs no answer.
+ *   The delivered message names the files it went without, for whoever edits it later (#476).
  * - A failure whose outcome is unknown, and a refusal of a message without files, are never resent.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -30,7 +31,8 @@ describe("presented chunk delivery", () => {
     postRich.mockRejectedValueOnce(refusal).mockResolvedValueOnce({ chatType: "private", messageId: "77" });
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await expect(postTelegramPresentationChunk({ format: "rich", media: [photo], text }, channel)).resolves.toEqual({ chatType: "private", messageId: "77" });
+    await expect(postTelegramPresentationChunk({ format: "rich", media: [photo], text }, channel))
+      .resolves.toEqual({ chatType: "private", messageId: "77", refusedFiles: [photo] });
 
     expect(postRich).toHaveBeenCalledTimes(2);
     expect(postRich.mock.calls[1]![0]).toBe(

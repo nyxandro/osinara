@@ -8,6 +8,8 @@
  *   of such a message that does not (RICH_MESSAGE_PHOTO_INVALID, tried in a live chat).
  * - A widget card's buttons are its keyboard (#480): the edit replaces the keyboard with the staying
  *   buttons and the caption as a disabled button, and leaves the card alone.
+ * - An edit Telegram cancelled for a newer edit of the same message is no failure: the newer edit
+ *   decides what the message shows and reports its own outcome (#476). Any other refusal is one.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -88,6 +90,33 @@ describe("reply button settlement", () => {
           { id: "f1", media: { media: "document-file", type: "document" } },
         ],
       },
+    });
+  });
+
+  it("leaves the outcome to a newer edit that cancelled this one (#476)", async () => {
+    // A press is settled on arrival and again in the chat queue tens of milliseconds later; Telegram
+    // keeps the later edit and answers the earlier one with this refusal (logs of 02.11–09.11).
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(
+      JSON.stringify({ description: "Bad Request: canceled by new edit message request", error_code: 400, ok: false }),
+      { headers: { "content-type": "application/json" }, status: 400 },
+    ));
+
+    await expect(replyButtonTelegram.settle({
+      buttons: [[{ text: "✅ Да" }]], messageFormat: "rich", messageMedia: [], messageText: "Берём?", telegramChatId: "101", telegramMessageId: "50",
+    }, "Выбрано: ✅ Да")).resolves.toBeUndefined();
+  });
+
+  it("reports any other refusal with Telegram's reason", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(
+      JSON.stringify({ description: "Bad Request: RICH_MESSAGE_DOCUMENT_INVALID", error_code: 400, ok: false }),
+      { headers: { "content-type": "application/json" }, status: 400 },
+    ));
+
+    await expect(replyButtonTelegram.settle({
+      buttons: [[{ text: "✅ Да" }]], messageFormat: "rich", messageMedia: [], messageText: "Берём?", telegramChatId: "101", telegramMessageId: "50",
+    }, "Выбрано: ✅ Да")).rejects.toMatchObject({
+      code: "AGENT_REPLY_BUTTONS_SETTLE_FAILED",
+      details: { description: "Bad Request: RICH_MESSAGE_DOCUMENT_INVALID", status: 400, telegramChatId: "101", telegramMessageId: "50" },
     });
   });
 

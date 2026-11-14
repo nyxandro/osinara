@@ -66,6 +66,11 @@ export interface SentTelegramMessage {
   /** The Telegram file each uploaded media id became; set for a rich chunk sent with files. */
   readonly media?: readonly SentRichMedia[];
   readonly messageId: string;
+  /**
+   * Files Telegram refused for good: the message went without them, a line in place of each
+   * (`withRefusedFiles`), so a later edit must rewrite those words, not the ones with the files.
+   */
+  readonly refusedFiles?: readonly TelegramRichMediaUpload[];
 }
 
 /** An uploaded file as Telegram now holds it: an edit of the message must name it again. */
