@@ -11,7 +11,7 @@
  * searching. Two copies of the list would drift, and the drift would be silent in both places.
  */
 export const AGENT_DISPLAY_NAME = "Осинара";
-export const AGENT_NAME_STEM_SOURCE = "осинар|асинар|азинар|озинар|синаар|osinar|asinar";
+export const AGENT_NAME_STEM_SOURCE = "осинар|асинар|азинар|озинар|синар|синаар|osinar|asinar";
 
 const AGENT_NAME_PATTERN = new RegExp(
   `(?:^|[^\\p{L}\\p{N}_])(?:${AGENT_NAME_STEM_SOURCE})\\p{L}*(?=$|[^\\p{L}\\p{N}_])`,

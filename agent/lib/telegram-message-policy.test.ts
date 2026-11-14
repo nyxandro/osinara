@@ -116,6 +116,7 @@ describe("isMessageAddressedToBot", () => {
     "Osinar help us",
     "Asinara is useful",
     "Синаара, ответь",
+    "Синара, скажи статус заказа",
   ])("accepts the agent name variant in ordinary group text: %s", (text) => {
     expect(isMessageAddressedToBot({ ...groupMessage, text }, "family_agent")).toBe(true);
   });
