@@ -20,6 +20,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createNetworkAccessGate, NetworkAccessRefusal, type NetworkAccessGate } from "./network-access-gate.js";
 import { createSandboxEgressProxy } from "./server.js";
 
+// These tests are not about the tally of opened sites (server-site-meter.test.ts covers it).
+const uncountedSites = { failed: () => undefined, opened: () => undefined };
+
 let upstream: Server;
 let proxy: Server;
 let upstreamPort: number;
@@ -73,7 +76,7 @@ describe("sandbox egress proxy IP destinations", () => {
     });
     upstreamPort = await listen(upstream);
     gate = { authorize: vi.fn(async () => undefined) };
-    proxy = createSandboxEgressProxy({ grantRecheckMilliseconds: 20, networkAccess: gate });
+    proxy = createSandboxEgressProxy({ grantRecheckMilliseconds: 20, networkAccess: gate, siteMeter: uncountedSites });
     proxyPort = await listen(proxy);
   });
 
@@ -153,6 +156,7 @@ describe("sandbox egress proxy with the real network access gate", () => {
     proxy = createSandboxEgressProxy({
       grantRecheckMilliseconds: 60_000,
       networkAccess: createNetworkAccessGate({ attachedSubnets: () => [], projectionPath, trustedLocalAddress: "127.0.0.1" }),
+      siteMeter: uncountedSites,
     });
     proxyPort = await listen(proxy);
   });

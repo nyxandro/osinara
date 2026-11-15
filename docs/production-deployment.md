@@ -432,6 +432,10 @@ site its node cannot reach shows only after the sandbox spoke: the tunnel ends, 
 `AGENT_SANDBOX_EGRESS_UPSTREAM_NO_ANSWER` and closes the tunnel without writing anything into it.
 Plain HTTP in the same case answers the sandbox with 502 and logs `AGENT_SANDBOX_EGRESS_HTTP_FAILED`
 with `"via": "upstream"`; a plain HTTP site gets the same 15 seconds of silence as on the direct route.
+When the upstream proxy itself refuses the tunnel, cannot be reached or does not open it within 15
+seconds, no site was asked at all: the proxy answers 502 and logs
+`AGENT_SANDBOX_EGRESS_UPSTREAM_PROXY_FAILED` for both kinds of request. That code is our own path
+broken and stays counted by `OsinaraErrorBurst`; a site that does not open is not an alert (#499).
 
 Production has used it since 15.11.2026 (#489): from this Netherlands host connections to Fivepost
 and X5 failed most of the time (14 and 32 of 90 over half an hour), while through the host Xray and

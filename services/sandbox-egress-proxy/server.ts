@@ -4,8 +4,8 @@
  * Exports:
  * - `bindTunnelLifecycle`: prevents either side of a CONNECT tunnel from becoming orphaned.
  * - `connectWithDeadline`: bounds TCP establishment without timing out an established idle tunnel.
- * - `SandboxEgressProxyOptions`: the owner-approved network access gate and how often open
- *   connections to IP destinations are rechecked against it.
+ * - `SandboxEgressProxyOptions`: the owner-approved network access gate, how often open connections
+ *   to IP destinations are rechecked against it, and the tally of sites opened and not reached.
  * - `createSandboxEgressProxy`: creates the internal proxy server.
  *
  * Security invariants:
@@ -22,19 +22,30 @@
  *   client that hangs up ends the request to the site at once, and a site that drops its response
  *   cuts the response to the sandbox. Either is routine traffic; only the proxy's own failure to
  *   reach or hear from the site is logged as a failure (#462).
+ * - Each site counts once in the tally, when its connection is decided (#499): opened when the tunnel
+ *   is established, or on the upstream route when the site's first byte comes back, or when a plain
+ *   HTTP response begins; failed when that did not happen or DNS gave no answer for the name. A
+ *   refusal by the proxy's own rules, a name that does not exist and an owner's device reached by its
+ *   granted address are neither. The upstream proxy failing to open a tunnel counts as failed too, but
+ *   is logged under a code of its own: it is our path broken, not a site, and stays an alert.
  */
 import { createServer, request as httpRequest } from "node:http";
 import { connect, type Socket } from "node:net";
 
 import {
+  type EgressLogRecord,
   SANDBOX_EGRESS_CLIENT_CLOSED_CODE,
+  SANDBOX_EGRESS_HTTP_FAILED_CODE,
   SANDBOX_EGRESS_UPSTREAM_CLOSED_CODE,
+  SANDBOX_EGRESS_UPSTREAM_FAILED_CODE,
+  SANDBOX_EGRESS_UPSTREAM_PROXY_FAILED_CODE,
   writeEgressLog,
 } from "./egress-log.js";
+import type { EgressSiteMeter } from "./egress-site-meter.js";
 import { filteredHeaders } from "./http-headers.js";
 import { createGrantedConnectionRegistry } from "./granted-connection-registry.js";
 import { NetworkAccessRefusal, type NetworkAccessGate } from "./network-access-gate.js";
-import { EgressHostNotFound, resolvePublicInternetAddress } from "./public-dns-resolver.js";
+import { EgressHostNotFound, EgressResolutionFailed, resolvePublicInternetAddress } from "./public-dns-resolver.js";
 import { openUpstreamTunnel, routedThroughUpstream, type UpstreamProxy, watchTunnelAnswer } from "./upstream-proxy.js";
 
 const ALLOWED_PORTS = new Set([80, 443]);
@@ -43,6 +54,8 @@ const IP_LITERAL_HOST = /^[0-9.]+$/u;
 const CONNECT_TIMEOUT_MS = 15_000;
 // How a client closing its side of the connection surfaces on the proxy socket.
 const CLIENT_CLOSED_ERROR_CODES = new Set(["ECONNRESET", "EPIPE"]);
+// A device of the owner's reached by its granted address is not a site (#499).
+const NOT_A_SITE: EgressSiteMeter = { failed: () => undefined, opened: () => undefined };
 
 interface ResolvedTarget {
   address: string;
@@ -96,6 +109,8 @@ export interface SandboxEgressProxyOptions {
   readonly networkAccess: NetworkAccessGate;
   /** Where sites in the Russian zones go; without it every destination is direct (#489). */
   readonly upstreamProxy?: UpstreamProxy | null;
+  /** Feeds the alert on a day without a single opened site (#499). */
+  readonly siteMeter: EgressSiteMeter;
 }
 
 function parseDestinationPort(hostname: string, value: string): number {
@@ -151,6 +166,15 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// A refusal before any connection: a name that does not exist is routine, DNS that gave no answer is a
+// site that did not open, and anything else is the proxy's own refusal under the caller's code.
+function refusalRecord(error: unknown, rejectedCode: string, where: Readonly<Record<string, string | null>>): EgressLogRecord {
+  if (error instanceof EgressHostNotFound || error instanceof EgressResolutionFailed) {
+    return { code: error.code, dnsCode: error.dnsCode, ...where };
+  }
+  return { code: rejectedCode, errorMessage: errorMessage(error), ...where };
+}
+
 function urlHost(url: string | undefined): string | null {
   return url !== undefined && URL.canParse(url) ? new URL(url).host : null;
 }
@@ -186,7 +210,7 @@ function guardClientSocket(socket: Socket, phase: () => ConnectPhase): () => boo
 }
 
 export function createSandboxEgressProxy(options: SandboxEgressProxyOptions) {
-  const { grantRecheckMilliseconds, networkAccess } = options;
+  const { grantRecheckMilliseconds, networkAccess, siteMeter } = options;
   const upstreamProxy = options.upstreamProxy ?? null;
   const grantedConnections = createGrantedConnectionRegistry(networkAccess, grantRecheckMilliseconds);
   const server = createServer((incoming, outgoing) => {
@@ -200,6 +224,7 @@ export function createSandboxEgressProxy(options: SandboxEgressProxyOptions) {
       // A client gone while the destination was being decided closed before any listener below
       // existed: nothing is opened for it, and nothing tracked under an owner's grant.
       if (outgoing.destroyed) return;
+      const site = target.granted ? NOT_A_SITE : siteMeter;
       // Which side ended an unfinished exchange first; the close of the other side that follows is
       // its echo, not a second event (#462).
       let endedBy: "client" | "failure" | "revocation" | "site" | null = null;
@@ -216,10 +241,12 @@ export function createSandboxEgressProxy(options: SandboxEgressProxyOptions) {
         endedBy = "client";
         writeEgressLog({ code: SANDBOX_EGRESS_CLIENT_CLOSED_CODE, hostname: target.hostname, phase, port, ...routeField(target) });
       };
-      const failed = (error: NodeJS.ErrnoException) => {
+      const failed = (error: NodeJS.ErrnoException, code: string) => {
         endedBy = "failure";
+        // A site gone silent mid-response had already opened.
+        if (!responseStarted) site.failed();
         writeEgressLog({
-          code: "AGENT_SANDBOX_EGRESS_HTTP_FAILED",
+          code,
           errorCode: error.code ?? null,
           errorMessage: error.message,
           hostname: target.hostname,
@@ -248,7 +275,7 @@ export function createSandboxEgressProxy(options: SandboxEgressProxyOptions) {
           tunnel = await openUpstreamTunnel(target.upstream, target.address, target.port, CONNECT_TIMEOUT_MS, clientGone.signal);
         } catch (error) {
           if (outgoing.destroyed) clientClosed("request");
-          else failed(error as NodeJS.ErrnoException);
+          else failed(error as NodeJS.ErrnoException, SANDBOX_EGRESS_UPSTREAM_PROXY_FAILED_CODE);
           return;
         } finally {
           outgoing.off("close", abandon);
@@ -272,6 +299,7 @@ export function createSandboxEgressProxy(options: SandboxEgressProxyOptions) {
         timeout: CONNECT_TIMEOUT_MS,
       }, (upstreamResponse) => {
         responseStarted = true;
+        site.opened();
         outgoing.writeHead(
           upstreamResponse.statusCode ?? 502,
           filteredHeaders(upstreamResponse.headers),
@@ -295,7 +323,7 @@ export function createSandboxEgressProxy(options: SandboxEgressProxyOptions) {
           siteEnded();
           return;
         }
-        failed(error);
+        failed(error, SANDBOX_EGRESS_HTTP_FAILED_CODE);
       });
       // A sandbox client that hangs up before the whole response came, as apt does with a package it
       // cannot store, leaves nobody to read the site. The request ends now, recorded as the client's
@@ -321,9 +349,8 @@ export function createSandboxEgressProxy(options: SandboxEgressProxyOptions) {
       }
       incoming.pipe(upstream);
     })().catch((error: unknown) => {
-      writeEgressLog(error instanceof EgressHostNotFound
-        ? { code: error.code, dnsCode: error.dnsCode, host: urlHost(incoming.url) }
-        : { code: "AGENT_SANDBOX_EGRESS_HTTP_REJECTED", errorMessage: errorMessage(error), host: urlHost(incoming.url) });
+      if (error instanceof EgressResolutionFailed) siteMeter.failed();
+      writeEgressLog(refusalRecord(error, "AGENT_SANDBOX_EGRESS_HTTP_REJECTED", { host: urlHost(incoming.url) }));
       const status = refusalStatus(error);
       if (!outgoing.headersSent) outgoing.writeHead(status.code, status.text);
       outgoing.end(refusalBody(error));
@@ -348,9 +375,14 @@ export function createSandboxEgressProxy(options: SandboxEgressProxyOptions) {
         socket.pipe(clientSocket);
         clientSocket.pipe(socket);
       };
-      const failed = (error: NodeJS.ErrnoException) => {
+      const site = target.granted ? NOT_A_SITE : siteMeter;
+      // `byUpstreamProxy`: the host's upstream proxy, not the site, failed to open the tunnel.
+      const failed = (error: NodeJS.ErrnoException, byUpstreamProxy = false) => {
+        // A site that drops an established tunnel had already opened.
+        if (phase !== "tunnel") site.failed();
+        const failureCode = byUpstreamProxy ? SANDBOX_EGRESS_UPSTREAM_PROXY_FAILED_CODE : SANDBOX_EGRESS_UPSTREAM_FAILED_CODE;
         writeEgressLog({
-          code: phase === "tunnel" ? SANDBOX_EGRESS_UPSTREAM_CLOSED_CODE : "AGENT_SANDBOX_EGRESS_UPSTREAM_FAILED",
+          code: phase === "tunnel" ? SANDBOX_EGRESS_UPSTREAM_CLOSED_CODE : failureCode,
           errorCode: error.code ?? null,
           errorMessage: error.message,
           hostname: target.hostname,
@@ -373,7 +405,7 @@ export function createSandboxEgressProxy(options: SandboxEgressProxyOptions) {
         } catch (error) {
           // A half-closed client socket stays open until closed here.
           if (clientGone.signal.aborted || clientUnavailable()) clientSocket.destroy();
-          else failed(error as NodeJS.ErrnoException);
+          else failed(error as NodeJS.ErrnoException, true);
           return;
         } finally {
           clientSocket.off("end", abandon);
@@ -390,15 +422,19 @@ export function createSandboxEgressProxy(options: SandboxEgressProxyOptions) {
           answerTimeoutMilliseconds: CONNECT_TIMEOUT_MS,
           asked: initialData.byteLength > 0,
           client: clientSocket,
-          onNoAnswer: (errorCode, errorMessage) => writeEgressLog({
-            code: "AGENT_SANDBOX_EGRESS_UPSTREAM_FAILED",
-            errorCode,
-            errorMessage,
-            hostname: target.hostname,
-            phase,
-            port,
-            via: "upstream",
-          }),
+          onAnswer: () => site.opened(),
+          onNoAnswer: (errorCode, errorMessage) => {
+            site.failed();
+            writeEgressLog({
+              code: SANDBOX_EGRESS_UPSTREAM_FAILED_CODE,
+              errorCode,
+              errorMessage,
+              hostname: target.hostname,
+              phase,
+              port,
+              via: "upstream",
+            });
+          },
           onTunnelError: (error) => writeEgressLog({
             code: SANDBOX_EGRESS_UPSTREAM_CLOSED_CODE,
             errorCode: error.code ?? null,
@@ -435,13 +471,14 @@ export function createSandboxEgressProxy(options: SandboxEgressProxyOptions) {
         });
         upstream.once("close", untrack);
       }
-      upstream.once("connect", () => open(upstream));
+      upstream.once("connect", () => {
+        site.opened();
+        open(upstream);
+      });
       upstream.once("error", failed);
     })().catch((error: unknown) => {
-      const target = connectTargetForLog(request.url);
-      writeEgressLog(error instanceof EgressHostNotFound
-        ? { code: error.code, dnsCode: error.dnsCode, phase, target }
-        : { code: "AGENT_SANDBOX_EGRESS_CONNECT_REJECTED", errorMessage: errorMessage(error), phase, target });
+      if (error instanceof EgressResolutionFailed) siteMeter.failed();
+      writeEgressLog(refusalRecord(error, "AGENT_SANDBOX_EGRESS_CONNECT_REJECTED", { phase, target: connectTargetForLog(request.url) }));
       const status = refusalStatus(error);
       rejectSocket(clientSocket, status.code, status.text, refusalBody(error));
     });

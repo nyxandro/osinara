@@ -6,12 +6,13 @@
  * - `PublicInternetAddress`: validated and connectable public IP result.
  * - `resolvePublicInternetAddress`: resolves through independent DNS and applies SSRF policy.
  * - `EgressHostNotFound`: public DNS answered that the name has no IPv4 address.
+ * - `EgressResolutionFailed`: public DNS gave no usable answer for the name at all.
  */
 import { NODATA, NOTFOUND } from "node:dns";
 import { Resolver } from "node:dns/promises";
 
 import { isPublicInternetAddress } from "./address-policy.js";
-import { SANDBOX_EGRESS_HOST_NOT_FOUND_CODE } from "./egress-log.js";
+import { SANDBOX_EGRESS_HOST_NOT_FOUND_CODE, SANDBOX_EGRESS_IPV4_RESOLUTION_FAILED_CODE } from "./egress-log.js";
 
 const PUBLIC_DNS_SERVER = "1.1.1.1";
 const PUBLIC_DNS_TIMEOUT_MS = 5_000;
@@ -35,6 +36,15 @@ export class EgressHostNotFound extends Error {
   }
 }
 
+export class EgressResolutionFailed extends Error {
+  readonly code = SANDBOX_EGRESS_IPV4_RESOLUTION_FAILED_CODE;
+
+  constructor(readonly hostname: string, readonly dnsCode: string | null, options?: { readonly cause?: unknown }) {
+    super(`${SANDBOX_EGRESS_IPV4_RESOLUTION_FAILED_CODE}: IPv4 DNS resolution failed (${dnsCode ?? "no DNS code"})`, options);
+    this.name = "EgressResolutionFailed";
+  }
+}
+
 const publicDnsClient = new Resolver({
   timeout: PUBLIC_DNS_TIMEOUT_MS,
   tries: PUBLIC_DNS_ATTEMPTS,
@@ -52,10 +62,7 @@ export async function resolvePublicInternetAddress(
   } catch (error) {
     const dnsCode = (error as NodeJS.ErrnoException | undefined)?.code;
     if (dnsCode === NOTFOUND || dnsCode === NODATA) throw new EgressHostNotFound(hostname, dnsCode, { cause: error });
-    throw new Error(
-      `AGENT_SANDBOX_EGRESS_IPV4_RESOLUTION_FAILED: IPv4 DNS resolution failed (${dnsCode ?? "no DNS code"})`,
-      { cause: error },
-    );
+    throw new EgressResolutionFailed(hostname, dnsCode ?? null, { cause: error });
   }
 
   // The selected address is pinned by the caller for the connection, preventing DNS rebinding.

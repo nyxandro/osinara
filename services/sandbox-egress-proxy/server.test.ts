@@ -17,6 +17,9 @@ import {
   createSandboxEgressProxy,
 } from "./server.js";
 
+// These tests are not about the tally of opened sites (server-site-meter.test.ts covers it).
+const uncountedSites = { failed: () => undefined, opened: () => undefined };
+
 // These cases use host names only, which never reach the network access gate.
 const hostNamesOnly = {
   authorize: async () => {
@@ -42,7 +45,7 @@ describe("sandbox egress proxy server", () => {
   it("handles an EPIPE from a disconnected CONNECT client", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(console, "info").mockImplementation(() => undefined);
-    const server = createSandboxEgressProxy({ grantRecheckMilliseconds: 60_000, networkAccess: hostNamesOnly });
+    const server = createSandboxEgressProxy({ grantRecheckMilliseconds: 60_000, networkAccess: hostNamesOnly, siteMeter: uncountedSites });
     const clientSocket = new PassThrough() as unknown as Socket;
     const error = Object.assign(new Error("client disconnected"), { code: "EPIPE" });
 

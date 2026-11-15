@@ -123,6 +123,8 @@ export interface TunnelAnswerWatch {
   /** The client sent bytes together with its tunnel request: it has already asked. */
   readonly asked: boolean;
   readonly client: Socket;
+  /** Called at most once, when the destination's first byte comes back: the site opened (#499). */
+  readonly onAnswer: () => void;
   /** Called at most once, when the destination did not answer what the client asked. */
   readonly onNoAnswer: (errorCode: string | null, errorMessage: string) => void;
   /** A tunnel failure that is ordinary traffic: after the destination answered, or before any question. */
@@ -147,6 +149,8 @@ export function watchTunnelAnswer(watch: TunnelAnswerWatch): void {
     watch.onNoAnswer(errorCode, `${NO_ANSWER_CODE}: ${reason}`);
   };
   const awaitAnswer = () => {
+    // A destination that spoke first has answered already: there is nothing left to wait for.
+    if (answered) return;
     asked = true;
     deadline = setTimeout(() => {
       noAnswer(null, `The destination sent nothing within ${watch.answerTimeoutMilliseconds} ms`);
@@ -159,6 +163,7 @@ export function watchTunnelAnswer(watch: TunnelAnswerWatch): void {
   tunnel.once("data", () => {
     answered = true;
     clearTimeout(deadline);
+    watch.onAnswer();
   });
   tunnel.once("error", (error: NodeJS.ErrnoException) => {
     clearTimeout(deadline);

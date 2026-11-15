@@ -143,18 +143,20 @@ describe("answer of the destination through an upstream tunnel", () => {
   function watched(asked = false) {
     const client = fakeSocket();
     const tunnel = fakeSocket();
+    const onAnswer = vi.fn();
     const onNoAnswer = vi.fn();
     const onTunnelError = vi.fn();
-    watchTunnelAnswer({ answerTimeoutMilliseconds: ANSWER_TIMEOUT_MILLISECONDS, asked, client, onNoAnswer, onTunnelError, tunnel });
-    return { client, onNoAnswer, onTunnelError, tunnel };
+    watchTunnelAnswer({ answerTimeoutMilliseconds: ANSWER_TIMEOUT_MILLISECONDS, asked, client, onAnswer, onNoAnswer, onTunnelError, tunnel });
+    return { client, onAnswer, onNoAnswer, onTunnelError, tunnel };
   }
 
   it("reports a destination that stays silent after the client asked, and closes the tunnel", async () => {
-    const { client, onNoAnswer, tunnel } = watched();
+    const { client, onAnswer, onNoAnswer, tunnel } = watched();
 
     client.push("client hello");
     await tick(ANSWER_TIMEOUT_MILLISECONDS * 3);
 
+    expect(onAnswer).not.toHaveBeenCalled();
     expect(onNoAnswer).toHaveBeenCalledExactlyOnceWith(null, expect.stringMatching(/^AGENT_SANDBOX_EGRESS_UPSTREAM_NO_ANSWER: /u));
     expect(tunnel.destroyed).toBe(true);
   });
@@ -183,17 +185,35 @@ describe("answer of the destination through an upstream tunnel", () => {
   });
 
   it("treats a tunnel that ends after the destination answered as ordinary traffic", async () => {
-    const { client, onNoAnswer, onTunnelError, tunnel } = watched();
+    const { client, onAnswer, onNoAnswer, onTunnelError, tunnel } = watched();
 
     client.push("client hello");
     await tick();
     tunnel.push("server hello");
     await tick();
+    tunnel.push("more of the page");
+    await tick();
     tunnel.destroy(resetError());
     await tick(ANSWER_TIMEOUT_MILLISECONDS * 3);
 
+    // The site opened once, however much it sent (#499).
+    expect(onAnswer).toHaveBeenCalledOnce();
     expect(onNoAnswer).not.toHaveBeenCalled();
     expect(onTunnelError).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ code: "ECONNRESET" }));
+  });
+
+  it("keeps a tunnel whose destination spoke first, and reports its answer once", async () => {
+    const { client, onAnswer, onNoAnswer, tunnel } = watched();
+
+    tunnel.push("server greeting");
+    await tick();
+    client.push("client request");
+    await tick(ANSWER_TIMEOUT_MILLISECONDS * 3);
+
+    // The answer came before the question: waiting for one would cut a working tunnel (#499).
+    expect(onAnswer).toHaveBeenCalledOnce();
+    expect(onNoAnswer).not.toHaveBeenCalled();
+    expect(tunnel.destroyed).toBe(false);
   });
 
   it("ignores a tunnel that ends before the client asked anything", async () => {

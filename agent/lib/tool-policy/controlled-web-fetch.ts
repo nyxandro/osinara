@@ -12,6 +12,10 @@
  * release list on GitHub ended mid-page (12.10.2026) and the agent went around through the API.
  * `offset` continues from `nextOffset` of the previous answer; the page is downloaded again each
  * time, so nothing is kept between calls and the tool stays a plain read.
+ *
+ * A site that does not open — no connection, no answer in time, a redirect loop, a file or an
+ * oversized page — is the outside world's answer: it is recorded as an expected refusal with its
+ * origin and no alert counts it (#499). An egress proxy the agent cannot reach stays a failure.
  */
 import { Buffer } from "node:buffer";
 
@@ -86,14 +90,76 @@ const controlledWebFetchDispatcher = new ProxyAgent(CONTROLLED_WEB_FETCH_PROXY_U
 const EGRESS_HOST_NOT_FOUND_TUNNEL = /^Proxy response \(404\) !== 200 when HTTP Tunneling$/u;
 const EGRESS_HOST_NOT_FOUND_STATUS_TEXT = "Host Not Found";
 
+// How long the reason of a failed request may be in the log; it is undici's own message, never the URL.
+const MAX_CAUSE_CHARACTERS = 200;
+
+/**
+ * A site that did not open is the outside world's answer, not a failure of the application: the tool
+ * boundary records it as one line with its code, and no alert counts it (#499). Only the origin reaches
+ * the log, because the path and query may carry tokens.
+ */
+function siteRefusal(
+  code: string,
+  message: string,
+  url: URL,
+  options: { readonly cause?: unknown; readonly details?: Readonly<Record<string, string | number>> } = {},
+): AppError {
+  return new AppError(code, message, {
+    ...(options.cause === undefined ? {} : { cause: options.cause }),
+    details: { origin: url.origin, ...options.details },
+    isExpectedRefusal: true,
+  });
+}
+
 // A mistyped or retired address, not an outage: "try later" made the model repeat it (#436). A name
 // with only an IPv6 address lands here too, and this deployment has no IPv6 route to it.
 function hostNotFound(url: URL): AppError {
-  return new AppError(
+  return siteRefusal(
     "AGENT_WEB_FETCH_HOST_NOT_FOUND",
     "Адрес недоступен: у этого домена нет IPv4-адреса в публичном DNS, такого домена нет или он не работает. Проверьте написание адреса",
-    { details: { origin: url.origin }, isExpectedRefusal: true },
+    url,
   );
+}
+
+function redirectLimit(url: URL): AppError {
+  return siteRefusal(
+    "AGENT_WEB_FETCH_REDIRECT_LIMIT",
+    "Страница перенаправляет слишком много раз. Укажите конечный адрес",
+    url,
+  );
+}
+
+// The agent opens a connection only to its own egress proxy, never to a site: failing to resolve or
+// connect to it means no site was asked, which is the application's own failure (#499).
+const PROXY_UNREACHABLE_SYSCALLS: ReadonlySet<string> = new Set(["connect", "getaddrinfo"]);
+
+// undici reports every network failure as a TypeError: "fetch failed" from fetch itself, "terminated"
+// when the body stops arriving. Anything else thrown while reading a page is a defect of this code.
+const NETWORK_FAILURE_MESSAGES: ReadonlySet<string> = new Set(["fetch failed", "terminated"]);
+
+function isNetworkFailure(error: unknown): boolean {
+  return error instanceof TypeError && NETWORK_FAILURE_MESSAGES.has(error.message);
+}
+
+// undici wraps the reason in "fetch failed" and a cancellation; the innermost error names it, such as
+// the status the egress proxy refused the tunnel with.
+function innermostError(error: unknown): unknown {
+  let current = error;
+  for (let depth = 0; depth < 5 && current instanceof Error && current.cause instanceof Error; depth += 1) {
+    current = current.cause;
+  }
+  return current;
+}
+
+function requestFailed(url: URL, error: unknown): AppError {
+  const innermost = innermostError(error);
+  const cause = (innermost instanceof Error ? innermost.message : String(innermost)).slice(0, MAX_CAUSE_CHARACTERS);
+  const syscall = (innermost as NodeJS.ErrnoException | undefined)?.syscall;
+  const message = "Не удалось загрузить страницу через защищённый шлюз. Попробуйте позже";
+  if (syscall !== undefined && PROXY_UNREACHABLE_SYSCALLS.has(syscall)) {
+    return new AppError("AGENT_WEB_FETCH_REQUEST_FAILED", message, { cause: error, details: { cause, origin: url.origin } });
+  }
+  return siteRefusal("AGENT_WEB_FETCH_REQUEST_FAILED", message, url, { cause: error, details: { cause } });
 }
 
 function isEgressHostNotFound(error: unknown): boolean {
@@ -136,7 +202,7 @@ function validateUrl(value: string | URL, base?: URL): URL {
   return url;
 }
 
-function textContentType(response: Response): string {
+function textContentType(response: Response, url: URL): string {
   const value = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
   const supported = value !== undefined && MEDIA_TYPE_PATTERN.test(value) && (
     value.startsWith("text/") ||
@@ -145,22 +211,28 @@ function textContentType(response: Response): string {
   );
   if (!supported) {
     void response.body?.cancel();
-    throw new AppError(
+    throw siteRefusal(
       "AGENT_WEB_FETCH_CONTENT_TYPE_UNSUPPORTED",
       "Сайт вернул не текстовую страницу. Загрузка файлов через веб-доступ запрещена",
+      url,
     );
   }
   return value;
 }
 
-async function readBoundedBody(response: Response): Promise<Uint8Array> {
+function bodyTooLarge(url: URL): AppError {
+  return siteRefusal(
+    "AGENT_WEB_FETCH_BODY_TOO_LARGE",
+    "Страница слишком большая для безопасной загрузки. Выберите более компактный источник",
+    url,
+  );
+}
+
+async function readBoundedBody(response: Response, url: URL): Promise<Uint8Array> {
   const declaredLength = response.headers.get("content-length");
   if (declaredLength !== null && Number(declaredLength) > CONTROLLED_WEB_FETCH_MAX_BODY_BYTES) {
     await response.body?.cancel();
-    throw new AppError(
-      "AGENT_WEB_FETCH_BODY_TOO_LARGE",
-      "Страница слишком большая для безопасной загрузки. Выберите более компактный источник",
-    );
+    throw bodyTooLarge(url);
   }
 
   // Read incrementally so a misleading or absent Content-Length cannot force unbounded buffering.
@@ -174,14 +246,17 @@ async function readBoundedBody(response: Response): Promise<Uint8Array> {
     totalBytes += value.byteLength;
     if (totalBytes > CONTROLLED_WEB_FETCH_MAX_BODY_BYTES) {
       await reader.cancel();
-      throw new AppError(
-        "AGENT_WEB_FETCH_BODY_TOO_LARGE",
-        "Страница слишком большая для безопасной загрузки. Выберите более компактный источник",
-      );
+      throw bodyTooLarge(url);
     }
     chunks.push(value);
   }
   return Buffer.concat(chunks, totalBytes);
+}
+
+// As in HTML: a reference to zero, a surrogate or a value past U+10FFFF names no character.
+function numericCharacterReference(codePoint: number): string {
+  const scalar = codePoint > 0 && codePoint <= 0x10ffff && !(codePoint >= 0xd800 && codePoint <= 0xdfff);
+  return scalar ? String.fromCodePoint(codePoint) : "�";
 }
 
 function decodeHtmlEntities(value: string): string {
@@ -194,8 +269,8 @@ function decodeHtmlEntities(value: string): string {
     quot: '"',
   };
   return value.replace(/&(?:#(\d+)|#x([\da-f]+)|([a-z]+));/giu, (entity, decimal, hex, named) => {
-    if (decimal) return String.fromCodePoint(Number(decimal));
-    if (hex) return String.fromCodePoint(Number.parseInt(hex, 16));
+    if (decimal) return numericCharacterReference(Number(decimal));
+    if (hex) return numericCharacterReference(Number.parseInt(hex, 16));
     return namedEntities[String(named).toLowerCase()] ?? entity;
   });
 }
@@ -292,17 +367,13 @@ export function createControlledWebFetch(dependencies: ControlledWebFetchDepende
         });
         if (REDIRECT_STATUSES.has(response.status)) {
           await response.body?.cancel();
-          if (redirectCount === CONTROLLED_WEB_FETCH_MAX_REDIRECTS) {
-            throw new AppError(
-              "AGENT_WEB_FETCH_REDIRECT_LIMIT",
-              "Страница перенаправляет слишком много раз. Укажите конечный адрес",
-            );
-          }
+          if (redirectCount === CONTROLLED_WEB_FETCH_MAX_REDIRECTS) throw redirectLimit(currentUrl);
           const location = response.headers.get("location");
           if (!location) {
-            throw new AppError(
+            throw siteRefusal(
               "AGENT_WEB_FETCH_REDIRECT_INVALID",
               "Страница вернула некорректное перенаправление. Укажите другой адрес",
+              currentUrl,
             );
           }
           currentUrl = validateUrl(location, currentUrl);
@@ -319,16 +390,17 @@ export function createControlledWebFetch(dependencies: ControlledWebFetchDepende
           // The status tells a blocked site from an invented address or an outage; the path and
           // query may carry tokens, so only the origin reaches the log. A site's answer is not an
           // application failure, so the tool boundary records it without a stack.
-          throw new AppError(
+          throw siteRefusal(
             "AGENT_WEB_FETCH_RESPONSE_FAILED",
             `Сайт не отдал доступную страницу: HTTP ${response.status}. Проверьте адрес или попробуйте позже`,
-            { details: { origin: currentUrl.origin, status: response.status }, isExpectedRefusal: true },
+            currentUrl,
+            { details: { status: response.status } },
           );
         }
 
         // Reject files before buffering; web access is intentionally limited to model-readable text.
-        const responseContentType = textContentType(response);
-        const body = await readBoundedBody(response);
+        const responseContentType = textContentType(response, currentUrl);
+        const body = await readBoundedBody(response, currentUrl);
         const decoded = new TextDecoder("utf-8", { fatal: false }).decode(body);
         const requestedFormat = input.format ?? "extracted_text";
         const formatted = responseContentType === HTML_CONTENT_TYPE && requestedFormat !== "html"
@@ -344,30 +416,23 @@ export function createControlledWebFetch(dependencies: ControlledWebFetchDepende
     } catch (error) {
       if (isAppError(error)) throw error;
       if (signal.aborted) {
-        const interruptedByCaller = options.abortSignal?.aborted === true;
-        throw new AppError(
-          interruptedByCaller ? "AGENT_WEB_FETCH_CANCELLED" : "AGENT_WEB_FETCH_TIMEOUT",
-          interruptedByCaller
-            ? "Загрузка страницы отменена"
-            : "Страница не загрузилась за отведённое время. Попробуйте другой источник",
+        // The turn's own cancellation is not the site's answer and stays as it was.
+        if (options.abortSignal?.aborted === true) {
+          throw new AppError("AGENT_WEB_FETCH_CANCELLED", "Загрузка страницы отменена");
+        }
+        throw siteRefusal(
+          "AGENT_WEB_FETCH_TIMEOUT",
+          "Страница не загрузилась за отведённое время. Попробуйте другой источник",
+          currentUrl,
         );
       }
       if (isEgressHostNotFound(error)) throw hostNotFound(currentUrl);
-      console.error("Controlled web fetch failed", {
-        code: "AGENT_WEB_FETCH_REQUEST_FAILED",
-        error,
-        url: currentUrl.origin,
-      });
-      throw new AppError(
-        "AGENT_WEB_FETCH_REQUEST_FAILED",
-        "Не удалось загрузить страницу через защищённый шлюз. Попробуйте позже",
-      );
+      // Not the site's answer: the tool boundary reports it as a failure, with its cause.
+      if (!isNetworkFailure(error)) throw error;
+      throw requestFailed(currentUrl, error);
     }
 
-    throw new AppError(
-      "AGENT_WEB_FETCH_REDIRECT_LIMIT",
-      "Страница перенаправляет слишком много раз. Укажите конечный адрес",
-    );
+    throw redirectLimit(currentUrl);
   };
 }
 
