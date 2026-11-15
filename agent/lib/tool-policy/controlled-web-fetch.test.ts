@@ -209,6 +209,55 @@ describe("controlled external-group web fetch", () => {
       });
   });
 
+  it("reads a page whose character reference names no character, showing the replacement mark there", async () => {
+    const page = "<p>a&#99999999;b &#x110000; &#0; &#xD800; &#171;c&#187;</p>";
+    const execute = createControlledWebFetch({
+      dispatcher: {} as never,
+      fetch: async () => response(page, { headers: { "content-type": "text/html" } }),
+    });
+
+    await expect(execute({ url: "https://example.com/broken" }))
+      .resolves.toMatchObject({ content: "a�b � � � «c»" });
+  });
+
+  it("turns every numeric character reference into the character it names, or the replacement mark", async () => {
+    // What a page can carry: any digits in decimal or hex, leading zeros, far past U+10FFFF.
+    // Controls and spaces are left out: the extraction strips or collapses them after decoding.
+    const codePoint = fc.oneof(
+      fc.integer({ max: 0x7e, min: 0x21 }),
+      fc.integer({ max: 0x10ffff, min: 0x80 }),
+      fc.integer({ max: 0xdfff, min: 0xd800 }),
+      fc.constant(0),
+      fc.bigInt({ max: 10n ** 400n, min: 0x110000n }),
+    ).map((value) => BigInt(value));
+    const reference = fc.tuple(codePoint, fc.boolean(), fc.boolean(), fc.nat({ max: 3 }))
+      .map(([value, hex, upper, zeros]) => {
+        const digits = "0".repeat(zeros) + (hex ? value.toString(16) : value.toString(10));
+        return { text: hex ? `&#${upper ? "X" : "x"}${upper ? digits.toUpperCase() : digits};` : `&#${digits};`, value };
+      });
+    const named = (value: bigint) => value > 0n && value <= 0x10ffffn && !(value >= 0xd800n && value <= 0xdfffn)
+      ? String.fromCodePoint(Number(value))
+      : "�";
+
+    await fc.assert(fc.asyncProperty(reference, async ({ text, value }) => {
+      const execute = createControlledWebFetch({
+        dispatcher: {} as never,
+        fetch: async () => response(`<p>x${text}y</p>`, { headers: { "content-type": "text/html" } }),
+      });
+      const result = await execute({ url: "https://example.com/reference" });
+      expect(wellFormed(result.content)).toBe(true);
+      expect(result.content).toBe(`x${named(value)}y`);
+    }), {
+      examples: [
+        [{ text: "&#99999999;", value: 99_999_999n }],
+        [{ text: "&#0;", value: 0n }],
+        [{ text: "&#xD800;", value: 0xd800n }],
+        [{ text: "&#x10FFFF;", value: 0x10ffffn }],
+        [{ text: "&#x110000;", value: 0x110000n }],
+      ],
+    });
+  });
+
   it("bounds textual model content by line count", async () => {
     const fetch = vi.fn(async () => response(
       "line\n".repeat(CONTROLLED_WEB_FETCH_MAX_MODEL_LINES + 20),

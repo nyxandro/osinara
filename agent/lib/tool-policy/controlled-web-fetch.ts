@@ -253,6 +253,12 @@ async function readBoundedBody(response: Response, url: URL): Promise<Uint8Array
   return Buffer.concat(chunks, totalBytes);
 }
 
+// As in HTML: a reference to zero, a surrogate or a value past U+10FFFF names no character.
+function numericCharacterReference(codePoint: number): string {
+  const scalar = codePoint > 0 && codePoint <= 0x10ffff && !(codePoint >= 0xd800 && codePoint <= 0xdfff);
+  return scalar ? String.fromCodePoint(codePoint) : "�";
+}
+
 function decodeHtmlEntities(value: string): string {
   const namedEntities: Readonly<Record<string, string>> = {
     amp: "&",
@@ -263,8 +269,8 @@ function decodeHtmlEntities(value: string): string {
     quot: '"',
   };
   return value.replace(/&(?:#(\d+)|#x([\da-f]+)|([a-z]+));/giu, (entity, decimal, hex, named) => {
-    if (decimal) return String.fromCodePoint(Number(decimal));
-    if (hex) return String.fromCodePoint(Number.parseInt(hex, 16));
+    if (decimal) return numericCharacterReference(Number(decimal));
+    if (hex) return numericCharacterReference(Number.parseInt(hex, 16));
     return namedEntities[String(named).toLowerCase()] ?? entity;
   });
 }
