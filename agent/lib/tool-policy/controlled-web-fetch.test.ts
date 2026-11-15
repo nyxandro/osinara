@@ -209,6 +209,55 @@ describe("controlled external-group web fetch", () => {
       });
   });
 
+  it("reads a page whose character reference names no character, showing the replacement mark there", async () => {
+    const page = "<p>a&#99999999;b &#x110000; &#0; &#xD800; &#171;c&#187;</p>";
+    const execute = createControlledWebFetch({
+      dispatcher: {} as never,
+      fetch: async () => response(page, { headers: { "content-type": "text/html" } }),
+    });
+
+    await expect(execute({ url: "https://example.com/broken" }))
+      .resolves.toMatchObject({ content: "a�b � � � «c»" });
+  });
+
+  it("turns every numeric character reference into the character it names, or the replacement mark", async () => {
+    // What a page can carry: any digits in decimal or hex, leading zeros, far past U+10FFFF.
+    // Controls and spaces are left out: the extraction strips or collapses them after decoding.
+    const codePoint = fc.oneof(
+      fc.integer({ max: 0x7e, min: 0x21 }),
+      fc.integer({ max: 0x10ffff, min: 0x80 }),
+      fc.integer({ max: 0xdfff, min: 0xd800 }),
+      fc.constant(0),
+      fc.bigInt({ max: 10n ** 400n, min: 0x110000n }),
+    ).map((value) => BigInt(value));
+    const reference = fc.tuple(codePoint, fc.boolean(), fc.boolean(), fc.nat({ max: 3 }))
+      .map(([value, hex, upper, zeros]) => {
+        const digits = "0".repeat(zeros) + (hex ? value.toString(16) : value.toString(10));
+        return { text: hex ? `&#${upper ? "X" : "x"}${upper ? digits.toUpperCase() : digits};` : `&#${digits};`, value };
+      });
+    const named = (value: bigint) => value > 0n && value <= 0x10ffffn && !(value >= 0xd800n && value <= 0xdfffn)
+      ? String.fromCodePoint(Number(value))
+      : "�";
+
+    await fc.assert(fc.asyncProperty(reference, async ({ text, value }) => {
+      const execute = createControlledWebFetch({
+        dispatcher: {} as never,
+        fetch: async () => response(`<p>x${text}y</p>`, { headers: { "content-type": "text/html" } }),
+      });
+      const result = await execute({ url: "https://example.com/reference" });
+      expect(wellFormed(result.content)).toBe(true);
+      expect(result.content).toBe(`x${named(value)}y`);
+    }), {
+      examples: [
+        [{ text: "&#99999999;", value: 99_999_999n }],
+        [{ text: "&#0;", value: 0n }],
+        [{ text: "&#xD800;", value: 0xd800n }],
+        [{ text: "&#x10FFFF;", value: 0x10ffffn }],
+        [{ text: "&#x110000;", value: 0x110000n }],
+      ],
+    });
+  });
+
   it("bounds textual model content by line count", async () => {
     const fetch = vi.fn(async () => response(
       "line\n".repeat(CONTROLLED_WEB_FETCH_MAX_MODEL_LINES + 20),
@@ -250,8 +299,9 @@ describe("controlled external-group web fetch", () => {
   });
 
   it("does not retry failed requests and returns a safe Russian error", async () => {
+    // undici reports every network failure as this TypeError, with the reason as its cause.
     const fetch = vi.fn(async () => {
-      throw new Error("connect ECONNREFUSED 10.0.0.1:3128");
+      throw new TypeError("fetch failed", { cause: new Error("read ECONNRESET") });
     });
     const execute = createControlledWebFetch({ dispatcher: {} as never, fetch });
 
@@ -259,6 +309,137 @@ describe("controlled external-group web fetch", () => {
       "AGENT_WEB_FETCH_REQUEST_FAILED: Не удалось загрузить страницу через защищённый шлюз. Попробуйте позже",
     );
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("records a site the egress proxy could not reach as one line, with the site and the reason", async () => {
+    // The egress proxy answers a CONNECT it could not establish with 502 (#499). The tool used to print
+    // a 29-line stack for it, which lit UnstructuredProblemBurst on three unreachable sites; a site
+    // that does not open is the outside world's answer, not a failure of the application.
+    const proxy = createServer((socket) => {
+      socket.once("data", () => socket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"));
+    });
+    await new Promise<void>((done) => proxy.listen(0, "127.0.0.1", done));
+    const dispatcher = new ProxyAgent(`http://127.0.0.1:${(proxy.address() as AddressInfo).port}`);
+    const execute = createControlledWebFetch({ dispatcher, fetch: undiciFetch });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const failure = await execute({ url: "https://incrussia.ru/news?token=secret" }).catch((error: unknown) => error);
+
+      expect(failure).toMatchObject({
+        code: "AGENT_WEB_FETCH_REQUEST_FAILED",
+        details: { cause: "Proxy response (502) !== 200 when HTTP Tunneling", origin: "https://incrussia.ru" },
+        isExpectedRefusal: true,
+      });
+      expect(JSON.stringify((failure as AppError).details)).not.toContain("secret");
+      expect(console.error).not.toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+      await dispatcher.close();
+      await new Promise((done) => proxy.close(done));
+    }
+  });
+
+  it("keeps its own egress proxy out of reach a failure of the application, not a site's answer", async () => {
+    // The agent connects only to the egress proxy; when that connection cannot be opened, no site
+    // was even asked, and the failure must stay visible to the alerts (#499).
+    const probe = createServer();
+    await new Promise<void>((done) => probe.listen(0, "127.0.0.1", done));
+    const closedPort = (probe.address() as AddressInfo).port;
+    await new Promise((done) => probe.close(done));
+    const dispatcher = new ProxyAgent(`http://127.0.0.1:${closedPort}`);
+    const execute = createControlledWebFetch({ dispatcher, fetch: undiciFetch });
+    try {
+      const failure = await execute({ url: "https://example.com/page" }).catch((error: unknown) => error);
+
+      expect(failure).toMatchObject({
+        code: "AGENT_WEB_FETCH_REQUEST_FAILED",
+        details: { cause: `connect ECONNREFUSED 127.0.0.1:${closedPort}`, origin: "https://example.com" },
+        isExpectedRefusal: false,
+      });
+    } finally {
+      await dispatcher.close();
+    }
+  });
+
+  it("records a page that stopped arriving as the site's answer", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error(new TypeError("terminated", { cause: new Error("other side closed") }));
+      },
+    });
+    const fetch = vi.fn(async () => response(body, { headers: { "content-type": "text/html" } }));
+    const execute = createControlledWebFetch({ dispatcher: {} as never, fetch });
+
+    await expect(execute({ url: "https://news.example.com/long" })).rejects.toMatchObject({
+      code: "AGENT_WEB_FETCH_REQUEST_FAILED",
+      details: { cause: "other side closed", origin: "https://news.example.com" },
+      isExpectedRefusal: true,
+    });
+  });
+
+  it("lets a defect of its own escape as it is, never as the site's answer", async () => {
+    // Only undici's network failures are a site's answer. Anything else thrown while reading a page
+    // is a bug of this code: dressed up as "the site did not open" it would be hidden from the alerts.
+    const defect = new RangeError("Invalid code point 99999999");
+    const fetch = vi.fn(async () => {
+      throw defect;
+    });
+    const execute = createControlledWebFetch({ dispatcher: {} as never, fetch });
+
+    await expect(execute({ url: "https://example.com/page" })).rejects.toBe(defect);
+  });
+
+  it("records a site that did not answer in time as the outside world's answer", async () => {
+    const fetch = vi.fn((_input: URL | string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal!.reason));
+    }));
+    const execute = createControlledWebFetch({ dispatcher: {} as never, fetch });
+    vi.useFakeTimers();
+    try {
+      const failure = execute({ timeout: 1, url: "https://slow.example.com/page" }).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(await failure).toMatchObject({
+        code: "AGENT_WEB_FETCH_TIMEOUT",
+        details: { origin: "https://slow.example.com" },
+        isExpectedRefusal: true,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a call the turn itself cancelled a cancellation, not the site's answer", async () => {
+    const fetch = vi.fn((_input: URL | string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal!.reason));
+    }));
+    const execute = createControlledWebFetch({ dispatcher: {} as never, fetch });
+    const turn = new AbortController();
+
+    const failure = execute({ url: "https://example.com/page" }, { abortSignal: turn.signal }).catch((error: unknown) => error);
+    turn.abort();
+
+    expect(await failure).toMatchObject({ code: "AGENT_WEB_FETCH_CANCELLED", isExpectedRefusal: false });
+  });
+
+  it.each([
+    ["a redirect loop", "AGENT_WEB_FETCH_REDIRECT_LIMIT", () => response(null, { headers: { location: "https://loop.example.com/again" }, status: 302 })],
+    ["a redirect without a target", "AGENT_WEB_FETCH_REDIRECT_INVALID", () => response(null, { status: 302 })],
+    ["a page over the size limit", "AGENT_WEB_FETCH_BODY_TOO_LARGE", () => response("x", {
+      headers: { "content-length": String(CONTROLLED_WEB_FETCH_MAX_BODY_BYTES + 1), "content-type": "text/plain" },
+    })],
+    ["a file instead of a page", "AGENT_WEB_FETCH_CONTENT_TYPE_UNSUPPORTED", () => response(new Uint8Array([0, 1]), {
+      headers: { "content-type": "application/pdf" },
+    })],
+  ])("records %s as the site's answer, naming the site", async (_label, code, answer) => {
+    const fetch = vi.fn(async () => answer());
+    const execute = createControlledWebFetch({ dispatcher: {} as never, fetch });
+
+    await expect(execute({ url: "https://loop.example.com/start?token=secret" })).rejects.toMatchObject({
+      code,
+      details: { origin: "https://loop.example.com" },
+      isExpectedRefusal: true,
+    });
   });
 
   it("tells the model an address does not exist when the egress proxy found no host for it", async () => {

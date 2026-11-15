@@ -75,6 +75,16 @@ groups:
       - record: osinara_memory_offered_characters_1m
         expr: 'project:"osinara-production" code:"AGENT_MEMORY_RETRIEVAL_METRICS" outcome:"succeeded" usageTracked:"true" | stats by (outcome) sum(memorySerializedCharacters) as value'
 
+      # Sites the sandbox egress proxy opened and could not reach, from its minute tally (#499). Every
+      # site the bot reaches goes through that proxy: web_fetch, the sandbox browser and commands. The
+      # proxy writes the line every minute, quiet minutes included, so these series exist whenever it
+      # runs: OsinaraSitesUnreachable reads their presence a day back as proof its window is full.
+      - record: osinara_sandbox_egress_opened_1m
+        expr: 'project:"osinara-production" code:"AGENT_SANDBOX_EGRESS_SITE_METRICS" | stats by (code) sum(opened) as value'
+
+      - record: osinara_sandbox_egress_failed_1m
+        expr: 'project:"osinara-production" code:"AGENT_SANDBOX_EGRESS_SITE_METRICS" | stats by (code) sum(failed) as value'
+
       # Model transport degradation: 429 and 5xx answers that the agent retried or surfaced.
       - record: osinara_model_transient_1m
         expr: 'project:"osinara-production" code:"AGENT_MODEL_TRANSIENT_RESPONSE" | stats by (statusCode) count() as value'

@@ -21,6 +21,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createSandboxEgressProxy } from "./server.js";
 
+// These tests are not about the tally of opened sites (server-site-meter.test.ts covers it).
+const uncountedSites = { failed: () => undefined, opened: () => undefined };
+
 // The site is a local server reached by its address, which the gate allows as an owner grant would.
 const allowLocalSite = { authorize: async () => undefined };
 const PACKAGE_PATH = "/debian/pool/main/y/yt-dlp/yt-dlp_2023.03.04-1_all.deb";
@@ -68,7 +71,7 @@ async function slowSite() {
 }
 
 async function proxyPort(): Promise<number> {
-  return await listen(createSandboxEgressProxy({ grantRecheckMilliseconds: 60_000, networkAccess: allowLocalSite }));
+  return await listen(createSandboxEgressProxy({ grantRecheckMilliseconds: 60_000, networkAccess: allowLocalSite, siteMeter: uncountedSites }));
 }
 
 /** A sandbox client asking the proxy for the package, as apt does over plain HTTP. */
@@ -172,7 +175,7 @@ describe("plain HTTP through the sandbox egress proxy", () => {
         decided.resolve();
       },
     };
-    const proxy = await listen(createSandboxEgressProxy({ grantRecheckMilliseconds: 200, networkAccess: slowGate }));
+    const proxy = await listen(createSandboxEgressProxy({ grantRecheckMilliseconds: 200, networkAccess: slowGate, siteMeter: uncountedSites }));
     const client = download(proxy, sitePort);
 
     // The client hangs up only once the proxy is deciding, so the case under test really happens.

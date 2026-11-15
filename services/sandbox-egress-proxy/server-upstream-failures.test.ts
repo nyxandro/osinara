@@ -2,7 +2,8 @@
  * Failures on the upstream route of the sandbox egress proxy, over real local sockets (#489).
  *
  * Constructs covered:
- * - An upstream proxy that refuses or cannot be reached answers the sandbox with 502.
+ * - An upstream proxy that refuses or cannot be reached answers the sandbox with 502 and is logged as
+ *   the upstream proxy's own failure, which the burst alert counts: no site was even asked (#499).
  * - Xray answers 200 before it dials, so a destination its node cannot reach shows as a tunnel that
  *   closes or resets before a byte came back: one failure record, and nothing written into a tunnel
  *   the sandbox already holds open, which would read as the site's own answer.
@@ -12,6 +13,8 @@
  *   tunnel at once: no failure is blamed on the path for a client that is gone.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { SANDBOX_EGRESS_SITE_FAILURE_CODES } from "./egress-log.js";
 
 import {
   answerOnceSite,
@@ -55,7 +58,7 @@ describe("failures on the upstream route of the sandbox egress proxy (#489)", ()
     expect(status).toBe(502);
     expect(logged).toEqual([{
       record: expect.objectContaining({
-        code: "AGENT_SANDBOX_EGRESS_UPSTREAM_FAILED",
+        code: "AGENT_SANDBOX_EGRESS_UPSTREAM_PROXY_FAILED",
         errorMessage: expect.stringContaining("AGENT_SANDBOX_EGRESS_UPSTREAM_REFUSED"),
         hostname: "shop.example.ru",
         phase: "connect",
@@ -75,9 +78,11 @@ describe("failures on the upstream route of the sandbox egress proxy (#489)", ()
     expect(status).toBe(502);
     expect(plain.status).toBe(502);
     expect(logged.map(({ record }) => [record.code, record.errorCode, record.via])).toEqual([
-      ["AGENT_SANDBOX_EGRESS_UPSTREAM_FAILED", "ECONNREFUSED", "upstream"],
-      ["AGENT_SANDBOX_EGRESS_HTTP_FAILED", "ECONNREFUSED", "upstream"],
+      ["AGENT_SANDBOX_EGRESS_UPSTREAM_PROXY_FAILED", "ECONNREFUSED", "upstream"],
+      ["AGENT_SANDBOX_EGRESS_UPSTREAM_PROXY_FAILED", "ECONNREFUSED", "upstream"],
     ]);
+    // The host's Xray inbound gone is our own path broken, not a site: it must stay loud.
+    expect(SANDBOX_EGRESS_SITE_FAILURE_CODES).not.toContain("AGENT_SANDBOX_EGRESS_UPSTREAM_PROXY_FAILED");
   });
 
   it.each([

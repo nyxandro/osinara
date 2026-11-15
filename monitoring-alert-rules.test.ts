@@ -8,7 +8,10 @@
  * - Scheduler heartbeat rules hold longer than the chain that delays the metric after a release.
  * - Every rule watching the embedding family ignores the codes that report normal operation.
  * - The worker announces itself through the shared constant instead of a second literal.
- * - The error burst ignores the sandbox proxy's records of connections that ended normally.
+ * - The error burst ignores the sandbox proxy's records of connections that ended normally and of a
+ *   site that did not open: one site is not an alert, a whole day of them is (#499).
+ * - The alert on a day without a single opened site reads only the proxy's minute tally, waits for a
+ *   full day of it, and stays silent on a day without attempts.
  * - The critical queue alert fires on a message nobody is serving, not on a chat busy with its own
  *   long turn; the long turn itself is a warning.
  * - Messages that keep failing in one chat raise a warning whatever the chat's pace.
@@ -27,7 +30,12 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { MEMORY_EMBEDDING_LIFECYCLE_CODES } from "./agent/lib/memory-config.js";
-import { SANDBOX_EGRESS_ROUTINE_CODES } from "./services/sandbox-egress-proxy/egress-log.js";
+import {
+  SANDBOX_EGRESS_ROUTINE_CODES,
+  SANDBOX_EGRESS_SITE_FAILURE_CODES,
+  SANDBOX_EGRESS_SITE_METRICS_CODE,
+  SANDBOX_EGRESS_UPSTREAM_PROXY_FAILED_CODE,
+} from "./services/sandbox-egress-proxy/egress-log.js";
 
 const projectRoot = new URL("./", import.meta.url);
 const read = (path: string) => readFileSync(new URL(path, projectRoot), "utf8");
@@ -54,8 +62,8 @@ const stateRules = read("infra/monitoring/rules/metrics/osinara-state.yaml");
 const exporter = read("infra/monitoring/collector/sql-exporter.yaml");
 const logRules = read("infra/monitoring/rules/logs/osinara.yaml");
 
-/** The files that write each memory log line the log rules count, read as text like the rules. */
-const MEMORY_LINE_WRITERS: Record<string, readonly string[]> = {
+/** The files that write each log line the log rules count by its fields, read as text like the rules. */
+const COUNTED_LINE_WRITERS: Record<string, readonly string[]> = {
   AGENT_MEMORY_RETRIEVAL_METRICS: [
     "agent/lib/prompt/turn-blocks.ts",
     "agent/lib/memory-observability.ts",
@@ -63,6 +71,7 @@ const MEMORY_LINE_WRITERS: Record<string, readonly string[]> = {
     "agent/lib/memory-retrieval.ts",
   ],
   AGENT_MEMORY_USAGE_DIRECTIVE: ["agent/lib/memory-usage-report.ts"],
+  [SANDBOX_EGRESS_SITE_METRICS_CODE]: ["services/sandbox-egress-proxy/egress-site-meter.ts"],
 };
 
 /** The log fields one LogsQL rule reads: its filters, its grouping and what it sums. */
@@ -188,6 +197,42 @@ describe("osinara alert rules", () => {
     }
   });
 
+  it("keeps OsinaraErrorBurst off a site that did not open", () => {
+    const [block] = alertBlocks("OsinaraErrorBurst");
+
+    // Three unreachable sites in one answer are the outside world, not a failure of the assistant;
+    // the owner wants an alert only when no site opened for a whole day (#499).
+    expect(SANDBOX_EGRESS_SITE_FAILURE_CODES.length).toBeGreaterThan(0);
+    for (const code of SANDBOX_EGRESS_SITE_FAILURE_CODES) {
+      expect(excludesCode(block!, code), `OsinaraErrorBurst still counts ${code}`).toBe(true);
+    }
+    // The host's Xray inbound failing is our own path, not a site, and stays an alert.
+    expect(excludesCode(block!, SANDBOX_EGRESS_UPSTREAM_PROXY_FAILED_CODE)).toBe(false);
+  });
+
+  it("raises OsinaraSitesUnreachable only for a full day of attempts with nothing opened", () => {
+    const [block] = alertBlocks("OsinaraSitesUnreachable");
+    expect(block, "the alert this guards has been renamed").toBeDefined();
+    const recorded = new Map([...logRules.matchAll(/^ *- record: (osinara_[a-z0-9_]+)\n *expr: '([^']*)'/gmu)]
+      .map((match) => [match[1]!, match[2]!]));
+    const expression = ruleField(block!, "expr") ?? "";
+    const series = [...new Set([...expression.matchAll(/osinara_[a-z0-9_]+/gu)].map((match) => match[0]))];
+
+    // The tally is the proxy's minute line: every site the bot reads, browses or fetches goes through it.
+    expect(series.sort()).toEqual(["osinara_sandbox_egress_failed_1m", "osinara_sandbox_egress_opened_1m"]);
+    for (const name of series) {
+      expect(recorded.get(name), `${name} is not recorded`).toContain(`code:"${SANDBOX_EGRESS_SITE_METRICS_CODE}"`);
+    }
+    expect(recorded.get("osinara_sandbox_egress_opened_1m")).toContain("sum(opened)");
+    expect(recorded.get("osinara_sandbox_egress_failed_1m")).toContain("sum(failed)");
+    // A day with nothing opened, but only a day with attempts: a quiet day is not an outage.
+    expect(expression).toMatch(/sum_over_time\(osinara_sandbox_egress_opened_1m\[24h\]\)\) == 0/u);
+    expect(expression).toMatch(/sum_over_time\(osinara_sandbox_egress_failed_1m\[24h\]\)\) > 0/u);
+    // Recording rules do not fill the past: until the hub holds a whole day of the tally, the window
+    // would read an hour after installation as a day without a single opened site.
+    expect(expression).toMatch(/count_over_time\(osinara_sandbox_egress_opened_1m\[1h\] offset 23h\)\) > 0/u);
+  });
+
   it("reports an indexing failure only from the indexer, not from a turn reading memory", () => {
     const [block] = alertBlocks("OsinaraEmbeddingFailed");
     const expression = ruleField(block!, "expr") ?? "";
@@ -233,7 +278,7 @@ describe("osinara alert rules", () => {
 });
 
 describe("osinara memory usage rules", () => {
-  it("counts only fields the application writes into the memory lines it counts", () => {
+  it("counts only fields the application writes into the lines it counts", () => {
     const records = logRules.split(/^ *- record: /mu).slice(1);
     let checked = 0;
 
@@ -243,7 +288,7 @@ describe("osinara memory usage rules", () => {
       const name = record.split("\n", 1)[0]!.trim();
       const expression = /expr: '([^']*)'/u.exec(record)?.[1] ?? "";
       const code = /\bcode:"([A-Z_]+)"/u.exec(expression)?.[1];
-      const writers = code === undefined ? undefined : MEMORY_LINE_WRITERS[code];
+      const writers = code === undefined ? undefined : COUNTED_LINE_WRITERS[code];
       if (writers === undefined) continue;
       const source = writers.map(read).join("\n");
       for (const field of logRuleFields(expression)) {
@@ -252,8 +297,8 @@ describe("osinara memory usage rules", () => {
       }
       checked += 1;
     }
-    expect(checked, "no memory rule was checked: the rule file or this test went out of step")
-      .toBeGreaterThanOrEqual(6);
+    expect(checked, "a counted rule was not checked: the rule file or this test went out of step")
+      .toBeGreaterThanOrEqual(8);
   });
 
   it("keeps a selection that chose silence apart from a search that found nothing", () => {

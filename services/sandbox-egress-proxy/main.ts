@@ -6,6 +6,8 @@
  * - Starts the forward proxy on the fixed internal port with the owner-approved access gate and, when
  *   `SANDBOX_EGRESS_UPSTREAM_PROXY_URL` is bound, the upstream route for Russian sites (#489); a
  *   malformed binding stops the process at startup.
+ * - Writes the minute tally of sites opened and not reached, which the alert on a day without a
+ *   single opened site reads (#499).
  * - Starts the API key gateway on its own port. Without a valid API key encryption key the gateway
  *   refuses every request with its code, while the forward proxy keeps serving all other traffic.
  */
@@ -32,6 +34,7 @@ import { agentUsageSenderFor, createApiKeyUsageReporter } from "./api-key-usage-
 import { createNetworkAccessGate, proxyAttachedSubnets } from "./network-access-gate.js";
 import { resolvePublicInternetAddress } from "./public-dns-resolver.js";
 import { SANDBOX_EGRESS_UPSTREAM_ENABLED_CODE, writeEgressLog } from "./egress-log.js";
+import { createEgressSiteMeter } from "./egress-site-meter.js";
 import { createSandboxEgressProxy } from "./server.js";
 import { parseUpstreamProxyUrl, UPSTREAM_DOMAIN_ZONES } from "./upstream-proxy.js";
 
@@ -41,6 +44,8 @@ const USAGE_FLUSH_MILLISECONDS = 5_000;
 const USAGE_MAX_BUFFERED = 20_000;
 // How long an open connection to an IP destination can outlive the revocation of its grant.
 const GRANT_RECHECK_MILLISECONDS = 15_000;
+// The alert's log rule counts lines per minute, so the tally is written once a minute.
+const SITE_METER_INTERVAL_MILLISECONDS = 60_000;
 // Compose gives the proxy this alias on the trusted sandbox network only, so Docker DNS answers it
 // with the proxy's own address on that network and nothing else.
 const TRUSTED_NETWORK_ALIAS = "sandbox-trusted-egress-proxy";
@@ -69,6 +74,8 @@ if (upstreamProxy !== null) {
   });
 }
 const trustedLocalAddress = await ownAddress(TRUSTED_NETWORK_ALIAS, "AGENT_SANDBOX_EGRESS_TRUSTED_NETWORK_UNRESOLVED");
+const siteMeter = createEgressSiteMeter();
+siteMeter.start(SITE_METER_INTERVAL_MILLISECONDS);
 const server = createSandboxEgressProxy({
   grantRecheckMilliseconds: GRANT_RECHECK_MILLISECONDS,
   networkAccess: createNetworkAccessGate({
@@ -76,6 +83,7 @@ const server = createSandboxEgressProxy({
     projectionPath: resolve(NETWORK_ACCESS_DIRECTORY_NAME, NETWORK_ACCESS_PROJECTION_FILE_NAME),
     trustedLocalAddress,
   }),
+  siteMeter,
   upstreamProxy,
 });
 server.listen(PROXY_PORT, "0.0.0.0", () => {
