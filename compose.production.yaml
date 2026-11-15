@@ -259,6 +259,8 @@ services:
       # the integration key that protects the Google tokens never reaches this container.
       AGENT_INTERNAL_BASE_URL: http://agent:3000
       SANDBOX_API_KEY_ENCRYPTION_KEY: ${SANDBOX_API_KEY_ENCRYPTION_KEY-}
+      # Optional: Russian sites go through this HTTP proxy when this server cannot reach them (#489).
+      SANDBOX_EGRESS_UPSTREAM_PROXY_URL: ${SANDBOX_EGRESS_UPSTREAM_PROXY_URL-}
     healthcheck:
       test: ["CMD", "node", "-e", "require('node:net').connect(3128,'127.0.0.1').on('connect',function(){this.destroy();process.exit(0)}).on('error',()=>process.exit(1))"]
       interval: 5s

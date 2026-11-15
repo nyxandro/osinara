@@ -4,6 +4,7 @@
  * Exports:
  * - `SANDBOX_EGRESS_ROUTINE_CODES`: connections that ended the way web traffic normally ends.
  * - `SANDBOX_EGRESS_HOST_NOT_FOUND_CODE`: the routine code of a name public DNS does not know.
+ * - `SANDBOX_EGRESS_UPSTREAM_ENABLED_CODE`: the startup record of the upstream route (#489).
  * - `writeEgressLog`: writes one event as one JSON line.
  *
  * The log collector stores every output line as a separate record and counts a line without a
@@ -20,10 +21,13 @@ export const SANDBOX_EGRESS_UPSTREAM_CLOSED_CODE = "AGENT_SANDBOX_EGRESS_UPSTREA
 // A name public DNS has no IPv4 address for is a mistyped or retired address: the resolver answered,
 // so the egress path works. A resolver that did not answer stays a failure.
 export const SANDBOX_EGRESS_HOST_NOT_FOUND_CODE = "AGENT_SANDBOX_EGRESS_HOST_NOT_FOUND";
+// Once at startup when Russian sites go through the upstream proxy (#489): a setting, not a failure.
+export const SANDBOX_EGRESS_UPSTREAM_ENABLED_CODE = "AGENT_SANDBOX_EGRESS_UPSTREAM_ENABLED";
 export const SANDBOX_EGRESS_ROUTINE_CODES = [
   SANDBOX_EGRESS_CLIENT_CLOSED_CODE,
   SANDBOX_EGRESS_UPSTREAM_CLOSED_CODE,
   SANDBOX_EGRESS_HOST_NOT_FOUND_CODE,
+  SANDBOX_EGRESS_UPSTREAM_ENABLED_CODE,
 ] as const;
 
 const routineCodes: ReadonlySet<string> = new Set(SANDBOX_EGRESS_ROUTINE_CODES);

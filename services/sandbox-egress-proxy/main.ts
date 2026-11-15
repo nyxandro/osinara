@@ -3,7 +3,9 @@
  *
  * Constructs:
  * - Finds the proxy's own address on the trusted sandbox network before accepting connections.
- * - Starts the forward proxy on the fixed internal port with the owner-approved access gate.
+ * - Starts the forward proxy on the fixed internal port with the owner-approved access gate and, when
+ *   `SANDBOX_EGRESS_UPSTREAM_PROXY_URL` is bound, the upstream route for Russian sites (#489); a
+ *   malformed binding stops the process at startup.
  * - Starts the API key gateway on its own port. Without a valid API key encryption key the gateway
  *   refuses every request with its code, while the forward proxy keeps serving all other traffic.
  */
@@ -29,7 +31,9 @@ import { createApiKeyGateway } from "./api-key-gateway.js";
 import { agentUsageSenderFor, createApiKeyUsageReporter } from "./api-key-usage-reporter.js";
 import { createNetworkAccessGate, proxyAttachedSubnets } from "./network-access-gate.js";
 import { resolvePublicInternetAddress } from "./public-dns-resolver.js";
+import { SANDBOX_EGRESS_UPSTREAM_ENABLED_CODE, writeEgressLog } from "./egress-log.js";
 import { createSandboxEgressProxy } from "./server.js";
+import { parseUpstreamProxyUrl, UPSTREAM_DOMAIN_ZONES } from "./upstream-proxy.js";
 
 const PROXY_PORT = 3128;
 const USAGE_FLUSH_MILLISECONDS = 5_000;
@@ -56,6 +60,14 @@ function requiredAgentBaseUrl(): string {
 }
 
 const agentBaseUrl = requiredAgentBaseUrl();
+const upstreamProxy = parseUpstreamProxyUrl(process.env.SANDBOX_EGRESS_UPSTREAM_PROXY_URL);
+if (upstreamProxy !== null) {
+  writeEgressLog({
+    code: SANDBOX_EGRESS_UPSTREAM_ENABLED_CODE,
+    proxy: `${upstreamProxy.host}:${upstreamProxy.port}`,
+    zones: UPSTREAM_DOMAIN_ZONES.join(","),
+  });
+}
 const trustedLocalAddress = await ownAddress(TRUSTED_NETWORK_ALIAS, "AGENT_SANDBOX_EGRESS_TRUSTED_NETWORK_UNRESOLVED");
 const server = createSandboxEgressProxy({
   grantRecheckMilliseconds: GRANT_RECHECK_MILLISECONDS,
@@ -64,6 +76,7 @@ const server = createSandboxEgressProxy({
     projectionPath: resolve(NETWORK_ACCESS_DIRECTORY_NAME, NETWORK_ACCESS_PROJECTION_FILE_NAME),
     trustedLocalAddress,
   }),
+  upstreamProxy,
 });
 server.listen(PROXY_PORT, "0.0.0.0", () => {
   console.log("Sandbox egress proxy ready", { port: PROXY_PORT });

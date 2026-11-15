@@ -14,6 +14,8 @@
  * - An IP address on any port is reached only when the network access gate allows it; a host name
  *   made of digits and dots is treated as an address and never resolved. An open connection to it
  *   is closed once a recheck finds the grant gone.
+ * - With an upstream proxy bound, a host name in the Russian zones goes through it, always by the
+ *   checked address and never by its name (#489); owner-granted addresses never go through it.
  * - Proxy credentials and hop-by-hop headers are never forwarded.
  * - Logs name the destination host, never a full URL: it may carry credentials or tokens.
  * - Neither side of a plain HTTP exchange is left orphaned, as with a CONNECT tunnel: a sandbox
@@ -33,6 +35,7 @@ import { filteredHeaders } from "./http-headers.js";
 import { createGrantedConnectionRegistry } from "./granted-connection-registry.js";
 import { NetworkAccessRefusal, type NetworkAccessGate } from "./network-access-gate.js";
 import { EgressHostNotFound, resolvePublicInternetAddress } from "./public-dns-resolver.js";
+import { openUpstreamTunnel, routedThroughUpstream, type UpstreamProxy, watchTunnelAnswer } from "./upstream-proxy.js";
 
 const ALLOWED_PORTS = new Set([80, 443]);
 const MAX_PORT = 65_535;
@@ -48,6 +51,8 @@ interface ResolvedTarget {
   granted: boolean;
   hostname: string;
   port: number;
+  /** The upstream proxy this destination goes through (#489), or null when it goes straight from here. */
+  upstream: UpstreamProxy | null;
 }
 
 type ConnectPhase = "connect" | "request" | "resolution" | "tunnel";
@@ -89,6 +94,8 @@ export function connectWithDeadline(
 export interface SandboxEgressProxyOptions {
   readonly grantRecheckMilliseconds: number;
   readonly networkAccess: NetworkAccessGate;
+  /** Where sites in the Russian zones go; without it every destination is direct (#489). */
+  readonly upstreamProxy?: UpstreamProxy | null;
 }
 
 function parseDestinationPort(hostname: string, value: string): number {
@@ -105,17 +112,25 @@ function parseDestinationPort(hostname: string, value: string): number {
 
 async function resolveTarget(
   networkAccess: NetworkAccessGate,
+  upstreamProxy: UpstreamProxy | null,
   hostname: string,
   port: number,
   localAddress: string | undefined,
 ): Promise<ResolvedTarget> {
   if (IP_LITERAL_HOST.test(hostname)) {
+    // An owner-granted address is a device of theirs: it is never sent anywhere but straight to it.
     await networkAccess.authorize({ address: hostname, localAddress, port });
-    return { address: hostname, family: 4, granted: true, hostname, port };
+    return { address: hostname, family: 4, granted: true, hostname, port, upstream: null };
   }
   // Resolve outside host VPN fake-IP DNS, then pin the validated address for this connection.
   const publicAddress = await resolvePublicInternetAddress(hostname);
-  return { ...publicAddress, granted: false, hostname, port };
+  const upstream = upstreamProxy !== null && routedThroughUpstream(hostname) ? upstreamProxy : null;
+  return { ...publicAddress, granted: false, hostname, port, upstream };
+}
+
+/** The route field of a log record: absent for the direct route, so its records stay as they were. */
+function routeField(target: ResolvedTarget): { via?: "upstream" } {
+  return target.upstream === null ? {} : { via: "upstream" };
 }
 
 // The sandbox sees why an IP destination was refused and that a name does not exist, which is
@@ -170,7 +185,9 @@ function guardClientSocket(socket: Socket, phase: () => ConnectPhase): () => boo
   return () => unavailable;
 }
 
-export function createSandboxEgressProxy({ grantRecheckMilliseconds, networkAccess }: SandboxEgressProxyOptions) {
+export function createSandboxEgressProxy(options: SandboxEgressProxyOptions) {
+  const { grantRecheckMilliseconds, networkAccess } = options;
+  const upstreamProxy = options.upstreamProxy ?? null;
   const grantedConnections = createGrantedConnectionRegistry(networkAccess, grantRecheckMilliseconds);
   const server = createServer((incoming, outgoing) => {
     void (async () => {
@@ -179,7 +196,7 @@ export function createSandboxEgressProxy({ grantRecheckMilliseconds, networkAcce
         throw new Error("AGENT_SANDBOX_EGRESS_URL_FORBIDDEN: Only credential-free HTTP URLs are allowed");
       }
       const port = parseDestinationPort(targetUrl.hostname, targetUrl.port || "80");
-      const target = await resolveTarget(networkAccess, targetUrl.hostname, port, incoming.socket.localAddress);
+      const target = await resolveTarget(networkAccess, upstreamProxy, targetUrl.hostname, port, incoming.socket.localAddress);
       // A client gone while the destination was being decided closed before any listener below
       // existed: nothing is opened for it, and nothing tracked under an owner's grant.
       if (outgoing.destroyed) return;
@@ -192,16 +209,66 @@ export function createSandboxEgressProxy({ grantRecheckMilliseconds, networkAcce
       // established tunnel, so routine traffic whether it closed or reset the connection.
       const siteEnded = () => {
         endedBy = "site";
-        writeEgressLog({ code: SANDBOX_EGRESS_UPSTREAM_CLOSED_CODE, hostname: target.hostname, phase: "response", port });
+        writeEgressLog({ code: SANDBOX_EGRESS_UPSTREAM_CLOSED_CODE, hostname: target.hostname, phase: "response", port, ...routeField(target) });
         outgoing.destroy();
       };
+      const clientClosed = (phase: "request" | "response") => {
+        endedBy = "client";
+        writeEgressLog({ code: SANDBOX_EGRESS_CLIENT_CLOSED_CODE, hostname: target.hostname, phase, port, ...routeField(target) });
+      };
+      const failed = (error: NodeJS.ErrnoException) => {
+        endedBy = "failure";
+        writeEgressLog({
+          code: "AGENT_SANDBOX_EGRESS_HTTP_FAILED",
+          errorCode: error.code ?? null,
+          errorMessage: error.message,
+          hostname: target.hostname,
+          port,
+          ...routeField(target),
+        });
+        // Text appended to a body already under way would corrupt it: a started response is cut.
+        if (outgoing.headersSent) {
+          outgoing.destroy();
+          return;
+        }
+        outgoing.writeHead(502);
+        outgoing.end("AGENT_SANDBOX_EGRESS_FAILED: Public destination request failed\n");
+      };
+      // Through the upstream proxy plain HTTP gets a tunnel of its own to the checked address, and the
+      // request then goes as the site expects it, with its own name in Host. An absolute-form request
+      // would reach the site with the address in Host (a proxy must replace it, RFC 9112 §3.2.2), and
+      // the host Xray closes such connections after each answer while announcing keep-alive (#489).
+      let tunnel: Socket | null = null;
+      if (target.upstream !== null) {
+        // A client that leaves while the tunnel is being opened lets go of the upstream proxy at once.
+        const clientGone = new AbortController();
+        const abandon = () => clientGone.abort();
+        outgoing.once("close", abandon);
+        try {
+          tunnel = await openUpstreamTunnel(target.upstream, target.address, target.port, CONNECT_TIMEOUT_MS, clientGone.signal);
+        } catch (error) {
+          if (outgoing.destroyed) clientClosed("request");
+          else failed(error as NodeJS.ErrnoException);
+          return;
+        } finally {
+          outgoing.off("close", abandon);
+        }
+        if (outgoing.destroyed) {
+          tunnel.destroy();
+          clientClosed("request");
+          return;
+        }
+      }
+      const opened = tunnel;
+      // A connection made by hand does not get the request's idle limit; the tunnel takes it here.
+      const destination = opened === null
+        ? { family: target.family, host: target.address, port: target.port }
+        : { createConnection: () => opened.setTimeout(CONNECT_TIMEOUT_MS) };
       const upstream = httpRequest({
-        family: target.family,
+        ...destination,
         headers: { ...filteredHeaders(incoming.headers), host: targetUrl.host },
-        host: target.address,
-        method: incoming.method,
         path: `${targetUrl.pathname}${targetUrl.search}`,
-        port: target.port,
+        method: incoming.method,
         timeout: CONNECT_TIMEOUT_MS,
       }, (upstreamResponse) => {
         responseStarted = true;
@@ -228,34 +295,14 @@ export function createSandboxEgressProxy({ grantRecheckMilliseconds, networkAcce
           siteEnded();
           return;
         }
-        endedBy = "failure";
-        writeEgressLog({
-          code: "AGENT_SANDBOX_EGRESS_HTTP_FAILED",
-          errorCode: error.code ?? null,
-          errorMessage: error.message,
-          hostname: target.hostname,
-          port,
-        });
-        // Text appended to a body already under way would corrupt it: a started response is cut.
-        if (outgoing.headersSent) {
-          outgoing.destroy();
-          return;
-        }
-        outgoing.writeHead(502);
-        outgoing.end("AGENT_SANDBOX_EGRESS_FAILED: Public destination request failed\n");
+        failed(error);
       });
       // A sandbox client that hangs up before the whole response came, as apt does with a package it
       // cannot store, leaves nobody to read the site. The request ends now, recorded as the client's
       // own close, instead of idling into a timeout blamed on the site (#462).
       outgoing.once("close", () => {
         if (outgoing.writableFinished || endedBy !== null) return;
-        endedBy = "client";
-        writeEgressLog({
-          code: SANDBOX_EGRESS_CLIENT_CLOSED_CODE,
-          hostname: target.hostname,
-          phase: responseStarted ? "response" : "request",
-          port,
-        });
+        clientClosed(responseStarted ? "response" : "request");
         upstream.destroy();
       });
       if (target.granted) {
@@ -291,9 +338,81 @@ export function createSandboxEgressProxy({ grantRecheckMilliseconds, networkAcce
       if (!match) throw new Error("AGENT_SANDBOX_EGRESS_CONNECT_INVALID: Invalid CONNECT target");
       const port = parseDestinationPort(match[1]!, match[2]!);
       phase = "resolution";
-      const target = await resolveTarget(networkAccess, match[1]!, port, clientSocket.localAddress);
+      const target = await resolveTarget(networkAccess, upstreamProxy, match[1]!, port, clientSocket.localAddress);
       if (clientUnavailable()) return;
       phase = "connect";
+      const open = (socket: Socket) => {
+        phase = "tunnel";
+        clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+        if (initialData.byteLength > 0) socket.write(initialData);
+        socket.pipe(clientSocket);
+        clientSocket.pipe(socket);
+      };
+      const failed = (error: NodeJS.ErrnoException) => {
+        writeEgressLog({
+          code: phase === "tunnel" ? SANDBOX_EGRESS_UPSTREAM_CLOSED_CODE : "AGENT_SANDBOX_EGRESS_UPSTREAM_FAILED",
+          errorCode: error.code ?? null,
+          errorMessage: error.message,
+          hostname: target.hostname,
+          phase,
+          port,
+          ...routeField(target),
+        });
+        rejectSocket(clientSocket, 502, "Bad Gateway");
+      };
+      if (target.upstream !== null) {
+        // A client that leaves while the tunnel is being opened lets go of the upstream proxy at once;
+        // a client that only half-closes before its tunnel is open has left too.
+        const clientGone = new AbortController();
+        const abandon = () => clientGone.abort();
+        clientSocket.once("end", abandon);
+        clientSocket.once("close", abandon);
+        let tunnel: Socket;
+        try {
+          tunnel = await openUpstreamTunnel(target.upstream, target.address, port, CONNECT_TIMEOUT_MS, clientGone.signal);
+        } catch (error) {
+          // A half-closed client socket stays open until closed here.
+          if (clientGone.signal.aborted || clientUnavailable()) clientSocket.destroy();
+          else failed(error as NodeJS.ErrnoException);
+          return;
+        } finally {
+          clientSocket.off("end", abandon);
+          clientSocket.off("close", abandon);
+        }
+        bindTunnelLifecycle(clientSocket, tunnel);
+        if (clientGone.signal.aborted || clientUnavailable()) {
+          tunnel.destroy();
+          return;
+        }
+        // The tunnel already answered 200 to the client: an error is recorded, never written into it,
+        // where it would read as the destination's own answer (#489).
+        watchTunnelAnswer({
+          answerTimeoutMilliseconds: CONNECT_TIMEOUT_MS,
+          asked: initialData.byteLength > 0,
+          client: clientSocket,
+          onNoAnswer: (errorCode, errorMessage) => writeEgressLog({
+            code: "AGENT_SANDBOX_EGRESS_UPSTREAM_FAILED",
+            errorCode,
+            errorMessage,
+            hostname: target.hostname,
+            phase,
+            port,
+            via: "upstream",
+          }),
+          onTunnelError: (error) => writeEgressLog({
+            code: SANDBOX_EGRESS_UPSTREAM_CLOSED_CODE,
+            errorCode: error.code ?? null,
+            errorMessage: error.message,
+            hostname: target.hostname,
+            phase,
+            port,
+            via: "upstream",
+          }),
+          tunnel,
+        });
+        open(tunnel);
+        return;
+      }
       const upstream = connectWithDeadline(() => connect({
         family: target.family,
         host: target.address,
@@ -316,24 +435,8 @@ export function createSandboxEgressProxy({ grantRecheckMilliseconds, networkAcce
         });
         upstream.once("close", untrack);
       }
-      upstream.once("connect", () => {
-        phase = "tunnel";
-        clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-        if (initialData.byteLength > 0) upstream.write(initialData);
-        upstream.pipe(clientSocket);
-        clientSocket.pipe(upstream);
-      });
-      upstream.once("error", (error: NodeJS.ErrnoException) => {
-        writeEgressLog({
-          code: phase === "tunnel" ? SANDBOX_EGRESS_UPSTREAM_CLOSED_CODE : "AGENT_SANDBOX_EGRESS_UPSTREAM_FAILED",
-          errorCode: error.code ?? null,
-          errorMessage: error.message,
-          hostname: target.hostname,
-          phase,
-          port,
-        });
-        rejectSocket(clientSocket, 502, "Bad Gateway");
-      });
+      upstream.once("connect", () => open(upstream));
+      upstream.once("error", failed);
     })().catch((error: unknown) => {
       const target = connectTargetForLog(request.url);
       writeEgressLog(error instanceof EgressHostNotFound
