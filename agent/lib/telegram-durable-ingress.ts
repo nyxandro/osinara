@@ -286,6 +286,8 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
       console.warn(JSON.stringify({
         code: "AGENT_VOICE_TRANSCRIPT_SKIPPED",
         cause: isAppError(error) ? error.code : error instanceof Error ? error.message : String(error),
+        // An AppError carries the failure itself as its cause: a stalled or refused Telegram fetch.
+        detail: error instanceof Error && error.cause instanceof Error ? error.cause.message : undefined,
         updateId: claim.updateId,
       }));
       return update;

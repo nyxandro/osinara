@@ -343,26 +343,21 @@ describe("osinara state alert rules", () => {
     expect(block).toMatch(/severity: warning/u);
   });
 
-  it("reports a scheduled scenario that failed or whose delivery is unconfirmed", () => {
-    const [block] = alertBlocks("OsinaraScheduleRunFailed", stateRules);
+  it("reports a failed or unconfirmed scheduled scenario for the hour after it, not for a day", () => {
+    const [block] = alertBlocks("OsinaraScheduleRunFailedRecently", stateRules);
     expect(block, "no rule watches failed scheduled scenarios").toBeDefined();
     const expression = ruleField(block!, "expr") ?? "";
 
     // Each such run is a scenario the family did not receive; both terminal states count.
-    expect(expression).toContain("osinara_agent_schedule_runs_24h");
-    expect(expression).toContain('status=~"failed|ambiguous"');
-    expect(block).toMatch(/severity: warning/u);
-  });
-
-  it("tells a new scenario failure apart from yesterday's by a last-hour window", () => {
-    const [block] = alertBlocks("OsinaraScheduleRunFailedRecently", stateRules);
-    expect(block, "no rule tells a new scenario failure from one still in the daily window").toBeDefined();
-    const expression = ruleField(block!, "expr") ?? "";
-
-    // A daily scenario failing again leaves the daily rule lit with the same number (#388).
     expect(expression).toContain("osinara_agent_schedule_runs_1h");
     expect(expression).toContain('status=~"failed|ambiguous"');
     expect(block).toMatch(/severity: warning/u);
+
+    // A daily window kept an alert lit for a day after the scenarios recovered, and the duty
+    // reader woke every hour to report nothing new (#493): the hour window alone reports each
+    // failure, because the reader looks back further than an hour on every run.
+    expect(stateRules).not.toContain("osinara_agent_schedule_runs_24h");
+    expect(alertBlocks("OsinaraScheduleRunFailed", stateRules)).toHaveLength(0);
   });
 
   it("reads only metrics the exporter publishes", () => {
