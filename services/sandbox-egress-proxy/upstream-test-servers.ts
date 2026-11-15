@@ -152,12 +152,20 @@ export async function upstreamProxy(sites: { http?: number; tls?: number }, beha
   return { port, stalled, tunnels };
 }
 
-export async function egressProxy(upstreamPort: number | null): Promise<number> {
-  return await listen(createSandboxEgressProxy({
+/** An egress proxy whose tally of opened and unreachable sites the test reads (#499). */
+export async function measuredEgressProxy(upstreamPort: number | null) {
+  const sites = { failed: 0, opened: 0 };
+  const port = await listen(createSandboxEgressProxy({
     grantRecheckMilliseconds: 60_000,
     networkAccess: grantsEveryAddress,
+    siteMeter: { failed: () => { sites.failed += 1; }, opened: () => { sites.opened += 1; } },
     ...(upstreamPort === null ? {} : { upstreamProxy: { host: "127.0.0.1", port: upstreamPort } }),
   }));
+  return { port, sites };
+}
+
+export async function egressProxy(upstreamPort: number | null): Promise<number> {
+  return (await measuredEgressProxy(upstreamPort)).port;
 }
 
 /** Opens a CONNECT tunnel through the egress proxy, as a sandbox client does. */

@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   EgressHostNotFound,
+  EgressResolutionFailed,
   resolvePublicInternetAddress,
   type PublicDnsClient,
 } from "./public-dns-resolver.js";
@@ -47,8 +48,13 @@ describe("resolvePublicInternetAddress", () => {
 
     const resolution = resolvePublicInternetAddress("www.googleapis.com", client);
 
+    // Logged under its own code: one site whose DNS did not answer is not an alert (#499).
+    await expect(resolution).rejects.toBeInstanceOf(EgressResolutionFailed);
     await expect(resolution).rejects.toMatchObject({
       cause: dnsError,
+      code: "AGENT_SANDBOX_EGRESS_IPV4_RESOLUTION_FAILED",
+      dnsCode: "ETIMEOUT",
+      hostname: "www.googleapis.com",
       message: expect.stringContaining("AGENT_SANDBOX_EGRESS_IPV4_RESOLUTION_FAILED"),
     });
     await expect(resolution).rejects.toThrow("(ETIMEOUT)");

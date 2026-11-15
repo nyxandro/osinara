@@ -112,8 +112,15 @@ groups:
       # a browser in the sandbox dropping a request, a site dropping an established tunnel. Over
       # two weeks of production they were 1255 records against 21 real rejections.
       # SANDBOX_EGRESS_HOST_NOT_FOUND is a mistyped address the resolver answered for: a morning
-      # scenario repeating one twice lit this alert (#436). A resolver that does not answer stays
-      # counted as AGENT_SANDBOX_EGRESS_CONNECT_REJECTED.
+      # scenario repeating one twice lit this alert (#436).
+      #
+      # SANDBOX_EGRESS_UPSTREAM_FAILED, SANDBOX_EGRESS_HTTP_FAILED and SANDBOX_EGRESS_IPV4_RESOLUTION_FAILED
+      # are a site that did not open: no connection, no answer, or no answer from DNS for its name. The
+      # owner decided that one site that does not open is not an alert, and a whole day with nothing
+      # opened is (#499): OsinaraSitesUnreachable owns that signal. SANDBOX_EGRESS_SITE_METRICS is the
+      # minute tally it reads. A refusal by the proxy's own rules stays counted as
+      # AGENT_SANDBOX_EGRESS_CONNECT_REJECTED, and the host's Xray failing to open a tunnel as
+      # AGENT_SANDBOX_EGRESS_UPSTREAM_PROXY_FAILED: no site was asked, our own path is broken.
       #
       # MODEL_TRANSIENT_RESPONSE is one line per refused attempt of a call that waits out the model
       # hub for up to two minutes (#417): OsinaraModelTransientBurst owns that signal.
@@ -136,7 +143,7 @@ groups:
       - alert: OsinaraErrorBurst
         expr: >-
           sum by (host) (sum_over_time(log_code_lines_1m{project="osinara-production",
-          code!~"AGENT_(SCHEDULE_TICK|SCHEDULE_CHECK|TELEGRAM_SILENT_TURN|MEMORY_PURGE_COMPLETED|DATABASE_BOOKKEEPING_RECOVERY|RUNTIME_DEAD_PROCESS_RECONCILED|TELEGRAM_INGRESS_RECOVERED|TELEGRAM_OBSERVER_TRANSFERRED|TELEGRAM_DATABASE_RECOVERY|MEMORY_WRITE_SUCCEEDED|MEMORY_WRITE_DEFERRED|MEMORY_INDEX_RETRY_CLAIMED|MEMORY_INDEX_CHUNK_RESPLIT|MEMORY_USAGE_DIRECTIVE|MEMORY_EMBEDDING_WORKER_STARTED|MEMORY_EMBEDDING_WORKER_WAITING|MODEL_CALL_METRICS|MODEL_TRANSIENT_RESPONSE|MODEL_PROXY_ENABLED|TOOL_CALL_METRICS|SKILL_SYNC_METRICS|MEMORY_SEARCH_METRICS|MEMORY_RETRIEVAL_METRICS|MEMORY_REVIEW_LANE_METRICS|SANDBOX_EGRESS_CLIENT_CLOSED|SANDBOX_EGRESS_UPSTREAM_CLOSED|SANDBOX_EGRESS_HOST_NOT_FOUND|SANDBOX_EGRESS_UPSTREAM_ENABLED|CONVERSATION_WAKEUP_OBSERVER_RELEASED|CONVERSATION_WAKEUP_RECOVERED|CONVERSATION_WAKEUP_RUN_ALREADY_CLOSED|RUNNER_LOCK_RETAKEN|RUNTIME_STARTED|RUNTIME_STOPPING|SCHEDULE_CONVERSATION_ENQUEUED|TURNS_RECOVERED|TURN_DEFERRED_BY_MAINTENANCE|TELEGRAM_DRAIN_WAITING|API_KEY_VALUE_STORED|API_KEY_INTAKE_CLOSED|API_KEY_INTAKE_REDELIVERED|API_KEY_REDELIVERY_DELETE_SKIPPED|API_KEY_LATE_MESSAGE_WITHHELD|SANDBOX_API_KEY_USED|REMINDER_AWAITING_TIMEZONE|REMINDER_AWAITING_ACTIVATED|REMINDER_AWAITING_MISSED|REMINDER_AWAITING_EXPIRED|REMINDER_TIMEZONE_FOLLOWUP_SENT|NOTIFICATION_TIMEZONE_INFERRED|NOTIFICATION_TIMEZONE_CORRECTED|TELEGRAM_QUIET_CALLBACK_ANSWER_FAILED|GROUP_DISCONNECTED|GROUP_RECONNECTED|GROUP_REMOVED|GROUP_BOT_MEMBERSHIP_CHANGED|GROUP_DISCONNECTED_TURN_SILENCED|GROUP_DISCONNECTED_PROMPT_LEFT|TELEGRAM_WEBHOOK_SUBSCRIPTION|PRIVATE_QUESTION_COMMANDS_SYNCED|PRIVATE_QUESTION_PLACEHOLDER_SENT|PRIVATE_QUESTION_REFUSED|PRIVATE_QUESTION_ANSWERED|PRIVATE_QUESTION_CANCELLED|WIDGET_SENT|WIDGET_UPDATED|WIDGET_QUERY|WIDGET_HTML_REFUSED)"}[5m])) > 10
+          code!~"AGENT_(SCHEDULE_TICK|SCHEDULE_CHECK|TELEGRAM_SILENT_TURN|MEMORY_PURGE_COMPLETED|DATABASE_BOOKKEEPING_RECOVERY|RUNTIME_DEAD_PROCESS_RECONCILED|TELEGRAM_INGRESS_RECOVERED|TELEGRAM_OBSERVER_TRANSFERRED|TELEGRAM_DATABASE_RECOVERY|MEMORY_WRITE_SUCCEEDED|MEMORY_WRITE_DEFERRED|MEMORY_INDEX_RETRY_CLAIMED|MEMORY_INDEX_CHUNK_RESPLIT|MEMORY_USAGE_DIRECTIVE|MEMORY_EMBEDDING_WORKER_STARTED|MEMORY_EMBEDDING_WORKER_WAITING|MODEL_CALL_METRICS|MODEL_TRANSIENT_RESPONSE|MODEL_PROXY_ENABLED|TOOL_CALL_METRICS|SKILL_SYNC_METRICS|MEMORY_SEARCH_METRICS|MEMORY_RETRIEVAL_METRICS|MEMORY_REVIEW_LANE_METRICS|SANDBOX_EGRESS_CLIENT_CLOSED|SANDBOX_EGRESS_UPSTREAM_CLOSED|SANDBOX_EGRESS_HOST_NOT_FOUND|SANDBOX_EGRESS_UPSTREAM_ENABLED|SANDBOX_EGRESS_SITE_METRICS|SANDBOX_EGRESS_UPSTREAM_FAILED|SANDBOX_EGRESS_HTTP_FAILED|SANDBOX_EGRESS_IPV4_RESOLUTION_FAILED|CONVERSATION_WAKEUP_OBSERVER_RELEASED|CONVERSATION_WAKEUP_RECOVERED|CONVERSATION_WAKEUP_RUN_ALREADY_CLOSED|RUNNER_LOCK_RETAKEN|RUNTIME_STARTED|RUNTIME_STOPPING|SCHEDULE_CONVERSATION_ENQUEUED|TURNS_RECOVERED|TURN_DEFERRED_BY_MAINTENANCE|TELEGRAM_DRAIN_WAITING|API_KEY_VALUE_STORED|API_KEY_INTAKE_CLOSED|API_KEY_INTAKE_REDELIVERED|API_KEY_REDELIVERY_DELETE_SKIPPED|API_KEY_LATE_MESSAGE_WITHHELD|SANDBOX_API_KEY_USED|REMINDER_AWAITING_TIMEZONE|REMINDER_AWAITING_ACTIVATED|REMINDER_AWAITING_MISSED|REMINDER_AWAITING_EXPIRED|REMINDER_TIMEZONE_FOLLOWUP_SENT|NOTIFICATION_TIMEZONE_INFERRED|NOTIFICATION_TIMEZONE_CORRECTED|TELEGRAM_QUIET_CALLBACK_ANSWER_FAILED|GROUP_DISCONNECTED|GROUP_RECONNECTED|GROUP_REMOVED|GROUP_BOT_MEMBERSHIP_CHANGED|GROUP_DISCONNECTED_TURN_SILENCED|GROUP_DISCONNECTED_PROMPT_LEFT|TELEGRAM_WEBHOOK_SUBSCRIPTION|PRIVATE_QUESTION_COMMANDS_SYNCED|PRIVATE_QUESTION_PLACEHOLDER_SENT|PRIVATE_QUESTION_REFUSED|PRIVATE_QUESTION_ANSWERED|PRIVATE_QUESTION_CANCELLED|WIDGET_SENT|WIDGET_UPDATED|WIDGET_QUERY|WIDGET_HTML_REFUSED)"}[5m])) > 10
         labels:
           severity: warning
           project: osinara-production
@@ -144,6 +151,28 @@ groups:
           summary: 'Osinara записала {{ $value }} ошибок с кодом за 5 минут'
           description: 'Всплеск ошибок приложения. Для пользователя это обычно выглядит как неотвеченные сообщения или потерянные действия.'
           runbook: 'Сгруппировать строки по полю code за этот период и разбирать самый частый код.'
+
+      # Every attempt of the bot to open a site failed for a whole day: reading a page, the sandbox
+      # browser and commands all go through the sandbox egress proxy, and none of them got through.
+      # One site that does not open is not an alert by the owner's decision (#499); this is the alert
+      # for the case where nothing opens. A day without any attempt is not an outage and stays silent.
+      #
+      # The last condition asks for the tally a day back. Recording rules do not fill the past, so
+      # after these rules are installed, or after a gap on the hub, the window holds less than a day,
+      # and an hour of failures would read as a whole day with nothing opened. The proxy writes its
+      # tally every minute even when idle, so the series is there a day back whenever it ran then.
+      - alert: OsinaraSitesUnreachable
+        expr: >-
+          sum(sum_over_time(osinara_sandbox_egress_opened_1m[24h])) == 0
+          and sum(sum_over_time(osinara_sandbox_egress_failed_1m[24h])) > 0
+          and sum(count_over_time(osinara_sandbox_egress_opened_1m[1h] offset 23h)) > 0
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'За сутки бот не открыл ни одного сайта'
+          description: 'Все попытки бота открыть сайт за последние сутки — чтением страницы, браузером или командой в песочнице — закончились отказом. Для семьи это выглядит так, будто у бота нет интернета.'
+          runbook: 'Строки прокси песочницы за сутки: AGENT_SANDBOX_EGRESS_UPSTREAM_FAILED, AGENT_SANDBOX_EGRESS_HTTP_FAILED и AGENT_SANDBOX_EGRESS_IPV4_RESOLUTION_FAILED — какие сайты и с какой ошибкой. Все с via=upstream — проверить вход Xray osinara-sandbox; отказы DNS — доступ сервера к 1.1.1.1; таймауты соединения ко всем сайтам — выход сервера в интернет и контейнер sandbox-egress-proxy.'
 
       - alert: OsinaraMemoryUnavailable
         expr: sum(sum_over_time(log_code_lines_1m{project="osinara-production", code="AGENT_MEMORY_UNAVAILABLE"}[5m])) > 0

@@ -43,6 +43,9 @@ const { createSandboxEgressProxy } = await import("./server.js");
 const { SANDBOX_EGRESS_ROUTINE_CODES } = await import("./egress-log.js");
 const { EgressHostNotFound } = await import("./public-dns-resolver.js");
 
+// These tests are not about the tally of opened sites (server-site-meter.test.ts covers it).
+const uncountedSites = { failed: () => undefined, opened: () => undefined };
+
 // These cases use host names only, which never reach the network access gate.
 const hostNamesOnly = {
   authorize: async () => {
@@ -71,7 +74,7 @@ async function settle(): Promise<void> {
 }
 
 async function openTunnel(target: string) {
-  const server = createSandboxEgressProxy({ grantRecheckMilliseconds: 60_000, networkAccess: hostNamesOnly });
+  const server = createSandboxEgressProxy({ grantRecheckMilliseconds: 60_000, networkAccess: hostNamesOnly, siteMeter: uncountedSites });
   const client = new PassThrough() as unknown as Socket;
   const upstream = new PassThrough() as unknown as Socket;
   network.connect.mockReturnValue(upstream);
@@ -215,7 +218,7 @@ describe("sandbox egress proxy log records", () => {
 
   it("records a host name that does not exist on the plain HTTP path as routine", async () => {
     resolver.resolvePublicInternetAddress.mockRejectedValueOnce(new EgressHostNotFound("5post.ru", "ENODATA"));
-    const server = createSandboxEgressProxy({ grantRecheckMilliseconds: 60_000, networkAccess: hostNamesOnly });
+    const server = createSandboxEgressProxy({ grantRecheckMilliseconds: 60_000, networkAccess: hostNamesOnly, siteMeter: uncountedSites });
     const incoming = { headers: {}, method: "GET", socket: {}, url: "http://5post.ru/tracking" };
     const outgoing = { end: vi.fn(), headersSent: false, writeHead: vi.fn() };
 
@@ -242,7 +245,7 @@ describe("sandbox egress proxy log records", () => {
   });
 
   it("logs a rejected HTTP request by host only, never with the credentials in its URL", async () => {
-    const server = createSandboxEgressProxy({ grantRecheckMilliseconds: 60_000, networkAccess: hostNamesOnly });
+    const server = createSandboxEgressProxy({ grantRecheckMilliseconds: 60_000, networkAccess: hostNamesOnly, siteMeter: uncountedSites });
     const incoming = { headers: {}, method: "GET", url: "http://user:s3cret@example.com/path?token=t0ken" };
     const outgoing = { end: vi.fn(), headersSent: false, writeHead: vi.fn() };
 
@@ -260,7 +263,7 @@ describe("sandbox egress proxy log records", () => {
   });
 
   it("records a failed plain HTTP request as one failure line", async () => {
-    const server = createSandboxEgressProxy({ grantRecheckMilliseconds: 60_000, networkAccess: hostNamesOnly });
+    const server = createSandboxEgressProxy({ grantRecheckMilliseconds: 60_000, networkAccess: hostNamesOnly, siteMeter: uncountedSites });
     const upstream = Object.assign(new PassThrough(), { destroy: vi.fn() });
     network.request.mockReturnValue(upstream as unknown as ClientRequest);
     const incoming = Object.assign(new PassThrough(), {
