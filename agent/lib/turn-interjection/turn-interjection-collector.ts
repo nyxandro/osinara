@@ -238,6 +238,7 @@ async function voiceEntry(
     console.warn(JSON.stringify({
       code: "AGENT_TURN_INTERJECTION_VOICE_UNAVAILABLE",
       error: error instanceof Error ? error.message : String(error),
+      cause: error instanceof Error && error.cause instanceof Error ? error.cause.message : undefined,
       agentTurnId: collection.coordinate.agentTurnId,
       updateId: planned.updateId,
     }));
