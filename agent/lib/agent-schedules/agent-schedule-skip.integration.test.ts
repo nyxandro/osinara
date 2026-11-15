@@ -111,7 +111,15 @@ describeWithDatabase("scenario read for the day (#480)", () => {
     await skipAgentScheduleForDay({
       pressId: "press-auto-1", addresseeTelegramUserId: "101", pressedAt, scheduleId: schedule.id, sentAt: pressedAt, telegramChatId: "101",
     });
-    await database().query("UPDATE agent_schedules SET next_run_at = $2 WHERE id = $1", [schedule.id, minutes(-1)]);
+    // The due occurrence sits on the schedule's own hourly grid, as a real one always does. Moving only
+    // next_run_at left the grid anchored half an hour ahead: past midnight when the test ran between
+    // 23:30 and 00:00 in Moscow, so the first occurrence after the skip came an hour late (14.11.2026).
+    await database().query(
+      `UPDATE agent_schedules
+          SET next_run_at = $2, recurrence_anchor_at = $2, recurrence_anchor_local = $2::timestamptz AT TIME ZONE timezone
+        WHERE id = $1`,
+      [schedule.id, minutes(-1)],
+    );
 
     const claimed = await agentScheduleDispatchRepository.claimDue({ leaseMilliseconds: 60_000, limit: 10, now: new Date() });
 

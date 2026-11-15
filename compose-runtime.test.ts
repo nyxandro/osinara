@@ -129,6 +129,14 @@ function healthCheckSeconds(block: string, key: string): number {
 }
 
 describe("Docker Compose runtime wiring", () => {
+  it("lets the sandbox egress proxy name an optional upstream proxy for Russian sites (#489)", () => {
+    for (const file of ["compose.yaml", "compose.production.yaml"]) {
+      // An optional host binding, like the model's: without it every site stays direct.
+      expect(serviceBlock(file, "sandbox-egress-proxy"), file)
+        .toContain("      SANDBOX_EGRESS_UPSTREAM_PROXY_URL: ${SANDBOX_EGRESS_UPSTREAM_PROXY_URL-}\n");
+    }
+  });
+
   it("wires the agent straight to the selected provider without a subscription gateway", () => {
     const localCompose = readFileSync(new URL("compose.yaml", projectRoot), "utf8");
     const productionCompose = readFileSync(new URL("compose.production.yaml", projectRoot), "utf8");
