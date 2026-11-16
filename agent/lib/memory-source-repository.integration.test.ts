@@ -19,6 +19,10 @@ const describeWithDatabase = process.env.RUN_DATABASE_INTEGRATION_TESTS === "tru
   ? describe
   : describe.skip;
 
+// The lookup returns the message's time, and the output must not contain the raw ids below: a clock
+// time could carry them by chance (milliseconds ".777" once failed CI), so the time is fixed.
+const SOURCE_SENT_AT = "2026-01-02T03:04:05.000Z";
+
 describeWithDatabase("R3 memory source lookup", () => {
   beforeEach(async () => {
     await database().query(
@@ -60,8 +64,8 @@ describeWithDatabase("R3 memory source lookup", () => {
          (group_id, conversation_id, telegram_message_id, sequence_id, actor_kind, actor_id,
           telegram_user_id, sender_display_name, sender_is_bot, message_kind, content_text, sent_at)
         VALUES ($1, $2, 777, 1, 'user', 'telegram:9501', '9501', 'Анна', false,
-                'text', 'Я предпочитаю утренние встречи', now()) RETURNING id`,
-      [group.rows[0]!.id, conversation.id],
+                'text', 'Я предпочитаю утренние встречи', $3) RETURNING id`,
+      [group.rows[0]!.id, conversation.id, SOURCE_SENT_AT],
     );
     const groupAuth: MemoryAuthorization = {
       familyId: family.rows[0]!.id,
@@ -117,6 +121,7 @@ describeWithDatabase("R3 memory source lookup", () => {
     expect(retained).toMatchObject({
       evidenceSnippet: "Я предпочитаю утренние встречи",
       fullTimelineSourceAvailable: true,
+      observedAt: SOURCE_SENT_AT,
       originChatLabel: "Закрытый источник",
       sourceAuthorLabel: "Анна",
     });
