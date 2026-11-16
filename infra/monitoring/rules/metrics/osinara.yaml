@@ -295,6 +295,22 @@ groups:
           description: 'Воспоминание сохранено, но не проиндексировано: поиск по нему работать не будет, пока задача не выполнится.'
           runbook: 'Проверить контейнеры memory-embedding и memory-embedding-worker, затем osinara_memory_embedding_jobs со статусом failed и osinara_memory_embedding_pending. Обе величины существуют всегда: пустой ответ означает, что метрика не собирается, а не что отказов нет.'
 
+      # The model cannot be reached: calls end in failure because the connection drops or never opens
+      # (#492). OsinaraModelTransientBurst counts only answers of the hub and stayed silent on
+      # 14.11.2026 through 151 failed calls in two outages, caught only because a scenario fell in
+      # them. Over the two weeks before, failed calls happened on one other day, once. More than five
+      # in ten minutes is about one message the bot could not answer, after its retries and the wait
+      # for the hub; the alert goes out ten minutes after calls succeed again.
+      - alert: OsinaraModelCallsFailing
+        expr: sum(sum_over_time(osinara_model_call_failed_1m[10m])) > 5
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Вызовы модели не проходят: {{ $value }} неудачных за 10 минут'
+          description: 'Бот не может получить ответ модели: соединение с ней обрывается, не открывается или она отвечает ошибкой. Люди в это время не получают ответов, сценарии по расписанию не приходят.'
+          runbook: 'Причина — в поле cause строк AGENT_TURN_FAILED за это время: ECONNRESET или Connect Timeout — путь к модели через Xray (journalctl -u xray, вход osinara-model, узел vless-am); ответы 429 или 5xx — сам хаб модели, см. AGENT_MODEL_TRANSIENT_RESPONSE.'
+
       - alert: OsinaraModelTransientBurst
         expr: sum(sum_over_time(osinara_model_transient_1m[10m])) > 5
         labels:
