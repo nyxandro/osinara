@@ -270,9 +270,10 @@ describe("osinara alert rules", () => {
     expect(ruleField(block!, "expr")).toBe("sum(sum_over_time(osinara_model_call_failed_1m[10m])) > 5");
     expect(recorded.get("osinara_model_call_failed_1m"))
       .toBe('project:"osinara-production" code:"AGENT_MODEL_CALL_METRICS" outcome:"failed" | stats by (outcome) count() as value');
-    // The wrapper writes "failed" for a call that did not start and for one cut off mid-answer.
+    // The wrapper writes "failed" for a call that did not start and for one cut off mid-answer, and
+    // "cancelled" for a call its turn stopped, which the alert leaves out.
     const writer = read("agent/lib/model-call-metrics.ts");
-    expect(writer).toContain('outcome: "failed"');
+    expect(writer.match(/outcome: params\.abortSignal\?\.aborted \? "cancelled" : "failed"/gu)).toHaveLength(2);
     expect(writer).toContain('record("failed")');
   });
 
