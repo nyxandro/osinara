@@ -65,6 +65,23 @@ describe("model request measurements", () => {
     expect(JSON.stringify(records)).not.toMatch(/private-content|never-log-secret|opaque-session|question/);
   });
 
+  // A call its turn cancelled is not the model failing: OsinaraModelCallsFailing counts "failed" (#492).
+  it.each([
+    ["the turn cancelled it", true, "cancelled"],
+    ["the call itself failed", false, "failed"],
+  ])("records a generate call that threw as %s", async (_case, aborted, outcome) => {
+    const log = vi.fn();
+    const controller = new AbortController();
+    if (aborted) controller.abort();
+    const middleware = createModelCallMetrics({ provider: "test", protocol: "openai-chat-completions", modelId: "test", log });
+
+    await expect(middleware.wrapGenerate!({
+      doGenerate: async () => { throw new Error("stopped"); },
+      params: { abortSignal: controller.signal },
+    } as never)).rejects.toThrow("stopped");
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({ outcome, usageAvailable: false }));
+  });
+
   it("records missing usage as unknown rather than a zero-token success", async () => {
     const log = vi.fn();
     const middleware = createModelCallMetrics({ provider: "test", protocol: "openai-chat-completions", modelId: "test", log });
