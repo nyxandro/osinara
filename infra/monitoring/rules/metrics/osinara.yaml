@@ -301,6 +301,22 @@ groups:
           description: 'Провайдер отвечает кодами 429 или 5xx. Ответы приходят медленнее, часть ходов может обрываться.'
           runbook: 'Проверить статус провайдера и поле statusCode в строках AGENT_MODEL_TRANSIENT_RESPONSE.'
 
+      # A photo, file or voice message a person sent did not reach the agent. Since 16.11.2026 such a
+      # message is not failed: the agent tells the person in its own words and nothing goes to the
+      # owner, so OsinaraIngressFailing no longer sees these; this alert is how the duty reader learns
+      # of a run of them. One file Telegram did not hand over is background, like one site that did not
+      # open (#499); two within an hour is the same bar OsinaraIngressFailing keeps for a broken chat,
+      # and speech recognition failing for everyone shows up here the same way.
+      - alert: OsinaraIncomingFilesUnreceived
+        expr: sum(sum_over_time(log_code_lines_1m{project="osinara-production", code=~"AGENT_(ATTACHMENT|VOICE)_UNRECEIVED"}[1h])) >= 2
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'За час бот не смог принять присланных файлов и голосовых: {{ $value }}'
+          description: 'Люди присылали фото, файлы или голосовые, а бот не смог их получить. Каждому агент сам объяснил, что случилось, и попросил прислать ещё раз или написать текстом. Несколько случаев подряд — сбой Telegram или распознавания речи, а не отдельный файл.'
+          runbook: 'Строки AGENT_ATTACHMENT_UNRECEIVED и AGENT_VOICE_UNRECEIVED за час, поле reason. telegram_failure — Telegram не отдаёт файлы: у фото и файлов исходная ошибка в соседней строке AGENT_ATTACHMENT_DOWNLOAD_FAILED, у голосовых — в полях cause и detail. recognition_unavailable — ошибка распознавания в поле cause: ключ, оплата или доступность Groq. too_large и speech_unrecognized — дело в самом файле, сбоя нет.'
+
       - alert: OsinaraDatabaseConnectionLost
         expr: sum(sum_over_time(log_code_lines_1m{project="osinara-production", code=~"AGENT_(DATABASE_CONNECTION_LOST|WORKFLOW_NOTIFY_CONNECTION_LOST)"}[5m])) > 0
         labels:

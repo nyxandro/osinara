@@ -233,6 +233,23 @@ describe("osinara alert rules", () => {
     expect(expression).toMatch(/count_over_time\(osinara_sandbox_egress_opened_1m\[1h\] offset 23h\)\) > 0/u);
   });
 
+  // A photo, file or voice message that did not come through no longer fails the message: the agent
+  // tells the person and nothing goes to the owner (16.11.2026), so OsinaraIngressFailing stops
+  // seeing these. This alert is how the duty reader still learns of a run of them.
+  it("raises OsinaraIncomingFilesUnreceived on two files or voice messages within an hour", () => {
+    const [block] = alertBlocks("OsinaraIncomingFilesUnreceived");
+    expect(block, "the alert this guards has been renamed").toBeDefined();
+    const expression = ruleField(block!, "expr") ?? "";
+    const codes = ["AGENT_ATTACHMENT_UNRECEIVED", "AGENT_VOICE_UNRECEIVED"];
+
+    expect(expression).toBe(
+      'sum(sum_over_time(log_code_lines_1m{project="osinara-production", code=~"AGENT_(ATTACHMENT|VOICE)_UNRECEIVED"}[1h])) >= 2',
+    );
+    // Both lines are written where the file or voice message is let go, under these exact codes.
+    expect(read("agent/lib/attachments/telegram-workspace-attachments.ts")).toContain(`code: "${codes[0]}"`);
+    expect(read("agent/lib/telegram-durable-ingress.ts")).toContain(`code: "${codes[1]}"`);
+  });
+
   it("reports an indexing failure only from the indexer, not from a turn reading memory", () => {
     const [block] = alertBlocks("OsinaraEmbeddingFailed");
     const expression = ruleField(block!, "expr") ?? "";

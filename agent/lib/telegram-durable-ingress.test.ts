@@ -21,6 +21,7 @@
  * - Reply buttons react on arrival, as soon as the update is stored and before its place in the
  *   chat queue comes: the queue may be busy with a turn of minutes.
  */
+import { AppError } from "./app-error.js";
 import { NO_PRIVATE_QUESTIONS } from "./telegram-ingress.test-fixtures.js";
 import { parseTelegramUpdate } from "../runtime/telegram/inbound.js";
 import type { RouteContext } from "../runtime/server.js";
@@ -29,6 +30,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { TelegramIngressClaim, TelegramIngressRepository } from "./telegram-ingress-contract.js";
 import { createTelegramDurableIngress, type DurableIngressDependencies } from "./telegram-durable-ingress.js";
+import { UNRECEIVED_VOICE_FIELD } from "./unreceived-telegram-files.js";
 
 function voicePayload(): Record<string, unknown> {
   return {
@@ -290,15 +292,29 @@ describe("createTelegramDurableIngress", () => {
     }
   });
 
-  it("fails a voice addressed to the agent whose words cannot be read, so the person learns it", async () => {
+  // The person hears from the agent what happened to their voice message, in its own words; nothing
+  // goes to the owner and the log keeps it (owner's decision of 16.11.2026).
+  it.each([
+    ["no speech is made out", vi.fn().mockResolvedValue(""), "speech_unrecognized", "warn"],
+    ["Telegram does not hand the recording over", vi.fn().mockRejectedValue(new AppError("AGENT_VOICE_DOWNLOAD_FAILED", "Не удалось скачать голосовое сообщение из Telegram. Попробуйте отправить его снова")), "telegram_failure", "warn"],
+    ["the recording is over 20 MB", vi.fn().mockRejectedValue(new AppError("AGENT_VOICE_FILE_TOO_LARGE", "Голосовое сообщение превышает допустимый размер")), "too_large", "warn"],
+    ["speech recognition fails", vi.fn().mockRejectedValue(new Error("provider rate limit")), "recognition_unavailable", "error"],
+  ] as const)("hands a voice addressed to the agent to its turn with the reason when %s", async (_case, transcribeVoice, reason, level) => {
     const storage = repository();
-    const { dependencies, handle } = ingress(storage, { transcribeVoice: vi.fn().mockResolvedValue("") });
+    const logged = vi.spyOn(console, level).mockImplementation(() => undefined);
+    const { dependencies, handle } = ingress(storage, { transcribeVoice });
 
     await runDrain(handle, voicePayload());
 
-    expect(dependencies.dispatch).not.toHaveBeenCalled();
-    expect(storage.value.fail).toHaveBeenCalledWith("1001", storage.claim.leaseToken,
-      expect.objectContaining({ code: "AGENT_VOICE_TRANSCRIPT_EMPTY" }), undefined);
+    expect(storage.value.fail).not.toHaveBeenCalled();
+    expect(dependencies.reportFailure).not.toHaveBeenCalled();
+    expect(storage.value.saveVoiceTranscript).not.toHaveBeenCalled();
+    const [update] = vi.mocked(dependencies.dispatch).mock.calls[0]!;
+    expect(update).toMatchObject({ message: { raw: { [UNRECEIVED_VOICE_FIELD]: reason }, text: "" } });
+    expect(storage.value.complete).toHaveBeenCalled();
+    const line = logged.mock.calls.map(([entry]) => JSON.parse(String(entry))).find((entry) => entry.code === "AGENT_VOICE_UNRECEIVED");
+    expect(line).toMatchObject({ reason, updateId: "1001" });
+    logged.mockRestore();
   });
 
   it("stores a video note for transcription like a voice note", async () => {

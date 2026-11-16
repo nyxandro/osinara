@@ -3,14 +3,16 @@
  *
  * Exports:
  * - `StoredTelegramAttachment`: trusted persistent path advertised to the model.
- * - `UnavailableAnimationStill`, `TelegramAttachmentImport`: a GIF that came without a picture, and
- *   the result for one attachment.
+ * - `TelegramAttachmentImport`: the result for one attachment, stored or not received.
  * - `createTelegramWorkspaceAttachmentImporter`: download, validate, and persist pipeline.
  *
  * Key construct:
- * - A GIF is stored as its middle frame (`animation-still.ts`). When no frame can be had, the GIF is
- *   not worth the person's message: the message goes on without it and the model learns it has no
- *   picture, as a video note goes on without its transcript.
+ * - A file that did not come through is not worth the person's message: the message goes on without
+ *   it and the model learns why (`unreceived-telegram-files.ts`), as a video note goes on without its
+ *   transcript. That covers a file Telegram did not hand over or that is over 20 MB (owner's decision
+ *   of 16.11.2026: the person hears it from the agent, the owner gets nothing) and a GIF, stored as its
+ *   middle frame (`animation-still.ts`), when no frame can be had. A fault of the server is not among
+ *   them and fails the message.
  */
 import type { TelegramAttachment } from "../../runtime/telegram/inbound.js";
 
@@ -21,6 +23,7 @@ import type {
   WorkspaceFileRecord,
   WorkspaceScope,
 } from "../workspaces/workspace-repository.js";
+import { unreceivedFileReason, type UnreceivedTelegramFile } from "../unreceived-telegram-files.js";
 import { validateAttachmentContent } from "./attachment-policy.js";
 import { telegramInboxDirectory } from "./telegram-inbox-path.js";
 
@@ -43,12 +46,9 @@ export interface StoredTelegramAttachment {
   telegramMessageId: string;
 }
 
-export interface UnavailableAnimationStill {
-  stillUnavailable: true;
-  telegramMessageId: string;
-}
 
-export type TelegramAttachmentImport = StoredTelegramAttachment | UnavailableAnimationStill;
+
+export type TelegramAttachmentImport = StoredTelegramAttachment | UnreceivedTelegramFile;
 
 const MEDIA_TYPE_DEFAULT_EXTENSIONS: Readonly<Record<string, string>> = {
   "application/json": ".json",
@@ -92,24 +92,21 @@ function assertTelegramMessageId(value: string): void {
   }
 }
 
-// What a GIF's own file can fail on: Telegram does not hand it over, or no frame comes out of it.
-// A missing media tool or another fault of the server is not among them and fails the message.
+// What a GIF's own file can fail on once it is in: no frame comes out of it. A missing media tool or
+// another fault of the server is not among them and fails the message.
 const ANIMATION_STILL_UNAVAILABLE_CAUSES = new Set([
   "AGENT_ANIMATION_FORMAT_UNSUPPORTED",
   "AGENT_ANIMATION_STILL_FAILED",
-  "AGENT_ATTACHMENT_DOWNLOAD_FAILED",
-  "AGENT_ATTACHMENT_DOWNLOAD_RESPONSE_INVALID",
-  "AGENT_ATTACHMENT_DOWNLOAD_TOO_LARGE",
 ]);
 
-/** The still of a GIF, or null when its file cannot be downloaded or cut; see the module note. */
+/** The still of a downloaded GIF, or null when no frame can be cut; see the module note. */
 async function animationStill(
   dependencies: AttachmentImporterDependencies,
-  attachment: TelegramAttachment,
+  bytes: Uint8Array,
   telegramMessageId: string,
 ): Promise<Uint8Array | null> {
   try {
-    return await dependencies.extractAnimationStill(await dependencies.download(attachment));
+    return await dependencies.extractAnimationStill(bytes);
   } catch (error) {
     if (!isAppError(error) || !ANIMATION_STILL_UNAVAILABLE_CAUSES.has(error.code)) throw error;
     console.error(JSON.stringify({
@@ -120,6 +117,42 @@ async function animationStill(
       telegramMessageId,
     }));
     return null;
+  }
+}
+
+/** The stored bytes and their validated type, or the reason the file did not come through. */
+async function receiveFile(
+  dependencies: AttachmentImporterDependencies,
+  attachment: TelegramAttachment,
+  fileName: string,
+  telegramMessageId: string,
+): Promise<{ bytes: Uint8Array; validated: { fileName: string; mediaType: string } } | UnreceivedTelegramFile> {
+  try {
+    const downloaded = await dependencies.download(attachment);
+    const bytes = attachment.kind === "animation"
+      ? await animationStill(dependencies, downloaded, telegramMessageId)
+      : downloaded;
+    if (bytes === null) return { kind: attachment.kind, telegramMessageId, unreceived: "picture_unavailable" };
+    // Every scope keeps any file, typed by its bytes; an external group's copy stays in its own
+    // isolated workspace (since 01.11.2026, text files only before).
+    const validated = await validateAttachmentContent({
+      bytes,
+      ...(attachment.mediaType ? { declaredMediaType: attachment.mediaType } : {}),
+      fileName,
+      kind: attachment.kind === "animation" ? "photo" : attachment.kind,
+    });
+    return { bytes, validated };
+  } catch (error) {
+    const reason = unreceivedFileReason(error);
+    if (reason === null) throw error;
+    console.warn(JSON.stringify({
+      cause: isAppError(error) ? error.code : undefined,
+      code: "AGENT_ATTACHMENT_UNRECEIVED",
+      kind: attachment.kind,
+      reason,
+      telegramMessageId,
+    }));
+    return { kind: attachment.kind, telegramMessageId, unreceived: reason };
   }
 }
 
@@ -163,22 +196,12 @@ export function createTelegramWorkspaceAttachmentImporter(
       for (const [index, attachment] of input.attachments.entries()) {
         const sourceId = sourceIds[index]!;
         const inboxDirectory = telegramInboxDirectory(input.auth, input.scope, sourceId);
-        const bytes = attachment.kind === "animation"
-          ? await animationStill(dependencies, attachment, sourceId)
-          : await dependencies.download(attachment);
-        if (bytes === null) {
-          imported.push({ stillUnavailable: true, telegramMessageId: sourceId });
+        const received = await receiveFile(dependencies, attachment, defaultAttachmentName(attachment, index), sourceId);
+        if ("unreceived" in received) {
+          imported.push(received);
           continue;
         }
-        // Every scope keeps any file, typed by its bytes; an external group's copy stays in its own
-        // isolated workspace (since 01.11.2026, text files only before).
-        const validated = await validateAttachmentContent({
-          bytes,
-          ...(attachment.mediaType ? { declaredMediaType: attachment.mediaType } : {}),
-          fileName: defaultAttachmentName(attachment, index),
-          kind: attachment.kind === "animation" ? "photo" : attachment.kind,
-        });
-
+        const { bytes, validated } = received;
         // Content validation establishes the stored MIME and safe filename before persistence.
         // Each real Telegram message retains its own directory and idempotency identity. This also
         // preserves image lookup by message ID and repeated occurrences of the same file in an album.
