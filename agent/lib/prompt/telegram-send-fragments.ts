@@ -47,7 +47,9 @@ export function scheduledSendRules(sends: { readonly gifs: boolean; readonly voi
     "This run may send what a live answer in this chat sends; send exactly what the scenario asks for and nothing on your own initiative. Each send is one message of the run's result: do not repeat its content in the final text.",
     [
       sends.voice ? "- A voice message: load `voice-replies`, then `send_voice_message`. It carries no buttons: a read button goes under the card or into the final text after it." : null,
-      sends.widgets ? "- A widget card: load `widgets`, then `send_widget`. Give every card a new `surfaceId` with the date and time of this run, for example `tasks_2026_11_09_0830`." : null,
+      sends.widgets
+        ? "- A widget card: load `widgets`, then `send_widget`. Give every card a new `surfaceId` with the date and time of this run, for example `tasks_2026_11_09_0830`."
+        : "- Widget cards are switched off for now: where the scenario asks for a card, put its content and buttons into the final text, and do not mention the card or that it was not sent.",
       sends.gifs ? "- A GIF: `send_gif`, as its description says." : null,
       "- A place, a poll or a contact card: `send_location`, `send_poll`, `send_contact`, as their descriptions say.",
     ].filter((line): line is string => line !== null).join("\n"),
