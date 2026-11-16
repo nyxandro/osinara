@@ -100,12 +100,13 @@ export const TELEGRAM_RICH_MESSAGE_MEDIA_MAX_COUNT = 50;
 // Telegram reads the uploaded files before it answers; a cut-off upload cannot be safely resent.
 export const TELEGRAM_RICH_MEDIA_UPLOAD_TIMEOUT_MS = 180_000;
 export const TELEGRAM_VOICE_MAX_BYTES = 20 * 1024 * 1024;
-// One attempt to fetch a voice file from Telegram: its metadata, the download and the body together.
-// A note of the largest size above needs about 0.7 MB/s to arrive in time; real notes are a few
-// hundred KB. A stalled attempt is ended and repeated once, after a timeout or a dropped connection
-// only (#498). Groq is not called until the audio is in.
-export const TELEGRAM_VOICE_DOWNLOAD_ATTEMPT_TIMEOUT_MS = 30_000;
-export const TELEGRAM_VOICE_DOWNLOAD_ATTEMPTS = 2;
+// One attempt to fetch a file from Telegram, a voice note or a photo or file of a message: its
+// metadata, the download and the body together. A file of the 20 MB limit needs about 0.7 MB/s to
+// arrive in time; real voice notes and photos are a few hundred KB. A stalled attempt is ended and
+// repeated once, after a timeout or a dropped connection only (#498; photos since 16.11.2026, when
+// Telegram held `getFile` for two minutes and then answered 504).
+export const TELEGRAM_FILE_DOWNLOAD_ATTEMPT_TIMEOUT_MS = 30_000;
+export const TELEGRAM_FILE_DOWNLOAD_ATTEMPTS = 2;
 export const WORKSPACE_MAX_FILE_BYTES = 50 * 1024 * 1024;
 export const WORKSPACE_DELETION_LEASE_MS = 15 * 60 * 1_000;
 export const WORKSPACE_TOOL_MAX_TEXT_BYTES = 1024 * 1024;
