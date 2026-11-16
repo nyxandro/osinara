@@ -71,6 +71,8 @@ const COUNTED_LINE_WRITERS: Record<string, readonly string[]> = {
     "agent/lib/memory-retrieval.ts",
   ],
   AGENT_MEMORY_USAGE_DIRECTIVE: ["agent/lib/memory-usage-report.ts"],
+  AGENT_ATTACHMENT_UNRECEIVED: ["agent/lib/attachments/telegram-workspace-attachments.ts"],
+  AGENT_VOICE_UNRECEIVED: ["agent/lib/telegram-durable-ingress.ts"],
   [SANDBOX_EGRESS_SITE_METRICS_CODE]: ["services/sandbox-egress-proxy/egress-site-meter.ts"],
 };
 
@@ -236,18 +238,24 @@ describe("osinara alert rules", () => {
   // A photo, file or voice message that did not come through no longer fails the message: the agent
   // tells the person and nothing goes to the owner (16.11.2026), so OsinaraIngressFailing stops
   // seeing these. This alert is how the duty reader still learns of a run of them.
-  it("raises OsinaraIncomingFilesUnreceived on two files or voice messages within an hour", () => {
+  it("raises OsinaraIncomingFilesUnreceived on a run of files Telegram or recognition failed", () => {
     const [block] = alertBlocks("OsinaraIncomingFilesUnreceived");
     expect(block, "the alert this guards has been renamed").toBeDefined();
-    const expression = ruleField(block!, "expr") ?? "";
-    const codes = ["AGENT_ATTACHMENT_UNRECEIVED", "AGENT_VOICE_UNRECEIVED"];
+    const recorded = new Map([...logRules.matchAll(/^ *- record: (osinara_[a-z0-9_]+)\n *expr: '([^']*)'/gmu)]
+      .map((match) => [match[1]!, match[2]!]));
 
-    expect(expression).toBe(
-      'sum(sum_over_time(log_code_lines_1m{project="osinara-production", code=~"AGENT_(ATTACHMENT|VOICE)_UNRECEIVED"}[1h])) >= 2',
+    expect(ruleField(block!, "expr")).toBe(
+      'sum(sum_over_time({__name__=~"osinara_(attachment|voice)_unreceived_1m"}[1h])) >= 3',
     );
-    // Both lines are written where the file or voice message is let go, under these exact codes.
-    expect(read("agent/lib/attachments/telegram-workspace-attachments.ts")).toContain(`code: "${codes[0]}"`);
-    expect(read("agent/lib/telegram-durable-ingress.ts")).toContain(`code: "${codes[1]}"`);
+    // Only a failure outside the file counts: a file over 20 MB or a recording without speech is not one.
+    expect(recorded.get("osinara_attachment_unreceived_1m")).toContain('code:"AGENT_ATTACHMENT_UNRECEIVED" reason:~"^telegram_failure$"');
+    expect(recorded.get("osinara_voice_unreceived_1m"))
+      .toContain('code:"AGENT_VOICE_UNRECEIVED" reason:~"^(telegram_failure|recognition_unavailable|interrupted)$"');
+    // The lines it reads are its own signal, not part of the error burst.
+    const [burst] = alertBlocks("OsinaraErrorBurst");
+    for (const code of ["AGENT_ATTACHMENT_UNRECEIVED", "AGENT_VOICE_UNRECEIVED"]) {
+      expect(excludesCode(burst!, code), `OsinaraErrorBurst still counts ${code}`).toBe(true);
+    }
   });
 
   it("reports an indexing failure only from the indexer, not from a turn reading memory", () => {

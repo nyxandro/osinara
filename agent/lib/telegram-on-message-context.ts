@@ -47,8 +47,6 @@ export function telegramWorkspaceAuthorization(
   };
 }
 
-// Named per message: without it the model blamed Telegram and asked to resend a GIF that never
-// carries a picture (03.11.2026).
 export function formatStoredTelegramAttachments(
   attachments: readonly StoredTelegramAttachment[],
 ): string {

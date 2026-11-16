@@ -59,13 +59,14 @@ const UNRECEIVED_FILE_REFUSALS: Readonly<Record<UnreceivedFileReason, { code: st
   },
 };
 
+// Expected: the importer already logged the file that did not come, and the model only passes it on.
 function unreceivedFileRefusal(reason: UnreceivedFileReason): ModelFacingError {
   return new ModelFacingError({
     category: "dependency",
     ...UNRECEIVED_FILE_REFUSALS[reason],
     retryable: false,
     sideEffectStatus: "not_started",
-  });
+  }, { isExpectedRefusal: true });
 }
 
 export function createTelegramAttachmentMaterializer(

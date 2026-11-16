@@ -362,6 +362,7 @@ describe("createTelegramWorkspaceAttachmentImporter", () => {
     expect(writeBinary).toHaveBeenCalledOnce();
     expect(JSON.parse(String(warnings.mock.calls[0]![0]))).toEqual({
       cause: failure.code,
+      chatId: "101",
       code: "AGENT_ATTACHMENT_UNRECEIVED",
       kind: file.kind,
       reason,
@@ -376,10 +377,42 @@ describe("createTelegramWorkspaceAttachmentImporter", () => {
       extractAnimationStill: noAnimationStill,
       writeBinary: vi.fn(),
     });
-    vi.spyOn(console, "warn").mockImplementationOnce(() => undefined);
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     await expect(importer.persist({ attachments: [photo()], auth, chatId: "101", messageId: "42", scope: "personal" }))
       .resolves.toEqual([{ kind: "photo", telegramMessageId: "42", unreceived: "telegram_failure" }]);
+    warnings.mockRestore();
+  });
+
+  // The line names the transfer's own failure, which the downloader keeps as the cause.
+  it("logs the transfer failure behind a file that did not come", async () => {
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const transfer = new Error("Telegram getFile failed with HTTP 504.");
+    const importer = createTelegramWorkspaceAttachmentImporter({
+      download: vi.fn().mockRejectedValue(new AppError("AGENT_ATTACHMENT_DOWNLOAD_FAILED", "Не удалось получить файл", { cause: transfer })),
+      extractAnimationStill: noAnimationStill,
+      writeBinary: vi.fn(),
+    });
+
+    await importer.persist({ attachments: [photo()], auth, chatId: "101", messageId: "42", scope: "personal" });
+
+    expect(JSON.parse(String(warnings.mock.calls[0]![0]))).toMatchObject({
+      detail: "Telegram getFile failed with HTTP 504.",
+      reason: "telegram_failure",
+    });
+    warnings.mockRestore();
+  });
+
+  // A GIF is checked as the server's own frame: a frame that is not a picture is our fault.
+  it("does not tell a GIF frame that is not a picture as Telegram's failure", async () => {
+    const importer = createTelegramWorkspaceAttachmentImporter({
+      download: vi.fn().mockResolvedValue(Buffer.from("mp4 bytes")),
+      extractAnimationStill: vi.fn().mockResolvedValue(Buffer.from("not an image")),
+      writeBinary: vi.fn(),
+    });
+
+    await expect(importer.persist({ attachments: [gif], auth, chatId: "101", messageId: "42", scope: "personal" }))
+      .rejects.toMatchObject({ code: "AGENT_ATTACHMENT_TYPE_MISMATCH" });
   });
 
   it("does not hide a fault of the server behind a file that did not come", async () => {

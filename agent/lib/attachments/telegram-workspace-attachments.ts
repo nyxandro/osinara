@@ -46,8 +46,6 @@ export interface StoredTelegramAttachment {
   telegramMessageId: string;
 }
 
-
-
 export type TelegramAttachmentImport = StoredTelegramAttachment | UnreceivedTelegramFile;
 
 const MEDIA_TYPE_DEFAULT_EXTENSIONS: Readonly<Record<string, string>> = {
@@ -124,35 +122,49 @@ async function animationStill(
 async function receiveFile(
   dependencies: AttachmentImporterDependencies,
   attachment: TelegramAttachment,
-  fileName: string,
-  telegramMessageId: string,
+  file: { chatId: string; fileName: string; telegramMessageId: string },
 ): Promise<{ bytes: Uint8Array; validated: { fileName: string; mediaType: string } } | UnreceivedTelegramFile> {
-  try {
-    const downloaded = await dependencies.download(attachment);
-    const bytes = attachment.kind === "animation"
-      ? await animationStill(dependencies, downloaded, telegramMessageId)
-      : downloaded;
-    if (bytes === null) return { kind: attachment.kind, telegramMessageId, unreceived: "picture_unavailable" };
-    // Every scope keeps any file, typed by its bytes; an external group's copy stays in its own
-    // isolated workspace (since 01.11.2026, text files only before).
-    const validated = await validateAttachmentContent({
-      bytes,
-      ...(attachment.mediaType ? { declaredMediaType: attachment.mediaType } : {}),
-      fileName,
-      kind: attachment.kind === "animation" ? "photo" : attachment.kind,
-    });
-    return { bytes, validated };
-  } catch (error) {
+  const { telegramMessageId } = file;
+  const unreceived = (error: unknown): UnreceivedTelegramFile => {
     const reason = unreceivedFileReason(error);
     if (reason === null) throw error;
     console.warn(JSON.stringify({
       cause: isAppError(error) ? error.code : undefined,
+      chatId: file.chatId,
       code: "AGENT_ATTACHMENT_UNRECEIVED",
+      // The transfer's own failure, kept by the downloader as the cause: a stall, a lost connection,
+      // Telegram's answer.
+      detail: error instanceof Error && error.cause instanceof Error ? error.cause.message : undefined,
       kind: attachment.kind,
       reason,
       telegramMessageId,
     }));
     return { kind: attachment.kind, telegramMessageId, unreceived: reason };
+  };
+  let downloaded: Uint8Array;
+  try {
+    downloaded = await dependencies.download(attachment);
+  } catch (error) {
+    return unreceived(error);
+  }
+  const bytes = attachment.kind === "animation"
+    ? await animationStill(dependencies, downloaded, telegramMessageId)
+    : downloaded;
+  if (bytes === null) return { kind: attachment.kind, telegramMessageId, unreceived: "picture_unavailable" };
+  try {
+    // Every scope keeps any file, typed by its bytes; an external group's copy stays in its own
+    // isolated workspace (since 01.11.2026, text files only before).
+    const validated = await validateAttachmentContent({
+      bytes,
+      ...(attachment.mediaType ? { declaredMediaType: attachment.mediaType } : {}),
+      fileName: file.fileName,
+      kind: attachment.kind === "animation" ? "photo" : attachment.kind,
+    });
+    return { bytes, validated };
+  } catch (error) {
+    // A GIF is checked as the server's own frame: a frame that is not a picture is our fault, not Telegram's.
+    if (attachment.kind === "animation") throw error;
+    return unreceived(error);
   }
 }
 
@@ -196,7 +208,11 @@ export function createTelegramWorkspaceAttachmentImporter(
       for (const [index, attachment] of input.attachments.entries()) {
         const sourceId = sourceIds[index]!;
         const inboxDirectory = telegramInboxDirectory(input.auth, input.scope, sourceId);
-        const received = await receiveFile(dependencies, attachment, defaultAttachmentName(attachment, index), sourceId);
+        const received = await receiveFile(dependencies, attachment, {
+          chatId: input.chatId,
+          fileName: defaultAttachmentName(attachment, index),
+          telegramMessageId: sourceId,
+        });
         if ("unreceived" in received) {
           imported.push(received);
           continue;

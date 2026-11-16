@@ -299,6 +299,7 @@ describe("createTelegramDurableIngress", () => {
     ["Telegram does not hand the recording over", vi.fn().mockRejectedValue(new AppError("AGENT_VOICE_DOWNLOAD_FAILED", "Не удалось скачать голосовое сообщение из Telegram. Попробуйте отправить его снова")), "telegram_failure", "warn"],
     ["the recording is over 20 MB", vi.fn().mockRejectedValue(new AppError("AGENT_VOICE_FILE_TOO_LARGE", "Голосовое сообщение превышает допустимый размер")), "too_large", "warn"],
     ["speech recognition fails", vi.fn().mockRejectedValue(new Error("provider rate limit")), "recognition_unavailable", "error"],
+    ["speech recognition is switched off here", vi.fn().mockRejectedValue(new AppError("AGENT_VOICE_NOT_CONFIGURED", "Распознавание голосовых сообщений не настроено")), "recognition_off", "warn"],
   ] as const)("hands a voice addressed to the agent to its turn with the reason when %s", async (_case, transcribeVoice, reason, level) => {
     const storage = repository();
     const logged = vi.spyOn(console, level).mockImplementation(() => undefined);
@@ -315,6 +316,54 @@ describe("createTelegramDurableIngress", () => {
     const line = logged.mock.calls.map(([entry]) => JSON.parse(String(entry))).find((entry) => entry.code === "AGENT_VOICE_UNRECEIVED");
     expect(line).toMatchObject({ reason, updateId: "1001" });
     logged.mockRestore();
+  });
+
+  // An attempt that began and left no words is not repeated, to never pay recognition twice: after a
+  // restart, a lost lease or a try made while the previous turn ran.
+  it("hands a voice whose recognition was interrupted to its turn instead of failing it", async () => {
+    const storage = repository();
+    storage.value.beginVoiceTranscription.mockRejectedValue(new AppError(
+      "AGENT_VOICE_TRANSCRIPTION_RECOVERY_REQUIRED", "Распознавание голосового сообщения было прервано. Отправьте запись повторно",
+    ));
+    vi.spyOn(console, "warn").mockImplementationOnce(() => undefined);
+    const { dependencies, handle } = ingress(storage);
+
+    await runDrain(handle, voicePayload());
+
+    expect(dependencies.transcribeVoice).not.toHaveBeenCalled();
+    expect(storage.value.fail).not.toHaveBeenCalled();
+    expect(dependencies.reportFailure).not.toHaveBeenCalled();
+    const [update] = vi.mocked(dependencies.dispatch).mock.calls[0]!;
+    expect(update).toMatchObject({ message: { raw: { [UNRECEIVED_VOICE_FIELD]: "interrupted" }, text: "" } });
+  });
+
+  it("leaves a voice whose lease was lost to the processor that took it over", async () => {
+    const storage = repository();
+    storage.value.beginVoiceTranscription.mockRejectedValue(new AppError(
+      "AGENT_TELEGRAM_LEASE_LOST", "Срок обработки голосового сообщения истёк. Операция остановлена",
+    ));
+    vi.spyOn(console, "info").mockImplementationOnce(() => undefined);
+    const { dependencies, handle } = ingress(storage);
+
+    await runDrain(handle, voicePayload());
+
+    expect(dependencies.transcribeVoice).not.toHaveBeenCalled();
+    expect(dependencies.dispatch).not.toHaveBeenCalled();
+    expect(storage.value.fail).not.toHaveBeenCalled();
+    expect(dependencies.reportFailure).not.toHaveBeenCalled();
+  });
+
+  it("still fails a voice whose recognition stopped on a fault of the server's own code", async () => {
+    const storage = repository();
+    const { dependencies, handle } = ingress(storage, {
+      transcribeVoice: vi.fn().mockRejectedValue(new TypeError("voice.fileId is not a function")),
+    });
+
+    await runDrain(handle, voicePayload());
+
+    expect(dependencies.dispatch).not.toHaveBeenCalled();
+    expect(storage.value.fail).toHaveBeenCalledWith("1001", storage.claim.leaseToken,
+      expect.objectContaining({ code: "AGENT_TELEGRAM_INGRESS_FAILED" }), undefined);
   });
 
   it("stores a video note for transcription like a voice note", async () => {

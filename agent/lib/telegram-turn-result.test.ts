@@ -120,6 +120,8 @@ describe("telegram turn files that did not arrive", () => {
     ["too_large", "The voice message did not reach you: it is larger than the 20 MB Telegram lets a bot receive."],
     ["speech_unrecognized", "No speech could be made out in the voice message."],
     ["recognition_unavailable", "Speech recognition did not work, so you do not know what the voice message says."],
+    ["interrupted", "The voice message could not be made out this time."],
+    ["recognition_off", "Voice messages are not turned into text here, so you do not know what this voice message says."],
   ])("explains a voice message marked %s at ingress", (reason, sentence) => {
     const context = buildResult({
       message: {

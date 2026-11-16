@@ -130,6 +130,8 @@ describe("createTelegramAttachmentMaterializer", () => {
     await expect(materialize(auth, "00000000-0000-4000-8000-000000000096")).rejects.toMatchObject({
       code,
       contract: expect.objectContaining({ category: "dependency", retryable: false, sideEffectStatus: "not_started" }),
+      // Already logged by the import: the tool call is not counted as a failure a second time.
+      isExpectedRefusal: true,
     });
   });
 });

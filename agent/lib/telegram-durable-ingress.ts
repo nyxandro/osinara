@@ -272,20 +272,13 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
     const authorized = await dependencies.authorizeVoice(update.message, { addressed });
     signal.throwIfAborted();
     if (!authorized) return update;
-    if (!claim.transcript) {
-      await dependencies.repository.beginVoiceTranscription(claim.updateId, claim.leaseToken);
-      signal.throwIfAborted();
-    }
-    let transcript: string;
-    try {
-      transcript = claim.transcript ?? await readVoiceTranscript(claim.voice, signal);
-    } catch (error) {
-      if (signal.aborted) throw error;
-      // A voice note spoken to the agent goes to its turn marked with the reason its words are missing:
-      // the person hears it from the agent in its own words; nothing goes to the owner, the log keeps
-      // it (owner's decision of 16.11.2026). A video note, often silent, and a voice the agent only
-      // overheard stay in the conversation as their placeholder line, without a note.
-      if (addressed && Object.hasOwn(update.message.raw, "voice")) return unreceivedVoiceUpdate(claim, error);
+    // A voice note spoken to the agent goes to its turn marked with the reason its words are missing:
+    // the person hears it from the agent in its own words; nothing goes to the owner, the log keeps
+    // it (owner's decision of 16.11.2026). A video note, often silent, and a voice the agent only
+    // overheard stay in the conversation as their placeholder line, without a note.
+    const spokenToAgent = addressed && Object.hasOwn(update.message.raw, "voice");
+    const withoutWords = (error: unknown): TelegramUpdate => {
+      if (spokenToAgent) return unreceivedVoiceUpdate(claim, error);
       console.warn(JSON.stringify({
         code: "AGENT_VOICE_TRANSCRIPT_SKIPPED",
         cause: isAppError(error) ? error.code : error instanceof Error ? error.message : String(error),
@@ -294,6 +287,24 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
         updateId: claim.updateId,
       }));
       return update;
+    };
+    if (!claim.transcript) {
+      try {
+        await dependencies.repository.beginVoiceTranscription(claim.updateId, claim.leaseToken);
+      } catch (error) {
+        // An attempt that already began and left no words is not repeated, so recognition is never
+        // paid twice: after a restart, a lost lease or a try during the previous turn (#498).
+        if (!isAppError(error) || error.code !== "AGENT_VOICE_TRANSCRIPTION_RECOVERY_REQUIRED") throw error;
+        return withoutWords(error);
+      }
+      signal.throwIfAborted();
+    }
+    let transcript: string;
+    try {
+      transcript = claim.transcript ?? await readVoiceTranscript(claim.voice, signal);
+    } catch (error) {
+      if (signal.aborted) throw error;
+      return withoutWords(error);
     }
     if (!claim.transcript) {
       await dependencies.repository.saveVoiceTranscript(claim.updateId, claim.leaseToken, transcript);
@@ -314,6 +325,8 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
     error: unknown,
   ): TelegramUpdate {
     const reason = unreceivedVoiceReason(error);
+    // A fault of the server's own code is not the recording's: it fails the message as before.
+    if (reason === null) throw error;
     // Speech recognition failing for everyone may need the owner's account; Telegram's glitches do not.
     (reason === "recognition_unavailable" ? console.error : console.warn)(JSON.stringify({
       code: "AGENT_VOICE_UNRECEIVED",

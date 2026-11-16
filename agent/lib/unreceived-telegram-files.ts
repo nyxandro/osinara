@@ -16,7 +16,7 @@
  */
 import type { TelegramAttachment, TelegramMessage } from "../runtime/telegram/inbound.js";
 
-import { isAppError } from "./app-error.js";
+import { AppError, isAppError } from "./app-error.js";
 
 export type UnreceivedFileReason =
   /** A GIF came in, but no frame could be taken from its file. */
@@ -33,17 +33,32 @@ export interface UnreceivedTelegramFile {
 }
 
 export type UnreceivedVoiceReason =
+  /** An earlier attempt to make out the words stopped half-way; it is not repeated, to never pay twice. */
+  | "interrupted"
+  /** This server has speech recognition switched off. */
+  | "recognition_off"
   | "recognition_unavailable"
   | "speech_unrecognized"
   | "telegram_failure"
   | "too_large";
 
 const UNRECEIVED_VOICE_REASONS: ReadonlySet<string> = new Set<UnreceivedVoiceReason>([
+  "interrupted",
+  "recognition_off",
   "recognition_unavailable",
   "speech_unrecognized",
   "telegram_failure",
   "too_large",
 ]);
+
+// How Node's fetch reports a lost connection; such a TypeError is the transfer failing, not a defect.
+const FETCH_CONNECTION_FAILURE_MESSAGES = new Set(["fetch failed", "terminated"]);
+
+/** A fault of the server's own code: it fails the message as before and is never told as Telegram's. */
+function isCodeDefect(error: unknown): boolean {
+  if (error instanceof ReferenceError) return true;
+  return error instanceof TypeError && !FETCH_CONNECTION_FAILURE_MESSAGES.has(error.message);
+}
 
 /** An application field beside Telegram's own: Telegram never sends it, the ingress writes it. */
 export const UNRECEIVED_VOICE_FIELD = "osinara_unreceived_voice";
@@ -71,12 +86,18 @@ export function unreceivedFileReason(error: unknown): Exclude<UnreceivedFileReas
 }
 
 /**
- * Why a voice message addressed to the agent has no words. Anything that is not a verdict on the
- * recording itself is speech recognition failing: the person's answer is the same, write it as text.
+ * Why a voice message addressed to the agent has no words, or null for a fault of the server's own
+ * code. Anything else that is not a verdict on the recording itself is speech recognition failing:
+ * the person's answer is the same, write it as text.
  */
-export function unreceivedVoiceReason(error: unknown): UnreceivedVoiceReason {
+export function unreceivedVoiceReason(error: unknown): UnreceivedVoiceReason | null {
+  if (isCodeDefect(error)) return null;
   if (!isAppError(error)) return "recognition_unavailable";
   switch (error.code) {
+    case "AGENT_VOICE_TRANSCRIPTION_RECOVERY_REQUIRED":
+      return "interrupted";
+    case "AGENT_VOICE_NOT_CONFIGURED":
+      return "recognition_off";
     case "AGENT_VOICE_DOWNLOAD_FAILED":
     case "AGENT_VOICE_CONTENT_INVALID":
       return "telegram_failure";
@@ -95,7 +116,10 @@ export function withUnreceivedVoice(payload: Record<string, unknown>, reason: Un
   const cloned = structuredClone(payload);
   const message = cloned.message;
   if (!message || typeof message !== "object" || Array.isArray(message)) {
-    throw new Error("AGENT_TELEGRAM_VOICE_INVALID: the voice update carries no message");
+    throw new AppError(
+      "AGENT_TELEGRAM_VOICE_INVALID",
+      "Telegram передал неполные данные голосового сообщения. Запишите и отправьте его заново",
+    );
   }
   (message as Record<string, unknown>)[UNRECEIVED_VOICE_FIELD] = reason;
   return cloned;
@@ -112,6 +136,8 @@ export function formatUnreceivedFile(file: UnreceivedTelegramFile): string {
   const name = FILE_NAMES[file.kind];
   const subject = `The ${name} of Telegram message ${file.telegramMessageId}`;
   switch (file.unreceived) {
+    // Named per message: without it the model blamed Telegram and asked to resend a GIF that never
+    // carries a picture (03.11.2026).
     case "picture_unavailable":
       return `You cannot see the GIF of Telegram message ${file.telegramMessageId}: the server could not take a frame from its file. ` +
         "Tell the person so plainly; do not guess what it shows or why it failed.";
@@ -137,6 +163,12 @@ export function formatUnreceivedVoice(reason: UnreceivedVoiceReason): string {
     case "speech_unrecognized":
       return "No speech could be made out in the voice message. " +
         "In your own words, ask the person to record it again or write it as text. Do not guess what it says.";
+    case "interrupted":
+      return "The voice message could not be made out this time. " +
+        "In your own words, without codes or technical terms, ask the person to send it again or write it as text. Do not guess what it says.";
+    case "recognition_off":
+      return "Voice messages are not turned into text here, so you do not know what this voice message says. " +
+        "In your own words, ask the person to write it as text; do not suggest trying again later. Do not guess what it says.";
     case "recognition_unavailable":
       return "Speech recognition did not work, so you do not know what the voice message says. " +
         "In your own words, without names of services, tell the person that voice messages cannot be made out right now " +
