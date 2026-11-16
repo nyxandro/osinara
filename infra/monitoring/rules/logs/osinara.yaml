@@ -88,3 +88,13 @@ groups:
       # Model transport degradation: 429 and 5xx answers that the agent retried or surfaced.
       - record: osinara_model_transient_1m
         expr: 'project:"osinara-production" code:"AGENT_MODEL_TRANSIENT_RESPONSE" | stats by (statusCode) count() as value'
+
+      # Photos, files and voice messages that did not reach the agent for a reason outside the file
+      # itself (16.11.2026): Telegram did not hand it over, or speech recognition failed or stopped.
+      # Over 20 MB, no speech in a recording and recognition switched off on purpose are the file or
+      # the setup, not a failure, and stay out. One line per file: an album counts each photo.
+      - record: osinara_attachment_unreceived_1m
+        expr: 'project:"osinara-production" code:"AGENT_ATTACHMENT_UNRECEIVED" reason:~"^telegram_failure$" | stats by (reason) count() as value'
+
+      - record: osinara_voice_unreceived_1m
+        expr: 'project:"osinara-production" code:"AGENT_VOICE_UNRECEIVED" reason:~"^(telegram_failure|recognition_unavailable|interrupted)$" | stats by (reason) count() as value'

@@ -2,8 +2,8 @@
  * Lazy authorized Telegram attachment materialization.
  *
  * Exports:
- * - `createTelegramAttachmentMaterializer`: resolves one opaque reference and persists its bytes; a GIF
- *   that came without a picture is a refusal the model reads.
+ * - `createTelegramAttachmentMaterializer`: resolves one opaque reference and persists its bytes; a file
+ *   that did not come through is a refusal the model reads and explains to the person in its own words.
  * - `materializeTelegramAttachment`: production registered-group journal to workspace pipeline.
  */
 import type { TelegramAttachment } from "../../runtime/telegram/inbound.js";
@@ -13,6 +13,7 @@ import { workspaceBinaryRepository } from "../workspaces/workspace-binary-reposi
 import type { WorkspaceAuthorization } from "../workspaces/workspace-repository.js";
 import { AppError } from "../app-error.js";
 import { ModelFacingError } from "../model-facing-error.js";
+import type { UnreceivedFileReason } from "../unreceived-telegram-files.js";
 import { extractAnimationStill } from "./animation-still.js";
 import { downloadTelegramAttachment } from "./telegram-attachment-download.js";
 import {
@@ -37,6 +38,35 @@ interface TelegramAttachmentMaterializerDependencies {
     messageId: string;
     scope: "family" | "group";
   }): Promise<TelegramAttachmentImport[]>;
+}
+
+const UNRECEIVED_FILE_REFUSALS: Readonly<Record<UnreceivedFileReason, { code: string; correction: string; reason: string }>> = {
+  picture_unavailable: {
+    code: "AGENT_ANIMATION_STILL_UNAVAILABLE",
+    correction: "Не повторяйте вызов. Скажите человеку прямо, что не видите эту гифку, и не гадайте, что на ней.",
+    reason: "Сервер не смог получить кадр из файла этой гифки.",
+  },
+  telegram_failure: {
+    code: "AGENT_ATTACHMENT_DOWNLOAD_FAILED",
+    correction: "Не повторяйте вызов. Своими словами, без кодов, скажите человеку, что Telegram глючит и файл не дошёл, " +
+      "и попросите прислать его ещё раз; если так уже не вышло раньше в этом чате, предложите попробовать чуть позже.",
+    reason: "Telegram не отдал боту файл — сбой на стороне Telegram.",
+  },
+  too_large: {
+    code: "AGENT_ATTACHMENT_DOWNLOAD_TOO_LARGE",
+    correction: "Не повторяйте вызов. Своими словами предложите человеку прислать файл поменьше, частями или ссылкой.",
+    reason: "Файл больше 20 МБ: такой Telegram боту не отдаёт.",
+  },
+};
+
+// Expected: the importer already logged the file that did not come, and the model only passes it on.
+function unreceivedFileRefusal(reason: UnreceivedFileReason): ModelFacingError {
+  return new ModelFacingError({
+    category: "dependency",
+    ...UNRECEIVED_FILE_REFUSALS[reason],
+    retryable: false,
+    sideEffectStatus: "not_started",
+  }, { isExpectedRefusal: true });
 }
 
 export function createTelegramAttachmentMaterializer(
@@ -71,16 +101,7 @@ export function createTelegramAttachmentMaterializer(
         "AGENT_TELEGRAM_ATTACHMENT_MATERIALIZATION_EMPTY: Telegram-вложение не было сохранено в workspace",
       );
     }
-    if ("stillUnavailable" in attachment) {
-      throw new ModelFacingError({
-        category: "dependency",
-        code: "AGENT_ANIMATION_STILL_UNAVAILABLE",
-        correction: "Не повторяйте вызов. Скажите человеку прямо, что не видите эту гифку, и не гадайте, что на ней.",
-        reason: "Сервер не смог получить кадр из файла этой гифки.",
-        retryable: false,
-        sideEffectStatus: "not_started",
-      });
-    }
+    if ("unreceived" in attachment) throw unreceivedFileRefusal(attachment.unreceived);
     return attachment;
   };
 }
