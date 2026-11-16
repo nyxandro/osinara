@@ -16,7 +16,9 @@
  *   server's PHP count a few dozen bytes apart and every refusal costs the model a new widget.
  */
 
-export const TELEGRAM_WIDGETS_AVAILABLE = true;
+// Off since Telegram switched widgets off on 13.11.2026: every `sendWidget` answers
+// INPUT_MEDIA_WIDGET_NOT_ALLOWED (#509). Turned back on when the owner says Telegram has returned them.
+export const TELEGRAM_WIDGETS_AVAILABLE = false;
 
 export const TELEGRAM_WIDGET_API_BASE_URL = "https://api.telegram.org/beta";
 

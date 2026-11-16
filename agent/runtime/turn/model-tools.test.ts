@@ -3,7 +3,14 @@ import { readFile } from "node:fs/promises";
 import { streamText } from "ai";
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test";
 import { z } from "zod";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// The reference requests were recorded while Telegram accepted widgets; the switched-off state has its own
+// cases in `widget-unavailable-surface.test.ts`.
+vi.mock("../../lib/widgets/widget-config.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../lib/widgets/widget-config.js")>(),
+  TELEGRAM_WIDGETS_AVAILABLE: true,
+}));
 
 import { buildModeToolSurface } from "../../lib/tool-policy/mode-tool-surface.js";
 import { defineTool, type ToolDefinition } from "../tool.js";
