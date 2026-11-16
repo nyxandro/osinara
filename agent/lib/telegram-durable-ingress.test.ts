@@ -353,17 +353,20 @@ describe("createTelegramDurableIngress", () => {
     expect(dependencies.reportFailure).not.toHaveBeenCalled();
   });
 
-  it("still fails a voice whose recognition stopped on a fault of the server's own code", async () => {
+  it.each([
+    ["thrown as it is", new TypeError("voice.fileId is not a function"), "AGENT_TELEGRAM_INGRESS_FAILED"],
+    ["wrapped by the download as its cause", new AppError("AGENT_VOICE_DOWNLOAD_FAILED", "Не удалось скачать голосовое сообщение из Telegram", {
+      cause: new TypeError("Cannot read properties of undefined (reading 'file_path')"),
+    }), "AGENT_VOICE_DOWNLOAD_FAILED"],
+  ])("still fails a voice whose recognition stopped on a fault of the server's own code %s", async (_case, failure, code) => {
     const storage = repository();
-    const { dependencies, handle } = ingress(storage, {
-      transcribeVoice: vi.fn().mockRejectedValue(new TypeError("voice.fileId is not a function")),
-    });
+    const { dependencies, handle } = ingress(storage, { transcribeVoice: vi.fn().mockRejectedValue(failure) });
 
     await runDrain(handle, voicePayload());
 
     expect(dependencies.dispatch).not.toHaveBeenCalled();
     expect(storage.value.fail).toHaveBeenCalledWith("1001", storage.claim.leaseToken,
-      expect.objectContaining({ code: "AGENT_TELEGRAM_INGRESS_FAILED" }), undefined);
+      expect.objectContaining({ code }), undefined);
   });
 
   it("stores a video note for transcription like a voice note", async () => {

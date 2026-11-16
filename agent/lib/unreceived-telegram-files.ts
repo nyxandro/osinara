@@ -54,10 +54,14 @@ const UNRECEIVED_VOICE_REASONS: ReadonlySet<string> = new Set<UnreceivedVoiceRea
 // How Node's fetch reports a lost connection; such a TypeError is the transfer failing, not a defect.
 const FETCH_CONNECTION_FAILURE_MESSAGES = new Set(["fetch failed", "terminated"]);
 
-/** A fault of the server's own code: it fails the message as before and is never told as Telegram's. */
+/**
+ * A fault of the server's own code: it fails the message as before and is never told as Telegram's.
+ * The downloaders wrap what stopped a transfer, the defect included, and keep it as the cause.
+ */
 function isCodeDefect(error: unknown): boolean {
-  if (error instanceof ReferenceError) return true;
-  return error instanceof TypeError && !FETCH_CONNECTION_FAILURE_MESSAGES.has(error.message);
+  const failures = error instanceof Error && error.cause !== undefined ? [error, error.cause] : [error];
+  return failures.some((failure) => failure instanceof ReferenceError
+    || (failure instanceof TypeError && !FETCH_CONNECTION_FAILURE_MESSAGES.has(failure.message)));
 }
 
 /** An application field beside Telegram's own: Telegram never sends it, the ingress writes it. */
@@ -71,7 +75,7 @@ const FILE_NAMES: Readonly<Record<TelegramAttachment["kind"], string>> = {
 
 /** The reason a failed attachment did not come through, or null for a fault that must fail the message. */
 export function unreceivedFileReason(error: unknown): Exclude<UnreceivedFileReason, "picture_unavailable"> | null {
-  if (!isAppError(error)) return null;
+  if (!isAppError(error) || isCodeDefect(error)) return null;
   switch (error.code) {
     case "AGENT_ATTACHMENT_DOWNLOAD_FAILED":
     case "AGENT_ATTACHMENT_DOWNLOAD_RESPONSE_INVALID":

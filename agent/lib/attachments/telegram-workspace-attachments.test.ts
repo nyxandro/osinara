@@ -415,6 +415,21 @@ describe("createTelegramWorkspaceAttachmentImporter", () => {
       .rejects.toMatchObject({ code: "AGENT_ATTACHMENT_TYPE_MISMATCH" });
   });
 
+  it("does not tell a defect the downloader wrapped as Telegram's failure", async () => {
+    const defect = new TypeError("Cannot read properties of undefined (reading 'file_path')");
+    const importer = createTelegramWorkspaceAttachmentImporter({
+      download: vi.fn().mockRejectedValue(new ModelFacingError({
+        category: "dependency", code: "AGENT_ATTACHMENT_DOWNLOAD_FAILED", correction: "Попросите прислать ещё раз.",
+        reason: "Не удалось получить файл из Telegram из-за транспортного сбоя.", retryable: false, sideEffectStatus: "not_started",
+      }, { cause: defect })),
+      extractAnimationStill: noAnimationStill,
+      writeBinary: vi.fn(),
+    });
+
+    await expect(importer.persist({ attachments: [photo()], auth, chatId: "101", messageId: "42", scope: "personal" }))
+      .rejects.toMatchObject({ cause: defect, code: "AGENT_ATTACHMENT_DOWNLOAD_FAILED" });
+  });
+
   it("does not hide a fault of the server behind a file that did not come", async () => {
     const failure = new TypeError("bug");
     const importer = createTelegramWorkspaceAttachmentImporter({
