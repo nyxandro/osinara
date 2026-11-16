@@ -141,6 +141,20 @@ describe("a stalled or dropped attempt", () => {
     expect(error).toHaveBeenCalledOnce();
   });
 
+  it("is repeated once when the body is cut off half-way", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const cutOff = new Response("partial", { status: 200 });
+    vi.spyOn(cutOff, "arrayBuffer").mockRejectedValue(new TypeError("terminated"));
+    const getFile = vi.fn().mockResolvedValue({ filePath: "photos/file.jpg" });
+    const downloadFile = vi.fn()
+      .mockResolvedValueOnce(cutOff)
+      .mockResolvedValueOnce(new Response("photo", { status: 200 }));
+    const download = createTelegramAttachmentDownloader({ ...ATTEMPTS, downloadFile, getFile });
+
+    await expect(download(attachment(5))).resolves.toEqual(Buffer.from("photo"));
+    expect(downloadFile).toHaveBeenCalledTimes(2);
+  });
+
   it("does not repeat Telegram's error answer", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const downloadFile = vi.fn().mockResolvedValue(new Response("gone", { status: 404 }));
@@ -175,5 +189,7 @@ describe("downloadTelegramAttachment", () => {
       "https://api.telegram.org/bot123:test-token/getFile",
       "https://api.telegram.org/file/bot123:test-token/documents/file.txt",
     ]);
+    // Without the attempt's signal a stalled Telegram request would wait for minutes again (16.11.2026).
+    for (const [, init] of fetchMock.mock.calls) expect((init as RequestInit | undefined)?.signal).toBeInstanceOf(AbortSignal);
   });
 });
