@@ -71,6 +71,7 @@ const COUNTED_LINE_WRITERS: Record<string, readonly string[]> = {
     "agent/lib/memory-retrieval.ts",
   ],
   AGENT_MEMORY_USAGE_DIRECTIVE: ["agent/lib/memory-usage-report.ts"],
+  AGENT_MODEL_CALL_METRICS: ["agent/lib/model-call-metrics.ts"],
   AGENT_ATTACHMENT_UNRECEIVED: ["agent/lib/attachments/telegram-workspace-attachments.ts"],
   AGENT_VOICE_UNRECEIVED: ["agent/lib/telegram-durable-ingress.ts"],
   [SANDBOX_EGRESS_SITE_METRICS_CODE]: ["services/sandbox-egress-proxy/egress-site-meter.ts"],
@@ -256,6 +257,23 @@ describe("osinara alert rules", () => {
     for (const code of ["AGENT_ATTACHMENT_UNRECEIVED", "AGENT_VOICE_UNRECEIVED"]) {
       expect(excludesCode(burst!, code), `OsinaraErrorBurst still counts ${code}`).toBe(true);
     }
+  });
+
+  // A dropped or refused connection gets no answer from the hub, so no AGENT_MODEL_TRANSIENT_RESPONSE
+  // line: on 14.11.2026 151 failed calls went by without OsinaraModelTransientBurst (#492).
+  it("raises OsinaraModelCallsFailing on failed model calls, a lost connection included", () => {
+    const [block] = alertBlocks("OsinaraModelCallsFailing");
+    expect(block, "the alert this guards has been renamed").toBeDefined();
+    const recorded = new Map([...logRules.matchAll(/^ *- record: (osinara_[a-z0-9_]+)\n *expr: '([^']*)'/gmu)]
+      .map((match) => [match[1]!, match[2]!]));
+
+    expect(ruleField(block!, "expr")).toBe("sum(sum_over_time(osinara_model_call_failed_1m[10m])) > 5");
+    expect(recorded.get("osinara_model_call_failed_1m"))
+      .toBe('project:"osinara-production" code:"AGENT_MODEL_CALL_METRICS" outcome:"failed" | stats by (outcome) count() as value');
+    // The wrapper writes "failed" for a call that did not start and for one cut off mid-answer.
+    const writer = read("agent/lib/model-call-metrics.ts");
+    expect(writer).toContain('outcome: "failed"');
+    expect(writer).toContain('record("failed")');
   });
 
   it("reports an indexing failure only from the indexer, not from a turn reading memory", () => {
