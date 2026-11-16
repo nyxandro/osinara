@@ -137,7 +137,7 @@ describe("Docker Compose runtime wiring", () => {
     }
   });
 
-  it("wires the agent straight to the selected provider without a subscription gateway", () => {
+  it("wires the agent straight to the selected provider", () => {
     const localCompose = readFileSync(new URL("compose.yaml", projectRoot), "utf8");
     const productionCompose = readFileSync(new URL("compose.production.yaml", projectRoot), "utf8");
     for (const compose of [localCompose, productionCompose]) {
@@ -156,11 +156,6 @@ describe("Docker Compose runtime wiring", () => {
     }
     expect(localCompose).not.toContain("MODEL_UPSTREAM_API_KEY");
     expect(productionCompose).not.toContain("MODEL_UPSTREAM_API_KEY");
-    // The subscription gateway left on 2026-10-26 with its service, OAuth volume and profile.
-    for (const compose of [localCompose, productionCompose]) {
-      expect(compose).not.toContain("cli-proxy");
-      expect(compose).not.toContain("codex-subscription");
-    }
     expect(productionCompose).toContain(
       "- /opt/osinara/agent-model-providers.json:/app/config/agent-model-providers.json:ro",
     );

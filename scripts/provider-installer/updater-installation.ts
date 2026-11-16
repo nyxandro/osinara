@@ -43,7 +43,7 @@ export const UPDATER_HOST_COMMANDS = [
 ] as const;
 
 const DEPLOY_IMAGE_DIR = "/app/deploy";
-const CONTROLLER_FILE_PATTERN = /^[a-z0-9-]+\.(sh|jq)$/u;
+const CONTROLLER_FILE_PATTERN = /^[a-z0-9-]+\.sh$/u;
 const REQUIRED_CONTROLLER_FILES = ["launcher.sh", "main.sh"] as const;
 const UPDATER_UNITS = ["osinara-deploy.service", "osinara-deploy.timer"] as const;
 const UPDATER_TIMER = "osinara-deploy.timer";
@@ -164,7 +164,7 @@ async function requireValidShell(
   files: readonly string[],
   run: HostCommandRunner,
 ): Promise<void> {
-  for (const name of files.filter((file) => file.endsWith(".sh"))) {
+  for (const name of files) {
     try {
       await run({ args: ["-n", join(directory, name)], command: "bash", timeoutMs: COMMAND_TIMEOUT_MS });
     } catch (error) {

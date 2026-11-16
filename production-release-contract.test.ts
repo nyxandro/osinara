@@ -71,8 +71,6 @@ describe("production container contract", () => {
     expect(dockerfile).toContain(
       "FROM nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de",
     );
-    // The subscription gateway left on 2026-10-26; its upstream image must not come back.
-    expect(dockerfile).not.toContain("cli-proxy");
 
     // The agent runs bundled; its authored tree stays for `instructions.md` and operator `tsx` commands.
     const runtime = dockerfile.slice(dockerfile.indexOf(" AS runtime"));
@@ -98,7 +96,6 @@ describe("production container contract", () => {
       "backup.sh",
       "common.sh",
       "database.sh",
-      "installation-compose.jq",
       "launcher.sh",
       "main.sh",
       "release.sh",
@@ -165,7 +162,6 @@ describe("production container contract", () => {
     expect(compose).toContain("SANDBOX_RUNTIME_IMAGE: ${SANDBOX_RUNTIME_IMAGE:?");
     expect(compose.match(/DATABASE_URL: \$\{DATABASE_URL:\?/g)).toHaveLength(3);
     expect(compose).not.toContain("DATABASE_URL: postgresql://");
-    expect(compose).not.toContain("cli-proxy");
   });
 
   // The background memory pipeline was retired in v0.12.0; its idle worker left in v0.40.2.
@@ -333,26 +329,21 @@ describe("release workflow contract", () => {
     );
   });
 
-  // The installer's first graph and every graph an installation host derives later come from one
-  // reviewed filter; an inline copy in the workflow could drift from what the controller applies.
-  it("builds the installation graph with the controller's own filter", () => {
+  // An installed server runs the same released graph as production, byte for byte.
+  it("bundles the released Compose file for installation", () => {
     const workflow = readProjectFile(".github/workflows/ci-release.yaml");
 
-    expect(workflow).toContain("jq --from-file scripts/production-deploy/installation-compose.jq");
-    expect(workflow).not.toContain('del(.services["cli-proxy-api"])');
+    expect(workflow).toMatch(
+      /build-installation-bundle\.sh[\s\S]*?osinara-deployment\.json"[\s\S]*?"\$\{GITHUB_WORKSPACE\}\/compose\.production\.yaml"/u,
+    );
   });
 
-  // Controllers and apps of v0.49.0 and older refuse a manifest without the gateway image, so the
-  // first release after its removal names the last published image instead of building a new one.
-  it("names the retired gateway image in the manifest without building it", () => {
+  it("names exactly the five release images in the manifest", () => {
     const workflow = readProjectFile(".github/workflows/ci-release.yaml");
 
     expect(workflow).toContain(
-      "RETIRED_CLI_PROXY_IMAGE: ghcr.io/nyxandro/osinara-cli-proxy@sha256:e8def6e9183c77670b741b5dac84de05284e6865b346e3a33722e9d14a55d240",
+      "images: {app: $app, edge: $edge, sandboxEgressProxy: $sandboxEgressProxy, sandboxRunner: $sandboxRunner, sandboxRuntime: $sandboxRuntime}",
     );
-    expect(workflow).toContain('--arg cliProxy "$RETIRED_CLI_PROXY_IMAGE"');
-    expect(workflow).not.toContain("target: cli-proxy");
-    expect(workflow).not.toContain("steps.cli-proxy");
   });
 });
 
@@ -518,7 +509,6 @@ describe("server deployment contract", () => {
     expect(script).toContain("logging.driver");
     expect(script).toContain("/var/run/docker.sock");
     expect(script).toContain("/opt/osinara/agent-model-providers.json");
-    expect(script).not.toContain("osinara-production-cli-proxy-auth");
     expect(script).toContain(".read_only == true");
   });
 

@@ -8,20 +8,21 @@
  *
  * Key construct:
  * - The Telegram fetch (metadata, download and body) runs under one deadline per attempt and is
- *   repeated once after a stall or a dropped connection (#498). Groq is called only after the audio
- *   is in, so a repeat never pays for a transcription twice.
+ *   repeated once after a stall or a dropped connection (#498, `telegram-file-download-attempts.ts`).
+ *   Groq is called only after the audio is in, so a repeat never pays for a transcription twice.
  */
 import { transcribe } from "ai";
 import { downloadTelegramFile, getTelegramFile } from "../runtime/telegram/api.js";
 
 import {
   GROQ_TRANSCRIPTION_TIMEOUT_MS,
-  TELEGRAM_VOICE_DOWNLOAD_ATTEMPT_TIMEOUT_MS,
-  TELEGRAM_VOICE_DOWNLOAD_ATTEMPTS,
+  TELEGRAM_FILE_DOWNLOAD_ATTEMPT_TIMEOUT_MS,
+  TELEGRAM_FILE_DOWNLOAD_ATTEMPTS,
   TELEGRAM_VOICE_MAX_BYTES,
 } from "../config.js";
-import { AppError, isAppError } from "./app-error.js";
+import { AppError } from "./app-error.js";
 import { voiceTranscriptionModel } from "./model-registry.js";
+import { telegramFetchWithSignal, withTelegramFileAttempts } from "./telegram-file-download-attempts.js";
 
 const OGG_SIGNATURE = new Uint8Array([0x4f, 0x67, 0x67, 0x53]);
 const OPUS_HEAD_SIGNATURE = new TextEncoder().encode("OpusHead");
@@ -37,9 +38,6 @@ const SUPPORTED_VOICE_MEDIA_TYPES = new Set([
   "audio/x-opus+ogg",
   VIDEO_NOTE_MEDIA_TYPE,
 ]);
-// How Node's fetch reports a lost connection: on the request, and on a body cut off mid-way.
-// Any other TypeError is a defect, which a repeat would only hide.
-const FETCH_CONNECTION_FAILURE_MESSAGES = new Set(["fetch failed", "terminated"]);
 
 export interface TelegramVoiceFile {
   fileId: string;
@@ -132,31 +130,17 @@ async function downloadVoice(
   voice: TelegramVoiceFile,
   dependencies: TelegramVoiceTranscriberDependencies,
 ): Promise<Uint8Array> {
-  for (let attempt = 1; ; attempt += 1) {
-    const deadline = AbortSignal.timeout(dependencies.downloadAttemptTimeoutMs);
-    try {
-      return await downloadVoiceOnce(
-        voice.fileId,
-        voice.signal ? AbortSignal.any([deadline, voice.signal]) : deadline,
-        dependencies,
-      );
-    } catch (error) {
-      // The caller's cancellation is its own decision; an AppError here is already a verdict on the
-      // file itself (Telegram's error answer, an oversized file), which a repeat would not change.
-      if (voice.signal?.aborted || isAppError(error)) throw error;
-      const transient = deadline.aborted
-        || (error instanceof TypeError && FETCH_CONNECTION_FAILURE_MESSAGES.has(error.message));
-      if (!transient || attempt >= dependencies.downloadAttempts) throw voiceDownloadFailed(error);
-      console.warn(JSON.stringify({
-        code: "AGENT_VOICE_DOWNLOAD_RETRIED",
-        attempt,
-        cause: error instanceof Error ? error.message : String(error),
-        // Node's fetch names the network failure only on its cause: ECONNRESET, UND_ERR_SOCKET.
-        causeCode: error instanceof Error ? (error.cause as { code?: unknown } | undefined)?.code : undefined,
-        fileSize: voice.fileSize,
-      }));
-    }
-  }
+  return withTelegramFileAttempts({
+    attempt: (signal) => downloadVoiceOnce(voice.fileId, signal, dependencies),
+    ...(voice.signal ? { callerSignal: voice.signal } : {}),
+    fail: voiceDownloadFailed,
+    onRetry: (retry) => console.warn(JSON.stringify({
+      code: "AGENT_VOICE_DOWNLOAD_RETRIED",
+      ...retry,
+      fileSize: voice.fileSize,
+    })),
+    policy: { attemptTimeoutMs: dependencies.downloadAttemptTimeoutMs, attempts: dependencies.downloadAttempts },
+  });
 }
 
 export function createTelegramVoiceTranscriber(dependencies: TelegramVoiceTranscriberDependencies) {
@@ -192,14 +176,6 @@ export function createTelegramVoiceTranscriber(dependencies: TelegramVoiceTransc
   };
 }
 
-/** The attempt's signal carries its deadline; without it a stalled request would never end. */
-function telegramFetchWithSignal(signal: AbortSignal) {
-  return (input: URL | RequestInfo, init?: RequestInit): Promise<Response> => fetch(input, {
-    ...init,
-    signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal,
-  });
-}
-
 // The runtime's Telegram API takes the bot token explicitly; a missing token fails the call.
 const telegramCredentials = () => ({ botToken: process.env.TELEGRAM_BOT_TOKEN });
 
@@ -207,8 +183,8 @@ export const transcribeTelegramVoice = createTelegramVoiceTranscriber({
   downloadFile: (filePath, signal) => downloadTelegramFile({
     credentials: telegramCredentials(), fetch: telegramFetchWithSignal(signal), filePath,
   }),
-  downloadAttemptTimeoutMs: TELEGRAM_VOICE_DOWNLOAD_ATTEMPT_TIMEOUT_MS,
-  downloadAttempts: TELEGRAM_VOICE_DOWNLOAD_ATTEMPTS,
+  downloadAttemptTimeoutMs: TELEGRAM_FILE_DOWNLOAD_ATTEMPT_TIMEOUT_MS,
+  downloadAttempts: TELEGRAM_FILE_DOWNLOAD_ATTEMPTS,
   getFile: async (fileId, signal) => {
     const file = await getTelegramFile({ credentials: telegramCredentials(), fetch: telegramFetchWithSignal(signal), fileId });
     return { filePath: file.filePath };

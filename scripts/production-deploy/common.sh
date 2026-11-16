@@ -25,11 +25,9 @@ readonly DEPLOY_WINDOW_METRIC="/var/lib/monitoring-agent/textfile/osinara-deploy
 # Observed releases need eleven to eighteen minutes from image pull to a healthy edge. The window
 # is republished before migration, so this also bounds how long a killed deployment stays silent.
 readonly DEPLOY_WINDOW_SECONDS=1800
+readonly RELEASE_COMPOSE_NAME="compose.production.yaml"
 readonly RELEASE_IMAGE_VARIABLES=(
   OSINARA_APP_IMAGE
-  # The gateway left on 2026-10-26, but release.env files of older releases still name its image:
-  # keeping the name lets pruning remove that image together with its release.
-  OSINARA_CLI_PROXY_IMAGE
   SANDBOX_RUNTIME_IMAGE
   OSINARA_SANDBOX_RUNNER_IMAGE
   OSINARA_SANDBOX_EGRESS_PROXY_IMAGE
@@ -38,7 +36,6 @@ readonly RELEASE_IMAGE_VARIABLES=(
 
 INITIAL_MODE=0
 PREFLIGHT_MODE=0
-DEPLOYMENT_PROFILE=""
 CLAIM_FOUND=0
 STALE_DEPLOYMENT_FOUND=0
 REQUESTED_VERSION=""
@@ -107,33 +104,10 @@ require_server_boundary() {
   done
 }
 
-# The host names the graph it runs. The profiles told apart the CLIProxy subscription gateway,
-# which left on 2026-10-26: both now run the same graph, and a later release drops the setting.
-require_deployment_profile() {
-  case "${OSINARA_DEPLOYMENT_PROFILE:-}" in
-    production | installation) DEPLOYMENT_PROFILE="$OSINARA_DEPLOYMENT_PROFILE" ;;
-    *)
-      fail "DEPLOY_PROFILE_INVALID" \
-        "OSINARA_DEPLOYMENT_PROFILE in ${SERVER_ENV} must be production or installation"
-      ;;
-  esac
-}
-
-profile_compose_name() {
-  case "$1" in
-    production) printf '%s\n' "compose.production.yaml" ;;
-    installation) printf '%s\n' "compose.installation.json" ;;
-    *) fail "DEPLOY_PROFILE_INVALID" "Unknown deployment profile: $1" ;;
-  esac
-}
-
-# The Compose file a release directory runs on this host. Every current, candidate, and promoted
-# release path goes through here, so no step can fall back to the other profile's graph.
+# The released Compose file a release directory runs. Every current, candidate, and promoted
+# release path goes through here, so no step can run a graph another step never validated.
 release_compose_path() {
-  local release_dir="$1"
-  local name
-  name="$(profile_compose_name "$DEPLOYMENT_PROFILE")"
-  printf '%s/%s\n' "$release_dir" "$name"
+  printf '%s/%s\n' "$1" "$RELEASE_COMPOSE_NAME"
 }
 
 require_release_environment_clean() {
@@ -188,7 +162,8 @@ set_current_release_paths() {
   CURRENT_COMPOSE="$(release_compose_path "$CURRENT_LINK")"
   CURRENT_ENV="${CURRENT_LINK}/release.env"
   [[ -f "$CURRENT_COMPOSE" && -f "$CURRENT_ENV" ]] ||
-    fail "DEPLOY_CURRENT_RELEASE_INVALID" "Current release files are incomplete"
+    fail "DEPLOY_CURRENT_RELEASE_INVALID" \
+      "Current release lacks ${RELEASE_COMPOSE_NAME} or release.env: ${CURRENT_LINK}"
 }
 
 require_clean_initial_state() {

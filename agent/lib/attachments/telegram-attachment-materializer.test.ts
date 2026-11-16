@@ -104,12 +104,34 @@ describe("createTelegramAttachmentMaterializer", () => {
         chatId: "-1001",
         messageId: "44",
       }),
-      persist: vi.fn().mockResolvedValue([{ stillUnavailable: true, telegramMessageId: "44" }]),
+      persist: vi.fn().mockResolvedValue([{ kind: "animation", telegramMessageId: "44", unreceived: "picture_unavailable" }]),
     });
 
     await expect(materialize(auth, "00000000-0000-4000-8000-000000000097")).rejects.toMatchObject({
       code: "AGENT_ANIMATION_STILL_UNAVAILABLE",
       contract: expect.objectContaining({ retryable: false, sideEffectStatus: "not_started" }),
+    });
+  });
+
+  // The model asked for this file in a group: the refusal it reads is the reason, for the person.
+  it.each([
+    ["telegram_failure", "AGENT_ATTACHMENT_DOWNLOAD_FAILED"],
+    ["too_large", "AGENT_ATTACHMENT_DOWNLOAD_TOO_LARGE"],
+  ] as const)("tells the model a group file did not come when it is %s", async (reason, code) => {
+    const materialize = createTelegramAttachmentMaterializer({
+      findAttachment: vi.fn().mockResolvedValue({
+        attachment: { fileId: "doc-file", fileName: "plan.pdf", kind: "document" as const, mediaType: "application/pdf" },
+        chatId: "-1001",
+        messageId: "45",
+      }),
+      persist: vi.fn().mockResolvedValue([{ kind: "document", telegramMessageId: "45", unreceived: reason }]),
+    });
+
+    await expect(materialize(auth, "00000000-0000-4000-8000-000000000096")).rejects.toMatchObject({
+      code,
+      contract: expect.objectContaining({ category: "dependency", retryable: false, sideEffectStatus: "not_started" }),
+      // Already logged by the import: the tool call is not counted as a failure a second time.
+      isExpectedRefusal: true,
     });
   });
 });

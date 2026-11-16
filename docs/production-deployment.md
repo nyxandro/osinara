@@ -16,11 +16,9 @@ Repository-level immutable releases are mandatory; both the application checker 
 published releases whose API metadata does not report `immutable: true`.
 
 - `osinara-deployment.json` contains schema version 1, commit SHA, release version, the SHA-256 of
-the exact Compose bytes, and five exact `ghcr.io/nyxandro/...@sha256:...` references. Releases
-after the subscription gateway left still name its last published image as `cliProxy`, because
-controllers and applications of v0.49.0 and older refuse a manifest without it. Drop the field only
-after production and every `osinara install` host run such a release: an application still on
-v0.49.0 rejects every manifest without it and never proposes an update again;
+the exact Compose bytes, and exactly five `ghcr.io/nyxandro/...@sha256:...` references: `app`,
+`edge`, `sandboxEgressProxy`, `sandboxRunner` and `sandboxRuntime`. The application, the installer
+and the controller refuse any other image key;
 - `compose.production.yaml` contains no build context or application source bind mount.
 
 The app image runs the bundled agent `.runtime/agent/main.js`. It also contains the authored
@@ -190,25 +188,23 @@ application. `infra/monitoring/` holds only the three files that describe what O
 
 ## Server files
 
-Both kinds of host share one layout and one deployment controller. They differ only in the graph
-they run, which `OSINARA_DEPLOYMENT_PROFILE` in `/opt/osinara/.env` names explicitly:
+Every host shares one layout, one deployment controller and one graph: each release directory runs
+the released `compose.production.yaml`. On every update the controller checks those bytes against
+`composeSha256` in the approved manifest. Hosts differ only in how their first release was started:
 
-- **`installation`** — hosts set up by `osinara install`. The checksum-bound standalone installer
-  runs on clean GNU/Linux x86_64 hosts with glibc and systemd (`osinara-linux-x64` is a glibc
-  Node.js SEA executable, so musl-based distributions such as Alpine Linux are not supported). The
-  graph is the released production graph: the controller derives `compose.installation.json` from
-  the verified `compose.production.yaml` with `scripts/production-deploy/installation-compose.jq`,
-  the same filter CI uses for the installer's first copy. Since the subscription gateway left on
-  2026-10-26 the filter changes nothing; a later release removes the two profiles. The installer writes the files below, places the controller and its units from the
-  release app image, starts the stack, and enables the timer. The host is maintained with
-  `osinara status`, `doctor`, `logs`, `restart` and `config`; `restart` and `config` take the
-  controller's lock and refuse to run while a release is being deployed.
-- **`production`** — the host whose first release was started by hand (see "First release"); from
-  then on it updates exactly like an installation host.
+- **Hosts set up by `osinara install`.** The checksum-bound standalone installer runs on clean
+  GNU/Linux x86_64 hosts with glibc and systemd (`osinara-linux-x64` is a glibc Node.js SEA
+  executable, so musl-based distributions such as Alpine Linux are not supported). The installer
+  writes the files below, places the controller and its units from the release app image, starts
+  the stack, and enables the timer. The host is maintained with `osinara status`, `doctor`, `logs`,
+  `restart` and `config`; `restart` and `config` take the controller's lock and refuse to run while
+  a release is being deployed.
+- **The production host**, whose first release was started by hand (see "First release"); from then
+  on it updates exactly like an installed host.
 
 | Path                                         | Mode   | Purpose                                                          |
 | -------------------------------------------- | ------ | ---------------------------------------------------------------- |
-| `/opt/osinara/.env`                          | `0600` | Secrets, environment-specific URLs, and `OSINARA_DEPLOYMENT_PROFILE`. |
+| `/opt/osinara/.env`                          | `0600` | Secrets and environment-specific URLs.                           |
 | `/opt/osinara/agent-model-providers.json`    | `0644` | Active reviewed provider config mounted into the agent.           |
 | `/opt/osinara/releases/vX.Y.Z/`              |        | One release: its Compose graph, manifest, and `release.env`.     |
 | `/opt/osinara/current`                       | link   | The running release; the controller switches it after health.   |
@@ -241,7 +237,7 @@ and checks that it is a flat set of modules that parse as shell and include `lau
 - **Different** — the new controller is placed as `bin/controller/vX.Y.Z` (the version of the
   release that brought it) and written to disk. Before anything points at it, it runs as
   `main.sh --preflight` and checks this host with its own rules (root, paths, required commands,
-  profile, current release); a refusal removes it and fails the proposal with
+  current release); a refusal removes it and fails the proposal with
   `DEPLOY_CONTROLLER_PREFLIGHT_FAILED`. Otherwise `controller/current` and then the launcher are
   switched by rename, and the process is replaced by the launcher with `--resume PROPOSAL LEASE`.
   The new controller keeps the inherited lock, re-reads the claim by its lease token, downloads and
@@ -289,9 +285,6 @@ chmod 0750 "$CONTROLLER"
 chmod 0640 "$CONTROLLER"/*
 ln -s "v${VERSION}" /opt/osinara/bin/controller/current
 install -o root -g root -m 0750 "$CONTROLLER/launcher.sh" /opt/osinara/bin/production-deploy.sh
-# Append on a line of its own even if the file does not end with a newline.
-grep -q '^OSINARA_DEPLOYMENT_PROFILE=' /opt/osinara/.env ||
-  printf '\nOSINARA_DEPLOYMENT_PROFILE=production\n' >> /opt/osinara/.env
 mv /opt/osinara/bin/production-deploy /opt/osinara/backups/deploy-scripts-before-self-update
 stat -c '%U:%G %a %n' /opt/osinara/bin /opt/osinara/bin/controller "$CONTROLLER" "$CONTROLLER"/* \
   /opt/osinara/bin/production-deploy.sh
@@ -365,8 +358,7 @@ The ceiling covers only what runs inside `orca-remote-server.service`. Test stac
 bring test stacks up only for a run and take them down afterwards. The disk scheduler here is
 `mq-deadline`, which ignores I/O weights, so there is no I/O counterpart.
 
-`/opt/osinara/.env` must be exactly `root:root 0600`. It contains `OSINARA_DEPLOYMENT_PROFILE`
-(`production` or `installation`, read only by the controller), `MODEL_API_KEY`,
+`/opt/osinara/.env` must be exactly `root:root 0600`. It contains `MODEL_API_KEY`,
 `POSTGRES_PASSWORD`, the required internal application `DATABASE_URL`, `GROQ_API_KEY`, the optional `ELEVENLABS_API_KEY`, `KLIPY_API_KEY`, `MODEL_PROXY_URL` and `SANDBOX_EGRESS_UPSTREAM_PROXY_URL`,
 `SANDBOX_API_KEY_ENCRYPTION_KEY` (generated by the installer; on an older host add 32 random bytes in
 base64 by hand),
@@ -386,9 +378,7 @@ almost no room under that half: it would compact on nearly every step or fail wi
 `AGENT_COMPACTION_OUTPUT_TOO_LARGE`. Choose models with a window of at least 128 thousand tokens.
 
 Every provider base URL must use HTTPS: the agent talks to the selected provider directly, or
-through a `CONNECT` tunnel when `MODEL_PROXY_URL` is set. The
-CLIProxyAPI subscription gateway, its `codex-subscription` provider and the `generate_image` tool
-with its `imagegen` skill left the project on 2026-10-26.
+through a `CONNECT` tunnel when `MODEL_PROXY_URL` is set.
 
 The optional `MODEL_PROXY_URL` (`http://host:port`, no path or credentials) sends the agent's model
 calls, and only them, through an HTTP proxy; Telegram, Google and the tools keep their direct routes.
@@ -447,15 +437,6 @@ the egress proxy: the trusted sandbox network has a host address of its own, and
 a sandbox reach Xray past the egress proxy. If that network is ever recreated with another subnet,
 update the rule. The binding is `SANDBOX_EGRESS_UPSTREAM_PROXY_URL=http://172.17.0.1:10811`. Ozon
 stays closed on any route: it answers plain requests with a bot check that only a real browser passes.
-
-The first release without the gateway removes its container but leaves two things on the production
-host on purpose: the `osinara-production-cli-proxy-auth` volume and `CLI_PROXY_API_KEY` in
-`/opt/osinara/.env`. The v0.49.0 Compose graph requires that key on every command, including the
-controller's restore of the current release and `psql` through it, and its gateway needs the volume.
-Keep both while v0.49.0 can still be restored or rolled back to; after the new release has run
-stably, remove them together by hand: `docker volume rm osinara-production-cli-proxy-auth` and the
-`CLI_PROXY_API_KEY` line. Deployment backups no longer archive the volume, so only backups taken
-by v0.49.0 and earlier hold a copy of it.
 
 Root turns may call the application-owned `send_voice_message` boundary when the current message or
 the running scenario explicitly asks for a voice reply. It synthesizes one ElevenLabs `eleven_v4` Ogg Opus note
@@ -728,11 +709,10 @@ with read-only package access. The release workflow itself never receives a cust
 
 ## First release
 
-Installation hosts never use this mode: `osinara install` performs their first release. A
-`production` host is set up by hand. Place the controller from the release app image as in "Moving a
+Installed hosts never use this mode: `osinara install` performs their first release. The production
+host is set up by hand. Place the controller from the release app image as in "Moving a
 host to the self-updating controller" (without moving an old module directory), install the two
-units from `/app/deploy/systemd` into `/etc/systemd/system`, and create `/opt/osinara/.env` with
-`OSINARA_DEPLOYMENT_PROFILE=production`.
+units from `/app/deploy/systemd` into `/etc/systemd/system`, and create `/opt/osinara/.env`.
 
 The first release cannot be selected from PostgreSQL because `software_update_proposals` does not
 exist before migrations. Run the server script once as root with `--initial VERSION`. The argument accepts only stable `X.Y.Z`.

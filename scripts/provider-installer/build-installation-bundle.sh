@@ -1,13 +1,13 @@
 #!/bin/bash
 # Builds one deterministic archive containing the root-owned initial deployment controller assets.
-# Arguments: output archive, deployment manifest, and generated installation Compose paths.
+# Arguments: output archive, deployment manifest, and released compose.production.yaml paths.
 
 set -euo pipefail
 
 readonly PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 readonly OUTPUT_PATH="${1:-}"
 readonly DEPLOYMENT_MANIFEST="${2:-}"
-readonly INSTALLATION_COMPOSE="${3:-}"
+readonly RELEASE_COMPOSE="${3:-}"
 if [[ -z "$OUTPUT_PATH" || "$OUTPUT_PATH" != /* ]]; then
   printf '%s\n' \
     "OSINARA_INSTALL_BUNDLE_OUTPUT_INVALID: Укажите абсолютный путь выходного архива" >&2
@@ -18,9 +18,9 @@ if [[ -z "$DEPLOYMENT_MANIFEST" || "$DEPLOYMENT_MANIFEST" != /* ]]; then
     "OSINARA_INSTALL_BUNDLE_MANIFEST_INVALID: Укажите абсолютный путь deployment manifest" >&2
   exit 64
 fi
-if [[ -z "$INSTALLATION_COMPOSE" || "$INSTALLATION_COMPOSE" != /* ]]; then
+if [[ -z "$RELEASE_COMPOSE" || "$RELEASE_COMPOSE" != /* ]]; then
   printf '%s\n' \
-    "OSINARA_INSTALL_BUNDLE_COMPOSE_INVALID: Укажите абсолютный путь installation Compose" >&2
+    "OSINARA_INSTALL_BUNDLE_COMPOSE_INVALID: Укажите абсолютный путь compose.production.yaml" >&2
   exit 64
 fi
 
@@ -31,7 +31,7 @@ for command in install mktemp rm tar; do
   fi
 done
 
-if [[ ! -s "$DEPLOYMENT_MANIFEST" || ! -s "$INSTALLATION_COMPOSE" ]]; then
+if [[ ! -s "$DEPLOYMENT_MANIFEST" || ! -s "$RELEASE_COMPOSE" ]]; then
   printf '%s\n' \
     "OSINARA_INSTALL_BUNDLE_INPUT_MISSING: Отсутствует deployment manifest или production Compose" >&2
   exit 66
@@ -46,8 +46,8 @@ trap cleanup EXIT HUP INT TERM
 # Fixed paths and modes make extraction validation explicit and archive bytes reproducible.
 install -d -m 0755 \
   "${WORK_DIR}/installation"
-install -m 0644 "$INSTALLATION_COMPOSE" \
-  "${WORK_DIR}/installation/compose.installation.json"
+install -m 0644 "$RELEASE_COMPOSE" \
+  "${WORK_DIR}/installation/compose.production.yaml"
 install -m 0644 "$DEPLOYMENT_MANIFEST" \
   "${WORK_DIR}/installation/osinara-deployment.json"
 install -m 0644 "${PROJECT_ROOT}/infra/traefik/compose.yaml" \

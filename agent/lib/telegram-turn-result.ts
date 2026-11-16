@@ -22,8 +22,8 @@ import type { TelegramGroupTurnTrigger } from "./telegram-message-policy.js";
 import {
   formatStoredTelegramAttachments,
   formatTelegramAttachmentReferences,
-  formatUnavailableAnimationStill,
 } from "./telegram-on-message-context.js";
+import { formatUnreceivedFile, formatUnreceivedVoice, unreceivedVoiceOf } from "./unreceived-telegram-files.js";
 import { alreadySeenTurnContext, turnInterjectionMarkerContext } from "./turn-interjection/turn-interjection-block.js";
 import { TURN_INTERJECTION_MARKER_ATTRIBUTE } from "./turn-interjection/turn-interjection-scope.js";
 import {
@@ -88,11 +88,14 @@ export function buildTelegramTurnResult(input: {
     `Verified turn: scope ${input.access.memoryScopes.join(", ")}; role ${input.access.role}; actor ${input.actor.kind}.`,
     formatCurrentTimeContext(input.turnStartedAt),
   ];
-  const storedFiles = input.storedAttachments.filter((item): item is StoredTelegramAttachment => !("stillUnavailable" in item));
+  const storedFiles = input.storedAttachments.filter((item): item is StoredTelegramAttachment => !("unreceived" in item));
   if (storedFiles.length > 0) context.push(formatStoredTelegramAttachments(storedFiles));
+  // What did not come through is said once each, for the agent to explain to the person (16.11.2026).
   for (const item of input.storedAttachments) {
-    if ("stillUnavailable" in item) context.push(formatUnavailableAnimationStill(item.telegramMessageId));
+    if ("unreceived" in item) context.push(formatUnreceivedFile(item));
   }
+  const unreceivedVoice = unreceivedVoiceOf(input.message);
+  if (unreceivedVoice !== null) context.push(formatUnreceivedVoice(unreceivedVoice));
   if (input.lazyAttachment) context.push(formatTelegramAttachmentReferences([input.lazyAttachment]));
   if (input.pendingDelivery) context.push(input.pendingDelivery.context);
   if (input.shownDuringTurn) context.push(alreadySeenTurnContext(input.shownDuringTurn));

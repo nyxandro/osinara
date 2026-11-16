@@ -26,6 +26,13 @@ vi.mock("../model-vision-availability.js", () => ({
   MODEL_VISION_AVAILABLE: true,
 }));
 
+// These cases exercise widgets as they work when Telegram accepts them; the switched-off state has
+// its own cases in `widget-unavailable-surface.test.ts`.
+vi.mock("../widgets/widget-config.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../widgets/widget-config.js")>(),
+  TELEGRAM_WIDGETS_AVAILABLE: true,
+}));
+
 vi.mock("./external-group-live-policy.js", () => ({
   loadCurrentExternalGroupCapabilities,
   authorizeCurrentExternalGroupCapability,

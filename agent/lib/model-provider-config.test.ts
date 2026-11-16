@@ -6,7 +6,6 @@
  * - Anthropic Messages and OpenAI Chat Completions remain provider-name independent.
  * - Required endpoint, authentication, thinking, capability, and context metadata fail fast.
  * - MiniMax and OpenCode Go transports enforce their exact protocol-native cross-field contracts.
- * - The removed Codex subscription provider and its gateway address are rejected.
  * - Voice-enabled startup requires an explicit Groq credential.
  * - Canonical runtime output limits reject values above the application-tested cap.
  * - Active schema is the host-mounted provider selection contract.
@@ -166,33 +165,6 @@ describe("parseModelProviderConfig", () => {
       agent: {
         ...anthropic.agent,
         transport: { ...anthropic.agent.transport, authentication: "api-key" },
-      },
-    })).toThrow("AGENT_MODEL_PROVIDER_CONFIG_INVALID");
-  });
-
-  // The subscription gateway was removed on 2026-10-26; a config still naming it must stop startup
-  // instead of sending the agent's requests to a service that no longer runs.
-  it("rejects the removed Codex subscription provider and its gateway address", () => {
-    const codexSubscription = {
-      ...validConfig,
-      agent: {
-        ...validConfig.agent,
-        transport: {
-          baseUrl: "http://cli-proxy-api:8317/v1",
-          protocol: "openai-chat-completions",
-          providerName: "codex-subscription",
-          reasoning: { effort: "medium", format: "reasoning-effort", type: "effort" },
-        },
-      },
-      provider: "codex-subscription",
-    };
-
-    expect(() => parseModelProviderConfig(codexSubscription)).toThrow("AGENT_MODEL_PROVIDER_CONFIG_INVALID");
-    expect(() => parseModelProviderConfig({
-      ...validConfig,
-      agent: {
-        ...validConfig.agent,
-        transport: { ...validConfig.agent.transport, baseUrl: "http://cli-proxy-api:8317/v1" },
       },
     })).toThrow("AGENT_MODEL_PROVIDER_CONFIG_INVALID");
   });

@@ -25,7 +25,6 @@ import type {
   TlsMode,
 } from "./contracts.js";
 import { InstallerError } from "./errors.js";
-import { DEPLOYMENT_PROFILE } from "./host-layout.js";
 
 export interface HostInstallationStageInput {
   readonly archive: Uint8Array;
@@ -92,8 +91,6 @@ function buildEnvironment(input: InstallationExecutionInput): Buffer {
     ["DATABASE_URL", `postgresql://osinara:${input.internalSecrets.postgresPassword}@postgres:5432/osinara`],
     ["INVITATION_SIGNING_SECRET", input.internalSecrets.invitationSigningSecret],
     ["MODEL_API_KEY", input.modelApiKey],
-    // Read by the release controller through its systemd EnvironmentFile, not by the application.
-    ["OSINARA_DEPLOYMENT_PROFILE", DEPLOYMENT_PROFILE],
     ["POSTGRES_PASSWORD", input.internalSecrets.postgresPassword],
     ["PUBLIC_BASE_URL", `https://${input.hostname}`],
     ["SANDBOX_API_KEY_ENCRYPTION_KEY", input.internalSecrets.sandboxApiKeyEncryptionKey],

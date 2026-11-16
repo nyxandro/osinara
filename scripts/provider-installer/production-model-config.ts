@@ -1,5 +1,5 @@
 /**
- * Installation-Compose wiring for the atomic model configuration controller.
+ * Compose wiring of an installed host for the atomic model configuration controller.
  *
  * Exports:
  * - `createInstalledModelConfigDependencies`: preflight, restart, and health operations.

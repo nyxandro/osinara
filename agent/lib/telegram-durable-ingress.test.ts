@@ -21,6 +21,7 @@
  * - Reply buttons react on arrival, as soon as the update is stored and before its place in the
  *   chat queue comes: the queue may be busy with a turn of minutes.
  */
+import { AppError } from "./app-error.js";
 import { NO_PRIVATE_QUESTIONS } from "./telegram-ingress.test-fixtures.js";
 import { parseTelegramUpdate } from "../runtime/telegram/inbound.js";
 import type { RouteContext } from "../runtime/server.js";
@@ -29,6 +30,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { TelegramIngressClaim, TelegramIngressRepository } from "./telegram-ingress-contract.js";
 import { createTelegramDurableIngress, type DurableIngressDependencies } from "./telegram-durable-ingress.js";
+import { UNRECEIVED_VOICE_FIELD } from "./unreceived-telegram-files.js";
 
 function voicePayload(): Record<string, unknown> {
   return {
@@ -290,15 +292,81 @@ describe("createTelegramDurableIngress", () => {
     }
   });
 
-  it("fails a voice addressed to the agent whose words cannot be read, so the person learns it", async () => {
+  // The person hears from the agent what happened to their voice message, in its own words; nothing
+  // goes to the owner and the log keeps it (owner's decision of 16.11.2026).
+  it.each([
+    ["no speech is made out", vi.fn().mockResolvedValue(""), "speech_unrecognized", "warn"],
+    ["Telegram does not hand the recording over", vi.fn().mockRejectedValue(new AppError("AGENT_VOICE_DOWNLOAD_FAILED", "Не удалось скачать голосовое сообщение из Telegram. Попробуйте отправить его снова")), "telegram_failure", "warn"],
+    ["the recording is over 20 MB", vi.fn().mockRejectedValue(new AppError("AGENT_VOICE_FILE_TOO_LARGE", "Голосовое сообщение превышает допустимый размер")), "too_large", "warn"],
+    ["speech recognition fails", vi.fn().mockRejectedValue(new Error("provider rate limit")), "recognition_unavailable", "error"],
+    ["speech recognition is switched off here", vi.fn().mockRejectedValue(new AppError("AGENT_VOICE_NOT_CONFIGURED", "Распознавание голосовых сообщений не настроено")), "recognition_off", "warn"],
+  ] as const)("hands a voice addressed to the agent to its turn with the reason when %s", async (_case, transcribeVoice, reason, level) => {
     const storage = repository();
-    const { dependencies, handle } = ingress(storage, { transcribeVoice: vi.fn().mockResolvedValue("") });
+    const logged = vi.spyOn(console, level).mockImplementation(() => undefined);
+    const { dependencies, handle } = ingress(storage, { transcribeVoice });
+
+    await runDrain(handle, voicePayload());
+
+    expect(storage.value.fail).not.toHaveBeenCalled();
+    expect(dependencies.reportFailure).not.toHaveBeenCalled();
+    expect(storage.value.saveVoiceTranscript).not.toHaveBeenCalled();
+    const [update] = vi.mocked(dependencies.dispatch).mock.calls[0]!;
+    expect(update).toMatchObject({ message: { raw: { [UNRECEIVED_VOICE_FIELD]: reason }, text: "" } });
+    expect(storage.value.complete).toHaveBeenCalled();
+    const line = logged.mock.calls.map(([entry]) => JSON.parse(String(entry))).find((entry) => entry.code === "AGENT_VOICE_UNRECEIVED");
+    expect(line).toMatchObject({ reason, updateId: "1001" });
+    logged.mockRestore();
+  });
+
+  // An attempt that began and left no words is not repeated, to never pay recognition twice: after a
+  // restart, a lost lease or a try made while the previous turn ran.
+  it("hands a voice whose recognition was interrupted to its turn instead of failing it", async () => {
+    const storage = repository();
+    storage.value.beginVoiceTranscription.mockRejectedValue(new AppError(
+      "AGENT_VOICE_TRANSCRIPTION_RECOVERY_REQUIRED", "Распознавание голосового сообщения было прервано. Отправьте запись повторно",
+    ));
+    vi.spyOn(console, "warn").mockImplementationOnce(() => undefined);
+    const { dependencies, handle } = ingress(storage);
+
+    await runDrain(handle, voicePayload());
+
+    expect(dependencies.transcribeVoice).not.toHaveBeenCalled();
+    expect(storage.value.fail).not.toHaveBeenCalled();
+    expect(dependencies.reportFailure).not.toHaveBeenCalled();
+    const [update] = vi.mocked(dependencies.dispatch).mock.calls[0]!;
+    expect(update).toMatchObject({ message: { raw: { [UNRECEIVED_VOICE_FIELD]: "interrupted" }, text: "" } });
+  });
+
+  it("leaves a voice whose lease was lost to the processor that took it over", async () => {
+    const storage = repository();
+    storage.value.beginVoiceTranscription.mockRejectedValue(new AppError(
+      "AGENT_TELEGRAM_LEASE_LOST", "Срок обработки голосового сообщения истёк. Операция остановлена",
+    ));
+    vi.spyOn(console, "info").mockImplementationOnce(() => undefined);
+    const { dependencies, handle } = ingress(storage);
+
+    await runDrain(handle, voicePayload());
+
+    expect(dependencies.transcribeVoice).not.toHaveBeenCalled();
+    expect(dependencies.dispatch).not.toHaveBeenCalled();
+    expect(storage.value.fail).not.toHaveBeenCalled();
+    expect(dependencies.reportFailure).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["thrown as it is", new TypeError("voice.fileId is not a function"), "AGENT_TELEGRAM_INGRESS_FAILED"],
+    ["wrapped by the download as its cause", new AppError("AGENT_VOICE_DOWNLOAD_FAILED", "Не удалось скачать голосовое сообщение из Telegram", {
+      cause: new TypeError("Cannot read properties of undefined (reading 'file_path')"),
+    }), "AGENT_VOICE_DOWNLOAD_FAILED"],
+  ])("still fails a voice whose recognition stopped on a fault of the server's own code %s", async (_case, failure, code) => {
+    const storage = repository();
+    const { dependencies, handle } = ingress(storage, { transcribeVoice: vi.fn().mockRejectedValue(failure) });
 
     await runDrain(handle, voicePayload());
 
     expect(dependencies.dispatch).not.toHaveBeenCalled();
     expect(storage.value.fail).toHaveBeenCalledWith("1001", storage.claim.leaseToken,
-      expect.objectContaining({ code: "AGENT_VOICE_TRANSCRIPT_EMPTY" }), undefined);
+      expect.objectContaining({ code }), undefined);
   });
 
   it("stores a video note for transcription like a voice note", async () => {

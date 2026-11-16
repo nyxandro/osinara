@@ -52,6 +52,7 @@ import { combineTelegramMediaGroup } from "./telegram-media-group.js";
 import { CAPTIONLESS_ATTACHMENT_MODEL_TEXT } from "./telegram-model-placeholders.js";
 import { telegramContentDescription } from "./telegram-content/telegram-content-description.js";
 import { combineTelegramBurst } from "./telegram-private-burst-message.js";
+import { unreceivedVoiceReason, withUnreceivedVoice } from "./unreceived-telegram-files.js";
 import { recordOperationalIncident } from "./operational-incidents/owner-alerts.js";
 import { isReplyButtonCallback } from "./reply-buttons/reply-button-contract.js";
 import type { ReplyButtonPressOutcome } from "./reply-buttons/reply-button-press.js";
@@ -271,18 +272,13 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
     const authorized = await dependencies.authorizeVoice(update.message, { addressed });
     signal.throwIfAborted();
     if (!authorized) return update;
-    if (!claim.transcript) {
-      await dependencies.repository.beginVoiceTranscription(claim.updateId, claim.leaseToken);
-      signal.throwIfAborted();
-    }
-    let transcript: string;
-    try {
-      transcript = claim.transcript ?? await readVoiceTranscript(claim.voice, signal);
-    } catch (error) {
-      // A voice note spoken to the agent needs its words, and the person must learn they were lost.
-      // A video note, often silent, and a voice the agent only overheard stay in the conversation as
-      // their placeholder line: a silent clip or a provider failure must not drop the message.
-      if (signal.aborted || (addressed && Object.hasOwn(update.message.raw, "voice"))) throw error;
+    // A voice note spoken to the agent goes to its turn marked with the reason its words are missing:
+    // the person hears it from the agent in its own words; nothing goes to the owner, the log keeps
+    // it (owner's decision of 16.11.2026). A video note, often silent, and a voice the agent only
+    // overheard stay in the conversation as their placeholder line, without a note.
+    const spokenToAgent = addressed && Object.hasOwn(update.message.raw, "voice");
+    const withoutWords = (error: unknown): TelegramUpdate => {
+      if (spokenToAgent) return unreceivedVoiceUpdate(claim, error);
       console.warn(JSON.stringify({
         code: "AGENT_VOICE_TRANSCRIPT_SKIPPED",
         cause: isAppError(error) ? error.code : error instanceof Error ? error.message : String(error),
@@ -291,6 +287,24 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
         updateId: claim.updateId,
       }));
       return update;
+    };
+    if (!claim.transcript) {
+      try {
+        await dependencies.repository.beginVoiceTranscription(claim.updateId, claim.leaseToken);
+      } catch (error) {
+        // An attempt that already began and left no words is not repeated, so recognition is never
+        // paid twice: after a restart, a lost lease or a try during the previous turn (#498).
+        if (!isAppError(error) || error.code !== "AGENT_VOICE_TRANSCRIPTION_RECOVERY_REQUIRED") throw error;
+        return withoutWords(error);
+      }
+      signal.throwIfAborted();
+    }
+    let transcript: string;
+    try {
+      transcript = claim.transcript ?? await readVoiceTranscript(claim.voice, signal);
+    } catch (error) {
+      if (signal.aborted) throw error;
+      return withoutWords(error);
     }
     if (!claim.transcript) {
       await dependencies.repository.saveVoiceTranscript(claim.updateId, claim.leaseToken, transcript);
@@ -304,6 +318,28 @@ export function createTelegramDurableIngress(dependencies: DurableIngressDepende
       );
     }
     return transcribedUpdate;
+  }
+
+  function unreceivedVoiceUpdate(
+    claim: NonNullable<Awaited<ReturnType<TelegramIngressRepository["claimNext"]>>>,
+    error: unknown,
+  ): TelegramUpdate {
+    const reason = unreceivedVoiceReason(error);
+    // A fault of the server's own code is not the recording's: it fails the message as before.
+    if (reason === null) throw error;
+    // Speech recognition failing for everyone may need the owner's account; Telegram's glitches do not.
+    (reason === "recognition_unavailable" ? console.error : console.warn)(JSON.stringify({
+      code: "AGENT_VOICE_UNRECEIVED",
+      cause: isAppError(error) ? error.code : error instanceof Error ? error.message : String(error),
+      detail: error instanceof Error && error.cause instanceof Error ? error.cause.message : undefined,
+      reason,
+      updateId: claim.updateId,
+    }));
+    const marked = parseTelegramUpdate(withUnreceivedVoice(claim.payload, reason));
+    if (!marked) {
+      throw new AppError("AGENT_TELEGRAM_PAYLOAD_INVALID", "Не удалось подготовить голосовое сообщение для обработки");
+    }
+    return marked;
   }
 
   /** Dispatches the update and runs its turn; returns the session it ran in, or null for none. */

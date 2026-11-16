@@ -29,9 +29,9 @@ import {
   BASE_DIR,
   CURRENT_LINK,
   ENV_PATH,
-  INSTALLATION_COMPOSE_NAME,
   MANIFEST_NAME,
   MODEL_CONFIG_PATH,
+  RELEASE_COMPOSE_NAME,
   RELEASE_ENV_NAME,
   RELEASE_ENV_PATH,
   RELEASES_DIR,
@@ -356,7 +356,7 @@ export function createProductionHostOperations(): HostInstallationOperations {
       const releaseDir = releaseDirectory(input.releaseVersion);
       const release: StagedRelease = {
         appImage: releaseAppImageFromManifest(manifest, input.releaseVersion),
-        composePath: `${releaseDir}/${INSTALLATION_COMPOSE_NAME}`,
+        composePath: `${releaseDir}/${RELEASE_COMPOSE_NAME}`,
         releaseEnvPath: `${releaseDir}/${RELEASE_ENV_NAME}`,
         version: input.releaseVersion,
       };
@@ -378,7 +378,7 @@ export function createProductionHostOperations(): HostInstallationOperations {
         // The release controller's layout: every later update adds `releases/vX.Y.Z` and switches
         // `current`, keeping the global release.env equal to the current release's copy.
         await writeRootFile(release.releaseEnvPath, releaseEnvironment, 0o600);
-        await writeRootFile(release.composePath, requireFile("installation/compose.installation.json"), 0o644);
+        await writeRootFile(release.composePath, requireFile("installation/compose.production.yaml"), 0o644);
         await writeRootFile(`${releaseDir}/${MANIFEST_NAME}`, manifest, 0o644);
         await symlink(releaseDir, CURRENT_LINK);
         await writeRootFile(RELEASE_ENV_PATH, releaseEnvironment, 0o600);

@@ -41,7 +41,6 @@ const MODULES = `
 `;
 const VALID_TREE: Record<string, string> = {
   "common.sh": "#!/bin/bash\nreadonly A=1\n",
-  "installation-compose.jq": ".\n",
   "launcher.sh": "#!/bin/bash\nexit 0\n",
   "main.sh": "#!/bin/bash\nmain() { :; }\n",
 };
@@ -170,7 +169,7 @@ describe("release controller validation", () => {
     return runShell(`${MODULES}\nvalidate_controller_tree ${JSON.stringify(directory)}`);
   }
 
-  it("accepts top-level controller modules and filters", () => {
+  it("accepts top-level controller modules", () => {
     const tree = writeTree(temporaryDirectory("osinara-controller-valid-"), VALID_TREE);
 
     const result = validate(tree);
@@ -182,6 +181,7 @@ describe("release controller validation", () => {
     ["a symbolic link", (tree: string) => symlinkSync("/etc/passwd", join(tree, "linked.sh"))],
     ["a subdirectory", (tree: string) => writeTree(join(tree, "nested"), { "x.sh": "#!/bin/bash\n" })],
     ["an unexpected file name", (tree: string) => writeFileSync(join(tree, "notes.txt"), "x")],
+    ["a file that is not a shell module", (tree: string) => writeFileSync(join(tree, "graph.jq"), ".\n")],
     ["an upper-case module name", (tree: string) => writeFileSync(join(tree, "Main.sh"), "#!/bin/bash\n")],
     ["a module that is not valid shell", (tree: string) => writeFileSync(join(tree, "backup.sh"), "if then fi\n")],
     ["no main.sh", (tree: string) => rmSync(join(tree, "main.sh"))],
@@ -216,7 +216,7 @@ describe("release controller extraction", () => {
 
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(join(target, "main.sh"), "utf8")).toBe(VALID_TREE["main.sh"]);
-    expect(readFileSync(join(target, "installation-compose.jq"), "utf8")).toBe(".\n");
+    expect(readFileSync(join(target, "common.sh"), "utf8")).toBe(VALID_TREE["common.sh"]);
   });
 });
 

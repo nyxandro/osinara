@@ -5,7 +5,7 @@
  * - `resolveCurrentRelease`: operator commands follow `current` into one release directory and
  *   refuse a link that points anywhere else.
  * - The installer's paths are the release controller's: a drift would silently break the shared
- *   lock, the profile, or where either side looks for the current release.
+ *   lock or where either side looks for the current release and its graph.
  */
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
@@ -18,11 +18,10 @@ import {
   CONTROLLER_ROOT,
   CURRENT_LINK,
   DEPLOY_LOCK_PATH,
-  DEPLOYMENT_PROFILE,
   ENV_PATH,
-  INSTALLATION_COMPOSE_NAME,
   LAUNCHER_PATH,
   MODEL_CONFIG_PATH,
+  RELEASE_COMPOSE_NAME,
   RELEASE_ENV_PATH,
   RELEASES_DIR,
   resolveCurrentRelease,
@@ -52,7 +51,7 @@ describe("current release resolution", () => {
     symlinkSync(join(releasesDir, "v0.41.0"), currentLink);
 
     await expect(resolveCurrentRelease(currentLink, releasesDir)).resolves.toEqual({
-      composePath: join(releasesDir, "v0.41.0", "compose.installation.json"),
+      composePath: join(releasesDir, "v0.41.0", "compose.production.yaml"),
       directory: join(releasesDir, "v0.41.0"),
       manifestPath: join(releasesDir, "v0.41.0", "osinara-deployment.json"),
       releaseEnvPath: join(releasesDir, "v0.41.0", "release.env"),
@@ -81,10 +80,9 @@ describe("current release resolution", () => {
 });
 
 describe("layout shared with the release controller", () => {
-  it("uses the controller's own paths, lock, and installation graph", () => {
+  it("uses the controller's own paths, lock, and release graph", () => {
     const result = spawnSync("/bin/bash", ["-c", `set -euo pipefail
       source scripts/production-deploy/common.sh
-      DEPLOYMENT_PROFILE=${DEPLOYMENT_PROFILE}
       printf '%s\\n' "$LOCK_FILE" "$LAUNCHER_PATH" "$CONTROLLER_ROOT" "$CURRENT_LINK" \\
         "$GLOBAL_RELEASE_ENV" "$RELEASES_DIR" "$SERVER_ENV" "$AGENT_MODEL_PROVIDER_CONFIG" \\
         "$(release_compose_path /release)"
@@ -105,7 +103,7 @@ describe("layout shared with the release controller", () => {
       RELEASES_DIR,
       ENV_PATH,
       MODEL_CONFIG_PATH,
-      `/release/${INSTALLATION_COMPOSE_NAME}`,
+      `/release/${RELEASE_COMPOSE_NAME}`,
     ]);
     expect(launcher.stdout.trim().split("\n")).toEqual([LAUNCHER_PATH, CONTROLLER_ROOT]);
     expect(unit).toContain(`ExecStart=${LAUNCHER_PATH}\n`);

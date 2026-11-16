@@ -11,6 +11,7 @@ import sharp from "sharp";
 import { describe, expect, it, vi } from "vitest";
 
 import { AppError } from "../app-error.js";
+import { ModelFacingError } from "../model-facing-error.js";
 import {
   createTelegramWorkspaceAttachmentImporter,
   type TelegramAttachmentImport,
@@ -42,6 +43,10 @@ const gif: TelegramAttachment = {
   mediaType: "image/jpeg",
   size: 90_180,
 };
+
+function photo(): TelegramAttachment {
+  return { fileId: "photo-file-id", fileUniqueId: "photo-unique-id", kind: "photo", mediaType: "image/jpeg", size: 127_610 };
+}
 
 function storedPath(file: TelegramAttachmentImport): string | null {
   return "path" in file ? file.path : null;
@@ -288,18 +293,13 @@ describe("createTelegramWorkspaceAttachmentImporter", () => {
 
   // A GIF is not worth the person's message: without its still the message still reaches the
   // model, which learns it has no picture, as a voice transcript failure leaves a video note.
-  it.each([
-    ["its frame cannot be cut", { download: vi.fn().mockResolvedValue(Buffer.from("broken")),
-      extractAnimationStill: vi.fn().mockRejectedValue(new AppError("AGENT_ANIMATION_STILL_FAILED", "Не удалось получить кадр гифки")) }],
-    ["its file cannot be downloaded", {
-      download: vi.fn().mockImplementation(async (file: TelegramAttachment) => {
-        if (file.kind === "animation") throw new AppError("AGENT_ATTACHMENT_DOWNLOAD_TOO_LARGE", "Слишком большой файл");
-        return Buffer.from("name,value\n");
-      }),
-      extractAnimationStill: vi.fn() }],
-  ])("keeps a GIF's message without a picture when %s", async (_case, dependencies) => {
+  it("keeps a GIF's message without a picture when its frame cannot be cut", async () => {
     const writeBinary = vi.fn().mockImplementation(async (_auth, file) => ({ ...file, scope: "personal" }));
-    const importer = createTelegramWorkspaceAttachmentImporter({ ...dependencies, writeBinary });
+    const importer = createTelegramWorkspaceAttachmentImporter({
+      download: vi.fn().mockResolvedValue(Buffer.from("broken")),
+      extractAnimationStill: vi.fn().mockRejectedValue(new AppError("AGENT_ANIMATION_STILL_FAILED", "Не удалось получить кадр гифки")),
+      writeBinary,
+    });
     const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     const result = await importer.persist({
@@ -311,7 +311,7 @@ describe("createTelegramWorkspaceAttachmentImporter", () => {
     });
 
     expect(result).toEqual([
-      { stillUnavailable: true, telegramMessageId: "41" },
+      { kind: "animation", telegramMessageId: "41", unreceived: "picture_unavailable" },
       expect.objectContaining({ path: "inbox/42/Семейный бюджет.csv", telegramMessageId: "42" }),
     ]);
     expect(writeBinary).toHaveBeenCalledOnce();
@@ -321,6 +321,125 @@ describe("createTelegramWorkspaceAttachmentImporter", () => {
       telegramMessageId: "41",
     });
     errors.mockRestore();
+  });
+
+  // A file Telegram does not hand over is not worth the whole message either: the person hears what
+  // happened from the agent, in its own words (owner's decision of 16.11.2026), and nothing goes to
+  // the owner; the log keeps it.
+  it.each([
+    ["Telegram does not hand the file over", photo(), new ModelFacingError({
+      category: "dependency", code: "AGENT_ATTACHMENT_DOWNLOAD_FAILED", correction: "Попросите прислать ещё раз.",
+      reason: "Не удалось получить файл из Telegram из-за транспортного сбоя.", retryable: false, sideEffectStatus: "not_started",
+    }), "telegram_failure"],
+    ["Telegram answers the download with an error", attachment, new AppError("AGENT_ATTACHMENT_DOWNLOAD_FAILED", "Не удалось получить файл из Telegram. Отправьте его ещё раз"), "telegram_failure"],
+    ["Telegram's answer is malformed", attachment, new AppError("AGENT_ATTACHMENT_DOWNLOAD_RESPONSE_INVALID", "Telegram вернул некорректные данные файла. Отправьте его ещё раз"), "telegram_failure"],
+    ["the file is over the 20 MB a bot may receive", attachment, new AppError("AGENT_ATTACHMENT_DOWNLOAD_TOO_LARGE", "Слишком большой файл"), "too_large"],
+    ["the GIF's file does not come", gif, new AppError("AGENT_ATTACHMENT_DOWNLOAD_TOO_LARGE", "Слишком большой файл"), "too_large"],
+  ] as const)("keeps the message and marks the file for the agent when %s", async (_case, file, failure, reason) => {
+    const writeBinary = vi.fn().mockImplementation(async (_auth, stored) => ({ ...stored, scope: "personal" }));
+    const importer = createTelegramWorkspaceAttachmentImporter({
+      download: vi.fn().mockImplementation(async (candidate: TelegramAttachment) => {
+        if (candidate.fileId === file.fileId) throw failure;
+        return Buffer.from("name,value\n");
+      }),
+      extractAnimationStill: noAnimationStill,
+      writeBinary,
+    });
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const result = await importer.persist({
+      attachments: [{ ...file, telegramMessageId: "41" }, { ...attachment, fileId: "other-file", telegramMessageId: "42" }],
+      auth,
+      chatId: "101",
+      messageId: "42",
+      scope: "personal",
+    });
+
+    expect(result).toEqual([
+      { kind: file.kind, telegramMessageId: "41", unreceived: reason },
+      expect.objectContaining({ telegramMessageId: "42" }),
+    ]);
+    expect(writeBinary).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(warnings.mock.calls[0]![0]))).toEqual({
+      cause: failure.code,
+      chatId: "101",
+      code: "AGENT_ATTACHMENT_UNRECEIVED",
+      kind: file.kind,
+      reason,
+      telegramMessageId: "41",
+    });
+    warnings.mockRestore();
+  });
+
+  it("marks a photo whose bytes are not an image as not received", async () => {
+    const importer = createTelegramWorkspaceAttachmentImporter({
+      download: vi.fn().mockResolvedValue(Buffer.from("not an image")),
+      extractAnimationStill: noAnimationStill,
+      writeBinary: vi.fn(),
+    });
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await expect(importer.persist({ attachments: [photo()], auth, chatId: "101", messageId: "42", scope: "personal" }))
+      .resolves.toEqual([{ kind: "photo", telegramMessageId: "42", unreceived: "telegram_failure" }]);
+    warnings.mockRestore();
+  });
+
+  // The line names the transfer's own failure, which the downloader keeps as the cause.
+  it("logs the transfer failure behind a file that did not come", async () => {
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const transfer = new Error("Telegram getFile failed with HTTP 504.");
+    const importer = createTelegramWorkspaceAttachmentImporter({
+      download: vi.fn().mockRejectedValue(new AppError("AGENT_ATTACHMENT_DOWNLOAD_FAILED", "Не удалось получить файл", { cause: transfer })),
+      extractAnimationStill: noAnimationStill,
+      writeBinary: vi.fn(),
+    });
+
+    await importer.persist({ attachments: [photo()], auth, chatId: "101", messageId: "42", scope: "personal" });
+
+    expect(JSON.parse(String(warnings.mock.calls[0]![0]))).toMatchObject({
+      detail: "Telegram getFile failed with HTTP 504.",
+      reason: "telegram_failure",
+    });
+    warnings.mockRestore();
+  });
+
+  // A GIF is checked as the server's own frame: a frame that is not a picture is our fault.
+  it("does not tell a GIF frame that is not a picture as Telegram's failure", async () => {
+    const importer = createTelegramWorkspaceAttachmentImporter({
+      download: vi.fn().mockResolvedValue(Buffer.from("mp4 bytes")),
+      extractAnimationStill: vi.fn().mockResolvedValue(Buffer.from("not an image")),
+      writeBinary: vi.fn(),
+    });
+
+    await expect(importer.persist({ attachments: [gif], auth, chatId: "101", messageId: "42", scope: "personal" }))
+      .rejects.toMatchObject({ code: "AGENT_ATTACHMENT_TYPE_MISMATCH" });
+  });
+
+  it("does not tell a defect the downloader wrapped as Telegram's failure", async () => {
+    const defect = new TypeError("Cannot read properties of undefined (reading 'file_path')");
+    const importer = createTelegramWorkspaceAttachmentImporter({
+      download: vi.fn().mockRejectedValue(new ModelFacingError({
+        category: "dependency", code: "AGENT_ATTACHMENT_DOWNLOAD_FAILED", correction: "Попросите прислать ещё раз.",
+        reason: "Не удалось получить файл из Telegram из-за транспортного сбоя.", retryable: false, sideEffectStatus: "not_started",
+      }, { cause: defect })),
+      extractAnimationStill: noAnimationStill,
+      writeBinary: vi.fn(),
+    });
+
+    await expect(importer.persist({ attachments: [photo()], auth, chatId: "101", messageId: "42", scope: "personal" }))
+      .rejects.toMatchObject({ cause: defect, code: "AGENT_ATTACHMENT_DOWNLOAD_FAILED" });
+  });
+
+  it("does not hide a fault of the server behind a file that did not come", async () => {
+    const failure = new TypeError("bug");
+    const importer = createTelegramWorkspaceAttachmentImporter({
+      download: vi.fn().mockRejectedValue(failure),
+      extractAnimationStill: noAnimationStill,
+      writeBinary: vi.fn(),
+    });
+
+    await expect(importer.persist({ attachments: [attachment], auth, chatId: "101", messageId: "42", scope: "personal" }))
+      .rejects.toBe(failure);
   });
 
   // A broken server is not a bad GIF: it fails the message instead of passing for "no picture".
