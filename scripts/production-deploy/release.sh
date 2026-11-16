@@ -6,11 +6,6 @@ readonly GITHUB_REPOSITORY="nyxandro/osinara"
 readonly GITHUB_API="https://api.github.com/repos/${GITHUB_REPOSITORY}"
 readonly GITHUB_RELEASES="https://github.com/${GITHUB_REPOSITORY}/releases/download"
 readonly APP_IMAGE_PREFIX="ghcr.io/nyxandro/osinara-app@sha256:"
-# Transitional: the subscription gateway left on 2026-10-26. The first release without it still
-# names its old image so the controller already on a server accepts that release; this one only
-# checks the reference and binds it to the approved bytes. Releases may stop naming it only once
-# production and every `osinara install` host run that first release or newer.
-readonly CLI_PROXY_IMAGE_PREFIX="ghcr.io/nyxandro/osinara-cli-proxy@sha256:"
 readonly EDGE_IMAGE_PREFIX="ghcr.io/nyxandro/osinara-edge@sha256:"
 readonly EGRESS_IMAGE_PREFIX="ghcr.io/nyxandro/osinara-sandbox-egress-proxy@sha256:"
 readonly RUNNER_IMAGE_PREFIX="ghcr.io/nyxandro/osinara-sandbox-runner@sha256:"
@@ -109,21 +104,17 @@ validate_manifest() {
     (.commitSha | test("^[0-9a-f]{40}$")) and
     (.composeSha256 | test("^[0-9a-f]{64}$")) and
     (.images | type == "object" and
-      (keys - ["cliProxy"]) == ["app", "edge", "sandboxEgressProxy", "sandboxRunner", "sandboxRuntime"])
+      keys == ["app", "edge", "sandboxEgressProxy", "sandboxRunner", "sandboxRuntime"])
   ' "$manifest" >/dev/null || fail "DEPLOY_MANIFEST_INVALID" "Deployment manifest schema is invalid"
 
   MANIFEST_COMMIT="$(jq -er '.commitSha' "$manifest")"
   MANIFEST_COMPOSE_SHA="$(jq -er '.composeSha256' "$manifest")"
   APP_IMAGE="$(jq -er '.images.app' "$manifest")"
-  CLI_PROXY_IMAGE="$(jq -r '.images.cliProxy // ""' "$manifest")"
   EDGE_IMAGE="$(jq -er '.images.edge' "$manifest")"
   EGRESS_IMAGE="$(jq -er '.images.sandboxEgressProxy' "$manifest")"
   RUNNER_IMAGE="$(jq -er '.images.sandboxRunner' "$manifest")"
   RUNTIME_IMAGE="$(jq -er '.images.sandboxRuntime' "$manifest")"
   require_image_ref "$APP_IMAGE" "$APP_IMAGE_PREFIX"
-  if [[ -n "$CLI_PROXY_IMAGE" ]]; then
-    require_image_ref "$CLI_PROXY_IMAGE" "$CLI_PROXY_IMAGE_PREFIX"
-  fi
   require_image_ref "$EDGE_IMAGE" "$EDGE_IMAGE_PREFIX"
   require_image_ref "$EGRESS_IMAGE" "$EGRESS_IMAGE_PREFIX"
   require_image_ref "$RUNNER_IMAGE" "$RUNNER_IMAGE_PREFIX"
@@ -132,8 +123,7 @@ validate_manifest() {
   if [[ "$INITIAL_MODE" -eq 0 ]] && {
     [[ "$STORED_VERSION" != "$version" || "$STORED_COMMIT" != "$MANIFEST_COMMIT" ||
        "$STORED_COMPOSE_SHA" != "$MANIFEST_COMPOSE_SHA" || "$STORED_APP" != "$APP_IMAGE" ||
-       "$STORED_CLI_PROXY" != "$CLI_PROXY_IMAGE" || "$STORED_EDGE" != "$EDGE_IMAGE" ||
-       "$STORED_EGRESS" != "$EGRESS_IMAGE" ||
+       "$STORED_EDGE" != "$EDGE_IMAGE" || "$STORED_EGRESS" != "$EGRESS_IMAGE" ||
        "$STORED_RUNNER" != "$RUNNER_IMAGE" || "$STORED_RUNTIME" != "$RUNTIME_IMAGE" ]];
   }; then
     fail "DEPLOY_APPROVED_MANIFEST_MISMATCH" "Public manifest differs from approved bytes"
@@ -201,9 +191,6 @@ prepare_candidate_release() {
     "${CANDIDATE_DIR}/osinara-deployment.json"
   CANDIDATE_COMPOSE="$(release_compose_path "$CANDIDATE_DIR")"
   CANDIDATE_ENV="${CANDIDATE_DIR}/release.env"
-  if [[ "$DEPLOYMENT_PROFILE" == "installation" ]]; then
-    derive_installation_compose "${CANDIDATE_DIR}/compose.production.yaml" "$CANDIDATE_COMPOSE"
-  fi
   {
     printf 'OSINARA_APP_IMAGE=%s\n' "$APP_IMAGE"
     printf 'SANDBOX_RUNTIME_IMAGE=%s\n' "$RUNTIME_IMAGE"
@@ -213,17 +200,6 @@ prepare_candidate_release() {
   } > "$CANDIDATE_ENV"
   chmod 0600 "$CANDIDATE_ENV"
   validate_resolved_compose
-}
-
-# The installation graph is the released production graph passed through the shared filter. CI
-# builds the installer's first copy with the same file. Since the subscription gateway left
-# (2026-10-26) the filter changes nothing; the two profiles go away in a following release.
-derive_installation_compose() {
-  local source="$1"
-  local target="$2"
-  docker compose --file "$source" config --no-interpolate --format json |
-    jq --exit-status --from-file "${CONTROLLER_DIR}/installation-compose.jq" > "$target"
-  chmod 0644 "$target"
 }
 
 validate_resolved_compose_security() {

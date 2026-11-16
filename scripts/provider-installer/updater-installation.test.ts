@@ -38,7 +38,6 @@ import {
 const APP_IMAGE = `ghcr.io/nyxandro/osinara-app@sha256:${"a".repeat(64)}`;
 const CONTROLLER_FILES: Record<string, string> = {
   "common.sh": "#!/bin/bash\n",
-  "installation-compose.jq": ".\n",
   "launcher.sh": "#!/bin/bash\n# launcher\n",
   "main.sh": "#!/bin/bash\n# main\n",
 };
@@ -142,7 +141,7 @@ describe("updater installation", () => {
     expect(mode(layout.binDir)).toBe(0o750);
     expect(mode(layout.controllerRoot)).toBe(0o750);
     expect(mode(versionDir)).toBe(0o750);
-    expect(mode(join(versionDir, "installation-compose.jq"))).toBe(0o640);
+    expect(mode(join(versionDir, "common.sh"))).toBe(0o640);
     expect(mode(layout.launcherPath)).toBe(0o750);
     expect(units).toEqual([
       join(layout.systemdDir, "osinara-deploy.service"),
@@ -156,6 +155,7 @@ describe("updater installation", () => {
 
   it.each([
     ["an unexpected controller file", (root: string) => writeFileSync(join(root, "controller/notes.txt"), "x")],
+    ["a controller file that is not a shell module", (root: string) => writeFileSync(join(root, "controller/graph.jq"), ".\n")],
     ["a nested controller directory", (root: string) => writeTree(join(root, "controller/lib"), { "x.sh": "" })],
     ["no main.sh", (root: string) => rmSync(join(root, "controller/main.sh"))],
     ["an extra unit", (root: string) => writeFileSync(join(root, "systemd/other.timer"), "")],

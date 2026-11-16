@@ -28,9 +28,10 @@ describe("installation bundle", () => {
     const first = join(directory, "first.tar.gz");
     const second = join(directory, "second.tar.gz");
     const manifestPath = join(directory, "osinara-deployment.json");
-    const composePath = join(directory, "compose.installation.json");
+    const composePath = join(directory, "compose.production.yaml");
+    const releasedCompose = "name: osinara-production\nservices: {}\n";
     await writeFile(manifestPath, JSON.stringify({ schemaVersion: 1 }));
-    await writeFile(composePath, JSON.stringify({ name: "osinara-production", services: {} }));
+    await writeFile(composePath, releasedCompose);
     const firstBuild = spawnSync("bash", [buildScript, first, manifestPath, composePath], { encoding: "utf8" });
     const secondBuild = spawnSync("bash", [buildScript, second, manifestPath, composePath], { encoding: "utf8" });
     expect(firstBuild.status, firstBuild.stderr).toBe(0);
@@ -40,6 +41,8 @@ describe("installation bundle", () => {
     expect(firstBytes.equals(secondBytes)).toBe(true);
     await expect(validateInstallationBundle(firstBytes)).resolves.toBeUndefined();
     const files = await readInstallationBundle(firstBytes);
+    // The server runs the released graph byte for byte, as production does.
+    expect(files.get("installation/compose.production.yaml")!.toString("utf8")).toBe(releasedCompose);
     const tlsCompose = files.get("installation/traefik-compose.yaml")!.toString("utf8");
     expect(tlsCompose).toContain("image: traefik:");
     expect(tlsCompose).toContain("      - edge-frontend\n");

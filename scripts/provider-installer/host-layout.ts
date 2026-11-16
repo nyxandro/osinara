@@ -32,9 +32,8 @@ export const LAUNCHER_PATH = `${BIN_DIR}/production-deploy.sh`;
 export const CONTROLLER_ROOT = `${BIN_DIR}/controller`;
 export const SYSTEMD_UNIT_DIR = "/etc/systemd/system";
 export const DEPLOY_LOCK_PATH = "/run/lock/osinara-production-deploy.lock";
-// The profile this host names to the controller; see `require_deployment_profile`.
-export const DEPLOYMENT_PROFILE = "installation";
-export const INSTALLATION_COMPOSE_NAME = "compose.installation.json";
+// The released graph, the same file production runs; see `release_compose_path`.
+export const RELEASE_COMPOSE_NAME = "compose.production.yaml";
 export const MANIFEST_NAME = "osinara-deployment.json";
 export const RELEASE_ENV_NAME = "release.env";
 
@@ -68,7 +67,7 @@ export async function resolveCurrentRelease(
     throw invalidCurrentRelease(currentLink, new Error(`current resolves to ${directory}`));
   }
   return {
-    composePath: join(directory, INSTALLATION_COMPOSE_NAME),
+    composePath: join(directory, RELEASE_COMPOSE_NAME),
     directory,
     manifestPath: join(directory, MANIFEST_NAME),
     releaseEnvPath: join(directory, RELEASE_ENV_NAME),

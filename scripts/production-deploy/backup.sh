@@ -9,8 +9,6 @@ readonly BACKUP_RESERVE_BYTES=$((512 * 1024 * 1024))
 readonly RETAINED_DEPLOY_BACKUP_COUNT=3
 readonly LEGACY_INITIAL_MIGRATION_BACKUP_NAME="initial-migration-v0.1.1"
 readonly DEPLOY_BACKUP_NAME_PATTERN='^[0-9]{8}T[0-9]{6}Z-to-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
-# The subscription gateway's OAuth volume left with the gateway on 2026-10-26: it is no longer
-# archived, and a host keeps the volume only until the operator removes it by hand.
 readonly DURABLE_VOLUME_BINDINGS=(
   "osinara-production-google-workspace-credentials|google-workspace-credentials"
   "osinara-production-tool-environments|tool-environments"
@@ -173,12 +171,6 @@ compose_declares_volume() {
   if [[ ! -f "$compose_path" ]]; then
     fail "DEPLOY_COMPOSE_OWNERSHIP_UNKNOWN" "Compose file is absent: ${compose_path}"
     return 1
-  fi
-  # An installation host runs the derived JSON graph; a production host the released YAML.
-  if [[ "$compose_path" == *.json ]]; then
-    jq --exit-status --arg volume "$logical_volume" '(.volumes // {}) | has($volume)' \
-      "$compose_path" >/dev/null
-    return
   fi
   grep -Eq "^  ${logical_volume}:([[:space:]]*\\{\\})?[[:space:]]*$" "$compose_path"
 }

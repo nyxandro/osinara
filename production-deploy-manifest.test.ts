@@ -2,9 +2,8 @@
  * Deployment manifest validation tests.
  *
  * Constructs covered:
- * - `validate_manifest`: the subscription gateway left on 2026-10-26. The first release without it
- *   still names its old image so the controller already on a server accepts it; later releases do
- *   not name it. Both forms pass, a malformed reference does not, and the approved bytes still bind.
+ * - `validate_manifest`: a release names exactly its five images; any other image key is refused,
+ *   and the approved bytes still bind.
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,15 +15,13 @@ import { afterEach, describe, expect, it } from "vitest";
 const projectRoot = new URL("./", import.meta.url).pathname;
 const temporaryDirectories: string[] = [];
 const digest = (character: string) => character.repeat(64);
-const RETIRED_GATEWAY = `ghcr.io/nyxandro/osinara-cli-proxy@sha256:${digest("2")}`;
 
-function manifest(cliProxy: string | null): Record<string, unknown> {
+function manifest(): Record<string, unknown> {
   return {
     commitSha: "a".repeat(40),
     composeSha256: "b".repeat(64),
     images: {
       app: `ghcr.io/nyxandro/osinara-app@sha256:${digest("1")}`,
-      ...(cliProxy === null ? {} : { cliProxy }),
       edge: `ghcr.io/nyxandro/osinara-edge@sha256:${digest("3")}`,
       sandboxEgressProxy: `ghcr.io/nyxandro/osinara-sandbox-egress-proxy@sha256:${digest("4")}`,
       sandboxRunner: `ghcr.io/nyxandro/osinara-sandbox-runner@sha256:${digest("5")}`,
@@ -53,7 +50,6 @@ function validate(published: Record<string, unknown>, approved: Record<string, u
     STORED_COMMIT=${JSON.stringify(approved.commitSha)}
     STORED_COMPOSE_SHA=${JSON.stringify(approved.composeSha256)}
     STORED_APP=${JSON.stringify(images.app)}
-    STORED_CLI_PROXY=${JSON.stringify(images.cliProxy ?? "")}
     STORED_EDGE=${JSON.stringify(images.edge)}
     STORED_EGRESS=${JSON.stringify(images.sandboxEgressProxy)}
     STORED_RUNNER=${JSON.stringify(images.sandboxRunner)}
@@ -68,42 +64,31 @@ afterEach(() => {
 });
 
 describe("deployment manifest validation", () => {
-  it.each([
-    ["still names", RETIRED_GATEWAY],
-    ["no longer names", null],
-  ])("accepts a release that %s the retired gateway image", (_name, cliProxy) => {
-    const result = validate(manifest(cliProxy), manifest(cliProxy));
+  it("accepts a release that names its five images", () => {
+    const result = validate(manifest(), manifest());
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe(`app=ghcr.io/nyxandro/osinara-app@sha256:${digest("1")}\n`);
   });
 
-  it("refuses a malformed retired gateway reference", () => {
-    const published = manifest("ghcr.io/nyxandro/osinara-cli-proxy:latest");
-
-    const result = validate(published, published);
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("DEPLOY_IMAGE_REFERENCE_INVALID");
-  });
-
-  it.each([
-    ["the approved manifest named the gateway, the public one does not", RETIRED_GATEWAY, null],
-    ["the public manifest names a gateway the approved one did not", null, RETIRED_GATEWAY],
-  ])("refuses a release when %s", (_name, approvedGateway, publishedGateway) => {
-    const result = validate(manifest(publishedGateway), manifest(approvedGateway));
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("DEPLOY_APPROVED_MANIFEST_MISMATCH");
-  });
-
   it("refuses an unknown image key", () => {
-    const published = manifest(null);
+    const published = manifest();
     (published.images as Record<string, string>).extra = `ghcr.io/nyxandro/osinara-app@sha256:${digest("1")}`;
 
     const result = validate(published, published);
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("DEPLOY_MANIFEST_INVALID");
+  });
+
+  it("refuses a release whose public manifest differs from the approved bytes", () => {
+    const approved = manifest();
+    const published = manifest();
+    (published.images as Record<string, string>).edge = `ghcr.io/nyxandro/osinara-edge@sha256:${digest("7")}`;
+
+    const result = validate(published, approved);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("DEPLOY_APPROVED_MANIFEST_MISMATCH");
   });
 });

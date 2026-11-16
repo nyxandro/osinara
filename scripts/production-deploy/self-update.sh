@@ -9,7 +9,7 @@
 # `launcher --resume PROPOSAL LEASE`. Every controller version must keep accepting both forms.
 
 readonly CONTROLLER_IMAGE_DIR="/app/deploy/controller"
-readonly CONTROLLER_FILE_PATTERN='^[a-z0-9-]+\.(sh|jq)$'
+readonly CONTROLLER_FILE_PATTERN='^[a-z0-9-]+\.sh$'
 readonly REQUIRED_CONTROLLER_FILES=(launcher.sh main.sh)
 CONTROLLER_STAGING_DIR=""
 RESUMED_AFTER_SELF_UPDATE=0
@@ -21,7 +21,7 @@ extract_release_controller() {
     tar -x --no-same-owner --no-same-permissions -C "$target"
 }
 
-# A controller is flat: regular top-level modules and filters, each module valid shell.
+# A controller is flat: regular top-level modules, each valid shell.
 validate_controller_tree() {
   local directory="$1"
   local path name
@@ -31,7 +31,7 @@ validate_controller_tree() {
       fail "DEPLOY_CONTROLLER_RELEASE_INVALID" "Release controller has an unexpected entry: ${name}"
       return 1
     fi
-    if [[ "$name" == *.sh ]] && ! bash -n "$path"; then
+    if ! bash -n "$path"; then
       fail "DEPLOY_CONTROLLER_RELEASE_INVALID" "Release controller module is not valid shell: ${name}"
       return 1
     fi

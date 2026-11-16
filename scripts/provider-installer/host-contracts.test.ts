@@ -19,17 +19,17 @@ import {
 const digest = (name: string, character: string): string =>
   `ghcr.io/nyxandro/${name}@sha256:${character.repeat(64)}`;
 
-function manifest(options: { retiredGateway?: boolean } = {}): Buffer {
+function manifest(extraImages: Record<string, string> = {}): Buffer {
   return Buffer.from(JSON.stringify({
     commitSha: "1".repeat(40),
     composeSha256: "2".repeat(64),
     images: {
       app: digest("osinara-app", "a"),
-      ...(options.retiredGateway === false ? {} : { cliProxy: digest("osinara-cli-proxy", "b") }),
       edge: digest("osinara-edge", "c"),
       sandboxEgressProxy: digest("osinara-sandbox-egress-proxy", "d"),
       sandboxRunner: digest("osinara-sandbox-runner", "e"),
       sandboxRuntime: digest("osinara-sandbox-runtime", "f"),
+      ...extraImages,
     },
     schemaVersion: 1,
     version: "0.15.3",
@@ -37,21 +37,22 @@ function manifest(options: { retiredGateway?: boolean } = {}): Buffer {
 }
 
 describe("production host contracts", () => {
-  it("emits only the five direct-provider image references used by fresh installation", () => {
+  it("emits the five image references of the release for a fresh installation", () => {
     const environment = releaseEnvironmentFromManifest(manifest(), "0.15.3").toString("utf8");
 
-    expect(environment).toContain(`OSINARA_APP_IMAGE=${digest("osinara-app", "a")}\n`);
-    expect(environment).toContain(`OSINARA_EDGE_IMAGE=${digest("osinara-edge", "c")}\n`);
-    expect(environment).not.toContain("OSINARA_CLI_PROXY_IMAGE");
+    expect(environment).toBe([
+      `OSINARA_APP_IMAGE=${digest("osinara-app", "a")}`,
+      `OSINARA_EDGE_IMAGE=${digest("osinara-edge", "c")}`,
+      `OSINARA_SANDBOX_EGRESS_PROXY_IMAGE=${digest("osinara-sandbox-egress-proxy", "d")}`,
+      `OSINARA_SANDBOX_RUNNER_IMAGE=${digest("osinara-sandbox-runner", "e")}`,
+      `SANDBOX_RUNTIME_IMAGE=${digest("osinara-sandbox-runtime", "f")}`,
+      "",
+    ].join("\n"));
   });
 
-  // The first release without the subscription gateway still names its image; later ones do not.
-  it("accepts a manifest that no longer names the retired gateway image", () => {
-    const environment = releaseEnvironmentFromManifest(manifest({ retiredGateway: false }), "0.15.3")
-      .toString("utf8");
-
-    expect(environment).toContain(`OSINARA_APP_IMAGE=${digest("osinara-app", "a")}\n`);
-    expect(environment).not.toContain("OSINARA_CLI_PROXY_IMAGE");
+  it("rejects a manifest that names an image the release does not ship", () => {
+    expect(() => releaseEnvironmentFromManifest(manifest({ extra: digest("osinara-app", "b") }), "0.15.3"))
+      .toThrow("OSINARA_INSTALL_MANIFEST_INVALID");
   });
 
   it("rejects a manifest from another release", () => {
