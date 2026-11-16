@@ -40,7 +40,6 @@ bootstrap_require_metadata "$CONTROLLER_DIR" "0:0:750"
 for module in main common database release backup self-update; do
   bootstrap_require_metadata "${CONTROLLER_DIR}/${module}.sh" "0:0:640"
 done
-bootstrap_require_metadata "${CONTROLLER_DIR}/installation-compose.jq" "0:0:640"
 
 # Modules expose explicit release, database, backup, self-update, and recovery boundaries.
 # shellcheck source=scripts/production-deploy/common.sh
@@ -154,7 +153,6 @@ main() {
   fi
 
   require_server_boundary
-  require_deployment_profile
   require_release_environment_clean
   # A newer controller checks the host here before its predecessor selects it; nothing is claimed,
   # locked, or changed.

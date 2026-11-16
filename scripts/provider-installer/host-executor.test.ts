@@ -116,12 +116,19 @@ describe("createHostInstallationExecutor", () => {
     const environment = staged?.environmentBytes.toString("utf8");
     expect(environment).toContain("MODEL_API_KEY='model-secret'\n");
     expect(environment).toContain("PUBLIC_BASE_URL='https://8-8-8-8.sslip.io'\n");
-    // The deployment controller reads the profile from the same EnvironmentFile as systemd passes it.
-    expect(environment).toContain("OSINARA_DEPLOYMENT_PROFILE='installation'\n");
     expect(environment).toContain("SANDBOX_API_KEY_ENCRYPTION_KEY='sandbox_api_key_secret_abcdefghijklmnopqrstuv'\n");
-    expect(environment).not.toContain("WORKFLOW_");
-    expect(environment).not.toContain("CLI_PROXY_API_KEY");
-    expect(environment).not.toContain("MODEL_UPSTREAM_API_KEY");
+    // A closed set: secrets and this host's bindings only, nothing that picks behaviour.
+    expect(environment?.trim().split("\n").map((line) => line.slice(0, line.indexOf("=")))).toEqual([
+      "DATABASE_URL",
+      "INVITATION_SIGNING_SECRET",
+      "MODEL_API_KEY",
+      "POSTGRES_PASSWORD",
+      "PUBLIC_BASE_URL",
+      "SANDBOX_API_KEY_ENCRYPTION_KEY",
+      "TELEGRAM_BOT_TOKEN",
+      "TELEGRAM_BOT_USERNAME",
+      "TELEGRAM_WEBHOOK_SECRET_TOKEN",
+    ]);
     expect(JSON.parse(staged!.modelConfigBytes.toString("utf8"))).toMatchObject({
       provider: "deepseek",
       schemaVersion: 4,

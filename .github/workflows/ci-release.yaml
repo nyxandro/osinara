@@ -55,11 +55,6 @@ jobs:
       packages: write
     env:
       APP_IMAGE: ghcr.io/nyxandro/osinara-app
-      # The subscription gateway left on 2026-10-26 and is no longer built. Controllers and apps of
-      # v0.49.0 and older refuse a manifest without its image, so releases keep naming the last
-      # published one until production and every `osinara install` host run a release that does
-      # not need it; an app still on v0.49.0 would otherwise reject every newer release.
-      RETIRED_CLI_PROXY_IMAGE: ghcr.io/nyxandro/osinara-cli-proxy@sha256:e8def6e9183c77670b741b5dac84de05284e6865b346e3a33722e9d14a55d240
       EDGE_IMAGE: ghcr.io/nyxandro/osinara-edge
       EGRESS_IMAGE: ghcr.io/nyxandro/osinara-sandbox-egress-proxy
       RUNNER_IMAGE: ghcr.io/nyxandro/osinara-sandbox-runner
@@ -265,31 +260,28 @@ jobs:
             --arg commitSha "$GITHUB_SHA" \
             --arg composeSha256 "$COMPOSE_SHA256" \
             --arg app "${APP_IMAGE}@${APP_DIGEST}" \
-            --arg cliProxy "$RETIRED_CLI_PROXY_IMAGE" \
             --arg edge "${EDGE_IMAGE}@${EDGE_DIGEST}" \
             --arg sandboxEgressProxy "${EGRESS_IMAGE}@${EGRESS_DIGEST}" \
             --arg sandboxRunner "${RUNNER_IMAGE}@${RUNNER_DIGEST}" \
             --arg sandboxRuntime "${RUNTIME_IMAGE}@${RUNTIME_DIGEST}" \
-            '{schemaVersion: 1, version: $version, commitSha: $commitSha, composeSha256: $composeSha256, images: {app: $app, cliProxy: $cliProxy, edge: $edge, sandboxEgressProxy: $sandboxEgressProxy, sandboxRunner: $sandboxRunner, sandboxRuntime: $sandboxRuntime}}' \
+            '{schemaVersion: 1, version: $version, commitSha: $commitSha, composeSha256: $composeSha256, images: {app: $app, edge: $edge, sandboxEgressProxy: $sandboxEgressProxy, sandboxRunner: $sandboxRunner, sandboxRuntime: $sandboxRuntime}}' \
              > osinara-deployment.json
 
       - name: Build immutable installation bundle
         shell: bash
         run: |
           set -euo pipefail
-          docker compose -f compose.production.yaml config --no-interpolate --format json \
-            | jq --from-file scripts/production-deploy/installation-compose.jq > compose.installation.json
-          jq -e '
+          docker compose -f compose.production.yaml config --no-interpolate --format json | jq -e '
             (.services | keys) == [
               "agent", "edge", "memory-embedding", "memory-embedding-worker",
               "migrate", "postgres", "sandbox-egress-proxy",
               "sandbox-runner", "sandbox-runtime-image", "telegram-ingress-worker"
             ]
-          ' compose.installation.json >/dev/null
+          ' >/dev/null
           bash scripts/provider-installer/build-installation-bundle.sh \
             "${GITHUB_WORKSPACE}/osinara-installation.tar.gz" \
             "${GITHUB_WORKSPACE}/osinara-deployment.json" \
-            "${GITHUB_WORKSPACE}/compose.installation.json"
+            "${GITHUB_WORKSPACE}/compose.production.yaml"
           INSTALLATION_ARCHIVE_SHA256="$(sha256sum osinara-installation.tar.gz | cut -d ' ' -f1)"
           if [[ ! "$INSTALLATION_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
             printf '%s\n' "RELEASE_INSTALLATION_ARCHIVE_DIGEST_INVALID: archive hash is malformed" >&2
