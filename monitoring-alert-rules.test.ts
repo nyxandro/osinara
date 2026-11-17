@@ -287,6 +287,25 @@ describe("osinara alert rules", () => {
     expect(expression).toContain('service="memory-embedding-worker"');
   });
 
+  it("watches background tasks through metrics the collector exports from the view (#519)", () => {
+    const expected = {
+      OsinaraBackgroundTaskQueueStalled: "osinara_background_task_queue_stalled_age_seconds > 600",
+      OsinaraBackgroundTaskStuck: "osinara_background_task_stuck_age_seconds > 900",
+      OsinaraBackgroundTaskUnreported: "osinara_background_task_unreported_age_seconds > 900",
+    };
+    for (const [alert, condition] of Object.entries(expected)) {
+      const [block] = alertBlocks(alert, stateRules);
+      // The whole condition before the deploy grace, so a changed threshold (> 6000) fails too.
+      const [threshold, grace] = (ruleField(block!, "expr") ?? "").replace(/\s+/gu, " ").trim().split(" unless ");
+      expect(threshold, alert).toBe(condition);
+      expect(grace, alert).toBe('on() deploy_window_end_timestamp_seconds{project="osinara-production"} + 600 > time()');
+      expect(exporter).toContain(`metric_name: ${condition.split(" ")[0]}`);
+    }
+    expect(exporter).toContain("FROM monitoring_background_tasks");
+    // A place frees seconds before the next pass takes the queued task: one scrape must not page.
+    expect(holdMinutes(alertBlocks("OsinaraBackgroundTaskQueueStalled", stateRules)[0]!)).toBe(2);
+  });
+
   it("keeps OsinaraErrorBurst off every line the application writes as information", () => {
     const [block] = alertBlocks("OsinaraErrorBurst");
     // Written with console.info and still counted: a dispatcher still busy when the next minute

@@ -24,6 +24,7 @@ const describeWithDatabase = integrationTestsEnabled ? describe : describe.skip;
 const METRICS_ROLE = "osinara_metrics";
 const MONITORING_VIEWS = [
   "monitoring_agent_schedule_runs",
+  "monitoring_background_tasks",
   "monitoring_memory_embedding_backlog",
   "monitoring_memory_embedding_jobs",
   "monitoring_memory_index_state",
@@ -97,11 +98,12 @@ describeWithDatabase("monitoring views migrations", () => {
         const result = await client.query(`SELECT * FROM public.${view}`);
         const columns = result.fields.map((field) => field.name).sort();
         expect({ view, empty: columns.length === 0 }).toEqual({ view, empty: false });
-        // Identifiers of things, never their contents: route_key is a hash, phase and status are enums.
+        // Identifiers of things, never their contents: route_key is a hash, phase and status are enums. The
+        // background task view (#519) is counts and ages only.
         for (const column of columns) {
           expect({ view, column }).toEqual({
             view,
-            column: expect.stringMatching(/^(pending|processing|failed|total|recent|status|phase|route_key|embedding_status|oldest_pending_age_seconds|stalled_oldest_age_seconds|longest_running_seconds|last_success_age_seconds|age_seconds)$/u),
+            column: expect.stringMatching(/^(pending|processing|failed|total|recent|status|phase|route_key|embedding_status|oldest_pending_age_seconds|stalled_oldest_age_seconds|longest_running_seconds|last_success_age_seconds|age_seconds|running|queued|waiting_answer|stuck_age_seconds|queue_stalled_age_seconds|unreported_age_seconds|gave_up_recent)$/u),
           });
         }
       }

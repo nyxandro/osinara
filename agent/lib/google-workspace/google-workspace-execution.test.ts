@@ -60,6 +60,10 @@ const SCHEDULED_CONTINUATION_TURN = turnOf("scheduled", PRESSER, SCENARIO);
 const WAKEUP_CONTINUATION_TURN = turnOf("wakeup", PRESSER);
 // Each lock holds on its own: the auth marks a scenario even where the turn kind does not.
 const SCENARIO_INITIATOR_ONLY_TURN = turnOf("conversation", PERSON, SCENARIO);
+// A background task's turn (#519) and the turn that brings its outcome to the chat.
+const BACKGROUND_TASK = { ...PERSON, attributes: { ...PERSON.attributes, backgroundTaskId: "7" } };
+const BACKGROUND_TASK_TURN = turnOf("background", BACKGROUND_TASK, BACKGROUND_TASK);
+const BACKGROUND_TASK_REPORT_TURN = turnOf("wakeup", { ...PERSON, attributes: { ...PERSON.attributes, backgroundTaskEventId: "5" } });
 const SUBAGENT_TURN = turnOf("subagent", PERSON, null, {
   parent: { callId: "call-agent", rootSessionId: "root", sessionId: "root", turn: { id: "turn-0", kind: "conversation", sequence: 1 } },
 });
@@ -140,6 +144,8 @@ describe("execute_google_workspace approval", () => {
 
   it.each([
     ["a delegated task", SUBAGENT_TURN, "AGENT_GOOGLE_WORKSPACE_SUBAGENT_WRITE_FORBIDDEN"],
+    ["a background task", BACKGROUND_TASK_TURN, "AGENT_GOOGLE_WORKSPACE_SUBAGENT_WRITE_FORBIDDEN"],
+    ["the report of a background task", BACKGROUND_TASK_REPORT_TURN, "AGENT_GOOGLE_WORKSPACE_SCENARIO_WRITE_FORBIDDEN"],
     ["an isolated scenario run", SCHEDULED_TURN, "AGENT_GOOGLE_WORKSPACE_SCENARIO_WRITE_FORBIDDEN"],
     ["a scenario wake-up in the conversation", WAKEUP_TURN, "AGENT_GOOGLE_WORKSPACE_SCENARIO_WRITE_FORBIDDEN"],
     ["an isolated scenario run continued after a button press", SCHEDULED_CONTINUATION_TURN,

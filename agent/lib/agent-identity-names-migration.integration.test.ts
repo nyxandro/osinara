@@ -54,8 +54,9 @@ describeWithDatabase("126 agent identity names", () => {
       "telegram_final_deliveries.agent_turn_id",
     ]));
     // 28 since `telegram_reply_button_sets` (migration 141) carries both; 30 since `telegram_widgets`
-    // (migration 152) records the turn that sent each widget.
-    expect(identity.rows).toHaveLength(30);
+    // (migration 152) records the turn that sent each widget; 31 since `background_tasks` (migration 156)
+    // records its task's runtime session.
+    expect(identity.rows).toHaveLength(31);
   });
 
   it("labels carried-over sessions as imported and drops the removed recovery state", async () => {

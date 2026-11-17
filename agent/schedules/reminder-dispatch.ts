@@ -5,7 +5,7 @@
  * - `reminderDispatchSchedule`: reminders, the bot's questions about a timezone a waiting reminder
  *   needs (#451), expired-session retention, workspace cleanup, physical cleanup of memory whose
  *   soft-delete recovery window has elapsed, and cancellation of Telegram approvals nobody
- *   confirmed in time.
+ *   confirmed in time, and erasure of background task records older than thirty days (#519).
  * - Records a completed cycle for external monitoring; a failed cycle records nothing. The approval
  *   sweep runs beside that cycle, admitted while a deploy drains, as before.
  */
@@ -19,6 +19,10 @@ import { privateQuestionStore } from "../lib/private-questions/private-question-
 import { deleteOrphanedWorkspaces } from "../lib/workspaces/workspace-deletion.js";
 import { withRuntimeAdmission } from "../lib/runtime-maintenance.js";
 import { withScheduleHeartbeat } from "../lib/schedule-heartbeat.js";
+import { backgroundTaskRepository } from "../lib/background-tasks/background-task-repository.js";
+
+// Background task records erased per minute: a few tasks a day leave no backlog.
+const BACKGROUND_TASK_PURGE_BATCH = 100;
 
 export function reminderDispatchSchedule(input: {
   /** Cancels the approvals that outlived the confirmation window (`createApprovalTimeoutResolver`). */
@@ -34,6 +38,8 @@ export function reminderDispatchSchedule(input: {
           deleteOrphanedWorkspaces(), purgeSoftDeletedMemory(new Date()),
           // A private question and its answer live a day (#467).
           privateQuestionStore.eraseExpired(new Date()),
+          // A background task's record, messages and events live thirty days (#519).
+          backgroundTaskRepository.purgeOld(new Date(), BACKGROUND_TASK_PURGE_BATCH),
         ]);
         const failed = results.find(result => result.status === "rejected");
         if (failed?.status === "rejected") throw failed.reason;

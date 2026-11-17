@@ -15,7 +15,7 @@ import type { InputRequest, InputResponse } from "../hitl/types.js";
 import type { AvailableSkillDescription } from "../prompt/skills-section.js";
 import type { ToolResultOutput } from "./tool-calls.js";
 
-export type TurnKind = "conversation" | "memory_review" | "scheduled" | "subagent" | "wakeup";
+export type TurnKind = "background" | "conversation" | "memory_review" | "scheduled" | "subagent" | "wakeup";
 export type TurnStatus = "cancelled" | "completed" | "failed" | "running" | "waiting_input";
 
 export interface TurnChannel {

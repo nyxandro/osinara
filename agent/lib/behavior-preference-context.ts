@@ -15,6 +15,7 @@ import { scheduledDeliveryMetadata } from "./agent-schedules/scheduled-session.j
 import { AppError } from "./app-error.js";
 import { resolveSessionCaller } from "./session-auth.js";
 import { resolveTelegramSessionActor } from "./telegram-session-actor.js";
+import { backgroundTaskEventIdOf } from "./background-tasks/background-task-session.js";
 import { conversationWakeupRunId } from "./conversation-wakeups/conversation-wakeup-turn.js";
 
 export interface BehaviorPreferenceAuthorization {
@@ -126,8 +127,9 @@ export function requireBehaviorPreferenceReadAuthorization(
       groupId: scope === "personal" ? null : attrs.groupId as string,
       kind: "approval", scope, telegramChatId: attrs.telegramChatId };
   }
-  // A wake-up turn continues its chat's conversation, but answers no message: read the chat's prompt.
-  if (conversationWakeupRunId(ctx.session.auth) !== null) {
+  // A wake-up turn (or a background task's report) continues its chat's conversation, but answers no
+  // message: read the chat's prompt. Its delegated child inherits the marks and reads the same notes.
+  if (conversationWakeupRunId(ctx.session.auth) !== null || backgroundTaskEventIdOf(ctx) !== null) {
     const family = attrs?.groupType === "family_private" && typeof attrs.groupId === "string";
     if (
       caller?.authenticator !== "telegram" || caller.principalType !== "user" ||

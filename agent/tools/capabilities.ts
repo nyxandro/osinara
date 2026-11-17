@@ -11,6 +11,7 @@
  * - Tool and skill policy share verified auth; execution still rechecks live revocation.
  * - Each independent policy lookup fails closed for its own application capability class.
  * - A guest's private chat (#471) is a member's, less what the owner turned off for that guest.
+ * - A background task's turn (#519) gets a delegated child's surface of its chat plus `ask_person`.
  */
 import type { DynamicResolveContext } from "../runtime/context.js";
 import type { ToolDefinition } from "../runtime/tool.js";
@@ -38,6 +39,8 @@ import { buildMemoryReviewToolSurface } from "../lib/memory-review/memory-review
 import { isTelegramChannelSession } from "../lib/telegram-session-actor.js";
 import { isPrivateQuestionSession } from "../lib/private-questions/private-question-session.js";
 import { privateQuestionToolSurface } from "../lib/private-questions/private-question-tool-surface.js";
+import { BACKGROUND_TASK_CHANNEL_KIND } from "../lib/background-tasks/background-task-session.js";
+import { backgroundTaskToolSurface } from "../lib/background-tasks/background-task-tools.js";
 
 type ToolMap = Readonly<Record<string, ToolDefinition<any, any>>>;
 
@@ -59,6 +62,8 @@ async function guestScopedSurface(auth: DynamicResolveContext["session"]["auth"]
 export async function resolveToolSurface(ctx: DynamicResolveContext) {
   // A private question (`/me`, #467) reads what its group's ordinary turn could, and changes only reminders.
   if (isPrivateQuestionSession(ctx)) return privateQuestionToolSurface(await resolveConversationToolSurface(ctx));
+  // A background task (#519) holds what a delegated child of its chat holds, plus its own question tool.
+  if (ctx.channel.kind === BACKGROUND_TASK_CHANNEL_KIND) return backgroundTaskToolSurface(ctx, await resolveConversationToolSurface(ctx));
   return await resolveConversationToolSurface(ctx);
 }
 
@@ -88,7 +93,7 @@ async function resolveConversationToolSurface(ctx: DynamicResolveContext) {
     }
   }
   const auth = ctx.session.auth;
-  const buildSurface = ctx.channel.kind === "subagent"
+  const buildSurface = ctx.channel.kind === "subagent" || ctx.channel.kind === BACKGROUND_TASK_CHANNEL_KIND
     ? buildSubagentToolSurface
     : buildModeToolSurface;
   let environment: ReturnType<typeof resolveConversationEnvironment>;

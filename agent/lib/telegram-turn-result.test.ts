@@ -22,6 +22,7 @@ function buildInput(overrides: Partial<TurnResultInput> = {}) {
     conversation: { id: "conversation-1" },
     forumTopicId: null,
     group: null,
+    backgroundTasks: [],
     groupTurnTrigger: null,
     lazyAttachment: null,
     message: { chat: { id: "555", type: "private" }, messageId: "42" },

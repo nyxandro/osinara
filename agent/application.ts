@@ -17,7 +17,9 @@
  *    unreported (a card not shown, an end not reported) is reported.
  * 4. The HTTP server: the Telegram webhook, the internal drain the ingress worker calls, the Google
  *    OAuth callback, the internal API key usage route the egress proxy calls and the health check.
- * 5. The minute scheduler: reminders and approval timeouts, scheduled runs, memory review, the
+ * 5. Background tasks (#519): their own dispatcher, outside the deploy admission; their questions and
+ *    outcomes reach the chat on the wake-up slot.
+ * 6. The minute scheduler: reminders and approval timeouts, scheduled runs, memory review, the
  *    software update check, the reminders' Google Calendar, and recovery again for turns whose
  *    start a deploy held back.
  */
@@ -33,6 +35,10 @@ import { createScheduleCheckRunner } from "./lib/agent-schedules/agent-schedule-
 import { AGENT_SCHEDULE_CONVERSATION_ADMISSION_MILLISECONDS } from "./lib/agent-schedules/agent-schedule-config.js";
 import type { ScheduledChatStart } from "./lib/agent-schedules/agent-schedule-dispatcher.js";
 import { createConversationWakeupProcessor } from "./lib/conversation-wakeups/conversation-wakeup-drain.js";
+import { createBackgroundTaskDispatcher } from "./lib/background-tasks/background-task-dispatcher.js";
+import { createBackgroundTaskEventProcessor } from "./lib/background-tasks/background-task-events.js";
+import { BACKGROUND_TASK_CHANNEL_KIND } from "./lib/background-tasks/background-task-session.js";
+import { backgroundTaskObserver } from "./lib/background-tasks/background-task-turn-events.js";
 import { conversationWakeupRepository } from "./lib/conversation-wakeups/conversation-wakeup-repository.js";
 import { createConversationWakeupTurn } from "./lib/conversation-wakeups/conversation-wakeup-turn-start.js";
 import { database, openDedicatedConnection } from "./lib/database.js";
@@ -74,6 +80,15 @@ export const TELEGRAM_DRAIN_ROUTE = "/v1/telegram-drain";
 const TURN_WAIT_MILLISECONDS = 1_000;
 // How long the start waits for reports of turns an earlier process left unreported.
 const STARTUP_REPORTS_WAIT_MILLISECONDS = 30_000;
+// How often background tasks are looked for, and how soon a stop request cuts a task's step.
+const BACKGROUND_TASK_POLL_MILLISECONDS = 3_000;
+
+async function readRuntimePhase(): Promise<string> {
+  const result = await database().query<{ phase: string }>("SELECT phase FROM runtime_maintenance WHERE singleton");
+  const phase = result.rows[0]?.phase;
+  if (phase === undefined) throw new AppError("AGENT_RUNTIME_MAINTENANCE_MISSING", "Не удалось проверить готовность обработки запросов");
+  return phase;
+}
 
 export interface ApplicationOptions {
   readonly agent: RuntimeAgent;
@@ -136,24 +151,34 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
   });
   // Turns and monitor checks open a chat's sandbox the same way, from the same verified identity.
   const sessionSandboxes = createSessionSandboxes({ baseUrl: options.sandboxRunnerBaseUrl, database: db });
+  const runtime = {
+    agent: options.agent,
+    callModel: callStepModel,
+    database: db,
+    observer: routeTurnObservers({
+      [BACKGROUND_TASK_CHANNEL_KIND]: backgroundTaskObserver(),
+      [MEMORY_REVIEW_CHANNEL_KIND]: lifecycleTurnObserver(memoryReviewTurnEvents),
+      [PRIVATE_QUESTION_CHANNEL_KIND]: privateQuestionObserver,
+      telegram: telegram.observer,
+    }),
+    runnerId: options.runnerId,
+    sandbox: sessionSandboxes,
+    summarize: summarizeWithModel,
+  };
   const dispatcher = createTurnDispatcher({
     // A turn that already exists may finish while a deploy drains, never once it is frozen.
     admit: (work) => withRuntimeAdmission("callback", work),
     runnerLock,
-    runtime: {
-      agent: options.agent,
-      callModel: callStepModel,
-      database: db,
-      observer: routeTurnObservers({
-        [MEMORY_REVIEW_CHANNEL_KIND]: lifecycleTurnObserver(memoryReviewTurnEvents),
-        [PRIVATE_QUESTION_CHANNEL_KIND]: privateQuestionObserver,
-        telegram: telegram.observer,
-      }),
-      runnerId: options.runnerId,
-      sandbox: sessionSandboxes,
-      summarize: summarizeWithModel,
-    },
+    runtime,
     waitMilliseconds: TURN_WAIT_MILLISECONDS,
+  });
+  // Background tasks (#519) run their turns on their own signal and outside the deploy admission.
+  const backgroundTasks = createBackgroundTaskDispatcher({
+    holdsRunnerLock: () => runnerLock.ensureHeld(),
+    now: () => new Date(),
+    pollMilliseconds: BACKGROUND_TASK_POLL_MILLISECONDS,
+    readPhase: readRuntimePhase,
+    runtime,
   });
 
   const createWakeupTurn = createConversationWakeupTurn({
@@ -165,13 +190,14 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
   const ingress = createTelegramIngress({
     dispatch: telegram.dispatch,
     privateQuestions: createPrivateQuestionIngress({ database: db, runTurn: dispatcher.run }),
-    processConversationWakeup: ({ slots }) => createConversationWakeupProcessor({
+    // A background task's question or outcome takes the wake-up slot only when no wake-up is due.
+    processConversationWakeup: async ({ slots }) => await createConversationWakeupProcessor({
       createTurn: createWakeupTurn,
       leaseMilliseconds: TELEGRAM_INGRESS_LEASE_MS,
       repository: conversationWakeupRepository,
       runTurn: dispatcher.run,
       slots,
-    })(),
+    })() || await createBackgroundTaskEventProcessor({ database: db, now: () => new Date(), runTurn: dispatcher.run, slots })(),
     runTurn: dispatcher.run,
   });
   const startInChat: ScheduledChatStart = async (target, message, { auth }) => {
@@ -181,6 +207,7 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
   };
 
   await dispatcher.recover();
+  backgroundTasks.start();
   // The `/me` menu follows the groups; a change made while the bot was down is caught up here. It never
   // rejects and must not hold the server back while Telegram is slow.
   void syncPrivateQuestionCommands("startup");
@@ -230,6 +257,8 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
   return {
     port: server.port,
     async stop(graceMilliseconds) {
+      // A task's turn is cut with the process and taken over by the next one; no new turn starts now.
+      backgroundTasks.stop();
       let graceTimer: ReturnType<typeof setTimeout> | undefined;
       const grace = new Promise<void>((resolve) => { graceTimer = setTimeout(resolve, graceMilliseconds); });
       await Promise.all([

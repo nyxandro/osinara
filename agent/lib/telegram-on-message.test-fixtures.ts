@@ -167,6 +167,9 @@ export function repositories() {
     turnInterjections: {
       findDeliveredContentKind: vi.fn().mockResolvedValue(null),
     },
+    backgroundTasks: {
+      listForContext: vi.fn().mockResolvedValue([]),
+    },
     conversationWakeups: {
       listPlanned: vi.fn().mockResolvedValue([]),
     },

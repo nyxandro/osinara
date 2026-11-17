@@ -84,6 +84,8 @@ const CHANGED_AFTER_RECORDING = new Set([
   "manage_gmail_message", "manage_google_workspace_connection", "manage_memory", "manage_memory_thread",
   "manage_reminder", "remember", "manage_skill", "notification_settings", "owner_settings", "search_memories",
   "send_contact", "send_location", "send_poll", "send_voice_message", "send_widget", "update_widget", "web_search",
+  // Arrived after the recording: background tasks (#519, 17.11.2026).
+  "background_task",
 ]);
 // The built-in `ask_question` left on 26.10.2026: buttons under the answer replaced it. The separate list
 // tools left on 04.11.2026 (#457): each list is an action of the tool that changes the same object. The
