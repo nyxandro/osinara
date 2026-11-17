@@ -29,15 +29,15 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { MEMORY_EMBEDDING_LIFECYCLE_CODES } from "./agent/lib/memory-config.js";
+import { MEMORY_EMBEDDING_LIFECYCLE_CODES } from "../agent/lib/memory-config.js";
 import {
   SANDBOX_EGRESS_ROUTINE_CODES,
   SANDBOX_EGRESS_SITE_FAILURE_CODES,
   SANDBOX_EGRESS_SITE_METRICS_CODE,
   SANDBOX_EGRESS_UPSTREAM_PROXY_FAILED_CODE,
-} from "./services/sandbox-egress-proxy/egress-log.js";
+} from "../services/sandbox-egress-proxy/egress-log.js";
 
-const projectRoot = new URL("./", import.meta.url);
+const projectRoot = new URL("../", import.meta.url);
 const read = (path: string) => readFileSync(new URL(path, projectRoot), "utf8");
 
 /**
