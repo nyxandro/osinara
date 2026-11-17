@@ -20,7 +20,7 @@ import {
   resolvedComposeSecurityFixture,
 } from "./production-release-contract-fixtures.js";
 
-const projectRoot = new URL("./", import.meta.url);
+const projectRoot = new URL("../", import.meta.url);
 
 function readProjectFile(path: string): string {
   return readFileSync(new URL(path, projectRoot), "utf8");

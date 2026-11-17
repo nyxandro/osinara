@@ -22,7 +22,7 @@ import {
   resolvedComposeSecurityFixture,
 } from "./production-release-contract-fixtures.js";
 
-const projectRoot = new URL("./", import.meta.url).pathname;
+const projectRoot = new URL("../", import.meta.url).pathname;
 const temporaryDirectories: string[] = [];
 const MODULES = `
   source scripts/production-deploy/common.sh

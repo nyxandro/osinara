@@ -16,7 +16,7 @@ import { spawnSync } from "node:child_process";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-const projectRoot = new URL("./", import.meta.url).pathname;
+const projectRoot = new URL("../", import.meta.url).pathname;
 const temporaryDirectories: string[] = [];
 
 function runShell(source: string, environment: NodeJS.ProcessEnv = {}) {

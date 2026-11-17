@@ -24,7 +24,7 @@ function shell(source: string) {
 source scripts/production-deploy/backup.sh
 fail() { printf '%s\\n' "$1" >&2; return 1; }
 log_event() { :; }
-${source}`], { cwd: new URL("./", import.meta.url), encoding: "utf8" });
+${source}`], { cwd: new URL("../", import.meta.url), encoding: "utf8" });
 }
 afterEach(() => { for (const directory of temporary.splice(0)) rmSync(directory, { recursive: true, force: true }); });
 

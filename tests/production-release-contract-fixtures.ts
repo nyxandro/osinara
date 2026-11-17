@@ -8,7 +8,7 @@
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const projectRoot = new URL("./", import.meta.url);
+const projectRoot = new URL("../", import.meta.url);
 
 export function resolvedComposeSecurityFixture(): Record<string, unknown> {
   const logging = { driver: "json-file", options: { "max-file": "5", "max-size": "20m" } };

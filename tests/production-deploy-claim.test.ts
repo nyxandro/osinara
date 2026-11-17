@@ -11,7 +11,7 @@ import { spawnSync } from "node:child_process";
 
 import { describe, expect, it } from "vitest";
 
-const projectRoot = new URL("./", import.meta.url).pathname;
+const projectRoot = new URL("../", import.meta.url).pathname;
 const PROPOSAL = "11111111-1111-4111-8111-111111111111";
 const LEASE = "22222222-2222-4222-8222-222222222222";
 const MANIFEST = [

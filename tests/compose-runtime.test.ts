@@ -21,13 +21,13 @@ import { describe, expect, it } from "vitest";
 import {
   MEMORY_EMBEDDING_WORKER_READY_PATH,
   MEMORY_EMBEDDING_WORKER_STALE_MILLISECONDS,
-} from "./agent/lib/memory-config.js";
+} from "../agent/lib/memory-config.js";
 
 interface PackageManifest {
   name: string;
 }
 
-const projectRoot = new URL("./", import.meta.url);
+const projectRoot = new URL("../", import.meta.url);
 const REMOVED_DOCUMENT_PARSER_PATHS = [
   "agent/lib/attachments/document-parser-client.ts",
   "agent/lib/workspaces/workspace-pdf-inspection.ts",
