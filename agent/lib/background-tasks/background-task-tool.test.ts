@@ -1,5 +1,5 @@
 /**
- * The main agent's `background_task` tool (#519).
+ * The main agent's `background_task` tool (#519); kept here, `lib/tools` holds tool modules only.
  *
  * Constructs covered:
  * - Only a live turn answering a person in a private chat or a family group may use it: a wake-up, a task's
@@ -19,13 +19,13 @@ const repository = vi.hoisted(() => ({
 }));
 const messages = vi.hoisted(() => ({ append: vi.fn() }));
 
-vi.mock("../background-tasks/background-task-repository.js", () => ({ backgroundTaskRepository: repository }));
-vi.mock("../background-tasks/background-task-message-repository.js", () => ({ backgroundTaskMessageRepository: messages }));
+vi.mock("./background-task-repository.js", () => ({ backgroundTaskRepository: repository }));
+vi.mock("./background-task-message-repository.js", () => ({ backgroundTaskMessageRepository: messages }));
 vi.mock("../database.js", () => ({
   database: () => ({ query: vi.fn().mockResolvedValue({ rows: [{ queue_id: "queue-1" }] }) }),
 }));
 
-import backgroundTask from "./background_task.js";
+import backgroundTask from "../tools/background_task.js";
 
 const AUTHOR = "0b9a3c3e-6a3f-4b8e-9d1f-2b7f4c8d9e10";
 const PRIVATE = {
