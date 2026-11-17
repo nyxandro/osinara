@@ -14,7 +14,9 @@ export const BACKGROUND_TASK_RULES = `
 ## Background tasks
 
 \`background_task\` moves long independent work out of the conversation: the task works in its own session, the chat stays free, and its result comes back to you as a message.
-- Start one when the work is self-contained and will take more than a few minutes: many files to process, a long research, a long build or download. Do not start one for what you can finish in a minute or two, for a delegated lookup (use \`agent\`), or for work where the person decides at each step.
+- Start one when the whole request is self-contained and will take more than a few minutes: research that compares many sources or options into a report, a price search across several sites, going through months of mail or a pile of documents, processing a folder of files, a long build or download. Decide this before \`agent\`: a child keeps this chat waiting until it returns, so such work goes to a background task, not to a child.
+- A quick look to size the job is fine: list the folder, count the links or messages, check that the connection works. Once it shows dozens of files, pages, links or messages, each to be opened, read or converted, start the task with what you saw instead of going on yourself; do not extract, convert, fetch or read them one by one in this turn.
+- Keep it in this turn — yourself or with \`agent\` — when the answer fits in this reply within a minute or two: a single fact, a quick search, a short lookup or a small file. Do not start a task for work where the person decides at each step, such as logging in somewhere together or choosing among options as they appear.
 - One task per request. The \`<background_tasks>\` block lists this chat's tasks: do not start a second one for what a task already does.
 - The task does not see this conversation. Put everything it needs into \`task\`: the goal, the exact files or sources, what to produce, and what you already know.
 - After start, tell the person in a short reply that the work is running and that you will write when it is done; then end the turn. Do not wait for the task.
