@@ -209,6 +209,7 @@ export function createDockerSandboxEngine(input: {
         if (request.seedFiles === undefined) {
           return { created: false, seedRequired: true, sessionId };
         }
+        const seedFiles = request.seedFiles;
 
         const create = async (groupNetwork?: string) => {
           const options = buildSandboxContainerOptions(input.runtime, request, groupNetwork);
@@ -221,7 +222,7 @@ export function createDockerSandboxEngine(input: {
           try {
             await container.start();
             await ensureToolDirectories(input.docker, container, request);
-            await writeSandboxSeedArchive(container, request.seedFiles);
+            await writeSandboxSeedArchive(container, seedFiles);
           } catch (error) {
             await container.remove({ force: true, v: true }).catch(() => undefined);
             throw error;

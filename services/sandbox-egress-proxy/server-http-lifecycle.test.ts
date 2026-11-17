@@ -53,12 +53,19 @@ async function within<T>(promise: Promise<T>, what: string): Promise<T> {
   }
 }
 
+/** A promise and its resolve, as Promise.withResolvers gives (its type needs lib ES2024, the project checks ES2022). */
+function signal(): { readonly promise: Promise<void>; readonly resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 /** A site that sends the headers and the first part of a package, then holds the rest. */
 async function slowSite() {
   let siteSocket: Socket | undefined;
   let response: ServerResponse | undefined;
-  const requested = Promise.withResolvers<void>();
-  const closed = Promise.withResolvers<void>();
+  const requested = signal();
+  const closed = signal();
   const port = await listen(createServer((incoming: IncomingMessage, outgoing: ServerResponse) => {
     siteSocket = incoming.socket;
     response = outgoing;
@@ -161,8 +168,8 @@ describe("plain HTTP through the sandbox egress proxy", () => {
   it("opens nothing to a site for a client gone before its address was decided", async () => {
     let siteConnections = 0;
     const sitePort = await listen(createServer(() => undefined).on("connection", () => { siteConnections += 1; }));
-    const deciding = Promise.withResolvers<void>();
-    const decided = Promise.withResolvers<void>();
+    const deciding = signal();
+    const decided = signal();
     let checks = 0;
     // The grant check takes a while and the client hangs up meanwhile. Every later check refuses, as
     // a revocation would: a connection left tracked for that address would be rechecked and closed.
