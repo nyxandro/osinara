@@ -89,6 +89,12 @@ groups:
       - record: osinara_model_transient_1m
         expr: 'project:"osinara-production" code:"AGENT_MODEL_TRANSIENT_RESPONSE" | stats by (statusCode) count() as value'
 
+      # Model calls that ended in failure, a lost or refused connection included: no answer of the hub,
+      # so no AGENT_MODEL_TRANSIENT_RESPONSE line either (#492). A call cancelled by its turn is
+      # written as "cancelled" and stays out.
+      - record: osinara_model_call_failed_1m
+        expr: 'project:"osinara-production" code:"AGENT_MODEL_CALL_METRICS" outcome:"failed" | stats by (outcome) count() as value'
+
       # Photos, files and voice messages that did not reach the agent for a reason outside the file
       # itself (16.11.2026): Telegram did not hand it over, or speech recognition failed or stopped.
       # Over 20 MB, no speech in a recording and recognition switched off on purpose are the file or

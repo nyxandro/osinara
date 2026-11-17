@@ -71,6 +71,7 @@ const COUNTED_LINE_WRITERS: Record<string, readonly string[]> = {
     "agent/lib/memory-retrieval.ts",
   ],
   AGENT_MEMORY_USAGE_DIRECTIVE: ["agent/lib/memory-usage-report.ts"],
+  AGENT_MODEL_CALL_METRICS: ["agent/lib/model-call-metrics.ts"],
   AGENT_ATTACHMENT_UNRECEIVED: ["agent/lib/attachments/telegram-workspace-attachments.ts"],
   AGENT_VOICE_UNRECEIVED: ["agent/lib/telegram-durable-ingress.ts"],
   [SANDBOX_EGRESS_SITE_METRICS_CODE]: ["services/sandbox-egress-proxy/egress-site-meter.ts"],
@@ -258,6 +259,24 @@ describe("osinara alert rules", () => {
     }
   });
 
+  // A dropped or refused connection gets no answer from the hub, so no AGENT_MODEL_TRANSIENT_RESPONSE
+  // line: on 14.11.2026 151 failed calls went by without OsinaraModelTransientBurst (#492).
+  it("raises OsinaraModelCallsFailing on failed model calls, a lost connection included", () => {
+    const [block] = alertBlocks("OsinaraModelCallsFailing");
+    expect(block, "the alert this guards has been renamed").toBeDefined();
+    const recorded = new Map([...logRules.matchAll(/^ *- record: (osinara_[a-z0-9_]+)\n *expr: '([^']*)'/gmu)]
+      .map((match) => [match[1]!, match[2]!]));
+
+    expect(ruleField(block!, "expr")).toBe("sum(sum_over_time(osinara_model_call_failed_1m[10m])) > 5");
+    expect(recorded.get("osinara_model_call_failed_1m"))
+      .toBe('project:"osinara-production" code:"AGENT_MODEL_CALL_METRICS" outcome:"failed" | stats by (outcome) count() as value');
+    // The wrapper writes "failed" for a call that did not start and for one cut off mid-answer, and
+    // "cancelled" for a call its turn stopped, which the alert leaves out.
+    const writer = read("agent/lib/model-call-metrics.ts");
+    expect(writer.match(/outcome: params\.abortSignal\?\.aborted \? "cancelled" : "failed"/gu)).toHaveLength(2);
+    expect(writer).toContain('record("failed")');
+  });
+
   it("reports an indexing failure only from the indexer, not from a turn reading memory", () => {
     const [block] = alertBlocks("OsinaraEmbeddingFailed");
     const expression = ruleField(block!, "expr") ?? "";
@@ -266,6 +285,25 @@ describe("osinara alert rules", () => {
     // reach the service. 08.10 such a read failure fired this alert, and its runbook sent the duty
     // reader to an indexer with no failed job (#352); OsinaraMemorySemanticBranchDown owns reads.
     expect(expression).toContain('service="memory-embedding-worker"');
+  });
+
+  it("watches background tasks through metrics the collector exports from the view (#519)", () => {
+    const expected = {
+      OsinaraBackgroundTaskQueueStalled: "osinara_background_task_queue_stalled_age_seconds > 600",
+      OsinaraBackgroundTaskStuck: "osinara_background_task_stuck_age_seconds > 900",
+      OsinaraBackgroundTaskUnreported: "osinara_background_task_unreported_age_seconds > 900",
+    };
+    for (const [alert, condition] of Object.entries(expected)) {
+      const [block] = alertBlocks(alert, stateRules);
+      // The whole condition before the deploy grace, so a changed threshold (> 6000) fails too.
+      const [threshold, grace] = (ruleField(block!, "expr") ?? "").replace(/\s+/gu, " ").trim().split(" unless ");
+      expect(threshold, alert).toBe(condition);
+      expect(grace, alert).toBe('on() deploy_window_end_timestamp_seconds{project="osinara-production"} + 600 > time()');
+      expect(exporter).toContain(`metric_name: ${condition.split(" ")[0]}`);
+    }
+    expect(exporter).toContain("FROM monitoring_background_tasks");
+    // A place frees seconds before the next pass takes the queued task: one scrape must not page.
+    expect(holdMinutes(alertBlocks("OsinaraBackgroundTaskQueueStalled", stateRules)[0]!)).toBe(2);
   });
 
   it("keeps OsinaraErrorBurst off every line the application writes as information", () => {

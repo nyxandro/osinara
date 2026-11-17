@@ -102,6 +102,21 @@ describe("requireBehaviorPreferenceAuthorization", () => {
     expect(() => requireBehaviorPreferenceAuthorization(wakeup({}))).toThrow("AGENT_BEHAVIOR_PREFERENCE_CONTEXT_INVALID");
   });
 
+  it("reads the chat's prompt for a child of a wake-up or of a background task's report (#519)", () => {
+    const base = {
+      applicationSessionId: "application-session-1", familyId: "family-1", telegramChatId: "101",
+      telegramChatType: "private", telegramConversationId: "conversation-1", telegramUserId: "101",
+    };
+    // A delegated child inherits its parent's auth and has a parent of its own.
+    const child = (attributes: Record<string, unknown>) => {
+      const ctx = context({ ...base, ...attributes });
+      return { ...ctx, session: { ...ctx.session, parent: { callId: "call-1", sessionId: "session-0", turnId: "turn-0" } } } as unknown as ToolContext;
+    };
+    for (const marker of [{ conversationScheduleRunId: "run-1" }, { backgroundTaskEventId: "17" }]) {
+      expect(requireBehaviorPreferenceReadAuthorization(child(marker))).toMatchObject({ kind: "wakeup", scope: "personal" });
+    }
+  });
+
   it("projects a scheduled chat as read-only authorization without a timeline source", () => {
     const scheduledAttributes = {
       applicationSessionId: "application-session-1",

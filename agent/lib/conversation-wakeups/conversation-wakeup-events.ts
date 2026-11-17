@@ -2,7 +2,8 @@
  * Channel lifecycle of a wake-up turn inside its chat's own conversation.
  *
  * Exports:
- * - `isConversationWakeupTurn`: whether the current turn was started by a wake-up.
+ * - `isConversationWakeupTurn`: whether the current turn was started by a wake-up, or brings a background
+ *   task's question or outcome (#519): both answer no message of a person and behave alike in the chat.
  * - `admitConversationWakeupTurn`: binds the starting turn to its run.
  * - `finishConversationWakeupTurn`: closes the run when the turn completes, fails, or is cancelled.
  *
@@ -14,11 +15,12 @@ import type { SessionContext } from "../../runtime/context.js";
 import { applicationSessionId } from "../sessions/session-context.js";
 import { conversationWakeupRunRepository } from "./conversation-wakeup-run-repository.js";
 import { conversationWakeupRunId } from "./conversation-wakeup-turn.js";
+import { backgroundTaskEventIdOf } from "../background-tasks/background-task-session.js";
 
 type TurnContext = Pick<SessionContext, "session">;
 
-export function isConversationWakeupTurn(ctx: TurnContext): boolean {
-  return !ctx.session.parent && conversationWakeupRunId(ctx.session.auth) !== null;
+export function isConversationWakeupTurn(ctx: { readonly session: { readonly auth: SessionContext["session"]["auth"]; readonly parent?: unknown } }): boolean {
+  return !ctx.session.parent && (conversationWakeupRunId(ctx.session.auth) !== null || backgroundTaskEventIdOf(ctx) !== null);
 }
 
 export async function admitConversationWakeupTurn(ctx: TurnContext): Promise<void> {

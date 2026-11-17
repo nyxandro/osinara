@@ -183,10 +183,14 @@ export async function releaseOtherRunners(client: JournalClient, runnerId: strin
 const ROOT_SESSION = `NOT EXISTS (SELECT 1 FROM agent_session_state child
   WHERE child.session_id = agent_turns.session_id AND child.parent_session_id IS NOT NULL)`;
 
-/** Running turns that no parent drives, oldest first in each session. */
+/**
+ * Running turns that no parent drives, oldest first in each session. A background task's turns are left
+ * to the task dispatcher: it runs them under its own limits and signal (#519).
+ */
 export async function listRunningRootTurns(client: JournalClient): Promise<TurnRecord[]> {
   const rows = (await client.query<TurnRow>(
-    `SELECT ${TURN_COLUMNS} FROM agent_turns WHERE status = 'running' AND ${ROOT_SESSION} ORDER BY session_id, sequence`,
+    `SELECT ${TURN_COLUMNS} FROM agent_turns
+      WHERE status = 'running' AND kind <> 'background' AND ${ROOT_SESSION} ORDER BY session_id, sequence`,
   )).rows;
   return rows.map(toTurn);
 }

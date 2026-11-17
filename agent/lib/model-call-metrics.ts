@@ -84,7 +84,7 @@ export function createModelCallMetrics(options: {
   }
   return {
     specificationVersion: "v4",
-    async wrapGenerate({ doGenerate }) {
+    async wrapGenerate({ doGenerate, params }) {
       const started = now(); const requestId = randomUUID();
       try {
         const result = await doGenerate();
@@ -95,7 +95,7 @@ export function createModelCallMetrics(options: {
         return result;
       } catch (error) {
         log({ code: "AGENT_MODEL_CALL_METRICS", requestId, provider: options.provider, modelId: options.modelId,
-          durationMs: Math.round(now() - started), outcome: "failed", usageAvailable: false });
+          durationMs: Math.round(now() - started), outcome: params.abortSignal?.aborted ? "cancelled" : "failed", usageAvailable: false });
         throw error;
       }
     },

@@ -18,6 +18,7 @@ import { MODEL_VISION_AVAILABLE } from "../model-vision-availability.js";
 import { externalGroupCapabilityInstructions } from "../tool-policy/external-group-capability-instructions.js";
 import type { ExternalGroupToolName } from "../tool-policy/group-tool-catalog.js";
 import { TURN_INTERJECTION_RULES } from "../turn-interjection/turn-interjection-block.js";
+import { BACKGROUND_TASK_RULES } from "../background-tasks/background-task-rules.js";
 import { SANDBOX_API_KEY_USAGE } from "./api-key-fragments.js";
 import { SANDBOX_PACKAGE_RULES } from "./sandbox-package-fragments.js";
 import { chatNotesRules } from "./chat-notes-fragments.js";
@@ -286,6 +287,7 @@ function privateInstructions(
       ? scheduledSendRules({ gifs: GIF_REPLIES_AVAILABLE, voice: true, widgets: TELEGRAM_WIDGETS_AVAILABLE })
       : null,
     scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
+    scheduledRun || subagentTurn ? null : BACKGROUND_TASK_RULES,
     // A delegated child has no notes tool; it reads the notes and leaves keeping them to the turn.
     scheduledRun || subagentTurn ? null : chatNotesRules("private"),
     // A child answers its parent, never the person, so it offers no buttons.
@@ -366,6 +368,7 @@ function familyInstructions(
     scheduledRun || subagentTurn ? null : TELEGRAM_NATIVE_SEND_RULES,
     scenarioRun ? scheduledSendRules({ gifs: GIF_REPLIES_AVAILABLE, voice: true, widgets: false }) : null,
     scheduledRun || subagentTurn ? null : TURN_INTERJECTION_RULES,
+    scheduledRun || subagentTurn ? null : BACKGROUND_TASK_RULES,
     // A delegated child has no notes tool; it reads the notes and leaves keeping them to the turn.
     scheduledRun || subagentTurn ? null : chatNotesRules("family"),
     // A child answers its parent, never the person, so it offers no buttons.

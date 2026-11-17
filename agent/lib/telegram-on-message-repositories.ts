@@ -5,6 +5,7 @@
  * - `TelegramMessageRepositories`: explicit repository surface consumed by authorization handling.
  * - `productionTelegramMessageRepositories`: PostgreSQL, attachment, notice, and workspace adapters.
  */
+import { backgroundTaskContextRepository } from "./background-tasks/background-task-context.js";
 import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 
 import { extractAnimationStill } from "./attachments/animation-still.js";
@@ -86,6 +87,7 @@ export interface TelegramMessageRepositories {
   telegram: TelegramRepository;
   timeline: Pick<typeof conversationTimelineRepository, "recordInbound">;
   turnInterjections: Pick<typeof turnInterjectionRepository, "findDeliveredContentKind">;
+  backgroundTasks: Pick<typeof backgroundTaskContextRepository, "listForContext">;
   conversationWakeups: Pick<typeof conversationWakeupContextRepository, "listPlanned">;
 }
 
@@ -111,5 +113,6 @@ export const productionTelegramMessageRepositories = {
   timeline: conversationTimelineRepository,
   threadNotices: productionMemoryThreadNotices,
   turnInterjections: turnInterjectionRepository,
+  backgroundTasks: backgroundTaskContextRepository,
   conversationWakeups: conversationWakeupContextRepository,
 } satisfies TelegramMessageRepositories;

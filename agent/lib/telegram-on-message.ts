@@ -363,6 +363,10 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
     const plannedWakeups = ctx.ingressRecovery && turnInterjectionMarker !== null && access.userId !== null
       ? await repositories.conversationWakeups.listPlanned(ctx.ingressRecovery.updateId, access.familyId, access.userId)
       : [];
+    // ...and the background tasks of this chat and topic (#519): to see a repeated request and an answer.
+    const backgroundTasks = turnInterjectionMarker !== null
+      ? await repositories.backgroundTasks.listForContext({ forumTopicId, telegramChatId: String(message.chat.id) })
+      : [];
     const deliveryAuthorization = telegramProactiveDeliveryAuthorization(decision, message);
     const pendingDeliveries = deliveryAuthorization
       ? await repositories.proactiveDeliveries.listPendingContext({
@@ -445,6 +449,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       access,
       actor,
       appSession,
+      backgroundTasks,
       conversation,
       forumTopicId,
       group,

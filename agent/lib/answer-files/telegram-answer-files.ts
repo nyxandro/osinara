@@ -23,6 +23,7 @@ import type { WorkspaceAuthorization } from "../workspaces/workspace-repository.
 import { answerFilesNotice } from "./answer-file-check.js";
 import { prepareAnswerFiles, type PreparedTelegramAnswer } from "./answer-file-delivery.js";
 import { answerFileResolver } from "./answer-file-resolution.js";
+import { isRestrictedChildTurn } from "../restricted-child-turn.js";
 
 export function answerWorkspaceAuthorization(session: { readonly auth: SessionAuth }): WorkspaceAuthorization | null {
   try {
@@ -36,7 +37,7 @@ export function answerWorkspaceAuthorization(session: { readonly auth: SessionAu
 export async function checkTelegramAnswer(
   context: StepStartContext & { readonly text: string },
 ): Promise<string | undefined> {
-  if (context.session.parent !== undefined) return undefined;
+  if (isRestrictedChildTurn(context.session)) return undefined;
   // A private question's answer is one Rich Message too (#467): only its tags can be wrong, it has no files or buttons.
   if (context.channel.kind === "private-question") return telegramRichTagsNotice(context.text);
   if (context.channel.kind !== "telegram") return undefined;

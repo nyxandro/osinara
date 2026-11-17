@@ -31,6 +31,8 @@ import {
   type PlannedConversationWakeup,
 } from "./conversation-wakeups/conversation-wakeup-context.js";
 import type { TurnInterjectionContentKind } from "./turn-interjection/turn-interjection-repository.js";
+import { formatBackgroundTasksContext } from "./background-tasks/background-task-context.js";
+import type { BackgroundTask } from "./background-tasks/background-task-records.js";
 
 /**
  * The group's last pause, while the history the turn sees spans it: messages written then were never
@@ -58,6 +60,8 @@ export function buildTelegramTurnResult(input: {
   access: ConversationAccess;
   actor: TelegramInboundActor;
   appSession: PreparedSession;
+  /** Background tasks of this chat and topic still at work or with an outcome on its way (#519). */
+  backgroundTasks: readonly BackgroundTask[];
   conversation: ApplicationConversation;
   forumTopicId: string | null;
   group: RegisteredGroup | null;
@@ -102,6 +106,8 @@ export function buildTelegramTurnResult(input: {
   if (input.turnInterjectionMarker) context.push(turnInterjectionMarkerContext(input.turnInterjectionMarker));
   const plannedWakeups = formatPlannedWakeupsContext(input.plannedWakeups);
   if (plannedWakeups) context.push(plannedWakeups);
+  const backgroundTasks = formatBackgroundTasksContext(input.backgroundTasks, input.turnStartedAt);
+  if (backgroundTasks) context.push(backgroundTasks);
   const pause = groupPauseContext(input.group, input.turnContext);
   if (pause) context.push(pause);
   return {

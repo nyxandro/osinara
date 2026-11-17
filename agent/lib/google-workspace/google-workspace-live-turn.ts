@@ -19,9 +19,11 @@ import type { SessionContext } from "../../runtime/context.js";
 import { scheduledRunId } from "../agent-schedules/scheduled-session.js";
 import { AppError } from "../app-error.js";
 import { conversationWakeupRunId } from "../conversation-wakeups/conversation-wakeup-turn.js";
+import { isRestrictedChildTurn } from "../restricted-child-turn.js";
+import { backgroundTaskEventIdOf } from "../background-tasks/background-task-session.js";
 
 export function googleWorkspaceChangeRefusal(ctx: Pick<SessionContext, "session">): AppError | null {
-  if (ctx.session.parent !== undefined) {
+  if (isRestrictedChildTurn(ctx.session)) {
     return new AppError(
       "AGENT_GOOGLE_WORKSPACE_SUBAGENT_WRITE_FORBIDDEN",
       "В делегированной задаче Google Workspace доступен только для чтения. Опишите нужное изменение в результате задачи: его выполнит основной агент",
@@ -30,7 +32,7 @@ export function googleWorkspaceChangeRefusal(ctx: Pick<SessionContext, "session"
   }
   const kind = ctx.session.turn.kind;
   const scenarioTurn = kind === "scheduled" || kind === "wakeup";
-  if (scenarioTurn || scheduledRunId(ctx) !== null || conversationWakeupRunId(ctx.session.auth) !== null) {
+  if (scenarioTurn || scheduledRunId(ctx) !== null || conversationWakeupRunId(ctx.session.auth) !== null || backgroundTaskEventIdOf(ctx) !== null) {
     return new AppError(
       "AGENT_GOOGLE_WORKSPACE_SCENARIO_WRITE_FORBIDDEN",
       "В сценарии по расписанию Google Workspace доступен только для чтения. Сообщите в итоге, какое изменение нужно: человек попросит о нём в чате",
