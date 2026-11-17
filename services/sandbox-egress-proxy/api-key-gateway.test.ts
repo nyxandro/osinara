@@ -14,7 +14,7 @@
 import { createServer, request, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import type { ApiKeyProjectionGrant } from "../../agent/lib/api-keys/api-key-contract.js";
 import { createApiKeyGateway, type ApiKeyGatewayOptions } from "./api-key-gateway.js";
@@ -57,8 +57,8 @@ let gatewayPort: number;
 let received: Received[];
 let upstreamStatus: number;
 let options: ApiKeyGatewayOptions;
-let recordUsage: ReturnType<typeof vi.fn>;
-let resolveUpstream: ReturnType<typeof vi.fn>;
+let recordUsage: Mock<ApiKeyGatewayOptions["recordUsage"]>;
+let resolveUpstream: Mock<ApiKeyGatewayOptions["resolveUpstream"]>;
 
 function listen(server: Server): Promise<number> {
   return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve((server.address() as AddressInfo).port)));
@@ -102,8 +102,8 @@ describe("sandbox API key gateway", () => {
       });
     });
     upstreamPort = await listen(upstream);
-    recordUsage = vi.fn();
-    resolveUpstream = vi.fn().mockResolvedValue({ address: "127.0.0.1", family: 4 });
+    recordUsage = vi.fn<ApiKeyGatewayOptions["recordUsage"]>();
+    resolveUpstream = vi.fn<ApiKeyGatewayOptions["resolveUpstream"]>().mockResolvedValue({ address: "127.0.0.1", family: 4 });
     options = {
       decrypt: () => "sk-real-key",
       loadGrants: async () => GRANTS,

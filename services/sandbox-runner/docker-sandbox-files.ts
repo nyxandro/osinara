@@ -13,8 +13,11 @@ import tar from "tar-stream";
 
 import { WORKSPACE_MAX_FILE_BYTES } from "../../agent/config.js";
 
+/** A Node stream with `destroy`, which @types/dockerode leaves out of the streams Docker hands over. */
+export type DestroyableStream = NodeJS.ReadableStream & { destroy(error?: Error): unknown };
+
 export async function collectLimitedStream(
-  stream: NodeJS.ReadableStream,
+  stream: DestroyableStream,
   limit: number,
 ): Promise<Buffer> {
   const chunks: Buffer[] = [];
