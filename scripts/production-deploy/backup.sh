@@ -61,7 +61,8 @@ runtime_is_idle() {
   # A wake-up turn runs in the chat's lane like a message, and so does the turn that brings a background
   # task's question or outcome. The running release may predate those tables, so their queries are built
   # at execution time and run only where the table exists. A background task's own turns (sessions of the
-  # `background` kind) never hold a deploy: the task goes on after the restart (#519).
+  # `background` kind) never hold a deploy: the task goes on after the restart (#519). Nor does an event
+  # whose attempt died before making its turn: a draining runtime never takes it back.
   app_idle="$(psql_current <<'SQL'
 SELECT CASE
  WHEN EXISTS (SELECT 1 FROM conversation_sessions WHERE retired_at IS NULL AND pending_operation)
@@ -74,7 +75,8 @@ SELECT CASE
        false, true, '')))[1]::text = 'true' END
    OR CASE WHEN to_regclass('public.background_task_events') IS NULL THEN false
      ELSE (xpath('/row/busy/text()', query_to_xml(
-       'SELECT EXISTS (SELECT 1 FROM background_task_events WHERE status = ''processing'') AS busy',
+       'SELECT EXISTS (SELECT 1 FROM background_task_events WHERE status = ''processing''
+          AND (turn_id IS NOT NULL OR lease_expires_at > now())) AS busy',
        false, true, '')))[1]::text = 'true' END
    OR EXISTS (SELECT 1 FROM conversation_sessions WHERE retired_at IS NULL
      AND kind IN ('scheduled', 'proactive') AND task_state IN ('pending', 'running'))

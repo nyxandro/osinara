@@ -5,7 +5,7 @@ description: Load before the first call of the agent tool in a turn, that is bef
 
 # Delegating to a child agent
 
-A child keeps the chat waiting until it returns. If this chat has `background_task` and the whole job will take more than a few minutes, do not delegate it: start a background task instead.
+A child keeps the chat waiting until it returns. If this chat has `background_task` and the whole job is self-contained and will take more than a few minutes, do not delegate it: start a background task instead.
 
 By default start one subagent. Start several in parallel only for truly independent parts, and no more than three subagents per user task. Do not split one sequential job for the sake of visible parallelism.
 

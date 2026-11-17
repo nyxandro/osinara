@@ -70,6 +70,8 @@ export const backgroundTaskEventRepository = {
              WHERE ((event.status = 'pending' AND event.available_at <= $1 AND NOT ${LANE_BUSY}
                      AND EXISTS (SELECT 1 FROM runtime_maintenance WHERE singleton AND phase = 'ready'))
                 OR (event.status = 'processing' AND event.lease_expires_at <= $1
+                     -- A dead attempt that made no turn starts a new one: it waits behind the person too.
+                     AND (event.turn_id IS NOT NULL OR NOT ${LANE_BUSY})
                      AND EXISTS (SELECT 1 FROM runtime_maintenance WHERE singleton
                        AND (phase = 'ready' OR (phase = 'draining' AND event.turn_id IS NOT NULL)))))
              ORDER BY event.available_at, event.id LIMIT 1 FOR UPDATE OF event SKIP LOCKED)
@@ -142,15 +144,24 @@ export const backgroundTaskEventRepository = {
     return result.rowCount === 1;
   },
 
-  /** The answer failed: again after the pause, or given up after the last attempt. */
-  async retry(event: Pick<BackgroundTaskEvent, "id" | "leaseToken">, code: string, now: Date): Promise<"gave_up" | "retry" | null> {
+  /**
+   * The answer failed: again after the pause, or given up after the last attempt. A failure that does not
+   * spend an attempt (the model hub is out for now) only waits for the pause.
+   */
+  async retry(
+    event: Pick<BackgroundTaskEvent, "id" | "leaseToken">,
+    code: string,
+    now: Date,
+    options: { readonly pauseMs: number; readonly spendsAttempt: boolean },
+  ): Promise<"gave_up" | "retry" | null> {
+    const spent = options.spendsAttempt ? 1 : 0;
     const result = await database().query<{ status: "gave_up" | "pending" }>(
       `UPDATE background_task_events
-          SET attempt_count = attempt_count + 1, last_error_code = $3, lease_token = NULL, lease_expires_at = NULL, turn_id = NULL,
-              status = CASE WHEN attempt_count + 1 >= $5 THEN 'gave_up' ELSE 'pending' END,
+          SET attempt_count = attempt_count + $7, last_error_code = $3, lease_token = NULL, lease_expires_at = NULL, turn_id = NULL,
+              status = CASE WHEN attempt_count + $7 >= $5 THEN 'gave_up' ELSE 'pending' END,
               available_at = $4::timestamptz + $6 * interval '1 millisecond'
         WHERE id = $1 AND lease_token = $2 AND status = 'processing' RETURNING status`,
-      [event.id, event.leaseToken, code, now, BACKGROUND_TASK_EVENT_ATTEMPTS, BACKGROUND_TASK_EVENT_RETRY_MS],
+      [event.id, event.leaseToken, code, now, BACKGROUND_TASK_EVENT_ATTEMPTS, options.pauseMs, spent],
     );
     const status = result.rows[0]?.status;
     return status === undefined ? null : status === "gave_up" ? "gave_up" : "retry";

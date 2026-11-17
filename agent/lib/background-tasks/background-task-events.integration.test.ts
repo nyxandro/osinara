@@ -4,6 +4,8 @@
  * Constructs covered:
  * - An outcome is answered only after the main agent's turn ended well; a failed turn brings it back in
  *   five minutes, and an answered outcome makes the task reported. A turn already created is let finish.
+ * - An unreachable model hub spends no attempt and is tried ever less often, for a day after the event was
+ *   ready (17.11.2026 the hub was down an hour, as long as twelve attempts last); then the event is given up.
  * - A chat with no conversation right now keeps the event waiting without spending an attempt, up to a day.
  * - An author who lost access is not told anything; a question answered meanwhile is not asked.
  */
@@ -15,7 +17,7 @@ import { telegramContinuationToken } from "../../runtime/telegram/api.js";
 import { loadTurn } from "../../runtime/turn/journal-repository.js";
 import type { TurnOutcome } from "../../runtime/turn/run-turn.js";
 import { newTestSession } from "../../runtime/turn/turn.integration-fixtures.js";
-import { BACKGROUND_TASK_CONCURRENCY } from "./background-task-config.js";
+import { BACKGROUND_TASK_ANSWER_WAIT_MS, BACKGROUND_TASK_CONCURRENCY, BACKGROUND_TASK_EVENT_ATTEMPTS } from "./background-task-config.js";
 import { createBackgroundTaskEventProcessor } from "./background-task-events.js";
 import { backgroundTaskMessageRepository } from "./background-task-message-repository.js";
 import { backgroundTaskRepository } from "./background-task-repository.js";
@@ -44,6 +46,19 @@ async function finishedTask(): Promise<string> {
   await backgroundTaskRepository.claimNextQueued(BACKGROUND_TASK_CONCURRENCY, now);
   await backgroundTaskRepository.finish({ code: "AGENT_BACKGROUND_TASK_FINISHED", id: task.id, now, state: "finished", text: "Готово" });
   return task.id;
+}
+
+/** The next attempt is due now and finds the turn it made already there (the test has no live conversation). */
+async function retryTurnMade(taskId: string): Promise<void> {
+  await database().query(
+    "UPDATE background_task_events SET available_at = $2, turn_id = 'turn-' || gen_random_uuid() WHERE task_id = $1", [taskId, now],
+  );
+}
+
+/** How long the event waits from `now` before its next attempt. */
+async function pauseOf(taskId: string): Promise<number> {
+  const result = await database().query<{ available_at: Date }>("SELECT available_at FROM background_task_events WHERE task_id = $1", [taskId]);
+  return result.rows[0]!.available_at.getTime() - now.getTime();
 }
 
 async function eventOf(taskId: string) {
@@ -78,6 +93,49 @@ describeWithDatabase("background task events", () => {
     expect(await processor(completed)()).toBe(true);
     expect((await eventOf(taskId))?.status).toBe("answered");
     expect((await backgroundTaskRepository.find(taskId))?.state).toBe("reported");
+  });
+
+  it("waits out an unreachable model hub without spending attempts, ever less often, and gives up after a day", async () => {
+    const taskId = await finishedTask();
+    const createdAt = now;
+    // The last attempt is at hand: a failure that spent it would give the outcome up.
+    await database().query(
+      "UPDATE background_task_events SET turn_id = 'turn-during-outage', attempt_count = $2 WHERE task_id = $1",
+      [taskId, BACKGROUND_TASK_EVENT_ATTEMPTS - 1],
+    );
+    const outage = vi.fn(async () => ({ code: "AGENT_MODEL_TEMPORARILY_UNAVAILABLE", message: "down", status: "failed" }) as TurnOutcome);
+    expect(await processor(outage)()).toBe(true);
+    expect(await eventOf(taskId)).toEqual({
+      attempt_count: BACKGROUND_TASK_EVENT_ATTEMPTS - 1, last_error_code: "AGENT_MODEL_TEMPORARILY_UNAVAILABLE", status: "pending",
+    });
+    expect(await pauseOf(taskId)).toBe(5 * 60_000);
+
+    // Half an hour into the outage the next try waits as long again; the pause never grows past an hour.
+    now = new Date(createdAt.getTime() + 30 * 60_000);
+    await retryTurnMade(taskId);
+    expect(await processor(outage)()).toBe(true);
+    expect(await pauseOf(taskId)).toBe(30 * 60_000);
+    now = new Date(createdAt.getTime() + 5 * 60 * 60_000);
+    await retryTurnMade(taskId);
+    expect(await processor(outage)()).toBe(true);
+    expect(await pauseOf(taskId)).toBe(60 * 60_000);
+
+    // A day after the outcome was ready nobody waits for it any more.
+    now = new Date(createdAt.getTime() + BACKGROUND_TASK_ANSWER_WAIT_MS + 1_000);
+    await retryTurnMade(taskId);
+    expect(await processor(outage)()).toBe(true);
+    expect(await eventOf(taskId)).toEqual({
+      attempt_count: BACKGROUND_TASK_EVENT_ATTEMPTS - 1, last_error_code: "AGENT_MODEL_TEMPORARILY_UNAVAILABLE", status: "gave_up",
+    });
+  });
+
+  it("spends an attempt on a model failure that is not the hub being out of reach", async () => {
+    const taskId = await finishedTask();
+    await retryTurnMade(taskId);
+    const empty = vi.fn(async () => ({ code: "AGENT_MODEL_OUTPUT_INCOMPLETE", message: "empty", status: "failed" }) as TurnOutcome);
+    expect(await processor(empty)()).toBe(true);
+    expect(empty).toHaveBeenCalled();
+    expect(await eventOf(taskId)).toMatchObject({ attempt_count: 1, status: "pending" });
   });
 
   it("brings an outcome into the chat's current conversation as the task's report, then answers it", async () => {

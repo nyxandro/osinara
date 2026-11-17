@@ -294,7 +294,10 @@ describe("osinara alert rules", () => {
     };
     for (const [alert, condition] of Object.entries(expected)) {
       const [block] = alertBlocks(alert, stateRules);
-      expect(ruleField(block!, "expr"), alert).toContain(condition);
+      // The whole condition before the deploy grace, so a changed threshold (> 6000) fails too.
+      const [threshold, grace] = (ruleField(block!, "expr") ?? "").replace(/\s+/gu, " ").trim().split(" unless ");
+      expect(threshold, alert).toBe(condition);
+      expect(grace, alert).toBe('on() deploy_window_end_timestamp_seconds{project="osinara-production"} + 600 > time()');
       expect(exporter).toContain(`metric_name: ${condition.split(" ")[0]}`);
     }
     expect(exporter).toContain("FROM monitoring_background_tasks");

@@ -80,6 +80,8 @@ describeWithDatabase("background task repository", () => {
     const started = [];
     for (let index = 0; index < 4; index += 1) started.push(await backgroundTaskRepository.claimNextQueued(BACKGROUND_TASK_CONCURRENCY, T0));
     expect(started.filter((task) => task !== null)).toHaveLength(3);
+    // A task already running does not count itself: two others run.
+    expect(await backgroundTaskRepository.tasksAhead(tasks[0]!.id)).toBe(2);
     expect((await backgroundTaskRepository.find(tasks[3]!.id))?.state).toBe("queued");
     await backgroundTaskRepository.finish({ code: "AGENT_BACKGROUND_TASK_FINISHED", id: tasks[0]!.id, now: minutes(1), state: "finished", text: "Готово" });
     expect((await backgroundTaskRepository.claimNextQueued(BACKGROUND_TASK_CONCURRENCY, minutes(1)))?.id).toBe(tasks[3]!.id);
@@ -98,6 +100,69 @@ describeWithDatabase("background task repository", () => {
     expect(await backgroundTaskRepository.find(task.id)).toMatchObject({ state: "queued", waitingQuestion: null });
     const events = await database().query("SELECT kind, question_seq FROM background_task_events WHERE task_id = $1", [task.id]);
     expect(events.rows).toEqual([{ kind: "question", question_seq: 1 }]);
+  });
+
+  it("keeps a new question waiting when the call that answered the old one is repeated", async () => {
+    const task = await createTestTask(fixture);
+    await backgroundTaskRepository.claimNextQueued(BACKGROUND_TASK_CONCURRENCY, T0);
+    await backgroundTaskRepository.recordQuestion(task.id, "Считать допсоглашения отдельно?");
+    await backgroundTaskRepository.waitForAnswer(task.id, minutes(1));
+    expect(await message(task.id, "Отдельно", "turn-answer")).toBe("resumes");
+    await backgroundTaskRepository.claimNextQueued(BACKGROUND_TASK_CONCURRENCY, minutes(2));
+    // The task's next turn saw the answer.
+    await backgroundTaskMessageRepository.claimForCall(task.id, { callId: "c1", turnId: "task-turn" });
+    expect(await backgroundTaskMessageRepository.markDelivered(task.id, "task-turn", minutes(2))).toBe(1);
+    await backgroundTaskRepository.recordQuestion(task.id, "А приложения?");
+    await backgroundTaskRepository.waitForAnswer(task.id, minutes(3));
+    // The same tool call again (a retry after a restart) adds nothing and answers no new question.
+    expect(await message(task.id, "Отдельно", "turn-answer")).toBe("next_step");
+    expect(await backgroundTaskRepository.find(task.id)).toMatchObject({ state: "waiting_answer", waitingQuestion: "А приложения?" });
+  });
+
+  it("starts the task queued earliest, also when an answer puts an older task back in the queue", async () => {
+    const older = await createTestTask(fixture);
+    await backgroundTaskRepository.claimNextQueued(BACKGROUND_TASK_CONCURRENCY, T0);
+    await backgroundTaskRepository.recordQuestion(older.id, "Какой год?");
+    await backgroundTaskRepository.waitForAnswer(older.id, minutes(1));
+    const busy = [await createTestTask(fixture), await createTestTask(fixture), await createTestTask(fixture)];
+    for (let index = 0; index < busy.length; index += 1) await backgroundTaskRepository.claimNextQueued(BACKGROUND_TASK_CONCURRENCY, minutes(1));
+    const newer = await createTestTask(fixture);
+    await database().query("UPDATE background_tasks SET queued_at = $2 WHERE id = $1", [newer.id, minutes(2)]);
+    await backgroundTaskMessageRepository.append({
+      authorUserId: fixture.userId, createdByCallId: "answer", createdByTurnId: "turn-answer", now: minutes(3), taskId: older.id, text: "2025",
+    });
+    // Three run; the newer task waited first, so it is ahead of the older one the answer queued again.
+    expect(await backgroundTaskRepository.tasksAhead(newer.id)).toBe(3);
+    expect(await backgroundTaskRepository.tasksAhead(older.id)).toBe(4);
+    await backgroundTaskRepository.finish({ code: "AGENT_BACKGROUND_TASK_FINISHED", id: busy[0]!.id, now: minutes(4), state: "finished", text: "Готово" });
+    expect((await backgroundTaskRepository.claimNextQueued(BACKGROUND_TASK_CONCURRENCY, minutes(4)))?.id).toBe(newer.id);
+  });
+
+  it("takes an event back from a dead attempt only while its chat is free, unless its turn exists", async () => {
+    const task = await createTestTask(fixture);
+    await backgroundTaskRepository.claimNextQueued(BACKGROUND_TASK_CONCURRENCY, T0);
+    await backgroundTaskRepository.finish({ code: "AGENT_BACKGROUND_TASK_FINISHED", id: task.id, now: T0, state: "finished", text: "Готово" });
+    expect(await backgroundTaskEventRepository.claim(T0, BACKGROUND_TASK_EVENT_LEASE_MS)).not.toBeNull();
+    const queue = await database().query<{ id: string }>(
+      "INSERT INTO telegram_ingress_queues (current_continuation_key) VALUES ($1) RETURNING id", [`bg-lane-${task.id}`],
+    );
+    await database().query("UPDATE background_tasks SET ingress_queue_id = $2 WHERE id = $1", [task.id, queue.rows[0]!.id]);
+    // The person wrote while the dead attempt held the event: their message goes first.
+    await database().query(
+      "INSERT INTO telegram_ingress_updates (update_id, queue_id, ingress_continuation_key, payload) VALUES (9001, $1, 'k', '{}')",
+      [queue.rows[0]!.id],
+    );
+    const later = new Date(T0.getTime() + BACKGROUND_TASK_EVENT_LEASE_MS + 1_000);
+    try {
+      expect(await backgroundTaskEventRepository.claim(later, BACKGROUND_TASK_EVENT_LEASE_MS)).toBeNull();
+      // A turn already made is let finish: it is the person's answer, not a new one.
+      await database().query("UPDATE background_task_events SET turn_id = 'turn-made' WHERE task_id = $1", [task.id]);
+      expect((await backgroundTaskEventRepository.claim(later, BACKGROUND_TASK_EVENT_LEASE_MS))?.turnId).toBe("turn-made");
+    } finally {
+      await database().query("DELETE FROM telegram_ingress_updates WHERE queue_id = $1", [queue.rows[0]!.id]);
+      await database().query("UPDATE background_tasks SET ingress_queue_id = NULL WHERE id = $1", [task.id]);
+      await database().query("DELETE FROM telegram_ingress_queues WHERE id = $1", [queue.rows[0]!.id]);
+    }
   });
 
   it("does not ask when a message came after the question, and does not end a task a correction waits for", async () => {
@@ -157,7 +222,7 @@ describeWithDatabase("background task repository", () => {
     for (let attempt = 1; attempt <= BACKGROUND_TASK_EVENT_ATTEMPTS; attempt += 1) {
       const event = await backgroundTaskEventRepository.claim(now, BACKGROUND_TASK_EVENT_LEASE_MS);
       expect(event?.kind).toBe("outcome");
-      const result = await backgroundTaskEventRepository.retry(event!, "AGENT_MODEL_UNAVAILABLE", now);
+      const result = await backgroundTaskEventRepository.retry(event!, "AGENT_MODEL_UNAVAILABLE", now, { pauseMs: 5 * 60_000, spendsAttempt: true });
       expect(result).toBe(attempt === BACKGROUND_TASK_EVENT_ATTEMPTS ? "gave_up" : "retry");
       now = new Date(now.getTime() + 5 * 60_000);
     }
@@ -193,7 +258,14 @@ describeWithDatabase("background task repository", () => {
     );
     expect(await deployIdleVerdict()).toBe("idle");
     await backgroundTaskRepository.finish({ code: "AGENT_BACKGROUND_TASK_FINISHED", id: task.id, now: T0, state: "finished", text: "Готово" });
-    await backgroundTaskEventRepository.claim(T0, BACKGROUND_TASK_EVENT_LEASE_MS);
+    // The verdict reads the database clock, so the lease is taken on it too.
+    await backgroundTaskEventRepository.claim(new Date(), BACKGROUND_TASK_EVENT_LEASE_MS);
+    expect(await deployIdleVerdict()).toBe("busy");
+    // An attempt that died before making its turn answers nothing, and a draining runtime never takes it back.
+    await database().query("UPDATE background_task_events SET lease_expires_at = now() - interval '1 minute' WHERE task_id = $1", [task.id]);
+    expect(await deployIdleVerdict()).toBe("idle");
+    // One whose turn exists may still be finishing it.
+    await database().query("UPDATE background_task_events SET turn_id = 'turn-made' WHERE task_id = $1", [task.id]);
     expect(await deployIdleVerdict()).toBe("busy");
   });
 

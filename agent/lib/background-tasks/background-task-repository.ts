@@ -160,7 +160,10 @@ export const backgroundTaskRepository = {
     return result.rows.map(mapTask);
   },
 
-  /** Starts the oldest queued task when fewer than `limit` run; null when no place or nothing waits. */
+  /**
+   * Starts the task queued earliest when fewer than `limit` run; null when no place or nothing waits. An
+   * answered task is queued again at its answer, behind the tasks that waited before it.
+   */
   async claimNextQueued(limit: number, now: Date): Promise<BackgroundTask | null> {
     return await inTransaction(async (client) => {
       await client.query("SELECT pg_advisory_xact_lock($1)", [CLAIM_LOCK_KEY]);
@@ -170,7 +173,7 @@ export const backgroundTaskRepository = {
       if (Number(running.rows[0]!.count) >= limit) return null;
       const result = await client.query<TaskRow>(
         `UPDATE background_tasks SET state = 'running', running_since = $1, updated_at = $1
-          WHERE id = (SELECT id FROM background_tasks WHERE state = 'queued' ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
+          WHERE id = (SELECT id FROM background_tasks WHERE state = 'queued' ORDER BY queued_at, id LIMIT 1 FOR UPDATE SKIP LOCKED)
           RETURNING *`,
         [now],
       );
@@ -303,11 +306,12 @@ export const backgroundTaskRepository = {
     return result.rows[0]?.summary_reason ?? null;
   },
 
-  /** Tasks running, and queued before this one: fewer than the places means it starts within seconds. */
+  /** Other tasks running, and those queued before this one: fewer than the places means it starts within seconds. */
   async tasksAhead(id: string): Promise<number> {
     const result = await database().query<{ count: string }>(
       `SELECT count(*) FROM background_tasks
-        WHERE state IN ('running', 'stopping') OR (state = 'queued' AND id < $1)`,
+        WHERE (state IN ('running', 'stopping') AND id <> $1) OR (state = 'queued' AND (queued_at, id) < (
+          SELECT queued_at, id FROM background_tasks WHERE id = $1))`,
       [id],
     );
     return Number(result.rows[0]!.count);

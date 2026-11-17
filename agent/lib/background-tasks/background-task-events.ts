@@ -8,6 +8,8 @@
  * Key constructs:
  * - At least once: the event is answered only after the main agent's turn ended well. A failed or broken
  *   turn brings it back in five minutes, a bounded number of times; the last failure gives it up loudly.
+ *   An unreachable model hub spends no attempt and is tried ever less often, up to a day after the event
+ *   was ready.
  * - A turn an earlier attempt created is let finish, never created again: the person hears it once.
  * - A chat without a conversation right now (a new context nobody wrote into, a card waiting for an
  *   answer) keeps the event waiting without spending an attempt, up to a day.
@@ -17,7 +19,7 @@ import type { Pool } from "pg";
 import type { JournalDatabase } from "../../runtime/turn/journal-repository.js";
 import type { TurnOutcome } from "../../runtime/turn/run-turn.js";
 import { isAppError } from "../app-error.js";
-import { BACKGROUND_TASK_EVENT_LEASE_MS } from "./background-task-config.js";
+import { BACKGROUND_TASK_ANSWER_WAIT_MS, BACKGROUND_TASK_EVENT_LEASE_MS, BACKGROUND_TASK_EVENT_RETRY_MS } from "./background-task-config.js";
 import { backgroundTaskEventRepository, type BackgroundTaskEvent } from "./background-task-event-repository.js";
 import { createBackgroundTaskEventTurn, EVENT_CONVERSATION_IDLE_CODE, prepareBackgroundTaskEvent } from "./background-task-event-turn.js";
 
@@ -42,10 +44,29 @@ async function settle(event: BackgroundTaskEvent, outcome: TurnOutcome, now: Dat
   await retry(event, outcome.status === "failed" ? outcome.code : "AGENT_BACKGROUND_TASK_EVENT_TURN_CANCELLED", now);
 }
 
+// The hub could not be reached or did not start answering: the same prompt goes through once it is back.
+const HUB_OUT_CODES: ReadonlySet<string> = new Set(["AGENT_MODEL_TEMPORARILY_UNAVAILABLE", "AGENT_MODEL_FIRST_CHUNK_TIMEOUT"]);
+const HUB_OUT_PAUSE_MAX_MS = 60 * 60_000;
+
 async function retry(event: BackgroundTaskEvent, code: string, now: Date): Promise<void> {
-  const result = await backgroundTaskEventRepository.retry(event, code, now);
+  if (HUB_OUT_CODES.has(code)) {
+    // The hub can be out for an hour (17.11.2026), as long as all the attempts last. Such a failure spends
+    // none, as an idle chat does, and is tried ever less often — the pause is as long as the wait so far, up
+    // to an hour — until a day after the outcome was ready.
+    const waited = now.getTime() - event.createdAt.getTime();
+    if (waited >= BACKGROUND_TASK_ANSWER_WAIT_MS) {
+      if (await backgroundTaskEventRepository.giveUp(event, code)) log("AGENT_BACKGROUND_TASK_EVENT_GAVE_UP", event, { lastErrorCode: code }, "error");
+      return;
+    }
+    const pauseMs = Math.min(Math.max(BACKGROUND_TASK_EVENT_RETRY_MS, waited), HUB_OUT_PAUSE_MAX_MS);
+    if (await backgroundTaskEventRepository.retry(event, code, now, { pauseMs, spendsAttempt: false }) === "retry") {
+      log("AGENT_BACKGROUND_TASK_EVENT_RETRY", event, { attempt: event.attemptCount, attemptSpent: false, lastErrorCode: code, pauseMs }, "warn");
+    }
+    return;
+  }
+  const result = await backgroundTaskEventRepository.retry(event, code, now, { pauseMs: BACKGROUND_TASK_EVENT_RETRY_MS, spendsAttempt: true });
   if (result === "gave_up") log("AGENT_BACKGROUND_TASK_EVENT_GAVE_UP", event, { lastErrorCode: code }, "error");
-  else if (result === "retry") log("AGENT_BACKGROUND_TASK_EVENT_RETRY", event, { attempt: event.attemptCount + 1, lastErrorCode: code }, "warn");
+  else if (result === "retry") log("AGENT_BACKGROUND_TASK_EVENT_RETRY", event, { attempt: event.attemptCount + 1, attemptSpent: true, lastErrorCode: code }, "warn");
 }
 
 async function handle(dependencies: BackgroundTaskEventDependencies, event: BackgroundTaskEvent): Promise<void> {

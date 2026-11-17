@@ -11,7 +11,8 @@
  *   same step sees none of them, and a claim of a turn that ended undelivered is free again.
  * - It counts as delivered when the next model step of that turn starts: only then had the model the
  *   result in its prompt. A new turn takes everything still undelivered into its input instead.
- * - A message to a waiting task puts it back in the queue in the same transaction.
+ * - A message to a waiting task puts it back in the queue in the same transaction; a repeat of the same
+ *   call changes nothing.
  */
 import type { PoolClient } from "pg";
 
@@ -51,12 +52,14 @@ export const backgroundTaskMessageRepository = {
       const state = current.rows[0]?.state;
       // A stopping task only writes its summary: a correction would never reach it.
       if (state === undefined || state === "stopping" || !(BACKGROUND_TASK_ACTIVE_STATES as readonly string[]).includes(state)) return null;
-      await client.query(
+      const inserted = await client.query(
         `INSERT INTO background_task_messages (task_id, author_user_id, text, created_by_turn_id, created_by_call_id)
          VALUES ($1, $2, $3, $4, $5) ON CONFLICT (created_by_turn_id, created_by_call_id) DO NOTHING`,
         [input.taskId, input.authorUserId, input.text, input.createdByTurnId, input.createdByCallId],
       );
-      if (state !== "waiting_answer") return "next_step";
+      // A repeat of the call: its message is already there, and a question asked since is a new one it
+      // does not answer.
+      if (inserted.rowCount !== 1 || state !== "waiting_answer") return "next_step";
       await client.query(
         `UPDATE background_tasks SET state = 'queued', waiting_question = NULL, waiting_since = NULL, queued_at = $2, updated_at = $2
           WHERE id = $1`,

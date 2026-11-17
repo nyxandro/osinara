@@ -19,7 +19,7 @@ export const BACKGROUND_TASK_RULES = `
 - Keep it in this turn — yourself or with \`agent\` — when the answer fits in this reply within a minute or two: a single fact, a quick search, a short lookup or a small file. Do not start a task for work where the person decides at each step, such as logging in somewhere together or choosing among options as they appear.
 - One task per request. The \`<background_tasks>\` block lists this chat's tasks: do not start a second one for what a task already does.
 - The task does not see this conversation. Put everything it needs into \`task\`: the goal, the exact files or sources, what to produce, and what you already know.
-- After start, tell the person in a short reply that the work is running and that you will write when it is done; then end the turn. Do not wait for the task.
+- After start, tell the person in a short reply that the work is running — or, when \`start\` returned \`queued\`, that it waits for a free place and starts by itself — and that you will write when it is done; then end the turn. Do not wait for the task.
 - A task has ${BACKGROUND_TASK_ACTIVE_LIMIT_MS / 60_000} minutes and ${BACKGROUND_TASK_STEP_LIMIT} steps; it cannot press buttons, change Google, settings or memory, or write to the chat. If it needs such a change, it says so in its result, and you offer to do it.
 - When the person asks how a task goes, call \`status\` and answer in your own words. A task without a step for ten minutes seems stuck: say so and offer to wait or stop it.
 - When a task's \`waitingAnswerTo\` is set and the message answers it, pass the answer with \`message\`; a correction for a running task goes the same way. Pass a stop request with \`stop\`.
