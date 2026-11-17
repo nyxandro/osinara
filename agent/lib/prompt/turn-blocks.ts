@@ -89,6 +89,7 @@ import { modeInstructions } from "./mode-instructions.js";
 import { applyTurnMemoryBudget } from "./turn-memory-budget.js";
 import { formatTurnMemoryContext } from "./turn-memory-context.js";
 import { resolveTurnProfile } from "./turn-profile.js";
+import { isRestrictedChildTurn } from "../restricted-child-turn.js";
 
 export interface TurnBlockContext {
   readonly channel?: { readonly kind?: string };
@@ -234,7 +235,7 @@ function createConversationModeBlockResolver(dependencies: {
     const privateQuestion = isPrivateQuestionSession(ctx);
     const scheduledRun = isScheduledSession(ctx) || privateQuestion;
     // A child answers its parent through the `agent` tool result, never the chat itself.
-    const subagentTurn = ctx.channel?.kind === "subagent" || Boolean(ctx.session.parent);
+    const subagentTurn = ctx.channel?.kind === "subagent" || isRestrictedChildTurn(ctx.session);
     // A scheduled run has no inbound message to react to, and a channel-authored turn keeps its
     // text-only surface, so neither one requests a reaction policy.
     const reactionsPossible = !scheduledRun && !isTelegramChannelSession(ctx.session.auth);
@@ -374,7 +375,7 @@ export function createMemoryBlockResolver(dependencies: {
     try {
       const authorization = dependencies.authorize(ctx);
       phase = "query";
-      const delegated = ctx.channel?.kind === "subagent" || Boolean(ctx.session.parent);
+      const delegated = ctx.channel?.kind === "subagent" || isRestrictedChildTurn(ctx.session);
       const query = memoryRetrievalQuery(ctx.session.auth, ctx.messages, delegated);
       if (query === null) return NO_MEMORY_BLOCKS;
       // A child's task text is its own request, not a message of the conversation.

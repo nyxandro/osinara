@@ -13,6 +13,7 @@
 import type { SessionAuth } from "../../runtime/context.js";
 
 import { isScheduledSession } from "../agent-schedules/scheduled-session.js";
+import { isRestrictedChildTurn } from "../restricted-child-turn.js";
 
 export const TURN_INTERJECTION_MARKER_ATTRIBUTE = "telegramTurnInterjectionMarker";
 
@@ -38,7 +39,8 @@ function forumTopic(value: unknown): number | null | undefined {
 export function resolveTurnInterjectionScope(
   ctx: { session: { auth: SessionAuth; parent?: unknown } },
 ): TurnInterjectionScope | null {
-  if (ctx.session.parent !== undefined && ctx.session.parent !== null) return null;
+  // A delegated child and a background task never see the chat's messages: a task gets its own (#519).
+  if (isRestrictedChildTurn(ctx.session)) return null;
   if (isScheduledSession(ctx)) return null;
   const attributes = ctx.session.auth.current?.attributes;
   if (!attributes || attributes.memoryReviewMode === "background") return null;

@@ -31,6 +31,7 @@ import type { RuntimeAgent } from "./runtime/agent-definition.js";
 import { composeBasePrompt } from "./runtime/prompt/system-prompt.js";
 import { resolveScopedSkills } from "./skills/scoped.js";
 import { recordTurnInterjectionDelivery } from "./lib/turn-interjection/turn-interjection-delivery.js";
+import { recordBackgroundTaskStep } from "./lib/background-tasks/background-task-turn-events.js";
 import { resolveToolSurface } from "./tools/capabilities.js";
 
 // Read from the project tree (the image keeps `agent/`): the bundled `.runtime/agent/main.js` has no
@@ -63,7 +64,11 @@ export function createOsinaraAgent(): RuntimeAgent {
       sessionId,
     }),
     staticToolNames: [],
-    // Messages shown to a running turn count as delivered once a model step had them in its prompt.
-    stepStarted: (ctx) => recordTurnInterjectionDelivery(ctx),
+    // Messages shown to a running turn count as delivered once a model step had them in its prompt; a
+    // background task's step is counted against its limit before the model is paid (#519).
+    stepStarted: async (ctx) => {
+      await recordTurnInterjectionDelivery(ctx);
+      await recordBackgroundTaskStep(ctx);
+    },
   };
 }

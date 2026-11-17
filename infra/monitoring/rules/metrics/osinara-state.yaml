@@ -105,6 +105,53 @@ groups:
           description: 'Автономный сценарий не дошёл до семьи или его доставка не подтверждена: человек не получил то, что ждал по расписанию.'
           runbook: 'В agent_schedule_runs со status failed или ambiguous и updated_at за последний час посмотреть error_code и schedule_id; затем строки агента в момент scheduled_for.'
 
+      # Background tasks (#519). A step normally takes up to two minutes; a task with no step for
+      # fifteen hangs in a model call or a command, and the hour limit cuts it at the latest. A
+      # restart starts a task's clock again, so the deploy grace covers the time the task waits to
+      # be taken over.
+      - alert: OsinaraBackgroundTaskStuck
+        expr: >-
+          osinara_background_task_stuck_age_seconds > 900
+          unless on() deploy_window_end_timestamp_seconds{project="osinara-production"} + 600 > time()
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Фоновая задача больше 15 минут без шага'
+          description: 'Задача висит на вызове модели или на команде в песочнице. Через час работы лимит оборвёт её сам, и человек получит итог «не уложилась».'
+          runbook: 'SELECT id, state, last_step_at, note FROM background_tasks WHERE state IN (''running'', ''stopping''); затем строки AGENT_TOOL_CALL_METRICS и AGENT_MODEL_CALL_METRICS этой сессии (agent_session_id).'
+
+      # The main agent retells an outcome within a minute or, when a scenario holds the wake-up slot,
+      # a few minutes; a failed retelling is repeated every five. An event waiting for the chat's
+      # next conversation (a new context nobody wrote into) is not counted: it waits for the person.
+      - alert: OsinaraBackgroundTaskUnreported
+        expr: >-
+          osinara_background_task_unreported_age_seconds > 900
+          unless on() deploy_window_end_timestamp_seconds{project="osinara-production"} + 600 > time()
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Итог или вопрос фоновой задачи не дошёл до чата за 15 минут'
+          description: 'Задача закончилась или спросила, но основной агент не пересказал это в чат: человек ждёт результат, который уже готов.'
+          runbook: 'SELECT task_id, kind, status, attempt_count, last_error_code FROM background_task_events WHERE status IN (''pending'', ''processing''); затем строки AGENT_BACKGROUND_TASK_EVENT_RETRY и AGENT_TURN_FAILED.'
+
+      # A queued task starts within seconds once a place is free; ten minutes with a free place means
+      # the task dispatcher does not run. The age counts from the task's last entry into the queue, and
+      # the hold covers the seconds between a place freeing and the dispatcher's next pass.
+      - alert: OsinaraBackgroundTaskQueueStalled
+        expr: >-
+          osinara_background_task_queue_stalled_age_seconds > 600
+          unless on() deploy_window_end_timestamp_seconds{project="osinara-production"} + 600 > time()
+        for: 2m
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Фоновая задача ждёт в очереди больше 10 минут при свободном месте'
+          description: 'Диспетчер фоновых задач не берёт работу: задачи, которые люди запустили, не начинаются.'
+          runbook: 'Строки AGENT_BACKGROUND_TASK_PASS_FAILED в логах агента и фаза runtime_maintenance; если фаза ready и ошибок нет — перезапустить агента.'
+
       - alert: OsinaraIncidentsPendingStuck
         expr: osinara_operational_incidents{status="pending"} > 0
         for: 15m

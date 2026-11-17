@@ -14,6 +14,7 @@ import { defineTool } from "../../runtime/tool.js";
 import { z } from "zod";
 import { syncPrivateQuestionCommands } from "../private-questions/private-question-commands.js";
 
+import { isRestrictedChildTurn } from "../restricted-child-turn.js";
 import { isScheduledSession } from "../agent-schedules/scheduled-session.js";
 import { AppError, isAppError } from "../app-error.js";
 import { requirePrivateTelegramOwner } from "../family-context.js";
@@ -265,7 +266,7 @@ export function requireManageTelegramGroupInput(input: unknown) {
 const CONNECTION_CHANGES: ReadonlySet<string> = new Set(["disconnect", "reconnect", "remove"]);
 
 function inOwnersConversation(ctx: Parameters<typeof isScheduledSession>[0] & { session: { parent?: unknown } }): boolean {
-  return ctx.session.parent === undefined && !isScheduledSession(ctx);
+  return !isRestrictedChildTurn(ctx.session) && !isScheduledSession(ctx);
 }
 
 function connectionChangeOutsideConversation(): AppError {
@@ -425,7 +426,7 @@ export default withCallExamples(defineTool({
     if (parsed.action === "update_skills") {
       // Without a button only the owner's own conversation may change what outsiders get: a schedule
       // or a delegated task (which reads untrusted pages) never does.
-      if (ctx.session.parent !== undefined || isScheduledSession(ctx)) {
+      if (isRestrictedChildTurn(ctx.session) || isScheduledSession(ctx)) {
         throw new AppError("AGENT_GROUP_SKILLS_CONVERSATION_REQUIRED",
           "Скиллы группы владелец меняет сам в личном разговоре с агентом, а не расписание или вспомогательная задача");
       }

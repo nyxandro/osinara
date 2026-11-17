@@ -304,13 +304,15 @@ function authorizedScenarioSends(surface: ToolMap): ToolMap {
 
 const TRUSTED_SCHEDULED_SURFACES: Readonly<Record<TrustedSurfaceKey, ToolMap>> = Object.fromEntries(
   Object.entries(TRUSTED_APPLICATION_SURFACES).map(([environment, surface]) => {
-    // A scheduled turn can read chat instructions but has no user source for prompt or memory writes.
+    // A scheduled turn can read chat instructions but has no user source for prompt or memory writes, and
+    // starts no background task (#519): a task needs a person who asked for it.
     // Family skills are managed only in a conversation with the owner, and nobody is there to confirm
     // network access or to send a requested API key: the owner's door keeps its other sections.
     // A scenario sends whatever a live turn of its chat sends (#480): a voice note, a widget, a GIF,
     // a place, a poll, a contact. Only changing a widget already shown stays with the live chat,
     // where its presses arrive.
     const {
+      background_task: _backgroundTask,
       manage_behavior_preference: _manageBehaviorPreference,
       manage_skill: _manageSkill,
       owner_settings: ownerSettings,

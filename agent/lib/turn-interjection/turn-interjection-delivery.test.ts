@@ -2,7 +2,8 @@
  * Turn interjection delivery record tests.
  *
  * Constructs covered:
- * - An eligible turn records delivery at each model step; other turns never touch the table.
+ * - An eligible turn records delivery at each model step; other turns, a background task's included,
+ *   never touch the table.
  * - A failed record is logged and never fails the person's turn.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -48,6 +49,12 @@ describe("recordTurnInterjectionDelivery", () => {
   it("ignores a turn that cannot receive messages meanwhile", async () => {
     const repository = { markDelivered: vi.fn(async () => 0) };
     await recordTurnInterjectionDelivery(context({ telegramTurnInterjectionMarker: undefined }), repository);
+    expect(repository.markDelivered).not.toHaveBeenCalled();
+  });
+
+  it("never shows the chat's messages to a background task, whatever its auth carries (#519)", async () => {
+    const repository = { markDelivered: vi.fn(async () => 0) };
+    await recordTurnInterjectionDelivery(context({ backgroundTaskId: "7" }), repository);
     expect(repository.markDelivered).not.toHaveBeenCalled();
   });
 
