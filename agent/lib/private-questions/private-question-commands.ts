@@ -16,6 +16,7 @@
  *   no longer in the database is still taken down.
  * - Telegram answering that the chat is gone or the bot is not in it counts as taken down.
  */
+import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 
 import { TELEGRAM_API_REQUEST_TIMEOUT_MS } from "../../config.js";
@@ -184,7 +185,11 @@ const productionReconcile = createPrivateQuestionCommandSync({
  * every later failure from the owner (#517).
  */
 export function commandSyncIncidentKey(failedChatIds: readonly string[] | null, at: Date): string {
-  const what = failedChatIds === null ? "error" : [...failedChatIds].sort().join(",");
+  // The set, not the list: a chat whose take-down and new menu both failed counts once. Hashed, so a long set
+  // stays inside the key's limit; the chats themselves are in the notice's context.
+  const what = failedChatIds === null
+    ? "error"
+    : createHash("sha256").update([...new Set(failedChatIds)].sort().join(",")).digest("hex").slice(0, 16);
   return `private-question-commands:${what}:${at.toISOString().slice(0, 10)}`;
 }
 

@@ -39,9 +39,11 @@ export function createWorkspaceDeletionWorker(
       );
       const workspaceId = claim.rows[0]?.workspace_id;
       if (!workspaceId) return deleted;
+      let removed = false;
       try {
         await deleteWorkspaceDirectory(root, workspaceId);
         await deleteToolEnvironment(workspaceId);
+        removed = true;
         const completed = await database().query(
           "DELETE FROM workspace_deletion_jobs WHERE workspace_id = $1 AND lease_token = $2",
           [workspaceId, leaseToken],
@@ -49,6 +51,14 @@ export function createWorkspaceDeletionWorker(
         if (completed.rowCount !== 1) throw new Error("AGENT_WORKSPACE_DELETION_LEASE_LOST");
         deleted += 1;
       } catch (error) {
+        if (removed) {
+          // Only the queue's record failed: the folder and the environment are gone. The job is not parked as a
+          // failed deletion; its lease runs out and the next pass repeats the (idempotent) removal and the record.
+          console.error(JSON.stringify({
+            code: "AGENT_WORKSPACE_DELETION_UNRECORDED", error: error instanceof Error ? error.message : String(error), workspaceId,
+          }));
+          continue;
+        }
         // The job keeps its code and waits for an operator, as a failed session deletion does: taken again
         // every minute it would fail the shared maintenance cycle, and with it the reminders' heartbeat (#538).
         const errorCode = isAppError(error) ? error.code : "AGENT_WORKSPACE_PHYSICAL_DELETE_FAILED";

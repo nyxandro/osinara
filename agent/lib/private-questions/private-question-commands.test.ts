@@ -137,7 +137,10 @@ describe("the owner's notice about a failed /me menu sync (#517)", () => {
     expect(commandSyncIncidentKey(null, day)).toBe("private-question-commands:error:2026-11-16");
     expect(commandSyncIncidentKey(null, sameDay)).toBe(commandSyncIncidentKey(null, day));
     expect(commandSyncIncidentKey(null, nextDay)).not.toBe(commandSyncIncidentKey(null, day));
-    expect(commandSyncIncidentKey(["-200", "-100"], day)).toBe("private-question-commands:-100,-200:2026-11-16");
+    // A set of chats: order and repeats do not matter, and a long set stays a short key.
+    expect(commandSyncIncidentKey(["-200", "-100", "-100"], day)).toBe(commandSyncIncidentKey(["-100", "-200"], day));
+    expect(commandSyncIncidentKey(["-100"], day)).not.toBe(commandSyncIncidentKey(["-200"], day));
+    expect(commandSyncIncidentKey(Array.from({ length: 60 }, (_, i) => `-1001234567${i}`), day).length).toBeLessThan(80);
   });
 });
 
