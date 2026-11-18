@@ -159,15 +159,24 @@ export function createTurnDispatcher(input: {
         }));
         continue;
       }
+      // This process may have started the turn while the check ran (a session's earlier turn ended meanwhile).
+      if (active.has(turn.id)) continue;
       if (access === "allowed") {
         start(turn.id);
         continue;
       }
-      // Closed as any failed turn, so its channel cleans up; the model is not called and nothing is answered.
-      await failTurn(runtime.database, turn, new AppError(
-        "AGENT_TURN_ACCESS_REVOKED", "Доступ к этому чату отозван, прерванный ход не продолжен",
-      ), NEVER_ABORTED);
-      report(turn.id);
+      try {
+        // Closed as any failed turn, so its channel cleans up; the model is not called and nothing is answered.
+        await failTurn(runtime.database, turn, new AppError(
+          "AGENT_TURN_ACCESS_REVOKED", "Доступ к этому чату отозван, прерванный ход не продолжен",
+        ), NEVER_ABORTED);
+        report(turn.id);
+      } catch (error) {
+        // One turn that cannot be closed must not stop the pass, nor the application's start that runs it.
+        console.error(JSON.stringify({
+          code: "AGENT_TURN_RESUME_REVOKE_FAILED", error: error instanceof Error ? error.message : String(error), turnId: turn.id,
+        }));
+      }
     }
     const unreported = (await listUnobservedRootTurns(runtime.database)).filter((id) => !active.has(id) && !reporting.has(id));
     for (const turnId of unreported) report(turnId);

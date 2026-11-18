@@ -171,8 +171,39 @@ function gate() {
     expect(asked).toEqual([OWNER_AUTH.current!.principalId]);
     expect(model.requests).toHaveLength(0);
     expect(await loadTurn(database(), turn.id)).toMatchObject({ errorCode: "AGENT_TURN_ACCESS_REVOKED", status: "failed" });
-    // The channel hears of the failure as of any other, so its cleanup runs; nothing is answered.
-    expect(events).toContainEqual({ kind: "turnFinished", outcome: "failed", turnId: turn.id });
+    // The channel hears of the failure once, as of any other, so its cleanup runs; nothing is answered.
+    expect(events.filter((event) => event.turnId === turn.id)).toEqual([{ kind: "turnFinished", outcome: "failed", turnId: turn.id }]);
+  });
+
+  it("finishes the rest of the pass when one revoked turn cannot be closed (#542)", async () => {
+    const revoked = await startMessageTurn(await newTestSession(), "чужой");
+    const kept = await startMessageTurn(await newTestSession(), "свой");
+    await claimTurn(database(), revoked.id, "runner-dead");
+    await claimTurn(database(), kept.id, "runner-dead");
+    await database().query(
+      `UPDATE agent_turns SET auth = jsonb_set(auth::jsonb, '{current,attributes,testMark}', '"revoked"')::json WHERE id = $1`, [revoked.id],
+    );
+    const model = scriptedModel(reply("готово"));
+    const { observer } = recordingObserver();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const dispatcher = createTurnDispatcher({
+      resumeAccess: async (auth) => {
+        if (auth.current?.attributes.testMark !== "revoked") return "allowed";
+        // The turn vanishes before it is closed: closing it fails.
+        await database().query("DELETE FROM agent_turns WHERE id = $1", [revoked.id]);
+        return "revoked";
+      },
+      admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, runtime: testRuntime({ agent: testAgent({}), callModel: model.callModel, observer, runnerId: "runner-new" }), waitMilliseconds: 50,
+    });
+
+    try {
+      await dispatcher.recover();
+      await dispatcher.idle();
+    } finally {
+      errors.mockRestore();
+    }
+
+    expect(await loadTurn(database(), kept.id)).toMatchObject({ finalText: "готово", status: "completed" });
   });
 
   it("leaves an interrupted turn for the next pass when its access cannot be read (#542)", async () => {

@@ -4,13 +4,16 @@
  * Constructs covered:
  * - A person's turn in a private chat or a family group resumes only while the person is still in the family
  *   (a guest: while the guest is not revoked) and the family group is still connected.
- * - An external group's turn resumes while the group is connected, whoever wrote in it.
- * - A turn outside Telegram (memory review, private question) is not this check's to stop.
+ * - An external group's turn resumes while the group is connected, whoever wrote in it; a family member's turn
+ *   there not after the member left, and an owner-only group's only for its owner (as an approval re-checks).
+ * - The auth a real wake-up builds passes; a group of another family and a malformed turn do not.
+ * - A turn outside Telegram (memory review) is not this check's to stop.
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "../runtime/context.js";
 import { closeDatabase, database } from "./database.js";
+import { conversationWakeupAuth } from "./conversation-wakeups/conversation-wakeup-turn.js";
 import { turnResumeAccess } from "./turn-resume-access.js";
 
 const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
@@ -58,10 +61,50 @@ describeWithDatabase("resuming an interrupted turn (#542)", () => {
     const f = await fixture();
     // A participant outside the family has no user record: the principal is the Telegram actor.
     const turn = { current: { attributes: { familyId: f.familyId, groupId: f.externalGroupId, groupType: "external" }, authenticator: "telegram",
-      principalId: "telegram_user:5555", principalType: "user" }, initiator: null } as const;
+      principalId: "telegram:5555", principalType: "user" }, initiator: null } as const;
     expect(await turnResumeAccess(turn)).toBe("allowed");
     await database().query("UPDATE telegram_groups SET disconnected_at = now() WHERE id = $1", [f.externalGroupId]);
     expect(await turnResumeAccess(turn)).toBe("revoked");
+  });
+
+  it("does not resume a family member's external-group turn after they left, nor a non-owner's in an owner-only group", async () => {
+    const f = await fixture();
+    const memberTurn = auth(f.memberId, { familyId: f.familyId, groupId: f.externalGroupId, groupType: "external" });
+    expect(await turnResumeAccess(memberTurn)).toBe("allowed");
+    await database().query("UPDATE telegram_groups SET message_mode = 'owner_only' WHERE id = $1", [f.externalGroupId]);
+    expect(await turnResumeAccess(memberTurn)).toBe("revoked");
+    await database().query("UPDATE family_memberships SET role = 'owner' WHERE user_id = $1", [f.memberId]);
+    expect(await turnResumeAccess(memberTurn)).toBe("allowed");
+    await database().query("UPDATE telegram_groups SET message_mode = 'all' WHERE id = $1", [f.externalGroupId]);
+    await database().query("DELETE FROM family_memberships WHERE user_id = $1", [f.memberId]);
+    expect(await turnResumeAccess(memberTurn)).toBe("revoked");
+  });
+
+  it("resumes the turn a real wake-up builds, in a private chat and a family group", async () => {
+    const f = await fixture();
+    const wakeup = {
+      applicationConversationId: crypto.randomUUID(), applicationSessionId: crypto.randomUUID(), authorUserId: f.memberId, check: null,
+      completedRuns: 0, agentSessionId: "wrun_test", familyId: f.familyId, forumTopicId: null, groupId: null, maxRuns: 1,
+      messageThreadId: null, role: "member" as const, runId: crypto.randomUUID(), sandboxSessionId: crypto.randomUUID(),
+      scenarioPrompt: "", scheduledFor: new Date(), scheduleId: crypto.randomUUID(), scope: "personal" as const, skillAllowlist: [],
+      telegramChatId: "7001", telegramChatType: "private" as const, telegramUserId: "7001", timezone: "UTC", title: "", userRequest: "",
+    };
+    const dispatch = { deadlineAt: new Date().toISOString(), id: crypto.randomUUID() };
+    expect(await turnResumeAccess({ current: conversationWakeupAuth(wakeup, new Date(), dispatch), initiator: null })).toBe("allowed");
+    const inGroup = { ...wakeup, groupId: f.familyGroupId, scope: "family" as const, telegramChatId: "-1001", telegramChatType: "supergroup" as const };
+    expect(await turnResumeAccess({ current: conversationWakeupAuth(inGroup, new Date(), dispatch), initiator: null })).toBe("allowed");
+  });
+
+  it("does not resume a group of another family or a turn without a family", async () => {
+    const f = await fixture();
+    // A person belongs to one family only: the other family has its own member.
+    const other = (await database().query<{ id: string }>("INSERT INTO families (name) VALUES ('Другая') RETURNING id")).rows[0]!.id;
+    const stranger = (await database().query<{ id: string }>("INSERT INTO users (telegram_user_id, display_name) VALUES ('7003', 'Чужой') RETURNING id")).rows[0]!.id;
+    await database().query("INSERT INTO family_memberships (family_id, user_id, role) VALUES ($1, $2, 'member')", [other, stranger]);
+    expect(await turnResumeAccess(auth(stranger, { familyId: other, groupId: f.familyGroupId, groupType: "family_private" }))).toBe("revoked");
+    expect(await turnResumeAccess(auth(f.memberId, { familyId: "not-a-uuid" }))).toBe("revoked");
+    // A family group turn always has a member behind it; one without is not a turn Osinara writes.
+    expect(await turnResumeAccess(auth("telegram:5555", { familyId: f.familyId, groupId: f.familyGroupId, groupType: "family_private" }))).toBe("revoked");
   });
 
   it("does not resume the turn of a guest the owner revoked", async () => {
