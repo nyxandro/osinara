@@ -73,6 +73,7 @@ import { agentScheduleDispatchSchedule } from "./schedules/agent-schedule-dispat
 import { memoryReviewDispatchSchedule } from "./schedules/memory-review-dispatch.js";
 import { reminderDispatchSchedule } from "./schedules/reminder-dispatch.js";
 import { softwareUpdateCheckSchedule } from "./schedules/software-update-check.js";
+import { turnResumeAccess } from "./lib/turn-resume-access.js";
 
 export const TELEGRAM_WEBHOOK_ROUTE = "/v1/telegram";
 export const TELEGRAM_DRAIN_ROUTE = "/v1/telegram-drain";
@@ -168,6 +169,8 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
   const dispatcher = createTurnDispatcher({
     // A turn that already exists may finish while a deploy drains, never once it is frozen.
     admit: (work) => withRuntimeAdmission("callback", work),
+    // Recovery finishes an interrupted turn only while its person and chat still have access (#542).
+    resumeAccess: turnResumeAccess,
     runnerLock,
     runtime,
     waitMilliseconds: TURN_WAIT_MILLISECONDS,

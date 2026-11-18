@@ -60,6 +60,8 @@ describeDatabase("deploy application readiness", () => {
     let started!: () => void;
     const modelCalled = new Promise<void>((resolve) => { started = resolve; });
     const dispatcher = createTurnDispatcher({
+      // Rights are not this test's subject: recovery may resume every turn (#542).
+      resumeAccess: async () => "allowed",
       admit: async (work) => await withRuntimeAdmission("callback", work),
       runnerLock: HELD_RUNNER_LOCK,
       runtime: testRuntime({
