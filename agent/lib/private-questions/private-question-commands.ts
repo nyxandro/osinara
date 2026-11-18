@@ -5,6 +5,7 @@
  * - `PRIVATE_QUESTION_COMMAND`: the one ephemeral command of the menu.
  * - `PrivateQuestionCommandScope`, `desiredPrivateQuestionCommandScopes`: which menus the registered groups need.
  * - `createPrivateQuestionCommandSync`: reconciles Telegram with the desired menus under one database lock.
+ * - `commandSyncIncidentKey`: the key of the owner's notice about a failed sync, one per failing set and day (#517).
  * - `syncPrivateQuestionCommands`: the production reconciliation; a failure becomes one owner incident and
  *   never fails the action that asked for it.
  *
@@ -178,6 +179,16 @@ const productionReconcile = createPrivateQuestionCommandSync({
 });
 
 /**
+ * The key of the owner's notice about a failed sync: one per set of failing chats (`null`: the sync broke as a
+ * whole) and per UTC day. Not one per startup or group change, and not one for ever either: a constant key kept
+ * every later failure from the owner (#517).
+ */
+export function commandSyncIncidentKey(failedChatIds: readonly string[] | null, at: Date): string {
+  const what = failedChatIds === null ? "error" : [...failedChatIds].sort().join(",");
+  return `private-question-commands:${what}:${at.toISOString().slice(0, 10)}`;
+}
+
+/**
  * Brings the menus in line with the groups; called at startup and after every change of a group. The change
  * itself has already happened, so a Telegram failure is reported to the owner and retried by the next sync.
  */
@@ -194,8 +205,7 @@ export async function syncPrivateQuestionCommands(reason: string): Promise<void>
           failed: result.failed.map((item) => `${item.code} ${item.scope.telegramChatId} HTTP ${item.status}`).join("; "),
           reason,
         },
-        // One incident per set of failing chats, not one per startup or group change.
-        key: `private-question-commands:${result.failed.map((item) => item.scope.telegramChatId).sort().join(",")}`,
+        key: commandSyncIncidentKey(result.failed.map((item) => item.scope.telegramChatId), new Date()),
         summary: "Не удалось обновить команду /me в меню некоторых групп. Повторю при следующем запуске или изменении группы.",
       };
     }
@@ -204,7 +214,7 @@ export async function syncPrivateQuestionCommands(reason: string): Promise<void>
     console.error(JSON.stringify({ code: "AGENT_PRIVATE_QUESTION_COMMANDS_SYNC_FAILED", error: message, reason }));
     failure = {
       context: { error: message, reason },
-      key: "private-question-commands:error",
+      key: commandSyncIncidentKey(null, new Date()),
       summary: "Не удалось обновить команду /me в меню групп. Повторю при следующем запуске или изменении группы.",
     };
   }
