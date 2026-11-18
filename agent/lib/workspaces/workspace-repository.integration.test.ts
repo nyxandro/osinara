@@ -332,6 +332,30 @@ describeWithDatabase("workspace repository", () => {
       .resolves.toMatchObject({ rowCount: 0 });
   });
 
+  it("leaves a failed deletion for an operator and goes on, without failing the maintenance cycle (#538)", async () => {
+    const root = await mkdtemp(join(tmpdir(), "osinara-workspace-"));
+    roots.push(root);
+    const stuck = crypto.randomUUID();
+    const next = crypto.randomUUID();
+    await database().query(
+      "INSERT INTO workspace_deletion_jobs (workspace_id, available_at) VALUES ($1, now() - interval '2 minutes'), ($2, now() - interval '1 minute')",
+      [stuck, next],
+    );
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const deleteToolEnvironment = vi.fn(async (workspaceId: string) => {
+      if (workspaceId === stuck) throw new Error("runner unavailable");
+    });
+    const worker = createWorkspaceDeletionWorker(root, deleteToolEnvironment);
+
+    // The failure does not throw into the shared minute cycle, and the next job is still deleted.
+    await expect(worker()).resolves.toBe(1);
+    // The failed job keeps its code and is not taken again every minute.
+    await expect(worker()).resolves.toBe(0);
+    expect(deleteToolEnvironment).toHaveBeenCalledTimes(2);
+    const jobs = await database().query<{ error_code: string | null; workspace_id: string }>("SELECT workspace_id, error_code FROM workspace_deletion_jobs");
+    expect(jobs.rows).toEqual([{ error_code: "AGENT_WORKSPACE_PHYSICAL_DELETE_FAILED", workspace_id: stuck }]);
+  });
+
   it("uses shell-created files directly without a database synchronization step", async () => {
     const f = await fixture();
     const root = await mkdtemp(join(tmpdir(), "osinara-workspace-"));
