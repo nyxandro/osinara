@@ -58,8 +58,9 @@ export function createWorkspaceDeletionWorker(
           WHERE workspace_id = $1 AND lease_token = $2`,
           [workspaceId, leaseToken, errorCode],
         );
+        // One stable code, whatever failed: OsinaraWorkspaceDeletionFailed watches it, its runbook re-arms the job.
         console.error(JSON.stringify({
-          code: errorCode, error: error instanceof Error ? error.message : String(error), workspaceId,
+          code: "AGENT_WORKSPACE_DELETION_FAILED", error: error instanceof Error ? error.message : String(error), errorCode, workspaceId,
         }));
       }
     }

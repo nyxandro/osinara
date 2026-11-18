@@ -105,7 +105,7 @@ export async function failBackgroundReview(input: {
  */
 export async function recoverModelWaitingReviews(client: PoolClient, now: Date, currentRouteKey: string): Promise<void> {
   // Each join meets at most one row: `route_key` is the primary key of model_availability.
-  const candidates = await client.query<ReviewAttempt & { success_version: string | null }>(
+  const candidates = await client.query<ReviewAttempt & { success_version: string | null; waiting_success_version: string | null }>(
     `SELECT batch.*, own.success_version
        FROM memory_review_batches batch
        JOIN memory_review_lanes lane ON lane.id = batch.lane_id
@@ -154,6 +154,9 @@ export async function recoverModelWaitingReviews(client: PoolClient, now: Date, 
     await audit(client, batch, "memory_review.model_recovered", {
       causeCode: batch.diagnostic_code, generation: batch.model_recovery_generation + 1,
       successVersion: batch.success_version, modelRouteKey: batch.model_route_key,
+      // Null when the model reviews use now woke the batch (#537): its own route had no new success.
+      wokenByRouteKey: batch.success_version !== null && Number(batch.success_version) > Number(batch.waiting_success_version)
+        ? batch.model_route_key : currentRouteKey,
       previousSessionId: batch.application_session_id, previousAgentSessionId: batch.agent_session_id,
       previousAgentTurnId: batch.agent_turn_id,
     });

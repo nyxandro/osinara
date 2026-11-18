@@ -211,7 +211,8 @@ export async function deliverTelegramReminder(job: ClaimedReminder): Promise<Pro
     return { messageId, text };
   } catch (error) {
     console.error(JSON.stringify({
-      code: "AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED",
+      code: error instanceof AppError && error.code === "AGENT_REMINDER_TELEGRAM_DELIVERY_AMBIGUOUS"
+        ? error.code : "AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED",
       errorName: error instanceof Error ? error.name : "UnknownError",
       providerStatus,
       reminderId: job.id,

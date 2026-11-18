@@ -267,9 +267,17 @@ describe("osinara alert rules", () => {
     const [block] = alertBlocks("OsinaraModelDown");
     expect(block, "the alert this guards has been renamed").toBeDefined();
     expect(ruleField(block!, "expr"))
-      .toBe("max(tlast_over_time(osinara_model_call_failed_1m[12h])) > time() - min(osinara_model_last_success_age_seconds)");
+      .toBe("max(tlast_over_time(osinara_model_call_failed_1m[12h])) - 60 > time() - min(osinara_model_last_success_age_seconds)");
     expect(ruleField(block!, "for")).toBe("5m");
     expect(exporter).toContain("metric_name: osinara_model_last_success_age_seconds");
+  });
+
+  it("raises OsinaraWorkspaceDeletionFailed on the first parked workspace deletion (#538)", () => {
+    const [block] = alertBlocks("OsinaraWorkspaceDeletionFailed");
+    expect(block, "the alert this guards has been renamed").toBeDefined();
+    expect(ruleField(block!, "expr"))
+      .toBe('sum(sum_over_time(log_code_lines_1m{project="osinara-production", code="AGENT_WORKSPACE_DELETION_FAILED"}[15m])) > 0');
+    expect(read("agent/lib/workspaces/workspace-deletion.ts")).toContain('code: "AGENT_WORKSPACE_DELETION_FAILED"');
   });
 
   it("raises OsinaraModelCallsFailing on failed model calls, a lost connection included", () => {

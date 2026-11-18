@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { AppError } from "../../lib/app-error.js";
+import { wrapModelFacingTool } from "../../lib/model-facing-tool.js";
 import { memoryToolState } from "../session/tool-state.test-fixtures.js";
 import { defineTool, type ToolContext, type ToolDefinition } from "../tool.js";
 import { executeStepCalls, STORAGE_OUTCOME_UNKNOWN_OUTPUT } from "./step-calls.js";
@@ -59,6 +60,21 @@ describe("step calls", () => {
       expect(result).toMatchObject({ output: STORAGE_OUTCOME_UNKNOWN_OUTPUT, state: "unknown" });
       expect(calls.settle).toHaveBeenCalledWith("call-1", "unknown", STORAGE_OUTCOME_UNKNOWN_OUTPUT);
     }
+  });
+
+  it("keeps the unknown outcome through the application's model-facing wrapper (#539)", async () => {
+    // Every application tool is wrapped (`wrapModelFacingTool`), and the wrapper rebuilds the error it reads.
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const commitLost = new Error("Connection terminated unexpectedly");
+    const rollbackFailed = new AggregateError([commitLost], "AGENT_DATABASE_ROLLBACK_FAILED", { cause: commitLost });
+    const wrapped = wrapModelFacingTool("remember", tool(async () => {
+      throw new AppError("AGENT_DATABASE_UNAVAILABLE", "Соединение с базой данных прервано", { cause: rollbackFailed });
+    }));
+    const calls = journal();
+    const [result] = await executeStepCalls({
+      calls: [CALL], contextFor: () => CONTEXT, delegateCall: vi.fn(), journal: calls, tools: { remember: wrapped },
+    });
+    expect(result).toMatchObject({ output: STORAGE_OUTCOME_UNKNOWN_OUTPUT, state: "unknown" });
   });
 
   it("keeps an ordinary failure a completed call with its error text", async () => {

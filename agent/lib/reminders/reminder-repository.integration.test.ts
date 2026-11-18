@@ -524,6 +524,49 @@ describeWithDatabase("reminder repositories", () => {
       await expectNextDay(auth, reminder.id, "AGENT_REMINDER_DELIVERY_AMBIGUOUS");
     });
 
+    it("brings the owner one notice a day for a reminder that keeps failing the same way", async () => {
+      // A member who blocked the bot: an hourly reminder must not bring a notice every hour.
+      const { reminder } = await dailyReminder("recurring-notices");
+      for (const at of ["2026-07-12T10:00:00.000Z", "2026-07-13T10:00:00.000Z"]) {
+        await database().query("UPDATE reminders SET due_at = $2, available_at = $2 WHERE id = $1", [reminder.id, at]);
+        const [claimed] = await reminderDispatchRepository.claimDue({ leaseMilliseconds: 300_000, limit: 1, now: new Date(at) });
+        await reminderDispatchRepository.markDispatchStarted(claimed!.id, claimed!.leaseToken);
+        await reminderDispatchRepository.fail(claimed!, "AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED", new Date(at));
+        if (at.startsWith("2026-07-12")) {
+          // A second failure the same day joins the first notice.
+          await database().query("UPDATE reminders SET due_at = '2026-07-12T20:00:00Z', available_at = '2026-07-12T20:00:00Z' WHERE id = $1", [reminder.id]);
+          const [again] = await reminderDispatchRepository.claimDue({ leaseMilliseconds: 300_000, limit: 1, now: new Date("2026-07-12T20:00:00Z") });
+          await reminderDispatchRepository.markDispatchStarted(again!.id, again!.leaseToken);
+          await reminderDispatchRepository.fail(again!, "AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED", new Date("2026-07-12T20:00:00Z"));
+        }
+      }
+      const notices = await database().query<{ operation_key: string }>(
+        "SELECT operation_key FROM operational_incidents WHERE operation_key LIKE $1 ORDER BY operation_key", [`reminder:${reminder.id}:%`],
+      );
+      expect(notices.rows.map((row) => row.operation_key)).toEqual([
+        `reminder:${reminder.id}:AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED:2026-07-12`,
+        `reminder:${reminder.id}:AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED:2026-07-13`,
+      ]);
+    });
+
+    it("still fails a one-off reminder whose delivery attempts ran out", async () => {
+      const fixture = await createFixture();
+      const auth = privateAuth(fixture, "member");
+      await reminderRepository.configureNotifications(auth, { basis: null, source: "person", quietEnd: null, quietStart: null, timezone: "UTC" });
+      const reminder = await reminderRepository.create(auth, {
+        content: "Разово", firstRunAt: new Date("2026-07-12T10:00:00.000Z"), operationKey: "one-off-exhausted",
+        recurrence: null, scope: "personal", timezone: "UTC",
+      });
+      await database().query(
+        `UPDATE reminders SET status = 'leased', attempts = $2, lease_token = gen_random_uuid(),
+           lease_expires_at = '2026-07-12T10:00:01.000Z', dispatch_started_at = NULL WHERE id = $1`,
+        [reminder.id, REMINDER_DISPATCH_MAX_SAFE_ATTEMPTS],
+      );
+      await reminderDispatchRepository.claimDue({ leaseMilliseconds: 1_000, limit: 1, now: new Date("2026-07-12T10:00:02.000Z") });
+      const row = await database().query<{ last_error_code: string; status: string }>("SELECT status, last_error_code FROM reminders WHERE id = $1", [reminder.id]);
+      expect(row.rows[0]).toEqual({ last_error_code: "AGENT_REMINDER_DELIVERY_ATTEMPTS_EXHAUSTED", status: "failed" });
+    });
+
     it("goes on to the next day after its delivery attempts ran out", async () => {
       const { auth, reminder } = await dailyReminder("recurring-exhausted");
       await database().query(

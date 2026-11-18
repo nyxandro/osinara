@@ -125,7 +125,9 @@ export function normalizeModelFacingError(
       reason,
       retryable: canCorrect,
       sideEffectStatus: canCorrect || category === "authorization" ? "not_started" : "unknown",
-    }, { isExpectedRefusal: error instanceof AppError && error.isExpectedRefusal });
+    // The cause travels for the log and for the runtime: a write whose outcome is unknown is marked deep in
+    // the chain (#539), and a fresh error without it would turn "maybe saved" into "failed".
+    }, { cause: error, isExpectedRefusal: error instanceof AppError && error.isExpectedRefusal });
   }
   // The raw failure stays out of the model's text but travels as the cause, for the log (#464).
   return new ModelFacingError({

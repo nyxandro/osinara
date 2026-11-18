@@ -104,40 +104,54 @@ async function closeUndeliveredOccurrence(
   errorCode: string,
   after: Date,
 ): Promise<void> {
-  // Before the time moves: the owner's notice is keyed by the occurrence that failed.
-  await recordFailures(client, [row], errorCode);
+  await recordFailures(client, [row], errorCode, after);
   const reminder = await client.query<{ recurrence_unit: ReminderRecurrenceUnit | null }>(
     "SELECT recurrence_unit FROM reminders WHERE id = $1", [row.id],
   );
-  if (reminder.rows[0]?.recurrence_unit == null) {
-    await client.query(
-      `UPDATE reminders
-          SET status = 'failed', lease_token = NULL, lease_expires_at = NULL, dispatch_started_at = NULL,
-              last_error_code = $2, updated_at = $3
-        WHERE id = $1`,
-      [row.id, errorCode, after],
-    );
-    return;
+  if (reminder.rows[0]?.recurrence_unit != null) {
+    // A savepoint per reminder: one whose next time cannot be computed must not roll back the whole claim,
+    // which would stop every reminder each minute; it fails alone instead.
+    await client.query("SAVEPOINT next_occurrence");
+    try {
+      const next = await nextAnchoredOccurrence(client, "reminders", row.id, after);
+      await client.query(
+        `UPDATE reminders
+            SET status = 'active', occurrence_index = $2, due_at = $3, available_at = $3, attempts = 0,
+                lease_token = NULL, lease_expires_at = NULL, dispatch_started_at = NULL, delayed_by_quiet_hours = false,
+                last_error_code = $4, updated_at = $5
+          WHERE id = $1`,
+        [row.id, next.next_index, next.next_run_at, errorCode, after],
+      );
+      await client.query("RELEASE SAVEPOINT next_occurrence");
+      return;
+    } catch (error) {
+      await client.query("ROLLBACK TO SAVEPOINT next_occurrence");
+      console.error(JSON.stringify({
+        code: "AGENT_REMINDER_NEXT_OCCURRENCE_FAILED", error: error instanceof Error ? error.message : String(error), reminderId: row.id,
+      }));
+    }
   }
-  const next = await nextAnchoredOccurrence(client, "reminders", row.id, after);
   await client.query(
     `UPDATE reminders
-        SET status = 'active', occurrence_index = $2, due_at = $3, available_at = $3, attempts = 0,
-            lease_token = NULL, lease_expires_at = NULL, dispatch_started_at = NULL, delayed_by_quiet_hours = false,
-            last_error_code = $4, updated_at = $5
+        SET status = 'failed', lease_token = NULL, lease_expires_at = NULL, dispatch_started_at = NULL,
+            last_error_code = $2, updated_at = $3
       WHERE id = $1`,
-    [row.id, next.next_index, next.next_run_at, errorCode, after],
+    [row.id, errorCode, after],
   );
 }
 
+/**
+ * One owner notice per reminder, cause and UTC day: a repeating reminder now goes on after a failure (#535),
+ * and a member who blocked the bot must not bring the owner a notice every hour of every day.
+ */
 async function recordFailures(
   client: PoolClient,
   rows: readonly { family_id: string; id: string }[],
   errorCode: string,
+  at: Date,
 ): Promise<void> {
   for (const row of rows) {
-    const reminder = (await client.query<{ due_at: Date }>("SELECT due_at FROM reminders WHERE id=$1", [row.id])).rows[0]!;
-    await recordOperationalIncident({ key: `reminder:${row.id}:${reminder.due_at.toISOString()}`,
+    await recordOperationalIncident({ key: `reminder:${row.id}:${errorCode}:${at.toISOString().slice(0, 10)}`,
       code: "AGENT_REMINDER_DELIVERY_FAILED", summary: "Не удалось подтвердить доставку напоминания. Проверьте его состояние.",
       context: { reminderId: row.id, causeCode: errorCode } }, client);
     await client.query(
@@ -213,7 +227,7 @@ export const reminderDispatchRepository = {
          RETURNING reminder.id, reminder.family_id`,
         [options.now],
       );
-      await recordFailures(client, invalid.rows, "AGENT_REMINDER_DESTINATION_REVOKED");
+      await recordFailures(client, invalid.rows, "AGENT_REMINDER_DESTINATION_REVOKED", options.now);
 
       // Quiet hours defer availability while retaining the original due_at for delayed-delivery notice.
       await client.query(
