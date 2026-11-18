@@ -74,6 +74,7 @@ export {
   PRIVATE_ONLY_TOOL_NAMES,
   TRUSTED_MODE_TOOL_NAMES,
 } from "./trusted-mode-tool-catalog.js";
+import { CHAT_SEND_TOOL_NAMES } from "./chat-send-tools.js";
 
 type AnyToolDefinition = ToolDefinition<any, any>;
 type ToolMap = Readonly<Record<string, AnyToolDefinition>>;
@@ -292,11 +293,10 @@ const TRUSTED_SURFACES: Readonly<Record<TrustedSurfaceKey, ToolMap>> = {
 
 // What a scenario sends goes out only while its run, author and chat are still authorized, as its
 // final text does before delivery (#480).
-const SCENARIO_SEND_TOOL_NAMES = ["send_contact", "send_gif", "send_location", "send_poll", "send_voice_message", "send_widget"] as const;
 const RAW_TRUSTED_TOOLS: ToolMap = { ...TRUSTED_MODE_TOOLS, ...FAMILY_ONLY_TOOLS, ...PRIVATE_ONLY_TOOLS, ...OWNER_ONLY_TOOLS };
 
 function authorizedScenarioSends(surface: ToolMap): ToolMap {
-  return Object.fromEntries(SCENARIO_SEND_TOOL_NAMES.flatMap((name) => {
+  return Object.fromEntries(CHAT_SEND_TOOL_NAMES.flatMap((name) => {
     const raw = RAW_TRUSTED_TOOLS[name];
     return surface[name] === undefined || raw === undefined ? [] : [[name, wrapModelFacingTool(name, scheduledSendTool(raw))]];
   }));

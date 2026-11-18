@@ -15,7 +15,7 @@ import {
   type SandboxRunnerProcessResponse,
 } from "../../agent/lib/sandbox-runner/sandbox-runner-contract.js";
 import { classifyGoogleWorkspaceCommand } from "../../agent/lib/google-workspace/google-workspace-command-policy.js";
-import { collectLimitedStream } from "./docker-sandbox-files.js";
+import { collectLimitedStream, type DestroyableStream } from "./docker-sandbox-files.js";
 import {
   buildGoogleWorkspaceContainerOptions,
   type SandboxDockerRuntime,
@@ -41,9 +41,10 @@ export async function executeGoogleWorkspaceContainer(input: {
   ];
   options.name = `osinara-gws-${randomUUID()}`;
   const container = await input.docker.createContainer(options);
-  let stream: NodeJS.ReadWriteStream | null = null;
+  let stream: (NodeJS.ReadWriteStream & DestroyableStream) | null = null;
   try {
-    stream = await container.attach({ stream: true, stderr: true, stdout: true });
+    // docker-modem hands over the attached HTTP stream, a Node stream with `destroy` the types leave out.
+    stream = await container.attach({ stream: true, stderr: true, stdout: true }) as NodeJS.ReadWriteStream & DestroyableStream;
     const stdout = new PassThrough();
     const stderr = new PassThrough();
     stdout.on("error", () => undefined);

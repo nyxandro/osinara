@@ -357,7 +357,10 @@ export function createSandboxEgressProxy(options: SandboxEgressProxyOptions) {
     });
   });
 
-  server.on("connect", (request, clientSocket, initialData) => {
+  server.on("connect", (request, connectSocket, initialData) => {
+    // Typed as a Duplex, but Node passes a net.Socket unless the server was built with another socket
+    // type (node:http, event 'connect'); this server never is.
+    const clientSocket = connectSocket as Socket;
     let phase: ConnectPhase = "request";
     const clientUnavailable = guardClientSocket(clientSocket, () => phase);
     void (async () => {

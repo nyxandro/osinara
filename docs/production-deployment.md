@@ -247,7 +247,7 @@ and checks that it is a flat set of modules that parse as shell and include `lau
 
 `main.sh --preflight` and `launcher --resume PROPOSAL LEASE` are how an older controller starts a
 newer one, so every controller version keeps accepting both forms
-(`production-release-contract.test.ts` pins them).
+(`tests/production-release-contract.test.ts` pins them).
 
 Nothing has been stopped at that point: a broken or refusing release controller ends the proposal as
 `failed` with the current release still running. The one window left is a resumed controller that
@@ -331,7 +331,7 @@ purpose. They run untrusted commands under their own hard limit (2 GiB each); in
 embedding service, the more so the heavier an arbitrary command is.
 
 Keep the slice equal to the sum of the reservations: less cuts every reservation proportionally,
-and `compose-runtime.test.ts` fails when the sum and this command disagree. `memory.low` shows only
+and `tests/compose-runtime.test.ts` fails when the sum and this command disagree. `memory.low` shows only
 the configured value; protection actually used shows up as the `low` counter in each container's
 `memory.events`, which grows when the kernel had to reclaim protected memory after all.
 

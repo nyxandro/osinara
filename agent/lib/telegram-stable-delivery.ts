@@ -13,6 +13,8 @@ import type { TelegramEventContext } from "../runtime/telegram/channel-types.js"
 
 import { AppError } from "./app-error.js";
 
+const TELEGRAM_SERVER_ERROR_STATUS = 500;
+
 type TelegramJsonValue =
   | boolean
   | null
@@ -99,9 +101,18 @@ async function requestStableTelegramMessage(
     result?: StableTelegramProviderResult;
   };
   if (!response.ok || body.ok !== true) {
+    // A server error of Telegram's own may come after it accepted the message: the outcome is unknown.
+    if (response.status >= TELEGRAM_SERVER_ERROR_STATUS) {
+      throw new AppError(
+        "AGENT_TELEGRAM_MESSAGE_DELIVERY_AMBIGUOUS",
+        "Telegram не подтвердил обычное сообщение: оно могло дойти. Проверьте чат, прежде чем повторять запрос",
+        { details: { providerStatus: response.status } },
+      );
+    }
     throw new AppError(
       "AGENT_TELEGRAM_MESSAGE_DELIVERY_FAILED",
       "Telegram не принял обычное сообщение. Попробуйте повторить запрос",
+      { details: { providerStatus: response.status } },
     );
   }
   return body.result ?? {};

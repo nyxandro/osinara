@@ -318,6 +318,8 @@ describe("postTelegramRichMessage", () => {
       details: { description: "Bad Request: BUTTON_TEXT_INVALID", providerStatus: 400 },
     });
     expect([refused, limited, broken].map(isTelegramRichMessageRefusal)).toEqual([true, false, false]);
+    // A server error is no refusal: Telegram may have delivered the message (17.11.2026, a 504).
+    expect(broken).toMatchObject({ code: "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_AMBIGUOUS", details: { providerStatus: 502 } });
     expect(isTelegramRichMessageRefusal(new Error("Bad Request"))).toBe(false);
   });
 

@@ -32,14 +32,6 @@ interface ActiveRunRow {
   schedule_id: string;
 }
 
-const UNCONFIRMED_DELIVERY_CODES = new Set([
-  "AGENT_SCHEDULE_DELIVERY_AMBIGUOUS",
-  "AGENT_SCHEDULE_DELIVERY_CONFIRMATION_MISSING",
-  "AGENT_TELEGRAM_MESSAGE_DELIVERY_AMBIGUOUS",
-  "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_AMBIGUOUS",
-  "AGENT_TELEGRAM_FINAL_DELIVERY_AMBIGUOUS",
-]);
-
 export type AgentScheduleRunOutcome =
   | { kind: "delivered" }
   // The model finished the run with the empty-delivery marker, as its scenario allowed.
@@ -123,10 +115,10 @@ export async function finishActiveAgentScheduleRun(
 
   const completedRuns = row.completed_runs + (errorCode === null ? 1 : 0);
   const limitReached = row.max_runs !== null && completedRuns >= row.max_runs;
-  // A storage error can hide the transport's ambiguity code. The durable outbox is authoritative.
-  const deliveryUnconfirmed = errorCode !== null &&
-    (row.delivery_may_have_happened || UNCONFIRMED_DELIVERY_CODES.has(errorCode));
-  const next = limitReached || deliveryUnconfirmed || row.monitor_window_closed
+  // An unconfirmed run is never repeated — the run row above is terminal and the next occurrence is a new
+  // one — but it no longer stops a recurring scenario for good (owner's decision 18.11.2026): a Telegram
+  // 5xx or a lost connection once a month would otherwise leave an hourly scenario off until re-enabled.
+  const next = limitReached || row.monitor_window_closed
     ? null : await nextAgentScheduleOccurrence(client, row.schedule_id, row.recurrence_kind, input.completedAt);
   if (!next) {
     await client.query(

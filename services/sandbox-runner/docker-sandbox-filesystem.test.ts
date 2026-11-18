@@ -52,7 +52,7 @@ function archiveFile(name: string, content: string): NodeJS.ReadableStream {
 describe("Docker sandbox filesystem bridge", () => {
   it("stages a hidden-home read outside tmpfs before using the archive API", async () => {
     const container = {
-      exec: vi.fn(async () => successfulExec()),
+      exec: vi.fn(async (_options: { Cmd: string[] }) => successfulExec()),
       getArchive: vi.fn(async () => archiveFile("staged", "skill instructions")),
       inspect: vi.fn(async () => ({ Config: { Labels: {} }, State: { Running: true } })),
     };
@@ -71,7 +71,8 @@ describe("Docker sandbox filesystem bridge", () => {
       "/tmp/home/.agents/skills/behavior-preferences/SKILL.md",
     );
 
-    expect(new TextDecoder().decode(content)).toBe("skill instructions");
+    expect(content).not.toBeNull();
+    expect(new TextDecoder().decode(content!)).toBe("skill instructions");
     expect(container.getArchive).toHaveBeenCalledWith({
       path: expect.stringMatching(/^\/\.osinara-sandbox-uploads\//u),
     });
@@ -86,7 +87,7 @@ describe("Docker sandbox filesystem bridge", () => {
     const missingExec = successfulExec();
     missingExec.inspect.mockResolvedValue({ ExitCode: 44, Running: false });
     const container = {
-      exec: vi.fn(async () => missingExec),
+      exec: vi.fn(async (_options: { Cmd: string[] }) => missingExec),
       getArchive: vi.fn(),
       inspect: vi.fn(async () => ({ Config: { Labels: {} }, State: { Running: true } })),
     };
@@ -111,7 +112,7 @@ describe("Docker sandbox filesystem bridge", () => {
     const source = new PassThrough();
     const exec = successfulExec(source);
     const container = {
-      exec: vi.fn(async () => exec),
+      exec: vi.fn(async (_options: { Cmd: string[] }) => exec),
       inspect: vi.fn(async () => ({ Config: { Labels: {} }, State: { Running: true } })),
       putArchive: vi.fn(async () => undefined),
     };
@@ -145,7 +146,7 @@ describe("Docker sandbox filesystem bridge", () => {
   it("rejects a directory destination and observes failed staging cleanup", async () => {
     const exitCodes = [0, 1, 1];
     const container = {
-      exec: vi.fn(async () => {
+      exec: vi.fn(async (_options: { Cmd: string[] }) => {
         const source = new PassThrough();
         const exitCode = exitCodes.shift();
         return {
