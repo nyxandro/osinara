@@ -49,6 +49,8 @@ export function runtimeTelegram(input: {
   });
   const model = scriptedModel(...input.steps);
   const dispatcher = createTurnDispatcher({
+    // Rights are not this fixture's subject: recovery may resume every turn (#542).
+    resumeAccess: async () => "allowed",
     admit: async (work) => await work(),
     runnerLock: HELD_RUNNER_LOCK,
     runtime: testRuntime({

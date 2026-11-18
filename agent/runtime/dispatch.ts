@@ -4,7 +4,8 @@
  * Export:
  * - `createTurnDispatcher`: `run` runs a created turn to its end and returns its outcome; `start`
  *   does the same in the background under the deploy admission; `recover` resumes the turns an
- *   earlier process left running, and any whose start the deploy admission refused, and reports
+ *   earlier process left running, and any whose start the deploy admission refused, once the
+ *   application confirms their rights still hold (`resumeAccess`, #542); it reports
  *   the turns it left unreported (it is repeated every minute); `reportsIdle` waits for those
  *   reports, `idle` for all background work.
  *
@@ -17,7 +18,10 @@ import type { RunnerLock } from "./runner-lock.js";
 import {
   listRunningRootTurns, listUnobservedRootTurns, loadTurn, loadUnobservedTurn, releaseOtherRunners,
 } from "./turn/journal-repository.js";
+import { AppError } from "../lib/app-error.js";
+import type { SessionAuth } from "./context.js";
 import { runTurn, type TurnOutcome, type TurnRuntime } from "./turn/run-turn.js";
+import { failTurn } from "./turn/turn-failure.js";
 import { reportUnobservedTurn, storedTurnOutcome } from "./turn/turn-observation.js";
 
 export interface TurnDispatcher {
@@ -35,8 +39,16 @@ export type RuntimeAdmission = <T>(work: () => Promise<T>) => Promise<T | null>;
 // Turns are never aborted from outside: a stopping process leaves them running for recovery.
 const NEVER_ABORTED = new AbortController().signal;
 
+/**
+ * Whether an interrupted turn may still be finished: its rights were recorded when it was created, and the
+ * application re-checks them against the current records before recovery runs it (#542).
+ */
+export type ResumeAccess = (auth: SessionAuth) => Promise<"allowed" | "revoked">;
+
 export function createTurnDispatcher(input: {
   readonly admit: RuntimeAdmission;
+  /** Asked before recovery finishes a turn an earlier process left running. */
+  readonly resumeAccess: ResumeAccess;
   /** Recovery takes over other processes' turns only while this process holds it. */
   readonly runnerLock: Pick<RunnerLock, "ensureHeld">;
   readonly runtime: TurnRuntime;
@@ -136,7 +148,27 @@ export function createTurnDispatcher(input: {
     await releaseOtherRunners(runtime.database, runtime.runnerId);
     // Turns this process already runs or waits on are left alone; a repeated recovery is cheap.
     const turns = (await listRunningRootTurns(runtime.database)).filter((turn) => !active.has(turn.id));
-    for (const turn of turns) start(turn.id);
+    for (const turn of turns) {
+      let access: "allowed" | "revoked";
+      try {
+        access = await input.resumeAccess(turn.auth);
+      } catch (error) {
+        // Unknown rights resume nothing: the turn waits for the next recovery, a minute later.
+        console.error(JSON.stringify({
+          code: "AGENT_TURN_RESUME_ACCESS_UNREADABLE", error: error instanceof Error ? error.message : String(error), turnId: turn.id,
+        }));
+        continue;
+      }
+      if (access === "allowed") {
+        start(turn.id);
+        continue;
+      }
+      // Closed as any failed turn, so its channel cleans up; the model is not called and nothing is answered.
+      await failTurn(runtime.database, turn, new AppError(
+        "AGENT_TURN_ACCESS_REVOKED", "Доступ к этому чату отозван, прерванный ход не продолжен",
+      ), NEVER_ABORTED);
+      report(turn.id);
+    }
     const unreported = (await listUnobservedRootTurns(runtime.database)).filter((id) => !active.has(id) && !reporting.has(id));
     for (const turnId of unreported) report(turnId);
     if (turns.length + unreported.length > 0) {
