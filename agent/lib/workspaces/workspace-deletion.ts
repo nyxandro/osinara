@@ -3,7 +3,8 @@
  *
  * Exports:
  * - `createWorkspaceDeletionWorker`: dependency-injected worker for integration tests.
- * - `deleteOrphanedWorkspaces`: leases cascade-generated jobs and removes volume directories.
+ * - `deleteOrphanedWorkspaces`: leases cascade-generated jobs and removes volume directories. A job that
+ *   failed keeps its `error_code` and is not taken again; the others go on.
  */
 import { resolve } from "node:path";
 
@@ -28,7 +29,7 @@ export function createWorkspaceDeletionWorker(
           SET lease_token = $2, lease_expires_at = $3
         WHERE workspace_id = (
           SELECT workspace_id FROM workspace_deletion_jobs
-           WHERE available_at <= $1
+           WHERE available_at <= $1 AND error_code IS NULL
              AND (lease_expires_at IS NULL OR lease_expires_at <= $1)
            ORDER BY available_at, workspace_id
            LIMIT 1 FOR UPDATE SKIP LOCKED
@@ -38,9 +39,11 @@ export function createWorkspaceDeletionWorker(
       );
       const workspaceId = claim.rows[0]?.workspace_id;
       if (!workspaceId) return deleted;
+      let removed = false;
       try {
         await deleteWorkspaceDirectory(root, workspaceId);
         await deleteToolEnvironment(workspaceId);
+        removed = true;
         const completed = await database().query(
           "DELETE FROM workspace_deletion_jobs WHERE workspace_id = $1 AND lease_token = $2",
           [workspaceId, leaseToken],
@@ -48,6 +51,16 @@ export function createWorkspaceDeletionWorker(
         if (completed.rowCount !== 1) throw new Error("AGENT_WORKSPACE_DELETION_LEASE_LOST");
         deleted += 1;
       } catch (error) {
+        if (removed) {
+          // Only the queue's record failed: the folder and the environment are gone. The job is not parked as a
+          // failed deletion; its lease runs out and the next pass repeats the (idempotent) removal and the record.
+          console.error(JSON.stringify({
+            code: "AGENT_WORKSPACE_DELETION_UNRECORDED", error: error instanceof Error ? error.message : String(error), workspaceId,
+          }));
+          continue;
+        }
+        // The job keeps its code and waits for an operator, as a failed session deletion does: taken again
+        // every minute it would fail the shared maintenance cycle, and with it the reminders' heartbeat (#538).
         const errorCode = isAppError(error) ? error.code : "AGENT_WORKSPACE_PHYSICAL_DELETE_FAILED";
         await database().query(
           `UPDATE workspace_deletion_jobs
@@ -55,8 +68,10 @@ export function createWorkspaceDeletionWorker(
           WHERE workspace_id = $1 AND lease_token = $2`,
           [workspaceId, leaseToken, errorCode],
         );
-        console.error("Workspace physical deletion failed", { error, errorCode, workspaceId });
-        throw error;
+        // One stable code, whatever failed: OsinaraWorkspaceDeletionFailed watches it, its runbook re-arms the job.
+        console.error(JSON.stringify({
+          code: "AGENT_WORKSPACE_DELETION_FAILED", error: error instanceof Error ? error.message : String(error), errorCode, workspaceId,
+        }));
       }
     }
   };

@@ -92,6 +92,16 @@ describe("Telegram animation delivery", () => {
     await expect(sendTelegramAnimation(ANIMATION, fetchMock)).rejects.toMatchObject({ code: "AGENT_GIF_DELIVERY_AMBIGUOUS" });
   });
 
+  it.each([500, 502, 504])("treats a Telegram server error %s as an unknown outcome (#536)", async (status) => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ description: "Gateway Timeout", ok: false }), { status }));
+
+    await expect(sendTelegramAnimation(ANIMATION, fetchMock)).rejects.toMatchObject({ code: "AGENT_GIF_DELIVERY_AMBIGUOUS" });
+    // Telegram's answer reached the HTTP branch (a thrown request would log no status).
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(JSON.parse(log.mock.calls[0]![0] as string)).toMatchObject({ code: "AGENT_GIF_DELIVERY_AMBIGUOUS", providerStatus: status });
+  });
+
   it("refuses a caption over Telegram's limit before sending", async () => {
     const fetchMock = vi.fn<typeof fetch>();
 

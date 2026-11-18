@@ -15,6 +15,7 @@ import { pruneTelegramGroupJournal } from "../telegram-group-message-storage.js"
 import { recoverEmptyReviewModelFailure } from "./memory-review-model-admin.js";
 import { createConfiguredLanguageModel } from "../model-transport.js";
 import { modelRouteKey } from "../model-route.js";
+import { modelProviderConfig } from "../model-provider-config.js";
 import { reconcileMemoryReviewExecutions } from "./memory-review-execution-reconciliation.js";
 import { createSessionHistory } from "../../runtime/history/history-repository.js";
 import { newSessionId, newTurnId } from "../../runtime/ids.js";
@@ -248,6 +249,17 @@ async function recordAmbiguousEnding(batchId: string): Promise<void> {
     expect((await database().query("SELECT count(*)::int AS count FROM audit_events WHERE event_type = 'memory_review.operator_model_recovery' AND subject_id = $1", [batch.batchId])).rows)
       .toEqual([{ count: 1 }]);
     expect(await claim()).toEqual([]);
+  });
+
+  it("recovers after a model change from a success of the model reviews use now (#537)", async () => {
+    // A batch that waited on the old model would otherwise wait for a success nobody sends any more.
+    const { batch } = await runningReview();
+    await database().query("UPDATE memory_review_batches SET model_route_key = $2 WHERE id = $1", [batch.batchId, "b".repeat(64)]);
+    const waiting = await wait(batch.batchId);
+    const current = modelRouteKey(modelProviderConfig.agent.transport, modelProviderConfig.agent.models.primary.id);
+    expect(waiting.model_route_key).not.toBe(current);
+    await recordSuccessfulModelCall({ requestId: crypto.randomUUID(), routeKey: current, observedAt: new Date(waiting.waiting_since.getTime() + 10) });
+    expect((await claim()).map((item) => item.batchId)).toEqual([batch.batchId]);
   });
 
   it("uses an actual model transport success as the signal for the waiting review", async () => {

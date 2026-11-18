@@ -288,7 +288,7 @@ describe("deliverTelegramReminder", () => {
     resolver.measure.mockResolvedValue({ file: { byteSize: 3, fileName: "oct.pdf", path: "bills/oct.pdf", scope: "personal" }, ok: true });
 
     await expect(deliverTelegramReminder({ ...personalJob, content: "Оплатить счёт\n\n![](/workspace/personal/bills/oct.pdf)" }))
-      .rejects.toMatchObject({ code: "AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED" });
+      .rejects.toMatchObject({ code: "AGENT_REMINDER_TELEGRAM_DELIVERY_AMBIGUOUS" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -368,7 +368,7 @@ describe("deliverTelegramReminder", () => {
       forumTopicId: null, messageThreadId: null, scope: "personal", telegramChatId: "101", telegramChatType: "private",
     };
 
-    await expect(deliverTelegramReminder(job)).rejects.toMatchObject({ code: "AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED" });
+    await expect(deliverTelegramReminder(job)).rejects.toMatchObject({ code: "AGENT_REMINDER_TELEGRAM_DELIVERY_AMBIGUOUS" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(buttons.discard).not.toHaveBeenCalled();
   });
@@ -390,10 +390,21 @@ describe("deliverTelegramReminder", () => {
   it("reports a Telegram refusal with the code the dispatcher stores", async () => {
     vi.stubEnv("TELEGRAM_BOT_TOKEN", "telegram-bot-secret");
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 503 })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 403 })));
 
     await expect(deliverTelegramReminder(delayedJob)).rejects.toMatchObject({
       code: "AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED",
+    });
+  });
+
+  it.each([500, 502, 503, 504])("reports a Telegram server error %s as an unknown outcome (#536)", async (status) => {
+    // A server error may come after Telegram accepted the reminder (17.11.2026, a 504 for a delivered message).
+    vi.stubEnv("TELEGRAM_BOT_TOKEN", "telegram-bot-secret");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status })));
+
+    await expect(deliverTelegramReminder(delayedJob)).rejects.toMatchObject({
+      code: "AGENT_REMINDER_TELEGRAM_DELIVERY_AMBIGUOUS",
     });
   });
 
