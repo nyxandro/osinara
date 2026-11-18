@@ -8,7 +8,8 @@
  *   ready (17.11.2026 the hub was down an hour, as long as twelve attempts last); then the event is given up.
  * - A chat with no conversation right now keeps the event waiting without spending an attempt, up to a day.
  * - An author who lost access is not told anything; a question answered meanwhile is not asked.
- * - A retelling that may have reached the chat (delivered, unknown outcome, a part arrived) is not told again.
+ * - A retelling that may have reached the chat (delivered, unknown outcome, a part arrived, a send by a tool)
+ *   is not told again; a turn already made is asked again, never replaced, when handling it broke.
  */
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -17,7 +18,7 @@ import { bindContinuation } from "../../runtime/session/continuations.js";
 import { telegramContinuationToken } from "../../runtime/telegram/api.js";
 import { loadTurn } from "../../runtime/turn/journal-repository.js";
 import type { TurnOutcome } from "../../runtime/turn/run-turn.js";
-import { newTestSession } from "../../runtime/turn/turn.integration-fixtures.js";
+import { newTestSession, startMessageTurn } from "../../runtime/turn/turn.integration-fixtures.js";
 import { BACKGROUND_TASK_ANSWER_WAIT_MS, BACKGROUND_TASK_CONCURRENCY, BACKGROUND_TASK_EVENT_ATTEMPTS } from "./background-task-config.js";
 import { createBackgroundTaskEventProcessor } from "./background-task-events.js";
 import { backgroundTaskMessageRepository } from "./background-task-message-repository.js";
@@ -179,6 +180,36 @@ describeWithDatabase("background task events", () => {
       expect((await eventOf(taskId))?.status, `${item.status}/${item.chunks}`).toBe(item.expected);
       if (item.expected === "answered") expect((await backgroundTaskRepository.find(taskId))?.state).toBe("reported");
     }
+  });
+
+  it("does not tell an outcome again after its retelling turn sent something to the chat by a tool", async () => {
+    // A GIF, a poll, a place, a contact or a voice note goes out by a tool, outside the final message.
+    for (const [tool, expected] of [["send_gif", "answered"], ["web_search", "pending"]] as const) {
+      const taskId = await finishedTask();
+      const turn = await startMessageTurn(await newTestSession(), "Итог задачи");
+      await database().query("INSERT INTO agent_turn_steps (turn_id, step_index, response, finish_reason) VALUES ($1, 0, '{}', 'tool-calls')", [turn.id]);
+      await database().query(
+        `INSERT INTO agent_tool_calls (turn_id, step_index, call_id, position, tool_name, input, state, output)
+         VALUES ($1, 0, 'call-1', 0, $2, '{}', 'completed', '{}')`,
+        [turn.id, tool],
+      );
+      await database().query("UPDATE background_task_events SET turn_id = $2, available_at = $3 WHERE task_id = $1", [taskId, turn.id, now]);
+      const failed = vi.fn(async () => ({ code: "AGENT_MODEL_CALL_FAILED", message: "down", status: "failed" }) as TurnOutcome);
+      expect(await processor(failed)(), tool).toBe(true);
+      expect((await eventOf(taskId))?.status, tool).toBe(expected);
+    }
+  });
+
+  it("lets the turn it made finish instead of making another when handling it broke", async () => {
+    const taskId = await finishedTask();
+    await database().query("UPDATE background_task_events SET turn_id = 'turn-made', available_at = $2 WHERE task_id = $1", [taskId, now]);
+    const broken = vi.fn(async () => { throw new Error("the database dropped the connection"); });
+    expect(await processor(broken)()).toBe(true);
+    const event = await database().query<{ status: string; turn_id: string | null }>(
+      "SELECT status, turn_id FROM background_task_events WHERE task_id = $1", [taskId],
+    );
+    // The turn may have told the outcome already: the next attempt asks it, it does not tell it anew.
+    expect(event.rows[0]).toEqual({ status: "pending", turn_id: "turn-made" });
   });
 
   it("brings an outcome into the chat's current conversation as the task's report, then answers it", async () => {

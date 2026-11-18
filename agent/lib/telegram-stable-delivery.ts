@@ -112,6 +112,7 @@ async function requestStableTelegramMessage(
     throw new AppError(
       "AGENT_TELEGRAM_MESSAGE_DELIVERY_FAILED",
       "Telegram не принял обычное сообщение. Попробуйте повторить запрос",
+      { details: { providerStatus: response.status } },
     );
   }
   return body.result ?? {};

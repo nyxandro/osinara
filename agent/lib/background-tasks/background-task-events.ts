@@ -46,7 +46,7 @@ async function settle(event: BackgroundTaskEvent, turnId: string, outcome: TurnO
   // The retelling may have reached the chat (delivered, an unknown outcome, a part sent): telling it again
   // could repeat it, and an unknown outcome is no leave to retry (17.11.2026 a 504 told an outcome twice).
   // The outcome stays in the task's record, and the person can ask for it.
-  if (await telegramFinalDeliveryRepository.mayHaveReachedChat(turnId)) {
+  if (await telegramFinalDeliveryRepository.mayHaveReachedChat(turnId) || await backgroundTaskEventRepository.sentToChatByTool(turnId)) {
     if (await backgroundTaskEventRepository.answer(event, now)) {
       log("AGENT_BACKGROUND_TASK_EVENT_DELIVERY_UNCONFIRMED", event, { lastErrorCode: code, turnId }, "warn");
     }
@@ -59,7 +59,8 @@ async function settle(event: BackgroundTaskEvent, turnId: string, outcome: TurnO
 const HUB_OUT_CODES: ReadonlySet<string> = new Set(["AGENT_MODEL_TEMPORARILY_UNAVAILABLE", "AGENT_MODEL_FIRST_CHUNK_TIMEOUT"]);
 const HUB_OUT_PAUSE_MAX_MS = 60 * 60_000;
 
-async function retry(event: BackgroundTaskEvent, code: string, now: Date): Promise<void> {
+/** `keepsTurn`: the turn this attempt made, if any, is asked again next time instead of being replaced. */
+async function retry(event: BackgroundTaskEvent, code: string, now: Date, keepsTurn = false): Promise<void> {
   if (HUB_OUT_CODES.has(code)) {
     // The hub can be out for an hour (17.11.2026), as long as all the attempts last. Such a failure spends
     // none, as an idle chat does, and is tried ever less often — the pause is as long as the wait so far, up
@@ -70,12 +71,12 @@ async function retry(event: BackgroundTaskEvent, code: string, now: Date): Promi
       return;
     }
     const pauseMs = Math.min(Math.max(BACKGROUND_TASK_EVENT_RETRY_MS, waited), HUB_OUT_PAUSE_MAX_MS);
-    if (await backgroundTaskEventRepository.retry(event, code, now, { pauseMs, spendsAttempt: false }) === "retry") {
+    if (await backgroundTaskEventRepository.retry(event, code, now, { keepsTurn, pauseMs, spendsAttempt: false }) === "retry") {
       log("AGENT_BACKGROUND_TASK_EVENT_RETRY", event, { attempt: event.attemptCount, attemptSpent: false, lastErrorCode: code, pauseMs }, "warn");
     }
     return;
   }
-  const result = await backgroundTaskEventRepository.retry(event, code, now, { pauseMs: BACKGROUND_TASK_EVENT_RETRY_MS, spendsAttempt: true });
+  const result = await backgroundTaskEventRepository.retry(event, code, now, { keepsTurn, pauseMs: BACKGROUND_TASK_EVENT_RETRY_MS, spendsAttempt: true });
   if (result === "gave_up") log("AGENT_BACKGROUND_TASK_EVENT_GAVE_UP", event, { lastErrorCode: code }, "error");
   else if (result === "retry") log("AGENT_BACKGROUND_TASK_EVENT_RETRY", event, { attempt: event.attemptCount + 1, attemptSpent: true, lastErrorCode: code }, "warn");
 }
@@ -118,7 +119,9 @@ export function createBackgroundTaskEventProcessor(dependencies: BackgroundTaskE
         // The conversation went away between the check and the turn: wait for the next one, as above.
         if (code === EVENT_CONVERSATION_IDLE_CODE && await backgroundTaskEventRepository.defer(event, code, dependencies.now())) return true;
         log("AGENT_BACKGROUND_TASK_EVENT_FAILED", event, { error: error instanceof Error ? error.message : String(error), errorCode: code }, "error");
-        await retry(event, code, dependencies.now());
+        // Handling broke, not necessarily the turn: one already made may have told the outcome. The next
+        // attempt runs that turn again (it returns its stored outcome) and settles it, never replaces it.
+        await retry(event, code, dependencies.now(), true);
       }
       return true;
     } finally {
