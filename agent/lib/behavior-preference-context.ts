@@ -6,7 +6,8 @@
  * - `BehaviorPreferenceReadAuthorization`: interactive source, server-authored scheduled target, or a
  *   channel post's source.
  * - `requireBehaviorPreferenceAuthorization`: projects trusted Telegram auth or fails closed.
- * - `requireBehaviorPreferenceReadAuthorization`: also admits read-only scheduled, wake-up and channel auth.
+ * - `requireBehaviorPreferenceReadAuthorization`: also admits read-only scheduled, wake-up, background task
+ *   and channel auth.
  */
 import type { SessionContext } from "../runtime/context.js";
 import type { DynamicResolveContext } from "../runtime/context.js";
@@ -15,7 +16,7 @@ import { scheduledDeliveryMetadata } from "./agent-schedules/scheduled-session.j
 import { AppError } from "./app-error.js";
 import { resolveSessionCaller } from "./session-auth.js";
 import { resolveTelegramSessionActor } from "./telegram-session-actor.js";
-import { backgroundTaskEventIdOf } from "./background-tasks/background-task-session.js";
+import { BACKGROUND_TASK_ID_ATTRIBUTE, backgroundTaskEventIdOf } from "./background-tasks/background-task-session.js";
 import { conversationWakeupRunId } from "./conversation-wakeups/conversation-wakeup-turn.js";
 
 export interface BehaviorPreferenceAuthorization {
@@ -29,7 +30,7 @@ export interface BehaviorPreferenceBoundChatReadAuthorization {
   actorUserId: string;
   familyId: string;
   groupId: string | null;
-  kind: "approval" | "scheduled" | "wakeup";
+  kind: "approval" | "background_task" | "scheduled" | "wakeup";
   scope: "family" | "group" | "personal";
   telegramChatId: string;
 }
@@ -129,7 +130,11 @@ export function requireBehaviorPreferenceReadAuthorization(
   }
   // A wake-up turn (or a background task's report) continues its chat's conversation, but answers no
   // message: read the chat's prompt. Its delegated child inherits the marks and reads the same notes.
-  if (conversationWakeupRunId(ctx.session.auth) !== null || backgroundTaskEventIdOf(ctx) !== null) {
+  // A background task's own turn works for the same chat on its author's behalf, so it reads them too.
+  // Only the current turn's mark counts: the initiator's would widen access, not narrow it.
+  const wakeup = conversationWakeupRunId(ctx.session.auth) !== null || backgroundTaskEventIdOf(ctx) !== null;
+  const backgroundTask = typeof ctx.session.auth.current?.attributes[BACKGROUND_TASK_ID_ATTRIBUTE] === "string";
+  if (wakeup || backgroundTask) {
     const family = attrs?.groupType === "family_private" && typeof attrs.groupId === "string";
     if (
       caller?.authenticator !== "telegram" || caller.principalType !== "user" ||
@@ -142,7 +147,7 @@ export function requireBehaviorPreferenceReadAuthorization(
       actorUserId: caller.principalId,
       familyId: attrs.familyId,
       groupId: family ? attrs.groupId as string : null,
-      kind: "wakeup",
+      kind: wakeup ? "wakeup" : "background_task",
       scope: family ? "family" : "personal",
       telegramChatId: attrs.telegramChatId,
     };

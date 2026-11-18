@@ -5,12 +5,15 @@
  * - Exact conversation, timeline source, actor, and sequence extraction.
  * - Rejection of incomplete or non-Telegram runtime identity.
  * - A post on behalf of a channel in an external group reads its chat's notes and changes nothing.
+ * - A background task's own turn reads its chat's notes and changes nothing (#530).
  */
 import type { ToolContext } from "../runtime/tool.js";
 import { describe, expect, it } from "vitest";
 
 import { requireBehaviorPreferenceAuthorization } from "./behavior-preference-context.js";
 import { requireBehaviorPreferenceReadAuthorization } from "./behavior-preference-context.js";
+import { backgroundTaskAuth } from "./background-tasks/background-task-access.js";
+import type { BackgroundTask } from "./background-tasks/background-task-records.js";
 
 function context(
   attributes: Record<string, unknown>,
@@ -114,6 +117,49 @@ describe("requireBehaviorPreferenceAuthorization", () => {
     };
     for (const marker of [{ conversationScheduleRunId: "run-1" }, { backgroundTaskEventId: "17" }]) {
       expect(requireBehaviorPreferenceReadAuthorization(child(marker))).toMatchObject({ kind: "wakeup", scope: "personal" });
+    }
+  });
+
+  it("reads its chat's notes in a background task's own turn, and changes nothing (#530)", () => {
+    // The task's turn answers no message: its auth is built exactly as production builds it.
+    const taskTurn = (task: Partial<BackgroundTask>) => {
+      const auth = backgroundTaskAuth({
+        access: { applicationConversationId: "conversation-1", role: "owner", skillAllowlist: [], telegramUserId: "101" },
+        applicationSessionId: "application-session-1",
+        now: new Date("2026-11-18T12:00:00Z"),
+        summary: false,
+        task: {
+          authorUserId: "user-1", familyId: "family-1", forumTopicId: null, groupId: null, id: "task-1",
+          messageThreadId: null, sandboxSessionId: "sandbox-1", telegramChatId: "101", telegramChatType: "private",
+          ...task,
+        } as BackgroundTask,
+      });
+      return { session: { auth: { current: auth, initiator: auth }, id: "session-1", turn: { id: "turn-1" } } } as unknown as ToolContext;
+    };
+
+    expect(requireBehaviorPreferenceReadAuthorization(taskTurn({}))).toEqual({
+      actorUserId: "user-1", familyId: "family-1", groupId: null, kind: "background_task", scope: "personal", telegramChatId: "101",
+    });
+    expect(requireBehaviorPreferenceReadAuthorization(taskTurn({
+      groupId: "group-1", telegramChatId: "-2001", telegramChatType: "supergroup",
+    }))).toEqual({
+      actorUserId: "user-1", familyId: "family-1", groupId: "group-1", kind: "background_task", scope: "family", telegramChatId: "-2001",
+    });
+    // A task never changes the chat's notes: it has no message of the chat to order a change by.
+    expect(() => requireBehaviorPreferenceAuthorization(taskTurn({}))).toThrow("AGENT_BEHAVIOR_PREFERENCE_CONTEXT_INVALID");
+
+    // The mark admits only the current turn: inherited from the session's initiator it opens nothing.
+    const { current: taskAuth } = (taskTurn({}).session.auth as { current: { attributes: Record<string, unknown> } });
+    const { backgroundTaskId: _mark, ...unmarked } = taskAuth.attributes;
+    expect(() => requireBehaviorPreferenceReadAuthorization(context(unmarked, "telegram", taskAuth.attributes)))
+      .toThrow("AGENT_BEHAVIOR_PREFERENCE_CONTEXT_INVALID");
+    // A marked turn still needs a verified Telegram caller and a chat it may read.
+    for (const broken of [
+      context(taskAuth.attributes, "memory-review"),
+      context({ ...taskAuth.attributes, telegramChatType: "supergroup" }),
+      context({ ...taskAuth.attributes, familyId: undefined }),
+    ]) {
+      expect(() => requireBehaviorPreferenceReadAuthorization(broken)).toThrow("AGENT_BEHAVIOR_PREFERENCE_CONTEXT_INVALID");
     }
   });
 
