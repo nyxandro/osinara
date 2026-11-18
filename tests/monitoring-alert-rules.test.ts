@@ -261,6 +261,17 @@ describe("osinara alert rules", () => {
 
   // A dropped or refused connection gets no answer from the hub, so no AGENT_MODEL_TRANSIENT_RESPONSE
   // line: on 14.11.2026 151 failed calls went by without OsinaraModelTransientBurst (#492).
+  it("holds OsinaraModelDown from a failed model call until the first successful one (#541)", () => {
+    // 17.11.2026 the hub was down an hour; with no one writing, the bot made no calls, and the burst alert
+    // went out after ten minutes. This one stays until a call succeeds after the failure.
+    const [block] = alertBlocks("OsinaraModelDown");
+    expect(block, "the alert this guards has been renamed").toBeDefined();
+    expect(ruleField(block!, "expr"))
+      .toBe("max(tlast_over_time(osinara_model_call_failed_1m[12h])) > time() - min(osinara_model_last_success_age_seconds)");
+    expect(ruleField(block!, "for")).toBe("5m");
+    expect(exporter).toContain("metric_name: osinara_model_last_success_age_seconds");
+  });
+
   it("raises OsinaraModelCallsFailing on failed model calls, a lost connection included", () => {
     const [block] = alertBlocks("OsinaraModelCallsFailing");
     expect(block, "the alert this guards has been renamed").toBeDefined();

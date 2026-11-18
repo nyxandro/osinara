@@ -316,6 +316,22 @@ groups:
           description: 'Бот не может получить ответ модели: соединение с ней обрывается, не открывается или она отвечает ошибкой. Люди в это время не получают ответов, сценарии по расписанию не приходят.'
           runbook: 'Причина — в поле cause строк AGENT_TURN_FAILED за это время: ECONNRESET или Connect Timeout — путь к модели через Xray (journalctl -u xray, вход osinara-model, узел vless-am); ответы 429 или 5xx — сам хаб модели, см. AGENT_MODEL_TRANSIENT_RESPONSE.'
 
+      # The burst above goes out ten minutes after the last failed call even when nothing succeeded since:
+      # on 17.11.2026 the hub stayed down an hour while the bot, with nobody writing, made no calls (#541).
+      # This one holds from a failed call until the first successful one, however quiet the chats are; the
+      # twelve hours cover the gap until OsinaraModelSuccessStale. Checked on the history of 11–18.11:
+      # 10:35–11:30 and 14:35–15:25 on 17.11, nothing else.
+      - alert: OsinaraModelDown
+        expr: max(tlast_over_time(osinara_model_call_failed_1m[12h])) > time() - min(osinara_model_last_success_age_seconds)
+        for: 5m
+        labels:
+          severity: warning
+          project: osinara-production
+        annotations:
+          summary: 'Модель не отвечает: после неудачного вызова не было ни одного успешного'
+          description: 'Последний вызов модели не прошёл, и с тех пор ни один не удался. Пока это так, люди не получают ответов, сценарии по расписанию не приходят. Тревога гаснет на первом успешном вызове; если к модели долго никто не обращается, она горит до первого обращения.'
+          runbook: 'Причина — в поле cause строк AGENT_TURN_FAILED: ECONNRESET или Connect Timeout — путь к модели через Xray (journalctl -u xray, вход osinara-model, узел vless-am) или сам хаб (проверить его с remote-vibe-station); ответы 429 или 5xx — хаб, см. AGENT_MODEL_TRANSIENT_RESPONSE. Запасной модели нет (решение владельца 18.11.2026): сбой пережидается.'
+
       - alert: OsinaraModelTransientBurst
         expr: sum(sum_over_time(osinara_model_transient_1m[10m])) > 5
         labels:
