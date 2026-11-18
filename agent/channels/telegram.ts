@@ -416,7 +416,8 @@ export const telegramTurnEvents: TelegramTurnEvents = {
         );
       }
     }
-    if (notifyFailure) {
+    // A turn closed because its person or chat lost access (#542) is expected: no failure notice to the owner.
+    if (notifyFailure && data.code !== "AGENT_TURN_ACCESS_REVOKED") {
       const updateId = ctx.session.auth.current?.attributes.osinaraTelegramUpdateId;
       await recordTelegramFailure({ sessionId: ctx.session.id, turnId: ctx.session.turn.id,
         ...(typeof updateId === "string" ? { updateId } : {}), code: data.code, message: data.message, chatId: channel.telegram.chatId });

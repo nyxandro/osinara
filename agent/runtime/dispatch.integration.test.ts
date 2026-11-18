@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { closeDatabase, database } from "../lib/database.js";
@@ -16,6 +16,7 @@ const enabled = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true";
 if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) throw new Error("AGENT_TEST_DATABASE_UNSAFE");
 
 const ADMIT_ALWAYS = async <T>(work: () => Promise<T>) => await work();
+const RESUME_ALLOWED = async () => "allowed" as const;
 // A handler that never returns: the process died while it ran.
 const DIES_HERE = () => new Promise<void>(() => {});
 
@@ -51,6 +52,7 @@ function gate() {
     const model = scriptedModel(async () => { await release.opened; return reply("первый"); }, reply("второй"));
     const { observer } = recordingObserver();
     const dispatcher = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, runtime: testRuntime({ agent: testAgent({}), callModel: model.callModel, observer }), waitMilliseconds: 50,
     });
     const first = await startMessageTurn(sessionId, "раз");
@@ -76,6 +78,7 @@ function gate() {
     const model = scriptedModel(reply("один раз"));
     const { events, observer } = recordingObserver();
     const dispatcher = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, runtime: testRuntime({ agent: testAgent({}), callModel: model.callModel, observer }), waitMilliseconds: 50,
     });
     const turn = await startMessageTurn(sessionId, "привет");
@@ -95,6 +98,7 @@ function gate() {
     const model = scriptedModel(toolCalls([{ id: "call-1", input: {}, name: "change" }]));
     const { observer } = recordingObserver();
     const dispatcher = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, runtime: testRuntime({ agent: testAgent(tools), callModel: model.callModel, observer }), waitMilliseconds: 50,
     });
     const turn = await startMessageTurn(sessionId, "измени");
@@ -135,6 +139,7 @@ function gate() {
     const model = scriptedModel(reply("доделал"));
     const { observer } = recordingObserver();
     const dispatcher = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, runtime: testRuntime({ agent: testAgent({}), callModel: model.callModel, observer, runnerId: "runner-new" }), waitMilliseconds: 50,
     });
 
@@ -147,6 +152,83 @@ function gate() {
     expect((await loadSessionHistory(database(), sessionId)).messages.at(-1)).toEqual({ role: "assistant", content: [{ type: "text", text: "доделал" }] });
   });
 
+  it("does not finish an interrupted turn of a person who lost access meanwhile (#542)", async () => {
+    const sessionId = await newTestSession();
+    const turn = await startMessageTurn(sessionId, "продолжи");
+    await claimTurn(database(), turn.id, "runner-dead");
+    const model = scriptedModel(reply("ответ с семейными данными"));
+    const { events, observer } = recordingObserver();
+    const asked: string[] = [];
+    const dispatcher = createTurnDispatcher({
+      resumeAccess: async (auth) => { asked.push(auth.current?.principalId ?? "none"); return "revoked"; },
+      admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, runtime: testRuntime({ agent: testAgent({}), callModel: model.callModel, observer, runnerId: "runner-new" }), waitMilliseconds: 50,
+    });
+
+    await dispatcher.recover();
+    await dispatcher.idle();
+    await dispatcher.reportsIdle();
+
+    expect(asked).toEqual([OWNER_AUTH.current!.principalId]);
+    expect(model.requests).toHaveLength(0);
+    expect(await loadTurn(database(), turn.id)).toMatchObject({ errorCode: "AGENT_TURN_ACCESS_REVOKED", status: "failed" });
+    // The channel hears of the failure once, as of any other, so its cleanup runs; nothing is answered.
+    expect(events.filter((event) => event.turnId === turn.id)).toEqual([{ kind: "turnFinished", outcome: "failed", turnId: turn.id }]);
+  });
+
+  it("finishes the rest of the pass when one revoked turn cannot be closed (#542)", async () => {
+    const revoked = await startMessageTurn(await newTestSession(), "чужой");
+    const kept = await startMessageTurn(await newTestSession(), "свой");
+    await claimTurn(database(), revoked.id, "runner-dead");
+    await claimTurn(database(), kept.id, "runner-dead");
+    await database().query(
+      `UPDATE agent_turns SET auth = jsonb_set(auth::jsonb, '{current,attributes,testMark}', '"revoked"')::json WHERE id = $1`, [revoked.id],
+    );
+    const model = scriptedModel(reply("готово"));
+    const { observer } = recordingObserver();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const dispatcher = createTurnDispatcher({
+      resumeAccess: async (auth) => {
+        if (auth.current?.attributes.testMark !== "revoked") return "allowed";
+        // The turn vanishes before it is closed: closing it fails.
+        await database().query("DELETE FROM agent_turns WHERE id = $1", [revoked.id]);
+        return "revoked";
+      },
+      admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, runtime: testRuntime({ agent: testAgent({}), callModel: model.callModel, observer, runnerId: "runner-new" }), waitMilliseconds: 50,
+    });
+
+    try {
+      await dispatcher.recover();
+      await dispatcher.idle();
+    } finally {
+      errors.mockRestore();
+    }
+
+    expect(await loadTurn(database(), kept.id)).toMatchObject({ finalText: "готово", status: "completed" });
+  });
+
+  it("leaves an interrupted turn for the next pass when its access cannot be read (#542)", async () => {
+    const sessionId = await newTestSession();
+    const turn = await startMessageTurn(sessionId, "продолжи");
+    await claimTurn(database(), turn.id, "runner-dead");
+    const model = scriptedModel(reply("готово"));
+    const { observer } = recordingObserver();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const dispatcher = createTurnDispatcher({
+      resumeAccess: async () => { throw new Error("database unavailable"); },
+      admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, runtime: testRuntime({ agent: testAgent({}), callModel: model.callModel, observer, runnerId: "runner-new" }), waitMilliseconds: 50,
+    });
+
+    try {
+      await dispatcher.recover();
+      await dispatcher.idle();
+    } finally {
+      errors.mockRestore();
+    }
+
+    expect(model.requests).toHaveLength(0);
+    expect(await loadTurn(database(), turn.id)).toMatchObject({ status: "running" });
+  });
+
   it("leaves a recovered turn running for the next process when maintenance refuses admission", async () => {
     const sessionId = await newTestSession();
     const turn = await startMessageTurn(sessionId, "продолжи");
@@ -154,6 +236,7 @@ function gate() {
     const model = scriptedModel();
     const { observer } = recordingObserver();
     const dispatcher = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: async () => null, runnerLock: HELD_RUNNER_LOCK, runtime: testRuntime({ agent: testAgent({}), callModel: model.callModel, observer, runnerId: "runner-new" }), waitMilliseconds: 50,
     });
 
@@ -171,6 +254,7 @@ function gate() {
     const model = scriptedModel();
     const { observer } = recordingObserver();
     const dispatcher = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: { ensureHeld: async () => false },
       runtime: testRuntime({ agent: testAgent({}), callModel: model.callModel, observer, runnerId: "runner-new" }), waitMilliseconds: 50,
     });
@@ -186,6 +270,7 @@ function gate() {
     const sessionId = await newTestSession();
     const model = scriptedModel(toolCalls([{ id: "call-1", input: {}, name: "change" }]));
     const dead = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
       runtime: testRuntime({
         agent: testAgent(approvalTools()), callModel: model.callModel, observer: recordingObserver({ inputRequested: DIES_HERE }).observer, runnerId: "runner-dead",
@@ -196,6 +281,7 @@ function gate() {
     await untilStatus(turn.id, "waiting_input");
     const { events, observer } = recordingObserver();
     const next = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
       runtime: testRuntime({ agent: testAgent(approvalTools()), callModel: model.callModel, observer, runnerId: "runner-new" }),
     });
@@ -216,6 +302,7 @@ function gate() {
     const sessionId = await newTestSession();
     const model = scriptedModel(toolCalls([{ id: "call-1", input: {}, name: "change" }]));
     const dead = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
       runtime: testRuntime({
         agent: testAgent(approvalTools()), callModel: model.callModel, observer: recordingObserver({ turnFinished: DIES_HERE }).observer, runnerId: "runner-dead",
@@ -226,6 +313,7 @@ function gate() {
     await untilStatus(turn.id, "waiting_input");
     const { events, observer } = recordingObserver();
     const next = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
       runtime: testRuntime({ agent: testAgent(approvalTools()), callModel: model.callModel, observer, runnerId: "runner-new" }),
     });
@@ -244,6 +332,7 @@ function gate() {
     const sessionId = await newTestSession();
     const model = scriptedModel(toolCalls([{ id: "call-1", input: {}, name: "change" }]));
     const dead = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
       runtime: testRuntime({
         agent: testAgent(approvalTools()), callModel: model.callModel, observer: recordingObserver({ inputRequested: DIES_HERE }).observer, runnerId: "runner-dead",
@@ -254,6 +343,7 @@ function gate() {
     await untilStatus(turn.id, "waiting_input");
     const { events, observer } = recordingObserver({ inputRequested: async () => { throw new Error("TEST_CARD_REFUSED"); } });
     const next = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
       runtime: testRuntime({ agent: testAgent(approvalTools()), callModel: model.callModel, observer, runnerId: "runner-new" }),
     });
@@ -270,6 +360,7 @@ function gate() {
     const sessionId = await newTestSession();
     const model = scriptedModel(reply("готово"));
     const dead = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
       runtime: testRuntime({
         agent: testAgent({}), callModel: model.callModel, observer: recordingObserver({ turnFinished: DIES_HERE }).observer, runnerId: "runner-dead",
@@ -280,6 +371,7 @@ function gate() {
     await untilStatus(turn.id, "completed");
     const { events, observer } = recordingObserver();
     const next = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
       runtime: testRuntime({ agent: testAgent({}), callModel: model.callModel, observer, runnerId: "runner-new" }),
     });
@@ -296,6 +388,7 @@ function gate() {
     const sessionId = await newTestSession();
     const model = scriptedModel(toolCalls([{ id: "call-1", input: {}, name: "change" }]));
     const dead = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
       runtime: testRuntime({
         agent: testAgent(approvalTools()), callModel: model.callModel, observer: recordingObserver({ inputRequested: DIES_HERE }).observer, runnerId: "runner-dead",
@@ -307,6 +400,7 @@ function gate() {
     let frozen = true;
     const { events, observer } = recordingObserver();
     const next = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: async (work) => frozen ? null : await work(), runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
       runtime: testRuntime({ agent: testAgent(approvalTools()), callModel: model.callModel, observer, runnerId: "runner-new" }),
     });
@@ -328,6 +422,7 @@ function gate() {
     const reached = gate();
     const { events, observer } = recordingObserver({ turnFinished: async () => { reached.open(); await release.opened; } });
     const dispatcher = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
       runtime: testRuntime({ agent: testAgent({}), callModel: model.callModel, observer }),
     });
@@ -348,6 +443,7 @@ function gate() {
     const model = scriptedModel(toolCalls([{ id: "call-1", input: {}, name: "change" }]));
     const { events, observer } = recordingObserver();
     const dispatcher = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
       runtime: testRuntime({ agent: testAgent(approvalTools()), callModel: model.callModel, observer }),
     });
@@ -374,6 +470,7 @@ function gate() {
     const sessionId = await newTestSession();
     const model = scriptedModel(toolCalls([{ id: "call-1", input: {}, name: "change" }]));
     const dead = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
       runtime: testRuntime({
         agent: testAgent(approvalTools()), callModel: model.callModel, observer: recordingObserver({ inputRequested: DIES_HERE }).observer, runnerId: "runner-dead",
@@ -390,6 +487,7 @@ function gate() {
       },
     });
     const next = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
       runtime: testRuntime({ agent: testAgent(approvalTools()), callModel: model.callModel, observer, runnerId: "runner-new" }),
     });
@@ -405,6 +503,7 @@ function gate() {
     const sessionId = await newTestSession();
     const model = scriptedModel(reply("готово"));
     const dead = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
       runtime: testRuntime({
         agent: testAgent({}), callModel: model.callModel, observer: recordingObserver({ turnFinished: DIES_HERE }).observer, runnerId: "runner-dead",
@@ -416,6 +515,7 @@ function gate() {
     const release = gate();
     const { events, observer } = recordingObserver({ turnFinished: async () => { await release.opened; } });
     const next = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
       runtime: testRuntime({ agent: testAgent({}), callModel: model.callModel, observer, runnerId: "runner-new" }),
     });
@@ -441,6 +541,7 @@ function gate() {
       turnFinished: async (event) => { if (event.outcome.status === "completed") throw new Error("TEST_REPORT_FAILED"); },
     });
     const dispatcher = createTurnDispatcher({
+      resumeAccess: RESUME_ALLOWED,
       admit: ADMIT_ALWAYS, runnerLock: HELD_RUNNER_LOCK, waitMilliseconds: 50,
       runtime: testRuntime({ agent: testAgent(approvalTools()), callModel: model.callModel, observer }),
     });
