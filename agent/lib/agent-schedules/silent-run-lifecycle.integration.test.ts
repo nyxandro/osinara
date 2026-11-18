@@ -136,7 +136,9 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
     });
     // The next occurrence runs; the unconfirmed 12:00 one is never claimed again.
     const [next] = await dispatch.claimDue({ now: new Date("2026-09-14T12:01:00Z"), limit: 1, leaseMilliseconds: 60_000 });
-    expect(next?.runId).not.toBe(job.runId);
+    expect(next).toBeDefined();
+    expect(next!.id).toBe(schedule.id);
+    expect(next!.runId).not.toBe(job.runId);
     expect(await runRow(job.runId)).toEqual({ error_code: "AGENT_SCHEDULE_DELIVERY_CONFIRMATION_MISSING", status: "failed" });
   });
 });
