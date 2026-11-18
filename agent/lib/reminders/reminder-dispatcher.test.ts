@@ -69,15 +69,22 @@ describe("reminder dispatcher", () => {
       markDispatchStarted: vi.fn(),
       skipWhileGroupDisconnected: vi.fn(),
     };
+    // The failure's own time, not the pass's: the next occurrence of a frequent reminder depends on it (#535).
+    vi.useFakeTimers({ now: new Date("2026-07-13T06:00:00.000Z") });
+    const failedAt = new Date("2026-07-13T06:01:05.000Z");
     const dispatch = createReminderDispatcher({
       isGroupDisconnected: async () => false,
-      deliver: vi.fn().mockRejectedValue(new Error("network unavailable")),
+      deliver: vi.fn(async () => { vi.setSystemTime(failedAt); throw new Error("network unavailable"); }),
       repository,
       timeline: { recordAgentResponse: vi.fn() },
     });
 
-    await expect(dispatch(new Date("2026-07-13T06:00:00.000Z"))).resolves.toBe(1);
-    expect(repository.fail).toHaveBeenCalledWith(job, "AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED");
+    try {
+      await expect(dispatch(new Date("2026-07-13T06:00:00.000Z"))).resolves.toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(repository.fail).toHaveBeenCalledWith(job, "AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED", failedAt);
     expect(repository.complete).not.toHaveBeenCalled();
   });
 

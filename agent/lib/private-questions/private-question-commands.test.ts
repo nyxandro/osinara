@@ -5,6 +5,7 @@ import type { PoolClient } from "pg";
 import { describe, expect, it } from "vitest";
 
 import {
+  commandSyncIncidentKey,
   createPrivateQuestionCommandSync,
   desiredPrivateQuestionCommandScopes,
   PRIVATE_QUESTION_COMMAND,
@@ -127,3 +128,19 @@ describe("createPrivateQuestionCommandSync", () => {
     expect(rows).toEqual([{ scope: "chat", telegram_chat_id: "-1002", telegram_user_id: null }]);
   });
 });
+
+describe("the owner's notice about a failed /me menu sync (#517)", () => {
+  it("is one per day and set of failing chats, so a new day's failure reaches the owner again", () => {
+    const day = new Date("2026-11-16T21:24:01Z");
+    const sameDay = new Date("2026-11-16T23:59:00Z");
+    const nextDay = new Date("2026-11-17T00:00:01Z");
+    expect(commandSyncIncidentKey(null, day)).toBe("private-question-commands:error:2026-11-16");
+    expect(commandSyncIncidentKey(null, sameDay)).toBe(commandSyncIncidentKey(null, day));
+    expect(commandSyncIncidentKey(null, nextDay)).not.toBe(commandSyncIncidentKey(null, day));
+    // A set of chats: order and repeats do not matter, and a long set stays a short key.
+    expect(commandSyncIncidentKey(["-200", "-100", "-100"], day)).toBe(commandSyncIncidentKey(["-100", "-200"], day));
+    expect(commandSyncIncidentKey(["-100"], day)).not.toBe(commandSyncIncidentKey(["-200"], day));
+    expect(commandSyncIncidentKey(Array.from({ length: 60 }, (_, i) => `-1001234567${i}`), day).length).toBeLessThan(80);
+  });
+});
+

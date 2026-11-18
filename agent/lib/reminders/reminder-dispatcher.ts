@@ -37,7 +37,7 @@ interface ReminderDispatcherRepository {
     completedAt: Date,
     receipt: ProactiveDeliveryReceipt,
   ): Promise<void>;
-  fail(job: ClaimedReminder, errorCode: string): Promise<void>;
+  fail(job: ClaimedReminder, errorCode: string, at: Date): Promise<void>;
   markDispatchStarted(id: string, leaseToken: string): Promise<void>;
   skipWhileGroupDisconnected(job: ClaimedReminder, at: Date): Promise<void>;
 }
@@ -93,7 +93,7 @@ export function createReminderDispatcher(dependencies: ReminderDispatcherDepende
         const errorCode = isAppError(error)
           ? error.code
           : "AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED";
-        await dependencies.repository.fail(job, errorCode);
+        await dependencies.repository.fail(job, errorCode, new Date());
         continue;
       }
       if (job.groupId) {

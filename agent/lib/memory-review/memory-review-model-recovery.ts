@@ -98,16 +98,24 @@ export async function failBackgroundReview(input: {
   } finally { client.release(); }
 }
 
-/** Called under dispatcher's lane locks; skip a batch already owned by a terminal handler. */
-export async function recoverModelWaitingReviews(client: PoolClient, now: Date): Promise<void> {
-  const candidates = await client.query<ReviewAttempt & { success_version: string }>(
-    `SELECT batch.*, health.success_version FROM memory_review_batches batch
-     JOIN model_availability health ON health.route_key = batch.model_route_key
-     JOIN memory_review_lanes lane ON lane.id = batch.lane_id
-     WHERE batch.status = 'waiting_model' AND batch.predecessor_sequence = lane.processed_through_sequence
-       AND health.success_version > batch.waiting_success_version AND health.observed_at > batch.waiting_since
-     ORDER BY batch.waiting_since, batch.id FOR UPDATE OF batch SKIP LOCKED LIMIT $1`,
-    [MEMORY_REVIEW_DISPATCH_BATCH_SIZE],
+/**
+ * Called under dispatcher's lane locks; skip a batch already owned by a terminal handler. A batch wakes on a
+ * new success of the model it failed on, or of the model reviews use now (`currentRouteKey`): after a model
+ * change the old one gets no calls, and the batch would wait for ever (#537).
+ */
+export async function recoverModelWaitingReviews(client: PoolClient, now: Date, currentRouteKey: string): Promise<void> {
+  // Each join meets at most one row: `route_key` is the primary key of model_availability.
+  const candidates = await client.query<ReviewAttempt & { success_version: string | null; waiting_success_version: string | null }>(
+    `SELECT batch.*, own.success_version
+       FROM memory_review_batches batch
+       JOIN memory_review_lanes lane ON lane.id = batch.lane_id
+       LEFT JOIN model_availability own ON own.route_key = batch.model_route_key
+       LEFT JOIN model_availability present ON present.route_key = $2 AND present.route_key <> batch.model_route_key
+      WHERE batch.status = 'waiting_model' AND batch.predecessor_sequence = lane.processed_through_sequence
+        AND ((own.success_version > batch.waiting_success_version AND own.observed_at > batch.waiting_since)
+          OR present.observed_at > batch.waiting_since)
+      ORDER BY batch.waiting_since, batch.id FOR UPDATE OF batch SKIP LOCKED LIMIT $1`,
+    [MEMORY_REVIEW_DISPATCH_BATCH_SIZE, currentRouteKey],
   );
   for (const batch of candidates.rows) {
     if (batch.application_session_id !== null) {
@@ -146,6 +154,9 @@ export async function recoverModelWaitingReviews(client: PoolClient, now: Date):
     await audit(client, batch, "memory_review.model_recovered", {
       causeCode: batch.diagnostic_code, generation: batch.model_recovery_generation + 1,
       successVersion: batch.success_version, modelRouteKey: batch.model_route_key,
+      // Null when the model reviews use now woke the batch (#537): its own route had no new success.
+      wokenByRouteKey: batch.success_version !== null && Number(batch.success_version) > Number(batch.waiting_success_version)
+        ? batch.model_route_key : currentRouteKey,
       previousSessionId: batch.application_session_id, previousAgentSessionId: batch.agent_session_id,
       previousAgentTurnId: batch.agent_turn_id,
     });
