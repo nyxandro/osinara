@@ -16,7 +16,7 @@ import { scheduledDeliveryMetadata } from "./agent-schedules/scheduled-session.j
 import { AppError } from "./app-error.js";
 import { resolveSessionCaller } from "./session-auth.js";
 import { resolveTelegramSessionActor } from "./telegram-session-actor.js";
-import { backgroundTaskEventIdOf, backgroundTaskIdOf } from "./background-tasks/background-task-session.js";
+import { BACKGROUND_TASK_ID_ATTRIBUTE, backgroundTaskEventIdOf } from "./background-tasks/background-task-session.js";
 import { conversationWakeupRunId } from "./conversation-wakeups/conversation-wakeup-turn.js";
 
 export interface BehaviorPreferenceAuthorization {
@@ -131,8 +131,10 @@ export function requireBehaviorPreferenceReadAuthorization(
   // A wake-up turn (or a background task's report) continues its chat's conversation, but answers no
   // message: read the chat's prompt. Its delegated child inherits the marks and reads the same notes.
   // A background task's own turn works for the same chat on its author's behalf, so it reads them too.
+  // Only the current turn's mark counts: the initiator's would widen access, not narrow it.
   const wakeup = conversationWakeupRunId(ctx.session.auth) !== null || backgroundTaskEventIdOf(ctx) !== null;
-  if (wakeup || backgroundTaskIdOf(ctx) !== null) {
+  const backgroundTask = typeof ctx.session.auth.current?.attributes[BACKGROUND_TASK_ID_ATTRIBUTE] === "string";
+  if (wakeup || backgroundTask) {
     const family = attrs?.groupType === "family_private" && typeof attrs.groupId === "string";
     if (
       caller?.authenticator !== "telegram" || caller.principalType !== "user" ||

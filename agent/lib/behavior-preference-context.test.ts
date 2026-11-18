@@ -147,6 +147,20 @@ describe("requireBehaviorPreferenceAuthorization", () => {
     });
     // A task never changes the chat's notes: it has no message of the chat to order a change by.
     expect(() => requireBehaviorPreferenceAuthorization(taskTurn({}))).toThrow("AGENT_BEHAVIOR_PREFERENCE_CONTEXT_INVALID");
+
+    // The mark admits only the current turn: inherited from the session's initiator it opens nothing.
+    const { current: taskAuth } = (taskTurn({}).session.auth as { current: { attributes: Record<string, unknown> } });
+    const { backgroundTaskId: _mark, ...unmarked } = taskAuth.attributes;
+    expect(() => requireBehaviorPreferenceReadAuthorization(context(unmarked, "telegram", taskAuth.attributes)))
+      .toThrow("AGENT_BEHAVIOR_PREFERENCE_CONTEXT_INVALID");
+    // A marked turn still needs a verified Telegram caller and a chat it may read.
+    for (const broken of [
+      context(taskAuth.attributes, "memory-review"),
+      context({ ...taskAuth.attributes, telegramChatType: "supergroup" }),
+      context({ ...taskAuth.attributes, familyId: undefined }),
+    ]) {
+      expect(() => requireBehaviorPreferenceReadAuthorization(broken)).toThrow("AGENT_BEHAVIOR_PREFERENCE_CONTEXT_INVALID");
+    }
   });
 
   it("projects a scheduled chat as read-only authorization without a timeline source", () => {
