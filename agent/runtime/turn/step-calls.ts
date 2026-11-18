@@ -9,6 +9,8 @@
  *   after a crash it reruns an interrupted call only when the tool is replay-safe, and a call whose
  *   tool is no longer granted does not run. An `agent` call runs as a child turn (`DelegateCall`).
  * - `UNKNOWN_OUTCOME_OUTPUT`: what the model reads about a call whose outcome is unknown.
+ * - `STORAGE_OUTCOME_UNKNOWN_OUTPUT`: the same for a call whose write may have been committed before the
+ *   storage connection broke (#539).
  *
  * The runtime runs the tools after the model call and journals every transition, so a restart
  * neither repeats a finished call nor guesses about an interrupted one.
@@ -17,7 +19,7 @@
 import { approvalRequest, deniedOutput } from "../hitl/input-requests.js";
 import type { ToolContext, ToolDefinition } from "../tool.js";
 import type { StepToolCall } from "./model-call.js";
-import { decideToolApproval, executeToolCall, resolveToolCallInput, type ToolResultOutput } from "./tool-calls.js";
+import { decideToolApproval, executeToolCall, resolveToolCallInput, ToolOutcomeUnknownError, type ToolResultOutput } from "./tool-calls.js";
 import { logRejectedToolCall, rejectedToolCall } from "./tool-input-errors.js";
 import type { SubagentInputRequest, ToolCallRecord } from "./turn-types.js";
 
@@ -27,6 +29,11 @@ type AnyToolDefinition = ToolDefinition<any, any>;
 export const UNKNOWN_OUTCOME_OUTPUT: ToolResultOutput = {
   type: "error-text",
   value: "AGENT_TOOL_OUTCOME_UNKNOWN: This tool call was interrupted by a restart and may or may not have taken effect. It was not repeated. Check the actual state before trying again, and tell the user if it matters.",
+};
+
+export const STORAGE_OUTCOME_UNKNOWN_OUTPUT: ToolResultOutput = {
+  type: "error-text",
+  value: "AGENT_TOOL_OUTCOME_UNKNOWN: The connection to storage broke while this call was saving, so the change may or may not have been saved. It was not repeated. Check the actual state before trying again, and tell the user if it matters.",
 };
 
 function unavailableOutput(toolName: string): ToolResultOutput {
@@ -123,7 +130,14 @@ export async function executeStepCalls(input: {
       return { ...call, output, state: "completed" };
     }
     if (call.state === "planned") await input.journal.markIntent(call.callId);
-    const output = await executeToolCall(definition, call.input, input.contextFor(call));
+    let output: ToolResultOutput;
+    try {
+      output = await executeToolCall(definition, call.input, input.contextFor(call));
+    } catch (error) {
+      if (!(error instanceof ToolOutcomeUnknownError)) throw error;
+      await input.journal.settle(call.callId, "unknown", STORAGE_OUTCOME_UNKNOWN_OUTPUT);
+      return { ...call, output: STORAGE_OUTCOME_UNKNOWN_OUTPUT, state: "unknown" };
+    }
     await input.journal.settle(call.callId, "completed", output);
     return { ...call, output, state: "completed" };
   }));

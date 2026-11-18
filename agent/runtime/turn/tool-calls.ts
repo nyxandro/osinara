@@ -16,6 +16,7 @@ import type { ToolResultPart } from "ai";
 
 import { isObject, parseJsonObject } from "../json.js";
 import type { ApprovalStatus, ToolContext, ToolDefinition, ToolModelOutput } from "../tool.js";
+import { isStorageOutcomeUnknown } from "../../lib/database-errors.js";
 import { TurnCancelledError } from "./model-errors.js";
 
 export type ToolResultOutput = ToolResultPart["output"];
@@ -143,6 +144,15 @@ export async function executeToolCall(
   } catch (error) {
     if (ctx.abortSignal.aborted) throw new TurnCancelledError({ cause: error });
     logFailure(error, ctx);
+    // The write may have been committed before the connection broke: the call's outcome is unknown, not failed (#539).
+    if (isStorageOutcomeUnknown(error)) throw new ToolOutcomeUnknownError(error);
     return { type: "error-text", value: errorText(error) };
+  }
+}
+
+/** A tool call whose write may have taken effect before storage stopped answering; the caller settles it as unknown. */
+export class ToolOutcomeUnknownError extends Error {
+  constructor(cause: unknown) {
+    super("AGENT_TOOL_OUTCOME_UNKNOWN: the storage connection broke after the write may have been committed", { cause });
   }
 }
