@@ -24,6 +24,8 @@ import { selectMemoryReviewContext } from "./memory-review-known-memory.js";
 import type { MemoryReviewClaim } from "./memory-review-repository.js";
 import { readMemoryReviewLaneHealth, recoverUnstartedReviewBatches } from "./memory-review-lane-recovery.js";
 import { recoverModelWaitingReviews } from "./memory-review-model-recovery.js";
+import { modelProviderConfig } from "../model-provider-config.js";
+import { modelRouteKey } from "../model-route.js";
 import { recoverReviewDispatches } from "./memory-review-dispatch-recovery.js";
 
 interface SourceRow {
@@ -77,7 +79,9 @@ async function materializeReadyBatches(client: PoolClient, now: Date): Promise<v
   // Recovery must not take one later lane before this globally ordered set: another dispatcher
   // could hold an earlier lane while waiting for that same later lane.
   await recoverUnstartedReviewBatches(client, now);
-  await recoverModelWaitingReviews(client, now);
+  // Reviews run on the primary model (`memory-review-session-repository.ts`): its success wakes a batch
+  // that waited on a model it no longer uses (#537).
+  await recoverModelWaitingReviews(client, now, modelRouteKey(modelProviderConfig.agent.transport, modelProviderConfig.agent.models.primary.id));
   for (const lane of lanes.rows) {
     const existing = await client.query<{ status: string; through_sequence: string }>(
       `SELECT status::text, through_sequence::text FROM memory_review_batches
