@@ -4,6 +4,8 @@
  * Constructs covered:
  * - Scoped settings and author-or-owner reminder mutations.
  * - Quiet-hour deferral, durable leases, recurrence, and ambiguous-delivery recovery.
+ * - A recurring reminder whose occurrence failed, was ambiguous or ran out of attempts goes on to the next
+ *   occurrence without repeating that one (#535).
  * - A list of upcoming reminders only, a delivered reminder closed for further changes, and a failed
  *   one returned to the schedule by a new time or a resume.
  */
@@ -11,6 +13,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDatabase, database } from "../database.js";
 import { encodeDateUuidCursor } from "../keyset-pagination.js";
+import { REMINDER_DISPATCH_MAX_SAFE_ATTEMPTS } from "./reminder-config.js";
 import { reminderDispatchRepository } from "./reminder-dispatch-repository.js";
 import { reminderRepository } from "./reminder-repository.js";
 
@@ -477,6 +480,60 @@ describeWithDatabase("reminder repositories", () => {
     expect(stored.rows[0]).toEqual({
       last_error_code: "AGENT_REMINDER_DELIVERY_AMBIGUOUS",
       status: "failed",
+    });
+  });
+
+  describe("a recurring reminder whose occurrence was not confirmed (#535)", () => {
+    // The owner's rule (18.11.2026): an unconfirmed occurrence is never repeated, but it no longer ends
+    // the whole series; the next one comes on its own schedule.
+    async function dailyReminder(operationKey: string) {
+      const fixture = await createFixture();
+      const auth = privateAuth(fixture, "member");
+      await reminderRepository.configureNotifications(auth, { basis: null, source: "person", quietEnd: null, quietStart: null, timezone: "UTC" });
+      const reminder = await reminderRepository.create(auth, {
+        content: "Таблетка", firstRunAt: new Date("2026-07-12T10:00:00.000Z"), operationKey,
+        recurrence: { interval: 1, unit: "daily" }, scope: "personal", timezone: "UTC",
+      });
+      return { auth, reminder };
+    }
+
+    async function expectNextDay(auth: ReturnType<typeof privateAuth>, id: string, code: string) {
+      const { items: [stored] } = await reminderRepository.list(auth, { limit: 100 });
+      expect(stored).toMatchObject({ id, nextRunAt: "2026-07-13T10:00:00.000Z", status: "active" });
+      const row = await database().query<{ last_error_code: string | null }>("SELECT last_error_code FROM reminders WHERE id = $1", [id]);
+      expect(row.rows[0]?.last_error_code).toBe(code);
+      // The missed occurrence is not repeated later the same day.
+      await expect(reminderDispatchRepository.claimDue({ leaseMilliseconds: 1_000, limit: 1, now: new Date("2026-07-12T18:00:00.000Z") }))
+        .resolves.toEqual([]);
+    }
+
+    it("goes on to the next day after a failed delivery", async () => {
+      const { auth, reminder } = await dailyReminder("recurring-failed");
+      const [claimed] = await reminderDispatchRepository.claimDue({ leaseMilliseconds: 300_000, limit: 1, now: new Date("2026-07-12T10:00:00.000Z") });
+      await reminderDispatchRepository.markDispatchStarted(claimed!.id, claimed!.leaseToken);
+      await reminderDispatchRepository.fail(claimed!, "AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED", new Date("2026-07-12T10:00:30.000Z"));
+      await expectNextDay(auth, reminder.id, "AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED");
+    });
+
+    it("goes on to the next day after a delivery that may have happened", async () => {
+      const { auth, reminder } = await dailyReminder("recurring-ambiguous");
+      const [claimed] = await reminderDispatchRepository.claimDue({ leaseMilliseconds: 1_000, limit: 1, now: new Date("2026-07-12T10:00:00.000Z") });
+      await reminderDispatchRepository.markDispatchStarted(claimed!.id, claimed!.leaseToken);
+      await expect(reminderDispatchRepository.claimDue({ leaseMilliseconds: 1_000, limit: 1, now: new Date("2026-07-12T10:00:02.000Z") }))
+        .resolves.toEqual([]);
+      await expectNextDay(auth, reminder.id, "AGENT_REMINDER_DELIVERY_AMBIGUOUS");
+    });
+
+    it("goes on to the next day after its delivery attempts ran out", async () => {
+      const { auth, reminder } = await dailyReminder("recurring-exhausted");
+      await database().query(
+        `UPDATE reminders SET status = 'leased', attempts = $2, lease_token = gen_random_uuid(),
+           lease_expires_at = '2026-07-12T10:00:01.000Z', dispatch_started_at = NULL WHERE id = $1`,
+        [reminder.id, REMINDER_DISPATCH_MAX_SAFE_ATTEMPTS],
+      );
+      await expect(reminderDispatchRepository.claimDue({ leaseMilliseconds: 1_000, limit: 1, now: new Date("2026-07-12T10:00:02.000Z") }))
+        .resolves.toEqual([]);
+      await expectNextDay(auth, reminder.id, "AGENT_REMINDER_DELIVERY_ATTEMPTS_EXHAUSTED");
     });
   });
 

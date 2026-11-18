@@ -77,7 +77,7 @@ describe("reminder dispatcher", () => {
     });
 
     await expect(dispatch(new Date("2026-07-13T06:00:00.000Z"))).resolves.toBe(1);
-    expect(repository.fail).toHaveBeenCalledWith(job, "AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED");
+    expect(repository.fail).toHaveBeenCalledWith(job, "AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED", expect.any(Date));
     expect(repository.complete).not.toHaveBeenCalled();
   });
 
