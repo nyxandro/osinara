@@ -18,6 +18,8 @@ import { AppError } from "../app-error.js";
 import { telegramCaptionFits } from "../attachments/telegram-workspace-file-delivery.js";
 import { renderTelegramMarkdownHtml } from "../telegram-markdown.js";
 
+const TELEGRAM_SERVER_ERROR_STATUS = 500;
+
 function ambiguousDelivery(): AppError {
   return new AppError(
     "AGENT_GIF_DELIVERY_AMBIGUOUS",
@@ -87,11 +89,14 @@ export async function sendTelegramAnimation(
     throw ambiguousDelivery();
   }
   if (!response.ok) {
+    // A server error of Telegram's own may come after it accepted the GIF (#536): unknown, never a refusal.
+    const unknown = response.status >= TELEGRAM_SERVER_ERROR_STATUS;
     console.error(JSON.stringify({
-      code: "AGENT_GIF_DELIVERY_FAILED",
+      code: unknown ? "AGENT_GIF_DELIVERY_AMBIGUOUS" : "AGENT_GIF_DELIVERY_FAILED",
       description: telegramDescription(response.body),
       providerStatus: response.status,
     }));
+    if (unknown) throw ambiguousDelivery();
     throw new AppError("AGENT_GIF_DELIVERY_FAILED", "Telegram не принял гифку");
   }
   const messageId = sentMessageId(response.body);

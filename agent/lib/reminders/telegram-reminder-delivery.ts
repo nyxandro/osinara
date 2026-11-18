@@ -55,6 +55,7 @@ function messageThreadId(value: string | null): number | undefined {
 }
 
 const TELEGRAM_BAD_REQUEST_STATUS = 400;
+const TELEGRAM_SERVER_ERROR_STATUS = 500;
 const TELEGRAM_DESCRIPTION_MAX_LENGTH = 200;
 
 function formatScheduledTime(job: ClaimedReminder): string {
@@ -189,6 +190,10 @@ export async function deliverTelegramReminder(job: ClaimedReminder): Promise<Pro
     }
     if (!response.ok) {
       providerStatus = response.status;
+      // A server error of Telegram's own may come after it accepted the reminder (#536): unknown, never a refusal.
+      if (response.status >= TELEGRAM_SERVER_ERROR_STATUS) {
+        throw new AppError("AGENT_REMINDER_TELEGRAM_DELIVERY_AMBIGUOUS", "Telegram не подтвердил напоминание: оно могло дойти");
+      }
       throw new AppError("AGENT_REMINDER_TELEGRAM_DELIVERY_FAILED", "Telegram не принял напоминание");
     }
     const messageId = sentMessageId(response.body);
