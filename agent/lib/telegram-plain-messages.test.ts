@@ -95,4 +95,19 @@ describe("plain Telegram messages", () => {
     await expect(postTelegramPlainMessageChunk("ответ", channel))
       .rejects.toThrowError(/AGENT_TELEGRAM_MESSAGE_DELIVERY_FAILED/u);
   });
+
+  it("marks a server error of Telegram as an unknown outcome: the message may have arrived", async () => {
+    // 17.11.2026 Telegram answered 504 to a message the person did receive.
+    for (const status of [500, 502, 504]) {
+      const channel = {
+        state: { chatId: "101", chatType: "private", messageThreadId: null },
+        telegram: {
+          request: vi.fn().mockResolvedValue({ body: { description: "Gateway Timeout", ok: false }, ok: false, status }),
+        },
+      } as unknown as TelegramEventContext;
+
+      await expect(postTelegramPlainMessageChunk("ответ", channel), String(status))
+        .rejects.toThrowError(/AGENT_TELEGRAM_MESSAGE_DELIVERY_AMBIGUOUS/u);
+    }
+  });
 });

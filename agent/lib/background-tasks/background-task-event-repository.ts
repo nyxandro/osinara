@@ -19,6 +19,7 @@ import type { PoolClient } from "pg";
 
 import { database } from "../database.js";
 import { inTransaction, mapTask, type BackgroundTask, type TaskRow } from "./background-task-records.js";
+import { CHAT_SEND_TOOL_NAMES } from "../tool-policy/chat-send-tools.js";
 import { BACKGROUND_TASK_EVENT_ATTEMPTS, BACKGROUND_TASK_EVENT_RETRY_MS } from "./background-task-config.js";
 
 export interface BackgroundTaskEvent {
@@ -144,6 +145,16 @@ export const backgroundTaskEventRepository = {
     return result.rowCount === 1;
   },
 
+  /** Whether the turn started a tool that sends to the chat by itself: what it sent may have arrived. */
+  async sentToChatByTool(turnId: string): Promise<boolean> {
+    const result = await database().query(
+      `SELECT 1 FROM agent_tool_calls
+        WHERE turn_id = $1 AND tool_name = ANY($2::text[]) AND state IN ('intent', 'completed', 'unknown') LIMIT 1`,
+      [turnId, CHAT_SEND_TOOL_NAMES],
+    );
+    return (result.rowCount ?? 0) > 0;
+  },
+
   /**
    * The answer failed: again after the pause, or given up after the last attempt. A failure that does not
    * spend an attempt (the model hub is out for now) only waits for the pause.
@@ -152,16 +163,17 @@ export const backgroundTaskEventRepository = {
     event: Pick<BackgroundTaskEvent, "id" | "leaseToken">,
     code: string,
     now: Date,
-    options: { readonly pauseMs: number; readonly spendsAttempt: boolean },
+    options: { readonly keepsTurn?: boolean; readonly pauseMs: number; readonly spendsAttempt: boolean },
   ): Promise<"gave_up" | "retry" | null> {
     const spent = options.spendsAttempt ? 1 : 0;
     const result = await database().query<{ status: "gave_up" | "pending" }>(
       `UPDATE background_task_events
-          SET attempt_count = attempt_count + $7, last_error_code = $3, lease_token = NULL, lease_expires_at = NULL, turn_id = NULL,
+          SET attempt_count = attempt_count + $7, last_error_code = $3, lease_token = NULL, lease_expires_at = NULL,
+              turn_id = CASE WHEN $8 THEN turn_id END,
               status = CASE WHEN attempt_count + $7 >= $5 THEN 'gave_up' ELSE 'pending' END,
               available_at = $4::timestamptz + $6 * interval '1 millisecond'
         WHERE id = $1 AND lease_token = $2 AND status = 'processing' RETURNING status`,
-      [event.id, event.leaseToken, code, now, BACKGROUND_TASK_EVENT_ATTEMPTS, options.pauseMs, spent],
+      [event.id, event.leaseToken, code, now, BACKGROUND_TASK_EVENT_ATTEMPTS, options.pauseMs, spent, options.keepsTurn === true],
     );
     const status = result.rows[0]?.status;
     return status === undefined ? null : status === "gave_up" ? "gave_up" : "retry";

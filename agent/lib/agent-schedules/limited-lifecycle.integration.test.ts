@@ -30,6 +30,18 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
     return { auth, schedule };
   }
 
+  /** The unconfirmed 12:00 run stays failed; the schedule claims a later occurrence next, never 12:00 again. */
+  async function expectNextOccurrenceOnly(scheduleId: string): Promise<void> {
+    const [job] = await dispatch.claimDue({ now: new Date("2026-09-14T13:00:00Z"), limit: 1, leaseMilliseconds: 60_000 });
+    expect(job?.id).toBe(scheduleId);
+    const runs = await database().query<{ scheduled_for: Date; status: string }>(
+      "SELECT scheduled_for, status FROM agent_schedule_runs WHERE schedule_id = $1 ORDER BY scheduled_for", [scheduleId],
+    );
+    expect(runs.rows).toHaveLength(2);
+    expect([runs.rows[0]!.scheduled_for.toISOString(), runs.rows[0]!.status]).toEqual(["2026-09-14T12:00:00.000Z", "failed"]);
+    expect(runs.rows[1]!.scheduled_for.getTime()).toBeGreaterThan(Date.parse("2026-09-14T12:00:00Z"));
+  }
+
   async function start(auth: Awaited<ReturnType<typeof setup>>["auth"], now: string) {
     const [job] = await dispatch.claimDue({ now: new Date(now), limit: 1, leaseMilliseconds: 60_000 });
     expect(job).toBeDefined();
@@ -102,13 +114,18 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
     expect(await schedules.findById(auth, schedule.id)).toMatchObject({ status: "leased", pauseRequested: false });
   });
 
-  it.each(["AGENT_TELEGRAM_MESSAGE_DELIVERY_AMBIGUOUS", "AGENT_SCHEDULE_DELIVERY_CONFIRMATION_MISSING"])(
-    "stops instead of scheduling another attempt after %s", async (code) => {
+  it.each([
+    "AGENT_TELEGRAM_MESSAGE_DELIVERY_AMBIGUOUS", "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_AMBIGUOUS",
+    "AGENT_SCHEDULE_DELIVERY_CONFIRMATION_MISSING",
+  ])(
+    "does not repeat a run after %s, and goes on to the next occurrence", async (code) => {
+      // The owner's decision 18.11.2026: an unconfirmed run is never repeated, but it no longer stops a
+      // recurring scenario for good; the next run is a new message on its own schedule.
       const { auth, schedule } = await setup();
       const { receipt } = await start(auth, "2026-09-14T12:00:00Z");
       await dispatch.failRun(receipt.applicationSessionId, receipt.agentSessionId, code, receipt.deliveredAt);
-      expect(await schedules.findById(auth, schedule.id)).toMatchObject({ status: "failed", completedRuns: 0, lastErrorCode: code });
-      expect(await dispatch.claimDue({ now: new Date("2026-09-14T13:00:00Z"), limit: 1, leaseMilliseconds: 60_000 })).toEqual([]);
+      expect(await schedules.findById(auth, schedule.id)).toMatchObject({ status: "active", completedRuns: 0, lastErrorCode: code });
+      await expectNextOccurrenceOnly(schedule.id);
     });
 
   it("serializes a delivery racing with pause without reopening the schedule", async () => {
@@ -171,7 +188,7 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
     expect(await schedules.findById(auth, schedule.id)).toMatchObject({ status: "completed", completedRuns: 2 });
   });
 
-  it("stops after Telegram accepts a message but receipt storage throws a different error code", async () => {
+  it("does not repeat a run Telegram accepted while receipt storage threw a different error code", async () => {
     const { auth, schedule } = await setup();
     const { receipt } = await start(auth, "2026-09-14T12:00:00Z");
     const outage = new AppError("AGENT_DATABASE_UNAVAILABLE", "Не удалось сохранить подтверждение");
@@ -187,8 +204,8 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
     expect(sendChunk).toHaveBeenCalledOnce();
     // The Telegram channel passes the original storage error to the schedule boundary.
     await dispatch.failRun(receipt.applicationSessionId, receipt.agentSessionId, outage.code, receipt.deliveredAt);
-    expect(await schedules.findById(auth, schedule.id)).toMatchObject({ status: "failed", completedRuns: 0 });
-    expect(await dispatch.claimDue({ now: new Date("2026-09-14T13:00:00Z"), limit: 1, leaseMilliseconds: 60_000 })).toEqual([]);
+    expect(await schedules.findById(auth, schedule.id)).toMatchObject({ status: "active", completedRuns: 0 });
+    await expectNextOccurrenceOnly(schedule.id);
   });
 
   it("resumes after run_now even when PostgreSQL stored sub-millisecond time", async () => {

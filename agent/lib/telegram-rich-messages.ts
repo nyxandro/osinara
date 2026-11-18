@@ -146,6 +146,7 @@ function telegramRichFetch(timeoutMs: number) {
 }
 
 const TELEGRAM_BAD_REQUEST_STATUS = 400;
+const TELEGRAM_SERVER_ERROR_STATUS = 500;
 const TELEGRAM_DESCRIPTION_MAX_LENGTH = 200;
 
 function addStableErrorCode(error: Error, code: string): void {
@@ -192,8 +193,19 @@ async function requestTelegramRichApi(
   ) {
     return response;
   }
-  const rejectionCode = "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_FAILED";
   const description = telegramDescription(response);
+  // A server error of Telegram's own may come after it accepted the message (17.11.2026: a 504 for a
+  // message the person received): the outcome is unknown, and nothing may send it again by itself.
+  if (response.status >= TELEGRAM_SERVER_ERROR_STATUS) {
+    const unknownCode = "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_AMBIGUOUS";
+    console.error(JSON.stringify({ code: unknownCode, method, providerStatus: response.status, ...(description === null ? {} : { description }) }));
+    throw new AppError(
+      unknownCode,
+      "Telegram не подтвердил форматированный ответ: он мог дойти. Проверьте чат, прежде чем повторять запрос",
+      { details: { providerStatus: response.status, ...(description === null ? {} : { description }) } },
+    );
+  }
+  const rejectionCode = "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_FAILED";
   console.error(
     JSON.stringify({
       code: rejectionCode,

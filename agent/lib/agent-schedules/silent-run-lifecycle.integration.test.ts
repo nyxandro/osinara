@@ -5,7 +5,8 @@
  * successful run without a message: the schedule keeps its recurrence and the owner receives no
  * failure notice. It still counts as an execution, because maxRuns limits executions and a limited
  * scenario that keeps finding nothing must end rather than call the model forever. Silence after a
- * delivery may already have started is not silence and keeps the unconfirmed-delivery stop.
+ * delivery may already have started is not silence: the run fails as unconfirmed and is not repeated,
+ * and the recurring scenario goes on to its next occurrence (owner's decision 18.11.2026).
  */
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -109,7 +110,7 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
     expect(await incidents(job.runId)).toBe(0);
   });
 
-  it("keeps the unconfirmed-delivery stop when a message may already have been sent", async () => {
+  it("fails a silent run after a delivery may have been sent, without repeating it, and goes on", async () => {
     const { auth, schedule } = await setup();
     const { job, receipt } = await start(auth, "2026-09-14T12:00:00Z");
     const outage = new AppError("AGENT_DATABASE_UNAVAILABLE", "Не удалось сохранить подтверждение");
@@ -130,8 +131,14 @@ if (enabled && !new URL(process.env.DATABASE_URL!).pathname.endsWith("_test")) {
       error_code: "AGENT_SCHEDULE_DELIVERY_CONFIRMATION_MISSING",
       status: "failed",
     });
-    expect(await schedules.findById(auth, schedule.id)).toMatchObject({ completedRuns: 0, status: "failed" });
-    expect(await dispatch.claimDue({ now: new Date("2026-09-14T12:01:00Z"), limit: 1, leaseMilliseconds: 60_000 }))
-      .toEqual([]);
+    expect(await schedules.findById(auth, schedule.id)).toMatchObject({
+      completedRuns: 0, lastErrorCode: "AGENT_SCHEDULE_DELIVERY_CONFIRMATION_MISSING", status: "active",
+    });
+    // The next occurrence runs; the unconfirmed 12:00 one is never claimed again.
+    const [next] = await dispatch.claimDue({ now: new Date("2026-09-14T12:01:00Z"), limit: 1, leaseMilliseconds: 60_000 });
+    expect(next).toBeDefined();
+    expect(next!.id).toBe(schedule.id);
+    expect(next!.runId).not.toBe(job.runId);
+    expect(await runRow(job.runId)).toEqual({ error_code: "AGENT_SCHEDULE_DELIVERY_CONFIRMATION_MISSING", status: "failed" });
   });
 });
