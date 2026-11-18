@@ -8,6 +8,7 @@
  *   ready (17.11.2026 the hub was down an hour, as long as twelve attempts last); then the event is given up.
  * - A chat with no conversation right now keeps the event waiting without spending an attempt, up to a day.
  * - An author who lost access is not told anything; a question answered meanwhile is not asked.
+ * - A retelling that may have reached the chat (delivered, unknown outcome, a part arrived) is not told again.
  */
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -53,6 +54,24 @@ async function retryTurnMade(taskId: string): Promise<void> {
   await database().query(
     "UPDATE background_task_events SET available_at = $2, turn_id = 'turn-' || gen_random_uuid() WHERE task_id = $1", [taskId, now],
   );
+}
+
+/** The record of a retelling turn's answer in the chat, as Telegram delivery keeps it. */
+async function finalDelivery(turnId: string, status: "ambiguous" | "delivered" | "failed", chunks: number): Promise<void> {
+  const ended = status !== "delivered";
+  const row = await database().query<{ id: string }>(
+    `INSERT INTO telegram_final_deliveries (agent_session_id, agent_turn_id, output_hash, expected_chunk_count, status,
+       diagnostic_code, started_at, completed_at)
+     VALUES ('wrun_test', $1, repeat('a', 64), 2, $2, $3, now(), now()) RETURNING id`,
+    [turnId, status, ended ? `AGENT_TELEGRAM_FINAL_DELIVERY_${status.toUpperCase()}` : null],
+  );
+  for (let ordinal = 0; ordinal < chunks; ordinal += 1) {
+    await database().query(
+      `INSERT INTO telegram_final_delivery_chunks (delivery_id, ordinal, content_hash, telegram_message_id, telegram_chat_type)
+       VALUES ($1, $2, repeat('b', 64), $3, 'private')`,
+      [row.rows[0]!.id, ordinal, 5000 + ordinal],
+    );
+  }
 }
 
 /** How long the event waits from `now` before its next attempt. */
@@ -136,6 +155,30 @@ describeWithDatabase("background task events", () => {
     expect(await processor(empty)()).toBe(true);
     expect(empty).toHaveBeenCalled();
     expect(await eventOf(taskId)).toMatchObject({ attempt_count: 1, status: "pending" });
+  });
+
+  it("does not tell an outcome again once its retelling may have reached the chat", async () => {
+    // 17.11.2026 Telegram answered 504 to a retelling the person received, and a retry told it twice.
+    const cases = [
+      { chunks: 0, expected: "answered", status: "ambiguous" },
+      { chunks: 0, expected: "answered", status: "delivered" },
+      // One part arrived before Telegram refused the next: a new retelling would repeat that part.
+      { chunks: 1, expected: "answered", status: "failed" },
+      // Refused before anything arrived: nothing to repeat, the outcome is told again.
+      { chunks: 0, expected: "pending", status: "failed" },
+    ] as const;
+    for (const [index, item] of cases.entries()) {
+      const taskId = await finishedTask();
+      const turnId = `turn-retelling-${index}`;
+      await database().query("UPDATE background_task_events SET turn_id = $2, available_at = $3 WHERE task_id = $1", [taskId, turnId, now]);
+      await finalDelivery(turnId, item.status, item.chunks);
+      const failed = vi.fn(async () => ({
+        code: "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_FAILED", message: "Telegram", status: "failed",
+      }) as TurnOutcome);
+      expect(await processor(failed)(), item.status).toBe(true);
+      expect((await eventOf(taskId))?.status, `${item.status}/${item.chunks}`).toBe(item.expected);
+      if (item.expected === "answered") expect((await backgroundTaskRepository.find(taskId))?.state).toBe("reported");
+    }
   });
 
   it("brings an outcome into the chat's current conversation as the task's report, then answers it", async () => {

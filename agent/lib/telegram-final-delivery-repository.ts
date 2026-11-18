@@ -167,4 +167,17 @@ export const telegramFinalDeliveryRepository = {
     );
   },
 
+  /**
+   * Whether the turn's answer may have reached its chat. Nothing did only when no delivery began, or
+   * Telegram refused it before any part arrived; delivered, unknown and partly sent answers may have.
+   */
+  async mayHaveReachedChat(agentTurnId: string): Promise<boolean> {
+    const result = await database().query<{ chunks: string; status: string }>(
+      `SELECT delivery.status,
+              (SELECT count(*) FROM telegram_final_delivery_chunks chunk WHERE chunk.delivery_id = delivery.id) AS chunks
+         FROM telegram_final_deliveries delivery WHERE delivery.agent_turn_id = $1`,
+      [agentTurnId],
+    );
+    return result.rows.some((row) => row.status !== "pending" && !(row.status === "failed" && Number(row.chunks) === 0));
+  },
 };

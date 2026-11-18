@@ -9,7 +9,7 @@
  * - At least once: the event is answered only after the main agent's turn ended well. A failed or broken
  *   turn brings it back in five minutes, a bounded number of times; the last failure gives it up loudly.
  *   An unreachable model hub spends no attempt and is tried ever less often, up to a day after the event
- *   was ready.
+ *   was ready. A failed turn whose answer may have reached the chat is not repeated: the event is closed.
  * - A turn an earlier attempt created is let finish, never created again: the person hears it once.
  * - A chat without a conversation right now (a new context nobody wrote into, a card waiting for an
  *   answer) keeps the event waiting without spending an attempt, up to a day.
@@ -19,6 +19,7 @@ import type { Pool } from "pg";
 import type { JournalDatabase } from "../../runtime/turn/journal-repository.js";
 import type { TurnOutcome } from "../../runtime/turn/run-turn.js";
 import { isAppError } from "../app-error.js";
+import { telegramFinalDeliveryRepository } from "../telegram-final-delivery-repository.js";
 import { BACKGROUND_TASK_ANSWER_WAIT_MS, BACKGROUND_TASK_EVENT_LEASE_MS, BACKGROUND_TASK_EVENT_RETRY_MS } from "./background-task-config.js";
 import { backgroundTaskEventRepository, type BackgroundTaskEvent } from "./background-task-event-repository.js";
 import { createBackgroundTaskEventTurn, EVENT_CONVERSATION_IDLE_CODE, prepareBackgroundTaskEvent } from "./background-task-event-turn.js";
@@ -35,13 +36,23 @@ function log(code: string, event: BackgroundTaskEvent, fields: Record<string, un
   console[level](JSON.stringify({ code, eventId: event.id, kind: event.kind, taskId: event.task.id, ...fields }));
 }
 
-async function settle(event: BackgroundTaskEvent, outcome: TurnOutcome, now: Date): Promise<void> {
+async function settle(event: BackgroundTaskEvent, turnId: string, outcome: TurnOutcome, now: Date): Promise<void> {
   // A turn that waits for a person's button has spoken: the event is answered.
   if (outcome.status === "completed" || outcome.status === "waiting_input") {
     if (await backgroundTaskEventRepository.answer(event, now)) log("AGENT_BACKGROUND_TASK_EVENT_ANSWERED", event);
     return;
   }
-  await retry(event, outcome.status === "failed" ? outcome.code : "AGENT_BACKGROUND_TASK_EVENT_TURN_CANCELLED", now);
+  const code = outcome.status === "failed" ? outcome.code : "AGENT_BACKGROUND_TASK_EVENT_TURN_CANCELLED";
+  // The retelling may have reached the chat (delivered, an unknown outcome, a part sent): telling it again
+  // could repeat it, and an unknown outcome is no leave to retry (17.11.2026 a 504 told an outcome twice).
+  // The outcome stays in the task's record, and the person can ask for it.
+  if (await telegramFinalDeliveryRepository.mayHaveReachedChat(turnId)) {
+    if (await backgroundTaskEventRepository.answer(event, now)) {
+      log("AGENT_BACKGROUND_TASK_EVENT_DELIVERY_UNCONFIRMED", event, { lastErrorCode: code, turnId }, "warn");
+    }
+    return;
+  }
+  await retry(event, code, now);
 }
 
 // The hub could not be reached or did not start answering: the same prompt goes through once it is back.
@@ -71,7 +82,7 @@ async function retry(event: BackgroundTaskEvent, code: string, now: Date): Promi
 
 async function handle(dependencies: BackgroundTaskEventDependencies, event: BackgroundTaskEvent): Promise<void> {
   if (event.turnId !== null) {
-    await settle(event, await dependencies.runTurn(event.turnId), dependencies.now());
+    await settle(event, event.turnId, await dependencies.runTurn(event.turnId), dependencies.now());
     return;
   }
   // The person answered before the question reached the chat (the task's line in the context shows it):
@@ -91,7 +102,7 @@ async function handle(dependencies: BackgroundTaskEventDependencies, event: Back
     return;
   }
   const turnId = await createBackgroundTaskEventTurn(dependencies.database, { event, now: dependencies.now(), prepared });
-  await settle(event, await dependencies.runTurn(turnId), dependencies.now());
+  await settle(event, turnId, await dependencies.runTurn(turnId), dependencies.now());
 }
 
 export function createBackgroundTaskEventProcessor(dependencies: BackgroundTaskEventDependencies) {
