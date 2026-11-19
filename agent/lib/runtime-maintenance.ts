@@ -5,12 +5,35 @@ import { recoverDatabaseBookkeeping } from "./database-recovery.js";
 import { runtimeProcessIdentity } from "./runtime-admission-reconciliation.js";
 
 const backendInstanceId = crypto.randomUUID();
+/**
+ * Admissions of this process whose work has not settled. An id joins before its holder row can exist
+ * and leaves only after the work and the release attempt end, so a holder of this process that is not
+ * here belongs to settled work whose release never reached the database (#553).
+ */
+const activeAdmissions = new Set<string>();
+
+export function isRuntimeAdmissionActive(id: string): boolean {
+  return activeAdmissions.has(id);
+}
 
 export async function withRuntimeAdmission<T>(
   kind: "ordinary" | "callback",
   work: (admissionId: string) => Promise<T>,
 ): Promise<T | null> {
   const id = crypto.randomUUID();
+  activeAdmissions.add(id);
+  try {
+    return await admitAndRun(id, kind, work);
+  } finally {
+    activeAdmissions.delete(id);
+  }
+}
+
+async function admitAndRun<T>(
+  id: string,
+  kind: "ordinary" | "callback",
+  work: (admissionId: string) => Promise<T>,
+): Promise<T | null> {
   const owner = await runtimeProcessIdentity();
   const state = await recoverDatabaseBookkeeping(() => database().query<{ phase: string; id: string | null }>(
     `WITH config AS MATERIALIZED (
@@ -44,7 +67,8 @@ export async function withRuntimeAdmission<T>(
       await recoverDatabaseBookkeeping(() => database().query("DELETE FROM runtime_admission_holders WHERE id=$1", [id]));
     } catch (cleanupError) {
       throw new AggregateError(workError === undefined ? [cleanupError] : [workError, cleanupError],
-        "AGENT_RUNTIME_ADMISSION_RELEASE_FAILED: Не удалось подтвердить завершение фоновой операции; обновление приостановлено");
+        "AGENT_RUNTIME_ADMISSION_RELEASE_FAILED: Не удалось снять отметку завершённой фоновой операции; "
+          + "минутная сверка снимет её, когда база станет доступна");
     }
   }
 }
