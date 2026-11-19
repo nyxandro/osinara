@@ -145,9 +145,10 @@ describe("sandbox runner HTTP server", () => {
     expect(response.status).toBe(503);
     const body = await response.json() as { code: string; message: string };
     expect(body.code).toBe("AGENT_SANDBOX_PROCESS_LIMIT_REACHED");
-    expect(body.message).toMatch(/agent-browser .*close/u);
+    expect(body.message).toMatch(/agent-browser session list.*agent-browser --session <name> close/u);
   });
   it("accepts a command for running compute only and reports a stopped sandbox by its own code (#529)", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const engine = fakeEngine();
     vi.mocked(engine.runProcess).mockRejectedValue(new Error("AGENT_SANDBOX_RUNNER_SESSION_NOT_RUNNING: Sandbox is stopped"));
     const baseUrl = await start(engine);
@@ -157,6 +158,8 @@ describe("sandbox runner HTTP server", () => {
     });
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ code: "AGENT_SANDBOX_RUNNER_SESSION_NOT_RUNNING" });
+    expect(logged).not.toHaveBeenCalled();
+    logged.mockRestore();
     expect(engine.runProcess).toHaveBeenCalledWith(SANDBOX_SESSION_ID,
       { command: "agent-browser session list --json", ifRunning: true }, expect.anything());
   });

@@ -123,10 +123,15 @@ describe("ModelFacingError", () => {
       expect(normalized.contract).toMatchObject({
         category: "dependency", code: "AGENT_SANDBOX_PROCESS_LIMIT_REACHED", retryable: true, sideEffectStatus: "not_started",
       });
-      expect(normalized.contract.correction).toMatch(/agent-browser .*close/u);
+      expect(normalized.contract.correction).toMatch(/agent-browser session list.*agent-browser --session <имя> close/u);
       expect(normalized.message).not.toContain("/workspace/personal");
       // Still a failure for the log: a sandbox that keeps filling up must show in the error burst.
       expect(normalized.isExpectedRefusal).toBe(false);
     }
+    // Text that only mentions the code inside a line is someone else's words, not the runner's line.
+    const quoted = normalizeModelFacingError(
+      new Error("cp failed: cannot stat 'AGENT_SANDBOX_PROCESS_LIMIT_REACHED: x'"), { toolName: "send_file" },
+    );
+    expect(quoted.contract.code).not.toBe("AGENT_SANDBOX_PROCESS_LIMIT_REACHED");
   });
 });

@@ -27,7 +27,8 @@ export const SANDBOX_PROCESS_LIMIT_CODE = "AGENT_SANDBOX_PROCESS_LIMIT_REACHED";
 // it by opening more browser sessions, each one more processes (#529).
 export const SANDBOX_PROCESS_LIMIT_MESSAGE =
   "The sandbox has no room for new processes: every turn of this chat shares it, and one browser takes most of it. " +
-  "Close the browser sessions you opened and no longer need (`agent-browser --session <name> close`), " +
+  "Run `agent-browser session list`, close only the listed sessions you opened and no longer need " +
+  "(`agent-browser --session <name> close`; closing a session that is not listed starts a new one), " +
   "use tabs instead of new sessions, then retry.";
 export const SANDBOX_RUNNER_COMMAND_MAX_CHARACTERS = 100_000;
 export const SANDBOX_RUNNER_ENVIRONMENT_MAX_ENTRIES = 100;

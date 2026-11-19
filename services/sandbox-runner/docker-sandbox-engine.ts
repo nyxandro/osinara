@@ -142,6 +142,8 @@ async function requireRunningContainer(
   wake = true,
 ): Promise<Docker.Container> {
   const existing = await inspectContainer(docker, sessionId);
+  // Housekeeping asks for running compute only: an absent sandbox is as empty as a stopped one.
+  if (!existing && !wake) throw new Error("AGENT_SANDBOX_RUNNER_SESSION_NOT_RUNNING: Sandbox is not running");
   if (!existing) throw new Error("AGENT_SANDBOX_RUNNER_SESSION_NOT_FOUND: Sandbox is absent");
   if (expectedInstanceId !== undefined && existing.inspection.Id !== expectedInstanceId) {
     throw new Error("AGENT_SANDBOX_RUNNER_INSTANCE_STALE: Sandbox permissions changed before command execution");

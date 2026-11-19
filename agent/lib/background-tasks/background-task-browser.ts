@@ -18,7 +18,8 @@ import type { BackgroundTask } from "./background-task-records.js";
 
 // Closing a few sessions takes seconds; a daemon that does not answer must not hold the dispatcher.
 const CLOSE_TIMEOUT_MS = 30_000;
-const STOPPED_SANDBOX = /^AGENT_SANDBOX_RUNNER_SESSION_NOT_(?:RUNNING|FOUND):/u;
+// The runner's answer for a sandbox that is stopped or absent when only running compute was asked for.
+const SANDBOX_NOT_RUNNING = /^AGENT_SANDBOX_RUNNER_SESSION_NOT_RUNNING:/u;
 
 export function backgroundTaskBrowserSession(taskId: string): string {
   return `bg-${taskId}`;
@@ -46,7 +47,7 @@ export async function closeBackgroundTaskBrowser(
   try {
     result = await runner.run(task.sandboxSessionId, { command: closeCommand(task.id), ifRunning: true, timeoutMs: CLOSE_TIMEOUT_MS });
   } catch (error) {
-    if (error instanceof Error && STOPPED_SANDBOX.test(error.message)) return;
+    if (error instanceof Error && SANDBOX_NOT_RUNNING.test(error.message)) return;
     throw error;
   }
   if (result.exitCode !== 0) {

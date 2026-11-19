@@ -102,6 +102,8 @@ describe("Docker sandbox process lifecycle", () => {
     for (const [exitCode, stderr] of [
       [125, "timeout: fork system call failed: Resource temporarily unavailable\n"],
       [254, "bash: fork: retry: Resource temporarily unavailable\nbash: fork: Resource temporarily unavailable\n"],
+      [2, "sh: 1: Cannot fork\n"],
+      [1, "Error: spawn EAGAIN\n    at ChildProcess.spawn (node:internal/child_process:421:11)\n"],
     ] as const) {
       const harness = processHarness({ ExitCode: exitCode, Running: false }, 0, undefined, stderr);
       const result = await harness.engine.runProcess(SANDBOX_SESSION_ID, { command: "ls" });

@@ -448,6 +448,11 @@ describe("buildSandboxContainerOptions", () => {
       .rejects.toThrow("AGENT_SANDBOX_RUNNER_SESSION_NOT_RUNNING");
     expect(start).not.toHaveBeenCalled();
     expect(container.exec).not.toHaveBeenCalled();
+
+    // An absent sandbox is as empty: the same answer, not a "request invalid" the runner logs as a failure.
+    container.inspect.mockRejectedValueOnce(Object.assign(new Error("no such container"), { statusCode: 404 }));
+    await expect(engine.runProcess(SANDBOX_SESSION_ID, { command: "agent-browser session list", ifRunning: true }))
+      .rejects.toThrow("AGENT_SANDBOX_RUNNER_SESSION_NOT_RUNNING");
   });
 
   it("removes compute on session and runner shutdown", async () => {

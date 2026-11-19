@@ -22,8 +22,9 @@ import { collectLimitedStream } from "./docker-sandbox-files.js";
 
 const PROCESS_KILL_GRACE_SECONDS = 5;
 
-// EAGAIN from fork or clone: the container's pids limit, which counts threads, is full.
-const FORK_FAILED = /\bfork\b[^\n]*Resource temporarily unavailable/u;
+// EAGAIN from fork, clone, spawn or a new thread: the container's pids limit, which counts threads, is full.
+// GNU tools and bash write "fork … Resource temporarily unavailable", dash "Cannot fork", Node "spawn EAGAIN".
+const FORK_FAILED = /\b(?:fork|clone|spawn|pthread_create)\b[^\n]*(?:resource temporarily unavailable|EAGAIN)|\bcannot fork\b/iu;
 
 function processLimitReached(exitCode: number, stderr: string): boolean {
   return exitCode !== 0 && FORK_FAILED.test(stderr);

@@ -83,6 +83,9 @@ function requiredPath(url: URL): string {
   return path;
 }
 
+// The runner appends this line to a command's stderr; an internal file operation quotes that stderr.
+const PROCESS_LIMIT_LINE = new RegExp(`(?:^|\\n)${SANDBOX_PROCESS_LIMIT_CODE}:`, "u");
+
 function requestError(error: unknown): boolean {
   return error instanceof Error && /^AGENT_SANDBOX_RUNNER_(?:CONTENT|GOOGLE|INSTANCE|JSON|PATH|PROCESS|REQUEST|SCOPE|SESSION|SKILLS_INVALID)/u
     .test(error.message);
@@ -215,6 +218,11 @@ export function createSandboxRunnerServer(dependencies: ServerDependencies) {
       return;
     }
     const operation = route(dependencies, request, response).catch((error: unknown) => {
+      // Housekeeping asked for running compute only and found none: an answer, not a failure to log.
+      if (error instanceof Error && error.message.startsWith("AGENT_SANDBOX_RUNNER_SESSION_NOT_RUNNING:")) {
+        if (!response.destroyed) sendJson(response, 409, { code: "AGENT_SANDBOX_RUNNER_SESSION_NOT_RUNNING", message: "Sandbox is not running" });
+        return;
+      }
       const invalidRequest = requestError(error);
       console.error("Sandbox runner request failed", {
         error,
@@ -223,12 +231,8 @@ export function createSandboxRunnerServer(dependencies: ServerDependencies) {
       });
       if (response.destroyed) return;
       // Named for the model (#529): a file operation that could not fork says why, not just "failed".
-      if (error instanceof Error && error.message.includes(`${SANDBOX_PROCESS_LIMIT_CODE}:`)) {
+      if (error instanceof Error && PROCESS_LIMIT_LINE.test(error.message)) {
         sendJson(response, 503, { code: SANDBOX_PROCESS_LIMIT_CODE, message: SANDBOX_PROCESS_LIMIT_MESSAGE });
-        return;
-      }
-      if (error instanceof Error && error.message.startsWith("AGENT_SANDBOX_RUNNER_SESSION_NOT_RUNNING:")) {
-        sendJson(response, 409, { code: "AGENT_SANDBOX_RUNNER_SESSION_NOT_RUNNING", message: "Sandbox is stopped" });
         return;
       }
       if (error instanceof Error && error.message.startsWith("AGENT_SANDBOX_RUNNER_INSTANCE_STALE:")) {

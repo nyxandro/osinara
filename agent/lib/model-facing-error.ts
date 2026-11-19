@@ -51,14 +51,17 @@ const NOT_FOUND_CORRECTIONS: Readonly<Record<string, string>> = {
     "Найдите файл в нужном workspace через glob, а где его нет — через ls в bash, и повторите действие с существующим путём из результата.",
 };
 
-// The runner's line rides inside glob's or grep's quoted stderr, so it is looked for anywhere in the text.
+// The runner's code leads the message, or a line of a command's quoted stderr where the runner appended it.
+const SANDBOX_PROCESS_LIMIT_LINE = new RegExp(`(?:^|\\n)${SANDBOX_PROCESS_LIMIT_CODE}:`, "u");
+
 function sandboxProcessLimitError(error: unknown): ModelFacingError | null {
-  if (!(error instanceof Error) || !error.message.includes(`${SANDBOX_PROCESS_LIMIT_CODE}:`)) return null;
+  if (!(error instanceof Error) || !SANDBOX_PROCESS_LIMIT_LINE.test(error.message)) return null;
   return new ModelFacingError({
     category: "dependency",
     code: SANDBOX_PROCESS_LIMIT_CODE,
-    correction: "Закройте сессии браузера, которые вы открыли и которые больше не нужны " +
-      "(`agent-browser --session <имя> close`), новые сессии не открывайте — используйте вкладки; затем повторите вызов.",
+    correction: "Выполните `agent-browser session list` и закройте только перечисленные сессии, которые открыли вы и которые " +
+      "больше не нужны (`agent-browser --session <имя> close`; закрытие сессии не из списка запускает новую). Новые сессии " +
+      "не открывайте — используйте вкладки; затем повторите вызов.",
     reason: "В песочнице чата нет места для новых процессов: её делят все ходы чата, а один браузер занимает большую часть.",
     retryable: true,
     sideEffectStatus: "not_started",

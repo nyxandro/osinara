@@ -33,10 +33,9 @@ describe("closeBackgroundTaskBrowser", () => {
   });
 
   it("has nothing to do when the sandbox is stopped or gone: the browser went with it", async () => {
-    for (const code of ["AGENT_SANDBOX_RUNNER_SESSION_NOT_RUNNING", "AGENT_SANDBOX_RUNNER_SESSION_NOT_FOUND"]) {
-      const client = runner(Promise.reject(new Error(`${code}: Sandbox is stopped (HTTP 409)`)));
-      await expect(closeBackgroundTaskBrowser(client, TASK)).resolves.toBeUndefined();
-    }
+    // The runner answers both with this code when only running compute was asked for.
+    const client = runner(Promise.reject(new Error("AGENT_SANDBOX_RUNNER_SESSION_NOT_RUNNING: Sandbox is stopped (HTTP 409)")));
+    await expect(closeBackgroundTaskBrowser(client, TASK)).resolves.toBeUndefined();
   });
 
   it("reports a close that failed, and passes any other runner failure on", async () => {
