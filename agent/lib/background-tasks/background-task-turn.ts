@@ -31,6 +31,7 @@ import {
 } from "./background-task-config.js";
 import { backgroundTaskMessageRepository } from "./background-task-message-repository.js";
 import type { BackgroundTask, BackgroundTaskSummaryReason } from "./background-task-records.js";
+import { backgroundTaskBrowserSession } from "./background-task-browser.js";
 import { BACKGROUND_TASK_CHANNEL_KIND, backgroundTaskToken } from "./background-task-session.js";
 import { backgroundTaskFolder } from "./background-task-tools.js";
 
@@ -57,7 +58,7 @@ function startMessage(task: BackgroundTask, folder: string): string {
     `task_id: ${task.id}`,
     `title: ${escapeUntrustedContextJson(task.title)}`,
     `your_folder: ${folder} — create it and write every file you make there; read the person's files elsewhere, but do not change them.`,
-    `browser: run agent-browser with AGENT_BROWSER_SESSION=bg-${task.id} so that you never touch the main agent's browser.`,
+    `browser: run agent-browser with AGENT_BROWSER_SESSION=${backgroundTaskBrowserSession(task.id)} so that you never touch the main agent's browser. Keep to this one session and open more pages as tabs: the sandbox is shared with the chat, and a second browser takes most of its room. Close it with \`agent-browser --session ${backgroundTaskBrowserSession(task.id)} close\` once you no longer need it (a bare \`agent-browser close\` closes the main agent's browser); when the task ends it is closed for you.`,
     `limits: ${BACKGROUND_TASK_ACTIVE_LIMIT_MS / 60_000} minutes of work and ${BACKGROUND_TASK_STEP_LIMIT} model steps; at either limit you are stopped and asked for a short summary.`,
     "question: if something important cannot be decided without the person, call ask_person once and end the turn; the answer comes in your next turn.",
     "confirmation: nobody can press a button for you. If an action needs a person's confirmation or a change outside your folder (Google, settings, memory), do not do it: say in the result what the main agent should do.",

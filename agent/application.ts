@@ -30,11 +30,12 @@ import { privateQuestionObserver } from "./channels/private-question.js";
 import { syncPrivateQuestionCommands } from "./lib/private-questions/private-question-commands.js";
 import { createPrivateQuestionIngress } from "./lib/private-questions/private-question-ingress.js";
 import { PRIVATE_QUESTION_CHANNEL_KIND } from "./lib/private-questions/private-question-turn.js";
-import { TELEGRAM_INGRESS_LEASE_MS } from "./config.js";
+import { SANDBOX_RUNNER_BASE_URL, TELEGRAM_INGRESS_LEASE_MS } from "./config.js";
 import { createScheduleCheckRunner } from "./lib/agent-schedules/agent-schedule-check-runner.js";
 import { AGENT_SCHEDULE_CONVERSATION_ADMISSION_MILLISECONDS } from "./lib/agent-schedules/agent-schedule-config.js";
 import type { ScheduledChatStart } from "./lib/agent-schedules/agent-schedule-dispatcher.js";
 import { createConversationWakeupProcessor } from "./lib/conversation-wakeups/conversation-wakeup-drain.js";
+import { closeBackgroundTaskBrowser } from "./lib/background-tasks/background-task-browser.js";
 import { createBackgroundTaskDispatcher } from "./lib/background-tasks/background-task-dispatcher.js";
 import { createBackgroundTaskEventProcessor } from "./lib/background-tasks/background-task-events.js";
 import { BACKGROUND_TASK_CHANNEL_KIND } from "./lib/background-tasks/background-task-session.js";
@@ -48,6 +49,7 @@ import { apiKeyUsageRoute } from "./lib/api-keys/api-key-usage-route.js";
 import { handleBotMembershipUpdate } from "./lib/group-connection/group-connection-membership.js";
 import { isTelegramGroupDisconnected } from "./lib/group-connection/group-connection-repository.js";
 import { withRuntimeAdmission } from "./lib/runtime-maintenance.js";
+import { SandboxRunnerClient } from "./lib/sandbox-runner/runner-client.js";
 import { AppError } from "./lib/app-error.js";
 import { createApprovalTimeoutResolver } from "./lib/telegram-hitl/approval-timeout.js";
 import { finalizeTimedOutPrompt } from "./lib/telegram-hitl/approval-timeout-prompt.js";
@@ -176,7 +178,9 @@ export async function startApplication(options: ApplicationOptions): Promise<Run
     waitMilliseconds: TURN_WAIT_MILLISECONDS,
   });
   // Background tasks (#519) run their turns on their own signal and outside the deploy admission.
+  const sandboxRunner = new SandboxRunnerClient(SANDBOX_RUNNER_BASE_URL);
   const backgroundTasks = createBackgroundTaskDispatcher({
+    closeTaskBrowser: (task) => closeBackgroundTaskBrowser(sandboxRunner, task),
     holdsRunnerLock: () => runnerLock.ensureHeld(),
     now: () => new Date(),
     pollMilliseconds: BACKGROUND_TASK_POLL_MILLISECONDS,

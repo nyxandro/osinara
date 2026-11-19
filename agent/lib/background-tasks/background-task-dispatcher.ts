@@ -15,6 +15,9 @@
  *   gets one short summary turn without tools; when that fails, the journal says what it did last.
  * - Before every turn the author's rights are checked again; a lost right stops the task.
  * - While a deploy prepares (phase other than `ready`) no turn starts: the task waits for its turn.
+ * - When a task ends, its browser in the chat's sandbox is closed (#529), after its place is freed; a failed
+ *   close is logged and changes nothing in the outcome. A task waiting for an answer is not cleaned up: its
+ *   browser closes by agent-browser's own idle timeout.
  */
 import type { Pool } from "pg";
 
@@ -31,7 +34,7 @@ import {
   BACKGROUND_TASK_TEXT_MAX_LENGTH,
 } from "./background-task-config.js";
 import { journalOutcomeText, lastBackgroundTaskTools } from "./background-task-journal.js";
-import { activeMsAt, type BackgroundTask } from "./background-task-records.js";
+import { activeMsAt, isActiveState, type BackgroundTask } from "./background-task-records.js";
 import { backgroundTaskRepository, type BackgroundTaskOutcome } from "./background-task-repository.js";
 import {
   createBackgroundTaskTurn,
@@ -40,6 +43,8 @@ import {
 } from "./background-task-turn.js";
 
 export interface BackgroundTaskDispatcherDependencies {
+  /** Closes the ended task's browser sessions in its chat's sandbox (`closeBackgroundTaskBrowser`). */
+  readonly closeTaskBrowser: (task: BackgroundTask) => Promise<void>;
   /** The runner lock: a process that lost it to another must not take tasks over (`RunnerLock.ensureHeld`). */
   readonly holdsRunnerLock: () => Promise<boolean>;
   readonly now: () => Date;
@@ -79,6 +84,8 @@ export function createBackgroundTaskDispatcher(dependencies: BackgroundTaskDispa
   const { runtime } = dependencies;
   const tasks = backgroundTaskRepository;
   const working = new Map<string, Promise<void>>();
+  // Every task's run up to its browser cleanup, which goes on after the place is freed; `idle` waits for it.
+  const runs = new Set<Promise<void>>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
 
@@ -229,6 +236,17 @@ export function createBackgroundTaskDispatcher(dependencies: BackgroundTaskDispa
     }
   }
 
+  /** Cleanup never fails the task: its outcome is written already, and the browser closes by idle anyway. */
+  async function closeBrowserIfEnded(taskId: string): Promise<void> {
+    try {
+      const current = await tasks.find(taskId);
+      if (current === null || isActiveState(current.state)) return;
+      await dependencies.closeTaskBrowser(current);
+    } catch (error) {
+      log("AGENT_BACKGROUND_TASK_BROWSER_CLOSE_FAILED", { error: error instanceof Error ? error.message : String(error), taskId }, "error");
+    }
+  }
+
   function begin(task: BackgroundTask, code: string): void {
     log(code, { taskId: task.id });
     const run = (async () => {
@@ -252,8 +270,13 @@ export function createBackgroundTaskDispatcher(dependencies: BackgroundTaskDispa
       } finally {
         working.delete(task.id);
       }
+      // The place is free already: an ended task is never taken over again, so a slow close holds no one up.
+      await closeBrowserIfEnded(task.id);
     })();
     working.set(task.id, run);
+    runs.add(run);
+    // `finally` keeps an unexpected rejection of the run as loud as before: nothing here swallows it.
+    void run.finally(() => runs.delete(run));
   }
 
   async function pass(): Promise<void> {
@@ -291,7 +314,7 @@ export function createBackgroundTaskDispatcher(dependencies: BackgroundTaskDispa
     },
     /** For tests: waits for every task this process works on. */
     async idle(): Promise<void> {
-      while (working.size > 0) await Promise.allSettled([...working.values()]);
+      while (runs.size > 0) await Promise.allSettled([...runs]);
     },
     pass,
   };
