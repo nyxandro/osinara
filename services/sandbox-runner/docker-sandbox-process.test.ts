@@ -5,6 +5,7 @@
  * - Default command timeout and stable timeout diagnostics.
  * - Forced disposable-compute cleanup when Docker exec remains active.
  * - Multiplexed source closure when either bounded output collector fails.
+ * - An exhausted process limit is named for the model, in command output and in file errors (#529).
  */
 import { Duplex, PassThrough } from "node:stream";
 
@@ -29,6 +30,7 @@ function processHarness(
   inspection: { ExitCode: number | null; Running: boolean },
   outputBytes = 0,
   removeError?: Error,
+  stderrText = "",
 ) {
   const remove = vi.fn(async () => {
     if (removeError) throw removeError;
@@ -48,7 +50,7 @@ function processHarness(
     modem: {
       demuxStream: vi.fn((_stream, stdout, stderr) => {
         stdout.end(Buffer.alloc(outputBytes));
-        stderr.end();
+        stderr.end(stderrText);
       }),
     },
   } as unknown as Docker;
@@ -93,6 +95,35 @@ describe("Docker sandbox process lifecycle", () => {
     expect(harness.container.exec).toHaveBeenCalledWith(expect.objectContaining({
       Cmd: ["timeout", "--signal=TERM", "--kill-after=5s", "120", "bash", "-c", "sleep infinity"],
     }));
+  });
+
+  it("names an exhausted process limit, so the model closes its browsers instead of opening more (#529)", async () => {
+    // As seen on 17.11: GNU timeout cannot fork bash, and bash cannot fork its own children.
+    for (const [exitCode, stderr] of [
+      [125, "timeout: fork system call failed: Resource temporarily unavailable\n"],
+      [254, "bash: fork: retry: Resource temporarily unavailable\nbash: fork: Resource temporarily unavailable\n"],
+      [2, "sh: 1: Cannot fork\n"],
+      [1, "Error: spawn EAGAIN\n    at ChildProcess.spawn (node:internal/child_process:421:11)\n"],
+    ] as const) {
+      const harness = processHarness({ ExitCode: exitCode, Running: false }, 0, undefined, stderr);
+      const result = await harness.engine.runProcess(SANDBOX_SESSION_ID, { command: "ls" });
+      expect(result.exitCode).toBe(exitCode);
+      expect(result.stderr).toContain(stderr.trimEnd());
+      expect(result.stderr).toMatch(/AGENT_SANDBOX_PROCESS_LIMIT_REACHED: .*agent-browser .*close/u);
+    }
+    // A fork that succeeded on retry is no failure; another command's own failure is not the limit.
+    for (const [exitCode, stderr] of [[0, "bash: fork: retry: Resource temporarily unavailable\n"], [1, "ls: cannot access 'x'\n"]] as const) {
+      const harness = processHarness({ ExitCode: exitCode, Running: false }, 0, undefined, stderr);
+      const result = await harness.engine.runProcess(SANDBOX_SESSION_ID, { command: "ls" });
+      expect(result.stderr).not.toContain("AGENT_SANDBOX_PROCESS_LIMIT_REACHED");
+    }
+  });
+
+  it("says a file could not be read because the sandbox is out of process room (#529)", async () => {
+    const harness = processHarness({ ExitCode: 125, Running: false }, 0, undefined,
+      "timeout: fork system call failed: Resource temporarily unavailable\n");
+    await expect(harness.engine.readFile(SANDBOX_SESSION_ID, "/workspace/personal/report.txt"))
+      .rejects.toThrow(/AGENT_SANDBOX_PROCESS_LIMIT_REACHED/u);
   });
 
   it("removes disposable compute when an aborted exec is still running", async () => {

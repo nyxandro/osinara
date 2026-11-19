@@ -11,6 +11,8 @@
  * - A lost right stops the task before any model call.
  * - A turn left by a previous process is continued, never started twice.
  * - While a deploy prepares, nothing starts.
+ * - The task's browser is closed once when the task ends, never while it waits or runs; a failed close
+ *   leaves the outcome as it was (#529).
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -41,6 +43,9 @@ const describeWithDatabase = enabled ? describe : describe.skip;
 
 let fixture: BackgroundTaskFixture;
 let phase = "ready";
+// The tasks whose browser the dispatcher closed, in order; `closeFails` makes the close throw.
+let closedBrowsers: string[] = [];
+let closeFails = false;
 
 // A tool that does nothing: a step that calls it is one more model step of the task.
 const NOOP = defineTool({ description: "noop", inputSchema: z.object({}).strict(), execute: async () => "ok" });
@@ -61,6 +66,10 @@ function harnessWith(options: { readonly maxModelSteps: number }, ...steps: Scri
     observer: backgroundTaskObserver(),
   });
   const dispatcher = createBackgroundTaskDispatcher({
+    closeTaskBrowser: async (task) => {
+      closedBrowsers.push(task.id);
+      if (closeFails) throw new Error("AGENT_BACKGROUND_TASK_BROWSER_CLOSE_FAILED: daemon not responding");
+    },
     holdsRunnerLock: async () => true, now: () => new Date(), pollMilliseconds: 50, readPhase: async () => phase, runtime,
   });
   return { dispatcher, model, runtime };
@@ -91,6 +100,8 @@ function requestText(call: { readonly messages: unknown }): string {
 describeWithDatabase("background task dispatcher", () => {
   beforeEach(async () => {
     phase = "ready";
+    closedBrowsers = [];
+    closeFails = false;
     await truncateBackgroundTaskTables();
     fixture = await createBackgroundTaskFixture();
   });
@@ -108,6 +119,16 @@ describeWithDatabase("background task dispatcher", () => {
     expect(session.rows).toEqual([{ kind: "background", retired: true }]);
     const events = await database().query("SELECT kind FROM background_task_events WHERE task_id = $1", [task.id]);
     expect(events.rows).toEqual([{ kind: "outcome" }]);
+    expect(closedBrowsers).toEqual([task.id]);
+  });
+
+  it("keeps the outcome when the task's browser could not be closed (#529)", async () => {
+    const task = await createTestTask(fixture);
+    closeFails = true;
+    const { dispatcher } = harness(reply("Готово"));
+    await run(dispatcher);
+    expect(closedBrowsers).toEqual([task.id]);
+    expect(await backgroundTaskRepository.find(task.id)).toMatchObject({ outcomeText: "Готово", state: "finished" });
   });
 
   it("waits for an answer without a place, and continues with the answer in a new turn", async () => {
@@ -119,12 +140,15 @@ describeWithDatabase("background task dispatcher", () => {
     );
     await run(dispatcher);
     expect(await backgroundTaskRepository.find(task.id)).toMatchObject({ state: "waiting_answer", waitingQuestion: "Считать допсоглашения отдельно?" });
+    // A task waiting for its answer keeps its browser: the work goes on with the same pages.
+    expect(closedBrowsers).toEqual([]);
     expect(await backgroundTaskMessageRepository.append({
       authorUserId: fixture.userId, createdByCallId: "m1", createdByTurnId: "main-turn", now: new Date(), taskId: task.id, text: "Отдельно",
     })).toBe("resumes");
     await run(dispatcher);
     expect(requestText(model.requests[2]!)).toContain("Отдельно");
     expect(await backgroundTaskRepository.find(task.id)).toMatchObject({ outcomeText: "Готово с учётом ответа", state: "finished" });
+    expect(closedBrowsers).toEqual([task.id]);
   });
 
   it("stops on request: the step under way is cut and the summary says what was done", async () => {
@@ -138,6 +162,7 @@ describeWithDatabase("background task dispatcher", () => {
     expect(await backgroundTaskRepository.find(task.id)).toMatchObject({
       outcomeCode: "AGENT_BACKGROUND_TASK_STOPPED", outcomeText: "Успел разобрать 14 файлов из 31", state: "stopped",
     });
+    expect(closedBrowsers).toEqual([task.id]);
   });
 
   it("falls back to the journal when the summary turn fails", async () => {
@@ -160,6 +185,7 @@ describeWithDatabase("background task dispatcher", () => {
     const { dispatcher } = harness(hanging.step, reply("Не уложилась, успела половину"));
     await run(dispatcher);
     expect(await backgroundTaskRepository.find(task.id)).toMatchObject({ outcomeCode: "AGENT_BACKGROUND_TASK_TIME_LIMIT", state: "limit_time" });
+    expect(closedBrowsers).toEqual([task.id]);
   });
 
   it("stops at the hundredth step before the model is paid again", async () => {
@@ -225,6 +251,7 @@ describeWithDatabase("background task dispatcher", () => {
     await run(dispatcher);
     expect(model.requests).toHaveLength(0);
     expect(await backgroundTaskRepository.find(task.id)).toMatchObject({ outcomeCode: "AGENT_BACKGROUND_TASK_ACCESS_LOST", state: "stopped" });
+    expect(closedBrowsers).toEqual([task.id]);
   });
 
   it("continues the turn a previous process left, without starting another", async () => {
@@ -247,5 +274,6 @@ describeWithDatabase("background task dispatcher", () => {
     await run(dispatcher);
     expect(model.requests).toHaveLength(0);
     expect((await backgroundTaskRepository.find(task.id))?.state).toBe("queued");
+    expect(closedBrowsers).toEqual([]);
   });
 });

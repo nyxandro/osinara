@@ -135,14 +135,24 @@ async function inspectContainer(
   }
 }
 
-async function requireRunningContainer(docker: Docker, sessionId: string, expectedInstanceId?: string): Promise<Docker.Container> {
+async function requireRunningContainer(
+  docker: Docker,
+  sessionId: string,
+  expectedInstanceId?: string,
+  wake = true,
+): Promise<Docker.Container> {
   const existing = await inspectContainer(docker, sessionId);
+  // Housekeeping asks for running compute only: an absent sandbox is as empty as a stopped one.
+  if (!existing && !wake) throw new Error("AGENT_SANDBOX_RUNNER_SESSION_NOT_RUNNING: Sandbox is not running");
   if (!existing) throw new Error("AGENT_SANDBOX_RUNNER_SESSION_NOT_FOUND: Sandbox is absent");
   if (expectedInstanceId !== undefined && existing.inspection.Id !== expectedInstanceId) {
     throw new Error("AGENT_SANDBOX_RUNNER_INSTANCE_STALE: Sandbox permissions changed before command execution");
   }
   const container = expectedInstanceId ? docker.getContainer(expectedInstanceId) : existing.container;
-  if (!existing.inspection.State.Running) await container.start();
+  if (!existing.inspection.State.Running) {
+    if (!wake) throw new Error("AGENT_SANDBOX_RUNNER_SESSION_NOT_RUNNING: Sandbox is stopped");
+    await container.start();
+  }
   return container;
 }
 
@@ -238,7 +248,9 @@ export function createDockerSandboxEngine(input: {
     },
     async runProcess(sessionId, request, signal) {
       return await activity.runActive(sessionId, async () => {
-        const container = await requireRunningContainer(input.docker, sessionId, request.expectedInstanceId);
+        const container = await requireRunningContainer(
+          input.docker, sessionId, request.expectedInstanceId, request.ifRunning !== true,
+        );
         const processRequest = request.workingDirectory
           ? { ...request, workingDirectory: resolvePath(request.workingDirectory) }
           : request;

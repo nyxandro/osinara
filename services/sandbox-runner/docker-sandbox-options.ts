@@ -24,7 +24,7 @@ export interface SandboxDockerRuntime {
   workspaceVolume: string;
 }
 
-export const SANDBOX_CONTAINER_POLICY_VERSION = "11";
+export const SANDBOX_CONTAINER_POLICY_VERSION = "12";
 
 const AGENT_BROWSER_SESSION_NAME = "osinara";
 const AGENT_BROWSER_RESTORE_SAVE_POLICY = "auto";
@@ -40,7 +40,12 @@ const RUSSIAN_TRUSTED_ROOT_CA_PATH =
   "/usr/local/share/ca-certificates/russian-trusted-root-ca.crt";
 const SANDBOX_CPU_NANOSECONDS = 1_000_000_000;
 const SANDBOX_MEMORY_BYTES = 2 * 1024 * 1024 * 1024;
-const SANDBOX_PIDS_LIMIT = 256;
+// The limit counts threads: one Chromium takes ~170–200, two ~345. Room for the main agent's browser and one
+// background task's, with commands beside them (#529). Two browsers then share the 2 GB: memory, not this
+// limit, bounds them, and the kernel ends the heaviest tab first.
+const SANDBOX_PIDS_LIMIT = 512;
+// One `gws` process: it never needs the room of a browser.
+const GOOGLE_WORKSPACE_PIDS_LIMIT = 256;
 const SANDBOX_SHM_BYTES = 256 * 1024 * 1024;
 
 function volumeMount(source: string, target: string, subpath: string): Docker.MountSettings {
@@ -226,7 +231,7 @@ export function buildGoogleWorkspaceContainerOptions(
       Mounts: [volumeMount(runtime.workspaceVolume, "/workspace", request.workspaceId)],
       NanoCpus: SANDBOX_CPU_NANOSECONDS,
       NetworkMode: runtime.egressNetwork,
-      PidsLimit: SANDBOX_PIDS_LIMIT,
+      PidsLimit: GOOGLE_WORKSPACE_PIDS_LIMIT,
       Privileged: false,
       ReadonlyRootfs: true,
       SecurityOpt: ["no-new-privileges:true"],

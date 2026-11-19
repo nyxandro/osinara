@@ -5,6 +5,7 @@
  * - `ModelFacingError`: stable structured remediation visible to the model.
  * - `normalizeModelFacingError`: safe conversion of unexpected dependency failures.
  * - `isExpectedRefusal`: coded refusals are expected, dependency failures are not.
+ * - A sandbox out of process room is named, with how to free it, wherever its code sits (#529).
  */
 import { describe, expect, it } from "vitest";
 
@@ -108,5 +109,29 @@ describe("ModelFacingError", () => {
     expect(normalized.contract.code).toBe("AGENT_FAKE_PROVIDER_FAILED");
     expect(normalized.contract.reason).not.toContain("/srv/private/token");
     expect(normalized.message).not.toContain("/srv/private/token");
+  });
+
+  it("tells the model a full sandbox is freed by closing its browsers, wherever the runner's code sits (#529)", () => {
+    for (const [toolName, error] of [
+      // A file operation the runner refused: the code leads the message.
+      ["send_file", new Error("AGENT_SANDBOX_PROCESS_LIMIT_REACHED: The sandbox has no room for new processes. (HTTP 503)")],
+      // glob and grep quote the command's stderr, where the runner appended its line.
+      ["glob", new Error("glob failed (exit 125): timeout: fork system call failed: Resource temporarily unavailable\n" +
+        "AGENT_SANDBOX_PROCESS_LIMIT_REACHED: The sandbox has no room for new processes.\nCommand: find /workspace/personal -name x")],
+    ] as const) {
+      const normalized = normalizeModelFacingError(error, { toolName });
+      expect(normalized.contract).toMatchObject({
+        category: "dependency", code: "AGENT_SANDBOX_PROCESS_LIMIT_REACHED", retryable: true, sideEffectStatus: "not_started",
+      });
+      expect(normalized.contract.correction).toMatch(/agent-browser session list.*agent-browser --session <имя> close/u);
+      expect(normalized.message).not.toContain("/workspace/personal");
+      // Still a failure for the log: a sandbox that keeps filling up must show in the error burst.
+      expect(normalized.isExpectedRefusal).toBe(false);
+    }
+    // Text that only mentions the code inside a line is someone else's words, not the runner's line.
+    const quoted = normalizeModelFacingError(
+      new Error("cp failed: cannot stat 'AGENT_SANDBOX_PROCESS_LIMIT_REACHED: x'"), { toolName: "send_file" },
+    );
+    expect(quoted.contract.code).not.toBe("AGENT_SANDBOX_PROCESS_LIMIT_REACHED");
   });
 });
