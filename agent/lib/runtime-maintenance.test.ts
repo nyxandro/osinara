@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const storage = vi.hoisted(() => ({ phase: "ready", query: vi.fn() }));
 vi.mock("./database.js", () => ({ database: () => ({ query: storage.query }) }));
-import { withRuntimeAdmission } from "./runtime-maintenance.js";
+import { isRuntimeAdmissionActive, withRuntimeAdmission } from "./runtime-maintenance.js";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -49,5 +49,31 @@ describe("runtime maintenance admission", () => {
     });
     await expect(withRuntimeAdmission("ordinary", async () => { throw workError; }))
       .rejects.toMatchObject({ errors: [workError, cleanupError] });
+  });
+  // The minute reconciliation releases this process's holders that are not active (#553), so an
+  // admission must count as active before its row can exist and stop counting once its work settled.
+  it("counts an admission as active from before its holder is written until its work settles", async () => {
+    let written: string | undefined, insideWork: boolean | undefined, writtenWhileActive: boolean | undefined;
+    storage.query.mockImplementation(async (sql: string, values: unknown[]) => {
+      if (sql.startsWith("DELETE")) throw new Error("timeout exceeded when trying to connect");
+      written = String(values[0]);
+      writtenWhileActive = isRuntimeAdmissionActive(written);
+      return { rows: [{ phase: "ready", id: values[0] }] };
+    });
+    await expect(withRuntimeAdmission("ordinary", async (id) => { insideWork = isRuntimeAdmissionActive(id); }))
+      .rejects.toThrow("AGENT_RUNTIME_ADMISSION_RELEASE_FAILED");
+    expect(writtenWhileActive).toBe(true);
+    expect(insideWork).toBe(true);
+    expect(isRuntimeAdmissionActive(written!)).toBe(false);
+  });
+  it("stops counting an admission that maintenance turned away", async () => {
+    storage.phase = "frozen";
+    let written: string | undefined;
+    storage.query.mockImplementation(async (sql: string, values: unknown[]) => {
+      if (!sql.startsWith("DELETE")) written = String(values[0]);
+      return { rows: sql.includes("config.phase") ? [{ phase: storage.phase, id: null }] : [] };
+    });
+    expect(await withRuntimeAdmission("ordinary", vi.fn())).toBeNull();
+    expect(isRuntimeAdmissionActive(written!)).toBe(false);
   });
 });
