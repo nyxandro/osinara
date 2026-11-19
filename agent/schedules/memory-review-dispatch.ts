@@ -4,11 +4,12 @@
  * Export:
  * - `memoryReviewDispatchSchedule`: delivers severe alerts and family skill notices, and starts
  *   ready review turns: a full 50-message batch, or a shorter one whose oldest message has waited
- *   out its age limit. It also releases deploy admissions of processes that are gone.
+ *   out its age limit. It also releases deploy admissions of processes that are gone and of this
+ *   process's work that settled while the database could not take the release.
  * - Records a completed cycle for external monitoring; a failed cycle records nothing.
  */
 import type { RuntimeSchedule } from "../runtime/scheduler.js";
-import { withRuntimeAdmission } from "../lib/runtime-maintenance.js";
+import { isRuntimeAdmissionActive, withRuntimeAdmission } from "../lib/runtime-maintenance.js";
 import { withScheduleHeartbeat } from "../lib/schedule-heartbeat.js";
 import { dispatchFamilySkillNotices } from "../lib/family-skills/family-skill-notices.js";
 import { dispatchOperationalIncidents } from "../lib/operational-incidents/owner-alerts.js";
@@ -48,7 +49,7 @@ export function memoryReviewDispatchSchedule(startReview: MemoryReviewStart): Ru
     cron: "* * * * *",
     name: "memory-review-dispatch",
     run({ waitUntil }) {
-      waitUntil(reconcileRuntimeAdmissions());
+      waitUntil(reconcileRuntimeAdmissions(isRuntimeAdmissionActive));
       waitUntil(withRuntimeAdmission(
         "ordinary",
         () => withScheduleHeartbeat("memory-review-dispatch", () => dispatchMemoryReviewCycle(startReview)),
