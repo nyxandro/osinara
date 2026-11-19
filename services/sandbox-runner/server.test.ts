@@ -133,6 +133,33 @@ describe("sandbox runner HTTP server", () => {
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ code: "AGENT_SANDBOX_RUNNER_INSTANCE_STALE" });
   });
+  it("tells the caller the sandbox is out of process room instead of an opaque failure (#529)", async () => {
+    const engine = fakeEngine();
+    vi.mocked(engine.readFile).mockRejectedValue(new Error(
+      "AGENT_SANDBOX_RUNNER_FILE_STAGE_FAILED: Не удалось подготовить файл sandbox для чтения. " +
+      "timeout: fork system call failed: Resource temporarily unavailable\n" +
+      "AGENT_SANDBOX_PROCESS_LIMIT_REACHED: The sandbox has no room for new processes.",
+    ));
+    const baseUrl = await start(engine);
+    const response = await fetch(`${baseUrl}/v1/sessions/${SANDBOX_SESSION_ID}/files?path=/workspace/personal/a.txt`);
+    expect(response.status).toBe(503);
+    const body = await response.json() as { code: string; message: string };
+    expect(body.code).toBe("AGENT_SANDBOX_PROCESS_LIMIT_REACHED");
+    expect(body.message).toMatch(/agent-browser .*close/u);
+  });
+  it("accepts a command for running compute only and reports a stopped sandbox by its own code (#529)", async () => {
+    const engine = fakeEngine();
+    vi.mocked(engine.runProcess).mockRejectedValue(new Error("AGENT_SANDBOX_RUNNER_SESSION_NOT_RUNNING: Sandbox is stopped"));
+    const baseUrl = await start(engine);
+    const response = await fetch(`${baseUrl}/v1/sessions/${SANDBOX_SESSION_ID}/processes`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ command: "agent-browser session list --json", ifRunning: true }),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "AGENT_SANDBOX_RUNNER_SESSION_NOT_RUNNING" });
+    expect(engine.runProcess).toHaveBeenCalledWith(SANDBOX_SESSION_ID,
+      { command: "agent-browser session list --json", ifRunning: true }, expect.anything());
+  });
   it("validates and delegates exact credentialed GWS argv", async () => {
     const engine = fakeEngine();
     const baseUrl = await start(engine);

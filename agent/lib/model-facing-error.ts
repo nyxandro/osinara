@@ -9,6 +9,7 @@
  * - `normalizeModelFacingError`: converts legacy and unexpected failures without leaking internals.
  */
 import { AppError } from "./app-error.js";
+import { SANDBOX_PROCESS_LIMIT_CODE } from "./sandbox-runner/sandbox-runner-contract.js";
 
 export type ModelFacingErrorCategory =
   | "authorization"
@@ -49,6 +50,20 @@ const NOT_FOUND_CORRECTIONS: Readonly<Record<string, string>> = {
   AGENT_WORKSPACE_FILE_NOT_FOUND:
     "Найдите файл в нужном workspace через glob, а где его нет — через ls в bash, и повторите действие с существующим путём из результата.",
 };
+
+// The runner's line rides inside glob's or grep's quoted stderr, so it is looked for anywhere in the text.
+function sandboxProcessLimitError(error: unknown): ModelFacingError | null {
+  if (!(error instanceof Error) || !error.message.includes(`${SANDBOX_PROCESS_LIMIT_CODE}:`)) return null;
+  return new ModelFacingError({
+    category: "dependency",
+    code: SANDBOX_PROCESS_LIMIT_CODE,
+    correction: "Закройте сессии браузера, которые вы открыли и которые больше не нужны " +
+      "(`agent-browser --session <имя> close`), новые сессии не открывайте — используйте вкладки; затем повторите вызов.",
+    reason: "В песочнице чата нет места для новых процессов: её делят все ходы чата, а один браузер занимает большую часть.",
+    retryable: true,
+    sideEffectStatus: "not_started",
+  }, { cause: error });
+}
 
 function categoryForCode(code: string): ModelFacingErrorCategory {
   if (/(?:INPUT|CURSOR|LIMIT|PATH|REF|FORMAT)_INVALID/u.test(code)) return "input";
@@ -105,6 +120,8 @@ export function normalizeModelFacingError(
   context: NormalizeModelFacingErrorContext,
 ): ModelFacingError {
   if (error instanceof ModelFacingError) return error;
+  const processLimit = sandboxProcessLimitError(error);
+  if (processLimit !== null) return processLimit;
   const applicationError = error instanceof AppError
     ? { code: error.code, reason: error.message.replace(new RegExp(`^${error.code}:\\s*`, "u"), "") }
     : null;

@@ -82,7 +82,8 @@ describe("buildSandboxContainerOptions", () => {
       CapDrop: ["ALL"],
       Init: true,
       NetworkMode: runtime.egressNetwork,
-      PidsLimit: 256,
+      // Two Chromium take ~345 places: a background task's browser beside the main agent's must fit (#529).
+      PidsLimit: 512,
       Privileged: false,
       ReadonlyRootfs: false,
       SecurityOpt: ["no-new-privileges:true"],
@@ -91,7 +92,7 @@ describe("buildSandboxContainerOptions", () => {
       }),
     });
     expect(options.Labels).toMatchObject({
-      "dev.osinara.sandbox.policy-version": "11",
+      "dev.osinara.sandbox.policy-version": "12",
       "dev.osinara.sandbox.project": "osinara",
       "dev.osinara.sandbox.session-id": SANDBOX_SESSION_ID,
     });
@@ -427,6 +428,26 @@ describe("buildSandboxContainerOptions", () => {
       path: "obsolete.txt",
     })).resolves.toBeUndefined();
     expect(start).toHaveBeenCalledOnce();
+  });
+
+  it("runs a command only in already running compute when asked, never waking a stopped sandbox (#529)", async () => {
+    const start = vi.fn(async () => undefined);
+    const container = {
+      exec: vi.fn(),
+      inspect: vi.fn(async () => ({ Config: { Labels: {} }, State: { Running: false } })),
+      start,
+    };
+    const docker = { getContainer: vi.fn(() => container) } as unknown as Docker;
+    const engine = createDockerSandboxEngine({
+      docker,
+      roots: { toolsRoot: "/tools", workspaceRoot: "/workspaces" },
+      runtime,
+    });
+
+    await expect(engine.runProcess(SANDBOX_SESSION_ID, { command: "agent-browser session list", ifRunning: true }))
+      .rejects.toThrow("AGENT_SANDBOX_RUNNER_SESSION_NOT_RUNNING");
+    expect(start).not.toHaveBeenCalled();
+    expect(container.exec).not.toHaveBeenCalled();
   });
 
   it("removes compute on session and runner shutdown", async () => {

@@ -21,6 +21,14 @@ export interface GroupSandboxCommandOptions extends SandboxSpawnOptions {
 }
 
 export const SANDBOX_RUNNER_API_PREFIX = "/v1";
+/** A command or file operation could not fork: the sandbox's process limit, which counts threads, is full. */
+export const SANDBOX_PROCESS_LIMIT_CODE = "AGENT_SANDBOX_PROCESS_LIMIT_REACHED";
+// Read by the model: without it a failed fork looks like a random error, and on 17.11 the model answered
+// it by opening more browser sessions, each one more processes (#529).
+export const SANDBOX_PROCESS_LIMIT_MESSAGE =
+  "The sandbox has no room for new processes: every turn of this chat shares it, and one browser takes most of it. " +
+  "Close the browser sessions you opened and no longer need (`agent-browser --session <name> close`), " +
+  "use tabs instead of new sessions, then retry.";
 export const SANDBOX_RUNNER_COMMAND_MAX_CHARACTERS = 100_000;
 export const SANDBOX_RUNNER_ENVIRONMENT_MAX_ENTRIES = 100;
 export const SANDBOX_RUNNER_MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
@@ -137,6 +145,8 @@ const processRequestSchema = z.strictObject({
   command: z.string().min(1).max(SANDBOX_RUNNER_COMMAND_MAX_CHARACTERS),
   expectedInstanceId: z.string().regex(/^[a-f0-9]{64}$/u).optional(),
   environment: environmentSchema.optional(),
+  // Housekeeping for compute that may be asleep: a stopped sandbox is reported, never started for it.
+  ifRunning: z.literal(true).optional(),
   timeoutMs: z.number().int().positive().max(SANDBOX_RUNNER_TIMEOUT_MAX_MS).optional(),
   workingDirectory: z.string().min(1).max(4_096).optional(),
 });

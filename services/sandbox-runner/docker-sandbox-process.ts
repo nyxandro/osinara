@@ -3,6 +3,7 @@
  *
  * Exports:
  * - `executeSandboxProcess`: runs one command, collects bounded output, and removes orphaned compute.
+ * A command that could not fork gets `SANDBOX_PROCESS_LIMIT_CODE` and its message appended to stderr.
  */
 import { randomUUID } from "node:crypto";
 import { PassThrough, type Duplex } from "node:stream";
@@ -10,6 +11,8 @@ import { PassThrough, type Duplex } from "node:stream";
 import type Docker from "dockerode";
 
 import {
+  SANDBOX_PROCESS_LIMIT_CODE,
+  SANDBOX_PROCESS_LIMIT_MESSAGE,
   SANDBOX_RUNNER_MAX_OUTPUT_BYTES,
   SANDBOX_RUNNER_PROCESS_DEFAULT_TIMEOUT_MS,
   type SandboxRunnerProcessRequest,
@@ -18,6 +21,13 @@ import {
 import { collectLimitedStream } from "./docker-sandbox-files.js";
 
 const PROCESS_KILL_GRACE_SECONDS = 5;
+
+// EAGAIN from fork or clone: the container's pids limit, which counts threads, is full.
+const FORK_FAILED = /\bfork\b[^\n]*Resource temporarily unavailable/u;
+
+function processLimitReached(exitCode: number, stderr: string): boolean {
+  return exitCode !== 0 && FORK_FAILED.test(stderr);
+}
 
 async function removeOrphanedCompute(container: Docker.Container): Promise<void> {
   // Compute is disposable while named-volume workspaces survive recreation on the next command.
@@ -139,12 +149,15 @@ export async function executeSandboxProcess(
   // GNU timeout returns 137 when an uncooperative process reaches the KILL grace boundary.
   const timedOut = inspection.ExitCode === 124 ||
     (inspection.ExitCode === 137 && Date.now() - startedAt >= timeoutMs);
+  const stderrOutput = stderrBytes.toString("utf8");
   const stderrText = timedOut
     ? [
-        stderrBytes.toString("utf8").trimEnd(),
+        stderrOutput.trimEnd(),
         `AGENT_SANDBOX_RUNNER_PROCESS_TIMED_OUT: Command exceeded ${timeoutMs} ms`,
       ].filter(Boolean).join("\n")
-    : stderrBytes.toString("utf8");
+    : processLimitReached(inspection.ExitCode, stderrOutput)
+      ? `${stderrOutput.trimEnd()}\n${SANDBOX_PROCESS_LIMIT_CODE}: ${SANDBOX_PROCESS_LIMIT_MESSAGE}`
+      : stderrOutput;
   return {
     exitCode: inspection.ExitCode,
     processId: randomUUID(),

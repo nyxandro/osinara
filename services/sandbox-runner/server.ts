@@ -16,6 +16,8 @@ import {
   parseSandboxRemovePathRequest,
   parseSandboxSessionId,
   parseSandboxWorkspaceId,
+  SANDBOX_PROCESS_LIMIT_CODE,
+  SANDBOX_PROCESS_LIMIT_MESSAGE,
   SANDBOX_RUNNER_API_PREFIX,
   SANDBOX_RUNNER_REQUEST_MAX_BYTES,
 } from "../../agent/lib/sandbox-runner/sandbox-runner-contract.js";
@@ -220,6 +222,15 @@ export function createSandboxRunnerServer(dependencies: ServerDependencies) {
         path: request.url,
       });
       if (response.destroyed) return;
+      // Named for the model (#529): a file operation that could not fork says why, not just "failed".
+      if (error instanceof Error && error.message.includes(`${SANDBOX_PROCESS_LIMIT_CODE}:`)) {
+        sendJson(response, 503, { code: SANDBOX_PROCESS_LIMIT_CODE, message: SANDBOX_PROCESS_LIMIT_MESSAGE });
+        return;
+      }
+      if (error instanceof Error && error.message.startsWith("AGENT_SANDBOX_RUNNER_SESSION_NOT_RUNNING:")) {
+        sendJson(response, 409, { code: "AGENT_SANDBOX_RUNNER_SESSION_NOT_RUNNING", message: "Sandbox is stopped" });
+        return;
+      }
       if (error instanceof Error && error.message.startsWith("AGENT_SANDBOX_RUNNER_INSTANCE_STALE:")) {
         sendJson(response, 409, {
           code: "AGENT_SANDBOX_RUNNER_INSTANCE_STALE",
