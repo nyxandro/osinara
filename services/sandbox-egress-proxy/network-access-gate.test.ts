@@ -35,6 +35,7 @@ describe("network access gate", () => {
     gate = createNetworkAccessGate({
       attachedSubnets: () => ["172.20.0.3/16", "10.77.0.2/24"],
       projectionPath,
+      serverAddresses: new Set(["45.159.189.111", "100.67.170.70"]),
       trustedLocalAddress: TRUSTED,
     });
   });
@@ -79,6 +80,16 @@ describe("network access gate", () => {
       await expect(gate.authorize({ address, localAddress: TRUSTED, port: 80 }))
         .rejects.toMatchObject({ code: "AGENT_SANDBOX_EGRESS_DESTINATION_FORBIDDEN" });
     }
+  });
+
+  // #560: Orca's remote control and the Xray entries live on these addresses.
+  it("never opens this server's own addresses, even when a grant lists them", async () => {
+    await grant(["45.159.189.111", 6768], ["100.67.170.70", 10811]);
+
+    await expect(gate.authorize({ address: "45.159.189.111", localAddress: TRUSTED, port: 6768 }))
+      .rejects.toMatchObject({ code: "AGENT_SANDBOX_EGRESS_DESTINATION_FORBIDDEN" });
+    await expect(gate.authorize({ address: "100.67.170.70", localAddress: TRUSTED, port: 10811 }))
+      .rejects.toMatchObject({ code: "AGENT_SANDBOX_EGRESS_DESTINATION_FORBIDDEN" });
   });
 
   it("closes every IP destination when the grant file is missing or damaged", async () => {

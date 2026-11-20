@@ -8,9 +8,10 @@ import { loadSessionHistory } from "../history/history-repository.js";
 import { defineTool } from "../tool.js";
 import { loadSkill } from "../tools/load-skill.js";
 import { estimateTokens } from "./compaction-estimate.js";
-import { loadTurn } from "./journal-repository.js";
+import { loadStep, loadTurn } from "./journal-repository.js";
 import { EmptyModelResponseError } from "./model-errors.js";
 import { runTurn, type TurnRuntime } from "./run-turn.js";
+import { failTurn } from "./turn-failure.js";
 import {
   newTestSession, recordingObserver, reply, scriptedModel, startMessageTurn, testAgent, testRuntime, toolCalls,
 } from "./turn.integration-fixtures.js";
@@ -350,7 +351,8 @@ async function releaseRunner(turnId: string) {
     expect(await history(sessionId)).toEqual([{ role: "user", content: "что нового?" }]);
   });
 
-  it("cancels the turn without writing its unfinished step", async () => {
+  // A background task stopped mid-step is retold from its history by its summary turn (#561).
+  it("cancels the turn and keeps in history the call its unfinished step had started", async () => {
     const sessionId = await newTestSession();
     const cancel = new AbortController();
     const slow = noteTool(async () => { cancel.abort(new Error("steered")); throw new Error("aborted"); });
@@ -362,8 +364,59 @@ async function releaseRunner(turnId: string) {
     }), turn.id, { abortSignal: cancel.signal });
 
     expect(outcome).toEqual({ status: "cancelled" });
-    expect(await history(sessionId)).toEqual([]);
+    expect(await history(sessionId)).toEqual([
+      { role: "user", content: "делай" },
+      { role: "assistant", content: [{ type: "tool-call", toolCallId: "call-1", toolName: "slow", input: { text: "a" } }] },
+      { role: "tool", content: [{ type: "tool-result", toolCallId: "call-1", toolName: "slow",
+        output: { type: "error-text", value: expect.stringMatching(/^AGENT_TOOL_OUTCOME_UNKNOWN: /u) } }] },
+    ]);
     expect(await loadTurn(database(), turn.id)).toMatchObject({ status: "cancelled" });
+  });
+
+  // #561: a reminder created by a step that never finished was missing from history, and the next
+  // turn, asked again, created a second one.
+  it("keeps what a failed turn's unfinished step already did, so the next turn does not repeat it", async () => {
+    const sessionId = await newTestSession();
+    const hang = vi.fn(() => never<string>());
+    const turn = await startMessageTurn(sessionId, "напомни и проверь почту");
+    const model = scriptedModel(toolCalls([
+      { id: "call-1", input: { text: "завтра в 9" }, name: "remind" }, { id: "call-2", input: { text: "inbox" }, name: "mail" },
+    ]));
+    void runTurn(testRuntime({
+      agent: testAgent({ mail: noteTool(hang), remind: noteTool(({ text }) => `reminder set: ${text}`) }),
+      callModel: model.callModel, observer: recordingObserver().observer,
+    }), turn.id, RUN);
+    await vi.waitFor(async () => expect((await loadStep(database(), turn.id, 0))?.calls.map((call) => call.state)).toEqual(["completed", "intent"]));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const outcome = await failTurn(database(), await loadTurn(database(), turn.id),
+      new AppError("AGENT_TEST_TURN_FAILED", "Ход оборвался"), new AbortController().signal);
+
+    log.mockRestore();
+    expect(outcome).toMatchObject({ code: "AGENT_TEST_TURN_FAILED", status: "failed" });
+    expect(await history(sessionId)).toEqual([
+      { role: "user", content: "напомни и проверь почту" },
+      { role: "assistant", content: [
+        { type: "tool-call", toolCallId: "call-1", toolName: "remind", input: { text: "завтра в 9" } },
+        { type: "tool-call", toolCallId: "call-2", toolName: "mail", input: { text: "inbox" } },
+      ] },
+      { role: "tool", content: [
+        { type: "tool-result", toolCallId: "call-1", toolName: "remind", output: { type: "text", value: "reminder set: завтра в 9" } },
+        { type: "tool-result", toolCallId: "call-2", toolName: "mail",
+          output: { type: "error-text", value: expect.stringMatching(/^AGENT_TOOL_OUTCOME_UNKNOWN: /u) } },
+      ] },
+    ]);
+  });
+
+  it("writes nothing for a failed turn whose unfinished step ran no call", async () => {
+    const sessionId = await newTestSession();
+    const turn = await startMessageTurn(sessionId, "привет");
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await failTurn(database(), turn, new AppError("AGENT_TEST_TURN_FAILED", "Ход оборвался"), new AbortController().signal);
+
+    log.mockRestore();
+    expect(await history(sessionId)).toEqual([]);
   });
 
   it("stops before the model when the turn cannot be prepared", async () => {

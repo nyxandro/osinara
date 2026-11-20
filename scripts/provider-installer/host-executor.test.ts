@@ -116,12 +116,15 @@ describe("createHostInstallationExecutor", () => {
     const environment = staged?.environmentBytes.toString("utf8");
     expect(environment).toContain("MODEL_API_KEY='model-secret'\n");
     expect(environment).toContain("PUBLIC_BASE_URL='https://8-8-8-8.sslip.io'\n");
+    // #560: the address the installer found is this server's own; sandboxes never reach it.
+    expect(environment).toContain("OSINARA_SERVER_ADDRESSES='8.8.8.8'\n");
     expect(environment).toContain("SANDBOX_API_KEY_ENCRYPTION_KEY='sandbox_api_key_secret_abcdefghijklmnopqrstuv'\n");
     // A closed set: secrets and this host's bindings only, nothing that picks behaviour.
     expect(environment?.trim().split("\n").map((line) => line.slice(0, line.indexOf("=")))).toEqual([
       "DATABASE_URL",
       "INVITATION_SIGNING_SECRET",
       "MODEL_API_KEY",
+      "OSINARA_SERVER_ADDRESSES",
       "POSTGRES_PASSWORD",
       "PUBLIC_BASE_URL",
       "SANDBOX_API_KEY_ENCRYPTION_KEY",

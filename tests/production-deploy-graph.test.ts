@@ -151,6 +151,25 @@ describe("release compose path", () => {
 });
 
 describe("resolved release graph", () => {
+  // #560: a release that needs a setting the server's .env lacks stops before anything is stopped, and
+  // says which one instead of a bare line number.
+  it("names the setting the server's .env lacks", () => {
+    const directory = temporaryDirectory("osinara-graph-env-");
+    const result = runShell(`
+      ${MODULES}
+      ${IMAGES}
+      WORK_DIR=${JSON.stringify(directory)}
+      compose_candidate() {
+        printf 'error while interpolating services.agent.environment.OSINARA_SERVER_ADDRESSES: required variable OSINARA_SERVER_ADDRESSES is missing a value\\n' >&2
+        return 15
+      }
+      validate_resolved_compose
+    `);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/^DEPLOY_SERVER_ENV_INCOMPLETE .*required variable OSINARA_SERVER_ADDRESSES is missing a value/mu);
+  });
+
   it("accepts the release graph", () => {
     const result = validateResolvedCompose();
 

@@ -15,7 +15,7 @@ import { z } from "zod";
 import { defineTool } from "../../runtime/tool.js";
 import { AppError, isAppError } from "../app-error.js";
 import { requirePrivateTelegramOwner } from "../family-context.js";
-import { networkAccessDestinationDenial } from "../network-access/network-access-contract.js";
+import { networkAccessDestinationDenial, serverAddressesFromEnvironment } from "../network-access/network-access-contract.js";
 import { networkAccessPublisher } from "../network-access/network-access-projection.js";
 import { networkAccessRepository } from "../network-access/network-access-repository.js";
 import {
@@ -43,7 +43,7 @@ type NetworkAccessInput =
   | { readonly action: "request"; readonly address: string; readonly port: number; readonly purpose: string }
   | { readonly action: "revoke"; readonly address: string; readonly port: number };
 
-function requireDestination(input: Record<string, unknown>): { address: string; port: number } {
+function requireDestination(input: Record<string, unknown>, action: "request" | "revoke"): { address: string; port: number } {
   const address = requiredString(input, "address", INPUT_ERROR_CODE, "100.91.171.16", { maxLength: 15 });
   const port = input.port;
   if (typeof port !== "number") {
@@ -56,11 +56,15 @@ function requireDestination(input: Record<string, unknown>): { address: string; 
   if (denial === "port_invalid") {
     toolInputError(INPUT_ERROR_CODE, "Поле port должно быть целым числом от 1 до 65535. Пример: 8123");
   }
-  if (denial) {
+  // The server's own addresses carry Orca's remote control and the Xray entries (#560). A grant made before
+  // that stays revocable; the proxy refuses it either way.
+  const ownServer = action === "request" && serverAddressesFromEnvironment().has(address);
+  const reason = denial ?? (ownServer ? "own_server" : null);
+  if (reason) {
     throw new AppError(
       "AGENT_NETWORK_ACCESS_DESTINATION_FORBIDDEN",
       "Этот адрес открыть нельзя: он принадлежит самому серверу агента или служебной сети",
-      { details: { reason: denial } },
+      { details: { reason } },
     );
   }
   return { address, port };
@@ -72,7 +76,7 @@ function parseNetworkAccessInput(raw: unknown): NetworkAccessInput {
   const action = requireAction(input, "manage_network_access", TOOL_ACTIONS, INPUT_ERROR_CODE);
   // Fields another action needs may be materialized by the model; an action ignores what it does not use.
   if (action === "list") return { action };
-  const destination = requireDestination(input);
+  const destination = requireDestination(input, action);
   if (action === "revoke") return { action, ...destination };
   const purpose = requiredString(input, "purpose", INPUT_ERROR_CODE, "Home Assistant", {
     maxLength: PURPOSE_MAX_LENGTH,
