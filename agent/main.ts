@@ -16,6 +16,7 @@ import { startApplication } from "./application.js";
 import { SANDBOX_RUNNER_BASE_URL } from "./config.js";
 import { closeDatabase } from "./lib/database.js";
 import { runtimeProcessIdentity } from "./lib/runtime-admission-reconciliation.js";
+import { serverAddressesFromEnvironment } from "./lib/network-access/network-access-contract.js";
 
 // The port Docker, Nginx, the ingress worker and the deploy controller already use.
 const HTTP_PORT = 3000;
@@ -30,6 +31,8 @@ function requiredEnv(name: "TELEGRAM_BOT_TOKEN" | "TELEGRAM_BOT_USERNAME" | "TEL
 }
 
 async function main(): Promise<void> {
+  // Read once at start so a deployment without the server's own addresses fails here, not at a request (#560).
+  serverAddressesFromEnvironment();
   const identity = await runtimeProcessIdentity();
   const application = await startApplication({
     agent: createOsinaraAgent(),

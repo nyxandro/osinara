@@ -28,6 +28,7 @@ import {
 import {
   NETWORK_ACCESS_DIRECTORY_NAME,
   NETWORK_ACCESS_PROJECTION_FILE_NAME,
+  serverAddressesFromEnvironment,
 } from "../../agent/lib/network-access/network-access-contract.js";
 import { createApiKeyGateway } from "./api-key-gateway.js";
 import { agentUsageSenderFor, createApiKeyUsageReporter } from "./api-key-usage-reporter.js";
@@ -65,6 +66,8 @@ function requiredAgentBaseUrl(): string {
 }
 
 const agentBaseUrl = requiredAgentBaseUrl();
+// Read before listening: without the server's own addresses the proxy does not start (#560).
+const serverAddresses = serverAddressesFromEnvironment();
 const upstreamProxy = parseUpstreamProxyUrl(process.env.SANDBOX_EGRESS_UPSTREAM_PROXY_URL);
 if (upstreamProxy !== null) {
   writeEgressLog({
@@ -81,6 +84,7 @@ const server = createSandboxEgressProxy({
   networkAccess: createNetworkAccessGate({
     attachedSubnets: proxyAttachedSubnets,
     projectionPath: resolve(NETWORK_ACCESS_DIRECTORY_NAME, NETWORK_ACCESS_PROJECTION_FILE_NAME),
+    serverAddresses,
     trustedLocalAddress,
   }),
   siteMeter,

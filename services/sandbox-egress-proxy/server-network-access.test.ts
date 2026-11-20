@@ -155,7 +155,9 @@ describe("sandbox egress proxy with the real network access gate", () => {
     // The test connects over loopback, so loopback stands in for the trusted sandbox network here.
     proxy = createSandboxEgressProxy({
       grantRecheckMilliseconds: 60_000,
-      networkAccess: createNetworkAccessGate({ attachedSubnets: () => [], projectionPath, trustedLocalAddress: "127.0.0.1" }),
+      networkAccess: createNetworkAccessGate({
+        attachedSubnets: () => [], projectionPath, serverAddresses: new Set(["45.159.189.111"]), trustedLocalAddress: "127.0.0.1",
+      }),
       siteMeter: uncountedSites,
     });
     proxyPort = await listen(proxy);

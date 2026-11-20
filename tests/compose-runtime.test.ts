@@ -137,6 +137,17 @@ describe("Docker Compose runtime wiring", () => {
     }
   });
 
+  // #560: a binding of the deployment, required — the agent and the proxy refuse to start without it.
+  it("hands this server's own addresses to the agent and the sandbox egress proxy", () => {
+    for (const file of ["compose.yaml", "compose.production.yaml"]) {
+      for (const service of ["agent", "sandbox-egress-proxy"]) {
+        expect(serviceBlock(file, service), `${file} ${service}`).toContain(
+          "      OSINARA_SERVER_ADDRESSES: ${OSINARA_SERVER_ADDRESSES:?OSINARA_SERVER_ADDRESSES must list this server's IPv4 addresses}\n",
+        );
+      }
+    }
+  });
+
   it("wires the agent straight to the selected provider", () => {
     const localCompose = readFileSync(new URL("compose.yaml", projectRoot), "utf8");
     const productionCompose = readFileSync(new URL("compose.production.yaml", projectRoot), "utf8");

@@ -15,7 +15,7 @@ import { z } from "zod";
 import { defineTool } from "../../runtime/tool.js";
 import { AppError, isAppError } from "../app-error.js";
 import { requirePrivateTelegramOwner } from "../family-context.js";
-import { networkAccessDestinationDenial } from "../network-access/network-access-contract.js";
+import { networkAccessDestinationDenial, serverAddressesFromEnvironment } from "../network-access/network-access-contract.js";
 import { networkAccessPublisher } from "../network-access/network-access-projection.js";
 import { networkAccessRepository } from "../network-access/network-access-repository.js";
 import {
@@ -56,11 +56,13 @@ function requireDestination(input: Record<string, unknown>): { address: string; 
   if (denial === "port_invalid") {
     toolInputError(INPUT_ERROR_CODE, "Поле port должно быть целым числом от 1 до 65535. Пример: 8123");
   }
-  if (denial) {
+  // The server's own addresses carry Orca's remote control and the Xray entries (#560).
+  const reason = denial ?? (serverAddressesFromEnvironment().has(address) ? "own_server" : null);
+  if (reason) {
     throw new AppError(
       "AGENT_NETWORK_ACCESS_DESTINATION_FORBIDDEN",
       "Этот адрес открыть нельзя: он принадлежит самому серверу агента или служебной сети",
-      { details: { reason: denial } },
+      { details: { reason } },
     );
   }
   return { address, port };

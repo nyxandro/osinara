@@ -117,6 +117,7 @@ services:
       MEMORY_EMBEDDING_BASE_URL: http://memory-embedding:80
       MODEL_API_KEY: ${MODEL_API_KEY:?MODEL_API_KEY is required}
       MODEL_PROXY_URL: ${MODEL_PROXY_URL-}
+      OSINARA_SERVER_ADDRESSES: ${OSINARA_SERVER_ADDRESSES:?OSINARA_SERVER_ADDRESSES must list this server's IPv4 addresses}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL-}
       SANDBOX_API_KEY_ENCRYPTION_KEY: ${SANDBOX_API_KEY_ENCRYPTION_KEY-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN is required}
@@ -260,6 +261,8 @@ services:
       AGENT_INTERNAL_BASE_URL: http://agent:3000
       SANDBOX_API_KEY_ENCRYPTION_KEY: ${SANDBOX_API_KEY_ENCRYPTION_KEY-}
       # Optional: Russian sites go through this HTTP proxy when this server cannot reach them (#489).
+      # This server's own addresses: never opened to a sandbox, even by the owner's grant (#560).
+      OSINARA_SERVER_ADDRESSES: ${OSINARA_SERVER_ADDRESSES:?OSINARA_SERVER_ADDRESSES must list this server's IPv4 addresses}
       SANDBOX_EGRESS_UPSTREAM_PROXY_URL: ${SANDBOX_EGRESS_UPSTREAM_PROXY_URL-}
     healthcheck:
       test: ["CMD", "node", "-e", "require('node:net').connect(3128,'127.0.0.1').on('connect',function(){this.destroy();process.exit(0)}).on('error',()=>process.exit(1))"]

@@ -42,6 +42,7 @@ describe("manage_network_access", () => {
     vi.resetAllMocks();
     requirePrivateTelegramOwner.mockReturnValue(OWNER);
     publish.mockResolvedValue(undefined);
+    vi.stubEnv("OSINARA_SERVER_ADDRESSES", "45.159.189.111,100.67.170.70");
   });
 
   it("asks the owner to confirm a request and nothing else", () => {
@@ -61,6 +62,12 @@ describe("manage_network_access", () => {
     });
   });
 
+  it("does not turn a missing list of the server's own addresses into a denial", () => {
+    vi.stubEnv("OSINARA_SERVER_ADDRESSES", "");
+
+    expect(() => approvalFor(request)).toThrow(/^AGENT_SERVER_ADDRESSES_MISSING: /u);
+  });
+
   it("does not turn an unexpected failure into a denial", () => {
     requirePrivateTelegramOwner.mockImplementation(() => {
       throw new Error("database connection lost");
@@ -77,6 +84,9 @@ describe("manage_network_access", () => {
     [{ ...request, scope: "all" }, "AGENT_NETWORK_ACCESS_INPUT_INVALID"],
     [{ ...request, address: "127.0.0.1" }, "AGENT_NETWORK_ACCESS_DESTINATION_FORBIDDEN"],
     [{ ...request, address: "169.254.169.254", port: 80 }, "AGENT_NETWORK_ACCESS_DESTINATION_FORBIDDEN"],
+    // #560: the server's own addresses carry Orca's remote control and the Xray entries.
+    [{ ...request, address: "45.159.189.111", port: 6768 }, "AGENT_NETWORK_ACCESS_DESTINATION_FORBIDDEN"],
+    [{ ...request, address: "100.67.170.70", port: 10811 }, "AGENT_NETWORK_ACCESS_DESTINATION_FORBIDDEN"],
   ])("denies %j before confirmation", (input, code) => {
     expect(approvalFor(input)).toEqual({ reason: expect.stringMatching(new RegExp(`^${code}: `, "u")), type: "denied" });
   });

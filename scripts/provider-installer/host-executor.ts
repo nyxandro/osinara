@@ -91,6 +91,8 @@ function buildEnvironment(input: InstallationExecutionInput): Buffer {
     ["DATABASE_URL", `postgresql://osinara:${input.internalSecrets.postgresPassword}@postgres:5432/osinara`],
     ["INVITATION_SIGNING_SECRET", input.internalSecrets.invitationSigningSecret],
     ["MODEL_API_KEY", input.modelApiKey],
+    // The address the installer found is this server's own: sandboxes never reach it (#560).
+    ["OSINARA_SERVER_ADDRESSES", input.publicIpv4],
     ["POSTGRES_PASSWORD", input.internalSecrets.postgresPassword],
     ["PUBLIC_BASE_URL", `https://${input.hostname}`],
     ["SANDBOX_API_KEY_ENCRYPTION_KEY", input.internalSecrets.sandboxApiKeyEncryptionKey],
