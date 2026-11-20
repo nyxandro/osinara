@@ -32,9 +32,10 @@ function startTicks(pid: number): string {
 
 /** A stand-in for `claude '<prompt>'`: alive, with the arguments and Orca terminal of a real run. */
 function session(home: string, input: {
-  args: string[]; handle: string; humanMessages: number; quietMinutes: number; status?: "busy" | "idle";
+  args: string[]; firstMessage?: string; handle: string; humanMessages: number; quietMinutes: number; status?: "busy" | "idle";
 }) {
-  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 60_000)", ...input.args], {
+  // `--` keeps the stand-in's arguments away from Node's own options, as with `--dangerously-skip-permissions`.
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 60_000)", "--", ...input.args], {
     env: { ...process.env, ORCA_TERMINAL_HANDLE: input.handle }, stdio: "ignore",
   });
   children.push(child);
@@ -45,7 +46,7 @@ function session(home: string, input: {
     status: input.status ?? "idle", statusUpdatedAt: Date.now() - input.quietMinutes * 60_000,
   }));
   const lines = [
-    { type: "user", message: { role: "user", content: PROMPT } },
+    { type: "user", message: { role: "user", content: input.firstMessage ?? PROMPT } },
     { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }] } },
     { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] } },
     { type: "user", isMeta: true, message: { role: "user", content: "<local-command-caveat>" } },
@@ -57,8 +58,9 @@ function session(home: string, input: {
 }
 
 async function settled(): Promise<void> {
-  // The children must have exec'd node before their /proc entries carry the arguments.
+  // The children must have exec'd node before their /proc entries carry the arguments, and must still run.
   await new Promise((resolve) => setTimeout(resolve, 300));
+  for (const child of children) expect(child.exitCode, "a stand-in session exited early").toBeNull();
 }
 
 it("closes only the finished on-call session's terminal", async () => {
@@ -78,6 +80,8 @@ it("closes only the finished on-call session's terminal", async () => {
   // A long tool call or a subagent keeps the main history quiet while the session works.
   session(home, { args: [PROMPT], handle: "term_busy", humanMessages: 1, quietMinutes: 40, status: "busy" });
   session(home, { args: ["--dangerously-skip-permissions"], handle: "term_owner", humanMessages: 1, quietMinutes: 30 });
+  // After `/clear` the process keeps the prompt in its arguments, but the new history is someone else's work.
+  session(home, { args: [PROMPT], firstMessage: "поправь вёрстку", handle: "term_cleared", humanMessages: 1, quietMinutes: 30 });
   writeFileSync(join(home, "sessions", "999999999.json"), JSON.stringify({ cwd: CWD, pid: 999999999, procStart: "1", sessionId: "gone" }));
   await settled();
 

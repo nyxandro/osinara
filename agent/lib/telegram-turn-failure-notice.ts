@@ -20,8 +20,12 @@ import { telegramTurnReplyParameters } from "./telegram-reply.js";
 
 const ACCESS_REVOKED = "AGENT_TURN_ACCESS_REVOKED";
 
-function noticeText(code: string): string {
-  return `Не получилось ответить на это сообщение: сбой на моей стороне. Попробуйте написать ещё раз чуть позже. Код: ${code}`;
+function noticeText(code: string, actedBeforeFailure: boolean): string {
+  // An action may have landed before the failure: repeating the request blindly could do it twice.
+  const next = actedBeforeFailure
+    ? "Часть действий могла выполниться — проверьте результат, прежде чем повторять."
+    : "Попробуйте написать ещё раз чуть позже.";
+  return `Не получилось ответить на это сообщение: сбой на моей стороне. ${next} Код: ${code}`;
 }
 
 function wanted(ctx: TelegramTurnContext, code: string): boolean {
@@ -37,10 +41,10 @@ export async function noticeFailedTurn(input: {
   readonly ctx: TelegramTurnContext;
 }): Promise<void> {
   if (!wanted(input.ctx, input.code)) return;
-  const text = noticeText(input.code);
   try {
     // A turn whose own answer began going out (and failed on the way) gets no second message.
-    if (await telegramFinalDeliveryRepository.hasDelivery(input.ctx.session.turn.id)) return;
+    if (await telegramFinalDeliveryRepository.hasDelivery(input.ctx.session.id, input.ctx.session.turn.id)) return;
+    const text = noticeText(input.code, await telegramFinalDeliveryRepository.startedAnyCall(input.ctx.session.turn.id));
     const replyParameters = telegramTurnReplyParameters(input.channel.state, input.ctx);
     await deliverTelegramFinalOutput({
       agentSessionId: input.ctx.session.id,

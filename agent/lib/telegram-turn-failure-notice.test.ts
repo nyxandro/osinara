@@ -9,9 +9,11 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const delivery = vi.hoisted(() => ({ deliver: vi.fn(), hasDelivery: vi.fn(), post: vi.fn() }));
+const delivery = vi.hoisted(() => ({ deliver: vi.fn(), hasDelivery: vi.fn(), post: vi.fn(), startedAnyCall: vi.fn() }));
 vi.mock("./telegram-final-delivery.js", () => ({ deliverTelegramFinalOutput: delivery.deliver }));
-vi.mock("./telegram-final-delivery-repository.js", () => ({ telegramFinalDeliveryRepository: { hasDelivery: delivery.hasDelivery } }));
+vi.mock("./telegram-final-delivery-repository.js", () => ({
+  telegramFinalDeliveryRepository: { hasDelivery: delivery.hasDelivery, startedAnyCall: delivery.startedAnyCall },
+}));
 vi.mock("./telegram-presentation-post.js", () => ({ postTelegramPresentationChunk: delivery.post }));
 
 import { noticeFailedTurn } from "./telegram-turn-failure-notice.js";
@@ -37,6 +39,7 @@ describe("failed turn notice", () => {
     vi.resetAllMocks();
     delivery.deliver.mockResolvedValue([]);
     delivery.hasDelivery.mockResolvedValue(false);
+    delivery.startedAnyCall.mockResolvedValue(false);
   });
 
   it("tells the person in the chat, with the failure's code, once through the turn's outbox", async () => {
@@ -47,6 +50,8 @@ describe("failed turn notice", () => {
     expect(input).toMatchObject({ agentSessionId: "wrun_session", agentTurnId: "turn_one", applicationSessionId: "app-1", replyButtons: false });
     expect(input.answer.markdown).toMatch(/^Не получилось ответить/u);
     expect(input.answer.markdown).toContain("AGENT_MODEL_TEMPORARILY_UNAVAILABLE");
+    expect(input.answer.markdown).toContain("Попробуйте написать ещё раз");
+    expect(delivery.hasDelivery).toHaveBeenCalledWith("wrun_session", "turn_one");
     await input.sendChunk({ format: "plain", media: [], text: input.answer.markdown }, 0, true);
     expect(delivery.post).toHaveBeenCalledWith(expect.objectContaining({ text: input.answer.markdown }), channel,
       { allow_sending_without_reply: true, message_id: 55 });
@@ -67,8 +72,17 @@ describe("failed turn notice", () => {
 
     await noticeFailedTurn({ applicationSessionId: "app-1", channel, code: "AGENT_TELEGRAM_RICH_MESSAGE_DELIVERY_FAILED", ctx: context(MEMBER_IN_GROUP) });
 
-    expect(delivery.hasDelivery).toHaveBeenCalledWith("turn_one");
     expect(delivery.deliver).not.toHaveBeenCalled();
+  });
+
+  // An action may have landed before the failure; a blind repeat could do it twice.
+  it("asks to check the result before repeating when the turn had started an action", async () => {
+    delivery.startedAnyCall.mockResolvedValue(true);
+
+    await noticeFailedTurn({ applicationSessionId: "app-1", channel, code: "AGENT_MODEL_FAILED", ctx: context(MEMBER_IN_GROUP) });
+
+    expect(delivery.startedAnyCall).toHaveBeenCalledWith("turn_one");
+    expect(delivery.deliver.mock.calls[0]![0].answer.markdown).toContain("проверьте результат, прежде чем повторять");
   });
 
   it("speaks to the owner in a group, where no owner notice reaches the others", async () => {

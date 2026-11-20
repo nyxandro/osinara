@@ -442,8 +442,10 @@ The required `OSINARA_SERVER_ADDRESSES` lists this server's own IPv4 addresses, 
 public one and any VPN one, such as Tailscale (#560). They carry the host's own services — Orca's remote
 control, the Xray entries, which accept connections from Docker networks — so the agent refuses to grant a
 sandbox access to them and the egress proxy refuses them even when a grant lists them. Sites by name are
-not affected. The installer writes the public address it found; on an older host add the line by hand
-before approving a release that needs it. A missing or malformed value stops the agent and the proxy at
+not affected: through Traefik and the edge they reach only what the internet reaches. The installer
+writes the public address it found, the only one it can verify; add a VPN address by hand when the server
+joins one (Tailscale: `tailscale ip -4`), and on an older host add the line before approving a release that
+needs it. A missing or malformed value stops the agent and the proxy at
 startup with `AGENT_SERVER_ADDRESSES_MISSING` or `AGENT_SERVER_ADDRESSES_INVALID`. On this host:
 `OSINARA_SERVER_ADDRESSES=45.159.189.111,100.67.170.70`.
 

@@ -40,10 +40,13 @@ started_by_oncall() {
 }
 
 # Messages a person wrote: tool results, Claude Code's own notes and subagent threads are not theirs.
-human_message_count() {
-  jq -s '[.[] | select(.type == "user" and (.isMeta | not) and (.isSidechain | not))
+# Prints how many there are, then whether the first is the on-call prompt; after `/clear` the same
+# process keeps the prompt in its arguments but writes a new history that someone else started.
+human_messages() {
+  jq -rs --arg prefix "$ONCALL_PROMPT_PREFIX" '[.[] | select(.type == "user" and (.isMeta | not) and (.isSidechain | not))
     | select((.message.content | type) == "string"
-      or ([.message.content[]?.type] | index("tool_result") | not))] | length' "$1"
+      or ([.message.content[]?.type] | index("tool_result") | not))]
+    | "\(length) \((.[0].message.content | if type == "string" then . else ([.[]? | .text? // empty] | join("")) end) // "" | startswith($prefix))"' "$1"
 }
 
 terminal_handle() {
@@ -66,7 +69,7 @@ close_if_finished() {
   started_by_oncall "$pid" || return 0
   transcript="${CLAUDE_HOME}/projects/$(printf '%s' "$cwd" | sed 's/[^A-Za-z0-9]/-/g')/${session_id}.jsonl"
   [[ -f "$transcript" ]] || return 0
-  [[ "$(human_message_count "$transcript")" == "1" ]] || return 0
+  [[ "$(human_messages "$transcript")" == "1 true" ]] || return 0
   handle="$(terminal_handle "$pid")"
   [[ -n "$handle" ]] || { log "ONCALL_SESSION_TERMINAL_UNKNOWN pid=${pid} session=${session_id}"; return 1; }
   # Called as an `if` condition, where errexit is off: every failure below is checked by hand.
