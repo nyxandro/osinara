@@ -253,7 +253,15 @@ validate_resolved_compose() {
   local config_json="${WORK_DIR}/resolved-compose.json"
   local -a expected_images=("$APP_IMAGE" "$APP_IMAGE" "$APP_IMAGE" "$APP_IMAGE"
     "$RUNTIME_IMAGE" "$RUNNER_IMAGE" "$EGRESS_IMAGE" "$EDGE_IMAGE" "$POSTGRES_IMAGE" "$TEI_IMAGE")
-  compose_candidate config --images | LC_ALL=C sort > "$images_file"
+  local resolved_images config_error="${WORK_DIR}/compose-config.err"
+  # The graph is CI-checked, so what fails here is the server's .env lacking a setting the release
+  # needs (OSINARA_SERVER_ADDRESSES in v0.80.0, #560). Nothing is stopped yet; Compose names the setting.
+  if ! resolved_images="$(compose_candidate config --images 2>"$config_error")"; then
+    fail "DEPLOY_SERVER_ENV_INCOMPLETE" \
+      "The release needs a setting the server's .env lacks: $(head -c 500 "$config_error" | tr '\n' ' ')"
+    return 1
+  fi
+  printf '%s\n' "$resolved_images" | LC_ALL=C sort > "$images_file"
   printf '%s\n' "${expected_images[@]}" | LC_ALL=C sort > "$expected_images_file"
   cmp --silent "$images_file" "$expected_images_file" ||
     fail "DEPLOY_COMPOSE_IMAGE_SET_INVALID" "Resolved Compose image multiset is not approved"
