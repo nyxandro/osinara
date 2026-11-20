@@ -62,6 +62,10 @@ describe("manage_network_access", () => {
     });
   });
 
+  it("lets the owner revoke a grant to the server's own address made before such grants were refused", () => {
+    expect(approvalFor({ action: "revoke", address: "45.159.189.111", port: 6768 })).toBe("not-applicable");
+  });
+
   it("does not turn a missing list of the server's own addresses into a denial", () => {
     vi.stubEnv("OSINARA_SERVER_ADDRESSES", "");
 
