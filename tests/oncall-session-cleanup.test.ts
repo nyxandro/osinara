@@ -2,12 +2,12 @@
  * Closing on-call sessions that finished their work (#428).
  *
  * Constructs covered:
- * - A live session started with the on-call prompt, with the prompt as its only message from a person and a
- *   history quiet for twenty minutes, has its Orca terminal closed.
- * - A session someone went on working in, a session still writing, and any other Claude Code session stay.
+ * - A live session started with the on-call prompt, with the prompt as its only message from a person, that
+ *   Claude Code has reported idle for twenty minutes, has its Orca terminal closed.
+ * - A session someone went on working in, a busy or recently idle one, and any other Claude Code session stay.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -31,7 +31,9 @@ function startTicks(pid: number): string {
 }
 
 /** A stand-in for `claude '<prompt>'`: alive, with the arguments and Orca terminal of a real run. */
-function session(home: string, input: { args: string[]; handle: string; humanMessages: number; quietMinutes: number }) {
+function session(home: string, input: {
+  args: string[]; handle: string; humanMessages: number; quietMinutes: number; status?: "busy" | "idle";
+}) {
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 60_000)", ...input.args], {
     env: { ...process.env, ORCA_TERMINAL_HANDLE: input.handle }, stdio: "ignore",
   });
@@ -40,6 +42,7 @@ function session(home: string, input: { args: string[]; handle: string; humanMes
   const sessionId = `session-${input.handle}`;
   writeFileSync(join(home, "sessions", `${pid}.json`), JSON.stringify({
     cwd: CWD, kind: "interactive", pid, procStart: startTicks(pid), sessionId,
+    status: input.status ?? "idle", statusUpdatedAt: Date.now() - input.quietMinutes * 60_000,
   }));
   const lines = [
     { type: "user", message: { role: "user", content: PROMPT } },
@@ -51,8 +54,6 @@ function session(home: string, input: { args: string[]; handle: string; humanMes
   ];
   const transcript = join(home, "projects", SLUG, `${sessionId}.jsonl`);
   writeFileSync(transcript, lines.map((line) => JSON.stringify(line)).join("\n") + "\n");
-  const quietSince = (Date.now() - input.quietMinutes * 60_000) / 1000;
-  utimesSync(transcript, quietSince, quietSince);
 }
 
 async function settled(): Promise<void> {
@@ -73,7 +74,9 @@ it("closes only the finished on-call session's terminal", async () => {
 
   session(home, { args: [PROMPT], handle: "term_finished", humanMessages: 1, quietMinutes: 30 });
   session(home, { args: [PROMPT], handle: "term_continued", humanMessages: 2, quietMinutes: 30 });
-  session(home, { args: [PROMPT], handle: "term_writing", humanMessages: 1, quietMinutes: 2 });
+  session(home, { args: [PROMPT], handle: "term_recent", humanMessages: 1, quietMinutes: 2 });
+  // A long tool call or a subagent keeps the main history quiet while the session works.
+  session(home, { args: [PROMPT], handle: "term_busy", humanMessages: 1, quietMinutes: 40, status: "busy" });
   session(home, { args: ["--dangerously-skip-permissions"], handle: "term_owner", humanMessages: 1, quietMinutes: 30 });
   writeFileSync(join(home, "sessions", "999999999.json"), JSON.stringify({ cwd: CWD, pid: 999999999, procStart: "1", sessionId: "gone" }));
   await settled();

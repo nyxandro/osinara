@@ -9,7 +9,8 @@
 #   (same start time, so a reused process number never qualifies);
 # - its history holds exactly one message from a person, the prompt itself: a session someone went on
 #   working in by hand is never touched;
-# - its history has not changed for IDLE_MINUTES.
+# - Claude Code reports it idle, and has for IDLE_MINUTES (`status`, `statusUpdatedAt` of its session file):
+#   a long tool call or a subagent writes elsewhere, so a quiet history alone does not prove the work ended.
 #
 # Usage: close-finished-oncall-sessions.sh [claude-home]   (default: ~/.claude)
 # Install: a copy in ~/.local/bin, and in `crontab -e`:
@@ -50,19 +51,22 @@ terminal_handle() {
 }
 
 close_if_finished() {
-  local session_file="$1" pid session_id cwd recorded_start transcript quiet handle
+  local session_file="$1" pid session_id cwd recorded_start status idle_since transcript quiet handle
   pid="$(jq -r '.pid // empty' "$session_file")"
   session_id="$(jq -r '.sessionId // empty' "$session_file")"
   cwd="$(jq -r '.cwd // empty' "$session_file")"
   recorded_start="$(jq -r '.procStart // empty' "$session_file")"
+  status="$(jq -r '.status // empty' "$session_file")"
+  idle_since="$(jq -r '.statusUpdatedAt // empty' "$session_file")"
   [[ "$pid" =~ ^[0-9]+$ && -n "$session_id" && -n "$cwd" && -n "$recorded_start" ]] || return 0
+  [[ "$status" == "idle" && "$idle_since" =~ ^[0-9]+$ ]] || return 0
+  quiet=$(( $(date +%s) - idle_since / 1000 ))
+  (( quiet >= IDLE_MINUTES * 60 )) || return 0
   [[ "$(start_ticks "$pid" || true)" == "$recorded_start" ]] || return 0
   started_by_oncall "$pid" || return 0
   transcript="${CLAUDE_HOME}/projects/$(printf '%s' "$cwd" | sed 's/[^A-Za-z0-9]/-/g')/${session_id}.jsonl"
   [[ -f "$transcript" ]] || return 0
   [[ "$(human_message_count "$transcript")" == "1" ]] || return 0
-  quiet=$(( $(date +%s) - $(stat -c %Y "$transcript") ))
-  (( quiet >= IDLE_MINUTES * 60 )) || return 0
   handle="$(terminal_handle "$pid")"
   [[ -n "$handle" ]] || { log "ONCALL_SESSION_TERMINAL_UNKNOWN pid=${pid} session=${session_id}"; return 1; }
   # Called as an `if` condition, where errexit is off: every failure below is checked by hand.
