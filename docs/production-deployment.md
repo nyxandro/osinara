@@ -776,11 +776,14 @@ pre-migration failure the controller first restores and validates the current re
 only those exact recorded volumes; a failed removal makes the result `ambiguous`. No candidate volume
 is removed after migration starts, and pre-existing candidate-only bytes remain a fail-closed error.
 
-Before every non-initial update the script derives the backup set from the current immutable Compose,
-verifies those durable volumes and free space, and writes and validates a logical dump of the
-application database. It then stops application writers, archives `google-workspace-credentials`,
-`tool-environments` and `workspace-data`, and validates every
-artifact. A current-owned durable volume missing from the candidate is forbidden. A missing
+Before every non-initial update the script derives the backup set from the current immutable Compose and
+verifies those durable volumes and free space. While the current release still serves, it archives the
+sandboxes' folders, `tool-environments` and `workspace-data`, at the lowest CPU and disk priority (`nice`,
+`ionice -c 3`): about twelve minutes on this host, which used to be silence (#558). Such a copy may hold a
+file a sandbox was writing half-written and miss files made in the minutes before the stop; the owner
+accepted that on 2026-11-20. Only then does it drain admission and stop application writers, write and
+validate a logical dump of the application database, archive `google-workspace-credentials`, and validate
+every artifact under one `SHA256SUMS`. A current-owned durable volume missing from the candidate is forbidden. A missing
 current-owned volume or a pre-existing candidate-only volume fails closed, so deploy never creates
 an empty replacement for active data or silently reuses bytes of unknown provenance. The
 reconstructible embedding model volume is omitted, and so is `network-access`: the agent rewrites

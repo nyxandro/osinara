@@ -14,6 +14,14 @@ readonly DURABLE_VOLUME_BINDINGS=(
   "osinara-production-tool-environments|tool-environments"
   "osinara-production-workspace-data|workspace-data"
 )
+# The sandboxes' folders (3.2 GB on 20.11.2026) took about twelve minutes to compress with the bot
+# stopped. They are archived while it still answers, at the lowest CPU and disk priority (#558). The
+# owner accepted that such a copy may hold a file a sandbox was writing half-written, and miss files
+# made in the minutes before the stop; the database and the Google keys are still copied stopped.
+readonly LIVE_ARCHIVED_VOLUMES=(
+  "osinara-production-tool-environments"
+  "osinara-production-workspace-data"
+)
 BACKUP_DURABLE_VOLUMES=()
 CREATED_CANDIDATE_VOLUMES=()
 COMPLETED_BACKUP_DIR=""
@@ -289,8 +297,11 @@ preflight_backup() {
     fail "DEPLOY_BACKUP_SPACE_INSUFFICIENT" "Backup filesystem has insufficient free space"
 }
 
-create_postgres_backup() {
+begin_backup() {
   BACKUP_TEMP_DIR="$(mktemp -d "${BACKUPS_DIR}/.backup.XXXXXX")"
+}
+
+create_postgres_backup() {
   compose_current exec -T postgres pg_dump --username osinara --dbname osinara \
     --format=custom --no-owner --no-privileges > "${BACKUP_TEMP_DIR}/postgres.dump"
   compose_current exec -T postgres pg_restore --list < "${BACKUP_TEMP_DIR}/postgres.dump" \
@@ -304,13 +315,47 @@ stop_current_services() {
   compose_current stop "${services[@]}"
 }
 
+# `low` runs the archive and its check at the lowest CPU and disk priority, so a copy taken while the
+# bot answers does not starve it on the slow disk; `normal` is for the copy taken with the bot stopped.
 backup_volume() {
-  local volume="$1"
+  local volume="$1" priority="$2"
   local archive="${BACKUP_TEMP_DIR}/${volume}.tar.gz"
-  docker run --rm --network none --entrypoint /bin/tar \
-    --volume "${volume}:/data:ro" --volume "${BACKUP_TEMP_DIR}:/backup" "$APP_IMAGE" \
-    -czf "/backup/${volume}.tar.gz" -C /data .
-  tar -tzf "$archive" >/dev/null
+  local -a create=(-czf "/backup/${volume}.tar.gz" -C /data .)
+  case "$priority" in
+    low)
+      docker run --rm --network none --entrypoint /usr/bin/nice \
+        --volume "${volume}:/data:ro" --volume "${BACKUP_TEMP_DIR}:/backup" "$APP_IMAGE" \
+        -n 19 /usr/bin/ionice -c 3 /bin/tar "${create[@]}"
+      nice -n 19 ionice -c 3 tar -tzf "$archive" >/dev/null
+      ;;
+    normal)
+      docker run --rm --network none --entrypoint /bin/tar \
+        --volume "${volume}:/data:ro" --volume "${BACKUP_TEMP_DIR}:/backup" "$APP_IMAGE" "${create[@]}"
+      tar -tzf "$archive" >/dev/null
+      ;;
+    *)
+      fail "DEPLOY_BACKUP_PRIORITY_INVALID" "Unknown archive priority: ${priority}"
+      ;;
+  esac
+}
+
+is_live_archived_volume() {
+  local volume="$1" live
+  for live in "${LIVE_ARCHIVED_VOLUMES[@]}"; do
+    [[ "$volume" == "$live" ]] && return 0
+  done
+  return 1
+}
+
+# Runs while the current release still serves: no admission drain, no stop.
+archive_live_volumes() {
+  local volume
+  ((${#BACKUP_DURABLE_VOLUMES[@]} > 0)) ||
+    fail "DEPLOY_BACKUP_VOLUME_SET_EMPTY" "Preflight did not select durable backup volumes"
+  for volume in "${BACKUP_DURABLE_VOLUMES[@]}"; do
+    is_live_archived_volume "$volume" || continue
+    backup_volume "$volume" low
+  done
 }
 
 snapshot_durable_volumes() {
@@ -318,7 +363,8 @@ snapshot_durable_volumes() {
   ((${#BACKUP_DURABLE_VOLUMES[@]} > 0)) ||
     fail "DEPLOY_BACKUP_VOLUME_SET_EMPTY" "Preflight did not select durable backup volumes"
   for volume in "${BACKUP_DURABLE_VOLUMES[@]}"; do
-    backup_volume "$volume"
+    is_live_archived_volume "$volume" && continue
+    backup_volume "$volume" normal
   done
   # Relative paths remain verifiable after the temporary directory is atomically renamed.
   (cd -- "$BACKUP_TEMP_DIR" && sha256sum -- ./* > SHA256SUMS && sha256sum --check --status SHA256SUMS)
