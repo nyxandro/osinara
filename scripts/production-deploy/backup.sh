@@ -321,11 +321,22 @@ backup_volume() {
   local volume="$1" priority="$2"
   local archive="${BACKUP_TEMP_DIR}/${volume}.tar.gz"
   local -a create=(-czf "/backup/${volume}.tar.gz" -C /data .)
+  local status=0
   case "$priority" in
     low)
+      # The bot keeps writing while this copy reads: GNU tar exits 1 when a file changed or vanished as
+      # it was read, and the archive still holds what it read (the accepted risk above). 2 and up — and
+      # docker's own 125-127 — are real failures.
       docker run --rm --network none --entrypoint /usr/bin/nice \
         --volume "${volume}:/data:ro" --volume "${BACKUP_TEMP_DIR}:/backup" "$APP_IMAGE" \
-        -n 19 /usr/bin/ionice -c 3 /bin/tar "${create[@]}"
+        -n 19 /usr/bin/ionice -c 3 /bin/tar --warning=no-file-changed --warning=no-file-removed "${create[@]}" ||
+        status=$?
+      if ((status == 1)); then
+        log_event "DEPLOY_LIVE_ARCHIVE_FILES_CHANGED" "Files of ${volume} changed while archived live; the copy holds them as read"
+      elif ((status != 0)); then
+        fail "DEPLOY_LIVE_ARCHIVE_FAILED" "Live archive of ${volume} failed with tar exit ${status}"
+        return 1
+      fi
       nice -n 19 ionice -c 3 tar -tzf "$archive" >/dev/null
       ;;
     normal)

@@ -116,23 +116,33 @@ snapshot_durable_volumes
 
 it("runs a live archive and its check at the lowest CPU and disk priority, a stopped one as before", () => {
   const directory = fixture();
-  const run = (priority: string) => shell(`
+  const run = (priority: string, tarExit = 0) => shell(`
 BACKUP_TEMP_DIR=${JSON.stringify(directory)}
 APP_IMAGE=app@sha256:abc
-docker() { printf '%s ' "$@"; printf '\\n'; }
+log_event() { printf 'event %s\\n' "$1" >&2; }
+docker() { printf '%s ' "$@"; printf '\\n'; return ${tarExit}; }
 nice() { printf 'host-check nice %s\\n' "$*" >&2; }
 tar() { printf 'host-check tar %s\\n' "$*" >&2; }
 backup_volume volume-a ${priority}`);
   const low = run("low");
   expect(low.status, low.stderr).toBe(0);
   expect(low.stdout).toContain("--entrypoint /usr/bin/nice");
-  expect(low.stdout).toContain("-n 19 /usr/bin/ionice -c 3 /bin/tar -czf /backup/volume-a.tar.gz -C /data .");
+  expect(low.stdout).toContain("-n 19 /usr/bin/ionice -c 3 /bin/tar --warning=no-file-changed --warning=no-file-removed -czf /backup/volume-a.tar.gz -C /data .");
   expect(low.stderr).toContain("host-check nice -n 19 ionice -c 3 tar -tzf");
   const normal = run("normal");
   expect(normal.status, normal.stderr).toBe(0);
   expect(normal.stdout).toContain("--entrypoint /bin/tar");
   expect(normal.stderr).toContain("host-check tar -tzf");
   expect(run("fast").status).not.toBe(0);
+  // The bot keeps writing while a live copy reads: GNU tar exits 1 when a file changed or vanished meanwhile.
+  const changed = run("low", 1);
+  expect(changed.status, changed.stderr).toBe(0);
+  expect(changed.stderr).toContain("event DEPLOY_LIVE_ARCHIVE_FILES_CHANGED");
+  const broken = run("low", 2);
+  expect(broken.status).not.toBe(0);
+  expect(broken.stderr).toContain("DEPLOY_LIVE_ARCHIVE_FAILED");
+  // A copy taken with the bot stopped has no such excuse.
+  expect(run("normal", 1).status).not.toBe(0);
 });
 
 it("does not prune in the deployment orchestrator before snapshot completion", () => {
