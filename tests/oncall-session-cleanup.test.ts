@@ -83,4 +83,11 @@ it("closes only the finished on-call session's terminal", async () => {
   expect(result.status, result.stderr).toBe(0);
   expect(readFileSync(calls, "utf8").trim().split("\n")).toEqual(["terminal close --terminal term_finished --tab --json"]);
   expect(result.stdout).toContain("ONCALL_SESSION_CLOSED");
+
+  // An Orca that cannot close the terminal is reported, never logged as closed.
+  writeFileSync(join(bin, "orca"), "#!/bin/bash\nexit 3\n");
+  const refused = spawnSync("/bin/bash", [SCRIPT, home], { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+  expect(refused.status).toBe(1);
+  expect(refused.stdout).toContain("ONCALL_SESSION_CLOSE_FAILED");
+  expect(refused.stdout).not.toContain("ONCALL_SESSION_CLOSED");
 });

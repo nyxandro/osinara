@@ -65,7 +65,8 @@ close_if_finished() {
   (( quiet >= IDLE_MINUTES * 60 )) || return 0
   handle="$(terminal_handle "$pid")"
   [[ -n "$handle" ]] || { log "ONCALL_SESSION_TERMINAL_UNKNOWN pid=${pid} session=${session_id}"; return 1; }
-  orca terminal close --terminal "$handle" --tab --json >/dev/null
+  # Called as an `if` condition, where errexit is off: every failure below is checked by hand.
+  orca terminal close --terminal "$handle" --tab --json >/dev/null || return 1
   log "ONCALL_SESSION_CLOSED pid=${pid} session=${session_id} terminal=${handle} quiet_minutes=$(( quiet / 60 ))"
 }
 
