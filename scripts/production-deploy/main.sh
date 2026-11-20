@@ -210,8 +210,11 @@ main() {
   prepare_candidate_release
   pull_release_images
   if [[ "$INITIAL_MODE" -eq 0 ]]; then
-    recheck_claim_owner
     preflight_backup
+    begin_backup
+    # The bot still answers through this copy of the sandboxes' folders, the longest step (#558).
+    archive_live_volumes
+    recheck_claim_owner
     prepare_runtime_update
     # Downtime starts on the next line and lasts through the backup. The window opened before the
     # download has been running through image pull, which has no bound of its own, so it is

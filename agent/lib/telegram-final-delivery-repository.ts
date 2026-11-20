@@ -3,7 +3,8 @@
  *
  * Exports:
  * - `TelegramFinalDeliveryStart`: claimed, replayed, or terminal delivery state.
- * - `telegramFinalDeliveryRepository`: intent, chunk receipt, completion, and ambiguity transitions.
+ * - `telegramFinalDeliveryRepository`: intent, chunk receipt, completion, and ambiguity transitions; whether a
+ *   turn's final message began going out.
  */
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
@@ -165,6 +166,24 @@ export const telegramFinalDeliveryRepository = {
        WHERE id = $1 AND status = 'started' AND delivery_token = $2`,
       [deliveryId, deliveryToken, ambiguous ? "ambiguous" : "failed", diagnosticCode],
     );
+  },
+
+  /** Whether any final message of the turn began going out, whatever became of it. */
+  async hasDelivery(agentSessionId: string, agentTurnId: string): Promise<boolean> {
+    // The outbox's own key: sessions of older releases numbered their turns locally (`turn_0`).
+    const result = await database().query(
+      "SELECT 1 FROM telegram_final_deliveries WHERE agent_session_id = $1 AND agent_turn_id = $2 LIMIT 1",
+      [agentSessionId, agentTurnId],
+    );
+    return (result.rowCount ?? 0) > 0;
+  },
+  /** Whether the turn began any tool call, whose effect may then have landed before the turn failed. */
+  async startedAnyCall(agentTurnId: string): Promise<boolean> {
+    const result = await database().query(
+      "SELECT 1 FROM agent_tool_calls WHERE turn_id = $1 AND state IN ('completed', 'unknown', 'intent') LIMIT 1",
+      [agentTurnId],
+    );
+    return (result.rowCount ?? 0) > 0;
   },
 
   /**

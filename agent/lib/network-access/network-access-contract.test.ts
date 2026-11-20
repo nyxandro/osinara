@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 import {
   networkAccessDestinationDenial,
   parseNetworkAccessProjection,
+  parseServerAddresses,
   serializeNetworkAccessProjection,
   type NetworkAccessGrant,
 } from "./network-access-contract.js";
@@ -125,4 +126,22 @@ describe("network access projection file", () => {
   ])("rejects %s", (_label, text) => {
     expect(() => parseNetworkAccessProjection(text)).toThrow(/^AGENT_NETWORK_ACCESS_PROJECTION_INVALID: /u);
   });
+});
+
+// #560: the server's own public and VPN addresses are a binding of the deployment, never guessed.
+describe("this server's own addresses", () => {
+  it("reads a comma-separated list of IPv4 addresses", () => {
+    expect([...parseServerAddresses(" 45.159.189.111, 100.67.170.70 ")]).toEqual(["45.159.189.111", "100.67.170.70"]);
+  });
+
+  it.each([undefined, "", "  "])("refuses to start without the list (%j)", (raw) => {
+    expect(() => parseServerAddresses(raw)).toThrow(/^AGENT_SERVER_ADDRESSES_MISSING: /u);
+  });
+
+  it.each(["45.159.189.111,", "example.com", "45.159.189.111:443", "045.159.189.111", "fd7a:115c:a1e0::1"])(
+    "refuses a malformed list %j instead of guarding fewer addresses",
+    (raw) => {
+      expect(() => parseServerAddresses(raw)).toThrow(/^AGENT_SERVER_ADDRESSES_INVALID: /u);
+    },
+  );
 });

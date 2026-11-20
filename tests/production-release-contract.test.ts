@@ -462,6 +462,9 @@ describe("server deployment contract", () => {
     expect(main.indexOf("prepare_runtime_update")).toBeLessThan(main.indexOf("stop_current_services"));
     expect(main.indexOf("stop_current_services")).toBeLessThan(main.indexOf("create_postgres_backup"));
     expect(main.indexOf("stop_current_services")).toBeLessThan(main.indexOf("snapshot_durable_volumes"));
+    // #558: the sandboxes' folders are archived while the bot still answers, before admission drains.
+    expect(main.indexOf("preflight_backup")).toBeLessThan(main.indexOf("archive_live_volumes"));
+    expect(main.indexOf("archive_live_volumes")).toBeLessThan(main.indexOf("prepare_runtime_update"));
     expect(main.lastIndexOf("record_proposal_result")).toBeLessThan(
       main.lastIndexOf("prune_retired_release_images"),
     );

@@ -8,6 +8,8 @@
  *   the file in it through which the agent publishes active grants to the proxy.
  * - `networkAccessDestinationDenial`: the refusal reason for an address and port, or null.
  * - `serializeNetworkAccessProjection`, `parseNetworkAccessProjection`: the projection file format.
+ * - `SERVER_ADDRESSES_ENVIRONMENT_NAME`, `parseServerAddresses`, `serverAddressesFromEnvironment`: this
+ *   server's own public and VPN addresses, which the agent never grants and the proxy never opens (#560).
  *
  * The proxy reads this file on every request, so a damaged file must fail as a whole: parsing never
  * drops an entry it does not understand and never accepts a refused destination.
@@ -40,7 +42,8 @@ const CANONICAL_OCTET = /^(0|[1-9][0-9]{0,2})$/u;
 // Loopback, Docker's default bridge range 172.16.0.0/12 and the hosting metadata service stay
 // closed even when the owner confirms: an approval card can be talked into, these ranges cannot.
 // The proxy also closes the networks it is attached to. The server's own public and Tailscale
-// addresses are not known here, so for them the owner's confirmation is the only gate.
+// addresses come from the deployment (`OSINARA_SERVER_ADDRESSES`) and are refused apart from these
+// ranges: a grant file listing one must not close every other grant (#560).
 const REFUSED_RANGES: ReadonlyArray<readonly [Exclude<NetworkAccessDenial, "address_invalid" | "port_invalid">, string, number]> = [
   ["unspecified", "0.0.0.0", 8],
   ["loopback", "127.0.0.0", 8],
@@ -119,4 +122,26 @@ export function parseNetworkAccessProjection(text: string): NetworkAccessGrant[]
   const destinations = new Set(grants.map(({ address, port }) => `${address}:${port}`));
   if (destinations.size !== grants.length) throw projectionError("grants contain a duplicate destination");
   return grants;
+}
+
+export const SERVER_ADDRESSES_ENVIRONMENT_NAME = "OSINARA_SERVER_ADDRESSES";
+
+/**
+ * This server's own IPv4 addresses, comma-separated: the public one and any VPN one (Tailscale). They carry
+ * services of the host itself — Orca's remote control, the Xray entries — that a sandbox must never reach.
+ */
+export function parseServerAddresses(raw: string | undefined): ReadonlySet<string> {
+  if (raw === undefined || raw.trim() === "") {
+    throw new Error(`AGENT_SERVER_ADDRESSES_MISSING: ${SERVER_ADDRESSES_ENVIRONMENT_NAME} must list this server's IPv4 addresses, comma-separated`);
+  }
+  const addresses = raw.split(",").map((part) => part.trim());
+  const invalid = addresses.find((address) => !isCanonicalIpv4(address));
+  if (invalid !== undefined) {
+    throw new Error(`AGENT_SERVER_ADDRESSES_INVALID: ${SERVER_ADDRESSES_ENVIRONMENT_NAME} holds ${JSON.stringify(invalid)}, not an IPv4 address`);
+  }
+  return new Set(addresses);
+}
+
+export function serverAddressesFromEnvironment(): ReadonlySet<string> {
+  return parseServerAddresses(process.env[SERVER_ADDRESSES_ENVIRONMENT_NAME]);
 }

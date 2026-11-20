@@ -56,19 +56,26 @@ async function admitAndRun<T>(
     return null;
   }
   if (state.rows[0]?.id !== id) throw new AppError("AGENT_RUNTIME_ADMISSION_MISSING", "Не удалось зарегистрировать выполняемую операцию");
-  let workError: unknown;
   try {
     return await work(id);
-  } catch (error) {
-    workError = error;
-    throw error;
   } finally {
-    try {
-      await recoverDatabaseBookkeeping(() => database().query("DELETE FROM runtime_admission_holders WHERE id=$1", [id]));
-    } catch (cleanupError) {
-      throw new AggregateError(workError === undefined ? [cleanupError] : [workError, cleanupError],
-        "AGENT_RUNTIME_ADMISSION_RELEASE_FAILED: Не удалось снять отметку завершённой фоновой операции; "
-          + "минутная сверка снимет её, когда база станет доступна");
-    }
+    await releaseHolder(id);
+  }
+}
+
+/**
+ * A holder that cannot be released here is released by the minute reconciliation once the database is
+ * back (#553), so the failure is logged and the work's own outcome stands (#559): finished work reported
+ * as failed made Telegram resend a pressed button that was already handled.
+ */
+async function releaseHolder(id: string): Promise<void> {
+  try {
+    await recoverDatabaseBookkeeping(() => database().query("DELETE FROM runtime_admission_holders WHERE id=$1", [id]));
+  } catch (error) {
+    console.error(JSON.stringify({
+      code: "AGENT_RUNTIME_ADMISSION_RELEASE_FAILED",
+      error: error instanceof Error ? error.message : String(error),
+      holderId: id,
+    }));
   }
 }

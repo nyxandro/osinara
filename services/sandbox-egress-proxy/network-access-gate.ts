@@ -13,7 +13,8 @@
  *   and the agent's own page fetches reach the proxy through other networks.
  * - The grant file is read for every connection, so a revocation applies to the next one, and a
  *   missing or damaged file closes every IP destination instead of falling back to a stale list.
- * - Closed ranges and the proxy's own networks are refused even if the file lists them.
+ * - Closed ranges, the proxy's own networks and this server's own addresses (#560) are refused even if
+ *   the file lists them.
  */
 import { readFile } from "node:fs/promises";
 import { BlockList } from "node:net";
@@ -45,6 +46,8 @@ export interface NetworkAccessGateOptions {
   /** CIDR blocks of every network the proxy is attached to; re-read per request as groups attach. */
   attachedSubnets: () => readonly string[];
   projectionPath: string;
+  /** This server's own public and VPN addresses (`parseServerAddresses`). */
+  serverAddresses: ReadonlySet<string>;
   /** The proxy's own address on the trusted sandbox network. */
   trustedLocalAddress: string;
 }
@@ -91,6 +94,12 @@ export function createNetworkAccessGate(options: NetworkAccessGateOptions): Netw
           "AGENT_SANDBOX_EGRESS_DESTINATION_FORBIDDEN",
           "This destination can never be opened",
           denial,
+        );
+      }
+      if (options.serverAddresses.has(address)) {
+        throw new NetworkAccessRefusal(
+          "AGENT_SANDBOX_EGRESS_DESTINATION_FORBIDDEN",
+          "This destination is the agent's own server",
         );
       }
       if (insideAttachedNetwork(address, options.attachedSubnets())) {

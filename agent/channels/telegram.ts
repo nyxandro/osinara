@@ -91,6 +91,7 @@ import { telegramRepository } from "../lib/telegram-repository.js";
 import { handleSoftwareUpdateCallback } from "../lib/software-updates/callback.js";
 import { recordOperationalIncident } from "../lib/operational-incidents/owner-alerts.js";
 import { TELEGRAM_INGRESS_LEASE_MS } from "../config.js";
+import { noticeFailedTurn } from "../lib/telegram-turn-failure-notice.js";
 
 /**
  * A continuation after a human answer finishes the review its parked turn started; that turn's
@@ -424,6 +425,10 @@ export const telegramTurnEvents: TelegramTurnEvents = {
     }
     if (!reviewBatchId) await sessionRepository.recordTurnFailed(sessionId, ctx.session.id);
     await telegramHitlApprovalRepository.clearForAgentSession(sessionId, ctx.session.id);
+    // The person whose message got no answer hears it in the chat (#561); a replay sends nothing again.
+    if (!scheduledDelivery && !reviewFailureReplayed) {
+      await noticeFailedTurn({ applicationSessionId: sessionId, channel, code: data.code, ctx });
+    }
   },
   async "turn.cancelled"(_data, _channel, ctx) {
     await answerDrafts.close(ctx.session.turn.id);
