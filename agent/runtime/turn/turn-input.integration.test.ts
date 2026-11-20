@@ -4,8 +4,10 @@ import { z } from "zod";
 import { closeDatabase, database } from "../../lib/database.js";
 import { loadSessionHistory } from "../history/history-repository.js";
 import { defineTool } from "../tool.js";
-import { loadTurn } from "./journal-repository.js";
+import { AppError } from "../../lib/app-error.js";
+import { loadStep, loadTurn } from "./journal-repository.js";
 import { runTurn } from "./run-turn.js";
+import { failTurn } from "./turn-failure.js";
 import { respondToInput } from "./turn-start.js";
 import {
   newTestSession, OWNER_AUTH, recordingObserver, reply, scriptedModel, startMessageTurn, testAgent, testRuntime, toolCalls,
@@ -34,9 +36,8 @@ async function respond(sessionId: string, responses: Array<{ optionId?: string; 
   return await respondToInput(database(), { auth: OWNER_AUTH, context, responses, sessionId });
 }
 
-async function parkOnApproval(calls: Array<{ id: string; group: string }>) {
+async function parkOnApproval(calls: Array<{ id: string; group: string }>, guarded = guardedTool()) {
   const sessionId = await newTestSession();
-  const guarded = guardedTool();
   const { events, observer } = recordingObserver();
   const turn = await startMessageTurn(sessionId, "включи");
   const outcome = await runTurn(testRuntime({
@@ -83,6 +84,37 @@ async function continueWith(sessionId: string, continuationId: string, guarded: 
     ]);
     expect(model.requests[0]!.toolChoice).toBeUndefined();
     expect(await loadTurn(database(), turn.id)).toMatchObject({ status: "completed" });
+  });
+
+  // #561: approved actions run under the parked turn's journal, so a continuation cut off there must still
+  // leave them in history, or the next turn, asked again, repeats an action the person already approved.
+  it("keeps the approved calls a cut-off continuation already ran", async () => {
+    const guarded = guardedTool(vi.fn(async ({ group }: { group: string }) => group === "g2"
+      ? await new Promise<never>(() => {}) : { changed: true, group }));
+    const { outcome, sessionId, turn } = await parkOnApproval([{ id: "call-1", group: "g1" }, { id: "call-2", group: "g2" }], guarded);
+    expect(await respond(sessionId, [{ optionId: "approve", requestId: outcome.requests[0]!.requestId }])).toMatchObject({ status: "waiting" });
+    const resumed = await respond(sessionId, [{ optionId: "approve", requestId: outcome.requests[1]!.requestId }]);
+    if (resumed.status !== "resumed") throw new Error(resumed.status);
+    void continueWith(sessionId, resumed.continuation.id, guarded, reply("Включил."));
+    await vi.waitFor(async () => expect((await loadStep(database(), turn.id, 0))?.calls.map((call) => call.state)).toEqual(["completed", "intent"]));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await failTurn(database(), await loadTurn(database(), resumed.continuation.id),
+      new AppError("AGENT_TEST_TURN_FAILED", "Ход оборвался"), new AbortController().signal);
+
+    log.mockRestore();
+    expect((await history(sessionId)).slice(2)).toEqual([
+      { role: "assistant", content: [
+        { type: "tool-call", toolCallId: "call-1", toolName: "project", input: { group: "g1" } },
+        { type: "tool-call", toolCallId: "call-2", toolName: "project", input: { group: "g2" } },
+      ] },
+      { role: "tool", content: [
+        { type: "tool-result", toolCallId: "call-1", toolName: "project", output: { type: "json", value: { changed: true, group: "g1" } } },
+        { type: "tool-result", toolCallId: "call-2", toolName: "project",
+          output: { type: "error-text", value: expect.stringMatching(/^AGENT_TOOL_OUTCOME_UNKNOWN: /u) } },
+      ] },
+    ]);
+    expect((await loadStep(database(), turn.id, 0))?.step.completed).toBe(true);
   });
 
   it("explains a denial to the model without running the tool", async () => {

@@ -15,9 +15,9 @@
  */
 import { AppError } from "../../lib/app-error.js";
 import { appendSessionHistory } from "../history/history-repository.js";
-import { interruptedStepMessages } from "./interrupted-step.js";
+import { interruptedStep } from "./interrupted-step.js";
 import {
-  failWaitingTurn, finishTurn, inJournalTransaction, loadTurn, type JournalClient, type JournalDatabase,
+  completeStep, failWaitingTurn, finishTurn, inJournalTransaction, loadTurn, type JournalClient, type JournalDatabase,
 } from "./journal-repository.js";
 import { TurnCancelledError } from "./model-errors.js";
 import type { TurnOutcome } from "./run-turn.js";
@@ -77,8 +77,11 @@ async function endKeepingStartedCalls(
   try {
     await inJournalTransaction(database, async (client) => {
       const current = await loadTurn(client, turn.id);
-      const messages = await interruptedStepMessages(client, current);
-      if (messages.length > 0) await appendSessionHistory(client, { messages, sessionId: current.sessionId, turnId: current.id });
+      const step = await interruptedStep(client, current);
+      if (step.messages.length > 0) {
+        await appendSessionHistory(client, { messages: step.messages, sessionId: current.sessionId, turnId: current.id });
+      }
+      if (step.settlesParked !== null) await completeStep(client, step.settlesParked.turnId, step.settlesParked.stepIndex);
       await finishTurn(client, turn.id, outcome);
     });
   } catch (error) {
