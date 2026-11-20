@@ -41,14 +41,29 @@ describe("runtime maintenance admission", () => {
     await expect(withRuntimeAdmission("ordinary", async () => { throw error; })).rejects.toBe(error);
     expect(storage.query.mock.calls[1]?.[0]).toContain("DELETE FROM runtime_admission_holders");
   });
-  it("preserves work and cleanup errors instead of hiding an admission holder", async () => {
-    const workError = new Error("work failed"), cleanupError = new Error("database unavailable");
+  // The minute reconciliation releases a holder whose work settled (#553), so a failed release no
+  // longer turns finished work into a failure (#559): a pressed button is not handled twice.
+  it("returns the work's result when its holder cannot be released, and logs the release failure", async () => {
+    const cleanupError = new Error("database unavailable");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     storage.query.mockImplementation(async (sql: string, values: unknown[]) => {
       if (sql.startsWith("DELETE")) throw cleanupError;
       return { rows: [{ phase: "ready", id: values[0] }] };
     });
-    await expect(withRuntimeAdmission("ordinary", async () => { throw workError; }))
-      .rejects.toMatchObject({ errors: [workError, cleanupError] });
+    await expect(withRuntimeAdmission("ordinary", async () => 42)).resolves.toBe(42);
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("AGENT_RUNTIME_ADMISSION_RELEASE_FAILED"));
+    logged.mockRestore();
+  });
+  it("keeps the work's own error when both the work and the release fail", async () => {
+    const workError = new Error("work failed"), cleanupError = new Error("database unavailable");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    storage.query.mockImplementation(async (sql: string, values: unknown[]) => {
+      if (sql.startsWith("DELETE")) throw cleanupError;
+      return { rows: [{ phase: "ready", id: values[0] }] };
+    });
+    await expect(withRuntimeAdmission("ordinary", async () => { throw workError; })).rejects.toBe(workError);
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining("AGENT_RUNTIME_ADMISSION_RELEASE_FAILED"));
+    logged.mockRestore();
   });
   // The minute reconciliation releases this process's holders that are not active (#553), so an
   // admission must count as active before its row can exist and stop counting once its work settled.
@@ -60,8 +75,9 @@ describe("runtime maintenance admission", () => {
       writtenWhileActive = isRuntimeAdmissionActive(written);
       return { rows: [{ phase: "ready", id: values[0] }] };
     });
-    await expect(withRuntimeAdmission("ordinary", async (id) => { insideWork = isRuntimeAdmissionActive(id); }))
-      .rejects.toThrow("AGENT_RUNTIME_ADMISSION_RELEASE_FAILED");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    await withRuntimeAdmission("ordinary", async (id) => { insideWork = isRuntimeAdmissionActive(id); });
+    logged.mockRestore();
     expect(writtenWhileActive).toBe(true);
     expect(insideWork).toBe(true);
     expect(isRuntimeAdmissionActive(written!)).toBe(false);

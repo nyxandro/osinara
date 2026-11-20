@@ -1,7 +1,10 @@
 /** Connection classification is attached at the PostgreSQL adapter, not to arbitrary network failures. */
 import { AppError } from "./app-error.js";
 const POSTGRES_UNAVAILABLE = new Set(["08000","08001","08003","08004","08006","08007","08P01","57P01","57P02","57P03","53300"]);
-const PG_CONNECTION_MESSAGES = new Set(["Connection terminated unexpectedly","Connection terminated","Client has encountered a connection error and is not queryable"]);
+// The last two are pg-pool 3.14's own errors, raised without a code before any query reaches the server: no
+// connection was handed out in time, or a new one did not open in time (#559). Waiting and retrying is safe.
+const PG_CONNECTION_MESSAGES = new Set(["Connection terminated unexpectedly","Connection terminated","Client has encountered a connection error and is not queryable",
+  "timeout exceeded when trying to connect","Connection terminated due to connection timeout"]);
 const SOCKET_CODES = new Set(["ECONNRESET","ECONNREFUSED","EPIPE","EHOSTUNREACH","ENETUNREACH","ETIMEDOUT"]);
 
 export function isDatabaseUnavailable(error: unknown): boolean {
