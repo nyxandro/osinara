@@ -5,6 +5,7 @@
  * - `bindMemoryTurnSources`: persists the immutable source set at `turn.started`.
  * - `resolveMemoryTurnSource`: resolves current, visible-delta, or review-batch source for `remember`.
  * - `releaseMemoryTurnSources`: releases timeline retention at the terminal turn boundary.
+ * - `releaseResumedMemoryTurnSources`: the same for the turns a finished continuation resumes.
  */
 import type { SessionContext } from "../runtime/context.js";
 
@@ -91,6 +92,7 @@ export async function bindMemoryTurnSources(ctx: TurnContext): Promise<void> {
     });
     return;
   }
+  // Only the internal background review owns a batch (#569): a chat turn naming one is malformed.
   if (
     typeof applicationSessionId !== "string" ||
     typeof conversationId !== "string" ||
@@ -98,8 +100,8 @@ export async function bindMemoryTurnSources(ctx: TurnContext): Promise<void> {
     invokingActor === null ||
     !Array.isArray(visibleTimelineEntryIds) ||
     !visibleTimelineEntryIds.every((entryId) => typeof entryId === "string") ||
-    (memoryReviewBatchId === undefined) !== (memoryReviewSourceEntryIds === undefined) ||
-    (memoryReviewSourceEntryIds !== undefined && (!Array.isArray(memoryReviewSourceEntryIds) || !memoryReviewSourceEntryIds.every((entryId) => typeof entryId === "string")))
+    memoryReviewBatchId !== undefined ||
+    memoryReviewSourceEntryIds !== undefined
   ) {
     throw sourceError("turn_attributes_invalid");
   }
@@ -111,12 +113,6 @@ export async function bindMemoryTurnSources(ctx: TurnContext): Promise<void> {
     agentTurnId: ctx.session.turn.id,
     invokingActorId: invokingActor.id,
     invokingActorKind: invokingActor.kind,
-    ...(typeof memoryReviewBatchId === "string" ? { memoryReviewBatchId } : {}),
-    ...(Array.isArray(memoryReviewSourceEntryIds)
-      ? {
-          memoryReviewSourceEntryIds: memoryReviewSourceEntryIds as string[],
-        }
-      : {}),
     visibleTimelineEntryIds,
   });
 }
@@ -167,4 +163,9 @@ export async function resolveMemoryTurnSource(
 
 export async function releaseMemoryTurnSources(ctx: TurnContext): Promise<void> {
   await memoryTurnSourceRepository.release(ctx.session.id, ctx.session.turn.id);
+}
+
+/** A continuation after a human answer also releases the turns it resumes. */
+export async function releaseResumedMemoryTurnSources(ctx: TurnContext): Promise<void> {
+  await memoryTurnSourceRepository.releaseResumed(ctx.session.id, ctx.session.turn.id);
 }

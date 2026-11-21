@@ -68,12 +68,8 @@ describe("Telegram channel draft policy", () => {
       source.indexOf('async "turn.completed"'),
       source.indexOf('async "authorization.required"'),
     );
-    const reviewCompletion = turnCompleted.indexOf("memoryReviewRepository.completeBatch(");
-    const sourceRelease = turnCompleted.indexOf("await releaseMemoryTurnSources(ctx)");
 
     expect(source).toContain("await bindMemoryTurnSources(ctx)");
-    expect(turnCompleted).toContain("if (!awaitingApproval) {");
-    expect(reviewCompletion).toBeGreaterThan(-1);
-    expect(sourceRelease).toBeGreaterThan(reviewCompletion);
+    expect(turnCompleted).toContain("if (!awaitingApproval) await releaseTurnSources(ctx);");
   });
 });

@@ -60,7 +60,7 @@ describe("Telegram owner-only external group dispatch", () => {
     await expect(handler(telegramContext().context, message)).resolves.toBeNull();
 
     expect(repository.attachmentReferences.record).toHaveBeenCalledWith("group-1", message);
-    expect(repository.memoryReview.observePassiveMessage).toHaveBeenCalledTimes(1);
+    expect(repository.memoryReview.observeGroupMessage).toHaveBeenCalledTimes(1);
     expect(repository.session.prepareTurn).not.toHaveBeenCalled();
   });
 

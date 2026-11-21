@@ -26,7 +26,7 @@ function sha256(value: unknown): string {
 }
 
 export function turnSourceBindingHash(
-  input: BindingCoordinates & { currentTimelineEntryId: string; memoryReviewBatchId?: string },
+  input: BindingCoordinates & { currentTimelineEntryId: string },
   sortedEntryIds: readonly string[],
 ): string {
   return sha256({
@@ -37,7 +37,8 @@ export function turnSourceBindingHash(
     agentTurnId: input.agentTurnId,
     invokingActorId: input.invokingActorId,
     invokingActorKind: input.invokingActorKind,
-    memoryReviewBatchId: input.memoryReviewBatchId ?? null,
+    // A chat turn has owned no review batch since #569; the field stays in the stored format as null.
+    memoryReviewBatchId: null,
     visibleTimelineEntryIds: sortedEntryIds,
   });
 }

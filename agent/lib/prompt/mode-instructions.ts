@@ -34,7 +34,7 @@ import {
   IMAGE_INSPECTION_CONTRACT,
   MEMORY_DEEPENING_PROTOCOL,
   MEMORY_EXACT_DUPLICATE_HANDLING,
-  GROUP_MEMORY_DELTA_CONTRACT,
+  GROUP_TURN_MEMORY_CONTRACT,
   MEMORY_WRITE_CONTRACT,
   PRIVATE_MEMORY_SOURCE_CONTRACT,
   SPOKEN_ASIDE_RULES,
@@ -230,7 +230,7 @@ const CHILD_OMITTED_SECTIONS: ReadonlySet<string> = new Set([
   MEMORY_SAVING_HEADING,
   MEMORY_WRITE_CONTRACT,
   PRIVATE_MEMORY_SOURCE_CONTRACT,
-  GROUP_MEMORY_DELTA_CONTRACT,
+  GROUP_TURN_MEMORY_CONTRACT,
   MEMORY_EXACT_DUPLICATE_HANDLING,
   TRUSTED_MEMORY_EDITS,
   trustedScheduleRules("personal"),
@@ -300,7 +300,7 @@ const FAMILY_HEADING = ["# Current mode: closed family group", VERIFIED_BLOCK_NO
 
 const FAMILY_MEMORY_AND_ADDRESSING = `## Memory and addressing
 
-Only family memory is available. Other memory scopes are unavailable in this chat. Save stable facts of the current author through \`remember\` under the rules below.
+Only family memory is available. Other memory scopes are unavailable in this chat. Save to memory through \`remember\` only under the rules below.
 
 ${GROUP_ADDRESSING}`;
 
@@ -311,8 +311,7 @@ Only family memory is available, for reading. Other memory scopes are unavailabl
 
 const FAMILY_INSTRUCTION_SECTIONS = [
   MEMORY_SAVING_HEADING,
-  MEMORY_WRITE_CONTRACT,
-  GROUP_MEMORY_DELTA_CONTRACT,
+  GROUP_TURN_MEMORY_CONTRACT,
   TRUSTED_MEMORY_EDITS,
   MEMORY_EXACT_DUPLICATE_HANDLING,
   MEMORY_DEEPENING_PROTOCOL,
@@ -456,8 +455,7 @@ function externalInstructions(
       : null,
     externalMemorySection(capabilities, subagentTurn),
     saving ? MEMORY_SAVING_HEADING : null,
-    saving ? MEMORY_WRITE_CONTRACT : null,
-    saving ? GROUP_MEMORY_DELTA_CONTRACT : null,
+    saving ? GROUP_TURN_MEMORY_CONTRACT : null,
     memoryEditContract(editActions),
     searchable ? MEMORY_DEEPENING_PROTOCOL : null,
     searchable && editActions.has("delete") ? MEMORY_EXACT_DUPLICATE_HANDLING : null,

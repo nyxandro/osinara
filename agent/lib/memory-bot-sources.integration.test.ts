@@ -119,8 +119,8 @@ describeWithDatabase("bot memory source end-to-end", () => {
 
   it("lets a bot's fiftieth message trigger the same background batch", async () => {
     const f = await fixture();
-    await memoryReviewRepository.observePassiveMessage({ groupId: f.groupId, timelineEntryId: f.entries[0]!.id });
-    await expect(memoryReviewRepository.observePassiveMessage({ groupId: f.groupId, timelineEntryId: f.entries[49]!.id }))
+    await memoryReviewRepository.observeGroupMessage({ groupId: f.groupId, timelineEntryId: f.entries[0]!.id });
+    await expect(memoryReviewRepository.observeGroupMessage({ groupId: f.groupId, timelineEntryId: f.entries[49]!.id }))
       .resolves.toMatchObject({ sourceCount: 50 });
   });
 
@@ -148,7 +148,7 @@ describeWithDatabase("bot memory source end-to-end", () => {
 
   it("binds all 49 human and 1 bot sources, saves both, and completes the lane", async () => {
     const f = await fixture();
-    await memoryReviewRepository.observePassiveMessage({ groupId: f.groupId, timelineEntryId: f.entries[0]!.id });
+    await memoryReviewRepository.observeGroupMessage({ groupId: f.groupId, timelineEntryId: f.entries[0]!.id });
     const [batch] = await memoryReviewDispatchRepository.claimPending({ leaseMilliseconds: 60_000, limit: 1, now: new Date() });
     expect(batch!.sourceCount).toBe(50);
     const rendered = batch!.prompt.split("\n").filter((line) => line.startsWith("{")).map((line) => JSON.parse(line));

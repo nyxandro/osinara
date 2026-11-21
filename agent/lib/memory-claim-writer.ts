@@ -404,7 +404,7 @@ export async function createMemoryClaim(
       subjectParticipantId: prepared?.subjectParticipantId ?? null,
       subjectUserId: prepared?.subjectUserId ?? null,
     });
-    // Taken before the insert: an interactive turn and the silent review can write the same slot
+    // Taken before the insert: a chat turn and the silent review can write the same slot
     // at the same moment, and neither would see the other's uncommitted version.
     if (guards.attribute !== null) {
       await lockMemoryAttributeSlot(client, {

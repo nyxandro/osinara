@@ -22,7 +22,7 @@ import {
 } from "./memory-review-prompt.js";
 import { selectMemoryReviewContext } from "./memory-review-known-memory.js";
 import type { MemoryReviewClaim } from "./memory-review-repository.js";
-import { readMemoryReviewLaneHealth, recoverUnstartedReviewBatches } from "./memory-review-lane-recovery.js";
+import { readMemoryReviewLaneHealth } from "./memory-review-lane-recovery.js";
 import { recoverModelWaitingReviews } from "./memory-review-model-recovery.js";
 import { modelProviderConfig } from "../model-provider-config.js";
 import { modelRouteKey } from "../model-route.js";
@@ -76,9 +76,6 @@ async function materializeReadyBatches(client: PoolClient, now: Date): Promise<v
        JOIN telegram_groups AS telegram_group ON telegram_group.id = conversation.telegram_group_id
       ORDER BY lane.created_at, lane.id FOR UPDATE OF lane`,
   );
-  // Recovery must not take one later lane before this globally ordered set: another dispatcher
-  // could hold an earlier lane while waiting for that same later lane.
-  await recoverUnstartedReviewBatches(client, now);
   // Reviews run on the primary model (`memory-review-session-repository.ts`): its success wakes a batch
   // that waited on a model it no longer uses (#537).
   await recoverModelWaitingReviews(client, now, modelRouteKey(modelProviderConfig.agent.transport, modelProviderConfig.agent.models.primary.id));

@@ -63,15 +63,13 @@ import {
 } from "../lib/agent-schedules/scheduled-telegram-target.js";
 import { telegramGroupJournalRepository } from "../lib/telegram-group-journal-repository.js";
 import { recordTelegramFailure } from "../lib/operational-incidents/telegram-failure.js";
-import { recoverDatabaseBookkeeping } from "../lib/database-recovery.js";
 import { AppError, isAppError } from "../lib/app-error.js";
 import { conversationTimelineRepository } from "../lib/conversation-timeline-repository.js";
 import { setTelegramMessageReaction } from "../lib/telegram-message-reaction.js";
 import {
   releaseMemoryTurnSources,
+  releaseResumedMemoryTurnSources,
 } from "../lib/memory-turn-source.js";
-import { resolveMemoryReviewBatch } from "../lib/memory-review/memory-review-turn-binding.js";
-import { memoryReviewRepository } from "../lib/memory-review/memory-review-repository.js";
 import { accountlessActorApprovalError } from "../lib/telegram-session-actor.js";
 import {
   finishConversationWakeupTurn,
@@ -93,13 +91,10 @@ import { recordOperationalIncident } from "../lib/operational-incidents/owner-al
 import { TELEGRAM_INGRESS_LEASE_MS } from "../config.js";
 import { noticeFailedTurn } from "../lib/telegram-turn-failure-notice.js";
 
-/**
- * A continuation after a human answer finishes the review its parked turn started; that turn's
- * retained sources go with the review.
- */
-async function releaseResumedTurnSources(ctx: Parameters<TelegramTurnEvents["turn.completed"]>[2], reviewTurnId: string): Promise<void> {
-  if (reviewTurnId === ctx.session.turn.id) return;
-  await releaseMemoryTurnSources({ session: { ...ctx.session, turn: { ...ctx.session.turn, id: reviewTurnId } } });
+/** A finished turn releases its sources, and a continuation those of the turns it resumes. */
+async function releaseTurnSources(ctx: Parameters<TelegramTurnEvents["turn.completed"]>[2]): Promise<void> {
+  await releaseMemoryTurnSources(ctx);
+  await releaseResumedMemoryTurnSources(ctx);
 }
 
 export const telegramTurnEvents: TelegramTurnEvents = {
@@ -359,26 +354,12 @@ export const telegramTurnEvents: TelegramTurnEvents = {
     // Before the failure notice, so no draft lands after it.
     await answerDrafts.close(ctx.session.turn.id);
     // Terminal failure releases the temporary timeline retention after all tool writes have stopped.
-    await releaseMemoryTurnSources(ctx);
+    await releaseTurnSources(ctx);
     // First, so a failing failure notice below cannot leave the wake-up's schedule leased for good.
     await finishConversationWakeupTurn(ctx, data.code);
-    const review = await resolveMemoryReviewBatch(ctx);
-    const reviewBatchId = review?.batchId ?? null;
-    let reviewFailureReplayed = false;
-    if (review) {
-      const terminal = await recoverDatabaseBookkeeping(() => memoryReviewRepository.failRunning({
-        batchId: review.batchId,
-        diagnosticCode: data.code,
-        agentSessionId: ctx.session.id,
-        agentTurnId: review.agentTurnId,
-      }));
-      reviewFailureReplayed = terminal === "replayed";
-      await releaseResumedTurnSources(ctx, review.agentTurnId);
-    }
     const sessionId = applicationSessionId(ctx);
     const scheduledDelivery = scheduledDeliveryMetadata(ctx);
-    // The durable terminal replay still performs cleanup, but never duplicates a user message.
-    let notifyFailure = !reviewFailureReplayed;
+    let notifyFailure = true;
     if (scheduledDelivery) {
       const failedAt = new Date();
       if (!scheduledTelegramTargetMatches(channel.telegram, scheduledDelivery)) {
@@ -423,28 +404,16 @@ export const telegramTurnEvents: TelegramTurnEvents = {
       await recordTelegramFailure({ sessionId: ctx.session.id, turnId: ctx.session.turn.id,
         ...(typeof updateId === "string" ? { updateId } : {}), code: data.code, message: data.message, chatId: channel.telegram.chatId });
     }
-    if (!reviewBatchId) await sessionRepository.recordTurnFailed(sessionId, ctx.session.id);
+    await sessionRepository.recordTurnFailed(sessionId, ctx.session.id);
     await telegramHitlApprovalRepository.clearForAgentSession(sessionId, ctx.session.id);
     // The person whose message got no answer hears it in the chat (#561); a replay sends nothing again.
-    if (!scheduledDelivery && !reviewFailureReplayed) {
+    if (!scheduledDelivery) {
       await noticeFailedTurn({ applicationSessionId: sessionId, channel, code: data.code, ctx });
     }
   },
   async "turn.cancelled"(_data, _channel, ctx) {
     await answerDrafts.close(ctx.session.turn.id);
-    // A cancelled turn closes its review like a failed one: a batch waiting for the time bound let
-    // later turns chain onto a head that would never report, so their work stayed unreachable.
-    await releaseMemoryTurnSources(ctx);
-    const review = await resolveMemoryReviewBatch(ctx);
-    if (review) {
-      await memoryReviewRepository.failRunning({
-        batchId: review.batchId,
-        diagnosticCode: "AGENT_MEMORY_REVIEW_TURN_CANCELLED",
-        agentSessionId: ctx.session.id,
-        agentTurnId: review.agentTurnId,
-      });
-      await releaseResumedTurnSources(ctx, review.agentTurnId);
-    }
+    await releaseTurnSources(ctx);
     await finishConversationWakeupTurn(ctx, "AGENT_CONVERSATION_WAKEUP_CANCELLED");
     // A cancelled turn is not a failure and its session keeps serving the replacement turn, so
     // only its own approval rows are released here.
@@ -463,21 +432,8 @@ export const telegramTurnEvents: TelegramTurnEvents = {
     await answerDrafts.close(ctx.session.turn.id);
     const sessionId = applicationSessionId(ctx);
     const awaitingApproval = await sessionRepository.hasPendingOperation(sessionId, ctx.session.id);
-    const review = await resolveMemoryReviewBatch(ctx);
-    const reviewBatchId = review?.batchId ?? null;
-    if (!awaitingApproval) {
-      // Completion verifies review evidence before release; a parked HITL turn retains its source set.
-      if (review) {
-        await recoverDatabaseBookkeeping(() => memoryReviewRepository.completeBatch({
-          batchId: review.batchId,
-          completedAt: new Date(),
-          agentSessionId: ctx.session.id,
-          agentTurnId: review.agentTurnId,
-        }));
-        await releaseResumedTurnSources(ctx, review.agentTurnId);
-      }
-      await releaseMemoryTurnSources(ctx);
-    }
+    // A parked HITL turn retains its source set until the turn finishes.
+    if (!awaitingApproval) await releaseTurnSources(ctx);
     if (isScheduledSession(ctx) && !awaitingApproval) {
       // Successful scheduled runs are completed atomically with Telegram delivery above.
       await agentScheduleDispatchRepository.failRun(
@@ -489,9 +445,7 @@ export const telegramTurnEvents: TelegramTurnEvents = {
     }
     // A parked wake-up has already asked its question; the run is done either way.
     await finishConversationWakeupTurn(ctx, null);
-    if (!reviewBatchId) {
-      await sessionRepository.recordTurnCompleted(sessionId, ctx.session.id, awaitingApproval, !isConversationWakeupTurn(ctx));
-    }
+    await sessionRepository.recordTurnCompleted(sessionId, ctx.session.id, awaitingApproval, !isConversationWakeupTurn(ctx));
     if (!awaitingApproval) {
       await telegramHitlApprovalRepository.clearForAgentSession(sessionId, ctx.session.id);
     }

@@ -40,18 +40,19 @@ export function memoryReviewBatchId(
   return value;
 }
 
+/** Group memory is reviewed only in the background (#569); a chat turn carries no review mode. */
 export function isMemoryReviewSession(
   ctx: { session: { auth: SessionContext["session"]["auth"] } },
 ): boolean {
   const mode = ctx.session.auth.current?.attributes.memoryReviewMode;
   if (mode === undefined) return false;
-  if (mode !== "background" && mode !== "interactive") {
+  if (mode !== "background") {
     throw new AppError(
       "AGENT_MEMORY_REVIEW_CONTEXT_INVALID",
       "Не удалось определить режим проверки памяти",
     );
   }
-  return mode === "background";
+  return true;
 }
 
 /** The dispatcher authorizes a review run for exactly one scope; anything else is a broken run. */

@@ -15,10 +15,12 @@ import {
   createMainAgentPrivateMemoryFixture,
 } from "../memory-agent-write.integration-fixtures.js";
 import { memoryTurnSourceRepository } from "../memory-turn-source-repository.js";
-import { createSessionHistory } from "../../runtime/history/history-repository.js";
-import { newSessionId, newTurnId } from "../../runtime/ids.js";
 import { memoryReviewRepository } from "./memory-review-repository.js";
 import { memoryReviewDispatchRepository } from "./memory-review-dispatch-repository.js";
+import {
+  bindHistoricalInteractiveTurn,
+  insertHistoricalInteractiveBatch,
+} from "./memory-review.integration-fixtures.js";
 
 const describeWithDatabase = process.env.RUN_DATABASE_INTEGRATION_TESTS === "true"
   ? describe
@@ -66,7 +68,7 @@ describeWithDatabase("memory review repository", () => {
         messageThreadId: 42,
         sequence,
       });
-      created = await memoryReviewRepository.observePassiveMessage({
+      created = await memoryReviewRepository.observeGroupMessage({
         groupId: fixture.groupId,
         timelineEntryId: message.id,
       });
@@ -107,7 +109,7 @@ describeWithDatabase("memory review repository", () => {
       sequence: 3,
     });
 
-    await expect(memoryReviewRepository.observePassiveMessage({
+    await expect(memoryReviewRepository.observeGroupMessage({
       groupId: fixture.groupId,
       timelineEntryId: otherTopic.id,
     })).resolves.toBeNull();
@@ -176,48 +178,6 @@ describeWithDatabase("memory review repository", () => {
     )).resolves.toMatchObject({ rows: [{ count: 0 }] });
   });
 
-  it("finds the batch of a parked turn from a continuation two answers later", async () => {
-    const fixture = await createMainAgentMemoryFixture();
-    await memoryReviewRepository.initializeLane({
-      conversationId: fixture.conversationId,
-      messageThreadId: null,
-      processedThroughSequence: "1",
-    });
-    const session = await database().query<{ id: string }>(
-      `INSERT INTO conversation_sessions
-         (thread_id, generation, family_id, group_id, scope, kind, conversation_key,
-          continuation_token, started_at, last_activity_at)
-       VALUES (gen_random_uuid(), 0, $1, $2, 'family', 'canonical', 'review-continued',
-               'review-continued', now(), now()) RETURNING id`,
-      [fixture.familyId, fixture.groupId],
-    );
-    const source = await insertUserMessage({ conversationId: fixture.conversationId, groupId: fixture.groupId, sequence: 2 });
-    const batch = await memoryReviewRepository.prepareInteractiveTurn({
-      applicationSessionId: session.rows[0]!.id, groupId: fixture.groupId, timelineEntryId: source.id,
-    });
-    const runtimeSession = newSessionId();
-    await createSessionHistory(database(), {
-      applicationSessionId: session.rows[0]!.id, channelState: null,
-      compaction: { inputTokens: null, promptMessageCount: null }, history: [], initiatorAuth: null, parentSessionId: null,
-      sandbox: null, sessionId: runtimeSession, source: "runtime", todo: null,
-    });
-    const [parked, answered, answeredAgain] = [newTurnId(), newTurnId(), newTurnId()];
-    for (const [sequence, id, resumes] of [[0, parked, null], [1, answered, parked], [2, answeredAgain, answered]] as const) {
-      await database().query(
-        `INSERT INTO agent_turns (id, session_id, sequence, kind, status, resumes_turn_id, auth, channel, input, completed_at)
-         VALUES ($1, $2, $3, 'conversation', 'completed', $4, '{}', '{"kind":"telegram"}', '{"context":[]}', now())`,
-        [id, runtimeSession, sequence, resumes],
-      );
-    }
-    await memoryReviewRepository.bindAgentTurn({
-      applicationSessionId: session.rows[0]!.id, batchId: batch!.batchId, agentSessionId: runtimeSession, agentTurnId: parked,
-    });
-
-    await expect(memoryReviewRepository.batchForTurn({ agentSessionId: runtimeSession, agentTurnId: answeredAgain }))
-      .resolves.toEqual({ batchId: batch!.batchId, agentTurnId: parked });
-    await expect(memoryReviewRepository.batchForTurn({ agentSessionId: "wrun_other", agentTurnId: answeredAgain })).resolves.toBeNull();
-  });
-
   it("retains active sources and advances only after successful completion", async () => {
     const fixture = await createMainAgentMemoryFixture();
     await memoryReviewRepository.initializeLane({
@@ -238,7 +198,7 @@ describeWithDatabase("memory review repository", () => {
       groupId: fixture.groupId,
       sequence: 2,
     });
-    const first = await memoryReviewRepository.prepareInteractiveTurn({
+    const first = await insertHistoricalInteractiveBatch({
       applicationSessionId: session.rows[0]!.id,
       groupId: fixture.groupId,
       timelineEntryId: firstSource.id,
@@ -256,17 +216,13 @@ describeWithDatabase("memory review repository", () => {
       agentSessionId: "agent-retention-complete",
       agentTurnId: "turn-retention-complete",
     });
-    await memoryTurnSourceRepository.bind({
-      applicationSessionId: session.rows[0]!.id,
-      conversationId: fixture.conversationId,
-      currentTimelineEntryId: firstSource.id,
+    await bindHistoricalInteractiveTurn({
       agentSessionId: "agent-retention-complete",
       agentTurnId: "turn-retention-complete",
-      invokingActorId: "agent-memory-author",
-      invokingActorKind: "telegram_user",
-      memoryReviewBatchId: first!.batchId,
-      memoryReviewSourceEntryIds: first!.sourceEntryIds,
-      visibleTimelineEntryIds: [firstSource.id],
+      applicationSessionId: session.rows[0]!.id,
+      batch: first!,
+      conversationId: fixture.conversationId,
+      currentTimelineEntryId: firstSource.id,
     });
     await memoryReviewRepository.completeBatch({
       batchId: first!.batchId,
@@ -300,7 +256,7 @@ describeWithDatabase("memory review repository", () => {
       groupId: fixture.groupId,
       sequence: 2,
     });
-    const batch = await memoryReviewRepository.prepareInteractiveTurn({
+    const batch = await insertHistoricalInteractiveBatch({
       applicationSessionId: session.rows[0]!.id,
       groupId: fixture.groupId,
       timelineEntryId: source.id,
@@ -312,17 +268,13 @@ describeWithDatabase("memory review repository", () => {
       agentSessionId: "agent-review-replay",
       agentTurnId: "turn-review-replay",
     });
-    await memoryTurnSourceRepository.bind({
-      applicationSessionId: session.rows[0]!.id,
-      conversationId: fixture.conversationId,
-      currentTimelineEntryId: source.id,
+    await bindHistoricalInteractiveTurn({
       agentSessionId: "agent-review-replay",
       agentTurnId: "turn-review-replay",
-      invokingActorId: "agent-memory-author",
-      invokingActorKind: "telegram_user",
-      memoryReviewBatchId: batch!.batchId,
-      memoryReviewSourceEntryIds: batch!.sourceEntryIds,
-      visibleTimelineEntryIds: [source.id],
+      applicationSessionId: session.rows[0]!.id,
+      batch: batch!,
+      conversationId: fixture.conversationId,
+      currentTimelineEntryId: source.id,
     });
     const completion = {
       batchId: batch!.batchId,
@@ -361,7 +313,7 @@ describeWithDatabase("memory review repository", () => {
       groupId: fixture.groupId,
       sequence: 2,
     });
-    const batch = await memoryReviewRepository.prepareInteractiveTurn({
+    const batch = await insertHistoricalInteractiveBatch({
       applicationSessionId: session.rows[0]!.id,
       groupId: fixture.groupId,
       timelineEntryId: source.id,
@@ -403,7 +355,7 @@ describeWithDatabase("memory review repository", () => {
       groupId: fixture.groupId,
       sequence: 2,
     });
-    const batch = await memoryReviewRepository.prepareInteractiveTurn({
+    const batch = await insertHistoricalInteractiveBatch({
       applicationSessionId: session.rows[0]!.id,
       groupId: fixture.groupId,
       timelineEntryId: source.id,
@@ -443,57 +395,6 @@ describeWithDatabase("memory review repository", () => {
         status: "completed",
       }],
     });
-  });
-
-  it("releases an interactive batch that never reached an agent turn", async () => {
-    const fixture = await createMainAgentMemoryFixture();
-    const session = await database().query<{ id: string }>(
-      `INSERT INTO conversation_sessions
-         (thread_id, generation, family_id, group_id, scope, kind, conversation_key,
-          continuation_token, started_at, last_activity_at)
-       VALUES (gen_random_uuid(), 0, $1, $2, 'family', 'canonical', 'review-stale',
-               'review-stale', now(), now()) RETURNING id`,
-      [fixture.familyId, fixture.groupId],
-    );
-    const source = await insertUserMessage({
-      conversationId: fixture.conversationId,
-      groupId: fixture.groupId,
-      sequence: 2,
-    });
-    const batch = await memoryReviewRepository.prepareInteractiveTurn({
-      applicationSessionId: session.rows[0]!.id,
-      groupId: fixture.groupId,
-      timelineEntryId: source.id,
-    });
-    await database().query(
-      `UPDATE memory_review_batches
-          SET started_at = '2026-08-12T09:00:00.000Z', updated_at = '2026-08-12T09:00:00.000Z'
-        WHERE id = $1`,
-      [batch!.batchId],
-    );
-
-    await memoryReviewDispatchRepository.claimPending({
-      leaseMilliseconds: 60_000,
-      limit: 10,
-      now: new Date("2026-08-12T10:00:00.000Z"),
-    });
-
-    // Без привязки к ходу пакет доказуемо ничего не записал: ждать нечего, а прежний терминал
-    // `ambiguous` держал курсор занятым навсегда и в проде останавливал проверку целой группы.
-    await expect(database().query(
-      "SELECT count(*)::integer AS batches FROM memory_review_batches WHERE id = $1",
-      [batch!.batchId],
-    )).resolves.toMatchObject({ rows: [{ batches: 0 }] });
-    // Источники вернулись в непроверенный хвост, и владельца незачем беспокоить.
-    const repeated = await memoryReviewRepository.prepareInteractiveTurn({
-      applicationSessionId: session.rows[0]!.id,
-      groupId: fixture.groupId,
-      timelineEntryId: source.id,
-    });
-    expect(repeated?.sourceCount).toBe(2);
-    await expect(database().query(
-      "SELECT count(*)::integer AS alerts FROM memory_review_owner_alerts",
-    )).resolves.toMatchObject({ rows: [{ alerts: 0 }] });
   });
 
 });

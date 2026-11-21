@@ -4,13 +4,17 @@
  * Exports:
  * - `BindMemoryTurnSourcesInput`: verified Telegram and turn coordinates.
  * - `ResolvedMemoryTurnSource`: exact source and authorization partition projection.
- * - `memoryTurnSourceRepository`: replay-safe binding, HITL resume verification, and source resolution.
+ * - `memoryTurnSourceRepository`: replay-safe binding, HITL resume verification, source resolution and
+ *   release, including the turns a continuation resumes.
  */
 import { AppError } from "./app-error.js";
 import { database } from "./database.js";
 import { reviewSourceBindingHash, turnSourceBindingHash } from "./memory-turn-source-binding-hash.js";
 import type { SourceAuthorNames } from "./memory-subject-author-label.js";
 import type { TelegramActorKind, TelegramTimelineActorKind } from "./telegram-inbound-actor.js";
+
+// A turn parks for each human answer it waits on; a chain longer than this is not a real conversation.
+const MAX_RESUMED_TURNS = 64;
 
 // The timeline discriminator each invoking actor kind must carry on its own current message.
 const TURN_SOURCE_ACTOR_KINDS: Record<TelegramActorKind, TelegramTimelineActorKind> = {
@@ -27,8 +31,6 @@ export interface BindMemoryTurnSourcesInput {
   agentTurnId: string;
   invokingActorId: string;
   invokingActorKind: TelegramActorKind;
-  memoryReviewBatchId?: string;
-  memoryReviewSourceEntryIds?: readonly string[];
   visibleTimelineEntryIds: readonly string[];
 }
 
@@ -65,16 +67,13 @@ interface SourceRow {
 }
 
 function canonicalEntryIds(input: BindMemoryTurnSourcesInput): string[] {
-  const reviewIds = input.memoryReviewSourceEntryIds ?? [];
-  if (new Set(input.visibleTimelineEntryIds).size !== input.visibleTimelineEntryIds.length || new Set(reviewIds).size !== reviewIds.length) {
+  if (new Set(input.visibleTimelineEntryIds).size !== input.visibleTimelineEntryIds.length) {
     throw new AppError("AGENT_MEMORY_TURN_SOURCE_SET_INVALID", "Набор сообщений текущего хода содержит повторяющиеся источники");
   }
-  const combined = [...input.visibleTimelineEntryIds, ...reviewIds];
-  const unique = [...new Set(combined)];
-  if (unique.length === 0 || !unique.includes(input.currentTimelineEntryId)) {
+  if (!input.visibleTimelineEntryIds.includes(input.currentTimelineEntryId)) {
     throw new AppError("AGENT_MEMORY_TURN_SOURCE_SET_INVALID", "Не удалось подтвердить набор сообщений текущего хода");
   }
-  return unique.sort();
+  return [...input.visibleTimelineEntryIds].sort();
 }
 
 export const memoryTurnSourceRepository = {
@@ -160,31 +159,12 @@ export const memoryTurnSourceRepository = {
       if (entries.rows.length !== entryIds.length || current?.actor_kind !== expectedActorKind || currentActorId !== input.invokingActorId) {
         throw new AppError("AGENT_MEMORY_TURN_SOURCE_SET_INVALID", "Сообщения текущего хода не принадлежат проверенному разговору или автору");
       }
-      if (input.memoryReviewBatchId !== undefined) {
-        const review = await client.query<{ timeline_entry_id: string }>(
-          `SELECT timeline_entry_id FROM memory_review_batch_sources
-            WHERE batch_id = $1 AND conversation_id = $2 ORDER BY timeline_sequence`,
-          [input.memoryReviewBatchId, input.conversationId],
-        );
-        const expected = [...(input.memoryReviewSourceEntryIds ?? [])].sort();
-        if (
-          expected.length === 0 ||
-          review.rows.length !== expected.length ||
-          review.rows
-            .map((row) => row.timeline_entry_id)
-            .sort()
-            .some((entryId, index) => entryId !== expected[index])
-        ) {
-          throw new AppError("AGENT_MEMORY_TURN_SOURCE_SET_INVALID", "Источники обычного хода не совпадают с пакетом проверки памяти");
-        }
-      }
       await client.query(
         `INSERT INTO memory_turn_source_sets
            (agent_session_id, agent_turn_id, application_session_id, conversation_id,
-              current_timeline_entry_id, invoking_actor_kind, invoking_actor_id, binding_hash,
-              memory_review_batch_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [input.agentSessionId, input.agentTurnId, input.applicationSessionId, input.conversationId, input.currentTimelineEntryId, input.invokingActorKind, input.invokingActorId, hash, input.memoryReviewBatchId ?? null],
+              current_timeline_entry_id, invoking_actor_kind, invoking_actor_id, binding_hash)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [input.agentSessionId, input.agentTurnId, input.applicationSessionId, input.conversationId, input.currentTimelineEntryId, input.invokingActorKind, input.invokingActorId, hash],
       );
       for (const entry of entries.rows) {
         await client.query(
@@ -282,7 +262,7 @@ export const memoryTurnSourceRepository = {
   async resolve(input: { agentSessionId: string; agentTurnId: string; sourceSequence: string | null }): Promise<ResolvedMemoryTurnSource | null> {
     const result = await database().query<SourceRow>(
       `SELECT source.conversation_id, source.timeline_entry_id, source.is_current,
-              (review_batch.batch_kind = 'background') AS is_review,
+              coalesce(review_batch.batch_kind = 'background', false) AS is_review,
                source_set.invoking_actor_kind, source_set.invoking_actor_id,
                conversation.scope::text,
               conversation.scope_partition_key::text,
@@ -343,6 +323,27 @@ export const memoryTurnSourceRepository = {
       `DELETE FROM memory_turn_source_sets
        WHERE agent_session_id = $1 AND agent_turn_id = $2`,
       [agentSessionId, agentTurnId],
+    );
+  },
+
+  /**
+   * A turn parked for a human answer is finished by the continuation that resumes it
+   * (`agent_turns.resumes_turn_id`). The source sets of the turns it resumes go with it: otherwise their
+   * timeline rows stay held from pruning until the chat session itself is deleted.
+   */
+  async releaseResumed(agentSessionId: string, agentTurnId: string): Promise<void> {
+    await database().query(
+      `WITH RECURSIVE chain (turn_id, depth) AS (
+         SELECT resumes_turn_id, 1 FROM agent_turns
+          WHERE id = $2 AND session_id = $1 AND resumes_turn_id IS NOT NULL
+         UNION ALL
+         SELECT turn.resumes_turn_id, chain.depth + 1
+           FROM chain JOIN agent_turns AS turn ON turn.id = chain.turn_id
+          WHERE turn.session_id = $1 AND turn.resumes_turn_id IS NOT NULL AND chain.depth < $3
+       )
+       DELETE FROM memory_turn_source_sets
+        WHERE agent_session_id = $1 AND agent_turn_id IN (SELECT turn_id FROM chain)`,
+      [agentSessionId, agentTurnId, MAX_RESUMED_TURNS],
     );
   },
 };

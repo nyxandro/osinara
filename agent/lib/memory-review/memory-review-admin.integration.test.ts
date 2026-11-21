@@ -26,7 +26,7 @@ async function incident() {
         actor_id = 'telegram-bot:123456', telegram_user_id = '123456', sender_is_bot = true
         WHERE id = $1`, [source.id],
     );
-    await memoryReviewRepository.observePassiveMessage({ groupId: fixture.groupId, timelineEntryId: source.id });
+    await memoryReviewRepository.observeGroupMessage({ groupId: fixture.groupId, timelineEntryId: source.id });
   }
   const [head] = await claim();
   const prepared = await memoryReviewSessionRepository.prepare(head!, new Date());

@@ -1,5 +1,5 @@
 /**
- * Terminal state for interactive and background memory-review batches.
+ * Terminal state for memory-review batches.
  *
  * Exports:
  * - `memoryReviewTerminalRepository`: replay-safe completion/failure and release of sources whose turn never started.
@@ -62,8 +62,9 @@ async function retireAbandonedReviewSession(
 ): Promise<void> {
   // Only the background review session is orphaned by an abandoned turn: `retireAbandonedTasks`
   // covers `task` kinds and retention covers retired rows, so nothing else would ever close it,
-  // and its bound sources would hold the group timeline against pruning forever. An interactive
-  // batch shares the live chat session, whose lifecycle belongs to the Telegram channel.
+  // and its bound sources would hold the group timeline against pruning forever. A historical
+  // interactive batch (before #569) shares the live chat session, whose lifecycle belongs to the
+  // Telegram channel.
   const retired = await client.query(
     `UPDATE conversation_sessions
         SET pending_operation = false, task_state = 'failed', retired_at = $2,
@@ -122,7 +123,7 @@ export async function resolveAbandonedReviewBatch(
       "SELECT 1 FROM memory_items_all WHERE source = $1 LIMIT 1",
       [`turn:${input.agentSessionId}:${input.agentTurnId}`],
     )).rowCount;
-  // The lane is locked before the successor is looked up. `prepareInteractiveTurn` commits a new
+  // The lane is locked before the successor is looked up. `observeGroupMessage` commits a new
   // batch behind a live head under that same lock, so without it a successor could appear between
   // this check and the delete below and end up unreachable from the cursor.
   await client.query(
@@ -343,11 +344,11 @@ export const memoryReviewTerminalRepository = {
   },
 
   /**
-   * A failed interactive turn keeps the lane blocked, because `(lane_id, predecessor_sequence)` is
+   * A failed review turn would keep the lane blocked, because `(lane_id, predecessor_sequence)` is
    * unique: no later batch can occupy the same cursor. That is correct only when the turn might
    * already have written memory, since a repeat would duplicate it. When the turn provably wrote
    * nothing, the batch is released instead: its sources return to the unreviewed tail and a later
-   * turn reviews them normally, so one broken model call cannot stop the group from remembering.
+   * pass reviews them normally, so one broken model call cannot stop the group from remembering.
    */
   async failRunning(input: {
     batchId: string;
@@ -446,39 +447,4 @@ export const memoryReviewTerminalRepository = {
     }
   },
 
-  async failInteractivePreparation(batchId: string, diagnosticCode: string): Promise<void> {
-    const client = await database().connect();
-    try {
-      await client.query("BEGIN");
-      // Preparation fails before the turn exists, so this batch never bound a session and wrote
-      // nothing. A `failed` row here used to sit mid-chain: `laneBlocked` only guards the cursor,
-      // while `coveredThrough` stops in front of such a row, so the next prepared turn claimed the
-      // same predecessor and every following message in the group failed on the unique index.
-      const claimed = await client.query<{ lane_id: string }>(
-        `SELECT lane_id FROM memory_review_batches
-          WHERE id = $1 AND batch_kind = 'interactive' AND status = 'running'
-            AND agent_session_id IS NULL FOR UPDATE`,
-        [batchId],
-      );
-      const batch = claimed.rows[0];
-      if (batch) {
-        await resolveAbandonedReviewBatch(client, {
-          applicationSessionId: null,
-          batchId,
-          diagnosticCode,
-          agentSessionId: null,
-          agentTurnId: null,
-          laneId: batch.lane_id,
-          notifyOwner: true,
-          now: new Date(),
-        });
-      }
-      await client.query("COMMIT");
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
-  },
 };

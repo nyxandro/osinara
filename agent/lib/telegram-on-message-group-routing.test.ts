@@ -31,6 +31,53 @@ describe("createTelegramMessageHandler group routing", () => {
     expect(result?.auth?.attributes.telegramTimelineEntryId).toBe("00000000-0000-4000-8000-000000000010");
     expect(repository.session.prepareTurn).toHaveBeenCalledOnce();
   });
+  // #569: the turn used to bind the unreviewed tail to itself and almost never saved from it, while
+  // the tail counted as reviewed. Every group message now waits for the background review.
+  it("leaves the group's unreviewed messages to the background review when the agent is addressed", async () => {
+    const repository = repositories();
+    repository.telegram.findGroup.mockResolvedValue({ familyId: "family-1", groupId: "group-1", messageMode: "addressed_only",
+      skillAllowlist: [], telegramChatId: "group-101", toolAllowlist: [], type: "family_private" });
+    repository.telegram.findIdentity.mockResolvedValue({ familyId: "family-1", role: "member", userId: "user-1" });
+    const { context } = telegramContext();
+
+    const result = await createTelegramMessageHandler(repository)(context, groupMessage(`@${BOT_USERNAME} что нового?`));
+
+    // The addressed message joins the review queue like any other, which also opens the queue of a
+    // topic where people only ever address the agent.
+    expect(repository.memoryReview.observeGroupMessage).toHaveBeenCalledOnce();
+    expect(repository.memoryReview.observeGroupMessage).toHaveBeenCalledWith({
+      groupId: "group-1", timelineEntryId: "00000000-0000-4000-8000-000000000010",
+    });
+    expect(result?.auth?.attributes).not.toHaveProperty("memoryReviewBatchId");
+    expect(result?.auth?.attributes).not.toHaveProperty("memoryReviewMode");
+    expect(result?.auth?.attributes).not.toHaveProperty("memoryReviewSourceEntryIds");
+  });
+
+  // The removed tail preparation also refreshed the people of the visible history; the turn keeps doing it.
+  it("refreshes the people of an addressed turn's visible history in order, after its own author", async () => {
+    const repository = repositories();
+    repository.telegram.findGroup.mockResolvedValue({ familyId: "family-1", groupId: "group-1", messageMode: "addressed_only",
+      skillAllowlist: [], telegramChatId: "group-101", toolAllowlist: [], type: "family_private" });
+    repository.telegram.findIdentity.mockResolvedValue({ familyId: "family-1", role: "member", userId: "user-1" });
+    const current = "00000000-0000-4000-8000-000000000010";
+    const earlier = Array.from({ length: 51 }, (_, index) => `00000000-0000-4000-8000-${String(index + 100).padStart(12, "0")}`);
+    repository.groupContext.prepare.mockResolvedValue({
+      cursorSequence: "1",
+      currentMessageEnvelope: "<current_telegram_message>test</current_telegram_message>",
+      durableMessage: "<current_telegram_message>test</current_telegram_message>",
+      omittedBeforeSequence: null,
+      visibleEntryIds: [...earlier, current],
+      visibleTimelineEntries: [],
+    });
+    const { context } = telegramContext();
+
+    await createTelegramMessageHandler(repository)(context, groupMessage(`@${BOT_USERNAME} что нового?`));
+
+    expect(repository.conversations.syncTimelineParticipants.mock.calls.map(([, ids]) => ids)).toEqual([
+      [current], earlier.slice(0, 50), earlier.slice(50),
+    ]);
+  });
+
   it("silently consumes an invitation command posted in a group", async () => {
     const repository = repositories();
     const handler = createTelegramMessageHandler(repository);
@@ -154,7 +201,7 @@ describe("createTelegramMessageHandler group routing", () => {
 
     await expect(handler(telegramContext().context, groupMessage("обычная реплика"))).resolves.toBeNull();
     expect(repository.journal.record).toHaveBeenCalledTimes(1);
-    expect(repository.memoryReview.observePassiveMessage).toHaveBeenCalledWith({
+    expect(repository.memoryReview.observeGroupMessage).toHaveBeenCalledWith({
       groupId: "group-1",
       timelineEntryId: "00000000-0000-4000-8000-000000000010",
     });
@@ -181,7 +228,7 @@ describe("createTelegramMessageHandler group routing", () => {
       message,
       expect.objectContaining({ id: "telegram-101", kind: "telegram_user" }),
     );
-    expect(repository.memoryReview.observePassiveMessage).toHaveBeenCalledTimes(1);
+    expect(repository.memoryReview.observeGroupMessage).toHaveBeenCalledTimes(1);
     expect(repository.telegram.findIdentity).not.toHaveBeenCalled();
   });
 
@@ -201,7 +248,6 @@ describe("createTelegramMessageHandler group routing", () => {
       durableMessage: "предыдущая реплика\n\nподведи итог",
       currentMessageEnvelope: "подведи итог",
       omittedBeforeSequence: null,
-      timelineOmission: null,
       visibleEntryIds: ["00000000-0000-4000-8000-000000000010"],
       visibleTimelineEntries: [],
     });
