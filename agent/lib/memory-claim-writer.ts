@@ -18,6 +18,7 @@ import {
   supersedeMemoryAttributeSlot,
 } from "./memory-attribute-slot.js";
 import { requireMemoryNeighbourDecision } from "./memory-neighbour-gate.js";
+import { requireSubjectNamedConsistently } from "./memory-subject-name-mismatch.js";
 import { prepareMemoryWriteGuards } from "./memory-write-guards.js";
 import { enforceMemoryQuota } from "./memory-quota.js";
 import {
@@ -196,6 +197,32 @@ async function replayBeforeTitleEmbedding(
   }
 }
 
+/**
+ * The same replay check for every other write, before the pre-write read of its source (#556): a
+ * repeat of a call that already wrote must get that record back, even if its source message has
+ * since left the journal or a username changed and the read would now refuse.
+ */
+async function replayBeforeGuards(
+  auth: MemoryAuthorization,
+  input: CreateMemoryInput,
+  inputHash: string,
+): Promise<ReferencedMemoryItem | null> {
+  const client = await database().connect();
+  try {
+    await client.query("BEGIN");
+    await requireCurrentWriteContext(client, auth, input.scope);
+    const replay = await existingCreate(client, auth, input, inputHash);
+    if (!replay) await fenceReviewMemoryWrite(client, input);
+    await client.query("COMMIT");
+    return replay;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function releaseReservationAfterEmbeddingFailure(
   auth: MemoryAuthorization,
   reservation: MemoryThreadCreationReservation,
@@ -253,12 +280,15 @@ export async function createMemoryClaim(
     const { replay } = preflight;
     if (replay) return replay;
     reservation = preflight.reservation;
+  } else {
+    const replay = await replayBeforeGuards(auth, input, inputHash);
+    if (replay) return replay;
   }
   // Refusals and both embeddings belong before the transaction: a refusal must cost nothing, and a
   // network call must not hold write locks for as long as the service takes to answer.
   let guards: Awaited<ReturnType<typeof prepareMemoryWriteGuards>>;
   try {
-    guards = await prepareMemoryWriteGuards(input);
+    guards = await prepareMemoryWriteGuards(auth, input);
   } catch (error) {
     // An explicit failed call may retry; a crash instead leaves a bounded lease for safe takeover.
     if (reservation) await releaseReservationAfterEmbeddingFailure(auth, reservation);
@@ -297,6 +327,7 @@ export async function createMemoryClaim(
     let prepared = input.explicitSource
       ? await prepareExplicitClaimEvidence(client, auth, input)
       : null;
+    if (prepared) await requireSubjectNamedConsistently(client, { ...prepared, content: input.content });
     if (input.thread && !prepared) {
       throw new AppError(
         "AGENT_MEMORY_THREAD_SOURCE_REQUIRED",

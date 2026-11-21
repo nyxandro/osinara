@@ -48,6 +48,7 @@ function searchFinds(...ids: string[]) {
     results: ids.map((id, index) => ({
       evidence: { russianMorphologyRank: 0.1, semanticSimilarity: 0.84, simpleLexicalRank: null },
       exactDuplicateIdentity: id, memory: item(id), score: 0.03 - index * 0.001, subjectLabel: null,
+      subjectPerson: null,
     })),
   });
 }

@@ -9,6 +9,8 @@
  *   decision the gate asks for, and the stop would otherwise send the model round in a circle.
  * - Another subject, another area of memory, and an episode are never gated.
  * - Without the embedding service the write goes through: a helper check must not block memory.
+ * - The probe of a record about a person carries that person in its header, as the stored vectors
+ *   of their records do since #556; without it every comparison would measure the header.
  *
  * The threshold is the whole design question, and it cannot be settled by taste. Measured on
  * production over 1030 active non-episode records with vectors: a gate at 0.90 would stop 360 of
@@ -20,6 +22,8 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { closeDatabase, database } from "./database.js";
+import { embedMemoryPassages } from "./memory-embedding-client.js";
+import { formatMemorySubjectPerson } from "./memory-subject-person.js";
 import type { MemoryAuthorization } from "./memory-context.js";
 import { memoryRepository } from "./memory-repository.js";
 import {
@@ -115,6 +119,20 @@ describeWithDatabase("memory neighbour gate", () => {
       [id, `[${vector(degrees).join(",")}]`, MEMORY_EMBEDDING_MODEL_VERSION],
     );
   }
+
+  it("builds the probe with the person the record is about", async () => {
+    vi.mocked(embedMemoryPassages).mockClear();
+
+    await remember({ content: "Не ест глютен", key: "gate-person" });
+
+    // As the person stands after the write's own source message made them a participant.
+    const person = (await database().query<{ name: string | null; username: string | null }>(
+      "SELECT name, username FROM memory_subject_person(NULL, $1::uuid)", [owner.userId],
+    )).rows[0]!;
+    expect(formatMemorySubjectPerson(person)).not.toBeNull();
+    expect(vi.mocked(embedMemoryPassages).mock.calls.map(([passages]) => passages))
+      .toEqual([[`${formatMemorySubjectPerson(person)}. Вид: предпочтение. Не ест глютен`]]);
+  });
 
   it("stops a paraphrase of what is already stored and names the neighbour", async () => {
     const stored = await remember({ content: "Не ест глютен", key: "gate-1" });

@@ -21,6 +21,11 @@ import {
 import { isMemoryThreadCandidateError } from "../memory-thread-write.js";
 import { logMemoryWriteEvent } from "../memory-observability.js";
 import { bindSourceAuthorLabel } from "../memory-subject-author-label.js";
+import {
+  MemorySubjectNameMismatchRefusal,
+  memorySubjectNameMismatchRefusalResult,
+} from "../memory-subject-name-mismatch.js";
+import { loadWrittenMemorySubjectPeople } from "../memory-subject-person.js";
 import { resolveMemoryTurnSource } from "../memory-turn-source.js";
 import { toModelMemory } from "../model-memory.js";
 import {
@@ -120,6 +125,9 @@ export default defineTool({
       // The stops run inside the write, so the source is resolved by the time any of them refuses.
       const deferred = error instanceof MemoryNeighbourRefusal
         ? memoryNeighbourRefusalResult(error, { editAvailable: source !== null && !source.isReview })
+        : error instanceof MemorySubjectNameMismatchRefusal
+          // The silent review has no profile cards, so a label is its only way to name the person.
+          ? memorySubjectNameMismatchRefusalResult(error, { verifiedRefAvailable: source !== null && !source.isReview })
         : error instanceof MemoryAttributeReplacementRefusal
           ? memoryAttributeReplacementRefusalResult(error)
           : isMemoryThreadCandidateError(error)
@@ -159,8 +167,10 @@ export default defineTool({
       sourceKind: source.isCurrent ? "current" : "delta",
       threadAction: item.thread?.action ?? "none",
     });
+    // Whom the write was bound to, said back: a fact that landed on the wrong person shows it at once.
+    const people = await loadWrittenMemorySubjectPeople([item.id]);
     return {
-      item: toModelMemory(item),
+      item: toModelMemory(item, people.get(item.id) ?? null),
       ...(item.supersededRefs === undefined ? {} : { supersededRefs: item.supersededRefs }),
       ...(item.thread === undefined ? {} : { thread: item.thread }),
       // The silent review has no manage_memory, so an undo hint would send it after a missing tool.

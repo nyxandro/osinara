@@ -23,6 +23,12 @@ const {
   updateMemoryByRef: vi.fn(),
 }));
 
+// No database behind these records: none of them is about a person.
+vi.mock("./memory-subject-person.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./memory-subject-person.js")>(),
+  loadMemorySubjectPeople: vi.fn(async () => new Map()),
+  loadWrittenMemorySubjectPeople: vi.fn(async () => new Map()),
+}));
 vi.mock("./memory-context.js", () => ({
   requireMemoryAuthorization: () => ({ familyId: "family-1", scopes: ["personal"] }),
 }));

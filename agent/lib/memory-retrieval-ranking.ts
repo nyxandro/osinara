@@ -56,6 +56,16 @@ export interface ScoredMemoryRetrievalResult {
   score: number;
   /** Whom or what the record is about, as indexing wrote it; read to prefer a named person. */
   subjectLabel: string | null;
+  /**
+   * The person the record is bound to, as Telegram names them now; null for a record bound to no
+   * person. `key` tells two bound people apart when neither has a username.
+   */
+  subjectPerson: {
+    key: string;
+    name: string | null;
+    telegramUserId: string | null;
+    username: string | null;
+  } | null;
 }
 
 /** The branches under the names their diagnostics already carry: `simple*`, `russian*`, `semantic*`. */

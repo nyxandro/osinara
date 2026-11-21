@@ -17,6 +17,7 @@ import {
 } from "./memory-config.js";
 import type { MemoryAuthorization, MemoryScope } from "./memory-context.js";
 import { liveMemoryReadPredicate } from "./memory-live-read-authorization.js";
+import { formatMemorySubjectPerson } from "./memory-subject-person.js";
 import type { ModelMemoryEvidence } from "./model-memory.js";
 
 export const THREAD_REF_PATTERN = /^thread_[0-9a-f]{32}$/u;
@@ -32,6 +33,8 @@ export interface ModelMemoryThreadSummary {
 }
 
 export interface ModelMemoryThreadEntry {
+  /** The person the entry's record is bound to, as in `ModelMemory.about`; absent for an outcome. */
+  about?: string;
   content: string;
   entryRef: string;
   occurredAt: string;
@@ -60,6 +63,8 @@ type ThreadReadRow = ThreadSummaryRow & { id: string } & ({
   source_observed_at: null;
   source_ref: null;
   source_type: null;
+  subject_person_name: null;
+  subject_person_username: null;
 } | {
   content: string;
   entry_ref: string;
@@ -70,6 +75,8 @@ type ThreadReadRow = ThreadSummaryRow & { id: string } & ({
   source_observed_at: Date;
   source_ref: string;
   source_type: ModelMemoryThreadEntry["sourceType"];
+  subject_person_name: string | null;
+  subject_person_username: string | null;
 });
 
 function vectorLiteral(vector: readonly number[]): string {
@@ -210,9 +217,13 @@ export const memoryThreadQueryRepository = {
                 COALESCE(source_evidence.evidence_kind, 'unresolved') AS source_evidence_kind,
                 COALESCE(source_evidence.author_label_snapshot, 'Источник не установлен')
                   AS source_author_label,
-                COALESCE(source_evidence.observed_at, entry.occurred_at) AS source_observed_at
+                COALESCE(source_evidence.observed_at, entry.occurred_at) AS source_observed_at,
+                subject_person.name AS subject_person_name,
+                subject_person.username AS subject_person_username
          FROM memory_thread_entries AS entry
          LEFT JOIN memory_items AS claim ON claim.id = entry.source_claim_id
+         LEFT JOIN LATERAL memory_subject_person(claim.subject_participant_id, claim.subject_user_id)
+           AS subject_person ON true
          LEFT JOIN memory_item_refs AS memory_ref ON memory_ref.memory_item_id = claim.id
          LEFT JOIN confirmed_outcomes AS outcome ON outcome.id = entry.source_outcome_id
          LEFT JOIN LATERAL (
@@ -237,7 +248,12 @@ export const memoryThreadQueryRepository = {
     for (const row of result.rows.slice(0, limit)) {
       if (row.entry_ref === null) continue;
       if (totalCharacters + row.content.length > THREAD_HISTORY_PAGE_MAX_CHARACTERS) break;
+      const about = formatMemorySubjectPerson({
+        name: row.subject_person_name,
+        username: row.subject_person_username,
+      });
       entries.push({
+        ...(about === null ? {} : { about }),
         content: row.content,
         entryRef: row.entry_ref,
         occurredAt: row.occurred_at.toISOString(),

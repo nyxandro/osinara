@@ -23,6 +23,7 @@ import type { MemoryKind, MemorySensitivity } from "../memory-record.js";
 import { memoryRepository } from "../memory-repository.js";
 import { MEMORY_UNDO_DENIED_MESSAGE } from "../memory-undo-repository.js";
 import { recordToolShows } from "../memory-tool-shows.js";
+import { loadMemorySubjectPeople, loadWrittenMemorySubjectPeople } from "../memory-subject-person.js";
 import { MEMORY_REF_PATTERN, toModelMemory } from "../model-memory.js";
 import {
   optionalEnum,
@@ -253,8 +254,9 @@ export default defineTool({
       const page = await memoryRepository.list(authorization, parsed.page);
       // Listing is reading too: a record the model used from a page counts like any other show.
       await recordToolShows(ctx, page.items.map((item) => item.memoryRef), "list");
+      const people = await loadMemorySubjectPeople(page.items.map((item) => item.id));
       return {
-        items: page.items.map((item) => toModelMemory(item, item.sourceEvidence)),
+        items: page.items.map((item) => toModelMemory(item, people.get(item.id) ?? null, item.sourceEvidence)),
         nextCursor: page.nextCursor,
       };
     }
@@ -265,7 +267,8 @@ export default defineTool({
         operationKey: ctx.callId,
         source: requireCurrentCorrectionSource(ctx),
       });
-      return toModelMemory(updated);
+      const people = await loadWrittenMemorySubjectPeople([updated.id]);
+      return toModelMemory(updated, people.get(updated.id) ?? null);
     }
 
     if (parsed.action === "undo") {

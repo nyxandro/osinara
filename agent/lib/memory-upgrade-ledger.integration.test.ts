@@ -188,6 +188,7 @@ const POST_V0101_MIGRATIONS = [
   "154_guest_shared_skills.sql",
   "155_scenario_sends.sql",
   "156_background_tasks.sql",
+  "157_memory_subject_person.sql",
 ] as const;
 
 const EXPECTED_R0_R7_TABLES = [
