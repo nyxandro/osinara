@@ -20,6 +20,18 @@ import {
   MEMORY_EMBEDDING_RETRY_DELAY_MILLISECONDS,
   MEMORY_EMBEDDING_TRANSIENT_ERROR_CODES,
 } from "./memory-config.js";
+import { formatMemorySubjectPerson } from "./memory-subject-person.js";
+
+/**
+ * A record whose stored vector, built by the current model, is still there. Its text never changes in
+ * place — an edit writes a new record — so that vector still describes it; a re-index that fails or is
+ * abandoned leaves it serving rather than taking the record out of semantic search (#556). `$2` is the
+ * current model version.
+ */
+const WITHOUT_CURRENT_VECTOR = `NOT EXISTS (
+  SELECT 1 FROM memory_embedding_chunks AS chunk
+  WHERE chunk.memory_item_id = memory_items.id AND chunk.embedding_model = $2
+)`;
 
 export interface MemoryEmbeddingJob {
   attempts: number;
@@ -63,7 +75,8 @@ export const memoryIndexRepository = {
       await client.query("BEGIN");
 
       // An expired lease says nothing about how the attempt ended, and an unclear ending is not
-      // permission to run it again, so it stays terminally failed and waits for an operator.
+      // permission to run it again, so it stays terminally failed and waits for an operator. A record
+      // that already had a vector keeps serving with it meanwhile.
       const expired = await client.query<{ memory_item_id: string }>(
         `UPDATE memory_embedding_jobs
          SET status = 'failed', lease_token = NULL, lease_expires_at = NULL,
@@ -74,8 +87,8 @@ export const memoryIndexRepository = {
       if (expired.rows.length > 0) {
         await client.query(
           `UPDATE memory_items SET embedding_status = 'failed'
-           WHERE id = ANY($1::uuid[])`,
-          [expired.rows.map((row) => row.memory_item_id)],
+           WHERE id = ANY($1::uuid[]) AND ${WITHOUT_CURRENT_VECTOR}`,
+          [expired.rows.map((row) => row.memory_item_id), MEMORY_EMBEDDING_MODEL_VERSION],
         );
       }
 
@@ -89,16 +102,20 @@ export const memoryIndexRepository = {
         lease_token: string;
         memory_item_id: string;
         subject_label: string | null;
+        subject_person_name: string | null;
+        subject_person_username: string | null;
       }>(
         `WITH candidates AS (
            SELECT job.memory_item_id
            FROM memory_embedding_jobs AS job
+           JOIN memory_items_all AS queued ON queued.id = job.memory_item_id
            WHERE (job.status = 'pending' AND job.attempts = 0)
               OR (job.status = 'failed' AND job.attempts < $3
                   AND job.last_error_code = ANY($4::text[])
                   AND job.updated_at < now() - ($5::text || ' milliseconds')::interval)
-           ORDER BY job.created_at, job.memory_item_id
-           FOR UPDATE SKIP LOCKED
+           -- A record without a vector first: a re-index of thousands must not hold a new fact back.
+           ORDER BY queued.embedding_status = 'indexed', job.created_at, job.memory_item_id
+           FOR UPDATE OF job SKIP LOCKED
            LIMIT $1
          )
          UPDATE memory_embedding_jobs AS job
@@ -109,7 +126,11 @@ export const memoryIndexRepository = {
          WHERE job.memory_item_id = candidates.memory_item_id
            AND item.id = job.memory_item_id
          RETURNING job.memory_item_id, job.attempts, job.lease_token::text, item.content,
-                   item.kind, item.subject_label`,
+                   item.kind, item.subject_label,
+                   (SELECT person.name FROM memory_subject_person(
+                      item.subject_participant_id, item.subject_user_id) AS person) AS subject_person_name,
+                   (SELECT person.username FROM memory_subject_person(
+                      item.subject_participant_id, item.subject_user_id) AS person) AS subject_person_username`,
         [
           limit,
           leaseMilliseconds,
@@ -125,7 +146,11 @@ export const memoryIndexRepository = {
         kind: row.kind,
         leaseToken: row.lease_token,
         memoryItemId: row.memory_item_id,
-        subjectLabel: row.subject_label,
+        // The person a record is bound to is named as they are now; the text label is for the rest.
+        subjectLabel: formatMemorySubjectPerson({
+          name: row.subject_person_name,
+          username: row.subject_person_username,
+        }) ?? row.subject_label,
       }));
     } catch (error) {
       await client.query("ROLLBACK");
@@ -233,10 +258,9 @@ export const memoryIndexRepository = {
         );
       }
       await client.query(
-        "UPDATE memory_items SET embedding_status = 'failed' WHERE id = $1",
-        [memoryItemId],
+        `UPDATE memory_items SET embedding_status = 'failed' WHERE id = $1 AND ${WITHOUT_CURRENT_VECTOR}`,
+        [memoryItemId, MEMORY_EMBEDDING_MODEL_VERSION],
       );
-      await client.query("DELETE FROM memory_embedding_chunks WHERE memory_item_id = $1", [memoryItemId]);
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");

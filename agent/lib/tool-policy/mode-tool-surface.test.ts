@@ -42,6 +42,7 @@ vi.mock("../attachments/telegram-attachment-materializer.js", () => ({ materiali
 
 import { FAMILY_ONLY_TOOL_NAMES, OWNER_ONLY_TOOL_NAMES, PRIVATE_ONLY_TOOL_NAMES, TRUSTED_MODE_TOOL_NAMES, buildModeToolSurface, buildSubagentToolSurface } from "./mode-tool-surface.js";
 import { agentTool } from "../../runtime/tools/delegate.js";
+import remember, { familyGroupRemember, groupRememberLead } from "../tools/remember.js";
 import { isGroupIdDisconnected } from "../group-connection/group-connection-repository.js";
 import { bash as nativeBash, glob as nativeGlob, grep as nativeGrep, readFile as nativeReadFile, writeFile as nativeWriteFile } from "../../runtime/tools/defaults.js";
 import { TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES } from "../turn-interjection/turn-interjection-surface.js";
@@ -134,6 +135,20 @@ describe("trusted mode tool surfaces", () => {
       [...TRUSTED_MODE_TOOL_NAMES, ...FAMILY_ONLY_TOOL_NAMES, ...TURN_INTERJECTION_FRAMEWORK_TOOL_NAMES, ...UNWRAPPED_BUILT_IN_NAMES].sort(),
     );
     expect(names({ environment: "family" })).not.toContain("manage_external_group_schedule");
+  });
+
+  // #569: the silent review reads every group message, so a group turn is told to save on request only.
+  it("describes remember for a group turn as saving on request and keeps the private chat's own description", () => {
+    const familyRemember = buildModeToolSurface({ environment: "family" }).remember!;
+    const privateRemember = buildModeToolSurface({ environment: "private", owner: true }).remember!;
+    const externalRemember = buildModeToolSurface({
+      capabilities: new Set(["remember"]), environment: "external",
+    }).remember!;
+
+    expect(familyRemember.description).toBe(familyGroupRemember.description);
+    expect(externalRemember.description).toBe(groupRememberLead("the current external group's memory"));
+    expect(privateRemember.description).toBe(remember.description);
+    expect(privateRemember.description).not.toBe(familyRemember.description);
   });
 
   it("exposes the run-bound history reader only to a scheduled external turn", () => {

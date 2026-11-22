@@ -2,7 +2,7 @@
  * Durable PostgreSQL lifecycle for group memory-review lanes and batches.
  *
  * Exports:
- * - `MemoryReviewBatchSummary`: newly created background or interactive source range.
+ * - `MemoryReviewBatchSummary`: newly created background source range.
  * - `MemoryReviewClaim`: fully authorized leased batch ready for its internal turn.
  * - `memoryReviewRepository`: lane initialization, batching, leasing, and terminal transitions.
  */
@@ -12,7 +12,6 @@ import { AppError } from "../app-error.js";
 import { database } from "../database.js";
 import type { TelegramGroupJournalEntry } from "../telegram-group-journal-context.js";
 import { MEMORY_REVIEW_BATCH_SIZE } from "./memory-review-config.js";
-import { formatMemoryReviewBatchPrompt } from "./memory-review-prompt.js";
 import { memoryReviewTerminalRepository } from "./memory-review-terminal-repository.js";
 
 export interface MemoryReviewBatchSummary {
@@ -21,7 +20,7 @@ export interface MemoryReviewBatchSummary {
   messageThreadId: string | null;
   sourceCount: number;
   sourceEntryIds: string[];
-  status: "pending" | "running";
+  status: "pending";
   throughSequence: string;
 }
 
@@ -60,9 +59,6 @@ interface SourceRow {
   sent_at: Date;
   sequence_id: string;
 }
-
-// A turn parks for each human answer it waits on; a review turn waits on a handful at most.
-const MAX_CONTINUATION_DEPTH = 64;
 
 const SOURCE_COLUMNS = `message.id, message.sequence_id::text, message.actor_kind,
   message.actor_id, message.message_thread_id::text, message.sender_username,
@@ -169,12 +165,9 @@ async function sourceRows(
 async function insertBatch(
   client: PoolClient,
   input: {
-    applicationSessionId: string | null;
-    batchKind: "background" | "interactive";
     lane: LaneRow;
     predecessorSequence: string;
     sources: readonly SourceRow[];
-    preparationEntryId?: string;
   },
 ): Promise<MemoryReviewBatchSummary> {
   const first = input.sources[0];
@@ -185,18 +178,14 @@ async function insertBatch(
       "Для проверки памяти не найдено сообщений",
     );
   }
-  const status = input.batchKind === "background" ? "pending" : "running";
   const inserted = await client.query<{ id: string }>(
     `INSERT INTO memory_review_batches
        (lane_id, conversation_id, batch_kind, status, predecessor_sequence,
-         from_sequence, through_sequence, source_count, application_session_id, started_at, preparation_entry_id)
-     VALUES ($1, $2, $3::memory_review_batch_kind, $4::memory_review_batch_status,
-             $5, $6, $7, $8, $9,
-              CASE WHEN $3::memory_review_batch_kind = 'interactive' THEN now() ELSE NULL END, $10)
+         from_sequence, through_sequence, source_count)
+     VALUES ($1, $2, 'background', 'pending', $3, $4, $5, $6)
      RETURNING id`,
-    [input.lane.id, input.lane.conversation_id, input.batchKind, status,
-      input.predecessorSequence, first.sequence_id, last.sequence_id, input.sources.length,
-       input.applicationSessionId, input.preparationEntryId ?? null],
+    [input.lane.id, input.lane.conversation_id, input.predecessorSequence,
+      first.sequence_id, last.sequence_id, input.sources.length],
   );
   const batchId = inserted.rows[0]!.id;
   await client.query(
@@ -213,7 +202,7 @@ async function insertBatch(
     messageThreadId: input.lane.message_thread_id,
     sourceCount: input.sources.length,
     sourceEntryIds: input.sources.map((source) => source.id),
-    status,
+    status: "pending",
     throughSequence: last.sequence_id,
   };
 }
@@ -234,7 +223,12 @@ export const memoryReviewRepository = {
     );
   },
 
-  async observePassiveMessage(input: {
+  /**
+   * Every group message joins its lane's review queue, addressed or not (#569): this opens the lane
+   * of a new chat or topic and cuts a batch the moment 50 messages wait. The dispatcher sees only
+   * lanes that exist, so a message never observed would never be reviewed.
+   */
+  async observeGroupMessage(input: {
     groupId: string;
     timelineEntryId: string;
   }): Promise<MemoryReviewBatchSummary | null> {
@@ -281,102 +275,6 @@ export const memoryReviewRepository = {
         return null;
       }
       const batch = await insertBatch(client, {
-        applicationSessionId: null,
-        batchKind: "background",
-        lane,
-        predecessorSequence: predecessor,
-        sources,
-      });
-      await client.query("COMMIT");
-      return batch;
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
-  },
-
-  async prepareInteractiveTurn(input: {
-    applicationSessionId: string;
-    groupId: string;
-    timelineEntryId: string;
-  }): Promise<MemoryReviewBatchSummary | null> {
-    const client = await database().connect();
-    try {
-      await client.query("BEGIN");
-      const message = await client.query<{
-        conversation_id: string;
-        message_thread_id: string | null;
-        sequence_id: string;
-      }>(
-        `SELECT conversation_id, message_thread_id::text, sequence_id::text
-           FROM telegram_group_messages
-          WHERE id = $1 AND group_id = $2
-            AND actor_kind IN ('user', 'telegram_bot') FOR SHARE`,
-        [input.timelineEntryId, input.groupId],
-      );
-      const current = message.rows[0];
-      if (!current) throw new AppError(
-        "AGENT_MEMORY_REVIEW_SOURCE_INVALID",
-        "Текущее сообщение не подходит для проверки памяти",
-      );
-      await lockConversation(client, current.conversation_id);
-      const lane = await laneForUpdate(client, current.conversation_id, current.message_thread_id, "0");
-      const prepared = await client.query<{ id: string; through_sequence: string; source_count: number }>(
-        `SELECT id,through_sequence::text,source_count FROM memory_review_batches WHERE lane_id=$1
-          AND application_session_id=$2 AND preparation_entry_id=$3 AND batch_kind='interactive'
-          AND status='running' AND agent_turn_id IS NULL FOR UPDATE`, [lane.id,input.applicationSessionId,input.timelineEntryId]);
-      if (prepared.rows[0]) {
-        const batch = prepared.rows[0];
-        const sources = await client.query<SourceRow>(`SELECT ${SOURCE_COLUMNS} FROM memory_review_batch_sources source
-          JOIN telegram_group_messages message ON message.id=source.timeline_entry_id WHERE source.batch_id=$1 ORDER BY source.timeline_sequence`, [batch.id]);
-        if (sources.rows.length !== batch.source_count) throw new AppError("AGENT_MEMORY_REVIEW_SOURCE_SET_INVALID", "Нарушен состав сохранённого пакета памяти");
-        await client.query("COMMIT");
-        return { batchId: batch.id, entries: sources.rows.map(projectSource), messageThreadId: lane.message_thread_id,
-          sourceCount: batch.source_count, sourceEntryIds: sources.rows.map(source => source.id), status: "running" as const,
-          throughSequence: batch.through_sequence };
-      }
-      if (await laneBlocked(client, lane)) {
-        await client.query("COMMIT");
-        return null;
-      }
-      let predecessor = await coveredThrough(client, lane);
-      let sources = await sourceRows(client, {
-        conversationId: current.conversation_id,
-        limit: MEMORY_REVIEW_BATCH_SIZE + 1,
-        messageThreadId: current.message_thread_id,
-        throughSequence: predecessor,
-        upperSequence: current.sequence_id,
-      });
-      // A Telegram request may beat minute recovery after a crash. Materialize every complete
-      // portion first, then bind only the final short tail to this ordinary agent turn.
-      while (sources.length > MEMORY_REVIEW_BATCH_SIZE) {
-        const completeSources = sources.slice(0, MEMORY_REVIEW_BATCH_SIZE);
-        const background = await insertBatch(client, {
-          applicationSessionId: null,
-          batchKind: "background",
-          lane,
-          predecessorSequence: predecessor,
-          sources: completeSources,
-        });
-        predecessor = background.throughSequence;
-        sources = await sourceRows(client, {
-          conversationId: current.conversation_id,
-          limit: MEMORY_REVIEW_BATCH_SIZE + 1,
-          messageThreadId: current.message_thread_id,
-          throughSequence: predecessor,
-          upperSequence: current.sequence_id,
-        });
-      }
-      if (sources.length === 0) {
-        await client.query("COMMIT");
-        return null;
-      }
-      const batch = await insertBatch(client, {
-        applicationSessionId: input.applicationSessionId,
-        batchKind: "interactive",
-        preparationEntryId: input.timelineEntryId,
         lane,
         predecessorSequence: predecessor,
         sources,
@@ -424,35 +322,6 @@ export const memoryReviewRepository = {
       "AGENT_MEMORY_REVIEW_TURN_BINDING_INVALID",
       "Не удалось связать проверку памяти с текущим ходом",
     );
-  },
-
-  /**
-   * The batch a turn reviews, with the turn it is bound to. A turn parked for a human answer is
-   * continued by a new turn under the authorization of that answer, so the batch marker of the
-   * message that started the review is no longer in context: the batch is found through the turns
-   * the continuation resumes (`agent_turns.resumes_turn_id`), nearest first. The binding written
-   * at turn start is durable, which makes it the only source terminal handling can trust. The
-   * status is deliberately not filtered: a replayed terminal event must still recognize a review.
-   */
-  async batchForTurn(input: {
-    agentSessionId: string;
-    agentTurnId: string;
-  }): Promise<{ batchId: string; agentTurnId: string } | null> {
-    const result = await database().query<{ id: string; agent_turn_id: string }>(
-      `WITH RECURSIVE chain (turn_id, depth) AS (
-         SELECT $2::text, 0
-         UNION ALL
-         SELECT turn.resumes_turn_id, chain.depth + 1
-           FROM chain JOIN agent_turns turn ON turn.id = chain.turn_id
-          WHERE turn.session_id = $1 AND turn.resumes_turn_id IS NOT NULL AND chain.depth < $3
-       )
-       SELECT batch.id, batch.agent_turn_id FROM chain
-         JOIN memory_review_batches batch ON batch.agent_session_id = $1 AND batch.agent_turn_id = chain.turn_id
-        ORDER BY chain.depth LIMIT 1`,
-      [input.agentSessionId, input.agentTurnId, MAX_CONTINUATION_DEPTH],
-    );
-    const row = result.rows[0];
-    return row === undefined ? null : { batchId: row.id, agentTurnId: row.agent_turn_id };
   },
 
 };

@@ -287,7 +287,7 @@ describeWithDatabase("R3 external projection retrieval", () => {
       "После ухода Анна выбирает проектор Дельта",
     ]));
     expect(privateContents).not.toContain("Пётр использует проектор Бета");
-    const safeModels = bothEnabled.map((result) => toModelMemory(result.memory, result.sourceEvidence));
+    const safeModels = bothEnabled.map((result) => toModelMemory(result.memory, null, result.sourceEvidence));
     const safe = JSON.stringify(safeModels);
     expect(safeModels).toEqual(expect.arrayContaining([
       // Пояснение вида evidence живёт один раз в шапке блока, в записи остаётся только kind.

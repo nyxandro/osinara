@@ -40,7 +40,7 @@ import listGroupHistory from "../tools/list_group_history.js";
 import manageBehaviorPreference from "../tools/manage_behavior_preference.js";
 import { manageMemoryPresentation } from "../tools/manage_memory.js";
 import { manageMemoryThreadPresentation, MEMORY_THREAD_READING_ACTIONS } from "../tools/manage_memory_thread.js";
-import remember from "../tools/remember.js";
+import remember, { familyGroupRemember, groupRememberLead } from "../tools/remember.js";
 import readScheduledGroupHistory from "../tools/read_scheduled_group_history.js";
 import readProfileView from "../tools/read_profile_view.js";
 import searchMemories from "../tools/search_memories.js";
@@ -144,9 +144,9 @@ const EXTERNAL_DIRECT_TOOL_PRESENTATION: Readonly<
       })
       .strict(),
   },
+  // The silent review reads every message of the group; the turn saves only on request (#569).
   remember: {
-    description:
-      "Save one specific fact from the current message or from one verified sourceSequence of the visible delta into the current external group's memory: a fact, a preference, first-hand experience, an event, a plan or a useful link with context. Do not require special importance or a request to remember; do not save guesses.",
+    description: groupRememberLead("the current external group's memory"),
     inputSchema: externalRememberInputSchema,
   },
 };
@@ -266,6 +266,8 @@ const TRUSTED_APPLICATION_SURFACES: Readonly<Record<TrustedSurfaceKey, ToolMap>>
   family: wrapModelFacingToolMap({
     ...TRUSTED_MODE_TOOLS,
     ...FAMILY_ONLY_TOOLS,
+    // The silent review reads every message of the group; the turn saves only on request (#569).
+    remember: familyGroupRemember as unknown as AnyToolDefinition,
   }),
   owner: wrapModelFacingToolMap({
     ...TRUSTED_MODE_TOOLS,

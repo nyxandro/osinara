@@ -3,7 +3,7 @@
  *
  * Exports:
  * - `MEMORY_RETRIEVAL_OTHER_PERSON_FACTOR`: how much a record about another person is lowered.
- * - `namedPeople`: the handles of the people a question names, among the subjects it found.
+ * - `namedPeople`: the people a question names, among the subjects it found, by their keys.
  * - `preferNamedPeople`: the same ranked records with other people's records lowered.
  *
  * «Что Нина говорила про Стаю?»: Nina never mentioned it, Timur did, and his record took a place
@@ -12,9 +12,18 @@
  * Мия», «Ilya Kruglov — система памяти», «Групповой чат» — the bot's own name is in most group
  * questions, and on 153 live turns the filter cost eight useful records and one turn's hit.
  *
- * So only a person counts, recognised by the shape the indexing writes for one — «Имя Фамилия
- * (handle)» with a Telegram handle — and another person's record is lowered, not removed: when the
- * named person has nothing on the topic, the neighbour is still there, below.
+ * So only a person counts, and another person's record is lowered, not removed: when the named
+ * person has nothing on the topic, the neighbour is still there, below. A record bound to a person
+ * is recognised by the binding (#556): the server knows the person's current name and username, and
+ * most bound records carry no label at all. A record without a binding is recognised by the shape the
+ * indexing writes for one — «Имя Фамилия (handle)» with a Telegram handle.
+ *
+ * A person's key is their username, so a label and a binding naming one handle are one person; a
+ * bound person without a username is keyed by the binding itself and recognised by name only.
+ *
+ * The asker's own records are never lowered. «Что я обещал Нине?» names Нина, and the asker's own
+ * record — bound to them, since nearly every record is bound — is the answer; the asker says «я», not
+ * their name. Before #556 these records counted as nobody and were never lowered either.
  */
 import type { ScoredMemoryRetrievalResult } from "./memory-retrieval-ranking.js";
 
@@ -26,8 +35,11 @@ export const MEMORY_RETRIEVAL_OTHER_PERSON_FACTOR = 0.25;
 // or a group of subjects, not one person.
 const PERSON_LABEL = /^\s*([^(—/,]+?)\s*\(@?([A-Za-z0-9_]{3,})\)\s*$/u;
 
+export type RankedSubject = Pick<ScoredMemoryRetrievalResult, "subjectLabel" | "subjectPerson">;
+
 interface Person {
-  handle: string;
+  handle: string | null;
+  key: string;
   names: string[];
 }
 
@@ -35,10 +47,22 @@ function words(text: string): string[] {
   return text.toLocaleLowerCase("ru-RU").replaceAll("ё", "е").match(/[\p{L}\p{N}_]+/gu) ?? [];
 }
 
-function person(label: string | null): Person | null {
-  const match = label === null ? null : PERSON_LABEL.exec(label);
+function names(text: string): string[] {
+  return words(text).filter((name) => name.length >= 3);
+}
+
+function person(subject: RankedSubject): Person | null {
+  const bound = subject.subjectPerson;
+  if (bound !== null) {
+    const handle = bound.username === null ? "" : bound.username.trim().toLowerCase();
+    const boundNames = bound.name === null ? [] : names(bound.name);
+    if (!handle && boundNames.length === 0) return null;
+    return { handle: handle || null, key: handle || bound.key, names: boundNames };
+  }
+  const match = subject.subjectLabel === null ? null : PERSON_LABEL.exec(subject.subjectLabel);
   if (match === null) return null;
-  return { handle: match[2]!.toLowerCase(), names: words(match[1]!).filter((name) => name.length >= 3) };
+  const handle = match[2]!.toLowerCase();
+  return { handle, key: handle, names: names(match[1]!) };
 }
 
 /**
@@ -54,15 +78,15 @@ function namesPerson(token: string, name: string): boolean {
   return ending.length <= 3 && /^[аеиоуыюяйь]*(?:м|х|ми)?$/u.test(ending);
 }
 
-export function namedPeople(query: string, subjectLabels: readonly (string | null)[]): Set<string> {
+export function namedPeople(query: string, subjects: readonly RankedSubject[]): Set<string> {
   const tokens = words(query);
   const named = new Set<string>();
-  for (const label of subjectLabels) {
-    const candidate = person(label);
+  for (const subject of subjects) {
+    const candidate = person(subject);
     if (candidate === null) continue;
-    if (tokens.includes(candidate.handle) ||
+    if ((candidate.handle !== null && tokens.includes(candidate.handle)) ||
       candidate.names.some((name) => tokens.some((token) => namesPerson(token, name)))) {
-      named.add(candidate.handle);
+      named.add(candidate.key);
     }
   }
   return named;
@@ -72,13 +96,16 @@ export function namedPeople(query: string, subjectLabels: readonly (string | nul
 export function preferNamedPeople(
   query: string,
   ranked: readonly ScoredMemoryRetrievalResult[],
+  /** The Telegram user asking, whose own records stay where they are; null for a run with no asker. */
+  askerTelegramUserId: string | null,
 ): ScoredMemoryRetrievalResult[] {
-  const named = namedPeople(query, ranked.map((result) => result.subjectLabel));
+  const named = namedPeople(query, ranked);
   if (named.size === 0) return [...ranked];
   return ranked
     .map((result, index) => {
-      const subject = person(result.subjectLabel);
-      const other = subject !== null && !named.has(subject.handle);
+      const subject = person(result);
+      const asker = askerTelegramUserId !== null && result.subjectPerson?.telegramUserId === askerTelegramUserId;
+      const other = subject !== null && !named.has(subject.key) && !asker;
       return { index, result: other ? { ...result, score: result.score * MEMORY_RETRIEVAL_OTHER_PERSON_FACTOR } : result };
     })
     // Equal scores keep the statement's own order, which already broke its ties.

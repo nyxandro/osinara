@@ -10,8 +10,6 @@ import { sessionRepository } from "./sessions/session-repository.js";
 import { groupTimelineCursorRepository } from "./sessions/group-timeline-cursor-repository.js";
 import { refreshTelegramReactionPolicy } from "./telegram-reaction-policy.js";
 import { isScheduledSession } from "./agent-schedules/scheduled-session.js";
-import { memoryReviewBatchId } from "./memory-review/memory-review-session.js";
-import { memoryReviewRepository } from "./memory-review/memory-review-repository.js";
 import { bindMemoryTurnSources } from "./memory-turn-source.js";
 import { proactiveDeliveryRepository } from "./proactive-deliveries/proactive-delivery-repository.js";
 import { admitScheduledAgentTurn } from "./agent-schedules/agent-schedule-recovery.js";
@@ -28,13 +26,6 @@ export const prepareTelegramTurn: TelegramTurnEvents["turn.started"] = async (_d
   await sessionRepository.bindAgentSession(sessionId, ctx.session.id);
   // Provider reaction policy is refreshed for later instruction resolution, never guessed.
   if (!isScheduledSession(ctx)) await refreshTelegramReactionPolicy(channel.telegram);
-  const reviewBatchId = memoryReviewBatchId(ctx);
-  if (reviewBatchId) {
-    await memoryReviewRepository.bindAgentTurn({
-      applicationSessionId: sessionId, batchId: reviewBatchId,
-      agentSessionId: ctx.session.id, agentTurnId: ctx.session.turn.id,
-    });
-  }
   await bindMemoryTurnSources(ctx);
   const attributes = ctx.session.auth.current?.attributes;
   const timelineSequence = attributes?.telegramTimelineSequence;

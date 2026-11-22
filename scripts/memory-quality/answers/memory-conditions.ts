@@ -32,6 +32,7 @@ import {
 } from "../../../agent/lib/memory-retrieval.js";
 import type { ModelMemory } from "../../../agent/lib/model-memory.js";
 import type { MemoryThreadContext } from "../../../agent/lib/memory-thread-context.js";
+import { loadMemorySubjectPeople } from "../../../agent/lib/memory-subject-person.js";
 import { toModelMemory } from "../../../agent/lib/model-memory.js";
 import { applyTurnMemoryBudget } from "../../../agent/lib/prompt/turn-memory-budget.js";
 import { formatTurnMemoryContext } from "../../../agent/lib/prompt/turn-memory-context.js";
@@ -73,15 +74,19 @@ export async function selectionBlock(auth: MemoryAuthorization, query: string): 
 
 export async function idealSelectionBlock(auth: MemoryAuthorization, memoryRefs: readonly string[]): Promise<MemoryBlock> {
   const wanted = new Set(memoryRefs);
-  const found = new Map<string, ModelMemory>();
+  const items = new Map<string, Awaited<ReturnType<typeof memoryListRepository.list>>["items"][number]>();
   let cursor: string | undefined;
   do {
     const page = await memoryListRepository.list(auth, { cursor, limit: MEMORY_LIST_MAX_LIMIT });
     for (const item of page.items) {
-      if (wanted.has(item.memoryRef)) found.set(item.memoryRef, toModelMemory(item, item.sourceEvidence));
+      if (wanted.has(item.memoryRef)) items.set(item.memoryRef, item);
     }
     cursor = page.nextCursor ?? undefined;
-  } while (cursor !== undefined && found.size < wanted.size);
+  } while (cursor !== undefined && items.size < wanted.size);
+  // The ideal block is shown the way a turn shows records, with the person each one is about.
+  const people = await loadMemorySubjectPeople([...items.values()].map((item) => item.id));
+  const found = new Map<string, ModelMemory>([...items].map(([memoryRef, item]) =>
+    [memoryRef, toModelMemory(item, people.get(item.id) ?? null, item.sourceEvidence)]));
   const missing = memoryRefs.filter((memoryRef) => !found.has(memoryRef));
   if (missing.length > 0) {
     throw new AppError(

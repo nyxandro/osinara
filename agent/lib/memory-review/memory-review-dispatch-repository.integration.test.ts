@@ -40,7 +40,7 @@ async function claimBackgroundBatch() {
       groupId: fixture.groupId,
       sequence,
     });
-    await memoryReviewRepository.observePassiveMessage({
+    await memoryReviewRepository.observeGroupMessage({
       groupId: fixture.groupId,
       timelineEntryId: source.id,
     });

@@ -7,9 +7,12 @@
  * - Sequence resolution returns only a source captured for that exact agent session and turn.
  * - Rebinding the same turn with a different visible set fails instead of widening access.
  * - A bot-invoked turn binds against its own actor kind and Telegram id.
+ * - A continuation after a human answer releases the source sets of the turns it resumes (#569).
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
+import { createSessionHistory } from "../runtime/history/history-repository.js";
+import { newSessionId, newTurnId } from "../runtime/ids.js";
 import { closeDatabase, database } from "./database.js";
 import { createMainAgentMemoryFixture } from "./memory-agent-write.integration-fixtures.js";
 import { memoryRepository } from "./memory-repository.js";
@@ -154,6 +157,51 @@ describeWithDatabase("turn-bound memory source repository", () => {
       agentTurnId: binding.agentTurnId,
       sourceSequence: "2",
     })).resolves.toBeNull();
+  });
+
+  // The parked group turn used to be released with its review batch; with no batch the chain releases it.
+  it("releases the source sets of the turns a continuation resumes, and nothing else", async () => {
+    const fixture = await createMainAgentMemoryFixture();
+    const appSession = (await database().query<{ id: string }>(
+      `INSERT INTO conversation_sessions
+         (thread_id, generation, family_id, group_id, scope, kind, conversation_key,
+          continuation_token, started_at, last_activity_at)
+       VALUES (gen_random_uuid(), 0, $1, $2, 'family', 'canonical', 'resumed-chain',
+               'resumed-chain:0', now(), now()) RETURNING id`,
+      [fixture.familyId, fixture.groupId],
+    )).rows[0]!.id;
+    const runtimeSession = newSessionId();
+    await createSessionHistory(database(), {
+      applicationSessionId: appSession, channelState: null,
+      compaction: { inputTokens: null, promptMessageCount: null }, history: [], initiatorAuth: null, parentSessionId: null,
+      sandbox: null, sessionId: runtimeSession, source: "runtime", todo: null,
+    });
+    const [parked, answered, answeredAgain, unrelated] = [newTurnId(), newTurnId(), newTurnId(), newTurnId()];
+    for (const [sequence, id, resumes] of [
+      [0, parked, null], [1, answered, parked], [2, answeredAgain, answered], [3, unrelated, null],
+    ] as const) {
+      await database().query(
+        `INSERT INTO agent_turns (id, session_id, sequence, kind, status, resumes_turn_id, auth, channel, input, completed_at)
+         VALUES ($1, $2, $3, 'conversation', 'completed', $4, '{}', '{"kind":"telegram"}', '{"context":[]}', now())`,
+        [id, runtimeSession, sequence, resumes],
+      );
+    }
+    for (const turn of [parked, answered, answeredAgain, unrelated]) {
+      await memoryTurnSourceRepository.bind({
+        applicationSessionId: appSession, conversationId: fixture.conversationId,
+        currentTimelineEntryId: fixture.timelineEntryId, agentSessionId: runtimeSession, agentTurnId: turn,
+        invokingActorId: "agent-memory-author", invokingActorKind: "telegram_user",
+        visibleTimelineEntryIds: [fixture.timelineEntryId],
+      });
+    }
+
+    await memoryTurnSourceRepository.releaseResumed(runtimeSession, answeredAgain);
+
+    const remaining = await database().query<{ agent_turn_id: string }>(
+      "SELECT agent_turn_id FROM memory_turn_source_sets WHERE agent_session_id = $1 ORDER BY agent_turn_id",
+      [runtimeSession],
+    );
+    expect(remaining.rows.map((row) => row.agent_turn_id)).toEqual([answeredAgain, unrelated].sort());
   });
 
   it("binds a turn invoked by another bot to that bot's own identity", async () => {

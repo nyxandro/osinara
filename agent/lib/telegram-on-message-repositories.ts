@@ -78,10 +78,7 @@ export interface TelegramMessageRepositories {
   groupContext: { prepare: TelegramGroupTurnContextPreparer };
   hitl: Pick<TelegramHitlApprovalRepository, "authorizeReply">;
   journal: Pick<TelegramGroupJournalRepository, "record">;
-  memoryReview: Pick<
-    typeof memoryReviewRepository,
-    "failInteractivePreparation" | "observePassiveMessage" | "prepareInteractiveTurn"
-  >;
+  memoryReview: Pick<typeof memoryReviewRepository, "observeGroupMessage">;
   proactiveDeliveries: Pick<typeof proactiveDeliveryRepository, "listPendingContext">;
   session: Pick<typeof sessionRepository, "hasRoute" | "prepareTurn">;
   telegram: TelegramRepository;

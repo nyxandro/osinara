@@ -66,7 +66,10 @@ const RUN_MARKER_TABLE = "memory_golden_eval_run";
 // Reviewed 08.10.2026: the seventeenth parameter is the branch agreement factor, a multiplier on
 // the fused rank that cuts nothing, and the repeat filter reads only the selection's own shows
 // (#339) — neither is a gate, so GATES stay complete.
-const REVIEWED_STATEMENT_SHA256 = "0194f54b41172bb07dc9bc28a0f76dfdfd636496b7b78724ecdaa17cec06660d";
+// Reviewed 20.11.2026: the statement only adds the person a record is bound to, joined by
+// `memory_subject_person` for #556 (name, username, Telegram id); no parameter, threshold or filter
+// changed.
+const REVIEWED_STATEMENT_SHA256 = "8f90a3c971367183733ff4a6c6a5ba013c941f42eff404b4c2aa20c057f0f976";
 const REVIEWED_PARAMETER_COUNT = 17;
 
 /** Where the gates sit in the product's parameter list, with the value each must hold there. */

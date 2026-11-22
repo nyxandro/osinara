@@ -9,6 +9,11 @@ vi.mock("./memory-embedding-client.js", () => ({
 }));
 vi.mock("./memory-retrieval-repository.js", () => ({ memoryRetrievalRepository: { searchAuthorized: mocks.search } }));
 vi.mock("./memory-thread-brief-repository.js", () => ({ memoryThreadBriefRepository: { activate: mocks.threads } }));
+// The selected records stand for search results with no database behind them; none is about a person.
+vi.mock("./memory-subject-person.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./memory-subject-person.js")>(),
+  loadMemorySubjectPeople: vi.fn(async () => new Map()),
+}));
 import { retrieveMemoryTurnContext, retrieveRelevantMemories } from "./memory-retrieval.js";
 import { memoryFailureCode } from "./memory-context-failure.js";
 

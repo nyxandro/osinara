@@ -69,11 +69,15 @@ export type MemoryNeighbourProbe = readonly number[] | null;
  * comparison would be measuring the header rather than the text. Only the opening chunk is used: a
  * rephrasing of a record shows there, and the whole check may spend one passage, not one per piece.
  */
-export function memoryNeighbourProbePassage(input: {
-  content: string;
-  explicitSource?: { subject: { kind: string; label?: string } };
-  kind: MemoryKind;
-}): string | null {
+export function memoryNeighbourProbePassage(
+  input: {
+    content: string;
+    explicitSource?: { subject: { kind: string; label?: string } };
+    kind: MemoryKind;
+  },
+  /** The person the record will be bound to, as the index names them in stored headers (#556). */
+  subjectPerson: string | null,
+): string | null {
   if (!memoryNeighbourGateApplies(input.kind)) return null;
   const opening = chunkMemoryContent(input.content)[0];
   if (opening === undefined) return null;
@@ -81,7 +85,7 @@ export function memoryNeighbourProbePassage(input: {
     kind: input.kind,
     subjectLabel: input.explicitSource?.subject.kind === "label"
       ? input.explicitSource.subject.label ?? null
-      : null,
+      : subjectPerson,
   });
 }
 

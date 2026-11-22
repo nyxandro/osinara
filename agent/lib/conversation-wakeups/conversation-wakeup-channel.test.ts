@@ -39,9 +39,7 @@ vi.mock("../telegram-hitl/approval-repository.js", () => ({
 vi.mock("../memory-turn-source.js", () => ({
   bindMemoryTurnSources: vi.fn(),
   releaseMemoryTurnSources: vi.fn(),
-}));
-vi.mock("../memory-review/memory-review-repository.js", () => ({
-  memoryReviewRepository: { batchForTurn: vi.fn(async () => null), completeBatch: vi.fn(), failRunning: vi.fn() },
+  releaseResumedMemoryTurnSources: vi.fn(),
 }));
 vi.mock("../operational-incidents/telegram-failure.js", () => ({
   recordTelegramFailure: dependencies.recordTelegramFailure,

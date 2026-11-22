@@ -71,7 +71,9 @@ function sandboxProcessLimitError(error: unknown): ModelFacingError | null {
 function categoryForCode(code: string): ModelFacingErrorCategory {
   if (/(?:INPUT|CURSOR|LIMIT|PATH|REF|FORMAT)_INVALID/u.test(code)) return "input";
   if (code.endsWith("_NOT_FOUND")) return "not_found";
-  if (/(?:ACCESS|AUTHORIZATION|FORBIDDEN|OWNER_REQUIRED|SCOPE_DENIED)/u.test(code)) {
+  // Only the refusals that mean "not yours" or "not here": a bare DENIED also names internal failures,
+  // such as the sandbox runner refusing to remount a session, and those must stay loud.
+  if (/(?:ACCESS|AUTHORIZATION|FORBIDDEN|OWNER_REQUIRED|SCOPE_DENIED|MUTATION_DENIED|UNDO_DENIED|NOT_ALLOWED)/u.test(code)) {
     return "authorization";
   }
   if (/(?:CONFLICT|STALE|ALREADY_)/u.test(code)) return "conflict";
@@ -89,7 +91,9 @@ function correctionFor(category: ModelFacingErrorCategory, code: string, toolNam
     return "Получите актуальный идентификатор через соответствующий list/search tool; не придумывайте и не переиспользуйте устаревший ref.";
   }
   if (category === "authorization") {
-    return "Не повторяйте вызов и не трактуйте отказ как отсутствие OAuth scope; сообщите, что действие недоступно в текущем контексте.";
+    return "Не повторяйте вызов и не трактуйте отказ как отсутствие OAuth scope. Если в reason сказано, как поступить, " +
+      "сделайте так; иначе объясните человеку причину из reason своими словами и, если там назван тот, кто может это " +
+      "сделать, подскажите обратиться к нему.";
   }
   return "Не повторяйте вызов автоматически. Сообщите пользователю о сбое и дождитесь нового запроса.";
 }

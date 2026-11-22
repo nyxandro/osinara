@@ -95,7 +95,7 @@ describe("createTelegramMessageHandler command routing", () => {
       expect(repository.session.prepareTurn).not.toHaveBeenCalled();
       expect(repository.groupContext.prepare).not.toHaveBeenCalled();
       expect(repository.hitl.authorizeReply).not.toHaveBeenCalled();
-      expect(repository.memoryReview.observePassiveMessage).toHaveBeenCalledTimes(1);
+      expect(repository.memoryReview.observeGroupMessage).toHaveBeenCalledTimes(1);
       expect(sendMessage).not.toHaveBeenCalled();
     },
   );

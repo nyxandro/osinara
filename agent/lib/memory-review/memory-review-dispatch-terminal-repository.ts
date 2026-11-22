@@ -3,65 +3,19 @@
  *
  * Exports:
  * - `terminalizeStaleMemoryReviewBatches`: exact timeout classification inside a claim transaction.
- * - `memoryReviewDispatchTerminalRepository`: bounded retry and terminal background/interactive states.
+ * - `memoryReviewDispatchTerminalRepository`: bounded retry and terminal background states.
  */
 import type { PoolClient } from "pg";
 
 import { SESSION_RETENTION_DAYS } from "../../config.js";
 import { AppError } from "../app-error.js";
 import { database } from "../database.js";
-import {
-  MEMORY_REVIEW_ABANDONED_TURN_BATCH_SIZE,
-  MEMORY_REVIEW_INTERACTIVE_START_TIMEOUT_MILLISECONDS,
-  MEMORY_REVIEW_MAX_SAFE_RECOVERY_ATTEMPTS,
-} from "./memory-review-config.js";
+import { MEMORY_REVIEW_MAX_SAFE_RECOVERY_ATTEMPTS } from "./memory-review-config.js";
 import { enqueueMemoryReviewOwnerAlert } from "./memory-review-owner-alert-repository.js";
 import type { MemoryReviewClaim } from "./memory-review-repository.js";
-import {
-  resolveAbandonedReviewBatch,
-  terminalizeAbandonedReviewTurns,
-} from "./memory-review-terminal-repository.js";
+import { terminalizeAbandonedReviewTurns } from "./memory-review-terminal-repository.js";
 
-const TURN_NEVER_STARTED = "AGENT_MEMORY_REVIEW_TURN_NEVER_STARTED";
 const DISPATCH_TIMEOUT_AMBIGUOUS = "AGENT_MEMORY_REVIEW_DISPATCH_TIMEOUT_AMBIGUOUS";
-
-async function terminalizeStaleInteractiveBatches(client: PoolClient, now: Date): Promise<void> {
-  // A batch whose turn never reached the runtime carries no binding at all, so it provably wrote nothing:
-  // the turn was cancelled or died before `turn.started`. The previous ending marked it ambiguous,
-  // which is a permanent freeze of the whole lane — that is what stopped the group on 2026-09-04.
-  const stale = await client.query<{
-    application_session_id: string | null;
-    id: string;
-    lane_id: string;
-  }>(
-    `SELECT id, lane_id, application_session_id FROM memory_review_batches
-      WHERE batch_kind = 'interactive' AND status = 'running' AND agent_session_id IS NULL
-        AND started_at <= $1::timestamptz - $2::double precision * interval '1 millisecond'
-      ORDER BY started_at, id
-      FOR UPDATE SKIP LOCKED
-      LIMIT $3`,
-    [now, MEMORY_REVIEW_INTERACTIVE_START_TIMEOUT_MILLISECONDS,
-      MEMORY_REVIEW_ABANDONED_TURN_BATCH_SIZE],
-  );
-  for (const batch of stale.rows) {
-    const outcome = await resolveAbandonedReviewBatch(client, {
-      applicationSessionId: batch.application_session_id,
-      batchId: batch.id,
-      diagnosticCode: TURN_NEVER_STARTED,
-      agentSessionId: null,
-      agentTurnId: null,
-      laneId: batch.lane_id,
-      notifyOwner: true,
-      now,
-    });
-    console.error(JSON.stringify({
-      batchId: batch.id,
-      code: TURN_NEVER_STARTED,
-      laneId: batch.lane_id,
-      outcome,
-    }));
-  }
-}
 
 async function terminalizeStaleDispatchingBatches(client: PoolClient, now: Date): Promise<void> {
   // A handoff that outlives its lease may already have started its turn, so it is never auto-retried.
@@ -91,7 +45,6 @@ export async function terminalizeStaleMemoryReviewBatches(
   client: PoolClient,
   now: Date,
 ): Promise<void> {
-  await terminalizeStaleInteractiveBatches(client, now);
   await terminalizeStaleDispatchingBatches(client, now);
   await terminalizeAbandonedReviewTurns(client, now);
 }

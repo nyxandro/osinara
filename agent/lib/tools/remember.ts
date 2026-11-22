@@ -1,8 +1,10 @@
 /**
  * Long-term memory creation tool.
  *
- * Export:
+ * Exports:
  * - `remember` tool for one main-agent source-backed claim and optional atomic thread action.
+ * - `groupRememberLead`, `familyGroupRemember`: the same tool as a group turn is told to use it
+ *   (#569): the silent review reads every group message, so the turn saves only on request.
  */
 import { defineTool } from "../../runtime/tool.js";
 import { AppError, isAppError } from "../app-error.js";
@@ -21,6 +23,11 @@ import {
 import { isMemoryThreadCandidateError } from "../memory-thread-write.js";
 import { logMemoryWriteEvent } from "../memory-observability.js";
 import { bindSourceAuthorLabel } from "../memory-subject-author-label.js";
+import {
+  MemorySubjectNameMismatchRefusal,
+  memorySubjectNameMismatchRefusalResult,
+} from "../memory-subject-name-mismatch.js";
+import { loadWrittenMemorySubjectPeople } from "../memory-subject-person.js";
 import { resolveMemoryTurnSource } from "../memory-turn-source.js";
 import { toModelMemory } from "../model-memory.js";
 import {
@@ -34,17 +41,29 @@ import {
 import { rememberInputSchema } from "../remember-contract.js";
 import { memoryReviewBatchId } from "../memory-review/memory-review-session.js";
 
-export default defineTool({
+const THREAD_ACTIONS =
+  "For an existing thread use thread.action=attach with a threadRef only from manage_memory_thread (list, search or read); thread.action=create creates a thread atomically.";
+
+const RECORD_RULES = [
+  "For an event with a known date set occurredOn: the day it happened, not the day of the conversation. Do not guess the date: if it is not known from the message, leave the field empty.",
+  "For a property that holds one value at a time (a city, a workplace, a birthday) set attribute, its short name. A new value moves the current record of that property into history; while one exists, the call is refused with its text until you name it in replaces.",
+  "If memory already holds a fact close in meaning about the same subject, the call is refused with AGENT_MEMORY_SIMILAR_RECORD_EXISTS and a list of such records: read them and decide yourself whether to update the existing one, save a new value with attribute and replaces, or list them in distinctFrom and save separately.",
+  "The result contains item.memoryRef, an optional thread, supersededRefs for replaced versions and a notice for an immediate undo.",
+];
+
+/** What a group turn saves and from where, for the memory named. */
+export function groupRememberLead(memory: string): string {
+  return `Save one specific fact into ${memory} only when the current request explicitly asks to remember or save it, with basis=user_requested: from the current message, or from the one message of the shown history the request points at, by its sourceSequence. The silent review reads every other message of the group, so do not save on your own initiative and do not save guesses.`;
+}
+
+const remember = defineTool({
   // Repeating it after a crash is safe: its effect is keyed on the call id.
   replaySafe: true,
   description: [
     "Save one specific fact only from the verified message of the current turn: a fact, a preference, first-hand experience, an event, a plan or a useful link with context. Do not require special importance or a request to remember; do not save guesses or requests without meaningful facts.",
     "When selecting on your own use basis=agent_inferred, on a direct request to save the fact basis=user_requested. An example of saving on your own: {\"basis\":\"agent_inferred\",\"content\":\"...\",\"kind\":\"fact\",\"scope\":\"personal\",\"sensitivity\":\"normal\",\"subject\":{\"kind\":\"current_author\"}}.",
-    "In a group sourceSequence picks exactly one message of the visible delta. For an existing thread use thread.action=attach with a threadRef only from manage_memory_thread (list, search or read); thread.action=create creates a thread atomically.",
-    "For an event with a known date set occurredOn: the day it happened, not the day of the conversation. Do not guess the date: if it is not known from the message, leave the field empty.",
-    "For a property that holds one value at a time (a city, a workplace, a birthday) set attribute, its short name. A new value moves the current record of that property into history; while one exists, the call is refused with its text until you name it in replaces.",
-    "If memory already holds a fact close in meaning about the same subject, the call is refused with AGENT_MEMORY_SIMILAR_RECORD_EXISTS and a list of such records: read them and decide yourself whether to update the existing one, save a new value with attribute and replaces, or list them in distinctFrom and save separately.",
-    "The result contains item.memoryRef, an optional thread, supersededRefs for replaced versions and a notice for an immediate undo.",
+    `In a group sourceSequence picks exactly one message of the visible delta. ${THREAD_ACTIONS}`,
+    ...RECORD_RULES,
   ].join(" "),
   inputSchema: rememberInputSchema,
   async execute(input, ctx) {
@@ -120,6 +139,9 @@ export default defineTool({
       // The stops run inside the write, so the source is resolved by the time any of them refuses.
       const deferred = error instanceof MemoryNeighbourRefusal
         ? memoryNeighbourRefusalResult(error, { editAvailable: source !== null && !source.isReview })
+        : error instanceof MemorySubjectNameMismatchRefusal
+          // The silent review has no profile cards, so a label is its only way to name the person.
+          ? memorySubjectNameMismatchRefusalResult(error, { verifiedRefAvailable: source !== null && !source.isReview })
         : error instanceof MemoryAttributeReplacementRefusal
           ? memoryAttributeReplacementRefusalResult(error)
           : isMemoryThreadCandidateError(error)
@@ -159,8 +181,10 @@ export default defineTool({
       sourceKind: source.isCurrent ? "current" : "delta",
       threadAction: item.thread?.action ?? "none",
     });
+    // Whom the write was bound to, said back: a fact that landed on the wrong person shows it at once.
+    const people = await loadWrittenMemorySubjectPeople([item.id]);
     return {
-      item: toModelMemory(item),
+      item: toModelMemory(item, people.get(item.id) ?? null),
       ...(item.supersededRefs === undefined ? {} : { supersededRefs: item.supersededRefs }),
       ...(item.thread === undefined ? {} : { thread: item.thread }),
       // The silent review has no manage_memory, so an undo hint would send it after a missing tool.
@@ -169,4 +193,12 @@ export default defineTool({
         : `Сохранено в область «${scope}». Для немедленной отмены используй manage_memory с action undo и memoryRef ${item.memoryRef}.`,
     };
   },
+});
+
+export default remember;
+
+/** `remember` in a closed family group: the turn saves only on request (#569). */
+export const familyGroupRemember = defineTool({
+  ...remember,
+  description: [groupRememberLead("the family's memory"), THREAD_ACTIONS, ...RECORD_RULES].join(" "),
 });

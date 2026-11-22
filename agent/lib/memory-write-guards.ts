@@ -15,11 +15,17 @@
  * single claim costs — the extra call is what #208 counted as its price, and it does not have to
  * be paid twice.
  *
+ * A probe of a record about a person carries that person, as the index puts them in the header of
+ * every stored vector of their records (#556). Who that is gets settled by a short read before the
+ * write: the same preparation of the source the write runs, so its refusals also come before any
+ * embedding is paid for.
+ *
  * The two failures are not the same, and the split is deliberate. A title that cannot be embedded
  * stops the write: the thread would be created without the vector its own duplicate check needs.
  * A probe that cannot be embedded is written to the log and the write goes on, because a helper
  * check must never cost the person a memory.
  */
+import { database } from "./database.js";
 import { normalizeMemoryAttribute } from "./memory-attribute-slot.js";
 import { embedMemoryPassages } from "./memory-embedding-client.js";
 import { normalizeMemoryEventDate } from "./memory-event-window-repository.js";
@@ -28,7 +34,11 @@ import {
   memoryNeighbourProbePassage,
   type MemoryNeighbourProbe,
 } from "./memory-neighbour-gate.js";
+import type { MemoryAuthorization } from "./memory-context.js";
+import { prepareExplicitClaimEvidence } from "./memory-explicit-claim-evidence.js";
 import type { CreateMemoryInput } from "./memory-record.js";
+import { requireSubjectNamedConsistently } from "./memory-subject-name-mismatch.js";
+import { formatMemorySubjectPerson } from "./memory-subject-person.js";
 import { requireMemoryThreadTitle } from "./memory-thread-write.js";
 
 export interface MemoryWriteGuards {
@@ -38,7 +48,33 @@ export interface MemoryWriteGuards {
   threadTitleEmbedding: readonly number[] | null;
 }
 
+/** The person a record about someone will be bound to, named as stored headers name them. */
+async function probeSubjectPerson(auth: MemoryAuthorization, input: CreateMemoryInput): Promise<string | null> {
+  const kind = input.explicitSource?.subject.kind;
+  if (kind !== "current_author" && kind !== "verified_ref") return null;
+  const client = await database().connect();
+  try {
+    await client.query("BEGIN READ ONLY");
+    const prepared = await prepareExplicitClaimEvidence(client, auth, input);
+    // Refused here, a mismatch costs no embedding; the write checks again, for kinds with no probe.
+    await requireSubjectNamedConsistently(client, { ...prepared, content: input.content });
+    const person = await client.query<{ name: string | null; username: string | null }>(
+      "SELECT name, username FROM memory_subject_person($1::uuid, $2::uuid)",
+      [prepared.subjectParticipantId, prepared.subjectUserId],
+    );
+    await client.query("COMMIT");
+    const row = person.rows[0];
+    return row === undefined ? null : formatMemorySubjectPerson(row);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function prepareMemoryWriteGuards(
+  auth: MemoryAuthorization,
   input: CreateMemoryInput,
 ): Promise<MemoryWriteGuards> {
   const attribute = input.attribute === undefined
@@ -48,7 +84,9 @@ export async function prepareMemoryWriteGuards(
     ? null
     : normalizeMemoryEventDate(input.occurredOn);
   const title = requireMemoryThreadTitle(input.thread);
-  const probe = memoryNeighbourProbePassage(input);
+  const probe = memoryNeighbourProbePassage(input, null) === null
+    ? null
+    : memoryNeighbourProbePassage(input, await probeSubjectPerson(auth, input));
   const passages = [
     ...(title === null ? [] : [title]),
     ...(probe === null ? [] : [probe]),

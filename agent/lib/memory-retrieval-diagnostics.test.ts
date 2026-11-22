@@ -16,6 +16,12 @@ const { embedQuery, searchAuthorized } = vi.hoisted(() => ({
 }));
 
 vi.mock("./memory-embedding-client.js", () => ({ embedMemoryQueryChunks: embedQuery }));
+// No database behind these records: none of them is about a person.
+vi.mock("./memory-subject-person.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./memory-subject-person.js")>(),
+  loadMemorySubjectPeople: vi.fn(async () => new Map()),
+  loadWrittenMemorySubjectPeople: vi.fn(async () => new Map()),
+}));
 vi.mock("./memory-retrieval-repository.js", () => ({
   memoryRetrievalRepository: { searchAuthorized },
 }));
@@ -63,6 +69,7 @@ describe("retrieval diagnostics boundary", () => {
         updatedAt: "2026-07-01T10:00:00.000Z",
       },
       score: 0.034,
+      subjectPerson: null,
     }] });
   });
 

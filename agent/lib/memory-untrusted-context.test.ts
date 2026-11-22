@@ -101,12 +101,12 @@ describe("provenance legend", () => {
 
   it("explains every evidence kind once per block instead of per record", () => {
     const block = formatRetrievedMemoryInstructions([
-      toModelMemory(memory as never, {
+      toModelMemory(memory as never, null, {
         authorLabel: "Анна",
         kind: "firsthand",
         observedAt: "2026-08-01T10:00:00.000Z",
       }),
-      toModelMemory({ ...memory, memoryRef: "mem_22222222222222222222222222222222" } as never, {
+      toModelMemory({ ...memory, memoryRef: "mem_22222222222222222222222222222222" } as never, null, {
         authorLabel: "Борис",
         kind: "reported",
         observedAt: "2026-08-01T11:00:00.000Z",
@@ -118,8 +118,8 @@ describe("provenance legend", () => {
   });
 
   it("carries updatedAt only for a record that actually changed", () => {
-    expect(toModelMemory(memory as never)).not.toHaveProperty("updatedAt");
-    expect(toModelMemory({ ...memory, updatedAt: "2026-08-02T10:00:00.000Z" } as never))
+    expect(toModelMemory(memory as never, null)).not.toHaveProperty("updatedAt");
+    expect(toModelMemory({ ...memory, updatedAt: "2026-08-02T10:00:00.000Z" } as never, null))
       .toHaveProperty("updatedAt", "2026-08-02T10:00:00.000Z");
   });
 });
