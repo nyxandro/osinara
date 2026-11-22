@@ -24,6 +24,11 @@ vi.mock("./memory-embedding-client.js", async (importOriginal) => ({
   ...await importOriginal<typeof import("./memory-embedding-client.js")>(),
   embedMemoryQueryChunks: vi.fn(async () => [Array.from({ length: MEMORY_EMBEDDING_DIMENSIONS }, () => 0.1)]),
 }));
+// The records here stand for search results with no database behind them, and none is about a person.
+vi.mock("./memory-subject-person.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./memory-subject-person.js")>(),
+  loadMemorySubjectPeople: vi.fn(async () => new Map()),
+}));
 
 const auth: MemoryAuthorization = {
   familyId: "family-1",
@@ -68,6 +73,7 @@ function search(overrides: Partial<MemoryRetrievalBranchDiagnostics>) {
       evidence: { russianMorphologyRank: null, semanticSimilarity: 0.815, simpleLexicalRank: null },
       exactDuplicateIdentity: "group",
       subjectLabel: null,
+      subjectPerson: null,
       memory: record,
       score: 0.016,
     }],

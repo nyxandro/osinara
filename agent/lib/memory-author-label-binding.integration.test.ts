@@ -133,7 +133,7 @@ async function turnContext(f: Awaited<ReturnType<typeof fixture>>): Promise<Tool
 }
 
 async function reviewContext(f: Awaited<ReturnType<typeof fixture>>): Promise<ToolContext> {
-  await memoryReviewRepository.observePassiveMessage({ groupId: f.groupId, timelineEntryId: f.entries[0]!.id });
+  await memoryReviewRepository.observeGroupMessage({ groupId: f.groupId, timelineEntryId: f.entries[0]!.id });
   const [batch] = await memoryReviewDispatchRepository.claimPending({
     leaseMilliseconds: 60_000, limit: 1, now: new Date(),
   });

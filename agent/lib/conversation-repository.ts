@@ -198,10 +198,11 @@ export const conversationRepository = {
       const selected = await client.query<{
         actor_kind: "agent_self" | "telegram_bot" | "telegram_channel" | "user";
         sender_display_name: string | null;
+        sender_username: string | null;
         sent_at: Date;
         telegram_user_id: string | null;
       }>(
-        `SELECT actor_kind, telegram_user_id, sender_display_name, sent_at
+        `SELECT actor_kind, telegram_user_id, sender_display_name, sender_username, sent_at
          FROM telegram_group_messages
          WHERE conversation_id = $1 AND id = ANY($2::uuid[])
          ORDER BY sequence_id`,
@@ -224,15 +225,17 @@ export const conversationRepository = {
         );
       }
 
-      // Upsert uses only Telegram user ID. The latest observed display name is a mutable snapshot,
-      // and exact users.telegram_user_id equality is the only application-user link.
+      // Upsert uses only Telegram user ID. The latest observed display name and username are
+      // mutable snapshots for display, and exact users.telegram_user_id equality is the only
+      // application-user link: a username never identifies anyone here.
       for (const row of users) {
         await client.query(
           `INSERT INTO conversation_participants
              (conversation_id, family_id, scope, scope_partition_key, telegram_user_id,
-              linked_user_id, display_name_snapshot, first_observed_at, last_observed_at)
+              linked_user_id, display_name_snapshot, username_snapshot, first_observed_at,
+              last_observed_at)
            VALUES ($1, $2, $3, $4, $5,
-                   (SELECT id FROM users WHERE telegram_user_id = $5), $6, $7, $7)
+                   (SELECT id FROM users WHERE telegram_user_id = $5), $6, $8, $7, $7)
            ON CONFLICT (conversation_id, telegram_user_id) DO UPDATE
            SET linked_user_id = (SELECT id FROM users WHERE telegram_user_id = EXCLUDED.telegram_user_id),
                display_name_snapshot = CASE
@@ -240,11 +243,16 @@ export const conversationRepository = {
                  THEN EXCLUDED.display_name_snapshot
                  ELSE conversation_participants.display_name_snapshot
                END,
+               username_snapshot = CASE
+                 WHEN EXCLUDED.last_observed_at >= conversation_participants.last_observed_at
+                 THEN EXCLUDED.username_snapshot
+                 ELSE conversation_participants.username_snapshot
+               END,
                first_observed_at = least(conversation_participants.first_observed_at, EXCLUDED.first_observed_at),
                last_observed_at = greatest(conversation_participants.last_observed_at, EXCLUDED.last_observed_at),
                updated_at = now()`,
           [boundary.id, boundary.family_id, boundary.scope, boundary.scope_partition_key,
-            row.telegram_user_id, row.sender_display_name, row.sent_at],
+            row.telegram_user_id, row.sender_display_name, row.sent_at, row.sender_username],
         );
       }
 

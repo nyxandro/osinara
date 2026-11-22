@@ -3,7 +3,6 @@
  *
  * Exports:
  * - `TelegramGroupTurnContextPreparer`: injectable bootstrap/incremental context contract.
- * - `composeTelegramTurnMessage`: joins a controlled timeline and exact current envelope.
  * - `createTelegramGroupTurnContextPreparer`: composes timeline and session cursor repositories.
  * - `telegramGroupTurnContextPreparer`: production context preparer.
  * - `currentTelegramMessageText`: reads the addressed message back out of the durable envelope.
@@ -20,7 +19,6 @@ import { groupTimelineCursorRepository } from "./sessions/group-timeline-cursor-
 import {
   selectTelegramGroupJournalContext,
   type TelegramGroupJournalEntry,
-  type TelegramTimelineOmission,
 } from "./telegram-group-journal-context.js";
 import {
   telegramGroupJournalRepository,
@@ -61,9 +59,6 @@ export interface PreparedTelegramGroupTurnContext {
   visibleEntryIds: string[];
   visibleTimelineEntries: TelegramGroupJournalEntry[];
   currentMessageEnvelope: string;
-  timelineOmission: TelegramTimelineOmission | null;
-  memoryReviewBatchId?: string;
-  memoryReviewSourceEntryIds?: string[];
 }
 
 export type TelegramGroupTurnContextPreparer = (
@@ -135,7 +130,7 @@ function currentTelegramMessageEnvelope(
   return `${CURRENT_MESSAGE_OPEN_TAG}\n${currentMessage}\n${CURRENT_MESSAGE_CLOSE_TAG}`;
 }
 
-export function composeTelegramTurnMessage(
+function composeTelegramTurnMessage(
   timeline: string | null,
   currentMessageEnvelope: string,
 ): string {
@@ -310,7 +305,6 @@ export function createTelegramGroupTurnContextPreparer(
       durableMessage,
       currentMessageEnvelope: resolvedCurrentMessageEnvelope,
       omittedBeforeSequence: page.omittedBeforeSequence,
-      timelineOmission: selected.omission,
       visibleEntryIds: [
         ...selected.entries.flatMap((entry) => entry.entryId ? [entry.entryId] : []),
         input.currentEntryId,

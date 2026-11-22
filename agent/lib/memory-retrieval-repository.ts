@@ -67,7 +67,24 @@ interface RetrievalRow extends ReferencedMemoryRow {
   subject_family_id: string | null;
   subject_label: string | null;
   subject_participant_id: string | null;
+  subject_person_name: string | null;
+  subject_person_telegram_user_id: string | null;
+  subject_person_username: string | null;
   subject_user_id: string | null;
+}
+
+/** The person a record is bound to, keyed by the binding for when neither of two has a username. */
+function rowSubjectPerson(row: RetrievalRow): ScoredMemoryRetrievalResult["subjectPerson"] {
+  const key = row.subject_participant_id !== null
+    ? `participant:${row.subject_participant_id}`
+    : row.subject_user_id === null ? null : `user:${row.subject_user_id}`;
+  if (key === null) return null;
+  return {
+    key,
+    name: row.subject_person_name,
+    telegramUserId: row.subject_person_telegram_user_id,
+    username: row.subject_person_username,
+  };
 }
 
 function vectorLiteral(vector: readonly number[]): string {
@@ -180,6 +197,7 @@ function rowToScoredResult(row: RetrievalRow): ScoredMemoryRetrievalResult {
     memory: rowToReferencedMemory(row),
     score: requiredScore(row.fused_score),
     subjectLabel: row.subject_label,
+    subjectPerson: rowSubjectPerson(row),
     sourceEvidence: {
       authorLabel: row.source_author_label,
       kind: row.source_evidence_kind,
@@ -376,6 +394,9 @@ export function memoryRetrievalSearchStatement(): string {
                authorized.memory_ref, authorized.scope_partition_key, authorized.subject_family_id,
                authorized.subject_user_id, authorized.subject_participant_id,
                authorized.memory_project_id, authorized.subject_label,
+               subject_person.name AS subject_person_name,
+               subject_person.username AS subject_person_username,
+               subject_person.telegram_user_id AS subject_person_telegram_user_id,
                simple_lexical.relevance AS simple_lexical_rank,
                russian_morphology.relevance AS russian_morphology_rank,
                 semantic.similarity AS semantic_similarity,
@@ -404,6 +425,8 @@ export function memoryRetrievalSearchStatement(): string {
        LEFT JOIN simple_lexical USING (id)
        LEFT JOIN russian_morphology USING (id)
        LEFT JOIN semantic USING (id)
+       LEFT JOIN LATERAL memory_subject_person(authorized.subject_participant_id, authorized.subject_user_id)
+         AS subject_person ON true
        LEFT JOIN LATERAL (
           SELECT evidence_kind, observed_at, author_label_snapshot, origin_conversation_id,
                  author_user_id, author_participant_id, author_telegram_user_id
@@ -539,7 +562,7 @@ export const memoryRetrievalRepository = {
     // before the offered places are chosen (#343, memory-named-people.ts).
     const scored = preferNamedPeople(normalizedQuery, result.rows
       .filter((row): row is DiagnosticsColumns & RetrievalRow => row.id !== null)
-      .map(rowToScoredResult));
+      .map(rowToScoredResult), auth.telegramUserId);
     return {
       diagnostics: rowToBranchDiagnostics(head),
       // Duplicate collapse is read-only and happens after global rank, keeping its representative.

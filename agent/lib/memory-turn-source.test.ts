@@ -91,6 +91,63 @@ describe("turn-bound memory source selection", () => {
     expect(bind).not.toHaveBeenCalled();
   });
 
+  // #569: only the internal background review owns a batch; a chat turn naming one is malformed.
+  it("refuses a chat turn that carries a memory-review batch", async () => {
+    bind.mockClear();
+    const turn = {
+      session: {
+        auth: {
+          current: {
+            attributes: {
+              applicationSessionId: "application-session-1",
+              memoryReviewBatchId: "batch-1",
+              memoryReviewSourceEntryIds: ["entry-1"],
+              telegramActorId: "caller-1",
+              telegramActorKind: "telegram_user",
+              telegramConversationId: "conversation-1",
+              telegramTimelineEntryId: "entry-2",
+              telegramTimelineVisibleEntryIds: ["entry-1", "entry-2"],
+              telegramUserId: "caller-1",
+            },
+            authenticator: "telegram",
+            principalId: "user-1",
+            principalType: "user",
+          },
+          initiator: null,
+        },
+        id: "agent-session-1",
+        turn: { id: "agent-turn-1", sequence: 0 },
+      },
+    } as never;
+    const ordinaryTurn = {
+      session: {
+        ...(turn as { session: object }).session,
+        auth: {
+          current: {
+            ...(turn as { session: { auth: { current: object } } }).session.auth.current,
+            attributes: {
+              applicationSessionId: "application-session-1",
+              telegramActorId: "caller-1",
+              telegramActorKind: "telegram_user",
+              telegramConversationId: "conversation-1",
+              telegramTimelineEntryId: "entry-2",
+              telegramTimelineVisibleEntryIds: ["entry-1", "entry-2"],
+              telegramUserId: "caller-1",
+            },
+          },
+          initiator: null,
+        },
+      },
+    } as never;
+
+    await expect(bindMemoryTurnSources(turn)).rejects.toThrow("AGENT_MEMORY_EXPLICIT_SOURCE_INVALID");
+    expect(bind).not.toHaveBeenCalled();
+    // The same turn without the batch is an ordinary chat turn and binds its visible history.
+    await expect(bindMemoryTurnSources(ordinaryTurn)).resolves.toBeUndefined();
+    expect(bind).toHaveBeenCalledOnce();
+    bind.mockClear();
+  });
+
   it("does not require a Telegram source binding for a scheduled run", async () => {
     verifyBoundResume.mockClear();
     const scheduled = {

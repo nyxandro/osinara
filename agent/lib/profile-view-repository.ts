@@ -13,6 +13,7 @@ import { database } from "./database.js";
 import { PROFILE_SELECTION_DORMANCY_MILLISECONDS } from "./memory-config.js";
 import type { MemoryAuthorization, MemoryScope } from "./memory-context.js";
 import type { MemoryConfirmation, MemoryKind } from "./memory-record.js";
+import { formatMemorySubjectPerson } from "./memory-subject-person.js";
 import { externalProfileProjectionPredicate } from "./external-profile-projection-predicate.js";
 import {
   selectProfileClaims,
@@ -52,6 +53,8 @@ interface SubjectRow {
   subject_user_id: string | null;
   telegram_user_id: string;
   display_label_snapshot: string;
+  subject_person_name: string | null;
+  subject_person_username: string | null;
 }
 
 interface ClaimRow {
@@ -157,12 +160,16 @@ async function loadSubjects(
   const result = await client.query<SubjectRow>(
     `SELECT subject.id, subject.subject_ref, subject.subject_user_id,
             subject.subject_participant_id, subject.display_label_snapshot,
+            subject_person.name AS subject_person_name,
+            subject_person.username AS subject_person_username,
             subject.last_verified_at,
             CASE WHEN subject.subject_user_id IS NOT NULL
                  THEN app_user.telegram_user_id ELSE participant.telegram_user_id END AS telegram_user_id
      FROM profile_subjects AS subject
      LEFT JOIN users AS app_user ON app_user.id = subject.subject_user_id
      LEFT JOIN conversation_participants AS participant ON participant.id = subject.subject_participant_id
+     LEFT JOIN LATERAL memory_subject_person(subject.subject_participant_id, subject.subject_user_id)
+       AS subject_person ON true
      WHERE subject.conversation_id = $1
        AND (CASE WHEN subject.subject_user_id IS NOT NULL
                  THEN app_user.telegram_user_id ELSE participant.telegram_user_id END) = ANY($2::text[])
@@ -292,7 +299,12 @@ export const profileViewRepository = {
           inContext: input.inContextMemoryRefs.has(claim.memory_ref),
           sensitivity: claim.sensitivity,
           sourceAuthorLabel: claim.source_author_label,
-          subjectLabel: subject.display_label_snapshot,
+          // The heading names the person as they are now, username included, so namesakes differ (#556);
+          // the stored snapshot is only the fallback for display.
+          subjectLabel: formatMemorySubjectPerson({
+            name: subject.subject_person_name,
+            username: subject.subject_person_username,
+          }) ?? subject.display_label_snapshot,
           subjectRef: subject.subject_ref,
           updatedAt: claim.updated_at.toISOString(),
         }];

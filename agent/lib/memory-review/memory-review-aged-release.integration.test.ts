@@ -74,7 +74,7 @@ async function seedLane(input: { count: number; seedSentAt: Date; sentAt: Date }
       sentAt: input.sentAt,
       sequence,
     });
-    await memoryReviewRepository.observePassiveMessage({
+    await memoryReviewRepository.observeGroupMessage({
       groupId: fixture.groupId,
       timelineEntryId: source.id,
     });
@@ -150,7 +150,7 @@ describeWithDatabase("memory review aged release", () => {
       sentAt: OUTWAITED,
       sequence: 51,
     });
-    await memoryReviewRepository.observePassiveMessage({
+    await memoryReviewRepository.observeGroupMessage({
       groupId: fixture.groupId,
       timelineEntryId: source.id,
     });
@@ -173,7 +173,7 @@ describeWithDatabase("memory review aged release", () => {
       sentAt: OUTWAITED,
       sequence: 3,
     });
-    await memoryReviewRepository.observePassiveMessage({
+    await memoryReviewRepository.observeGroupMessage({
       groupId: fixture.groupId,
       timelineEntryId: source.id,
     });

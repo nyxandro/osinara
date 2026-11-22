@@ -256,7 +256,7 @@ describeWithDatabase("critical main-agent memory paths", () => {
           sequence === 50 ? "Анна предпочитает утренние тренировки" : `Фоновое сообщение ${sequence}`],
       );
       sourceEntryIds.push(message.rows[0]!.id);
-      await memoryReviewRepository.observePassiveMessage({
+      await memoryReviewRepository.observeGroupMessage({
         groupId: fixture.groupId,
         timelineEntryId: message.rows[0]!.id,
       });

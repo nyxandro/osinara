@@ -4,12 +4,47 @@
  * Constructs covered:
  * - `toModelMemory`: exposes only the explicit model contract and an opaque stable reference.
  * - Internal database, identity, source, thread, and indexing fields never cross the model boundary.
+ * - A record about a person carries `about`, the person's current name and username by the server's
+ *   binding (#556); a record about nobody carries no such field.
  */
 import { describe, expect, it } from "vitest";
 
 import { toModelMemory } from "./model-memory.js";
 
+const MEMORY = {
+  attribute: null,
+  occurredOn: null,
+  author: {
+    status: "current_member",
+    telegramUserId: "7100000001",
+    userId: "00000000-0000-4000-8000-000000000002",
+  },
+  confirmation: "user_confirmed",
+  content: "Любит Postgres",
+  createdAt: "2026-08-01T10:00:00.000Z",
+  embeddingStatus: "indexed",
+  id: "00000000-0000-4000-8000-000000000001",
+  kind: "preference",
+  memoryRef: "mem_0123456789abcdef0123456789abcdef",
+  messageThreadId: null,
+  scope: "group",
+  sensitivity: "normal",
+  source: "turn:session-internal:turn-internal",
+  updatedAt: "2026-08-01T10:00:00.000Z",
+} as const;
+
 describe("toModelMemory", () => {
+  it("names the person a record is bound to, whatever its text says", () => {
+    expect(toModelMemory(MEMORY, { name: "Нина Соколова", username: "nina_new" })).toMatchObject({
+      about: "Нина Соколова (@nina_new)",
+      content: "Любит Postgres",
+    });
+  });
+
+  it("leaves a record about nobody without the field", () => {
+    expect(toModelMemory(MEMORY, null)).not.toHaveProperty("about");
+  });
+
   it("returns the exact model-safe DTO without internal identifiers or processing metadata", () => {
     const projected = toModelMemory({
       attribute: null,
@@ -31,7 +66,7 @@ describe("toModelMemory", () => {
       sensitivity: "normal",
       source: "turn:session-internal:turn-internal",
       updatedAt: "2026-08-01T11:00:00.000Z",
-    });
+    }, null);
 
     expect(projected).toEqual({
       authorStatus: "current_member",

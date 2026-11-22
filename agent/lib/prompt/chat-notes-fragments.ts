@@ -36,11 +36,22 @@ Never put passwords, tokens, codes, payment details or whole documents into the 
 // everyday examples, and a one-off event is named as the case without one.
 const TRUSTED_MEMORY_LINK = `The notes and long-term memory do not exclude each other: the notes keep what is current in view, memory keeps what should be known later. If a matter will go on and bring news, such as treatment at a doctor, a renovation or a move, start a thread for it through \`remember\` when you save its first fact, attach each later fact to that thread, and keep one line about it in the notes while it is current; when it ends, remove the line and keep the thread. A single event with nothing to follow, such as one visit, one purchase or a recipe, is saved without a thread. A wish about the format or manner of answers goes only into the notes, never into memory.`;
 
+// A family group's facts reach memory through the silent review, and its turn saves only on request
+// (#569), so the link to memory there names a request instead of telling the turn to save by itself.
+const FAMILY_MEMORY_LINK = `The notes and long-term memory do not exclude each other: the notes keep what is current in view, memory keeps what should be known later. What people say in this group reaches memory through the silent review; you save to memory only on an explicit request. When such a request concerns a matter that will go on and bring news, such as treatment at a doctor, a renovation or a move, start a thread for it through \`remember\`. Keep one line about a current matter in the notes while it is current; when it ends, remove the line. A wish about the format or manner of answers goes only into the notes, never into memory.`;
+
+const MEMORY_LINK: Readonly<Record<ChatNotesEnvironment, string | null>> = {
+  external: null,
+  family: FAMILY_MEMORY_LINK,
+  private: TRUSTED_MEMORY_LINK,
+};
+
 export function chatNotesRules(environment: ChatNotesEnvironment): string {
+  const memoryLink = MEMORY_LINK[environment];
   return [
     PURPOSE,
     KEEPING[environment],
-    ...(environment === "external" ? [] : [TRUSTED_MEMORY_LINK]),
+    ...(memoryLink === null ? [] : [memoryLink]),
     FORM,
   ].join("\n\n");
 }

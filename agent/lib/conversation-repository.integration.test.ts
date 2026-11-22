@@ -5,6 +5,7 @@
  * - Group chat lookup returns one stable conversation independent of forum topic metadata.
  * - Participant synchronization trusts Telegram user IDs and exact user links, never usernames.
  * - Opaque participant refs remain local to their origin conversation.
+ * - The participant keeps the username of its latest observed message, for display only (#556).
  */
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -77,5 +78,44 @@ describeWithDatabase("conversationRepository", () => {
     await expect(
       conversationRepository.resolveParticipantRef(otherConversation.id, firstRef),
     ).rejects.toThrowError(/AGENT_CONVERSATION_PARTICIPANT_NOT_FOUND/u);
+  });
+
+  it("keeps the username of the latest observed message, also when it was dropped", async () => {
+    const family = await database().query<{ id: string }>(
+      "INSERT INTO families (name) VALUES ('Username snapshot') RETURNING id",
+    );
+    const group = await database().query<{ id: string }>(
+      `INSERT INTO telegram_groups (family_id, telegram_chat_id, title, type, message_mode)
+       VALUES ($1, '-100503', 'Группа', 'external', 'addressed_only') RETURNING id`,
+      [family.rows[0]!.id],
+    );
+    const conversation = await conversationRepository.getByGroupId(group.rows[0]!.id);
+    const message = async (sequence: number, username: string | null, sentAt: string) =>
+      (await database().query<{ id: string }>(
+        `INSERT INTO telegram_group_messages
+           (group_id, telegram_message_id, sequence_id, actor_kind, actor_id, telegram_user_id,
+            sender_username, sender_display_name, sender_is_bot, message_kind, content_text, sent_at)
+         VALUES ($1, $2, $2, 'user', 'telegram:601', '601', $3, 'Нина', false, 'text', 'Текст', $4)
+         RETURNING id`,
+        [group.rows[0]!.id, sequence, username, sentAt],
+      )).rows[0]!.id;
+    const snapshot = async () => (await database().query<{ username_snapshot: string | null }>(
+      "SELECT username_snapshot FROM conversation_participants WHERE conversation_id = $1",
+      [conversation.id],
+    )).rows[0]!.username_snapshot;
+
+    const late = await message(2, "nina_new", "2026-11-20T10:00:00Z");
+    await conversationRepository.syncTimelineParticipants(conversation.id, [late]);
+    expect(await snapshot()).toBe("nina_new");
+
+    // An older message synced afterwards does not bring the old username back.
+    const early = await message(1, "nina_s", "2026-11-19T10:00:00Z");
+    await conversationRepository.syncTimelineParticipants(conversation.id, [early]);
+    expect(await snapshot()).toBe("nina_new");
+
+    // A newer message without a username means the person removed it.
+    const removed = await message(3, null, "2026-11-21T10:00:00Z");
+    await conversationRepository.syncTimelineParticipants(conversation.id, [removed]);
+    expect(await snapshot()).toBeNull();
   });
 });

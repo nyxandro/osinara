@@ -30,7 +30,6 @@ function privateRepository(visibleEntryIds: string[]) {
     currentMessageEnvelope: "<current_telegram_message>test</current_telegram_message>",
     durableMessage: "<current_telegram_message>test</current_telegram_message>",
     omittedBeforeSequence: null,
-    timelineOmission: null,
     visibleEntryIds,
     visibleTimelineEntries: [],
   });

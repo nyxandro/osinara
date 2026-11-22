@@ -70,7 +70,6 @@ describe("Telegram channel sender routing", () => {
     expect(repository.telegram.findIdentity).not.toHaveBeenCalled();
     expect(repository.family.claimInvitation).not.toHaveBeenCalled();
     expect(repository.hitl.authorizeReply).not.toHaveBeenCalled();
-    expect(repository.memoryReview.prepareInteractiveTurn).not.toHaveBeenCalled();
     expect(repository.groupContext.prepare).toHaveBeenCalledWith(expect.objectContaining({
       currentSenderDisplayName: "Pavel Zloi",
       currentSenderUsername: "evilfreelancer",
@@ -101,7 +100,7 @@ describe("Telegram channel sender routing", () => {
     ).resolves.toBeNull();
 
     expect(repository.journal.record).toHaveBeenCalledWith("group-1", message, CHANNEL_ACTOR);
-    expect(repository.memoryReview.observePassiveMessage).not.toHaveBeenCalled();
+    expect(repository.memoryReview.observeGroupMessage).not.toHaveBeenCalled();
     expect(repository.session.prepareTurn).not.toHaveBeenCalled();
   });
 

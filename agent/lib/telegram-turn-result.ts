@@ -152,15 +152,6 @@ export function buildTelegramTurnResult(input: {
         telegramTimelineEntryId: input.timelineEntryId,
         telegramTimelineSequence: input.turnContext.cursorSequence,
         telegramTimelineVisibleEntryIds: input.turnContext.visibleEntryIds,
-        ...(input.turnContext.memoryReviewBatchId === undefined
-          ? {}
-          : { memoryReviewBatchId: input.turnContext.memoryReviewBatchId }),
-        ...(input.turnContext.memoryReviewBatchId === undefined
-          ? {}
-          : { memoryReviewMode: "interactive" }),
-        ...(input.turnContext.memoryReviewSourceEntryIds === undefined
-          ? {}
-          : { memoryReviewSourceEntryIds: input.turnContext.memoryReviewSourceEntryIds }),
         telegramActorId: input.actor.id,
         telegramActorKind: input.actor.kind,
         // A bot carries a real Telegram user id, so it identifies itself exactly like a person.

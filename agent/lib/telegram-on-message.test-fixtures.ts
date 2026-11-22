@@ -108,7 +108,6 @@ export function repositories() {
         durableMessage: "<current_telegram_message>test</current_telegram_message>",
         currentMessageEnvelope: "<current_telegram_message>test</current_telegram_message>",
         omittedBeforeSequence: null,
-        timelineOmission: null,
         visibleEntryIds: ["00000000-0000-4000-8000-000000000010"],
         visibleTimelineEntries: [],
       }),
@@ -141,9 +140,7 @@ export function repositories() {
       }),
     },
     memoryReview: {
-      failInteractivePreparation: vi.fn().mockResolvedValue(undefined),
-      observePassiveMessage: vi.fn().mockResolvedValue(null),
-      prepareInteractiveTurn: vi.fn().mockResolvedValue(null),
+      observeGroupMessage: vi.fn().mockResolvedValue(null),
     },
     proactiveDeliveries: {
       listPendingContext: vi.fn().mockResolvedValue(null),

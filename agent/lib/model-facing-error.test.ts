@@ -82,6 +82,37 @@ describe("ModelFacingError", () => {
     expect(normalize(new AppError("AGENT_MEMORY_THREAD_STALE", "Нить изменилась")).isExpectedRefusal).toBe(true);
   });
 
+  // 21.11.2026 editing another person's memory record was reported to the model as a failure with an
+  // unknown outcome, although the server refused before touching anything.
+  it("treats a refusal to touch someone else's record, or an action not allowed here, as lack of rights", () => {
+    for (const code of [
+      "AGENT_MEMORY_MUTATION_DENIED",
+      "AGENT_REMINDER_MUTATION_DENIED",
+      "AGENT_SCHEDULE_MUTATION_DENIED",
+      "AGENT_MEMORY_UNDO_DENIED",
+      "AGENT_BACKGROUND_TASK_NOT_ALLOWED",
+    ]) {
+      const normalized = normalizeModelFacingError(new AppError(code, "Изменить может только автор"), {
+        toolName: "manage_memory",
+      });
+
+      expect(normalized.contract).toMatchObject({
+        category: "authorization", code, retryable: false, sideEffectStatus: "not_started",
+      });
+      expect(normalized.isExpectedRefusal).toBe(true);
+    }
+  });
+
+  it("keeps an internal sandbox failure loud although its code also ends in DENIED", () => {
+    const normalized = normalizeModelFacingError(
+      new Error("AGENT_SANDBOX_RUNNER_REMOUNT_DENIED: Session mounts are immutable"),
+      { toolName: "bash" },
+    );
+
+    expect(normalized.contract.category).toBe("dependency");
+    expect(normalized.isExpectedRefusal).toBe(false);
+  });
+
   it("keeps operation and dependency failures loud unless the thrower marks a refusal", () => {
     const normalize = (error: Error) => normalizeModelFacingError(error, { toolName: "manage_memory_thread" });
 

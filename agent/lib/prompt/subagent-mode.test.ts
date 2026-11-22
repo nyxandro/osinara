@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ExternalGroupToolName } from "../tool-policy/group-tool-catalog.js";
 import {
-  GROUP_MEMORY_DELTA_CONTRACT,
+  GROUP_TURN_MEMORY_CONTRACT,
   MEMORY_EXACT_DUPLICATE_HANDLING,
   MEMORY_WRITE_CONTRACT,
 } from "./common-fragments.js";
@@ -39,7 +39,7 @@ const CHATS: Array<[string, ModeInstructionsInput]> = [
 // What a child cannot act on, by the text that teaches it.
 const CHILD_CANNOT = [
   ["saving memory", MEMORY_WRITE_CONTRACT],
-  ["the group's memory delta", GROUP_MEMORY_DELTA_CONTRACT],
+  ["saving memory in a group", GROUP_TURN_MEMORY_CONTRACT],
   ["duplicate cleanup", MEMORY_EXACT_DUPLICATE_HANDLING],
   ["memory edits", "For `manage_memory` use only the explicit JSON contract"],
   ["progress notes to the person", PROGRESS_UPDATE_RULES],
@@ -75,7 +75,9 @@ describe("delegated child mode block", () => {
     const child = modeInstructions({ ...input, subagentTurn: true });
 
     expect(live).not.toContain(SUBAGENT_TURN_RULES);
-    expect(live).toContain(MEMORY_WRITE_CONTRACT);
+    // A group leaves what to remember to the silent review and saves only on request (#569).
+    expect(live).toContain(input.environment === "private" ? MEMORY_WRITE_CONTRACT : GROUP_TURN_MEMORY_CONTRACT);
+    if (input.environment !== "private") expect(live).not.toContain(MEMORY_WRITE_CONTRACT);
     // A child reads every page of its subtask into a fresh context: a far shorter block is the point.
     expect(child.length).toBeLessThan(live.length * 0.75);
   });

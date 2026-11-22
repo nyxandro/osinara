@@ -55,7 +55,6 @@ import {
   productionTelegramMessageRepositories,
   type TelegramMessageRepositories,
 } from "./telegram-on-message-repositories.js";
-import { prepareTelegramMemoryReviewTurn } from "./memory-review/telegram-memory-review-turn.js";
 import { telegramInboundActor } from "./telegram-inbound-actor.js";
 import type { TelegramPreparationContext } from "./telegram-ingress-preparation.js";
 import type { PreparedSession } from "./sessions/session-repository.js";
@@ -135,7 +134,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       }
       if (unsupportedGroupSlashCommand) {
         if (inboundTimeline.status === "inserted" && actor.kind !== "telegram_channel") {
-          await repositories.memoryReview.observePassiveMessage({
+          await repositories.memoryReview.observeGroupMessage({
             groupId: group.groupId,
             timelineEntryId: inboundTimeline.entryId,
           });
@@ -171,12 +170,20 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       // Authorized family attachment references are retained without waking the model.
       if (!addressed && !hasLazyGroupAttachment) {
         if (inboundTimeline.status === "inserted") {
-          if (actor.kind !== "telegram_channel") await repositories.memoryReview.observePassiveMessage({
+          if (actor.kind !== "telegram_channel") await repositories.memoryReview.observeGroupMessage({
             groupId: group.groupId,
             timelineEntryId: inboundTimeline.entryId,
           });
         }
         return null;
+      }
+      // An addressed message joins the review queue like any other (#569): the background review is
+      // the only reader of group memory, and a topic where people only address the agent needs a queue.
+      if (addressed && inboundTimeline.status === "inserted" && actor.kind !== "telegram_channel") {
+        await repositories.memoryReview.observeGroupMessage({
+          groupId: group.groupId,
+          timelineEntryId: inboundTimeline.entryId,
+        });
       }
     } else if (!addressed) {
       return null;
@@ -263,7 +270,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
     if (!addressed || (journalDuplicate && !ctx.ingressRecovery)) {
       if (!addressed && !journalDuplicate && group && inboundTimeline &&
         actor.kind !== "telegram_channel") {
-        await repositories.memoryReview.observePassiveMessage({
+        await repositories.memoryReview.observeGroupMessage({
           groupId: group.groupId,
           timelineEntryId: inboundTimeline.entryId,
         });
@@ -405,33 +412,23 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
         "AGENT_CONVERSATION_TURN_CONTEXT_MISSING: Не удалось подготовить историю разговора",
       );
     }
-    const groupTurnContext = group && actor.kind !== "telegram_channel"
-      ? await prepareTelegramMemoryReviewTurn({
-          applicationSessionId: appSession.id,
-          conversationId: conversation.id,
-          currentEntryId: inboundTimeline.entryId,
-          groupId: group.groupId,
-          preparedContext: preparedGroupTurnContext,
-          repositories: {
-            memoryReview: repositories.memoryReview,
-            syncParticipants: (conversationId, entryIds) =>
-              repositories.conversations.syncTimelineParticipants(conversationId, entryIds),
-          },
-        })
-      : preparedGroupTurnContext;
-    if (!group) {
-      // The current participant was synchronized before context preparation. Remaining private
-      // history can exceed the repository's bounded selection contract, so synchronize it in order.
+    // Group memory is reviewed only in the background (#569): the turn leaves the unreviewed
+    // messages, its own included, in the review queue and answers from the visible history.
+    // A channel speaking in an external group never refreshed the people of its history.
+    if (actor.kind !== "telegram_channel") {
+      // The current participant was synchronized before context preparation. The rest of the visible
+      // history can exceed the repository's bounded selection contract, so synchronize it in order:
+      // the names and usernames the turn's profile cards show come from here.
       if (
-        groupTurnContext.visibleEntryIds.length === 0 ||
-        new Set(groupTurnContext.visibleEntryIds).size !== groupTurnContext.visibleEntryIds.length
+        preparedGroupTurnContext.visibleEntryIds.length === 0 ||
+        new Set(preparedGroupTurnContext.visibleEntryIds).size !== preparedGroupTurnContext.visibleEntryIds.length
       ) {
         throw new AppError(
           "AGENT_CONVERSATION_TIMELINE_SELECTION_INVALID",
           "Набор записей разговора пуст или содержит повторы",
         );
       }
-      const additionalEntryIds = groupTurnContext.visibleEntryIds.filter(
+      const additionalEntryIds = preparedGroupTurnContext.visibleEntryIds.filter(
         (entryId) => entryId !== inboundTimeline.entryId,
       );
       for (
@@ -464,7 +461,7 @@ export function createTelegramMessageHandler(repositories: TelegramMessageReposi
       turnInterjectionMarker,
       storedAttachments,
       timelineEntryId: inboundTimeline.entryId,
-      turnContext: groupTurnContext,
+      turnContext: preparedGroupTurnContext,
       turnStartedAt,
     });
     if (!group) return turnResult;

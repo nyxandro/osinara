@@ -23,6 +23,7 @@ import {
   offeredMemoryEvidence,
   type OfferedMemoryEvidence,
 } from "../memory-observability.js";
+import { loadMemorySubjectPeople } from "../memory-subject-person.js";
 import { toModelMemory, type ModelMemory } from "../model-memory.js";
 
 const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u);
@@ -65,7 +66,8 @@ export default defineTool({
             : await currentTimeRepository.findUserTimezone(auth.userId, auth.familyId),
           to: to ?? LATEST_SEARCHABLE_DAY,
         });
-        found = window.map((item) => toModelMemory(item));
+        const people = await loadMemorySubjectPeople(window.map((item) => item.id));
+        found = window.map((item) => toModelMemory(item, people.get(item.id) ?? null));
         await recordToolShows(ctx, found.map((item) => item.memoryRef), "search");
         return found;
       }

@@ -34,7 +34,7 @@ async function runningReview(agentSessionId = "agent-model-failure", agentTurnId
   const fixture = await createMainAgentMemoryFixture();
   for (let sequence = 2; sequence <= 50; sequence++) {
     const message = await insertReviewUserMessage({ ...fixture, sequence });
-    await memoryReviewRepository.observePassiveMessage({ groupId: fixture.groupId, timelineEntryId: message.id });
+    await memoryReviewRepository.observeGroupMessage({ groupId: fixture.groupId, timelineEntryId: message.id });
   }
   const [batch] = await claim();
   const session = await memoryReviewSessionRepository.prepare(batch!, new Date());
@@ -331,7 +331,7 @@ async function recordAmbiguousEnding(batchId: string): Promise<void> {
     const { fixture, batch } = await runningReview();
     for (let sequence = 51; sequence <= 100; sequence++) {
       const message = await insertReviewUserMessage({ ...fixture, sequence });
-      await memoryReviewRepository.observePassiveMessage({ groupId: fixture.groupId, timelineEntryId: message.id });
+      await memoryReviewRepository.observeGroupMessage({ groupId: fixture.groupId, timelineEntryId: message.id });
     }
     await memoryReviewRepository.failRunning({ batchId: batch.batchId,
       diagnosticCode: "AGENT_MODEL_TEMPORARILY_UNAVAILABLE",

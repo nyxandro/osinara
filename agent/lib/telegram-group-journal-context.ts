@@ -5,8 +5,6 @@
  * - `TelegramGroupJournalEntry`: normalized unified timeline projection.
  * - `TelegramGroupAttachmentSummary`: model-safe lazy attachment reference metadata.
  * - `TelegramTimelineOmission`: trusted rendering metadata for an omitted history prefix.
- * - `renderTelegramGroupJournalContext`: exact safe serialization of a selected entry set.
- *   Each entry carries the time of day; the date arrives once per calendar day as a separator.
  * - `formatTelegramGroupJournalContext`: bounded, untrusted JSON context serialization.
  * - `selectTelegramGroupJournalContext`: exact entries retained by character bounds.
  * - Entry-count bounds preserve current reply ancestry and favor the most recent coherent suffix.
@@ -108,7 +106,11 @@ function renderEntries(entries: readonly TelegramGroupJournalEntry[]): string[] 
   return lines;
 }
 
-export function renderTelegramGroupJournalContext(
+/**
+ * Exact safe serialization of a selected entry set. Each entry carries the time of day; the date
+ * arrives once per calendar day as a separator.
+ */
+function renderTelegramGroupJournalContext(
   entries: readonly TelegramGroupJournalEntry[],
   omission: TelegramTimelineOmission | null = null,
 ): string {

@@ -396,7 +396,7 @@ describe("createTelegramMessageHandler", () => {
     await expect(createTelegramMessageHandler(repository)(telegramContext().context, message)).resolves.toBeNull();
 
     expect(repository.journal.record).toHaveBeenCalledWith("group-1", message, expect.objectContaining({ kind: "telegram_user" }));
-    expect(repository.memoryReview.observePassiveMessage).toHaveBeenCalledTimes(1);
+    expect(repository.memoryReview.observeGroupMessage).toHaveBeenCalledTimes(1);
     expect(repository.session.prepareTurn).not.toHaveBeenCalled();
   });
 

@@ -95,7 +95,7 @@ describe("createTelegramMessageHandler bot senders", () => {
       expect.objectContaining({ actorId: "telegram-bot:8123456789", kind: "telegram_bot" }),
     );
     // A bot's message enters memory review exactly like a person's.
-    expect(repository.memoryReview.observePassiveMessage).toHaveBeenCalledWith({
+    expect(repository.memoryReview.observeGroupMessage).toHaveBeenCalledWith({
       groupId: "group-2",
       timelineEntryId: "00000000-0000-4000-8000-000000000010",
     });
