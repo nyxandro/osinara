@@ -6,8 +6,72 @@ import type { LanguageModelV4Usage } from "@ai-sdk/provider";
 const SESSION_SAMPLES = 128;
 const PREFIX_CHARACTERS = 128 * 1024;
 const BLOCK_CHARACTERS = 1024;
+// Enough for "Cannot connect to API: …" or "Proxy response (502) !== 200 …"; the cap keeps a long
+// low-level message from swamping the record.
+const ERROR_MESSAGE_CHARACTERS = 200;
+const ERROR_CAUSE_DEPTH = 5;
+// AI SDK quotes the model's unparsable chunk in these messages: answer or reasoning text.
+const MODEL_TEXT_ERRORS = new Set(["AI_TypeValidationError", "AI_JSONParseError"]);
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 interface Sample { system: string; tools: string; blocks: string[] }
+interface ErrorNode { name?: unknown; type?: unknown; message?: unknown; code?: unknown; statusCode?: unknown; cause?: unknown }
+
+/**
+ * Only text written by this code, undici or Node is logged. The provider's own text — an HTTP error
+ * body (the error then has a status), an error part of the stream (a plain object), a chunk that did
+ * not parse — may quote the request, the answer or the key it refused; its status, type and code
+ * stay in the record instead.
+ */
+function errorMessageField(node: ErrorNode): string | undefined {
+  if (node.statusCode !== undefined || !(node instanceof Error) || MODEL_TEXT_ERRORS.has(node.name)) return undefined;
+  return node.message.slice(0, ERROR_MESSAGE_CHARACTERS);
+}
+
+/**
+ * What broke in a failed call: the error itself, the HTTP status if the provider answered, and the
+ * deepest cause — undici and AI SDK wrap the socket error or the proxy's refusal two levels down,
+ * under messages like "fetch failed" or "Request was cancelled.". `providerText` marks an error the
+ * provider itself reported in its stream (a plain object or an `Error`): only its name, type and code
+ * are kept.
+ */
+function failureFields(error: unknown, providerText: boolean): Record<string, unknown> {
+  if (typeof error !== "object" || error === null) return { errorName: typeof error };
+  const top = error as ErrorNode;
+  const fields: Record<string, unknown> = {
+    errorName: typeof top.name === "string" ? top.name : typeof top.type === "string" ? top.type : "object",
+  };
+  const message = providerText ? undefined : errorMessageField(top);
+  if (message !== undefined) fields.errorMessage = message;
+  if (typeof top.code === "string" || typeof top.code === "number") fields.errorCode = String(top.code);
+  let current: unknown = error;
+  let deepest: ErrorNode | undefined;
+  let deepestCoded: ErrorNode | undefined;
+  for (let depth = 0; depth < ERROR_CAUSE_DEPTH && typeof current === "object" && current !== null; depth += 1) {
+    const node = current as ErrorNode;
+    if (fields.statusCode === undefined && typeof node.statusCode === "number") fields.statusCode = node.statusCode;
+    if (node !== top) {
+      deepest = node;
+      // DOMException carries a legacy numeric code; only string codes name a cause (UND_ERR_*, E*).
+      if (typeof node.code === "string") deepestCoded = node;
+    }
+    current = node.cause;
+  }
+  // Code, name and message come from one error, so the record never pairs one cause's code with
+  // another's text.
+  const cause = deepestCoded ?? deepest;
+  if (cause !== undefined) {
+    if (typeof cause.code === "string") fields.causeCode = cause.code;
+    if (typeof cause.name === "string") fields.causeName = cause.name;
+    const causeMessage = providerText ? undefined : errorMessageField(cause);
+    if (causeMessage !== undefined) fields.causeMessage = causeMessage;
+  }
+  return fields;
+}
+
+/** A call its turn cancelled is not the model failing: OsinaraModelCallsFailing counts "failed" (#492). */
+function thrownOutcome(signal: AbortSignal | undefined, error: unknown, providerText = false): Record<string, unknown> {
+  return signal?.aborted ? { outcome: "cancelled" } : { outcome: "failed", ...failureFields(error, providerText) };
+}
 
 export function createModelCallMetrics(options: {
   provider: string; modelId: string;
@@ -95,7 +159,7 @@ export function createModelCallMetrics(options: {
         return result;
       } catch (error) {
         log({ code: "AGENT_MODEL_CALL_METRICS", requestId, provider: options.provider, modelId: options.modelId,
-          durationMs: Math.round(now() - started), outcome: params.abortSignal?.aborted ? "cancelled" : "failed", usageAvailable: false });
+          durationMs: Math.round(now() - started), ...thrownOutcome(params.abortSignal, error), usageAvailable: false });
         throw error;
       }
     },
@@ -105,7 +169,7 @@ export function createModelCallMetrics(options: {
       try { result = await doStream(); }
       catch (error) {
         log({ code: "AGENT_MODEL_CALL_METRICS", requestId, provider: options.provider, modelId: options.modelId,
-          durationMs: Math.round(now() - started), outcome: params.abortSignal?.aborted ? "cancelled" : "failed", usageAvailable: false });
+          durationMs: Math.round(now() - started), ...thrownOutcome(params.abortSignal, error), usageAvailable: false });
         throw error;
       }
       const headersMs = Math.round(now() - started);
@@ -115,10 +179,14 @@ export function createModelCallMetrics(options: {
       let recorded = false;
       let released = false;
       const release = () => { if (!released) { released = true; reader.releaseLock(); } };
-      const record = (outcome: string, usage?: LanguageModelV4Usage, reportedUsage?: unknown) => {
+      const record = (outcome: string, usage?: LanguageModelV4Usage, reportedUsage?: unknown, failure: Record<string, unknown> = {}) => {
         if (recorded) return; recorded = true;
         log({ code: "AGENT_MODEL_CALL_METRICS", requestId, provider: options.provider, modelId: options.modelId,
-          durationMs: Math.round(now() - started), headersMs, firstDataMs, outcome, ...metadata, ...usageFields(usage, reportedUsage, outcome !== "other" && outcome !== "error") });
+          durationMs: Math.round(now() - started), headersMs, firstDataMs, outcome, ...failure, ...metadata, ...usageFields(usage, reportedUsage, outcome !== "other" && outcome !== "error") });
+      };
+      const recordThrown = (error: unknown, providerText = false) => {
+        const { outcome, ...failure } = thrownOutcome(params.abortSignal, error, providerText);
+        record(outcome as string, undefined, undefined, failure);
       };
       return { ...result, stream: new ReadableStream({
         async pull(controller) {
@@ -129,9 +197,10 @@ export function createModelCallMetrics(options: {
             if (["text-delta", "reasoning-delta", "tool-input-delta"].includes(part.type)) firstDataMs ??= Math.round(now() - started);
             if (part.type === "finish") record(part.finishReason.unified, part.usage, options.protocol === "anthropic-messages"
               ? part.providerMetadata?.anthropic?.usage : part.usage.raw);
-            if (part.type === "error") record("failed");
+            // An error part is the provider's report, whatever object carries it: no text from it is logged.
+            if (part.type === "error") recordThrown(part.error, true);
             controller.enqueue(part);
-          } catch (error) { record(params.abortSignal?.aborted ? "cancelled" : "failed"); release(); controller.error(error); }
+          } catch (error) { recordThrown(error); release(); controller.error(error); }
         },
         async cancel(reason) { record("cancelled"); try { await reader.cancel(reason); } finally { release(); } },
       }) };

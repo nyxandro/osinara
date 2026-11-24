@@ -1,5 +1,5 @@
 /**
- * The bot's `/me` command menu in group chats (#467, docs/plans/private-questions.md).
+ * The bot's `/me` command menu in group chats (#467).
  *
  * Exports:
  * - `PRIVATE_QUESTION_COMMAND`: the one ephemeral command of the menu.

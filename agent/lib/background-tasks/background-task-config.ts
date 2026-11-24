@@ -1,5 +1,5 @@
 /**
- * Fixed limits of background tasks (#519, docs/plans/[16.11.2026]-background-tasks.md).
+ * Fixed limits of background tasks (#519).
  *
  * The owner set the concurrency, the hour, the steps and the day of waiting for an answer on 16.11.2026;
  * the rest follow from them and are explained where they are used.
