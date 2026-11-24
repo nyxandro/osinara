@@ -557,7 +557,7 @@ reaches the agent with a plain note.
 Since v0.61.0 each connected Google profile keeps the reminders in a calendar of its own («Осинара —
 напоминания», for the family «Осинара — семейные напоминания»), both ways: the minute schedule
 `calendar-mirror` of the agent process takes a person's edits from that calendar by sync token and
-writes the reminders back (`docs/plans/reminders-google-calendar.md`). It calls the Calendar API
+writes the reminders back. It calls the Calendar API
 directly over HTTPS with the access token of the existing Google connection: no new secret or scope.
 The `gws` CLI starts a one-shot container per command and stays the model's path only. Every Google
 call takes the profile's advisory lock without waiting, so a person's own Google command waits at most
@@ -571,7 +571,7 @@ deleting a calendar over 10-20 minutes and reports all its events as deleted at 
 such a mass deletion as the calendar deleted and deletes no reminder for it.
 
 Since v0.63.0 a reminder named by the clock while the person's timezone is unknown waits instead of
-failing (`docs/plans/reminder-timezone.md`, #451). The wait lives in `reminder_timezone_waits` (migration
+failing (#451). The wait lives in `reminder_timezone_waits` (migration
 149) with the clock time the person named; saving the zone through `notification_settings` sets every
 wait of that person in the same transaction. `user_notification_settings.timezone_source` says whether
 the person named the zone or the agent read it from a clear sign (`timezone_basis`); the agent may set a
@@ -595,7 +595,7 @@ or a disconnected one is stored: every update of such a chat is acknowledged and
 (`telegram_ingress_ignored_updates` keeps only its id, reason `unaccepted_chat`; earlier rows say
 `external_media`).
 
-A disconnected external group (v0.63.0, `docs/plans/group-disconnect.md`) keeps its data and does nothing:
+A disconnected external group (v0.63.0, #465) keeps its data and does nothing:
 no turn, no send (`registerTelegramGroupSendGate` stops any write to it and logs
 `AGENT_GROUP_DISCONNECTED_SEND_BLOCKED`), no reminder, schedule, memory review or key. The webhook must be
 subscribed to `my_chat_member` to hear that the bot was removed from a group: the installer does it; a host
@@ -607,7 +607,7 @@ in the group's own `/workspace/group` folder, typed by its bytes; before 01.11.2
 could import only UTF-8 text files.
 
 Since v0.70.0 a person in any connected group may ask the bot privately with `/me <question>`
-(`docs/plans/private-questions.md`, #467): Telegram shows the command and the answer only to them
+(#467): Telegram shows the command and the answer only to them
 (Bot API 10.2 ephemeral messages). The backend takes such an update before the group feed, answers
 within Telegram's 15 seconds with a "thinking" message only that person sees, runs a one-off turn with
 read-only tools plus `manage_reminder` at an exact time, and edits the answer into that message; any
