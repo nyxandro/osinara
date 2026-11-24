@@ -293,10 +293,10 @@ describe("osinara alert rules", () => {
     // "cancelled" for a call its turn stopped, which the alert leaves out (#573 added the failure's
     // fields, so the choice lives in one helper used on every thrown path).
     const writer = read("agent/lib/model-call-metrics.ts");
-    expect(writer).toContain('signal?.aborted ? { outcome: "cancelled" } : { outcome: "failed", ...failureFields(error) }');
+    expect(writer).toContain('signal?.aborted ? { outcome: "cancelled" } : { outcome: "failed", ...failureFields(error, providerText) }');
     expect(writer.match(/\.\.\.thrownOutcome\(params\.abortSignal, error\)/gu)).toHaveLength(2);
     expect(writer).toContain("catch (error) { recordThrown(error);");
-    expect(writer).toContain('if (part.type === "error") recordThrown(part.error);');
+    expect(writer).toContain('if (part.type === "error") recordThrown(part.error, true);');
   });
 
   it("reports an indexing failure only from the indexer, not from a turn reading memory", () => {

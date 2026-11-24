@@ -190,6 +190,23 @@ describe("model request measurements", () => {
       expect(JSON.stringify(records)).not.toContain(secret);
     });
 
+    // An error part comes from the provider's stream, so its text is the provider's whatever its type.
+    it("without the text of an error part, even an Error", async () => {
+      const log = vi.fn();
+      const middleware = createModelCallMetrics({ provider: "test", protocol: "openai-chat-completions", modelId: "test", log });
+      const result = await middleware.wrapStream!({
+        doStream: async () => ({ stream: new ReadableStream({ start(stream) {
+          stream.enqueue({ type: "error", error: Object.assign(new Error("Invalid API key: sk-short", { cause: new Error("quoted private-question") }), { code: "invalid_api_key" }) });
+          stream.close();
+        } }) }),
+        params: {},
+      } as never);
+
+      for await (const _part of result.stream) { /* The error part arrives in the stream. */ }
+      expect(log.mock.calls[0]![0]).toMatchObject({ outcome: "failed", errorName: "Error", errorCode: "invalid_api_key" });
+      expect(JSON.stringify(log.mock.calls)).not.toMatch(/sk-short|private-question/);
+    });
+
     it("with the code, name and message of one and the same cause", async () => {
       const records: Record<string, unknown>[] = [];
       const coded = Object.assign(new Error("upstream reset", { cause: new Error("plain detail") }), { name: "UpstreamError", code: "EUPSTREAM" });

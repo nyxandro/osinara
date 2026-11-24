@@ -30,16 +30,17 @@ function errorMessageField(node: ErrorNode): string | undefined {
 /**
  * What broke in a failed call: the error itself, the HTTP status if the provider answered, and the
  * deepest cause — undici and AI SDK wrap the socket error or the proxy's refusal two levels down,
- * under messages like "fetch failed" or "Request was cancelled.". An error part of a stream may be
- * the provider's plain error object (`message`, `type`, `code`) rather than an `Error`.
+ * under messages like "fetch failed" or "Request was cancelled.". `providerText` marks an error the
+ * provider itself reported in its stream (a plain object or an `Error`): only its name, type and code
+ * are kept.
  */
-function failureFields(error: unknown): Record<string, unknown> {
+function failureFields(error: unknown, providerText: boolean): Record<string, unknown> {
   if (typeof error !== "object" || error === null) return { errorName: typeof error };
   const top = error as ErrorNode;
   const fields: Record<string, unknown> = {
     errorName: typeof top.name === "string" ? top.name : typeof top.type === "string" ? top.type : "object",
   };
-  const message = errorMessageField(top);
+  const message = providerText ? undefined : errorMessageField(top);
   if (message !== undefined) fields.errorMessage = message;
   if (typeof top.code === "string" || typeof top.code === "number") fields.errorCode = String(top.code);
   let current: unknown = error;
@@ -61,15 +62,15 @@ function failureFields(error: unknown): Record<string, unknown> {
   if (cause !== undefined) {
     if (typeof cause.code === "string") fields.causeCode = cause.code;
     if (typeof cause.name === "string") fields.causeName = cause.name;
-    const causeMessage = errorMessageField(cause);
+    const causeMessage = providerText ? undefined : errorMessageField(cause);
     if (causeMessage !== undefined) fields.causeMessage = causeMessage;
   }
   return fields;
 }
 
 /** A call its turn cancelled is not the model failing: OsinaraModelCallsFailing counts "failed" (#492). */
-function thrownOutcome(signal: AbortSignal | undefined, error: unknown): Record<string, unknown> {
-  return signal?.aborted ? { outcome: "cancelled" } : { outcome: "failed", ...failureFields(error) };
+function thrownOutcome(signal: AbortSignal | undefined, error: unknown, providerText = false): Record<string, unknown> {
+  return signal?.aborted ? { outcome: "cancelled" } : { outcome: "failed", ...failureFields(error, providerText) };
 }
 
 export function createModelCallMetrics(options: {
@@ -183,8 +184,8 @@ export function createModelCallMetrics(options: {
         log({ code: "AGENT_MODEL_CALL_METRICS", requestId, provider: options.provider, modelId: options.modelId,
           durationMs: Math.round(now() - started), headersMs, firstDataMs, outcome, ...failure, ...metadata, ...usageFields(usage, reportedUsage, outcome !== "other" && outcome !== "error") });
       };
-      const recordThrown = (error: unknown) => {
-        const { outcome, ...failure } = thrownOutcome(params.abortSignal, error);
+      const recordThrown = (error: unknown, providerText = false) => {
+        const { outcome, ...failure } = thrownOutcome(params.abortSignal, error, providerText);
         record(outcome as string, undefined, undefined, failure);
       };
       return { ...result, stream: new ReadableStream({
@@ -196,7 +197,8 @@ export function createModelCallMetrics(options: {
             if (["text-delta", "reasoning-delta", "tool-input-delta"].includes(part.type)) firstDataMs ??= Math.round(now() - started);
             if (part.type === "finish") record(part.finishReason.unified, part.usage, options.protocol === "anthropic-messages"
               ? part.providerMetadata?.anthropic?.usage : part.usage.raw);
-            if (part.type === "error") recordThrown(part.error);
+            // An error part is the provider's report, whatever object carries it: no text from it is logged.
+            if (part.type === "error") recordThrown(part.error, true);
             controller.enqueue(part);
           } catch (error) { recordThrown(error); release(); controller.error(error); }
         },
