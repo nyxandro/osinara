@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { wrapLanguageModel } from "ai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { errors as undiciErrors } from "undici";
 import { createModelCallMetrics } from "./model-call-metrics.js";
 
 describe("model request measurements", () => {
@@ -80,6 +81,123 @@ describe("model request measurements", () => {
       params: { abortSignal: controller.signal },
     } as never)).rejects.toThrow("stopped");
     expect(log).toHaveBeenCalledWith(expect.objectContaining({ outcome, usageAvailable: false }));
+    if (aborted) expect(log.mock.calls[0]![0]).not.toHaveProperty("errorName");
+    else expect(log.mock.calls[0]![0]).toMatchObject({ errorName: "Error", errorMessage: "stopped" });
+  });
+
+  // A failed call names what broke (#573): on 24.11.2026 the cause of 19 failures had to be pieced
+  // together from the proxy's journal, because the record said only "failed".
+  describe("names the failure of a failed call", () => {
+    const socketError = () => Object.assign(new Error("other side closed"), { name: "SocketError", code: "UND_ERR_SOCKET" });
+    const streamingModel = (fetch: (input: unknown, init?: RequestInit) => Promise<Response>, log: (record: Record<string, unknown>) => void) =>
+      wrapLanguageModel({
+        model: createOpenAICompatible({ name: "neuraldeep", baseURL: "https://test.invalid/v1", apiKey: "never-log-secret", includeUsage: true, fetch: fetch as never }).chatModel("test"),
+        middleware: createModelCallMetrics({ provider: "neuraldeep", protocol: "openai-chat-completions", modelId: "test", log }),
+      });
+    const options = { prompt: [{ role: "user" as const, content: [{ type: "text" as const, text: "private-question" }] }] };
+
+    it("when the connection breaks before any answer", async () => {
+      const records: Record<string, unknown>[] = [];
+      const model = streamingModel(async () => { throw new TypeError("fetch failed", { cause: socketError() }); }, (record) => records.push(record));
+
+      await expect(model.doStream(options)).rejects.toThrow("other side closed");
+      expect(records).toEqual([expect.objectContaining({
+        outcome: "failed", errorName: "AI_APICallError", errorMessage: "Cannot connect to API: other side closed",
+        causeName: "SocketError", causeCode: "UND_ERR_SOCKET",
+      })]);
+      expect(JSON.stringify(records)).not.toMatch(/private-question|never-log-secret/);
+    });
+
+    it("when the provider answers with an error status", async () => {
+      const records: Record<string, unknown>[] = [];
+      const model = streamingModel(async () => new Response(JSON.stringify({ error: { message: "upstream unavailable" } }), {
+        status: 502, headers: { "content-type": "application/json" },
+      }), (record) => records.push(record));
+
+      await expect(model.doStream(options)).rejects.toThrow();
+      expect(records).toEqual([expect.objectContaining({ outcome: "failed", errorName: "AI_APICallError", statusCode: 502 })]);
+    });
+
+    it("when the answer is cut off mid-stream", async () => {
+      const records: Record<string, unknown>[] = [];
+      const model = streamingModel(async () => new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ id: "c", created: 1, model: "test", choices: [{ index: 0, delta: { content: "par" }, finish_reason: null }] })}\n\n`));
+          controller.error(new TypeError("terminated", { cause: socketError() }));
+        },
+      }), { headers: { "content-type": "text/event-stream" } }), (record) => records.push(record));
+
+      const result = await model.doStream(options);
+      await expect((async () => { for await (const _part of result.stream) { /* Read until the break. */ } })()).rejects.toThrow("terminated");
+      expect(records).toEqual([expect.objectContaining({
+        outcome: "failed", errorName: "TypeError", errorMessage: "terminated", causeName: "SocketError", causeCode: "UND_ERR_SOCKET",
+      })]);
+    });
+
+    it("when the provider reports an error inside the stream", async () => {
+      const records: Record<string, unknown>[] = [];
+      const model = streamingModel(async () => new Response(
+        `data: ${JSON.stringify({ error: { message: "model overloaded", type: "server_error", code: 400 } })}\n\n`,
+        { headers: { "content-type": "text/event-stream" } },
+      ), (record) => records.push(record));
+
+      const result = await model.doStream(options);
+      for await (const _part of result.stream) { /* The error arrives as a stream part. */ }
+      expect(records).toEqual([expect.objectContaining({ outcome: "failed", errorName: "server_error", errorMessage: "model overloaded", errorCode: "400" })]);
+    });
+
+    // undici turns a refused CONNECT into "Request was cancelled."; the proxy's answer is two causes down.
+    it("when the model proxy refuses the tunnel", async () => {
+      const records: Record<string, unknown>[] = [];
+      const refused = new undiciErrors.RequestAbortedError("Proxy response (502) !== 200 when HTTP Tunneling");
+      const model = streamingModel(async () => {
+        throw new TypeError("fetch failed", { cause: Object.assign(new DOMException("Request was cancelled."), { cause: refused }) });
+      }, (record) => records.push(record));
+
+      await expect(model.doStream(options)).rejects.toThrow();
+      expect(records).toEqual([expect.objectContaining({
+        outcome: "failed", causeCode: "UND_ERR_ABORTED", causeMessage: "Proxy response (502) !== 200 when HTTP Tunneling",
+      })]);
+    });
+
+    it("without the model's text when its answer does not parse", async () => {
+      const records: Record<string, unknown>[] = [];
+      const model = streamingModel(async () => new Response(
+        `data: ${JSON.stringify({ id: "c", choices: "private-reasoning private-answer" })}\n\n`,
+        { headers: { "content-type": "text/event-stream" } },
+      ), (record) => records.push(record));
+
+      const result = await model.doStream(options);
+      for await (const _part of result.stream) { /* The unparsable chunk arrives as an error part. */ }
+      expect(records).toEqual([expect.objectContaining({ outcome: "failed", errorName: "AI_TypeValidationError" })]);
+      expect(JSON.stringify(records)).not.toContain("private-");
+    });
+
+    it("but not of a call the turn cancelled mid-stream", async () => {
+      const log = vi.fn();
+      const controller = new AbortController();
+      const middleware = createModelCallMetrics({ provider: "test", protocol: "openai-chat-completions", modelId: "test", log });
+      const result = await middleware.wrapStream!({
+        doStream: async () => ({ stream: new ReadableStream({ pull() { controller.abort(); throw new Error("aborted"); } }) }),
+        params: { abortSignal: controller.signal },
+      } as never);
+
+      await expect((async () => { for await (const _part of result.stream) { /* Read until the abort. */ } })()).rejects.toThrow("aborted");
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(log.mock.calls[0]![0]).toMatchObject({ outcome: "cancelled" });
+      expect(log.mock.calls[0]![0]).not.toHaveProperty("errorName");
+    });
+
+    it("keeps a long message short and names an application error by its code", async () => {
+      const log = vi.fn();
+      const middleware = createModelCallMetrics({ provider: "test", protocol: "openai-chat-completions", modelId: "test", log });
+      const appError = Object.assign(new Error("x".repeat(1000)), { name: "AppError", code: "AGENT_MODEL_API_KEY_INVALID" });
+
+      await expect(middleware.wrapGenerate!({ doGenerate: async () => { throw appError; }, params: {} } as never)).rejects.toBe(appError);
+      const record = log.mock.calls[0]![0] as Record<string, unknown>;
+      expect(record).toMatchObject({ outcome: "failed", errorName: "AppError", errorCode: "AGENT_MODEL_API_KEY_INVALID" });
+      expect(String(record.errorMessage).length).toBeLessThanOrEqual(200);
+    });
   });
 
   it("records missing usage as unknown rather than a zero-token success", async () => {
