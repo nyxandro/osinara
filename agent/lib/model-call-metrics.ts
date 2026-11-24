@@ -6,21 +6,25 @@ import type { LanguageModelV4Usage } from "@ai-sdk/provider";
 const SESSION_SAMPLES = 128;
 const PREFIX_CHARACTERS = 128 * 1024;
 const BLOCK_CHARACTERS = 1024;
-// Enough for "Cannot connect to API: …" or a provider's error sentence; the cap keeps any long text
-// a provider might echo out of the log.
+// Enough for "Cannot connect to API: …" or "Proxy response (502) !== 200 …"; the cap keeps a long
+// low-level message from swamping the record.
 const ERROR_MESSAGE_CHARACTERS = 200;
 const ERROR_CAUSE_DEPTH = 5;
 // AI SDK quotes the model's unparsable chunk in these messages: answer or reasoning text.
 const MODEL_TEXT_ERRORS = new Set(["AI_TypeValidationError", "AI_JSONParseError"]);
-// A provider may echo the key it refused ("Invalid API key: sk-…"): any long unbroken token is cut.
-const TOKEN_LIKE = /[A-Za-z0-9_-]{24,}/gu;
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 interface Sample { system: string; tools: string; blocks: string[] }
 interface ErrorNode { name?: unknown; type?: unknown; message?: unknown; code?: unknown; statusCode?: unknown; cause?: unknown }
 
+/**
+ * Only text written by this code, undici or Node is logged. The provider's own text — an HTTP error
+ * body (the error then has a status), an error part of the stream (a plain object), a chunk that did
+ * not parse — may quote the request, the answer or the key it refused; its status, type and code
+ * stay in the record instead.
+ */
 function errorMessageField(node: ErrorNode): string | undefined {
-  if (typeof node.message !== "string" || MODEL_TEXT_ERRORS.has(node.name as string)) return undefined;
-  return node.message.replace(TOKEN_LIKE, "[redacted]").slice(0, ERROR_MESSAGE_CHARACTERS);
+  if (node.statusCode !== undefined || !(node instanceof Error) || MODEL_TEXT_ERRORS.has(node.name)) return undefined;
+  return node.message.slice(0, ERROR_MESSAGE_CHARACTERS);
 }
 
 /**

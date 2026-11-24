@@ -143,7 +143,8 @@ describe("model request measurements", () => {
 
       const result = await model.doStream(options);
       for await (const _part of result.stream) { /* The error arrives as a stream part. */ }
-      expect(records).toEqual([expect.objectContaining({ outcome: "failed", errorName: "server_error", errorMessage: "model overloaded", errorCode: "400" })]);
+      expect(records).toEqual([expect.objectContaining({ outcome: "failed", errorName: "server_error", errorCode: "400" })]);
+      expect(records[0]).not.toHaveProperty("errorMessage");
     });
 
     // undici turns a refused CONNECT into "Request was cancelled."; the proxy's answer is two causes down.
@@ -173,16 +174,20 @@ describe("model request measurements", () => {
       expect(JSON.stringify(records)).not.toContain("private-");
     });
 
-    it("without a credential the provider echoes back", async () => {
+    // A provider's own text may quote the refused key or the request; its status and code are enough.
+    it.each([
+      ["a long key", 401, "Invalid API key: sk-live-0123456789abcdefABCDEF0123456789", "sk-live-0123456789abcdefABCDEF0123456789"],
+      ["a short key", 401, "Invalid API key: sk-short", "sk-short"],
+      ["the request it quotes", 400, "Invalid content: private-question", "private-question"],
+    ])("without the provider's own text, which may hold %s", async (_case, status, message, secret) => {
       const records: Record<string, unknown>[] = [];
-      const key = "sk-live-0123456789abcdefABCDEF0123456789";
-      const model = streamingModel(async () => new Response(JSON.stringify({ error: { message: `Invalid API key: ${key}` } }), {
-        status: 401, headers: { "content-type": "application/json" },
+      const model = streamingModel(async () => new Response(JSON.stringify({ error: { message } }), {
+        status, headers: { "content-type": "application/json" },
       }), (record) => records.push(record));
 
       await expect(model.doStream(options)).rejects.toThrow();
-      expect(records).toEqual([expect.objectContaining({ outcome: "failed", statusCode: 401, errorMessage: expect.stringContaining("Invalid API key") })]);
-      expect(JSON.stringify(records)).not.toContain(key);
+      expect(records).toEqual([expect.objectContaining({ outcome: "failed", errorName: "AI_APICallError", statusCode: status })]);
+      expect(JSON.stringify(records)).not.toContain(secret);
     });
 
     it("with the code, name and message of one and the same cause", async () => {
