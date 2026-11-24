@@ -173,6 +173,46 @@ describe("model request measurements", () => {
       expect(JSON.stringify(records)).not.toContain("private-");
     });
 
+    it("without a credential the provider echoes back", async () => {
+      const records: Record<string, unknown>[] = [];
+      const key = "sk-live-0123456789abcdefABCDEF0123456789";
+      const model = streamingModel(async () => new Response(JSON.stringify({ error: { message: `Invalid API key: ${key}` } }), {
+        status: 401, headers: { "content-type": "application/json" },
+      }), (record) => records.push(record));
+
+      await expect(model.doStream(options)).rejects.toThrow();
+      expect(records).toEqual([expect.objectContaining({ outcome: "failed", statusCode: 401, errorMessage: expect.stringContaining("Invalid API key") })]);
+      expect(JSON.stringify(records)).not.toContain(key);
+    });
+
+    it("with the code, name and message of one and the same cause", async () => {
+      const records: Record<string, unknown>[] = [];
+      const coded = Object.assign(new Error("upstream reset", { cause: new Error("plain detail") }), { name: "UpstreamError", code: "EUPSTREAM" });
+      const model = streamingModel(async () => { throw new TypeError("fetch failed", { cause: coded }); }, (record) => records.push(record));
+
+      await expect(model.doStream(options)).rejects.toThrow();
+      expect(records).toEqual([expect.objectContaining({ causeCode: "EUPSTREAM", causeName: "UpstreamError", causeMessage: "upstream reset" })]);
+    });
+
+    it("but not of a cancelled call whose stream then reports an error", async () => {
+      const log = vi.fn();
+      const controller = new AbortController();
+      const middleware = createModelCallMetrics({ provider: "test", protocol: "openai-chat-completions", modelId: "test", log });
+      const result = await middleware.wrapStream!({
+        doStream: async () => ({ stream: new ReadableStream({ start(stream) {
+          controller.abort();
+          stream.enqueue({ type: "error", error: new Error("stream closed after abort") });
+          stream.close();
+        } }) }),
+        params: { abortSignal: controller.signal },
+      } as never);
+
+      for await (const _part of result.stream) { /* The error part follows the abort. */ }
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(log.mock.calls[0]![0]).toMatchObject({ outcome: "cancelled" });
+      expect(log.mock.calls[0]![0]).not.toHaveProperty("errorName");
+    });
+
     it("but not of a call the turn cancelled mid-stream", async () => {
       const log = vi.fn();
       const controller = new AbortController();

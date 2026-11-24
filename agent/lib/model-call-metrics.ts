@@ -12,13 +12,15 @@ const ERROR_MESSAGE_CHARACTERS = 200;
 const ERROR_CAUSE_DEPTH = 5;
 // AI SDK quotes the model's unparsable chunk in these messages: answer or reasoning text.
 const MODEL_TEXT_ERRORS = new Set(["AI_TypeValidationError", "AI_JSONParseError"]);
+// A provider may echo the key it refused ("Invalid API key: sk-…"): any long unbroken token is cut.
+const TOKEN_LIKE = /[A-Za-z0-9_-]{24,}/gu;
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 interface Sample { system: string; tools: string; blocks: string[] }
 interface ErrorNode { name?: unknown; type?: unknown; message?: unknown; code?: unknown; statusCode?: unknown; cause?: unknown }
 
 function errorMessageField(node: ErrorNode): string | undefined {
   if (typeof node.message !== "string" || MODEL_TEXT_ERRORS.has(node.name as string)) return undefined;
-  return node.message.slice(0, ERROR_MESSAGE_CHARACTERS);
+  return node.message.replace(TOKEN_LIKE, "[redacted]").slice(0, ERROR_MESSAGE_CHARACTERS);
 }
 
 /**
@@ -38,19 +40,24 @@ function failureFields(error: unknown): Record<string, unknown> {
   if (typeof top.code === "string" || typeof top.code === "number") fields.errorCode = String(top.code);
   let current: unknown = error;
   let deepest: ErrorNode | undefined;
+  let deepestCoded: ErrorNode | undefined;
   for (let depth = 0; depth < ERROR_CAUSE_DEPTH && typeof current === "object" && current !== null; depth += 1) {
     const node = current as ErrorNode;
     if (fields.statusCode === undefined && typeof node.statusCode === "number") fields.statusCode = node.statusCode;
     if (node !== top) {
       deepest = node;
       // DOMException carries a legacy numeric code; only string codes name a cause (UND_ERR_*, E*).
-      if (typeof node.code === "string") fields.causeCode = node.code;
+      if (typeof node.code === "string") deepestCoded = node;
     }
     current = node.cause;
   }
-  if (deepest !== undefined) {
-    if (typeof deepest.name === "string") fields.causeName = deepest.name;
-    const causeMessage = errorMessageField(deepest);
+  // Code, name and message come from one error, so the record never pairs one cause's code with
+  // another's text.
+  const cause = deepestCoded ?? deepest;
+  if (cause !== undefined) {
+    if (typeof cause.code === "string") fields.causeCode = cause.code;
+    if (typeof cause.name === "string") fields.causeName = cause.name;
+    const causeMessage = errorMessageField(cause);
     if (causeMessage !== undefined) fields.causeMessage = causeMessage;
   }
   return fields;
@@ -185,7 +192,7 @@ export function createModelCallMetrics(options: {
             if (["text-delta", "reasoning-delta", "tool-input-delta"].includes(part.type)) firstDataMs ??= Math.round(now() - started);
             if (part.type === "finish") record(part.finishReason.unified, part.usage, options.protocol === "anthropic-messages"
               ? part.providerMetadata?.anthropic?.usage : part.usage.raw);
-            if (part.type === "error") record("failed", undefined, undefined, failureFields(part.error));
+            if (part.type === "error") recordThrown(part.error);
             controller.enqueue(part);
           } catch (error) { recordThrown(error); release(); controller.error(error); }
         },

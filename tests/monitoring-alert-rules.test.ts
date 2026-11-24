@@ -296,7 +296,7 @@ describe("osinara alert rules", () => {
     expect(writer).toContain('signal?.aborted ? { outcome: "cancelled" } : { outcome: "failed", ...failureFields(error) }');
     expect(writer.match(/\.\.\.thrownOutcome\(params\.abortSignal, error\)/gu)).toHaveLength(2);
     expect(writer).toContain("catch (error) { recordThrown(error);");
-    expect(writer).toContain('record("failed", undefined, undefined, failureFields(part.error))');
+    expect(writer).toContain('if (part.type === "error") recordThrown(part.error);');
   });
 
   it("reports an indexing failure only from the indexer, not from a turn reading memory", () => {
