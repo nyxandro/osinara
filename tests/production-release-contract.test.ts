@@ -58,12 +58,15 @@ describe("production container contract", () => {
     ]) {
       expect(dockerfile).toContain(` AS ${target}`);
     }
-    expect(dockerfile).toContain("ARG OCI_SOURCE");
-    expect(dockerfile).toContain("ARG OCI_VERSION");
-    expect(dockerfile).toContain("ARG OCI_REVISION");
-    expect(dockerfile).toContain("org.opencontainers.image.source=\"${OCI_SOURCE}\"");
-    expect(dockerfile).toContain("org.opencontainers.image.version=\"${OCI_VERSION}\"");
-    expect(dockerfile).toContain("org.opencontainers.image.revision=\"${OCI_REVISION}\"");
+    // #577: a release-specific value in a build stage breaks the layer cache of everything built on it,
+    // so each release rebuilt and the host re-downloaded every image. The workflow labels the result.
+    expect(dockerfile).not.toContain("OCI_");
+    expect(dockerfile).not.toContain("org.opencontainers.image");
+    expect(dockerfile).not.toContain("first-party-node");
+    // The release bump of `version` must not reach `npm ci` either: it installs from blanked copies.
+    expect(dockerfile).toContain("FROM node-base AS package-manifests");
+    expect(dockerfile.match(/COPY --from=package-manifests \/manifests\/package\.json \/manifests\/package-lock\.json \.\/\n/g)).toHaveLength(2);
+    expect(dockerfile.match(/^COPY package\.json package-lock\.json \.\/$/gm)).toHaveLength(1);
     expect(dockerfile).toContain("COPY infra/nginx.conf /etc/nginx/nginx.conf");
     expect(dockerfile).toContain(
       "FROM node:24-bookworm-slim@sha256:cb4e8f7c443347358b7875e717c29e27bf9befc8f5a26cf18af3c3dec80e58c5",
@@ -97,6 +100,7 @@ describe("production container contract", () => {
       "common.sh",
       "database.sh",
       "launcher.sh",
+      "live-copy.sh",
       "main.sh",
       "release.sh",
       "self-update.sh",
@@ -257,6 +261,41 @@ describe("release workflow contract", () => {
     );
   });
 
+  // #577: the release push to main carries the tree develop already tested; both suites run again only
+  // when that proof is missing, and a manual dispatch always runs them.
+  it("publishes from main without repeating suites that already passed for the same tree", () => {
+    const workflow = readProjectFile(".github/workflows/ci-release.yaml");
+    const job = (name: string) => {
+      const start = workflow.indexOf(`\n  ${name}:\n`);
+      expect(start, name).toBeGreaterThan(0);
+      const next = workflow.slice(start + 1).search(/\n {2}[a-z-]+:\n/);
+      return workflow.slice(start, next < 0 ? undefined : start + 1 + next);
+    };
+
+    const reuse = job("tested-tree");
+    expect(reuse).toContain("if: github.ref == 'refs/heads/main' && github.event_name == 'push'");
+    expect(reuse).toContain("actions: read");
+    expect(reuse).toContain("fetch-depth: 2");
+    expect(reuse).toContain("run: bash scripts/ci/tested-tree-reuse.sh");
+    expect(reuse).toContain("reused: ${{ steps.reuse.outputs.reused }}");
+
+    for (const suite of ["test", "retrieval-evals"]) {
+      const suiteJob = job(suite);
+      expect(suiteJob).toContain("needs: tested-tree");
+      expect(suiteJob).toContain("if: ${{ !cancelled() && needs.tested-tree.outputs.reused != 'true' }}");
+    }
+
+    const release = job("release");
+    expect(release).toContain("needs: [tested-tree, test, retrieval-evals]");
+    expect(release).toContain("!cancelled()");
+    expect(release).toContain("github.event_name == 'push' || github.event_name == 'workflow_dispatch'");
+    expect(release).toContain(
+      "(needs.tested-tree.outputs.reused == 'true' || (needs.test.result == 'success' && needs.retrieval-evals.result == 'success'))",
+    );
+    // The token may read run results only in the job that looks them up.
+    expect(workflow.match(/actions: read/g)).toHaveLength(1);
+  });
+
   it("publishes fixed GHCR names with immutable action revisions and attestations", () => {
     const workflow = readProjectFile(".github/workflows/ci-release.yaml");
     const actionUses = [...workflow.matchAll(/uses:\s+([^\s]+)/g)].map((match) => match[1]);
@@ -275,6 +314,18 @@ describe("release workflow contract", () => {
       expect(workflow).toContain(`ghcr.io/nyxandro/${image}`);
     }
     expect(workflow.match(/actions\/attest@/g)).toHaveLength(9);
+    const builds = [...workflow.matchAll(/- name: Build and push [^\n]+ image\n[\s\S]*?(?=\n {6}- name:)/g)].map(
+      (match) => match[0],
+    );
+    expect(builds).toHaveLength(5);
+    for (const build of builds) {
+      expect(build).not.toContain("build-args:");
+      expect(build).toContain("labels: |");
+      expect(build).toContain("org.opencontainers.image.source=https://github.com/${{ github.repository }}");
+      expect(build).toContain("org.opencontainers.image.version=${{ steps.release.outputs.version }}");
+      expect(build).toContain("org.opencontainers.image.revision=${{ github.sha }}");
+      expect(build).toMatch(/cache-from: type=gha,scope=[a-z-]+\n\s+cache-to: type=gha,mode=max,scope=[a-z-]+/);
+    }
     expect(workflow).toContain("packages: write");
     expect(workflow).toContain("attestations: write");
     expect(workflow).toContain("id-token: write");
@@ -373,7 +424,7 @@ describe("server deployment contract", () => {
     expect(body).toContain('"$1" == "--resume"');
     expect(body.indexOf("adopt_claimed_proposal")).toBeLessThan(body.indexOf("claim_approved_proposal"));
     // Every module the controller sources is part of the bootstrap metadata check.
-    expect(main).toMatch(/for module in main common database release backup self-update; do/u);
+    expect(main).toMatch(/for module in main common database release backup live-copy self-update; do/u);
     expect(main).toContain('source "${CONTROLLER_DIR}/self-update.sh"');
     expect(main.lastIndexOf("prune_retired_controllers")).toBeGreaterThan(
       main.lastIndexOf('record_proposal_result "succeeded"'),
@@ -447,6 +498,7 @@ describe("server deployment contract", () => {
     expect(script).toContain("ghcr.io/nyxandro/osinara-app@sha256:");
     expect(script).toContain("pg_dump");
     expect(script).toContain("backup_volume");
+    expect(script).toContain("copy_live_volume");
     expect(script).toContain("preflight_backup");
     expect(script).toContain("prune_old_deploy_backups");
     expect(script).toContain("prune_retired_release_images");
@@ -462,9 +514,21 @@ describe("server deployment contract", () => {
     expect(main.indexOf("prepare_runtime_update")).toBeLessThan(main.indexOf("stop_current_services"));
     expect(main.indexOf("stop_current_services")).toBeLessThan(main.indexOf("create_postgres_backup"));
     expect(main.indexOf("stop_current_services")).toBeLessThan(main.indexOf("snapshot_durable_volumes"));
-    // #558: the sandboxes' folders are archived while the bot still answers, before admission drains.
-    expect(main.indexOf("preflight_backup")).toBeLessThan(main.indexOf("archive_live_volumes"));
-    expect(main.indexOf("archive_live_volumes")).toBeLessThan(main.indexOf("prepare_runtime_update"));
+    // #558: the sandboxes' folders are copied while the bot still answers, before admission drains.
+    expect(main.indexOf("preflight_backup")).toBeLessThan(main.indexOf("copy_live_volumes"));
+    expect(main.indexOf("copy_live_volumes")).toBeLessThan(main.indexOf("prepare_runtime_update"));
+    // #577: retired sets are deleted after the bot answers and before a new copy, never inside the stop.
+    expect(main.indexOf("remove_retired_deploy_backups")).toBeLessThan(main.indexOf("preflight_backup"));
+    expect(main.lastIndexOf("remove_retired_deploy_backups")).toBeGreaterThan(main.indexOf("send_success_notification"));
+    expect(main.match(/remove_retired_deploy_backups/g)).toHaveLength(2);
+    // After the owner was told the update succeeded, a failed deletion must not report a failed update.
+    expect(main).toContain(
+      'remove_retired_deploy_backups ||\n    log_event "DEPLOY_BACKUP_PRUNE_DEFERRED" "Retired deploy backups were kept for the next run"',
+    );
+    // The live copy runs rsync from the release's own app image.
+    const dockerfile = readProjectFile("Dockerfile");
+    const runtime = dockerfile.slice(dockerfile.indexOf("FROM node-base AS runtime"), dockerfile.indexOf("FROM nginx:"));
+    expect(runtime).toMatch(/apt-get install --no-install-recommends --yes ca-certificates rsync/);
     expect(main.lastIndexOf("record_proposal_result")).toBeLessThan(
       main.lastIndexOf("prune_retired_release_images"),
     );

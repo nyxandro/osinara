@@ -343,8 +343,8 @@ describe("Docker Compose runtime wiring", () => {
   it("installs system CA roots in the production agent runtime", () => {
     const dockerfile = readFileSync(new URL("Dockerfile", projectRoot), "utf8");
     const runtime = dockerfile.slice(
-      dockerfile.indexOf("FROM first-party-node AS runtime"),
-      dockerfile.indexOf("FROM nginx:", dockerfile.indexOf("FROM first-party-node AS runtime")),
+      dockerfile.indexOf("FROM node-base AS runtime"),
+      dockerfile.indexOf("FROM nginx:", dockerfile.indexOf("FROM node-base AS runtime")),
     );
 
     // OAuth refresh and other HTTPS boundaries require the OS trust store in production.

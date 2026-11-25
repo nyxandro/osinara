@@ -4,9 +4,19 @@
 
 GitHub-hosted CI runs the complete `compose.test.yaml` suite for pull requests and pushes to
 `develop` or `main`, and beside it the memory retrieval evals with the production embedding model
-(`compose.memory-retrieval-eval.yaml`); a release waits for both. A successful `main` run requires a new stable version in `package.json`,
+(`compose.memory-retrieval-eval.yaml`); a release waits for both. A push to `main` first runs the
+`Tested tree` job (`scripts/ci/tested-tree-reuse.sh`, #577): a release PR merges `develop` into `main`, and
+while `main` is an ancestor of `develop` the merge commit carries exactly the tree of `develop`'s head. If a
+parent with that same tree has a successful push run of this workflow in this repository in which both
+suites succeeded, the release starts at once and the run shows a notice with that run's link; any other
+case — another tree, a suite skipped or failed, that `develop` run still going, a GitHub API failure (shown
+as a warning) — runs both suites as before. A manual dispatch always runs them. A successful `main` run requires a new stable version in `package.json`,
 builds five container-only images, publishes immutable tags to GHCR, records image and file artifact attestations,
-and prepares `vVERSION` as a draft. CI uploads and byte-verifies every asset before publishing the
+and prepares `vVERSION` as a draft. The workflow sets the OCI labels (source, version, revision) on the
+finished images, and `npm ci` installs from copies of `package.json` and `package-lock.json` with `version`
+blanked (stage `package-manifests`): no release-specific value reaches a build step, so unchanged layers —
+`node_modules` until a dependency changes, the sandbox's system packages — come from the build cache with
+their digests, and a host pulls only the layers that changed (#577). CI uploads and byte-verifies every asset before publishing the
 draft as the latest release. A failed rerun may resume only a draft whose tag still resolves to the
 same commit; a published release or unrelated tag requires a package version bump.
 Every version must also provide a detailed user-facing changelog at `docs/releases/vVERSION.md`;
@@ -54,12 +64,25 @@ the same `CI and release` workflow manually with `gh workflow run "CI and releas
 The manual path still runs the production-equivalent test job first and publishes only from the
 current canonical `main` ref; it does not permit a branch build or bypass release validation.
 
-Each non-initial deployment retains the previous restore point until the new PostgreSQL dumps
-and durable-volume archives are complete and checksum-verified. Only then does it remove older
-rolling copies and the historical initial migration backup, keeping the three most recent verified
-release backups. One copy alone is no restore point for damage noticed a day or two late: by then
-the only copy holds it too. Three sets cost about 11 GB on the current host. Checksum paths are relative and remain valid after the atomic directory rename. Capacity
-preflight must fit both the existing and new copies; insufficient space never triggers early deletion.
+Each non-initial deployment retains the previous restore point until the new set is complete: the
+PostgreSQL dump and the Google keys archive checksum-verified, the sandboxes' folders copied. Only then
+does it remove older rolling copies and the historical initial migration backup, keeping the three most
+recent verified release backups. One copy alone is no restore point for damage noticed a day or two late:
+by then the only copy holds it too. Checksum paths are relative and remain valid after the atomic
+directory rename. Capacity preflight must fit both the existing and new copies, counting every byte of
+the volumes as if nothing were shared; insufficient space never triggers early deletion.
+
+A set made since #577 holds `postgres.dump`, `osinara-production-google-workspace-credentials.tar.gz`,
+`SHA256SUMS` (over those two files) and two folders, `osinara-production-tool-environments/` and
+`osinara-production-workspace-data/`. Sets made before it hold `.tar.gz` archives of those two volumes
+instead; they leave the rotation after three deployments. A file unchanged since the previous set is a
+hard link to it: the sets share those bytes, so a set takes the space of its changed files only, and
+removing an old set frees only what no other set holds. Never edit a file inside a set, nor its mode,
+owner or time (`chmod`, `chown`, `touch`) — the change would reach every set sharing it; rsync writes a
+changed file as a new file, so a deployment never does. A set leaving the rotation is only renamed to
+`.retired.<set>` while the bot is stopped; its files are deleted at the lowest priority once the new
+release answers, or at the start of the next run if this one ended earlier or the deletion failed
+(`DEPLOY_BACKUP_PRUNE_DEFERRED`; the update itself stays successful).
 After a successful health
 check and terminal success record it removes local first-party Osinara image references older than
 the current and previous release; this never prunes non-Osinara projects on the same server.
@@ -770,6 +793,42 @@ documented the npm form and it never worked; the compiled script ships from v0.2
 reindex for v0.27.0 itself was performed by running the same logic through `tsx` against
 `/app/agent/lib`.
 
+## Restoring the sandboxes' folders from a deploy backup
+
+The controller never restores a backup by itself. To bring the sandboxes' folders back from a set, stop
+whatever writes them, copy the set's folder over the volume, and start again. Restoring copies the files
+into the volume — it never links them — so later work in the sandboxes cannot change the set.
+
+```bash
+cd /opt/osinara
+systemctl stop osinara-deploy.timer        # no deployment may start meanwhile
+# Stopping the timer does not stop a running deployment; wait until this prints "inactive".
+systemctl is-active osinara-deploy.service
+COMPOSE=(docker compose --project-name osinara-production --env-file .env
+  --env-file current/release.env --file current/compose.production.yaml)
+"${COMPOSE[@]}" stop agent sandbox-runner
+docker ps --quiet --filter label=dev.osinara.sandbox.project=osinara-production | xargs --no-run-if-empty docker stop
+SET=/opt/osinara/backups/<set>                  # e.g. 20261125T120000Z-to-v0.82.0
+APP_IMAGE="$(sed -n 's/^OSINARA_APP_IMAGE=//p' current/release.env)"   # carries rsync since #577
+docker run --rm --network none --entrypoint /usr/bin/rsync \
+  --volume osinara-production-workspace-data:/data \
+  --volume "$SET/osinara-production-workspace-data:/copy:ro" "$APP_IMAGE" \
+  --archive --numeric-ids --delete /copy/ /data/
+# The copy has no caches; the same excludes keep the volume's current ones instead of deleting them.
+docker run --rm --network none --entrypoint /usr/bin/rsync \
+  --volume osinara-production-tool-environments:/data \
+  --volume "$SET/osinara-production-tool-environments:/copy:ro" "$APP_IMAGE" \
+  --archive --numeric-ids --delete --exclude='/*/cache/' --exclude='/*/home/.cache/' /copy/ /data/
+"${COMPOSE[@]}" start sandbox-runner agent
+systemctl start osinara-deploy.timer
+```
+
+A sandbox downloads its caches again on first use: Python and npm packages stay in the copy; puppeteer's
+Chrome, Playwright's browsers and pip's downloads do not. A set made before #577 holds `<volume>.tar.gz` instead of a folder:
+empty the volume and unpack the archive into it with `tar -xzf` from the same image. The database is
+restored from the set's `postgres.dump` with `pg_restore`; check `sha256sum --check SHA256SUMS` in the set
+first.
+
 ## Failure semantics
 
 Claiming sets a unique deployment lease whose lifetime exceeds the bounded systemd execution
@@ -788,13 +847,27 @@ only those exact recorded volumes; a failed removal makes the result `ambiguous`
 is removed after migration starts, and pre-existing candidate-only bytes remain a fail-closed error.
 
 Before every non-initial update the script derives the backup set from the current immutable Compose and
-verifies those durable volumes and free space. While the current release still serves, it archives the
+verifies those durable volumes and free space. While the current release still serves, it copies the
 sandboxes' folders, `tool-environments` and `workspace-data`, at the lowest CPU and disk priority (`nice`,
-`ionice -c 3`): about twelve minutes on this host, which used to be silence (#558). Such a copy may hold a
-file a sandbox was writing half-written and miss files made in the minutes before the stop; the owner
-accepted that on 2026-11-20. Only then does it drain admission and stop application writers, write and
-validate a logical dump of the application database, archive `google-workspace-credentials`, and validate
-every artifact under one `SHA256SUMS`. A current-owned durable volume missing from the candidate is forbidden. A missing
+`ionice -c 3`; #558). The copy is `rsync --archive --numeric-ids` run from the release's app image, with
+`--link-dest` on the same folder of the newest finished set that has one (#577): only changed files are
+written, the first copy after sets of archives takes every file. Hard links inside a sandbox are not kept —
+two names of one file are two files in the set — so a set never ties two of its own paths to one file and a
+restore cannot join files the sandbox kept apart. Sockets and devices are left out, and so are the caches a sandbox downloads again on demand: `<chat>/cache/` (the tools'
+`XDG_CACHE_HOME`, pip's cache, Playwright browsers) and `<chat>/home/.cache/` (puppeteer's Chrome) of
+`tool-environments`. Compressing both folders whole took 14 minutes of the deploy at 6.5 GB on 25.11.2026.
+Such a copy may hold a file a sandbox was writing half-written and miss files made in the minutes before
+the stop; the owner accepted that on 2026-11-20. A file deleted while it is copied ends the copy with
+rsync's code 24 (`DEPLOY_LIVE_COPY_FILES_VANISHED`); a file shortened while it is read ends it with code 23
+and `read errors mapping` (`DEPLOY_LIVE_COPY_FILES_CHANGED`). Both are logged and the deploy goes on. Code
+23 with any other message — a file rsync could not open or write — and every other failure is
+`DEPLOY_LIVE_COPY_FAILED` and stops the deploy before the bot is stopped; rsync's own lines stay in the
+journal. rsync takes a file as unchanged when its size and modification time match the previous set: a
+program that rewrites a file keeping both (unpacking with preserved times, `cp -p`) leaves the previous
+bytes in the new set. Installed packages and files the model writes get fresh times. Only then does it drain admission
+and stop application writers, write and validate a logical dump of the application database, archive
+`google-workspace-credentials`, and validate both under one `SHA256SUMS`. The folders are not summed:
+rsync checks each file it writes, and reading gigabytes again would lengthen the stop. A current-owned durable volume missing from the candidate is forbidden. A missing
 current-owned volume or a pre-existing candidate-only volume fails closed, so deploy never creates
 an empty replacement for active data or silently reuses bytes of unknown provenance. The
 reconstructible embedding model volume is omitted, and so is `network-access`: the agent rewrites

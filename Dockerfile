@@ -1,24 +1,14 @@
-ARG OCI_SOURCE
-ARG OCI_VERSION
-ARG OCI_REVISION
-
+# Release labels (source, version, revision) are set by the release workflow on the finished images,
+# never here: a release-specific value inside a stage breaks the layer cache of everything built on it,
+# and every release rebuilt and re-downloaded all images (#577).
 FROM node:24-bookworm-slim@sha256:cb4e8f7c443347358b7875e717c29e27bf9befc8f5a26cf18af3c3dec80e58c5 AS node-base
-
-FROM node-base AS first-party-node
-ARG OCI_SOURCE
-ARG OCI_VERSION
-ARG OCI_REVISION
-LABEL org.opencontainers.image.source="${OCI_SOURCE}" \
-      org.opencontainers.image.version="${OCI_VERSION}" \
-      org.opencontainers.image.revision="${OCI_REVISION}"
 
 # The agent cuts the middle frame of a Telegram GIF, an H.264 MP4 a chat participant sent, with its
 # own FFmpeg build that reads only MP4 (H.264) and GIF from a descriptor, opens no path and writes only
 # JPEG: a decoder is where a crafted file attacks, and Debian's full ffmpeg would add 200 packages and
 # 481 MB. Release 9.0.2 of 18.09.2026, signed by the FFmpeg release key
 # FCF9 86EA 15E6 E293 A564 4F10 B432 2F04 D676 58D8; the checksum pins the verified tarball. License
-# and source: THIRD_PARTY_NOTICES.md. Built from `node-base`, without the release labels, so the
-# stage stays cached from one release to the next.
+# and source: THIRD_PARTY_NOTICES.md.
 FROM node-base AS media-tools
 ARG FFMPEG_VERSION=9.0.2
 ARG FFMPEG_SHA256=8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
@@ -73,9 +63,18 @@ RUN git clone --depth 1 --branch "$WIDGET_SANDBOX_TAG" https://github.com/Telegr
 COPY infra/widget-check/package.json infra/widget-check/package-lock.json /opt/widget-check/
 RUN cd /opt/widget-check && npm ci --omit=dev --no-audit --no-fund
 
-FROM first-party-node AS dependencies
-WORKDIR /app
+# Every release bumps `version` in package.json and package-lock.json. npm installs from copies with that
+# field blanked, so `npm ci` and its node_modules layer stay cached until a dependency changes, and a host
+# does not download node_modules again with each release (#577). Stages that ship the real manifest copy
+# it from the source tree.
+FROM node-base AS package-manifests
+WORKDIR /manifests
 COPY package.json package-lock.json ./
+RUN node -e 'const fs = require("node:fs"); for (const file of ["package.json", "package-lock.json"]) { const manifest = JSON.parse(fs.readFileSync(file, "utf8")); manifest.version = "0.0.0"; if (manifest.packages?.[""]) manifest.packages[""].version = "0.0.0"; fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + "\n"); }'
+
+FROM node-base AS dependencies
+WORKDIR /app
+COPY --from=package-manifests /manifests/package.json /manifests/package-lock.json ./
 COPY scripts/install-google-workspace-cli.ts ./scripts/install-google-workspace-cli.ts
 RUN npm ci --ignore-scripts \
     && npm run install:gws
@@ -95,23 +94,24 @@ FROM scratch AS installer-cli-artifact
 COPY --from=installer-cli-build /tmp/osinara-linux-x64 /osinara-linux-x64
 
 FROM dependencies AS test
+# rsync: the deploy's backup tests run the real copy of the sandboxes' folders (#577).
 RUN apt-get update \
-    && apt-get install --no-install-recommends --yes jq \
+    && apt-get install --no-install-recommends --yes jq rsync \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=media-tools /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /opt/ffmpeg/bin/media-sandbox /usr/local/bin/
 COPY . .
 CMD ["npm", "test"]
 
 # Runtime images install only production packages; build tooling and TypeScript stay behind.
-FROM first-party-node AS production-dependencies
+FROM node-base AS production-dependencies
 WORKDIR /app
 ENV NODE_ENV=production
-COPY package.json package-lock.json ./
+COPY --from=package-manifests /manifests/package.json /manifests/package-lock.json ./
 COPY scripts/install-google-workspace-cli.ts ./scripts/install-google-workspace-cli.ts
 RUN npm ci --omit=dev --ignore-scripts \
     && npm run install:gws
 
-FROM first-party-node AS sandbox-runtime
+FROM node-base AS sandbox-runtime
 COPY infra/certificates/russian-trusted-root-ca.crt /usr/local/share/ca-certificates/russian-trusted-root-ca.crt
 # The model's commands run here without privileges, so apt cannot install anything at run time: what
 # its tasks need beyond pip and npm comes with the image. FFmpeg converts the audio and video people
@@ -176,14 +176,14 @@ RUN npm ci --ignore-scripts --prefix /opt/sandbox-tools \
 WORKDIR /workspace
 CMD ["sleep", "infinity"]
 
-FROM first-party-node AS sandbox-runner
+FROM node-base AS sandbox-runner
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=production-dependencies /app/node_modules ./node_modules
 COPY --from=build /app/.runtime/services/sandbox-runner/main.js ./.runtime/services/sandbox-runner/main.js
 CMD ["node", ".runtime/services/sandbox-runner/main.js"]
 
-FROM first-party-node AS sandbox-egress-proxy
+FROM node-base AS sandbox-egress-proxy
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=production-dependencies /app/node_modules ./node_modules
@@ -191,9 +191,10 @@ COPY --from=build /app/.runtime/services/sandbox-egress-proxy/main.js ./.runtime
 USER node
 CMD ["node", ".runtime/services/sandbox-egress-proxy/main.js"]
 
-FROM first-party-node AS runtime
+FROM node-base AS runtime
+# rsync: the deployment controller copies the sandboxes' folders with this image before an update (#577).
 RUN apt-get update \
-    && apt-get install --no-install-recommends --yes ca-certificates \
+    && apt-get install --no-install-recommends --yes ca-certificates rsync \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production
@@ -220,11 +221,5 @@ EXPOSE 3000
 ENTRYPOINT ["osinara-entrypoint"]
 
 FROM nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de AS edge
-ARG OCI_SOURCE
-ARG OCI_VERSION
-ARG OCI_REVISION
-LABEL org.opencontainers.image.source="${OCI_SOURCE}" \
-      org.opencontainers.image.version="${OCI_VERSION}" \
-      org.opencontainers.image.revision="${OCI_REVISION}"
 COPY infra/nginx.conf /etc/nginx/nginx.conf
 EXPOSE 80
