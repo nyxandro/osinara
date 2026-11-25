@@ -14,14 +14,8 @@ readonly DURABLE_VOLUME_BINDINGS=(
   "osinara-production-tool-environments|tool-environments"
   "osinara-production-workspace-data|workspace-data"
 )
-# The sandboxes' folders (3.2 GB on 20.11.2026) took about twelve minutes to compress with the bot
-# stopped. They are archived while it still answers, at the lowest CPU and disk priority (#558). The
-# owner accepted that such a copy may hold a file a sandbox was writing half-written, and miss files
-# made in the minutes before the stop; the database and the Google keys are still copied stopped.
-readonly LIVE_ARCHIVED_VOLUMES=(
-  "osinara-production-tool-environments"
-  "osinara-production-workspace-data"
-)
+# A set leaving the rotation is renamed with this prefix during the stop and deleted after it (#577).
+readonly RETIRED_BACKUP_PREFIX=".retired."
 BACKUP_DURABLE_VOLUMES=()
 CREATED_CANDIDATE_VOLUMES=()
 COMPLETED_BACKUP_DIR=""
@@ -162,19 +156,50 @@ prune_old_deploy_backups() {
   # Keep the explicit verified copy even if the host clock moved backwards since an older backup.
   remove_count=$((${#deploy_backups[@]} - RETAINED_DEPLOY_BACKUP_COUNT + 1))
   for ((index = 0; index < remove_count; index += 1)); do
-    name="${deploy_backups[index]##*/}"
-    rm -rf -- "${deploy_backups[index]}" ||
-      fail "DEPLOY_BACKUP_RETENTION_FAILED" "Could not remove old deploy backup: ${name}"
-    log_event "DEPLOY_BACKUP_PRUNED" "Removed old deploy backup: ${name}"
+    retire_deploy_backup "${deploy_backups[index]}" || return 1
   done
 
   # The rolling pre-deploy snapshot supersedes the historical bootstrap copy.
   path="${BACKUPS_DIR}/${LEGACY_INITIAL_MIGRATION_BACKUP_NAME}"
   if [[ -d "$path" ]]; then
-    rm -rf -- "$path" ||
-      fail "DEPLOY_BACKUP_RETENTION_FAILED" "Could not remove legacy initial migration backup"
-    log_event "DEPLOY_BACKUP_PRUNED" "Removed legacy initial migration backup"
+    retire_deploy_backup "$path" || return 1
   fi
+}
+
+# Runs while the bot is stopped, so it only renames: since #577 a set holds the sandboxes' files one by
+# one (~112 thousand on 25.11.2026), and unlinking them on the slow disk would lengthen the stop. The
+# renamed set leaves the rotation at once; remove_retired_deploy_backups deletes it once the bot answers.
+retire_deploy_backup() {
+  local path="$1" name="${1##*/}"
+  local target="${BACKUPS_DIR}/${RETIRED_BACKUP_PREFIX}${name}"
+  if [[ -e "$target" ]]; then
+    fail "DEPLOY_BACKUP_RETENTION_FAILED" "Could not retire old deploy backup ${name}: ${target##*/} exists"
+    return 1
+  fi
+  if ! mv -- "$path" "$target"; then
+    fail "DEPLOY_BACKUP_RETENTION_FAILED" "Could not retire old deploy backup: ${name}"
+    return 1
+  fi
+  log_event "DEPLOY_BACKUP_RETIRED" "Retired old deploy backup: ${name}"
+}
+
+# Deletes retired sets at the lowest CPU and disk priority, after a release answers and at the start of
+# the next run, where a failed or interrupted deploy left them.
+remove_retired_deploy_backups() {
+  local path name nullglob_was_enabled=0
+  local -a retired=()
+  shopt -q nullglob && nullglob_was_enabled=1
+  shopt -s nullglob
+  retired=("${BACKUPS_DIR}/${RETIRED_BACKUP_PREFIX}"*)
+  [[ "$nullglob_was_enabled" -eq 1 ]] || shopt -u nullglob
+  for path in "${retired[@]}"; do
+    name="${path##*/"${RETIRED_BACKUP_PREFIX}"}"
+    if [[ ! -d "$path" || -L "$path" ]] || ! nice -n 19 ionice -c 3 rm -rf -- "$path"; then
+      fail "DEPLOY_BACKUP_RETENTION_FAILED" "Could not remove retired deploy backup: ${name}"
+      return 1
+    fi
+    log_event "DEPLOY_BACKUP_PRUNED" "Removed old deploy backup: ${name}"
+  done
 }
 
 compose_declares_volume() {
@@ -315,70 +340,39 @@ stop_current_services() {
   compose_current stop "${services[@]}"
 }
 
-# `low` runs the archive and its check at the lowest CPU and disk priority, so a copy taken while the
-# bot answers does not starve it on the slow disk; `normal` is for the copy taken with the bot stopped.
+# Archives a volume taken with the bot stopped (the Google keys) and checks that the archive reads back.
 backup_volume() {
-  local volume="$1" priority="$2"
-  local archive="${BACKUP_TEMP_DIR}/${volume}.tar.gz"
-  local -a create=(-czf "/backup/${volume}.tar.gz" -C /data .)
-  local status=0
-  case "$priority" in
-    low)
-      # The bot keeps writing while this copy reads: GNU tar exits 1 when a file changed or vanished as
-      # it was read, and the archive still holds what it read (the accepted risk above). 2 and up — and
-      # docker's own 125-127 — are real failures.
-      docker run --rm --network none --entrypoint /usr/bin/nice \
-        --volume "${volume}:/data:ro" --volume "${BACKUP_TEMP_DIR}:/backup" "$APP_IMAGE" \
-        -n 19 /usr/bin/ionice -c 3 /bin/tar --warning=no-file-changed --warning=no-file-removed "${create[@]}" ||
-        status=$?
-      if ((status == 1)); then
-        log_event "DEPLOY_LIVE_ARCHIVE_FILES_CHANGED" "Files of ${volume} changed while archived live; the copy holds them as read"
-      elif ((status != 0)); then
-        fail "DEPLOY_LIVE_ARCHIVE_FAILED" "Live archive of ${volume} failed with tar exit ${status}"
-        return 1
-      fi
-      nice -n 19 ionice -c 3 tar -tzf "$archive" >/dev/null
-      ;;
-    normal)
-      docker run --rm --network none --entrypoint /bin/tar \
-        --volume "${volume}:/data:ro" --volume "${BACKUP_TEMP_DIR}:/backup" "$APP_IMAGE" "${create[@]}"
-      tar -tzf "$archive" >/dev/null
-      ;;
-    *)
-      fail "DEPLOY_BACKUP_PRIORITY_INVALID" "Unknown archive priority: ${priority}"
-      ;;
-  esac
-}
-
-is_live_archived_volume() {
-  local volume="$1" live
-  for live in "${LIVE_ARCHIVED_VOLUMES[@]}"; do
-    [[ "$volume" == "$live" ]] && return 0
-  done
-  return 1
-}
-
-# Runs while the current release still serves: no admission drain, no stop.
-archive_live_volumes() {
-  local volume
-  ((${#BACKUP_DURABLE_VOLUMES[@]} > 0)) ||
-    fail "DEPLOY_BACKUP_VOLUME_SET_EMPTY" "Preflight did not select durable backup volumes"
-  for volume in "${BACKUP_DURABLE_VOLUMES[@]}"; do
-    is_live_archived_volume "$volume" || continue
-    backup_volume "$volume" low
-  done
+  local volume="$1"
+  docker run --rm --network none --entrypoint /bin/tar \
+    --volume "${volume}:/data:ro" --volume "${BACKUP_TEMP_DIR}:/backup" "$APP_IMAGE" \
+    -czf "/backup/${volume}.tar.gz" -C /data .
+  tar -tzf "${BACKUP_TEMP_DIR}/${volume}.tar.gz" >/dev/null
 }
 
 snapshot_durable_volumes() {
-  local volume
+  local volume path
+  local -a summed=()
   ((${#BACKUP_DURABLE_VOLUMES[@]} > 0)) ||
     fail "DEPLOY_BACKUP_VOLUME_SET_EMPTY" "Preflight did not select durable backup volumes"
   for volume in "${BACKUP_DURABLE_VOLUMES[@]}"; do
-    is_live_archived_volume "$volume" && continue
-    backup_volume "$volume" normal
+    if is_live_copied_volume "$volume"; then
+      [[ -d "${BACKUP_TEMP_DIR}/${volume}" ]] ||
+        fail "DEPLOY_BACKUP_LIVE_COPY_MISSING" "The set has no live copy of ${volume}"
+      continue
+    fi
+    backup_volume "$volume"
   done
+  # The manifest covers the files taken with the bot stopped. The folder copies are not summed here:
+  # rsync checks each file it writes, and reading gigabytes again would keep the bot stopped (#577).
+  for path in "$BACKUP_TEMP_DIR"/*; do
+    if [[ -f "$path" && ! -L "$path" ]]; then
+      summed+=("./${path##*/}")
+    fi
+  done
+  ((${#summed[@]} > 0)) ||
+    fail "DEPLOY_BACKUP_SET_EMPTY" "The backup set holds no file to checksum"
   # Relative paths remain verifiable after the temporary directory is atomically renamed.
-  (cd -- "$BACKUP_TEMP_DIR" && sha256sum -- ./* > SHA256SUMS && sha256sum --check --status SHA256SUMS)
+  (cd -- "$BACKUP_TEMP_DIR" && sha256sum -- "${summed[@]}" > SHA256SUMS && sha256sum --check --status SHA256SUMS)
   local timestamp final_dir
   timestamp="$(date -u +'%Y%m%dT%H%M%SZ')"
   final_dir="${BACKUPS_DIR}/${timestamp}-to-v${REQUESTED_VERSION}"

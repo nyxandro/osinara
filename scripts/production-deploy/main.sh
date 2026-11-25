@@ -37,7 +37,7 @@ bootstrap_require_metadata "/opt/osinara" "0:0:750"
 bootstrap_require_metadata "/opt/osinara/bin" "0:0:750"
 bootstrap_require_metadata "$BOOTSTRAP_CONTROLLER_ROOT" "0:0:750"
 bootstrap_require_metadata "$CONTROLLER_DIR" "0:0:750"
-for module in main common database release backup self-update; do
+for module in main common database release backup live-copy self-update; do
   bootstrap_require_metadata "${CONTROLLER_DIR}/${module}.sh" "0:0:640"
 done
 
@@ -50,6 +50,8 @@ source "${CONTROLLER_DIR}/database.sh"
 source "${CONTROLLER_DIR}/release.sh"
 # shellcheck source=scripts/production-deploy/backup.sh
 source "${CONTROLLER_DIR}/backup.sh"
+# shellcheck source=scripts/production-deploy/live-copy.sh
+source "${CONTROLLER_DIR}/live-copy.sh"
 # shellcheck source=scripts/production-deploy/self-update.sh
 source "${CONTROLLER_DIR}/self-update.sh"
 
@@ -210,10 +212,12 @@ main() {
   prepare_candidate_release
   pull_release_images
   if [[ "$INITIAL_MODE" -eq 0 ]]; then
+    # Sets an earlier deploy retired but did not get to delete (#577).
+    remove_retired_deploy_backups
     preflight_backup
     begin_backup
-    # The bot still answers through this copy of the sandboxes' folders, the longest step (#558).
-    archive_live_volumes
+    # The bot still answers through this copy of the sandboxes' folders (#558, #577).
+    copy_live_volumes
     recheck_claim_owner
     prepare_runtime_update
     # Downtime starts on the next line and lasts through the backup. The window opened before the
@@ -243,6 +247,11 @@ main() {
   send_success_notification
   prune_retired_release_images
   prune_retired_controllers "$CONTROLLER_ROOT" "$LAUNCHER_PATH"
+  # Old backup sets were only renamed during the stop; deleting their files waits until the bot answers,
+  # last, so a slow deletion holds up no other cleanup. The release has succeeded and the owner was told
+  # so: a failed deletion is logged, not a failed update, and the next run deletes them before its copy.
+  remove_retired_deploy_backups ||
+    log_event "DEPLOY_BACKUP_PRUNE_DEFERRED" "Retired deploy backups were kept for the next run"
   log_event "DEPLOY_RELEASE_SUCCEEDED" "Release v${REQUESTED_VERSION} is healthy"
 }
 

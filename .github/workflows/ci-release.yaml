@@ -16,8 +16,33 @@ permissions:
   contents: read
 
 jobs:
+  tested-tree:
+    # A release PR merges develop into main with develop's exact tree, which develop's own push run has
+    # just tested. Only that proof lets main publish without both suites; a manual dispatch never uses it.
+    name: Tested tree
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      reused: ${{ steps.reuse.outputs.reused }}
+    steps:
+      - name: Check out the pushed commit and its parents
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 2
+      - name: Look for a push run that passed both suites for this tree
+        id: reuse
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/ci/tested-tree-reuse.sh
+
   test:
     name: Docker Compose test suite
+    needs: tested-tree
+    if: ${{ !cancelled() && needs.tested-tree.outputs.reused != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -31,6 +56,8 @@ jobs:
     # change that quietly loses answers or leaks another group's memory fails here, not in a chat.
     # The switch is passed explicitly: without it every eval is skipped and the job would pass empty.
     name: Memory retrieval evals
+    needs: tested-tree
+    if: ${{ !cancelled() && needs.tested-tree.outputs.reused != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -44,8 +71,13 @@ jobs:
 
   release:
     name: Publish immutable production release
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    needs: [test, retrieval-evals]
+    # `!cancelled()` lets the release start after skipped suites; it then requires the reuse proof or
+    # both suites passed in this run.
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (needs.tested-tree.outputs.reused == 'true' || (needs.test.result == 'success' && needs.retrieval-evals.result == 'success'))
+    needs: [tested-tree, test, retrieval-evals]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -121,10 +153,12 @@ jobs:
         id: app
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
-          build-args: |
-            OCI_SOURCE=https://github.com/${{ github.repository }}
-            OCI_VERSION=${{ steps.release.outputs.version }}
-            OCI_REVISION=${{ github.sha }}
+          # Labels go on the finished image: a release value inside a build stage breaks the layer
+          # cache of everything built on it (#577).
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.release.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=app
           cache-to: type=gha,mode=max,scope=app
           context: .
@@ -138,10 +172,12 @@ jobs:
         id: sandbox-runtime
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
-          build-args: |
-            OCI_SOURCE=https://github.com/${{ github.repository }}
-            OCI_VERSION=${{ steps.release.outputs.version }}
-            OCI_REVISION=${{ github.sha }}
+          # Labels go on the finished image: a release value inside a build stage breaks the layer
+          # cache of everything built on it (#577).
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.release.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=sandbox-runtime
           cache-to: type=gha,mode=max,scope=sandbox-runtime
           context: .
@@ -155,10 +191,12 @@ jobs:
         id: sandbox-runner
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
-          build-args: |
-            OCI_SOURCE=https://github.com/${{ github.repository }}
-            OCI_VERSION=${{ steps.release.outputs.version }}
-            OCI_REVISION=${{ github.sha }}
+          # Labels go on the finished image: a release value inside a build stage breaks the layer
+          # cache of everything built on it (#577).
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.release.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=sandbox-runner
           cache-to: type=gha,mode=max,scope=sandbox-runner
           context: .
@@ -172,10 +210,12 @@ jobs:
         id: sandbox-egress-proxy
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
-          build-args: |
-            OCI_SOURCE=https://github.com/${{ github.repository }}
-            OCI_VERSION=${{ steps.release.outputs.version }}
-            OCI_REVISION=${{ github.sha }}
+          # Labels go on the finished image: a release value inside a build stage breaks the layer
+          # cache of everything built on it (#577).
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.release.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=sandbox-egress-proxy
           cache-to: type=gha,mode=max,scope=sandbox-egress-proxy
           context: .
@@ -189,10 +229,12 @@ jobs:
         id: edge
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
-          build-args: |
-            OCI_SOURCE=https://github.com/${{ github.repository }}
-            OCI_VERSION=${{ steps.release.outputs.version }}
-            OCI_REVISION=${{ github.sha }}
+          # Labels go on the finished image: a release value inside a build stage breaks the layer
+          # cache of everything built on it (#577).
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.release.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=edge
           cache-to: type=gha,mode=max,scope=edge
           context: .
