@@ -15,9 +15,14 @@ readonly TEI_IMAGE="ghcr.io/huggingface/text-embeddings-inference:cpu-1.9@sha256
 readonly RETAINED_LOCAL_RELEASE_IMAGE_COUNT=2
 readonly RELEASE_DIRECTORY_NAME_PATTERN='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 
+# A GitHub read waits out a short outage instead of failing the update: on 25.11.2026 GitHub's API
+# answered 504 for about four minutes, and a version once proposed is never proposed again (#577).
+# curl retries only timeouts and HTTP 408/429/500/502/503/504, for at most five minutes per request,
+# and prints each retry to the journal; every request here only reads.
 curl_github() {
-  curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+  curl --fail --no-progress-meter --location --proto '=https' --tlsv1.2 \
     --connect-timeout 10 --max-time 60 \
+    --retry 10 --retry-delay 30 --retry-max-time 300 \
     --header 'Accept: application/vnd.github+json' \
     --header 'X-GitHub-Api-Version: 2022-11-28' \
     --header 'User-Agent: osinara-production-deploy/1' "$@"
