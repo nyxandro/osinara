@@ -94,9 +94,10 @@ FROM scratch AS installer-cli-artifact
 COPY --from=installer-cli-build /tmp/osinara-linux-x64 /osinara-linux-x64
 
 FROM dependencies AS test
-# rsync: the deploy's backup tests run the real copy of the sandboxes' folders (#577).
+# rsync and curl: the deploy's tests run the real copy of the sandboxes' folders and the real GitHub
+# request with its retries (#577).
 RUN apt-get update \
-    && apt-get install --no-install-recommends --yes jq rsync \
+    && apt-get install --no-install-recommends --yes curl jq rsync \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=media-tools /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /opt/ffmpeg/bin/media-sandbox /usr/local/bin/
 COPY . .

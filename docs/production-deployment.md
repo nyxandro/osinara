@@ -835,11 +835,22 @@ Claiming sets a unique deployment lease whose lifetime exceeds the bounded syste
 timeout. Each timer start marks an expired `deploying` lease as `ambiguous` and never retries it.
 SIGTERM and SIGINT pass through the same terminal-state logic.
 
+Every read from GitHub (release record, manifest, Compose file, tag) waits out a short outage: curl
+retries timeouts and HTTP 408, 429, 500, 502, 503 and 504 every 30 seconds for up to five minutes per
+request and prints each retry (`Warning: Problem : HTTP error. Will retry in 30 seconds.`) to the journal;
+a definite answer such as 404 fails at once. On 25.11.2026 GitHub's API answered 504 for about four minutes
+and failed v0.82.0 at its first step, and a version once proposed is never proposed again (#577).
+
 Validation, pull, dump, or snapshot failures before migration are stored as `failed`. If current
 services were already stopped, the script first restarts the current release and requires its
 health check to pass; failed recovery becomes `ambiguous`. Once candidate migration begins, every
 failure is `ambiguous` and no automatic rollback is attempted. Operators inspect the stored stable
 result code, logs, and timestamp, then approve a later version explicitly.
+
+Once the release is recorded as `succeeded`, the owner is told so, and nothing after it changes that: a
+later cleanup step that fails — old images, old controllers, retired backup sets — logs
+`DEPLOY_POST_SUCCESS_STEP_FAILED` with the line and exit code, sends no Telegram message, and leaves the
+recorded result alone; the next run repeats the cleanup.
 
 An absent candidate-only durable volume is recorded when this deployment attempt creates it. On a
 pre-migration failure the controller first restores and validates the current release, then removes
