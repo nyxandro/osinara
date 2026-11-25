@@ -67,6 +67,14 @@ handle_failure() {
   trap - ERR INT TERM
   set +e
 
+  # The release is recorded as succeeded and the owner was told so. A cleanup step failing after that
+  # changes neither: it is logged, and the next run repeats the cleanup.
+  if [[ "$RELEASE_SUCCEEDED" -eq 1 ]]; then
+    log_event "DEPLOY_POST_SUCCESS_STEP_FAILED" \
+      "Release v${REQUESTED_VERSION} is healthy; a cleanup step after it failed at line ${line}: ${reason} (exit ${exit_code})"
+    exit "$exit_code"
+  fi
+
   local status="failed"
   local code="DEPLOY_RELEASE_FAILED"
   local message="Deployment failed at line ${line}: ${reason} (exit ${exit_code})"
@@ -244,6 +252,7 @@ main() {
   resume_runtime_admission
   record_proposal_result "succeeded" "DEPLOY_RELEASE_SUCCEEDED" \
     "Release v${REQUESTED_VERSION} passed the production health check"
+  RELEASE_SUCCEEDED=1
   send_success_notification
   prune_retired_release_images
   prune_retired_controllers "$CONTROLLER_ROOT" "$LAUNCHER_PATH"
