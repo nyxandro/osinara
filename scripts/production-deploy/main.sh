@@ -248,8 +248,10 @@ main() {
   prune_retired_release_images
   prune_retired_controllers "$CONTROLLER_ROOT" "$LAUNCHER_PATH"
   # Old backup sets were only renamed during the stop; deleting their files waits until the bot answers,
-  # last, so a slow or failed deletion holds up no other cleanup (the next run retries it).
-  remove_retired_deploy_backups
+  # last, so a slow deletion holds up no other cleanup. The release has succeeded and the owner was told
+  # so: a failed deletion is logged, not a failed update, and the next run deletes them before its copy.
+  remove_retired_deploy_backups ||
+    log_event "DEPLOY_BACKUP_PRUNE_DEFERRED" "Retired deploy backups were kept for the next run"
   log_event "DEPLOY_RELEASE_SUCCEEDED" "Release v${REQUESTED_VERSION} is healthy"
 }
 

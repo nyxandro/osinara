@@ -521,6 +521,10 @@ describe("server deployment contract", () => {
     expect(main.indexOf("remove_retired_deploy_backups")).toBeLessThan(main.indexOf("preflight_backup"));
     expect(main.lastIndexOf("remove_retired_deploy_backups")).toBeGreaterThan(main.indexOf("send_success_notification"));
     expect(main.match(/remove_retired_deploy_backups/g)).toHaveLength(2);
+    // After the owner was told the update succeeded, a failed deletion must not report a failed update.
+    expect(main).toContain(
+      'remove_retired_deploy_backups ||\n    log_event "DEPLOY_BACKUP_PRUNE_DEFERRED" "Retired deploy backups were kept for the next run"',
+    );
     // The live copy runs rsync from the release's own app image.
     const dockerfile = readProjectFile("Dockerfile");
     const runtime = dockerfile.slice(dockerfile.indexOf("FROM node-base AS runtime"), dockerfile.indexOf("FROM nginx:"));

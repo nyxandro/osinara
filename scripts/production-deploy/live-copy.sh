@@ -52,6 +52,8 @@ latest_volume_copy() {
 # Copies one sandboxes' folder while the bot answers, at the lowest CPU and disk priority so it does not
 # starve the bot on the slow disk. A file unchanged since the newest set becomes a hard link to it: the
 # sets share those bytes, and rsync writes a changed file as a new one, so an earlier set never changes.
+# Hard links inside a sandbox are not kept: each path is its own file in the set, so `--link-dest` can
+# tie a path only to the same path of the previous set, never two paths of one set to each other.
 # Sockets and devices are left out, as tar left out sockets before.
 copy_live_volume() {
   local volume="$1" previous pattern errors status=0
@@ -59,7 +61,7 @@ copy_live_volume() {
   # The new set and the link source must sit under one mount: hard links never cross mounts.
   [[ "${BACKUP_TEMP_DIR%/*}" == "$BACKUPS_DIR" ]] ||
     fail "DEPLOY_BACKUP_TEMP_DIR_INVALID" "Backup set is not directly under ${BACKUPS_DIR}"
-  local -a options=(--archive --hard-links --numeric-ids --no-devices --no-specials) excludes=()
+  local -a options=(--archive --numeric-ids --no-devices --no-specials) excludes=()
   # `read -a` splits the patterns without expanding `/*/` against the host's own paths.
   if [[ -v LIVE_COPY_EXCLUDES["$volume"] ]]; then
     read -r -a excludes <<<"${LIVE_COPY_EXCLUDES["$volume"]}"

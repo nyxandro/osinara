@@ -1,6 +1,8 @@
 /** The last restore point survives every failure until a complete new backup is verified. */
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -185,9 +187,11 @@ it("copies a sandboxes' folder with rsync at the lowest priority, without caches
   const command = args.slice(args.indexOf("app@sha256:abc") + 1);
   expect(command.slice(0, 6)).toEqual(["-n", "19", "/usr/bin/ionice", "-c", "3", "/usr/bin/rsync"]);
   expect(command).toEqual(expect.arrayContaining([
-    "--archive", "--hard-links", "--numeric-ids", "--no-devices", "--no-specials",
+    "--archive", "--numeric-ids", "--no-devices", "--no-specials",
     "--exclude=/*/cache/", "--exclude=/*/home/.cache/",
   ]));
+  // Kept hard links would let --link-dest tie two independent paths of one set to one file.
+  expect(command).not.toContain("--hard-links");
   expect(command.slice(-2)).toEqual(["/data/", `/backups/.backup.test/${TOOLS}/`]);
   // No earlier copy of this folder: everything is copied, nothing is linked.
   expect(command.some((arg) => arg.startsWith("--link-dest"))).toBe(false);
@@ -278,6 +282,8 @@ it("keeps earlier sets intact and shares only unchanged files with them", () => 
   writeFileSync(join(chat, "home", "profile"), "kept");
   writeFileSync(join(chat, "same.txt"), "unchanged");
   writeFileSync(join(chat, "edited.txt"), "first");
+  writeFileSync(join(chat, "twin-a"), "twin");
+  linkSync(join(chat, "twin-a"), join(chat, "twin-b"));
   execFileSync("mkfifo", [join(chat, "pipe")]);
   const copy = (name: string) => shell(`
 BACKUPS_DIR=${JSON.stringify(directory)}
@@ -309,7 +315,9 @@ mv "$BACKUP_TEMP_DIR" "$BACKUPS_DIR/${name}"`);
   const created = copy(firstSet);
   expect(created.status, created.stderr).toBe(0);
   const firstCopy = join(directory, firstSet, TOOLS, "chat");
-  expect(readdirSync(firstCopy).sort()).toEqual(["edited.txt", "home", "same.txt"]);
+  expect(readdirSync(firstCopy).sort()).toEqual(["edited.txt", "home", "same.txt", "twin-a", "twin-b"]);
+  // Two names of one file in a sandbox are two files in the set: a later set never joins two paths.
+  expect(statSync(join(firstCopy, "twin-a")).ino).not.toBe(statSync(join(firstCopy, "twin-b")).ino);
   expect(readdirSync(join(firstCopy, "home"))).toEqual(["profile"]);
 
   writeFileSync(join(chat, "edited.txt"), "second, longer");

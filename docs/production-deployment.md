@@ -81,7 +81,8 @@ removing an old set frees only what no other set holds. Never edit a file inside
 owner or time (`chmod`, `chown`, `touch`) — the change would reach every set sharing it; rsync writes a
 changed file as a new file, so a deployment never does. A set leaving the rotation is only renamed to
 `.retired.<set>` while the bot is stopped; its files are deleted at the lowest priority once the new
-release answers, or at the start of the next run if this one ended earlier.
+release answers, or at the start of the next run if this one ended earlier or the deletion failed
+(`DEPLOY_BACKUP_PRUNE_DEFERRED`; the update itself stays successful).
 After a successful health
 check and terminal success record it removes local first-party Osinara image references older than
 the current and previous release; this never prunes non-Osinara projects on the same server.
@@ -812,12 +813,12 @@ APP_IMAGE="$(sed -n 's/^OSINARA_APP_IMAGE=//p' current/release.env)"   # carries
 docker run --rm --network none --entrypoint /usr/bin/rsync \
   --volume osinara-production-workspace-data:/data \
   --volume "$SET/osinara-production-workspace-data:/copy:ro" "$APP_IMAGE" \
-  --archive --hard-links --numeric-ids --delete /copy/ /data/
+  --archive --numeric-ids --delete /copy/ /data/
 # The copy has no caches; the same excludes keep the volume's current ones instead of deleting them.
 docker run --rm --network none --entrypoint /usr/bin/rsync \
   --volume osinara-production-tool-environments:/data \
   --volume "$SET/osinara-production-tool-environments:/copy:ro" "$APP_IMAGE" \
-  --archive --hard-links --numeric-ids --delete --exclude='/*/cache/' --exclude='/*/home/.cache/' /copy/ /data/
+  --archive --numeric-ids --delete --exclude='/*/cache/' --exclude='/*/home/.cache/' /copy/ /data/
 "${COMPOSE[@]}" start sandbox-runner agent
 systemctl start osinara-deploy.timer
 ```
@@ -848,10 +849,11 @@ is removed after migration starts, and pre-existing candidate-only bytes remain 
 Before every non-initial update the script derives the backup set from the current immutable Compose and
 verifies those durable volumes and free space. While the current release still serves, it copies the
 sandboxes' folders, `tool-environments` and `workspace-data`, at the lowest CPU and disk priority (`nice`,
-`ionice -c 3`; #558). The copy is `rsync --archive --hard-links --numeric-ids` run from the release's app
-image, with `--link-dest` on the same folder of the newest finished set that has one (#577): only changed
-files are written, the first copy after sets of archives takes every file. Sockets and devices are left
-out, and so are the caches a sandbox downloads again on demand: `<chat>/cache/` (the tools'
+`ionice -c 3`; #558). The copy is `rsync --archive --numeric-ids` run from the release's app image, with
+`--link-dest` on the same folder of the newest finished set that has one (#577): only changed files are
+written, the first copy after sets of archives takes every file. Hard links inside a sandbox are not kept —
+two names of one file are two files in the set — so a set never ties two of its own paths to one file and a
+restore cannot join files the sandbox kept apart. Sockets and devices are left out, and so are the caches a sandbox downloads again on demand: `<chat>/cache/` (the tools'
 `XDG_CACHE_HOME`, pip's cache, Playwright browsers) and `<chat>/home/.cache/` (puppeteer's Chrome) of
 `tool-environments`. Compressing both folders whole took 14 minutes of the deploy at 6.5 GB on 25.11.2026.
 Such a copy may hold a file a sandbox was writing half-written and miss files made in the minutes before
