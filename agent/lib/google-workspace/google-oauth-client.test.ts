@@ -4,9 +4,11 @@
  * Constructs covered:
  * - Consent requests exact identity and full user Workspace scopes.
  * - Authorization-code and refresh exchanges reject incomplete grants.
+ * - A timeout or a non-JSON answer becomes an application error with the original as cause.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { AppError } from "../app-error.js";
 import {
   buildGoogleAuthorizationUrl,
   exchangeGoogleAuthorizationCode,
@@ -82,6 +84,44 @@ describe("Google Workspace OAuth client", () => {
       .toMatchObject({ refreshToken: "refresh-secret", scopes: GOOGLE_WORKSPACE_SCOPES });
     await expect(refreshGoogleAccessToken(config, "refresh-secret")).resolves
       .toMatchObject({ accessToken: "new-access-secret", scopes: GOOGLE_WORKSPACE_SCOPES });
+  });
+
+  // fetch reports its timeout as a DOMException whose message is read-only.
+  it.each(["request", "answer"] as const)("reports a timeout of the %s as a Google network failure", async (stage) => {
+    const timeout = new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      if (stage === "request") throw timeout;
+      return new Response(new ReadableStream({ start: (controller) => controller.error(timeout) }), { status: 200 });
+    }));
+
+    const failure = await refreshGoogleAccessToken(config, "refresh-secret").catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(AppError);
+    expect((failure as AppError).code).toBe("AGENT_GOOGLE_OAUTH_NETWORK_FAILED");
+    expect((failure as AppError).cause).toBe(timeout);
+  });
+
+  // The connection tool and the calendar mirror tell a revoked grant from a passing failure by this code.
+  it("reports a revoked grant as expired access", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: "invalid_grant",
+      error_description: "Token has been expired or revoked.",
+    }), { status: 400 })));
+
+    const failure = await refreshGoogleAccessToken(config, "refresh-secret").catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(AppError);
+    expect((failure as AppError).code).toBe("AGENT_GOOGLE_AUTH_EXPIRED");
+  });
+
+  it("reports an answer that is not JSON as an invalid Google answer", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<html>", { status: 200 })));
+
+    const failure = await refreshGoogleAccessToken(config, "refresh-secret").catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(AppError);
+    expect((failure as AppError).code).toBe("AGENT_GOOGLE_OAUTH_RESPONSE_INVALID");
+    expect((failure as AppError).cause).toBeInstanceOf(SyntaxError);
   });
 
   it("rejects grants missing any required Workspace scope", async () => {

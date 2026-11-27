@@ -66,8 +66,17 @@ export function buildGoogleAuthorizationUrl(
   return url.toString();
 }
 
-async function requestToken(body: URLSearchParams): Promise<z.infer<typeof tokenResponseSchema>> {
+// What the person can do after a failed exchange: the connection link is spent once Google returns to the
+// callback, while a token refresh serves a request that can simply be repeated.
+const AUTHORIZATION_RETRY_HINT = "Запросите новую ссылку в Telegram и попробуйте ещё раз";
+const REFRESH_RETRY_HINT = "Попробуйте ещё раз чуть позже";
+
+async function requestToken(
+  body: URLSearchParams,
+  retryHint: string,
+): Promise<z.infer<typeof tokenResponseSchema>> {
   let response: Response;
+  let rawBody: string;
   try {
     response = await fetch(GOOGLE_OAUTH_TOKEN_URL, {
       body,
@@ -75,18 +84,21 @@ async function requestToken(body: URLSearchParams): Promise<z.infer<typeof token
       method: "POST",
       signal: AbortSignal.timeout(GOOGLE_PROVIDER_REQUEST_TIMEOUT_MILLISECONDS),
     });
+    // The timeout signal also covers reading the body.
+    rawBody = await response.text();
   } catch (error) {
     console.error(JSON.stringify({
       code: "AGENT_GOOGLE_OAUTH_NETWORK_FAILED",
       errorName: error instanceof Error ? error.name : "UnknownError",
     }));
-    if (error instanceof Error) {
-      error.message = "AGENT_GOOGLE_OAUTH_NETWORK_FAILED: Не удалось связаться с Google OAuth";
-    }
-    throw error;
+    // A fetch timeout is a DOMException with a read-only message, so the error is wrapped, not edited.
+    throw new AppError(
+      "AGENT_GOOGLE_OAUTH_NETWORK_FAILED",
+      `Не удалось связаться с Google. ${retryHint}`,
+      { cause: error },
+    );
   }
 
-  const rawBody = await response.text();
   let payload: unknown;
   try {
     payload = JSON.parse(rawBody);
@@ -95,10 +107,11 @@ async function requestToken(body: URLSearchParams): Promise<z.infer<typeof token
       code: "AGENT_GOOGLE_OAUTH_RESPONSE_INVALID",
       providerStatus: response.status,
     }));
-    if (error instanceof Error) {
-      error.message = "AGENT_GOOGLE_OAUTH_RESPONSE_INVALID: Google OAuth вернул некорректный ответ";
-    }
-    throw error;
+    throw new AppError(
+      "AGENT_GOOGLE_OAUTH_RESPONSE_INVALID",
+      `Google ответил непонятно. ${retryHint}`,
+      { cause: error },
+    );
   }
   if (!response.ok) {
     const providerError = providerErrorSchema.safeParse(payload);
@@ -151,7 +164,7 @@ export async function exchangeGoogleAuthorizationCode(
     code,
     grant_type: "authorization_code",
     redirect_uri: config.redirectUri,
-  }));
+  }), AUTHORIZATION_RETRY_HINT);
   if (!token.refresh_token) {
     throw new AppError(
       "AGENT_GOOGLE_REFRESH_TOKEN_MISSING",
@@ -175,7 +188,7 @@ export async function refreshGoogleAccessToken(
     client_secret: config.clientSecret,
     grant_type: "refresh_token",
     refresh_token: refreshToken,
-  }));
+  }), REFRESH_RETRY_HINT);
   return {
     accessToken: token.access_token,
     expiresInSeconds: token.expires_in,

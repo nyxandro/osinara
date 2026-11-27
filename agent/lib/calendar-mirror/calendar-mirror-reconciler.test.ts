@@ -165,6 +165,17 @@ describe("reconcileCalendarMirrors", () => {
     );
   });
 
+  it("treats a lost connection to Google sign-in as a temporary failure", async () => {
+    const run = setup({ token: new AppError("AGENT_GOOGLE_OAUTH_NETWORK_FAILED", "Не удалось связаться с Google") });
+    await reconcileCalendarMirrors(run.dependencies, NOW);
+    expect(run.repository.recordFailure).toHaveBeenCalledWith(
+      "workspace-1",
+      "AGENT_CALENDAR_MIRROR_PROVIDER_UNAVAILABLE",
+      new Date(NOW.getTime() + 60_000),
+    );
+    expect(run.repository.stop).not.toHaveBeenCalled();
+  });
+
   it("counts a calendar deleted only when it stays missing for five minutes", async () => {
     const first = setup();
     first.google.fail("list", new CalendarCallError("not_found", 404, "notFound"));
