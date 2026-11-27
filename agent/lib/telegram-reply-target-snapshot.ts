@@ -8,6 +8,7 @@
  */
 import type { TelegramMessage } from "../runtime/telegram/inbound.js";
 import { telegramMessageDisplay } from "./telegram-content/telegram-content-description.js";
+import { telegramRichMessageText, telegramRichQuoteText } from "./telegram-rich-inbound.js";
 
 export interface TelegramReplyTargetSnapshot {
   contentText: string;
@@ -28,6 +29,13 @@ type TelegramReplyMessage = Pick<TelegramMessage, "chat" | "raw" | "replyToMessa
 
 const REJECTED_TARGET_CODE = "AGENT_TELEGRAM_REPLY_TARGET_REJECTED";
 
+// Telegram's limits for a text message and for a quote. A rich message runs up to 32768 characters,
+// while the whole current-message envelope must fit the 12000 of the turn context, so a rich target
+// and its fragment are kept to what a plain message and a plain quote could ever carry.
+const REPLY_TARGET_TEXT_MAX_CHARACTERS = 4_096;
+const QUOTED_FRAGMENT_MAX_CHARACTERS = 1_024;
+const CLIPPED_MARK = "…";
+
 const NO_REPLY_TARGET: TelegramReplyTargetProjection = { snapshot: null, quotedText: null };
 
 function record(value: unknown): JsonRecord | null {
@@ -40,6 +48,15 @@ function exactIdentifier(value: unknown): string | null {
   if (typeof value === "string" && value.length > 0) return value;
   if (typeof value === "number" && Number.isSafeInteger(value)) return String(value);
   return null;
+}
+
+function clipped(text: string, maxCharacters: number): string {
+  if (text.length <= maxCharacters) return text;
+  let end = maxCharacters - CLIPPED_MARK.length;
+  // Do not split a surrogate pair: half of an emoji is not text.
+  const last = text.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return `${text.slice(0, end)}${CLIPPED_MARK}`;
 }
 
 function nonEmptyText(value: unknown): string | null {
@@ -104,13 +121,25 @@ function verifiedRawTarget(message: TelegramReplyMessage): JsonRecord | null {
 
 function targetSnapshot(rawTarget: JsonRecord): TelegramReplyTargetSnapshot | null {
   // A reply to a place, a sticker or a forwarded post shows what that message was, not nothing.
-  const words = [nonEmptyText(rawTarget.text), nonEmptyText(rawTarget.caption)]
+  // A rich message carries no text or caption: its words are only in `rich_message`.
+  const words = [
+    nonEmptyText(rawTarget.text),
+    nonEmptyText(rawTarget.caption),
+    telegramRichMessageText(rawTarget.rich_message),
+  ]
     .filter((part): part is string => part !== null)
     .join("\n");
   const contentText = telegramMessageDisplay(rawTarget, words);
   if (!contentText) return null;
 
-  return { contentText, ...senderProjection(rawTarget) };
+  return { contentText: clipped(contentText, REPLY_TARGET_TEXT_MAX_CHARACTERS), ...senderProjection(rawTarget) };
+}
+
+// A fragment highlighted in a rich message comes in `rich_texts`, and `text` is then empty (Bot API 10.4).
+function quotedFragment(quote: JsonRecord | null): string | null {
+  if (quote === null) return null;
+  const fragment = nonEmptyText(quote.text) ?? telegramRichQuoteText(quote.rich_texts);
+  return fragment === null ? null : clipped(fragment, QUOTED_FRAGMENT_MAX_CHARACTERS);
 }
 
 /**
@@ -126,6 +155,6 @@ export function telegramReplyTargetProjection(
 
   return {
     snapshot: targetSnapshot(rawTarget),
-    quotedText: nonEmptyText(record(message.raw.quote)?.text),
+    quotedText: quotedFragment(record(message.raw.quote)),
   };
 }

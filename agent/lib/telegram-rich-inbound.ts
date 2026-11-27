@@ -3,6 +3,7 @@
  *
  * Exports:
  * - `telegramRichMessageText`: plain text a person reads in a Bot API `RichMessage`.
+ * - `telegramRichQuoteText`: plain text of a fragment highlighted in a rich message.
  *
  * Key constructs:
  * - `RichText` is recursive: a string, an array, or a typed wrapper around another `RichText`.
@@ -33,7 +34,11 @@ function richText(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) return value.map(richText).join("");
   const node = record(value);
-  return node === null ? "" : richText(node.text);
+  if (node === null) return "";
+  // A formula and a custom emoji carry their text in their own fields, not in `text`.
+  if (node.type === "mathematical_expression" && typeof node.expression === "string") return node.expression;
+  if (node.type === "custom_emoji" && typeof node.alternative_text === "string") return node.alternative_text;
+  return richText(node.text);
 }
 
 function nonEmpty(value: string): string | null {
@@ -101,4 +106,14 @@ export function telegramRichMessageText(value: unknown): string | null {
   const message = record(value);
   if (message === null) return null;
   return blockList(message.blocks, BLOCK_SEPARATOR);
+}
+
+/**
+ * Returns the fragment a person highlighted in a rich message (`TextQuote.rich_texts`, Bot API 10.4),
+ * or `null` when it carries no readable text. Each item is one quotable text of the message, and
+ * Telegram itself joins them with line feeds when it counts the quote position.
+ */
+export function telegramRichQuoteText(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  return joinLines(value.map((part) => nonEmpty(richText(part))), "\n");
 }

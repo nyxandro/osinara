@@ -3,6 +3,7 @@
  *
  * Constructs covered:
  * - `telegramReplyTargetProjection`: full target text, its author, and the highlighted fragment.
+ * - A rich target and a fragment highlighted in it are read from their rich fields (Bot API 10.4).
  * - A target is admitted only from the chat the current turn belongs to.
  * - A refused target leaves one structured record and never reaches the turn.
  */
@@ -55,6 +56,31 @@ function foreignChatReply(): TelegramMessage {
   };
 }
 
+/**
+ * A reply to a rich message, such as the bot's own formatted answer. Since Bot API 10.4 a fragment
+ * highlighted there comes in `quote.rich_texts`, one item per quotable text, and `quote.text` is empty.
+ */
+function richTargetReply(quote: Record<string, unknown>): TelegramMessage {
+  const message = productionReply();
+  const { text: _text, ...rawTarget } = message.raw.reply_to_message as Record<string, unknown>;
+  return {
+    ...message,
+    raw: {
+      ...message.raw,
+      quote,
+      reply_to_message: {
+        ...rawTarget,
+        rich_message: {
+          blocks: [
+            { text: "Что нового", type: "section_heading" },
+            { text: ["Hex 3.5.2: ", { text: "диктовка", type: "bold" }, " теперь по умолчанию"], type: "paragraph" },
+          ],
+        },
+      },
+    },
+  };
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -85,6 +111,54 @@ describe("telegramReplyTargetProjection", () => {
     };
 
     expect(telegramReplyTargetProjection(reply).snapshot?.contentText).toBe("📍 Место «Чашка», Ленина ул., 12 — 1, 2");
+  });
+
+  it("reads a fragment highlighted in a rich message, which Telegram sends apart from the quote text", () => {
+    const reply = richTargetReply({
+      is_manual: true,
+      position: 0,
+      rich_texts: ["Что нового", ["Hex 3.5.2: ", { text: "диктовка", type: "bold" }, " теперь по умолчанию"]],
+      text: "",
+    });
+
+    expect(telegramReplyTargetProjection(reply)).toEqual({
+      snapshot: {
+        contentText: "Что нового\n\nHex 3.5.2: диктовка теперь по умолчанию",
+        senderDisplayName: "nlp_daily",
+        senderUsername: "nlp_daily",
+      },
+      quotedText: "Что нового\nHex 3.5.2: диктовка теперь по умолчанию",
+    });
+  });
+
+  it("prefers the plain quote text when Telegram fills it", () => {
+    const reply = richTargetReply({ position: 0, rich_texts: ["другое"], text: "диктовка" });
+
+    expect(telegramReplyTargetProjection(reply).quotedText).toBe("диктовка");
+  });
+
+  // A rich answer may be up to 32768 characters, and the whole current-message envelope fits in 12000.
+  it("keeps a long rich target and its fragment within Telegram's limits for a message and a quote", () => {
+    const message = richTargetReply({ position: 0, rich_texts: ["я".repeat(5_000)], text: "" });
+    const rawTarget = message.raw.reply_to_message as Record<string, unknown>;
+    const reply = {
+      ...message,
+      raw: {
+        ...message.raw,
+        reply_to_message: { ...rawTarget, rich_message: { blocks: [{ text: "ж".repeat(30_000), type: "paragraph" }] } },
+      },
+    };
+
+    const projection = telegramReplyTargetProjection(reply);
+
+    expect(projection.snapshot?.contentText).toBe(`${"ж".repeat(4_095)}…`);
+    expect(projection.quotedText).toBe(`${"я".repeat(1_023)}…`);
+  });
+
+  it("reports no fragment when a rich quote carries nothing readable", () => {
+    const reply = richTargetReply({ is_manual: true, position: 0, rich_texts: [" "], text: "" });
+
+    expect(telegramReplyTargetProjection(reply).quotedText).toBeNull();
   });
 
   it("reports no fragment for a whole-message reply", () => {

@@ -47,6 +47,8 @@ const ACCESS_LOST_APP_CODES = new Set([
   "AGENT_GOOGLE_WORKSPACE_ACCESS_DENIED",
   "AGENT_GOOGLE_WORKSPACE_PROFILE_NOT_READY",
 ]);
+// Google sign-in did not answer: the same passing outage as a 5xx from the Calendar API.
+const TEMPORARY_APP_CODES = new Set(["AGENT_GOOGLE_OAUTH_NETWORK_FAILED"]);
 
 export type MirrorCalendarClient = Pick<
   GoogleCalendarClient,
@@ -200,7 +202,8 @@ async function handleFailure(
     }
     return;
   }
-  const temporary = error instanceof CalendarCallError && error.kind === "transient";
+  const temporary = (error instanceof CalendarCallError && error.kind === "transient") ||
+    (isAppError(error) && TEMPORARY_APP_CODES.has(error.code));
   const minutes = Math.min(2 ** profile.consecutiveFailures, CALENDAR_MIRROR_BACKOFF_MAX_MINUTES);
   const code = temporary ? "AGENT_CALENDAR_MIRROR_PROVIDER_UNAVAILABLE" : "AGENT_CALENDAR_MIRROR_CYCLE_FAILED";
   console.error(JSON.stringify({

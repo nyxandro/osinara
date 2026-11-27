@@ -6,10 +6,11 @@
  * - Every container block contributes its text: lists, tables, details, media captions.
  * - Structural noise (block types, ids, urls) never leaks into the flattened text.
  * - A rich message without any readable text is reported as absent, not as an empty string.
+ * - A fragment highlighted in a rich message joins its quotable texts with line feeds.
  */
 import { describe, expect, it } from "vitest";
 
-import { telegramRichMessageText } from "./telegram-rich-inbound.js";
+import { telegramRichMessageText, telegramRichQuoteText } from "./telegram-rich-inbound.js";
 
 describe("telegramRichMessageText", () => {
   it("flattens nested rich text of a paragraph", () => {
@@ -112,5 +113,31 @@ describe("telegramRichMessageText", () => {
     { label: "blank text", value: { blocks: [{ text: "   ", type: "paragraph" }] } },
   ])("reports no text for $label", ({ value }) => {
     expect(telegramRichMessageText(value)).toBeNull();
+  });
+});
+
+describe("telegramRichQuoteText", () => {
+  it("joins the quotable texts of a fragment with line feeds and keeps nested formatting as text", () => {
+    expect(telegramRichQuoteText([
+      "Итоги",
+      ["Готово ", { text: { text: "сегодня", type: "italic" }, type: "bold" }],
+      "  ",
+    ])).toBe("Итоги\nГотово сегодня");
+  });
+
+  // These two carry their text in their own fields, not in `text`.
+  it("keeps a formula and a custom emoji readable", () => {
+    expect(telegramRichQuoteText([
+      ["Формула ", { expression: "E=mc^2", type: "mathematical_expression" }],
+      [{ alternative_text: "🔥", custom_emoji_id: "5368324170671202286", type: "custom_emoji" }, " горячо"],
+    ])).toBe("Формула E=mc^2\n🔥 горячо");
+  });
+
+  it.each([
+    { label: "absent", value: undefined },
+    { label: "not an array", value: "строка" },
+    { label: "only blank texts", value: ["", "  "] },
+  ])("reports no fragment when it is $label", ({ value }) => {
+    expect(telegramRichQuoteText(value)).toBeNull();
   });
 });
