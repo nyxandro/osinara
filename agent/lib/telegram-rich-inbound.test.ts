@@ -125,6 +125,14 @@ describe("telegramRichQuoteText", () => {
     ])).toBe("Итоги\nГотово сегодня");
   });
 
+  // These two carry their text in their own fields, not in `text`.
+  it("keeps a formula and a custom emoji readable", () => {
+    expect(telegramRichQuoteText([
+      ["Формула ", { expression: "E=mc^2", type: "mathematical_expression" }],
+      [{ alternative_text: "🔥", custom_emoji_id: "5368324170671202286", type: "custom_emoji" }, " горячо"],
+    ])).toBe("Формула E=mc^2\n🔥 горячо");
+  });
+
   it.each([
     { label: "absent", value: undefined },
     { label: "not an array", value: "строка" },

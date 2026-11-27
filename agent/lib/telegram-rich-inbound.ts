@@ -34,7 +34,11 @@ function richText(value: unknown): string {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) return value.map(richText).join("");
   const node = record(value);
-  return node === null ? "" : richText(node.text);
+  if (node === null) return "";
+  // A formula and a custom emoji carry their text in their own fields, not in `text`.
+  if (node.type === "mathematical_expression" && typeof node.expression === "string") return node.expression;
+  if (node.type === "custom_emoji" && typeof node.alternative_text === "string") return node.alternative_text;
+  return richText(node.text);
 }
 
 function nonEmpty(value: string): string | null {
